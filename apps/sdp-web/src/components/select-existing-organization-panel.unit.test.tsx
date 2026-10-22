@@ -8,24 +8,35 @@ import { I18nProvider } from "@/i18n/provider";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
 import { SelectExistingOrganizationPanel } from "./select-existing-organization-panel";
 
-const mocks = vi.hoisted(() => ({
-  isLoaded: true,
-  memberships: [
-    {
-      organization: {
-        id: "org_existing",
-        name: "Existing workspace",
-        imageUrl: "",
+interface InvitationFixture {
+  id: string;
+  publicOrganizationData: { id: string; name: string; imageUrl: string };
+  accept: () => Promise<void>;
+}
+
+const mocks = vi.hoisted(() => {
+  const invitations: InvitationFixture[] = [];
+  return {
+    isLoaded: true,
+    memberships: [
+      {
+        organization: {
+          id: "org_existing",
+          name: "Existing workspace",
+          imageUrl: "",
+        },
       },
-    },
-  ],
-  fetchNext: vi.fn(),
-  hasNextPage: false,
-  isFetching: false,
-  setActive: vi.fn(),
-}));
+    ],
+    invitations,
+    fetchNext: vi.fn(),
+    hasNextPage: false,
+    isFetching: false,
+    setActive: vi.fn(),
+  };
+});
 
 vi.mock("@clerk/nextjs", () => ({
+  useClerk: () => ({ setActive: mocks.setActive }),
   useOrganizationList: () => ({
     isLoaded: mocks.isLoaded,
     setActive: mocks.setActive,
@@ -35,15 +46,17 @@ vi.mock("@clerk/nextjs", () => ({
       hasNextPage: mocks.hasNextPage,
       isFetching: mocks.isFetching,
     },
+    userInvitations: { data: mocks.invitations },
   }),
 }));
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
+vi.mock("@/app/dashboard/create-organization-actions", () => ({ createOrganization: vi.fn() }));
 
 function renderPanel() {
   return render(
     <I18nProvider locale="en" messages={getMessages("en")}>
-      <SelectExistingOrganizationPanel />
+      <SelectExistingOrganizationPanel noAccess={false} />
     </I18nProvider>
   );
 }
@@ -62,6 +75,7 @@ describe("SelectExistingOrganizationPanel", () => {
         },
       },
     ];
+    mocks.invitations = [];
     mocks.fetchNext.mockReset();
     mocks.hasNextPage = false;
     mocks.isFetching = false;
@@ -86,12 +100,36 @@ describe("SelectExistingOrganizationPanel", () => {
     expect(dashboardRouter.refresh).toHaveBeenCalledOnce();
   });
 
-  it("does not offer organization creation when no memberships exist", () => {
+  it("offers to create an organization with no memberships and no invitations", () => {
     mocks.memberships = [];
     renderPanel();
 
-    expect(screen.getByText("No organizations yet.")).toBeTruthy();
-    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.getByRole("heading", { name: "Name your organization" })).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: "Organization name" })).toBeTruthy();
+  });
+
+  it("accepts a pending invitation before activating its organization", async () => {
+    const user = userEvent.setup();
+    const accept = vi.fn(async () => {});
+    mocks.memberships = [];
+    mocks.invitations = [
+      {
+        id: "orginv_test",
+        publicOrganizationData: { id: "org_invited", name: "Invited workspace", imageUrl: "" },
+        accept,
+      },
+    ];
+    renderPanel();
+
+    expect(screen.queryByRole("textbox", { name: "Organization name" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Join Invited workspace" }));
+
+    expect(accept).toHaveBeenCalledOnce();
+    expect(mocks.setActive).toHaveBeenCalledWith({ organization: "org_invited" });
+    expect(accept.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.setActive.mock.invocationCallOrder[0]
+    );
+    expect(dashboardRouter.refresh).toHaveBeenCalledOnce();
   });
 
   it("loads more existing memberships when Clerk has another page", async () => {

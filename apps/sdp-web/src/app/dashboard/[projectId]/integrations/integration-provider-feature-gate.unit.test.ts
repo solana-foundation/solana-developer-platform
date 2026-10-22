@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   fetchProjectProviderAvailability: vi.fn(),
   organizationFetch: vi.fn(),
   projectRequest: vi.fn(),
+  requestMemberRole: vi.fn(),
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }));
@@ -37,6 +38,7 @@ vi.mock("@/lib/sdp-api", async (importOriginal) => ({
     organizationClient: { request: vi.fn(), fetch: mocks.organizationFetch },
     projectClient: { request: mocks.projectRequest, fetch: vi.fn() },
   }),
+  requestMemberRole: mocks.requestMemberRole,
 }));
 
 import IntegrationDetailPage from "./[provider]/page";
@@ -44,7 +46,7 @@ import IntegrationDetailPage from "./[provider]/page";
 describe("integration provider route feature gates", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.auth.mockResolvedValue({ userId: null, orgId: null, orgRole: null });
+    mocks.auth.mockResolvedValue({ userId: null, orgId: null });
     mocks.custody.mockReturnValue(false);
     mocks.rampProviders.mockResolvedValue([]);
     mocks.payments.mockReturnValue(false);
@@ -71,7 +73,8 @@ describe("integration provider route feature gates", () => {
 describe("integration provider route availability", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.auth.mockResolvedValue({ userId: "user_test", orgId: "org_test", orgRole: "org:admin" });
+    mocks.auth.mockResolvedValue({ userId: "user_test", orgId: "org_test" });
+    mocks.requestMemberRole.mockResolvedValue("admin");
     mocks.custody.mockReturnValue(true);
     mocks.rampProviders.mockResolvedValue(["moonpay", "stripe"]);
     mocks.payments.mockReturnValue(true);

@@ -58,7 +58,7 @@ function WorkspaceFixture() {
       </button>
       <DashboardWorkspaceProvider
         scopeRefreshFallback={<div>Refreshing scope</div>}
-        dashboardAccess={resolveDashboardAccess("org:admin")}
+        dashboardAccess={resolveDashboardAccess("admin")}
         flags={{
           assetProfiles: false,
           compliance: false,

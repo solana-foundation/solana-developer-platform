@@ -11,12 +11,14 @@ const {
   mockIssuanceFlag,
   mockLoadWalletActivity,
   mockRequest,
+  mockRequestMemberRole,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockFetchProjectProviderAvailability: vi.fn(),
   mockIssuanceFlag: vi.fn(),
   mockLoadWalletActivity: vi.fn(),
   mockRequest: vi.fn(),
+  mockRequestMemberRole: vi.fn(),
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({
@@ -42,6 +44,7 @@ vi.mock("@/flags/new-design", () => ({ isNewDesignOn: async () => false }));
 vi.mock("@/lib/sdp-api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/sdp-api")>()),
   createSdpApiClient: vi.fn(async () => ({ request: mockRequest })),
+  requestMemberRole: mockRequestMemberRole,
 }));
 
 vi.mock("@/app/dashboard/[projectId]/custody/wallet-activity.data", async (importOriginal) => {
@@ -99,6 +102,8 @@ beforeEach(() => {
   setPageRequest(`/dashboard/${PRODUCTION_PROJECT.id}/wallets/wallet%2Fone`);
 
   mockAuth.mockResolvedValue({ userId: "user_test", orgId: "org_test" });
+  mockRequestMemberRole.mockReset();
+  mockRequestMemberRole.mockResolvedValue("member");
   mockIssuanceFlag.mockResolvedValue(true);
   mockLoadWalletActivity.mockResolvedValue({
     ok: true,
@@ -209,7 +214,7 @@ describe("WalletDetailPage", () => {
 
   it("does not request admin-only connection data for a member", async () => {
     walletOverrides = { custodyConnectionId: "connection_one" };
-    mockAuth.mockResolvedValue({ userId: "user_test", orgId: "org_test", orgRole: "org:member" });
+    mockRequestMemberRole.mockResolvedValue("member");
     const { wallet } = await renderPage();
     expect(requested("/connections/")).toBe(false);
     expect(mockFetchProjectProviderAvailability).not.toHaveBeenCalled();
@@ -219,7 +224,7 @@ describe("WalletDetailPage", () => {
 
   it("loads the wallet's exact connection and links its label for an admin", async () => {
     walletOverrides = { custodyConnectionId: "connection_one" };
-    mockAuth.mockResolvedValue({ userId: "user_test", orgId: "org_test", orgRole: "org:admin" });
+    mockRequestMemberRole.mockResolvedValue("admin");
     mockFetchProjectProviderAvailability.mockResolvedValue(
       projectProviderAvailability({
         project: PRODUCTION_PROJECT,
@@ -239,7 +244,7 @@ describe("WalletDetailPage", () => {
 
   it("leaves the connection label unlinked for an admin when the project does not offer privy in byok", async () => {
     walletOverrides = { custodyConnectionId: "connection_one" };
-    mockAuth.mockResolvedValue({ userId: "user_test", orgId: "org_test", orgRole: "org:admin" });
+    mockRequestMemberRole.mockResolvedValue("admin");
     mockFetchProjectProviderAvailability.mockResolvedValue(
       projectProviderAvailability({
         project: PRODUCTION_PROJECT,

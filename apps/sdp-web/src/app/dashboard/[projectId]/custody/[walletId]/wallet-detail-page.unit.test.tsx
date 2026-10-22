@@ -27,6 +27,7 @@ const {
   mockLoadWalletActivity,
   mockPoliciesFlag,
   mockRequest,
+  mockRequestMemberRole,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockFetchProjectProviderAvailability: vi.fn(),
@@ -34,6 +35,7 @@ const {
   mockLoadWalletActivity: vi.fn(),
   mockPoliciesFlag: vi.fn(),
   mockRequest: vi.fn(),
+  mockRequestMemberRole: vi.fn(),
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({
@@ -60,6 +62,7 @@ vi.mock("@/flags/new-design", () => ({ isNewDesignOn: async () => false }));
 vi.mock("@/lib/sdp-api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/sdp-api")>()),
   createSdpApiClient: vi.fn(async () => ({ request: mockRequest })),
+  requestMemberRole: mockRequestMemberRole,
 }));
 
 vi.mock("@/app/dashboard/[projectId]/custody/wallet-activity.data", async (importOriginal) => {
@@ -163,6 +166,8 @@ beforeEach(() => {
   mockRequest.mockReset();
 
   mockAuth.mockResolvedValue({ userId: "user_test", orgId: "org_test" });
+  mockRequestMemberRole.mockReset();
+  mockRequestMemberRole.mockResolvedValue("member");
   mockIssuanceFlag.mockResolvedValue(true);
   mockPoliciesFlag.mockResolvedValue(true);
   mockLoadWalletActivity.mockResolvedValue({
@@ -216,7 +221,7 @@ async function defaultApiResponse(path: string): Promise<Response> {
 describe("WalletDetailPage critical path", () => {
   it("keeps a connection-owned wallet readable without connection requests or links for a member", async () => {
     walletOverrides = { custodyConnectionId: "connection_one" };
-    mockAuth.mockResolvedValue({ userId: "user_test", orgId: "org_test", orgRole: "org:member" });
+    mockRequestMemberRole.mockResolvedValue("member");
 
     const page = await renderPage();
 
@@ -231,7 +236,7 @@ describe("WalletDetailPage critical path", () => {
 
   it("loads the wallet's exact connection and links its label for an admin", async () => {
     walletOverrides = { custodyConnectionId: "connection_one" };
-    mockAuth.mockResolvedValue({ userId: "user_test", orgId: "org_test", orgRole: "org:admin" });
+    mockRequestMemberRole.mockResolvedValue("admin");
     mockFetchProjectProviderAvailability.mockResolvedValue(
       projectProviderAvailability({
         project: PRODUCTION_PROJECT,
@@ -256,7 +261,7 @@ describe("WalletDetailPage critical path", () => {
 
   it("renders the connection label unlinked for an admin when the project does not offer privy in byok", async () => {
     walletOverrides = { custodyConnectionId: "connection_one" };
-    mockAuth.mockResolvedValue({ userId: "user_test", orgId: "org_test", orgRole: "org:admin" });
+    mockRequestMemberRole.mockResolvedValue("admin");
     mockFetchProjectProviderAvailability.mockResolvedValue(
       projectProviderAvailability({
         project: PRODUCTION_PROJECT,
@@ -277,7 +282,7 @@ describe("WalletDetailPage critical path", () => {
     "renders the truncated connection id, unlinked, when the connection lookup returns %i",
     async (status) => {
       walletOverrides = { custodyConnectionId: "connection_one" };
-      mockAuth.mockResolvedValue({ userId: "user_test", orgId: "org_test", orgRole: "org:admin" });
+      mockRequestMemberRole.mockResolvedValue("admin");
       mockRequest.mockImplementation(async (path: string) =>
         path === "/internal/dashboard/custody/connections/connection_one"
           ? new Response(null, { status })
@@ -310,7 +315,7 @@ describe("WalletDetailPage critical path", () => {
     "propagates a connection lookup %s failure instead of rendering the wallet without it",
     async (_failure, connectionResponse, expectedError) => {
       walletOverrides = { custodyConnectionId: "connection_one" };
-      mockAuth.mockResolvedValue({ userId: "user_test", orgId: "org_test", orgRole: "org:admin" });
+      mockRequestMemberRole.mockResolvedValue("admin");
       mockRequest.mockImplementation(async (path: string) =>
         path === "/internal/dashboard/custody/connections/connection_one"
           ? connectionResponse()
@@ -356,10 +361,10 @@ describe("WalletDetailPage critical path", () => {
   });
 
   it.each([
-    ["org:admin", true],
-    ["org:member", false],
-  ])("reuses the wallet label editor for %s users", async (orgRole, canEdit) => {
-    mockAuth.mockResolvedValue({ userId: "user_test", orgId: "org_test", orgRole });
+    ["admin", true],
+    ["member", false],
+  ] as const)("reuses the wallet label editor for %s users", async (role, canEdit) => {
+    mockRequestMemberRole.mockResolvedValue(role);
 
     const page = await renderPage();
 

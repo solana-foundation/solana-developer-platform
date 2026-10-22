@@ -140,6 +140,23 @@ describe("rejectCrossSiteWrite", () => {
       rejectCrossSiteWrite(write("/api/workspace-status", { origin: "https://attacker.example" }))
     ).toBeNull();
   });
+
+  it("refuses a cross-origin Server Action posted to a page and allows a same-origin one", () => {
+    const settingsPath = `/dashboard/${PRODUCTION_PROJECT.id}/settings`;
+    expect(
+      rejectCrossSiteWrite(
+        write(settingsPath, { "next-action": "action_test", origin: "https://attacker.example" })
+      )?.status
+    ).toBe(403);
+    expect(
+      rejectCrossSiteWrite(
+        write(settingsPath, {
+          "next-action": "action_test",
+          origin: "https://dashboard.example.com",
+        })
+      )
+    ).toBeNull();
+  });
 });
 
 describe("proxy request project", () => {
