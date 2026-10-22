@@ -214,6 +214,7 @@ export function parsedTokenBalance(balance: {
  * @param transaction.blockTime - Its block time in Unix seconds.
  * @param transaction.accountKeys - Its account keys; the first is the fee payer.
  * @param transaction.instructions - Its top-level parsed instructions.
+ * @param transaction.innerInstructions - Its `meta.innerInstructions` groups, each `{ index, instructions }`.
  * @param transaction.preTokenBalances - Token balances before execution.
  * @param transaction.postTokenBalances - Token balances after execution.
  * @returns The JSON-RPC `result`.
@@ -224,6 +225,7 @@ export function parsedTransactionResult(transaction: {
   blockTime: number;
   accountKeys: readonly string[];
   instructions: readonly JsonRpcResult[];
+  innerInstructions: readonly JsonRpcResult[];
   preTokenBalances: readonly JsonRpcResult[];
   postTokenBalances: readonly JsonRpcResult[];
 }): JsonRpcResult {
@@ -237,7 +239,7 @@ export function parsedTransactionResult(transaction: {
       fee: 5000,
       preBalances: transaction.accountKeys.map(() => 1_000_000_000),
       postBalances: transaction.accountKeys.map(() => 1_000_000_000),
-      innerInstructions: [],
+      innerInstructions: transaction.innerInstructions,
       logMessages: [],
       preTokenBalances: transaction.preTokenBalances,
       postTokenBalances: transaction.postTokenBalances,
