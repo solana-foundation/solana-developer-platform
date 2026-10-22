@@ -1078,14 +1078,17 @@ function chainOf(count: number, offset = 0): Signature[] {
   return Array.from({ length: count }, (_, index) => chainSignature(index + offset));
 }
 
-function mockChain(oldestFirst: readonly Signature[]) {
+function mockChain(
+  oldestFirst: readonly Signature[],
+  failed: ReadonlySet<Signature> = new Set<Signature>()
+) {
   signaturesSpy.mockImplementation(async (_rpc, _reference, options) => {
     const newestFirst = [...oldestFirst].reverse();
     const start = options?.before ? newestFirst.indexOf(options.before) + 1 : 0;
     const page: solanaRpc.SignatureInfo[] = [];
     for (const sig of newestFirst.slice(start)) {
       if (sig === options?.until || page.length >= (options?.limit ?? 100)) break;
-      page.push(signatureInfo(sig));
+      page.push(signatureInfo(sig, failed.has(sig) ? { err: {} } : {}));
     }
     return page;
   });
@@ -1101,6 +1104,15 @@ function mockOnlyValid(paid: Signature) {
 
 function validatedSignatures() {
   return validateTransferSpy.mock.calls.map((call) => call[1]);
+}
+
+async function checkUntilSettled(request: PaymentRequestRow, maxChecks: number) {
+  let row = request;
+  for (let checks = 0; checks < maxChecks && row.status !== "paid"; checks++) {
+    await checkOnSandbox(row);
+    row = await readStored(request.id);
+  }
+  return row;
 }
 
 async function storeScanPosition(
@@ -1279,15 +1291,97 @@ describe("signature scan cursor", () => {
       expect(stored).toMatchObject({
         status: "awaiting_payment",
         signature_scan_cursor: null,
-        signature_scan_before: junk[1],
+        signature_scan_before: junk[2],
       });
 
       const second = await onSandbox(() => closeLapsedPaymentRequest(env, stored));
 
       expect(second.status).toBe("paid");
-      expect(signaturesSpy.mock.calls.at(-1)?.[2]).toMatchObject({ before: junk[1] });
+      expect(signaturesSpy.mock.calls.at(-1)?.[2]).toMatchObject({ before: junk[2] });
       expect(validatedSignatures()).toEqual([REAL]);
     });
+
+    it("settles a payment that is the oldest of exactly a full capped scan above the cursor", async () => {
+      const [cursor, ...junk] = chainOf(5000);
+      if (cursor === undefined) throw new Error("chain too short");
+      mockChain([cursor, REAL, ...junk]);
+      mockOnlyValid(REAL);
+      const request = await storeScanPosition(
+        await createRequest({ token: SOL_MINT, expiresAt: null }),
+        { cursor, before: null }
+      );
+
+      const settled = await checkUntilSettled(request, 3);
+
+      expect(settled.status).toBe("paid");
+      expect(await listInboundTransfers()).toMatchObject([{ signature: REAL }]);
+    });
+
+    it("settles a payment that is the oldest of exactly a full capped scan with no cursor", async () => {
+      const junk = chainOf(4999);
+      mockChain([REAL, ...junk]);
+      mockOnlyValid(REAL);
+      const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+
+      const settled = await checkUntilSettled(request, 3);
+
+      expect(settled.status).toBe("paid");
+    });
+
+    it("settles a payment just above the cursor under a full capped scan of junk", async () => {
+      const [cursor, ...junk] = chainOf(5001);
+      if (cursor === undefined) throw new Error("chain too short");
+      mockChain([cursor, REAL, ...junk]);
+      mockOnlyValid(REAL);
+      const request = await storeScanPosition(
+        await createRequest({ token: SOL_MINT, expiresAt: null }),
+        { cursor, before: null }
+      );
+
+      const settled = await checkUntilSettled(request, 3);
+
+      expect(settled.status).toBe("paid");
+      expect(await listInboundTransfers()).toMatchObject([{ signature: REAL }]);
+    });
+
+    const progressCases = [4999, 5000, 5001, 9999].flatMap((size) =>
+      [0, 1, size - 5000, size - 4999, size - 1]
+        .filter((paidAt, index, all) => paidAt >= 0 && all.indexOf(paidAt) === index)
+        .map((paidAt) => ({ size, paidAt, label: `index ${paidAt} of ${size}` }))
+    );
+
+    it.for(progressCases)(
+      "moves the scan forward on every check until the payment at $label settles",
+      async ({ size, paidAt }) => {
+        const chain = chainOf(size, 10_000);
+        const paid = chain[paidAt];
+        if (paid === undefined) throw new Error("payment outside chain");
+        mockChain(chain, new Set(chain.filter((sig) => sig !== paid)));
+        mockOnlyValid(paid);
+        const position = (sig: string | null, unset: number) =>
+          sig === null ? unset : chain.indexOf(signature(sig));
+        let row = await createRequest({ token: SOL_MINT, expiresAt: null });
+
+        for (let checks = 1; row.status !== "paid"; checks++) {
+          expect(checks).toBeLessThanOrEqual(8);
+          const previous = row;
+          await checkOnSandbox(previous);
+          row = await readStored(previous.id);
+          if (row.status === "paid") break;
+          const cursorAdvanced =
+            position(row.signature_scan_cursor, -1) > position(previous.signature_scan_cursor, -1);
+          const resumedFurtherBack =
+            position(row.signature_scan_before, size) <
+            position(previous.signature_scan_before, size);
+          expect(cursorAdvanced || resumedFurtherBack).toBe(true);
+          expect(position(row.signature_scan_cursor, -1)).toBeGreaterThanOrEqual(
+            position(previous.signature_scan_cursor, -1)
+          );
+        }
+
+        expect(await listInboundTransfers()).toMatchObject([{ signature: paid }]);
+      }
+    );
 
     it("keeps the request open after a resumed range holds no payment", async () => {
       const junk = chainOf(5002);

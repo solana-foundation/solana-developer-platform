@@ -160,8 +160,8 @@ async function findValidPayment(
     before: row.signature_scan_before,
   };
   const fetched = await fetchUnscannedSignatures(rpc, reference, from);
-  const oldest = fetched.newestFirst.at(-1);
-  if (fetched.truncated && oldest !== undefined) {
+  const resumeBefore = fetched.newestFirst.at(-2);
+  if (fetched.truncated && resumeBefore !== undefined) {
     logEvent("warn", {
       event: "payment_requests.signature_scan_truncated",
       requestId: row.id,
@@ -170,7 +170,10 @@ async function findValidPayment(
       fetched: fetched.newestFirst.length,
       resumed: from.before !== null,
     });
-    await advanceSignatureScan(env, row, from, { cursor: from.cursor, before: oldest.signature });
+    await advanceSignatureScan(env, row, from, {
+      cursor: from.cursor,
+      before: resumeBefore.signature,
+    });
     return { kind: "pending" };
   }
   const scan = await evaluateOldestFirst(rpc, row, reference, [...fetched.newestFirst].reverse());
