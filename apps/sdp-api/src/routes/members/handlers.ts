@@ -1,9 +1,11 @@
-import { normalizeOrganizationRole, type OrganizationRole } from "@sdp/types/roles";
+import { normalizeOrganizationRole } from "@sdp/types/roles";
 import type { Context } from "hono";
 import { getDb } from "@/db/client";
+import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { createOrganizationRepository } from "@/db/repositories/repository-factory";
-import { AppError, badRequest, notFound, unauthorized } from "@/lib/errors";
+import { AppError, badRequest, conflict, notFound, unauthorized } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
+import { getAuthorized } from "@/middleware/authorize";
 import { requireHumanActor } from "@/middleware/human-session";
 import { callerMayPerform } from "@/middleware/require-action";
 import type { ValidatedBodyContext } from "@/middleware/validate";
@@ -13,32 +15,23 @@ import {
   type ClerkOrganizationInvitation,
   ClerkOrganizationsService,
 } from "@/services/clerk-organizations.service";
-import { applyMembershipChange } from "@/services/organization-membership.service";
+import {
+  applyMembershipChange,
+  type MembershipChange,
+} from "@/services/organization-membership.service";
 import type { Env } from "@/types/env";
 import type { inviteSchema, updateMemberRoleSchema } from "./schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
 
 /** The signed-in person; the router refuses API keys first (HOO-2099). */
-function resolveActor(c: AppContext): {
-  organizationId: string;
-  userId: string;
-  clerkUserId: string;
-} {
+function resolveActor(c: AppContext): { organizationId: string; userId: string } {
   const clerk = requireHumanActor(c);
-  return {
-    organizationId: clerk.organizationId,
-    userId: clerk.userId,
-    clerkUserId: clerk.clerkUserId,
-  };
+  return { organizationId: clerk.organizationId, userId: clerk.userId };
 }
 
-function mapRoleToClerkRole(role: OrganizationRole): string {
-  if (role === "admin") {
-    return "org:admin";
-  }
-  return "org:member";
-}
+/** How long an invitation admits its address, in SDP and in Clerk's link alike. */
+const INVITATION_TTL_DAYS = 7;
 
 async function getClerkOrgId(db: DatabaseClient, organizationId: string): Promise<string | null> {
   const row = await db
@@ -78,18 +71,12 @@ function resolveInviteRedirectUrl(env: Env): string | undefined {
 }
 
 /**
- * Predicate that picks the Clerk invitation a local row stands for.
+ * Predicate that picks the Clerk invitations a local row stands for.
  *
- * Clerk's invitation id is the only unique key. Email is shared by every
- * pending invitation raised for the same address, so matching on it cannot tell
- * a second invitation for that address apart from ours — which is what let an
- * ambiguous revocation response read someone else's live invitation as proof
- * that ours survived.
- *
- * Rows written before the id was persisted have no better key available and
- * fall back to email. That is why revocation acts on *every* email match rather
- * than the first: it cannot identify which one is ours, so the invariant it
- * enforces is that none survive.
+ * Clerk's invitation id is the only key that identifies exactly one. A row
+ * without it is one whose Clerk call failed before the id was recorded, so any
+ * Clerk invitation it created can only be found by address: every pending one
+ * for that address matches, and revocation takes them all.
  */
 function matchesClerkInvitation(invitation: {
   email: string;
@@ -353,16 +340,12 @@ async function resolveClerkInvitations(
 }
 
 export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>) => {
-  const { organizationId, userId, clerkUserId } = resolveActor(c);
+  const { organizationId, userId } = resolveActor(c);
 
   const body = c.req.valid("json");
-
-  const { email } = body;
   const role = normalizeOrganizationRole(body.role);
-  const normalizedEmail = email.toLowerCase().trim();
-  const clerkRole = mapRoleToClerkRole(role);
+  const normalizedEmail = body.email.toLowerCase().trim();
 
-  // Check if user already exists and is a member
   const existingMember = await getDb(c.env)
     .prepare(
       `SELECT om.id FROM organization_members om
@@ -373,20 +356,7 @@ export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>)
     .first();
 
   if (existingMember) {
-    throw new AppError("CONFLICT", "User is already a member of this organization");
-  }
-
-  // Check for pending invitation
-  const existingInvite = await getDb(c.env)
-    .prepare(
-      `SELECT id FROM invitations
-     WHERE organization_id = ? AND email = ? AND status = 'pending'`
-    )
-    .bind(organizationId, normalizedEmail)
-    .first();
-
-  if (existingInvite) {
-    throw new AppError("CONFLICT", "Invitation already sent to this email");
+    throw conflict("User is already a member of this organization");
   }
 
   const clerkOrgId = await getClerkOrgId(getDb(c.env), organizationId);
@@ -394,64 +364,78 @@ export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>)
     throw badRequest("Organization is not linked to Clerk");
   }
 
-  const clerkService = new ClerkOrganizationsService(c.env);
-  const redirectUrl = resolveInviteRedirectUrl(c.env);
-  const clerkInvitation = await clerkService.createOrganizationInvitation({
+  const invitationId = `inv_${crypto.randomUUID()}`;
+  const now = new Date();
+  const expiresAt = new Date(
+    now.getTime() + INVITATION_TTL_DAYS * 24 * 60 * 60 * 1000
+  ).toISOString();
+
+  // The SDP invitation is the claim (ADR 0012): its INSERT decides concurrent
+  // invites to one address on idx_invitations_one_pending_per_email, so the
+  // loser spends no Clerk call. A pending row past its expiry no longer
+  // admits anyone, so it gives the address up first.
+  try {
+    await new AuditService(getDb(c.env)).logWithin(c, async (tx) => {
+      await tx
+        .prepare(
+          `UPDATE invitations SET status = 'expired'
+            WHERE organization_id = ? AND LOWER(email) = ? AND status = 'pending' AND expires_at <= ?`
+        )
+        .bind(organizationId, normalizedEmail, now.toISOString())
+        .run();
+      await tx
+        .prepare(
+          `INSERT INTO invitations (id, organization_id, email, role, invited_by, token_hash, expires_at, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`
+        )
+        .bind(
+          invitationId,
+          organizationId,
+          normalizedEmail,
+          role,
+          userId,
+          // Nothing redeems a token since the accept route went; the NOT NULL
+          // UNIQUE column takes the invitation id until the cleanup migration drops it.
+          invitationId,
+          expiresAt
+        )
+        .run();
+      return {
+        entry: {
+          action: "invite",
+          resourceType: "invitation",
+          resourceId: invitationId,
+          metadata: { email: normalizedEmail, role },
+          organizationId,
+          userId,
+        },
+        result: undefined,
+      };
+    });
+  } catch (error) {
+    if (isPostgresUniqueViolation(error)) {
+      throw conflict("Invitation already sent to this email");
+    }
+    throw error;
+  }
+
+  const clerkInvitation = await new ClerkOrganizationsService(c.env).createOrganizationInvitation({
     organizationId: clerkOrgId,
-    inviterUserId: clerkUserId,
     emailAddress: normalizedEmail,
-    role: clerkRole,
-    redirectUrl,
-    publicMetadata: {
-      sdpRole: role,
-      sdpOrganizationId: organizationId,
-    },
+    expiresInDays: INVITATION_TTL_DAYS,
+    redirectUrl: resolveInviteRedirectUrl(c.env),
   });
 
-  // Create local invitation record for role mapping
-  const invitationId = `inv_${crypto.randomUUID()}`;
-  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 days
-
-  // Clerk's invitation id is stored, not just audited. It is the only key that
-  // identifies exactly one pending Clerk invitation — email is shared by every
-  // invitation raised for the same address — and revocation depends on it to
-  // avoid acting on, or drawing conclusions from, somebody else's invitation.
+  // Clerk's invitation id is the only key that identifies exactly one pending
+  // Clerk invitation, so revocation acts on it rather than on the address.
   await getDb(c.env)
     .prepare(
-      `INSERT INTO invitations (id, organization_id, email, role, invited_by, token_hash, expires_at, status, clerk_invitation_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)`
+      "UPDATE invitations SET clerk_invitation_id = ? WHERE id = ? AND clerk_invitation_id IS NULL"
     )
-    .bind(
-      invitationId,
-      organizationId,
-      normalizedEmail,
-      role,
-      userId,
-      // Nothing redeems a token since the accept route went; the NOT NULL
-      // UNIQUE column takes the invitation id until the cleanup migration drops it.
-      invitationId,
-      expiresAt,
-      clerkInvitation.id
-    )
+    .bind(clerkInvitation.id, invitationId)
     .run();
 
-  // Audit log
-  const auditService = new AuditService(getDb(c.env));
-  await auditService.log(c, {
-    action: "invite",
-    resourceType: "invitation",
-    resourceId: invitationId,
-    metadata: {
-      email: normalizedEmail,
-      role,
-      clerkInvitationId: clerkInvitation.id,
-      clerkRole,
-    },
-    organizationId: organizationId,
-    userId,
-  });
-
-  const response = {
+  return created(c, {
     invitation: {
       id: invitationId,
       email: normalizedEmail,
@@ -459,9 +443,7 @@ export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>)
       expiresAt,
       clerkInvitationId: clerkInvitation.id,
     },
-  };
-
-  return created(c, response);
+  });
 };
 
 export const updateMemberRole = async (c: ValidatedBodyContext<typeof updateMemberRoleSchema>) => {
@@ -493,210 +475,201 @@ export const updateMemberRole = async (c: ValidatedBodyContext<typeof updateMemb
   return success(c, { memberId: updated.memberId, userId: updated.userId, organizationId, role });
 };
 
-export const removeMember = async (c: AppContext) => {
+/**
+ * The remove route's access check: the member belongs to the caller's
+ * organization. Scoped by organization, so an id from another one reads as
+ * missing rather than as a permission failure.
+ *
+ * @param c - The request context.
+ * @returns The member's id.
+ */
+export async function authorizeOrganizationMember(c: AppContext): Promise<{ id: string }> {
   const { memberId } = c.req.param();
-  const { organizationId, userId } = resolveActor(c);
+  const { organizationId } = resolveActor(c);
+  const member = await getDb(c.env)
+    .prepare("SELECT id FROM organization_members WHERE id = ? AND organization_id = ?")
+    .bind(memberId, organizationId)
+    .first<{ id: string }>();
+  if (!member) {
+    throw notFound("Member");
+  }
+  return member;
+}
 
-  const removed = await getDb(c.env).transaction((tx) =>
-    applyMembershipChange(tx, {
-      organizationId,
-      actorUserId: userId,
-      change: { kind: "remove", memberId },
-    })
-  );
-  await finishRemoval(c, { organizationId, actorUserId: userId, removed, left: false });
+export const removeMember = async (c: AppContext) => {
+  const { organizationId, userId } = resolveActor(c);
+  const member = getAuthorized<{ id: string }>(c);
+
+  const removed = await endMembership(c, {
+    organizationId,
+    actorUserId: userId,
+    change: { kind: "remove", memberId: member.id },
+  });
+  await removeClerkMembership(c, organizationId, removed.userId);
   return noContent(c);
 };
 
 export const leaveOrganization = async (c: AppContext) => {
   const { organizationId, userId } = resolveActor(c);
 
-  const removed = await getDb(c.env).transaction((tx) =>
-    applyMembershipChange(tx, { organizationId, actorUserId: userId, change: { kind: "leave" } })
-  );
-  await finishRemoval(c, { organizationId, actorUserId: userId, removed, left: true });
+  // Leaving cannot be retried: the next request of someone who left is
+  // refused at sign-in. A failed Clerk call still fails the request; the Clerk
+  // membership it leaves behind admits no one (ADR 0012).
+  const left = await endMembership(c, {
+    organizationId,
+    actorUserId: userId,
+    change: { kind: "leave" },
+  });
+  await removeClerkMembership(c, organizationId, left.userId);
   return noContent(c);
 };
 
 /**
- * Mirrors a committed removal or leave into Clerk and audits it. The SDP
- * membership is already ended, so this only follows it.
+ * Ends a membership by removal or leaving and records it in one transaction.
+ * A removal retried after its Clerk half failed changes and records nothing.
  *
  * @param c - The request context.
  * @param params.organizationId - The organization.
  * @param params.actorUserId - The caller.
- * @param params.removed - The ended membership.
- * @param params.left - Whether the person left rather than being removed.
+ * @param params.change - The removal or the leave.
+ * @returns The ended membership.
  */
-async function finishRemoval(
+async function endMembership(
   c: AppContext,
   params: {
     organizationId: string;
     actorUserId: string;
-    removed: { memberId: string; userId: string };
-    left: boolean;
+    change: Extract<MembershipChange, { kind: "remove" | "leave" }>;
   }
-): Promise<void> {
-  // Clerk drives sign-in, so leaving the membership there would keep the
-  // organization visible in its switcher even though our API rejects it.
-  await removeClerkMembership(c, params.organizationId, params.removed.userId).catch((error) =>
-    getLogger().error({ error }, "Failed to remove Clerk membership after member removal")
-  );
-
-  await new AuditService(getDb(c.env)).log(c, {
-    action: "delete",
-    resourceType: "member",
-    resourceId: params.removed.memberId,
-    metadata: { userId: params.removed.userId, left: params.left },
-    organizationId: params.organizationId,
-    userId: params.actorUserId,
+): Promise<{ memberId: string; userId: string }> {
+  return new AuditService(getDb(c.env)).logWithin(c, async (tx) => {
+    const ended = await applyMembershipChange(tx, params);
+    return {
+      entry: ended.changed
+        ? {
+            action: "delete",
+            resourceType: "member",
+            resourceId: ended.memberId,
+            metadata: { userId: ended.userId, left: params.change.kind === "leave" },
+            organizationId: params.organizationId,
+            userId: params.actorUserId,
+          }
+        : null,
+      result: { memberId: ended.memberId, userId: ended.userId },
+    };
   });
 }
 
-/**
- * Whether Clerk received a revocation call and refused it outright.
- *
- * The service surfaces the HTTP status on the error details, so a 4xx means
- * Clerk answered and declined to act — the invitation is still live there.
- * 404 is deliberately excluded: it means the invitation no longer exists in
- * Clerk, so the local row should stay revoked rather than be reopened.
- */
-function clerkDefinitivelyRefused(error: unknown): boolean {
-  if (!(error instanceof AppError)) return false;
-  const status = error.details?.status;
-  return typeof status === "number" && status >= 400 && status < 500 && status !== 404;
+/** An invitation of the caller's organization, as the revoke route's access check loads it. */
+export interface OrganizationInvitation {
+  id: string;
+  email: string;
+  clerk_invitation_id: string | null;
 }
 
-export const revokeInvitation = async (c: AppContext) => {
+/**
+ * The revoke route's access check: the invitation belongs to the caller's
+ * organization. Scoped by organization, so an id from another one reads as
+ * missing rather than as a permission failure.
+ *
+ * @param c - The request context.
+ * @returns The invitation.
+ */
+export async function authorizeOrganizationInvitation(
+  c: AppContext
+): Promise<OrganizationInvitation> {
   const { invitationId } = c.req.param();
-  const { organizationId, userId, clerkUserId } = resolveActor(c);
-
+  const { organizationId } = resolveActor(c);
   const invitation = await getDb(c.env)
     .prepare(
-      `SELECT id, email, status, invited_by, clerk_invitation_id
+      `SELECT id, email, clerk_invitation_id
          FROM invitations
         WHERE id = ? AND organization_id = ?`
     )
     .bind(invitationId, organizationId)
-    .first<{
-      id: string;
-      email: string;
-      status: string;
-      invited_by: string;
-      clerk_invitation_id: string | null;
-    }>();
-
-  // Scoped by organization so an id from another org reads as missing rather
-  // than as a permission failure.
+    .first<OrganizationInvitation>();
   if (!invitation) {
     throw notFound("Invitation");
   }
+  return invitation;
+}
 
-  if (invitation.status !== "pending") {
-    throw badRequest("Only a pending invitation can be revoked");
-  }
+export const revokeInvitation = async (c: AppContext) => {
+  const { organizationId, userId } = resolveActor(c);
+  const invitation = getAuthorized<OrganizationInvitation>(c);
 
-  // Claim the row before calling Clerk. Revoking in Clerk first leaves a window
-  // in which an acceptance consumes the still-pending local token and creates a
-  // membership that the local update below never removes, leaving the invitee
-  // active against a revoked invitation. A conditional write closes that window.
-  const claimed = await getDb(c.env)
-    .prepare("UPDATE invitations SET status = 'revoked' WHERE id = ? AND status = 'pending'")
-    .bind(invitation.id)
-    .run();
-
-  if (claimed === 0) {
-    throw badRequest("Only a pending invitation can be revoked");
-  }
-
-  let clerkRevocationAttempted = false;
-  let clerkService: ClerkOrganizationsService | null = null;
-  let clerkOrgId: string | null = null;
-
-  try {
-    clerkOrgId = await getClerkOrgId(getDb(c.env), organizationId);
-    if (!clerkOrgId) {
-      throw badRequest("Organization is not linked to Clerk");
-    }
-
-    clerkService = new ClerkOrganizationsService(c.env);
-    const pending = await clerkService.listPendingOrganizationInvitations(clerkOrgId);
-
-    // Keyed on Clerk's invitation id, so exactly the invitation this row stands
-    // for is revoked. Legacy rows without that id fall back to email and match
-    // every invitation for the address — see matchesClerkInvitation.
-    const matches = pending.filter(matchesClerkInvitation(invitation));
-
-    for (const match of matches) {
-      clerkRevocationAttempted = true;
-      // The signed-in caller is the revoking user Clerk is told about.
-      await clerkService.revokeOrganizationInvitation({
-        organizationId: clerkOrgId,
-        invitationId: match.id,
-        requestingUserId: clerkUserId,
-      });
-    }
-  } catch (error) {
-    // Release the claim only when the invitation is known to still be live in
-    // Clerk, because Clerk mints the acceptance link and recording a revocation
-    // we did not carry out there would leave the invite redeemable while we
-    // report it revoked.
-    const releaseClaim = async () => {
-      await getDb(c.env)
-        .prepare("UPDATE invitations SET status = 'pending' WHERE id = ? AND status = 'revoked'")
+  // SDP revokes first (ADR 0012): sign-in admits only from a pending SDP
+  // invitation, so the revoked row keeps the person out whatever Clerk still
+  // holds. An invitation already revoked is a retry whose Clerk half failed,
+  // so only that half runs again.
+  await new AuditService(getDb(c.env)).logWithin(c, async (tx) => {
+    const revoked = await tx
+      .prepare("UPDATE invitations SET status = 'revoked' WHERE id = ? AND status = 'pending'")
+      .bind(invitation.id)
+      .run();
+    if (revoked === 0) {
+      const current = await tx
+        .prepare("SELECT status FROM invitations WHERE id = ?")
         .bind(invitation.id)
-        .run();
-    };
-
-    if (!clerkRevocationAttempted || clerkDefinitivelyRefused(error)) {
-      // Never asked, or asked and refused outright: nothing was revoked there.
-      await releaseClaim();
-    } else if (clerkService && clerkOrgId) {
-      // A transport failure or 5xx says nothing about whether Clerk applied the
-      // revocation. Rather than guess, ask: if the invitation is still pending
-      // there, the revocation did not take effect and the local row has to
-      // follow it back to pending. This is what keeps the two from diverging
-      // into a live acceptance link recorded locally as revoked.
-      //
-      // Matched on Clerk's invitation id, so a different invitation raised for
-      // the same address cannot be mistaken for ours and reopen a token that
-      // was in fact revoked.
-      //
-      // If the verification itself also fails, the claim stays. Sign-in admits
-      // only from a pending SDP invitation (ADR 0012), so the revoked row keeps
-      // the person out whatever Clerk still holds, and reopening it would make
-      // a revocation that may well have succeeded redeemable again. The admin
-      // still learns the attempt failed — this path throws.
-      const stillPendingInClerk = await clerkService
-        .listPendingOrganizationInvitations(clerkOrgId)
-        .then((entries) => entries.some(matchesClerkInvitation(invitation)))
-        .catch(() => false);
-
-      if (stillPendingInClerk) {
-        await releaseClaim();
+        .first<{ status: string }>();
+      if (current?.status !== "revoked") {
+        throw badRequest("Only a pending invitation can be revoked");
       }
+      return { entry: null, result: undefined };
     }
-
-    throw error;
-  }
-
-  const auditService = new AuditService(getDb(c.env));
-  await auditService.log(c, {
-    action: "revoke",
-    resourceType: "invitation",
-    resourceId: invitation.id,
-    metadata: { email: invitation.email },
-    organizationId,
-    userId,
+    return {
+      entry: {
+        action: "revoke",
+        resourceType: "invitation",
+        resourceId: invitation.id,
+        metadata: { email: invitation.email },
+        organizationId,
+        userId,
+      },
+      result: undefined,
+    };
   });
 
+  await revokeClerkInvitations(c, organizationId, invitation);
   return noContent(c);
 };
 
 /**
- * Mirrors a removal into Clerk. Best effort: our own membership row is already
- * the gate that clerk-auth enforces, so a Clerk failure must not fail the
- * removal and leave the two out of step in the other direction.
+ * Revokes the Clerk invitations an SDP invitation stands for that are still
+ * pending in Clerk. Asking Clerk which are pending first makes a retry after a
+ * partial failure revoke only what is left.
+ *
+ * @param c - The request context.
+ * @param organizationId - The SDP organization.
+ * @param invitation - The revoked SDP invitation.
+ */
+async function revokeClerkInvitations(
+  c: AppContext,
+  organizationId: string,
+  invitation: OrganizationInvitation
+): Promise<void> {
+  const clerkOrgId = await getClerkOrgId(getDb(c.env), organizationId);
+  if (!clerkOrgId) {
+    throw badRequest("Organization is not linked to Clerk");
+  }
+  const clerkService = new ClerkOrganizationsService(c.env);
+  const pending = await clerkService.listPendingOrganizationInvitations(clerkOrgId);
+  for (const match of pending.filter(matchesClerkInvitation(invitation))) {
+    await clerkService.revokeOrganizationInvitation({
+      organizationId: clerkOrgId,
+      invitationId: match.id,
+    });
+  }
+}
+
+/**
+ * Mirrors a committed removal into Clerk, so the organization leaves the
+ * person's Clerk switcher. A membership Clerk no longer has is already removed
+ * there, which is what a retry finds once the first attempt got through.
+ *
+ * @param c - The request context.
+ * @param organizationId - The SDP organization.
+ * @param userId - The SDP user whose membership ended.
  */
 async function removeClerkMembership(
   c: AppContext,
@@ -705,16 +678,22 @@ async function removeClerkMembership(
 ): Promise<void> {
   const clerkOrgId = await getClerkOrgId(getDb(c.env), organizationId);
   if (!clerkOrgId) {
-    return;
+    throw badRequest("Organization is not linked to Clerk");
   }
-
+  // A person who never signed in through Clerk holds no Clerk membership.
   const clerkUserId = await getClerkUserId(getDb(c.env), userId);
   if (!clerkUserId) {
     return;
   }
-
-  await new ClerkOrganizationsService(c.env).deleteOrganizationMembership({
-    organizationId: clerkOrgId,
-    userId: clerkUserId,
-  });
+  try {
+    await new ClerkOrganizationsService(c.env).deleteOrganizationMembership({
+      organizationId: clerkOrgId,
+      userId: clerkUserId,
+    });
+  } catch (error) {
+    if (error instanceof AppError && error.details?.status === 404) {
+      return;
+    }
+    throw error;
+  }
 }

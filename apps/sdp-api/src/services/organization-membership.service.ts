@@ -21,7 +21,8 @@ const lockedMemberSchema = z.object({
  * every such change shares (ADR 0012): nobody changes their own role or
  * removes themselves, an admin cannot leave, and the organization always keeps
  * an active admin. Removal and leaving also revoke the person's pending
- * invitations and remove their project memberships.
+ * invitations and remove their project memberships. Removing a member already
+ * removed changes nothing, so a retry can finish the removal's Clerk half.
  *
  * @param tx - An open transaction; the admin rows it locks are held until it ends.
  * @param params.organizationId - The caller's organization; the target must belong to it.
@@ -83,7 +84,10 @@ export async function applyMembershipChange(
   if (!member) {
     throw notFound("Member");
   }
-  if (member.status !== "active") {
+  // Removing a member already removed is a retry whose Clerk half failed: it
+  // passes the caller's check below and then changes nothing.
+  const retriedRemoval = change.kind === "remove" && member.status === "removed";
+  if (member.status !== "active" && !retriedRemoval) {
     throw conflict("Member is not active");
   }
 
@@ -122,6 +126,9 @@ export async function applyMembershipChange(
       return { ...result, changed: true };
     }
     case "remove": {
+      if (retriedRemoval) {
+        return { ...result, changed: false };
+      }
       if (isSelf) {
         throw conflict("You cannot remove yourself from the organization");
       }

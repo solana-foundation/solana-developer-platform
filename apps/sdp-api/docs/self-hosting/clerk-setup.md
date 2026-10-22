@@ -2,7 +2,7 @@
 
 This guide walks an operator through wiring up their own Clerk tenant for a self-hosted SDP deployment. Follow it after you have the API and dashboard running with `SDP_DEPLOYMENT_MODE=self_hosted` (see [`apps/sdp-api/README.md`](../../README.md#self-hosted-mode-no-third-party-providers)).
 
-The Clerk webhook handler is the only path that creates `organizations` rows outside `pnpm db:seed:local`. Without the steps below, sign-ups will succeed in Clerk but the API will reject every authenticated request with `Active Clerk organization required` (the session token does not contain `org_id` by default — see step 3).
+SDP creates organizations and their memberships (ADR 0012); the Clerk webhook only syncs the name, slug and entitlements of organizations SDP already knows, and ignores membership events. Without the steps below, sign-ups will succeed in Clerk but the API will reject every authenticated request with `Active Clerk organization required` (the session token does not contain `org_id` by default — see step 3).
 
 Time estimate: under 30 minutes against a fresh Clerk account.
 

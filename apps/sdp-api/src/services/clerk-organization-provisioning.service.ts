@@ -1,11 +1,5 @@
-import type { OrganizationSettings } from "@sdp/types/organizations";
-import { isPostgresUniqueViolation } from "@/db/postgres-utils";
-import type { Env } from "@/types/env";
 import type { ClerkOrganization } from "./clerk-organizations.service";
-import {
-  parseClerkOrganizationTierMetadata,
-  syncProviderAccessFromClerk,
-} from "./provider-availability.service";
+import { syncProviderAccessFromClerk } from "./provider-availability.service";
 
 export interface ClerkOrganizationMapping {
   organizationId: string;
@@ -23,31 +17,20 @@ function slugify(input: string): string {
 async function ensureUniqueSlug(
   db: DatabaseClient,
   base: string,
-  excludeOrganizationId?: string
+  organizationId: string
 ): Promise<string> {
   const normalized = slugify(base) || `org-${crypto.randomUUID().slice(0, 8)}`;
-  const existing = await db
-    .prepare(
-      excludeOrganizationId
-        ? "SELECT id FROM organizations WHERE slug = ? AND id <> ?"
-        : "SELECT id FROM organizations WHERE slug = ?"
-    )
-    .bind(...(excludeOrganizationId ? [normalized, excludeOrganizationId] : [normalized]))
-    .first();
+  const isTaken = async (slug: string) =>
+    (await db
+      .prepare("SELECT id FROM organizations WHERE slug = ? AND id <> ?")
+      .bind(slug, organizationId)
+      .first()) !== null;
 
-  if (!existing) return normalized;
+  if (!(await isTaken(normalized))) return normalized;
 
   let candidate = `${normalized}-${crypto.randomUUID().slice(0, 6)}`;
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const taken = await db
-      .prepare(
-        excludeOrganizationId
-          ? "SELECT id FROM organizations WHERE slug = ? AND id <> ?"
-          : "SELECT id FROM organizations WHERE slug = ?"
-      )
-      .bind(...(excludeOrganizationId ? [candidate, excludeOrganizationId] : [candidate]))
-      .first();
-    if (!taken) return candidate;
+    if (!(await isTaken(candidate))) return candidate;
     candidate = `${normalized}-${crypto.randomUUID().slice(0, 6)}`;
   }
 
@@ -70,63 +53,23 @@ export async function findClerkOrganizationMapping(
   return mapping ? { organizationId: mapping.organization_id, slug: mapping.slug } : null;
 }
 
-export async function ensureClerkOrganizationMapping(params: {
-  env: Env;
-  db: DatabaseClient;
-  organization: ClerkOrganization;
-}): Promise<ClerkOrganizationMapping> {
-  const existing = await findClerkOrganizationMapping(params.db, params.organization.id);
-  if (existing) return existing;
-
-  const name =
-    params.organization.name?.trim() || params.organization.slug?.trim() || "Organization";
-  const slug = await ensureUniqueSlug(params.db, params.organization.slug || name);
-  const organizationId = `org_${crypto.randomUUID()}`;
-  const providerState = parseClerkOrganizationTierMetadata(params.organization);
-
-  const initialSettings: OrganizationSettings = {
-    ...(providerState.providerOverrides
-      ? { providerOverrides: providerState.providerOverrides }
-      : {}),
-    ...(providerState.enableProductionProject ? { enableProductionProject: true } : {}),
-  };
-  const settings = Object.keys(initialSettings).length > 0 ? JSON.stringify(initialSettings) : null;
-
-  // Persist Clerk-derived access state with the mapping so provisioning cannot
-  // commit an organization that depends on a later repair update succeeding.
-  try {
-    await params.db.batch([
-      params.db
-        .prepare(
-          `INSERT INTO organizations (id, name, slug, tier, settings, status)
-           VALUES (?, ?, ?, ?, ?, 'active')`
-        )
-        .bind(organizationId, name, slug, providerState.tier, settings),
-      params.db
-        .prepare(
-          `INSERT INTO auth_organization_identities
-             (id, provider, provider_org_id, organization_id, slug)
-           VALUES (?, 'clerk', ?, ?, ?)`
-        )
-        .bind(`aoi_${crypto.randomUUID()}`, params.organization.id, organizationId, slug),
-    ]);
-  } catch (error) {
-    if (isPostgresUniqueViolation(error)) {
-      const concurrent = await findClerkOrganizationMapping(params.db, params.organization.id);
-      if (concurrent) return concurrent;
-    }
-    throw error;
-  }
-
-  return { organizationId, slug };
-}
-
+/**
+ * Copies a Clerk organization's name, slug and entitlement metadata onto the
+ * SDP organization it maps to. SDP creates every organization (ADR 0012), so
+ * a Clerk organization SDP does not know is left alone.
+ *
+ * @param params.db - The database.
+ * @param params.organization - The Clerk organization from the webhook.
+ * @returns The mapping it synced, or null when SDP does not know the organization.
+ */
 export async function syncClerkOrganization(params: {
-  env: Env;
   db: DatabaseClient;
   organization: ClerkOrganization;
-}): Promise<ClerkOrganizationMapping> {
-  const mapping = await ensureClerkOrganizationMapping(params);
+}): Promise<ClerkOrganizationMapping | null> {
+  const mapping = await findClerkOrganizationMapping(params.db, params.organization.id);
+  if (!mapping) {
+    return null;
+  }
   const name =
     params.organization.name?.trim() || params.organization.slug?.trim() || "Organization";
   const slug = await ensureUniqueSlug(

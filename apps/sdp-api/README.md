@@ -250,8 +250,8 @@ Without it, choosing the local signer returns `403 Local requires manual activat
 
 For the Clerk side of self-hosting (account creation, session token customization, webhook
 relay via an ngrok tunnel), follow [`docs/self-hosting/clerk-setup.md`](docs/self-hosting/clerk-setup.md).
-The webhook handler is the only path that creates `organizations` rows
-outside `pnpm db:seed:local`.
+SDP creates organizations and their memberships (ADR 0012); the Clerk webhook only
+syncs the name, slug and entitlements of organizations SDP already knows.
 
 ### Optional: Compliance & Ramp Integrations
 

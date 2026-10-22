@@ -76,20 +76,28 @@ export class ClerkOrganizationsService {
     })) as T;
   }
 
+  /**
+   * Invites an address to the Clerk organization as `org:member`, naming no
+   * inviter: SDP holds the person's real role (ADR 0012), and Clerk checks a
+   * named inviter's own permissions, which no `org:member` has.
+   *
+   * @param params.organizationId - The Clerk organization id.
+   * @param params.emailAddress - The address to invite.
+   * @param params.expiresInDays - How long Clerk's link lives; matches the SDP invitation.
+   * @param params.redirectUrl - Where Clerk sends the person after accepting, when set.
+   * @returns The Clerk invitation.
+   */
   async createOrganizationInvitation(params: {
     organizationId: string;
-    inviterUserId: string;
     emailAddress: string;
-    role: string;
-    redirectUrl?: string;
-    publicMetadata?: Record<string, unknown>;
+    expiresInDays: number;
+    redirectUrl: string | undefined;
   }): Promise<ClerkOrganizationInvitation> {
     const payload = {
-      inviter_user_id: params.inviterUserId,
       email_address: params.emailAddress,
-      role: params.role,
-      ...(params.redirectUrl ? { redirect_url: params.redirectUrl } : {}),
-      ...(params.publicMetadata ? { public_metadata: params.publicMetadata } : {}),
+      role: "org:member",
+      expires_in_days: params.expiresInDays,
+      redirect_url: params.redirectUrl,
     };
 
     return this.request<ClerkOrganizationInvitation>(
@@ -132,17 +140,20 @@ export class ClerkOrganizationsService {
     }
   }
 
+  /**
+   * Revokes a pending Clerk invitation, naming no requesting user (ADR 0012).
+   *
+   * @param params.organizationId - The Clerk organization id.
+   * @param params.invitationId - The Clerk invitation id.
+   * @returns The revoked Clerk invitation.
+   */
   async revokeOrganizationInvitation(params: {
     organizationId: string;
     invitationId: string;
-    requestingUserId: string;
   }): Promise<ClerkOrganizationInvitation> {
     return this.request<ClerkOrganizationInvitation>(
       `/organizations/${params.organizationId}/invitations/${params.invitationId}/revoke`,
-      {
-        method: "POST",
-        body: JSON.stringify({ requesting_user_id: params.requestingUserId }),
-      }
+      { method: "POST" }
     );
   }
 

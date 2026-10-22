@@ -1,31 +1,18 @@
-import type {
-  DeletedObjectJSON,
-  OrganizationJSON,
-  OrganizationMembershipJSON,
-  UserDeletedJSON,
-  UserJSON,
-} from "@clerk/backend";
+import type { DeletedObjectJSON, OrganizationJSON, UserJSON } from "@clerk/backend";
 import { verifyWebhook, type WebhookEvent } from "@clerk/backend/webhooks";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { Context } from "hono";
 import { getDb } from "@/db/client";
 import { createPostgresRampWebhookEventsRepository } from "@/db/repositories/ramp-webhook-event.repository";
-import { mapClerkRoleToOrgRole } from "@/lib/clerk-role";
 import { AppError } from "@/lib/errors";
-import { invitationWasRevoked } from "@/lib/invitations";
 import { success } from "@/lib/response";
 import { getLogger } from "@/runtime/logger";
 import {
-  ensureClerkOrganizationMapping,
   findClerkOrganizationMapping,
   syncClerkOrganization,
 } from "@/services/clerk-organization-provisioning.service";
-import {
-  ClerkUsersService,
-  verifiedPrimaryEmailFromClerkUser,
-} from "@/services/clerk-users.service";
+import { verifiedPrimaryEmailFromClerkUser } from "@/services/clerk-users.service";
 import { applyStoredRampWebhookEvent } from "@/services/jobs/replay-ramp-webhook-events";
-import { ProjectService } from "@/services/project.service";
 import type { WebhookProcessor } from "@/services/ramps/webhooks/processor";
 import {
   parseRampWebhookProvider,
@@ -40,21 +27,27 @@ async function findOrganizationMapping(c: AppContext, clerkOrgId: string) {
   return mapping ? { organization_id: mapping.organizationId, slug: mapping.slug } : null;
 }
 
-async function ensureOrganizationMapping(c: AppContext, org: OrganizationJSON): Promise<string> {
-  const mapping = await ensureClerkOrganizationMapping({
-    env: c.env,
-    db: getDb(c.env),
-    organization: org,
-  });
-  return mapping.organizationId;
+async function syncOrganization(c: AppContext, data: OrganizationJSON) {
+  const synced = await syncClerkOrganization({ db: getDb(c.env), organization: data });
+  if (!synced) {
+    logIgnoredClerkEvent(c, "organization", data.id);
+  }
 }
 
-async function syncOrganization(c: AppContext, data: OrganizationJSON) {
-  await syncClerkOrganization({
-    env: c.env,
-    db: getDb(c.env),
-    organization: data,
-  });
+/**
+ * Logs a Clerk event SDP does not act on. SDP owns organizations and their
+ * memberships (ADR 0012): Clerk's events about them change nothing here, and
+ * SDP's own writes to Clerk come back as these same events.
+ *
+ * @param c - The request context.
+ * @param resource - What the event is about.
+ * @param clerkId - The Clerk id it names.
+ */
+function logIgnoredClerkEvent(c: AppContext, resource: string, clerkId: string | undefined) {
+  getLogger().info(
+    { requestId: c.get("requestId"), resource, clerkId },
+    "webhooks: ignored a Clerk event SDP does not act on"
+  );
 }
 
 async function deleteOrganization(c: AppContext, data: DeletedObjectJSON) {
@@ -97,11 +90,6 @@ async function deleteOrganization(c: AppContext, data: DeletedObjectJSON) {
       )
       .bind(mapping.organization_id),
   ]);
-}
-
-async function resolveVerifiedUserEmail(env: Env, userId: string): Promise<string | null> {
-  const user = await new ClerkUsersService(env).getUser(userId);
-  return verifiedPrimaryEmailFromClerkUser(user);
 }
 
 async function ensureUserMapping(
@@ -191,185 +179,11 @@ async function syncUser(c: AppContext, data: UserJSON) {
     return;
   }
   const fullName = [data.first_name, data.last_name].filter(Boolean).join(" ").trim();
-  const userId = await ensureUserMapping(c, {
+  await ensureUserMapping(c, {
     id: data.id,
     email,
     name: fullName || data.username,
   });
-  const memberships = await new ClerkUsersService(c.env).getOrganizationMemberships(data.id);
-  await Promise.all(
-    memberships.map((membership) =>
-      upsertVerifiedMembership(c, {
-        organization: membership.organization,
-        userId,
-        role: membership.role,
-        reactivateRemoved: false,
-      })
-    )
-  );
-}
-
-async function deleteUser(c: AppContext, data: UserDeletedJSON) {
-  if (!data.id) {
-    return;
-  }
-
-  const identity = await getDb(c.env)
-    .prepare(
-      `SELECT user_id
-       FROM auth_user_identities
-       WHERE provider = 'clerk' AND provider_user_id = ?`
-    )
-    .bind(data.id)
-    .first<{ user_id: string }>();
-
-  if (!identity) {
-    return;
-  }
-
-  await getDb(c.env).batch([
-    getDb(c.env).prepare("UPDATE users SET status = 'deleted' WHERE id = ?").bind(identity.user_id),
-    getDb(c.env)
-      .prepare("UPDATE organization_members SET status = 'removed' WHERE user_id = ?")
-      .bind(identity.user_id),
-  ]);
-}
-
-/** The address the revoked-invitation rule is keyed on. */
-async function resolveMemberEmail(c: AppContext, userId: string): Promise<string | null> {
-  const user = await getDb(c.env)
-    .prepare("SELECT email FROM users WHERE id = ?")
-    .bind(userId)
-    .first<{ email: string }>();
-
-  return user?.email ?? null;
-}
-
-async function upsertVerifiedMembership(
-  c: AppContext,
-  data: {
-    organization: OrganizationJSON;
-    userId: string;
-    role: string;
-    reactivateRemoved: boolean;
-  }
-) {
-  const organizationId = await ensureOrganizationMapping(c, data.organization);
-  const role = mapClerkRoleToOrgRole(data.role);
-  const memberId = `mem_${crypto.randomUUID()}`;
-  const existing = await getDb(c.env)
-    .prepare(
-      `SELECT status
-       FROM organization_members
-       WHERE organization_id = ? AND user_id = ?`
-    )
-    .bind(organizationId, data.userId)
-    .first<{ status: string }>();
-
-  const email = await resolveMemberEmail(c, data.userId);
-
-  // The check and the write share one transaction, and the check locks the
-  // invitation rows. Reading the status and inserting as separate statements
-  // let a revocation commit in between and still admit the member.
-  const admitted = await getDb(c.env).transaction(async (tx) => {
-    if (
-      existing?.status !== "active" &&
-      email &&
-      (await invitationWasRevoked(tx, organizationId, email, { lock: true }))
-    ) {
-      // Clerk says join, we say the invitation was withdrawn. Clerk mints the
-      // acceptance link and we cannot expire it, so this sync is the last point
-      // that can honour the revocation — without this, revoking an invitation
-      // stopped the local token but not the Clerk link.
-      //
-      // Scoped to users who are not already active members, so this can only
-      // decline a join, never strip access from someone who has it. A revoked
-      // invitation for an existing member is stale and irrelevant.
-      return false;
-    }
-
-    await tx
-      .prepare(
-        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-       VALUES (?, ?, ?, ?, 'active')
-       ON CONFLICT(organization_id, user_id)
-       DO UPDATE SET
-         role = excluded.role,
-         status = CASE
-           WHEN organization_members.status = 'removed' AND ? = 0
-             THEN organization_members.status
-           ELSE 'active'
-         END`
-      )
-      .bind(memberId, organizationId, data.userId, role, data.reactivateRemoved ? 1 : 0)
-      .run();
-
-    return true;
-  });
-
-  if (!admitted) {
-    getLogger().warn(
-      {
-        requestId: c.get("requestId"),
-        organizationId,
-        userId: data.userId,
-      },
-      "webhooks: declined membership for a revoked invitation"
-    );
-    return;
-  }
-
-  const projectService = new ProjectService(getDb(c.env));
-  await Promise.all([
-    projectService.findOrCreateDefault(organizationId, "sandbox", data.userId),
-    projectService.findOrCreateDefault(organizationId, "production", data.userId),
-  ]);
-}
-
-async function upsertMembership(c: AppContext, data: OrganizationMembershipJSON) {
-  const email = await resolveVerifiedUserEmail(c.env, data.public_user_data.user_id);
-  if (!email) {
-    return;
-  }
-  const userId = await ensureUserMapping(c, {
-    id: data.public_user_data.user_id,
-    email,
-  });
-  await upsertVerifiedMembership(c, {
-    organization: data.organization,
-    userId,
-    role: data.role,
-    reactivateRemoved: true,
-  });
-}
-
-async function deleteMembership(c: AppContext, data: OrganizationMembershipJSON) {
-  const mapping = await findOrganizationMapping(c, data.organization.id);
-  if (!mapping) {
-    return;
-  }
-
-  const identity = await getDb(c.env)
-    .prepare(
-      `SELECT user_id
-       FROM auth_user_identities
-       WHERE provider = 'clerk' AND provider_user_id = ?`
-    )
-    .bind(data.public_user_data.user_id)
-    .first<{ user_id: string }>();
-
-  if (!identity) {
-    return;
-  }
-
-  await getDb(c.env)
-    .prepare(
-      `UPDATE organization_members
-       SET status = 'removed'
-       WHERE organization_id = ? AND user_id = ?`
-    )
-    .bind(mapping.organization_id, identity.user_id)
-    .run();
 }
 
 export const handleRampProviderWebhook = async (c: AppContext, environment: SdpEnvironment) => {
@@ -448,14 +262,12 @@ export const handleClerkWebhook = async (c: AppContext) => {
       await syncUser(c, event.data);
       break;
     case "user.deleted":
-      await deleteUser(c, event.data);
+      logIgnoredClerkEvent(c, "user", event.data.id);
       break;
     case "organizationMembership.created":
     case "organizationMembership.updated":
-      await upsertMembership(c, event.data);
-      break;
     case "organizationMembership.deleted":
-      await deleteMembership(c, event.data);
+      logIgnoredClerkEvent(c, "organization_membership", event.data.id);
       break;
     default:
       break;

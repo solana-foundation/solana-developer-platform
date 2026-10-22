@@ -10,7 +10,7 @@ import {
   listMembersQuerySchema,
   updateMemberRoleRequestSchema,
 } from "@/openapi/schemas/organizations";
-import { errorResponses, jsonContent } from "./helpers";
+import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
 import { inviteMemberResponse, listMembersResponse, memberRoleResponse } from "./responses";
 
 export function registerMemberPaths(registry: OpenAPIRegistry) {
@@ -62,6 +62,7 @@ export function registerMemberPaths(registry: OpenAPIRegistry) {
     description: "Creates an invitation for a new organization member.",
     security: [{ clerkBearerAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       body: {
         required: true,
         content: jsonContent(inviteMemberRequestSchema),
@@ -86,6 +87,7 @@ export function registerMemberPaths(registry: OpenAPIRegistry) {
       "Withdraws a pending invitation, in Clerk as well as locally. Only a pending invitation can be revoked.",
     security: [{ clerkBearerAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       params: z.object({
         invitationId: invitationIdSchema,
       }),
@@ -152,6 +154,7 @@ export function registerMemberPaths(registry: OpenAPIRegistry) {
       "Removes another member from the organization, along with their project memberships in it and their pending invitations, so an unspent invitation cannot readmit them. The last active admin cannot be removed, and nobody can remove themselves (409). Re-inviting the removed member issues a fresh invitation that works normally.",
     security: [{ clerkBearerAuth: [] }],
     request: {
+      headers: projectScopeHeaders,
       params: z.object({
         memberId: memberIdParamSchema,
       }),
