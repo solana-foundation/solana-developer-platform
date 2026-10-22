@@ -615,7 +615,9 @@ async function releaseUnsentRampDeposit(
 /**
  * A failure after the durable start marker remains processing for chain
  * reconciliation, and the request answers with the row as it stands now, so a
- * verdict reconciliation already wrote is what the caller sees (APE-892).
+ * verdict reconciliation already wrote is what the caller sees (APE-892): a
+ * success closes the audit intent like a concurrent verdict, and a failure
+ * answers exactly as a later replay of the row would.
  * Before that marker, no broadcast was possible and the
  * transfer can fail normally; an unsigned off-ramp deposit is released.
  */
@@ -637,6 +639,12 @@ async function settleTransferExecutionFailure(
     });
     if (!current) {
       throw internalError("Payment transfer record not found after submission");
+    }
+    if (current.status === "failed") {
+      return replayTransferRow(c, current);
+    }
+    if (isSuccessfulPaymentTransferStatus(current.status)) {
+      await onConcurrentChainVerdict?.(current);
     }
     return success(c, toPayload(current));
   }
