@@ -220,6 +220,25 @@ describe("Payments routes — transfer idempotency", () => {
     expect(await countTransferRows()).toBe(1);
   });
 
+  it("fingerprints the token as the mint it sends, so SOL and its mint are one transfer (APE SOLA9-695)", async () => {
+    const body = {
+      sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+      destination: TEST_SOLANA_ADDRESSES.wallet2,
+      amount: "1",
+    };
+
+    const first = await postTransfer({ ...body, token: "SOL" }, { idempotencyKey: "xfer-alias" });
+    expect(first.status).toBe(200);
+    const aliased = await postTransfer(
+      { ...body, token: "So11111111111111111111111111111111111111112" },
+      { idempotencyKey: "xfer-alias" }
+    );
+
+    expect(aliased.status).toBe(200);
+    expect(aliased.headers.get("Idempotent-Replayed")).toBe("true");
+    expect(await countTransferRows()).toBe(1);
+  });
+
   it("refuses an unknown ramp transferId before claiming the key", async () => {
     const response = await postTransfer(
       {

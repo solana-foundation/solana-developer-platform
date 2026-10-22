@@ -61,6 +61,23 @@ describe("Payments routes — payment request access before the key", () => {
     expect(response.status).toBe(201);
     expect(await storedKeyCount("payreq-own-wallet")).toBe(1);
   });
+
+  it("replays a retry that only re-spells the amount (APE SOLA9-734)", async () => {
+    const first = await postPaymentRequest(
+      { walletId: TEST_WALLET_ID, token: DEVNET_USDC_MINT, amount: "1" },
+      "payreq-respelled"
+    );
+    const retry = await postPaymentRequest(
+      { walletId: TEST_WALLET_ID, token: DEVNET_USDC_MINT, amount: "1.00" },
+      "payreq-respelled"
+    );
+
+    expect(first.status).toBe(201);
+    expect(retry.status).toBe(201);
+    const created = (await first.json()) as { data: { id: string } };
+    const replayed = (await retry.json()) as { data: { id: string } };
+    expect(replayed.data.id).toBe(created.data.id);
+  });
 });
 
 describe("Payments routes — payment request token cluster", () => {
@@ -151,5 +168,17 @@ describe("Payments routes — subscription plan wallets before the key", () => {
     );
     expect(response.status).toBe(404);
     expect(await storedKeyCount("plan-foreign-puller")).toBe(0);
+  });
+
+  it("replays a retry that only re-spells the amount (APE SOLA9-759)", async () => {
+    const first = await postPlan({ ownerWalletId: TEST_WALLET_ID, amount: "25" }, "plan-respelled");
+    const retry = await postPlan(
+      { ownerWalletId: TEST_WALLET_ID, amount: "25.0" },
+      "plan-respelled"
+    );
+
+    expect(first.status).toBe(201);
+    expect(retry.status).toBe(201);
+    expect(await retry.json()).toEqual(await first.clone().json());
   });
 });

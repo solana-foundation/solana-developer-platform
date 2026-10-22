@@ -1,10 +1,10 @@
 import { Hono } from "hono";
-import { canonicalizeDecimalFields, type JsonValue } from "@/lib/idempotency";
 import { authorize } from "@/middleware/authorize";
 import { idempotent } from "@/middleware/idempotency";
 import { replayFromRecord } from "@/middleware/movement-steps";
 import { requireAction } from "@/middleware/require-action";
 import { validateBody, validateParams } from "@/middleware/validate";
+import { canonicalizePaymentBody } from "@/routes/payments/fingerprint";
 import type { Env } from "@/types/env";
 import {
   authorizeRecurringPayment,
@@ -40,9 +40,6 @@ import {
 
 export const recurringPayments = new Hono<{ Bindings: Env }>();
 
-/** "1.0" and "1" collect the same amount, so they fingerprint as one request. */
-const canonicalAmount = (body: JsonValue) => canonicalizeDecimalFields(body, ["amount"]);
-
 recurringPayments.post(
   "/",
   requireAction("recurring.manage"),
@@ -53,7 +50,7 @@ recurringPayments.post(
     key: "required",
     serverErrors: "rerun",
     recovery: "record",
-    canonicalize: canonicalAmount,
+    canonicalize: canonicalizePaymentBody,
   }),
   replayFromRecord(findRecurringPaymentCreateReplay),
   createRecurringPayment
@@ -73,7 +70,7 @@ recurringPayments.patch(
     key: "required",
     serverErrors: "rerun",
     recovery: "record",
-    canonicalize: canonicalAmount,
+    canonicalize: canonicalizePaymentBody,
   }),
   replayFromRecord(findRecurringPaymentUpdateReplay),
   updateRecurringPayment
