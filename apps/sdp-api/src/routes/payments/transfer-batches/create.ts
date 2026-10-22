@@ -146,7 +146,8 @@ export async function createTransferBatch(
   const feePayment = createSponsorshipFeePayment(
     c.env,
     resolveRequestSponsorshipScope(c),
-    "payments.transfer_batch"
+    "payments.transfer_batch",
+    { custodyWalletId: resolved.sourceWallet.id }
   );
   const [signer, feePayer, lifetime] = await Promise.all([
     createOrgSignerForCustodyWallet(

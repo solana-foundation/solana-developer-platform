@@ -98,7 +98,8 @@ export async function resolveVaultSponsorship(
       projectId: input.projectId,
       actor: { type: "wallet", id: input.walletId },
     }),
-    input.movement
+    input.movement,
+    { custodyWalletId: input.walletId }
   );
   const sponsor = await input.deadline.run("Resolving the sponsored fee payer", () =>
     feePayment.getFeePayer()

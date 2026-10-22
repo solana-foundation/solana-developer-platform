@@ -1685,7 +1685,8 @@ async function runReplacementUpdate(input: {
         projectId: input.projectId,
         actor: { type: "wallet", id: input.resolved.sourceWallet.walletId },
       }),
-      "recurring.update"
+      "recurring.update",
+      { custodyWalletId: input.resolved.sourceWallet.id }
     );
     const feePayer = await feePayment.getFeePayer();
     const payer = createNoopSigner(feePayer);

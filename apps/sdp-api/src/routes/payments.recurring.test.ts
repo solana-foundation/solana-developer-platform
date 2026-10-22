@@ -580,7 +580,7 @@ async function narrowWhileClaiming(input: {
   path: string;
   init: { method: string; body: unknown };
   headers: Record<string, string>;
-  table: "api_keys" | "organization_members";
+  table: "api_keys" | "organization_members" | "project_members";
   rowId: string;
   narrowing: string;
 }): Promise<Response> {
@@ -592,10 +592,11 @@ async function narrowWhileClaiming(input: {
   const holding = new Promise<void>((resolve) => {
     locked = resolve;
   });
-  const lockRow =
-    input.table === "api_keys"
-      ? "SELECT id FROM api_keys WHERE id = ? FOR UPDATE"
-      : "SELECT id FROM organization_members WHERE user_id = ? FOR UPDATE";
+  const lockRow = {
+    api_keys: "SELECT id FROM api_keys WHERE id = ? FOR UPDATE",
+    organization_members: "SELECT id FROM organization_members WHERE user_id = ? FOR UPDATE",
+    project_members: "SELECT id FROM project_members WHERE user_id = ? FOR UPDATE",
+  }[input.table];
   const narrowing = getDb(env).transaction(async (tx) => {
     await tx.execute(lockRow, [input.rowId]);
     locked();
@@ -615,7 +616,9 @@ async function narrowWhileClaiming(input: {
 }
 
 /** Waits until a claim's share lock on a row of `table` is blocked behind another transaction. */
-async function untilWaitingOnRowLock(table: "api_keys" | "organization_members"): Promise<void> {
+async function untilWaitingOnRowLock(
+  table: "api_keys" | "organization_members" | "project_members"
+): Promise<void> {
   for (let attempt = 0; attempt < 250; attempt++) {
     const waiting = await getDb(env).queryOne<{ count: number }>(
       `SELECT COUNT(*)::int AS count FROM pg_stat_activity
@@ -5114,6 +5117,36 @@ describe("Payments routes — recurring", () => {
       table: "organization_members",
       rowId: TEST_USER.id,
       narrowing: "UPDATE organization_members SET status = 'removed' WHERE user_id = ?",
+    });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { details: { reason: "principal_not_live" } },
+    });
+    expect(await recurringExecutionSnapshot(payment.id)).toEqual(before);
+  });
+
+  // SOLA9-790: removal from the project is ordered against the claim too.
+  it("refuses an activation whose member is removed from the project between admission and claim", async () => {
+    const payment = await seedPendingRecurringPayment();
+    const before = await recurringExecutionSnapshot(payment.id);
+    const { headers } = await authenticateTestClerkUser(env, getDb(env), {
+      userId: TEST_USER.id,
+      email: TEST_USER.email,
+      clerkUserId: `clerk_${TEST_USER.id}`,
+      organizationId: TEST_ORG.id,
+      clerkOrgId: "clerk_org_recurring_member",
+      orgSlug: TEST_ORG.slug,
+      role: "admin",
+    });
+
+    const response = await narrowWhileClaiming({
+      path: `/v1/payments/recurring-payments/${payment.id}/activate`,
+      init: { method: "POST", body: {} },
+      headers: { ...headers(TEST_PROJECT.id), "Content-Type": "application/json" },
+      table: "project_members",
+      rowId: TEST_USER.id,
+      narrowing: "DELETE FROM project_members WHERE user_id = ?",
     });
 
     expect(response.status).toBe(403);

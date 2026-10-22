@@ -128,7 +128,9 @@ export async function issuePaymentRequestTransaction(
         projectId: request.project_id,
         actor: { type: "wallet", id: request.wallet_id },
       }),
-      "payments.pay_request"
+      "payments.pay_request",
+      // No custody wallet signs a `/pay` transaction: the payer signs it.
+      { custodyWalletId: null }
     );
     return feePaymentInstance;
   };

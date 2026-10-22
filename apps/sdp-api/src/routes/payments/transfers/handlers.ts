@@ -721,7 +721,8 @@ async function executeSponsoredTransfer(
   const feePayment = createSponsorshipFeePayment(
     c.env,
     resolveRequestSponsorshipScope(c),
-    "payments.transfer"
+    "payments.transfer",
+    { custodyWalletId: params.sourceWallet.id }
   );
   const feePayer = await feePayment.getFeePayer();
   const instructions = await params.buildInstructions({ signer, feePayer, rpc });

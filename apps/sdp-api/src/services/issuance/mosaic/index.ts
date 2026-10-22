@@ -18,7 +18,13 @@ export type MosaicFeePayment = "sponsored" | "wallet";
 /** How a Mosaic service pays fees: the signer's own SOL, or a sponsor for a scope and movement. */
 export type MosaicFee =
   | { mode: "wallet" }
-  | { mode: "sponsored"; scope: SponsorshipScope; movement: MovementId };
+  | {
+      mode: "sponsored";
+      scope: SponsorshipScope;
+      movement: MovementId;
+      /** The custody wallet that signs; the sponsor decides the principal's scope on it. */
+      custodyWalletId: string;
+    };
 
 /**
  * Create a MosaicService with a signer and an explicit fee-payment mode.
@@ -40,7 +46,9 @@ export function createMosaicService(
 ): MosaicService {
   const sponsor =
     fee.mode === "sponsored" && isKoraSponsorshipConfigured(env)
-      ? createIssuanceSponsor(env, fee.scope, fee.movement)
+      ? createIssuanceSponsor(env, fee.scope, fee.movement, {
+          custodyWalletId: fee.custodyWalletId,
+        })
       : undefined;
   return new MosaicService(env, signer, sponsor, {
     // Keep on-chain failures surfacing as AppError("TRANSACTION_FAILED") so
