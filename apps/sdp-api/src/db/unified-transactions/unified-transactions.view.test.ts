@@ -1,4 +1,6 @@
 import { EARN_MOVEMENT_STATUSES } from "@sdp/types/earn";
+import type { PaymentTransferType } from "@sdp/types/payments";
+import type { LegVerifier, TokenMovementBasis } from "@sdp/types/token-movements";
 import {
   UNIFIED_TRANSACTION_MODULE_CONTRACTS,
   UNIFIED_TRANSACTION_MODULES,
@@ -9,7 +11,10 @@ import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { runWithTenantDatabaseIdentity } from "@/db/identity";
+import type { PaymentTransferDirection } from "@/db/repositories/payments.repository";
+import type { TokenMovementLegOwner } from "@/db/repositories/token-movement-legs.repository";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { seedProjectCryptoWalletCounterparty } from "@/test/helpers/counterparties";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -294,6 +299,137 @@ async function seedEarn(status: string): Promise<string> {
   return id;
 }
 
+const LEG_MINT = wellKnownMint("USDC", "devnet");
+const BATCH = "ptb_unified_view";
+
+async function seedLeggedTransfer(input: {
+  id: string;
+  type: PaymentTransferType;
+  direction: PaymentTransferDirection;
+  amount: string;
+}): Promise<string> {
+  await getDb(env).execute(
+    `INSERT INTO payment_transfers
+       (id, organization_id, project_id, wallet_id, custody_wallet_id, source_address,
+        destination_address, token, amount, type, direction, status, created_at, updated_at)
+     VALUES (?, ?, ?, 'wallet_unified_view', ?, 'source', 'destination', ?, ?, ?, ?,
+             'confirmed', ?, ?)`,
+    [
+      input.id,
+      TEST_ORG.id,
+      PROJECT,
+      CUSTODY_WALLET,
+      LEG_MINT,
+      input.amount,
+      input.type,
+      input.direction,
+      CREATED_AT,
+      CREATED_AT,
+    ]
+  );
+  return input.id;
+}
+
+/**
+ * A landed leg in base units. A token leg is the USDC mint read at a slot; a
+ * native leg has fixed terms. A chain leg records what the chain showed,
+ * equal to its quote, as the on-ramp verifier writes it.
+ */
+async function seedLeg(
+  owner: TokenMovementLegOwner,
+  leg: {
+    asset: "native" | "token";
+    decimals: number;
+    basis: TokenMovementBasis;
+    debit: bigint;
+    fee: bigint;
+    credit: bigint;
+    verifiedBy: LegVerifier;
+  }
+): Promise<void> {
+  const ownerId = owner.kind === "transfer" ? owner.transferId : owner.recipientId;
+  const token = leg.asset === "token";
+  const chain = leg.verifiedBy === "chain";
+  await getDb(env).execute(
+    `INSERT INTO token_movement_legs
+       (id, organization_id, project_id, payment_transfer_id, payment_transfer_recipient_id,
+        asset_kind, mint, token_program, decimals, basis, quoted_debit, quoted_fee,
+        quoted_credit, as_of_slot, as_of_unix_timestamp, observed_debit, observed_fee,
+        observed_credit, verified_by, verification_state, verification_reason)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::numeric, ?::numeric, ?::numeric, ?::numeric, ?,
+             ?::numeric, ?::numeric, ?::numeric, ?, 'verified', ?)`,
+    [
+      `tml_${ownerId}`,
+      TEST_ORG.id,
+      PROJECT,
+      owner.kind === "transfer" ? owner.transferId : null,
+      owner.kind === "batch_recipient" ? owner.recipientId : null,
+      leg.asset,
+      token ? LEG_MINT : null,
+      token ? "spl-token" : null,
+      leg.decimals,
+      leg.basis,
+      leg.debit.toString(),
+      leg.fee.toString(),
+      leg.credit.toString(),
+      token ? "4200" : null,
+      token ? 1_800_000_000 : null,
+      chain ? leg.debit.toString() : null,
+      chain ? leg.fee.toString() : null,
+      chain ? leg.credit.toString() : null,
+      leg.verifiedBy,
+      chain ? "chain_delta_matched" : "sdp_built_transfer_landed",
+    ]
+  );
+}
+
+/** A USDC fee-mint leg: 1.005 leaves the source, 0.005 is withheld, 1 arrives. */
+const FEE_LEG = {
+  asset: "token",
+  decimals: 6,
+  debit: 1_005_000n,
+  fee: 5_000n,
+  credit: 1_000_000n,
+} as const;
+
+async function seedBatch(): Promise<void> {
+  await seedProjectCryptoWalletCounterparty(getDb(env), {
+    organizationId: TEST_ORG.id,
+    projectId: PROJECT,
+    createdBy: TEST_USER.id,
+    counterpartyId: "cpty_unified_view",
+    counterpartyAccountId: "cpacct_unified_view",
+    walletAddress: "destination",
+  });
+  await getDb(env).execute(
+    `INSERT INTO payment_transfer_batches
+       (id, organization_id, project_id, source_custody_wallet_id, source_wallet_id,
+        source_address, token, status, total_amount, recipient_count, transaction_count)
+     VALUES (?, ?, ?, ?, 'wallet_unified_view', 'source', ?, 'confirmed', '999', 4, 3)`,
+    [BATCH, TEST_ORG.id, PROJECT, CUSTODY_WALLET, LEG_MINT]
+  );
+}
+
+async function seedRecipient(id: string, chunkId: string, amount: string): Promise<void> {
+  await getDb(env).execute(
+    `INSERT INTO payment_transfer_recipients
+       (id, batch_id, organization_id, project_id, transfer_id, counterparty_id,
+        counterparty_account_id, destination_address, amount, status)
+     VALUES (?, ?, ?, ?, ?, 'cpty_unified_view', 'cpacct_unified_view', 'destination', ?,
+             'confirmed')`,
+    [id, BATCH, TEST_ORG.id, PROJECT, chunkId, amount]
+  );
+}
+
+async function paymentAmount(id: string): Promise<string | null> {
+  const row = await getDb(env).queryOne<{ amount: string | null }>(
+    "SELECT amount FROM unified_transactions WHERE module = 'payments' AND id = ?",
+    [id]
+  );
+  if (row === null) throw new Error(`missing unified row ${id}`);
+  return row.amount;
+}
+
 const seeders = {
   payments: seedPayment,
   earn: seedEarn,
@@ -510,5 +646,188 @@ describe("unified_transactions view (postgres)", () => {
     );
     if (ringsAmount === null) throw new Error("missing Rings amount fixture");
     expect(ringsAmount.amount_matches).toBe(true);
+  });
+  it("shows an outbound row's quoted debit from its leg, not its stored text", async () => {
+    const id = await seedLeggedTransfer({
+      id: "xfr_leg_debit",
+      type: "transfer",
+      direction: "outbound",
+      amount: "999",
+    });
+    await seedLeg(
+      { kind: "transfer", transferId: id },
+      { ...FEE_LEG, basis: "credit", verifiedBy: "construction" }
+    );
+    // A fee mint: the source's wallet loses the debit, not the credit.
+    expect(await paymentAmount(id)).toBe("1.005");
+  });
+
+  it("shows an inbound row's credit: a request deposit and a verified on-ramp delivery", async () => {
+    const deposit = await seedLeggedTransfer({
+      id: "xfr_leg_inbound",
+      type: "transfer",
+      direction: "inbound",
+      amount: "999",
+    });
+    await seedLeg(
+      { kind: "transfer", transferId: deposit },
+      { ...FEE_LEG, basis: "credit", verifiedBy: "construction" }
+    );
+    // The provider quoted 25; the chain shows 25.5 delivered.
+    const onramp = await seedLeggedTransfer({
+      id: "xfr_leg_onramp",
+      type: "onramp",
+      direction: "inbound",
+      amount: "25",
+    });
+    await seedLeg(
+      { kind: "transfer", transferId: onramp },
+      {
+        asset: "token",
+        decimals: 6,
+        basis: "credit",
+        debit: 25_500_000n,
+        fee: 0n,
+        credit: 25_500_000n,
+        verifiedBy: "chain",
+      }
+    );
+    expect(await paymentAmount(deposit)).toBe("1");
+    expect(await paymentAmount(onramp)).toBe("25.5");
+  });
+
+  it("shows an off-ramp's credit, the provider's deposit amount, beside a larger debit", async () => {
+    const id = await seedLeggedTransfer({
+      id: "xfr_leg_offramp",
+      type: "offramp",
+      direction: "outbound",
+      amount: "1.00",
+    });
+    await seedLeg(
+      { kind: "transfer", transferId: id },
+      { ...FEE_LEG, basis: "credit", verifiedBy: "construction" }
+    );
+    expect(await paymentAmount(id)).toBe("1");
+  });
+
+  it("keeps a legacy row's stored amount: it has no leg", async () => {
+    const id = await seedLeggedTransfer({
+      id: "xfr_leg_legacy",
+      type: "transfer",
+      direction: "outbound",
+      amount: "1.50",
+    });
+    expect(await paymentAmount(id)).toBe("1.50");
+  });
+
+  it("keeps the stored amount when the row's only leg is archived", async () => {
+    const id = await seedLeggedTransfer({
+      id: "xfr_leg_archived",
+      type: "transfer",
+      direction: "outbound",
+      amount: "1.50",
+    });
+    await seedLeg(
+      { kind: "transfer", transferId: id },
+      { ...FEE_LEG, basis: "credit", verifiedBy: "construction" }
+    );
+    await getDb(env).execute("UPDATE token_movement_legs SET status = 'archived' WHERE id = ?", [
+      `tml_${id}`,
+    ]);
+    expect(await paymentAmount(id)).toBe("1.50");
+  });
+
+  it.each([
+    ["a whole number without a point", "token", 6, 2_000_000n, "2"],
+    ["a fraction with its leading zero", "native", 9, 1n, "0.000000001"],
+    ["a mint with no decimals", "token", 0, 7n, "7"],
+    [
+      "the largest u64 at 18 decimals, every digit",
+      "token",
+      18,
+      18_446_744_073_709_551_615n,
+      "18.446744073709551615",
+    ],
+  ] as const)(
+    "formats %s in canonical token units",
+    async (_case, asset, decimals, debit, shown) => {
+      const id = await seedLeggedTransfer({
+        id: `xfr_leg_format_${decimals}_${debit}`,
+        type: "transfer",
+        direction: "outbound",
+        amount: "999",
+      });
+      await seedLeg(
+        { kind: "transfer", transferId: id },
+        {
+          asset,
+          decimals,
+          basis: "debit",
+          debit,
+          fee: 0n,
+          credit: debit,
+          verifiedBy: "construction",
+        }
+      );
+      expect(await paymentAmount(id)).toBe(shown);
+    }
+  );
+
+  it("sums a batch chunk's recipient debits, and keeps a legacy chunk's stored amount", async () => {
+    await seedBatch();
+    const chunk = await seedLeggedTransfer({
+      id: "xfr_leg_chunk",
+      type: "transfer_batch",
+      direction: "outbound",
+      amount: "999",
+    });
+    const other = await seedLeggedTransfer({
+      id: "xfr_leg_chunk_other",
+      type: "transfer_batch",
+      direction: "outbound",
+      amount: "999",
+    });
+    const legacy = await seedLeggedTransfer({
+      id: "xfr_leg_chunk_legacy",
+      type: "transfer_batch",
+      direction: "outbound",
+      amount: "3",
+    });
+    await seedRecipient("ptr_leg_a", chunk, "1.005");
+    await seedRecipient("ptr_leg_b", chunk, "0.5025");
+    await seedRecipient("ptr_leg_other", other, "0.5");
+    await seedRecipient("ptr_leg_legacy", legacy, "3");
+    await seedLeg(
+      { kind: "batch_recipient", recipientId: "ptr_leg_a" },
+      { ...FEE_LEG, basis: "debit", verifiedBy: "construction" }
+    );
+    await seedLeg(
+      { kind: "batch_recipient", recipientId: "ptr_leg_b" },
+      {
+        asset: "token",
+        decimals: 6,
+        basis: "debit",
+        debit: 502_500n,
+        fee: 2_500n,
+        credit: 500_000n,
+        verifiedBy: "construction",
+      }
+    );
+    await seedLeg(
+      { kind: "batch_recipient", recipientId: "ptr_leg_other" },
+      {
+        asset: "token",
+        decimals: 6,
+        basis: "debit",
+        debit: 500_000n,
+        fee: 0n,
+        credit: 500_000n,
+        verifiedBy: "construction",
+      }
+    );
+    // Each chunk shows the debits of the recipients it pays, never the batch total.
+    expect(await paymentAmount(chunk)).toBe("1.5075");
+    expect(await paymentAmount(other)).toBe("0.5");
+    expect(await paymentAmount(legacy)).toBe("3");
   });
 });

@@ -1,9 +1,13 @@
+import { baseUnits } from "@sdp/solana/token-amount";
+import { getAddressDecoder, unixTimestamp } from "@solana/kit";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
-import { mapTransferRow } from "./mappers";
+import type { TokenMovementLeg } from "@/db/repositories/token-movement-legs.repository";
+import { mapTransferRow, mapTransferWithLegs } from "./mappers";
 
 const SALE_REFERENCE = "826ca171-dd61-46e8-bfa1-8a22c7372f64";
+const LEG_MINT = getAddressDecoder().decode(new Uint8Array(32).fill(7));
 
 const wireObjectSchema = z.record(z.string(), z.unknown());
 
@@ -117,5 +121,56 @@ describe("mapTransferRow payout and confirmation", () => {
   it("omits confirmedAt until the transfer is confirmed", () => {
     const row = offrampRow({ status: "settling", confirmed_at: null });
     expect(onTheWire(row)).not.toHaveProperty("confirmedAt");
+  });
+});
+
+/** A verified 6-decimal token leg of `transferId`, with a credit basis. */
+function creditLeg(
+  transferId: string,
+  quoted: { debit: bigint; fee: bigint; credit: bigint }
+): TokenMovementLeg {
+  const amounts = {
+    debit: baseUnits(quoted.debit),
+    fee: baseUnits(quoted.fee),
+    credit: baseUnits(quoted.credit),
+  };
+  return {
+    id: `tml_${transferId}`,
+    organizationId: "org_mapper",
+    projectId: "prj_mapper",
+    owner: { kind: "transfer", transferId },
+    asset: { kind: "token", mint: LEG_MINT, program: "spl-token" },
+    decimals: 6,
+    basis: "credit",
+    quoted: amounts,
+    feeEpoch: null,
+    asOf: { slot: 512958400n, unixTimestamp: unixTimestamp(1760915192n) },
+    displayRule: null,
+    observed: amounts,
+    verifiedBy: "chain",
+    verification: { state: "verified", reason: "chain_delta_matched" },
+    createdAt: "2026-10-19T23:07:00.000Z",
+    updatedAt: "2026-10-19T23:07:00.000Z",
+  };
+}
+
+describe("mapTransferWithLegs amount", () => {
+  it("reports an on-ramp's delivered credit once its delivery has a leg, not the provider quote", () => {
+    const row = offrampRow({ type: "onramp", kind: "onramp", direction: "inbound", amount: "25" });
+    const leg = creditLeg(row.id, { debit: 25_500_000n, fee: 0n, credit: 25_500_000n });
+    expect(mapTransferRow(row)).toMatchObject({ amount: "25" });
+    expect(mapTransferWithLegs(row, [leg])).toMatchObject({
+      amount: "25.5",
+      amounts: { basis: "credit", debit: "25.5", fee: "0", credit: "25.5", decimals: 6 },
+    });
+  });
+
+  it("keeps an off-ramp's provider deposit amount, its credit, beside a larger debit", () => {
+    const row = offrampRow({ amount: "25" });
+    const leg = creditLeg(row.id, { debit: 25_250_000n, fee: 250_000n, credit: 25_000_000n });
+    expect(mapTransferWithLegs(row, [leg])).toMatchObject({
+      amount: "25",
+      amounts: { debit: "25.25", fee: "0.25", credit: "25" },
+    });
   });
 });
