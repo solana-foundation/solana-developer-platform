@@ -10,11 +10,7 @@ import {
   listMembersQuerySchema,
   updateMemberRoleRequestSchema,
 } from "@/openapi/schemas/organizations";
-import {
-  errorResponses,
-  jsonContent,
-  projectScopeWithDeclaredIdempotencyHeaders,
-} from "./helpers";
+import { errorResponses, jsonContent, projectScopeWithDeclaredIdempotencyHeaders } from "./helpers";
 import { inviteMemberResponse, listMembersResponse, memberRoleResponse } from "./responses";
 
 // Matches each route's `idempotent()` step (ADR 0009); spec.test.ts checks.
