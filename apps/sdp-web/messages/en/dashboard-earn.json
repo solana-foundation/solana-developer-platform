@@ -274,6 +274,7 @@
       "fundRefusedBalanceShort": "This wallet doesn't hold enough {symbol} to fund this leg. Nothing was sent.",
       "fundRefusedBalanceShortUnnamed": "This wallet doesn't hold enough of this token to fund this leg. Nothing was sent.",
       "fundRefusedFrozen": "This leg's escrow is frozen, so a transfer into it would bounce. The token's issuer has to unfreeze it first.",
+      "fundRefusedMintUnsupported": "This leg's token can't be funded any more: its mint is now in a state DvP settlement refuses, such as a transfer fee, a pause or a transfer hook. Nothing was sent.",
       "fundRefusedInProgress": "This leg is already being moved. Check back in a moment.",
       "legRefusedTradeClosing": "This trade is being settled or cancelled, so nothing was sent.",
       "fundRefusedNoToken": "This wallet doesn't hold any {symbol} yet. Send it some, then fund the leg.",

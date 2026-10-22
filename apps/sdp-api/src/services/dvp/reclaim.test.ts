@@ -11,6 +11,7 @@
 
 import assert from "node:assert/strict";
 import { DVP_SWAP_PROGRAM_PROGRAM_ADDRESS } from "@sdp/dvp";
+import type { SolanaRpc } from "@sdp/rpc/solana";
 import { DVP_LEG_REFUSAL } from "@sdp/types/dvp";
 import { MEMO_PROGRAM_ADDRESS } from "@sdp/types/well-known-programs";
 import {
@@ -33,6 +34,7 @@ import { conflict } from "@/lib/errors";
 import * as sponsorshipService from "@/services/sponsorship.service";
 import { acceptTransaction, buildDvpTradeRow, createTestSponsor } from "@/test/fixtures/dvp";
 import { env } from "@/test/helpers/env";
+import { mintTermsAt } from "@/test/helpers/token-movement";
 
 const createOrgSignerForCustodyWallet = vi.hoisted(() => vi.fn());
 const sendTransaction = vi.hoisted(() => vi.fn());
@@ -48,7 +50,7 @@ const confirmTransaction = vi.hoisted(() => vi.fn());
 const resolveProjectSponsorshipScope = vi.fn();
 const createSponsorshipFeePayment = vi.fn();
 const prepareOwnedSubmission = vi.hoisted(() => vi.fn());
-const fetchMaybeMint = vi.hoisted(() => vi.fn());
+const readDvpLegMint = vi.hoisted(() => vi.fn());
 
 let partySigner: Awaited<ReturnType<typeof generateKeyPairSigner>>;
 
@@ -74,10 +76,7 @@ vi.mock("@/db/repositories/dvp-leg-funding-claim.repository", () => ({
     release: releaseClaim,
   }),
 }));
-vi.mock("@solana-program/token-2022", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@solana-program/token-2022")>()),
-  fetchMaybeMint,
-}));
+vi.mock("./mints", () => ({ readDvpLegMint }));
 vi.mock("@sdp/rpc/solana", () => ({
   createRpc: () => ({}),
   getRecentBlockhash: async () => ({
@@ -157,7 +156,10 @@ describe("reclaimDvpTradeLeg", () => {
       clusterUnixTimestamp: 1_800_000_000n,
     });
     verifySwapDvpAccount.mockResolvedValue({ address: trade().swapDvp });
-    fetchMaybeMint.mockResolvedValue({ exists: true, data: { extensions: { __option: "None" } } });
+    readDvpLegMint.mockImplementation(async (_rpc: SolanaRpc, leg: { mint: string }) => ({
+      kind: "read",
+      terms: mintTermsAt(leg.mint, "token-2022", { decimals: 6, extensions: [] }),
+    }));
     listForTrade.mockResolvedValue([]);
     claimForReclaim.mockResolvedValue(true);
     assertTradeNotClosing.mockResolvedValue(undefined);
@@ -427,10 +429,19 @@ describe("reclaimDvpTradeLeg", () => {
 
   // The hook's extra accounts are not resolved, so the refund CPI would fail.
   it("refuses a transfer-hook mint rather than sending a reclaim the token program refuses", async () => {
-    fetchMaybeMint.mockResolvedValue({
-      exists: true,
-      data: { extensions: { __option: "Some", value: [{ __kind: "TransferHook" }] } },
-    });
+    readDvpLegMint.mockImplementation(async (_rpc: SolanaRpc, leg: { mint: string }) => ({
+      kind: "read",
+      terms: mintTermsAt(leg.mint, "token-2022", {
+        decimals: 6,
+        extensions: [
+          {
+            __kind: "TransferHook",
+            authority: partySigner.address,
+            programId: partySigner.address,
+          },
+        ],
+      }),
+    }));
 
     await expect(reclaimDvpTradeLeg(context, trade(), RECLAIMER_A)).rejects.toMatchObject({
       details: { reason: DVP_LEG_REFUSAL.transferHookUnsupported },

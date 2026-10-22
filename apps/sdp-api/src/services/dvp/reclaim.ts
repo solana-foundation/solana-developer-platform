@@ -11,6 +11,7 @@
 
 import { SwapDvpVerificationError, verifySwapDvpAccount } from "@sdp/dvp";
 import { confirmTransaction, createRpc, getRecentBlockhash } from "@sdp/rpc/solana";
+import { capabilityRefusals, TOKEN_MOVEMENT_REFUSALS } from "@sdp/solana/token-movement";
 import { DVP_LEG_REFUSAL, type DvpTradeSide, type DvpTradeStatus } from "@sdp/types/dvp";
 import {
   type Address,
@@ -26,7 +27,7 @@ import {
   signature,
 } from "@solana/kit";
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
-import { fetchMaybeMint, findAssociatedTokenPda } from "@solana-program/token-2022";
+import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import type { Context } from "hono";
 import { getDb } from "@/db/client";
 import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dvp-leg-funding-claim.repository";
@@ -46,7 +47,7 @@ import type { Env } from "@/types/env";
 import { assertTradeNotClosing } from "./close-exclusion";
 import { readDvpFundingReceipt } from "./funding-receipt";
 import type { RecordDvpLegActionAttempt } from "./leg-action-idempotency";
-import { UNSUPPORTED_MINT_EXTENSIONS } from "./mints";
+import { readDvpLegMint } from "./mints";
 import { readDvpAccounts } from "./read-chain";
 import { buildReclaimInstructions } from "./reclaim-instructions";
 
@@ -111,7 +112,7 @@ export async function reclaimDvpTradeLeg(
   const rpc = createRpc(env);
   const held = await readReclaimableEscrow(rpc, trade, side);
 
-  await refuseTransferHookMint(rpc, trade.id, mint);
+  await refuseTransferHookMint(rpc, trade.id, { mint, tokenProgram });
 
   const claims = createPostgresDvpLegFundingClaimRepository(getDb(env));
   const receipt = await takeoverableReceipt(claims, rpc, trade.id, side);
@@ -309,21 +310,28 @@ async function readReclaimableEscrow(rpc: Rpc, trade: DvpTradeRow, side: DvpTrad
  * accounts as trailing extras. SDP does not resolve those, so the Token-2022 CPI
  * would refuse the refund; say so instead of paying to find out.
  *
- * Create refuses these mints now (`UNSUPPORTED_MINT_EXTENSIONS`), so this only
- * catches a trade created before that refusal existed.
+ * Create refuses these mints now (the `dvp` row of the capability table), so
+ * this only catches a trade created before that refusal existed, or a hook set
+ * since. Only the hook refusal applies: a reclaim is an exit, and no other
+ * money-in rule may hold funds in an escrow.
  */
-async function refuseTransferHookMint(rpc: Rpc, tradeId: string, mint: Address) {
-  const mintAccount = await fetchMaybeMint(rpc, mint);
-  if (!mintAccount.exists) {
-    throw badRequest(`DvP trade ${tradeId}: mint ${mint} could not be read`, {
+async function refuseTransferHookMint(
+  rpc: Rpc,
+  tradeId: string,
+  leg: { mint: Address; tokenProgram: Address }
+) {
+  const legMint = await readDvpLegMint(rpc, leg);
+  if (legMint.kind !== "read") {
+    throw badRequest(`DvP trade ${tradeId}: mint ${leg.mint} could not be read`, {
       reason: DVP_LEG_REFUSAL.mintUnreadable,
     });
   }
-  const extensions = mintAccount.data.extensions;
   if (
-    extensions.__option === "Some" &&
-    extensions.value.some((extension) => UNSUPPORTED_MINT_EXTENSIONS.has(extension.__kind))
+    capabilityRefusals(legMint.terms, "dvp").some(
+      (refusal) => refusal.refusal === TOKEN_MOVEMENT_REFUSALS.transferHook
+    )
   ) {
+    const mint = leg.mint;
     throw conflict(
       `DvP trade ${tradeId}: mint ${mint} carries a transfer hook, which reclaim does not support yet; nothing was sent`,
       { reason: DVP_LEG_REFUSAL.transferHookUnsupported }

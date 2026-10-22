@@ -10,6 +10,11 @@
  * precision check are all delegated, so this file stays about the contract the
  * form holds (the `AmountResult` tagged union), not about string decimal
  * arithmetic.
+ *
+ * TODO(ADR 0012, token movements): this conversion belongs on the server, at
+ * the mint's live decimals (Token Terms), as every other movement path does.
+ * It stays here because the DvP API takes `amountA`/`amountB` as base units,
+ * so moving it is an API contract change, not a dashboard change.
  */
 
 import { decimalScale, isDecimalString, parseDecimalAmount } from "@sdp/solana/amount";

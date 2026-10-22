@@ -25,7 +25,6 @@
  */
 
 import { getRecentBlockhash, sendTransaction } from "@sdp/rpc/solana";
-import { parseDecimalAmount } from "@sdp/solana/amount";
 import { getWithdrawFundsInstructionAsync } from "@sdp/spc-withdraw";
 import type { PrivateChannelInstance } from "@sdp/types/private-channels";
 import {
@@ -61,7 +60,7 @@ import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { type SpcAuthContext, withGatewayRpc } from "./auth/gateway-auth";
 import { getChannelBalance } from "./balance";
-import { resolveChannelToken } from "./mint";
+import { channelAmountBaseUnits, resolveChannelToken } from "./mint";
 import type { PrivateChannelProjectRpcClient } from "./project-rpc";
 import { describeTxError, isAmbiguousSubmissionOutcome } from "./tx-error";
 import { confirmAndPersistWithdrawal } from "./withdraw-confirm";
@@ -328,18 +327,12 @@ export async function createChannelWithdrawal(
 ): Promise<PrivateChannelWithdrawal> {
   const { instance, organizationId, projectId, wallet } = input;
 
-  const { mint, decimals, tokenProgram } = await resolveChannelToken(
-    input.instance,
-    input.projectRpc,
-    input.mint
-  );
+  const { token, terms } = await resolveChannelToken(input.instance, input.projectRpc, input.mint);
+  const { mint, tokenProgram } = token;
   const owner = wallet.publicKey;
   const destination = input.destination;
 
-  const amountBaseUnits = parseDecimalAmount(input.amount, decimals);
-  if (amountBaseUnits <= 0n) {
-    throw badRequest("amount must be greater than zero");
-  }
+  const amountBaseUnits = channelAmountBaseUnits(input.amount, terms);
 
   const repo = createPrivateChannelWithdrawalRepository(env);
   const findReplay = () =>

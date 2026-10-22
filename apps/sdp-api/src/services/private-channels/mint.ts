@@ -7,6 +7,15 @@
  * their default mint and metadata.
  */
 
+import { AmountError } from "@sdp/solana/amount";
+import {
+  type BaseUnits,
+  parseTokenAmount,
+  type TokenAmount,
+  toBaseUnits,
+} from "@sdp/solana/token-amount";
+import { support } from "@sdp/solana/token-movement";
+import { decodeTokenTerms, type MintTokenTerms, TokenTermsError } from "@sdp/solana/token-terms";
 import { findAllowedMintPda } from "@sdp/spc-escrow";
 import type {
   PrivateChannelInstance,
@@ -15,8 +24,18 @@ import type {
 } from "@sdp/types/private-channels";
 import { privateChannelTokens } from "@sdp/types/private-channels";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
-import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
-import { address } from "@solana/kit";
+import {
+  SPL_TOKEN_PROGRAMS,
+  type TokenProgramKind,
+  WELL_KNOWN_TOKENS,
+} from "@sdp/types/well-known-tokens";
+import {
+  address,
+  assertAccountExists,
+  fetchEncodedAccounts,
+  type MaybeEncodedAccount,
+} from "@solana/kit";
+import { SYSVAR_CLOCK_ADDRESS } from "@solana/sysvars";
 import { badRequest, serviceUnavailable } from "@/lib/errors";
 import type { PrivateChannelProjectRpcClient } from "./project-rpc";
 
@@ -106,42 +125,144 @@ export function resolveRegisteredChannelToken(
   return token;
 }
 
-/** Resolve one token and require its on-chain allowlist PDA before any write. */
+/** A registered token a write moves, with its mint's Token Terms read live. */
+export interface ChannelTokenForWrite {
+  token: PrivateChannelToken;
+  terms: MintTokenTerms;
+}
+
+type WriteTokenRead =
+  | Readonly<{ kind: "enabled"; token: PrivateChannelToken; terms: MintTokenTerms }>
+  | Readonly<{ kind: "disabled"; token: PrivateChannelToken }>
+  | Readonly<{ kind: "unavailable"; token: PrivateChannelToken }>;
+
+function tokenProgramKind(token: PrivateChannelToken): TokenProgramKind {
+  if (token.tokenProgram === SPL_TOKEN_PROGRAMS["spl-token"]) return "spl-token";
+  if (token.tokenProgram === SPL_TOKEN_PROGRAMS["token-2022"]) return "token-2022";
+  throw new Error(`Private Channels token ${token.symbol} names an unknown token program`);
+}
+
+/**
+ * One registered token's allowlist entry, mint and the Clock, in one
+ * `getMultipleAccounts`: the entry says whether the instance enables it, and
+ * the mint's terms are what the write converts and gates with.
+ */
+async function readWriteToken(
+  instance: TokenEligibilityInstance,
+  projectRpc: PrivateChannelProjectRpcClient,
+  token: PrivateChannelToken
+): Promise<WriteTokenRead> {
+  const mint = address(token.mint);
+  const [allowedMint] = await findAllowedMintPda(
+    { instance: address(instance.escrowInstanceAddr), mint },
+    { programAddress: address(instance.escrowProgramId) }
+  );
+  let accounts: MaybeEncodedAccount[];
+  try {
+    accounts = await fetchEncodedAccounts(projectRpc.rpc, [
+      allowedMint,
+      mint,
+      SYSVAR_CLOCK_ADDRESS,
+    ]);
+  } catch {
+    // An outage is no verdict on the token: the caller answers 503.
+    return { kind: "unavailable", token };
+  }
+  const [allowed, mintAccount, clock] = accounts;
+  if (!allowed.exists || allowed.programAddress !== instance.escrowProgramId) {
+    return { kind: "disabled", token };
+  }
+  if (!mintAccount.exists) {
+    throw badRequest(`${token.symbol} mint ${token.mint} does not exist on ${projectRpc.cluster}`);
+  }
+  // The Clock sysvar always exists; a node answering otherwise fails like any read.
+  assertAccountExists(clock);
+  try {
+    const terms = decodeTokenTerms(
+      { kind: "token", mint, program: tokenProgramKind(token) },
+      { mint: mintAccount, clock }
+    );
+    return { kind: "enabled", token, terms };
+  } catch (error) {
+    if (error instanceof TokenTermsError) {
+      throw badRequest(error.message, { reason: error.reason });
+    }
+    throw error;
+  }
+}
+
+/**
+ * Resolve one token for a write: require its on-chain allowlist PDA, read its
+ * mint's Token Terms live, and refuse what the `private_channels` row of the
+ * capability table cannot move (ADR 0012): SPC's escrow and its unchecked
+ * `Transfer` cannot state a transfer fee or pass a hook's accounts, and
+ * cannot thaw the accounts a frozen-by-default mint opens.
+ *
+ * RPC budget: one `getMultipleAccounts` (allowlist entry, mint, Clock) per
+ * registered token for the default token, one in all for a named mint (was one
+ * `getAccountInfo` per registered token either way).
+ *
+ * @throws AppError (400) for an unregistered, disabled or refused mint, (503)
+ * when the instance's allowlist cannot be read.
+ */
 export async function resolveChannelToken(
   instance: TokenEligibilityInstance,
   projectRpc: PrivateChannelProjectRpcClient,
   mint?: string
-): Promise<PrivateChannelToken> {
-  const tokens = await readPrivateChannelTokenEligibility(instance, projectRpc);
-  if (mint === undefined) {
-    const defaultToken = tokens.find((candidate) => candidate.enabled);
-    if (defaultToken) return defaultToken;
-    if (
-      tokens.some((candidate) =>
-        candidate.exclusionReasons.some((reason) => reason.code === "ALLOWLIST_UNAVAILABLE")
-      )
-    ) {
-      throw serviceUnavailable(
-        "We could not read token access from the Private Channels instance."
-      );
-    }
-    throw badRequest("This Private Channels instance does not enable an SDP-supported token.");
-  }
-
-  const token = tokens.find((candidate) => candidate.mint === mint);
-  if (!token) {
-    const registered = privateChannelTokens(projectRpc.cluster);
+): Promise<ChannelTokenForWrite> {
+  const registered = privateChannelTokens(projectRpc.cluster);
+  const named = mint === undefined ? registered : registered.filter((token) => token.mint === mint);
+  if (named.length === 0) {
     const allowed = registered
       .map((candidate) => `${candidate.symbol} (${candidate.mint})`)
       .join(", ");
     throw badRequest(`mint ${mint} is not registered for Private Channels. Registered: ${allowed}`);
   }
-  if (token.enabled) return token;
-
-  if (token.exclusionReasons.some((reason) => reason.code === "ALLOWLIST_UNAVAILABLE")) {
-    throw serviceUnavailable("We could not read token access from the Private Channels instance.");
+  const reads = await Promise.all(
+    named.map((token) => readWriteToken(instance, projectRpc, token))
+  );
+  const enabled = reads.find(
+    (read): read is Extract<WriteTokenRead, { kind: "enabled" }> => read.kind === "enabled"
+  );
+  if (enabled === undefined) {
+    if (reads.some((read) => read.kind === "unavailable")) {
+      throw serviceUnavailable(
+        "We could not read token access from the Private Channels instance."
+      );
+    }
+    throw badRequest(
+      mint === undefined
+        ? "This Private Channels instance does not enable an SDP-supported token."
+        : `${named[0]?.symbol} is not enabled by this Private Channels instance.`
+    );
   }
-  throw badRequest(token.exclusionReasons[0]?.message);
+  const decision = support(enabled.terms, "private_channels");
+  if (!decision.supported) {
+    throw badRequest(decision.message, { reason: decision.refusal });
+  }
+  return { token: enabled.token, terms: enabled.terms };
+}
+
+/**
+ * The base units of a write's amount, at the mint's live decimals.
+ *
+ * @throws AppError (400) when the amount is not a positive decimal the mint can hold.
+ */
+export function channelAmountBaseUnits(amount: string, terms: MintTokenTerms): BaseUnits {
+  let parsed: TokenAmount;
+  try {
+    parsed = parseTokenAmount(amount, terms.decimals);
+  } catch (error) {
+    if (error instanceof AmountError) {
+      throw badRequest(error.message);
+    }
+    throw error;
+  }
+  const units = toBaseUnits(parsed);
+  if (units === 0n) {
+    throw badRequest("amount must be greater than zero");
+  }
+  return units;
 }
 
 /**

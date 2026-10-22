@@ -16,63 +16,32 @@
  *    program will not accept — and that address is the one we would publish for
  *    a counterparty to pay into.
  *
- * 2. The mint carries none of the four extensions the program refuses.
- *
- * 3. The mint carries no extension SDP cannot move yet, even where the program
- *    accepts it. A trade SDP can create but never settle, cancel or reclaim is
- *    a trap for whoever funds it.
+ * 2. The mint's Token Terms pass the `dvp` row of the capability table
+ *    (`support` in `@sdp/solana/token-movement`, ADR 0012): the four
+ *    extensions the program's `validate_mint_extensions` rejects with
+ *    `BlockedMintExtension` (`program/src/processor/shared/token_utils.rs`, at
+ *    CreateDvp and at SettleDvp alike), and what SDP cannot move yet even where
+ *    the program accepts it. A trade SDP can create but never settle, cancel or
+ *    reclaim is a trap for whoever funds it.
  */
 
 import type { SolanaRpc } from "@sdp/rpc/solana";
-import { type Account, type Address, type EncodedAccount, fetchEncodedAccount } from "@solana/kit";
-import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
+import type { TokenAsset } from "@sdp/solana/asset-ref";
 import {
-  decodeMint,
-  fetchMaybeMint,
-  type Mint,
-  TOKEN_2022_PROGRAM_ADDRESS,
-} from "@solana-program/token-2022";
-
-/**
- * Extensions `validate_mint_extensions` rejects with `BlockedMintExtension`
- * (`program/src/processor/shared/token_utils.rs:340-346`), at CreateDvp and at
- * SettleDvp alike.
- *
- * Two distinct reasons, kept apart because they say different things to a user:
- * the first three mutate amounts, so the credited amount drifts from the
- * debited one and a leg settles short; `NonTransferable` blocks transfers out
- * of the escrow, so anything that lands there is stranded with no settle,
- * refund or reclaim.
- *
- * Everything else passes the program, including `PermanentDelegate`,
- * `DefaultAccountState`, `TransferHook` and `Pausable`. See
- * `UNSUPPORTED_MINT_EXTENSIONS` for what SDP refuses on top.
- */
-export const BLOCKED_MINT_EXTENSIONS: ReadonlySet<string> = new Set([
-  "TransferFeeConfig",
-  "InterestBearingConfig",
-  // biome-ignore lint/security/noSecrets: Token-2022 extension name, not a secret.
-  "ScaledUiAmountConfig",
-  "NonTransferable",
-]);
-
-/**
- * Extensions the program accepts that SDP cannot move yet, so it refuses them
- * before a trade exists.
- *
- * `TransferHook`: every transfer out of an escrow (settle, cancel, reclaim) runs
- * the mint's hook, and the program forwards the hook's extra accounts as
- * trailing accounts on the instruction. SDP does not resolve those accounts, so
- * the token program refuses each of those transfers. Accepting the mint at
- * create would leave a funded leg with no way out.
- */
-export const UNSUPPORTED_MINT_EXTENSIONS: ReadonlySet<string> = new Set(["TransferHook"]);
-
-/** The two token programs a DvP leg may use. */
-const SUPPORTED_TOKEN_PROGRAMS: ReadonlySet<string> = new Set([
-  TOKEN_PROGRAM_ADDRESS,
-  TOKEN_2022_PROGRAM_ADDRESS,
-]);
+  capabilityRefusals,
+  type TokenMovementRefusal,
+  type TokenMovementRefusalNotice,
+} from "@sdp/solana/token-movement";
+import { decodeTokenTerms, type MintTokenTerms, TokenTermsError } from "@sdp/solana/token-terms";
+import { SPL_TOKEN_PROGRAMS, type TokenProgramKind } from "@sdp/types/well-known-tokens";
+import {
+  type Address,
+  assertAccountExists,
+  type EncodedAccount,
+  fetchEncodedAccounts,
+  type MaybeEncodedAccount,
+} from "@solana/kit";
+import { SYSVAR_CLOCK_ADDRESS } from "@solana/sysvars";
 
 export interface DvpMintLeg {
   /** "mintA" or "mintB" — used only to name the offending field in the error. */
@@ -81,12 +50,78 @@ export interface DvpMintLeg {
   tokenProgram: Address;
 }
 
+/** The token program kind a DvP leg names, or null for any other program. */
+function tokenProgramKind(tokenProgram: Address): TokenProgramKind | null {
+  if (tokenProgram === SPL_TOKEN_PROGRAMS["spl-token"]) return "spl-token";
+  if (tokenProgram === SPL_TOKEN_PROGRAMS["token-2022"]) return "token-2022";
+  return null;
+}
+
+/**
+ * A leg mint's terms from its account and the Clock read with it, or null when
+ * the bytes do not decode as a mint SDP can move. SDP cannot rule a transfer
+ * hook out of a mint it cannot read, so callers refuse it.
+ */
+function decodeDvpMint(
+  mint: EncodedAccount,
+  clock: EncodedAccount,
+  asset: TokenAsset
+): MintTokenTerms | null {
+  try {
+    return decodeTokenTerms(asset, { mint, clock });
+  } catch (error) {
+    if (error instanceof TokenTermsError) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+/** Whether the program itself refuses the state, rather than SDP. */
+function refusedByProgram(refusal: TokenMovementRefusal): boolean {
+  switch (refusal) {
+    case "transfer_fee":
+    case "display_rule":
+    case "non_transferable":
+      return true;
+    case "transfer_hook":
+    case "paused":
+    case "default_frozen":
+    case "hook_unresolved":
+    case "memo_required":
+    case "nothing_credited":
+    case "destination_frozen":
+    case "fee_above_tolerance":
+      return false;
+    default: {
+      const exhaustive: never = refusal;
+      throw new Error(`Unknown token movement refusal: ${String(exhaustive)}`);
+    }
+  }
+}
+
+/** The problem a create reports for one refusal of a leg's mint. */
+export function dvpMintProblem(
+  leg: Pick<DvpMintLeg, "label" | "mint">,
+  refusal: TokenMovementRefusalNotice
+): string {
+  if (refusal.refusal === "paused") {
+    return `${leg.label} ${leg.mint} is paused, so no leg of it can be funded, settled or refunded`;
+  }
+  return refusedByProgram(refusal.refusal)
+    ? `${leg.label} ${leg.mint} carries the ${refusal.extension} extension, which DvP settlement refuses`
+    : `${leg.label} ${leg.mint} carries the ${refusal.extension} extension, which SDP cannot settle, cancel or reclaim yet`;
+}
+
 /**
  * Reads both legs' mints and returns every problem, empty when they are sound.
  *
  * Reports all problems rather than the first, so a caller fixes one payload
  * instead of discovering the next failure on the next request — same contract
  * as `validateDvpTerms`.
+ *
+ * RPC budget: one `getMultipleAccounts` for both mints and the Clock (was one
+ * `getAccountInfo` per mint).
  *
  * @param rpc - Solana RPC to read the mints from.
  * @param legs - The mint and declared token program of each leg.
@@ -98,14 +133,19 @@ export async function validateDvpMints(
 ): Promise<string[]> {
   const problems: string[] = [];
 
-  // Encoded fetch, not `fetchMaybeMint`: that decodes eagerly, so bytes that are
-  // not a mint would throw before the owner check ran — turning "you pasted a
-  // non-mint address" from a named 400 into a 500. Existence and ownership are
-  // judged on the raw account; decoding happens only for the extensions check.
-  const accounts = await Promise.all(legs.map((leg) => fetchEncodedAccount(rpc, leg.mint)));
+  // Encoded reads, decoded only after the owner check: bytes that are not a
+  // mint would otherwise throw before it ran, turning "you pasted a non-mint
+  // address" from a named 400 into a 500.
+  const [clock, ...accounts] = await fetchEncodedAccounts(rpc, [
+    SYSVAR_CLOCK_ADDRESS,
+    ...legs.map((leg) => leg.mint),
+  ]);
+  // The Clock sysvar always exists; a node answering otherwise fails like any read.
+  assertAccountExists(clock);
 
   for (const [index, leg] of legs.entries()) {
-    if (!SUPPORTED_TOKEN_PROGRAMS.has(leg.tokenProgram)) {
+    const program = tokenProgramKind(leg.tokenProgram);
+    if (program === null) {
       problems.push(`${leg.label} token program ${leg.tokenProgram} is not an SPL token program`);
       continue;
     }
@@ -126,14 +166,8 @@ export async function validateDvpMints(
       continue;
     }
 
-    // Only Token-2022 mints carry extensions; a legacy mint has none by
-    // construction, so there is nothing to inspect.
-    if (leg.tokenProgram !== TOKEN_2022_PROGRAM_ADDRESS) {
-      continue;
-    }
-
-    const extensionProblems = readMintExtensionProblems(account);
-    if (extensionProblems === null) {
+    const terms = decodeDvpMint(account, clock, { kind: "token", mint: leg.mint, program });
+    if (terms === null) {
       // The program would still refuse its own four, but it accepts a transfer
       // hook, so a mint SDP cannot read is one it cannot rule a hook out of.
       problems.push(
@@ -141,76 +175,69 @@ export async function validateDvpMints(
       );
       continue;
     }
-    const { refusedByProgram, unsupportedBySdp } = extensionProblems;
-    for (const extension of refusedByProgram) {
-      problems.push(
-        `${leg.label} ${leg.mint} carries the ${extension} extension, which DvP settlement refuses`
-      );
-    }
-    for (const extension of unsupportedBySdp) {
-      problems.push(
-        `${leg.label} ${leg.mint} carries the ${extension} extension, which SDP cannot settle, cancel or reclaim yet`
-      );
+    for (const refusal of capabilityRefusals(terms, "dvp")) {
+      problems.push(dvpMintProblem(leg, refusal));
     }
   }
 
   return problems;
 }
 
+/** A leg mint read live: its terms, or why they cannot be had. */
+export type DvpLegMint =
+  | Readonly<{ kind: "read"; terms: MintTokenTerms }>
+  | Readonly<{ kind: "missing" }>
+  | Readonly<{ kind: "unreadable" }>;
+
 /**
- * A mint's decimals, or null when it cannot be read.
- *
- * `TransferChecked` takes decimals and the token program verifies them against
- * the mint, so passing a guess would fail the transfer rather than move a wrong
- * quantity — but reading them is still the only way to send at all.
- *
- * Returns null when the mint is missing or its bytes do not decode as a mint.
- * This is a pre-flight, not a gate: the program still verifies the decimals
- * against the mint on transfer, so a parse failure here costs only a round
- * trip, not a wrong quantity.
- *
- * @param rpc - Solana RPC to read the mint from.
- * @param mint - The mint address.
- * @returns The mint's decimals, or null when the mint is missing or undecodable.
+ * A leg's mint from its account and the Clock read with it: unreadable when
+ * the account is not the declared token program's, or does not decode as a
+ * mint SDP can move.
  */
-export async function readMintDecimals(rpc: SolanaRpc, mint: Address): Promise<number | null> {
-  try {
-    const account = await fetchMaybeMint(rpc, mint);
-    return account.exists ? account.data.decimals : null;
-  } catch {
-    return null;
+export function decodeDvpLegMint(
+  account: MaybeEncodedAccount,
+  clock: MaybeEncodedAccount,
+  leg: Pick<DvpMintLeg, "mint" | "tokenProgram">
+): DvpLegMint {
+  // The Clock sysvar always exists; a node answering otherwise fails like any read.
+  assertAccountExists(clock);
+  if (!account.exists) {
+    return { kind: "missing" };
   }
+  const program = tokenProgramKind(leg.tokenProgram);
+  if (program === null || account.programAddress !== leg.tokenProgram) {
+    return { kind: "unreadable" };
+  }
+  const terms = decodeDvpMint(account, clock, { kind: "token", mint: leg.mint, program });
+  return terms === null ? { kind: "unreadable" } : { kind: "read", terms };
 }
 
 /**
- * Names the ruled-out extensions present on a mint's raw account data: those
- * the program refuses, and those SDP cannot move yet.
- *
- * Returns null on data it cannot decode, and the caller refuses the mint. The
- * program enforces its own refusals on chain, but not SDP's: an unreadable
- * mint could carry a transfer hook, and accepting it would strand the funded
- * leg.
- *
- * @param account - A fetched, existing account owned by Token-2022.
- * @returns The ruled-out extension names present, split by who rules them out,
- *   or null when the mint cannot be decoded.
+ * A leg's mint terms, read live with the Clock in one `getMultipleAccounts`.
  */
-function readMintExtensionProblems(account: EncodedAccount): {
-  refusedByProgram: string[];
-  unsupportedBySdp: string[];
-} | null {
-  let mint: Account<Mint>;
-  try {
-    mint = decodeMint(account);
-  } catch {
-    return null;
-  }
-  const kinds =
-    mint.data.extensions.__option === "Some"
-      ? mint.data.extensions.value.map((extension) => extension.__kind)
-      : [];
-  return {
-    refusedByProgram: kinds.filter((kind) => BLOCKED_MINT_EXTENSIONS.has(kind)),
-    unsupportedBySdp: kinds.filter((kind) => UNSUPPORTED_MINT_EXTENSIONS.has(kind)),
-  };
+export async function readDvpLegMint(
+  rpc: SolanaRpc,
+  leg: Pick<DvpMintLeg, "mint" | "tokenProgram">
+): Promise<DvpLegMint> {
+  const [account, clock] = await fetchEncodedAccounts(rpc, [leg.mint, SYSVAR_CLOCK_ADDRESS]);
+  return decodeDvpLegMint(account, clock, leg);
+}
+
+/**
+ * A leg's mint terms and the funding wallet's token account of it, read in
+ * one `getMultipleAccounts` (was a mint read, then the account read).
+ *
+ * @returns The mint, and the source account as read (missing or not).
+ */
+export async function readDvpFundingAccounts(
+  rpc: SolanaRpc,
+  leg: Pick<DvpMintLeg, "mint" | "tokenProgram">,
+  source: Address
+): Promise<{ mint: DvpLegMint; source: MaybeEncodedAccount }> {
+  const [account, clock, sourceAccount] = await fetchEncodedAccounts(rpc, [
+    leg.mint,
+    SYSVAR_CLOCK_ADDRESS,
+    source,
+  ]);
+  return { mint: decodeDvpLegMint(account, clock, leg), source: sourceAccount };
 }

@@ -8,17 +8,38 @@
  * exist to avoid.
  */
 
-import { type Address, none, some } from "@solana/kit";
+import { type Address, none, some, unixTimestamp } from "@solana/kit";
+import { getSysvarClockEncoder, SYSVAR_CLOCK_ADDRESS } from "@solana/sysvars";
 import { extension, getMintEncoder } from "@solana-program/token-2022";
 import { describe, expect, it } from "vitest";
 
-/** An RPC whose `getAccountInfo` returns the given wire-format account. */
+const CLOCK = {
+  owner: "Sysvar1111111111111111111111111111111111111",
+  data: [
+    Buffer.from(
+      getSysvarClockEncoder().encode({
+        slot: 900n,
+        epochStartTimestamp: unixTimestamp(1_799_990_000n),
+        epoch: 700n,
+        leaderScheduleEpoch: 701n,
+        unixTimestamp: unixTimestamp(1_800_000_000n),
+      })
+    ).toString("base64"),
+    "base64",
+  ],
+  lamports: 1n,
+  executable: false,
+  space: 40n,
+};
+
+/** An RPC whose `getMultipleAccounts` returns the given wire-format mint and the Clock. */
 function rpcReturning(account: { owner: string; data: string } | null) {
   return {
-    getAccountInfo: () => ({
+    getMultipleAccounts: (addresses: readonly string[]) => ({
       send: async () => ({
-        value:
-          account === null
+        value: addresses.map((at) => {
+          if (at === SYSVAR_CLOCK_ADDRESS) return CLOCK;
+          return account === null
             ? null
             : {
                 owner: account.owner,
@@ -26,7 +47,8 @@ function rpcReturning(account: { owner: string; data: string } | null) {
                 lamports: 1n,
                 executable: false,
                 space: 0n,
-              },
+              };
+        }),
       }),
     }),
   } as never;
@@ -132,7 +154,7 @@ describe("inspectDvpMint", () => {
     // unreadable would refuse a valid token until someone retried.
     it("throws when the account read fails, rather than judging the mint", async () => {
       const rpc = {
-        getAccountInfo: () => ({
+        getMultipleAccounts: () => ({
           send: async () => {
             throw new Error("rpc down");
           },
