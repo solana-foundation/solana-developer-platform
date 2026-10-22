@@ -128,7 +128,6 @@ export const TEST_KORA_FEE_PAYER = "4YhMUz8xDgHMPAevvfMpnJX9TJmw9DTNDA1sNWPRZG9q
 export const TEST_SPONSORSHIP_PROVIDER_CONFIG = {
   signerAddress: TEST_MOCK_FEE_PAYER,
   maxAllowedLamports: 0n,
-  feePayerMayTransferLamports: false,
   feePayerPolicy: { test: "zero-outflow" },
 } satisfies SponsorshipProviderConfiguration;
 

@@ -55,9 +55,8 @@ describe.skipIf(!KORA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Kora Fee Payment", 
       // admission reserves fee + max_allowed_lamports per transaction. The
       // invariant that keeps sponsorship alive is that this ceiling stays
       // under the seeded 10M-lamport per-transaction budget: if the deployed
-      // Kora raises max_allowed_lamports past the headroom, or grows an
-      // authority this code reads as spend without a matching cap, every
-      // request is denied without any change to this repository.
+      // Kora raises max_allowed_lamports past the headroom, every request is
+      // denied without any change to this repository.
       // Mirrors the deployed environment's seeded per-transaction budget
       // (migration 0055), not the 20M policies kora-flow.test.ts seeds for its
       // own suite. Override alongside a coordinated budget raise so this pin
@@ -66,7 +65,6 @@ describe.skipIf(!KORA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Kora Fee Payment", 
         ? BigInt(env.KORA_PER_TRANSACTION_BUDGET_LAMPORTS)
         : 10_000_000n;
       const NETWORK_FEE_HEADROOM_LAMPORTS = 50_000n;
-      expect(configuration?.feePayerMayTransferLamports).toBe(true);
       expect(configuration?.maxAllowedLamports).toBeDefined();
       expect(
         (configuration?.maxAllowedLamports ?? 0n) + NETWORK_FEE_HEADROOM_LAMPORTS

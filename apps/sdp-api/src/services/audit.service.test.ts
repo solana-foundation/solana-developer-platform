@@ -439,6 +439,45 @@ describe("AuditService", () => {
     });
   });
 
+  it("refuses a critical intent naming another organization than the authenticated caller's", async () => {
+    const { db, queryOne, checkpoint } = createAuditWriter();
+    const context = {
+      get: (key: string) =>
+        key === "apiKey" ? { id: "ak_123", organizationId: "org_123" } : "req_123",
+      req: { header: () => null },
+    };
+
+    await expect(
+      new AuditService(db as never, checkpoint).beginCritical(context as never, {
+        organizationId: "org_other",
+        action: "sign",
+        resourceType: "payment_request",
+        resourceId: "pr_123",
+      })
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+    expect(insertedCalls(queryOne)).toHaveLength(0);
+  });
+
+  it("files an unauthenticated caller's critical intent under the entry's organization", async () => {
+    const { db, queryOne, checkpoint } = createAuditWriter();
+    const context = {
+      get: () => null,
+      req: { header: () => null },
+    };
+
+    await new AuditService(db as never, checkpoint).beginCritical(context as never, {
+      organizationId: "org_pay",
+      action: "sign",
+      resourceType: "payment_request",
+      resourceId: "pr_456",
+    });
+
+    const writes = insertedCalls(queryOne);
+    expect(writes).toHaveLength(1);
+    expect(writes[0]?.[1]?.[1]).toBe("org_pay");
+  });
+
   it("keeps a completed operation successful when its durable intent exists", async () => {
     const { db, checkpoint } = createAuditWriter({ failAt: 2 });
     const context = {

@@ -123,7 +123,6 @@ function harnessParts() {
     getSponsorshipConfiguration: vi.fn().mockResolvedValue({
       signerAddress: FEE_PAYER,
       maxAllowedLamports: 1_000_000n,
-      feePayerMayTransferLamports: false,
       feePayerPolicy: { system: { allow_transfer: false } },
     }),
     signAsFeePayer: vi.fn().mockImplementation(sponsorSignTestTransaction),
@@ -230,7 +229,9 @@ describe("BudgetedFeePayment", () => {
     await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toMatchObject({
       code: "RATE_LIMITED",
     });
-    expect(budgetRedis.reserve).toHaveBeenCalledWith(expect.objectContaining({ amount: 5_000 }));
+    expect(budgetRedis.reserve).toHaveBeenCalledWith(
+      expect.objectContaining({ amount: 1_005_000 })
+    );
     expect(provider.signAsFeePayer).not.toHaveBeenCalled();
     expect(repository.createReservation).toHaveBeenCalledOnce();
     expect(repository.markReleased).toHaveBeenCalledWith(
@@ -240,14 +241,8 @@ describe("BudgetedFeePayment", () => {
     );
   });
 
-  it("reserves network fee plus Kora outflow ceiling and denies before provider execution", async () => {
+  it("reserves network fee plus Kora's full outflow ceiling even when its policy denies transfers", async () => {
     const { feePayment, provider, repository, budgetRedis } = harness();
-    vi.mocked(provider.getSponsorshipConfiguration).mockResolvedValueOnce({
-      signerAddress: FEE_PAYER,
-      maxAllowedLamports: 1_000_000n,
-      feePayerMayTransferLamports: true,
-      feePayerPolicy: { system: { allow_transfer: true } },
-    });
     repository.resolvePolicies.mockResolvedValueOnce([
       { ...policy("global"), perTransactionLamports: 1_000_000 },
       { ...policy("organization"), perTransactionLamports: 1_000_000 },

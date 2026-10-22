@@ -300,28 +300,4 @@ describe("KoraAdapter.getSponsorshipConfiguration", () => {
         /max_allowed_lamports/.test(String(error.cause?.message))
     );
   });
-
-  it("treats an incomplete fee_payer_policy as able to spend (fails closed)", async () => {
-    const adapter = makeAdapter(async () => ({
-      validation_config: {
-        max_allowed_lamports: 1000,
-        fee_payer_policy: { system: { allow_transfer: false } },
-      },
-    }));
-    const config = await adapter.getSponsorshipConfiguration();
-    assert.equal(config.maxAllowedLamports, 1000n);
-    assert.equal(config.feePayerMayTransferLamports, true);
-  });
-
-  it("recognizes the complete zero-outflow policy as unable to spend", async () => {
-    const adapter = makeAdapter(async () => ({
-      validation_config: {
-        max_allowed_lamports: 5000,
-        fee_payer_policy: ZERO_OUTFLOW_POLICY,
-      },
-    }));
-    const config = await adapter.getSponsorshipConfiguration();
-    assert.equal(config.maxAllowedLamports, 5000n);
-    assert.equal(config.feePayerMayTransferLamports, false);
-  });
 });
