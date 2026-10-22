@@ -1,14 +1,12 @@
-import { getSponsoredTransaction, isSponsoredBlockhashValid } from "@sdp/fee-payment/chain-reads";
+import {
+  getSponsoredSignatureStatus,
+  getSponsoredTransaction,
+  sponsoredBlockhashValidity,
+} from "@sdp/fee-payment/chain-reads";
 import type { SponsorshipProviderConfiguration } from "@sdp/fee-payment/port";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
-import {
-  address,
-  assertIsAddress,
-  assertIsBlockhash,
-  assertIsSignature,
-  type Blockhash,
-} from "@solana/kit";
+import { address, assertIsAddress, assertIsBlockhash, assertIsSignature } from "@solana/kit";
 import { getDb } from "@/db/client";
 import {
   SPONSORSHIP_BREAKER_OPERATOR,
@@ -27,6 +25,8 @@ import type { Env } from "@/types/env";
 
 const RECONCILIATION_DELAY_MS = 2 * 60_000;
 const RECONCILIATION_BATCH_SIZE = 250;
+// About 20 minutes at the 2-minute spacing, far past finality for a transaction that landed.
+const FINALITY_WAIT_PASSES = 10;
 
 // Cloud Run recycles provider instances routinely; a config read that fails
 // during such a gap must not disable sponsorship on the first miss.
@@ -66,13 +66,16 @@ type ReconciliationOutcome =
   | "committed"
   | "charged_unknown"
   | "still_valid"
-  | "awaiting_expiry";
+  | "awaiting_expiry"
+  | "awaiting_finality"
+  | "released";
 
 export interface SponsorshipReconciliationDependencies {
   repository?: ReconciliationRepository;
   budgetRedis?: ReconciliationRedis;
   getTransaction?: typeof getSponsoredTransaction;
-  isBlockhashValid?: (blockhash: Blockhash) => Promise<boolean>;
+  blockhashValidity?: typeof sponsoredBlockhashValidity;
+  getSignatureStatus?: typeof getSponsoredSignatureStatus;
   getProviderConfiguration?: () => Promise<SponsorshipProviderConfiguration>;
   now?: () => Date;
   sleep?: (ms: number) => Promise<void>;
@@ -113,11 +116,14 @@ async function reconcileSponsorshipNetwork(
   // NOTE: settlement reads Kora's upstream while track-pending-transfers settles the same
   // transaction's payment row on the managed pool. Kept apart on purpose: sponsorship bookkeeping
   // stays off the customer pool. Both are nodes on one genesis-checked cluster, so outcomes
-  // converge, and every transient difference (slot lag, an early "not found") resolves toward
-  // charged_unknown, which over-counts and never refunds a transaction that landed. Each read
-  // resolves the endpoint when called, so a network with nothing outstanding needs none.
+  // converge. A reservation is released only on proof it never landed: its blockhash expired at
+  // finalized and its signature is absent from history. Every difference that proof cannot settle
+  // (slot lag, an early "not found") still resolves toward charged_unknown, which over-counts and
+  // never refunds a transaction that landed. Each read resolves the endpoint when called, so a
+  // network with nothing outstanding needs none.
   const getTransaction = dependencies.getTransaction ?? getSponsoredTransaction;
-  const isBlockhashValid = dependencies.isBlockhashValid ?? isSponsoredBlockhashValid;
+  const blockhashValidity = dependencies.blockhashValidity ?? sponsoredBlockhashValidity;
+  const getSignatureStatus = dependencies.getSignatureStatus ?? getSponsoredSignatureStatus;
   const now = dependencies.now?.() ?? new Date();
   const sleep =
     dependencies.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
@@ -135,6 +141,8 @@ async function reconcileSponsorshipNetwork(
     charged_unknown: 0,
     still_valid: 0,
     awaiting_expiry: 0,
+    awaiting_finality: 0,
+    released: 0,
   };
 
   const globalPolicy = await repository.getGlobalPolicy(network);
@@ -219,7 +227,8 @@ async function reconcileSponsorshipNetwork(
         repository,
         budgetRedis,
         getTransaction,
-        isBlockhashValid,
+        blockhashValidity,
+        getSignatureStatus,
       });
       outcomes[outcome] += 1;
     } catch (error) {
@@ -254,7 +263,8 @@ async function reconcileReservation(input: {
   repository: ReconciliationRepository;
   budgetRedis: ReconciliationRedis;
   getTransaction: SponsorshipReconciliationDependencies["getTransaction"] & {};
-  isBlockhashValid: SponsorshipReconciliationDependencies["isBlockhashValid"] & {};
+  blockhashValidity: SponsorshipReconciliationDependencies["blockhashValidity"] & {};
+  getSignatureStatus: SponsorshipReconciliationDependencies["getSignatureStatus"] & {};
 }): Promise<ReconciliationOutcome> {
   const { reservation, repository, budgetRedis } = input;
   if (reservation.status === "committed" || reservation.status === "released") {
@@ -314,20 +324,45 @@ async function reconcileReservation(input: {
   }
 
   assertIsBlockhash(reservation.recentBlockhash);
-  if (await input.isBlockhashValid(reservation.recentBlockhash)) return "still_valid";
+  const expiry = await input.blockhashValidity(reservation.recentBlockhash);
+  if (expiry.valid) return "still_valid";
   if (reservation.missCount === 0) {
     await repository.recordReconciliationMiss(reservation.id, reservation.attempt, 0);
     return "awaiting_expiry";
   }
-  await persistAmbiguousCharge({
-    reservation,
+  // The status is read from a node at least as current as the expiry proof (minContextSlot), and
+  // assumes Kora's upstream keeps ledger history at least back to the reservation's blockhash,
+  // which holds because reconciliation runs minutes after expiry: an absent status is then proof
+  // the transaction never landed, not a lagging or pruned record of one that did.
+  const status = await input.getSignatureStatus(reservation.signature, expiry.contextSlot);
+  if (status !== null) {
+    if (reservation.missCount >= FINALITY_WAIT_PASSES) {
+      await persistAmbiguousCharge({
+        reservation,
+        repository,
+        budgetRedis,
+        reason: "Signature landed but never finalized within the wait window",
+        breakerReason: "Unfinalized landed reservation lost its durable transition",
+        lostTransitionError: "Failed to retain unfinalized landed sponsorship charge",
+      });
+      return "charged_unknown";
+    }
+    await repository.recordReconciliationMiss(
+      reservation.id,
+      reservation.attempt,
+      reservation.missCount
+    );
+    return "awaiting_finality";
+  }
+  await settleDurably(
     repository,
     budgetRedis,
-    reason: "Signature absent after blockhash expiry on two reconciliation passes",
-    breakerReason: "Ambiguous unconfirmed reservation lost its durable transition",
-    lostTransitionError: "Failed to retain ambiguous unconfirmed sponsorship charge",
-  });
-  return "charged_unknown";
+    reservation,
+    "released",
+    0,
+    "Blockhash expired at finalized and the signature is absent from history"
+  );
+  return "released";
 }
 
 function feePayerSpendLamports(

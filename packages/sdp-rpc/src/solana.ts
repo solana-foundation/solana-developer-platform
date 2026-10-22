@@ -268,16 +268,22 @@ export async function getRecentBlockhash(
 }
 
 /**
- * Check if a blockhash is still valid
+ * Whether a blockhash is still valid at a commitment, with the slot the node answered at, so a
+ * follow-up read can demand a node at least that current (`minContextSlot`).
+ *
+ * @param rpc - The Solana RPC to ask.
+ * @param blockhash - The blockhash to check.
+ * @param commitment - The commitment whose bank decides validity.
+ * @returns The validity and the response's context slot.
  */
-export async function isBlockhashValid(
+export async function getBlockhashValidity(
   rpc: SolanaRpc,
   blockhash: Blockhash,
-  commitment: Commitment = "confirmed"
-): Promise<boolean> {
+  commitment: Commitment
+): Promise<{ valid: boolean; contextSlot: Slot }> {
   const response = await rpc.isBlockhashValid(blockhash, { commitment }).send();
 
-  return response.value;
+  return { valid: response.value, contextSlot: response.context.slot };
 }
 
 /** Estimate only the Solana network fee from the exact compiled message. */
@@ -632,12 +638,27 @@ function numericTransactionError(err: TransactionError): TransactionError {
 }
 
 /**
- * Batch-fetch status for multiple transaction signatures
+ * Batch-fetch status for multiple transaction signatures, retrying transient RPC failures.
+ *
+ * @param rpc - The Solana RPC to ask.
+ * @param signatures - The signatures to look up, in the order statuses are returned.
+ * @param options - Lookup options.
+ * @param options.searchTransactionHistory - Search ledger history beyond the recent status cache.
+ * @param options.minContextSlot - With history search, the lowest slot the answering node may be
+ * at; a node behind it errors instead of answering.
+ * @param options.retryDelaysMs - Backoff delays between transient-failure retries.
+ * @returns Each signature's status, or null where the node has none.
  */
 export async function getSignatureStatuses(
   rpc: SolanaRpc,
   signatures: Signature[],
-  options: { searchTransactionHistory?: boolean; retryDelaysMs?: readonly number[] } = {}
+  options:
+    | { searchTransactionHistory?: false; retryDelaysMs?: readonly number[] }
+    | {
+        searchTransactionHistory: true;
+        minContextSlot?: Slot;
+        retryDelaysMs?: readonly number[];
+      } = {}
 ): Promise<Array<SignatureStatusInfo | null>> {
   if (signatures.length === 0) {
     return [];
@@ -646,7 +667,15 @@ export async function getSignatureStatuses(
   const response = await withTransientRpcRetry(
     () =>
       (options.searchTransactionHistory
-        ? rpc.getSignatureStatuses(signatures, { searchTransactionHistory: true })
+        ? rpc.getSignatureStatuses(
+            signatures,
+            // SAFETY: Agave's RpcSignatureStatusConfig accepts minContextSlot (a node behind it
+            // errors instead of answering); kit's config type lags the server and omits it.
+            {
+              searchTransactionHistory: true,
+              minContextSlot: options.minContextSlot,
+            } as Parameters<SolanaRpc["getSignatureStatuses"]>[1]
+          )
         : rpc.getSignatureStatuses(signatures)
       ).send(),
     options.retryDelaysMs
