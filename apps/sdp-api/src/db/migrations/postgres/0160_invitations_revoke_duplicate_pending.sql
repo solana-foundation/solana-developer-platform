@@ -15,4 +15,5 @@ UPDATE invitations AS i
           WHERE status = 'pending'
        ) AS ranked
  WHERE i.id = ranked.id
+   AND i.status = 'pending'
    AND ranked.position > 1;
