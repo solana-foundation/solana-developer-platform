@@ -1,5 +1,12 @@
 import { createClusterRpc } from "@sdp/rpc/factory";
-import { AmountError, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
+import { AmountError } from "@sdp/solana/amount";
+import {
+  type BaseUnits,
+  baseUnits,
+  parseTokenAmount,
+  toBaseUnits,
+  toTokenAmount,
+} from "@sdp/solana/token-amount";
 import { SOL_DECIMALS, SOL_MINT, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import { address } from "@solana/kit";
 import { AppError, accountFrozen, badRequest } from "@/lib/errors";
@@ -54,9 +61,9 @@ export async function assertOfframpSourceFunded(
     throw badRequest("Off-ramp asset is not a well-known token");
   }
   const symbol = token?.symbol ?? "SOL";
-  let needed: bigint;
+  let needed: BaseUnits;
   try {
-    needed = parseDecimalAmount(cryptoAmount, decimals);
+    needed = toBaseUnits(parseTokenAmount(cryptoAmount, decimals));
   } catch (cause) {
     // The schema checks the shape; only the asset knows its precision.
     if (cause instanceof AmountError) {
@@ -69,8 +76,8 @@ export async function assertOfframpSourceFunded(
     throw accountFrozen(`Source wallet's ${symbol} account is frozen`);
   }
   if (holding.amount >= needed) return;
-  const held = formatDecimalAmount(holding.amount, decimals);
-  const neededAmount = formatDecimalAmount(needed, decimals);
+  const held = toTokenAmount(baseUnits(holding.amount), decimals).value;
+  const neededAmount = toTokenAmount(needed, decimals).value;
   throw new AppError(
     "INSUFFICIENT_TOKEN_BALANCE",
     `Source wallet holds ${held} ${symbol}; this sale needs ${neededAmount} ${symbol}`,

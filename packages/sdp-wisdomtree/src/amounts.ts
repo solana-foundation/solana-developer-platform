@@ -1,10 +1,13 @@
+import { AmountError } from "@sdp/solana/amount";
+import { parseTokenAmount, type TokenAmount, toBaseUnits } from "@sdp/solana/token-amount";
 import { SdpWisdomTreeError } from "./errors";
 
 /**
  * Amount validation at the MINT's own scale — the `@sdp/kamino amounts.ts`
  * rule restated for this package: refuse sub-atomic precision rather than
  * floor it silently, and return the canonical form the instructions actually
- * encode, because a movement row is a claim about what moved on chain.
+ * encode, because a movement row is a claim about what moved on chain. The
+ * conversion itself is `@sdp/solana/token-amount`'s, at the mint's decimals.
  */
 
 function isPlainPositiveDecimal(value: string): boolean {
@@ -30,8 +33,9 @@ export interface AcceptedAmount {
 
 /**
  * Parse `amount` against a mint of `decimals`, refusing anything the mint
- * cannot represent exactly. Zero is refused too: a zero-quantity transfer is
- * never a subscription or redemption, only a caller bug.
+ * cannot represent exactly or the u64 instruction field cannot hold. Zero is
+ * refused too: a zero-quantity transfer is never a subscription or redemption,
+ * only a caller bug.
  */
 export function acceptAtMintScale(amount: string, decimals: number, what: string): AcceptedAmount {
   const trimmed = amount.trim();
@@ -52,20 +56,21 @@ export function acceptAtMintScale(amount: string, decimals: number, what: string
     );
   }
 
-  const baseUnits =
-    BigInt(whole) * 10n ** BigInt(decimals) + BigInt(keptFraction.padEnd(decimals, "0") || "0");
+  // Zeros past the mint's scale carry no value; the rest is exact at its decimals.
+  let accepted: TokenAmount;
+  try {
+    accepted = parseTokenAmount(keptFraction ? `${whole}.${keptFraction}` : whole, decimals);
+  } catch (error) {
+    if (!(error instanceof AmountError)) throw error;
+    // The syntax and scale checks above passed, so the parse refuses only a value above u64.
+    throw new SdpWisdomTreeError(
+      "INVALID_AMOUNT",
+      `${what} of ${amount} is above the largest amount a token account holds.`
+    );
+  }
+  const baseUnits = toBaseUnits(accepted);
   if (baseUnits === 0n) {
     throw new SdpWisdomTreeError("INVALID_AMOUNT", `${what} must be greater than zero.`);
   }
-  return { canonical: formatBaseUnits(baseUnits, decimals), baseUnits };
-}
-
-/** Exact base-units → canonical decimal string. Serializes zero as "0". */
-export function formatBaseUnits(baseUnits: bigint, decimals: number): string {
-  const digits = baseUnits.toString().padStart(decimals + 1, "0");
-  const cut = digits.length - decimals;
-  const whole = digits.slice(0, cut);
-  let fraction = digits.slice(cut);
-  while (fraction.endsWith("0")) fraction = fraction.slice(0, -1);
-  return fraction === "" ? whole : `${whole}.${fraction}`;
+  return { canonical: accepted.value, baseUnits };
 }

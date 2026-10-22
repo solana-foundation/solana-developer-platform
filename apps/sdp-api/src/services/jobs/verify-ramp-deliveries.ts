@@ -8,9 +8,9 @@ import {
   type SolanaRpc,
   tokenBalanceDelta,
 } from "@sdp/rpc/solana";
-import { compareDecimalAmounts, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
+import { compareDecimalAmounts } from "@sdp/solana/amount";
 import { type AssetRef, NATIVE_ASSET } from "@sdp/solana/asset-ref";
-import { baseUnits } from "@sdp/solana/token-amount";
+import { baseUnits, parseTokenAmount, toBaseUnits, toTokenAmount } from "@sdp/solana/token-amount";
 import { feeFor, type TokenTerms } from "@sdp/solana/token-terms";
 import type { RampDeliveryMismatch, RampDeliveryMismatchReason } from "@sdp/types/payments";
 import { type AmountVerificationVerdict, MOVEMENT_NOT_EXECUTED } from "@sdp/types/token-movements";
@@ -368,7 +368,7 @@ async function judgeOnrampDelivery(
   if (delivery === null) return PENDING;
   if (delivery === "absent" || delivery.credit <= 0n) return mismatch("not_delivered");
   const { decimals } = delivery;
-  const observedAmount = formatDecimalAmount(delivery.credit, decimals);
+  const observedAmount = toTokenAmount(baseUnits(delivery.credit), decimals).value;
   // A provider may report what it received (the credit) or what it sent (the
   // debit): the debit counts only when the fee rule explains the difference.
   const debitCounts =
@@ -378,9 +378,10 @@ async function judgeOnrampDelivery(
     const reported = [settled.receivedAmount, settled.onchain?.amount].filter(
       (amount): amount is string => amount !== undefined
     );
-    const quoted = transfer.amount === null ? null : parseDecimalAmount(transfer.amount, decimals);
+    const quoted =
+      transfer.amount === null ? null : toBaseUnits(parseTokenAmount(transfer.amount, decimals));
     const reportsHold = reported.every((amount) => {
-      const units = parseDecimalAmount(amount, decimals);
+      const units = toBaseUnits(parseTokenAmount(amount, decimals));
       return units === delivery.credit || (debitCounts && units === delivery.debit);
     });
     const quoteHolds =

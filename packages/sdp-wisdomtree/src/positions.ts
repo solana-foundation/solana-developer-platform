@@ -1,9 +1,9 @@
+import { baseUnits, toTokenAmount } from "@sdp/solana/token-amount";
 import { SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
 import type { WisdomTreeFund } from "@sdp/types/wisdomtree-programs";
 import type { Address } from "@solana/kit";
 import { address } from "@solana/kit";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
-import { formatBaseUnits } from "./amounts";
 import { tokenAccountBaseUnits, type WisdomTreeChainReader } from "./chain";
 
 /**
@@ -32,10 +32,10 @@ export async function readWisdomTreePosition(
     mint: address(input.fund.mint),
   });
   const account = await reader.getAccount(ata);
-  const baseUnits = account === null ? 0n : tokenAccountBaseUnits(account.data);
+  const units = account === null ? 0n : tokenAccountBaseUnits(account.data);
   return {
     fund: input.fund,
     owner: input.owner,
-    shares: formatBaseUnits(baseUnits, input.fund.decimals),
+    shares: toTokenAmount(baseUnits(units), input.fund.decimals).value,
   };
 }

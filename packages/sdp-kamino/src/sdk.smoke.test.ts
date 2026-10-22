@@ -1,4 +1,4 @@
-import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
+import { baseUnits, parseTokenAmount, toBaseUnits, toTokenAmount } from "@sdp/solana/token-amount";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import {
   address,
@@ -134,14 +134,14 @@ describe.skipIf(!RPC_URL)("Kamino plans against a local fork", () => {
       slot: await rpc.getSlot().send(),
     });
     expect(quote.issues).toEqual([]);
-    const quotedShares = parseDecimalAmount(quote.sharesOut, quote.shareDecimals);
+    const quotedShares = toBaseUnits(parseTokenAmount(quote.sharesOut, quote.shareDecimals));
     const supportsFloor = kaminoClusterConfig(runtime.cluster).depositFloorSupported;
     if (supportsFloor) {
       const impossible = await buildKaminoDepositPlan(runtime, {
         vault: VAULT,
         owner,
         amount: "25",
-        minSharesOut: formatDecimalAmount(quotedShares * 2n, quote.shareDecimals),
+        minSharesOut: toTokenAmount(baseUnits(quotedShares * 2n), quote.shareDecimals).value,
       });
       const unsigned = compileTransaction(await compile(rpc, owner, impossible));
       const simulation = await rpc
@@ -164,7 +164,10 @@ describe.skipIf(!RPC_URL)("Kamino plans against a local fork", () => {
         amount: "25",
         ...(supportsFloor
           ? {
-              minSharesOut: formatDecimalAmount((quotedShares * 999n) / 1000n, quote.shareDecimals),
+              minSharesOut: toTokenAmount(
+                baseUnits((quotedShares * 999n) / 1000n),
+                quote.shareDecimals
+              ).value,
             }
           : {}),
       })
@@ -179,7 +182,7 @@ describe.skipIf(!RPC_URL)("Kamino plans against a local fork", () => {
       requestedAmount: "25",
     });
     expect(receipt).toEqual({ amount: "25", sharesOut: deposited.shares });
-    const depositedShares = parseDecimalAmount(deposited.shares, quote.shareDecimals);
+    const depositedShares = toBaseUnits(parseTokenAmount(deposited.shares, quote.shareDecimals));
     expect(depositedShares).toBeGreaterThan(0n);
     expect(deposited.withdrawableShares).toBe(deposited.shares);
 
@@ -190,12 +193,12 @@ describe.skipIf(!RPC_URL)("Kamino plans against a local fork", () => {
       await buildKaminoWithdrawPlan(runtime, {
         vault: VAULT,
         owner,
-        shares: formatDecimalAmount(partial, quote.shareDecimals),
+        shares: toTokenAmount(baseUnits(partial), quote.shareDecimals).value,
         slot: await rpc.getSlot().send(),
       })
     );
     const remaining = await position();
-    expect(parseDecimalAmount(remaining.shares, quote.shareDecimals)).toBe(
+    expect(toBaseUnits(parseTokenAmount(remaining.shares, quote.shareDecimals))).toBe(
       depositedShares - partial
     );
     await execute(

@@ -8,7 +8,7 @@ import {
 
 // The three write bodies, tested together because the point is that they agree.
 // Deposit and withdrawal previously accepted `amount` as a bare non-empty string,
-// so a malformed or over-scaled value reached `parseDecimalAmount` in the service,
+// so a malformed or over-scaled value reached the amount parser in the service,
 // threw an `AmountError`, and surfaced as a 500 — `mapPrivateChannelError` has no
 // case for it. They now share transfer's amount schema, which rejects at the route.
 

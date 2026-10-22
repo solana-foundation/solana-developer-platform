@@ -1,4 +1,4 @@
-import { formatDecimalAmount } from "@sdp/solana/amount";
+import { baseUnits, toTokenAmount } from "@sdp/solana/token-amount";
 import type { Address, Slot } from "@solana/kit";
 
 /**
@@ -114,11 +114,14 @@ export function deriveKaminoDepositQuote(estimate: KaminoDepositEstimate): Kamin
     estimate.minimumDepositBaseUnits > 0n &&
     estimate.tokensForSharesBaseUnits < estimate.minimumDepositBaseUnits
   ) {
-    const minimum = formatDecimalAmount(estimate.minimumDepositBaseUnits, estimate.tokenDecimals);
-    const requestedMinimum = formatDecimalAmount(
-      estimate.minimumDepositBaseUnits + estimate.crankFundsBaseUnits,
+    const minimum = toTokenAmount(
+      baseUnits(estimate.minimumDepositBaseUnits),
       estimate.tokenDecimals
-    );
+    ).value;
+    const requestedMinimum = toTokenAmount(
+      baseUnits(estimate.minimumDepositBaseUnits + estimate.crankFundsBaseUnits),
+      estimate.tokenDecimals
+    ).value;
     issues.push({
       code: "DEPOSIT_BELOW_MINIMUM",
       message:
@@ -133,7 +136,7 @@ export function deriveKaminoDepositQuote(estimate: KaminoDepositEstimate): Kamin
     });
   }
   return {
-    sharesOut: formatDecimalAmount(estimate.sharesOutBaseUnits, estimate.shareDecimals),
+    sharesOut: toTokenAmount(baseUnits(estimate.sharesOutBaseUnits), estimate.shareDecimals).value,
     shareDecimals: estimate.shareDecimals,
     issues,
   };
@@ -196,7 +199,7 @@ export function deriveKaminoWithdrawQuote(
   observation: KaminoExitPlanObservation
 ): KaminoWithdrawQuote {
   const { assetDecimals } = observation;
-  const format = (baseUnits: bigint) => formatDecimalAmount(baseUnits, assetDecimals);
+  const format = (units: bigint) => toTokenAmount(baseUnits(units), assetDecimals).value;
   const issues: KaminoQuoteIssue[] = [];
   const net = conservativeExitNetBaseUnits(observation);
 

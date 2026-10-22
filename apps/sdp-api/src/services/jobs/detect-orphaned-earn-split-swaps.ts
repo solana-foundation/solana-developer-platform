@@ -1,6 +1,6 @@
 import { resolveClusterRpcUrl } from "@sdp/rpc/config";
 import { createRpc } from "@sdp/rpc/solana";
-import { parseDecimalAmount } from "@sdp/solana/amount";
+import { parseTokenAmount, toBaseUnits } from "@sdp/solana/token-amount";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
@@ -393,7 +393,7 @@ async function judgeAdvisory(
 /** A movement's decimal deposit amount in the advisory's atoms, or null when unparseable. */
 function depositAtoms(amountRequested: string, advisory: EarnSplitSwapAdvisoryRow): bigint | null {
   try {
-    return parseDecimalAmount(amountRequested, advisory.deposit_token_decimals);
+    return toBaseUnits(parseTokenAmount(amountRequested, advisory.deposit_token_decimals));
   } catch {
     return null;
   }

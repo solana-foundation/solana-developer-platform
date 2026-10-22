@@ -19,7 +19,7 @@ import { shortenAddress } from "@/app/dashboard/[projectId]/payments/payments-ov
 import { TokenMark } from "@/components/token-mark";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
-import { toBaseUnits } from "./dvp-amount";
+import { amountToBaseUnits } from "./dvp-amount";
 import type {
   DvpCreateCounterpartyAccount,
   DvpCreateOption,
@@ -219,7 +219,8 @@ export function AmountField({
   value: string;
 }) {
   const t = useTranslations();
-  const converted = decimals === null || value.trim() === "" ? null : toBaseUnits(value, decimals);
+  const converted =
+    decimals === null || value.trim() === "" ? null : amountToBaseUnits(value, decimals);
   const tooPrecise = converted?.ok === false && converted.reason === "too-precise";
 
   const hint = disabled ? null : amountHintKey(decimals, tooPrecise);

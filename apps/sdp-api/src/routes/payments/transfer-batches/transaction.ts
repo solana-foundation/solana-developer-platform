@@ -1,4 +1,4 @@
-import { formatDecimalAmount } from "@sdp/solana/amount";
+import { formatFixedDecimal } from "@sdp/solana/amount";
 import { MEMO_PROGRAM_ADDRESS } from "@sdp/types/well-known-programs";
 import type { Address, Instruction, TransactionSigner } from "@solana/kit";
 import {
@@ -128,13 +128,13 @@ function buildCandidateChunk(
   };
 }
 
-/** The sum of a chunk's recipients' debits, in token units. */
+/** The sum of a chunk's recipients' debits, in token units. A sum may pass u64: generic fixed-point. */
 function chunkDebit(groups: readonly RecipientInstructionGroup[]): string {
   const [first] = groups;
   if (first === undefined) {
     throw new Error("A transaction chunk has at least one recipient");
   }
-  return formatDecimalAmount(
+  return formatFixedDecimal(
     groups.reduce((total, group) => total + group.leg.quote.debit, 0n),
     first.leg.quote.decimals
   );

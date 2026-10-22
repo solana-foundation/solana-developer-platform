@@ -10,7 +10,7 @@
  */
 
 import { useState } from "react";
-import { toBaseUnits } from "./dvp-amount";
+import { amountToBaseUnits } from "./dvp-amount";
 import type { DvpCreateOption } from "./dvp-create.data";
 import { type PastedMintState, usePastedMint } from "./use-pasted-mint";
 
@@ -94,7 +94,7 @@ export function useDvpLeg(options: DvpCreateOption[], preselectFirst: boolean): 
     custom,
     pasted
   );
-  const resolved = decimals != null ? toBaseUnits(amount, decimals) : null;
+  const resolved = decimals != null ? amountToBaseUnits(amount, decimals) : null;
 
   return {
     amount,

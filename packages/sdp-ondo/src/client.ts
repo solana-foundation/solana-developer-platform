@@ -19,7 +19,14 @@ import type {
 } from "@sdp/earn/types";
 import { contextAwareRpcFetch } from "@sdp/rpc/read-context";
 import { deriveAssociatedTokenAddress } from "@sdp/solana/address";
-import { AmountError, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
+import { AmountError } from "@sdp/solana/amount";
+import {
+  baseUnits,
+  parseTokenAmount,
+  type TokenAmount,
+  toBaseUnits,
+  toTokenAmount,
+} from "@sdp/solana/token-amount";
 import {
   ONDO_DEPOSIT_TOKEN_SYMBOLS,
   type OndoDeployment,
@@ -155,9 +162,9 @@ export function ondoClusterConfig(cluster: SolanaCluster): OndoClusterConfig {
 
 /** Canonical decimal amount at the pair's scale, or a typed refusal. */
 function canonicalAmount(value: string, label: string): { text: string; atoms: bigint } {
-  let atoms: bigint;
+  let amount: TokenAmount;
   try {
-    atoms = parseDecimalAmount(value, TOKEN_DECIMALS);
+    amount = parseTokenAmount(value, TOKEN_DECIMALS);
   } catch (error) {
     if (error instanceof AmountError) {
       throw new SdpOndoError(
@@ -167,10 +174,11 @@ function canonicalAmount(value: string, label: string): { text: string; atoms: b
     }
     throw error;
   }
-  if (atoms <= 0n || atoms > MAX_TOKEN_ATOMS) {
+  const atoms = toBaseUnits(amount);
+  if (atoms === 0n) {
     throw new SdpOndoError("INVALID_AMOUNT", `${label} must fit a positive SPL token amount`);
   }
-  return { text: formatDecimalAmount(atoms, TOKEN_DECIMALS), atoms };
+  return { text: amount.value, atoms };
 }
 
 interface OndoTokenAccount {
@@ -502,7 +510,7 @@ export class OndoVaultDirectClient
       outputMint: args.outputMint,
       amount: args.amount.text,
     });
-    const quoteAtoms = parseDecimalAmount(quote.outAmount, TOKEN_DECIMALS);
+    const quoteAtoms = toBaseUnits(parseTokenAmount(quote.outAmount, TOKEN_DECIMALS));
     if (quoteAtoms < args.floor.atoms) {
       throw new SdpOndoError(
         refusalCode,
@@ -524,7 +532,7 @@ export class OndoVaultDirectClient
         owner: args.owner,
         slippageBps,
       });
-      const thresholdAtoms = parseDecimalAmount(leg.minOutAmount, TOKEN_DECIMALS);
+      const thresholdAtoms = toBaseUnits(parseTokenAmount(leg.minOutAmount, TOKEN_DECIMALS));
       if (thresholdAtoms >= args.floor.atoms) return leg;
       if (slippageBps === 0) {
         throw new SdpOndoError(
@@ -583,9 +591,12 @@ export class OndoVaultDirectClient
           const spendable = accounts.find(
             (account) => account.address === associatedAddress && !account.frozen
           );
-          const withdrawableShares = formatDecimalAmount(spendable?.atoms ?? 0n, TOKEN_DECIMALS);
+          const withdrawableShares = toTokenAmount(
+            baseUnits(spendable?.atoms ?? 0n),
+            TOKEN_DECIMALS
+          ).value;
           if (readAllHoldings && atoms === 0n) continue;
-          const shares = formatDecimalAmount(atoms, TOKEN_DECIMALS);
+          const shares = toTokenAmount(baseUnits(atoms), TOKEN_DECIMALS).value;
 
           let tokenValue: string | undefined;
           if (atoms > 0n) {

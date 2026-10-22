@@ -1,5 +1,11 @@
 import type { EarnRuntimeContext, EarnVaultTransactionPlan } from "@sdp/earn/types";
-import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
+import {
+  baseUnits,
+  parseBaseUnits,
+  parseTokenAmount,
+  toBaseUnits,
+  toTokenAmount,
+} from "@sdp/solana/token-amount";
 import { ONDO_DEPLOYMENTS } from "@sdp/types/ondo-programs";
 import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import {
@@ -71,7 +77,7 @@ function toPlanInstruction(instruction: LiteInstruction) {
 }
 
 async function liteQuote(inputMint: string, outputMint: string, amount: string, slippageBps = 50) {
-  const atoms = parseDecimalAmount(amount, TOKEN_DECIMALS);
+  const atoms = toBaseUnits(parseTokenAmount(amount, TOKEN_DECIMALS));
   const url =
     `${LITE_BASE}/quote?inputMint=${inputMint}&outputMint=${outputMint}` +
     `&amount=${atoms}&slippageBps=${slippageBps}&restrictIntermediateTokens=true`;
@@ -92,7 +98,7 @@ const litePort: OndoSwapPort = {
   async quoteSwap(request) {
     const quote = await liteQuote(request.inputMint, request.outputMint, request.amount);
     return {
-      outAmount: formatDecimalAmount(BigInt(quote.outAmount as string), TOKEN_DECIMALS),
+      outAmount: toTokenAmount(parseBaseUnits(quote.outAmount as string), TOKEN_DECIMALS).value,
       priceImpactPct: String(quote.priceImpactPct ?? "0"),
     };
   },
@@ -127,11 +133,11 @@ const litePort: OndoSwapPort = {
         toPlanInstruction
       ),
       lookupTableAddresses: response.addressLookupTableAddresses ?? [],
-      quotedAmount: formatDecimalAmount(BigInt(quote.outAmount as string), TOKEN_DECIMALS),
-      minOutAmount: formatDecimalAmount(
-        BigInt(quote.otherAmountThreshold as string),
+      quotedAmount: toTokenAmount(parseBaseUnits(quote.outAmount as string), TOKEN_DECIMALS).value,
+      minOutAmount: toTokenAmount(
+        parseBaseUnits(quote.otherAmountThreshold as string),
         TOKEN_DECIMALS
-      ),
+      ).value,
       priceImpactPct: String(quote.priceImpactPct ?? "0"),
       routeLabels: [],
     };
@@ -223,8 +229,8 @@ describe.skipIf(!RPC_URL || !SIGNER_HEX)("Ondo plans against a surfpool mainnet 
     expect(Number(quote.sharesOut)).toBeGreaterThan(0);
 
     // The dashboard derivation: floor = quote × (1 − 50bps), floored to scale.
-    const quotedAtoms = parseDecimalAmount(quote.sharesOut, TOKEN_DECIMALS);
-    const floor = formatDecimalAmount((quotedAtoms * 9_950n) / 10_000n, TOKEN_DECIMALS);
+    const quotedAtoms = toBaseUnits(parseTokenAmount(quote.sharesOut, TOKEN_DECIMALS));
+    const floor = toTokenAmount(baseUnits((quotedAtoms * 9_950n) / 10_000n), TOKEN_DECIMALS).value;
 
     const plan = await client.buildVaultDeposit(CTX, {
       providerReference: USDY,
@@ -246,8 +252,8 @@ describe.skipIf(!RPC_URL || !SIGNER_HEX)("Ondo plans against a surfpool mainnet 
     const position = positions[0];
     expect(position).toBeDefined();
     if (!position) throw new Error("unreachable");
-    expect(parseDecimalAmount(position.shares, TOKEN_DECIMALS)).toBeGreaterThanOrEqual(
-      parseDecimalAmount(floor, TOKEN_DECIMALS)
+    expect(toBaseUnits(parseTokenAmount(position.shares, TOKEN_DECIMALS))).toBeGreaterThanOrEqual(
+      toBaseUnits(parseTokenAmount(floor, TOKEN_DECIMALS))
     );
     if (position.tokenValue !== undefined) {
       expect(position.tokenValue).toMatch(/^\d+(\.\d+)?$/);
@@ -262,14 +268,14 @@ describe.skipIf(!RPC_URL || !SIGNER_HEX)("Ondo plans against a surfpool mainnet 
     });
     expect(position).toBeDefined();
     if (!position) throw new Error("unreachable");
-    expect(parseDecimalAmount(position.shares, TOKEN_DECIMALS)).toBeGreaterThan(0n);
+    expect(toBaseUnits(parseTokenAmount(position.shares, TOKEN_DECIMALS))).toBeGreaterThan(0n);
 
     const quote = await client.quoteVaultWithdrawal(CTX, {
       providerReference: USDY,
       shares: position.shares,
     });
-    const quotedAtoms = parseDecimalAmount(quote.assetsOut, TOKEN_DECIMALS);
-    const floor = formatDecimalAmount((quotedAtoms * 9_950n) / 10_000n, TOKEN_DECIMALS);
+    const quotedAtoms = toBaseUnits(parseTokenAmount(quote.assetsOut, TOKEN_DECIMALS));
+    const floor = toTokenAmount(baseUnits((quotedAtoms * 9_950n) / 10_000n), TOKEN_DECIMALS).value;
 
     const plan = await client.buildVaultWithdrawal(CTX, {
       providerReference: USDY,

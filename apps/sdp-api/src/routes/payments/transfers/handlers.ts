@@ -2,9 +2,8 @@ import { compareDecimalAmounts } from "@sdp/payments/decimal";
 // biome-ignore lint/style/noRestrictedImports: the transfers list reads wallet signature history through the Helius-first pool
 import { createClusterHistoryRpc, createClusterRpc } from "@sdp/rpc/factory";
 import { confirmTransaction, getRecentBlockhash, getSignaturesForAddress } from "@sdp/rpc/solana";
-import { formatDecimalAmount } from "@sdp/solana/amount";
 import type { MovementQuote } from "@sdp/solana/movement-quote";
-import { toTokenAmount } from "@sdp/solana/token-amount";
+import { baseUnits, toTokenAmount } from "@sdp/solana/token-amount";
 import type { Action } from "@sdp/types/actions";
 import {
   isRampTransferType,
@@ -276,7 +275,7 @@ function assertRampDepositFunded(transfer: TransferRow, plan: PlannedTokenMoveme
 
   const mint = transfer.token;
   const token = resolveTokenLabel(mint);
-  const held = formatDecimalAmount(source.amount, terms.decimals);
+  const held = toTokenAmount(baseUnits(source.amount), terms.decimals).value;
   const neededAmount = toTokenAmount(needed, terms.decimals).value;
   logEvent("info", {
     event: "sdp_api_ramp_deposit_refused",

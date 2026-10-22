@@ -11,8 +11,8 @@
 
 import {
   AmountError,
-  formatDecimalAmount,
-  parseDecimalAmount,
+  formatFixedDecimal,
+  parseFixedDecimal,
   parseTokenAmount as parseU64BaseUnits,
 } from "./amount";
 
@@ -105,7 +105,7 @@ export function toTokenAmount(units: BaseUnits, decimals: number): TokenAmount {
   assertMintDecimals(decimals);
   // SAFETY: the value is formatted from u64 base units at a valid scale,
   // which is exactly what the brand promises.
-  return { value: formatDecimalAmount(units, decimals), decimals } as TokenAmount;
+  return { value: formatFixedDecimal(units, decimals), decimals } as TokenAmount;
 }
 
 /**
@@ -116,5 +116,5 @@ export function toTokenAmount(units: BaseUnits, decimals: number): TokenAmount {
  * @returns `amount × 10^decimals`.
  */
 export function toBaseUnits(amount: TokenAmount): BaseUnits {
-  return baseUnits(parseDecimalAmount(amount.value, amount.decimals));
+  return baseUnits(parseFixedDecimal(amount.value, amount.decimals));
 }

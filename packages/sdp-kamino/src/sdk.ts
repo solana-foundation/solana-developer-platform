@@ -10,7 +10,8 @@ import {
   getFarmUserStatePDA,
   getUserSharesInTokensStakedInFarm,
 } from "@kamino-finance/klend-sdk/dist/classes/farm_utils.js";
-import { formatDecimalAmount, isDecimalString, parseDecimalAmount } from "@sdp/solana/amount";
+import { isDecimalString } from "@sdp/solana/amount";
+import { baseUnits, parseTokenAmount, toBaseUnits, toTokenAmount } from "@sdp/solana/token-amount";
 import { type Address, address, getBase64Encoder, type Instruction } from "@solana/kit";
 import {
   AccountState,
@@ -666,7 +667,7 @@ export async function buildKaminoWithdrawPlan(
   const shareDecimals = mintDecimals(state.sharesMintDecimals, "sharesMintDecimals");
   const acceptedShares = acceptAtMintScale("shares", input.shares, shareDecimals);
   if (isZeroAmount(acceptedShares)) throw invalidAmount("shares", input.shares);
-  const requestedBaseUnits = parseDecimalAmount(acceptedShares, shareDecimals);
+  const requestedBaseUnits = toBaseUnits(parseTokenAmount(acceptedShares, shareDecimals));
   const shares = toDecimal(acceptedShares, "shares");
 
   assertActive();
@@ -752,10 +753,10 @@ export async function buildKaminoWithdrawPlan(
   const originalGetUserSharesState = sdkClient.getUserSharesState.bind(sdkClient);
   if (consolidation.instructions.length > 0) {
     const postConsolidationAta = new Decimal(
-      formatDecimalAmount(consolidation.postConsolidationAtaBaseUnits, shareDecimals)
+      toTokenAmount(baseUnits(consolidation.postConsolidationAtaBaseUnits), shareDecimals).value
     );
     const totalShares = new Decimal(
-      formatDecimalAmount(consolidation.totalBaseUnits, shareDecimals)
+      toTokenAmount(baseUnits(consolidation.totalBaseUnits), shareDecimals).value
     );
     sdkClient.getUserSharesState = async () => ({
       userSharesAta: consolidation.shareAta,
@@ -1145,7 +1146,7 @@ async function holdingFromReads(
   const unstakedBase = shareRead.value;
   const shares = requireNonNegativeFiniteDecimal(
     "total share balance",
-    new Decimal(formatDecimalAmount(unstakedBase, shareDecimals)).add(
+    new Decimal(toTokenAmount(baseUnits(unstakedBase), shareDecimals).value).add(
       requireNonNegativeFiniteDecimal("staked share balance", stakedShares)
     )
   );
@@ -1176,13 +1177,13 @@ async function holdingFromReads(
     if (rawRate === undefined) throw new Error("vault exchange rate unavailable");
     const rate = requireNonNegativeFiniteDecimal("vault exchange rate", rawRate);
     const decimals = mintDecimals(state.tokenMintDecimals, "tokenMintDecimals");
-    // Round-trip through the repo's own fixed-point helpers so the string that
-    // leaves this package is scaled exactly like every other amount in SDP.
+    // Round-trip through the token amount so the string that leaves this
+    // package is canonical at the mint's scale, like every other amount in SDP.
     const raw = requireNonNegativeFiniteDecimal("vault token value", shares.mul(rate)).toFixed(
       decimals,
       Decimal.ROUND_DOWN
     );
-    tokenValue = formatDecimalAmount(parseDecimalAmount(raw, decimals), decimals);
+    tokenValue = parseTokenAmount(raw, decimals).value;
   } catch {
     tokenValue = undefined;
   }
@@ -1192,7 +1193,7 @@ async function holdingFromReads(
     owner: input.owner,
     cluster: config.cluster,
     shares: shares.toFixed(),
-    withdrawableShares: formatDecimalAmount(unstakedBase, shareDecimals),
+    withdrawableShares: toTokenAmount(baseUnits(unstakedBase), shareDecimals).value,
     ...(tokenValue === undefined ? {} : { tokenValue }),
     tokenMint: assetIdentity.depositTokenMint,
     sharesMint: assetIdentity.shareMint,
@@ -1298,11 +1299,10 @@ export async function quoteKaminoDeposit(
       "estimated shares",
       client.estimateSharesFromTokens(state, amount, input.slot as Kit2, reserves)
     );
-    // Same fixed-point round trip as the position read: what leaves this
-    // package is scaled exactly like every other amount in SDP.
-    sharesOutBaseUnits = parseDecimalAmount(
-      estimate.toFixed(shareDecimals, Decimal.ROUND_DOWN),
-      shareDecimals
+    // Same token-amount round trip as the position read: what leaves this
+    // package is canonical at the mint's scale, like every other amount in SDP.
+    sharesOutBaseUnits = toBaseUnits(
+      parseTokenAmount(estimate.toFixed(shareDecimals, Decimal.ROUND_DOWN), shareDecimals)
     );
     pricing = observeDepositPricing(
       client,
@@ -1310,7 +1310,7 @@ export async function quoteKaminoDeposit(
       input.slot as Kit2,
       reserves,
       tokenDecimals,
-      parseDecimalAmount(acceptedAmount, tokenDecimals)
+      toBaseUnits(parseTokenAmount(acceptedAmount, tokenDecimals))
     );
   } catch (cause) {
     if (cause instanceof SdpKaminoError) throw cause;

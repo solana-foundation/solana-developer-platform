@@ -1,4 +1,4 @@
-import { formatDecimalAmount } from "@sdp/solana/amount";
+import { baseUnits, toTokenAmount } from "@sdp/solana/token-amount";
 import { describe, expect, it } from "vitest";
 import { acceptAtMintScale, isZeroAmount, mintDecimals } from "./amounts";
 import { SdpKaminoError } from "./errors";
@@ -104,7 +104,7 @@ describe("acceptAtMintScale", () => {
    */
   it("survives a raw balance above 2^53 base units", () => {
     const base = 9_007_199_254_740_993n; // Number.MAX_SAFE_INTEGER + 2
-    const asDecimal = formatDecimalAmount(base, 6);
+    const asDecimal = toTokenAmount(baseUnits(base), 6).value;
     expect(asDecimal).toBe("9007199254.740993");
     // Round-tripping through the accept path must not perturb the last digit.
     expect(acceptAtMintScale("shares", asDecimal, 6)).toBe("9007199254.740993");

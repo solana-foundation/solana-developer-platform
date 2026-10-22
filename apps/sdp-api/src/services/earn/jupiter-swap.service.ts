@@ -4,7 +4,15 @@ import {
   providerUnavailable,
 } from "@sdp/earn/errors";
 import type { EarnVaultInstruction, EarnVaultTransactionPlan } from "@sdp/earn/types";
-import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
+import { AmountError } from "@sdp/solana/amount";
+import {
+  type BaseUnits,
+  baseUnits,
+  parseTokenAmount,
+  type TokenAmount,
+  toBaseUnits,
+  toTokenAmount,
+} from "@sdp/solana/token-amount";
 import { HASTRA_DEPLOYMENTS } from "@sdp/types/hastra-programs";
 import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import { isAddress } from "@solana/addresses";
@@ -117,6 +125,25 @@ const MAX_TOKEN_ATOMS = (1n << 64n) - 1n;
 
 function isTokenAtoms(value: unknown): value is string {
   return typeof value === "string" && /^\d{1,20}$/.test(value) && BigInt(value) <= MAX_TOKEN_ATOMS;
+}
+
+/**
+ * A swap's source amount in the funding token's atoms, at its decimals.
+ *
+ * @throws AppError 400 with `refusal` when the amount is malformed, finer
+ * than the token's decimals, zero, or above u64.
+ */
+function swapSourceAtoms(amount: string, decimals: number, refusal: string): BaseUnits {
+  let parsed: TokenAmount;
+  try {
+    parsed = parseTokenAmount(amount, decimals);
+  } catch (error) {
+    if (error instanceof AmountError) throw badRequest(refusal);
+    throw error;
+  }
+  const atoms = toBaseUnits(parsed);
+  if (atoms === 0n) throw badRequest(refusal);
+  return atoms;
 }
 
 /** Jupiter's ExactIn V2 program rounds the post-slippage floor up. */
@@ -728,12 +755,11 @@ export async function fetchJupiterSwapLeg(
   const sourceDecimals = sourceToken.decimals;
   const depositDecimals = destinationToken.decimals;
 
-  const amountAtoms = parseDecimalAmount(request.sourceAmount, sourceDecimals);
-  if (amountAtoms <= 0n || amountAtoms > MAX_TOKEN_ATOMS) {
-    throw badRequest(
-      "Swap amount must fit a positive SPL token amount at the funding token's precision"
-    );
-  }
+  const amountAtoms = swapSourceAtoms(
+    request.sourceAmount,
+    sourceDecimals,
+    "Swap amount must fit a positive SPL token amount at the funding token's precision"
+  );
   const sourceTokenProgram = SPL_TOKEN_PROGRAMS[sourceToken.tokenProgram];
   const destinationTokenProgram = SPL_TOKEN_PROGRAMS[destinationToken.tokenProgram];
   const [[sourceTokenAccount], [destinationTokenAccount]] = await Promise.all([
@@ -829,8 +855,8 @@ export async function fetchJupiterSwapLeg(
     ),
     lookupTableAddresses: Object.keys(body.addressesByLookupTableAddress ?? {}),
     sourceAmount: request.sourceAmount,
-    quotedAmount: formatDecimalAmount(BigInt(body.outAmount), depositDecimals),
-    minOutAmount: formatDecimalAmount(minOutAtoms, depositDecimals),
+    quotedAmount: toTokenAmount(baseUnits(quotedOutAtoms), depositDecimals).value,
+    minOutAmount: toTokenAmount(baseUnits(minOutAtoms), depositDecimals).value,
     minOutAtoms: minOutAtoms.toString(),
     priceImpactPct: String(body.priceImpactPct ?? "0"),
     routeLabels: (body.routePlan ?? [])
@@ -875,12 +901,11 @@ export async function fetchJupiterSwapQuote(
   const sourceDecimals = requireEarnSwapMintMetadata(request.inputMint, "funding token").decimals;
   const outputDecimals = requireEarnSwapMintMetadata(request.outputMint, "deposit token").decimals;
 
-  const amountAtoms = parseDecimalAmount(request.sourceAmount, sourceDecimals);
-  if (amountAtoms <= 0n || amountAtoms > MAX_TOKEN_ATOMS) {
-    throw badRequest(
-      "Swap quote amount must fit a positive SPL token amount at the token's precision"
-    );
-  }
+  const amountAtoms = swapSourceAtoms(
+    request.sourceAmount,
+    sourceDecimals,
+    "Swap quote amount must fit a positive SPL token amount at the token's precision"
+  );
 
   const query = new URLSearchParams({
     inputMint: request.inputMint,
@@ -938,7 +963,7 @@ export async function fetchJupiterSwapQuote(
   }
 
   return {
-    outAmount: formatDecimalAmount(BigInt(body.outAmount), outputDecimals),
+    outAmount: toTokenAmount(baseUnits(BigInt(body.outAmount)), outputDecimals).value,
     priceImpactPct: String(body.priceImpactPct ?? "0"),
   };
 }

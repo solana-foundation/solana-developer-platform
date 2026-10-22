@@ -256,7 +256,7 @@ const MODULE_METADATA = [
     // @sdp/earn must never depend back — the hourly catalogue cron would then
     // load @solana/kit. The fund registry lives in @sdp/types for the same
     // no-cycle reason as the Kamino program tables.
-    allowedDependencies: ["@sdp/earn", "@sdp/rpc", "@sdp/types"],
+    allowedDependencies: ["@sdp/earn", "@sdp/rpc", "@sdp/solana", "@sdp/types"],
   },
   {
     name: "@sdp/types",

@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { parseDecimalAmount } from "@sdp/solana/amount";
+import { parseTokenAmount, toBaseUnits } from "@sdp/solana/token-amount";
 import type { Instruction } from "@solana/kit";
 import {
   address,
@@ -400,8 +400,12 @@ describe.skipIf(!ENABLED || !RPC_URL)("Veda queued withdrawals on Surfpool", () 
       vault,
       owner: owner.address,
     });
-    const depositedAtoms = parseDecimalAmount(deposited.shares, queueAsset.shareDecimals);
-    const requestAtoms = parseDecimalAmount(queueAsset.minimumShares, queueAsset.shareDecimals);
+    const depositedAtoms = toBaseUnits(
+      parseTokenAmount(deposited.shares, queueAsset.shareDecimals)
+    );
+    const requestAtoms = toBaseUnits(
+      parseTokenAmount(queueAsset.minimumShares, queueAsset.shareDecimals)
+    );
     expect(depositedAtoms).toBeGreaterThanOrEqual(requestAtoms);
 
     // A deployment may impose a post-deposit share lock. Advance the real
@@ -470,7 +474,7 @@ describe.skipIf(!ENABLED || !RPC_URL)("Veda queued withdrawals on Surfpool", () 
       vault,
       owner: owner.address,
     });
-    expect(parseDecimalAmount(afterRequest.shares, queueAsset.shareDecimals)).toBe(
+    expect(toBaseUnits(parseTokenAmount(afterRequest.shares, queueAsset.shareDecimals))).toBe(
       depositedAtoms - requestAtoms
     );
 
@@ -571,7 +575,9 @@ describe.skipIf(!ENABLED || !RPC_URL)("Veda queued withdrawals on Surfpool", () 
       vault,
       owner: owner.address,
     });
-    expect(parseDecimalAmount(restored.shares, queueAsset.shareDecimals)).toBe(depositedAtoms);
+    expect(toBaseUnits(parseTokenAmount(restored.shares, queueAsset.shareDecimals))).toBe(
+      depositedAtoms
+    );
     expect(
       await readVedaQueuedWithdrawalRequest(runtime(), config, {
         vault,
