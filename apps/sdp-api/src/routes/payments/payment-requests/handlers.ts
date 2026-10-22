@@ -41,6 +41,8 @@ function mapPaymentRequest(row: PaymentRequestRow): PaymentRequest {
     status: expired && row.status === "awaiting_payment" ? "expired" : row.status,
     expiresAt: row.expires_at,
     fulfilledByTransferId: row.fulfilled_by_transfer_id,
+    paidLate: row.paid_late,
+    lastCheckedAt: row.last_checked_at,
     canceledBy: row.canceled_by,
     lifecycle: row.lifecycle,
     createdBy: row.created_by,

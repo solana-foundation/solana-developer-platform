@@ -1210,6 +1210,8 @@ export interface PaymentRequest {
   status: PaymentRequestStatus;
   expiresAt: string | null;
   fulfilledByTransferId: string | null;
+  paidLate?: boolean;
+  lastCheckedAt?: string | null;
   canceledBy: string | null;
   lifecycle: PaymentRequestLifecycleEvent[];
   createdBy: string | null;
