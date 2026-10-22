@@ -1,3 +1,4 @@
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import {
   CRYPTO_RAIL_ASSET_LABELS,
   type CryptoAssetSymbol,
@@ -5,7 +6,8 @@ import {
   type RampCountrySupport,
   type RampCurrencyLimit,
 } from "@sdp/types/payment-rails";
-import { internalError } from "#/errors";
+import { internalError, providerNotConfigured } from "#/errors";
+import type { RampProvider, RampProviderCredentials, RampRuntimeContext } from "#/ramps/types";
 
 let icuModernCurrencies: Set<string> | undefined;
 let countryDisplayNames: Intl.DisplayNames | undefined;
@@ -84,12 +86,60 @@ export function isIso3166Alpha2CountryCode(value: string): boolean {
   return displayName !== undefined && displayName !== normalized;
 }
 
-export function requireEnv(env: Record<string, string | undefined>, key: string): string {
-  const value = env[key]?.trim();
-  if (!value) {
-    throw new Error(`Missing required env: ${key}.`);
+/** The format of each key in each mode: a provider's keys name the mode they run in. */
+export type RampKeyFormats = Readonly<
+  Record<SdpEnvironment, Readonly<Record<keyof RampProviderCredentials, RegExp>>>
+>;
+
+const KEY_MODE_NAMES = {
+  sandbox: "test-mode",
+  production: "live-mode",
+} as const satisfies Record<SdpEnvironment, string>;
+
+/**
+ * Every provider's `checkCredentials`: why `credentials` can't serve `mode`
+ * under `formats`, or null when both keys fit it.
+ *
+ * @param label - The provider's name in the refusal.
+ * @param formats - The provider's key formats by mode.
+ * @param credentials - The keys to check.
+ * @param mode - The mode the call runs in.
+ * @returns The refusal, or null.
+ */
+export function checkRampKeyFormats(
+  label: string,
+  formats: RampKeyFormats,
+  credentials: RampProviderCredentials,
+  mode: SdpEnvironment
+): string | null {
+  const format = formats[mode];
+  if (
+    format.publicKey.test(credentials.publicKey) &&
+    format.secretKey.test(credentials.secretKey)
+  ) {
+    return null;
   }
-  return value;
+  return `${label} ${mode} keys must be ${KEY_MODE_NAMES[mode]} keys.`;
+}
+
+/**
+ * `ctx`'s keys, once `provider` confirms they fit `ctx.mode`. Every provider
+ * call reads its keys here, so a key from the other mode never makes a request.
+ *
+ * @param provider - The provider making the call.
+ * @param ctx - The call's runtime.
+ * @returns The keys.
+ * @throws SdpPaymentsError PROVIDER_NOT_CONFIGURED when they don't fit the mode.
+ */
+export function rampCredentials(
+  provider: Pick<RampProvider, "checkCredentials">,
+  ctx: RampRuntimeContext
+): RampProviderCredentials {
+  const refusal = provider.checkCredentials(ctx.credentials, ctx.mode);
+  if (refusal !== null) {
+    throw providerNotConfigured(refusal);
+  }
+  return ctx.credentials;
 }
 
 export function basicAuthHeader(username: string, password: string): string {

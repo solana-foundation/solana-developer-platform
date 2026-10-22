@@ -2,15 +2,12 @@ import { NETWORK_METRIC_IDS, networkSnapshotSchema } from "@sdp/types/network-me
 import { describe, expect, it } from "vitest";
 import {
   formatNetworkAge,
-  formatNetworkChange,
   formatNetworkDay,
   formatNetworkTicks,
   formatNetworkValue,
   NETWORK_METRIC_DISPLAY,
   NETWORK_RANGES,
   networkAxisTicks,
-  networkChange,
-  networkChangeTone,
   networkFreshness,
   networkRangePoints,
   niceNetworkTicks,
@@ -119,34 +116,6 @@ describe("formatNetworkValue", () => {
   });
 });
 
-describe("changes", () => {
-  it("signs a change with a true minus", () => {
-    expect(formatNetworkChange(0.297, "en")).toBe("+29.7%");
-    expect(formatNetworkChange(-0.636, "en")).toBe("−63.6%");
-  });
-
-  it("reads a falling cost as good news and a falling supply as bad", () => {
-    expect(
-      networkChangeTone(-0.636, NETWORK_METRIC_DISPLAY.costPerTransaction.higherIsBetter)
-    ).toBe("positive");
-    expect(networkChangeTone(-0.1, NETWORK_METRIC_DISPLAY.stablecoinSupply.higherIsBetter)).toBe(
-      "critical"
-    );
-    expect(networkChangeTone(0, true)).toBe("neutral");
-  });
-
-  it("measures a change from the first point to the last", () => {
-    expect(
-      networkChange([
-        { date: "2026-01-01", value: 10 },
-        { date: "2026-01-02", value: 15 },
-      ])
-    ).toBe(0.5);
-    expect(networkChange([])).toBeNull();
-    expect(networkChange([{ date: "2026-01-01", value: 0 }])).toBeNull();
-  });
-});
-
 describe("7-day averages", () => {
   it("averages each day with the six before it, from the first full week", () => {
     expect(sevenDayAverages(daily([1, 2, 3, 4, 5, 6, 7, 8, 9]))).toEqual([
@@ -174,12 +143,12 @@ describe("7-day averages", () => {
   });
 
   it("reads a weekday swing as flat, on every range and whatever day it starts", () => {
-    // One busy day a week: daily, the change would depend on the weekday a range starts on.
+    // One busy day a week: drawn daily, the line would spike weekly and the headline would
+    // hinge on the weekday.
     const swinging = daily(Array.from({ length: 365 }, (_, day) => (day % 7 === 0 ? 70 : 0)));
     for (const range of NETWORK_RANGES) {
       const points = networkRangePoints(swinging, range, true);
-      expect(points.at(-1)?.value).toBe(10);
-      expect(networkChange(points)).toBe(0);
+      expect(new Set(points.map(({ value }) => value))).toEqual(new Set([10]));
     }
   });
 
@@ -252,16 +221,15 @@ describe("the design-review fixture", () => {
       return [
         id,
         formatNetworkValue(last.value, format, "en", "headline"),
-        formatNetworkChange(networkChange(points) ?? 0, "en"),
         points[0].date,
         last.date,
       ];
     });
     expect(figures).toEqual([
-      ["stablecoinSupply", "$16.27B", "+29.7%", "2025-10-13", "2026-10-12"],
-      ["stablecoinTransfers", "18.90M", "+160.6%", "2025-10-13", "2026-10-12"],
-      ["stablecoinShare", "18.3%", "+52.3%", "2025-10-13", "2026-10-12"],
-      ["costPerTransaction", "$0.0063", "−63.6%", "2025-10-13", "2026-10-12"],
+      ["stablecoinSupply", "$16.27B", "2025-10-13", "2026-10-12"],
+      ["stablecoinTransfers", "18.90M", "2025-10-13", "2026-10-12"],
+      ["stablecoinShare", "18.3%", "2025-10-13", "2026-10-12"],
+      ["costPerTransaction", "$0.0063", "2025-10-13", "2026-10-12"],
     ]);
   });
 

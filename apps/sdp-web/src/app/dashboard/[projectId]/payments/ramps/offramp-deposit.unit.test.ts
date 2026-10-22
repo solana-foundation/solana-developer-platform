@@ -79,7 +79,7 @@ describe("off-ramp deposit feedback", () => {
     );
     await submitOfframpDeposit(submission, send, t);
     expect(feedback.error).toHaveBeenCalledWith(
-      "DashboardPayments.ramps.transferFailed",
+      "DashboardPayments.ramps.sendRefused",
       expect.objectContaining({ description: "DashboardPayments.ramps.transferFailed" })
     );
     expect(feedback.success).not.toHaveBeenCalled();
@@ -92,7 +92,7 @@ describe("off-ramp deposit feedback", () => {
     );
     await submitOfframpDeposit(submission, send, t);
     expect(feedback.error).toHaveBeenCalledWith(
-      "DashboardPayments.ramps.transferFailed",
+      "DashboardPayments.ramps.sendRefused",
       expect.objectContaining({ description: "Quote expired" })
     );
     expect(feedback.success).not.toHaveBeenCalled();
@@ -107,7 +107,7 @@ describe("off-ramp deposit feedback", () => {
     );
     await submitOfframpDeposit(submission, send, t);
     expect(feedback.error).toHaveBeenCalledWith(
-      "DashboardPayments.ramps.transferFailed",
+      "DashboardPayments.ramps.sendRefused",
       expect.objectContaining({ description: "connection lost" })
     );
     expect(feedback.success).not.toHaveBeenCalled();

@@ -1,4 +1,8 @@
-import { GENESIS_HASH_BY_CLUSTER, type SolanaCluster } from "@sdp/types/well-known-tokens";
+import {
+  GENESIS_HASH_BY_CLUSTER,
+  SOLANA_CLUSTERS,
+  type SolanaCluster,
+} from "@sdp/types/well-known-tokens";
 import {
   createDefaultRpcTransport,
   createSolanaRpcFromTransport,
@@ -346,6 +350,18 @@ function managedEndpointUrls(cluster: SolanaCluster): string[] {
     });
   }
   return endpointUrls;
+}
+
+/**
+ * Boot check for deployments that must serve every cluster: each cluster's managed pool names at
+ * least one endpoint, so `createClusterRpc()` never answers `RPC_NOT_CONFIGURED` at request time.
+ *
+ * @throws SdpRpcError `RPC_NOT_CONFIGURED` naming the first cluster with no endpoint.
+ */
+export function assertManagedRpcConfigured(): void {
+  for (const cluster of SOLANA_CLUSTERS) {
+    managedEndpointUrls(cluster);
+  }
 }
 
 /**

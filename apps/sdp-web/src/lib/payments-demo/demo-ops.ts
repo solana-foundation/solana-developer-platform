@@ -69,7 +69,6 @@ const demoOpSchema = z.discriminatedUnion("k", [
     wallet: id,
     token: text,
     amount: text,
-    cp: id.nullable(),
     expires: text.nullable(),
   }),
   z.object({

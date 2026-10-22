@@ -194,6 +194,8 @@ pnpm kora:surfpool:test
 pnpm kora:surfpool:down
 ```
 
+This harness binds Kora to 18080, which the mainnet Kora that `pnpm dev` starts holds until `pnpm kora:local:down`; `pnpm kora:surfpool:up` refuses to start while it does, so run that first.
+
 The test command still runs SDP through `KORA_DEVNET_URL=http://127.0.0.1:18080`;
 only the JSON-RPC server behind that URL is local test infrastructure. It signs
 with a test-only fee payer; SDP sends the signed transaction to the embedded

@@ -5,6 +5,7 @@ import {
   formatElapsedShort,
   formatSignedAmount,
   PAYMENT_STATUS_TONE,
+  rampFiatSide,
   summarizeBatch,
 } from "./payments-presentation";
 
@@ -103,6 +104,31 @@ describe("summarizeBatch", () => {
       values: { count: 8 },
     });
     expect(summarizeBatch({ status: "archived", recipientCount: 4 }).tone).toBe("neutral");
+  });
+});
+
+describe("rampFiatSide", () => {
+  const sale = {
+    id: "xfr_sale",
+    custodyWalletId: "cwlt_1",
+    providerWalletId: "wallet_1",
+    status: "completed",
+    signature: null,
+    rampsMemo: {},
+    type: "offramp",
+    fiatAmount: "20.69",
+    fiatCurrency: "USD",
+  } as const;
+
+  it("reads a paid sale as the payout the provider reported, not its quote", () => {
+    expect(
+      rampFiatSide({ ...sale, fiatPayout: { amount: "20.82", currency: "USD" } })
+    ).toMatchObject({ amount: "20.82", currency: "USD" });
+  });
+
+  it("falls back to the quote until the provider reports a payout, and to nothing", () => {
+    expect(rampFiatSide(sale)).toEqual({ amount: "20.69", currency: "USD" });
+    expect(rampFiatSide({ ...sale, fiatAmount: undefined })).toBeNull();
   });
 });
 

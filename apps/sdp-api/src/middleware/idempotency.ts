@@ -620,6 +620,16 @@ export function markIdempotencyCommitted(c: Context<{ Bindings: Env }>): void {
 }
 
 /**
+ * Undoes markIdempotencyCommitted when the handler put its domain row back as
+ * it was (a released off-ramp deposit claim): the refusal it answers with then
+ * stays unstored like one raised before the row existed, so a same-key retry
+ * runs again instead of replaying it.
+ */
+export function markIdempotencyReleased(c: Context<{ Bindings: Env }>): void {
+  c.set("idempotencyCommitted", false);
+}
+
+/**
  * Marks that the key's domain row belongs to another request (its fingerprint
  * differs), so the 422 is not stored and the key is released: a retry of the
  * request that made the row is still answered from it.

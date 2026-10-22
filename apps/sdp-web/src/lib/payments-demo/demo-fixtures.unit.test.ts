@@ -405,7 +405,6 @@ describe("demo world", () => {
         expect(transfer?.amount).toBe(request.amount);
         expect(transfer?.kind).toBe("request_deposit");
       }
-      if (request.counterpartyId) expect(contactIds.has(request.counterpartyId)).toBe(true);
       expect(request.reference).toMatch(BASE58_ADDRESS);
     }
   });
@@ -653,12 +652,11 @@ describe("Contacts", () => {
 });
 
 describe("Requests", () => {
-  it("renders the list across every status, tied to demo wallets and contacts", async () => {
+  it("renders the list across every status", async () => {
     const props = propsOf<{
       initialPaymentRequests: PaymentRequest[];
       total: number;
       initialError: string | undefined;
-      counterparties: Counterparty[];
     }>(await PaymentRequestsPage({ searchParams: Promise.resolve({}) }));
     expect(props.initialError).toBeUndefined();
     expect(props.total).toBe(props.initialPaymentRequests.length);
@@ -666,15 +664,13 @@ describe("Requests", () => {
     expect(new Set(props.initialPaymentRequests.map((request) => request.status))).toEqual(
       new Set(["awaiting_payment", "paid", "expired", "canceled"])
     );
-    const contactIds = props.counterparties.map((contact) => contact.id);
     for (const request of props.initialPaymentRequests) {
-      if (request.counterpartyId) expect(contactIds).toContain(request.counterpartyId);
       expect(request.lifecycle[0]?.status).toBe("awaiting_payment");
     }
     expect(isNewestFirst(props.initialPaymentRequests)).toBe(true);
   });
 
-  it("opens each request's page on a demo wallet, naming its contact", async () => {
+  it("opens each request's page on a demo wallet", async () => {
     const { initialPaymentRequests } = propsOf<{ initialPaymentRequests: PaymentRequest[] }>(
       await PaymentRequestsPage({ searchParams: Promise.resolve({}) })
     );
@@ -684,12 +680,10 @@ describe("Requests", () => {
       );
       const props = propsOf<{
         request: PaymentRequest | null;
-        contactName: string | null;
         walletName: string | null;
       }>(detail.children);
       expect(props.request?.id).toBe(request.id);
       expect(props.walletName).not.toBeNull();
-      expect(props.contactName === null).toBe(request.counterpartyId === null);
     }
   });
 });

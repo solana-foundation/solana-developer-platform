@@ -26,14 +26,15 @@ export function sponsoredNetworkFee(transaction: Uint8Array): Promise<bigint> {
 }
 
 /**
- * A sponsored transaction as Kora's upstream sees it, for budget reconciliation.
+ * A sponsored transaction as Kora's upstream sees it at `finalized`, for budget reconciliation:
+ * settlement never commits spend from a block that can still be rolled back.
  *
  * @param signature - The transaction signature.
- * @returns The parsed transaction, or null when the upstream has not seen it.
+ * @returns The parsed transaction, or null when the upstream has not finalized it.
  * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the scope's cluster has no Kora upstream.
  */
 export function getSponsoredTransaction(signature: Signature): Promise<ParsedTransaction | null> {
-  return getTransaction(createKoraUpstreamRpc(), signature);
+  return getTransaction(createKoraUpstreamRpc(), signature, "finalized");
 }
 
 /**

@@ -1,12 +1,7 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
-import {
-  CLUSTER_BY_SDP_ENVIRONMENT,
-  type SolanaCluster,
-  WELL_KNOWN_TOKENS,
-} from "@sdp/types/well-known-tokens";
+import { type SolanaCluster, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDb } from "@/db/client";
 import {
   attachTokenSymbolsToBalances,
   attachUsdValuesToBalances,
@@ -15,14 +10,9 @@ import {
 import { clearJupiterPriceCacheForTests } from "@/services/jupiter-price.service";
 import { ENVIRONMENT_CLUSTER_CASES } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
-import { seedDefaultProjects } from "@/test/helpers/projects";
-import { seedTestDatabase } from "@/test/mocks/db";
 
-const TEST_ORG_ID = "org_helius_das";
-const TEST_USER_ID = "usr_helius_das";
-const TEST_PROJECT_ID = "prj_helius_das";
-const TEST_STABLE_MINT = "GnaWvQYgS4xypWoqA3xPgHMFxr2iGnWhEEjF6HEdutBa";
 const TEST_DAS_MINT = "DasC1usterMint11111111111111111111111111111";
+const TEST_LOOKALIKE_USDC_MINT = "FakeUsdcMint1111111111111111111111111111111";
 const HELIUS_DAS_URL_BY_CLUSTER = {
   devnet: "https://devnet.helius-das.sdp.test/?api-key=devnet",
   "mainnet-beta": "https://mainnet.helius-das.sdp.test/?api-key=mainnet",
@@ -36,49 +26,12 @@ function inScope<TResult>(
 }
 
 describe("helius-das service", () => {
-  beforeEach(async () => {
-    await seedTestDatabase(env);
+  beforeEach(() => {
     vi.stubEnv("SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL", HELIUS_DAS_URL_BY_CLUSTER.devnet);
     vi.stubEnv("SOLANA_RPC_HELIUS_MAINNET_API_KEY_URL", HELIUS_DAS_URL_BY_CLUSTER["mainnet-beta"]);
-
-    await getDb(env).batch([
-      getDb(env)
-        .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
-        .bind(TEST_ORG_ID, "Helius DAS Org", "helius-das-org", "individual", "active"),
-      getDb(env)
-        .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
-        .bind(TEST_USER_ID, "helius-das@example.com", 1, "active"),
-    ]);
-    await seedDefaultProjects(getDb(env), {
-      organizationId: TEST_ORG_ID,
-      createdBy: TEST_USER_ID,
-      members: [],
-      ids: { sandbox: TEST_PROJECT_ID, production: `${TEST_PROJECT_ID}_production` },
-    });
-    await getDb(env).batch([
-      getDb(env)
-        .prepare(
-          `INSERT INTO issued_tokens
-             (id, project_id, organization_id, mint_address, name, symbol, decimals, template, status, deployed_at, created_by)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(
-          "tok_helius_das_stable",
-          TEST_PROJECT_ID,
-          TEST_ORG_ID,
-          TEST_STABLE_MINT,
-          "Test Stable",
-          "TEST",
-          6,
-          "stablecoin",
-          "active",
-          "2026-03-19T00:00:00.000Z",
-          TEST_USER_ID
-        ),
-    ]);
   });
 
-  afterEach(async () => {
+  afterEach(() => {
     vi.restoreAllMocks();
     vi.useRealTimers();
     clearHeliusDasCachesForTests();
@@ -86,61 +39,34 @@ describe("helius-das service", () => {
     vi.unstubAllEnvs();
   });
 
-  it("prices a Sandbox-issued stablecoin at one USD under the sandbox scope only", async () => {
-    const balance = {
-      token: "TEST",
-      mint: TEST_STABLE_MINT,
-      amount: "12500000",
-      uiAmount: "12.5",
-      decimals: 6,
-    };
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockImplementation(async () => Response.json({}));
-
-    const sandboxBalances = await inScope("sandbox", () =>
-      attachUsdValuesToBalances(env, [balance])
-    );
-
-    expect(sandboxBalances).toEqual([{ ...balance, usdPrice: 1, usdValue: 12.5 }]);
-    expect(fetchSpy).not.toHaveBeenCalled();
-
-    const productionBalances = await inScope("production", () =>
-      attachUsdValuesToBalances(env, [balance])
-    );
-
-    expect(productionBalances).toEqual([balance]);
-    expect(fetchSpy).toHaveBeenCalled();
-  });
-
-  it("prices the built-in USDC when the issued stablecoin lookup fails", async () => {
-    const usdcMint = WELL_KNOWN_TOKENS.USDC.mints[CLUSTER_BY_SDP_ENVIRONMENT.sandbox];
+  it("prices USDC at Jupiter's quote and leaves a lookalike USDC mint unpriced", async () => {
+    const usdcMint = WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"];
     const usdcBalance = {
       token: WELL_KNOWN_TOKENS.USDC.symbol,
       mint: usdcMint.address,
-      amount: "3000000",
-      uiAmount: "3",
-      decimals: usdcMint.decimals,
-    };
-    const issuedBalance = {
-      token: "TEST",
-      mint: TEST_STABLE_MINT,
       amount: "12500000",
       uiAmount: "12.5",
+      decimals: usdcMint.decimals,
+    };
+    const lookalikeBalance = {
+      token: WELL_KNOWN_TOKENS.USDC.symbol,
+      mint: TEST_LOOKALIKE_USDC_MINT,
+      amount: "3000000",
+      uiAmount: "3",
       decimals: 6,
     };
-    const db = getDb(env);
-    const statement = db.prepare("SELECT 1");
-    vi.spyOn(statement, "bind").mockReturnValue(statement);
-    vi.spyOn(statement, "all").mockRejectedValue(new Error("database unavailable"));
-    vi.spyOn(db, "prepare").mockReturnValue(statement);
-    vi.spyOn(globalThis, "fetch").mockImplementation(async () => Response.json({}));
-
-    const balances = await inScope("sandbox", () =>
-      attachUsdValuesToBalances(env, [usdcBalance, issuedBalance])
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      Response.json({ [usdcMint.address]: { usdPrice: 0.9998, decimals: usdcMint.decimals } })
     );
 
-    expect(balances).toEqual([{ ...usdcBalance, usdPrice: 1, usdValue: 3 }, issuedBalance]);
+    const balances = await inScope("production", () =>
+      attachUsdValuesToBalances(env, [usdcBalance, lookalikeBalance])
+    );
+
+    expect(balances).toEqual([
+      { ...usdcBalance, usdPrice: 0.9998, usdValue: 12.4975 },
+      lookalikeBalance,
+    ]);
   });
 
   it("attaches DAS symbols to unlabeled token balances", async () => {

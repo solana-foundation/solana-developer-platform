@@ -1,6 +1,5 @@
 "use client";
 
-import type { Counterparty, CounterpartyAccount } from "@sdp/types/counterparties";
 import type { CreatedPaymentRequest, PaymentsDashboardWallet } from "@sdp/types/payments";
 import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
 import { Button } from "@sdp/ui/button";
@@ -14,15 +13,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useMemo, useState } from "react";
 import { toast } from "sonner";
-import useSWR from "swr";
-import { NewSolanaAddressForm } from "@/app/dashboard/[projectId]/payments/counterparty/new-solana-address-form";
 import { shortenAddress } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
 import {
   formatDateTime,
   formatDecimalAmount,
 } from "@/app/dashboard/[projectId]/payments/payments-presentation";
-import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
-import { fetchCounterpartyAccounts } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import { WizardFrame } from "@/components/wizard-frame";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
@@ -45,16 +40,10 @@ const EXPIRY_OPTIONS = [
   { id: "thirtyDays", hours: 720, labelKey: "DashboardPayments.requests.thirtyDays" },
 ] as const satisfies readonly { id: string; hours: number | null; labelKey: MessageKey }[];
 
-/** The form's "from anyone" choice; a sentinel value, never shown. */
-const ANYONE = "anyone";
-
 const EMPTY_STEP = [{ label: "", title: "" }];
 
 /** The token a new request starts on, as the design's does. */
 const DEFAULT_TOKEN_SYMBOL = "USDC";
-
-/** Past this many contacts the From list opens with a search box; a short list reads at a glance. */
-const FROM_SEARCH_THRESHOLD = 6;
 
 /**
  * Resolves the absolute expiry instant from a preset. Computed from the browser clock; callers
@@ -74,12 +63,6 @@ function isValidAmount(value: string): boolean {
   return /^\d+(\.\d+)?$/.test(trimmed) && Number(trimmed) > 0;
 }
 
-function hasCryptoAddress(accounts: readonly CounterpartyAccount[] | undefined): boolean {
-  return (accounts ?? []).some(
-    (account) => account.accountKind === "crypto_wallet" && account.status === "active"
-  );
-}
-
 async function copyToClipboard(text: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(text);
@@ -90,7 +73,7 @@ async function copyToClipboard(text: string): Promise<boolean> {
 }
 
 /**
- * Puts nodes where a translated sentence has its `{from}`, `{amount}` and `{wallet}` slots, so
+ * Puts nodes where a translated sentence has its `{amount}` and `{wallet}` slots, so
  * each part can carry its own ink while the word order stays the catalog's.
  */
 function fillSentence(template: string, parts: Record<string, ReactNode>): ReactNode[] {
@@ -108,19 +91,10 @@ function FieldHint({ children }: { children: ReactNode }) {
   return <p className="text-meta text-tertiary">{children}</p>;
 }
 
-/** The request put in words: who pays what into where, with what is still unset in faint ink. */
-function ReadsAs({
-  from,
-  amount,
-  wallet,
-}: {
-  from: string | null;
-  amount: string | null;
-  wallet: string | null;
-}) {
+/** The request put in words: what is paid into where, with what is still unset in faint ink. */
+function ReadsAs({ amount, wallet }: { amount: string | null; wallet: string | null }) {
   const t = useTranslations();
-  const sentence = t("DashboardPayments.requests.readsAsSentence", {
-    from: "{from}",
+  const sentence = t("DashboardPayments.requests.anyoneCanPaySentence", {
     amount: "{amount}",
     wallet: "{wallet}",
   });
@@ -129,11 +103,6 @@ function ReadsAs({
       <span className="text-meta text-secondary">{t("DashboardPayments.requests.readsAs")}</span>
       <p className="max-w-[36em] text-body text-secondary">
         {fillSentence(sentence, {
-          from: from ? (
-            <b className="font-medium text-primary">{from}</b>
-          ) : (
-            t("DashboardPayments.requests.anyoneWithLink")
-          ),
           amount: amount ? (
             <b className="font-medium text-primary tabular-nums">{amount}</b>
           ) : (
@@ -249,84 +218,6 @@ function AmountField({ amount, onChange }: { amount: string; onChange: (next: st
   );
 }
 
-/**
- * Who is expected to pay: anyone with the link, or one of the active contacts. A contact with no
- * Solana address on file is said so, with a way to add one in place.
- */
-function FromField({
-  contacts,
-  contact,
-  onPick,
-}: {
-  contacts: Counterparty[];
-  contact: Counterparty | null;
-  onPick: (next: string) => void;
-}) {
-  const t = useTranslations();
-  const [addingAddress, setAddingAddress] = useState(false);
-  const {
-    data: contactAccounts,
-    isLoading: accountsLoading,
-    mutate: mutateAccounts,
-  } = useSWR(
-    contact
-      ? paymentsQueryKeys.paymentRequestCounterpartyAccounts({ counterpartyId: contact.id })
-      : null,
-    ([, id]: readonly [string, string]) => fetchCounterpartyAccounts(id, t),
-    { revalidateOnFocus: false }
-  );
-  const contactHasNoAddress =
-    contact !== null &&
-    !accountsLoading &&
-    contactAccounts !== undefined &&
-    !hasCryptoAddress(contactAccounts);
-
-  return (
-    <div className="flex flex-col gap-1.5">
-      <Combobox
-        label={t("DashboardPayments.requests.from")}
-        value={contact ? contact.id : ANYONE}
-        onChange={(next) => {
-          onPick(next);
-          setAddingAddress(false);
-        }}
-        options={[
-          { value: ANYONE, label: t("DashboardPayments.requests.anyoneWithLink") },
-          ...contacts.map((option) => ({ value: option.id, label: option.displayName })),
-        ]}
-        searchable={contacts.length > FROM_SEARCH_THRESHOLD}
-        searchPlaceholder={t("DashboardPayments.payForm.searchContacts")}
-      />
-      {contact && contactHasNoAddress && !addingAddress ? (
-        <FieldHint>
-          {t("DashboardPayments.requests.noAddressOnFile", { contact: contact.displayName })}{" "}
-          <button
-            type="button"
-            onClick={() => setAddingAddress(true)}
-            className="inline-flex min-h-6 items-center rounded-sm text-primary underline underline-offset-4 outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-          >
-            {t("DashboardPayments.requests.addAnAddress")}
-          </button>
-        </FieldHint>
-      ) : null}
-      {contact && addingAddress ? (
-        // Opens under From, as the design does, in place of the hint that offered it.
-        <NewSolanaAddressForm
-          key={contact.id}
-          className="mt-2.5"
-          counterpartyId={contact.id}
-          idPrefix="request-add"
-          onAdded={() => {
-            setAddingAddress(false);
-            void mutateAccounts();
-          }}
-          onCancel={() => setAddingAddress(false)}
-        />
-      ) : null}
-    </div>
-  );
-}
-
 /** When the link stops working, with the instant that comes to read from the browser clock. */
 function ExpiryField({ expiry, onChange }: { expiry: string; onChange: (next: string) => void }) {
   const t = useTranslations();
@@ -359,40 +250,28 @@ interface PaymentRequestCreateWorkspaceProps {
   wallets: PaymentsDashboardWallet[];
   /** Why the wallets could not be read, when they could not. */
   walletsError: string | null;
-  counterparties: Counterparty[];
 }
 
 /**
- * New request, as its own page: the amount and token, the wallet it lands in, who pays it, when
- * the link stops working, and the request read back as a sentence. Creating it copies the link
- * and opens the request in the list.
+ * New request, as its own page: the amount and token, the wallet it lands in, when the link stops
+ * working, and the request read back as a sentence. Creating it copies the link and opens the
+ * request in the list.
  *
- * The API matches a payment to its request by the link's reference, not by who sent it, so
- * naming a contact records who is expected to pay; it does not stop anyone else paying the link.
+ * The API matches a payment to its request by the link's reference, not by who sent it, so a
+ * request names no payer: anyone holding the link can pay it.
  */
 export function PaymentRequestCreateWorkspace({
   wallets,
   walletsError,
-  counterparties,
 }: PaymentRequestCreateWorkspaceProps) {
   if (!walletsError && wallets.length === 0) {
     return <NoWalletState />;
   }
-  return (
-    <PaymentRequestCreateForm
-      wallets={wallets}
-      walletsError={walletsError}
-      counterparties={counterparties}
-    />
-  );
+  return <PaymentRequestCreateForm wallets={wallets} walletsError={walletsError} />;
 }
 
 /** The new request's form and its create, once there is a wallet to be paid into. */
-function PaymentRequestCreateForm({
-  wallets,
-  walletsError,
-  counterparties,
-}: PaymentRequestCreateWorkspaceProps) {
+function PaymentRequestCreateForm({ wallets, walletsError }: PaymentRequestCreateWorkspaceProps) {
   const t = useTranslations();
   const notice = useOutcomeUnknownNotice(null);
   const locale = useLocale();
@@ -403,16 +282,11 @@ function PaymentRequestCreateForm({
     () => deriveTokenOptions(CLUSTER_BY_SDP_ENVIRONMENT[sdpEnvironment]),
     [sdpEnvironment]
   );
-  const contacts = useMemo(
-    () => counterparties.filter((counterparty) => counterparty.status === "active"),
-    [counterparties]
-  );
 
   const demo = usePaymentsDemo();
   const [amount, setAmount] = useState(demo ? DEMO_PREFILL_AMOUNTS.request : "");
   const [pickedToken, setPickedToken] = useState("");
   const [pickedWallet, setPickedWallet] = useState("");
-  const [pickedFrom, setPickedFrom] = useState(ANYONE);
   const [expiry, setExpiry] = useState<string>("none");
   const [submitting, setSubmitting] = useState(false);
   // Once the link exists the page stays busy: it is on its way to the request, and a second
@@ -426,7 +300,6 @@ function PaymentRequestCreateForm({
     tokens.find((token) => token.symbol === DEFAULT_TOKEN_SYMBOL) ?? tokens.at(0) ?? null;
   const token = tokens.find((option) => option.mintAddress === pickedToken) ?? defaultToken;
   const wallet = wallets.find((option) => option.walletId === pickedWallet) ?? null;
-  const contact = contacts.find((option) => option.id === pickedFrom) ?? null;
 
   const canCreate = isValidAmount(amount) && token !== null && wallet !== null && !busy;
 
@@ -437,13 +310,7 @@ function PaymentRequestCreateForm({
     setSubmitting(true);
     let created: CreatedPaymentRequest | undefined;
     try {
-      const input = JSON.stringify([
-        wallet.walletId,
-        token.mintAddress,
-        amount.trim(),
-        contact?.id ?? null,
-        expiry,
-      ]);
+      const input = JSON.stringify([wallet.walletId, token.mintAddress, amount.trim(), expiry]);
       // Read from the clock once per action, so a retry resends the same body
       // under the first attempt's key.
       const expiresAt = expiresAtForAction(input, () => resolveExpiryDate(expiry));
@@ -461,7 +328,6 @@ function PaymentRequestCreateForm({
             walletId: wallet.walletId,
             token: token.mintAddress,
             amount: amount.trim(),
-            counterpartyId: contact ? contact.id : null,
             expiresAt,
           },
         }
@@ -556,15 +422,9 @@ function PaymentRequestCreateForm({
           disabled={wallets.length === 0}
         />
 
-        <FromField contacts={contacts} contact={contact} onPick={setPickedFrom} />
-
         <ExpiryField expiry={expiry} onChange={setExpiry} />
 
-        <ReadsAs
-          from={contact ? contact.displayName : null}
-          amount={readsAsAmount(amount, token, locale)}
-          wallet={walletDisplayName(wallet)}
-        />
+        <ReadsAs amount={readsAsAmount(amount, token, locale)} wallet={walletDisplayName(wallet)} />
       </form>
     </WizardFrame>
   );

@@ -1,6 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import { fetchCounterparties } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-page.data";
 import { fetchPaymentsWallets } from "@/app/dashboard/[projectId]/payments/payments-page.data";
 import { resolvePlaygroundApiBaseUrl } from "@/app/dashboard/[projectId]/playground-api-data";
 import { withLegacyDesign } from "@/flags/new-design";
@@ -24,10 +23,9 @@ async function PaymentRequestsPage() {
   const apiBaseUrl = resolvePlaygroundApiBaseUrl();
 
   return withDashboardPageTrace("dashboard.payment-requests.page", async ({ trace, apiClient }) => {
-    const [result, walletsResult, counterpartiesResult] = await Promise.all([
+    const [result, walletsResult] = await Promise.all([
       trace.step("fetch_payment_requests", () => fetchPaymentRequests(apiClient.request)),
       trace.step("fetch_wallets", () => fetchPaymentsWallets(apiClient.request)),
-      trace.step("fetch_counterparties", () => fetchCounterparties(apiClient.request)),
     ]);
 
     trace.log({ ok: result.ok, count: result.data.length, total: result.total });
@@ -42,7 +40,6 @@ async function PaymentRequestsPage() {
           initialLocalErrorCode={result.localErrorCode}
           apiBaseUrl={apiBaseUrl}
           wallets={wallets}
-          counterparties={counterpartiesResult.data}
         />
       </div>
     );

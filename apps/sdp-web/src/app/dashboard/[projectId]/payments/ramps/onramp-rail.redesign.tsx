@@ -72,23 +72,18 @@ function onrampPrimaryAction(
 }
 
 /**
- * The wizard's steps as the frame shows them: the provider's name in "What {provider} needs",
- * and the memo step called "Memo" when a separate requirements step already took the
- * "Provider details" name.
+ * The wizard's steps as the frame shows them: the provider's name in "What {provider} needs"
+ * on its requirements step. The memo is SDP's own record of the deposit, so it stays "Memo",
+ * as on the off-ramp, whatever the provider asks for.
  */
 function displaySteps(wizard: OnrampWizard, t: ReturnType<typeof useTranslations>) {
   const provider = wizard.fields.provider ? getRampProviderLabel(wizard.fields.provider) : null;
   const needsTitle = provider
     ? t("DashboardPayments.ramps.whatProviderNeeds", { provider })
     : undefined;
-  const hasRequirements = wizard.steps.some((step) => step.id === "REQUIREMENTS");
   return wizard.steps.map((step) => {
     if (step.id === "REQUIREMENTS") return { ...step, title: needsTitle ?? step.title };
-    if (step.id === "MEMO") {
-      return hasRequirements
-        ? { ...step, label: t("DashboardPayments.ramps.memoStep") }
-        : { ...step, title: needsTitle ?? step.title };
-    }
+    if (step.id === "MEMO") return { ...step, label: t("DashboardPayments.ramps.memoStep") };
     return step;
   });
 }

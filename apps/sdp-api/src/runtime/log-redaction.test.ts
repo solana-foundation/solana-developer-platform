@@ -40,6 +40,23 @@ function captureLogs(write: (logger: pino.Logger) => void): string {
 }
 
 describe("log redaction registry", () => {
+  it("never emits a pay-link bearer token in a request path, message or error", () => {
+    const token = "synthetic-pay-link-credential";
+    const output = captureLogs((logger) => {
+      logger.info(
+        { event: "sdp_api_request_timing", path: `/pay/${token}/tx` },
+        "request completed"
+      );
+      logger.error({ path: `/pay/${token}`, error: new Error(`Failed /pay/${token}/tx`) });
+      logger.info(`GET https://api.example.com/pay/${token}/missing 404`);
+    });
+
+    expect(output).not.toContain(token);
+    expect(output).toContain("/pay/[REDACTED]/tx");
+    expect(output).toContain("/pay/[REDACTED]/missing");
+    expect(output).toContain("sdp_api_request_timing");
+  });
+
   it("expands every registered field to the root and one level deep", () => {
     for (const field of [...REDACTED_LEAF_FIELDS, ...REDACTED_NESTED_PATHS]) {
       expect(LOG_REDACTION_PATHS).toContain(field);

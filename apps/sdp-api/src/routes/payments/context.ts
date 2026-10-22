@@ -1,4 +1,5 @@
 import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
+import type { RampProviderId } from "@sdp/types/provider-access";
 import type { Context } from "hono";
 import {
   createCounterpartiesRepository,
@@ -10,15 +11,14 @@ import {
 } from "@/db/repositories/repository-factory";
 import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
+import { rampRuntimeFor } from "@/services/ramps/runtime";
 import type { Env } from "@/types/env";
 
 export type AppContext = Context<{ Bindings: Env }>;
 
-export function rampRuntime(c: AppContext): RampRuntimeContext {
-  return {
-    env: c.env as unknown as Record<string, string | undefined>,
-    mode: resolveSdpEnvironment(c),
-  };
+/** The runtime a call to `provider` runs under for this request's project mode. */
+export function rampRuntime(c: AppContext, provider: RampProviderId): RampRuntimeContext {
+  return rampRuntimeFor(c.env, provider, resolveSdpEnvironment(c));
 }
 
 export function getPaymentsRepository(c: AppContext) {

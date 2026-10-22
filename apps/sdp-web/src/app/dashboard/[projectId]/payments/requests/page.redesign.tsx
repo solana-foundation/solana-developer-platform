@@ -1,6 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import { fetchCounterparties } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-page.data";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import {
@@ -48,19 +47,11 @@ export async function PaymentRequestsPage({
   const listState = parsePaymentRequestsListParams(params);
 
   return withDashboardPageTrace("dashboard.payment-requests.page", async ({ trace, apiClient }) => {
-    // The API's largest page, so the From column names every contact a request is likely to
-    // carry (the default page of 10 left the rest as raw ids).
-    const counterpartiesLoad = trace.step("fetch_counterparties", () =>
-      fetchCounterparties(apiClient.request, { page: 1, pageSize: 100 })
+    // One page, as the URL names it: listing reconciles each open request on chain, so the list
+    // reads no more than it shows (see loadPaymentRequestsList).
+    const result = await trace.step("fetch_payment_requests", () =>
+      loadPaymentRequestsList(apiClient.request, listState)
     );
-    const [result, counterpartiesResult] = await Promise.all([
-      // One page, as the URL names it: listing reconciles each open request on chain, so the
-      // list reads no more than it shows (see loadPaymentRequestsList).
-      trace.step("fetch_payment_requests", () =>
-        loadPaymentRequestsList(apiClient.request, listState)
-      ),
-      counterpartiesLoad,
-    ]);
 
     trace.log({
       ok: result.ok,
@@ -85,7 +76,6 @@ export async function PaymentRequestsPage({
         listState={listState}
         initialError={result.error}
         initialLocalErrorCode={result.localErrorCode}
-        counterparties={counterpartiesResult.data}
       />
     );
   });

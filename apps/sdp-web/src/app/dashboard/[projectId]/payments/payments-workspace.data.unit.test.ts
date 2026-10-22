@@ -1,10 +1,13 @@
+import type { Counterparty } from "@sdp/types/counterparties";
 import { address } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setWindowPathname } from "@/test/window-location";
 import {
+  counterpartyListComplete,
   createTransfer,
   createTransferBatch,
   estimateTransferBatch,
+  fetchRampEstimates,
   TransferRequestError,
 } from "./payments-workspace.data";
 
@@ -120,5 +123,134 @@ describe("Payments write requests", () => {
       });
       expect(JSON.parse(String((init as RequestInit).body))).not.toHaveProperty("source");
     }
+  });
+});
+
+describe("fetchRampEstimates", () => {
+  beforeEach(() => setWindowPathname("/dashboard/prj_test_sandbox/payments/deposit"));
+  afterEach(() => vi.unstubAllGlobals());
+
+  const request = {
+    direction: "onramp",
+    assetRail: "sol.solana",
+    fiatCurrency: "USD",
+    amount: "25",
+  } as const;
+  const estimate = {
+    provider: "stripe",
+    direction: "onramp",
+    fiatCurrency: "USD",
+    assetRail: "sol.solana",
+    fiatAmount: "25",
+    cryptoAmount: "0.2",
+    exchangeRate: "110.25",
+    totalFiatAmount: "26.02",
+    fees: { currency: "USD", total: "1.02" },
+  } as const;
+
+  it("turns an estimate without a usable rate into that provider's error", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          data: {
+            estimates: [
+              { provider: "moonpay", status: "ok", estimate: { ...estimate, exchangeRate: "0" } },
+              { provider: "stripe", status: "ok", estimate },
+            ],
+          },
+        })
+      )
+    );
+
+    expect(await fetchRampEstimates(request, t)).toEqual([
+      {
+        provider: "moonpay",
+        status: "error",
+        error: "DashboardPayments.workspace.rampEstimateInvalidRate",
+      },
+      { provider: "stripe", status: "ok", estimate },
+    ]);
+  });
+
+  it("keeps an error's reason and the bound an amount crossed", async () => {
+    const outOfRange = {
+      provider: "moonpay",
+      status: "error",
+      error: "Amount is below the minimum",
+      reason: "amount_below_minimum",
+      limit: { amount: "20.00879", currency: "USDC" },
+    } as const;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          data: { estimates: [outOfRange, { provider: "stripe", status: "unsupported" }] },
+        })
+      )
+    );
+
+    expect(await fetchRampEstimates(request, t)).toEqual([
+      outOfRange,
+      { provider: "stripe", status: "unsupported" },
+    ]);
+  });
+
+  it("refuses a response that is not an estimate list", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({ data: { estimates: [{ provider: "stripe", status: "ok" }] } })
+      )
+    );
+
+    await expect(fetchRampEstimates(request, t)).rejects.toThrow(
+      "DashboardPayments.workspace.rampEstimateMissing"
+    );
+  });
+
+  it.each([{ totalFiatAmount: "26,02" }, { fees: { currency: "USD", total: "1.02 USD" } }])(
+    "refuses an estimate whose figures aren't decimals: %o",
+    async (figures) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () =>
+          jsonResponse({
+            data: {
+              estimates: [
+                { provider: "stripe", status: "ok", estimate: { ...estimate, ...figures } },
+              ],
+            },
+          })
+        )
+      );
+
+      await expect(fetchRampEstimates(request, t)).rejects.toThrow(
+        "DashboardPayments.workspace.rampEstimateMissing"
+      );
+    }
+  );
+});
+
+describe("counterpartyListComplete", () => {
+  const contact: Counterparty = {
+    id: "cpty_one",
+    organizationId: "org_test",
+    projectId: "proj_test",
+    externalId: null,
+    displayName: "One",
+    entityType: "business",
+    status: "active",
+    createdBy: null,
+    createdAt: "2026-10-20T00:00:00.000Z",
+    updatedAt: "2026-10-20T00:00:00.000Z",
+  };
+
+  it("reuses a read only when it holds the whole directory", () => {
+    expect(counterpartyListComplete({ ok: true, data: [contact], total: 1 })).toBe(true);
+    expect(counterpartyListComplete({ ok: true, data: [contact], total: 25 })).toBe(false);
+    expect(counterpartyListComplete({ ok: false, data: [], total: 0 })).toBe(false);
+    // A read that loaded every page names no total.
+    expect(counterpartyListComplete({ ok: true, data: [contact] })).toBe(true);
   });
 });

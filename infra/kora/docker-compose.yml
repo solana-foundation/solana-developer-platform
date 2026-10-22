@@ -23,6 +23,8 @@ services:
       - RUST_LOG=info
       - RPC_URL=${RPC_URL:-https://api.devnet.solana.com}
       - SIGNER_PRIVATE_KEY=${SIGNER_PRIVATE_KEY}
+      # Empty (the CI harness) means no auth; scripts/kora-local/up.sh always sets one.
+      - KORA_API_KEY=${KORA_API_KEY:-}
     command:
       - kora
       - --config

@@ -34,6 +34,14 @@ export function isSelfHostedDeployment(env: Pick<Env, "SDP_DEPLOYMENT_MODE">): b
   return resolveDeploymentMode(env.SDP_DEPLOYMENT_MODE) === "self_hosted";
 }
 
+export function requireEnv(env: Record<string, string | undefined>, key: string): string {
+  const value = env[key]?.trim();
+  if (!value) {
+    throw new Error(`Missing required env: ${key}.`);
+  }
+  return value;
+}
+
 /**
  * Return the complete Node process environment as SDP bindings.
  *

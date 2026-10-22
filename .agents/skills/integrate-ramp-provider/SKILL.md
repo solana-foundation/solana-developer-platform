@@ -22,9 +22,9 @@ Complete the [ramp intake](https://solanafoundation.typeform.com/to/sxTGbwXt) an
 
 ## Sequence
 
-Do them in this order. For unsupported directions, skip business-flow implementation but still satisfy the required `RampProvider` methods with empty rail/entity support and explicit typed rejection; only `createOnrampQuote` is optional. `fetchTransferStatus` is optional on the contract, but the status sweep requires it for every registered provider: a provider SDP cannot look up leaves a transfer open forever when its webhook is lost.
+Do them in this order. For an unsupported direction, leave out both of its members and declare empty rail/entity support with an explicit typed rejection. `fetchTransferStatus` is required: a provider SDP cannot look up leaves a transfer open forever when its webhook is lost.
 
-1. **register-provider** — add the id, package client, API schemas/dispatch, availability, setup registry, mode-keyed config, webhook registration decision, and dashboard catalog. Make the skeleton compile.
+1. **register-provider** — add the id, package client, API schemas/dispatch, managed sandbox keys, availability, setup registry, webhook registration decision, and dashboard catalog. Make the skeleton compile.
 2. **rail-discovery** — declare which fiat/crypto rails you support.
 3. **integrate-estimate** — rate preview; the cheapest live end-to-end check (no DB, no KYC).
 4. **counterparty-requirements** — required readiness contract for every provider, including providers that immediately return `ready` or reject an unsupported direction.
@@ -55,8 +55,8 @@ Manual-instruction and multi-step onboarding providers were removed; one that re
 ## Rules that aren't optional (shared by every step)
 
 - **Do not default required credentials or required upstream fields.** Explicit product defaults and optional-field fallbacks are acceptable only when their semantics are deliberate and tested; never swallow an upstream failure.
-- **HTTP in the provider; DB in the route handler.** Providers read creds from the passed `env` keyed by `mode` and never touch the database.
-- **Secrets are environment variables**, mode-keyed where the upstream separates sandbox and production; a missing one throws `providerNotConfigured` → HTTP 503. Never commit credentials.
+- **HTTP in the provider; DB in the route handler.** Providers get their keys in `ctx.credentials`, never the process env, and never touch the database.
+- **SDP's managed keys are sandbox env vars**, resolved once in `apps/sdp-api/src/services/ramps/runtime.ts`; production projects bring their own account. Missing keys, or keys from the other mode, answer `PROVIDER_NOT_CONFIGURED` → HTTP 503. Never commit credentials.
 - **Webhooks are fully typed** — parse the raw body as `unknown` only at the signature boundary, then narrow.
 - **One status mapping per provider, in the package** — the provider's transaction object becomes a `RampSettlementEvent` in `providers/<id>/*-status-mapping.ts`; the webhook parser and `fetchTransferStatus` both call it, so a pulled observation and a delivered one cannot diverge.
 - **Strong typing** — no `any`, no `enum`, finite sets are `as const satisfies Record<…>`.

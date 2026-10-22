@@ -18,7 +18,6 @@ function requestRow(id: string, overrides: Partial<PaymentRequest> = {}): Paymen
     id,
     organizationId: "org_1",
     projectId: "prj_1",
-    counterpartyId: null,
     walletId: "wal_1",
     destinationAddress: "11111111111111111111111111111111",
     token: MAINNET_USDC,
@@ -69,23 +68,18 @@ describe("parsePaymentRequestsListParams", () => {
 describe("paymentRequestMatchesSearch", () => {
   const request = requestRow("preq_1", {
     amount: "12.5",
-    counterpartyId: "cp_1",
     destinationAddress: "Dest1111111111111111111111111111111111111111",
     reference: "INV-42",
   });
-  const names = new Map([["cp_1", "Jane Doe"]]);
 
-  it("matches the amount, token symbol, payer, destination or reference, ignoring case", () => {
-    for (const needle of ["12.5", "usdc", "jane", "dest111", "inv-42"]) {
-      expect(paymentRequestMatchesSearch(request, needle, names)).toBe(true);
+  it("matches the amount, token symbol, destination or reference, ignoring case", () => {
+    for (const needle of ["12.5", "usdc", "dest111", "inv-42"]) {
+      expect(paymentRequestMatchesSearch(request, needle)).toBe(true);
     }
   });
 
   it("matches nothing else", () => {
-    expect(paymentRequestMatchesSearch(request, "john", names)).toBe(false);
-    expect(paymentRequestMatchesSearch({ ...request, counterpartyId: null }, "jane", names)).toBe(
-      false
-    );
+    expect(paymentRequestMatchesSearch(request, "john")).toBe(false);
   });
 });
 

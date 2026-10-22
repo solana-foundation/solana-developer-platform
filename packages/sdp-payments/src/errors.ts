@@ -1,6 +1,12 @@
-import type { RampDirection } from "@sdp/types/payments";
+import {
+  RAMP_AMOUNT_LIMIT_REASONS,
+  type RampAmountLimit,
+  type RampAmountLimitReason,
+  type RampDirection,
+} from "@sdp/types/payments";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
+import { z } from "zod";
 
 export type SdpPaymentsErrorCode =
   | "BAD_REQUEST"
@@ -94,6 +100,45 @@ export function providerUnavailable(
   diagnostics?: Record<string, unknown>
 ): SdpPaymentsError {
   return new SdpPaymentsError("PROVIDER_UNAVAILABLE", message, details, diagnostics);
+}
+
+const AMOUNT_LIMIT_MESSAGES = {
+  amount_below_minimum: "Amount is below this provider's minimum of",
+  amount_above_maximum: "Amount is above this provider's maximum of",
+} as const satisfies Record<RampAmountLimitReason, string>;
+
+/**
+ * A provider refuses the amount for this pair. The bound rides in `details`
+ * so a caller can say what amount would work.
+ *
+ * @param reason - Which bound the amount crossed.
+ * @param limit - The bound, in the currency the amount was given in.
+ * @returns The 400 to throw.
+ */
+export function rampAmountOutOfRange(
+  reason: RampAmountLimitReason,
+  limit: RampAmountLimit
+): SdpPaymentsError {
+  return new SdpPaymentsError(
+    "BAD_REQUEST",
+    `${AMOUNT_LIMIT_MESSAGES[reason]} ${limit.amount} ${limit.currency}`,
+    { reason, limit }
+  );
+}
+
+/** The details a `rampAmountOutOfRange` error carries. */
+const rampAmountLimitDetailsSchema = z.object({
+  reason: z.enum(RAMP_AMOUNT_LIMIT_REASONS),
+  limit: z.object({ amount: z.string(), currency: z.string() }),
+});
+
+/** The bound a `rampAmountOutOfRange` error carries, or null for any other error. */
+export function rampAmountLimitOf(
+  cause: unknown
+): { reason: RampAmountLimitReason; limit: RampAmountLimit } | null {
+  if (!(cause instanceof SdpPaymentsError) || cause.code !== "BAD_REQUEST") return null;
+  const details = rampAmountLimitDetailsSchema.safeParse(cause.details);
+  return details.success ? details.data : null;
 }
 
 export function estimateNotAvailable(

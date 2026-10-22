@@ -23,6 +23,7 @@ import {
   offrampPairs,
   onrampPairs,
   RAMP_PROVIDER_LOGOS,
+  RAMP_PROVIDER_OPTIONS,
   type RampDirection,
   type RampPair,
   type RampProviderOption,
@@ -236,8 +237,24 @@ interface ProviderChoiceProps {
 }
 
 /**
- * The refresh surface's provider tiles, one radio group: the providers that can take the ramp
- * with their estimates, then the ones that cannot, each with its first reason.
+ * Every provider in the catalog's own order, each marked with its exclusion when it can't take
+ * the ramp: a tile stays where it is as the amount changes instead of jumping to the end.
+ */
+function tilesInStaticOrder(
+  availableProviders: readonly RampProviderOption[],
+  providerExclusions: readonly ProviderExclusion[]
+): { option: RampProviderOption; exclusion: ProviderExclusion | null }[] {
+  const rank = (option: RampProviderOption) =>
+    RAMP_PROVIDER_OPTIONS.findIndex((candidate) => candidate.id === option.id);
+  return [
+    ...availableProviders.map((option) => ({ option, exclusion: null })),
+    ...providerExclusions.map((exclusion) => ({ option: exclusion.option, exclusion })),
+  ].sort((left, right) => rank(left.option) - rank(right.option));
+}
+
+/**
+ * The refresh surface's provider tiles, one radio group: every provider in a fixed order, the
+ * ones that can take the ramp with their estimates, the others with their first reason.
  */
 function ProviderQuoteTiles({
   direction,
@@ -263,29 +280,32 @@ function ProviderQuoteTiles({
         aria-label={t("DashboardPayments.ramps.chooseProvider")}
         className="grid auto-rows-fr gap-3 sm:grid-cols-2"
       >
-        {availableProviders.map((option) => (
-          <ProviderQuoteCard
-            key={option.id}
-            name={`${direction}-provider`}
-            option={option}
-            active={selectedProvider === option.id}
-            estimate={estimatesByProvider.get(option.id)}
-            estimateLoading={estimatesLoading}
-            sandboxOnly={RAMP_PROVIDER_SURFACING[option.id] === "sandbox"}
-            onSelect={() => onProviderSelect(option.id)}
-          />
-        ))}
-        {providerExclusions.map((exclusion) => (
-          <ProviderQuoteCard
-            key={exclusion.option.id}
-            name={`${direction}-provider`}
-            option={exclusion.option}
-            active={false}
-            sandboxOnly={RAMP_PROVIDER_SURFACING[exclusion.option.id] === "sandbox"}
-            unavailableReason={exclusion.reasons[0] ?? t("DashboardPayments.ramps.unavailable")}
-            onSelect={() => {}}
-          />
-        ))}
+        {tilesInStaticOrder(availableProviders, providerExclusions).map((tile) =>
+          tile.exclusion ? (
+            <ProviderQuoteCard
+              key={tile.option.id}
+              name={`${direction}-provider`}
+              option={tile.option}
+              active={false}
+              sandboxOnly={RAMP_PROVIDER_SURFACING[tile.option.id] === "sandbox"}
+              unavailableReason={
+                tile.exclusion.reasons[0] ?? t("DashboardPayments.ramps.unavailable")
+              }
+              onSelect={() => {}}
+            />
+          ) : (
+            <ProviderQuoteCard
+              key={tile.option.id}
+              name={`${direction}-provider`}
+              option={tile.option}
+              active={selectedProvider === tile.option.id}
+              estimate={estimatesByProvider.get(tile.option.id)}
+              estimateLoading={estimatesLoading}
+              sandboxOnly={RAMP_PROVIDER_SURFACING[tile.option.id] === "sandbox"}
+              onSelect={() => onProviderSelect(tile.option.id)}
+            />
+          )
+        )}
       </div>
       {availableProviders.length === 0 && providerExclusions.length === 0 ? (
         <p className="text-body text-tertiary">

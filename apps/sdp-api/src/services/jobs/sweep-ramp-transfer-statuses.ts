@@ -20,6 +20,7 @@ import type {
 import { createSystemPaymentsRepository } from "@/db/repositories/repository-factory";
 import { logEvent, paymentsErrorDiagnostics } from "@/runtime/money-path-events";
 import { isProviderConfigured } from "@/services/provider-availability.service";
+import { rampRuntimeFor } from "@/services/ramps/runtime";
 import type { WebhookProcessor } from "@/services/ramps/webhooks/processor";
 import { RAMP_PROVIDER_WEBHOOK_PROCESSOR } from "@/services/ramps/webhooks/registry";
 import type { Env } from "@/types/env";
@@ -127,13 +128,6 @@ export interface RampStatusSweepResult {
   unmapped: number;
 }
 
-/** The string values of the process env, which is where provider credentials live. */
-function providerEnv(env: Env): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(env).filter((entry): entry is [string, string] => typeof entry[1] === "string")
-  );
-}
-
 /**
  * Whether SDP should now call a checkout abandoned: still waiting on the
  * customer, nothing this pull said counts as activity, needs an operator, or is
@@ -181,7 +175,6 @@ async function expireAbandonedCheckout(
 
 async function pullTransfer(
   env: Env,
-  credentials: Record<string, string>,
   repo: PaymentsRepository,
   provider: RampProviderId,
   claimed: { transfer: RampPaymentTransferRow; environment: SdpEnvironment },
@@ -191,7 +184,7 @@ async function pullTransfer(
   let outcomes: RampStatusPullOutcome[];
   try {
     outcomes = await RAMP_STATUS_PULLS[provider](
-      { env: credentials, mode: environment },
+      rampRuntimeFor(env, provider, environment),
       env,
       environment,
       {
@@ -284,7 +277,6 @@ function sweepQueues(now: number): {
 
 async function sweepProvider(
   env: Env,
-  credentials: Record<string, string>,
   repo: PaymentsRepository,
   provider: RampProviderId,
   deadline: number
@@ -322,7 +314,7 @@ async function sweepProvider(
         break;
       }
       result.polled += 1;
-      await pullTransfer(env, credentials, repo, provider, claimed, result);
+      await pullTransfer(env, repo, provider, claimed, result);
     }
   }
   if (result.polled > 0) {
@@ -347,11 +339,10 @@ export async function sweepRampTransferStatuses(
   env: Env,
   repo: PaymentsRepository = createSystemPaymentsRepository(env)
 ): Promise<RampStatusSweepResult[]> {
-  const credentials = providerEnv(env);
   const deadline = Date.now() + SWEEP_BUDGET_MS;
   // Settled, not raced: a failing provider fails the run only after the others finish.
   const settled = await Promise.allSettled(
-    RAMP_PROVIDERS.map((provider) => sweepProvider(env, credentials, repo, provider, deadline))
+    RAMP_PROVIDERS.map((provider) => sweepProvider(env, repo, provider, deadline))
   );
   const results: RampStatusSweepResult[] = [];
   for (const outcome of settled) {
