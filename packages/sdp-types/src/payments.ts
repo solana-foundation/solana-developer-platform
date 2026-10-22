@@ -14,10 +14,12 @@ import {
   type PrivateChannelTransferStatus,
 } from "./private-channels";
 import type { PersistedRampProviderId, RampProviderId } from "./provider-access";
-import type {
-  AmountVerification,
-  TokenMovementAmounts,
-  TokenMovementBasis,
+import {
+  type AmountVerification,
+  TOKEN_MOVEMENT_REFUSAL_REASONS,
+  type TokenMovementAmounts,
+  type TokenMovementBasis,
+  type TokenMovementExpectation,
 } from "./token-movements";
 import type { PaymentTransactionKind } from "./unified-transactions";
 
@@ -787,6 +789,12 @@ export const paymentSubscriptionCollectionAttemptMetadataSchema = z.discriminate
     transferId: z.string().nullable(),
     error: z.string(),
     retryAfterAt: z.string(),
+    /**
+     * Set when the pull was held before it was signed (ADR 0012): the token's
+     * terms refused it at that read (paused, a fee above the mandate's
+     * tolerance, a destination that requires memos). The period stays due.
+     */
+    holdReason: z.enum(TOKEN_MOVEMENT_REFUSAL_REASONS).optional(),
   }),
   collectionAttemptMetadataBaseSchema.extend({
     source: z.literal("linked_transfer"),
@@ -1145,6 +1153,8 @@ export interface PaymentSubscriptionPlan {
   pullerAddress: string | null;
   metadataUri: string | null;
   status: PaymentSubscriptionPlanStatus;
+  /** The plan's mandate in token units (basis `debit`); absent for a plan recorded before mandates. */
+  amounts?: TokenMovementExpectation;
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
@@ -1215,6 +1225,11 @@ export interface PaymentRecurringPayment {
   authorizationSignature: string | null;
   status: PaymentRecurringPaymentStatus;
   metadataUri: string | null;
+  /**
+   * The mandate in token units (basis `debit`): what each pull debits and the
+   * fee tolerance; absent for a payment recorded before mandates.
+   */
+  amounts?: TokenMovementExpectation;
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
@@ -1246,6 +1261,11 @@ export interface PaymentRequest {
   destinationAddress: string;
   token: string;
   amount: string;
+  /**
+   * What the payment must deliver to the destination, in token units (basis
+   * `credit`); absent for a request recorded before expectations.
+   */
+  amounts?: TokenMovementExpectation;
   reference: string;
   status: PaymentRequestStatus;
   expiresAt: string | null;
