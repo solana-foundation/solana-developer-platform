@@ -2,6 +2,7 @@ import { SDP_ENVIRONMENTS } from "@sdp/types/api-keys";
 import {
   type PaymentTransferStatus,
   PROVIDER_OBSERVABLE_RAMP_TRANSFER_STATUSES,
+  RAMP_DELIVERY_RETRYABLE_MISMATCH_REASONS,
   RAMP_TRANSFER_TRANSITIONS,
   RAMP_TRANSFER_TYPES,
   type RampTransferType,
@@ -279,6 +280,14 @@ function buildUpdateTransferWhere(input: UpdatePaymentTransferInput) {
   const clauses = ["id = ?"];
   const values: unknown[] = [input.transferId];
 
+  if (input.requireUnsigned) {
+    clauses.push(
+      "signature IS NULL",
+      "signed_transaction IS NULL",
+      "submission_started_at IS NULL"
+    );
+  }
+
   if (input.organizationId) {
     clauses.push("organization_id = ?");
     values.push(input.organizationId);
@@ -290,6 +299,9 @@ function buildUpdateTransferWhere(input: UpdatePaymentTransferInput) {
   if (input.expectedStatus !== undefined) {
     clauses.push("status = ?");
     values.push(input.expectedStatus);
+  }
+  if (input.requireUnstarted) {
+    clauses.push("submission_started_at IS NULL");
   }
   // Ramp statuses move only through RAMP_TRANSFER_TRANSITIONS.
   if (input.status !== undefined) {
@@ -338,6 +350,11 @@ export function createPostgresPaymentsRepository(
 
     const assignments = ["status = ?", "updated_at = ?", ...sql.assignments];
     const assignmentValues: unknown[] = [guard.toStatus, input.updatedAt, ...sql.assignmentValues];
+    // A ramp reaches completed only once its delivery is verified; that moment is its confirmation.
+    if (guard.toStatus === "completed") {
+      assignments.push("confirmed_at = COALESCE(confirmed_at, ?)");
+      assignmentValues.push(input.updatedAt);
+    }
     if (input.sourceAddress !== undefined) {
       assignments.push("source_address = ?");
       assignmentValues.push(input.sourceAddress);
@@ -676,6 +693,36 @@ export function createPostgresPaymentsRepository(
       );
     },
 
+    async releaseOfframpDepositClaim(input) {
+      return applyRampTransition(
+        {
+          transferId: input.transferId,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          transition: "offramp_deposit_released",
+          destinationAddress: null,
+          error: null,
+          updatedAt: input.updatedAt,
+        },
+        {
+          clauses: [
+            "signature IS NULL",
+            "serialized_tx IS NULL",
+            "signed_transaction IS NULL",
+            "last_valid_block_height IS NULL",
+            "submission_started_at IS NULL",
+            "slot IS NULL",
+            // A sale the provider failed during the claim fails with the send instead.
+            "jsonb_typeof(provider_data->'providerFailure') IS DISTINCT FROM 'object'",
+          ],
+          clauseValues: [],
+          // The released claim's key is no longer this row's: a retry under it runs again.
+          assignments: ["idempotency_key = NULL", "idempotency_fingerprint = NULL"],
+          assignmentValues: [],
+        }
+      );
+    },
+
     async markTransferSubmissionStarted(input) {
       assertScope(input);
       const scope = buildTransferScopeWhere({
@@ -729,12 +776,47 @@ export function createPostgresPaymentsRepository(
            WHERE p.environment = ? AND pt.status = 'settling'
              AND pt.type = ANY(?)
              AND jsonb_typeof(pt.provider_data->'providerSettlement') = 'object'
+             AND (
+               jsonb_typeof(pt.provider_data->'deliveryMismatch') IS DISTINCT FROM 'object'
+               OR pt.provider_data->'deliveryMismatch'->>'reason' = ANY(?)
+             )
            ORDER BY pt.finalization_last_polled_at ASC NULLS FIRST, pt.id ASC
            LIMIT ?`
         )
-        .bind(environment, [...RAMP_TRANSFER_TYPES], limit)
+        .bind(
+          environment,
+          [...RAMP_TRANSFER_TYPES],
+          [...RAMP_DELIVERY_RETRYABLE_MISMATCH_REASONS],
+          limit
+        )
         .all<PaymentTransferProjectionRow>();
       return rows.results.map(mapTransferRow);
+    },
+
+    async holdRampDeliveryMismatch({ transferId, providerSettlement, mismatch, updatedAt }) {
+      if (tenantScope) {
+        throw new TenantScopeViolationError(
+          "PaymentsRepository.holdRampDeliveryMismatch is system-only"
+        );
+      }
+      const row = await db
+        .prepare(
+          `UPDATE payment_transfers
+           SET provider_data = provider_data || jsonb_build_object('deliveryMismatch', ?::jsonb),
+               updated_at = ?
+           WHERE id = ? AND status = 'settling' AND type = ANY(?)
+             AND provider_data->'providerSettlement' = ?::jsonb
+           RETURNING id`
+        )
+        .bind(
+          JSON.stringify(mismatch),
+          updatedAt,
+          transferId,
+          [...RAMP_TRANSFER_TYPES],
+          JSON.stringify(providerSettlement)
+        )
+        .first<{ id: string }>();
+      return row !== null;
     },
 
     async markRampTransfersVerificationPolled({ transferIds, polledAt }) {

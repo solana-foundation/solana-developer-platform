@@ -63,7 +63,10 @@ export interface PaymentRecurringPaymentActivationAttemptRow {
   status: PaymentRecurringPaymentAttemptStatus;
   stage: PaymentRecurringPaymentActivationAttemptStage;
   plan_creation_signature: string | null;
+  authorization_setup_signature: string | null;
   authorization_signature: string | null;
+  /** The expiry of the step in flight's blockhash; null when no step signature is pending. */
+  last_valid_block_height: string | null;
   error: string | null;
   metadata: Record<string, unknown>;
   created_at: string;
@@ -81,6 +84,8 @@ export interface PaymentRecurringPaymentLifecycleAttemptRow {
   status: PaymentRecurringPaymentAttemptStatus;
   stage: PaymentRecurringPaymentLifecycleAttemptStage;
   signature: string | null;
+  /** The expiry of `signature`'s blockhash; null when no signature is pending. */
+  last_valid_block_height: string | null;
   error: string | null;
   metadata: Record<string, unknown>;
   created_at: string;
@@ -107,6 +112,8 @@ export interface PaymentRecurringPaymentUpdateAttemptRow {
   authorization_setup_signature: string | null;
   authorization_signature: string | null;
   old_cancel_signature: string | null;
+  /** The expiry of the step in flight's blockhash; null when no step signature is pending. */
+  last_valid_block_height: string | null;
   changed_fields: string[];
   before_values: Record<string, unknown>;
   after_values: Record<string, unknown>;
@@ -319,6 +326,8 @@ export interface UpdatePaymentRecurringPaymentUpdateAttemptInput {
   authorizationSetupSignature?: string | null;
   authorizationSignature?: string | null;
   oldCancelSignature?: string | null;
+  /** Written with the step signature it belongs to. */
+  lastValidBlockHeight?: string;
   changedFields?: string[];
   beforeValues?: Record<string, unknown>;
   afterValues?: Record<string, unknown>;
@@ -334,18 +343,15 @@ export interface UpdatePaymentRecurringPaymentUpdateAttemptInput {
   updatedAt: string;
 }
 
-/**
- * Where one subscription step's saved signature lives. Activation's authority-setup signature is a
- * key in its attempt's `metadata`, not a column.
- */
+/** Where one subscription step's saved signature lives. */
 export type RecurringPaymentStepSignatureSlot =
   | { row: "recurring_payment"; column: "plan_creation_signature" | "authorization_signature" }
   | {
       row: "activation_attempt";
       column:
         | "plan_creation_signature"
-        | "authorization_signature"
-        | "metadata.authorizationSetupSignature";
+        | "authorization_setup_signature"
+        | "authorization_signature";
     }
   | {
       row: "update_attempt";
@@ -364,7 +370,10 @@ export interface ClearPaymentRecurringPaymentStepSignatureInput {
   id: string;
   organizationId: string;
   projectId: string;
-  /** The signature the step saved; the slot is cleared only while it still holds it. */
+  /**
+   * The signature the step saved; the slot, and an attempt row's block height, are cleared only
+   * while it still holds it.
+   */
   signature: string;
   updatedAt: string;
 }
@@ -412,7 +421,10 @@ export interface UpdatePaymentRecurringPaymentActivationAttemptInput {
   status?: PaymentRecurringPaymentAttemptStatus;
   stage?: PaymentRecurringPaymentActivationAttemptStage;
   planCreationSignature?: string | null;
+  authorizationSetupSignature?: string;
   authorizationSignature?: string | null;
+  /** Written with the step signature it belongs to. */
+  lastValidBlockHeight?: string;
   error?: string | null;
   metadata?: Record<string, unknown>;
   /**
@@ -447,6 +459,8 @@ export interface UpdatePaymentRecurringPaymentLifecycleAttemptInput {
   status?: PaymentRecurringPaymentAttemptStatus;
   stage?: PaymentRecurringPaymentLifecycleAttemptStage;
   signature?: string | null;
+  /** Written with the signature it belongs to. */
+  lastValidBlockHeight?: string;
   error?: string | null;
   metadata?: Record<string, unknown>;
   /**

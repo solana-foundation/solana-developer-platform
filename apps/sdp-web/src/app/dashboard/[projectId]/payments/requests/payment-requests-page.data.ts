@@ -22,7 +22,6 @@ const paymentRequestDetailResponseSchema = z.object({
     id: z.string(),
     organizationId: z.string(),
     projectId: z.string().nullable(),
-    counterpartyId: z.string().nullable(),
     walletId: z.string(),
     destinationAddress: z.string(),
     token: z.string(),
@@ -172,25 +171,17 @@ const TOKEN_SYMBOL_BY_MINT: ReadonlyMap<string, string> = new Map(
 );
 
 /**
- * Whether a request matches a search: its amount, token, payer's name, destination or
- * reference contains the needle, ignoring case.
+ * Whether a request matches a search: its amount, token, destination or reference contains the
+ * needle, ignoring case.
  *
  * @param request - The request.
  * @param needle - The search, already trimmed.
- * @param counterpartyNames - Contact display names by id.
  * @returns `true` when any of those fields contains the needle.
  */
-export function paymentRequestMatchesSearch(
-  request: PaymentRequest,
-  needle: string,
-  counterpartyNames: ReadonlyMap<string, string>
-): boolean {
+export function paymentRequestMatchesSearch(request: PaymentRequest, needle: string): boolean {
   return [
     request.amount,
     TOKEN_SYMBOL_BY_MINT.get(request.token) ?? request.token,
-    request.counterpartyId
-      ? counterpartyNames.get(request.counterpartyId) || request.counterpartyId
-      : "",
     request.destinationAddress,
     request.reference,
   ]

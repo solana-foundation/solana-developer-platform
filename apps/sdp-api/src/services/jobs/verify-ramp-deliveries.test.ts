@@ -79,7 +79,7 @@ async function seedTransfer(input: {
 async function row(id: string) {
   return getDb(env)
     .prepare(
-      "SELECT status, amount, fiat_amount, source_address, destination_address, provider_data FROM payment_transfers WHERE id = ?"
+      "SELECT status, amount, fiat_amount, source_address, destination_address, block_time, confirmed_at, provider_data FROM payment_transfers WHERE id = ?"
     )
     .bind(id)
     .first<{
@@ -88,6 +88,8 @@ async function row(id: string) {
       fiat_amount: string | null;
       source_address: string | null;
       destination_address: string | null;
+      block_time: string | null;
+      confirmed_at: string | null;
       provider_data: Record<string, unknown>;
     }>();
 }
@@ -106,6 +108,7 @@ function landedToken(amount: string, owner = "quoted-destination", mint = MINT):
   return {
     slot: 42n,
     blockTime: LANDED_AFTER_TRANSFER,
+    accountKeys: ["fee-payer"],
     executionResultKnown: true,
     err: null,
     preTokenBalances: [],
@@ -157,6 +160,8 @@ describe("verifyRampDeliveries", () => {
       fiat_amount: "10",
       source_address: null,
       destination_address: "quoted-destination",
+      block_time: "2026-10-19T00:05:00.000Z",
+      confirmed_at: expect.any(String),
       provider_data: {
         verifiedDelivery: {
           signature: SIG_1,
@@ -167,6 +172,45 @@ describe("verifyRampDeliveries", () => {
         },
       },
     });
+  });
+
+  it("audits the provider's settlement and the chain-verified completion", async () => {
+    await seedTransfer({ id: "xfr_audited", reference: "moonpay_audited" });
+    await applyRampSettlementEvent(env, "sandbox", {
+      provider: "moonpay",
+      kind: "settled",
+      reference: "moonpay_audited",
+      onchain: { signature: SIG_1, destinationAddress: "quoted-destination", amount: "0.5" },
+      receivedAmount: "0.5",
+    });
+    getTransactionMock.mockResolvedValue(landedToken("500000"));
+
+    await sweep();
+
+    const { results } = await getDb(env)
+      .prepare(
+        `SELECT action, metadata FROM audit_logs
+          WHERE resource_id = ? ORDER BY ledger_sequence`
+      )
+      .bind("xfr_audited")
+      .all<{ action: string; metadata: string }>();
+    expect(
+      results.map((entry) => ({ action: entry.action, ...JSON.parse(entry.metadata) }))
+    ).toEqual([
+      expect.objectContaining({
+        action: "settle",
+        source: "provider",
+        status: "settling",
+        receivedAmount: "0.5",
+      }),
+      expect.objectContaining({
+        action: "settle",
+        source: "chain",
+        status: "completed",
+        signature: SIG_1,
+        deliveredAmount: "0.5",
+      }),
+    ]);
   });
 
   it("keeps a quoted amount and records the actual chain delivery separately", async () => {
@@ -434,8 +478,9 @@ describe("verifyRampDeliveries", () => {
       amount: "1",
       fiat_amount: "10",
       destination_address: "quoted-deposit",
+      confirmed_at: expect.any(String),
     });
-    expect((await row("xfr_off_pending"))?.status).toBe("settling");
+    expect(await row("xfr_off_pending")).toMatchObject({ status: "settling", confirmed_at: null });
   });
 
   it("never completes a provider-reported deposit without SDP submission evidence", async () => {
@@ -492,5 +537,161 @@ describe("verifyRampDeliveries", () => {
     await sweep();
     expect((await row("xfr_retry_delivery"))?.status).toBe("completed");
     expect(getTransactionMock).toHaveBeenCalledTimes(2);
+  });
+
+  describe("delivery the chain contradicts", () => {
+    async function settleUsdc(id: string, receivedAmount: string) {
+      await seedTransfer({ id, reference: `moonpay_${id}` });
+      await applyRampSettlementEvent(env, "sandbox", {
+        provider: "moonpay",
+        kind: "settled",
+        reference: `moonpay_${id}`,
+        providerObservedAt: "2026-10-19T00:06:00.000Z",
+        onchain: { signature: SIG_1, destinationAddress: "quoted-destination" },
+        receivedAmount,
+      });
+    }
+
+    it("holds an underpaid delivery once and stops re-reading its transaction", async () => {
+      await settleUsdc("xfr_underpaid", "20");
+      getTransactionMock.mockResolvedValue(landedToken("500000"));
+
+      await sweep();
+      await sweep();
+
+      expect(getTransactionMock).toHaveBeenCalledTimes(1);
+      expect(await row("xfr_underpaid")).toMatchObject({
+        status: "settling",
+        confirmed_at: null,
+        provider_data: {
+          deliveryMismatch: {
+            reason: "amount_mismatch",
+            reportedAmount: "20",
+            observedAmount: "0.5",
+            checkedAt: expect.any(String),
+          },
+        },
+      });
+    });
+
+    it("releases the hold when the provider reports again", async () => {
+      await settleUsdc("xfr_rereported", "20");
+      getTransactionMock.mockResolvedValue(landedToken("500000"));
+      await sweep();
+
+      await applyRampSettlementEvent(env, "sandbox", {
+        provider: "moonpay",
+        kind: "settled",
+        reference: "moonpay_xfr_rereported",
+        providerObservedAt: "2026-10-19T00:07:00.000Z",
+        onchain: { signature: SIG_1, destinationAddress: "quoted-destination" },
+        receivedAmount: "0.5",
+      });
+      expect((await row("xfr_rereported"))?.provider_data.deliveryMismatch).toBeNull();
+      await sweep();
+
+      expect(getTransactionMock).toHaveBeenCalledTimes(2);
+      expect((await row("xfr_rereported"))?.status).toBe("completed");
+    });
+
+    it("holds a delivery that moved nothing to the quoted wallet", async () => {
+      await settleUsdc("xfr_elsewhere", "0.5");
+      getTransactionMock.mockResolvedValue(landedToken("500000", "someone-else"));
+
+      await sweep();
+
+      expect((await row("xfr_elsewhere"))?.provider_data.deliveryMismatch).toMatchObject({
+        reason: "not_delivered",
+      });
+    });
+
+    it("holds a reported signature still missing an hour after the report", async () => {
+      await settleUsdc("xfr_never_landed", "0.5");
+      getTransactionMock.mockResolvedValue(null);
+      await sweep();
+      expect((await row("xfr_never_landed"))?.provider_data).not.toHaveProperty(
+        "deliveryMismatch.reason"
+      );
+
+      await getDb(env)
+        .prepare("UPDATE payment_transfers SET updated_at = ? WHERE id = ?")
+        .bind(new Date(Date.now() - 61 * 60 * 1000).toISOString(), "xfr_never_landed")
+        .run();
+      await sweep();
+
+      expect((await row("xfr_never_landed"))?.provider_data.deliveryMismatch).toMatchObject({
+        reason: "transaction_not_found",
+        reportedAmount: "0.5",
+      });
+    });
+
+    it("keeps checking a missing transaction and completes once it lands", async () => {
+      await settleUsdc("xfr_late_rpc", "0.5");
+      await getDb(env)
+        .prepare("UPDATE payment_transfers SET updated_at = ? WHERE id = ?")
+        .bind(new Date(Date.now() - 61 * 60 * 1000).toISOString(), "xfr_late_rpc")
+        .run();
+      const updatedAt = async () =>
+        (
+          await getDb(env)
+            .prepare("SELECT updated_at FROM payment_transfers WHERE id = ?")
+            .bind("xfr_late_rpc")
+            .first<{ updated_at: string }>()
+        )?.updated_at;
+      getTransactionMock.mockResolvedValue(null);
+      await sweep();
+      expect((await row("xfr_late_rpc"))?.provider_data.deliveryMismatch).toMatchObject({
+        reason: "transaction_not_found",
+      });
+      const heldAt = await updatedAt();
+
+      // A second miss writes nothing new; the RPC catching up completes the buy.
+      await sweep();
+      expect(await updatedAt()).toBe(heldAt);
+      getTransactionMock.mockResolvedValue(landedToken("500000"));
+      await sweep();
+
+      expect(await row("xfr_late_rpc")).toMatchObject({
+        status: "completed",
+        provider_data: { deliveryMismatch: null },
+      });
+      expect(getTransactionMock).toHaveBeenCalledTimes(3);
+    });
+
+    it("holds an off-ramp whose SDP deposit failed onchain", async () => {
+      await seedTransfer({
+        id: "xfr_failed_deposit",
+        reference: "moonpay_failed_deposit",
+        type: "offramp",
+        signature: SIG_1,
+        signed: true,
+      });
+      await applyRampSettlementEvent(env, "sandbox", {
+        provider: "moonpay",
+        kind: "settled",
+        reference: "moonpay_failed_deposit",
+        onchain: { signature: SIG_1, destinationAddress: "quoted-deposit", amount: "1" },
+        receivedAmount: "9.5",
+      });
+      getSignatureStatusesMock.mockResolvedValue([
+        {
+          slot: 50n,
+          confirmations: null,
+          confirmationStatus: "finalized",
+          err: { InstructionError: [0, { Custom: 1 }] },
+        },
+      ]);
+
+      await sweep();
+      await sweep();
+
+      expect(getSignatureStatusesMock).toHaveBeenCalledTimes(1);
+      expect(await row("xfr_failed_deposit")).toMatchObject({
+        status: "settling",
+        provider_data: {
+          deliveryMismatch: { reason: "transaction_failed", reportedAmount: "1" },
+        },
+      });
+    });
   });
 });

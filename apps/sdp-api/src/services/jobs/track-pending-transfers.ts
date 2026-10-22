@@ -117,12 +117,14 @@ async function updateTerminalTransfer(
     }
     await createSystemPaymentTransferBatchesRepository(env).settleTransferBatch({
       transferId: transfer.id,
+      requireUnsigned: input.requireUnsigned,
       organizationId: transfer.organization_id,
       projectId: transfer.project_id,
       transferStatus: input.status,
       error: input.status === "failed" ? input.error : null,
       slot: input.slot === undefined ? null : input.slot,
       updatedAt: input.updatedAt,
+      requireUnstarted: input.requireUnstarted,
     });
     return;
   }
@@ -149,6 +151,9 @@ async function applyOnChainVerdict(
         status: "failed",
         error: "Transaction not found on chain",
         updatedAt: nowIso,
+        // With signed bytes, absence is definitive only while broadcast has
+        // not started. Recheck that proof in SQL, not just on the selected row.
+        requireUnstarted: transfer.signed_transaction !== null ? true : undefined,
       });
       return true;
     }
@@ -409,6 +414,7 @@ async function recoverStuckProcessingTransfers(
         transferId: transfer.id,
         status: "failed",
         error: "Transfer processing timed out",
+        requireUnsigned: true,
         updatedAt: nowIso,
       });
     } catch (err) {

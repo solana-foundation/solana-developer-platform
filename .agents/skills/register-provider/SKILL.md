@@ -38,11 +38,11 @@ export class <Id>RampClient implements RampProvider {
 }
 ```
 
-`RampProvider` currently requires both estimates, rail discovery/distillation, counterparty validation, and an off-ramp method. An unsupported direction must use empty declared/discovered support plus a typed unsupported requirement or payments error; it must not pretend to work. `createOnrampQuote` is optional. `fetchTransferStatus` is optional on the contract but required in practice: the status sweep's `RAMP_STATUS_PULLS` table fails typecheck without it. It makes one request per lookup and returns the events the provider's webhook would carry, oldest first, through the package status mapping the webhook parser also calls; an empty answer must mean the provider holds no transaction, never that SDP could not ask.
+`RampProvider`'s members are function-typed, so an implementation is checked strictly. Every provider has an `id`, a `label` (its name in SDP's messages), declared rail support, `checkCredentials`, rail discovery/distillation, counterparty validation and `fetchTransferStatus`. A direction the provider runs has both of its members (`estimateOnramp` + `createOnrampQuote`, `estimateOfframp` + `createOfframpQuote`); a direction it doesn't run has neither, plus empty declared/discovered support and a typed unsupported requirement. `supportsRampDirection` and `rampClientFor` read member presence, and the contract suite fails a provider with half a direction. `cancelOfframpSale` is optional. `fetchTransferStatus` makes one request per lookup and returns the events the provider's webhook would carry, oldest first, through the package status mapping the webhook parser also calls; an empty answer must mean the provider holds no transaction, never that SDP could not ask.
 
-Use one mode-aware config reader over the passed `env`. Provider code performs HTTP only and imports neither `AppContext` nor database modules. Use `providerFetchJson` for provider requests, with a zod schema of exactly the response fields the adapter reads (a mismatch fails closed as `PROVIDER_RESPONSE_INVALID`, 502), and payments-package errors such as `providerNotConfigured`, `providerUnavailable`, and `estimateNotAvailable`. An error's message and `details` are returned to callers, so they carry only SDP's own wording; the provider's message, codes and field errors go in its `diagnostics` (ADR 0008), which the API logs and never returns. Add `providers/<id>/test-kit.ts` (recorded exchanges per direction, `transferStatus` lookups including the provider's answer for a transfer it holds nothing for, the mode-credential check, one malformed reply) and register it in `KITS` in `packages/sdp-payments/src/ramps/contract.test.ts`; typecheck fails until you do, and the suite pins one request per status lookup.
+Every call gets a `RampRuntimeContext` of `{ mode, cluster, credentials }` (the account's `publicKey` and `secretKey`); the API resolves it, so provider code never sees the process env. Read the keys with `rampCredentials(this, ctx)` from `#/ramps/shared`: it runs `checkCredentials` first, so a key from the other mode never makes a request. When the provider's keys name their mode, `checkCredentials` is `checkRampKeyFormats(this.label, <ID>_KEY_FORMATS, credentials, mode)` over a `RampKeyFormats` table. Hosts follow `ctx.mode` inside the adapter. Provider code performs HTTP only and imports neither `AppContext` nor database modules. Use `providerFetchJson` for provider requests, with a zod schema of exactly the response fields the adapter reads (a mismatch fails closed as `PROVIDER_RESPONSE_INVALID`, 502), and payments-package errors such as `providerNotConfigured`, `providerUnavailable`, and `estimateNotAvailable`. An error's message and `details` are returned to callers, so they carry only SDP's own wording; the provider's message, codes and field errors go in its `diagnostics` (ADR 0008), which the API logs and never returns. Add `providers/<id>/test-kit.ts` (test-mode `credentials` and `liveCredentials`, recorded exchanges per direction, `transferStatus` lookups including the provider's answer for a transfer it holds nothing for, the credential checks on requests and quotes, one malformed reply) and register it in `KITS` in `packages/sdp-payments/src/ramps/contract.test.ts`; typecheck fails until you do, and the suite pins one request per status lookup and refuses each mode's calls on the other mode's keys.
 
-If API-side handlers import provider-specific public helpers or types through package subpaths, add explicit exports in `packages/sdp-payments/package.json`.
+Register the client in `RAMP_PROVIDER_CLIENTS` and its status-pull event type in `RampProviderSettlementEvents` (`packages/sdp-payments/src/ramps/index.ts`). Callers reach it only through the contract. Outside the package, only the provider's webhook processor imports its modules, and only its status mapping (export it as `./ramps/providers/<id>/<x>-status-mapping`); `packages/sdp-payments/src/ramps/boundaries.test.ts` enforces it.
 
 ## 3. Wire API admission and orchestration
 
@@ -50,24 +50,15 @@ Update every applicable site:
 
 | Site | Decision |
 |---|---|
-| `apps/sdp-api/src/services/provider-availability.service.ts` | label plus prod/sandbox credential completeness; `testMode === undefined` means either configured mode |
+| `apps/sdp-api/src/services/ramps/runtime.ts` | add the env vars of SDP's managed sandbox keys to `MANAGED_RAMP_KEYS`, in the order a missing-key refusal names them; every runtime, availability check and discovery run resolves keys here |
+| `apps/sdp-api/src/services/provider-availability.service.ts` | `managedRampDefinition("<id>", [...])`, listing any key it needs beyond its account keys (Stripe: its webhook secret) |
 | `apps/sdp-api/src/services/provider-setup-registry.ts` | add `rampSetup("<id>")`; ramps are deployment-managed today |
 | `apps/sdp-api/src/routes/counterparties/schemas.ts` | add the provider-specific submit-requirements schema arm; add the id only to the directions actually supported |
-| `apps/sdp-api/src/routes/payments/ramps/{onramp,offramp}/handlers.ts` + `ramps/shared.ts` | add quote branches per direction and `advanceCounterpartyRequirements` branches in `shared.ts` for every provider; unsupported directions reject explicitly; keep DB work here or in `ramps/providers/<id>.ts` |
+| `apps/sdp-api/src/routes/payments/ramps/{onramp,offramp}/handlers.ts` + `ramps/shared.ts` | add the quote case per direction, calling `rampClientFor("<id>", direction)` with `rampRuntime(c, "<id>")`, and `advanceCounterpartyRequirements` branches in `shared.ts`; unsupported directions reject explicitly; keep DB work here or in `ramps/providers/<id>.ts` |
 | `apps/sdp-api/src/services/ramps/webhooks/registry.ts` | register the provider's `WebhookProcessor`; the registry covers every provider id, so typecheck fails until you do |
 | `apps/sdp-api/src/services/jobs/sweep-ramp-transfer-statuses.ts` | add the provider to `RAMP_STATUS_PULLS` (its client paired with its processor) and `RAMP_ABANDONMENT_HORIZON_MS` (how long a quiet checkout stays open per direction: a product call, recorded with its reason) |
 
-Availability is tri-state by environment:
-
-```ts
-isConfigured: (env, testMode) => {
-  const prod = hasAllEnv(env, ["<PROVIDER>_KEY", "<PROVIDER>_SECRET"]);
-  const sandbox = hasAllEnv(env, ["<PROVIDER>_SANDBOX_KEY", "<PROVIDER>_SANDBOX_SECRET"]);
-  if (testMode === true) return sandbox;
-  if (testMode === false) return prod;
-  return prod || sandbox;
-},
-```
+SDP holds sandbox keys only: production is never managed, so a production project answers `PROVIDER_NOT_CONFIGURED` until it brings its own account (HOO-1942, HOO-1943).
 
 Do not add obsolete `executeOnramp` / `executeOfframp` branches; those methods are not part of the current provider contract.
 
@@ -99,7 +90,7 @@ Add every runtime key to all environment-contract projections that consume API k
 3. `scripts/secret-keys.mjs` `API_LOCAL_ENV_KEYS`
 4. `apps/sdp-api/.env.local.example` with commented placeholders and no real credentials
 
-If the provider has distinct webhook keys, API base URL overrides, account ids, or sandbox-only settings, include those exact keys too. A missing required key must produce `PROVIDER_NOT_CONFIGURED` (503).
+If the provider has distinct webhook keys, account ids, or sandbox-only settings, include those exact keys too. Hosts are not env keys: they follow `ctx.mode` inside the adapter. A missing required key must produce `PROVIDER_NOT_CONFIGURED` (503).
 
 ## 6. Surface the provider in the dashboard
 

@@ -30,10 +30,14 @@ const runDev = async () => {
     shell: false,
   });
 
-  const next = spawn("pnpm", ["exec", "next", "dev", "--port", "3001"], {
-    stdio: "inherit",
-    shell: false,
-  });
+  const next = spawn(
+    "pnpm",
+    ["exec", "next", "dev", "--port", process.env.SDP_DOCS_PORT ?? "3001"],
+    {
+      stdio: "inherit",
+      shell: false,
+    }
+  );
 
   const shutdown = () => {
     sourceWatcher.kill("SIGTERM");

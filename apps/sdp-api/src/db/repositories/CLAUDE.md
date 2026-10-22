@@ -132,12 +132,16 @@ status change, with its source statuses, target and ramp types (HOO-2033).
   observation revives.
 - **Every ramp status write goes through it** (HOO-2087): settlement, cancel,
   MoonPay quote fill and failure, MoonPay failed-buy recovery, and the off-ramp
-  deposit claim and outcome, plus chain-verified delivery and the status
-  sweep's abandoned-checkout expiry (`checkout_abandoned`).
+  deposit claim, outcome and release, plus chain-verified delivery and the
+  status sweep's abandoned-checkout expiry (`checkout_abandoned`).
   `updateTransfer` with a `status` matches no ramp row. The deposit claim adds
   its deposit-instruction preconditions to the same compare-and-swap inside
   the repository, and a landed deposit moves to `settling`, never `confirmed`
-  (`OFFRAMP_DEPOSIT_OUTCOME_TRANSITIONS`). The inventory is in
+  (`OFFRAMP_DEPOSIT_OUTCOME_TRANSITIONS`). A deposit that fails before SDP
+  records signed bytes is released (`offramp_deposit_released`, back to
+  `awaiting_payment`) only while the row holds no signed bytes, signature or
+  submission start, and the release clears the claim's idempotency key. The
+  inventory is in
   `../../services/payments/ramp-transfer-transitions.test.ts`; it counts
   guarded writes per file, so a new call fails it even in a listed file.
 - **Add a transition to the table, not a source set to a call site.** Mirror
@@ -147,6 +151,22 @@ status change, with its source statuses, target and ramp types (HOO-2033).
   provider observation and row signature in the same guarded write. Quoted
   values stay fixed; provider amounts and addresses live in `provider_data`.
   Every new provider follows `docs/contributing/ramp-provider-safety.md`.
+- **A delivery the chain contradicts is held, not retried.** When a finalized
+  transaction (or the provider's own report) disproves the settlement, the
+  verifier writes `provider_data.deliveryMismatch` once, guarded on the
+  settlement it judged, and the row leaves `listRampTransfersToVerify`. The
+  next provider event clears it (`deliveryMismatch: null`). A finalized
+  transaction never changes, so re-reading it each minute only spends RPC.
+  A transaction the RPC can't find is only missing evidence
+  (`RAMP_DELIVERY_RETRYABLE_MISMATCH_REASONS`): it is held for review but
+  stays in the queue, and the delivery that later lands clears the hold.
+- **Audited steps commit with their audit row.** A quote, a cancel, a settled,
+  failed or expired event and a verified delivery write through
+  `auditedRampWrite` (`AuditService.logWithin`) or, without a request,
+  `withRampSettlementTransaction` and `auditedRampWriteSystem`
+  (`logSystemWithin`); a ledger failure rolls the transition back. The ledger
+  cannot join an open transaction (a transactional client refuses its session
+  lock), so it owns the transaction: MoonPay's observation runs inside it.
 
 ## Ramps: status pull queue
 
@@ -183,7 +203,9 @@ for review; sandbox discards them.
 A failed MoonPay sale with no claimed deposit moves to `failed` and withdraws
 `cryptoDeposit` in the same guarded transition, but retains its reference and
 returns `refused` for review. A sale whose deposit was already claimed stays
-open for reconciliation and refuses the failure without regressing its state.
+`processing` for reconciliation, but holds the failure in
+`provider_data.providerFailure` and withdraws `cryptoDeposit` (audited), so a
+send that then fails before signing fails the sale instead of releasing it.
 If the failed event reports a deposit hash, the row moves to `settling`, holds
 the reported hash in `provider_data` and its reference, leaves any SDP-signed
 deposit signature untouched, and withdraws the instruction for review.

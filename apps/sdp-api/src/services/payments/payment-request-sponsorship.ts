@@ -15,6 +15,7 @@ import {
   createTransactionMessage,
   getBase64Decoder,
   getBase64Encoder,
+  getCompiledTransactionMessageDecoder,
   getSignatureFromTransaction,
   getTransactionDecoder,
   getTransactionEncoder,
@@ -53,6 +54,15 @@ const sponsoredPaymentTransactionSchema = z.discriminatedUnion("kind", [
 
 export type SponsoredPaymentTransaction = z.infer<typeof sponsoredPaymentTransactionSchema>;
 
+/** Saved claims retain their original sponsor even after the configured signer rotates. */
+function assertSavedPayerIsNotSponsor(payer: Address, unsignedBase64: string): void {
+  const transaction = getTransactionDecoder().decode(getBase64Encoder().encode(unsignedBase64));
+  const message = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
+  if (payer === message.staticAccounts[0]) {
+    throw badRequest("Payment payer cannot be the fee sponsor");
+  }
+}
+
 /**
  * Issue the fee-sponsored transaction a payer signs to settle a payment request. One sponsored
  * transaction per blockhash window, claimed on the request row. Everyone who scans while a claim
@@ -70,7 +80,7 @@ export type SponsoredPaymentTransaction = z.infer<typeof sponsoredPaymentTransac
  * @returns The partially signed transaction, or the hold another payer's live claim places.
  * @throws AppError `RATE_LIMITED` when the claim is lost with no live claim to serve, or a
  *   concurrent claim superseded this one.
- * @throws AppError `BAD_REQUEST` when a SOL request's amount is not positive.
+ * @throws AppError `BAD_REQUEST` when the payer is the sponsor or a SOL amount is not positive.
  */
 export async function issuePaymentRequestTransaction(
   c: Context<{ Bindings: Env }>,
@@ -97,6 +107,9 @@ export async function issuePaymentRequestTransaction(
       );
       return { kind: "held", retryAfterSeconds: Math.max(retryAfterSeconds, 1) };
     }
+    // Check the saved fee payer, including across sponsor rotations, before
+    // signing an old claim or replaying bytes signed before this admission rule.
+    assertSavedPayerIsNotSponsor(payer, claim.unsignedTransaction);
     if (claim.signedTransaction !== null) {
       return { kind: "signed", transaction: claim.signedTransaction };
     }
@@ -154,6 +167,7 @@ export async function issuePaymentRequestTransaction(
         superseding.account === payer &&
         superseding.signedTransaction !== null
       ) {
+        assertSavedPayerIsNotSponsor(payer, superseding.unsignedTransaction);
         return { kind: "signed", transaction: superseding.signedTransaction };
       }
       throw rateLimited("This payment request's sponsored transaction was superseded; retry");
@@ -167,10 +181,11 @@ export async function issuePaymentRequestTransaction(
   }
 
   const feePayment = await getFeePayment();
-  const [feePayer, { blockhash, lastValidBlockHeight }] = await Promise.all([
-    feePayment.getFeePayer(),
-    getRecentBlockhash(rpc, "confirmed"),
-  ]);
+  const feePayer = await feePayment.getFeePayer();
+  if (payer === feePayer) {
+    throw badRequest("Payment payer cannot be the fee sponsor");
+  }
+  const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
   const unsignedBase64 = await buildPaymentTransaction(rpc, {
     ...params,
     feePayer,

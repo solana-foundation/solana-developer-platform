@@ -100,7 +100,6 @@ describe("payment request public tokens", () => {
     ).createPaymentRequest({
       organizationId: ORGANIZATION_ID,
       projectId: PROJECT_ID,
-      counterpartyId: null,
       custodyWalletId: "cwlt_request_token",
       walletId: "wlt_request_token",
       destinationAddress: WALLET_ADDRESS,

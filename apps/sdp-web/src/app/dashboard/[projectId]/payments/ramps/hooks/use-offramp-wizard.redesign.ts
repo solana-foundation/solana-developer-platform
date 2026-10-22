@@ -18,12 +18,13 @@ import {
   fetchTransferById,
 } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import { submitOfframpDeposit } from "@/app/dashboard/[projectId]/payments/ramps/offramp-deposit";
-import { getRampTransferState } from "@/app/dashboard/[projectId]/payments/ramps/ramp-transfer-state";
+import { rampTransferPollInterval } from "@/app/dashboard/[projectId]/payments/ramps/ramp-phase";
 import {
   sourceWalletSchema,
   withdrawAmountSchema,
   withdrawSelectionSchema,
 } from "@/app/dashboard/[projectId]/payments/ramps/schema";
+import { exceedsWalletBalance } from "@/app/dashboard/[projectId]/payments/ramps/wallet-options";
 import {
   memoSummaryDetails,
   optionalDetail,
@@ -89,6 +90,7 @@ export function useOfframpWizard(props: UseRampWizardProps) {
     trigger: triggerCreateTransfer,
     data: onchainSendResult,
     isMutating: onchainSendLoading,
+    error: onchainSendError,
     reset: resetCreateTransfer,
   } = useSWRMutation(
     paymentsQueryKeys.createTransfer(),
@@ -139,10 +141,11 @@ export function useOfframpWizard(props: UseRampWizardProps) {
     transferStatusKey,
     ([, transferId]): Promise<PaymentTransferSummary> => fetchTransferById({ transferId }, t),
     {
-      refreshInterval: (transfer) =>
-        transfer && getRampTransferState(transfer.status).terminal ? 0 : 3000,
-      revalidateOnFocus: true,
-      dedupingInterval: 0,
+      // A fresh function each render re-arms SWR's timer with the latest transfer.
+      refreshInterval: (transfer) => rampTransferPollInterval(transfer),
+      // The interval keeps it current; a focus read on top only doubles the calls.
+      revalidateOnFocus: false,
+      dedupingInterval: 2_000,
     }
   );
 
@@ -224,8 +227,16 @@ export function useOfframpWizard(props: UseRampWizardProps) {
     );
   };
 
+  // The amount hint turns red over the balance; the step must not continue past it either.
+  const overBalance = exceedsWalletBalance(
+    wizard.selectedWallet,
+    offrampCryptoToken,
+    wizard.fields.amount
+  );
+
   return {
     ...wizard,
+    canProceed: wizard.canProceed && !(wizard.currentStepId === "WITHDRAW" && overBalance),
     sourceWalletHint:
       signingUnavailable && !onchainSendResult ? t("DashboardPayments.signingUnavailable") : null,
     summaryDetails,
@@ -237,6 +248,7 @@ export function useOfframpWizard(props: UseRampWizardProps) {
     canSendOnchain,
     onchainSendLoading,
     onchainSendResult: onchainSendResult ?? null,
+    onchainSendError: onchainSendError instanceof Error ? onchainSendError.message : null,
     sendCryptoToDeposit,
   };
 }

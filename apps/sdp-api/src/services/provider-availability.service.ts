@@ -1,5 +1,4 @@
-import { hasMoonpayManagedKeys } from "@sdp/payments/ramps/providers/moonpay/client";
-import { hasStripeManagedKeys } from "@sdp/payments/ramps/providers/stripe/client";
+import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import {
   CUSTODY_MODES,
@@ -47,6 +46,7 @@ import {
 } from "@/lib/feature-flags";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
 import { logEvent } from "@/runtime/money-path-events";
+import { resolveManagedRampCredentials } from "@/services/ramps/runtime";
 import type { Env } from "@/types/env";
 
 type OrganizationProviderRow = {
@@ -94,6 +94,27 @@ function hasEnv(env: Env, key: keyof Env): boolean {
 
 function hasAllEnv(env: Env, keys: readonly (keyof Env)[]): boolean {
   return keys.every((key) => hasEnv(env, key));
+}
+
+/**
+ * A ramp provider on SDP's managed keys: configured exactly when every call to
+ * it could run, so availability never disagrees with the call. Production is
+ * never managed.
+ *
+ * @param provider - The ramp provider.
+ * @param alsoRequired - Env keys it needs beyond its account keys.
+ * @returns Its availability definition.
+ */
+function managedRampDefinition(
+  provider: RampProviderId,
+  alsoRequired: readonly (keyof Env)[]
+): ProviderAvailabilityDefinition {
+  return {
+    label: RAMP_PROVIDER_CLIENTS[provider].label,
+    isConfigured: (env, testMode) =>
+      resolveManagedRampCredentials(env, provider, testMode === false ? "production" : "sandbox")
+        .ok && hasAllEnv(env, alsoRequired),
+  };
 }
 
 /**
@@ -239,21 +260,8 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
     },
   },
   ramps: {
-    moonpay: {
-      label: "MoonPay",
-      // The client's own key check, so a live key under the sandbox names
-      // reads as unconfigured here too. Production is never managed.
-      isConfigured: (env, testMode) =>
-        hasMoonpayManagedKeys(env, testMode === false ? "production" : "sandbox"),
-    },
-    stripe: {
-      label: "Stripe",
-      // The client's own key check, so a live key under the sandbox names
-      // reads as unconfigured here too. Production is never managed.
-      isConfigured: (env, testMode) =>
-        hasStripeManagedKeys(env, testMode === false ? "production" : "sandbox") &&
-        hasEnv(env, "STRIPE_SANDBOX_WEBHOOK_SECRET"),
-    },
+    moonpay: managedRampDefinition("moonpay", []),
+    stripe: managedRampDefinition("stripe", ["STRIPE_SANDBOX_WEBHOOK_SECRET"]),
   },
   earn: {
     // Keyless like Kamino, though for a cluster reason rather than Kamino's

@@ -1,13 +1,32 @@
+import type { RampDirection } from "@sdp/types/payments";
 import type { RampProviderId } from "@sdp/types/provider-access";
-import { providerNotConfigured } from "#/errors";
+import { badRequest, providerNotConfigured } from "#/errors";
 import { MoonpayRampClient } from "./providers/moonpay/client";
+import type { MoonpaySettlementEvent } from "./providers/moonpay/event-status-mapping";
 import { StripeRampClient } from "./providers/stripe/client";
-import type { RampProvider } from "./types";
+import {
+  type RampDirectionMembers,
+  type RampProvider,
+  type RampSettlementEvent,
+  supportsRampDirection,
+} from "./types";
 
-export const RAMP_PROVIDER_CLIENTS = {
+/** The events each provider's status pull answers, as its webhook processor reads them. */
+interface RampProviderSettlementEvents {
+  moonpay: MoonpaySettlementEvent;
+  stripe: RampSettlementEvent;
+}
+
+/**
+ * The one instance of each provider, typed as the contract: callers reach a
+ * provider only through `RampProvider` members.
+ */
+export const RAMP_PROVIDER_CLIENTS: {
+  readonly [Provider in RampProviderId]: RampProvider<RampProviderSettlementEvents[Provider]>;
+} = {
   moonpay: new MoonpayRampClient(),
   stripe: new StripeRampClient(),
-} as const satisfies Record<RampProviderId, RampProvider>;
+};
 
 export function isRampProviderId(value: string): value is RampProviderId {
   // Object.hasOwn, not `in`: provider ids come from open TEXT columns, and a
@@ -27,4 +46,19 @@ export function resolveRampProviderClient(provider: string): RampProvider {
     });
   }
   return RAMP_PROVIDER_CLIENTS[provider];
+}
+
+/**
+ * `provider`'s client, narrowed to the members `direction` needs. BAD_REQUEST
+ * when it does not run that direction.
+ */
+export function rampClientFor<Direction extends RampDirection>(
+  provider: RampProviderId,
+  direction: Direction
+): RampProvider & RampDirectionMembers[Direction] {
+  const client: RampProvider = RAMP_PROVIDER_CLIENTS[provider];
+  if (!supportsRampDirection(client, direction)) {
+    throw badRequest(`${provider} does not support ${direction}.`, { provider });
+  }
+  return client;
 }

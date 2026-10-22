@@ -5,6 +5,7 @@ import { app } from "@/index";
 import * as moneyAdmission from "@/lib/money-admission";
 import { errorResponseSchema } from "@/openapi/schemas/base";
 import { env } from "@/test/helpers/env";
+import { stubOfframpQuoteReads } from "@/test/helpers/offramp-quote";
 import {
   installPaymentsRouteTestHooks,
   seedCachedKey,
@@ -111,6 +112,7 @@ describe("Payments routes: ramp quote money admission (HOO-2029)", () => {
       });
       const admission = vi.spyOn(moneyAdmission, "assertMoneyStartAdmitted");
       onTestFinished(() => admission.mockRestore());
+      stubOfframpQuoteReads();
 
       const response = await requestMoonPayQuote(direction, counterpartyId);
 

@@ -1,19 +1,15 @@
 "use client";
 
-import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
-import { Button } from "@sdp/ui/button";
-import { SendIcon } from "lucide-react";
-import Link from "next/link";
 import { WizardSummaryList } from "@/app/dashboard/[projectId]/payments/wizard-summary-list";
 import { useTranslations } from "@/i18n/provider";
 import { openExternalRampUrl } from "@/lib/trusted-ramp-destinations";
-import { useProjectHref } from "@/lib/use-dashboard-project";
-import { InstructionActionButton } from "./components/instruction-action-button";
+import { OfframpFooterActionButton } from "./components/offramp-final-step";
 import { OfframpStepContent } from "./components/offramp-step-content.redesign";
 import { ProviderSummaryTrigger } from "./components/provider-summary-trigger";
 import { RampStatusInline } from "./components/ramp-status-panel";
 import { RampWizardShell } from "./components/ramp-wizard-shell.redesign";
 import { type OfframpWizard, useOfframpWizard } from "./hooks/use-offramp-wizard.redesign";
+import { offrampFooterAction } from "./offramp-footer-action";
 import type { RailProps } from "./ramp-action-page.redesign";
 import { getRampTransferState } from "./ramp-transfer-state";
 import { preStepSummaryDetails } from "./wizard-summary";
@@ -80,64 +76,6 @@ function showOfframpInlineStatus(wizard: OfframpWizard, hosted: boolean): boolea
   return hosted || wizard.depositTarget !== null;
 }
 
-type OfframpFooterAction =
-  | { kind: "transaction" }
-  | { kind: "send"; depositTarget: NonNullable<OfframpWizard["depositTarget"]> };
-
-/** The one action the final step offers, in precedence order. */
-function offrampFooterAction(wizard: OfframpWizard): OfframpFooterAction | null {
-  const transfer = wizard.transferStatus;
-  if (transfer !== undefined && getRampTransferState(transfer.status).terminal) {
-    return { kind: "transaction" };
-  }
-  return wizard.depositTarget === null
-    ? null
-    : { kind: "send", depositTarget: wizard.depositTarget };
-}
-
-function OfframpFooterActionButton({
-  action,
-  wizard,
-}: {
-  action: OfframpFooterAction;
-  wizard: OfframpWizard;
-}) {
-  const t = useTranslations();
-  const projectHref = useProjectHref();
-  switch (action.kind) {
-    case "transaction":
-      return (
-        <Button asChild type="button">
-          <Link
-            href={projectHref(`/dashboard/payments/counterparty/${wizard.fields.counterpartyId}`)}
-          >
-            {t("DashboardPayments.goToTransaction")}
-          </Link>
-        </Button>
-      );
-    case "send":
-      return (
-        <InstructionActionButton
-          variant="default"
-          size="default"
-          action={{
-            loading: wizard.onchainSendLoading,
-            succeeded: wizard.onchainSendResult !== null,
-            disabled: !wizard.canSendOnchain,
-            onClick: () => void wizard.sendCryptoToDeposit(),
-            icon: <SendIcon />,
-            idleLabel: t("DashboardPayments.ramps.sendCrypto", {
-              amount: action.depositTarget.amount,
-              token: getCryptoRailAssetLabel(wizard.selectedRampPair.assetRail),
-            }),
-            busyLabel: t("DashboardPayments.ramps.sending"),
-            doneLabel: t("DashboardPayments.ramps.transferSubmitted"),
-          }}
-        />
-      );
-  }
-}
-
 /**
  * Where the provider's own onboarding has got to, as the footer reads it: a
  * verification the person still has to open, or a wait on the provider. Only
@@ -174,8 +112,9 @@ export function OfframpRail({
 
   const transferState =
     wizard.transferStatus === undefined ? null : getRampTransferState(wizard.transferStatus.status);
-  const liveTransferState = wizard.onTransactionStage ? transferState : null;
-  const cancelable = liveTransferState?.cancelable === true;
+  // Before the first status read the sale may still be open, so leaving it confirms first.
+  const cancelable =
+    wizard.onTransactionStage && (transferState === null || transferState.cancelable);
   const hosted = wizard.onTransactionStage && wizard.quote?.deliveryMode === "hosted";
   const footerAction = offrampFooterAction(wizard);
   const { verificationUrl, verificationPending } = offrampOnboardingState(wizard);
@@ -210,10 +149,16 @@ export function OfframpRail({
           <RampStatusInline direction="offramp" hosted={hosted} transfer={wizard.transferStatus} />
         ) : undefined
       }
-      secondaryLabel={cancelable ? t("DashboardPayments.counterparty.cancel") : undefined}
-      confirmSecondary={cancelable}
+      // On the transaction stage the footer's Cancel payout (confirmed) is the way out, as on
+      // the on-ramp; there is no step to go back to.
+      onCancel={cancelable ? wizard.handleSecondary : undefined}
+      cancelLabel={
+        wizard.onTransactionStage ? t("DashboardPayments.ramps.cancelPayout") : undefined
+      }
+      confirmCancel={cancelable}
+      cancelDisabled={wizard.isCanceling}
       secondaryDisabled={wizard.isCanceling || wizard.hostedQuoteLoading || wizard.quoteInFlight}
-      hideSecondary={liveTransferState !== null && !liveTransferState.cancelable}
+      hideSecondary={wizard.onTransactionStage}
       footerActions={
         footerAction === null ? undefined : (
           <OfframpFooterActionButton action={footerAction} wizard={wizard} />

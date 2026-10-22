@@ -184,8 +184,11 @@ stop_pid_file() {
   local pid
   pid="$(cat "${pid_file}")"
   # A pid file can outlive its process (reboot, hard-closed terminal), so only
-  # signal a pid that is still one of ours.
-  if [ -n "${pid}" ] && [[ "$(ps -o command= -p "${pid}" 2>/dev/null)" == *surfpool* ]]; then
+  # signal a pid that is still one of ours: one of the harness scripts, or the CLI fork.
+  # The embedded fork leads its own process group, so the match stays exact.
+  local command_line
+  command_line="$(ps -o command= -p "${pid}" 2>/dev/null || true)"
+  if [ -n "${pid}" ] && [[ "${command_line}" == *scripts/kora-surfpool-*.mjs* || "${command_line}" == *"surfpool start "* ]]; then
     kill -- -"${pid}" >/dev/null 2>&1 || kill "${pid}" >/dev/null 2>&1 || true
   fi
   rm -f "${pid_file}"
@@ -198,10 +201,19 @@ start_embedded_surfpool() {
     if [ -n "${old_pid}" ] && kill -0 "${old_pid}" >/dev/null 2>&1; then
       if [ -f "${SURFPOOL_INFO_FILE}" ]; then
         SURFPOOL_RPC_URL="$(json_file_field "${SURFPOOL_INFO_FILE}" rpcUrl)"
-        if embedded_surfpool_config_matches "${SURFPOOL_INFO_FILE}" && json_rpc_ok "${SURFPOOL_RPC_URL}"; then
-          export SURFPOOL_RPC_URL
-          echo "Embedded Surfpool RPC is already healthy at ${SURFPOOL_RPC_URL}."
-          return 0
+        if json_rpc_ok "${SURFPOOL_RPC_URL}"; then
+          if embedded_surfpool_config_matches "${SURFPOOL_INFO_FILE}"; then
+            export SURFPOOL_RPC_URL
+            echo "Embedded Surfpool RPC is already healthy at ${SURFPOOL_RPC_URL}."
+            return 0
+          fi
+          # A shared fork (scripts/kora-local) has callers that already hold its address, so a
+          # different upstream must not restart it out from under them.
+          if [ "${KORA_SURFPOOL_SHARED:-}" = "1" ]; then
+            export SURFPOOL_RPC_URL
+            echo "Reusing the shared Surfpool fork at ${SURFPOOL_RPC_URL}, which forks a different upstream RPC; run \`pnpm kora:local:down\` to restart it on this one." >&2
+            return 0
+          fi
         fi
       fi
       stop_pid_file "${SURFPOOL_PID_FILE}"
@@ -210,12 +222,16 @@ start_embedded_surfpool() {
 
   echo "Starting embedded Surfpool RPC."
   rm -f "${SURFPOOL_INFO_FILE}"
+  # Its own process group, so Ctrl-C in the terminal that started it leaves the fork to
+  # whoever else shares it; down.sh stops the whole group through the pid file.
+  set -m
   (
     cd "${ROOT_DIR}/packages/sdp-api-integration"
     export SURFPOOL_INFO_FILE
     exec node scripts/kora-surfpool-surfnet.mjs
   ) >"${SURFPOOL_LOG}" 2>&1 &
   echo "$!" >"${SURFPOOL_PID_FILE}"
+  set +m
   wait_for_surfpool_info "${KORA_SURFPOOL_STARTUP_TIMEOUT_SECONDS}"
 }
 
@@ -307,6 +323,16 @@ require_command curl
 require_command node
 require_command pnpm
 
+KORA_PORT="$(url_port "${KORA_SURFPOOL_KORA_URL}")"
+
+# `pnpm dev`'s mainnet Kora (scripts/kora-local/up.sh, compose project kora-mainnet) holds this
+# port until `pnpm kora:local:down`; a standalone run refuses before it starts its own fork.
+if [ "${KORA_SURFPOOL_SHARED:-}" != "1" ] && command -v docker >/dev/null 2>&1 &&
+  [[ "$(docker port kora-mainnet-kora-1 8080/tcp 2>/dev/null || true)" == *:"${KORA_PORT}" ]]; then
+  echo "The mainnet Kora from \`pnpm dev\` already holds 127.0.0.1:${KORA_PORT}; run \`pnpm kora:local:down\` first." >&2
+  exit 1
+fi
+
 case "${KORA_SURFPOOL_RUNTIME}" in
   embedded)
     configure_embedded_remote_rpc
@@ -340,7 +366,6 @@ if [ -z "${SIGNER_PRIVATE_KEY:-}" ]; then
 fi
 
 KORA_DOCKER_RPC_URL="${KORA_DOCKER_RPC_URL:-http://host.docker.internal:$(url_port "${SURFPOOL_RPC_URL}")}"
-KORA_PORT="$(url_port "${KORA_SURFPOOL_KORA_URL}")"
 
 umask 077
 cat >"${ENV_FILE}" <<EOF
@@ -390,6 +415,8 @@ NODE
       if [ -n "${gateway_ip}" ]; then
         echo "Forwarding Surfpool RPC on ${gateway_ip}:${surfpool_port} for the Kora container."
         stop_pid_file "${KORA_RPC_PROXY_PID_FILE}"
+        # Its own process group, like the fork it forwards to, so Ctrl-C leaves both up.
+        set -m
         (
           cd "${ROOT_DIR}/packages/sdp-api-integration"
           export KORA_RPC_PROXY_LISTEN_HOST="${gateway_ip}"
@@ -398,6 +425,7 @@ NODE
           exec node scripts/kora-surfpool-rpc-proxy.mjs
         ) >"${KORA_RPC_PROXY_LOG}" 2>&1 &
         echo "$!" >"${KORA_RPC_PROXY_PID_FILE}"
+        set +m
       fi
     fi
     echo "Starting local Kora with upstream RPC ${KORA_DOCKER_RPC_URL}."
@@ -412,9 +440,11 @@ wait_for_kora 90
 
 FEE_PAYER="$(node - "${KORA_SURFPOOL_KORA_URL}" <<'NODE'
 const url = process.argv[2];
+const headers = { "Content-Type": "application/json" };
+if (process.env.KORA_API_KEY) headers["x-api-key"] = process.env.KORA_API_KEY;
 const response = await fetch(url, {
   method: "POST",
-  headers: { "Content-Type": "application/json" },
+  headers,
   body: JSON.stringify({
     jsonrpc: "2.0",
     id: 1,

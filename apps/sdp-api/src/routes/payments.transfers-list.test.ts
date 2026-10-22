@@ -160,6 +160,7 @@ describe("Payments routes — list transfers", () => {
             lamports: 2_000_000,
           }),
         ],
+        innerInstructions: [],
         preTokenBalances: [],
         postTokenBalances: [],
       })
@@ -487,6 +488,7 @@ describe("Payments routes — list transfers", () => {
               tokenAmount: { amount: "10000000", decimals: 6, uiAmountString: "10" },
             }),
           ],
+          innerInstructions: [],
           preTokenBalances: [
             usdcBalance(1, TEST_SOLANA_ADDRESSES.wallet2, "10000000"),
             usdcBalance(2, TEST_SOLANA_ADDRESSES.wallet1, "0"),
@@ -553,6 +555,7 @@ describe("Payments routes — list transfers", () => {
               tokenAmount: { amount: "25000000", decimals: 6, uiAmountString: "25" },
             }),
           ],
+          innerInstructions: [],
           preTokenBalances: [
             customBalance(1, TEST_SOLANA_ADDRESSES.wallet2, "25000000"),
             customBalance(2, TEST_SOLANA_ADDRESSES.wallet1, "0"),
@@ -621,6 +624,7 @@ describe("Payments routes — list transfers", () => {
               amount: "500000000",
             }),
           ],
+          innerInstructions: [],
           preTokenBalances: [],
           postTokenBalances: [
             parsedTokenBalance({

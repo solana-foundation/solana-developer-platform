@@ -103,8 +103,12 @@ async function fetchPriceChunk(
  * USD prices for the mints Jupiter can price. Mints it cannot are absent from the result
  * rather than present with a zero, so a caller can tell "worth nothing" from "unknown".
  *
- * A price is reused for 30 seconds per cluster and mint. A mint left unpriced, by
- * Jupiter or by a failed batch, is asked about again on the next call.
+ * Jupiter quotes mainnet markets only, so off mainnet every mint is unpriced: a devnet
+ * mint has no market, and one sharing a mainnet address (native SOL) would borrow a
+ * price it does not trade at.
+ *
+ * A price is reused for 30 seconds per mint. A mint left unpriced, by Jupiter or by a
+ * failed batch, is asked about again on the next call.
  *
  * Never throws. Pricing decorates a balance response; a pricing outage should render
  * balances unpriced, not fail the request that carries them.
@@ -113,9 +117,13 @@ export async function fetchJupiterUsdPrices(
   env: Env,
   mints: string[]
 ): Promise<Map<string, number>> {
+  const { cluster } = currentClusterScope();
+  if (cluster !== "mainnet-beta") {
+    return new Map();
+  }
   const { url, apiKey } = resolveJupiterPriceConfig(env);
 
-  return priceCache.lookup(currentClusterScope().cluster, mints, async (missingMints) => {
+  return priceCache.lookup(cluster, mints, async (missingMints) => {
     const prices = new Map<string, number>();
     // Chunks are independent, so one failing batch must not discard the others.
     const results = await Promise.allSettled(

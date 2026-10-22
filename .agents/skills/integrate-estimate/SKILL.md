@@ -12,11 +12,11 @@ Choose the closest implementation in `packages/sdp-payments/src/ramps/providers/
 
 ## Contract
 
-Both methods are required on `RampProvider` (`packages/sdp-payments/src/ramps/types.ts`), even when one direction is unsupported:
+Each direction the provider runs has its estimate member on `RampProvider` (`packages/sdp-payments/src/ramps/types.ts`); a direction it doesn't run has none:
 
 ```ts
-estimateOnramp(ctx: RampRuntimeContext, input: RampEstimateOnrampInput): Promise<PaymentRampEstimate>
-estimateOfframp(ctx: RampRuntimeContext, input: RampEstimateOfframpInput): Promise<PaymentRampEstimate>
+estimateOnramp: (ctx: RampRuntimeContext, input: RampEstimateOnrampInput) => Promise<PaymentRampEstimate>;
+estimateOfframp: (ctx: RampRuntimeContext, input: RampEstimateOfframpInput) => Promise<PaymentRampEstimate>;
 ```
 
 Inputs (`packages/sdp-payments/src/ramps/types.ts`):
@@ -29,6 +29,7 @@ Output `PaymentRampEstimate` (`@sdp/types`, `packages/sdp-types/src/payments.ts`
 {
   provider; direction: "onramp" | "offramp";
   fiatCurrency; assetRail; fiatAmount; cryptoAmount; exchangeRate;  // all strings
+  totalFiatAmount?;  // on-ramp: what the customer pays in all, fees included
   fees: { currency; total; network?; provider? };
   minFiatAmount?; maxFiatAmount?; expiresAt?;
 }
@@ -36,7 +37,7 @@ Output `PaymentRampEstimate` (`@sdp/types`, `packages/sdp-types/src/payments.ts`
 
 ## How to build it
 
-`ctx` is `{ env, mode }` — read your config with the mode-keyed reader from `register-provider`, then HTTP only. Convert the asset rail with `getCryptoRailAssetLabel` from `@sdp/types/payment-rails`; convert minor units with `parseDecimalAmount` / `formatDecimalAmount` from `@sdp/solana/amount`.
+`ctx` is `{ mode, cluster, credentials }`: read the keys with `rampCredentials(this, ctx)`, then HTTP only. Convert the asset rail with `getCryptoRailAssetLabel` from `@sdp/types/payment-rails`; convert minor units with `parseDecimalAmount` / `formatDecimalAmount` from `@sdp/solana/amount`.
 
 A common shape: GET the corridor's exchange rate once to learn decimals, again with the amount to get the quote, then map into `PaymentRampEstimate`.
 
@@ -65,6 +66,7 @@ Estimate sourcing differs per upstream: corridor exchange-rate GETs (once for de
 Shared rules live in `integrate-ramp-provider`. Hot here:
 
 - No fallbacks — non-positive/empty rate throws; never substitute a default amount or rate.
+- Price on the hosted widget's terms: the same payment method and fee treatment the widget charges (MoonPay's widget spends the amount with fees taken out, by card, so its buy quote passes `areFeesIncluded=true` and `paymentMethod`). Otherwise the review promises a total and crypto amount the widget won't honor.
 - HTTP only; no DB, no counterparty lookups in estimate.
 - Strong typing — status/type maps are `as const satisfies Record<…>`; no `any`.
 - Verify with `pnpm --filter @sdp/payments typecheck`, `lint`, and `test`, plus focused API fan-out tests when orchestration changes. Unit-test provider mapping with mocked fetch and cover unsupported directions and missing credentials.

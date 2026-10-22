@@ -100,6 +100,7 @@ function offrampWizard(overrides: Partial<OfframpWizard>): OfframpWizard {
     handlePrimary: asyncNoop,
     handleSecondary: noop,
     finish: noop,
+    startOver: noop,
     handlePairChange: noop,
     handleCounterpartyCreated: noop,
     summaryDetails: [],
@@ -111,6 +112,7 @@ function offrampWizard(overrides: Partial<OfframpWizard>): OfframpWizard {
     canSendOnchain: true,
     onchainSendLoading: false,
     onchainSendResult: null,
+    onchainSendError: null,
     sendCryptoToDeposit: asyncNoop,
     ...overrides,
   };

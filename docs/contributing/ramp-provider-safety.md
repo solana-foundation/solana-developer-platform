@@ -51,9 +51,14 @@ contract; this document defines the money movement acceptance gate.
   payout status and destination with provider records; park discrepancies for
   operator review. Chain finality proves the crypto deposit, not a bank credit.
 - Keep unknown, mismatched, failed, or unavailable chain evidence in
-  `settling` for retry and operator review. Do not treat a missing signature,
-  RPC timeout, provider timeout, or generic error as proof that no money moved.
-  Never release a once-only claim unless the provider definitely rejected it.
+  `settling` for retry and operator review. Retry what is unknown or
+  unavailable; hold a finalized contradiction (`deliveryMismatch`) until the
+  provider reports again, rather than re-reading it. Do not treat a missing
+  signature, RPC timeout, provider timeout, or generic error as proof that no
+  money moved. Never release a once-only claim unless the provider definitely
+  rejected it, or SDP holds no signed bytes for it (an off-ramp deposit that
+  failed before signing returns to `awaiting_payment`, unless the provider
+  failed the sale during the claim: then it fails).
 - Recover missed webhooks by pulling. `fetchTransferStatus` makes one request
   per transfer, maps the answer through the same package mapping as the
   webhook parser, and returns no events only when the provider holds no

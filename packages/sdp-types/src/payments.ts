@@ -315,6 +315,14 @@ export const RAMP_TRANSFER_TRANSITIONS = {
     to: "failed",
     types: ["offramp"],
   },
+  // A sale failed while its deposit is claimed: the claim stays open, since the
+  // deposit may still land, but holds the failure so releasing the claim after
+  // a failed send can't reopen the sale.
+  moonpay_sell_failed_while_claimed: {
+    from: ["processing"],
+    to: "processing",
+    types: ["offramp"],
+  },
   // Not from `settling`: a stale redelivered expiry must not undo a transfer
   // another event already revived.
   provider_expired: {
@@ -363,6 +371,13 @@ export const RAMP_TRANSFER_TRANSITIONS = {
   offramp_deposit_failed: {
     from: ["processing"],
     to: "failed",
+    types: ["offramp"],
+  },
+  // A deposit that failed before SDP recorded any signed bytes moved nothing,
+  // so the sale goes back to awaiting its deposit.
+  offramp_deposit_released: {
+    from: ["processing"],
+    to: "awaiting_payment",
     types: ["offramp"],
   },
 } as const satisfies Record<string, RampTransferTransition>;
@@ -454,6 +469,56 @@ export interface RampCryptoDeposit {
   amount: string;
 }
 
+/** What an off-ramp's provider reports paying out once it settles the sale. SDP cannot verify a bank payout. */
+export interface RampFiatPayout {
+  /** Fiat paid out, in display units. Differs from the quoted `fiatAmount` when the provider re-prices. */
+  amount: string;
+  /** ISO currency of `amount`, as the provider reports it. */
+  currency: string;
+  /** When the provider reported the payout. */
+  reportedAt?: string;
+}
+
+/** Why SDP holds a provider-settled ramp instead of completing it. */
+export const RAMP_DELIVERY_MISMATCH_REASONS = [
+  /** The provider's report contradicts SDP's record of the ramp (its wallet, deposit or amount). */
+  "provider_report_mismatch",
+  /** The delivery transaction failed onchain. */
+  "transaction_failed",
+  /** The transaction landed before SDP created the transfer, so it delivered something else. */
+  "predates_transfer",
+  /** The transaction moved none of the quoted asset to the quoted wallet. */
+  "not_delivered",
+  /** It delivered a different amount than the provider reported, or less than quoted. */
+  "amount_mismatch",
+  /** No finalized transaction carries the reported signature an hour after the report. */
+  "transaction_not_found",
+] as const;
+export type RampDeliveryMismatchReason = (typeof RAMP_DELIVERY_MISMATCH_REASONS)[number];
+
+/**
+ * Holds that record only missing evidence (the RPC found no transaction). The
+ * verifier keeps checking, and a later read that finds the delivery completes
+ * the transfer and clears the hold.
+ */
+export const RAMP_DELIVERY_RETRYABLE_MISMATCH_REASONS = [
+  "transaction_not_found",
+] as const satisfies readonly RampDeliveryMismatchReason[];
+
+/**
+ * A provider-settled ramp the chain contradicts. SDP holds it in `settling`
+ * for review instead of completing it, until the provider reports again.
+ */
+export interface RampDeliveryMismatch {
+  reason: RampDeliveryMismatchReason;
+  /** When SDP's delivery check reached this verdict. */
+  checkedAt: string;
+  /** What the provider reported delivering, in display units, when it said. */
+  reportedAmount?: string;
+  /** What the chain shows the quoted wallet received, in display units. */
+  observedAmount?: string;
+}
+
 export interface PaymentTransferSummary {
   id: string;
   custodyWalletId: string | null;
@@ -479,6 +544,10 @@ export interface PaymentTransferSummary {
   fiatAmount?: string;
   settlement?: RampTransferSettlement;
   cryptoDeposit?: RampCryptoDeposit;
+  fiatPayout?: RampFiatPayout;
+  deliveryMismatch?: RampDeliveryMismatch;
+  /** When SDP confirmed the transfer; a ramp is confirmed once its delivery is verified onchain. */
+  confirmedAt?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -855,6 +924,51 @@ export const RECURRING_PAYMENT_ATTEMPT_STATUSES_ANSWERING_IDEMPOTENCY_KEY = [
   "processing",
   "confirmed",
 ] as const satisfies readonly PaymentRecurringPaymentAttemptStatus[];
+/**
+ * A revoke of a wallet's per-mint Subscriptions authority (HOO-2210): the
+ * revoke-subscription-authorities cron's row (migration 0153).
+ */
+export const SUBSCRIPTION_AUTHORITY_REVOCATION_STATUSES = [
+  "processing",
+  "confirmed",
+  "failed",
+] as const;
+export type SubscriptionAuthorityRevocationStatus =
+  (typeof SUBSCRIPTION_AUTHORITY_REVOCATION_STATUSES)[number];
+/** A revoke in these holds the wallet: activation, update and resume wait for it. */
+export const SUBSCRIPTION_AUTHORITY_REVOCATION_HOLDING_STATUSES = [
+  "processing",
+] as const satisfies readonly SubscriptionAuthorityRevocationStatus[];
+/**
+ * A recurring payment in these no longer needs its authority once its last
+ * billing period is over; every other status does, or may again.
+ */
+export const RECURRING_PAYMENT_STATUSES_RELEASING_AUTHORITY = [
+  "canceled",
+  "expired",
+] as const satisfies readonly PaymentRecurringPaymentStatus[];
+/** A subscription in these no longer needs its authority once its last billing period is over. */
+export const PAYMENT_SUBSCRIPTION_STATUSES_RELEASING_AUTHORITY = [
+  "canceled",
+  "expired",
+] as const satisfies readonly PaymentSubscriptionStatus[];
+/**
+ * A subscription in these was recorded before its authorization was sent. It stops holding its
+ * authority once nothing can still authorize it: no live recurring payment names it and no update
+ * in flight is creating it (a failed attempt has proven its authorization never landed).
+ */
+export const PAYMENT_SUBSCRIPTION_STATUSES_AWAITING_AUTHORIZATION = [
+  "pending_authorization",
+] as const satisfies readonly PaymentSubscriptionStatus[];
+/**
+ * A recurring payment in these may be about to use its wallet's authority before it records the
+ * authority on its row, so nothing on that wallet is revoked meanwhile.
+ */
+export const RECURRING_PAYMENT_STATUSES_CLAIMING_AUTHORITY = [
+  "activating",
+  "updating",
+  "resuming",
+] as const satisfies readonly PaymentRecurringPaymentStatus[];
 export function isInFlightRecurringPaymentAttemptStatus(
   status: PaymentRecurringPaymentAttemptStatus
 ): boolean {
@@ -1091,7 +1205,6 @@ export interface PaymentRequest {
   id: string;
   organizationId: string;
   projectId: string | null;
-  counterpartyId: string | null;
   walletId: string;
   destinationAddress: string;
   token: string;
@@ -1317,9 +1430,13 @@ export interface PaymentRampEstimate {
   direction: RampDirection;
   fiatCurrency: RampFiatCurrency;
   assetRail: CryptoRailId;
+  /** On-ramp: the fiat that buys the crypto, the provider's fees apart. Off-ramp: the payout. */
   fiatAmount: string;
   cryptoAmount: string;
+  /** What one unit of the crypto costs in the fiat, in both directions. */
   exchangeRate: string;
+  /** On-ramp only: what the customer pays in all, `fiatAmount` plus the provider's fees. */
+  totalFiatAmount?: string;
   fees: PaymentRampEstimateFees;
   minFiatAmount?: string;
   maxFiatAmount?: string;
@@ -1357,11 +1474,31 @@ export interface RampProviderEstimateRefusal {
   reason: StagedProviderRefusalReason;
 }
 
+/** Why a provider refuses an amount for a pair. */
+export const RAMP_AMOUNT_LIMIT_REASONS = ["amount_below_minimum", "amount_above_maximum"] as const;
+export type RampAmountLimitReason = (typeof RAMP_AMOUNT_LIMIT_REASONS)[number];
+
+/** The bound an amount crossed, in the currency the amount was given in. */
+export interface RampAmountLimit {
+  amount: string;
+  currency: string;
+}
+
+/** The provider takes no such amount for this pair: a refusal with its bound, not a fault. */
+export interface RampProviderEstimateOutOfRange {
+  provider: RampProviderId;
+  status: "error";
+  error: string;
+  reason: RampAmountLimitReason;
+  limit: RampAmountLimit;
+}
+
 export type RampProviderEstimateResult =
   | RampProviderEstimateSuccess
   | RampProviderEstimateUnsupported
   | RampProviderEstimateFailure
-  | RampProviderEstimateRefusal;
+  | RampProviderEstimateRefusal
+  | RampProviderEstimateOutOfRange;
 
 export interface PaymentRampEstimateEnvelope {
   data?: {

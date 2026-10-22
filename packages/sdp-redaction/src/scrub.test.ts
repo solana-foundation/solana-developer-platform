@@ -16,6 +16,23 @@ import {
 } from "./test/fixtures";
 
 describe("scrubTelemetry", () => {
+  it("redacts pay-link bearer tokens in paths, URLs and errors while retaining route context", () => {
+    const token = "synthetic-pay-link-credential";
+    const result = scrubTelemetry({
+      path: `/pay/${token}`,
+      url: new URL(`https://api.example.com/pay/${token}/tx`),
+      error: new Error(`GET /pay/${token}/missing returned 404`),
+      resourcePath: "/v1/payments/requests/preq_1",
+    });
+
+    assert.equal(result.path, "/pay/[REDACTED]");
+    assert.equal(result.url, "https://api.example.com/pay/[REDACTED]/tx");
+    assert.equal(result.error.message, "GET /pay/[REDACTED]/missing returned 404");
+    assert.ok(!result.error.stack?.includes(token));
+    assert.equal(result.resourcePath, "/v1/payments/requests/preq_1");
+    assert.ok(!JSON.stringify(result).includes(token));
+  });
+
   it("removes every identifying field from the representative payload", () => {
     assertScrubbed(JSON.stringify(scrubTelemetry(COUNTERPARTY_PAYLOAD)));
   });

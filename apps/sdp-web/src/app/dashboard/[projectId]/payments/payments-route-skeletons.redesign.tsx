@@ -1,3 +1,4 @@
+import { cn } from "@sdp/ui/cn";
 import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 import { TableCell } from "@sdp/ui/table";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
@@ -26,6 +27,8 @@ interface ListSkeletonColumn {
   id: string;
   headerClassName?: string;
   cellSkeletonClassName: string;
+  /** The settled list drops the column below md, so the skeleton does too. */
+  fromMd?: true;
 }
 
 type ListSkeletonVariant =
@@ -40,9 +43,9 @@ const LIST_SKELETON_COLUMNS: Record<ListSkeletonVariant, readonly ListSkeletonCo
     { id: "status", cellSkeletonClassName: "h-4 w-20" },
     { id: "type", cellSkeletonClassName: "h-4 w-24" },
     { id: "amount", headerClassName: "text-right", cellSkeletonClassName: "ml-auto h-4 w-24" },
-    { id: "contact", cellSkeletonClassName: "h-4 w-28" },
-    { id: "wallet", cellSkeletonClassName: "h-4 w-24" },
-    { id: "created", cellSkeletonClassName: "h-4 w-24" },
+    { id: "contact", cellSkeletonClassName: "h-4 w-28", fromMd: true },
+    { id: "wallet", cellSkeletonClassName: "h-4 w-24", fromMd: true },
+    { id: "created", cellSkeletonClassName: "h-4 w-24", fromMd: true },
   ],
   "counterparty-directory": [
     { id: "name", cellSkeletonClassName: "h-4 w-32" },
@@ -95,13 +98,18 @@ function ListTableSkeleton({ variant }: { variant: ListSkeletonVariant }) {
       data-loading-table
       data-loading-table-variant={variant}
     >
-      <Table className="min-w-[760px] rounded-none border-0">
+      <Table
+        className={cn(
+          "rounded-none border-0",
+          columns.some((column) => column.fromMd) ? "md:min-w-[47.5rem]" : "min-w-[47.5rem]"
+        )}
+      >
         <TableHeader>
           <TableRow>
             {columns.map((column) => (
               <TableHead
                 key={column.id}
-                className={column.headerClassName}
+                className={cn(column.headerClassName, column.fromMd && "hidden md:table-cell")}
                 data-loading-column={column.id}
               >
                 {column.id === "actions" ? null : (
@@ -119,7 +127,7 @@ function ListTableSkeleton({ variant }: { variant: ListSkeletonVariant }) {
           {TABLE_ROW_IDS.map((rowId) => (
             <TableRow key={`${variant}-${rowId}`} data-loading-table-row>
               {columns.map((column) => (
-                <TableCell key={column.id}>
+                <TableCell key={column.id} className={cn(column.fromMd && "hidden md:table-cell")}>
                   <SkeletonBlock className={`${column.cellSkeletonClassName} max-w-full`} />
                 </TableCell>
               ))}
@@ -207,19 +215,6 @@ function FlowPageSkeleton({
   );
 }
 
-function DetailRowsSkeleton({ count = 8 }: { count?: number }) {
-  return (
-    <div className="divide-y divide-border-default" data-loading-detail-rows>
-      {DETAIL_ROW_IDS.slice(0, count).map((id, index) => (
-        <div key={id} className="flex min-h-12 items-center justify-between gap-6 py-3">
-          <SkeletonBlock className="h-4 w-24 shrink-0" />
-          <SkeletonBlock className={index % 3 === 0 ? "h-5 w-24 rounded-full" : "h-4 w-40"} />
-        </div>
-      ))}
-    </div>
-  );
-}
-
 export function PaymentRequestsPageSkeleton() {
   return <ListPageSkeleton layout="payment-requests" />;
 }
@@ -243,24 +238,53 @@ export function PaymentsPayPageSkeleton() {
   );
 }
 
-/** Deposit opens on its address tab: the wallet's address and QR card, then its terms. */
+/**
+ * The address tab while its wallets load, cut to the settled panel: the address card (the code
+ * on top on a phone, on the right from sm) and its three 40px fact rows. The route skeleton and
+ * the panel's own loading pass both draw it, so Deposit settles without a jump.
+ */
+export function DepositAddressSkeleton() {
+  return (
+    <div data-loading-deposit-address aria-busy="true">
+      <div className="flex flex-col gap-4 rounded-card border border-border-default bg-fill-subtle p-4 sm:flex-row sm:items-stretch">
+        <SkeletonBlock className="size-44 shrink-0 self-center rounded-control sm:order-last sm:size-32 sm:self-auto" />
+        <div className="flex min-w-0 flex-1 flex-col gap-4 sm:justify-between">
+          <div className="flex min-w-0 flex-col gap-1.5">
+            <SkeletonBlock className="h-6 w-40 max-w-full" />
+            <div className="flex flex-col gap-1">
+              <SkeletonBlock className="h-6 w-full" />
+              <SkeletonBlock className="h-4 w-2/3 sm:hidden" />
+            </div>
+          </div>
+          <SkeletonBlock className="h-11 w-full rounded-control sm:hidden" />
+          <SkeletonBlock className="h-4 w-64 max-w-full" />
+        </div>
+      </div>
+      <div className="mt-6 divide-y divide-border-subtle">
+        {DETAIL_ROW_IDS.slice(0, 3).map((id) => (
+          <div key={id} className="flex items-center justify-between gap-4 py-2.5">
+            <SkeletonBlock className="h-5 w-20" />
+            <SkeletonBlock className="h-5 w-32" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Deposit opens on its address tab, in the column the tab lays out itself: the shell's gutter,
+ * 36px under the tabs (32px on a phone) and the flow's width.
+ */
 export function PaymentsDepositPageSkeleton() {
   return (
     <div
-      className="mx-auto w-full max-w-flow space-y-10 pt-2"
+      className="h-full min-h-0 overflow-y-auto px-4 pt-8 pb-16 md:px-6 md:pt-9"
       data-loading-layout="payments-deposit"
-      data-loading-deposit-address
-      aria-busy="true"
     >
-      <div className="flex flex-col gap-6 rounded-card border border-border-default bg-fill-subtle p-6 sm:flex-row sm:items-start">
-        <div className="min-w-0 flex-1 space-y-4">
-          <SkeletonBlock className="h-5 w-40 max-w-full" />
-          <SkeletonBlock className="h-5 w-full" />
-          <SkeletonBlock className="h-4 w-64 max-w-full" />
-        </div>
-        <SkeletonBlock className="size-28 shrink-0 rounded-control" />
+      <div className="mx-auto w-full max-w-flow">
+        <DepositAddressSkeleton />
       </div>
-      <DetailRowsSkeleton count={3} />
     </div>
   );
 }

@@ -39,8 +39,11 @@ export interface Env extends ManagedRpcEnv {
   K_SERVICE?: string;
   K_REVISION?: string;
   CLOUD_RUN_JOB?: string;
-  // Trust the first X-Forwarded-For address outside Cloud Run only when a
-  // deployment-owned proxy replaces caller-supplied forwarding headers.
+  // Explicit proxy-trust assertion; never inferred from K_SERVICE (APE-810).
+  // "gclb": ingress is restricted to the Google external load balancer, which
+  // appends the verified client address. "true": a deployment-owned proxy
+  // replaces caller-supplied forwarding headers. Unset: forwarded headers are
+  // caller-controlled and no client IP resolves.
   TRUST_PROXY_HEADERS?: string;
 
   // Public-facing origin of this API (e.g. "https://api.example.com"). The
@@ -272,8 +275,6 @@ export interface Env extends ManagedRpcEnv {
 
   // MoonPay ramps configuration
   // MoonPay sandbox only: production projects bring their own MoonPay account.
-  MOONPAY_ONRAMP_URL?: string;
-  MOONPAY_OFFRAMP_URL?: string;
   MOONPAY_SANDBOX_API_KEY?: string;
   MOONPAY_SANDBOX_SECRET_KEY?: string;
   MOONPAY_SANDBOX_WEBHOOK_KEY?: string;

@@ -4,6 +4,7 @@ import { Button } from "@sdp/ui/button";
 import Link from "next/link";
 import { WizardSummaryList } from "@/app/dashboard/[projectId]/payments/wizard-summary-list";
 import { useTranslations } from "@/i18n/provider";
+import { transactionHref } from "@/lib/payments-routes";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { OnrampStepContent } from "./components/onramp-step-content";
 import { ProviderSummaryTrigger } from "./components/provider-summary-trigger";
@@ -99,9 +100,9 @@ export function OnrampRail({
         wizard.onTransactionStage && transferState !== null && !transferState.cancelable
       }
       footerActions={
-        transferState?.terminal ? (
+        transferState?.terminal && wizard.quoteTransferId !== null ? (
           <Button asChild type="button">
-            <Link href={href(`/dashboard/payments/counterparty/${wizard.fields.counterpartyId}`)}>
+            <Link href={href(transactionHref(wizard.quoteTransferId))}>
               {t("DashboardPayments.goToTransaction")}
             </Link>
           </Button>

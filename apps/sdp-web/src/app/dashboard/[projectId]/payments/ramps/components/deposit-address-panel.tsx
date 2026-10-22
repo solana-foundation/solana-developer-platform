@@ -34,6 +34,7 @@ import {
   PAYMENT_STATUS_TONE,
 } from "@/app/dashboard/[projectId]/payments/payments-presentation";
 import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
+import { DepositAddressSkeleton } from "@/app/dashboard/[projectId]/payments/payments-route-skeletons.redesign";
 import { fetchTransfers } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import { usePaymentsActionWallets } from "@/app/dashboard/[projectId]/payments/ramps/hooks/use-payments-action-wallets";
 import { useLocale, useTranslations } from "@/i18n/provider";
@@ -430,7 +431,7 @@ export function DepositAddressPanel({
   );
 
   if (walletsLoading && liveWallets.length === 0) {
-    return <div className="h-56 animate-pulse rounded-card bg-fill-subtle" />;
+    return <DepositAddressSkeleton />;
   }
   if (!wallet) {
     if (liveWalletsError) {

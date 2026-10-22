@@ -1,7 +1,9 @@
 import type { RampSettlementEvent } from "@sdp/payments/ramps/types";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { createSystemPaymentsRepository } from "@/db/repositories/repository-factory";
+import { RedisKVStore } from "@/runtime/kv-redis";
+import * as moneyPathEvents from "@/runtime/money-path-events";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -210,6 +212,42 @@ describe("applyRampSettlementEvent", () => {
     });
   });
 
+  it("leaves the transfer as it was when its settlement cannot be recorded", async () => {
+    await seedTransfer({
+      id: "xfr_unaudited_settle",
+      reference: "order_unaudited_settle",
+      status: "awaiting_payment",
+    });
+    // The ledger's pending witness is refused, so the record never seals.
+    const witness = vi.spyOn(RedisKVStore.prototype, "compareAndSet").mockResolvedValueOnce(false);
+    onTestFinished(() => witness.mockRestore());
+
+    await expect(
+      applyRampSettlementEvent(env, "sandbox", {
+        provider: "moonpay",
+        kind: "settled",
+        reference: "order_unaudited_settle",
+        receivedAmount: "12",
+        onchain: {
+          signature: "unaudited-signature",
+          destinationAddress: "destination",
+          amount: "12",
+        },
+      })
+    ).rejects.toMatchObject({ name: "AuditPersistenceError" });
+
+    expect(await readTransfer("xfr_unaudited_settle")).toMatchObject({
+      status: "awaiting_payment",
+      signature: null,
+      provider_data: {},
+    });
+    const audits = await getDb(env)
+      .prepare("SELECT count(*)::integer AS count FROM audit_logs WHERE resource_id = ?")
+      .bind("xfr_unaudited_settle")
+      .first<{ count: number }>();
+    expect(audits).toMatchObject({ count: 0 });
+  });
+
   it("refuses settlement when cancellation wins after the first read", async () => {
     await seedCounterparty();
     await seedTransfer({
@@ -219,11 +257,14 @@ describe("applyRampSettlementEvent", () => {
       counterpartyId: COUNTERPARTY_ID,
     });
 
+    // A settled event's writes run in the audit ledger's transaction, which
+    // opens after the checks read: the cancel lands in between.
     const db = getDb(env);
-    const runTransaction = db.transaction.bind(db);
+    const runLedgerTransaction = db.lockedTransactionWithPostCommit?.bind(db);
+    if (!runLedgerTransaction) throw new Error("The test database serializes audit writes");
     const settlementTransaction = vi
-      .spyOn(db, "transaction")
-      .mockImplementationOnce(async (callback) => {
+      .spyOn(db, "lockedTransactionWithPostCommit")
+      .mockImplementationOnce(async (lockKey, callback, afterCommit, afterRollback, options) => {
         const canceled = await createSystemPaymentsRepository(env).transitionRampTransfer({
           transferId: "xfr_cancel_race",
           organizationId: ORG_ID,
@@ -232,7 +273,7 @@ describe("applyRampSettlementEvent", () => {
           updatedAt: new Date().toISOString(),
         });
         expect(canceled?.status).toBe("canceled");
-        return runTransaction(callback);
+        return runLedgerTransaction(lockKey, callback, afterCommit, afterRollback, options);
       });
 
     const result = await applyRampSettlementEvent(env, "sandbox", {
@@ -320,6 +361,33 @@ describe("applyRampSettlementEvent", () => {
     expect(await readTransfer("xfr_expired")).toMatchObject({
       status: "settling",
       amount: "10",
+    });
+  });
+
+  it("stores the payout currency beside the off-ramp's provider-reported payout", async () => {
+    await seedTransfer({
+      id: "xfr_payout_currency",
+      reference: "order_payout_currency",
+      status: "settling",
+      type: "offramp",
+      signature: "sdp-submitted-signature",
+    });
+
+    await applyRampSettlementEvent(env, "sandbox", {
+      provider: "moonpay",
+      kind: "settled",
+      reference: "order_payout_currency",
+      receivedAmount: "20.82",
+      receivedCurrency: "USD",
+    });
+
+    expect(await readTransfer("xfr_payout_currency")).toMatchObject({
+      status: "settling",
+      fiat_amount: "10",
+      provider_data: {
+        providerSettlement: { receivedAmount: "20.82", receivedCurrency: "USD" },
+        observedDelivery: { receivedAmount: "20.82", receivedCurrency: "USD" },
+      },
     });
   });
 
@@ -418,6 +486,51 @@ describe("applyRampSettlementEvent", () => {
       .first<{ provider_customer_reference: string; metadata: Record<string, unknown> }>();
     expect(link?.provider_customer_reference).toBe("cust_first");
     expect(link?.metadata).toEqual({ mismatchedReferences: ["cust_second"] });
+  });
+
+  it("warns about a displaced provider customer once, not on every event", async () => {
+    await seedCounterparty();
+    await seedTransfer({
+      id: "xfr_linked_first",
+      reference: "order_linked_first",
+      status: "pending",
+      counterpartyId: COUNTERPARTY_ID,
+    });
+    await seedTransfer({
+      id: "xfr_other_customer",
+      reference: "order_other_customer",
+      status: "pending",
+      counterpartyId: COUNTERPARTY_ID,
+    });
+    await applyRampSettlementEvent(env, "sandbox", {
+      provider: "moonpay",
+      kind: "awaiting_payment",
+      reference: "order_linked_first",
+      providerCustomerId: "cust_first",
+    });
+    const events = vi.spyOn(moneyPathEvents, "logEvent");
+
+    for (const kind of ["awaiting_payment", "settling", "settled"] as const) {
+      await applyRampSettlementEvent(env, "sandbox", {
+        provider: "moonpay",
+        kind,
+        reference: "order_other_customer",
+        providerCustomerId: "cust_second",
+      });
+    }
+
+    const mismatches = events.mock.calls.filter(
+      ([, payload]) => payload.event === "sdp_api_counterparty_provider_reference_mismatch"
+    );
+    expect(mismatches).toEqual([
+      [
+        "warn",
+        expect.objectContaining({
+          canonical_reference: "cust_first",
+          mismatched_reference: "cust_second",
+        }),
+      ],
+    ]);
   });
 
   it("links the customer from the winning event and never from a refused one", async () => {

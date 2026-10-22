@@ -11,7 +11,11 @@ import {
   formatCurrencyAmount,
   resolveTotalBalance,
 } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
-import { findWalletBalanceForToken } from "@/app/dashboard/[projectId]/payments/ramps/wallet-options";
+import {
+  exceedsWalletBalance,
+  maxPayoutAmount,
+  walletTokenBalance,
+} from "@/app/dashboard/[projectId]/payments/ramps/wallet-options";
 import { useTranslations } from "@/i18n/provider";
 import { fiatCurrencyOptions } from "@/lib/fiat-currency-options";
 import { AmountBalanceReadout } from "./amount-balance-readout";
@@ -89,15 +93,13 @@ function RampAmountField() {
     useRampSelection();
   const isOfframp = direction === "offramp";
   const assetLabel = getCryptoRailAssetLabel(selectedPair.assetRail);
-  const offrampBalance = useMemo<string | null>(() => {
-    if (!isOfframp || !selectedWallet) {
-      return null;
-    }
-    const balance = findWalletBalanceForToken(selectedWallet, assetLabel);
-    return balance ? balance.uiAmount : "0";
-  }, [isOfframp, selectedWallet, assetLabel]);
-  const offrampExceeds =
-    offrampBalance !== null && amount !== "" && Number(amount) > Number(offrampBalance);
+  const showOfframpBalance = isOfframp && selectedWallet !== null;
+  const offrampBalance = useMemo(
+    () => walletTokenBalance(selectedWallet, assetLabel),
+    [selectedWallet, assetLabel]
+  );
+  const offrampExceeds = isOfframp && exceedsWalletBalance(selectedWallet, assetLabel, amount);
+  const offrampMax = maxPayoutAmount(offrampBalance);
   return (
     <div className="flex flex-col gap-2">
       <Label className="text-tertiary" htmlFor={`${direction}-ramp-amount`}>
@@ -115,12 +117,12 @@ function RampAmountField() {
         placeholder={isOfframp ? "1.0" : "20.00"}
         size="xl"
         action={
-          offrampBalance !== null ? (
+          showOfframpBalance ? (
             <AmountBalanceReadout
               available={offrampBalance}
               assetLabel={assetLabel}
               exceeds={offrampExceeds}
-              onMax={Number(offrampBalance) > 0 ? () => onAmountChange(offrampBalance) : undefined}
+              onMax={offrampMax === null ? undefined : () => onAmountChange(offrampMax)}
             />
           ) : undefined
         }

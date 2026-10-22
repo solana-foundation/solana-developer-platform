@@ -108,7 +108,7 @@ describe("home and payments route loading states", () => {
     // The four refresh Payments lists; the Overview loads its balance and charts, not a table.
     expect(markup.match(/data-loading-table="true"/g)).toHaveLength(4);
     expect(markup.match(/data-loading-wizard/g)).toHaveLength(4);
-    expect(markup.match(/data-loading-detail-rows/g)).toHaveLength(3);
+    expect(markup.match(/data-loading-detail-rows/g)).toHaveLength(2);
     expect(markup).toContain("lg:grid-cols-2");
     expect(markup).toContain("size-[208px]");
   });
@@ -119,6 +119,8 @@ describe("home and payments route loading states", () => {
         layout: "payments-transactions",
         markup: renderToStaticMarkup(<TransactionsLoading />),
         columns: ["status", "type", "amount", "contact", "wallet", "created"],
+        // Its table drops three columns on a phone, so it only scrolls from md up.
+        minWidth: "md:min-w-[47.5rem]",
       },
       {
         layout: "payment-requests",
@@ -137,7 +139,7 @@ describe("home and payments route loading states", () => {
       },
     ];
 
-    for (const { layout, markup, columns } of listCases) {
+    for (const { layout, markup, columns, minWidth = "min-w-[47.5rem]" } of listCases) {
       expect(markup).toContain(`data-loading-layout="${layout}"`);
       expect(markup).toContain(`data-loading-table-variant="${layout}"`);
       expect(markup.match(/data-loading-list-toolbar=/g)).toHaveLength(1);
@@ -147,7 +149,7 @@ describe("home and payments route loading states", () => {
       expect(markup.match(/data-loading-table-row=/g)).toHaveLength(5);
       // The settled lists scroll sideways on narrow screens rather than swapping to cards.
       expect(markup).toContain("overflow-x-auto");
-      expect(markup).toContain("min-w-[760px]");
+      expect(markup).toContain(minWidth);
       expect(markup).not.toContain("data-loading-mobile-rows");
     }
   });
@@ -191,7 +193,10 @@ describe("home and payments route loading states", () => {
     const deposit = renderToStaticMarkup(<PaymentsDepositPageSkeleton />);
     expect(deposit).toContain('data-loading-layout="payments-deposit"');
     expect(deposit.match(/data-loading-deposit-address=/g)).toHaveLength(1);
-    expect(deposit).toContain("size-28");
+    expect(deposit).toContain("size-44");
+    expect(deposit).toContain("sm:size-32");
+    expect(deposit).toContain("max-w-flow");
+    expect(deposit).toContain("md:pt-9");
     expect(deposit).not.toContain("data-loading-wizard");
   });
 
@@ -221,7 +226,7 @@ describe("home and payments route loading states", () => {
     // The Schedules list scrolls sideways inside its column, like the other refresh lists.
     expect(markup).toContain('data-loading-layout="recurring-payments"');
     expect(markup).toContain("overflow-x-auto");
-    expect(markup).toContain("min-w-[760px]");
+    expect(markup).toContain("min-w-[47.5rem]");
   });
 
   it("uses theme-aware surfaces for every authenticated loading state", () => {

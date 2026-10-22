@@ -664,8 +664,9 @@ export const FIELDS: EnvField[] = [
     options: [
       { value: "false", label: "Disabled" },
       { value: "true", label: "Enabled" },
+      { value: "gclb", label: "Google Cloud load balancer" },
     ],
-    help: "Enable only behind an ingress that replaces caller-supplied X-Forwarded-For headers. Direct deployments must leave this disabled.",
+    help: "Enable only behind an ingress that replaces caller-supplied X-Forwarded-For headers, or pick the Google Cloud option when ingress is restricted to an external Application Load Balancer, which appends the verified client address instead. Direct deployments must leave this disabled.",
   },
   {
     key: "SDP_FLAG_ASSET_PROFILES",

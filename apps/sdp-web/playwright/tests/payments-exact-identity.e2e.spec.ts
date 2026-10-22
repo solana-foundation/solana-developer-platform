@@ -84,7 +84,7 @@ test.describe
         walletLabel: "Wallet Identity A",
         walletCount: 1,
         fundSourceWallet: true,
-        fundSourceAmountSol: 0.05,
+        fundSourceAmountSol: 1,
         tier: "enterprise",
       });
       const source = fixture.wallets[0];
@@ -361,7 +361,8 @@ test.describe
             sourceCustodyWalletId: alias.id,
             assetRail: "sol.solana",
             fiatCurrency: "USD",
-            cryptoAmount: "0.01",
+            // Keep the sandbox sale above MoonPay's minimum.
+            cryptoAmount: "0.5",
           },
         }
       );

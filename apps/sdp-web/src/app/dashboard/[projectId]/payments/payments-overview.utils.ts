@@ -380,9 +380,13 @@ export function resolveTransferFlow(transfer: TransferRecord): {
     transfer.fiatAmount && transfer.fiatCurrency
       ? `${transfer.fiatAmount} ${transfer.fiatCurrency.toUpperCase()}`
       : null;
+  // What the recipient got is the provider's reported payout once it pays, not the quote.
+  const payoutLabel = transfer.fiatPayout
+    ? formatDisplayAmount(transfer.fiatPayout.amount, transfer.fiatPayout.currency.toUpperCase())
+    : null;
   return isInbound
     ? { send: fiatLabel, receive: cryptoLabel }
-    : { send: cryptoLabel, receive: fiatLabel };
+    : { send: cryptoLabel, receive: payoutLabel ?? fiatLabel };
 }
 
 export function resolveTotalBalance(balances: CustodyWalletTokenBalance[]): number | null {
