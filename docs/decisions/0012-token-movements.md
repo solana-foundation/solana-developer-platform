@@ -133,6 +133,30 @@ them in one place, not adding special cases to every flow.
   refuses a non-transferable mint. `support` still refuses interest-bearing and scaled mints:
   balances and the dashboard show their display amount until PR 5, so a user would type one
   amount and move another. /pay keeps the stopgap until PR 3, recurring until PR 3.
+- **Payment requests (PR 3).** A request stores its expectation, the credit in base units with
+  the asset and decimals read at creation (migration 0162); an amount with more decimals than the
+  mint, or a mint the builder refuses, is a 400 then. /pay quotes that credit under the terms it
+  reads and builds with `buildTokenMovement`; the Solana Pay reference is the transfer
+  instruction's last account, after any hook accounts. Each claim window records its issued
+  transaction and quote (`payment_request_transactions`); the sponsor signs first, so its
+  signature is the transaction id. Settlement reads only those signatures, every window still
+  `open`, and closes a window that landed, failed, or has no record past its blockhash's last
+  valid block height (the `readSavedSend` rule). A landed one is verified by construction. The
+  claim refuses an expired request, and settlement refuses one whose expiry came before the
+  paying transaction was issued. `findReference` and main's `validatePaymentRequestTransfer` are
+  gone (SOLA9-699). /pay leaves `loadPaymentMint`: a scaled or interest-bearing request is paid in
+  token units.
+- **Recurring mandates (PR 3).** A recurring payment and its plan store the mandate once: the
+  debit in base units, the decimals and the fee tolerance (`maxFeePerPull`, the larger of the
+  current and next epoch's fee for the debit; migration 0163). Each pull reads the terms once
+  before its claim; a paused mint, a fee above the tolerance or a destination that requires memos
+  holds it as a `failed` attempt with `holdReason`, the period still due. Activation refuses a
+  memo-required destination. A pull's leg is `verified_by` the chain (migration 0164): its
+  observed debit is the instruction's amount and its credit the destination's raw balance delta,
+  read from the `getTransaction` the collection proof already makes. Create, plan create and an
+  update that changes the token or amount make the mandate before any row (the precision check
+  `loadPaymentMint` made); token admission stays start admission, so cancel and recovery never
+  ask it. Interest-bearing and scaled mints are no longer refused: a mandate is base units.
 - **Mint watch.** `pnpm check:well-known-mints` decodes every catalogue mint with the same
   decoder, prints its extension state, and fails when a 1 000-token transfer would pay a fee
   under the current or the newer fee entry (bps alone is not the signal, since `maximumFee` is
