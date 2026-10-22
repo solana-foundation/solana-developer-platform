@@ -20,7 +20,7 @@ import {
   isPaymentRequestExpired,
   reconcilePaymentRequest,
 } from "@/services/payments/payment-requests";
-import { assertPaymentAmountFitsMint } from "@/services/payments/token-amount";
+import { parseStaticPaymentAmount } from "@/services/payments/token-amount";
 import {
   type createPaymentRequestSchema,
   listPaymentRequestsQuerySchema,
@@ -132,7 +132,7 @@ export async function createPaymentRequest(
   const scope = await resolveScope(c);
   const wallet = resolveWallet(scope.wallets, body.walletId);
   const token = assertValidAddress(normalizePaymentToken(body.token), "token");
-  await assertPaymentAmountFitsMint(body.amount, token);
+  await parseStaticPaymentAmount(body.amount, token);
 
   const row = await createPaymentRequestsRepository(
     c.env,

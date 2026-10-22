@@ -156,7 +156,7 @@ type ResolvedRecurringPaymentUpdate = {
   counterpartyId: string;
   counterpartyAccountId: string;
   destinationAddress: string;
-  token: string;
+  token: Address;
   amount: string;
   periodHours: number;
   firstCollectionAt: string | null;
@@ -1000,7 +1000,7 @@ async function runMetadataScheduleUpdate(input: {
         status: parsePlanStatus(onChainPlan.data.status),
       });
       planUpdateSignature = await sendRecurringPaymentUpdateInstructions({
-        mint: resolveRecurringPaymentTokenMint(input.resolved.token),
+        mint: input.resolved.token,
         movement: "recurring.update",
         env: input.env,
         organizationId: input.organizationId,
@@ -1480,10 +1480,10 @@ async function runReplacementUpdate(input: {
   }
   const owner = assertValidAddress(input.resolved.sourceWallet.publicKey, "sourceAddress");
   const destination = assertValidAddress(input.resolved.destinationAddress, "destinationAddress");
-  const mint = assertValidAddress(input.resolved.token, "token");
+  const mint = input.resolved.token;
   const paymentMint = await loadPaymentMint(mint);
   const { tokenProgram } = paymentMint;
-  const sourceTokenAccount = await resolveSourceTokenAccountOrAta(rpc, owner, mint, paymentMint);
+  const sourceTokenAccount = await resolveSourceTokenAccountOrAta(owner, mint, paymentMint);
   const amountBaseUnits = paymentMint.toBaseUnits(input.resolved.amount);
   if (amountBaseUnits <= 0n) {
     throw badRequest("Subscription amount must be greater than zero");

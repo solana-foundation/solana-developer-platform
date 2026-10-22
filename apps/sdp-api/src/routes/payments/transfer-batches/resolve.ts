@@ -1,7 +1,7 @@
 import { sumDecimalAmounts } from "@sdp/payments/decimal";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { assertValidAddress } from "@sdp/solana/address";
-import { formatDecimalAmount, parseTokenAmount } from "@sdp/solana/amount";
+import { formatDecimalAmount } from "@sdp/solana/amount";
 import { SOL_DECIMALS, SOL_MINT } from "@sdp/types/well-known-tokens";
 import { type Address, address } from "@solana/kit";
 import type { CounterpartyAccountRow } from "@/db/repositories/counterparty-account.repository";
@@ -26,7 +26,6 @@ import type {
   CreateTransferBatchInput,
   ResolvedBatchRequest,
   ResolvedRecipient,
-  Rpc,
   TokenContext,
   TransferBatchRecipientInput,
 } from "./types";
@@ -51,16 +50,11 @@ function parseRecipientAmount(amount: string, toBaseUnits: PaymentAmountConverte
  * Resolves the batch token into transfer parameters: native SOL, or an SPL
  * mint with its token program and the source wallet's token account.
  *
- * @param rpc - Solana RPC client.
  * @param token - "SOL" or an SPL mint address.
  * @param sourceAddress - Source wallet address holding the token.
  * @returns The token context used to build transfer instructions.
  */
-async function resolveTokenContext(
-  rpc: Rpc,
-  token: string,
-  sourceAddress: Address
-): Promise<TokenContext> {
+async function resolveTokenContext(token: string, sourceAddress: Address): Promise<TokenContext> {
   if (isNativePaymentToken(token)) {
     const { toBaseUnits } = await loadPaymentMint(address(SOL_MINT));
     return {
@@ -74,7 +68,6 @@ async function resolveTokenContext(
   const mintAddress = assertValidAddress(token, "token");
   const { tokenProgram, decimals, toBaseUnits } = await loadPaymentMint(mintAddress);
   const sourceTokenAccount = await resolveSourceTokenAccount(
-    rpc,
     sourceAddress,
     mintAddress,
     tokenProgram
@@ -212,7 +205,7 @@ export async function resolveBatchMovement(
 ): Promise<ResolvedBatchRequest> {
   const token = normalizePaymentToken(input.token);
   const rpc = createClusterRpc();
-  const tokenContext = await resolveTokenContext(rpc, token, authorized.sourceAddress);
+  const tokenContext = await resolveTokenContext(token, authorized.sourceAddress);
   const recipients = resolveRecipients({
     recipients: input.recipients,
     accounts: authorized.accounts,

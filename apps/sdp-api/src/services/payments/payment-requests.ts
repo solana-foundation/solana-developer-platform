@@ -1,5 +1,4 @@
 import { createClusterRpc } from "@sdp/rpc/factory";
-import type { SolanaRpc } from "@sdp/rpc/solana";
 import { verifyTransactionLanded } from "@sdp/rpc/verified-confirmation";
 import { assertValidAddress } from "@sdp/solana/address";
 import { AmountError, parseTokenAmount } from "@sdp/solana/amount";
@@ -67,9 +66,8 @@ export async function reconcilePaymentRequest(
     throw new AppError("CONFLICT", "Payment request wallet identity is unresolved");
   }
 
-  const rpc = createClusterRpc();
   try {
-    return await settlePaymentRequestIfPaid(env, rpc, row, row.custody_wallet_id);
+    return await settlePaymentRequestIfPaid(env, row, row.custody_wallet_id);
   } catch (err) {
     if (!options.bestEffort || err instanceof AppError) {
       throw err;
@@ -95,7 +93,6 @@ export async function reconcilePaymentRequest(
  */
 async function settlePaymentRequestIfPaid(
   env: Env,
-  rpc: SolanaRpc,
   row: PaymentRequestRow,
   custodyWalletId: string
 ): Promise<PaymentRequestRow> {
@@ -108,14 +105,17 @@ async function settlePaymentRequestIfPaid(
   const reference = assertValidAddress(row.reference, "reference");
 
   const found = await nullOnExpected(
-    findReference(rpc, reference, { commitment: "confirmed" }),
+    findReference(createClusterRpc(), reference, { commitment: "confirmed" }),
     FindReferenceError
   );
   if (found === null) {
     return row;
   }
 
-  const verified = await verifyTransactionLanded(rpc, found.signature as unknown as Signature);
+  const verified = await verifyTransactionLanded(
+    createClusterRpc(),
+    found.signature as unknown as Signature
+  );
   if (!verified.ok) {
     return row;
   }
@@ -149,7 +149,7 @@ async function settlePaymentRequestIfPaid(
   const recipient = assertValidAddress(row.destination_address, "destinationAddress");
 
   const validated = await nullOnExpected(
-    validatePaymentRequestTransfer(rpc, found.signature, {
+    validatePaymentRequestTransfer(found.signature, {
       recipient,
       amount: expectedAmount,
       decimals: mint.decimals,

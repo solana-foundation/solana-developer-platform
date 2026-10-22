@@ -778,7 +778,7 @@ export async function activateRecurringPayment(input: {
     const mint = assertValidAddress(claimed.token, "token");
     const paymentMint = await loadPaymentMint(mint);
     const { tokenProgram } = paymentMint;
-    const sourceTokenAccount = await resolveSourceTokenAccountOrAta(rpc, owner, mint, paymentMint);
+    const sourceTokenAccount = await resolveSourceTokenAccountOrAta(owner, mint, paymentMint);
     const amountBaseUnits = paymentMint.toBaseUnits(claimed.amount);
 
     if (amountBaseUnits <= 0n) {

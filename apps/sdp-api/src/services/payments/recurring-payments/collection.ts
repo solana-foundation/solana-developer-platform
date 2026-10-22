@@ -1744,12 +1744,7 @@ export async function collectRecurringPayment(input: {
 
     const paymentMint = await loadPaymentMint(mint);
     const { tokenProgram } = paymentMint;
-    const sourceTokenAccount = await resolveSourceTokenAccountOrAta(
-      rpc,
-      sourceOwner,
-      mint,
-      paymentMint
-    );
+    const sourceTokenAccount = await resolveSourceTokenAccountOrAta(sourceOwner, mint, paymentMint);
     const amountBaseUnits = paymentMint.toBaseUnits(input.recurringPayment.amount);
     if (amountBaseUnits <= 0n) {
       throw badRequest("Subscription amount must be greater than zero");

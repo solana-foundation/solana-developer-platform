@@ -1,10 +1,9 @@
-import type { SolanaRpc } from "@sdp/rpc/solana";
+import { createClusterRpc } from "@sdp/rpc/factory";
 import {
   type Address,
-  decompileTransactionMessage,
-  getBase64Encoder,
-  getCompiledTransactionMessageDecoder,
-  getTransactionDecoder,
+  decodeTransactionFromRpcResponse,
+  getAccountMetasFromCompiledTransactionMessage,
+  getInstructionsFromCompiledTransactionMessage,
   type Signature,
   type TokenBalance,
 } from "@solana/kit";
@@ -32,13 +31,22 @@ interface PaymentRequestTransferFields {
   splToken?: Address;
 }
 
-/** Validates the referenced transfer and its exact recipient balance increase in one read. */
+/**
+ * Validates the referenced transfer and its exact recipient balance increase in one read. Accounts
+ * resolve through the transaction's loaded lookup-table addresses, in the runtime's order, so a
+ * version-0 payment naming its recipient through a lookup table settles like a static one.
+ *
+ * @param signature - The transaction that carries the payment request's reference.
+ * @param fields - The request's recipient, exact base-unit amount, mint facts and reference.
+ * @returns The confirmed transaction response the transfer was validated against.
+ * @throws ValidateTransferError when the transaction fails, or its last instruction is not the
+ *   expected transfer, or the recipient received less than the amount.
+ */
 export async function validatePaymentRequestTransfer(
-  rpc: SolanaRpc,
   signature: Signature,
   fields: PaymentRequestTransferFields
 ) {
-  const response = await rpc
+  const response = await createClusterRpc()
     .getTransaction(signature, {
       commitment: "confirmed",
       maxSupportedTransactionVersion: 0,
@@ -48,11 +56,11 @@ export async function validatePaymentRequestTransfer(
   if (response === null || response.meta === null || response.meta.err !== null) {
     throw new ValidateTransferError("Transaction is missing or failed");
   }
-  const transaction = getTransactionDecoder().decode(
-    getBase64Encoder().encode(response.transaction[0])
-  );
-  const compiled = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
-  const candidate = decompileTransactionMessage(compiled).instructions.at(-1);
+  const { compiledMessage, loadedAddresses } = decodeTransactionFromRpcResponse(response);
+  const candidate = getInstructionsFromCompiledTransactionMessage(
+    compiledMessage,
+    loadedAddresses
+  ).at(-1);
   if (candidate === undefined || candidate.accounts === undefined || candidate.data === undefined) {
     throw new ValidateTransferError("Missing transfer instruction");
   }
@@ -108,7 +116,10 @@ export async function validatePaymentRequestTransfer(
   ) {
     throw new ValidateTransferError("Wrong payment reference");
   }
-  const accountIndex = compiled.staticAccounts.indexOf(recipientAccount);
+  const accountIndex = getAccountMetasFromCompiledTransactionMessage(
+    compiledMessage,
+    loadedAddresses
+  ).findIndex((account) => account.address === recipientAccount);
   if (accountIndex === -1) throw new ValidateTransferError("Missing recipient account");
   validateReceivedAmount(response.meta, accountIndex, fields);
   return response;

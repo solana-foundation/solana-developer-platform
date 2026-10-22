@@ -104,7 +104,7 @@ import {
   resolveOutboundPaymentOperation,
 } from "@/services/payment-operation.service";
 import { createTransferSignedSubmissionStore } from "@/services/payments/signed-submission";
-import { assertPaymentAmountFitsMint, loadPaymentMint } from "@/services/payments/token-amount";
+import { loadPaymentMint, parseStaticPaymentAmount } from "@/services/payments/token-amount";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
   createSponsorshipFeePayment,
@@ -257,12 +257,10 @@ async function assertRampDepositFunded(
   operation: OutboundPaymentOperation
 ): Promise<SplTransferSource | undefined> {
   if (isNativePaymentToken(operation.token)) return undefined;
-  const rpc = createClusterRpc();
   const mint = assertValidAddress(operation.token, "token");
   const paymentMint = await loadPaymentMint(mint);
   const { tokenProgram, toBaseUnits } = paymentMint;
   const account = await resolveSourceTokenAccount(
-    rpc,
     address(operation.sourceWallet.publicKey),
     mint,
     tokenProgram
@@ -763,9 +761,9 @@ async function executeSplTransfer(
   return executeSponsoredTransfer(c, {
     sourceWallet,
     submissionStore,
-    buildInstructions: async ({ signer, feePayer, rpc }) => {
+    buildInstructions: async ({ signer, feePayer }) => {
       const { createDestinationAtaInstruction, transferInstruction } =
-        await buildSplTransferInstructions(rpc, {
+        await buildSplTransferInstructions({
           authority: signer,
           destination: destinationAddress,
           mint: mintAddress,
@@ -872,7 +870,7 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
   const body = c.req.valid("json");
   const { scope, operation, rampTransfer } = getAuthorized<TransferResolved>(c);
   // Before the row: a too-precise amount is the caller's 400, never a failed transfer.
-  await assertPaymentAmountFitsMint(operation.amount, assertValidAddress(operation.token, "token"));
+  await parseStaticPaymentAmount(operation.amount, assertValidAddress(operation.token, "token"));
   // The credential-bound record key (ADR 0009), never the raw client key.
   const recordKey = getIdempotencyRecordKey(c);
   const fingerprint = getIdempotencyFingerprint(c);

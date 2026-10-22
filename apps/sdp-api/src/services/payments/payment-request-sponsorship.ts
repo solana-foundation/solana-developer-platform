@@ -1,6 +1,6 @@
 import { hashString } from "@sdp/payments/hash";
 import { createClusterRpc } from "@sdp/rpc/factory";
-import { getRecentBlockhash, type SolanaRpc } from "@sdp/rpc/solana";
+import { getRecentBlockhash } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import {
@@ -187,7 +187,7 @@ export async function issuePaymentRequestTransaction(
     throw badRequest("Payment payer cannot be the fee sponsor");
   }
   const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
-  const unsignedBase64 = await buildPaymentTransaction(rpc, {
+  const unsignedBase64 = await buildPaymentTransaction({
     ...params,
     feePayer,
     blockhash,
@@ -228,18 +228,15 @@ export async function issuePaymentRequestTransaction(
  * @returns The compiled, unsigned transaction as base64.
  * @throws AppError `BAD_REQUEST` when a SOL request's amount is not positive.
  */
-async function buildPaymentTransaction(
-  rpc: SolanaRpc,
-  params: {
-    request: PaymentRequestRow;
-    payer: Address;
-    recipient: Address;
-    reference: Address;
-    feePayer: Address;
-    blockhash: Blockhash;
-    lastValidBlockHeight: bigint;
-  }
-): Promise<string> {
+async function buildPaymentTransaction(params: {
+  request: PaymentRequestRow;
+  payer: Address;
+  recipient: Address;
+  reference: Address;
+  feePayer: Address;
+  blockhash: Blockhash;
+  lastValidBlockHeight: bigint;
+}): Promise<string> {
   const { request, recipient, reference, feePayer, blockhash, lastValidBlockHeight } = params;
   const withReference = (instruction: Instruction & { accounts: readonly AccountMeta[] }) => ({
     ...instruction,
@@ -261,7 +258,7 @@ async function buildPaymentTransaction(
     instructions = [withReference(transferInstruction)];
   } else {
     const { createDestinationAtaInstruction, transferInstruction } =
-      await buildSplTransferInstructions(rpc, {
+      await buildSplTransferInstructions({
         authority: payerSigner,
         destination: recipient,
         mint: assertValidAddress(request.token, "token"),

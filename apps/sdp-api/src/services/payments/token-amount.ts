@@ -127,17 +127,15 @@ export async function loadPaymentAmountConverter(mint: Address): Promise<Payment
   return (await loadPaymentMint(mint)).toBaseUnits;
 }
 
-/** Recurring and subscription amounts use the same admissible mints as single payments. */
-export async function readStaticAmountMintDecimals(mint: Address): Promise<number> {
-  return (await loadPaymentMint(mint)).decimals;
-}
-
-/** Validates a payment's precision before a create path persists it. */
-export async function assertPaymentAmountFitsMint(amount: string, mint: Address): Promise<void> {
-  (await loadPaymentMint(mint)).toBaseUnits(amount);
-}
-
-/** Parses recurring and subscription terms with the same strict payment rules. */
+/**
+ * Parses a payment amount against an admissible mint's precision and the u64 range, so a create
+ * path refuses an amount it could never send before it persists anything.
+ *
+ * @param amount - The decimal UI amount from the request.
+ * @param mint - The payment's SPL mint, or the SOL mint.
+ * @returns The amount in the mint's base units.
+ * @throws AppError `BAD_REQUEST` for a refused mint, excess precision or a value outside u64.
+ */
 export async function parseStaticPaymentAmount(amount: string, mint: Address): Promise<bigint> {
   return (await loadPaymentMint(mint)).toBaseUnits(amount);
 }

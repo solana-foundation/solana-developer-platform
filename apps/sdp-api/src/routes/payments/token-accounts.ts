@@ -1,3 +1,4 @@
+import { createClusterRpc } from "@sdp/rpc/factory";
 import { getAccountInfo, type SolanaRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
@@ -180,12 +181,11 @@ export async function getSplTokenAccountAddresses(
 }
 
 export async function resolveSourceTokenAccount(
-  rpc: SolanaRpc,
   owner: Address,
   mint: Address,
   tokenProgram: Address
 ): Promise<SourceTokenAccount> {
-  const selected = await findSourceTokenAccount(rpc, owner, mint, tokenProgram);
+  const selected = await findSourceTokenAccount(owner, mint, tokenProgram);
 
   if (!selected) {
     throw badRequest("Source wallet has no token account for this mint");
@@ -195,7 +195,6 @@ export async function resolveSourceTokenAccount(
 }
 
 export async function resolveSourceTokenAccountOrAta(
-  rpc: SolanaRpc,
   owner: Address,
   mint: Address,
   paymentMint: PaymentMint
@@ -205,7 +204,7 @@ export async function resolveSourceTokenAccountOrAta(
     tokenProgram: paymentMint.tokenProgram,
     mint,
   });
-  const tokenAccountInfo = await getAccountInfo(rpc, tokenAccount);
+  const tokenAccountInfo = await getAccountInfo(createClusterRpc(), tokenAccount);
 
   return {
     tokenAccount,
@@ -219,23 +218,19 @@ export async function resolveSourceTokenAccountOrAta(
  * creation for the destination (rent paid by `ataRentPayer`) followed by a
  * transferChecked from the authority's largest token account.
  */
-export async function buildSplTransferInstructions(
-  rpc: SolanaRpc,
-  input: {
-    authority: TransactionSigner;
-    destination: Address;
-    mint: Address;
-    amount: string;
-    ataRentPayer: Address;
-    /** The source this request already read, so the build reads nothing again. */
-    source?: SplTransferSource;
-  }
-) {
+export async function buildSplTransferInstructions(input: {
+  authority: TransactionSigner;
+  destination: Address;
+  mint: Address;
+  amount: string;
+  ataRentPayer: Address;
+  /** The source this request already read, so the build reads nothing again. */
+  source?: SplTransferSource;
+}) {
   let source = input.source;
   if (source === undefined) {
     const mint = await loadPaymentMint(input.mint);
     const account = await resolveSourceTokenAccount(
-      rpc,
       input.authority.address,
       input.mint,
       mint.tokenProgram
@@ -278,12 +273,11 @@ export async function buildSplTransferInstructions(
 }
 
 async function findSourceTokenAccount(
-  rpc: SolanaRpc,
   owner: Address,
   mint: Address,
   tokenProgram: Address
 ): Promise<SourceTokenAccount | null> {
-  const response = await rpc
+  const response = await createClusterRpc()
     .getTokenAccountsByOwner(
       owner,
       { programId: tokenProgram },
