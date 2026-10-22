@@ -36,9 +36,9 @@ export type TokenMovementLegStatus = (typeof TOKEN_MOVEMENT_LEG_STATUSES)[number
 export const DEFAULT_TOKEN_MOVEMENT_BASIS = "debit" satisfies TokenMovementBasis;
 
 /**
- * Why SDP will not make a movement now (`@sdp/solana/token-movement`). A
- * builder path refuses it with a 400; a recurring pull is held with it, and
- * the collection attempt reports it.
+ * Why SDP will not make a movement now (`@sdp/solana/token-movement`). The
+ * builder and each adapter refuse it with a 400; a recurring pull is held
+ * with it, and the collection attempt reports it.
  */
 export const TOKEN_MOVEMENT_REFUSAL_REASONS = [
   "non_transferable",
@@ -49,6 +49,15 @@ export const TOKEN_MOVEMENT_REFUSAL_REASONS = [
   "nothing_credited",
   /** A recurring pull's transfer fee is above the fee tolerance its mandate recorded. */
   "fee_above_tolerance",
+  /** An existing destination token account is frozen. */
+  "destination_frozen",
+  // An adapter's row (issuance, DvP, Private Channels, Earn) refuses these.
+  /** The path cannot state a transfer fee, or cannot carry one. */
+  "transfer_fee",
+  /** The path's program refuses a scaled or interest-bearing mint. */
+  "display_rule",
+  /** The path cannot pass a transfer hook's extra accounts. */
+  "transfer_hook",
 ] as const;
 
 export type TokenMovementRefusalReason = (typeof TOKEN_MOVEMENT_REFUSAL_REASONS)[number];
