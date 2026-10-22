@@ -10,7 +10,7 @@ import {
   listMembersQuerySchema,
   updateMemberRoleRequestSchema,
 } from "@/openapi/schemas/organizations";
-import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
+import { errorResponses, jsonContent } from "./helpers";
 import { inviteMemberResponse, listMembersResponse, memberRoleResponse } from "./responses";
 
 export function registerMemberPaths(registry: OpenAPIRegistry) {
@@ -62,7 +62,6 @@ export function registerMemberPaths(registry: OpenAPIRegistry) {
     description: "Creates an invitation for a new organization member.",
     security: [{ clerkBearerAuth: [] }],
     request: {
-      headers: projectScopeHeaders,
       body: {
         required: true,
         content: jsonContent(inviteMemberRequestSchema),
@@ -87,7 +86,6 @@ export function registerMemberPaths(registry: OpenAPIRegistry) {
       "Withdraws a pending invitation, in Clerk as well as locally. Only a pending invitation can be revoked.",
     security: [{ clerkBearerAuth: [] }],
     request: {
-      headers: projectScopeHeaders,
       params: z.object({
         invitationId: invitationIdSchema,
       }),

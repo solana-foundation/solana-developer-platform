@@ -5,7 +5,6 @@
 import { Hono } from "hono";
 import { unifiedAuthMiddleware } from "@/middleware/auth";
 import { requireHumanSession } from "@/middleware/human-session";
-import { projectContextMiddleware } from "@/middleware/project-context";
 import { publicRoute, requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
@@ -31,21 +30,10 @@ members.use("*", requireHumanSession());
 // an existing member no longer has access to any project.
 members.get("/", requireAction("members.read"), listMembers);
 members.get("/me", requireAction("members.read"), getCurrentMember);
-members.post(
-  "/invite",
-  projectContextMiddleware(),
-  requireAction("members.manage"),
-  validateBody(inviteSchema),
-  inviteMember
-);
+members.post("/invite", requireAction("members.manage"), validateBody(inviteSchema), inviteMember);
 
 // Declared before /:memberId so "invitations" and "me" are not read as member ids.
-members.delete(
-  "/invitations/:invitationId",
-  projectContextMiddleware(),
-  requireAction("members.manage"),
-  revokeInvitation
-);
+members.delete("/invitations/:invitationId", requireAction("members.manage"), revokeInvitation);
 members.delete(
   "/me",
   publicRoute(
