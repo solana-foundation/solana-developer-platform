@@ -1,7 +1,8 @@
 /**
  * The token movement builder (ADR 0012): the one place SDP builds the
  * instructions that move a token or native SOL, and the capability decision
- * every movement path asks first.
+ * every movement path asks first (`support`, one row per path: the builder's
+ * and each registered adapter's).
  *
  * - Native SOL is a system transfer of the quoted debit, in lamports.
  * - A token movement opens the destination's associated token account under
@@ -53,21 +54,43 @@ import {
 import { isSameAsset } from "./asset-ref";
 import type { MovementQuote } from "./movement-quote";
 import { type BaseUnits, toTokenAmount } from "./token-amount";
-import { feeFor, type MintTokenTerms, type TokenTerms } from "./token-terms";
+import {
+  epochFee,
+  feeFor,
+  type MintTokenTerms,
+  type TokenTerms,
+  type TransferFeeRate,
+} from "./token-terms";
 
 /**
- * The paths a movement takes, each with its own capability row. PR 4 adds
- * the other registered adapters (issuance, DvP, Private Channels, Earn).
+ * The paths a movement takes, each with its own capability row (ADR 0012,
+ * "one capability decision"). `builder` is the instructions built here; the
+ * others are registered adapters: each moves tokens through its own engine
+ * (an SDK or an on-chain program), so its row holds that engine's rules.
  */
 export const TOKEN_MOVEMENT_PATHS = [
-  /** Instructions built here: Payments transfers, batches, off-ramp funding and /pay. */
+  /** Instructions built here: Payments transfers, batches, off-ramp funding, /pay and DvP funding. */
   "builder",
+  // ── Registered adapters ────────────────────────────────────────────────
   /**
    * A recurring pull: the subscriptions program moves the mandate's debit with
    * a plain `TransferChecked` through CPI, so no fee guard is on chain and the
    * destination cannot get a memo first.
    */
   "recurring",
+  /** Issuance mint and burn through Mosaic. Neither is a transfer, so no fee or hook applies. */
+  "issuance",
+  /** Issuance seize: the permanent delegate's `TransferChecked`, which Mosaic builds. */
+  "issuance_seize",
+  /** DvP trades: the DvP program settles, cancels and reclaims each escrow. */
+  "dvp",
+  /** Private Channels deposits, transfers and withdrawals, through SPC's escrow and encoding. */
+  "private_channels",
+  /**
+   * Earn deposit mints, moved by each provider's own builder or program. Exits
+   * never inherit a money-in gate; the deposit-mint guard reports this row.
+   */
+  "earn",
 ] as const;
 
 export type TokenMovementPath = (typeof TOKEN_MOVEMENT_PATHS)[number];
@@ -81,6 +104,15 @@ export const TOKEN_MOVEMENT_REFUSALS = {
   nothingCredited: "nothing_credited",
   scaledDisplay: "scaled_display",
   feeAboveTolerance: "fee_above_tolerance",
+  /** An existing destination token account is frozen. */
+  destinationFrozen: "destination_frozen",
+  // ── The adapters' rows ─────────────────────────────────────────────────
+  /** The path cannot state a transfer fee, or cannot carry one. */
+  transferFee: "transfer_fee",
+  /** The path's program refuses a scaled or interest-bearing mint. */
+  displayRule: "display_rule",
+  /** The path cannot pass a transfer hook's extra accounts. */
+  transferHook: "transfer_hook",
 } as const satisfies Record<string, TokenMovementRefusalReason>;
 
 export type TokenMovementRefusal =
@@ -98,98 +130,267 @@ export class TokenMovementError extends Error {
 }
 
 /**
- * Whether a path can move a token under its terms, and why not. A `hold`
- * may pass later without anything SDP stores changing (a paused mint can be
- * unpaused), so a path that can wait, a recurring pull, waits instead of
- * failing; a `refuse` cannot.
+ * What a path does with a movement it will not make now. A `hold` may pass
+ * later without anything SDP stores changing (a paused mint can be unpaused),
+ * so a path that can wait, a recurring pull, waits instead of failing; a
+ * `refuse` cannot.
  */
+export type TokenMovementDisposition = "refuse" | "hold";
+
+/** Whether a path can move a token under its terms, and why not. */
 export type TokenMovementSupport =
   | Readonly<{ supported: true }>
   | Readonly<{
       supported: false;
       refusal: TokenMovementRefusal;
       message: string;
-      disposition: "refuse" | "hold";
+      disposition: TokenMovementDisposition;
     }>;
 
-const SUPPORTED: TokenMovementSupport = { supported: true };
+/** The Token-2022 mint extension, as the client names it, whose state a row refuses. */
+export type CapabilityExtension =
+  | "NonTransferable"
+  | "PausableConfig"
+  | "DefaultAccountState"
+  | "TransferFeeConfig"
+  | "ScaledUiAmountConfig"
+  | "InterestBearingConfig"
+  | "TransferHook";
 
-function refused(refusal: TokenMovementRefusal, message: string): TokenMovementSupport {
-  return { supported: false, refusal, message, disposition: "refuse" };
-}
+/** One reason a path refuses, or holds, a mint. */
+export type TokenMovementRefusalNotice = Readonly<{
+  refusal: TokenMovementRefusal;
+  extension: CapabilityExtension;
+  message: string;
+  disposition: TokenMovementDisposition;
+}>;
+
+/** One cell of a capability row: a mint state the path cannot move, or null. */
+type CapabilityRule = (terms: TokenTerms) => TokenMovementRefusalNotice | null;
+
+const SUPPORTED: TokenMovementSupport = { supported: true };
 
 function held(refusal: TokenMovementRefusal, message: string): TokenMovementSupport {
   return { supported: false, refusal, message, disposition: "hold" };
 }
 
-/**
- * The builder's row: a transfer fee, a permanent delegate and confidential
- * transfers all move through it; a hook moves once its accounts resolve
- * (checked when they are). A mint the program refuses to transfer, one whose
- * new accounts start frozen (no Token ACL thaw yet), and one whose wallets
- * show a scaled or interest-bearing amount are refused. The last waits for
- * PR 5: until balances and the dashboard show token units, a user would type
- * the displayed amount and move another.
- */
-function builderSupport(terms: TokenTerms): TokenMovementSupport {
-  if (terms.nonTransferable) {
-    return refused(
-      TOKEN_MOVEMENT_REFUSALS.nonTransferable,
-      "This token cannot be transferred: its mint is non-transferable"
-    );
-  }
-  if (terms.paused) {
-    return refused(
-      TOKEN_MOVEMENT_REFUSALS.paused,
-      "This token is paused: its mint refuses every transfer"
-    );
-  }
-  if (terms.defaultAccountState === "frozen") {
-    return refused(
-      TOKEN_MOVEMENT_REFUSALS.defaultFrozen,
-      "This token opens new token accounts frozen, and SDP cannot thaw them"
-    );
-  }
-  if (terms.display.kind !== "plain") {
-    return refused(
-      TOKEN_MOVEMENT_REFUSALS.scaledDisplay,
-      "Payments does not move tokens whose wallets show a scaled or interest-bearing amount yet"
-    );
-  }
-  return SUPPORTED;
+function notice(
+  refusal: TokenMovementRefusal,
+  extension: CapabilityExtension,
+  message: string
+): TokenMovementRefusalNotice {
+  return { refusal, extension, message, disposition: "refuse" };
+}
+
+const nonTransferable: CapabilityRule = (terms) =>
+  terms.nonTransferable
+    ? notice(
+        TOKEN_MOVEMENT_REFUSALS.nonTransferable,
+        "NonTransferable",
+        "This token cannot be transferred: its mint is non-transferable"
+      )
+    : null;
+
+/** Token-2022 refuses every transfer, mint and burn of a paused mint. */
+const paused: CapabilityRule = (terms) =>
+  terms.paused
+    ? notice(
+        TOKEN_MOVEMENT_REFUSALS.paused,
+        "PausableConfig",
+        "This token is paused: its mint refuses every transfer, mint and burn"
+      )
+    : null;
+
+/** The same, for a path that can wait: it holds the movement until the mint is unpaused. */
+const pausedHolds: CapabilityRule = (terms) =>
+  terms.paused
+    ? {
+        refusal: TOKEN_MOVEMENT_REFUSALS.paused,
+        extension: "PausableConfig",
+        message: "This token is paused: its mint refuses every transfer until it is unpaused",
+        disposition: "hold",
+      }
+    : null;
+
+/** Any frozen-by-default mint, for an engine that cannot thaw the accounts it opens. */
+function frozenByDefault(engine: string): CapabilityRule {
+  return (terms) =>
+    terms.defaultAccountState === "frozen"
+      ? notice(
+          TOKEN_MOVEMENT_REFUSALS.defaultFrozen,
+          "DefaultAccountState",
+          `This token opens new token accounts frozen, and ${engine} cannot thaw them`
+        )
+      : null;
+}
+
+/** A fee config, even at 0 bps, for an engine that cannot state the fee it would pay. */
+function feeConfig(engine: string): CapabilityRule {
+  return (terms) =>
+    terms.transferFee === null
+      ? null
+      : notice(
+          TOKEN_MOVEMENT_REFUSALS.transferFee,
+          "TransferFeeConfig",
+          `This token has a transfer fee config, which ${engine} cannot carry`
+        );
+}
+
+function charges(rate: TransferFeeRate): boolean {
+  return rate.basisPoints > 0 && rate.maximumFee > 0n;
 }
 
 /**
- * The recurring row: what the builder refuses, except a paused mint, which
- * holds the pull until it is unpaused. A transfer fee and a hook move (the
- * mandate's fee tolerance is checked per pull, by {@link recurringPullSupport});
- * a display rule is refused, as the builder refuses it until PR 5.
+ * A fee that is charged now or is set to be: the entry in force at the read,
+ * or the newer one. A zero fee config (PYUSD, USDG) passes; a plain
+ * `TransferChecked` under it credits the whole debit.
  */
-function recurringSupport(terms: TokenTerms): TokenMovementSupport {
-  if (terms.paused) {
-    return held(
-      TOKEN_MOVEMENT_REFUSALS.paused,
-      "This token is paused: its mint refuses every transfer until it is unpaused"
-    );
-  }
-  return builderSupport(terms);
+function chargedFee(engine: string): CapabilityRule {
+  return (terms) => {
+    if (terms.transferFee === null || terms.readAt === null) {
+      return null;
+    }
+    const current = epochFee(terms, terms.readAt.epoch);
+    const charged = (current !== null && charges(current)) || charges(terms.transferFee.newer);
+    return charged
+      ? notice(
+          TOKEN_MOVEMENT_REFUSALS.transferFee,
+          "TransferFeeConfig",
+          `This token charges a transfer fee, which ${engine} cannot carry`
+        )
+      : null;
+  };
+}
+
+/** A scaled or interest-bearing mint, for a program that refuses both. */
+function displayRule(engine: string): CapabilityRule {
+  return (terms) => {
+    switch (terms.display.kind) {
+      case "plain":
+        return null;
+      case "scaled":
+        return notice(
+          TOKEN_MOVEMENT_REFUSALS.displayRule,
+          // biome-ignore lint/security/noSecrets: an extension name, not a secret.
+          "ScaledUiAmountConfig",
+          `This token has a scaled UI amount, which ${engine} refuses`
+        );
+      case "interest":
+        return notice(
+          TOKEN_MOVEMENT_REFUSALS.displayRule,
+          "InterestBearingConfig",
+          `This token bears interest, which ${engine} refuses`
+        );
+      default: {
+        const exhaustive: never = terms.display;
+        throw new Error(`Unknown display rule: ${JSON.stringify(exhaustive)}`);
+      }
+    }
+  };
+}
+
+/** A hook program that runs on every transfer, for an engine that cannot pass its accounts. */
+function hookSet(engine: string): CapabilityRule {
+  return (terms) =>
+    terms.transferHookProgram === null
+      ? null
+      : notice(
+          TOKEN_MOVEMENT_REFUSALS.transferHook,
+          "TransferHook",
+          `This token runs a transfer hook, which ${engine} cannot pass accounts to`
+        );
 }
 
 /**
- * The capability decision for moving a token under `terms` on `path`. Every
- * path asks it before it reads or builds anything else.
+ * A hook program that runs, or that its authority can set later: an engine
+ * that holds funds across transfers (an escrow) is stranded if one appears.
+ * An immutable hook with no program can never run.
+ */
+function hookSettable(engine: string): CapabilityRule {
+  return (terms) =>
+    terms.transferHookProgram === null && terms.transferHookAuthority === null
+      ? null
+      : notice(
+          TOKEN_MOVEMENT_REFUSALS.transferHook,
+          "TransferHook",
+          `This token has a transfer hook that runs or can be set, which ${engine} cannot pass accounts to`
+        );
+}
+
+/**
+ * The capability table: per path, the mint states it refuses, in the order
+ * they are reported. A state no rule names moves on that path. Rows come from
+ * SDP's own rules and from each path's engine:
+ *
+ * | State | builder | recurring | issuance | issuance_seize | dvp | private_channels | earn |
+ * |---|---|---|---|---|---|---|---|
+ * | Transfer fee | yes (`TransferCheckedWithFee`) | yes, within the mandate's tolerance (`recurringPullSupport`) | n/a | yes: the seized amount is the debit, the fee is withheld in the destination | program refuses | refused (SPC cannot encode `WithFee`) | refused once a fee is charged; a 0-bps config moves |
+ * | Scaled / interest | yes (display only) | yes | yes | yes | program refuses | yes | yes |
+ * | Hook | yes once its accounts resolve | yes | n/a | refused when a program is set | refused when it runs or can be set | refused when it runs or can be set | refused when a program is set |
+ * | Paused | refused | held until unpaused | refused | refused | refused | refused | refused |
+ * | Non-transferable | refused | refused | yes | refused | program refuses | refused | refused |
+ * | Frozen by default | refused | refused | yes (Mosaic thaws Token ACL accounts) | yes (same) | yes (funding refuses a frozen escrow) | refused | refused |
+ * | Permanent delegate, confidential | yes | yes | yes | yes | yes | yes | yes |
+ *
+ * Every refusal is a `refuse` except the recurring row's paused mint, a
+ * `hold`: a recurring pull can wait for the mint to be unpaused. A row lists
+ * its refusals before its holds, so a mint that can never move is refused.
+ * `builder` agrees with the Kora sponsor policy (`infra/kora/kora.toml`,
+ * pinned by `kora-sponsor-policy.test.ts`); `dvp` is the DvP program's
+ * `validate_mint_extensions` plus what SDP cannot settle, cancel or reclaim.
+ */
+const CAPABILITY_ROWS = {
+  builder: [nonTransferable, paused, frozenByDefault("SDP")],
+  recurring: [nonTransferable, frozenByDefault("a recurring pull"), pausedHolds],
+  issuance: [paused],
+  issuance_seize: [nonTransferable, paused, hookSet("Mosaic's force transfer")],
+  dvp: [
+    feeConfig("the DvP program"),
+    displayRule("the DvP program"),
+    nonTransferable,
+    hookSettable("DvP settlement"),
+    paused,
+  ],
+  private_channels: [
+    nonTransferable,
+    paused,
+    frozenByDefault("Private Channels"),
+    feeConfig("Private Channels"),
+    hookSettable("Private Channels"),
+  ],
+  earn: [nonTransferable, paused, frozenByDefault("Earn"), chargedFee("Earn"), hookSet("Earn")],
+} as const satisfies Record<TokenMovementPath, readonly CapabilityRule[]>;
+
+/**
+ * Every reason `path` refuses to move a token under `terms`, in its row's
+ * order; empty when it moves. For a caller that reports them all at once.
+ */
+export function capabilityRefusals(
+  terms: TokenTerms,
+  path: TokenMovementPath
+): readonly TokenMovementRefusalNotice[] {
+  const rules: readonly CapabilityRule[] = CAPABILITY_ROWS[path];
+  return rules.flatMap((rule) => {
+    const refusal = rule(terms);
+    return refusal === null ? [] : [refusal];
+  });
+}
+
+/**
+ * The capability decision for moving a token under `terms` on `path`: its
+ * first refusal, or supported. Every path asks it before it reads or builds
+ * anything else.
  */
 export function support(terms: TokenTerms, path: TokenMovementPath): TokenMovementSupport {
-  switch (path) {
-    case "builder":
-      return builderSupport(terms);
-    case "recurring":
-      return recurringSupport(terms);
-    default: {
-      const exhaustive: never = path;
-      throw new Error(`Unknown token movement path: ${String(exhaustive)}`);
-    }
-  }
+  const [first] = capabilityRefusals(terms, path);
+  return first === undefined
+    ? SUPPORTED
+    : {
+        supported: false,
+        refusal: first.refusal,
+        message: first.message,
+        disposition: first.disposition,
+      };
 }
 
 /** A destination token account, as the movement's account read saw it. */

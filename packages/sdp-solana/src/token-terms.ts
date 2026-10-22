@@ -102,6 +102,8 @@ type TokenTermsFields = Readonly<{
   decimals: number;
   /** The hook program, or null when the extension is absent or its program is unset. */
   transferHookProgram: Address | null;
+  /** May set or change the hook program; null when the extension is absent or immutable. */
+  transferHookAuthority: Address | null;
   paused: boolean;
   nonTransferable: boolean;
   defaultAccountState: DefaultAccountState;
@@ -141,6 +143,7 @@ export const NATIVE_TOKEN_TERMS: NativeTokenTerms = {
   transferFee: null,
   display: { kind: "plain" },
   transferHookProgram: null,
+  transferHookAuthority: null,
   paused: false,
   nonTransferable: false,
   defaultAccountState: "initialized",
@@ -282,6 +285,7 @@ function foldExtensions(extensions: readonly Extension[]) {
   let transferFee: TransferFeeSchedule | null = null;
   let display: DisplayRule = { kind: "plain" };
   let transferHookProgram: Address | null = null;
+  let transferHookAuthority: Address | null = null;
   let paused = false;
   let nonTransferable = false;
   let defaultAccountState: DefaultAccountState = "initialized";
@@ -308,6 +312,7 @@ function foldExtensions(extensions: readonly Extension[]) {
         break;
       case "TransferHook":
         transferHookProgram = setOrNull(extension.programId);
+        transferHookAuthority = setOrNull(extension.authority);
         requiredAccountExtensions.push({ __kind: "TransferHookAccount", transferring: false });
         break;
       case "PausableConfig":
@@ -368,6 +373,7 @@ function foldExtensions(extensions: readonly Extension[]) {
     transferFee,
     display,
     transferHookProgram,
+    transferHookAuthority,
     paused,
     nonTransferable,
     defaultAccountState,

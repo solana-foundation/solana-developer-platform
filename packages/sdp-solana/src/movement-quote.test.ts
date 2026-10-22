@@ -36,6 +36,7 @@ function mintTerms(
     transferFee,
     display,
     transferHookProgram: null,
+    transferHookAuthority: null,
     paused: false,
     nonTransferable: false,
     defaultAccountState: "initialized",
