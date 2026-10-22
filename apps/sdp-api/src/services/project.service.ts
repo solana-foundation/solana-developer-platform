@@ -311,16 +311,6 @@ export class ProjectService {
   }
 
   /**
-   * Remove a member from a project
-   */
-  async removeMember(projectId: string, userId: string): Promise<void> {
-    await this.db
-      .prepare("DELETE FROM project_members WHERE project_id = ? AND user_id = ?")
-      .bind(projectId, userId)
-      .run();
-  }
-
-  /**
    * Get a user's membership in a project
    */
   async getMembership(projectId: string, userId: string): Promise<ProjectMember | null> {

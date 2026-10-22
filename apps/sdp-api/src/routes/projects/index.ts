@@ -11,7 +11,7 @@ import { validateBody } from "@/middleware/validate";
 import { apiKeyCreateSchema } from "@/routes/api-keys/schemas";
 import type { Env } from "@/types/env";
 import { createProjectApiKey, listProjectApiKeys } from "./handlers/api-keys";
-import { addProjectMember, listProjectMembers, removeProjectMember } from "./handlers/members";
+import { addProjectMember, listProjectMembers } from "./handlers/members";
 import { getProject, listProjects, updateProject } from "./handlers/projects";
 import { apiKeyProjectAccessMiddleware } from "./project-access";
 import { projectProviderAvailability } from "./provider-availability";
@@ -65,11 +65,6 @@ projects.post(
   requireAction("members.manage"),
   validateBody(addMemberSchema),
   addProjectMember
-);
-projects.delete(
-  "/:projectId/members/:memberId",
-  requireAction("members.manage"),
-  removeProjectMember
 );
 
 // ═══════════════════════════════════════════════════════════════════════════

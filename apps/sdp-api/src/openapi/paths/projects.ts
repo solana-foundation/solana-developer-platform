@@ -4,7 +4,6 @@ import { createApiKeyRequestSchema } from "@/openapi/schemas/api-keys";
 import {
   errorResponseSchema,
   includeArchivedQuerySchema,
-  memberIdParamSchema,
   projectIdParamSchema,
 } from "@/openapi/schemas/base";
 import {
@@ -176,28 +175,6 @@ export function registerProjectAdministrationPaths(registry: OpenAPIRegistry) {
         content: jsonContent(projectMemberResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
-    },
-  });
-
-  registry.registerPath({
-    method: "delete",
-    path: "/v1/projects/{projectId}/members/{memberId}",
-    tags: ["Projects"],
-    summary: "Remove project member",
-    operationId: "removeProjectMember",
-    description: "Removes a member from the project.",
-    security: [{ clerkBearerAuth: [] }],
-    request: {
-      params: z.object({
-        projectId: projectIdParamSchema,
-        memberId: memberIdParamSchema,
-      }),
-    },
-    responses: {
-      204: {
-        description: "Project member removed",
-      },
-      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
     },
   });
 

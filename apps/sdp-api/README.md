@@ -245,8 +245,7 @@ private metadata:
 ```
 
 Set it in the Clerk dashboard (Organizations → your org → Metadata → Private;
-the `organization.updated` webhook syncs it) or with
-`pnpm --filter @sdp/api org:tier:local --clerk-org-id <org_…> --tier individual --overrides '{"custody":{"local":true}}'`.
+the `organization.updated` webhook syncs it).
 Without it, choosing the local signer returns `403 Local requires manual activation`.
 
 For the Clerk side of self-hosting (account creation, session token customization, webhook

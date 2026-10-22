@@ -3,7 +3,7 @@ import type { Context } from "hono";
 import { getDb } from "@/db/client";
 import { getAuth } from "@/lib/auth";
 import { badRequest, notFound } from "@/lib/errors";
-import { created, noContent, success } from "@/lib/response";
+import { created, success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import type { addMemberSchema } from "@/routes/projects/schemas";
 import { AuditService } from "@/services/audit.service";
@@ -80,39 +80,4 @@ export const addProjectMember = async (c: ValidatedBodyContext<typeof addMemberS
     },
   };
   return created(c, response);
-};
-
-export const removeProjectMember = async (c: AppContext) => {
-  const { projectId, memberId } = c.req.param();
-  const auth = getAuth(c);
-
-  const projectService = new ProjectService(getDb(c.env));
-
-  // Verify project belongs to org
-  const project = await projectService.getProject(projectId);
-  if (!project || project.organizationId !== auth.organizationId) {
-    throw notFound("Project");
-  }
-
-  // Get member to find userId
-  const memberRow = await getDb(c.env)
-    .prepare("SELECT user_id FROM project_members WHERE id = ? AND project_id = ?")
-    .bind(memberId, projectId)
-    .first<{ user_id: string }>();
-
-  if (!memberRow) {
-    throw notFound("Project member");
-  }
-
-  await projectService.removeMember(projectId, memberRow.user_id);
-
-  // Audit log
-  const auditService = new AuditService(getDb(c.env));
-  await auditService.log(c, {
-    action: "delete",
-    resourceType: "project_member",
-    resourceId: memberId,
-  });
-
-  return noContent(c);
 };

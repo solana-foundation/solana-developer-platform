@@ -60,8 +60,6 @@ import type { PrivateChannelVerifiedWalletRepository } from "./private-channel-v
 import { createPostgresPrivateChannelVerifiedWalletRepository } from "./private-channel-verified-wallet.repository.postgres";
 import type { PrivateChannelWithdrawalRepository } from "./private-channel-withdrawal.repository";
 import { createPostgresPrivateChannelWithdrawalRepository } from "./private-channel-withdrawal.repository.postgres";
-import type { ProjectUserRepository } from "./project-user.repository";
-import { createPostgresProjectUserRepository } from "./project-user.repository.postgres";
 import type { SecretRetirementsRepository } from "./secret-retirement.repository";
 import { createPostgresSecretRetirementsRepository } from "./secret-retirement.repository.postgres";
 import type { TokenRepository } from "./token.repository";
@@ -333,8 +331,4 @@ export function createPrivateChannelSettlementObservationRepository(
 
 export function createOrganizationRepository(env: Env): OrganizationRepository {
   return createPostgresOrganizationRepository(getDb(env));
-}
-
-export function createProjectUserRepository(env: Env): ProjectUserRepository {
-  return createPostgresProjectUserRepository(getDb(env));
 }

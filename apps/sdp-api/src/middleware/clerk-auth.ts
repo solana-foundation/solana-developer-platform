@@ -264,34 +264,34 @@ async function ensureMembership(
     return normalizedRole;
   }
 
-  const pendingInvite = await db
-    .prepare(
-      `SELECT id, role, expires_at
-       FROM invitations
-       WHERE organization_id = ? AND email = ? AND status = 'pending'
-       ORDER BY created_at DESC
-       LIMIT 1`
-    )
-    .bind(params.organizationId, params.email.toLowerCase())
-    .first<{ id: string; role: string; expires_at: string }>();
-
-  // Admission comes only from an SDP invitation (ADR 0012): the Clerk
-  // membership that let this token name the organization grants nothing.
-  if (!pendingInvite) {
-    throw unauthorized("No pending invitation to this organization");
-  }
-  if (new Date(pendingInvite.expires_at) < new Date()) {
-    await db
-      .prepare("UPDATE invitations SET status = 'expired' WHERE id = ? AND status = 'pending'")
-      .bind(pendingInvite.id)
-      .run();
-    throw unauthorized("Invitation to this organization has expired");
-  }
-
-  const role = normalizeOrganizationRole(pendingInvite.role);
-  const memberId = `mem_${crypto.randomUUID()}`;
-
   try {
+    const pendingInvite = await db
+      .prepare(
+        `SELECT id, role, expires_at
+         FROM invitations
+         WHERE organization_id = ? AND email = ? AND status = 'pending'
+         ORDER BY created_at DESC
+         LIMIT 1`
+      )
+      .bind(params.organizationId, params.email.toLowerCase())
+      .first<{ id: string; role: string; expires_at: string }>();
+
+    // Admission comes only from an SDP invitation (ADR 0012): the Clerk
+    // membership that let this token name the organization grants nothing.
+    if (!pendingInvite) {
+      throw unauthorized("No pending invitation to this organization");
+    }
+    if (new Date(pendingInvite.expires_at) < new Date()) {
+      await db
+        .prepare("UPDATE invitations SET status = 'expired' WHERE id = ? AND status = 'pending'")
+        .bind(pendingInvite.id)
+        .run();
+      throw unauthorized("Invitation to this organization has expired");
+    }
+
+    const role = normalizeOrganizationRole(pendingInvite.role);
+    const memberId = `mem_${crypto.randomUUID()}`;
+
     // The claim, the membership, its project memberships and the audit record
     // commit together. Claiming first alone would let a failing insert consume
     // the invitation without granting access, and inserting first would let a
@@ -377,17 +377,17 @@ async function ensureMembership(
         result: undefined,
       };
     });
+    return role;
   } catch (error) {
-    // A concurrent sign-in may have admitted this person first; the rollback
-    // released our claim, so deferring to the row that won is correct.
+    // A concurrent sign-in may have admitted this person first: it claimed the
+    // invitation before this request read it, or won the claim and rolled ours
+    // back. Either way the row that won is the answer.
     const winner = await resolveOrgMembership(db, params.userId, params.organizationId);
     if (winner?.status === "active") {
       return normalizeOrganizationRole(winner.role);
     }
     throw error;
   }
-
-  return role;
 }
 
 async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJwtPayload) {

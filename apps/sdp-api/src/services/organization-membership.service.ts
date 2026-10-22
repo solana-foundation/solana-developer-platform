@@ -189,6 +189,9 @@ async function revokePendingInvitations(
 
 /**
  * Ends the membership and the person's memberships of the organization's projects.
+ * Project memberships end only with the organization membership and carry no
+ * history of their own (the membership row and the audit log hold it), so they
+ * are deleted rather than archived.
  *
  * @param tx - The open transaction.
  * @param organizationId - The organization.
