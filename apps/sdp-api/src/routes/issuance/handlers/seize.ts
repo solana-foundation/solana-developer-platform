@@ -15,6 +15,7 @@ import {
   assertTokenAllowsOperation,
   assertTokenIsDeployed,
   parsePositiveTokenAmount,
+  withLiveIssuanceTerms,
 } from "@/services/token-operation.service";
 import { assertDestinationAllowedByControlList } from "./access-control";
 import {
@@ -52,7 +53,7 @@ export const prepareSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
   assertTokenAllowsOperation(token, "seize");
   assertTokenIsDeployed(token);
 
-  const { mosaicAmount } = parsePositiveTokenAmount(body.seize.amount, token.decimals);
+  const { amount } = parsePositiveTokenAmount(body.seize.amount, token.decimals);
 
   const isOnControlList = await tokenService.isAddressAllowed(tokenId, body.seize.destination);
   assertDestinationAllowedByControlList({
@@ -87,14 +88,19 @@ export const prepareSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
   const permanentDelegate = assertValidAddress(permanentDelegateRaw, "delegateAuthority");
 
   const mosaic = createIssuanceMosaicService(c, authority, "sponsored");
-  const prepared = await mosaic.prepareForceTransfer({
-    mint: mintAddress,
-    source,
-    destination,
-    amount: mosaicAmount,
-    permanentDelegate,
-    feePayer: signer.address,
-  });
+  // A seize is the permanent delegate's TransferChecked: on a mint with a
+  // transfer fee, the amount is what leaves the source, and the program
+  // withholds the fee in the destination (the `issuance_seize` row).
+  const prepared = await withLiveIssuanceTerms(() =>
+    mosaic.prepareForceTransfer({
+      mint: mintAddress,
+      source,
+      destination,
+      amount,
+      permanentDelegate,
+      feePayer: signer.address,
+    })
+  );
 
   let simulation: unknown;
   if (body.options?.simulate) {
@@ -194,7 +200,7 @@ export const executeSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
   assertTokenAllowsOperation(token, "seize");
   assertTokenIsDeployed(token);
 
-  const { mosaicAmount } = parsePositiveTokenAmount(body.seize.amount, token.decimals);
+  const { amount } = parsePositiveTokenAmount(body.seize.amount, token.decimals);
 
   const isOnControlList = await tokenService.isAddressAllowed(tokenId, body.seize.destination);
   assertDestinationAllowedByControlList({
@@ -290,14 +296,16 @@ export const executeSeize = async (c: ValidatedBodyContext<typeof seizeSchema>) 
   let onChainEffectCompleted = false;
 
   try {
-    const result = await mosaic.forceTransfer({
-      mint: mintAddress,
-      source,
-      destination,
-      amount: mosaicAmount,
-      permanentDelegate: signer,
-      feePayer: signer,
-    });
+    const result = await withLiveIssuanceTerms(() =>
+      mosaic.forceTransfer({
+        mint: mintAddress,
+        source,
+        destination,
+        amount,
+        permanentDelegate: signer,
+        feePayer: signer,
+      })
+    );
     onChainEffectCompleted = true;
 
     const updatedTx = await persistSettledTransactionThenOutcome({
