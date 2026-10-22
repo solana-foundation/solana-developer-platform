@@ -222,6 +222,14 @@ describe("sendTransferUnderKey", () => {
   });
 });
 
+describe("transferRequestFingerprint", () => {
+  it("tells apart sends of one payment to different counterparty accounts", () => {
+    expect(
+      transferRequestFingerprint({ ...SUBMISSION, counterpartyAccountId: "cpa_first" })
+    ).not.toBe(transferRequestFingerprint({ ...SUBMISSION, counterpartyAccountId: "cpa_second" }));
+  });
+});
+
 describe("concurrent transfer submissions", () => {
   it("joins simultaneous sends of one payment into a single request", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () =>

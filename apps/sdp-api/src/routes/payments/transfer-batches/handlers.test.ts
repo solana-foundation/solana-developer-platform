@@ -1514,6 +1514,40 @@ describe("payment transfer batches", () => {
     expect(signingOutcomeMock).toHaveBeenCalledTimes(sends);
   });
 
+  it("refuses a recipient account whose counterparty is archived", async () => {
+    const counterpartyId = await seedCounterparty("batch_archived_counterparty");
+    const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+    await getDb(env).execute("UPDATE counterparties SET status = 'archived' WHERE id = ?", [
+      counterpartyId,
+    ]);
+
+    const response = await app.request(
+      "/v1/payments/transfer-batches",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          "Idempotency-Key": crypto.randomUUID(),
+        },
+        body: JSON.stringify({
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          token: "SOL",
+          recipients: [{ counterpartyAccountId, amount: "0.1" }],
+          options: { preflight: false },
+        }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({ error: { code: "NOT_FOUND" } });
+    expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
+  });
+
   it("replays the original transfer batch for the same idempotency key and payload", async () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);

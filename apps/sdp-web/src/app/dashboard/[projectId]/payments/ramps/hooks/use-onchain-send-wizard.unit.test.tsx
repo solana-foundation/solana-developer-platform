@@ -254,6 +254,7 @@ describe("useOnchainSendWizard", () => {
     expect(result.current.readySubmission).toEqual({
       sourceCustodyWalletId: "wallet-usdc",
       destination: DESTINATION,
+      counterpartyAccountId: cryptoAccount.id,
       token: SECOND_MINT,
       amount: "0.5",
     });
@@ -262,6 +263,7 @@ describe("useOnchainSendWizard", () => {
     expect(result.current.readySubmission).toEqual({
       sourceCustodyWalletId: "wallet-usdc",
       destination: DESTINATION,
+      counterpartyAccountId: cryptoAccount.id,
       token: SECOND_MINT,
       amount: "0.5",
       memo: "invoice-42",
@@ -286,6 +288,7 @@ describe("useOnchainSendWizard", () => {
     expect(JSON.parse(String(transferCall?.[1]?.body))).toEqual({
       sourceCustodyWalletId: "wallet-usdc",
       destination: DESTINATION,
+      counterpartyAccountId: cryptoAccount.id,
       token: SECOND_MINT,
       amount: "0.5",
     });

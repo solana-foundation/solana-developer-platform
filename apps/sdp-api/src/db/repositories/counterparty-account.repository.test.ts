@@ -711,4 +711,58 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
       expect(foreign.total).toBe(0);
     });
   });
+
+  describe("listCounterpartyAccountsWithCounterpartyStatus", () => {
+    async function seedArchivedAccountOfArchivedCounterparty() {
+      const counterparty = await seedCounterparty();
+      const tenant = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID };
+      const account = await repo.createCounterpartyAccount({
+        ...tenant,
+        counterpartyId: counterparty.id,
+        accountKind: "crypto_wallet",
+        details: TEST_ACCOUNT_DETAILS,
+      });
+      assert(account);
+      await repo.archiveCounterpartyAccount({
+        counterpartyAccountId: account.id,
+        counterpartyId: counterparty.id,
+        ...tenant,
+      });
+      await createPostgresCounterpartiesRepository(getDb(env)).archiveCounterparty({
+        counterpartyId: counterparty.id,
+        ...tenant,
+      });
+      return account.id;
+    }
+
+    it("returns a named account with its counterparty's status, whatever either is", async () => {
+      const accountId = await seedArchivedAccountOfArchivedCounterparty();
+
+      const rows = await repo.listCounterpartyAccountsWithCounterpartyStatus({
+        counterpartyAccountIds: [accountId],
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+      });
+
+      expect(rows).toEqual([
+        expect.objectContaining({
+          id: accountId,
+          status: "archived",
+          counterparty_status: "archived",
+        }),
+      ]);
+    });
+
+    it("returns nothing for the account when read as another project of the organization", async () => {
+      const accountId = await seedArchivedAccountOfArchivedCounterparty();
+
+      const rows = await repo.listCounterpartyAccountsWithCounterpartyStatus({
+        counterpartyAccountIds: [accountId],
+        organizationId: TEST_ORG.id,
+        projectId: `${TEST_PROJECT_ID}_production`,
+      });
+
+      expect(rows).toEqual([]);
+    });
+  });
 });
