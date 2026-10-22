@@ -599,7 +599,9 @@ describe("PaymentRequestsRepository (postgres)", () => {
 
   describe("reconciler queries", () => {
     it("lists hot requests whose sponsored transaction can still land, stalest first", async () => {
-      const live = await repo.createPaymentRequest(createInput({ token: SOL_MINT, expiresAt: null }));
+      const live = await repo.createPaymentRequest(
+        createInput({ token: SOL_MINT, expiresAt: null })
+      );
       const lapsedClaim = await repo.createPaymentRequest(
         createInput({ token: SOL_MINT, expiresAt: null })
       );
@@ -633,9 +635,15 @@ describe("PaymentRequestsRepository (postgres)", () => {
     });
 
     it("lists unexpired awaiting requests not checked since the cutoff, never-checked first", async () => {
-      const never = await repo.createPaymentRequest(createInput({ token: SOL_MINT, expiresAt: null }));
-      const old = await repo.createPaymentRequest(createInput({ token: SOL_MINT, expiresAt: null }));
-      const fresh = await repo.createPaymentRequest(createInput({ token: SOL_MINT, expiresAt: null }));
+      const never = await repo.createPaymentRequest(
+        createInput({ token: SOL_MINT, expiresAt: null })
+      );
+      const old = await repo.createPaymentRequest(
+        createInput({ token: SOL_MINT, expiresAt: null })
+      );
+      const fresh = await repo.createPaymentRequest(
+        createInput({ token: SOL_MINT, expiresAt: null })
+      );
       const lapsed = await repo.createPaymentRequest(
         createInput({ token: SOL_MINT, expiresAt: "2020-01-01T00:00:00.000Z" })
       );
@@ -692,10 +700,17 @@ describe("PaymentRequestsRepository (postgres)", () => {
       );
       const transferId = await seedInboundTransfer(request);
       const systemRepo = createSystemPaymentRequestsRepository(env);
-      const scoped = { requestId: request.id, organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID };
+      const scoped = {
+        requestId: request.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+      };
 
       expect(
-        await systemRepo.markExpiredPaymentRequestPaidLate({ ...scoped, fulfilledByTransferId: transferId })
+        await systemRepo.markExpiredPaymentRequestPaidLate({
+          ...scoped,
+          fulfilledByTransferId: transferId,
+        })
       ).toBeNull();
 
       await repo.markPaymentRequest({
@@ -709,7 +724,11 @@ describe("PaymentRequestsRepository (postgres)", () => {
         fulfilledByTransferId: transferId,
       });
 
-      expect(paid).toMatchObject({ status: "paid", paid_late: true, fulfilled_by_transfer_id: transferId });
+      expect(paid).toMatchObject({
+        status: "paid",
+        paid_late: true,
+        fulfilled_by_transfer_id: transferId,
+      });
       expect(paid?.lifecycle.map((event) => event.status)).toEqual([
         "awaiting_payment",
         "expired",
