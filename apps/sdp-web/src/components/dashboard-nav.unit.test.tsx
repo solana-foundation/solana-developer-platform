@@ -62,7 +62,6 @@ function moreSheetMarkup(overrides: Partial<ComponentProps<typeof DashboardMoreS
   return renderToStaticMarkup(
     <DashboardMoreSheet
       pathname="/dashboard"
-      canManageOrgSettings={false}
       dvpEnabled={false}
       earnEnabled={false}
       heliusRingsEnabled={false}

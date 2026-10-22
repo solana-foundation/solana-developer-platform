@@ -45,7 +45,7 @@ describe("SidebarUserMenu", () => {
     const user = userEvent.setup();
     render(
       <I18nProvider locale="en" messages={getMessages("en")}>
-        <SidebarUserMenu collapsed={false} canManageOrgSettings menuSide="right" />
+        <SidebarUserMenu collapsed={false} menuSide="right" />
       </I18nProvider>
     );
 
@@ -69,7 +69,7 @@ describe("SidebarUserMenu", () => {
     const user = userEvent.setup();
     render(
       <I18nProvider locale="en" messages={getMessages("en")}>
-        <SidebarUserMenu collapsed={false} canManageOrgSettings menuSide="right" />
+        <SidebarUserMenu collapsed={false} menuSide="right" />
       </I18nProvider>
     );
 
