@@ -1,4 +1,6 @@
+import { ORGANIZATION_STATUSES } from "@sdp/types/organizations";
 import type { Context } from "hono";
+import { z } from "zod";
 import { type DatabaseClient, getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { conflict, internalError } from "@/lib/errors";
@@ -19,6 +21,7 @@ type AppContext = Context<{ Bindings: Env }>;
 
 const ORGANIZATION_COLUMNS = "id, name, slug, tier, status, settings, created_at, updated_at";
 const SLUG_ATTEMPTS = 3;
+const organizationStatusSchema = z.object({ status: z.enum(ORGANIZATION_STATUSES) });
 
 /**
  * Creates the caller's organization (ADR 0012), staged so that a retry after
@@ -245,12 +248,13 @@ async function activateOrganization(
     const current = await tx
       .prepare("SELECT status FROM organizations WHERE id = ? FOR UPDATE")
       .bind(params.organizationId)
-      .first<{ status: string }>();
+      .first<Record<string, unknown>>();
     if (!current) {
       throw internalError("Provisioning organization is missing");
     }
+    const { status } = organizationStatusSchema.parse(current);
     // A concurrent attempt activated it first.
-    if (current.status !== "provisioning") {
+    if (status !== "provisioning") {
       return { entry: null, result: undefined };
     }
     await tx
