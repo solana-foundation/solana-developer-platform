@@ -284,6 +284,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
         status: "canceled",
         fulfilledByTransferId: null,
         canceledBy: TEST_USER.id,
+        paidLate: false,
       });
 
       const { rows, total } = await repo.listPaymentRequests({
@@ -310,6 +311,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
         status: "canceled",
         fulfilledByTransferId: null,
         canceledBy: TEST_USER.id,
+        paidLate: false,
       });
 
       expect(canceled?.status).toBe("canceled");
@@ -329,6 +331,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
           status: "canceled",
           fulfilledByTransferId: null,
           canceledBy: TEST_USER.id,
+          paidLate: false,
         });
       await expectProjectScoped(
         transition,
@@ -348,6 +351,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
         status: "paid",
         fulfilledByTransferId: "xfr_settle",
         canceledBy: null,
+        paidLate: false,
       });
 
       expect(paid?.status).toBe("paid");
@@ -367,6 +371,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
           status: "paid",
           fulfilledByTransferId: null,
           canceledBy: null,
+          paidLate: false,
         })
       ).rejects.toThrow();
     });
@@ -382,6 +387,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
           status: "expired",
           fulfilledByTransferId: null,
           canceledBy: TEST_USER.id,
+          paidLate: false,
         })
       ).rejects.toThrow();
     });
@@ -396,6 +402,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
         status: "expired",
         fulfilledByTransferId: null,
         canceledBy: null,
+        paidLate: false,
       });
       expect(expired?.status).toBe("expired");
     });
@@ -409,6 +416,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
         status: "canceled",
         fulfilledByTransferId: null,
         canceledBy: TEST_USER.id,
+        paidLate: false,
       });
 
       const second = await repo.markPaymentRequest({
@@ -418,6 +426,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
         status: "paid",
         fulfilledByTransferId: null,
         canceledBy: null,
+        paidLate: false,
       });
       expect(second).toBeNull();
 
@@ -572,6 +581,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
         status: "canceled",
         fulfilledByTransferId: null,
         canceledBy: TEST_USER.id,
+        paidLate: false,
       });
       expect(
         await repo.claimSponsoredTransactionWindow({
@@ -694,7 +704,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
       expect(rows.map((row) => row.id)).toEqual([lapsed.id]);
     });
 
-    it("moves only an expired request to paid late", async () => {
+    it("moves only an expired request to paid, recording lateness as given", async () => {
       const request = await repo.createPaymentRequest(
         createInput({ token: SOL_MINT, expiresAt: "2020-01-01T00:00:00.000Z" })
       );
@@ -707,9 +717,10 @@ describe("PaymentRequestsRepository (postgres)", () => {
       };
 
       expect(
-        await systemRepo.markExpiredPaymentRequestPaidLate({
+        await systemRepo.markExpiredPaymentRequestPaid({
           ...scoped,
           fulfilledByTransferId: transferId,
+          paidLate: true,
         })
       ).toBeNull();
 
@@ -718,10 +729,12 @@ describe("PaymentRequestsRepository (postgres)", () => {
         status: "expired",
         fulfilledByTransferId: null,
         canceledBy: null,
+        paidLate: false,
       });
-      const paid = await systemRepo.markExpiredPaymentRequestPaidLate({
+      const paid = await systemRepo.markExpiredPaymentRequestPaid({
         ...scoped,
         fulfilledByTransferId: transferId,
+        paidLate: true,
       });
 
       expect(paid).toMatchObject({
@@ -734,6 +747,33 @@ describe("PaymentRequestsRepository (postgres)", () => {
         "expired",
         "paid",
       ]);
+    });
+
+    it("moves an expired request to paid on time when lateness is false", async () => {
+      const request = await repo.createPaymentRequest(
+        createInput({ token: SOL_MINT, expiresAt: "2020-01-01T00:00:00.000Z" })
+      );
+      const transferId = await seedInboundTransfer(request);
+      const scoped = {
+        requestId: request.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+      };
+      await repo.markPaymentRequest({
+        ...scoped,
+        status: "expired",
+        fulfilledByTransferId: null,
+        canceledBy: null,
+        paidLate: false,
+      });
+
+      const paid = await createSystemPaymentRequestsRepository(env).markExpiredPaymentRequestPaid({
+        ...scoped,
+        fulfilledByTransferId: transferId,
+        paidLate: false,
+      });
+
+      expect(paid).toMatchObject({ status: "paid", paid_late: false });
     });
 
     it("stamps last_checked_at on every listed id", async () => {

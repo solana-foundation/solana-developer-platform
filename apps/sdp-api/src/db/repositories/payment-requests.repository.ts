@@ -24,7 +24,7 @@ export interface PaymentRequestRow {
   id: string;
   public_token: string;
   organization_id: string;
-  project_id: string | null;
+  project_id: string;
   custody_wallet_id: string | null;
   wallet_id: string;
   destination_address: string;
@@ -62,14 +62,15 @@ export interface MarkPaymentRequestInput {
   status: Exclude<PaymentRequestStatus, "awaiting_payment">;
   fulfilledByTransferId: string | null;
   canceledBy: string | null;
-  paidLate?: boolean;
+  paidLate: boolean;
 }
 
-export interface MarkExpiredPaymentRequestPaidLateInput {
+export interface MarkExpiredPaymentRequestPaidInput {
   requestId: string;
   organizationId: string;
   projectId: string;
   fulfilledByTransferId: string;
+  paidLate: boolean;
 }
 
 export interface ListPaymentRequestsInput {
@@ -137,8 +138,8 @@ export interface PaymentRequestsRepository {
     limit: number;
   }): Promise<PaymentRequestRow[]>;
   markPaymentRequestsChecked(requestIds: readonly string[]): Promise<void>;
-  markExpiredPaymentRequestPaidLate(
-    input: MarkExpiredPaymentRequestPaidLateInput
+  markExpiredPaymentRequestPaid(
+    input: MarkExpiredPaymentRequestPaidInput
   ): Promise<PaymentRequestRow | null>;
   countStaleAwaitingPaymentRequests(params: {
     environment: SdpEnvironment;

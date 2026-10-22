@@ -38,6 +38,7 @@ import { env } from "@/test/helpers/env";
 import {
   createKoraAdapterMock,
   getRecentBlockhashMock,
+  getSignaturesForAddressMock,
   installPaymentsRouteTestHooks,
   TEST_CUSTODY_WALLET_ID,
   TEST_ORG,
@@ -325,7 +326,11 @@ describe("Public payment request routes", () => {
           expect.objectContaining({ projectId: wallet.projectId }),
           "payments.pay_request"
         );
-        expect(rpc.calls).toContainEqual({ cluster, method: "getSignaturesForAddress" });
+        expect(
+          new Set(
+            getSignaturesForAddressMock.mock.calls.map(([client]) => clusterOfRpcClient(client))
+          )
+        ).toEqual(new Set([cluster]));
         expect(rpc.calls).toContainEqual({ cluster, method: "getBlockHeight" });
         expect(calledClusters()).toEqual(new Set([cluster]));
         expect(

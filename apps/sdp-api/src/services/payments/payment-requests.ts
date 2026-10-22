@@ -1,16 +1,12 @@
 import { createClusterRpc } from "@sdp/rpc/factory";
-import type { SolanaRpc } from "@sdp/rpc/solana";
+import { getSignaturesForAddress, type SolanaRpc } from "@sdp/rpc/solana";
 import { verifyTransactionLanded } from "@sdp/rpc/verified-confirmation";
 import { assertValidAddress } from "@sdp/solana/address";
 import { toNumberAmount } from "@sdp/solana/amount";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import type { Signature } from "@solana/kit";
-import {
-  FindReferenceError,
-  findReference,
-  ValidateTransferError,
-  validateTransfer,
-} from "@solana/pay";
+import { ValidateTransferError, validateTransfer } from "@solana/pay";
+import { asTransactionalClient, getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import type {
   PaymentRequestRow,
@@ -18,23 +14,35 @@ import type {
 } from "@/db/repositories/payment-requests.repository";
 import {
   generatePaymentTransferId,
+  type PaymentsRepository,
   type PaymentTransferRow,
 } from "@/db/repositories/payments.repository";
 import {
   createPaymentRequestsRepository,
-  createPaymentsRepository,
+  createTransactionalPaymentRequestsRepository,
+  createTransactionalPaymentsRepository,
 } from "@/db/repositories/repository-factory";
 import { AppError, internalError, nullOnExpected } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import type { Env } from "@/types/env";
 
+const REFERENCE_SIGNATURE_LIMIT = 100;
+const MAX_PAYMENT_CANDIDATES = 10;
+
 export function isPaymentRequestExpired(expiresAt: string | null): boolean {
   return expiresAt !== null && Date.parse(expiresAt) <= Date.now();
 }
 
-type FoundPayment = Awaited<ReturnType<typeof findReference>>;
+interface FoundPayment {
+  signature: Signature;
+  slot: bigint;
+  blockTime: bigint | null;
+}
 
-type SettlementTiming = "on_time" | "late" | "after_expired";
+type PaymentSearchResult =
+  | { kind: "paid"; found: FoundPayment }
+  | { kind: "pending" }
+  | { kind: "none" };
 
 interface PaymentRequestKey {
   requestId: string;
@@ -66,11 +74,11 @@ export async function checkAwaitingPaymentRequest(
   ) {
     return row;
   }
-  const found = await findValidPayment(createClusterRpc(), row);
-  if (found === null) {
+  const result = await findValidPayment(createClusterRpc(), row);
+  if (result.kind !== "paid") {
     return row;
   }
-  return settlePaymentRequest(env, row, row.custody_wallet_id, found, "on_time");
+  return settlePaymentRequest(env, row, row.custody_wallet_id, result.found);
 }
 
 export async function closeLapsedPaymentRequest(
@@ -81,10 +89,12 @@ export async function closeLapsedPaymentRequest(
     return row;
   }
   if (row.custody_wallet_id !== null) {
-    const found = await findValidPayment(createClusterRpc(), row);
-    if (found !== null) {
-      const timing = landedAfterExpiry(found, row.expires_at) ? "late" : "on_time";
-      return settlePaymentRequest(env, row, row.custody_wallet_id, found, timing);
+    const result = await findValidPayment(createClusterRpc(), row);
+    if (result.kind === "paid") {
+      return settlePaymentRequest(env, row, row.custody_wallet_id, result.found);
+    }
+    if (result.kind === "pending") {
+      return row;
     }
   }
   return markExpired(env, row);
@@ -97,89 +107,142 @@ export async function checkExpiredPaymentRequestForLatePayment(
   if (row.status !== "expired" || row.custody_wallet_id === null) {
     return row;
   }
-  const found = await findValidPayment(createClusterRpc(), row);
-  if (found === null) {
+  const result = await findValidPayment(createClusterRpc(), row);
+  if (result.kind !== "paid") {
     return row;
   }
-  return settlePaymentRequest(env, row, row.custody_wallet_id, found, "after_expired");
+  return settlePaymentRequest(env, row, row.custody_wallet_id, result.found);
 }
 
-function landedAfterExpiry(found: FoundPayment, expiresAt: string | null): boolean {
+function isPaidLate(blockTime: bigint | null, expiresAt: string | null): boolean {
   if (expiresAt === null) {
     return false;
   }
-  if (found.blockTime === null) {
-    return true;
-  }
-  return Number(found.blockTime) * 1000 > Date.parse(expiresAt);
+  return blockTime !== null
+    ? Number(blockTime) * 1000 > Date.parse(expiresAt)
+    : isPaymentRequestExpired(expiresAt);
 }
 
 async function findValidPayment(
   rpc: SolanaRpc,
   row: PaymentRequestRow
-): Promise<FoundPayment | null> {
+): Promise<PaymentSearchResult> {
   const reference = assertValidAddress(row.reference, "reference");
+  const signatures = await getSignaturesForAddress(rpc, reference, {
+    commitment: "confirmed",
+    limit: REFERENCE_SIGNATURE_LIMIT,
+  });
+  const candidates = signatures
+    .filter((info) => info.err === null)
+    .reverse()
+    .slice(0, MAX_PAYMENT_CANDIDATES);
 
-  const found = await nullOnExpected(
-    findReference(rpc, reference, { commitment: "confirmed" }),
-    FindReferenceError
-  );
-  if (found === null) {
-    return null;
+  let pending = false;
+  for (const candidate of candidates) {
+    const verified = await verifyTransactionLanded(rpc, candidate.signature);
+    if (!verified.ok) {
+      pending ||= verified.reason === "not_indexed";
+      continue;
+    }
+    const validated = await nullOnExpected(
+      validateTransfer(rpc, candidate.signature, {
+        recipient: assertValidAddress(row.destination_address, "destinationAddress"),
+        amount: toNumberAmount(row.amount),
+        reference,
+        ...(row.token === SOL_MINT ? {} : { splToken: assertValidAddress(row.token, "token") }),
+      }),
+      ValidateTransferError
+    );
+    if (validated !== null) {
+      return {
+        kind: "paid",
+        found: {
+          signature: candidate.signature,
+          slot: candidate.slot,
+          blockTime: candidate.blockTime ?? verified.transaction.blockTime ?? null,
+        },
+      };
+    }
   }
-
-  const verified = await verifyTransactionLanded(rpc, found.signature as unknown as Signature);
-  if (!verified.ok) {
-    return null;
-  }
-
-  const validated = await nullOnExpected(
-    validateTransfer(rpc, found.signature, {
-      recipient: assertValidAddress(row.destination_address, "destinationAddress"),
-      amount: toNumberAmount(row.amount),
-      reference,
-      ...(row.token === SOL_MINT ? {} : { splToken: assertValidAddress(row.token, "token") }),
-    }),
-    ValidateTransferError
-  );
-  return validated === null ? null : found;
+  return pending ? { kind: "pending" } : { kind: "none" };
 }
 
 async function settlePaymentRequest(
   env: Env,
   row: PaymentRequestRow,
   custodyWalletId: string,
-  found: FoundPayment,
-  timing: SettlementTiming
+  found: FoundPayment
 ): Promise<PaymentRequestRow> {
   const key = paymentRequestKey(row);
-  const transfer = await recordInboundTransfer(env, row, key.projectId, custodyWalletId, found);
-  const requestsRepo = paymentRequestsRepositoryFor(env, key);
+  const scope = createTenantScope({ organizationId: key.organizationId, projectId: key.projectId });
+  const paidLate = isPaidLate(found.blockTime, row.expires_at);
+  const settle = () =>
+    getDb(env).transaction(async (tx) => {
+      const db = asTransactionalClient(tx);
+      const transfer = await recordInboundTransfer(
+        createTransactionalPaymentsRepository(db, scope),
+        row,
+        key.projectId,
+        custodyWalletId,
+        found
+      );
+      return transitionToPaid(
+        createTransactionalPaymentRequestsRepository(db, scope),
+        row,
+        key,
+        transfer.id,
+        paidLate
+      );
+    });
+  try {
+    return await settle();
+  } catch (err) {
+    if (!isPostgresUniqueViolation(err)) {
+      throw err;
+    }
+    return settle();
+  }
+}
 
-  const settled =
-    timing === "after_expired"
-      ? await requestsRepo.markExpiredPaymentRequestPaidLate({
-          ...key,
-          fulfilledByTransferId: transfer.id,
-        })
-      : await requestsRepo.markPaymentRequest({
-          ...key,
-          status: "paid",
-          fulfilledByTransferId: transfer.id,
-          canceledBy: null,
-          paidLate: timing === "late",
-        });
-  return settled ?? (await reread(requestsRepo, key));
+async function transitionToPaid(
+  requestsRepo: PaymentRequestsRepository,
+  row: PaymentRequestRow,
+  key: PaymentRequestKey,
+  transferId: string,
+  paidLate: boolean
+): Promise<PaymentRequestRow> {
+  const paid = { ...key, fulfilledByTransferId: transferId, paidLate };
+  if (row.status === "awaiting_payment") {
+    const settled = await requestsRepo.markPaymentRequest({
+      ...paid,
+      status: "paid",
+      canceledBy: null,
+    });
+    if (settled) {
+      return settled;
+    }
+  }
+  const current = await reread(requestsRepo, key);
+  if (current.status !== "expired") {
+    return current;
+  }
+  return (
+    (await requestsRepo.markExpiredPaymentRequestPaid(paid)) ?? (await reread(requestsRepo, key))
+  );
 }
 
 async function markExpired(env: Env, row: PaymentRequestRow): Promise<PaymentRequestRow> {
   const key = paymentRequestKey(row);
-  const requestsRepo = paymentRequestsRepositoryFor(env, key);
+  const requestsRepo = createPaymentRequestsRepository(
+    env,
+    createTenantScope({ organizationId: key.organizationId, projectId: key.projectId })
+  );
   const expired = await requestsRepo.markPaymentRequest({
     ...key,
     status: "expired",
     fulfilledByTransferId: null,
     canceledBy: null,
+    paidLate: false,
   });
   return expired ?? (await reread(requestsRepo, key));
 }
@@ -195,91 +258,23 @@ async function reread(
   return current;
 }
 
-function paymentRequestsRepositoryFor(env: Env, key: PaymentRequestKey): PaymentRequestsRepository {
-  return createPaymentRequestsRepository(
-    env,
-    createTenantScope({ organizationId: key.organizationId, projectId: key.projectId })
-  );
-}
-
 function paymentRequestKey(row: PaymentRequestRow): PaymentRequestKey {
-  const projectId = row.project_id;
-  // TODO: once migration 0129 makes payment_requests.project_id NOT NULL (HOO-1966), narrow PaymentRequestRow.project_id to string and delete this guard.
-  if (projectId === null) {
-    throw internalError("payment_requests row is missing project_id");
-  }
-  return { requestId: row.id, organizationId: row.organization_id, projectId };
+  return { requestId: row.id, organizationId: row.organization_id, projectId: row.project_id };
 }
 
-/**
- * Records the inbound transfer that fulfilled a payment request.
- *
- * A concurrent reconcile of the same request inserts the same signature
- * (payment_transfers.signature is UNIQUE), so on a duplicate insert this
- * converges on the already-recorded row instead of bubbling the error.
- *
- * @param found - The on-chain transaction that paid the request.
- * @returns The recorded transfer row, whether inserted here or by a
- *   concurrent reconcile.
- */
 async function recordInboundTransfer(
-  env: Env,
+  paymentsRepo: PaymentsRepository,
   row: PaymentRequestRow,
   projectId: string,
   custodyWalletId: string,
-  found: Awaited<ReturnType<typeof findReference>>
+  found: FoundPayment
 ): Promise<PaymentTransferRow> {
-  const paymentsRepo = createPaymentsRepository(
-    env,
-    createTenantScope({
-      organizationId: row.organization_id,
-      projectId,
-    })
-  );
-  try {
-    const transfer = await paymentsRepo.createTransfer({
-      id: generatePaymentTransferId(),
-      organizationId: row.organization_id,
-      projectId,
-      custodyWalletId,
-      walletId: row.wallet_id,
-      counterpartyId: null,
-      sourceAddress: null,
-      destinationAddress: row.destination_address,
-      token: row.token,
-      amount: row.amount,
-      memo: null,
-      type: "transfer",
-      direction: "inbound",
-      status: "confirmed",
-      provider: null,
-      providerReference: null,
-      deliveryMode: null,
-      fiatCurrency: null,
-      fiatAmount: null,
-      providerData: {},
-      serializedTx: null,
-      signature: found.signature,
-      slot: Number(found.slot),
-      initiatedByKeyId: null,
-    });
-    if (!transfer) {
-      throw internalError("Failed to record inbound transfer for payment request settlement");
-    }
-    return transfer;
-  } catch (err) {
-    if (!isPostgresUniqueViolation(err)) {
-      throw err;
-    }
-    const recorded = await paymentsRepo.listTransfersBySignatures({
-      signatures: [found.signature],
-      organizationId: row.organization_id,
-      projectId,
-    });
-    const existing = recorded[0];
-    if (!existing) {
-      throw err;
-    }
+  const [existing] = await paymentsRepo.listTransfersBySignatures({
+    signatures: [found.signature],
+    organizationId: row.organization_id,
+    projectId,
+  });
+  if (existing) {
     if (
       existing.custody_wallet_id !== row.custody_wallet_id ||
       existing.wallet_id !== row.wallet_id ||
@@ -293,4 +288,34 @@ async function recordInboundTransfer(
     }
     return existing;
   }
+  const transfer = await paymentsRepo.createTransfer({
+    id: generatePaymentTransferId(),
+    organizationId: row.organization_id,
+    projectId,
+    custodyWalletId,
+    walletId: row.wallet_id,
+    counterpartyId: null,
+    sourceAddress: null,
+    destinationAddress: row.destination_address,
+    token: row.token,
+    amount: row.amount,
+    memo: null,
+    type: "transfer",
+    direction: "inbound",
+    status: "confirmed",
+    provider: null,
+    providerReference: null,
+    deliveryMode: null,
+    fiatCurrency: null,
+    fiatAmount: null,
+    providerData: {},
+    serializedTx: null,
+    signature: found.signature,
+    slot: Number(found.slot),
+    initiatedByKeyId: null,
+  });
+  if (!transfer) {
+    throw internalError("Failed to record inbound transfer for payment request settlement");
+  }
+  return transfer;
 }

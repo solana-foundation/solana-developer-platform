@@ -7,7 +7,7 @@ import type {
   CreatePaymentRequestInput,
   ListPaymentRequestsInput,
   ListPaymentRequestsResult,
-  MarkExpiredPaymentRequestPaidLateInput,
+  MarkExpiredPaymentRequestPaidInput,
   MarkPaymentRequestInput,
   PaymentRequestRow,
   PaymentRequestsRepository,
@@ -23,7 +23,7 @@ function mapPaymentRequestRow(row: Record<string, unknown>): PaymentRequestRow {
     id: row.id as string,
     public_token: row.public_token as string,
     organization_id: row.organization_id as string,
-    project_id: row.project_id as string | null,
+    project_id: row.project_id as string,
     custody_wallet_id: parseNullableCustodyWalletId(row.custody_wallet_id),
     wallet_id: row.wallet_id as string,
     destination_address: row.destination_address as string,
@@ -38,7 +38,7 @@ function mapPaymentRequestRow(row: Record<string, unknown>): PaymentRequestRow {
     created_by: row.created_by as string | null,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
-    last_checked_at: (row.last_checked_at as string | null) ?? null,
+    last_checked_at: row.last_checked_at as string | null,
     paid_late: row.paid_late === true,
   };
 }
@@ -139,7 +139,7 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
           input.status,
           input.fulfilledByTransferId,
           input.canceledBy,
-          input.paidLate ?? false,
+          input.paidLate,
           input.status,
           input.requestId,
           input.organizationId,
@@ -366,12 +366,12 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
         .run();
     },
 
-    async markExpiredPaymentRequestPaidLate(input: MarkExpiredPaymentRequestPaidLateInput) {
+    async markExpiredPaymentRequestPaid(input: MarkExpiredPaymentRequestPaidInput) {
       const row = await db
         .prepare(
           `UPDATE payment_requests
              SET status = 'paid',
-                 paid_late = true,
+                 paid_late = ?,
                  fulfilled_by_transfer_id = ?,
                  lifecycle = lifecycle || jsonb_build_array(
                    jsonb_build_object('status', 'paid', 'at', sdp_iso_now())
@@ -384,7 +384,13 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
              AND status = 'expired'
            RETURNING *`
         )
-        .bind(input.fulfilledByTransferId, input.requestId, input.organizationId, input.projectId)
+        .bind(
+          input.paidLate,
+          input.fulfilledByTransferId,
+          input.requestId,
+          input.organizationId,
+          input.projectId
+        )
         .first<Record<string, unknown>>();
       return row ? mapPaymentRequestRow(row) : null;
     },

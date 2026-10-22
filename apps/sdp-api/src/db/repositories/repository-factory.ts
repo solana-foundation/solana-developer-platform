@@ -130,26 +130,35 @@ export function createPaymentRecurringPaymentsRepository(
   );
 }
 
+const PAYMENT_REQUESTS_SYSTEM_ONLY_METHODS = [
+  "getPaymentRequestByPublicToken",
+  "claimSponsoredTransactionWindow",
+  "getSponsoredTransactionClaim",
+  "storeSponsoredTransactionSignature",
+  "listHotPaymentRequests",
+  "listPaymentRequestsDueForCheck",
+  "listLapsedPaymentRequests",
+  "listExpiredPaymentRequestsForLateCheck",
+  "markPaymentRequestsChecked",
+  "countStaleAwaitingPaymentRequests",
+] as const;
+
 export function createPaymentRequestsRepository(
   env: Env,
   scope: TenantScope
 ): PaymentRequestsRepository {
+  return createTransactionalPaymentRequestsRepository(getDb(env), scope);
+}
+
+export function createTransactionalPaymentRequestsRepository(
+  db: AppDb,
+  scope: TenantScope
+): PaymentRequestsRepository {
   return bindRepositoryToTenant(
-    createPostgresPaymentRequestsRepository(getDb(env)),
+    createPostgresPaymentRequestsRepository(db),
     scope,
     "PaymentRequestsRepository",
-    [
-      "getPaymentRequestByPublicToken",
-      "claimSponsoredTransactionWindow",
-      "getSponsoredTransactionClaim",
-      "storeSponsoredTransactionSignature",
-      "listHotPaymentRequests",
-      "listPaymentRequestsDueForCheck",
-      "listLapsedPaymentRequests",
-      "listExpiredPaymentRequestsForLateCheck",
-      "markPaymentRequestsChecked",
-      "countStaleAwaitingPaymentRequests",
-    ]
+    PAYMENT_REQUESTS_SYSTEM_ONLY_METHODS
   );
 }
 

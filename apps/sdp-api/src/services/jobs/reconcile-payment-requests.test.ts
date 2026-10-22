@@ -1,7 +1,6 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
+import * as solanaRpc from "@sdp/rpc/solana";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
-import * as solanaPay from "@solana/pay";
-import { FindReferenceError } from "@solana/pay";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import {
@@ -122,7 +121,7 @@ describe("reconcilePaymentRequests", () => {
   installJobHooks();
 
   it("stamps last_checked_at on every row it read, paid or not", async () => {
-    vi.spyOn(solanaPay, "findReference").mockRejectedValue(new FindReferenceError("not found"));
+    vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);
     const request = await createRequest({ token: SOL_MINT, expiresAt: null });
 
     await onSandbox(() => reconcilePaymentRequests(env));
@@ -137,9 +136,9 @@ describe("reconcilePaymentRequests", () => {
     const first = await createRequest({ token: SOL_MINT, expiresAt: null });
     const second = await createRequest({ token: SOL_MINT, expiresAt: null });
     const findReference = vi
-      .spyOn(solanaPay, "findReference")
+      .spyOn(solanaRpc, "getSignaturesForAddress")
       .mockRejectedValueOnce(new Error("rpc down"))
-      .mockRejectedValueOnce(new FindReferenceError("not found"));
+      .mockResolvedValueOnce([]);
 
     await onSandbox(() => reconcilePaymentRequests(env));
 
@@ -154,7 +153,7 @@ describe("reconcilePaymentRequests", () => {
 
   it("logs the stale backlog when awaiting rows go unchecked", async () => {
     const log = vi.spyOn(moneyPathEvents, "logEvent");
-    vi.spyOn(solanaPay, "findReference").mockRejectedValue(new FindReferenceError("not found"));
+    vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);
     const request = await createRequest({ token: SOL_MINT, expiresAt: null });
     await getDb(env)
       .prepare("UPDATE payment_requests SET created_at = ?, last_checked_at = ? WHERE id = ?")
@@ -174,9 +173,7 @@ describe("reconcileHotPaymentRequests", () => {
   installJobHooks();
 
   it("checks only rows whose sponsored transaction can still land", async () => {
-    const findReference = vi
-      .spyOn(solanaPay, "findReference")
-      .mockRejectedValue(new FindReferenceError("not found"));
+    const findReference = vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);
     const hot = await createRequest({ token: SOL_MINT, expiresAt: null });
     await createRequest({ token: SOL_MINT, expiresAt: null });
     await getDb(env)
@@ -198,7 +195,7 @@ describe("expirePaymentRequests", () => {
   installJobHooks();
 
   it("stores expired for a lapsed request with no payment", async () => {
-    vi.spyOn(solanaPay, "findReference").mockRejectedValue(new FindReferenceError("not found"));
+    vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);
     const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
 
     await onSandbox(() => expirePaymentRequests(env));
@@ -207,9 +204,7 @@ describe("expirePaymentRequests", () => {
   });
 
   it("stops watching an expired request after the late-payment window", async () => {
-    const findReference = vi
-      .spyOn(solanaPay, "findReference")
-      .mockRejectedValue(new FindReferenceError("not found"));
+    const findReference = vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);
     await createRequest({ token: SOL_MINT, expiresAt: PAST });
     await onSandbox(() => expirePaymentRequests(env));
     findReference.mockClear();
