@@ -124,11 +124,15 @@ export interface PaymentRequestsRepository {
   }): Promise<PaymentRequestRow[]>;
   listPaymentRequestsDueForCheck(params: {
     environment: SdpEnvironment;
-    checkedBefore: string;
+    recentCheckedBefore: string;
+    agedCheckedBefore: string;
+    agedCreatedBefore: string;
     limit: number;
   }): Promise<PaymentRequestRow[]>;
   listLapsedPaymentRequests(params: {
     environment: SdpEnvironment;
+    checkedBefore: string;
+    liveClaimMinLastValidBlockHeight: bigint;
     limit: number;
   }): Promise<PaymentRequestRow[]>;
   listExpiredPaymentRequestsForLateCheck(params: {
@@ -143,6 +147,11 @@ export interface PaymentRequestsRepository {
   ): Promise<PaymentRequestRow | null>;
   countStaleAwaitingPaymentRequests(params: {
     environment: SdpEnvironment;
+    checkedBefore: string;
+  }): Promise<number>;
+  countStaleLateWatchPaymentRequests(params: {
+    environment: SdpEnvironment;
+    expiredSince: string;
     checkedBefore: string;
   }): Promise<number>;
 }

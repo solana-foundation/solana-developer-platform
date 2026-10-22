@@ -295,7 +295,13 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
       return result.results.map(mapPaymentRequestRow);
     },
 
-    async listPaymentRequestsDueForCheck({ environment, checkedBefore, limit }) {
+    async listPaymentRequestsDueForCheck({
+      environment,
+      recentCheckedBefore,
+      agedCheckedBefore,
+      agedCreatedBefore,
+      limit,
+    }) {
       const result = await db
         .prepare(
           `SELECT pr.* FROM payment_requests pr
@@ -304,16 +310,32 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
               AND pr.status = 'awaiting_payment'
               AND pr.custody_wallet_id IS NOT NULL
               AND (pr.expires_at IS NULL OR pr.expires_at > sdp_iso_now())
-              AND (pr.last_checked_at IS NULL OR pr.last_checked_at < ?)
+              AND (
+                pr.last_checked_at IS NULL
+                OR (pr.created_at >= ? AND pr.last_checked_at < ?)
+                OR (pr.created_at < ? AND pr.last_checked_at < ?)
+              )
             ORDER BY pr.last_checked_at ASC NULLS FIRST, pr.created_at ASC, pr.id ASC
             LIMIT ?`
         )
-        .bind(environment, checkedBefore, limit)
+        .bind(
+          environment,
+          agedCreatedBefore,
+          recentCheckedBefore,
+          agedCreatedBefore,
+          agedCheckedBefore,
+          limit
+        )
         .all<Record<string, unknown>>();
       return result.results.map(mapPaymentRequestRow);
     },
 
-    async listLapsedPaymentRequests({ environment, limit }) {
+    async listLapsedPaymentRequests({
+      environment,
+      checkedBefore,
+      liveClaimMinLastValidBlockHeight,
+      limit,
+    }) {
       const result = await db
         .prepare(
           `SELECT pr.* FROM payment_requests pr
@@ -322,10 +344,15 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
               AND pr.status = 'awaiting_payment'
               AND pr.expires_at IS NOT NULL
               AND pr.expires_at <= sdp_iso_now()
-            ORDER BY pr.expires_at ASC, pr.id ASC
+              AND (pr.last_checked_at IS NULL OR pr.last_checked_at < ?)
+              AND (
+                pr.sponsored_tx_last_valid_block_height IS NULL
+                OR pr.sponsored_tx_last_valid_block_height < ?
+              )
+            ORDER BY pr.expires_at DESC, pr.id DESC
             LIMIT ?`
         )
-        .bind(environment, limit)
+        .bind(environment, checkedBefore, liveClaimMinLastValidBlockHeight.toString(), limit)
         .all<Record<string, unknown>>();
       return result.results.map(mapPaymentRequestRow);
     },
@@ -403,11 +430,34 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
             WHERE p.environment = ?
               AND pr.status = 'awaiting_payment'
               AND pr.custody_wallet_id IS NOT NULL
+              AND (pr.expires_at IS NULL OR pr.expires_at > sdp_iso_now())
               AND COALESCE(pr.last_checked_at, pr.created_at) < ?`
         )
         .bind(environment, checkedBefore)
         .first<{ stale: number }>();
-      return row?.stale ?? 0;
+      if (!row) {
+        throw internalError("payment_requests stale COUNT returned no row");
+      }
+      return row.stale;
+    },
+
+    async countStaleLateWatchPaymentRequests({ environment, expiredSince, checkedBefore }) {
+      const row = await db
+        .prepare(
+          `SELECT COUNT(*)::int AS stale FROM payment_requests pr
+             JOIN projects p ON p.id = pr.project_id
+            WHERE p.environment = ?
+              AND pr.status = 'expired'
+              AND pr.custody_wallet_id IS NOT NULL
+              AND pr.expires_at >= ?
+              AND COALESCE(pr.last_checked_at, pr.updated_at) < ?`
+        )
+        .bind(environment, expiredSince, checkedBefore)
+        .first<{ stale: number }>();
+      if (!row) {
+        throw internalError("payment_requests late-watch stale COUNT returned no row");
+      }
+      return row.stale;
     },
   };
 }

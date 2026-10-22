@@ -26,6 +26,22 @@ const TEST_CONFIG_ID = "cust_cfg_preq_job_test";
 const TEST_CUSTODY_WALLET_ID = "cwlt_preq_job_test";
 const TEST_WALLET_ID = "wal_preq_job_test";
 const PAST = "2020-01-01T00:00:00.000Z";
+const MINUTE = 60_000;
+const DAY = 24 * 60 * MINUTE;
+
+function ago(ms: number): string {
+  return new Date(Date.now() - ms).toISOString();
+}
+
+async function updateRow(id: string, fields: Record<string, string | null>) {
+  const columns = Object.keys(fields);
+  await getDb(env)
+    .prepare(
+      `UPDATE payment_requests SET ${columns.map((column) => `${column} = ?`).join(", ")} WHERE id = ?`
+    )
+    .bind(...Object.values(fields), id)
+    .run();
+}
 
 async function createRequest(params: { token: string; expiresAt: string | null }) {
   return createPaymentRequestsRepository(
@@ -155,17 +171,45 @@ describe("reconcilePaymentRequests", () => {
     const log = vi.spyOn(moneyPathEvents, "logEvent");
     vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);
     const request = await createRequest({ token: SOL_MINT, expiresAt: null });
-    await getDb(env)
-      .prepare("UPDATE payment_requests SET created_at = ?, last_checked_at = ? WHERE id = ?")
-      .bind(PAST, PAST, request.id)
-      .run();
+    await createRequest({ token: SOL_MINT, expiresAt: PAST });
+    await updateRow(request.id, { created_at: PAST, last_checked_at: PAST });
 
-    await onSandbox(() => reconcilePaymentRequests(env, { limit: 0 }));
+    await onSandbox(() => reconcilePaymentRequests(env));
 
     expect(log).toHaveBeenCalledWith(
       "warn",
       expect.objectContaining({ event: "payment_requests.reconcile_backlog", stale: 1 })
     );
+    expect((await getRow(request.id)).last_checked_at).not.toBe(PAST);
+  });
+
+  it("does not report a backlog for aged rows on their slower recheck cadence", async () => {
+    const log = vi.spyOn(moneyPathEvents, "logEvent");
+    vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);
+    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+    await updateRow(request.id, { created_at: ago(2 * DAY), last_checked_at: ago(11 * MINUTE) });
+
+    await onSandbox(() => reconcilePaymentRequests(env));
+
+    expect(log).not.toHaveBeenCalledWith(
+      "warn",
+      expect.objectContaining({ event: "payment_requests.reconcile_backlog" })
+    );
+  });
+
+  it("rechecks requests older than a day at most every ten minutes", async () => {
+    const findReference = vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);
+    const young = await createRequest({ token: SOL_MINT, expiresAt: null });
+    const aged = await createRequest({ token: SOL_MINT, expiresAt: null });
+    const lastChecked = ago(MINUTE);
+    await updateRow(young.id, { last_checked_at: lastChecked });
+    await updateRow(aged.id, { created_at: ago(2 * DAY), last_checked_at: lastChecked });
+
+    await onSandbox(() => reconcilePaymentRequests(env));
+
+    expect(findReference).toHaveBeenCalledTimes(1);
+    expect((await getRow(young.id)).last_checked_at).not.toBe(lastChecked);
+    expect((await getRow(aged.id)).last_checked_at).toBe(lastChecked);
   });
 });
 
@@ -203,14 +247,60 @@ describe("expirePaymentRequests", () => {
     expect((await getRow(request.id)).status).toBe("expired");
   });
 
+  it("leaves a lapsed request open while its sponsored transaction can still land", async () => {
+    vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);
+    const live = await createRequest({ token: SOL_MINT, expiresAt: PAST });
+    const passed = await createRequest({ token: SOL_MINT, expiresAt: PAST });
+    await updateRow(live.id, {
+      sponsored_tx_account: "acct",
+      sponsored_tx_unsigned: "tx",
+      sponsored_tx_last_valid_block_height: "900",
+    });
+    await updateRow(passed.id, {
+      sponsored_tx_account: "acct",
+      sponsored_tx_unsigned: "tx",
+      sponsored_tx_last_valid_block_height: "849",
+    });
+
+    await onSandbox(() => expirePaymentRequests(env));
+
+    expect((await getRow(live.id)).status).toBe("awaiting_payment");
+    expect((await getRow(passed.id)).status).toBe("expired");
+  });
+
   it("stops watching an expired request after the late-payment window", async () => {
     const findReference = vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);
-    await createRequest({ token: SOL_MINT, expiresAt: PAST });
-    await onSandbox(() => expirePaymentRequests(env));
-    findReference.mockClear();
+    const outside = await createRequest({ token: SOL_MINT, expiresAt: null });
+    const inside = await createRequest({ token: SOL_MINT, expiresAt: null });
+    await updateRow(outside.id, {
+      status: "expired",
+      expires_at: ago(8 * DAY),
+      last_checked_at: PAST,
+    });
+    await updateRow(inside.id, {
+      status: "expired",
+      expires_at: ago(6 * DAY),
+      last_checked_at: PAST,
+    });
 
     await onSandbox(() => expirePaymentRequests(env));
 
-    expect(findReference).not.toHaveBeenCalled();
+    expect(findReference).toHaveBeenCalledTimes(1);
+    expect((await getRow(inside.id)).last_checked_at).not.toBe(PAST);
+    expect((await getRow(outside.id)).last_checked_at).toBe(PAST);
+  });
+
+  it("logs the late-watch backlog when expired rows go unchecked", async () => {
+    const log = vi.spyOn(moneyPathEvents, "logEvent");
+    vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);
+    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+    await updateRow(request.id, { status: "expired", expires_at: ago(DAY), last_checked_at: PAST });
+
+    await onSandbox(() => expirePaymentRequests(env));
+
+    expect(log).toHaveBeenCalledWith(
+      "warn",
+      expect.objectContaining({ event: "payment_requests.late_watch_backlog", stale: 1 })
+    );
   });
 });

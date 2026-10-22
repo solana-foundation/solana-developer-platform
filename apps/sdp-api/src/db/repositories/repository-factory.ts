@@ -141,6 +141,7 @@ const PAYMENT_REQUESTS_SYSTEM_ONLY_METHODS = [
   "listExpiredPaymentRequestsForLateCheck",
   "markPaymentRequestsChecked",
   "countStaleAwaitingPaymentRequests",
+  "countStaleLateWatchPaymentRequests",
 ] as const;
 
 export function createPaymentRequestsRepository(

@@ -20,6 +20,32 @@ import { createPostgresPaymentRequestsRepository } from "./payment-requests.repo
 
 const TEST_PROJECT_ID = "prj_preq_repo_test";
 const TEST_CUSTODY_WALLET_ID = "cwlt_preq_repo_test";
+const PAST = "2020-01-01T00:00:00.000Z";
+const SECOND = 1000;
+const MINUTE = 60 * SECOND;
+const DAY = 24 * 60 * MINUTE;
+
+function ago(ms: number): string {
+  return new Date(Date.now() - ms).toISOString();
+}
+
+async function updateRow(id: string, fields: Record<string, string | null>) {
+  const columns = Object.keys(fields);
+  await getDb(env)
+    .prepare(
+      `UPDATE payment_requests SET ${columns.map((column) => `${column} = ?`).join(", ")} WHERE id = ?`
+    )
+    .bind(...Object.values(fields), id)
+    .run();
+}
+
+async function claimWindow(id: string, lastValidBlockHeight: string) {
+  await updateRow(id, {
+    sponsored_tx_account: "acct",
+    sponsored_tx_unsigned: "tx",
+    sponsored_tx_last_valid_block_height: lastValidBlockHeight,
+  });
+}
 
 describe("PaymentRequestsRepository (postgres)", () => {
   let repo: PaymentRequestsRepository;
@@ -669,7 +695,9 @@ describe("PaymentRequestsRepository (postgres)", () => {
 
       const rows = await createSystemPaymentRequestsRepository(env).listPaymentRequestsDueForCheck({
         environment: "sandbox",
-        checkedBefore: "2026-06-01T00:00:00.000Z",
+        recentCheckedBefore: "2026-06-01T00:00:00.000Z",
+        agedCheckedBefore: "2026-06-01T00:00:00.000Z",
+        agedCreatedBefore: "2000-01-01T00:00:00.000Z",
         limit: 10,
       });
 
@@ -681,7 +709,9 @@ describe("PaymentRequestsRepository (postgres)", () => {
       await repo.createPaymentRequest(createInput({ token: SOL_MINT, expiresAt: null }));
       const rows = await createSystemPaymentRequestsRepository(env).listPaymentRequestsDueForCheck({
         environment: "production",
-        checkedBefore: "2099-01-01T00:00:00.000Z",
+        recentCheckedBefore: "2099-01-01T00:00:00.000Z",
+        agedCheckedBefore: "2099-01-01T00:00:00.000Z",
+        agedCreatedBefore: "2099-01-01T00:00:00.000Z",
         limit: 10,
       });
       expect(rows).toEqual([]);
@@ -698,10 +728,124 @@ describe("PaymentRequestsRepository (postgres)", () => {
 
       const rows = await createSystemPaymentRequestsRepository(env).listLapsedPaymentRequests({
         environment: "sandbox",
+        checkedBefore: ago(45 * SECOND),
+        liveClaimMinLastValidBlockHeight: 500n,
         limit: 10,
       });
 
       expect(rows.map((row) => row.id)).toEqual([lapsed.id]);
+    });
+
+    it("lists the newest lapse first so fresh expiries skip the historical backlog", async () => {
+      const oldest = await repo.createPaymentRequest(
+        createInput({ token: SOL_MINT, expiresAt: "2020-01-01T00:00:00.000Z" })
+      );
+      const newest = await repo.createPaymentRequest(
+        createInput({ token: SOL_MINT, expiresAt: ago(MINUTE) })
+      );
+      const middle = await repo.createPaymentRequest(
+        createInput({ token: SOL_MINT, expiresAt: "2023-01-01T00:00:00.000Z" })
+      );
+
+      const rows = await createSystemPaymentRequestsRepository(env).listLapsedPaymentRequests({
+        environment: "sandbox",
+        checkedBefore: ago(45 * SECOND),
+        liveClaimMinLastValidBlockHeight: 500n,
+        limit: 10,
+      });
+
+      expect(rows.map((row) => row.id)).toEqual([newest.id, middle.id, oldest.id]);
+    });
+
+    it("skips lapsed requests checked since the cutoff so failing rows rotate", async () => {
+      const due = await repo.createPaymentRequest(
+        createInput({ token: SOL_MINT, expiresAt: "2020-01-01T00:00:00.000Z" })
+      );
+      const justChecked = await repo.createPaymentRequest(
+        createInput({ token: SOL_MINT, expiresAt: "2021-01-01T00:00:00.000Z" })
+      );
+      await updateRow(due.id, { last_checked_at: ago(MINUTE) });
+      await updateRow(justChecked.id, { last_checked_at: ago(SECOND) });
+
+      const rows = await createSystemPaymentRequestsRepository(env).listLapsedPaymentRequests({
+        environment: "sandbox",
+        checkedBefore: ago(45 * SECOND),
+        liveClaimMinLastValidBlockHeight: 500n,
+        limit: 10,
+      });
+
+      expect(rows.map((row) => row.id)).toEqual([due.id]);
+    });
+
+    it("skips lapsed requests whose sponsored transaction can still land", async () => {
+      const live = await repo.createPaymentRequest(
+        createInput({ token: SOL_MINT, expiresAt: "2020-01-01T00:00:00.000Z" })
+      );
+      const atBoundary = await repo.createPaymentRequest(
+        createInput({ token: SOL_MINT, expiresAt: "2020-01-01T00:00:00.000Z" })
+      );
+      const passed = await repo.createPaymentRequest(
+        createInput({ token: SOL_MINT, expiresAt: "2020-01-01T00:00:00.000Z" })
+      );
+      const unclaimed = await repo.createPaymentRequest(
+        createInput({ token: SOL_MINT, expiresAt: "2020-01-01T00:00:00.000Z" })
+      );
+      await claimWindow(live.id, "1000");
+      await claimWindow(atBoundary.id, "500");
+      await claimWindow(passed.id, "499");
+
+      const rows = await createSystemPaymentRequestsRepository(env).listLapsedPaymentRequests({
+        environment: "sandbox",
+        checkedBefore: ago(45 * SECOND),
+        liveClaimMinLastValidBlockHeight: 500n,
+        limit: 10,
+      });
+
+      expect(rows.map((row) => row.id).sort()).toEqual([passed.id, unclaimed.id].sort());
+    });
+
+    it("does not list another environment's lapsed requests", async () => {
+      await repo.createPaymentRequest(
+        createInput({ token: SOL_MINT, expiresAt: "2020-01-01T00:00:00.000Z" })
+      );
+
+      const rows = await createSystemPaymentRequestsRepository(env).listLapsedPaymentRequests({
+        environment: "production",
+        checkedBefore: ago(45 * SECOND),
+        liveClaimMinLastValidBlockHeight: 500n,
+        limit: 10,
+      });
+
+      expect(rows).toEqual([]);
+    });
+
+    it("rechecks requests older than the age cutoff less often", async () => {
+      const young = await repo.createPaymentRequest(
+        createInput({ token: SOL_MINT, expiresAt: null })
+      );
+      const agedRecent = await repo.createPaymentRequest(
+        createInput({ token: SOL_MINT, expiresAt: null })
+      );
+      const agedDue = await repo.createPaymentRequest(
+        createInput({ token: SOL_MINT, expiresAt: null })
+      );
+      const youngFresh = await repo.createPaymentRequest(
+        createInput({ token: SOL_MINT, expiresAt: null })
+      );
+      await updateRow(young.id, { last_checked_at: ago(MINUTE) });
+      await updateRow(youngFresh.id, { last_checked_at: ago(10 * SECOND) });
+      await updateRow(agedRecent.id, { created_at: ago(2 * DAY), last_checked_at: ago(MINUTE) });
+      await updateRow(agedDue.id, { created_at: ago(2 * DAY), last_checked_at: ago(20 * MINUTE) });
+
+      const rows = await createSystemPaymentRequestsRepository(env).listPaymentRequestsDueForCheck({
+        environment: "sandbox",
+        recentCheckedBefore: ago(45 * SECOND),
+        agedCheckedBefore: ago(10 * MINUTE),
+        agedCreatedBefore: ago(DAY),
+        limit: 10,
+      });
+
+      expect(rows.map((row) => row.id)).toEqual([agedDue.id, young.id]);
     });
 
     it("moves only an expired request to paid, recording lateness as given", async () => {
@@ -793,6 +937,130 @@ describe("PaymentRequestsRepository (postgres)", () => {
         )
       );
       expect(rows.every((row) => row?.last_checked_at !== null)).toBe(true);
+    });
+
+    describe("listExpiredPaymentRequestsForLateCheck", () => {
+      async function expiredRequest(fields: Record<string, string | null>) {
+        const request = await repo.createPaymentRequest(
+          createInput({ token: SOL_MINT, expiresAt: null })
+        );
+        await updateRow(request.id, {
+          status: "expired",
+          last_checked_at: PAST,
+          ...fields,
+        });
+        return request;
+      }
+
+      function listLateCheck(environment: "sandbox" | "production" = "sandbox") {
+        return createSystemPaymentRequestsRepository(env).listExpiredPaymentRequestsForLateCheck({
+          environment,
+          expiredSince: ago(7 * DAY),
+          checkedBefore: ago(10 * MINUTE),
+          limit: 10,
+        });
+      }
+
+      it("lists expired requests inside the late-payment window only", async () => {
+        const inside = await expiredRequest({ expires_at: ago(6 * DAY) });
+        await expiredRequest({ expires_at: ago(8 * DAY) });
+
+        expect((await listLateCheck()).map((row) => row.id)).toEqual([inside.id]);
+      });
+
+      it("skips expired requests checked since the cutoff", async () => {
+        const due = await expiredRequest({ expires_at: ago(DAY) });
+        await expiredRequest({ expires_at: ago(DAY), last_checked_at: ago(MINUTE) });
+
+        expect((await listLateCheck()).map((row) => row.id)).toEqual([due.id]);
+      });
+
+      it("skips expired requests with no resolved receiving wallet", async () => {
+        await expiredRequest({ expires_at: ago(DAY), custody_wallet_id: null });
+
+        expect(await listLateCheck()).toEqual([]);
+      });
+
+      it("does not list another environment's expired requests", async () => {
+        await expiredRequest({ expires_at: ago(DAY) });
+
+        expect(await listLateCheck("production")).toEqual([]);
+      });
+    });
+
+    describe("countStaleAwaitingPaymentRequests", () => {
+      function countStale(environment: "sandbox" | "production" = "sandbox") {
+        return createSystemPaymentRequestsRepository(env).countStaleAwaitingPaymentRequests({
+          environment,
+          checkedBefore: ago(10 * MINUTE),
+        });
+      }
+
+      async function staleRequest(expiresAt: string | null, fields = {}) {
+        const request = await repo.createPaymentRequest(
+          createInput({ token: SOL_MINT, expiresAt })
+        );
+        await updateRow(request.id, { created_at: PAST, last_checked_at: PAST, ...fields });
+        return request;
+      }
+
+      it("counts unexpired awaiting requests not checked since the cutoff", async () => {
+        await staleRequest(null);
+        await staleRequest("2099-01-01T00:00:00.000Z");
+        await staleRequest(null, { last_checked_at: ago(MINUTE) });
+
+        expect(await countStale()).toBe(2);
+      });
+
+      it("excludes lapsed requests, which the expiry lane owns", async () => {
+        await staleRequest("2020-01-01T00:00:00.000Z");
+
+        expect(await countStale()).toBe(0);
+      });
+
+      it("excludes requests with no resolved receiving wallet", async () => {
+        await staleRequest(null, { custody_wallet_id: null });
+
+        expect(await countStale()).toBe(0);
+      });
+
+      it("excludes another environment's requests", async () => {
+        await staleRequest(null);
+
+        expect(await countStale("production")).toBe(0);
+      });
+    });
+
+    describe("countStaleLateWatchPaymentRequests", () => {
+      async function expiredRequest(fields: Record<string, string | null>) {
+        const request = await repo.createPaymentRequest(
+          createInput({ token: SOL_MINT, expiresAt: null })
+        );
+        await updateRow(request.id, {
+          status: "expired",
+          last_checked_at: PAST,
+          ...fields,
+        });
+        return request;
+      }
+
+      function countStaleLateWatch(environment: "sandbox" | "production" = "sandbox") {
+        return createSystemPaymentRequestsRepository(env).countStaleLateWatchPaymentRequests({
+          environment,
+          expiredSince: ago(7 * DAY),
+          checkedBefore: ago(20 * MINUTE),
+        });
+      }
+
+      it("counts expired requests inside the window not checked since the cutoff", async () => {
+        await expiredRequest({ expires_at: ago(DAY) });
+        await expiredRequest({ expires_at: ago(8 * DAY) });
+        await expiredRequest({ expires_at: ago(DAY), last_checked_at: ago(MINUTE) });
+        await expiredRequest({ expires_at: ago(DAY), custody_wallet_id: null });
+
+        expect(await countStaleLateWatch()).toBe(1);
+        expect(await countStaleLateWatch("production")).toBe(0);
+      });
     });
 
     it("denies the reconciler methods to tenant callers", () => {
