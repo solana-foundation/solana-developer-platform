@@ -787,7 +787,8 @@ export const paymentSubscriptionCollectionAttemptMetadataSchema = z.discriminate
     /**
      * Set when the pull was held before it was signed (ADR 0012): the token's
      * terms refused it at that read (paused, a fee above the mandate's
-     * tolerance, a destination that requires memos). The period stays due.
+     * tolerance, a destination that is frozen or requires memos). The period
+     * stays due.
      */
     holdReason: z.enum(TOKEN_MOVEMENT_REFUSAL_REASONS).optional(),
   }),

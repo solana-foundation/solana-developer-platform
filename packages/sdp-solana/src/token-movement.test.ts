@@ -10,7 +10,9 @@ import {
   createSolanaRpcFromTransport,
   type EncodedAccount,
   getAddressDecoder,
+  getAddressEncoder,
   getBase64Decoder,
+  getProgramDerivedAddress,
   lamports,
   type MaybeEncodedAccount,
   type ReadonlyUint8Array,
@@ -19,11 +21,20 @@ import {
 } from "@solana/kit";
 import { getSysvarClockEncoder, SYSVAR_CLOCK_ADDRESS } from "@solana/sysvars";
 import {
+  findFlagAccountPda,
+  findMintConfigPda,
+  findThawExtraMetasAccountPda,
+  getMintConfigEncoder,
+  getThawPermissionlessIdempotentInstructionDataEncoder,
+  TOKEN_ACL_PROGRAM_ADDRESS,
+} from "@solana/token-acl-sdk";
+import {
   getTransferSolInstructionDataDecoder,
   SYSTEM_PROGRAM_ADDRESS,
 } from "@solana-program/system";
 import {
   AccountState,
+  ASSOCIATED_TOKEN_PROGRAM_ADDRESS,
   type ExtensionArgs,
   type ExtraAccountMeta,
   findExtraAccountMetaListPda,
@@ -46,6 +57,7 @@ import {
   decodeDestinationTokenAccount,
   recurringPullFee,
   recurringPullSupport,
+  resolveTokenAclThaws,
   resolveTransferHookAccounts,
   support,
   TOKEN_MOVEMENT_PATHS,
@@ -102,19 +114,27 @@ const CLOCK = account(
   })
 );
 
-function terms(program: Address, extensions: ExtensionArgs[] | null): MintTokenTerms {
+function mintTerms(
+  program: Address,
+  extensions: ExtensionArgs[] | null,
+  freezeAuthority: Address | null
+): MintTokenTerms {
   const mint = getMintEncoder().encode({
     mintAuthority: AUTHORITY,
     supply: 1_000_000n,
     decimals: 6,
     isInitialized: true,
-    freezeAuthority: AUTHORITY,
+    freezeAuthority,
     extensions,
   });
   return decodeTokenTerms(
     { kind: "mint", mint: MINT },
     { mint: account(MINT, program, mint), clock: CLOCK }
   );
+}
+
+function terms(program: Address, extensions: ExtensionArgs[] | null): MintTokenTerms {
+  return mintTerms(program, extensions, AUTHORITY);
 }
 
 const fee = (basisPoints: number, maximumFee: bigint): ExtensionArgs => {
@@ -157,6 +177,7 @@ const DESTINATION: DestinationTokenAccount = {
   tokenAccount: DESTINATION_ACCOUNT,
   exists: true,
   requiresMemo: false,
+  frozen: false,
 };
 
 type TokenAccounts = Extract<TokenMovementAccounts, { kind: "token" }>;
@@ -166,11 +187,12 @@ const TOKEN_ACCOUNTS: TokenAccounts = {
   source: SOURCE,
   destination: DESTINATION,
   hookAccounts: [],
+  thaw: null,
 };
 
 /** A token movement's context: the shared accounts with `accounts` and `extra` applied. */
 function tokenContext(
-  accounts: Partial<Pick<TokenAccounts, "destination" | "hookAccounts">>,
+  accounts: Partial<Pick<TokenAccounts, "destination" | "hookAccounts" | "thaw">>,
   extra: Partial<Pick<TokenMovementContext, "memo" | "reference">>
 ): TokenMovementContext {
   return {
@@ -194,17 +216,26 @@ describe("support", () => {
     }
   });
 
-  it("refuses a non-transferable, paused or frozen-by-default mint", () => {
-    const cases: [ExtensionArgs[], string][] = [
-      [[{ __kind: "NonTransferable" }], TOKEN_MOVEMENT_REFUSALS.nonTransferable],
-      [[{ __kind: "PausableConfig", authority: AUTHORITY, paused: true }], "paused"],
-      [[{ __kind: "DefaultAccountState", state: AccountState.Frozen }], "default_frozen"],
+  it("refuses a non-transferable or paused mint, and a frozen-by-default one nothing can thaw", () => {
+    const frozen: ExtensionArgs = { __kind: "DefaultAccountState", state: AccountState.Frozen };
+    const cases: [MintTokenTerms, string][] = [
+      [terms(TOKEN_2022, [{ __kind: "NonTransferable" }]), TOKEN_MOVEMENT_REFUSALS.nonTransferable],
+      [
+        terms(TOKEN_2022, [{ __kind: "PausableConfig", authority: AUTHORITY, paused: true }]),
+        "paused",
+      ],
+      [mintTerms(TOKEN_2022, [frozen], null), "default_frozen"],
     ];
-    for (const [extensions, reason] of cases) {
-      const decision = support(terms(TOKEN_2022, extensions), "builder");
+    for (const [refusedTerms, reason] of cases) {
+      const decision = support(refusedTerms, "builder");
       assert.equal(decision.supported, false);
       assert.equal(decision.supported === false && decision.refusal, reason);
     }
+  });
+
+  it("moves a frozen-by-default mint with a freeze authority: the thaw is decided per destination", () => {
+    const frozen: ExtensionArgs = { __kind: "DefaultAccountState", state: AccountState.Frozen };
+    assert.deepEqual(support(terms(TOKEN_2022, [frozen]), "builder"), { supported: true });
   });
 
   it("moves a pausable mint that is not paused", () => {
@@ -243,6 +274,12 @@ describe("recurring support (ADR 0012)", () => {
       const decision = support(terms(TOKEN_2022, extensions), "recurring");
       assert.equal(decision.supported === false && decision.disposition, "refuse");
     }
+  });
+
+  it("holds a pull to a frozen destination until its freeze authority thaws it", () => {
+    const decision = recurringPullSupport(CLASSIC, PULL, { ...DESTINATION, frozen: true });
+    assert.equal(decision.supported === false && decision.refusal, "destination_frozen");
+    assert.equal(decision.supported === false && decision.disposition, "hold");
   });
 
   it("holds a pull to a destination that requires memos, which a CPI cannot send", () => {
@@ -489,8 +526,22 @@ describe("the capability table", () => {
       },
     ],
     [
-      "frozen by default",
+      "frozen by default, with a freeze authority",
       terms(TOKEN_2022, [{ __kind: "DefaultAccountState", state: AccountState.Frozen }]),
+      {
+        builder: [],
+        // The subscriptions program's CPI cannot thaw an account.
+        recurring: ["default_frozen"],
+        issuance: [],
+        issuance_seize: [],
+        dvp: [],
+        private_channels: ["default_frozen"],
+        earn: ["default_frozen"],
+      },
+    ],
+    [
+      "frozen by default, with no freeze authority",
+      mintTerms(TOKEN_2022, [{ __kind: "DefaultAccountState", state: AccountState.Frozen }], null),
       {
         builder: ["default_frozen"],
         recurring: ["default_frozen"],
@@ -809,8 +860,40 @@ describe("decodeDestinationTokenAccount", () => {
         address: DESTINATION_ACCOUNT,
         exists: false,
       }),
-      { owner: OWNER, tokenAccount: DESTINATION_ACCOUNT, exists: false, requiresMemo: false }
+      {
+        owner: OWNER,
+        tokenAccount: DESTINATION_ACCOUNT,
+        exists: false,
+        requiresMemo: false,
+        frozen: false,
+      }
     );
+  });
+
+  it("reads whether an existing account is frozen", () => {
+    for (const state of [AccountState.Frozen, AccountState.Initialized]) {
+      const read = account(
+        DESTINATION_ACCOUNT,
+        TOKEN_2022,
+        getTokenEncoder().encode({
+          mint: MINT,
+          owner: OWNER,
+          amount: 0n,
+          delegate: null,
+          state,
+          isNative: null,
+          delegatedAmount: 0n,
+          closeAuthority: null,
+          extensions: null,
+        })
+      );
+      const decoded = decodeDestinationTokenAccount(FEE_ZERO, OWNER, DESTINATION_ACCOUNT, {
+        ...read,
+        data: new Uint8Array(read.data),
+        exists: true,
+      });
+      assert.equal(decoded.frozen, state === AccountState.Frozen);
+    }
   });
 
   it("reads the MemoTransfer extension", () => {
@@ -844,40 +927,40 @@ describe("decodeDestinationTokenAccount", () => {
   });
 });
 
+type StoredAccount = { owner: Address; data: ReadonlyUint8Array };
+
+/** An RPC that answers `getAccountInfo` from `accounts` and records each address it read. */
+function stubRpc(accounts: ReadonlyMap<Address, StoredAccount>) {
+  const reads: string[] = [];
+  const transport: RpcTransport = async <TResponse>({ payload }: Parameters<RpcTransport>[0]) => {
+    // SAFETY: kit sends a JSON-RPC request; a getAccountInfo request names its address first.
+    const request = payload as { id: string; method: string; params: [Address, unknown] };
+    assert.equal(request.method, "getAccountInfo");
+    const [at] = request.params;
+    reads.push(at);
+    const stored = accounts.get(at);
+    const value =
+      stored === undefined
+        ? null
+        : {
+            data: [getBase64Decoder().decode(stored.data), "base64"],
+            executable: false,
+            lamports: 1,
+            owner: stored.owner,
+            rentEpoch: 0,
+            space: stored.data.length,
+          };
+    // SAFETY: the transport returns the JSON-RPC response body kit asked for.
+    return {
+      jsonrpc: "2.0",
+      id: request.id,
+      result: { context: { slot: 1 }, value },
+    } as TResponse;
+  };
+  return { rpc: createSolanaRpcFromTransport(transport), reads };
+}
+
 describe("resolveTransferHookAccounts", () => {
-  type StoredAccount = { owner: Address; data: ReadonlyUint8Array };
-
-  /** An RPC that answers `getAccountInfo` from `accounts` and records each address it read. */
-  function stubRpc(accounts: ReadonlyMap<Address, StoredAccount>) {
-    const reads: string[] = [];
-    const transport: RpcTransport = async <TResponse>({ payload }: { payload: unknown }) => {
-      // SAFETY: kit sends a JSON-RPC request; a getAccountInfo request names its address first.
-      const request = payload as { id: string; method: string; params: [Address, unknown] };
-      assert.equal(request.method, "getAccountInfo");
-      const [at] = request.params;
-      reads.push(at);
-      const stored = accounts.get(at);
-      const value =
-        stored === undefined
-          ? null
-          : {
-              data: [getBase64Decoder().decode(stored.data), "base64"],
-              executable: false,
-              lamports: 1,
-              owner: stored.owner,
-              rentEpoch: 0,
-              space: stored.data.length,
-            };
-      // SAFETY: the transport returns the JSON-RPC response body kit asked for.
-      return {
-        jsonrpc: "2.0",
-        id: request.id,
-        result: { context: { slot: 1 }, value },
-      } as TResponse;
-    };
-    return { rpc: createSolanaRpcFromTransport(transport), reads };
-  }
-
   const transfer = (destination: Address) => ({
     source: SOURCE,
     destination,
@@ -965,6 +1048,262 @@ describe("resolveTransferHookAccounts", () => {
     await assert.rejects(
       resolveTransferHookAccounts(rpc, HOOKED, [transfer(DESTINATION_ACCOUNT)]),
       refusal(TOKEN_MOVEMENT_REFUSALS.hookUnresolved)
+    );
+  });
+});
+
+describe("Token ACL thaw", () => {
+  const GATE = testAddress(20);
+  const LIST_STATE = testAddress(21);
+  const FROZEN_DEFAULT: ExtensionArgs = {
+    __kind: "DefaultAccountState",
+    state: AccountState.Frozen,
+  };
+  const NEW_DESTINATION: DestinationTokenAccount = { ...DESTINATION, exists: false };
+
+  /** A frozen-by-default mint whose freeze authority is its Token ACL config. */
+  async function aclTerms(): Promise<MintTokenTerms> {
+    const [mintConfig] = await findMintConfigPda(
+      { mint: MINT },
+      { programAddress: TOKEN_ACL_PROGRAM_ADDRESS }
+    );
+    return mintTerms(TOKEN_2022, [FROZEN_DEFAULT], mintConfig);
+  }
+
+  /** One literal account, and the gate's wallet entry PDA seeded by the token account's owner. */
+  const THAW_METAS: ExtraAccountMeta[] = [
+    { config: { __kind: "Literal", address: LIST_STATE }, isSigner: false, isWritable: false },
+    {
+      config: {
+        __kind: "ProgramPda",
+        seeds: [
+          { __kind: "Literal", bytes: new TextEncoder().encode("wallet_entry") },
+          { __kind: "AccountKey", index: 3 },
+        ],
+      },
+      isSigner: false,
+      isWritable: false,
+    },
+  ];
+
+  /** The chain an ACL mint publishes: its config and its gate's thaw account list. */
+  async function aclChain(options: { permissionlessThaw: boolean; metas: ExtraAccountMeta[] }) {
+    const [mintConfig] = await findMintConfigPda(
+      { mint: MINT },
+      { programAddress: TOKEN_ACL_PROGRAM_ADDRESS }
+    );
+    const [thawList] = await findThawExtraMetasAccountPda({ mint: MINT }, { programAddress: GATE });
+    const accounts = new Map<Address, StoredAccount>([
+      [
+        mintConfig,
+        {
+          owner: TOKEN_ACL_PROGRAM_ADDRESS,
+          data: getMintConfigEncoder().encode({
+            bump: 255,
+            enablePermissionlessThaw: options.permissionlessThaw,
+            enablePermissionlessFreeze: false,
+            mint: MINT,
+            freezeAuthority: AUTHORITY,
+            gatingProgram: GATE,
+          }),
+        },
+      ],
+      [thawList, { owner: GATE, data: getExtraAccountMetasEncoder().encode(options.metas) }],
+    ]);
+    return { mintConfig, thawList, accounts };
+  }
+
+  it("reads nothing when no destination opens frozen", async () => {
+    const { rpc, reads } = stubRpc(new Map());
+    assert.deepEqual(await resolveTokenAclThaws(rpc, await aclTerms(), [DESTINATION], SOURCE), [
+      null,
+    ]);
+    assert.deepEqual(await resolveTokenAclThaws(rpc, FEE_ZERO, [NEW_DESTINATION], SOURCE), [null]);
+    assert.deepEqual(reads, []);
+  });
+
+  it("refuses a freeze authority that is not the mint's Token ACL config, reading nothing", async () => {
+    const { rpc, reads } = stubRpc(new Map());
+    await assert.rejects(
+      resolveTokenAclThaws(rpc, terms(TOKEN_2022, [FROZEN_DEFAULT]), [NEW_DESTINATION], SOURCE),
+      refusal(TOKEN_MOVEMENT_REFUSALS.defaultFrozen)
+    );
+    assert.deepEqual(reads, []);
+  });
+
+  it("refuses a missing config, a config without permissionless thaw, and a gate without a list", async () => {
+    const aclMint = await aclTerms();
+    const missing = stubRpc(new Map());
+    await assert.rejects(
+      resolveTokenAclThaws(missing.rpc, aclMint, [NEW_DESTINATION], SOURCE),
+      refusal(TOKEN_MOVEMENT_REFUSALS.defaultFrozen)
+    );
+
+    const disabled = await aclChain({ permissionlessThaw: false, metas: THAW_METAS });
+    await assert.rejects(
+      resolveTokenAclThaws(stubRpc(disabled.accounts).rpc, aclMint, [NEW_DESTINATION], SOURCE),
+      refusal(TOKEN_MOVEMENT_REFUSALS.defaultFrozen)
+    );
+
+    const noList = await aclChain({ permissionlessThaw: true, metas: THAW_METAS });
+    noList.accounts.delete(noList.thawList);
+    await assert.rejects(
+      resolveTokenAclThaws(stubRpc(noList.accounts).rpc, aclMint, [NEW_DESTINATION], SOURCE),
+      refusal(TOKEN_MOVEMENT_REFUSALS.defaultFrozen)
+    );
+  });
+
+  it("resolves each new destination's thaw, reading the config and list once", async () => {
+    const chain = await aclChain({ permissionlessThaw: true, metas: THAW_METAS });
+    const { rpc, reads } = stubRpc(chain.accounts);
+    const second: DestinationTokenAccount = {
+      ...NEW_DESTINATION,
+      owner: testAddress(22),
+      tokenAccount: testAddress(23),
+    };
+
+    const thaws = await resolveTokenAclThaws(
+      rpc,
+      await aclTerms(),
+      [NEW_DESTINATION, DESTINATION, second],
+      SOURCE
+    );
+
+    assert.deepEqual(reads, [chain.mintConfig, chain.thawList]);
+    assert.equal(thaws[1], null);
+    for (const [index, destination] of [NEW_DESTINATION, second].entries()) {
+      const thaw = thaws[index * 2];
+      assert.ok(thaw);
+      const [flagAccount] = await findFlagAccountPda(
+        { tokenAccount: destination.tokenAccount },
+        { programAddress: TOKEN_ACL_PROGRAM_ADDRESS }
+      );
+      const [walletEntry] = await getProgramDerivedAddress({
+        programAddress: GATE,
+        seeds: [
+          new TextEncoder().encode("wallet_entry"),
+          getAddressEncoder().encode(destination.owner),
+        ],
+      });
+      assert.deepEqual(thaw, {
+        authority: SOURCE,
+        mintConfig: chain.mintConfig,
+        gatingProgram: GATE,
+        flagAccount,
+        extraAccounts: [
+          { address: chain.thawList, role: AccountRole.READONLY },
+          { address: LIST_STATE, role: AccountRole.READONLY },
+          { address: walletEntry, role: AccountRole.READONLY },
+        ],
+      });
+    }
+  });
+
+  it("refuses a gate account that must sign", async () => {
+    const chain = await aclChain({
+      permissionlessThaw: true,
+      metas: [
+        { config: { __kind: "Literal", address: LIST_STATE }, isSigner: true, isWritable: false },
+      ],
+    });
+    await assert.rejects(
+      resolveTokenAclThaws(
+        stubRpc(chain.accounts).rpc,
+        await aclTerms(),
+        [NEW_DESTINATION],
+        SOURCE
+      ),
+      refusal(TOKEN_MOVEMENT_REFUSALS.defaultFrozen)
+    );
+  });
+
+  it("thaws a new destination right after its create, signed by the movement's authority", async () => {
+    const chain = await aclChain({ permissionlessThaw: true, metas: THAW_METAS });
+    const aclMint = await aclTerms();
+    const [thaw] = await resolveTokenAclThaws(
+      stubRpc(chain.accounts).rpc,
+      aclMint,
+      [NEW_DESTINATION],
+      SOURCE
+    );
+    assert.ok(thaw);
+
+    const [create, thawIx, transfer, ...rest] = buildTokenMovement(
+      aclMint,
+      debit(aclMint, "1"),
+      tokenContext({ destination: NEW_DESTINATION, thaw }, {})
+    );
+
+    assert.equal(rest.length, 0);
+    assert.equal(create.programAddress, ASSOCIATED_TOKEN_PROGRAM_ADDRESS);
+    assert.equal(transfer.programAddress, TOKEN_2022);
+    assert.equal(thawIx.programAddress, TOKEN_ACL_PROGRAM_ADDRESS);
+    assert.deepEqual(
+      thawIx.data,
+      getThawPermissionlessIdempotentInstructionDataEncoder().encode({})
+    );
+    assert.deepEqual(
+      thawIx.accounts?.map((meta) => [meta.address, meta.role]),
+      [
+        [SOURCE, AccountRole.READONLY_SIGNER],
+        [MINT, AccountRole.READONLY],
+        [DESTINATION_ACCOUNT, AccountRole.WRITABLE],
+        [thaw.flagAccount, AccountRole.WRITABLE],
+        [OWNER, AccountRole.READONLY],
+        [chain.mintConfig, AccountRole.READONLY],
+        [TOKEN_2022, AccountRole.READONLY],
+        [SYSTEM_PROGRAM_ADDRESS, AccountRole.READONLY],
+        [GATE, AccountRole.READONLY],
+        ...thaw.extraAccounts.map((meta) => [meta.address, meta.role]),
+      ]
+    );
+  });
+
+  it("refuses a new frozen destination without its thaw, and an existing frozen one", async () => {
+    const aclMint = await aclTerms();
+    assert.throws(
+      () =>
+        assertMovementBuildable(aclMint, debit(aclMint, "1"), {
+          accounts: { ...TOKEN_ACCOUNTS, destination: NEW_DESTINATION },
+          memo: null,
+        }),
+      refusal(TOKEN_MOVEMENT_REFUSALS.defaultFrozen)
+    );
+    assert.throws(
+      () =>
+        assertMovementBuildable(CLASSIC, debit(CLASSIC, "1"), {
+          accounts: { ...TOKEN_ACCOUNTS, destination: { ...DESTINATION, frozen: true } },
+          memo: null,
+        }),
+      refusal(TOKEN_MOVEMENT_REFUSALS.destinationFrozen)
+    );
+  });
+
+  it("fails loudly on a thaw for an account that does not open frozen, or for another authority", async () => {
+    const chain = await aclChain({ permissionlessThaw: true, metas: THAW_METAS });
+    const aclMint = await aclTerms();
+    const [thaw] = await resolveTokenAclThaws(
+      stubRpc(chain.accounts).rpc,
+      aclMint,
+      [NEW_DESTINATION],
+      SOURCE
+    );
+    assert.ok(thaw);
+    assert.throws(
+      () =>
+        assertMovementBuildable(aclMint, debit(aclMint, "1"), {
+          accounts: { ...TOKEN_ACCOUNTS, thaw },
+          memo: null,
+        }),
+      (cause: unknown) => cause instanceof Error && !(cause instanceof TokenMovementError)
+    );
+    assert.throws(
+      () =>
+        buildTokenMovement(aclMint, debit(aclMint, "1"), {
+          ...tokenContext({ destination: NEW_DESTINATION, thaw }, {}),
+          authority: createNoopSigner(testAddress(24)),
+        }),
+      /another authority/
     );
   });
 });
