@@ -9,7 +9,10 @@
  * - Token-2022 extension configuration per template
  * - sRFC-37 Token ACL setup (freeze authority delegation)
  * - ABL (Allowlist/Blocklist) on-chain gating
- * - Decimal-aware amount conversion for minting
+ * - Decimal-aware amount conversion for minting, which takes a JS number. SDP
+ *   passes it one only through `@sdp/solana/mosaic-amount`: the mint's terms
+ *   read live, the issuance capability rows asked, and the number checked to
+ *   convert back to exactly the amount's base units (ADR 0012).
  */
 
 import {
@@ -19,7 +22,9 @@ import {
 } from "@sdp/rpc/solana";
 import type { RpcEnv } from "@sdp/rpc/types";
 import { parseDecimalAmount } from "@sdp/solana/amount";
+import { mosaicAmountUnderLiveTerms } from "@sdp/solana/mosaic-amount";
 import type { SponsoredSubmitter } from "@sdp/solana/token-2022";
+import type { TokenAmount } from "@sdp/solana/token-amount";
 import {
   type Address,
   appendTransactionMessageInstructions,
@@ -577,14 +582,21 @@ export class MosaicService {
     const fallbackFeePayer =
       options.feePayer === this.signer.address ? this.signer : options.feePayer;
     const feePayer = await this.resolveFeePayer(fallbackFeePayer, false);
+    const decimalAmount = await mosaicAmountUnderLiveTerms(
+      this.rpc,
+      options.mint,
+      options.amount,
+      "issuance"
+    );
 
-    // SDK signature: (rpc, mint, recipient, amount, mintAuthority, feePayer)
-    // Note: amount is decimal number, SDK converts using mint decimals
+    // SDK signature: (rpc, mint, recipient, amount, mintAuthority, feePayer).
+    // The SDK converts the number with the mint's decimals; it is checked to
+    // convert back to exactly the amount's base units.
     const fullTx = await createMintToTransaction(
       this.rpc,
       options.mint,
       options.destination,
-      options.amount,
+      decimalAmount,
       this.signer, // mintAuthority as TransactionSigner
       feePayer
     );
@@ -607,12 +619,18 @@ export class MosaicService {
     const fallbackFeePayer =
       options.feePayer === this.signer.address ? this.signer : options.feePayer;
     const feePayer = await this.resolveFeePayer(fallbackFeePayer, true);
+    const decimalAmount = await mosaicAmountUnderLiveTerms(
+      this.rpc,
+      options.mint,
+      options.amount,
+      "issuance"
+    );
 
     const fullTx = await createMintToTransaction(
       this.rpc,
       options.mint,
       options.destination,
-      options.amount,
+      decimalAmount,
       options.mintAuthority, // Just the address for prepare mode
       feePayer
     );
@@ -807,7 +825,7 @@ export class MosaicService {
     mint: Address;
     source: Address;
     destination: Address;
-    amount: number;
+    amount: TokenAmount;
     permanentDelegate: Address;
     feePayer: Address;
   }): Promise<MosaicTransaction> {
@@ -816,7 +834,7 @@ export class MosaicService {
       options.mint,
       options.source,
       options.destination,
-      options.amount,
+      await mosaicAmountUnderLiveTerms(this.rpc, options.mint, options.amount, "issuance_seize"),
       createNoopSigner(options.permanentDelegate),
       createNoopSigner(options.feePayer)
     );
@@ -828,7 +846,7 @@ export class MosaicService {
     mint: Address;
     source: Address;
     destination: Address;
-    amount: number;
+    amount: TokenAmount;
     permanentDelegate: TransactionSigner;
     feePayer: TransactionSigner;
   }): Promise<MosaicTransactionResult> {
@@ -839,7 +857,7 @@ export class MosaicService {
       options.mint,
       options.source,
       options.destination,
-      options.amount,
+      await mosaicAmountUnderLiveTerms(this.rpc, options.mint, options.amount, "issuance_seize"),
       options.permanentDelegate,
       feePayer
     );
@@ -850,7 +868,7 @@ export class MosaicService {
   async prepareForceBurn(options: {
     mint: Address;
     source: Address;
-    amount: number;
+    amount: TokenAmount;
     permanentDelegate: Address;
     feePayer: Address;
   }): Promise<MosaicTransaction> {
@@ -858,7 +876,7 @@ export class MosaicService {
       this.rpc,
       options.mint,
       options.source,
-      options.amount,
+      await mosaicAmountUnderLiveTerms(this.rpc, options.mint, options.amount, "issuance"),
       createNoopSigner(options.permanentDelegate),
       createNoopSigner(options.feePayer)
     );
@@ -869,7 +887,7 @@ export class MosaicService {
   async forceBurn(options: {
     mint: Address;
     source: Address;
-    amount: number;
+    amount: TokenAmount;
     permanentDelegate: TransactionSigner;
     feePayer: TransactionSigner;
   }): Promise<MosaicTransactionResult> {
@@ -879,7 +897,7 @@ export class MosaicService {
       this.rpc,
       options.mint,
       options.source,
-      options.amount,
+      await mosaicAmountUnderLiveTerms(this.rpc, options.mint, options.amount, "issuance"),
       options.permanentDelegate,
       feePayer
     );

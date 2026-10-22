@@ -20,7 +20,10 @@ import type { mintSchema } from "@/routes/issuance/schemas";
 import { getLogger } from "@/runtime/logger";
 import { type AuditIntent, AuditService } from "@/services/audit.service";
 import type { TokenService } from "@/services/token.service";
-import { resolveMintOperationAmount } from "@/services/token-operation.service";
+import {
+  resolveMintOperationAmount,
+  withLiveIssuanceTerms,
+} from "@/services/token-operation.service";
 import type { Env } from "@/types/env";
 import {
   assertDestinationAllowedByControlList,
@@ -85,7 +88,7 @@ interface MintExecutionResolved {
   tokenService: TokenService;
   mintAddress: ReturnType<typeof assertValidAddress>;
   destination: ReturnType<typeof assertValidAddress>;
-  mosaicAmount: MintOperationAmount["mosaicAmount"];
+  amount: MintOperationAmount["amount"];
   amountBaseUnits: MintOperationAmount["amountBaseUnits"];
   ablListAddress: string | null;
   currentAuthority: string;
@@ -446,7 +449,7 @@ export const prepareMint = async (c: ValidatedBodyContext<typeof mintSchema>) =>
 
   const {
     mintAddress: mintAddressRaw,
-    mosaicAmount,
+    amount,
     amountBaseUnits,
   } = resolveMintOperationAmount(token, body.mint.amount);
 
@@ -502,13 +505,15 @@ export const prepareMint = async (c: ValidatedBodyContext<typeof mintSchema>) =>
     }
   }
 
-  const prepared = await mosaic.prepareMintTo({
-    mint: mintAddress,
-    destination,
-    amount: mosaicAmount,
-    mintAuthority,
-    feePayer: signer.address,
-  });
+  const prepared = await withLiveIssuanceTerms(() =>
+    mosaic.prepareMintTo({
+      mint: mintAddress,
+      destination,
+      amount,
+      mintAuthority,
+      feePayer: signer.address,
+    })
+  );
 
   let simulation: unknown;
   if (body.options?.simulate) {
@@ -659,7 +664,7 @@ export async function extractMintRequest(
 
   const {
     mintAddress: mintAddressRaw,
-    mosaicAmount,
+    amount,
     amountBaseUnits,
   } = resolveMintOperationAmount(token, input.mint.amount);
   const ablListAddress = getOnChainAllowlistMutationForMint(token);
@@ -705,7 +710,7 @@ export async function extractMintRequest(
       tokenService,
       mintAddress,
       destination,
-      mosaicAmount,
+      amount,
       amountBaseUnits,
       ablListAddress,
       currentAuthority,
@@ -725,7 +730,7 @@ export const executeMint = async (c: AppContext) => {
       tokenService,
       mintAddress,
       destination,
-      mosaicAmount,
+      amount,
       amountBaseUnits,
       ablListAddress,
       currentAuthority,
@@ -814,21 +819,26 @@ export const executeMint = async (c: AppContext) => {
         })
       : false;
 
-    const result = await mosaic.mintTo(
-      {
-        mint: mintAddress,
-        destination,
-        amount: mosaicAmount,
-        mintAuthority: signer.address,
-        feePayer: signer.address,
-      },
-      async () => {
-        const reserved = await tokenService.reserveMintSupply(tokenId, amountBaseUnits.toString());
-        if (reserved === null) {
-          throw new AppError("MAX_SUPPLY_EXCEEDED", "Mint amount would exceed maximum supply");
+    const result = await withLiveIssuanceTerms(() =>
+      mosaic.mintTo(
+        {
+          mint: mintAddress,
+          destination,
+          amount,
+          mintAuthority: signer.address,
+          feePayer: signer.address,
+        },
+        async () => {
+          const reserved = await tokenService.reserveMintSupply(
+            tokenId,
+            amountBaseUnits.toString()
+          );
+          if (reserved === null) {
+            throw new AppError("MAX_SUPPLY_EXCEEDED", "Mint amount would exceed maximum supply");
+          }
+          reservedSupply = reserved;
         }
-        reservedSupply = reserved;
-      }
+      )
     );
 
     const settledTokenAccount =
