@@ -31,6 +31,12 @@ const LATE_PAYMENT_STALE_AFTER_MS = 2 * LATE_PAYMENT_RECHECK_MS;
 type RowCheck = (env: Env, row: PaymentRequestRow) => Promise<PaymentRequestRow>;
 type Lane = "hot" | "sweep" | "expiry" | "late_watch";
 
+interface LaneRun {
+  lane: Lane;
+  checked: number;
+  failed: number;
+}
+
 export async function reconcileHotPaymentRequests(env: Env): Promise<void> {
   const { environment } = currentClusterScope();
   const blockHeight = await createClusterRpc().getBlockHeight({ commitment: "confirmed" }).send();
@@ -39,7 +45,9 @@ export async function reconcileHotPaymentRequests(env: Env): Promise<void> {
     minLastValidBlockHeight: blockHeight - HOT_LANE_BLOCK_MARGIN,
     limit: HOT_BATCH_SIZE,
   });
-  await checkEach(env, environment, rows, checkAwaitingPaymentRequest, "hot");
+  throwIfEveryCheckFailed(
+    await checkEach(env, environment, rows, checkAwaitingPaymentRequest, "hot")
+  );
 }
 
 export async function reconcilePaymentRequests(env: Env): Promise<void> {
@@ -61,7 +69,9 @@ export async function reconcilePaymentRequests(env: Env): Promise<void> {
     agedCreatedBefore: new Date(now - SWEEP_AGED_AFTER_MS).toISOString(),
     limit: SWEEP_BATCH_SIZE,
   });
-  await checkEach(env, environment, rows, checkAwaitingPaymentRequest, "sweep");
+  throwIfEveryCheckFailed(
+    await checkEach(env, environment, rows, checkAwaitingPaymentRequest, "sweep")
+  );
 }
 
 export async function expirePaymentRequests(env: Env): Promise<void> {
@@ -81,7 +91,7 @@ export async function expirePaymentRequests(env: Env): Promise<void> {
     liveClaimMinLastValidBlockHeight: blockHeight - HOT_LANE_BLOCK_MARGIN,
     limit: EXPIRY_BATCH_SIZE,
   });
-  await checkEach(env, environment, lapsed, closeLapsedPaymentRequest, "expiry");
+  const expiry = await checkEach(env, environment, lapsed, closeLapsedPaymentRequest, "expiry");
 
   const now = Date.now();
   const expiredSince = new Date(now - LATE_PAYMENT_WATCH_MS).toISOString();
@@ -100,13 +110,25 @@ export async function expirePaymentRequests(env: Env): Promise<void> {
     checkedBefore: new Date(now - LATE_PAYMENT_RECHECK_MS).toISOString(),
     limit: LATE_CHECK_BATCH_SIZE,
   });
-  await checkEach(
+  const lateWatch = await checkEach(
     env,
     environment,
     watched,
     checkExpiredPaymentRequestForLatePayment,
     "late_watch"
   );
+  throwIfEveryCheckFailed(expiry, lateWatch);
+}
+
+function throwIfEveryCheckFailed(...runs: readonly LaneRun[]): void {
+  const failedLanes = runs.filter((run) => run.checked > 0 && run.failed === run.checked);
+  if (failedLanes.length > 0) {
+    throw new Error(
+      failedLanes
+        .map((run) => `payment request ${run.lane} lane: all ${run.checked} checks failed`)
+        .join("; ")
+    );
+  }
 }
 
 async function checkEach(
@@ -115,7 +137,7 @@ async function checkEach(
   rows: readonly PaymentRequestRow[],
   check: RowCheck,
   lane: Lane
-): Promise<void> {
+): Promise<LaneRun> {
   const results = await mapSettledWithConcurrency([...rows], CHECK_CONCURRENCY, (row) =>
     check(env, row)
   );
@@ -158,4 +180,5 @@ async function checkEach(
     failed,
     settled,
   });
+  return { lane, checked: rows.length, failed };
 }

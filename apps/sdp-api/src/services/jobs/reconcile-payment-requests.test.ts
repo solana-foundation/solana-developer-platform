@@ -187,6 +187,32 @@ describe("reconcilePaymentRequests", () => {
     });
   });
 
+  it("fails the run when every check failed, after stamping and summarising", async () => {
+    const log = vi.spyOn(moneyPathEvents, "logEvent");
+    const first = await createRequest({ token: SOL_MINT, expiresAt: null });
+    const second = await createRequest({ token: SOL_MINT, expiresAt: null });
+    vi.spyOn(solanaRpc, "getSignaturesForAddress").mockRejectedValue(new Error("rpc down"));
+
+    await expect(onSandbox(() => reconcilePaymentRequests(env))).rejects.toThrow(
+      /sweep lane: all 2 checks failed/
+    );
+
+    expect((await getRow(first.id)).last_checked_at).not.toBeNull();
+    expect((await getRow(second.id)).last_checked_at).not.toBeNull();
+    expect(log).toHaveBeenCalledWith("warn", {
+      event: "payment_requests.lane_run",
+      environment: "sandbox",
+      lane: "sweep",
+      checked: 2,
+      failed: 2,
+      settled: 0,
+    });
+  });
+
+  it("does not fail a run that checked no rows", async () => {
+    await expect(onSandbox(() => reconcilePaymentRequests(env))).resolves.toBeUndefined();
+  });
+
   it("summarises a clean run at info level", async () => {
     const log = vi.spyOn(moneyPathEvents, "logEvent");
     vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);
@@ -292,6 +318,23 @@ describe("reconcileHotPaymentRequests", () => {
     expect(findReference).toHaveBeenCalledTimes(1);
     expect((await getRow(hot.id)).last_checked_at).not.toBeNull();
   });
+
+  it("fails the run when every hot check failed", async () => {
+    vi.spyOn(solanaRpc, "getSignaturesForAddress").mockRejectedValue(new Error("rpc down"));
+    const hot = await createRequest({ token: SOL_MINT, expiresAt: null });
+    await getDb(env)
+      .prepare(
+        `UPDATE payment_requests SET sponsored_tx_account = 'acct', sponsored_tx_unsigned = 'tx',
+           sponsored_tx_last_valid_block_height = ? WHERE id = ?`
+      )
+      .bind("999999999", hot.id)
+      .run();
+
+    await expect(onSandbox(() => reconcileHotPaymentRequests(env))).rejects.toThrow(
+      /hot lane: all 1 checks failed/
+    );
+    expect((await getRow(hot.id)).last_checked_at).not.toBeNull();
+  });
 });
 
 describe("expirePaymentRequests", () => {
@@ -335,6 +378,49 @@ describe("expirePaymentRequests", () => {
 
     expect((await getRow(live.id)).status).toBe("awaiting_payment");
     expect((await getRow(passed.id)).status).toBe("expired");
+  });
+
+  it("still runs the late watch, then fails the run, when every expiry check failed", async () => {
+    const log = vi.spyOn(moneyPathEvents, "logEvent");
+    const lapsed = await createRequest({ token: SOL_MINT, expiresAt: PAST });
+    const watched = await createRequest({ token: SOL_MINT, expiresAt: null });
+    await updateRow(watched.id, {
+      status: "expired",
+      expires_at: ago(DAY),
+      last_checked_at: PAST,
+    });
+    vi.spyOn(solanaRpc, "getSignaturesForAddress")
+      .mockRejectedValueOnce(new Error("rpc down"))
+      .mockResolvedValueOnce([]);
+
+    await expect(onSandbox(() => expirePaymentRequests(env))).rejects.toThrow(
+      /expiry lane: all 1 checks failed/
+    );
+
+    expect((await getRow(lapsed.id)).last_checked_at).not.toBeNull();
+    expect((await getRow(watched.id)).last_checked_at).not.toBe(PAST);
+    expect(log).toHaveBeenCalledWith("info", {
+      event: "payment_requests.lane_run",
+      environment: "sandbox",
+      lane: "late_watch",
+      checked: 1,
+      failed: 0,
+      settled: 0,
+    });
+  });
+
+  it("fails the run when every late-watch check failed", async () => {
+    const watched = await createRequest({ token: SOL_MINT, expiresAt: null });
+    await updateRow(watched.id, {
+      status: "expired",
+      expires_at: ago(DAY),
+      last_checked_at: PAST,
+    });
+    vi.spyOn(solanaRpc, "getSignaturesForAddress").mockRejectedValue(new Error("rpc down"));
+
+    await expect(onSandbox(() => expirePaymentRequests(env))).rejects.toThrow(
+      /late_watch lane: all 1 checks failed/
+    );
   });
 
   it("stops watching an expired request after the late-payment window", async () => {
