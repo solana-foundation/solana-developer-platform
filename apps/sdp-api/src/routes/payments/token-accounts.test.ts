@@ -1,8 +1,21 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
 import type { SolanaRpc } from "@sdp/rpc/solana";
 import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
-import type { Address } from "@solana/kit";
+import { type Address, createNoopSigner } from "@solana/kit";
+import {
+  getTransferCheckedInstructionDataDecoder,
+  TOKEN_2022_PROGRAM_ADDRESS,
+} from "@solana-program/token-2022";
 import { describe, expect, it } from "vitest";
-import { getSplTokenBalances, resolveTokenLabel, withIssuedTokenLabels } from "./token-accounts";
+import { installClusterRpcResponder, tokenAccountsByOwnerResult } from "@/test/helpers/cluster-rpc";
+import { syntheticAddress } from "@/test/helpers/parsed-transactions";
+import { respondMintAccounts, scaledUiAmountConfig } from "@/test/helpers/token-mints";
+import {
+  buildSplTransferInstructions,
+  getSplTokenBalances,
+  resolveTokenLabel,
+  withIssuedTokenLabels,
+} from "./token-accounts";
 
 describe("resolveTokenLabel", () => {
   it("uses the issued token symbol for a known mint", () => {
@@ -60,4 +73,69 @@ describe("getSplTokenBalances", () => {
     for (const answer of answers) answer();
     await expect(balances).resolves.toEqual([]);
   });
+});
+
+describe("buildSplTransferInstructions", () => {
+  const rpc = installClusterRpcResponder();
+
+  it.each([false, true])(
+    "builds exact amounts or rejects scaled mints (scaled=%s)",
+    async (scaled) => {
+      const mint = syntheticAddress(11);
+      respondMintAccounts(rpc, {
+        mints: new Map([
+          [
+            mint,
+            {
+              decimals: 6,
+              extensions: scaled
+                ? [
+                    scaledUiAmountConfig({
+                      multiplier: 2,
+                      newMultiplier: 4,
+                      newMultiplierEffectiveTimestamp: 1_800_000_000n,
+                    }),
+                  ]
+                : null,
+            },
+          ],
+        ]),
+        clockUnixTimestamp: 1_750_000_000n,
+      });
+      rpc.answer(
+        "getTokenAccountsByOwner",
+        tokenAccountsByOwnerResult(1, [
+          {
+            pubkey: syntheticAddress(12),
+            mint,
+            amount: "20000000",
+            decimals: 9,
+            uiAmountString: "40",
+            state: "initialized",
+          },
+        ])
+      );
+
+      const result = runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+        buildSplTransferInstructions({
+          authority: createNoopSigner(syntheticAddress(13)),
+          destination: syntheticAddress(14),
+          mint,
+          amount: "9007199254.740993",
+          ataRentPayer: syntheticAddress(15),
+        })
+      );
+
+      if (scaled) {
+        await expect(result).rejects.toMatchObject({ code: "BAD_REQUEST", statusCode: 400 });
+        return;
+      }
+      const { transferInstruction } = await result;
+      expect(rpc.requests.filter((request) => request.method === "getAccountInfo")).toHaveLength(1);
+      expect(transferInstruction.programAddress).toBe(TOKEN_2022_PROGRAM_ADDRESS);
+      expect(
+        getTransferCheckedInstructionDataDecoder().decode(transferInstruction.data)
+      ).toMatchObject({ amount: 9007199254740993n, decimals: 6 });
+    }
+  );
 });

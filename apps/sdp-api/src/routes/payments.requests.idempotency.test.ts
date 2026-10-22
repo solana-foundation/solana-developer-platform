@@ -9,6 +9,7 @@ import {
   seedProductionPrivyWallet,
   TEST_API_KEY,
   TEST_PRODUCTION_PROJECT_ID,
+  TEST_PROJECT,
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
 import { required } from "@/test/helpers/required";
@@ -95,6 +96,24 @@ describe("Payments routes — payment request token cluster", () => {
       .first<{ count: number }>();
     expect(stored).toEqual({ count: 0 });
   });
+
+  it.each(["1.0000001", "18446744073709.551616"])(
+    "refuses invalid USDC amount %s and stores no request",
+    async (amount) => {
+      const response = await postPaymentRequest(
+        { walletId: TEST_WALLET_ID, token: DEVNET_USDC_MINT, amount },
+        "payreq-too-precise-amount"
+      );
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({ error: { code: "BAD_REQUEST" } });
+      const stored = await getDb(env)
+        .prepare("SELECT COUNT(*)::integer AS count FROM payment_requests WHERE project_id = ?")
+        .bind(TEST_PROJECT.id)
+        .first<{ count: number }>();
+      expect(stored).toEqual({ count: 0 });
+    }
+  );
 });
 
 describe("Payments routes — subscription plan wallets before the key", () => {

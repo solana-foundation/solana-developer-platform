@@ -16,7 +16,7 @@ import {
   preparePaymentSubscriptionPlanResponseSchema,
 } from "@/openapi/schemas/payments";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
-import { installClusterRpcStub, tokenSupplyResult } from "@/test/helpers/cluster-rpc";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import {
   DEVNET_USDC_MINT,
@@ -31,6 +31,7 @@ import {
 } from "@/test/helpers/payments-routes";
 import { required } from "@/test/helpers/required";
 import { TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
+import { mintAccountInfoResult } from "@/test/helpers/token-mints";
 
 const SUBSCRIPTION_HEADERS = {
   Authorization: "Bearer sk_test_payments_policy",
@@ -81,7 +82,7 @@ describe("Payments routes — subscriptions", () => {
   const rpc = installClusterRpcStub();
 
   beforeEach(() => {
-    rpc.answer("getTokenSupply", tokenSupplyResult(1, 6));
+    rpc.answer("getAccountInfo", mintAccountInfoResult({ decimals: 6, extensions: null }));
   });
 
   it("stores a Production plan's USDC as the mainnet mint", async () => {
@@ -119,6 +120,33 @@ describe("Payments routes — subscriptions", () => {
       projectId: TEST_PRODUCTION_PROJECT_ID,
       token: MAINNET_USDC_MINT,
     });
+  });
+
+  it("refuses a plan amount finer than USDC's decimals with 400 and stores no plan", async () => {
+    const planRes = await app.request(
+      "/v1/payments/subscription-plans",
+      {
+        method: "POST",
+        headers: SUBSCRIPTION_HEADERS,
+        body: JSON.stringify({
+          ownerWalletId: TEST_WALLET_ID,
+          token: DEVNET_USDC_MINT,
+          amount: "1.0000001",
+          periodHours: 720,
+        }),
+      },
+      env
+    );
+
+    expect(planRes.status).toBe(400);
+    expect(errorResponseSchema.parse(await planRes.json()).error.code).toBe("BAD_REQUEST");
+    const stored = await getDb(env)
+      .prepare(
+        "SELECT COUNT(*)::integer AS count FROM payment_subscription_plans WHERE project_id = ?"
+      )
+      .bind(TEST_PROJECT.id)
+      .first<{ count: number }>();
+    expect(stored).toEqual({ count: 0 });
   });
 
   // A plan is a record and an unsigned transaction the owner signs; SDP signs

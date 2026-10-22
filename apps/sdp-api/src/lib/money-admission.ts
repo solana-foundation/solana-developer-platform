@@ -1,10 +1,12 @@
 import { type Action, apiKeyMayPerform, organizationRoleMayPerform } from "@sdp/types/actions";
 import { API_KEY_WALLET_SCOPES, type ApiKeyWalletScope } from "@sdp/types/api-keys";
+import type { CustodyWalletPurpose } from "@sdp/types/custody";
 import {
   MANDATE_MOVEMENT_STATUSES,
   MOVEMENTS,
   type MovementId,
   movementActions,
+  movementAllowsWalletPurpose,
   PAYMENT_REQUEST_MOVEMENT_STATUSES,
 } from "@sdp/types/movements";
 import {
@@ -69,7 +71,8 @@ export type MoneyAdmissionRefusal =
   | "principal_missing"
   | "principal_not_live"
   | "action_not_held"
-  | "wallet_out_of_scope";
+  | "wallet_out_of_scope"
+  | "wallet_purpose";
 
 export interface MoneyAdmissionScope {
   organizationId: string;
@@ -149,6 +152,7 @@ const REFUSAL_MESSAGES: Record<Exclude<MoneyAdmissionRefusal, "action_not_held">
   principal_missing: "No authenticated principal may move money here",
   principal_not_live: "The credential moving money is no longer active",
   wallet_out_of_scope: "The credential may not sign with this wallet",
+  wallet_purpose: "Payments can only be sent from a transfer wallet",
 };
 
 type RefusalArguments =
@@ -198,30 +202,81 @@ export function assertCallerWalletInScope(
   custodyWalletId: string
 ): void {
   if (walletAccessAllows(caller.walletAccess, custodyWalletId)) return;
-  logMoneyRefusedEarly(caller, custodyWalletId);
+  logMoneyRefusedEarly(caller, custodyWalletId, "wallet_out_of_scope", null);
   throw new MoneyMovementRefusedError("wallet_out_of_scope");
 }
 
 /**
+ * Refuses, before any work, a request whose source wallet may not sign the
+ * movement: outside the caller's wallet scope ({@link assertCallerWalletInScope}),
+ * then a purpose the movement does not allow ({@link assertWalletPurposeAdmitted}).
+ * For flows that sign in the request (transfers, batches, ramp quotes); a
+ * route asks here before its Idempotency-Key is claimed, so a refusal stores
+ * nothing.
+ *
+ * @param caller - The authenticated caller, as read at authentication.
+ * @param wallet - The custody wallet the movement would sign with.
+ * @param wallet.id - Its custody wallet row id.
+ * @param wallet.purpose - Its purpose; null for a wallet created before purposes.
+ * @param movement - The movement the wallet would sign.
+ */
+export function assertCallerMaySignWith(
+  caller: Pick<ApiKeyContext, "walletAccess" | "organizationId" | "projectId">,
+  wallet: { id: string; purpose: CustodyWalletPurpose | null },
+  movement: MovementId
+): void {
+  assertCallerWalletInScope(caller, wallet.id);
+  assertWalletPurposeAdmitted(caller, wallet, movement);
+}
+
+/**
+ * Refuses, before any work, a wallet whose purpose the movement does not
+ * allow (APE-371), without requiring the caller's wallet scope: recurring
+ * writes that sign nothing succeed on any project wallet (HOO-2099). A
+ * refused wallet outside the scope is refused as out of scope instead, so a
+ * key never learns the purpose of a wallet it cannot see. The custody signer
+ * makes the same purpose refusal ({@link decideWalletPurpose}) on every path,
+ * cron included.
+ *
+ * @param caller - The authenticated caller, as read at authentication.
+ * @param wallet - The custody wallet the movement would sign with.
+ * @param wallet.id - Its custody wallet row id.
+ * @param wallet.purpose - Its purpose; null for a wallet created before purposes.
+ * @param movement - The movement the wallet would sign.
+ */
+export function assertWalletPurposeAdmitted(
+  caller: Pick<ApiKeyContext, "walletAccess" | "organizationId" | "projectId">,
+  wallet: { id: string; purpose: CustodyWalletPurpose | null },
+  movement: MovementId
+): void {
+  if (movementAllowsWalletPurpose(movement, wallet.purpose)) return;
+  assertCallerWalletInScope(caller, wallet.id);
+  logMoneyRefusedEarly(caller, wallet.id, "wallet_purpose", movement);
+  throw new MoneyMovementRefusedError("wallet_purpose");
+}
+
+/**
  * The waist's `sdp_money_refused` event for a refusal made before any
- * movement starts, so it names no movement (surface `early`).
+ * movement starts (surface `early`). A scope refusal names no movement.
  */
 function logMoneyRefusedEarly(
   caller: Pick<ApiKeyContext, "organizationId" | "projectId">,
-  custodyWalletId: string
+  custodyWalletId: string,
+  reason: Extract<MoneyAdmissionRefusal, "wallet_out_of_scope" | "wallet_purpose">,
+  movement: MovementId | null
 ): void {
   const principal = currentMoneyPrincipal();
   logEvent("warn", {
     event: "sdp_money_refused",
     surface: "early",
-    movement: null,
-    module: null,
+    movement,
+    module: movement === null ? null : MOVEMENTS[movement].module,
     subject_id: custodyWalletId,
     organization_id: caller.organizationId,
     project_id: caller.projectId,
     principal_kind: principal ? principal.kind : null,
     principal: principal ? describeMoneyPrincipal(principal) : null,
-    reason: "wallet_out_of_scope",
+    reason,
   });
 }
 
@@ -387,6 +442,23 @@ export function decideMovement(
     return organization;
   }
   return decidePrincipal(movement, facts, subject);
+}
+
+/**
+ * Pure. Whether a custody wallet of this purpose may sign the movement
+ * (APE-371): the signer's half of {@link assertCallerMaySignWith}.
+ *
+ * @param movement - The movement asking to sign.
+ * @param purpose - The signing wallet's purpose; null for a wallet created before purposes.
+ * @returns Admitted, or refused with `wallet_purpose`.
+ */
+export function decideWalletPurpose(
+  movement: MovementId,
+  purpose: CustodyWalletPurpose | null
+): MoneyAdmissionDecision {
+  return movementAllowsWalletPurpose(movement, purpose)
+    ? ADMITTED
+    : { admitted: false, reason: "wallet_purpose" };
 }
 
 /** Where a movement was refused, for the `sdp_money_refused` event. */

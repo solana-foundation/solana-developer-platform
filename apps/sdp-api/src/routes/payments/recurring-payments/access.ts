@@ -1,6 +1,8 @@
+import type { MovementId } from "@sdp/types/movements";
 import type { PaymentRecurringPaymentRow } from "@/db/repositories/payment-recurring-payments.repository";
 import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, notFound, walletNotFound } from "@/lib/errors";
+import { assertWalletPurposeAdmitted } from "@/lib/money-admission";
 import type { AuthorizeInput } from "@/middleware/authorize";
 import {
   type AppContext,
@@ -118,6 +120,7 @@ export async function authorizeRecurringPaymentCreate(
   };
   const scope = await resolveScope(c, body.sourceCustodyWalletId);
   const sourceWallet = resolveWalletByCustodyWalletId(scope.wallets, body.sourceCustodyWalletId);
+  assertWalletPurposeAdmitted(scope.auth, sourceWallet, "recurring.activate");
   // Every id the caller names is checked before the key is claimed: a
   // counterparty account from another tenant never reaches the service.
   await assertCounterpartyAccountInProject(c, {
@@ -161,6 +164,29 @@ export async function authorizeRecurringPayment(
 }
 
 /**
+ * A start on an existing schedule (activate, collect, resume): as
+ * {@link authorizeRecurringPayment}, and the pinned source wallet's purpose
+ * may sign the movement. Cancel is an exit and never asks, so a schedule can
+ * always be unwound.
+ *
+ * @param c - Request context.
+ * @param input - The validated request.
+ * @param movement - The start the route signs.
+ * @returns The schedule and its pinned source wallet.
+ */
+export async function authorizeRecurringPaymentStart(
+  c: AppContext,
+  input: AuthorizeInput,
+  movement: MovementId
+): Promise<AuthorizedRecurringPayment> {
+  const authorized = await authorizeRecurringPayment(c, input);
+  if (authorized.sourceWallet !== null) {
+    assertWalletPurposeAdmitted(authorized.scope.auth, authorized.sourceWallet, movement);
+  }
+  return authorized;
+}
+
+/**
  * Update: the schedule, its source wallet, the wallet the body moves it to,
  * and the counterparty account it points it at, all in the project.
  */
@@ -182,7 +208,10 @@ export async function authorizeRecurringPaymentUpdate(
     if (!named) {
       throw walletNotFound();
     }
+    assertWalletPurposeAdmitted(access, named, "recurring.update");
     nextSourceWallet = named;
+  } else if (authorized.sourceWallet !== null) {
+    assertWalletPurposeAdmitted(access, authorized.sourceWallet, "recurring.update");
   }
   await assertNamedCounterpartyIdsInProject(c, body);
   return { ...authorized, nextSourceWallet };

@@ -425,6 +425,7 @@ SDP decides again each time it signs on a key's behalf, so a change to the key o
 | `reason` | Why |
 | --- | --- |
 | `wallet_out_of_scope` | The custody wallet is outside the key's wallet scope |
+| `wallet_purpose` | The custody wallet's purpose may not send payments: only a `transfer` wallet can be the source of a transfer, batch, recurring payment or offramp |
 | `principal_not_live` | The key was revoked, expired, or passed its rotation deadline during the request |
 | `organization_inactive` | The organization is suspended or deleted |
 | `production_not_enabled` | The project is a production project and the organization does not have production access |

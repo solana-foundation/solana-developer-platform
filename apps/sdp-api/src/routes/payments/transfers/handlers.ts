@@ -8,7 +8,7 @@ import {
   type SolanaRpc,
 } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
+import { formatDecimalAmount, parseTokenAmount } from "@sdp/solana/amount";
 import type { Action } from "@sdp/types/actions";
 import {
   isRampTransferType,
@@ -23,6 +23,7 @@ import {
   transferLandingStatus,
   WALLET_TRANSFER_TYPES,
 } from "@sdp/types/payments";
+import { SOL_DECIMALS } from "@sdp/types/well-known-tokens";
 import {
   type Address,
   address,
@@ -63,7 +64,7 @@ import {
   solanaRpcError,
   transactionFailed,
 } from "@/lib/errors";
-import { assertCallerWalletInScope } from "@/lib/money-admission";
+import { assertCallerMaySignWith } from "@/lib/money-admission";
 import { appErrorResponse, paginated, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { type AuthorizeInput, getAuthorized } from "@/middleware/authorize";
@@ -84,7 +85,6 @@ import { mapTransferRow } from "@/routes/payments/mappers";
 import { transferIdParamsSchema } from "@/routes/payments/schemas";
 import {
   buildSplTransferInstructions,
-  resolveMintTokenProgram,
   resolveSourceTokenAccount,
   resolveTokenLabel,
   type SplTransferSource,
@@ -106,6 +106,7 @@ import {
   resolveOutboundPaymentOperation,
 } from "@/services/payment-operation.service";
 import { createTransferSignedSubmissionStore } from "@/services/payments/signed-submission";
+import { loadPaymentMint, parseStaticPaymentAmount } from "@/services/payments/token-amount";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
   createSponsorshipFeePayment,
@@ -258,17 +259,17 @@ async function assertRampDepositFunded(
   operation: OutboundPaymentOperation
 ): Promise<SplTransferSource | undefined> {
   if (isNativePaymentToken(operation.token)) return undefined;
-  const rpc = createClusterRpc();
   const mint = assertValidAddress(operation.token, "token");
-  const tokenProgram = await resolveMintTokenProgram(rpc, mint);
-  const source = await resolveSourceTokenAccount(
-    rpc,
+  const paymentMint = await loadPaymentMint(mint);
+  const { tokenProgram, toBaseUnits } = paymentMint;
+  const account = await resolveSourceTokenAccount(
     address(operation.sourceWallet.publicKey),
     mint,
     tokenProgram
   );
-  const needed = parseDecimalAmount(operation.amount, source.decimals);
-  if (!source.frozen && source.amount >= needed) return { ...source, tokenProgram };
+  const source = { ...account, ...paymentMint };
+  const needed = toBaseUnits(operation.amount);
+  if (!source.frozen && source.amount >= needed) return { ...source, tokenProgram, toBaseUnits };
 
   const token = resolveTokenLabel(mint);
   const held = formatDecimalAmount(source.amount, source.decimals);
@@ -385,11 +386,11 @@ export async function authorizeTransfer(
     token: body.token,
     amount: body.amount,
   });
-  // The custody signer refuses a wallet outside the key's scope (HOO-2099).
-  // Refusing here as well, before the key is claimed, keeps a refused start
-  // from writing a failed transfer row and an Idempotency-Key that would
-  // replay that failure after the scope is fixed.
-  assertCallerWalletInScope(scope.auth, operation.sourceWallet.id);
+  // The custody signer refuses a wallet outside the key's scope (HOO-2099)
+  // or of a purpose that may not send (APE-371). Refusing here as well,
+  // before the key is claimed, keeps a refused start from writing a failed
+  // transfer row and an Idempotency-Key that would replay that failure.
+  assertCallerMaySignWith(scope.auth, operation.sourceWallet, "payments.transfer");
   // A ramp deposit the request funds is named by id: it must be in the
   // project before the key is claimed, so a wrong id is never stored as a 404.
   let rampTransfer: TransferRow | null = null;
@@ -763,7 +764,7 @@ async function executeSolTransfer(
   submissionStore: SignedSubmissionStore,
   landingStatus: TransferLandingStatus
 ): Promise<{ signature: string; slot: number | null; blockTime: string | null }> {
-  const lamports = parseDecimalAmount(amount, 9);
+  const lamports = parseTokenAmount(amount, SOL_DECIMALS);
   if (lamports <= 0n) {
     throw badRequest("Transfer amount must be greater than zero");
   }
@@ -795,9 +796,9 @@ async function executeSplTransfer(
     sourceWallet,
     submissionStore,
     landingStatus,
-    buildInstructions: async ({ signer, feePayer, rpc }) => {
+    buildInstructions: async ({ signer, feePayer }) => {
       const { createDestinationAtaInstruction, transferInstruction } =
-        await buildSplTransferInstructions(rpc, {
+        await buildSplTransferInstructions({
           authority: signer,
           destination: destinationAddress,
           mint: mintAddress,
@@ -911,6 +912,8 @@ function compareTransferRows(
 export async function createTransfer(c: ValidatedBodyContext<typeof createTransferSchema>) {
   const body = c.req.valid("json");
   const { scope, operation, rampTransfer } = getAuthorized<TransferResolved>(c);
+  // Before the row: a too-precise amount is the caller's 400, never a failed transfer.
+  await parseStaticPaymentAmount(operation.amount, assertValidAddress(operation.token, "token"));
   // The credential-bound record key (ADR 0009), never the raw client key.
   const recordKey = getIdempotencyRecordKey(c);
   const fingerprint = getIdempotencyFingerprint(c);

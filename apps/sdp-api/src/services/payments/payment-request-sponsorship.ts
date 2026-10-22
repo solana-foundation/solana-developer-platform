@@ -1,13 +1,13 @@
 import { hashString } from "@sdp/payments/hash";
 import { createClusterRpc } from "@sdp/rpc/factory";
-import { getRecentBlockhash, type SolanaRpc } from "@sdp/rpc/solana";
+import { getRecentBlockhash } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import { parseDecimalAmount } from "@sdp/solana/amount";
-import { SOL_DECIMALS, SOL_MINT } from "@sdp/types/well-known-tokens";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import {
   type AccountMeta,
   AccountRole,
   type Address,
+  address,
   appendTransactionMessageInstructions,
   type Blockhash,
   compileTransaction,
@@ -33,6 +33,7 @@ import { createSystemPaymentRequestsRepository } from "@/db/repositories/reposit
 import { badRequest, rateLimited } from "@/lib/errors";
 import { buildSplTransferInstructions } from "@/routes/payments/token-accounts";
 import { AuditService } from "@/services/audit.service";
+import { loadPaymentMint } from "@/services/payments/token-amount";
 import {
   createSponsorshipFeePayment,
   resolveProjectSponsorshipScope,
@@ -186,7 +187,7 @@ export async function issuePaymentRequestTransaction(
     throw badRequest("Payment payer cannot be the fee sponsor");
   }
   const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
-  const unsignedBase64 = await buildPaymentTransaction(rpc, {
+  const unsignedBase64 = await buildPaymentTransaction({
     ...params,
     feePayer,
     blockhash,
@@ -227,18 +228,15 @@ export async function issuePaymentRequestTransaction(
  * @returns The compiled, unsigned transaction as base64.
  * @throws AppError `BAD_REQUEST` when a SOL request's amount is not positive.
  */
-async function buildPaymentTransaction(
-  rpc: SolanaRpc,
-  params: {
-    request: PaymentRequestRow;
-    payer: Address;
-    recipient: Address;
-    reference: Address;
-    feePayer: Address;
-    blockhash: Blockhash;
-    lastValidBlockHeight: bigint;
-  }
-): Promise<string> {
+async function buildPaymentTransaction(params: {
+  request: PaymentRequestRow;
+  payer: Address;
+  recipient: Address;
+  reference: Address;
+  feePayer: Address;
+  blockhash: Blockhash;
+  lastValidBlockHeight: bigint;
+}): Promise<string> {
   const { request, recipient, reference, feePayer, blockhash, lastValidBlockHeight } = params;
   const withReference = (instruction: Instruction & { accounts: readonly AccountMeta[] }) => ({
     ...instruction,
@@ -248,7 +246,7 @@ async function buildPaymentTransaction(
 
   let instructions: Instruction[];
   if (request.token === SOL_MINT) {
-    const lamports = parseDecimalAmount(request.amount, SOL_DECIMALS);
+    const lamports = (await loadPaymentMint(address(SOL_MINT))).toBaseUnits(request.amount);
     if (lamports <= 0n) {
       throw badRequest("Transfer amount must be greater than zero");
     }
@@ -260,7 +258,7 @@ async function buildPaymentTransaction(
     instructions = [withReference(transferInstruction)];
   } else {
     const { createDestinationAtaInstruction, transferInstruction } =
-      await buildSplTransferInstructions(rpc, {
+      await buildSplTransferInstructions({
         authority: payerSigner,
         destination: recipient,
         mint: assertValidAddress(request.token, "token"),

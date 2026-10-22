@@ -7,7 +7,6 @@ import {
 import { createClusterRpc } from "@sdp/rpc/factory";
 import type { SolanaRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import { parseDecimalAmount } from "@sdp/solana/amount";
 import {
   IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
   isActivatingRecurringPaymentStatus,
@@ -41,13 +40,11 @@ import {
 import { AppError, badRequest, conflict, internalError } from "@/lib/errors";
 import { currentMandateActivator } from "@/lib/money-principal";
 import { createTenantScope } from "@/lib/tenant-scope";
-import {
-  resolveMintTokenProgram,
-  resolveSourceTokenAccountOrAta,
-} from "@/routes/payments/token-accounts";
+import { resolveSourceTokenAccountOrAta } from "@/routes/payments/token-accounts";
 import { getLogger } from "@/runtime/logger";
 import { createSigningService } from "@/services/domain/signing.service";
 import { parseU64String } from "@/services/payment-operation.service";
+import { loadPaymentMint } from "@/services/payments/token-amount";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
   createSponsorshipFeePayment,
@@ -779,9 +776,10 @@ export async function activateRecurringPayment(input: {
     const owner = assertValidAddress(claimed.source_address, "sourceAddress");
     const destination = assertValidAddress(claimed.destination_address, "destinationAddress");
     const mint = assertValidAddress(claimed.token, "token");
-    const tokenProgram = await resolveMintTokenProgram(rpc, mint);
-    const sourceTokenAccount = await resolveSourceTokenAccountOrAta(rpc, owner, mint, tokenProgram);
-    const amountBaseUnits = parseDecimalAmount(claimed.amount, sourceTokenAccount.decimals);
+    const paymentMint = await loadPaymentMint(mint);
+    const { tokenProgram } = paymentMint;
+    const sourceTokenAccount = await resolveSourceTokenAccountOrAta(owner, mint, paymentMint);
+    const amountBaseUnits = paymentMint.toBaseUnits(claimed.amount);
 
     if (amountBaseUnits <= 0n) {
       throw badRequest("Subscription amount must be greater than zero");

@@ -765,6 +765,7 @@ export async function createFundedPrivyWallet(input: {
   const wallet = await signingService.createWallet(TEST_ORG.id, TEST_PROJECT.id, {
     provider: "privy",
     label: input.label,
+    purpose: "transfer",
   });
 
   if (input.fundLamports && input.fundLamports > 0) {

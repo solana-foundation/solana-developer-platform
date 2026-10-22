@@ -20,7 +20,12 @@ import type { DatabaseClient } from "@/db/client";
 import { isCustodyWalletRequestRecorded } from "@/db/postgres-utils";
 import { AppError, conflict, internalError, notFound, providerUnavailable } from "@/lib/errors";
 import { isCustodyProviderAvailable } from "@/lib/feature-flags";
-import { decideMovement, readMovementFactsWith } from "@/lib/money-admission";
+import {
+  assertMovementAdmitted,
+  decideMovement,
+  decideWalletPurpose,
+  readMovementFactsWith,
+} from "@/lib/money-admission";
 import { getLogger } from "@/runtime/logger";
 import type { SigningConfigRecord } from "@/services/adapters/signing";
 import { AuditService } from "@/services/audit.service";
@@ -54,6 +59,7 @@ type ConfigAdapterResolver = (
 interface RuntimeWallet {
   walletId: string;
   publicKey: Address;
+  purpose: CustodyWalletPurpose | null;
 }
 
 interface ConfigRuntimeTarget {
@@ -147,6 +153,7 @@ interface ConfigRow {
 interface ConfigWalletRow extends ConfigRow {
   wallet_id: string;
   wallet_public_key: string;
+  wallet_purpose: string | null;
   wallet_status: string;
 }
 
@@ -167,6 +174,7 @@ interface ConnectionOwnerRow extends CustodyConnectionRuntimeAvailabilityFacts {
 interface ConnectionWalletRow extends ConnectionOwnerRow {
   wallet_id: string;
   wallet_public_key: string;
+  wallet_purpose: string | null;
   wallet_status: CustodyWalletStatus;
 }
 
@@ -521,7 +529,7 @@ export class CustodyRuntimeTargets {
     projectId: string;
     connectionId: string;
     label?: string;
-    purpose?: CustodyWalletPurpose;
+    purpose: CustodyWalletPurpose;
     /** A keyed request's recovery point: sent to Privy and recorded on the row. */
     idempotency?: CustodyWalletIdempotency | null;
   }): Promise<CreatedCustodyConnectionWallet> {
@@ -673,6 +681,13 @@ export class CustodyRuntimeTargets {
       throw new SigningError("Custody wallet not found", "WALLET_NOT_FOUND");
     }
     this.assertRuntimeExecutionAllowed(target, custodyWalletId);
+    assertMovementAdmitted(decideWalletPurpose(movement, target.wallet.purpose), {
+      surface: "signer",
+      movement,
+      organizationId,
+      projectId,
+      subjectId: custodyWalletId,
+    });
     await assertCustodyProviderEntitled(this.env, this.db, organizationId, target.provider);
 
     const adapter =
@@ -910,7 +925,7 @@ export class CustodyRuntimeTargets {
       walletId: string;
       publicKey: string;
       label?: string;
-      purpose?: CustodyWalletPurpose;
+      purpose: CustodyWalletPurpose;
       idempotency: CustodyWalletIdempotency | null;
     }
   ): Promise<CreatedCustodyConnectionWallet> {
@@ -981,7 +996,7 @@ export class CustodyRuntimeTargets {
           wallet.walletId,
           wallet.publicKey,
           wallet.label ?? null,
-          wallet.purpose ?? null,
+          wallet.purpose,
           wallet.idempotency?.requestId ?? null,
           wallet.idempotency?.fingerprint ?? null,
         ]
@@ -1068,6 +1083,7 @@ export class CustodyRuntimeTargets {
       wallet: {
         walletId: row.wallet_id,
         publicKey: row.wallet_public_key as Address,
+        purpose: parseWalletPurpose(row.wallet_purpose),
       },
       isRuntimeAvailable: row.status === "active" && row.wallet_status === "active",
     };
@@ -1161,6 +1177,7 @@ export class CustodyRuntimeTargets {
       wallet: {
         walletId: row.wallet_id,
         publicKey: row.wallet_public_key as Address,
+        purpose: parseWalletPurpose(row.wallet_purpose),
       },
       isRuntimeAvailable: this.isConnectionRuntimeAvailable(row) && row.wallet_status === "active",
     };
@@ -1381,6 +1398,7 @@ function connectionTargetSelect(): string {
                  pc.status AS credential_status, c.provider_account_fingerprint,
                  w.wallet_id,
                  w.public_key AS wallet_public_key,
+                 w.purpose AS wallet_purpose,
                  w.status AS wallet_status
           FROM custody_connections c
           JOIN provider_credentials pc
@@ -1395,7 +1413,7 @@ function configWalletSelect(): string {
                  c.config_encrypted, c.encryption_version,
                  c.status, c.created_at, c.updated_at,
                  w.wallet_id, w.public_key AS wallet_public_key,
-                 w.status AS wallet_status
+                 w.purpose AS wallet_purpose, w.status AS wallet_status
           FROM custody_configs c
           JOIN custody_wallets w ON w.custody_config_id = c.id`;
 }
