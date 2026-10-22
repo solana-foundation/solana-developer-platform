@@ -33,6 +33,7 @@ import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
 import { requireProjectId } from "@/lib/auth";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { AppError, conflict, unsupportedRampCorridor } from "@/lib/errors";
+import { assertCallerMaySignWith } from "@/lib/money-admission";
 import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { isRampProviderInChannel } from "@/middleware/require-module";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
@@ -43,7 +44,6 @@ import {
   resolveWalletByCustodyWalletId,
 } from "@/routes/payments/wallets";
 import { describeError, logEvent, paymentsErrorDiagnostics } from "@/runtime/money-path-events";
-import { assertWalletPurposeMaySign } from "@/services/domain/signing/custody-runtime-target";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import { auditedRampWrite } from "@/services/payments/ramp-audit";
 import { loadProjectProviderVerdict } from "@/services/provider-availability.service";
@@ -199,7 +199,7 @@ export async function resolveRampQuoteRequest(
   const wallet = resolveWalletByCustodyWalletId(scope.wallets, custodyWalletId);
   if (direction === "offramp") {
     // The quote's deposit is a transfer from this wallet; refuse it before quoting.
-    assertWalletPurposeMaySign(wallet.purpose, "payments.transfer");
+    assertCallerMaySignWith(scope.auth, wallet, "payments.transfer");
   }
   return { scope, projectId, counterparty, wallet, walletAddress: wallet.publicKey };
 }

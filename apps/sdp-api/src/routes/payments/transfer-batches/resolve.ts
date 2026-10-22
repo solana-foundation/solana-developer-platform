@@ -7,6 +7,7 @@ import type { Address } from "@solana/kit";
 import type { CounterpartyAccountRow } from "@/db/repositories/counterparty-account.repository";
 import { requireProjectId } from "@/lib/auth";
 import { badRequest, notFound } from "@/lib/errors";
+import { assertCallerMaySignWith } from "@/lib/money-admission";
 import { type AppContext, getCounterpartyAccountsRepository } from "@/routes/payments/context";
 import {
   resolveMintTokenProgram,
@@ -17,7 +18,6 @@ import {
   resolveScope,
   resolveWalletByCustodyWalletId,
 } from "@/routes/payments/wallets";
-import { assertWalletPurposeMaySign } from "@/services/domain/signing/custody-runtime-target";
 import {
   assertPaymentProjectScope,
   assertPositivePaymentAmount,
@@ -159,11 +159,13 @@ export interface AuthorizedBatchRequest {
 }
 
 /**
- * The access check for a batch (HOO-1918): project scope and every named
- * counterparty account in the project and under the counterparty the
- * recipient names. Whether the caller may sign with the source wallet is the
- * custody signer's decision (HOO-2099). Status is state and
- * is checked later, so a request that already ran is still answered.
+ * The access check for a batch (HOO-1918), for create and `/estimate`:
+ * project scope, a source wallet the caller may sign with (in its scope, of a
+ * purpose that may send), and every named counterparty account in the project
+ * and under the counterparty the recipient names. Create runs it before the
+ * Idempotency-Key is claimed, so a refused batch writes no failed recipients.
+ * Status is state and is checked later, so a request that already ran is
+ * still answered.
  *
  * @param retainedCustodyWalletId - Resolve this wallet even when inactive, so a replay of a request that ran is answered.
  */
@@ -177,7 +179,7 @@ export async function authorizeBatchRequest(
   assertPaymentProjectScope(input.projectId, projectId);
 
   const sourceWallet = resolveWalletByCustodyWalletId(scope.wallets, input.sourceCustodyWalletId);
-  assertWalletPurposeMaySign(sourceWallet.purpose, "payments.transfer_batch");
+  assertCallerMaySignWith(scope.auth, sourceWallet, "payments.transfer_batch");
 
   const sourceAddress = assertValidAddress(sourceWallet.publicKey, "source");
 

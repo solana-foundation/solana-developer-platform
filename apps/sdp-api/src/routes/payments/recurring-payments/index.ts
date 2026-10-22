@@ -9,6 +9,7 @@ import type { Env } from "@/types/env";
 import {
   authorizeRecurringPayment,
   authorizeRecurringPaymentCreate,
+  authorizeRecurringPaymentStart,
   authorizeRecurringPaymentUpdate,
 } from "./access";
 import {
@@ -82,7 +83,7 @@ recurringPayments.post(
   requireAction("recurring.execute"),
   validateParams(recurringPaymentIdParamsSchema),
   validateBody(activateRecurringPaymentSchema),
-  authorize((c, input) => authorizeRecurringPayment(c, input, "recurring.activate")),
+  authorize((c, input) => authorizeRecurringPaymentStart(c, input, "recurring.activate")),
   idempotent({ key: "required", serverErrors: "rerun", recovery: "record" }),
   replayFromRecord(findRecurringPaymentActivateReplay),
   activateRecurringPayment
@@ -92,7 +93,7 @@ recurringPayments.post(
   requireAction("recurring.manage"),
   validateParams(recurringPaymentIdParamsSchema),
   validateBody(cancelRecurringPaymentSchema),
-  authorize((c, input) => authorizeRecurringPayment(c, input, "recurring.cancel")),
+  authorize(authorizeRecurringPayment),
   idempotent({ key: "required", serverErrors: "rerun", recovery: "record" }),
   replayFromRecord(findRecurringPaymentCancelReplay),
   cancelRecurringPayment
@@ -102,7 +103,7 @@ recurringPayments.post(
   requireAction("recurring.execute"),
   validateParams(recurringPaymentIdParamsSchema),
   validateBody(collectRecurringPaymentSchema),
-  authorize((c, input) => authorizeRecurringPayment(c, input, "recurring.collect")),
+  authorize((c, input) => authorizeRecurringPaymentStart(c, input, "recurring.collect")),
   idempotent({ key: "required", serverErrors: "rerun", recovery: "record" }),
   replayFromRecord(findRecurringPaymentCollectReplay),
   collectRecurringPayment
@@ -112,7 +113,7 @@ recurringPayments.post(
   requireAction("recurring.execute"),
   validateParams(recurringPaymentIdParamsSchema),
   validateBody(resumeRecurringPaymentSchema),
-  authorize((c, input) => authorizeRecurringPayment(c, input, "recurring.resume")),
+  authorize((c, input) => authorizeRecurringPaymentStart(c, input, "recurring.resume")),
   idempotent({ key: "required", serverErrors: "rerun", recovery: "record" }),
   replayFromRecord(findRecurringPaymentResumeReplay),
   resumeRecurringPayment

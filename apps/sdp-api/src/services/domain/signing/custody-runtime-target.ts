@@ -11,23 +11,21 @@ import {
   type CustodyWalletStatus,
   type ProviderCredentialStatus,
 } from "@sdp/types/custody";
-import { type MovementId, movementAllowsWalletPurpose } from "@sdp/types/movements";
+import type { MovementId } from "@sdp/types/movements";
 import type { OrganizationProviderAvailabilityResponse } from "@sdp/types/provider-access";
 import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
 import type { Address, TransactionSigner } from "@solana/kit";
 import type { Context } from "hono";
 import type { DatabaseClient } from "@/db/client";
 import { isCustodyWalletRequestRecorded } from "@/db/postgres-utils";
-import {
-  AppError,
-  conflict,
-  forbidden,
-  internalError,
-  notFound,
-  providerUnavailable,
-} from "@/lib/errors";
+import { AppError, conflict, internalError, notFound, providerUnavailable } from "@/lib/errors";
 import { isCustodyProviderAvailable } from "@/lib/feature-flags";
-import { decideMovement, readMovementFactsWith } from "@/lib/money-admission";
+import {
+  assertMovementAdmitted,
+  decideMovement,
+  decideWalletPurpose,
+  readMovementFactsWith,
+} from "@/lib/money-admission";
 import { getLogger } from "@/runtime/logger";
 import type { SigningConfigRecord } from "@/services/adapters/signing";
 import { AuditService } from "@/services/audit.service";
@@ -683,7 +681,13 @@ export class CustodyRuntimeTargets {
       throw new SigningError("Custody wallet not found", "WALLET_NOT_FOUND");
     }
     this.assertRuntimeExecutionAllowed(target, custodyWalletId);
-    assertWalletPurposeMaySign(target.wallet.purpose, movement);
+    assertMovementAdmitted(decideWalletPurpose(movement, target.wallet.purpose), {
+      surface: "signer",
+      movement,
+      organizationId,
+      projectId,
+      subjectId: custodyWalletId,
+    });
     await assertCustodyProviderEntitled(this.env, this.db, organizationId, target.provider);
 
     const adapter =
@@ -1348,23 +1352,6 @@ const KNOWN_WALLET_PURPOSES = {
   transfer: true,
   dvp_settlement_authority: true,
 } as const satisfies Record<CustodyWalletPurpose, true>;
-
-/**
- * Refuses a wallet whose purpose may not sign the movement (APE-371). The
- * signer checks it on every path, cron included; a route checks it again
- * before its Idempotency-Key is claimed, so a refusal stores nothing.
- */
-export function assertWalletPurposeMaySign(
-  purpose: CustodyWalletPurpose | null,
-  movement: MovementId
-): void {
-  if (!movementAllowsWalletPurpose(movement, purpose)) {
-    throw forbidden(`A ${purpose ?? "purposeless"} wallet cannot sign ${movement}`, {
-      reason: "wallet_purpose",
-      purpose,
-    });
-  }
-}
 
 function parseWalletPurpose(purpose: string | null): CustodyWalletPurpose | null {
   if (purpose === null) {
