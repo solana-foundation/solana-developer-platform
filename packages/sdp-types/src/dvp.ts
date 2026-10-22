@@ -118,6 +118,12 @@ export const DVP_LEG_REFUSAL = {
   escrowFrozen: "dvp_escrow_frozen",
   legAlreadyFunded: "dvp_leg_already_funded",
   mintUnreadable: "dvp_mint_unreadable",
+  /**
+   * The leg's mint, read live, is in a state the DvP capability row refuses
+   * (a transfer fee, a display rule, non-transferable, paused, a transfer hook
+   * that runs or can be set), so the funding sends nothing.
+   */
+  mintUnsupported: "dvp_mint_unsupported",
   /** The paying wallet has no token account for the leg's mint. */
   walletHoldsNoToken: "dvp_wallet_holds_no_token",
   walletBalanceShort: "dvp_wallet_balance_short",

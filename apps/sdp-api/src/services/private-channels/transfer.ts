@@ -1,5 +1,4 @@
 import { getRecentBlockhash, sendTransaction } from "@sdp/rpc/solana";
-import { AmountError, parseDecimalAmount } from "@sdp/solana/amount";
 import type { PrivateChannelInstance, PrivateChannelTransfer } from "@sdp/types/private-channels";
 import {
   PRIVATE_CHANNEL_EVENT_STATUSES,
@@ -34,7 +33,7 @@ import {
   type PrivateChannelTransferRow,
 } from "@/db/repositories/private-channel-transfer.repository";
 import { createPrivateChannelTransferRepository } from "@/db/repositories/repository-factory";
-import { AppError, badRequest } from "@/lib/errors";
+import { AppError } from "@/lib/errors";
 import { buildPrivateChannelTransferFingerprint } from "@/lib/idempotency";
 import { MoneyMovementRefusedError } from "@/lib/money-admission";
 import { getLogger } from "@/runtime/logger";
@@ -42,7 +41,7 @@ import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { type SpcAuthContext, withGatewayRpc } from "./auth/gateway-auth";
 import { getChannelBalance } from "./balance";
-import { resolveChannelToken } from "./mint";
+import { channelAmountBaseUnits, resolveChannelToken } from "./mint";
 import type { PrivateChannelProjectRpcClient } from "./project-rpc";
 import { confirmAndPersistTransfer } from "./transfer-confirm";
 import { emitTransferEvent } from "./transfer-events";
@@ -383,22 +382,11 @@ export async function createChannelTransfer(
   env: Env,
   input: CreateChannelTransferInput
 ): Promise<PrivateChannelTransfer> {
-  const token = await resolveChannelToken(input.instance, input.projectRpc, input.mint);
+  const { token, terms } = await resolveChannelToken(input.instance, input.projectRpc, input.mint);
   const mint = address(token.mint);
   const tokenProgram = address(token.tokenProgram);
-  const { decimals } = token;
-  let amountBaseUnits: bigint;
-  try {
-    amountBaseUnits = parseDecimalAmount(input.amount, decimals);
-  } catch (error) {
-    if (error instanceof AmountError) {
-      throw badRequest(error.message);
-    }
-    throw error;
-  }
-  if (amountBaseUnits <= 0n) {
-    throw badRequest("amount must be greater than zero");
-  }
+  const { decimals } = terms;
+  const amountBaseUnits = channelAmountBaseUnits(input.amount, terms);
 
   const sender = address(input.wallet.publicKey);
   const recipientAddress = address(input.recipient.pubkey);

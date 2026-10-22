@@ -557,6 +557,7 @@
       "fundRefusedBalanceShort": "Esta Wallet no tiene suficiente {symbol} para fondear este tramo. No se envió nada.",
       "fundRefusedBalanceShortUnnamed": "Esta Wallet no tiene suficiente de este Token para fondear este tramo. No se envió nada.",
       "fundRefusedFrozen": "El escrow de este tramo está congelado, así que una transferencia hacia él rebotaría. El emisor del Token tiene que descongelarlo primero.",
+      "fundRefusedMintUnsupported": "El token de este tramo ya no se puede financiar: su mint está ahora en un estado que la liquidación DvP rechaza, como una comisión de transferencia, una pausa o un transfer hook. No se envió nada.",
       "fundRefusedInProgress": "Este tramo ya se está moviendo. Vuelve a revisar en un momento.",
       "fundRefusedNoToken": "Esta Wallet todavía no tiene {symbol}. Envíale un poco y luego fondea el tramo.",
       "fundRefusedNoTokenUnnamed": "Esta Wallet todavía no tiene este Token. Envíale un poco y luego fondea el tramo.",

@@ -557,6 +557,7 @@
       "fundRefusedBalanceShort": "Ce Wallet ne détient pas assez de {symbol} pour financer cette jambe. Rien n'a été envoyé.",
       "fundRefusedBalanceShortUnnamed": "Ce Wallet ne détient pas assez de ce Token pour financer cette jambe. Rien n'a été envoyé.",
       "fundRefusedFrozen": "L'escrow de cette jambe est gelé : un transfert vers celui-ci serait rejeté. L'émetteur du Token doit d'abord le dégeler.",
+      "fundRefusedMintUnsupported": "Le token de cette jambe ne peut plus être financé : son mint est désormais dans un état que le règlement DvP refuse, comme des frais de transfert, une pause ou un transfer hook. Rien n'a été envoyé.",
       "fundRefusedInProgress": "Cette jambe est déjà en cours de traitement. Revenez dans un instant.",
       "fundRefusedNoToken": "Ce Wallet ne détient pas encore de {symbol}. Envoyez-lui-en, puis financez la jambe.",
       "fundRefusedNoTokenUnnamed": "Ce Wallet ne détient pas encore ce Token. Envoyez-lui-en, puis financez la jambe.",
