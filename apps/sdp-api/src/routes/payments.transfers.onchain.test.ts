@@ -15,6 +15,7 @@ import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { installClusterRpcStub, tokenAccountsByOwnerResult } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import {
+  confirmTransactionMock,
   createKoraAdapterMock,
   createOrgSignerForCustodyWalletMock,
   DEVNET_USDC_MINT,
@@ -158,7 +159,7 @@ describe("Payments routes — on-chain transfers", () => {
     expect(await countTransferRows()).toBe(0);
   });
 
-  it("executes a SOL transfer and returns a confirmed transfer record", async () => {
+  it("executes a SOL transfer, waits for finalization, and returns a finalized transfer record", async () => {
     const res = await postTransfer(
       {
         sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
@@ -171,13 +172,19 @@ describe("Payments routes — on-chain transfers", () => {
 
     expect(res.status).toBe(200);
     const body = await readTransferResponse(res);
-    expect(body.data.transfer.status).toBe("confirmed");
+    expect(body.data.transfer.status).toBe("finalized");
     expect(body.data.transfer.id).toMatch(/^xfr_/);
     expect(body.data.transfer.signature).toBeTruthy();
+    expect(confirmTransactionMock).toHaveBeenCalledWith(
+      expect.anything(),
+      body.data.transfer.signature,
+      { commitment: "finalized" }
+    );
 
     const row = await readTransferRow(body.data.transfer.id);
-    expect(row.status).toBe("confirmed");
+    expect(row.status).toBe("finalized");
     expect(row.signature).toBeTruthy();
+    expect(row.confirmed_at).not.toBeNull();
   });
 
   it("appends a tamper-evident audit intent and outcome for an executed transfer", async () => {
@@ -304,6 +311,11 @@ describe("Payments routes — on-chain transfers", () => {
       status: "settling",
     });
     expect(body.data.transfer.signature).toBeTruthy();
+    expect(confirmTransactionMock).toHaveBeenCalledWith(
+      expect.anything(),
+      body.data.transfer.signature,
+      { commitment: "confirmed" }
+    );
 
     const rows = await listTransferRows();
     expect(rows).toHaveLength(1);
@@ -630,7 +642,7 @@ describe("Payments routes — on-chain transfers", () => {
 
     expect(res.status).toBe(200);
     const body = await readTransferResponse(res);
-    expect(body.data.transfer.status).toBe("confirmed");
+    expect(body.data.transfer.status).toBe("finalized");
     expect(body.data.transfer.signature).toBeTruthy();
   });
 

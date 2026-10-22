@@ -118,27 +118,31 @@ describe("Payments routes — signed submission", () => {
       expect(sendTransactionMock).toHaveBeenCalledOnce();
     });
 
+    async function finalizeProcessingTransfer(signature: string) {
+      const processing = (await listTransferRows()).find(
+        (row) => row.status === "processing" && row.signature === signature
+      );
+      if (!processing) throw new Error("processing transfer not found");
+
+      const reconciled = await createPostgresPaymentsRepository(
+        getDb(env),
+        createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+      ).updateTransfer({
+        transferId: processing.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        expectedStatus: "processing",
+        status: "finalized",
+        slot: 200,
+        updatedAt: new Date().toISOString(),
+      });
+      expect(reconciled).toMatchObject({ status: "finalized" });
+    }
+
     it("does not regress a transfer finalized while the route waits for confirmation", async () => {
       await mockSignedSubmissionAdapter();
       confirmTransactionMock.mockImplementationOnce(async (_rpc, signature) => {
-        const processing = (await listTransferRows()).find(
-          (row) => row.status === "processing" && row.signature === signature
-        );
-        if (!processing) throw new Error("processing transfer not found");
-
-        const reconciled = await createPostgresPaymentsRepository(
-          getDb(env),
-          createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
-        ).updateTransfer({
-          transferId: processing.id,
-          organizationId: TEST_ORG.id,
-          projectId: TEST_PROJECT.id,
-          expectedStatus: "processing",
-          status: "finalized",
-          slot: 200,
-          updatedAt: new Date().toISOString(),
-        });
-        expect(reconciled?.status).toBe("finalized");
+        await finalizeProcessingTransfer(signature);
 
         return {
           signature,
@@ -156,6 +160,20 @@ describe("Payments routes — signed submission", () => {
 
       const row = await readTransferRow(json.data.transfer.id);
       expect(row).toMatchObject({ status: "finalized", slot: 200 });
+    });
+
+    it("answers an ambiguous confirmation failure with the row reconciliation already finalized", async () => {
+      await mockSignedSubmissionAdapter();
+      confirmTransactionMock.mockImplementationOnce(async (_rpc, signature) => {
+        await finalizeProcessingTransfer(signature);
+        throw new Error("confirmation timed out");
+      });
+
+      const res = await transferRequest("0.001");
+
+      expect(res.status).toBe(200);
+      const json = await readTransferResponse(res);
+      expect(json.data.transfer).toMatchObject({ status: "finalized", slot: 200 });
     });
 
     it("returns the durable processing transfer when its first broadcast is ambiguous", async () => {

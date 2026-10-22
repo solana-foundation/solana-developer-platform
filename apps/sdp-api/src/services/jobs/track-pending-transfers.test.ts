@@ -6,7 +6,7 @@ import {
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_TRANSACTION_HISTORY_NOT_AVAILABLE,
 } from "@solana/kit";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { createSystemPaymentsRepository } from "@/db/repositories/repository-factory";
 import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
@@ -899,7 +899,14 @@ describe("trackPendingTransfers", () => {
       });
     });
 
-    it("rotates a confirmed transfer whose signature status reads null without touching its status", async () => {
+    function spyOnWarn() {
+      const warn = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
+      onTestFinished(() => warn.mockRestore());
+      return warn;
+    }
+
+    it("rotates and logs a confirmed transfer whose signature status reads null without touching its status", async () => {
+      const warn = spyOnWarn();
       await insertTransfer({
         id: "xfr_confirmed_no_status",
         status: "confirmed",
@@ -914,6 +921,15 @@ describe("trackPendingTransfers", () => {
       const rotated = await getTransfer("xfr_confirmed_no_status");
       expect(rotated?.status).toBe("confirmed");
       expect(rotated?.finalization_last_polled_at).not.toBeNull();
+      expect(warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: "sdp_api_payment_finalization_unproven",
+          reason: "status_missing",
+          transfer_id: "xfr_confirmed_no_status",
+          transaction_error: null,
+        }),
+        "sdp_api_payment_finalization_unproven"
+      );
     });
 
     it("does not poll confirmed transfers older than the finalization window", async () => {
@@ -965,7 +981,8 @@ describe("trackPendingTransfers", () => {
       expect(upgraded?.slot).toBe(44444);
     });
 
-    it("leaves confirmed transfer untouched when the finalized status carries an error", async () => {
+    it("leaves and logs a confirmed transfer whose finalized status carries an error", async () => {
+      const warn = spyOnWarn();
       rpc.respondSignatureStatuses(() => ({
         slot: 88888,
         confirmations: null,
@@ -986,6 +1003,15 @@ describe("trackPendingTransfers", () => {
 
       const unchanged = await getTransfer("xfr_confirmed_errored");
       expect(unchanged?.status).toBe("confirmed");
+      expect(warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: "sdp_api_payment_finalization_unproven",
+          reason: "transaction_error",
+          transfer_id: "xfr_confirmed_errored",
+          transaction_error: JSON.stringify({ InstructionError: [0, { Custom: 1 }] }),
+        }),
+        "sdp_api_payment_finalization_unproven"
+      );
     });
 
     it("polls each project's confirmed transfers for finality on its environment's cluster", async () => {
