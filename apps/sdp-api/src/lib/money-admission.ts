@@ -209,11 +209,10 @@ export function assertCallerWalletInScope(
 /**
  * Refuses, before any work, a request whose source wallet may not sign the
  * movement: outside the caller's wallet scope ({@link assertCallerWalletInScope}),
- * then a purpose the movement does not allow (APE-371). Scope goes first so a
- * refusal never tells a key about a wallet it cannot see. The custody signer
- * makes the same purpose refusal ({@link decideWalletPurpose}) on every path,
- * cron included; a route asks here before its Idempotency-Key is claimed, so
- * a refusal stores nothing.
+ * then a purpose the movement does not allow ({@link assertWalletPurposeAdmitted}).
+ * For flows that sign in the request (transfers, batches, ramp quotes); a
+ * route asks here before its Idempotency-Key is claimed, so a refusal stores
+ * nothing.
  *
  * @param caller - The authenticated caller, as read at authentication.
  * @param wallet - The custody wallet the movement would sign with.
@@ -227,7 +226,31 @@ export function assertCallerMaySignWith(
   movement: MovementId
 ): void {
   assertCallerWalletInScope(caller, wallet.id);
+  assertWalletPurposeAdmitted(caller, wallet, movement);
+}
+
+/**
+ * Refuses, before any work, a wallet whose purpose the movement does not
+ * allow (APE-371), without requiring the caller's wallet scope: recurring
+ * writes that sign nothing succeed on any project wallet (HOO-2099). A
+ * refused wallet outside the scope is refused as out of scope instead, so a
+ * key never learns the purpose of a wallet it cannot see. The custody signer
+ * makes the same purpose refusal ({@link decideWalletPurpose}) on every path,
+ * cron included.
+ *
+ * @param caller - The authenticated caller, as read at authentication.
+ * @param wallet - The custody wallet the movement would sign with.
+ * @param wallet.id - Its custody wallet row id.
+ * @param wallet.purpose - Its purpose; null for a wallet created before purposes.
+ * @param movement - The movement the wallet would sign.
+ */
+export function assertWalletPurposeAdmitted(
+  caller: Pick<ApiKeyContext, "walletAccess" | "organizationId" | "projectId">,
+  wallet: { id: string; purpose: CustodyWalletPurpose | null },
+  movement: MovementId
+): void {
   if (movementAllowsWalletPurpose(movement, wallet.purpose)) return;
+  assertCallerWalletInScope(caller, wallet.id);
   logMoneyRefusedEarly(caller, wallet.id, "wallet_purpose", movement);
   throw new MoneyMovementRefusedError("wallet_purpose");
 }
