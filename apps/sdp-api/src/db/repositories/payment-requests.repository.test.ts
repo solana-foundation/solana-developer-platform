@@ -1,5 +1,11 @@
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
+import {
+  createPaymentRequestsRepository,
+  createSystemPaymentRequestsRepository,
+} from "@/db/repositories/repository-factory";
+import { createTenantScope } from "@/lib/tenant-scope";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
@@ -9,7 +15,7 @@ import {
   seedDefaultProjects,
 } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-import type { PaymentRequestsRepository } from "./payment-requests.repository";
+import type { PaymentRequestRow, PaymentRequestsRepository } from "./payment-requests.repository";
 import { createPostgresPaymentRequestsRepository } from "./payment-requests.repository.postgres";
 
 const TEST_PROJECT_ID = "prj_preq_repo_test";
@@ -92,6 +98,30 @@ describe("PaymentRequestsRepository (postgres)", () => {
       )
       .bind(id, TEST_ORG.id, TEST_PROJECT_ID)
       .run();
+  }
+
+  async function seedInboundTransfer(request: PaymentRequestRow): Promise<string> {
+    const transferId = `xfr_${request.id}`;
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_transfers (
+           id, organization_id, project_id, custody_wallet_id, wallet_id, source_address,
+           destination_address, token, amount, type, direction, status, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, 'PayerAddr', ?, ?, ?, 'transfer', 'inbound', 'confirmed',
+                   '2026-06-23T00:00:00.000Z', '2026-06-23T00:00:00.000Z')`
+      )
+      .bind(
+        transferId,
+        TEST_ORG.id,
+        TEST_PROJECT_ID,
+        TEST_CUSTODY_WALLET_ID,
+        request.wallet_id,
+        request.destination_address,
+        request.token,
+        request.amount
+      )
+      .run();
+    return transferId;
   }
 
   function createInput(
@@ -552,6 +582,166 @@ describe("PaymentRequestsRepository (postgres)", () => {
           currentBlockHeight: 900n,
         })
       ).toBe(false);
+    });
+  });
+
+  describe("reconciler constraint", () => {
+    it("refuses paid_late on a request that is not paid", async () => {
+      const request = await repo.createPaymentRequest(createInput({ token: SOL_MINT }));
+      await expect(
+        getDb(env)
+          .prepare("UPDATE payment_requests SET paid_late = true WHERE id = ?")
+          .bind(request.id)
+          .run()
+      ).rejects.toThrow(/payment_requests_paid_late_only_when_paid/);
+    });
+  });
+
+  describe("reconciler queries", () => {
+    it("lists hot requests whose sponsored transaction can still land, stalest first", async () => {
+      const live = await repo.createPaymentRequest(createInput({ token: SOL_MINT, expiresAt: null }));
+      const lapsedClaim = await repo.createPaymentRequest(
+        createInput({ token: SOL_MINT, expiresAt: null })
+      );
+      const noClaim = await repo.createPaymentRequest(
+        createInput({ token: SOL_MINT, expiresAt: null })
+      );
+      const db = getDb(env);
+      await db
+        .prepare(
+          `UPDATE payment_requests SET sponsored_tx_account = 'acct', sponsored_tx_unsigned = 'tx',
+             sponsored_tx_last_valid_block_height = ? WHERE id = ?`
+        )
+        .bind("1000", live.id)
+        .run();
+      await db
+        .prepare(
+          `UPDATE payment_requests SET sponsored_tx_account = 'acct', sponsored_tx_unsigned = 'tx',
+             sponsored_tx_last_valid_block_height = ? WHERE id = ?`
+        )
+        .bind("10", lapsedClaim.id)
+        .run();
+
+      const rows = await createSystemPaymentRequestsRepository(env).listHotPaymentRequests({
+        environment: "sandbox",
+        minLastValidBlockHeight: 500n,
+        limit: 10,
+      });
+
+      expect(rows.map((row) => row.id)).toEqual([live.id]);
+      expect(rows.map((row) => row.id)).not.toContain(noClaim.id);
+    });
+
+    it("lists unexpired awaiting requests not checked since the cutoff, never-checked first", async () => {
+      const never = await repo.createPaymentRequest(createInput({ token: SOL_MINT, expiresAt: null }));
+      const old = await repo.createPaymentRequest(createInput({ token: SOL_MINT, expiresAt: null }));
+      const fresh = await repo.createPaymentRequest(createInput({ token: SOL_MINT, expiresAt: null }));
+      const lapsed = await repo.createPaymentRequest(
+        createInput({ token: SOL_MINT, expiresAt: "2020-01-01T00:00:00.000Z" })
+      );
+      const db = getDb(env);
+      await db
+        .prepare("UPDATE payment_requests SET last_checked_at = ? WHERE id = ?")
+        .bind("2026-01-01T00:00:00.000Z", old.id)
+        .run();
+      await db
+        .prepare("UPDATE payment_requests SET last_checked_at = ? WHERE id = ?")
+        .bind("2099-01-01T00:00:00.000Z", fresh.id)
+        .run();
+
+      const rows = await createSystemPaymentRequestsRepository(env).listPaymentRequestsDueForCheck({
+        environment: "sandbox",
+        checkedBefore: "2026-06-01T00:00:00.000Z",
+        limit: 10,
+      });
+
+      expect(rows.map((row) => row.id)).toEqual([never.id, old.id]);
+      expect(rows.map((row) => row.id)).not.toContain(lapsed.id);
+    });
+
+    it("does not list another environment's requests", async () => {
+      await repo.createPaymentRequest(createInput({ token: SOL_MINT, expiresAt: null }));
+      const rows = await createSystemPaymentRequestsRepository(env).listPaymentRequestsDueForCheck({
+        environment: "production",
+        checkedBefore: "2099-01-01T00:00:00.000Z",
+        limit: 10,
+      });
+      expect(rows).toEqual([]);
+    });
+
+    it("lists awaiting requests past expires_at as lapsed", async () => {
+      const lapsed = await repo.createPaymentRequest(
+        createInput({ token: SOL_MINT, expiresAt: "2020-01-01T00:00:00.000Z" })
+      );
+      await repo.createPaymentRequest(
+        createInput({ token: SOL_MINT, expiresAt: "2099-01-01T00:00:00.000Z" })
+      );
+      await repo.createPaymentRequest(createInput({ token: SOL_MINT, expiresAt: null }));
+
+      const rows = await createSystemPaymentRequestsRepository(env).listLapsedPaymentRequests({
+        environment: "sandbox",
+        limit: 10,
+      });
+
+      expect(rows.map((row) => row.id)).toEqual([lapsed.id]);
+    });
+
+    it("moves only an expired request to paid late", async () => {
+      const request = await repo.createPaymentRequest(
+        createInput({ token: SOL_MINT, expiresAt: "2020-01-01T00:00:00.000Z" })
+      );
+      const transferId = await seedInboundTransfer(request);
+      const systemRepo = createSystemPaymentRequestsRepository(env);
+      const scoped = { requestId: request.id, organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID };
+
+      expect(
+        await systemRepo.markExpiredPaymentRequestPaidLate({ ...scoped, fulfilledByTransferId: transferId })
+      ).toBeNull();
+
+      await repo.markPaymentRequest({
+        ...scoped,
+        status: "expired",
+        fulfilledByTransferId: null,
+        canceledBy: null,
+      });
+      const paid = await systemRepo.markExpiredPaymentRequestPaidLate({
+        ...scoped,
+        fulfilledByTransferId: transferId,
+      });
+
+      expect(paid).toMatchObject({ status: "paid", paid_late: true, fulfilled_by_transfer_id: transferId });
+      expect(paid?.lifecycle.map((event) => event.status)).toEqual([
+        "awaiting_payment",
+        "expired",
+        "paid",
+      ]);
+    });
+
+    it("stamps last_checked_at on every listed id", async () => {
+      const a = await repo.createPaymentRequest(createInput({ token: SOL_MINT, expiresAt: null }));
+      const b = await repo.createPaymentRequest(createInput({ token: SOL_MINT, expiresAt: null }));
+      const systemRepo = createSystemPaymentRequestsRepository(env);
+
+      await systemRepo.markPaymentRequestsChecked([a.id, b.id]);
+
+      const rows = await Promise.all(
+        [a, b].map((row) =>
+          repo.getPaymentRequestById({
+            requestId: row.id,
+            organizationId: TEST_ORG.id,
+            projectId: TEST_PROJECT_ID,
+          })
+        )
+      );
+      expect(rows.every((row) => row?.last_checked_at !== null)).toBe(true);
+    });
+
+    it("denies the reconciler methods to tenant callers", () => {
+      const tenant = createPaymentRequestsRepository(
+        env,
+        createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID })
+      );
+      expect(() => tenant.markPaymentRequestsChecked([])).toThrow(/system-only/);
     });
   });
 });
