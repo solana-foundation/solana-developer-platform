@@ -827,6 +827,11 @@ jobs:
             test_files: src/tests/payments-wallet-scope.test.ts src/tests/api-keys-flow.test.ts src/tests/api-keys-rotation.test.ts src/tests/custody-local.test.ts src/tests/kora-surfpool-shim.test.ts
             rpc_provider: alchemy
             custody_provider: local
+          - name: Surfpool / Recurring Payments
+            provider: surfpool
+            test_files: src/tests/recurring-payments-authority-revocation.test.ts
+            rpc_provider: alchemy
+            custody_provider: local
           - name: Surfpool / Token and Payment Flows (Kora)
             provider: surfpool
             kora_mode: docker
