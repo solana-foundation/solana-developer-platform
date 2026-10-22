@@ -5,12 +5,16 @@ import type { WalletTrackedBalancesResult } from "./[walletId]/wallet-detail-bal
 
 export const READ_AT = 1_700_000_000_000;
 
-export function solBalance(uiAmount: string): CustodyWalletTokenBalance {
+/** Native SOL has no display rule: its display amount is its token amount. */
+export function solBalance(tokenAmount: string): CustodyWalletTokenBalance {
   return {
     token: "SOL",
     mint: SOL_MINT,
-    amount: solToLamports(sol(uiAmount)).toString(),
-    uiAmount,
+    amount: solToLamports(sol(tokenAmount)).toString(),
+    tokenAmount,
+    displayAmount: tokenAmount,
+    displayAsOf: null,
+    displayRule: "plain",
     decimals: 9,
   };
 }

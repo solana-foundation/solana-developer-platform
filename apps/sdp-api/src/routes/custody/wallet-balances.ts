@@ -1,5 +1,8 @@
 /**
- * Live SOL and SPL balances for custody wallets, read from the chain.
+ * Live SOL and SPL holdings for custody wallets, read from the chain, in base
+ * units summed per mint. Display is added after, for every wallet of the
+ * request at once (`withDisplayAmounts`), and never cached: an
+ * interest-bearing mint's display changes every second.
  *
  * Home and DvP create ask for every wallet at once, often from several requests
  * together, so the read is shaped for that: SOL for every wallet the cache missed
@@ -17,12 +20,10 @@ import {
   getMultipleAccountsLamports,
   type SolanaRpc,
 } from "@sdp/rpc/solana";
-import { formatDecimalAmount } from "@sdp/solana/amount";
-import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
-import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { type Address, isAddress } from "@solana/kit";
 import { getSplTokenBalances } from "@/routes/payments/token-accounts";
 import { getLogger } from "@/runtime/logger";
+import { type HeldTokenBalance, nativeSolHolding } from "@/services/token-movement/balance-display";
 
 const WALLET_BALANCE_CACHE_TTL_MS = 10_000;
 
@@ -32,13 +33,10 @@ export interface WalletBalanceTarget {
   publicKey: string;
 }
 
-/** A wallet's balances, or null when any part of the read failed. */
-type WalletBalanceRead = Promise<CustodyWalletTokenBalance[] | null>;
+/** A wallet's holdings, or null when any part of the read failed. */
+type WalletBalanceRead = Promise<HeldTokenBalance[] | null>;
 
-const walletBalanceCache = new Map<
-  string,
-  { expiresAt: number; value: CustodyWalletTokenBalance[] }
->();
+const walletBalanceCache = new Map<string, { expiresAt: number; value: HeldTokenBalance[] }>();
 
 /** Reads running now, per cache key. Removed as each settles, so a failure is never replayed. */
 const walletBalanceReads = new Map<string, WalletBalanceRead>();
@@ -55,7 +53,7 @@ export function clearWalletBalanceCache(): void {
   cacheGeneration += 1;
 }
 
-function readCachedBalances(cacheKey: string): CustodyWalletTokenBalance[] | null {
+function readCachedBalances(cacheKey: string): HeldTokenBalance[] | null {
   const entry = walletBalanceCache.get(cacheKey);
   if (!entry) {
     return null;
@@ -111,17 +109,7 @@ async function readWalletBalance(
     return null;
   }
 
-  const lamports = solBalanceResult.value;
-  const balances: CustodyWalletTokenBalance[] = [
-    {
-      token: "SOL",
-      mint: SOL_MINT,
-      amount: lamports.toString(),
-      uiAmount: formatDecimalAmount(lamports, 9),
-      decimals: 9,
-    },
-    ...splBalancesResult.value,
-  ];
+  const balances = [nativeSolHolding(solBalanceResult.value), ...splBalancesResult.value];
   if (generation === cacheGeneration) {
     walletBalanceCache.set(cacheKey, {
       value: balances,
@@ -132,7 +120,7 @@ async function readWalletBalance(
 }
 
 /**
- * Balances per wallet id for the wallets whose read succeeded. Labels are not applied:
+ * Holdings per wallet id for the wallets whose read succeeded. Labels are not applied:
  * a read is shared by every caller for the same cache scope and address.
  *
  * @param rpc - The cluster to read.
@@ -145,7 +133,7 @@ export async function readWalletBalances(
   cacheScope: string,
   wallets: readonly WalletBalanceTarget[],
   requestId: string | undefined
-): Promise<Map<string, CustodyWalletTokenBalance[]>> {
+): Promise<Map<string, HeldTokenBalance[]>> {
   const readsByKey = new Map<string, WalletBalanceRead>();
   const unread = new Map<string, { wallet: WalletBalanceTarget; walletAddress: Address }>();
 
@@ -198,14 +186,14 @@ export async function readWalletBalances(
     });
   }
 
-  const balancesByKey = new Map<string, CustodyWalletTokenBalance[] | null>();
+  const balancesByKey = new Map<string, HeldTokenBalance[] | null>();
   await Promise.all(
     [...readsByKey.entries()].map(async ([cacheKey, read]) => {
       balancesByKey.set(cacheKey, await read);
     })
   );
 
-  const balancesByWalletId = new Map<string, CustodyWalletTokenBalance[]>();
+  const balancesByWalletId = new Map<string, HeldTokenBalance[]>();
   for (const wallet of wallets) {
     const balances = balancesByKey.get(`${cacheScope}:${wallet.publicKey}`);
     if (balances) {

@@ -240,7 +240,10 @@ export const privateChannelBalanceSchema = z
     }),
     amount: z.string().openapi({ description: "Raw base-unit amount.", example: "1500000" }),
     decimals: z.number().openapi({ example: 6 }),
-    uiAmount: z.string().openapi({ description: "Human-readable amount.", example: "1.5" }),
+    tokenAmount: z.string().openapi({
+      description: "Token units: `amount` ÷ 10^decimals, as a decimal string.",
+      example: "1.5",
+    }),
   })
   .openapi({
     description:

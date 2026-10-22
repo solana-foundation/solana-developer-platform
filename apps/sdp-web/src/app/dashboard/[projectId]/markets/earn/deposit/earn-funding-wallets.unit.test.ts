@@ -122,7 +122,10 @@ describe("live funding wallet balances", () => {
         token: "USDC",
         mint: "USDC111111111111111111111111111111111111111",
         amount: "425000000",
-        uiAmount: "425",
+        tokenAmount: "425",
+        displayAmount: "425",
+        displayAsOf: null,
+        displayRule: "plain",
         decimals: 6,
       },
     ];
@@ -144,7 +147,10 @@ describe("live funding wallet balances", () => {
           token: "USDC",
           mint: "USDC111111111111111111111111111111111111111",
           amount: "1000000",
-          uiAmount: "1",
+          tokenAmount: "1",
+          displayAmount: "1",
+          displayAsOf: null,
+          displayRule: "plain",
           decimals: 6,
         },
       ],
@@ -164,7 +170,10 @@ describe("live funding wallet balances", () => {
                   token: "USDC",
                   mint: "USDC111111111111111111111111111111111111111",
                   amount: "500000",
-                  uiAmount: "0.5",
+                  tokenAmount: "0.5",
+                  displayAmount: "0.5",
+                  displayAsOf: null,
+                  displayRule: "plain",
                   decimals: 6,
                 },
               ],
@@ -177,7 +186,7 @@ describe("live funding wallet balances", () => {
     await expect(refreshFundingWalletBalances([first, unavailable])).rejects.toThrow(
       "Request failed (503)"
     );
-    expect(first.balances?.[0]?.uiAmount).toBe("1");
-    expect(unavailable.balances?.[0]?.uiAmount).toBe("1");
+    expect(first.balances?.[0]?.tokenAmount).toBe("1");
+    expect(unavailable.balances?.[0]?.tokenAmount).toBe("1");
   });
 });

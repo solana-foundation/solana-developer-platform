@@ -1,7 +1,6 @@
 // biome-ignore lint/style/noRestrictedImports: the one module that sends Helius DAS requests
 import { fetchHeliusDas, isHeliusDasConfigured } from "@sdp/rpc/helius-das";
 import { currentClusterScope } from "@sdp/rpc/scope";
-import { formatDecimalAmount } from "@sdp/solana/amount";
 import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
 import { logVendorCallFailure } from "@/runtime/vendor-calls";
 import { fetchJupiterUsdPrices } from "@/services/jupiter-price.service";
@@ -23,16 +22,9 @@ interface HeliusRpcError {
   message?: string;
 }
 
+/** The `token_info` fields symbol lookups read; amounts come from the chain, never from DAS. */
 interface HeliusTokenInfo {
-  amount?: number | string | null;
-  balance?: number | string | null;
-  decimals?: number | null;
-  mint?: string | null;
   symbol?: string | null;
-  uiAmount?: number | string | null;
-  ui_amount?: number | string | null;
-  uiAmountString?: string | null;
-  ui_amount_string?: string | null;
 }
 
 interface HeliusGetAssetBatchItem {
@@ -48,24 +40,6 @@ interface HeliusGetAssetBatchItem {
 interface HeliusGetAssetBatchResponse {
   error?: HeliusRpcError;
   result?: HeliusGetAssetBatchItem[];
-}
-
-function parseIntegerString(value: number | string | null | undefined): string | null {
-  if (typeof value === "string") {
-    const normalized = value.trim();
-    return /^\d+$/.test(normalized) ? normalized : null;
-  }
-
-  if (
-    typeof value === "number" &&
-    Number.isFinite(value) &&
-    Number.isInteger(value) &&
-    value >= 0
-  ) {
-    return value.toString();
-  }
-
-  return null;
 }
 
 async function dasRequest(init: RequestInit): Promise<unknown> {
@@ -206,31 +180,35 @@ export async function attachTokenSymbolsToBalanceMap(
   );
 }
 
+/** What pricing reads from a balance: its mint and the amount a wallet shows. */
+type PricedBalanceInput = Pick<CustodyWalletTokenBalance, "mint" | "displayAmount">;
+
+/** A balance with the USD price and value Jupiter gave it, when it gave one. */
+type WithUsdValue<T> = T & { usdPrice?: number; usdValue?: number };
+
 /**
  * Sets `usdPrice` and `usdValue` on each balance Jupiter priced. A mint it did not price
  * stays unpriced: a symbol, a stablecoin template or a peg is not a market price, and
- * anyone can mint a token called "USDC".
+ * anyone can mint a token called "USDC". The value prices the display amount, which is
+ * what a price per token refers to on a scaled or interest-bearing mint.
  *
  * @param balances - Balances to decorate.
  * @param pricesByMint - Jupiter USD prices keyed by mint.
  * @returns The balances, priced where a price exists.
  */
-function enrichBalancesWithUsdValues(
-  balances: CustodyWalletTokenBalance[],
+function enrichBalancesWithUsdValues<T extends PricedBalanceInput>(
+  balances: readonly T[],
   pricesByMint: Map<string, number>
-): CustodyWalletTokenBalance[] {
+): WithUsdValue<T>[] {
   return balances.map((balance) => {
     const usdPrice = pricesByMint.get(balance.mint);
-    const uiAmount = Number(balance.uiAmount);
-
-    if (usdPrice === undefined || !Number.isFinite(uiAmount)) {
+    if (usdPrice === undefined) {
       return balance;
     }
-
     return {
       ...balance,
       usdPrice,
-      usdValue: Number((uiAmount * usdPrice).toFixed(6)),
+      usdValue: Number((Number(balance.displayAmount) * usdPrice).toFixed(6)),
     };
   });
 }
@@ -238,15 +216,15 @@ function enrichBalancesWithUsdValues(
 /** Jupiter USD prices for the distinct mints across `balances`. */
 function fetchUsdPricesForBalances(
   env: Env,
-  balances: CustodyWalletTokenBalance[]
+  balances: readonly PricedBalanceInput[]
 ): Promise<Map<string, number>> {
   return fetchJupiterUsdPrices(env, [...new Set(balances.map((balance) => balance.mint))]);
 }
 
-export async function attachUsdValuesToBalances(
+export async function attachUsdValuesToBalances<T extends PricedBalanceInput>(
   env: Env,
-  balances: CustodyWalletTokenBalance[]
-): Promise<CustodyWalletTokenBalance[]> {
+  balances: readonly T[]
+): Promise<WithUsdValue<T>[]> {
   const pricesByMint = await fetchUsdPricesForBalances(env, balances);
   return enrichBalancesWithUsdValues(balances, pricesByMint);
 }
@@ -266,41 +244,4 @@ export async function attachUsdValuesToBalanceMap(
       enrichBalancesWithUsdValues(balances, pricesByMint),
     ])
   );
-}
-
-export function aggregateTrackedWalletBalances(
-  balanceSets: CustodyWalletTokenBalance[][]
-): CustodyWalletTokenBalance[] {
-  const aggregate = new Map<
-    string,
-    { token: string; mint: string; amount: bigint; decimals: number }
-  >();
-
-  for (const balances of balanceSets) {
-    for (const balance of balances) {
-      const current = aggregate.get(balance.mint);
-      const rawAmount = parseIntegerString(balance.amount) ?? "0";
-      if (!current) {
-        aggregate.set(balance.mint, {
-          token: balance.token,
-          mint: balance.mint,
-          amount: BigInt(rawAmount),
-          decimals: balance.decimals,
-        });
-        continue;
-      }
-
-      current.amount += BigInt(rawAmount);
-    }
-  }
-
-  return [...aggregate.values()]
-    .map((entry) => ({
-      token: entry.token,
-      mint: entry.mint,
-      amount: entry.amount.toString(),
-      uiAmount: formatDecimalAmount(entry.amount, entry.decimals),
-      decimals: entry.decimals,
-    }))
-    .sort((left, right) => right.token.localeCompare(left.token));
 }

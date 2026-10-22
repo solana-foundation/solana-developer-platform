@@ -205,7 +205,7 @@ function batchBalanceCheck(
   const totalAmountValue = Number(totalAmount);
   let availableAmount: number | null = null;
   if (selectedWallet) {
-    availableAmount = selectedAssetBalance ? Number(selectedAssetBalance.uiAmount) : 0;
+    availableAmount = selectedAssetBalance ? Number(selectedAssetBalance.tokenAmount) : 0;
   }
   const exceedsBalance =
     totalAmountValue > 0 && availableAmount !== null && totalAmountValue > availableAmount;

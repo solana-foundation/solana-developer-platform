@@ -61,7 +61,7 @@ function usdcAccount(amount: string) {
         parsed: {
           info: {
             mint: USDC_MINT,
-            tokenAmount: { amount, decimals: 6, uiAmountString: "1.5" },
+            tokenAmount: { amount, decimals: 6 },
           },
         },
       },
@@ -107,9 +107,10 @@ describe("readWalletBalances", () => {
 
     const balances = await result;
     expect(balances.get("cwlt_1")).toEqual([
-      { token: "SOL", mint: SOL_MINT, amount: "1500000000", uiAmount: "1.5", decimals: 9 },
+      // Holdings in base units; display is added per request, never cached.
+      { token: "SOL", mint: SOL_MINT, amount: "1500000000", decimals: 9, program: null },
       // Unlabeled by the organization; the well-known symbol still applies.
-      { token: "USDC", mint: USDC_MINT, amount: "1500000", uiAmount: "1.5", decimals: 6 },
+      { token: "USDC", mint: USDC_MINT, amount: "1500000", decimals: 6, program: "spl-token" },
     ]);
     // No account is an unfunded wallet: a real zero, not a failure.
     expect(balances.get("cwlt_2")?.[0]).toMatchObject({ amount: "0" });

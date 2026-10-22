@@ -1,11 +1,13 @@
 import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
+import type { TokenBalanceAmounts } from "@sdp/types/token-movements";
 
-export interface HoldingRow {
+/** The display amount is what the row shows and ranks by; USD prices it too. */
+export interface HoldingRow
+  extends Pick<TokenBalanceAmounts, "displayAmount" | "displayRule" | "displayAsOf"> {
   /** Mint address — the stable identity, and the React key. */
   mint: string;
   /** Raw token field from the aggregate; the renderer resolves the display symbol. */
   token: string;
-  uiAmount: string;
   /** Null when nothing prices this holding. */
   usdValue: number | null;
   /** Share of the priced total, 0-100. Null for unpriced holdings, which are not part of one. */
@@ -20,7 +22,7 @@ export interface HoldingRow {
  * rows an organization no longer holds.
  */
 function isHeld(balance: CustodyWalletTokenBalance): boolean {
-  const amount = Number(balance.uiAmount);
+  const amount = Number(balance.tokenAmount);
   return Number.isFinite(amount) && amount > 0;
 }
 
@@ -28,8 +30,9 @@ function usdValueOf(balance: CustodyWalletTokenBalance): number | null {
   if (typeof balance.usdValue === "number" && Number.isFinite(balance.usdValue)) {
     return balance.usdValue;
   }
+  // A price applies to the display amount, as the API's `usdValue` does.
   if (typeof balance.usdPrice === "number" && Number.isFinite(balance.usdPrice)) {
-    const amount = Number(balance.uiAmount);
+    const amount = Number(balance.displayAmount);
     if (Number.isFinite(amount)) {
       return amount * balance.usdPrice;
     }
@@ -59,7 +62,9 @@ export function buildHoldingsRows(balances: CustodyWalletTokenBalance[]): Holdin
     const row: HoldingRow = {
       mint: balance.mint,
       token: balance.token,
-      uiAmount: balance.uiAmount,
+      displayAmount: balance.displayAmount,
+      displayRule: balance.displayRule,
+      displayAsOf: balance.displayAsOf,
       usdValue,
       sharePercent: null,
     };
@@ -71,7 +76,7 @@ export function buildHoldingsRows(balances: CustodyWalletTokenBalance[]): Holdin
   }
 
   priced.sort((a, b) => (b.usdValue ?? 0) - (a.usdValue ?? 0));
-  unpriced.sort((a, b) => Number(b.uiAmount) - Number(a.uiAmount));
+  unpriced.sort((a, b) => Number(b.displayAmount) - Number(a.displayAmount));
 
   const total = priced.reduce((sum, row) => sum + (row.usdValue ?? 0), 0);
   for (const row of priced) {

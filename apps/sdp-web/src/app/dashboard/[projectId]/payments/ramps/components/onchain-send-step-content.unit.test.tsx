@@ -10,6 +10,7 @@ import { DashboardWorkspaceProvider } from "@/contexts/dashboard-workspace-conte
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
+import { tokenUnitsEntry } from "@/test/token-amount-entry";
 import { OnchainSendStepContent } from "./onchain-send-step-content";
 
 vi.mock("@clerk/nextjs", () => ({ useAuth: () => ({ isLoaded: false }) }));
@@ -57,6 +58,9 @@ const baseWizard = {
   selectedAssetBalance: null,
   availableAmount: null,
   exceedsBalance: false,
+  amountEntry: tokenUnitsEntry(""),
+  sendAmount: "",
+  quoteInFlight: false,
   fields: { accountId: "", walletId: "", asset: "", amount: "", memo: "" },
   setField: vi.fn(),
   selectWallet: vi.fn(),
@@ -207,6 +211,7 @@ describe("OnchainSendStepContent", () => {
         amount: "3.25",
         memo: "  Invoice 7  ",
       },
+      sendAmount: "3.25",
     });
 
     expect(screen.queryByText("3.25 USDC")).not.toBeNull();

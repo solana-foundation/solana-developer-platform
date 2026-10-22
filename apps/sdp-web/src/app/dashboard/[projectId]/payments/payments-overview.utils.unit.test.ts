@@ -4,6 +4,7 @@ import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import type { BadgeVariant } from "@sdp/ui/badge";
 import { describe, expect, it } from "vitest";
 import {
+  aggregateBalancesFromWallets,
   formatTokenAmount,
   isHttpUrl,
   normalizeAggregateBalances,
@@ -176,7 +177,10 @@ describe("normalizeAggregateBalances", () => {
     token: "SOL",
     mint: SOL_MINT,
     amount: "2500000000",
-    uiAmount: "2.5",
+    tokenAmount: "2.5",
+    displayAmount: "2.5",
+    displayAsOf: null,
+    displayRule: "plain",
     decimals: 9,
     usdValue: 375.25,
   };
@@ -184,14 +188,20 @@ describe("normalizeAggregateBalances", () => {
     token: "USDC",
     mint: WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"].address,
     amount: "100000000",
-    uiAmount: "100",
+    tokenAmount: "100",
+    displayAmount: "100",
+    displayAsOf: null,
+    displayRule: "plain",
     decimals: 6,
   };
   const issuedBalance: CustodyWalletTokenBalance = {
     token: "bSGD",
     mint: UNCATALOGUED_MINT,
     amount: "50000000",
-    uiAmount: "50",
+    tokenAmount: "50",
+    displayAmount: "50",
+    displayAsOf: null,
+    displayRule: "plain",
     decimals: 6,
     usdValue: 37.5,
   };
@@ -210,5 +220,49 @@ describe("normalizeAggregateBalances", () => {
     const unpriced: CustodyWalletTokenBalance = { ...issuedBalance, usdValue: undefined };
     const rows = normalizeAggregateBalances([solBalance, usdcBalance, unpriced]);
     expect(rows.map((row) => row.token)).toEqual(["USDC", "SOL"]);
+  });
+});
+
+describe("aggregateBalancesFromWallets", () => {
+  // An interest-bearing mint: each wallet shows more than its token amount.
+  const accruing: CustodyWalletTokenBalance = {
+    token: "USDX",
+    mint: UNCATALOGUED_MINT,
+    amount: "1000000",
+    tokenAmount: "1",
+    displayAmount: "1.0234",
+    displayAsOf: "2026-10-22T12:00:05.000Z",
+    displayRule: "interest",
+    decimals: 6,
+  };
+  const wallet = (id: string, balances: CustodyWalletTokenBalance[]) => ({
+    id,
+    walletId: id,
+    publicKey: id,
+    label: null,
+    isRuntimeExecutionAllowed: true,
+    balances,
+  });
+
+  it("sums base units for the token amount and display amounts exactly for the total", () => {
+    const [row] = aggregateBalancesFromWallets([
+      wallet("a", [accruing]),
+      wallet("b", [
+        {
+          ...accruing,
+          amount: "2500001",
+          tokenAmount: "2.500001",
+          displayAmount: "2.5585",
+          displayAsOf: "2026-10-22T12:00:01.000Z",
+        },
+      ]),
+    ]);
+
+    expect(row?.amount).toBe("3500001");
+    expect(row?.tokenAmount).toBe("3.500001");
+    expect(row?.displayAmount).toBe("3.5819");
+    expect(row?.displayRule).toBe("interest");
+    // The total is only as fresh as its oldest part.
+    expect(row?.displayAsOf).toBe("2026-10-22T12:00:01.000Z");
   });
 });

@@ -64,7 +64,18 @@ describe("fetchPaymentsWallets", () => {
       provider: "privy",
       custodyConfigId: "config",
       isRuntimeExecutionAllowed: allowed,
-      balances: [{ token: "USDC", mint: "mint", amount: "1000000", uiAmount: "1", decimals: 6 }],
+      balances: [
+        {
+          token: "USDC",
+          mint: "mint",
+          amount: "1000000",
+          tokenAmount: "1",
+          displayAmount: "1",
+          displayAsOf: null,
+          displayRule: "plain",
+          decimals: 6,
+        },
+      ],
     };
     const request = vi.fn().mockResolvedValue(Response.json({ data: { wallets: [wallet] } }));
 

@@ -409,7 +409,10 @@ export const earnVaultShareReconciliationResponse = successResponseSchema(
             example: "500",
           }),
           decimals: z.number().int().openapi({ example: 6 }),
-          uiShares: z.string().openapi({ example: "0.0005" }),
+          uiShares: z.string().openapi({
+            description: "The shares in token units: `shares` ÷ 10^decimals.",
+            example: "0.0005",
+          }),
           ambiguousAttribution: z.boolean().openapi({
             description:
               "True when more than one catalogued vault identity claims this share mint, so " +

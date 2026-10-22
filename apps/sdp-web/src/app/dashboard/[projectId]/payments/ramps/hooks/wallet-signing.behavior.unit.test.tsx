@@ -29,7 +29,18 @@ const wallet: PaymentsDashboardWallet = {
   publicKey: "11111111111111111111111111111111",
   label: "Treasury",
   isRuntimeExecutionAllowed: true,
-  balances: [{ token: "SOL", mint: MINT, amount: "10000000000", uiAmount: "10", decimals: 9 }],
+  balances: [
+    {
+      token: "SOL",
+      mint: MINT,
+      amount: "10000000000",
+      tokenAmount: "10",
+      displayAmount: "10",
+      displayAsOf: null,
+      displayRule: "plain",
+      decimals: 9,
+    },
+  ],
 };
 
 function wrapper({ children }: { children: ReactNode }) {
@@ -47,9 +58,20 @@ afterEach(() => {
 
 describe("wallet selection during payments", () => {
   it("blocks offramp funding after runtime disablement while preserving its quote", async () => {
-    const source = {
+    const source: PaymentsDashboardWallet = {
       ...wallet,
-      balances: [{ token: "USDC", mint: MINT, amount: "10000000", uiAmount: "10", decimals: 6 }],
+      balances: [
+        {
+          token: "USDC",
+          mint: MINT,
+          amount: "10000000",
+          tokenAmount: "10",
+          displayAmount: "10",
+          displayAsOf: null,
+          displayRule: "plain",
+          decimals: 6,
+        },
+      ],
     };
     const sent: unknown[] = [];
     vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {

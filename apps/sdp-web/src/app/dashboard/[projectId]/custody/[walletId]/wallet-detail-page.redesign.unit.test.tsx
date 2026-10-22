@@ -62,7 +62,10 @@ const solBalance: CustodyWalletTokenBalance = {
   token: "SOL",
   mint: "So11111111111111111111111111111111111111112",
   amount: "0",
-  uiAmount: "0",
+  tokenAmount: "0",
+  displayAmount: "0",
+  displayAsOf: null,
+  displayRule: "plain",
   decimals: 9,
 };
 

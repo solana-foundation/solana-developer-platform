@@ -104,7 +104,7 @@ beforeEach(async () => {
   ]);
   vi.spyOn(spcGateway, "getChannelTokenBalance").mockResolvedValue({
     tokenAccount: signer.address,
-    balance: { amount: "10000000", decimals: 6, uiAmountString: "10" },
+    balance: { amount: "10000000", decimals: 6 },
   });
   vi.spyOn(solanaRpc, "getRecentBlockhash").mockResolvedValue({
     blockhash: blockhash("11111111111111111111111111111111"),

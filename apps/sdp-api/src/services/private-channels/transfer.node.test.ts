@@ -156,7 +156,7 @@ function makeBalance(amount = "10000000"): PrivateChannelBalance {
     tokenAccount: senderSigner.address,
     amount,
     decimals: 6,
-    uiAmount: "10",
+    tokenAmount: "10",
   };
 }
 

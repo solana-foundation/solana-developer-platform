@@ -182,8 +182,8 @@ export function buildWalletsPlaygroundEndpointConfigs({
           aggregate: {
             walletCount: wallets.length || 1,
             balances: [
-              { token: "SOL", uiAmount: "12.34" },
-              { token: "USDC", uiAmount: "2500.00" },
+              { token: "SOL", tokenAmount: "12.34", displayAmount: "12.34", displayRule: "plain" },
+              { token: "USDC", tokenAmount: "2500", displayAmount: "2500", displayRule: "plain" },
             ],
           },
         },

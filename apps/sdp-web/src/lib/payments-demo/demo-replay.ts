@@ -1,3 +1,4 @@
+import { parseTokenAmount, toBaseUnits } from "@sdp/solana/token-amount";
 import type { Counterparty, CounterpartyAccount } from "@sdp/types/counterparties";
 import type {
   PaymentRampQuoteDeliveryMode,
@@ -20,7 +21,6 @@ import {
   newestFirst,
   ORGANIZATION_ID,
   PROJECT_ID,
-  toBaseUnits,
   tokenBalance,
 } from "./demo-fixtures";
 import type { DemoOp, DemoOpOf } from "./demo-ops";
@@ -76,9 +76,9 @@ export function transferById(world: DemoWorld, id: string): DemoTransfer | undef
   return world.transfers.find((row) => row.transfer.id === id)?.transfer;
 }
 
-/** A wallet's holding of a token, in display units ("0" when it holds none). */
+/** A wallet's holding of a token, in token units ("0" when it holds none). */
 export function walletHolding(wallet: DemoWallet, mint: string): string {
-  return wallet.balances.find((balance) => balance.mint === mint)?.uiAmount ?? "0";
+  return wallet.balances.find((balance) => balance.mint === mint)?.tokenAmount ?? "0";
 }
 
 function adjustBalance(
@@ -94,7 +94,7 @@ function adjustBalance(
   const { decimals } = DEMO_TOKENS[key];
   const index = wallet.balances.findIndex((balance) => balance.mint === mint);
   const current = index === -1 ? 0n : BigInt(wallet.balances[index]?.amount ?? "0");
-  const next = current + BigInt(sign) * toBaseUnits(amount, decimals);
+  const next = current + BigInt(sign) * toBaseUnits(parseTokenAmount(amount, decimals));
   const balance = tokenBalance(key, fromBaseUnits(next < 0n ? 0n : next, decimals));
   if (index === -1) wallet.balances.push(balance);
   else wallet.balances[index] = balance;
@@ -197,7 +197,8 @@ function sum(amounts: readonly string[], mint: string): string {
   const key = tokenKeyForMint(mint) ?? "USDC";
   const { decimals } = DEMO_TOKENS[key];
   const total = amounts.reduce(
-    (running, amount) => running + (DECIMAL.test(amount) ? toBaseUnits(amount, decimals) : 0n),
+    (running, amount) =>
+      running + (DECIMAL.test(amount) ? toBaseUnits(parseTokenAmount(amount, decimals)) : 0n),
     0n
   );
   return fromBaseUnits(total, decimals, 2);

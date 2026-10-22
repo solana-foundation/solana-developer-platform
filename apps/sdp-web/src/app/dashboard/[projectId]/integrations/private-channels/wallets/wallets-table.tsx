@@ -48,7 +48,7 @@ function balanceLabel(t: Translate, balance: WalletChannelBalance | undefined): 
   const known = WELL_KNOWN_TOKEN_BY_MINT.get(balance.mint);
   const symbol = known?.symbol ?? shortKey(balance.mint);
   return t("DashboardPrivateChannels.verifiedWallets.channelBalanceAmount", {
-    amount: balance.uiAmount,
+    amount: balance.tokenAmount,
     symbol,
   });
 }

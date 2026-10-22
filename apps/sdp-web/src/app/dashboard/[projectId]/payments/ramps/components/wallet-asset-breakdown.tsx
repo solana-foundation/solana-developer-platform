@@ -1,23 +1,26 @@
 "use client";
 
 import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import type { TokenBalanceAmounts } from "@sdp/types/token-movements";
 import { motion } from "motion/react";
 import {
   formatCurrencyAmount,
   resolveTransferTokenLabel,
   resolveUsdBalanceValue,
 } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import { TokenDisplayAmount } from "@/components/token-display-amount";
 import { useLocale, useTranslations } from "@/i18n/provider";
 
-interface BreakdownRow {
+/** A row shows the display amount, as a wallet shows it; USD prices it too. */
+interface BreakdownRow
+  extends Pick<TokenBalanceAmounts, "displayAmount" | "displayRule" | "displayAsOf"> {
   token: string;
-  amount: number;
   usdValue: number | null;
 }
 
 function breakdownRows(wallet: PaymentsDashboardWallet): BreakdownRow[] {
   const rows = (wallet.balances ?? []).flatMap((balance) => {
-    const amount = Number(balance.uiAmount);
+    const amount = Number(balance.tokenAmount);
     if (!Number.isFinite(amount) || amount <= 0) {
       return [];
     }
@@ -26,7 +29,9 @@ function breakdownRows(wallet: PaymentsDashboardWallet): BreakdownRow[] {
         token:
           resolveTransferTokenLabel(balance.mint, { [balance.mint]: balance.token }) ??
           balance.mint,
-        amount,
+        displayAmount: balance.displayAmount,
+        displayRule: balance.displayRule,
+        displayAsOf: balance.displayAsOf,
         usdValue: resolveUsdBalanceValue(balance),
       },
     ];
@@ -87,7 +92,10 @@ export function WalletAssetBreakdown({ wallet }: { wallet: PaymentsDashboardWall
                   ) : null}
                 </div>
                 <p className="shrink-0 text-sm text-secondary">
-                  {formatTwoDecimals(row.amount, locale)}
+                  <TokenDisplayAmount
+                    balance={row}
+                    formatted={formatTwoDecimals(Number(row.displayAmount), locale)}
+                  />
                   {shareValue !== null ? ` · ${formatTwoDecimals(shareValue, locale)}%` : ""}
                 </p>
               </div>

@@ -38,7 +38,18 @@ const source: PaymentsDashboardWallet = {
   publicKey: "11111111111111111111111111111111",
   label: "Treasury",
   isRuntimeExecutionAllowed: true,
-  balances: [{ token: "USDC", mint: MINT, amount: "10000000", uiAmount: "10", decimals: 6 }],
+  balances: [
+    {
+      token: "USDC",
+      mint: MINT,
+      amount: "10000000",
+      tokenAmount: "10",
+      displayAmount: "10",
+      displayAsOf: null,
+      displayRule: "plain",
+      decimals: 6,
+    },
+  ],
 };
 const recurring: PaymentRecurringPayment & { sourceCustodyWalletId: string } = {
   id: "prp_test",
@@ -275,7 +286,7 @@ describe("Recurring Payment exact source selection", () => {
     ["holds the schedule's token", MINT, true],
     ["holds only another token", "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", false],
   ])("switching to a wallet that %s", async (_case, replacementMint, keepsToken) => {
-    const replacement = {
+    const replacement: PaymentsDashboardWallet = {
       ...source,
       id: "cwlt_replacement",
       label: "Replacement",
@@ -284,7 +295,10 @@ describe("Recurring Payment exact source selection", () => {
           token: keepsToken ? "USDC" : "USDT",
           mint: replacementMint,
           amount: "10000000",
-          uiAmount: "10",
+          tokenAmount: "10",
+          displayAmount: "10",
+          displayAsOf: null,
+          displayRule: "plain",
           decimals: 6,
         },
       ],

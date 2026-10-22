@@ -18,6 +18,14 @@ import {
   formatDateTime,
   formatDecimalAmount,
 } from "@/app/dashboard/[projectId]/payments/payments-presentation";
+import {
+  AmountUnitToggle,
+  TokenAmountQuotePreview,
+} from "@/app/dashboard/[projectId]/payments/token-amount-entry-controls";
+import {
+  type TokenAmountEntry,
+  useTokenAmountEntry,
+} from "@/app/dashboard/[projectId]/payments/use-token-amount-entry";
 import { WizardFrame } from "@/components/wizard-frame";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
@@ -195,12 +203,31 @@ function CreateFooter({
   );
 }
 
-/** The amount asked, with a note under it while it is not one the API would take. */
-function AmountField({ amount, onChange }: { amount: string; onChange: (next: string) => void }) {
+/**
+ * The amount asked, with a note under it while it is not one the API would take. For a mint
+ * with a display rule it may be typed as wallets show it; the quote's credit is what is asked.
+ */
+function AmountField({
+  amount,
+  onChange,
+  entry,
+  symbol,
+}: {
+  amount: string;
+  onChange: (next: string) => void;
+  entry: TokenAmountEntry;
+  symbol: string;
+}) {
   const t = useTranslations();
+  const displayEntry = entry.unit === "display";
+  const typed = displayEntry ? entry.displayAmount : amount;
   return (
     <div className="flex flex-col gap-2">
-      <Label htmlFor="payment-request-amount">{t("DashboardPayments.requests.amount")}</Label>
+      <Label htmlFor="payment-request-amount">
+        {displayEntry
+          ? t("DashboardPayments.tokenAmount.displayAmountLabel")
+          : t("DashboardPayments.requests.amount")}
+      </Label>
       <Input
         id="payment-request-amount"
         size="xl"
@@ -208,12 +235,18 @@ function AmountField({ amount, onChange }: { amount: string; onChange: (next: st
         autoComplete="off"
         placeholder="0.00"
         className="tabular-nums"
-        value={amount}
-        onChange={(event) => onChange(event.currentTarget.value)}
+        value={typed}
+        onChange={(event) =>
+          displayEntry
+            ? entry.setDisplayAmount(event.currentTarget.value)
+            : onChange(event.currentTarget.value)
+        }
       />
-      {amount.trim() && !isValidAmount(amount) ? (
+      {typed.trim() && !isValidAmount(typed) ? (
         <p className="text-meta text-error">{t("DashboardPayments.requests.invalidAmount")}</p>
       ) : null}
+      <AmountUnitToggle entry={entry} />
+      <TokenAmountQuotePreview entry={entry} symbol={symbol} />
     </div>
   );
 }
@@ -301,16 +334,35 @@ function PaymentRequestCreateForm({ wallets, walletsError }: PaymentRequestCreat
   const token = tokens.find((option) => option.mintAddress === pickedToken) ?? defaultToken;
   const wallet = wallets.find((option) => option.walletId === pickedWallet) ?? null;
 
-  const canCreate = isValidAmount(amount) && token !== null && wallet !== null && !busy;
+  // A request's amount is what the recipient receives, so it is quoted as a credit.
+  const amountEntry = useTokenAmountEntry({
+    mint: token === null ? null : token.mintAddress,
+    basis: "credit",
+    tokenAmountInput: amount,
+  });
+  const requestAmount = amountEntry.tokenAmount.trim();
+
+  const canCreate =
+    isValidAmount(requestAmount) &&
+    token !== null &&
+    wallet !== null &&
+    !busy &&
+    !amountEntry.quoteInFlight;
 
   async function create() {
     if (!canCreate || token === null || wallet === null) {
       return;
     }
+    // A display amount's credit holds only until its quote expires.
+    if (!amountEntry.canSubmitAt(Date.now())) {
+      amountEntry.refreshQuote();
+      toast.error(t("DashboardPayments.tokenAmount.quoteExpired"));
+      return;
+    }
     setSubmitting(true);
     let created: CreatedPaymentRequest | undefined;
     try {
-      const input = JSON.stringify([wallet.walletId, token.mintAddress, amount.trim(), expiry]);
+      const input = JSON.stringify([wallet.walletId, token.mintAddress, requestAmount, expiry]);
       // Read from the clock once per action, so a retry resends the same body
       // under the first attempt's key.
       const expiresAt = expiresAtForAction(input, () => resolveExpiryDate(expiry));
@@ -327,7 +379,7 @@ function PaymentRequestCreateForm({ wallets, walletsError }: PaymentRequestCreat
           body: {
             walletId: wallet.walletId,
             token: token.mintAddress,
-            amount: amount.trim(),
+            amount: requestAmount,
             expiresAt,
           },
         }
@@ -388,7 +440,12 @@ function PaymentRequestCreateForm({ wallets, walletsError }: PaymentRequestCreat
           </p>
         ) : null}
         <div className="grid gap-6 sm:grid-cols-2">
-          <AmountField amount={amount} onChange={setAmount} />
+          <AmountField
+            amount={amount}
+            onChange={setAmount}
+            entry={amountEntry}
+            symbol={token === null ? "" : token.symbol}
+          />
           <Combobox
             label={t("DashboardPayments.requests.token")}
             value={token ? token.mintAddress : null}
@@ -424,7 +481,10 @@ function PaymentRequestCreateForm({ wallets, walletsError }: PaymentRequestCreat
 
         <ExpiryField expiry={expiry} onChange={setExpiry} />
 
-        <ReadsAs amount={readsAsAmount(amount, token, locale)} wallet={walletDisplayName(wallet)} />
+        <ReadsAs
+          amount={readsAsAmount(requestAmount, token, locale)}
+          wallet={walletDisplayName(wallet)}
+        />
       </form>
     </WizardFrame>
   );

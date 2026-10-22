@@ -12,6 +12,7 @@ import {
 import Link from "next/link";
 import { Suspense } from "react";
 import { loadOrganizationProviderAccess } from "@/app/dashboard/[projectId]/payments/payments-provider-access.server";
+import { TokenDisplayAmount } from "@/components/token-display-amount";
 import { TokenMark } from "@/components/token-mark";
 import { getEnabledRampProviders } from "@/flags/ramps";
 import { getRequestLocale, getTranslations } from "@/i18n/server";
@@ -200,9 +201,14 @@ async function AvailableBalance({ apiClientPromise }: { apiClientPromise: ApiCli
                 </span>
               </span>
               <span className="shrink-0 text-secondary">
-                {usdValue === null
-                  ? `${balance.uiAmount} ${label.length > 10 ? shortenAddress(label) : label}`
-                  : formatCurrencyAmount(usdValue, locale)}
+                {usdValue === null ? (
+                  <TokenDisplayAmount
+                    balance={balance}
+                    formatted={`${balance.displayAmount} ${label.length > 10 ? shortenAddress(label) : label}`}
+                  />
+                ) : (
+                  formatCurrencyAmount(usdValue, locale)
+                )}
               </span>
             </div>
           );

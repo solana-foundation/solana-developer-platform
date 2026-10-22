@@ -8,6 +8,7 @@ import {
   clearHeliusDasCachesForTests,
 } from "@/services/helius-das.service";
 import { clearJupiterPriceCacheForTests } from "@/services/jupiter-price.service";
+import { plainTokenBalance } from "@/test/helpers/balances";
 import { ENVIRONMENT_CLUSTER_CASES } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 
@@ -41,20 +42,20 @@ describe("helius-das service", () => {
 
   it("prices USDC at Jupiter's quote and leaves a lookalike USDC mint unpriced", async () => {
     const usdcMint = WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"];
-    const usdcBalance = {
+    const usdcBalance = plainTokenBalance({
       token: WELL_KNOWN_TOKENS.USDC.symbol,
       mint: usdcMint.address,
       amount: "12500000",
-      uiAmount: "12.5",
+      tokenAmount: "12.5",
       decimals: usdcMint.decimals,
-    };
-    const lookalikeBalance = {
+    });
+    const lookalikeBalance = plainTokenBalance({
       token: WELL_KNOWN_TOKENS.USDC.symbol,
       mint: TEST_LOOKALIKE_USDC_MINT,
       amount: "3000000",
-      uiAmount: "3",
+      tokenAmount: "3",
       decimals: 6,
-    };
+    });
     vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
       Response.json({ [usdcMint.address]: { usdPrice: 0.9998, decimals: usdcMint.decimals } })
     );
@@ -67,6 +68,29 @@ describe("helius-das service", () => {
       { ...usdcBalance, usdPrice: 0.9998, usdValue: 12.4975 },
       lookalikeBalance,
     ]);
+  });
+
+  it("prices the display amount of a scaled mint, not its token amount", async () => {
+    const usdcMint = WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"];
+    const scaled = {
+      ...plainTokenBalance({
+        token: "SCALED",
+        mint: usdcMint.address,
+        amount: "2000000",
+        tokenAmount: "2",
+        decimals: 6,
+      }),
+      displayAmount: "3",
+      displayAsOf: "2026-10-22T00:00:00.000Z",
+      displayRule: "scaled" as const,
+    };
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      Response.json({ [usdcMint.address]: { usdPrice: 1.5, decimals: usdcMint.decimals } })
+    );
+
+    const [priced] = await inScope("production", () => attachUsdValuesToBalances(env, [scaled]));
+
+    expect(priced).toEqual({ ...scaled, usdPrice: 1.5, usdValue: 4.5 });
   });
 
   it("attaches DAS symbols to unlabeled token balances", async () => {
@@ -87,13 +111,13 @@ describe("helius-das service", () => {
 
     const balances = await inScope("sandbox", () =>
       attachTokenSymbolsToBalances([
-        {
+        plainTokenBalance({
           token: mint,
           mint,
           amount: "20000000",
-          uiAmount: "20",
+          tokenAmount: "20",
           decimals: 6,
-        },
+        }),
       ])
     );
 
@@ -101,7 +125,7 @@ describe("helius-das service", () => {
       token: "EURC",
       mint,
       amount: "20000000",
-      uiAmount: "20",
+      tokenAmount: "20",
       decimals: 6,
     });
   });
@@ -109,7 +133,13 @@ describe("helius-das service", () => {
   it("looks a symbol up once an hour, and again after a failed lookup", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const mint = "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr";
-    const balance = { token: mint, mint, amount: "20000000", uiAmount: "20", decimals: 6 };
+    const balance = plainTokenBalance({
+      token: mint,
+      mint,
+      amount: "20000000",
+      tokenAmount: "20",
+      decimals: 6,
+    });
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockRejectedValueOnce(new Error("helius down"))
@@ -140,13 +170,13 @@ describe("helius-das service", () => {
 
     const balances = await inScope("sandbox", () =>
       attachTokenSymbolsToBalances([
-        {
+        plainTokenBalance({
           token: "INSTITUTIONALUSD",
           mint,
           amount: "20000000",
-          uiAmount: "20",
+          tokenAmount: "20",
           decimals: 6,
-        },
+        }),
       ])
     );
 
@@ -158,13 +188,13 @@ describe("helius-das service", () => {
   });
 
   it("looks a mint's symbol up on each cluster's Helius endpoint instead of reusing one answer", async () => {
-    const balance = {
+    const balance = plainTokenBalance({
       token: TEST_DAS_MINT,
       mint: TEST_DAS_MINT,
       amount: "20000000",
-      uiAmount: "20",
+      tokenAmount: "20",
       decimals: 6,
-    };
+    });
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(

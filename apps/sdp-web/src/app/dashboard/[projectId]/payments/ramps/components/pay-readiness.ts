@@ -22,6 +22,6 @@ export function payEmptyReason(
 /** Whether any wallet holds any token at all. */
 export function hasFundedWallet(wallets: readonly PaymentsDashboardWallet[]): boolean {
   return wallets.some((wallet) =>
-    (wallet.balances ?? []).some((balance) => Number(balance.uiAmount) > 0)
+    (wallet.balances ?? []).some((balance) => Number(balance.tokenAmount) > 0)
   );
 }

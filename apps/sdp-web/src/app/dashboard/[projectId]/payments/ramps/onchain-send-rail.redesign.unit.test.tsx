@@ -7,6 +7,7 @@ import { DashboardWorkspaceProvider } from "@/contexts/dashboard-workspace-conte
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
+import { tokenUnitsEntry } from "@/test/token-amount-entry";
 import type { OnchainSendWizard } from "./hooks/use-onchain-send-wizard.redesign";
 import { OnchainSendRail } from "./onchain-send-rail.redesign";
 import type { RailProps } from "./ramp-action-page.redesign";
@@ -46,6 +47,9 @@ const reviewWizard = {
   selectedAssetBalance: null,
   availableAmount: null,
   exceedsBalance: false,
+  amountEntry: tokenUnitsEntry(""),
+  sendAmount: "",
+  quoteInFlight: false,
   fields: { accountId: "", walletId: "", asset: "", amount: "", memo: "" },
   setField: vi.fn(),
   selectWallet: vi.fn(),

@@ -1,0 +1,166 @@
+// @vitest-environment jsdom
+
+import type { TokenMovementBasis } from "@sdp/types/token-movements";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { SWRConfig } from "swr";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { getMessages } from "@/i18n/messages";
+import { I18nProvider } from "@/i18n/provider";
+import { requiredWellKnownMint } from "@/test/well-known-mints";
+import type { TokenAmountTerms } from "./token-amount-quote.data";
+import { useTokenAmountEntry } from "./use-token-amount-entry";
+
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
+
+const MINT = requiredWellKnownMint("USDC", "devnet");
+const OTHER_MINT = requiredWellKnownMint("EURC", "devnet");
+const EXPIRES_AT = "2099-01-01T00:00:00.000Z";
+
+const scaledTerms: TokenAmountTerms = {
+  mint: MINT,
+  decimals: 6,
+  transferFee: null,
+  display: {
+    rule: "scaled",
+    multiplier: 2,
+    newMultiplier: 2,
+    newMultiplierEffectiveAt: "2026-01-01T00:00:00.000Z",
+  },
+};
+
+const feeEntry = { epoch: "700", basisPoints: 100, maximumFee: "5" };
+const feeTerms: TokenAmountTerms = {
+  mint: MINT,
+  decimals: 6,
+  transferFee: { current: feeEntry, next: feeEntry },
+  display: { rule: "plain" },
+};
+
+function quote(basis: TokenMovementBasis, amount: string, debit: string, credit: string) {
+  return {
+    mint: MINT,
+    amount,
+    amounts: { basis, debit, fee: "1", credit, decimals: 6 },
+    feeEpoch: "700",
+    asOf: "2026-10-22T12:00:00.000Z",
+    expiresAt: EXPIRES_AT,
+  };
+}
+
+/** Answers the terms and quote proxies, and records each quote body. */
+function stubTokenRoutes(terms: TokenAmountTerms, answer: ReturnType<typeof quote>) {
+  const quoteBodies: unknown[] = [];
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/terms")) return Response.json({ data: { terms } });
+    if (url.endsWith("/quote")) {
+      quoteBodies.push(JSON.parse(String(init?.body)));
+      return Response.json({ data: { quote: answer } });
+    }
+    return Response.json({ error: { message: `Unexpected ${url}` } }, { status: 404 });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return { fetchMock, quoteBodies };
+}
+
+function wrapper({ children }: { children: ReactNode }) {
+  return (
+    <I18nProvider locale="en" messages={getMessages("en")}>
+      <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>{children}</SWRConfig>
+    </I18nProvider>
+  );
+}
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
+
+describe("useTokenAmountEntry", () => {
+  it("reads no terms for SOL and keeps the typed token amount", () => {
+    const { fetchMock } = stubTokenRoutes(scaledTerms, quote("debit", "1", "1", "1"));
+    const { result } = renderHook(
+      () => useTokenAmountEntry({ mint: SOL_MINT, basis: "debit", tokenAmountInput: "1.5" }),
+      { wrapper }
+    );
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.current.displayEntryAvailable).toBe(false);
+    expect(result.current.tokenAmount).toBe("1.5");
+    expect(result.current.canSubmitAt(Date.now())).toBe(true);
+  });
+
+  it("prices a display amount as a debit and sends the quote's token amount", async () => {
+    const { quoteBodies } = stubTokenRoutes(scaledTerms, quote("debit", "5", "5", "4"));
+    const { result } = renderHook(
+      () => useTokenAmountEntry({ mint: MINT, basis: "debit", tokenAmountInput: "" }),
+      { wrapper }
+    );
+
+    await waitFor(() => expect(result.current.displayEntryAvailable).toBe(true));
+    act(() => result.current.setUnit("display"));
+    act(() => result.current.setDisplayAmount("10"));
+    // Nothing is sent until a quote for this input lands.
+    expect(result.current.tokenAmount).toBe("");
+    expect(result.current.quoteInFlight).toBe(true);
+
+    await waitFor(() => expect(result.current.tokenAmount).toBe("5"));
+    expect(quoteBodies).toEqual([{ displayAmount: "10", basis: "debit" }]);
+    expect(result.current.quoteInFlight).toBe(false);
+    expect(result.current.canSubmitAt(Date.parse(EXPIRES_AT) - 1)).toBe(true);
+    // Past its expiry the quote's token amount is no longer the display amount.
+    expect(result.current.canSubmitAt(Date.parse(EXPIRES_AT))).toBe(false);
+  });
+
+  it("submits a credit quote's credit when the amount is what the recipient receives", async () => {
+    stubTokenRoutes(scaledTerms, quote("credit", "12.5", "13.5", "12.5"));
+    const { result } = renderHook(
+      () => useTokenAmountEntry({ mint: MINT, basis: "credit", tokenAmountInput: "" }),
+      { wrapper }
+    );
+
+    await waitFor(() => expect(result.current.displayEntryAvailable).toBe(true));
+    act(() => {
+      result.current.setUnit("display");
+      result.current.setDisplayAmount("25");
+    });
+
+    await waitFor(() => expect(result.current.tokenAmount).toBe("12.5"));
+  });
+
+  it("previews the fee of a token amount for a mint with a transfer fee", async () => {
+    const { quoteBodies } = stubTokenRoutes(feeTerms, quote("credit", "100", "101", "100"));
+    const { result } = renderHook(
+      () => useTokenAmountEntry({ mint: MINT, basis: "credit", tokenAmountInput: "100" }),
+      { wrapper }
+    );
+
+    await waitFor(() => expect(result.current.quote?.amounts.debit).toBe("101"));
+    expect(quoteBodies).toEqual([{ amount: "100", basis: "credit" }]);
+    // A plain mint has no display entry, and the typed token amount is what is sent.
+    expect(result.current.displayEntryAvailable).toBe(false);
+    expect(result.current.tokenAmount).toBe("100");
+  });
+
+  it("starts over in token units when the token changes", async () => {
+    stubTokenRoutes(scaledTerms, quote("debit", "5", "5", "4"));
+    const { result, rerender } = renderHook(
+      ({ mint }: { mint: string }) =>
+        useTokenAmountEntry({ mint, basis: "debit", tokenAmountInput: "3" }),
+      { wrapper, initialProps: { mint: MINT } }
+    );
+
+    await waitFor(() => expect(result.current.displayEntryAvailable).toBe(true));
+    act(() => {
+      result.current.setUnit("display");
+      result.current.setDisplayAmount("10");
+    });
+    rerender({ mint: OTHER_MINT });
+
+    expect(result.current.unit).toBe("token");
+    expect(result.current.displayAmount).toBe("");
+    expect(result.current.tokenAmount).toBe("3");
+  });
+});

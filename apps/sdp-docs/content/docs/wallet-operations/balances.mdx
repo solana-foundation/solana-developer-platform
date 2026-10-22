@@ -3,7 +3,7 @@ title: Wallet balances
 description: Per-wallet token balances with optional USD valuation via SDP.
 ---
 
-`GET /v1/payments/wallets/{walletId}/balances` returns the wallet's native **SOL** balance plus every **SPL token** balance held by a custody wallet — raw amount, human-readable amount, decimals, and optional USD valuation when a price source is configured. SOL is always prepended as the first entry and is represented with `token: "SOL"` and `mint: "So11111111111111111111111111111111111111112"`.
+`GET /v1/payments/wallets/{walletId}/balances` returns the wallet's native **SOL** balance plus every **SPL token** balance held by a custody wallet — raw amount, exact token amount, the amount a wallet displays, decimals, and optional USD valuation when a price source is configured. SOL is always prepended as the first entry and is represented with `token: "SOL"` and `mint: "So11111111111111111111111111111111111111112"`.
 
 ## Request
 
@@ -50,14 +50,20 @@ The payload is wrapped in the standard `data` / `meta` envelope, with the balanc
           "token": "SOL",
           "mint": "So11111111111111111111111111111111111111112",
           "amount": "2500000000",
-          "uiAmount": "2.5",
+          "tokenAmount": "2.5",
+          "displayAmount": "2.5",
+          "displayAsOf": null,
+          "displayRule": "plain",
           "decimals": 9
         },
         {
           "token": "USDC",
           "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
           "amount": "1500000000",
-          "uiAmount": "1500.00",
+          "tokenAmount": "1500",
+          "displayAmount": "1500",
+          "displayAsOf": null,
+          "displayRule": "plain",
           "decimals": 6,
           "usdPrice": 1.0,
           "usdValue": 1500.0
@@ -75,11 +81,14 @@ Per-balance fields:
 | --- | --- |
 | `token` | Token symbol if known, otherwise the on-chain mint. |
 | `mint` | On-chain mint address. |
-| `amount` | Raw amount in the smallest unit (string to preserve precision). |
-| `uiAmount` | Human-readable decimal string — `amount / 10^decimals`. |
+| `amount` | Raw amount in the smallest unit (string to preserve precision), summed over every token account the wallet holds for the mint. |
+| `tokenAmount` | Token units: `amount / 10^decimals`, exact. Use it for balance checks and as the most a transfer can send: transfer amounts are token units. |
+| `displayAmount` | What a wallet shows for `amount`. Equal to `tokenAmount` for most tokens. A Token-2022 mint with a scaled UI amount multiplies it, and an interest-bearing mint adds accrued interest (approximate: it changes every second). For screens only; never send it as an amount. |
+| `displayAsOf` | The chain time `displayAmount` was computed at (ISO 8601); `null` when `displayRule` is `plain`. |
+| `displayRule` | `plain`, `scaled` or `interest`: how the mint's wallets show an amount. |
 | `decimals` | Token's decimal count. |
 | `usdPrice` | Per-token USD price; omitted when no pricing data is available. |
-| `usdValue` | Total USD value (= `usdPrice * uiAmount`); omitted when pricing is unavailable. |
+| `usdValue` | USD value of the displayed amount (= `usdPrice * displayAmount`); omitted when pricing is unavailable. |
 | `confidential` | Reserved for confidential transfer balances; absent for standard balances. |
 
 ## Use cases
@@ -90,7 +99,7 @@ Per-balance fields:
 
 ## Pricing freshness
 
-When USD valuation is populated, the price comes from SDP's configured price source and reflects the most recent quote available. The cadence and source depend on deployment configuration — do not rely on `usdValue` for downstream balance-sheet decisions without confirming the price source's freshness with your operations team. When in doubt, treat `amount` / `uiAmount` as authoritative and convert with your own price feed.
+When USD valuation is populated, the price comes from SDP's configured price source and reflects the most recent quote available. The cadence and source depend on deployment configuration — do not rely on `usdValue` for downstream balance-sheet decisions without confirming the price source's freshness with your operations team. When in doubt, treat `amount` / `tokenAmount` as authoritative and convert with your own price feed.
 
 If no price source is configured, the `usdPrice` and `usdValue` fields are absent rather than zero — the omission signals "unknown," not "$0.00," so downstream consumers can decide how to handle the gap.
 

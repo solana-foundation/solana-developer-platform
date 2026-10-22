@@ -7,7 +7,10 @@ function balance(overrides: Partial<CustodyWalletTokenBalance>): CustodyWalletTo
     token: "USDC",
     mint: "mint-usdc",
     amount: "1000000",
-    uiAmount: "1",
+    tokenAmount: "1",
+    displayAmount: "1",
+    displayAsOf: null,
+    displayRule: "plain",
     decimals: 6,
     ...overrides,
   };
@@ -19,8 +22,8 @@ describe("buildHomeBalanceBreakdown", () => {
     // no feed. Charting them together compares dollars against raw token counts.
     const result = buildHomeBalanceBreakdown([
       balance({ mint: "sol", token: "SOL", usdValue: 149.11 }),
-      balance({ mint: "nwsol", token: "nwSOL", uiAmount: "132.5" }),
-      balance({ mint: "atd", token: "ATD", uiAmount: "25000" }),
+      balance({ mint: "nwsol", token: "nwSOL", tokenAmount: "132.5", displayAmount: "132.5" }),
+      balance({ mint: "atd", token: "ATD", tokenAmount: "25000", displayAmount: "25000" }),
     ]);
 
     expect(result.priced.map((s) => s.token)).toEqual(["SOL"]);
@@ -51,8 +54,8 @@ describe("buildHomeBalanceBreakdown", () => {
 
   it("orders unpriced holdings by amount, largest first", () => {
     const result = buildHomeBalanceBreakdown([
-      balance({ mint: "few", uiAmount: "10" }),
-      balance({ mint: "many", uiAmount: "9000" }),
+      balance({ mint: "few", tokenAmount: "10", displayAmount: "10" }),
+      balance({ mint: "many", tokenAmount: "9000", displayAmount: "9000" }),
     ]);
 
     expect(result.unpriced.map((s) => s.mint)).toEqual(["many", "few"]);
@@ -73,15 +76,33 @@ describe("buildHomeBalanceBreakdown", () => {
 
   it("derives value from price when usdValue is absent", () => {
     const result = buildHomeBalanceBreakdown([
-      balance({ mint: "priced", uiAmount: "3", usdPrice: 7 }),
+      balance({ mint: "priced", tokenAmount: "3", displayAmount: "3", usdPrice: 7 }),
     ]);
 
     expect(result.priced[0].usdValue).toBe(21);
   });
 
+  it("ranks and prices a scaled holding by the display amount a wallet shows", () => {
+    const scaled = { displayRule: "scaled", displayAsOf: "2026-10-22T12:00:00.000Z" } as const;
+    const result = buildHomeBalanceBreakdown([
+      balance({ mint: "plain", tokenAmount: "100", displayAmount: "100" }),
+      balance({ mint: "scaled", tokenAmount: "10", displayAmount: "500", ...scaled }),
+      balance({ mint: "priced", tokenAmount: "2", displayAmount: "4", usdPrice: 3, ...scaled }),
+    ]);
+
+    expect(result.unpriced.map((s) => s.mint)).toEqual(["scaled", "plain"]);
+    expect(result.unpriced[0]?.displayAmount).toBe("500");
+    expect(result.priced[0]?.usdValue).toBe(12);
+  });
+
   it("treats a non-finite amount as unpriced rather than producing NaN", () => {
     const result = buildHomeBalanceBreakdown([
-      balance({ mint: "bad", uiAmount: "not-a-number", usdPrice: 2 }),
+      balance({
+        mint: "bad",
+        tokenAmount: "not-a-number",
+        displayAmount: "not-a-number",
+        usdPrice: 2,
+      }),
     ]);
 
     expect(result.priced).toHaveLength(0);
@@ -117,9 +138,9 @@ describe("countHeldTokens", () => {
     // holdings the organization no longer has.
     expect(
       countHeldTokens([
-        balance({ mint: "a", uiAmount: "1" }),
-        balance({ mint: "b", uiAmount: "0" }),
-        balance({ mint: "c", uiAmount: "0.0" }),
+        balance({ mint: "a", tokenAmount: "1", displayAmount: "1" }),
+        balance({ mint: "b", tokenAmount: "0", displayAmount: "0" }),
+        balance({ mint: "c", tokenAmount: "0.0", displayAmount: "0.0" }),
       ])
     ).toBe(1);
   });
@@ -129,8 +150,8 @@ describe("countHeldTokens", () => {
     // list still shows the row (as unpriced) — showing something unexplained beats
     // hiding it — but nothing that cannot be ranked or summed is claimed as a holding.
     const balances = [
-      balance({ mint: "ok", uiAmount: "3" }),
-      balance({ mint: "bad", uiAmount: "not-a-number" }),
+      balance({ mint: "ok", tokenAmount: "3", displayAmount: "3" }),
+      balance({ mint: "bad", tokenAmount: "not-a-number", displayAmount: "not-a-number" }),
     ];
 
     expect(countHeldTokens(balances)).toBe(1);
@@ -139,9 +160,15 @@ describe("countHeldTokens", () => {
 
   it("agrees with what the breakdown lists", () => {
     const balances = [
-      balance({ mint: "sol", token: "SOL", uiAmount: "2", usdValue: 149.11 }),
-      balance({ mint: "spent", token: "SPENT", uiAmount: "0", usdValue: 0 }),
-      balance({ mint: "nwsol", token: "nwSOL", uiAmount: "132.5" }),
+      balance({
+        mint: "sol",
+        token: "SOL",
+        tokenAmount: "2",
+        displayAmount: "2",
+        usdValue: 149.11,
+      }),
+      balance({ mint: "spent", token: "SPENT", tokenAmount: "0", displayAmount: "0", usdValue: 0 }),
+      balance({ mint: "nwsol", token: "nwSOL", tokenAmount: "132.5", displayAmount: "132.5" }),
     ];
     const breakdown = buildHomeBalanceBreakdown(balances);
     const listed = [...breakdown.priced, ...breakdown.unpriced].length;
@@ -161,7 +188,12 @@ describe("unpriced cap", () => {
     // An organization issuing a dozen of its own tokens turned the card into a
     // ledger; only the largest few are listed and the remainder is a count.
     const many = Array.from({ length: 11 }, (_, i) =>
-      balance({ mint: `u${i}`, token: `TKN${i}`, uiAmount: String(100 - i) })
+      balance({
+        mint: `u${i}`,
+        token: `TKN${i}`,
+        tokenAmount: String(100 - i),
+        displayAmount: String(100 - i),
+      })
     );
     const result = buildHomeBalanceBreakdown(many);
 

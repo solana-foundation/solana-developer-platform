@@ -1,3 +1,4 @@
+import { addDecimalAmounts, isDecimalString } from "@sdp/solana/amount";
 import type { CustodyWalletAggregate, CustodyWalletTokenBalance } from "@sdp/types/custody";
 import {
   PAYMENT_TRANSFER_STATUS_TONE,
@@ -27,7 +28,8 @@ function parseIntegerAmount(value: string): bigint | null {
   }
 }
 
-function formatUiAmountFromRaw(amount: bigint, decimals: number): string {
+/** Exact token units of a base-unit count: `amount ÷ 10^decimals`. */
+function formatTokenAmountFromRaw(amount: bigint, decimals: number): string {
   if (decimals <= 0) {
     return amount.toString();
   }
@@ -40,7 +42,7 @@ function formatUiAmountFromRaw(amount: bigint, decimals: number): string {
 }
 
 function resolveFallbackUsdValue(
-  balance: Pick<CustodyWalletTokenBalance, "token" | "mint" | "uiAmount">
+  balance: Pick<CustodyWalletTokenBalance, "token" | "mint" | "displayAmount">
 ) {
   const normalizedToken = balance.token.trim().toUpperCase();
   if (
@@ -50,12 +52,13 @@ function resolveFallbackUsdValue(
     return null;
   }
 
-  const uiAmount = Number(balance.uiAmount);
-  return Number.isFinite(uiAmount) ? uiAmount : null;
+  // A USD price applies to the display amount, as the API's `usdValue` does.
+  const displayAmount = Number(balance.displayAmount);
+  return Number.isFinite(displayAmount) ? displayAmount : null;
 }
 
 export function resolveUsdBalanceValue(
-  balance: Pick<CustodyWalletTokenBalance, "token" | "mint" | "uiAmount" | "usdValue">
+  balance: Pick<CustodyWalletTokenBalance, "token" | "mint" | "displayAmount" | "usdValue">
 ): number | null {
   if (typeof balance.usdValue === "number" && Number.isFinite(balance.usdValue)) {
     return balance.usdValue;
@@ -140,7 +143,7 @@ export function formatTokenAmount(value: number | string, locale?: string): stri
 }
 
 export function formatLamportsAsSol(lamports: bigint, locale?: string): string {
-  return `${formatTokenAmount(formatUiAmountFromRaw(lamports, SOL_DECIMALS), locale)} SOL`;
+  return `${formatTokenAmount(formatTokenAmountFromRaw(lamports, SOL_DECIMALS), locale)} SOL`;
 }
 
 /**
@@ -408,19 +411,33 @@ export function resolveTotalBalance(balances: CustodyWalletTokenBalance[]): numb
   return hasNumericBalance ? total : null;
 }
 
+/**
+ * One mint's holdings summed across wallets. Base units sum exactly and give
+ * the token amount; the display amounts sum exactly too, so the total shows
+ * what each wallet shows. The display time is the oldest wallet's: the sum is
+ * only as fresh as its oldest part.
+ */
 export function aggregateBalancesFromWallets(wallets: WalletRecord[]): CustodyWalletTokenBalance[] {
   const aggregate = new Map<
     string,
-    { token: string; mint: string; amount: bigint; decimals: number; usdValue: number | null }
+    {
+      token: string;
+      mint: string;
+      amount: bigint;
+      decimals: number;
+      displayAmount: string;
+      displayRule: CustodyWalletTokenBalance["displayRule"];
+      displayAsOf: string | null;
+      usdValue: number | null;
+    }
   >();
 
   for (const wallet of wallets) {
     for (const balance of wallet.balances ?? []) {
       const current = aggregate.get(balance.mint);
-      const numericValue = Number(balance.uiAmount);
       const rawAmount = parseIntegerAmount(balance.amount);
       const usdValue = resolveUsdBalanceValue(balance);
-      if (!Number.isFinite(numericValue) || rawAmount === null) {
+      if (rawAmount === null || !isDecimalString(balance.displayAmount)) {
         continue;
       }
 
@@ -430,26 +447,45 @@ export function aggregateBalancesFromWallets(wallets: WalletRecord[]): CustodyWa
           mint: balance.mint,
           amount: rawAmount,
           decimals: balance.decimals,
+          displayAmount: balance.displayAmount,
+          displayRule: balance.displayRule,
+          displayAsOf: balance.displayAsOf,
           usdValue,
         });
         continue;
       }
 
       current.amount += rawAmount;
+      current.displayAmount = addDecimalAmounts(current.displayAmount, balance.displayAmount);
+      current.displayAsOf = olderDisplayTime(current.displayAsOf, balance.displayAsOf);
       if (usdValue !== null) {
         current.usdValue = (current.usdValue ?? 0) + usdValue;
       }
     }
   }
 
-  return [...aggregate.values()].map((entry) => ({
-    token: entry.token,
-    mint: entry.mint,
-    amount: entry.amount.toString(),
-    uiAmount: formatUiAmountFromRaw(entry.amount, entry.decimals),
-    decimals: entry.decimals,
-    ...(entry.usdValue !== null ? { usdValue: Number(entry.usdValue.toFixed(6)) } : {}),
-  }));
+  return [...aggregate.values()].map((entry) => {
+    const balance: CustodyWalletTokenBalance = {
+      token: entry.token,
+      mint: entry.mint,
+      amount: entry.amount.toString(),
+      tokenAmount: formatTokenAmountFromRaw(entry.amount, entry.decimals),
+      displayAmount: entry.displayAmount,
+      displayAsOf: entry.displayAsOf,
+      displayRule: entry.displayRule,
+      decimals: entry.decimals,
+    };
+    if (entry.usdValue !== null) {
+      balance.usdValue = Number(entry.usdValue.toFixed(6));
+    }
+    return balance;
+  });
+}
+
+function olderDisplayTime(left: string | null, right: string | null): string | null {
+  if (left === null) return right;
+  if (right === null) return left;
+  return Date.parse(right) < Date.parse(left) ? right : left;
 }
 
 /**

@@ -171,7 +171,7 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
                 transition={{ duration: 0.4 }}
               >
                 <AmountBalanceReadout
-                  available={selectedAssetBalance.uiAmount}
+                  available={selectedAssetBalance.tokenAmount}
                   assetLabel={displayAsset}
                   exceeds={exceedsBalance}
                 />

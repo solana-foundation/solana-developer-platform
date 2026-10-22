@@ -398,8 +398,9 @@ export interface PrivateChannelTransferRecipientDto {
 
 /**
  * An owner's token balance on the channel, read through the gateway. Amounts are
- * strings to stay JSON- and precision-safe: `amount` is base units, `uiAmount` is
- * the human-readable value. A never-credited owner reads as a zero balance.
+ * strings to stay JSON- and precision-safe: `amount` is base units and
+ * `tokenAmount` the exact token units (ADR 0012). A never-credited owner reads
+ * as a zero balance.
  *
  * Balances live at the SPC layer, one per (wallet, mint) — logical channels are
  * labels, so a wallet in multiple channels shows the SAME balance in each.
@@ -415,8 +416,8 @@ export interface PrivateChannelBalance {
   amount: string;
   /** Mint decimals. */
   decimals: number;
-  /** Human-readable amount. */
-  uiAmount: string;
+  /** Exact token units: `amount` ÷ 10^decimals. */
+  tokenAmount: string;
 }
 
 /**
