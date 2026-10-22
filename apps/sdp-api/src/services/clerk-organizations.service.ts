@@ -192,6 +192,19 @@ export class ClerkOrganizationsService {
   }
 
   /**
+   * Renames the Clerk organization to the name SDP holds.
+   *
+   * @param params.organizationId - The Clerk organization id.
+   * @param params.name - The organization's name.
+   */
+  async updateOrganizationName(params: { organizationId: string; name: string }): Promise<void> {
+    await this.request<unknown>(`/organizations/${params.organizationId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name: params.name }),
+    });
+  }
+
+  /**
    * Creates a Clerk organization naming no creator (ADR 0012): Clerk would
    * otherwise make that person its `org:admin`. The SDP organization id rides
    * in private metadata so an operator can trace an orphan back.

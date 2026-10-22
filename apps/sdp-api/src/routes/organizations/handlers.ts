@@ -15,6 +15,8 @@ import { noContent, success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
+import { findClerkOrganizationId } from "@/services/clerk-organization-provisioning.service";
+import { ClerkOrganizationsService } from "@/services/clerk-organizations.service";
 import { getProviderAvailability } from "@/services/provider-availability.service";
 import type { Env } from "@/types/env";
 import type { updateOrgSchema } from "./schemas";
@@ -184,6 +186,19 @@ export const updateOrganization = async (c: ValidatedBodyContext<typeof updateOr
     // Canonical form, not the submitted spelling: the trail records what was granted.
     metadata: { ...body, ...(settingsPatch ? { settings: settingsPatch } : {}) },
   });
+
+  // SDP owns the name (ADR 0012); Clerk's copy only labels the session's
+  // organization switcher, so it follows the committed rename.
+  if (body.name !== undefined) {
+    const clerkOrganizationId = await findClerkOrganizationId(getDb(c.env), orgId);
+    if (clerkOrganizationId === null) {
+      throw badRequest("Organization is not linked to Clerk");
+    }
+    await new ClerkOrganizationsService(c.env).updateOrganizationName({
+      organizationId: clerkOrganizationId,
+      name: org.name,
+    });
+  }
 
   return success(c, toOrganizationResponse(org));
 };

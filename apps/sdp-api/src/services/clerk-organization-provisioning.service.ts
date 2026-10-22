@@ -84,12 +84,13 @@ export async function findClerkOrganizationMapping(
 }
 
 /**
- * Copies a Clerk organization's name, slug and entitlement metadata onto the
- * SDP organization it maps to. SDP creates every organization (ADR 0012), so
- * a Clerk organization SDP does not know is left alone.
+ * Copies a Clerk organization's entitlement metadata (private metadata, which
+ * operators set in Clerk) onto the SDP organization it maps to. SDP owns the
+ * name and slug (ADR 0012) and creates every organization, so a Clerk
+ * organization SDP does not know is left alone.
  *
  * @param params.db - The database.
- * @param params.organization - The Clerk organization from the webhook.
+ * @param params.organization - The Clerk organization, as Clerk holds it now.
  * @returns The mapping it synced, or null when SDP does not know the organization.
  */
 export async function syncClerkOrganization(params: {
@@ -100,35 +101,11 @@ export async function syncClerkOrganization(params: {
   if (!mapping) {
     return null;
   }
-  const name =
-    params.organization.name?.trim() || params.organization.slug?.trim() || "Organization";
-  const slug = await ensureUniqueSlug(
-    params.db,
-    params.organization.slug || name,
-    mapping.organizationId
-  );
-
-  await params.db.batch([
-    params.db
-      .prepare(
-        `UPDATE auth_organization_identities
-         SET slug = ?, updated_at = sdp_datetime_now()
-         WHERE provider = 'clerk' AND provider_org_id = ?`
-      )
-      .bind(slug, params.organization.id),
-    params.db
-      .prepare(
-        `UPDATE organizations
-         SET name = ?, slug = ?, updated_at = sdp_datetime_now()
-         WHERE id = ?`
-      )
-      .bind(name, slug, mapping.organizationId),
-  ]);
 
   await syncProviderAccessFromClerk(params.db, {
     organizationId: mapping.organizationId,
     clerkOrganization: params.organization,
   });
 
-  return { organizationId: mapping.organizationId, slug };
+  return mapping;
 }

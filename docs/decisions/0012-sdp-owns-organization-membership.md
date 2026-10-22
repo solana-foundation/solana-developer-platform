@@ -42,8 +42,9 @@ calls admin can always write memberships.
   sees, and its membership and user-deletion webhooks only come back as echoes:
   they are logged and change nothing. A Clerk membership with no SDP admission
   behind it is refused at sign-in. Organization deletion is still mirrored, and
-  organization updates sync name, slug and entitlements from a fresh Backend
-  API read, never from the event payload.
+  organization updates sync only entitlements (Clerk private metadata) from a
+  fresh Backend API read, never from the event payload. SDP owns the name and
+  slug and pushes a rename to Clerk.
 - **Admission happens only in SDP**: creating an organization (the creator
   becomes its first admin) or the first sign-in matching a pending SDP
   invitation. Admission grants both default projects once; nothing re-grants
