@@ -1,3 +1,4 @@
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { PaymentRequestLifecycleEvent, PaymentRequestStatus } from "@sdp/types/payments";
 import { generateKeyPairSigner } from "@solana/kit";
 import { customAlphabet } from "nanoid";
@@ -38,6 +39,8 @@ export interface PaymentRequestRow {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  last_checked_at: string | null;
+  paid_late: boolean;
 }
 
 export interface CreatePaymentRequestInput {
@@ -59,6 +62,14 @@ export interface MarkPaymentRequestInput {
   status: Exclude<PaymentRequestStatus, "awaiting_payment">;
   fulfilledByTransferId: string | null;
   canceledBy: string | null;
+  paidLate?: boolean;
+}
+
+export interface MarkExpiredPaymentRequestPaidLateInput {
+  requestId: string;
+  organizationId: string;
+  projectId: string;
+  fulfilledByTransferId: string;
 }
 
 export interface ListPaymentRequestsInput {
@@ -105,4 +116,32 @@ export interface PaymentRequestsRepository {
     signedTransaction: string;
   }): Promise<boolean>;
   listPaymentRequests(params: ListPaymentRequestsInput): Promise<ListPaymentRequestsResult>;
+  listHotPaymentRequests(params: {
+    environment: SdpEnvironment;
+    minLastValidBlockHeight: bigint;
+    limit: number;
+  }): Promise<PaymentRequestRow[]>;
+  listPaymentRequestsDueForCheck(params: {
+    environment: SdpEnvironment;
+    checkedBefore: string;
+    limit: number;
+  }): Promise<PaymentRequestRow[]>;
+  listLapsedPaymentRequests(params: {
+    environment: SdpEnvironment;
+    limit: number;
+  }): Promise<PaymentRequestRow[]>;
+  listExpiredPaymentRequestsForLateCheck(params: {
+    environment: SdpEnvironment;
+    expiredSince: string;
+    checkedBefore: string;
+    limit: number;
+  }): Promise<PaymentRequestRow[]>;
+  markPaymentRequestsChecked(requestIds: readonly string[]): Promise<void>;
+  markExpiredPaymentRequestPaidLate(
+    input: MarkExpiredPaymentRequestPaidLateInput
+  ): Promise<PaymentRequestRow | null>;
+  countStaleAwaitingPaymentRequests(params: {
+    environment: SdpEnvironment;
+    checkedBefore: string;
+  }): Promise<number>;
 }

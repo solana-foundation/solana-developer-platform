@@ -1,11 +1,13 @@
 import type { PaymentRequestLifecycleEvent, PaymentRequestStatus } from "@sdp/types/payments";
 import type { DatabaseClient as AppDb } from "@/db/client";
+import { buildInClause } from "@/db/postgres-utils";
 import { internalError } from "@/lib/errors";
 import { parseNullableCustodyWalletId } from "./payment-execution-identity";
 import type {
   CreatePaymentRequestInput,
   ListPaymentRequestsInput,
   ListPaymentRequestsResult,
+  MarkExpiredPaymentRequestPaidLateInput,
   MarkPaymentRequestInput,
   PaymentRequestRow,
   PaymentRequestsRepository,
@@ -36,13 +38,11 @@ function mapPaymentRequestRow(row: Record<string, unknown>): PaymentRequestRow {
     created_by: row.created_by as string | null,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
+    last_checked_at: (row.last_checked_at as string | null) ?? null,
+    paid_late: row.paid_late === true,
   };
 }
 
-// "expired" is computed from expires_at and never written to the status column,
-// so it (and awaiting_payment) filter the awaiting_payment rows partitioned by
-// expiry. Text comparison is exact: expires_at and sdp_iso_now() share the same
-// ISO-8601 UTC format, and the partial index on (expires_at) covers the predicate.
 function paymentRequestStatusFilter(status: PaymentRequestStatus | undefined): {
   sql: string;
   binds: string[];
@@ -57,7 +57,7 @@ function paymentRequestStatusFilter(status: PaymentRequestStatus | undefined): {
       };
     case "expired":
       return {
-        sql: "status = 'awaiting_payment' AND expires_at IS NOT NULL AND expires_at <= sdp_iso_now()",
+        sql: "(status = 'expired' OR (status = 'awaiting_payment' AND expires_at IS NOT NULL AND expires_at <= sdp_iso_now()))",
         binds: [],
       };
     default:
@@ -123,9 +123,11 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
              SET status = ?,
                  fulfilled_by_transfer_id = COALESCE(?, fulfilled_by_transfer_id),
                  canceled_by = ?,
+                 paid_late = ?,
                  lifecycle = lifecycle || jsonb_build_array(
                    jsonb_build_object('status', ?::text, 'at', sdp_iso_now())
                  ),
+                 last_checked_at = sdp_iso_now(),
                  updated_at = sdp_iso_now()
            WHERE id = ?
              AND organization_id = ?
@@ -137,6 +139,7 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
           input.status,
           input.fulfilledByTransferId,
           input.canceledBy,
+          input.paidLate ?? false,
           input.status,
           input.requestId,
           input.organizationId,
@@ -272,6 +275,133 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
         rows: rowsResult.results.map(mapPaymentRequestRow),
         total: countRow.total,
       };
+    },
+
+    async listHotPaymentRequests({ environment, minLastValidBlockHeight, limit }) {
+      const result = await db
+        .prepare(
+          `SELECT pr.* FROM payment_requests pr
+             JOIN projects p ON p.id = pr.project_id
+            WHERE p.environment = ?
+              AND pr.status = 'awaiting_payment'
+              AND pr.custody_wallet_id IS NOT NULL
+              AND pr.sponsored_tx_last_valid_block_height >= ?
+              AND (pr.expires_at IS NULL OR pr.expires_at > sdp_iso_now())
+            ORDER BY pr.last_checked_at ASC NULLS FIRST, pr.created_at ASC, pr.id ASC
+            LIMIT ?`
+        )
+        .bind(environment, minLastValidBlockHeight.toString(), limit)
+        .all<Record<string, unknown>>();
+      return result.results.map(mapPaymentRequestRow);
+    },
+
+    async listPaymentRequestsDueForCheck({ environment, checkedBefore, limit }) {
+      const result = await db
+        .prepare(
+          `SELECT pr.* FROM payment_requests pr
+             JOIN projects p ON p.id = pr.project_id
+            WHERE p.environment = ?
+              AND pr.status = 'awaiting_payment'
+              AND pr.custody_wallet_id IS NOT NULL
+              AND (pr.expires_at IS NULL OR pr.expires_at > sdp_iso_now())
+              AND (pr.last_checked_at IS NULL OR pr.last_checked_at < ?)
+            ORDER BY pr.last_checked_at ASC NULLS FIRST, pr.created_at ASC, pr.id ASC
+            LIMIT ?`
+        )
+        .bind(environment, checkedBefore, limit)
+        .all<Record<string, unknown>>();
+      return result.results.map(mapPaymentRequestRow);
+    },
+
+    async listLapsedPaymentRequests({ environment, limit }) {
+      const result = await db
+        .prepare(
+          `SELECT pr.* FROM payment_requests pr
+             JOIN projects p ON p.id = pr.project_id
+            WHERE p.environment = ?
+              AND pr.status = 'awaiting_payment'
+              AND pr.expires_at IS NOT NULL
+              AND pr.expires_at <= sdp_iso_now()
+            ORDER BY pr.expires_at ASC, pr.id ASC
+            LIMIT ?`
+        )
+        .bind(environment, limit)
+        .all<Record<string, unknown>>();
+      return result.results.map(mapPaymentRequestRow);
+    },
+
+    async listExpiredPaymentRequestsForLateCheck({
+      environment,
+      expiredSince,
+      checkedBefore,
+      limit,
+    }) {
+      const result = await db
+        .prepare(
+          `SELECT pr.* FROM payment_requests pr
+             JOIN projects p ON p.id = pr.project_id
+            WHERE p.environment = ?
+              AND pr.status = 'expired'
+              AND pr.custody_wallet_id IS NOT NULL
+              AND pr.expires_at >= ?
+              AND (pr.last_checked_at IS NULL OR pr.last_checked_at < ?)
+            ORDER BY pr.last_checked_at ASC NULLS FIRST, pr.expires_at ASC, pr.id ASC
+            LIMIT ?`
+        )
+        .bind(environment, expiredSince, checkedBefore, limit)
+        .all<Record<string, unknown>>();
+      return result.results.map(mapPaymentRequestRow);
+    },
+
+    async markPaymentRequestsChecked(requestIds) {
+      if (requestIds.length === 0) {
+        return;
+      }
+      await db
+        .prepare(
+          `UPDATE payment_requests SET last_checked_at = sdp_iso_now()
+            WHERE id IN (${buildInClause(requestIds.length)})`
+        )
+        .bind(...requestIds)
+        .run();
+    },
+
+    async markExpiredPaymentRequestPaidLate(input: MarkExpiredPaymentRequestPaidLateInput) {
+      const row = await db
+        .prepare(
+          `UPDATE payment_requests
+             SET status = 'paid',
+                 paid_late = true,
+                 fulfilled_by_transfer_id = ?,
+                 lifecycle = lifecycle || jsonb_build_array(
+                   jsonb_build_object('status', 'paid', 'at', sdp_iso_now())
+                 ),
+                 last_checked_at = sdp_iso_now(),
+                 updated_at = sdp_iso_now()
+           WHERE id = ?
+             AND organization_id = ?
+             AND project_id = ?
+             AND status = 'expired'
+           RETURNING *`
+        )
+        .bind(input.fulfilledByTransferId, input.requestId, input.organizationId, input.projectId)
+        .first<Record<string, unknown>>();
+      return row ? mapPaymentRequestRow(row) : null;
+    },
+
+    async countStaleAwaitingPaymentRequests({ environment, checkedBefore }) {
+      const row = await db
+        .prepare(
+          `SELECT COUNT(*)::int AS stale FROM payment_requests pr
+             JOIN projects p ON p.id = pr.project_id
+            WHERE p.environment = ?
+              AND pr.status = 'awaiting_payment'
+              AND pr.custody_wallet_id IS NOT NULL
+              AND COALESCE(pr.last_checked_at, pr.created_at) < ?`
+        )
+        .bind(environment, checkedBefore)
+        .first<{ stale: number }>();
+      return row?.stale ?? 0;
     },
   };
 }

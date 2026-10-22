@@ -143,6 +143,13 @@ export function createPaymentRequestsRepository(
       "claimSponsoredTransactionWindow",
       "getSponsoredTransactionClaim",
       "storeSponsoredTransactionSignature",
+      "listHotPaymentRequests",
+      "listPaymentRequestsDueForCheck",
+      "listLapsedPaymentRequests",
+      "listExpiredPaymentRequestsForLateCheck",
+      "markPaymentRequestsChecked",
+      "markExpiredPaymentRequestPaidLate",
+      "countStaleAwaitingPaymentRequests",
     ]
   );
 }
