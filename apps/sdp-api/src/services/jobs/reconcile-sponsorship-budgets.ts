@@ -337,10 +337,10 @@ async function reconcileReservation(input: {
   if (height.blockHeight <= reservation.lastValidBlockHeight) return "still_valid";
   // Expiry is proven by the finalized block height passing the reservation's stored upper bound on
   // the transaction's last valid block height. The status is read from a node at least as current
-  // as that height read (minContextSlot), and assumes Kora's upstream keeps ledger history at
-  // least back to the transaction's blockhash, which holds because reconciliation runs minutes
-  // after expiry: an absent status is then proof the transaction never landed, not a lagging or
-  // pruned record of one that did.
+  // as that height read (minContextSlot). Deployment invariant: Kora's upstream serves full
+  // transaction history (an indexer-backed RPC), however late reconciliation runs. An absent
+  // status is then proof the transaction never landed, not a lagging or pruned record of one
+  // that did.
   const status = await input.getSignatureStatus(reservation.signature, height.absoluteSlot);
   if (status !== null) {
     if (reservation.missCount >= FINALITY_WAIT_PASSES) {
