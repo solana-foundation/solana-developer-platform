@@ -1,3 +1,4 @@
+import { FeePaymentError } from "@sdp/fee-payment/port";
 import { hashString } from "@sdp/payments/hash";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { getRecentBlockhash, type SolanaRpc } from "@sdp/rpc/solana";
@@ -164,7 +165,11 @@ export async function issuePaymentRequestTransaction(
     } catch (error) {
       await auditService.completeCritical(c, auditIntent, {
         status: "failure",
-        metadata: { error: error instanceof Error ? error.message : "Unknown sponsorship error" },
+        // A code, never the message: Kora and RPC error text can carry provider context the
+        // audit scrubber does not decode.
+        metadata: {
+          errorCode: error instanceof FeePaymentError ? error.code : "UNCLASSIFIED_ERROR",
+        },
       });
       throw error;
     }
