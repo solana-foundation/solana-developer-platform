@@ -1,3 +1,4 @@
+import type { DatabaseExecutor } from "@/db/client";
 import type { ClerkOrganization } from "./clerk-organizations.service";
 import { syncProviderAccessFromClerk } from "./provider-availability.service";
 
@@ -43,6 +44,27 @@ export async function ensureUniqueSlug(
   }
 
   return candidate;
+}
+
+/**
+ * The Clerk organization an SDP organization maps to.
+ *
+ * @param db - The database or open transaction.
+ * @param organizationId - The SDP organization.
+ * @returns The Clerk organization id, or null when it has none yet.
+ */
+export async function findClerkOrganizationId(
+  db: DatabaseExecutor,
+  organizationId: string
+): Promise<string | null> {
+  const mapping = await db
+    .prepare(
+      `SELECT provider_org_id FROM auth_organization_identities
+        WHERE provider = 'clerk' AND organization_id = ?`
+    )
+    .bind(organizationId)
+    .first<{ provider_org_id: string }>();
+  return mapping ? mapping.provider_org_id : null;
 }
 
 export async function findClerkOrganizationMapping(

@@ -30,6 +30,12 @@ const clerkOrganizationSchema = z.object({
   private_metadata: z.record(z.string(), z.unknown()).nullable(),
 });
 
+/**
+ * Bounds every Backend API call: organization creation holds a row lock across
+ * its Clerk calls, so a hung one must fail rather than hold the connection.
+ */
+const CLERK_REQUEST_TIMEOUT_MS = 10_000;
+
 export class ClerkOrganizationsService {
   private apiBase: string;
   private secretKey: string;
@@ -47,6 +53,7 @@ export class ClerkOrganizationsService {
     const startedAt = Date.now();
     const res = await fetch(`${this.apiBase}${path}`, {
       ...options,
+      signal: AbortSignal.timeout(CLERK_REQUEST_TIMEOUT_MS),
       headers: {
         Authorization: `Bearer ${this.secretKey}`,
         "Content-Type": "application/json",

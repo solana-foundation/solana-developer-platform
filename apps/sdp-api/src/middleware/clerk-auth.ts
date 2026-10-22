@@ -6,7 +6,7 @@
  */
 
 import { normalizeOrganizationRole, type OrganizationRole } from "@sdp/types/roles";
-import type { Context, Next } from "hono";
+import type { Context, ContextVariableMap, Next } from "hono";
 import { getDb } from "@/db/client";
 import { runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db/identity";
 import {
@@ -569,16 +569,34 @@ export function clerkSignupSessionMiddleware() {
       if (!email) {
         throw unauthorized("Clerk token has no usable email claim");
       }
-      const user = await ensureClerkUser(c.env, getDb(c.env), payload.sub, email);
+      // Limited before anything is written: provisioning the user is itself a write.
       await enforceRateLimit(
         c,
-        `user:${user.userId}:organization-signup`,
+        `clerk:${payload.sub}:organization-signup`,
         DASHBOARD_ACTOR_MAX_REQUESTS
       );
+      const user = await ensureClerkUser(c.env, getDb(c.env), payload.sub, email);
       c.set("clerkSignup", { userId: user.userId, clerkUserId: payload.sub, email: user.email });
       await next();
     });
   };
+}
+
+/**
+ * The signed-in person with no organization that `clerkSignupSessionMiddleware`
+ * authenticated.
+ *
+ * @param c - The request context.
+ * @returns The person.
+ */
+export function requireClerkSignup(
+  c: Context<{ Bindings: Env }>
+): NonNullable<ContextVariableMap["clerkSignup"]> {
+  const signup = c.get("clerkSignup");
+  if (!signup) {
+    throw internalError("Route has no signup session step");
+  }
+  return signup;
 }
 
 export function optionalClerkAuth(options: { rejectInvalid?: boolean } = {}) {

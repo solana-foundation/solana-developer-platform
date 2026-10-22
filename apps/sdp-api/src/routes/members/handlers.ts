@@ -11,6 +11,7 @@ import { callerMayPerform } from "@/middleware/require-action";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
+import { findClerkOrganizationId } from "@/services/clerk-organization-provisioning.service";
 import {
   type ClerkOrganizationInvitation,
   ClerkOrganizationsService,
@@ -39,19 +40,6 @@ const INVITATION_TTL_DAYS = 7;
  * counts its own membership limit: refusing here spends no Clerk call.
  */
 const MAX_ORGANIZATION_MEMBERS = 20;
-
-async function getClerkOrgId(db: DatabaseClient, organizationId: string): Promise<string | null> {
-  const row = await db
-    .prepare(
-      `SELECT provider_org_id
-       FROM auth_organization_identities
-       WHERE provider = 'clerk' AND organization_id = ?`
-    )
-    .bind(organizationId)
-    .first<{ provider_org_id: string }>();
-
-  return row?.provider_org_id ?? null;
-}
 
 /** Clerk user id for an SDP user, or null when they have no Clerk identity. */
 async function getClerkUserId(db: DatabaseClient, userId: string): Promise<string | null> {
@@ -326,7 +314,7 @@ async function resolveClerkInvitations(
   organizationId: string
 ): Promise<ClerkOrganizationInvitation[]> {
   try {
-    const clerkOrgId = await getClerkOrgId(getDb(c.env), organizationId);
+    const clerkOrgId = await findClerkOrganizationId(getDb(c.env), organizationId);
     if (!clerkOrgId) {
       return [];
     }
@@ -366,7 +354,7 @@ export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>)
     throw conflict("User is already a member of this organization");
   }
 
-  const clerkOrgId = await getClerkOrgId(getDb(c.env), organizationId);
+  const clerkOrgId = await findClerkOrganizationId(getDb(c.env), organizationId);
   if (!clerkOrgId) {
     throw badRequest("Organization is not linked to Clerk");
   }
@@ -722,7 +710,7 @@ async function revokeClerkInvitations(
   organizationId: string,
   invitation: OrganizationInvitation
 ): Promise<void> {
-  const clerkOrgId = await getClerkOrgId(getDb(c.env), organizationId);
+  const clerkOrgId = await findClerkOrganizationId(getDb(c.env), organizationId);
   if (!clerkOrgId) {
     throw badRequest("Organization is not linked to Clerk");
   }
@@ -763,7 +751,7 @@ async function removeClerkMembership(
   organizationId: string,
   userId: string
 ): Promise<void> {
-  const clerkOrgId = await getClerkOrgId(getDb(c.env), organizationId);
+  const clerkOrgId = await findClerkOrganizationId(getDb(c.env), organizationId);
   if (!clerkOrgId) {
     throw badRequest("Organization is not linked to Clerk");
   }

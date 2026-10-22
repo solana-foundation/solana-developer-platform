@@ -105,12 +105,6 @@ export const listProjectsResponseSchema = z
   })
   .openapi({ description: "List of projects." });
 
-export const projectMemberResponseSchema = z
-  .object({
-    member: projectMemberWithUserSchema.openapi({ description: "Project member details." }),
-  })
-  .openapi({ description: "Project member response payload." });
-
 export const listProjectMembersResponseSchema = z
   .object({
     members: z.array(projectMemberWithUserSchema).openapi({ description: "Project members." }),

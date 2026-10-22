@@ -60,20 +60,6 @@ export interface ListProjectsResponse {
   projects: Project[];
 }
 
-export interface AddProjectMemberRequest {
-  userId: string;
-}
-
-export interface ProjectMemberResponse {
-  member: ProjectMember & {
-    user: {
-      id: string;
-      email: string;
-      name: string | null;
-    };
-  };
-}
-
 export interface ListProjectMembersResponse {
   members: Array<
     ProjectMember & {

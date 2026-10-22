@@ -3,9 +3,13 @@ import { type DatabaseClient, getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { conflict, internalError } from "@/lib/errors";
 import { created } from "@/lib/response";
+import { requireClerkSignup } from "@/middleware/clerk-auth";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
-import { ensureUniqueSlug } from "@/services/clerk-organization-provisioning.service";
+import {
+  ensureUniqueSlug,
+  findClerkOrganizationId,
+} from "@/services/clerk-organization-provisioning.service";
 import { ClerkOrganizationsService } from "@/services/clerk-organizations.service";
 import type { Env } from "@/types/env";
 import { type OrganizationRow, toOrganizationResponse } from "./handlers";
@@ -14,6 +18,7 @@ import type { createOrganizationSchema } from "./schemas";
 type AppContext = Context<{ Bindings: Env }>;
 
 const ORGANIZATION_COLUMNS = "id, name, slug, tier, status, settings, created_at, updated_at";
+const SLUG_ATTEMPTS = 3;
 
 /**
  * Creates the caller's organization (ADR 0012), staged so that a retry after
@@ -28,22 +33,28 @@ const ORGANIZATION_COLUMNS = "id, name, slug, tier, status, settings, created_at
 export const createOrganization = async (
   c: ValidatedBodyContext<typeof createOrganizationSchema>
 ) => {
-  const signup = c.get("clerkSignup");
-  if (!signup) {
-    throw internalError("Route has no signup session step");
-  }
+  const signup = requireClerkSignup(c);
   const { name } = c.req.valid("json");
   const db = getDb(c.env);
 
   const organization = await claimOrganization(db, { name, creatorUserId: signup.userId });
-  // An active organization is a retry of a request that finished: nothing is
-  // written again, in Clerk above all, where it could re-add a creator whom
-  // another admin has since removed.
+  // An active organization is a retry of a request that finished, answered
+  // only while its creator still belongs to it: nothing is written again, in
+  // Clerk above all, where it could re-add a creator another admin removed.
+  // A removed creator keeps the slot; a person creates one organization.
+  if (organization.status === "active") {
+    await assertCreatorStillMember(db, { organizationId: organization.id, userId: signup.userId });
+  }
   const clerkOrganizationId =
     organization.status === "active"
       ? await readClerkOrganizationId(db, organization.id)
       : await provisionClerkOrganization(c, { organization, clerkUserId: signup.clerkUserId });
-  await activateOrganization(c, { organizationId: organization.id, creatorUserId: signup.userId });
+  if (organization.status === "provisioning") {
+    await activateOrganization(c, {
+      organizationId: organization.id,
+      creatorUserId: signup.userId,
+    });
+  }
 
   const active = await db
     .prepare(`SELECT ${ORGANIZATION_COLUMNS} FROM organizations WHERE id = ?`)
@@ -69,18 +80,26 @@ async function claimOrganization(
   db: DatabaseClient,
   params: { name: string; creatorUserId: string }
 ): Promise<OrganizationRow> {
+  // The creator's slot is decided by ON CONFLICT; a unique violation is then
+  // only the slug, which another organization took between the check and the
+  // insert, so a fresh one is tried.
   const id = `org_${crypto.randomUUID()}`;
-  try {
-    await db
-      .prepare(
-        `INSERT INTO organizations (id, name, slug, status, created_by_user_id)
-         VALUES (?, ?, ?, 'provisioning', ?)`
-      )
-      .bind(id, params.name, await ensureUniqueSlug(db, params.name, id), params.creatorUserId)
-      .run();
-  } catch (error) {
-    if (!isPostgresUniqueViolation(error)) {
-      throw error;
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await db
+        .prepare(
+          `INSERT INTO organizations (id, name, slug, status, created_by_user_id)
+           VALUES (?, ?, ?, 'provisioning', ?)
+           ON CONFLICT (created_by_user_id) WHERE created_by_user_id IS NOT NULL AND status <> 'deleted'
+           DO NOTHING`
+        )
+        .bind(id, params.name, await ensureUniqueSlug(db, params.name, id), params.creatorUserId)
+        .run();
+      break;
+    } catch (error) {
+      if (!isPostgresUniqueViolation(error) || attempt === SLUG_ATTEMPTS) {
+        throw error;
+      }
     }
   }
 
@@ -117,17 +136,34 @@ async function readClerkOrganizationId(
   db: DatabaseClient,
   organizationId: string
 ): Promise<string> {
-  const mapping = await db
-    .prepare(
-      `SELECT provider_org_id FROM auth_organization_identities
-        WHERE provider = 'clerk' AND organization_id = ?`
-    )
-    .bind(organizationId)
-    .first<{ provider_org_id: string }>();
-  if (!mapping) {
+  const clerkOrganizationId = await findClerkOrganizationId(db, organizationId);
+  if (clerkOrganizationId === null) {
     throw internalError("Active organization has no Clerk organization");
   }
-  return mapping.provider_org_id;
+  return clerkOrganizationId;
+}
+
+/**
+ * Refuses a creator who no longer belongs to the organization they created.
+ *
+ * @param db - The database.
+ * @param params.organizationId - The organization.
+ * @param params.userId - The creator.
+ */
+async function assertCreatorStillMember(
+  db: DatabaseClient,
+  params: { organizationId: string; userId: string }
+): Promise<void> {
+  const member = await db
+    .prepare(
+      `SELECT id FROM organization_members
+        WHERE organization_id = ? AND user_id = ? AND status = 'active'`
+    )
+    .bind(params.organizationId, params.userId)
+    .first<{ id: string }>();
+  if (!member) {
+    throw conflict("You have already created an organization");
+  }
 }
 
 /**
@@ -153,15 +189,9 @@ async function provisionClerkOrganization(
       .prepare("SELECT id FROM organizations WHERE id = ? FOR UPDATE")
       .bind(params.organization.id)
       .first();
-    const mapping = await tx
-      .prepare(
-        `SELECT provider_org_id FROM auth_organization_identities
-          WHERE provider = 'clerk' AND organization_id = ?`
-      )
-      .bind(params.organization.id)
-      .first<{ provider_org_id: string }>();
-    if (mapping) {
-      return mapping.provider_org_id;
+    const mapped = await findClerkOrganizationId(tx, params.organization.id);
+    if (mapped !== null) {
+      return mapped;
     }
     const createdId = await clerk.createOrganization({
       name: params.organization.name,
@@ -216,7 +246,11 @@ async function activateOrganization(
       .prepare("SELECT status FROM organizations WHERE id = ? FOR UPDATE")
       .bind(params.organizationId)
       .first<{ status: string }>();
-    if (current?.status !== "provisioning") {
+    if (!current) {
+      throw internalError("Provisioning organization is missing");
+    }
+    // A concurrent attempt activated it first.
+    if (current.status !== "provisioning") {
       return { entry: null, result: undefined };
     }
     await tx
