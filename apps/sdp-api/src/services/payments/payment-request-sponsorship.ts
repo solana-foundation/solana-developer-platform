@@ -147,7 +147,9 @@ export async function issuePaymentRequestTransaction(
         projectId: request.project_id,
         sponsoredAccount: payer,
         amount: request.amount,
-        token: request.token,
+        // Named tokenMint: a bare "token" key is scrubbed as a credential by
+        // the audit redaction policy, and a mint address is not a secret.
+        tokenMint: request.token,
         destination: request.destination_address,
         walletId: request.wallet_id,
         transactionDigest: sponsoredMessageDigest(

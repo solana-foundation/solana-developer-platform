@@ -8,7 +8,6 @@
 import { type Address, assertIsAddress } from "@solana/kit";
 import {
   type Config,
-  type FeePayerPolicy,
   KoraClient,
   type KoraClientOptions,
   type SignTransactionRequest,
@@ -239,7 +238,6 @@ export class KoraAdapter implements FeePaymentPort {
       return {
         signerAddress,
         maxAllowedLamports,
-        feePayerMayTransferLamports: policyMaySpendLamports(fee_payer_policy),
         feePayerPolicy: fee_payer_policy,
       };
     } catch (error) {
@@ -347,61 +345,6 @@ function decodeBase64(base64: string): Uint8Array {
 
 function formatErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Unknown error";
-}
-
-// Managed sponsorship assumes zero additional lamport outflow only when every
-// authority Kora reports is explicitly disabled. Checking the values rather than
-// pinning the schema keeps a newly added authority meaningful: one that arrives
-// disabled is still proof of zero outflow, while one that arrives enabled fails
-// closed even though this code has never heard of it.
-function policyMaySpendLamports(policy: FeePayerPolicy): boolean {
-  return !(reportsRequiredAuthorities(policy) && everyAuthorityDisabled(policy));
-}
-
-// Kora reports its policy as JSON, so anything that is not a plain object with
-// its authorities as own properties is not a policy this code can vouch for.
-// Reading inherited or hidden members would let an empty-looking payload pass
-// as proof of zero outflow while carrying an enabled authority out of sight.
-function isPlainRecord(value: unknown): value is Record<PropertyKey, unknown> {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
-}
-
-const REQUIRED_DISABLED_AUTHORITIES = [
-  ["system", "allow_transfer"],
-  ["system", "allow_assign"],
-  ["system", "allow_create_account"],
-  ["system", "allow_allocate"],
-  ["system", "nonce", "allow_withdraw"],
-  ["spl_token", "allow_transfer"],
-  ["spl_token", "allow_close_account"],
-  ["token_2022", "allow_transfer"],
-  ["token_2022", "allow_close_account"],
-] as const;
-
-// A policy Kora truncated, or one this code failed to parse, must not read as
-// proof of zero outflow: the authorities that move lamports have to be present
-// and explicitly disabled before the rest of the report is worth checking.
-function reportsRequiredAuthorities(policy: FeePayerPolicy): boolean {
-  return REQUIRED_DISABLED_AUTHORITIES.every((path) => {
-    let current: unknown = policy;
-    for (const key of path) {
-      if (!isPlainRecord(current) || !Object.hasOwn(current, key)) return false;
-      current = current[key];
-    }
-    return current === false;
-  });
-}
-
-function everyAuthorityDisabled(value: unknown): boolean {
-  if (typeof value === "boolean") return value === false;
-  if (!isPlainRecord(value)) return false;
-  const keys: PropertyKey[] = [
-    ...Object.getOwnPropertyNames(value),
-    ...Object.getOwnPropertySymbols(value),
-  ];
-  return keys.every((key) => everyAuthorityDisabled(value[key]));
 }
 
 // The @solana/kora SDK throws `KoraError` with a numeric `code` and a

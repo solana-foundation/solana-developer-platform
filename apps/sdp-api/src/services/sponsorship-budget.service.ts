@@ -179,7 +179,6 @@ export function sponsorshipProviderConfigFingerprint(
     .update(
       canonicalJson({
         maxAllowedLamports: configuration.maxAllowedLamports,
-        feePayerMayTransferLamports: configuration.feePayerMayTransferLamports,
         feePayerPolicy: configuration.feePayerPolicy,
       })
     )
