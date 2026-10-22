@@ -641,7 +641,7 @@ async function settleTransferExecutionFailure(
       throw internalError("Payment transfer record not found after submission");
     }
     if (current.status === "failed") {
-      return replayTransferRow(c, current);
+      throw failedTransferError(current);
     }
     if (isSuccessfulPaymentTransferStatus(current.status)) {
       await onConcurrentChainVerdict?.(current);
@@ -836,6 +836,18 @@ function replayTransferRow(c: AppContext, row: TransferRow): Response {
   if (row.status !== "failed") {
     return success(c, buildTransferReplayPayload(row));
   }
+  // Returned, not thrown: replayFromRecord marks the Response the finder builds.
+  return appErrorResponse(c, failedTransferError(row));
+}
+
+/**
+ * The error a failed transfer row answers with: the code its request recorded,
+ * or `TRANSACTION_FAILED` for a row the reconciler failed from the chain.
+ *
+ * @param row - A transfer row whose status is `failed`.
+ * @returns The error a replay of the row's key answers with.
+ */
+function failedTransferError(row: TransferRow): AppError {
   const recorded = row.provider_data[EXECUTION_FAILURE_KEY];
   const recordedCode =
     typeof recorded === "object" && recorded !== null && "code" in recorded
@@ -844,14 +856,10 @@ function replayTransferRow(c: AppContext, row: TransferRow): Response {
   // A row the reconciler failed from the chain records no code: it is a
   // transaction failure.
   const code = isErrorCode(recordedCode) ? recordedCode : "TRANSACTION_FAILED";
-  // Returned, not thrown: replayFromRecord marks the Response the finder builds.
-  return appErrorResponse(
-    c,
-    new AppError(
-      code,
-      `${row.error ?? "The transfer failed"}. This Idempotency-Key belongs to a transfer that failed; send the request again with a new Idempotency-Key to try again.`,
-      { transferId: row.id, status: row.status }
-    )
+  return new AppError(
+    code,
+    `${row.error ?? "The transfer failed"}. This Idempotency-Key belongs to a transfer that failed; send the request again with a new Idempotency-Key to try again.`,
+    { transferId: row.id, status: row.status }
   );
 }
 
