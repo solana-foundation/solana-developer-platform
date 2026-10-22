@@ -72,9 +72,11 @@ function getWalletListItemSchema(value: unknown): TestJsonSchema {
 }
 
 describe("OpenAPI spec", () => {
-  it("requires no project header for organization role changes and membership exits", () => {
+  it("requires no project header on organization membership routes", () => {
     const doc = createOpenApiDocument();
     for (const [path, method] of [
+      ["/v1/members/invite", "post"],
+      ["/v1/members/invitations/{invitationId}", "delete"],
       ["/v1/members/me", "delete"],
       ["/v1/members/{memberId}", "patch"],
       ["/v1/members/{memberId}", "delete"],

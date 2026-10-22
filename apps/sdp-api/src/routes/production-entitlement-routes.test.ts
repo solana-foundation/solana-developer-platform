@@ -22,6 +22,7 @@ const NO_PROJECT_ROUTES: readonly (readonly [RegExp, string])[] = [
   [/^\/pay(\/|$)/, "public payment page; admits its own money movement (lib/money-admission.ts)"],
   [/^\/admin\//, "operator routes behind their own credential"],
   [/^\/v1\/(organizations|onboarding|places)(\/|$)/, "organization-scoped, no project"],
+  [/^\/v1\/members(\/|$)/, "organization-wide membership, no project (ADR 0012)"],
   [/^\/internal\/dashboard\/network(\/|$)/, "chain-wide public figures; reads no tenant data"],
   [/^\/v1\/projects$/, "lists projects; hides production without the entitlement"],
   [
@@ -47,15 +48,6 @@ function concretePath(path: string): string {
 function exemption(method: string, path: string): string | undefined {
   const reason = NO_PROJECT_ROUTES.find(([pattern]) => pattern.test(path))?.[1];
   if (reason) return reason;
-  if (method === "GET" && /^\/v1\/members(\/me)?$/.test(path)) {
-    return "organization-wide membership reads, no project (ADR 0012)";
-  }
-  if (
-    (method === "DELETE" && path === "/v1/members/me") ||
-    ((method === "PATCH" || method === "DELETE") && path === "/v1/members/:memberId")
-  ) {
-    return "organization-wide role changes and membership exits, no project (ADR 0012)";
-  }
   if (path.startsWith("/v1/earn/") && isEarnExitOrRead(probeMethod(method), concretePath(path))) {
     return "Earn read or exit (ADR 0002)";
   }
