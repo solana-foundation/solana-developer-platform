@@ -2,9 +2,8 @@
 import { createClusterHistoryRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import type { getSignaturesForAddress, SolanaRpc } from "@sdp/rpc/solana";
-import { formatDecimalAmount } from "@sdp/solana/amount";
 import { type AssetRef, NATIVE_ASSET } from "@sdp/solana/asset-ref";
-import { type BaseUnits, baseUnits, U64_MAX } from "@sdp/solana/token-amount";
+import { type BaseUnits, baseUnits, toTokenAmount, U64_MAX } from "@sdp/solana/token-amount";
 import type { PaymentTransferStatus as TransferStatus } from "@sdp/types/payments";
 import {
   type AmountVerificationReason,
@@ -947,7 +946,7 @@ function buildObservedTransfers(
       source_address: move.sourceAddress,
       destination_address: move.destinationAddress,
       token: move.token,
-      amount: formatDecimalAmount(ownEffect, move.decimals),
+      amount: toTokenAmount(ownEffect, move.decimals).value,
       memo: null,
       type: "transfer",
       kind: observedTransferKind(move.direction),

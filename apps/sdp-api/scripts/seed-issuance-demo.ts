@@ -31,7 +31,7 @@ import {
   validateSelectedSettings,
   validateSettingParams,
 } from "@sdp/issuance/capabilities";
-import { parseDecimalAmount } from "@sdp/solana/amount";
+import { parseFixedDecimal } from "@sdp/solana/amount";
 import {
   type AssetCategory,
   getAssetTypeRegistryEntry,
@@ -91,12 +91,13 @@ function integer(random: Random, min: number, max: number): number {
 // can never claim an account that doesn't exist.
 
 /**
- * Whole tokens → the base units the column stores. The read path formats it back
- * with the token's decimals, so writing whole tokens directly would render as a
- * fraction of a token.
+ * A supply cap in whole tokens → the base units the column stores. The read path
+ * formats it back with the token's decimals, so writing whole tokens directly
+ * would render as a fraction of a token. A cap is SDP policy that may pass u64,
+ * so it is generic fixed-point, not a token amount.
  */
-function toBaseUnits(wholeTokens: string, decimals: number): string {
-  return parseDecimalAmount(wholeTokens, decimals).toString();
+function capBaseUnits(wholeTokens: string, decimals: number): string {
+  return parseFixedDecimal(wholeTokens, decimals).toString();
 }
 
 // ── Asset catalogue ─────────────────────────────────────────────────────────
@@ -989,7 +990,7 @@ function buildRow(
     signingCustodyWalletId: signer?.id ?? null,
     // Base units, as the column stores them; the API formats them back with
     // `decimals`. Circulating supply is absent because nothing has been minted.
-    maxSupply: maxSupplyWhole ? toBaseUnits(maxSupplyWhole, decimals) : null,
+    maxSupply: maxSupplyWhole ? capBaseUnits(maxSupplyWhole, decimals) : null,
     isMintable: chance(random, 0.8),
     isFreezable: chance(random, 0.7),
     requiresAllowlist,

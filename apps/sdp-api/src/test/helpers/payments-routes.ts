@@ -5,7 +5,7 @@ import type { SponsorshipProviderConfiguration } from "@sdp/fee-payment/port";
 import { hashString } from "@sdp/payments/hash";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import * as solanaRpc from "@sdp/rpc/solana";
-import { parseDecimalAmount } from "@sdp/solana/amount";
+import { parseTokenAmount, toBaseUnits } from "@sdp/solana/token-amount";
 import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { getBase58Codec } from "@solana/codecs";
 import {
@@ -454,7 +454,7 @@ export async function recurringCollectionTransactionForSignature(options: {
   });
   const destinationTokenAccount = row.destination_token_account ?? derivedDestinationTokenAccount;
 
-  const amountBaseUnits = parseDecimalAmount(row.amount, options.decimals);
+  const amountBaseUnits = toBaseUnits(parseTokenAmount(row.amount, options.decimals));
   const instructionData = subscriptionsProgram
     .getTransferSubscriptionInstructionDataEncoder()
     .encode({

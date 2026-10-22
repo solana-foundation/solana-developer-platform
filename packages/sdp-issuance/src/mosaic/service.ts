@@ -21,10 +21,9 @@ import {
   createRpcForSdk,
 } from "@sdp/rpc/solana";
 import type { RpcEnv } from "@sdp/rpc/types";
-import { parseDecimalAmount } from "@sdp/solana/amount";
 import { mosaicAmountUnderLiveTerms } from "@sdp/solana/mosaic-amount";
 import type { SponsoredSubmitter } from "@sdp/solana/token-2022";
-import type { TokenAmount } from "@sdp/solana/token-amount";
+import { parseTokenAmount, type TokenAmount, toBaseUnits } from "@sdp/solana/token-amount";
 import {
   type Address,
   appendTransactionMessageInstructions,
@@ -476,7 +475,7 @@ export class MosaicService {
         const interestBearing = extensions.interestBearing;
         const defaultAccountState = extensions.defaultAccountState;
         const transferFeeMaximum = transferFee
-          ? parseDecimalAmount(transferFee.maxFee, options.decimals)
+          ? toBaseUnits(parseTokenAmount(transferFee.maxFee, options.decimals))
           : undefined;
         transaction = await createCustomTokenInitTransaction(
           this.rpc,

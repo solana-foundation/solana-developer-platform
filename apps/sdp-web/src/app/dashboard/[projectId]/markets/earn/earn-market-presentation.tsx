@@ -1,6 +1,6 @@
 "use client";
 
-import { formatDecimalAmount, isDecimalString, parseDecimalAmount } from "@sdp/solana/amount";
+import { formatFixedDecimal, isDecimalString, parseFixedDecimal } from "@sdp/solana/amount";
 import type { EarnStrategy } from "@sdp/types/earn";
 import { type SolanaCluster, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import { Badge } from "@sdp/ui/badge";
@@ -52,8 +52,8 @@ export function sumDecimalStrings(values: readonly string[]): string | undefined
     const fraction = value.split(".")[1]?.length ?? 0;
     return Math.max(largest, fraction);
   }, 0);
-  const total = values.reduce((sum, value) => sum + parseDecimalAmount(value, scale), 0n);
-  return formatDecimalAmount(total, scale);
+  const total = values.reduce((sum, value) => sum + parseFixedDecimal(value, scale), 0n);
+  return formatFixedDecimal(total, scale);
 }
 
 /** APY is a decimal rate (`0.062` = 6.2%); absent and malformed values stay unavailable. */

@@ -1,5 +1,9 @@
-import { parseDecimalAmount } from "@sdp/solana/amount";
-import { parseBaseUnits, toTokenAmount } from "@sdp/solana/token-amount";
+import {
+  parseBaseUnits,
+  parseTokenAmount,
+  toBaseUnits,
+  toTokenAmount,
+} from "@sdp/solana/token-amount";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { getLogger } from "@/runtime/logger";
 import type { VaultDeadline } from "@/services/earn/vault-deadline";
@@ -154,7 +158,7 @@ function sumAtoms(mint: string, amounts: readonly string[], decimals: number): b
   let total = 0n;
   for (const amount of amounts) {
     try {
-      total += parseDecimalAmount(amount, decimals);
+      total += toBaseUnits(parseTokenAmount(amount, decimals));
     } catch (error) {
       getLogger().warn(
         { mint, amount, decimals, error },

@@ -1,8 +1,8 @@
 import {
   decimalScale,
-  formatDecimalAmount,
+  formatFixedDecimal,
   isDecimalString,
-  parseDecimalAmount,
+  parseFixedDecimal,
 } from "@sdp/solana/amount";
 import { type EarnVaultPositionIntermediate, isEarnVaultHoldingEmpty } from "@sdp/types/earn";
 import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
@@ -210,8 +210,8 @@ function walletsByPublicKey(
 function subtractFloored(left: string, right: string): string | undefined {
   if (!isDecimalString(left) || !isDecimalString(right)) return undefined;
   const scale = Math.max(decimalScale(left), decimalScale(right));
-  const difference = parseDecimalAmount(left, scale) - parseDecimalAmount(right, scale);
-  return formatDecimalAmount(difference > 0n ? difference : 0n, scale);
+  const difference = parseFixedDecimal(left, scale) - parseFixedDecimal(right, scale);
+  return formatFixedDecimal(difference > 0n ? difference : 0n, scale);
 }
 
 /**
@@ -356,14 +356,14 @@ export function estimatedTreasuryApy({
   let totalValue = 0n;
   let weightedRate = 0n;
   for (const [index, value] of validValues.entries()) {
-    const valueUnits = parseDecimalAmount(value, valueScale);
-    const rateUnits = parseDecimalAmount(validRates[index], rateScale);
+    const valueUnits = parseFixedDecimal(value, valueScale);
+    const rateUnits = parseFixedDecimal(validRates[index], rateScale);
     totalValue += valueUnits;
     weightedRate += valueUnits * rateUnits;
   }
   if (totalValue === 0n) return undefined;
   const rateUnits = (weightedRate * 2n + totalValue) / (2n * totalValue);
-  return formatDecimalAmount(rateUnits, rateScale);
+  return formatFixedDecimal(rateUnits, rateScale);
 }
 
 /**

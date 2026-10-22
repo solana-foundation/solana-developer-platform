@@ -275,7 +275,7 @@ describe("TokenService", () => {
     });
 
     it("rejects a cap with more decimal places than the mint can represent", async () => {
-      // parseDecimalAmount throws AmountError on excess scale. Unguarded that
+      // parseFixedDecimal throws AmountError on excess scale. Unguarded that
       // escaped as a 500; it must surface as a 400 instead, because the effective
       // decimals are only known here (a template may override what was requested).
       await expect(

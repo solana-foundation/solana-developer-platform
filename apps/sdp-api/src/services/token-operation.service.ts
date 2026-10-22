@@ -1,4 +1,4 @@
-import { AmountError, parseDecimalAmount } from "@sdp/solana/amount";
+import { AmountError, parseFixedDecimal } from "@sdp/solana/amount";
 import { MOSAIC_AMOUNT_REFUSALS, MosaicAmountError } from "@sdp/solana/mosaic-amount";
 import {
   type BaseUnits,
@@ -137,8 +137,10 @@ export function resolveMintOperationAmount(
   const parsed = parsePositiveTokenAmount(amount, token.decimals);
 
   if (token.maxSupply) {
-    const currentSupply = parseDecimalAmount(token.totalSupply ?? "0", token.decimals);
-    const maxSupply = parseDecimalAmount(token.maxSupply, token.decimals);
+    // The recorded supply (with reservations) and the cap are SDP bookkeeping
+    // that may pass u64, so they compare as generic fixed-point at the mint's scale.
+    const currentSupply = parseFixedDecimal(token.totalSupply ?? "0", token.decimals);
+    const maxSupply = parseFixedDecimal(token.maxSupply, token.decimals);
 
     if (currentSupply + parsed.amountBaseUnits > maxSupply) {
       throw new AppError("MAX_SUPPLY_EXCEEDED", "Mint amount would exceed maximum supply");

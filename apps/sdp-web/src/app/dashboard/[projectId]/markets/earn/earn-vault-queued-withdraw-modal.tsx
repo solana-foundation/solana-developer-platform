@@ -1,5 +1,6 @@
 "use client";
 
+import { decimalScale, formatFixedDecimal, parseFixedDecimal } from "@sdp/solana/amount";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type {
   EarnVaultPosition,
@@ -81,10 +82,15 @@ function bpsToPercent(bps: number): string {
   return (bps / 100).toFixed(2).replace(/\.?0+$/, "");
 }
 
+/**
+ * A percent with at most two decimals, in basis points; NaN when it is not one.
+ * Up to 16 whole digits keep the Number exact, and any longer value is far
+ * past every discount the terms allow.
+ */
 function percentToBps(value: string): number {
-  const match = /^(\d+)(?:\.(\d{0,2}))?$/.exec(value.trim());
-  if (!match) return Number.NaN;
-  return Number(match[1]) * 100 + Number((match[2] ?? "").padEnd(2, "0"));
+  const trimmed = value.trim();
+  if (!/^\d{1,16}(?:\.\d{0,2})?$/.test(trimmed)) return Number.NaN;
+  return Number(parseFixedDecimal(trimmed, 2));
 }
 
 function queueDurationUnit(seconds: number): QueueDurationUnit {
@@ -104,18 +110,30 @@ function durationValue(seconds: number, unit: QueueDurationUnit): string {
   return String(seconds / unit.divisor);
 }
 
+/**
+ * The longest canonical duration that can be valid: at most 16 whole digits
+ * (MAX_SAFE_INTEGER seconds), and at most 7 fraction digits, as a unit of at
+ * most 86 400 s (2^7 × 3^3 × 5^2) clears no more. The cap also keeps the
+ * fixed-point parse inside its range.
+ */
+const MAX_DURATION_DIGITS = 24;
+
+/** A duration in `unit`s as whole seconds; NaN when it is not a positive whole second count. */
 function durationToSeconds(value: string, unit: QueueDurationUnit): number {
   const amount = parseUnsignedDecimal(value, { maxLength: 128 });
-  if (!amount) return Number.NaN;
+  if (!amount || amount.canonical.length > MAX_DURATION_DIGITS) return Number.NaN;
 
-  const scale = amount.fraction.length;
-  const denominator = 10n ** BigInt(scale);
-  const scaledAmount = BigInt(`${amount.whole}${amount.fraction}`);
-  const scaledSeconds = scaledAmount * BigInt(unit.divisor);
-  if (scaledSeconds % denominator !== 0n) return Number.NaN;
+  // Exact fixed-point: the duration times the unit's seconds, at its own scale.
+  const scale = decimalScale(amount.canonical);
+  const seconds = formatFixedDecimal(
+    parseFixedDecimal(amount.canonical, scale) * BigInt(unit.divisor),
+    scale
+  );
+  // A fraction left over is part of a second.
+  if (seconds.includes(".")) return Number.NaN;
 
-  const seconds = scaledSeconds / denominator;
-  return seconds > 0n && seconds <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(seconds) : Number.NaN;
+  const whole = Number(seconds);
+  return whole > 0 && Number.isSafeInteger(whole) ? whole : Number.NaN;
 }
 
 function isQueueTermsValid(

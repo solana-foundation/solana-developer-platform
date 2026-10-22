@@ -5,7 +5,8 @@
  * allowlist management, and freeze/unfreeze operations.
  */
 
-import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
+import { formatFixedDecimal, parseFixedDecimal } from "@sdp/solana/amount";
+import { parseTokenAmount, toBaseUnits } from "@sdp/solana/token-amount";
 import type {
   AllowlistEntryStatus,
   FrozenAccount,
@@ -511,15 +512,16 @@ export class TokenService {
     const id = `tok_${crypto.randomUUID()}`;
     const now = new Date().toISOString();
     const decimals = input.decimals ?? 9;
-    // parseDecimalAmount throws when the cap carries more decimal places than the
-    // mint supports. It can't be caught in the request schema: callers resolve
+    // A cap is SDP policy, not an on-chain amount, so it is generic fixed-point
+    // at the mint's scale and may pass u64. parseFixedDecimal throws when the cap
+    // carries more decimal places than the mint supports. It can't be caught in the request schema: callers resolve
     // template settings first, and a template may pin `decimals` to something
     // other than what the caller asked for — so the effective precision is only
     // known here. Surface it as a 400 rather than letting AmountError escape.
     let maxSupplyBaseUnits: string | null = null;
     if (input.maxSupply) {
       try {
-        maxSupplyBaseUnits = parseDecimalAmount(input.maxSupply, decimals).toString();
+        maxSupplyBaseUnits = parseFixedDecimal(input.maxSupply, decimals).toString();
       } catch {
         throw badRequest("Invalid maxSupply for this token's decimals", {
           errors: {
@@ -588,7 +590,7 @@ export class TokenService {
         token.uri,
         token.imageUrl,
         token.template,
-        parseDecimalAmount(token.totalSupply, decimals).toString(),
+        toBaseUnits(parseTokenAmount(token.totalSupply, decimals)).toString(),
         token.totalSupplyUpdatedAt,
         maxSupplyBaseUnits,
         token.isMintable ? 1 : 0,
@@ -1067,7 +1069,7 @@ export class TokenService {
     const decimals = input.decimals ?? existing.decimals;
     let baseUnits: bigint;
     try {
-      baseUnits = parseDecimalAmount(input.maxSupply, decimals);
+      baseUnits = parseFixedDecimal(input.maxSupply, decimals);
     } catch {
       throw badRequest("Invalid maxSupply for this token's decimals", {
         errors: {
@@ -1094,7 +1096,7 @@ export class TokenService {
       throw badRequest("maxSupply cannot be below the already-minted supply", {
         errors: {
           maxSupply: [
-            `Must be at least the current supply of ${formatDecimalAmount(supplyBaseUnits, decimals)}`,
+            `Must be at least the current supply of ${formatFixedDecimal(BigInt(supplyBaseUnits), decimals)}`,
           ],
         },
       });
@@ -1464,7 +1466,7 @@ export class TokenService {
       throw new Error("TOKEN_NOT_FOUND");
     }
 
-    const deltaBaseUnits = parseDecimalAmount(delta, token.decimals).toString();
+    const deltaBaseUnits = toBaseUnits(parseTokenAmount(delta, token.decimals)).toString();
     await this._applySupplyDelta(
       tokenId,
       deltaBaseUnits,
@@ -1506,7 +1508,7 @@ export class TokenService {
       if (!row) throw new Error("TOKEN_TRANSACTION_NOT_FOUND");
       if (row.supply_bookkeeping_applied_at !== null) return;
 
-      const deltaBaseUnits = parseDecimalAmount(amount, row.decimals).toString();
+      const deltaBaseUnits = toBaseUnits(parseTokenAmount(amount, row.decimals)).toString();
       const now = new Date().toISOString();
       const params = parsePostgresJsonOr<Record<string, unknown>>(row.operation_params, {});
       const baseline = params.supplyBaselineUpdatedAt;
@@ -2244,7 +2246,7 @@ export class TokenService {
     // Worth saying out loud: the only other trace is a supply figure quietly larger
     // than the cap beside it, and no further mints will be admitted.
     if (updated.maxSupply) {
-      const maxSupply = parseDecimalAmount(updated.maxSupply, updated.decimals);
+      const maxSupply = parseFixedDecimal(updated.maxSupply, updated.decimals);
       if (BigInt(supplyBaseUnits) > maxSupply) {
         getLogger().warn(
           {
@@ -3495,8 +3497,15 @@ export class TokenService {
   // ═══════════════════════════════════════════════════════════════════════════
 
   private mapRowToToken(row: TokenRow, extensionState: TokenExtensionState): Token {
-    const totalSupply = formatDecimalAmount(row.total_supply_cached ?? "0", row.decimals);
-    const maxSupply = row.max_supply ? formatDecimalAmount(row.max_supply, row.decimals) : null;
+    // Both are SDP bookkeeping in base units, not one on-chain amount: the supply
+    // counts mint reservations and the cap is policy, so either may pass u64.
+    const totalSupply = formatFixedDecimal(
+      parseFixedDecimal(row.total_supply_cached ?? "0", 0),
+      row.decimals
+    );
+    const maxSupply = row.max_supply
+      ? formatFixedDecimal(parseFixedDecimal(row.max_supply, 0), row.decimals)
+      : null;
 
     return {
       id: row.id,

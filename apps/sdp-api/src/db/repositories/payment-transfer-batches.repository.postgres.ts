@@ -1,4 +1,4 @@
-import { formatDecimalAmount } from "@sdp/solana/amount";
+import { formatFixedDecimal } from "@sdp/solana/amount";
 import {
   type AmountVerificationVerdict,
   BUILT_MOVEMENT_VERDICTS,
@@ -312,9 +312,10 @@ export function createPostgresPaymentTransferBatchesRepository(
       return db.transaction(async (tx) => {
         const batch = await insertTransferBatch(tx, {
           ...input.batch,
-          // A batch with no recipient has no total; the API refuses one.
+          // A batch with no recipient has no total; the API refuses one. A sum
+          // of debits may pass u64, so it formats as generic fixed-point.
           totalAmount:
-            first === undefined ? null : formatDecimalAmount(totalDebit, first.quote.decimals),
+            first === undefined ? null : formatFixedDecimal(totalDebit, first.quote.decimals),
         });
         const quoted = input.recipients.map(({ quote, ...recipient }) => ({
           ...recipient,

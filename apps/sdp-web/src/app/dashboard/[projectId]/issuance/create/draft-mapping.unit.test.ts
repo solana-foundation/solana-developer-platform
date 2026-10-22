@@ -64,7 +64,7 @@ describe("getAssetDetailsErrors (max supply)", () => {
   });
 
   it("rejects more decimal places than the mint can represent", () => {
-    // parseDecimalAmount throws on excess scale, so the API would 400 (or, before
+    // parseFixedDecimal throws on excess scale, so the API would 400 (or, before
     // the service guard, 500). Catch it in the form instead.
     expect(getAssetDetailsErrors(draftWith({ maxSupply: "1.5", decimals: "0" }), t).maxSupply).toBe(
       t("DashboardIssuance.errors.maxSupplyPrecision", { decimals: "0" })

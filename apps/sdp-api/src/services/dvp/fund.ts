@@ -8,7 +8,6 @@ import {
   verifySwapDvpAccount,
 } from "@sdp/dvp";
 import { createRpc, getRecentBlockhash } from "@sdp/rpc/solana";
-import { formatDecimalAmount } from "@sdp/solana/amount";
 import { quoteMovement } from "@sdp/solana/movement-quote";
 import { baseUnits, toTokenAmount } from "@sdp/solana/token-amount";
 import { buildTokenMovement, support, TokenMovementError } from "@sdp/solana/token-movement";
@@ -188,8 +187,8 @@ async function readFundableMint(
   }
   const sourceBalance = decodeToken(accounts.source).data.amount;
   if (sourceBalance < outstanding) {
-    const sourceAmount = formatDecimalAmount(sourceBalance, decimals);
-    const outstandingAmount = formatDecimalAmount(outstanding, decimals);
+    const sourceAmount = toTokenAmount(baseUnits(sourceBalance), decimals).value;
+    const outstandingAmount = toTokenAmount(baseUnits(outstanding), decimals).value;
     throw badRequest(
       `DvP trade ${trade.id}: wallet ${wallet} holds ${sourceAmount} of the ${outstandingAmount} ${mint} this leg still needs; nothing was sent`,
       { reason: DVP_LEG_REFUSAL.walletBalanceShort }

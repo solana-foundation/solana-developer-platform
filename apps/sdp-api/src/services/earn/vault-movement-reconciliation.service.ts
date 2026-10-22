@@ -10,7 +10,8 @@ import {
   type SolanaRpc,
   tokenBalanceDelta,
 } from "@sdp/rpc/solana";
-import { formatDecimalAmount, isDecimalString } from "@sdp/solana/amount";
+import { isDecimalString } from "@sdp/solana/amount";
+import { baseUnits, toTokenAmount } from "@sdp/solana/token-amount";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { EARN_TERMINAL_MOVEMENT_STATUSES, isEarnVaultHoldingEmpty } from "@sdp/types/earn";
 import {
@@ -732,7 +733,7 @@ async function observeWithdrawalPayout(
     if (!transaction || transaction.err !== null) return null;
     const delta = tokenBalanceDelta(transaction, { mint: tokenMint, owner: receiver });
     if (!delta || delta.baseUnits <= 0n) return null;
-    return formatDecimalAmount(delta.baseUnits, delta.decimals);
+    return toTokenAmount(baseUnits(delta.baseUnits), delta.decimals).value;
   } catch (error) {
     getLogger().warn(
       { movementId: movement.id, signature: movement.signature, error: errorMessage(error) },

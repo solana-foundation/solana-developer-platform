@@ -54,8 +54,15 @@ export const decimalScale = (value: string): number =>
 const TOTAL_BITS = 256;
 
 /**
- * Parses a decimal amount string into a kit unsigned decimal fixed-point at
- * the given scale, enforcing the SDP input grammar and error contract before
+ * Generic fixed-point math on decimal strings: rates, prices, percentages,
+ * shares and sums at a chosen scale. A token's base units ↔ token units
+ * conversion does not belong here: it goes through `@sdp/solana/token-amount`
+ * (`parseTokenAmount`, `toBaseUnits`, `toTokenAmount`) with the mint's decimals.
+ */
+
+/**
+ * Parses a decimal string into a kit unsigned decimal fixed-point at the
+ * given scale, enforcing the SDP input grammar and error contract before
  * delegating to kit.
  *
  * The guards run before the kit call in the exact order callers have always
@@ -63,49 +70,55 @@ const TOTAL_BITS = 256;
  * unsigned 256-bit range, which is rethrown as
  * `AmountError("Amount is out of range")`.
  *
- * @param value - Decimal amount string; surrounding whitespace is ignored.
- * @param decimals - Non-negative integer count of fractional digits.
- * @returns The parsed amount as a frozen kit decimal fixed-point.
+ * @param value - Decimal string; surrounding whitespace is ignored.
+ * @param scale - Non-negative integer count of fractional digits.
+ * @returns The parsed value as a frozen kit decimal fixed-point.
  * @throws {AmountError} When the string is not a plain unsigned decimal, the
- * decimals configuration is invalid, the string exceeds the target scale, or
- * the scaled value overflows the 256-bit raw range.
+ * scale is invalid, the string has more fraction digits than the scale, or the
+ * scaled value overflows the 256-bit raw range.
  */
-const parseDecimalFixedPoint = (value: string, decimals: number, totalBits: number) => {
+const parseDecimalFixedPoint = (value: string, scale: number, totalBits: number) => {
   const normalized = value.trim();
 
   if (!isDecimalString(normalized)) {
     throw new AmountError("Invalid decimal amount");
   }
 
-  if (!Number.isInteger(decimals) || decimals < 0) {
+  if (!Number.isInteger(scale) || scale < 0) {
     throw new AmountError("Invalid decimals configuration");
   }
 
-  if (decimalScale(normalized) > decimals) {
+  if (decimalScale(normalized) > scale) {
     throw new AmountError("Amount has too many decimal places");
   }
 
   try {
-    return decimalFixedPoint("unsigned", totalBits, decimals)(normalized, "strict");
+    return decimalFixedPoint("unsigned", totalBits, scale)(normalized, "strict");
   } catch {
     throw new AmountError("Amount is out of range");
   }
 };
 
 /**
- * Parses a decimal amount string into base units at the given scale.
+ * Parses a decimal string into an integer count of units at the given scale:
+ * `parseFixedDecimal("1.25", 4)` is `12500n`. Generic math only; a token
+ * amount goes through `parseTokenAmount` in `@sdp/solana/token-amount`.
  *
- * @param value - Decimal amount string; surrounding whitespace is ignored.
- * @param decimals - Non-negative integer count of fractional digits.
- * @returns The amount in base units as a bigint.
+ * @param value - Decimal string; surrounding whitespace is ignored.
+ * @param scale - Non-negative integer count of fractional digits.
+ * @returns The value × 10^scale as a bigint.
  * @throws {AmountError} When the string is not a plain unsigned decimal, the
- * decimals configuration is invalid, the string exceeds the target scale, or
- * the scaled value overflows the 256-bit raw range.
+ * scale is invalid, the string has more fraction digits than the scale, or the
+ * scaled value overflows the 256-bit raw range.
  */
-export const parseDecimalAmount = (value: string, decimals: number): bigint =>
-  parseDecimalFixedPoint(value, decimals, TOTAL_BITS).raw;
+export const parseFixedDecimal = (value: string, scale: number): bigint =>
+  parseDecimalFixedPoint(value, scale, TOTAL_BITS).raw;
 
-/** Parses an exact token or lamport amount, rejecting precision loss and u64 overflow. */
+/**
+ * Parses an exact token or lamport amount, rejecting precision loss and u64
+ * overflow. `@sdp/solana/token-amount` builds its `parseTokenAmount` on it;
+ * code converting a mint's amount uses that one.
+ */
 export const parseTokenAmount = (value: string, decimals: number): bigint =>
   parseDecimalFixedPoint(value, decimals, 64).raw;
 
@@ -119,9 +132,9 @@ export const parseTokenAmount = (value: string, decimals: number): bigint =>
  * @throws {AmountError} When either string fails the parse guards.
  */
 export const compareDecimalAmounts = (left: string, right: string): number => {
-  const decimals = Math.max(decimalScale(left), decimalScale(right));
-  const leftAmount = parseDecimalFixedPoint(left, decimals, TOTAL_BITS);
-  const rightAmount = parseDecimalFixedPoint(right, decimals, TOTAL_BITS);
+  const scale = Math.max(decimalScale(left), decimalScale(right));
+  const leftAmount = parseDecimalFixedPoint(left, scale, TOTAL_BITS);
+  const rightAmount = parseDecimalFixedPoint(right, scale, TOTAL_BITS);
   return cmpDecimalFixedPoint(leftAmount, rightAmount);
 };
 
@@ -134,9 +147,9 @@ export const compareDecimalAmounts = (left: string, right: string): number => {
  * @throws {AmountError} When either string fails the parse guards.
  */
 export const addDecimalAmounts = (left: string, right: string): string => {
-  const decimals = Math.max(decimalScale(left), decimalScale(right));
-  const sum = parseDecimalAmount(left, decimals) + parseDecimalAmount(right, decimals);
-  return formatDecimalAmount(sum, decimals);
+  const scale = Math.max(decimalScale(left), decimalScale(right));
+  const sum = parseFixedDecimal(left, scale) + parseFixedDecimal(right, scale);
+  return formatFixedDecimal(sum, scale);
 };
 
 /**
@@ -156,55 +169,32 @@ export const scaleDecimalAmountByBps = (value: string, bps: number): string => {
   if (!Number.isInteger(bps) || bps < 0) {
     throw new AmountError("Invalid basis points");
   }
-  const decimals = decimalScale(value);
-  const scaled = (parseDecimalAmount(value, decimals) * BigInt(bps)) / 10_000n;
-  return formatDecimalAmount(scaled, decimals);
+  const scale = decimalScale(value);
+  const scaled = (parseFixedDecimal(value, scale) * BigInt(bps)) / 10_000n;
+  return formatFixedDecimal(scaled, scale);
 };
 
 /**
- * Formats base units at the given scale as a canonical decimal string,
- * trimming trailing zeros and dropping the decimal point for whole numbers.
+ * Formats an integer count of units at the given scale as a canonical decimal
+ * string, trimming trailing zeros and dropping the point for whole numbers:
+ * `formatFixedDecimal(12500n, 4)` is `"1.25"`. Signed: a negative count keeps
+ * its "-". Generic math only; base units of a mint become a token amount
+ * through `toTokenAmount` in `@sdp/solana/token-amount`.
  *
- * The `BigInt(value || "0")` conversion for string inputs is intentionally
- * outside the kit try/catch so that non-numeric strings keep throwing the
- * same native SyntaxError they always have.
- *
- * @param value - Base units as a bigint, or a base-unit string; an empty
- * string formats as "0".
- * @param decimals - Non-negative integer count of fractional digits.
+ * @param units - The value × 10^scale.
+ * @param scale - Non-negative integer count of fractional digits.
  * @returns The canonical decimal string, prefixed with "-" for negatives.
- * @throws {AmountError} When the decimals configuration is invalid or the
- * value overflows the signed 256-bit raw range.
+ * @throws {AmountError} When the scale is invalid or the value overflows the
+ * signed 256-bit raw range.
  */
-export const formatDecimalAmount = (value: string | bigint, decimals: number): string => {
-  if (!Number.isInteger(decimals) || decimals < 0) {
+export const formatFixedDecimal = (units: bigint, scale: number): string => {
+  if (!Number.isInteger(scale) || scale < 0) {
     throw new AmountError("Invalid decimals configuration");
   }
 
-  const bigintValue = typeof value === "bigint" ? value : BigInt(value || "0");
-
   try {
-    return decimalFixedPointToString(
-      rawDecimalFixedPoint("signed", TOTAL_BITS, decimals)(bigintValue)
-    );
+    return decimalFixedPointToString(rawDecimalFixedPoint("signed", TOTAL_BITS, scale)(units));
   } catch {
     throw new AmountError("Amount is out of range");
   }
-};
-
-/**
- * Converts a decimal amount string to a JS number, throwing if the value
- * cannot be represented exactly as a float at its own decimal scale.
- */
-export const toNumberAmount = (value: string): number => {
-  const decimals = decimalScale(value);
-  const baseUnits = parseDecimalAmount(value, decimals);
-  const amount = Number(formatDecimalAmount(baseUnits, decimals));
-
-  const roundTrip = parseDecimalAmount(amount.toFixed(decimals), decimals);
-  if (roundTrip !== baseUnits) {
-    throw new AmountError("Amount loses precision when converted to a number");
-  }
-
-  return amount;
 };

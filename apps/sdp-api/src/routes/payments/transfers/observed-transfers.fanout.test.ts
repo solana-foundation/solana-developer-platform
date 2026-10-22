@@ -1,6 +1,6 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
 import type { SignatureInfo } from "@sdp/rpc/solana";
-import { formatDecimalAmount } from "@sdp/solana/amount";
+import { baseUnits, parseBaseUnits, toTokenAmount } from "@sdp/solana/token-amount";
 import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
@@ -34,7 +34,11 @@ function tokenBalance(accountIndex: number, owner: string, amount: string) {
     accountIndex,
     mint: USDC_MINT,
     owner,
-    tokenAmount: { amount, decimals: 6, uiAmountString: formatDecimalAmount(BigInt(amount), 6) },
+    tokenAmount: {
+      amount,
+      decimals: 6,
+      uiAmountString: toTokenAmount(parseBaseUnits(amount), 6).value,
+    },
   });
 }
 
@@ -119,7 +123,7 @@ describe("buildObservedTransfersForSignatures", () => {
     ).toEqual([
       {
         token: SOL_MINT,
-        amount: formatDecimalAmount(1_500_000n, 9),
+        amount: toTokenAmount(baseUnits(1_500_000n), 9).value,
         direction: "inbound",
         source: PAYER,
         destination: WALLET_ADDRESS,
@@ -162,11 +166,11 @@ describe("buildObservedTransfersForSignatures", () => {
     expect(rows.map((row) => ({ id: row.id, amount: row.amount }))).toEqual([
       {
         id: `xfr_observed_wal_fanout_test_${observed.signature}_0_inbound`,
-        amount: formatDecimalAmount(1_000_000n, 9),
+        amount: toTokenAmount(baseUnits(1_000_000n), 9).value,
       },
       {
         id: `xfr_observed_wal_fanout_test_${observed.signature}_1_inbound`,
-        amount: formatDecimalAmount(1_000_000n, 9),
+        amount: toTokenAmount(baseUnits(1_000_000n), 9).value,
       },
     ]);
   });

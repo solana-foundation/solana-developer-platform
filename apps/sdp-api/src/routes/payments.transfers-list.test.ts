@@ -1,4 +1,4 @@
-import { formatDecimalAmount } from "@sdp/solana/amount";
+import { baseUnits, parseBaseUnits, toTokenAmount } from "@sdp/solana/token-amount";
 import {
   PAYMENT_TRANSFER_STATUSES,
   SUCCESSFUL_PAYMENT_TRANSFER_STATUSES,
@@ -487,7 +487,7 @@ describe("Payments routes — list transfers", () => {
           tokenAmount: {
             amount,
             decimals: 6,
-            uiAmountString: formatDecimalAmount(BigInt(amount), 6),
+            uiAmountString: toTokenAmount(parseBaseUnits(amount), 6).value,
           },
         });
       rpc.answer(
@@ -554,7 +554,7 @@ describe("Payments routes — list transfers", () => {
           tokenAmount: {
             amount,
             decimals: 6,
-            uiAmountString: formatDecimalAmount(BigInt(amount), 6),
+            uiAmountString: toTokenAmount(parseBaseUnits(amount), 6).value,
           },
         });
       rpc.answer(
@@ -697,7 +697,7 @@ describe("Payments routes — list transfers", () => {
       const body = await listObservedTransfers(TEST_CUSTODY_WALLET_ID);
 
       expect(body.data.map((row) => ({ signature: row.signature, amount: row.amount }))).toEqual([
-        { signature: observedSig, amount: formatDecimalAmount(2_000_000n, 9) },
+        { signature: observedSig, amount: toTokenAmount(baseUnits(2_000_000n), 9).value },
       ]);
       expect(rpc.calls).toContainEqual({ cluster: "devnet", method: "getSignaturesForAddress" });
       expect(rpc.calls).toContainEqual({ cluster: "devnet", method: "getTransaction" });
@@ -724,7 +724,7 @@ describe("Payments routes — list transfers", () => {
       const body = await listObservedTransfers("cwlt_observed_production");
 
       expect(body.data.map((row) => ({ signature: row.signature, amount: row.amount }))).toEqual([
-        { signature: observedSig, amount: formatDecimalAmount(2_000_000n, 9) },
+        { signature: observedSig, amount: toTokenAmount(baseUnits(2_000_000n), 9).value },
       ]);
       expect(rpc.calls).toContainEqual({
         cluster: "mainnet-beta",
