@@ -1656,10 +1656,16 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
 - **Token-2022 deposit mints are watched, not trusted blindly** (PRO-1962).
   Kora co-signs PYUSD and USDG movements under `transfer_hook_policy =
   "allow_all"` (both mints keep a mutable Paxos hook authority), so the metrics
-  refresh ends by reading each Token-2022 deposit mint per cluster and emitting
+  refresh ends by reading every Token-2022 deposit mint of a cluster (one
+  `getMultipleAccounts` with the Clock) and emitting
   `sdp_api_earn_deposit_mint_drift` when the hook program, hook authority or
   permanent delegate differs from the pins in
-  `services/earn/deposit-mint-guard.ts`. Report-only. Adding a Token-2022
+  `services/earn/deposit-mint-guard.ts`, or when the `earn` row of the token
+  movement capability table (`support(terms, "earn")`, ADR 0012) refuses the
+  mint's live Token Terms (field `earn_support`: a charged fee, a hook
+  program set, paused, frozen by default, non-transferable). Report-only;
+  Earn's deposit builders read no deposit mint, so this is where the
+  decision is made. Adding a Token-2022
   stablecoin to `EARN_DEPOSIT_TOKEN_SYMBOLS` without pinning it fails the
   guard's unit suite; adding any deposit token without its devnet mint in
   `infra/kora/kora.toml` `allowed_tokens` fails
