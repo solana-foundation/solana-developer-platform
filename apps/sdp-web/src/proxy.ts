@@ -38,9 +38,8 @@ const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
  * The only ambient credential on these requests is the Clerk session cookie, so
  * a write arriving with a cross-origin `Origin` (including the sandboxed
  * literal "null") is never legitimate. A write without an `Origin` header
- * passes unless `Sec-Fetch-Site` positively marks it cross-site: origin-less
- * callers are non-browser clients, which carry no ambient credentials for
- * CSRF to ride on.
+ * passes unless `Sec-Fetch-Site` marks it cross-site, or, with neither header,
+ * it carries the Clerk session cookie.
  */
 export function rejectCrossSiteWrite(req: NextRequest): NextResponse | null {
   if (
@@ -50,16 +49,31 @@ export function rejectCrossSiteWrite(req: NextRequest): NextResponse | null {
     return null;
   }
 
-  const origin = req.headers.get("origin");
-  const crossSite =
-    origin !== null
-      ? origin !== req.nextUrl.origin
-      : ["cross-site", "same-site"].includes(req.headers.get("sec-fetch-site") ?? "");
-
-  if (!crossSite) {
+  if (!isCrossSiteWrite(req)) {
     return null;
   }
   return NextResponse.json({ error: { message: "Cross-origin request refused" } }, { status: 403 });
+}
+
+/**
+ * Whether a write may come from another site. Without an `Origin`, the fetch
+ * site decides; with neither header the request cannot be placed, so it is
+ * refused while it carries the Clerk session cookie, the only credential CSRF
+ * could ride on.
+ *
+ * @param req - The write.
+ * @returns True when the write must be refused.
+ */
+function isCrossSiteWrite(req: NextRequest): boolean {
+  const origin = req.headers.get("origin");
+  if (origin !== null) {
+    return origin !== req.nextUrl.origin;
+  }
+  const fetchSite = req.headers.get("sec-fetch-site");
+  if (fetchSite === null) {
+    return req.cookies.has("__session");
+  }
+  return ["cross-site", "same-site"].includes(fetchSite);
 }
 
 /**
