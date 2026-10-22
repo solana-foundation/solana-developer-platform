@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
+import { normalizeDecimalString } from "@sdp/types/idempotency";
 import { z } from "zod";
 import { conflict } from "@/lib/errors";
+
+export { normalizeDecimalString };
 
 /**
  * Turn a caller's `Idempotency-Key` into the stable request id a provider
@@ -171,16 +174,6 @@ export interface EarnVaultDepositFingerprintInput {
    */
   swapSourceTokenMint?: string;
   swapSlippageBps?: number;
-}
-
-/** Canonicalize decimal spelling without rounding or passing through a float. */
-export function normalizeDecimalString(value: string): string {
-  const [integer = "0", fraction = ""] = value.split(".");
-  const normalizedInteger = integer.replace(/^0+(?=\d)/, "") || "0";
-  const normalizedFraction = fraction.replace(/0+$/, "");
-  return normalizedFraction === ""
-    ? normalizedInteger
-    : `${normalizedInteger}.${normalizedFraction}`;
 }
 
 /**

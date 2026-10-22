@@ -57,3 +57,19 @@ export function isIdempotencyErrorCode(code: string | null): code is Idempotency
 export function isIdempotencyKeyOutcomeUnknown(status: number, code: string | null): boolean {
   return status === 409 && code === "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN";
 }
+
+/**
+ * A decimal string's canonical spelling, without rounding or passing through a
+ * float: no leading integer zeroes, no trailing fraction zeroes, no bare point.
+ * `"1.0"`, `"01"` and `"1"` are one amount. The API's Idempotency-Key
+ * fingerprints and the dashboard's browser keys both spell amounts with it, so
+ * one intent gets one key on either side.
+ */
+export function normalizeDecimalString(value: string): string {
+  const [integer = "0", fraction = ""] = value.split(".");
+  const normalizedInteger = integer.replace(/^0+(?=\d)/, "") || "0";
+  const normalizedFraction = fraction.replace(/0+$/, "");
+  return normalizedFraction === ""
+    ? normalizedInteger
+    : `${normalizedInteger}.${normalizedFraction}`;
+}
