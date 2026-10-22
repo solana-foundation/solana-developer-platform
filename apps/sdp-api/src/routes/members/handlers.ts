@@ -732,6 +732,18 @@ async function revokeClerkInvitations(
     .bind(organizationId, invitation.id)
     .all<{ clerk_invitation_id: string }>();
   const othersRecorded = new Set(recorded.results.map((row) => row.clerk_invitation_id));
+  // A row with no Clerk id matches by address, which is only safe while no
+  // other SDP invitation holds the address: a newer one may have created its
+  // Clerk invitation and not yet recorded the id.
+  if (invitation.clerk_invitation_id === null) {
+    const newer = await findPendingInvitation(getDb(c.env), {
+      organizationId,
+      email: invitation.email,
+    });
+    if (newer !== null) {
+      return;
+    }
+  }
   const clerkService = new ClerkOrganizationsService(c.env);
   const pending = await clerkService.listPendingOrganizationInvitations(clerkOrgId);
   const ours = pending
