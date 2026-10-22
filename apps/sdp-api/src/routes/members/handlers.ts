@@ -17,6 +17,7 @@ import {
 } from "@/services/clerk-organizations.service";
 import {
   applyMembershipChange,
+  findPendingInvitation,
   type MembershipChange,
 } from "@/services/organization-membership.service";
 import type { Env } from "@/types/env";
@@ -445,7 +446,8 @@ export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>)
     throw error;
   }
 
-  const clerkInvitation = await new ClerkOrganizationsService(c.env).createOrganizationInvitation({
+  const clerk = new ClerkOrganizationsService(c.env);
+  const clerkInvitation = await clerk.createOrganizationInvitation({
     organizationId: clerkOrgId,
     emailAddress: normalizedEmail,
     expiresInDays: INVITATION_TTL_DAYS,
@@ -453,13 +455,23 @@ export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>)
   });
 
   // Clerk's invitation id is the only key that identifies exactly one pending
-  // Clerk invitation, so revocation acts on it rather than on the address.
-  await getDb(c.env)
+  // Clerk invitation, so revocation acts on it rather than on the address. A
+  // revocation that committed while Clerk was inviting found nothing to revoke
+  // there, so the invitation it just created is withdrawn here.
+  const recorded = await getDb(c.env)
     .prepare(
-      "UPDATE invitations SET clerk_invitation_id = ? WHERE id = ? AND clerk_invitation_id IS NULL"
+      `UPDATE invitations SET clerk_invitation_id = ?
+        WHERE id = ? AND status = 'pending' AND clerk_invitation_id IS NULL`
     )
     .bind(clerkInvitation.id, invitationId)
     .run();
+  if (recorded === 0) {
+    await clerk.revokeOrganizationInvitation({
+      organizationId: clerkOrgId,
+      invitationId: clerkInvitation.id,
+    });
+    throw conflict("The invitation was revoked while it was being sent");
+  }
 
   return created(c, {
     invitation: {
@@ -531,6 +543,11 @@ export const removeMember = async (c: AppContext) => {
     actorUserId: userId,
     change: { kind: "remove", memberId: member.id },
   });
+  // A retry of a finished removal must not take the Clerk membership of a
+  // person re-invited since: accepting that invitation gave it back to them.
+  if (!removed.changed && (await holdsPendingInvitation(c, organizationId, removed.userId))) {
+    return noContent(c);
+  }
   await removeClerkMembership(c, organizationId, removed.userId);
   return noContent(c);
 };
@@ -567,7 +584,7 @@ async function endMembership(
     actorUserId: string;
     change: Extract<MembershipChange, { kind: "remove" | "leave" }>;
   }
-): Promise<{ memberId: string; userId: string }> {
+): Promise<{ memberId: string; userId: string; changed: boolean }> {
   return new AuditService(getDb(c.env)).logWithin(c, async (tx) => {
     const ended = await applyMembershipChange(tx, params);
     return {
@@ -581,9 +598,34 @@ async function endMembership(
             userId: params.actorUserId,
           }
         : null,
-      result: { memberId: ended.memberId, userId: ended.userId },
+      result: { memberId: ended.memberId, userId: ended.userId, changed: ended.changed },
     };
   });
+}
+
+/**
+ * Whether the person holds a pending invitation to the organization.
+ *
+ * @param c - The request context.
+ * @param organizationId - The organization.
+ * @param userId - The person.
+ * @returns True when an invitation to their address is pending.
+ */
+async function holdsPendingInvitation(
+  c: AppContext,
+  organizationId: string,
+  userId: string
+): Promise<boolean> {
+  const user = await getDb(c.env)
+    .prepare("SELECT email FROM users WHERE id = ?")
+    .bind(userId)
+    .first<{ email: string }>();
+  if (!user) {
+    throw notFound("User");
+  }
+  return (
+    (await findPendingInvitation(getDb(c.env), { organizationId, email: user.email })) !== null
+  );
 }
 
 /** An invitation of the caller's organization, as the revoke route's access check loads it. */
@@ -684,9 +726,22 @@ async function revokeClerkInvitations(
   if (!clerkOrgId) {
     throw badRequest("Organization is not linked to Clerk");
   }
+  // A Clerk invitation another SDP invitation recorded is that invitation's,
+  // even when its address matches a row with no Clerk id of its own.
+  const recorded = await getDb(c.env)
+    .prepare(
+      `SELECT clerk_invitation_id FROM invitations
+        WHERE organization_id = ? AND id <> ? AND clerk_invitation_id IS NOT NULL`
+    )
+    .bind(organizationId, invitation.id)
+    .all<{ clerk_invitation_id: string }>();
+  const othersRecorded = new Set(recorded.results.map((row) => row.clerk_invitation_id));
   const clerkService = new ClerkOrganizationsService(c.env);
   const pending = await clerkService.listPendingOrganizationInvitations(clerkOrgId);
-  for (const match of pending.filter(matchesClerkInvitation(invitation))) {
+  const ours = pending
+    .filter(matchesClerkInvitation(invitation))
+    .filter((entry) => !othersRecorded.has(entry.id));
+  for (const match of ours) {
     await clerkService.revokeOrganizationInvitation({
       organizationId: clerkOrgId,
       invitationId: match.id,

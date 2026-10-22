@@ -154,6 +154,44 @@ export async function applyMembershipChange(
   }
 }
 
+const pendingInvitationSchema = z.object({
+  id: z.string(),
+  role: z.string(),
+  expires_at: z.string(),
+});
+
+/**
+ * The newest pending invitation of an address to the organization, the one
+ * sign-in admits from (ADR 0012). Every read that decides whether a person
+ * without an active membership may proceed goes through this, so they cannot
+ * disagree.
+ *
+ * @param db - The database or open transaction.
+ * @param params.organizationId - The organization.
+ * @param params.email - The address, in any letter case.
+ * @returns The invitation, expired or not, or null when there is none.
+ */
+export async function findPendingInvitation(
+  db: DatabaseExecutor,
+  params: { organizationId: string; email: string }
+): Promise<{ id: string; role: string; expiresAt: string } | null> {
+  const row = await db
+    .prepare(
+      `SELECT id, role, expires_at
+         FROM invitations
+        WHERE organization_id = ? AND LOWER(email) = ? AND status = 'pending'
+        ORDER BY created_at DESC
+        LIMIT 1`
+    )
+    .bind(params.organizationId, params.email.toLowerCase())
+    .first<Record<string, unknown>>();
+  if (!row) {
+    return null;
+  }
+  const invitation = pendingInvitationSchema.parse(row);
+  return { id: invitation.id, role: invitation.role, expiresAt: invitation.expires_at };
+}
+
 /**
  * Revokes the person's pending invitations to the organization, matched on
  * every email SDP holds for them, since any of them could become the verified

@@ -3,6 +3,7 @@ import { getDb } from "@/db/client";
 import { createOrganizationRepository } from "@/db/repositories/repository-factory";
 import { unauthorized } from "@/lib/errors";
 import { readActiveOrganizationSettings } from "@/lib/organization-access";
+import { findPendingInvitation } from "@/services/organization-membership.service";
 import type { Env } from "@/types/env";
 
 export async function authorizeOnboardingSession(c: Context<{ Bindings: Env }>) {
@@ -21,26 +22,23 @@ export async function authorizeOnboardingSession(c: Context<{ Bindings: Env }>) 
     organizationId: session.organizationId,
     clerkUserId: session.clerkUserId,
   });
-  if (membership && membership.status !== "active") {
+  // Admission decides the same way: a suspended member is refused, and anyone
+  // else without an active membership sees the organization only while an
+  // invitation would admit them at their next request (ADR 0012).
+  if (membership?.status === "suspended") {
     throw unauthorized("Organization membership is inactive");
   }
-  // A Clerk member SDP never admitted sees the organization only as an
-  // invitee about to be admitted by their first request; anyone else holds a
-  // Clerk membership that grants nothing (ADR 0012).
-  if (!membership) {
-    const invitation = await getDb(c.env)
-      .prepare(
-        `SELECT id FROM invitations
-          WHERE organization_id = ? AND LOWER(email) = ? AND status = 'pending' AND expires_at > ?`
-      )
-      .bind(session.organizationId, session.email.toLowerCase(), new Date().toISOString())
-      .first<{ id: string }>();
-    if (!invitation) {
+  if (membership?.status !== "active") {
+    const invitation = await findPendingInvitation(getDb(c.env), {
+      organizationId: session.organizationId,
+      email: session.email,
+    });
+    if (!invitation || new Date(invitation.expiresAt) <= new Date()) {
       throw unauthorized("No pending invitation to this organization");
     }
   }
 
-  return { session, memberRole: membership ? membership.role : null };
+  return { session, memberRole: membership?.status === "active" ? membership.role : null };
 }
 
 export type OnboardingAccess = Awaited<ReturnType<typeof authorizeOnboardingSession>>;

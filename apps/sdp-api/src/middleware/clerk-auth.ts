@@ -26,6 +26,7 @@ import {
   ClerkUsersService,
   verifiedPrimaryEmailFromClerkUser,
 } from "@/services/clerk-users.service";
+import { findPendingInvitation } from "@/services/organization-membership.service";
 import type { Env } from "@/types/env";
 import { DASHBOARD_ACTOR_MAX_REQUESTS, enforceRateLimit } from "./rate-limit";
 
@@ -265,23 +266,17 @@ async function ensureMembership(
   }
 
   try {
-    const pendingInvite = await db
-      .prepare(
-        `SELECT id, role, expires_at
-         FROM invitations
-         WHERE organization_id = ? AND LOWER(email) = ? AND status = 'pending'
-         ORDER BY created_at DESC
-         LIMIT 1`
-      )
-      .bind(params.organizationId, params.email.toLowerCase())
-      .first<{ id: string; role: string; expires_at: string }>();
+    const pendingInvite = await findPendingInvitation(db, {
+      organizationId: params.organizationId,
+      email: params.email,
+    });
 
     // Admission comes only from an SDP invitation (ADR 0012): the Clerk
     // membership that let this token name the organization grants nothing.
     if (!pendingInvite) {
       throw unauthorized("No pending invitation to this organization");
     }
-    if (new Date(pendingInvite.expires_at) < new Date()) {
+    if (new Date(pendingInvite.expiresAt) < new Date()) {
       await db
         .prepare("UPDATE invitations SET status = 'expired' WHERE id = ? AND status = 'pending'")
         .bind(pendingInvite.id)
