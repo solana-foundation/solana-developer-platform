@@ -64,8 +64,11 @@ members.delete(
 );
 members.patch(
   "/:memberId",
+  projectContextMiddleware(),
   requireAction("members.manage"),
   validateBody(updateMemberRoleSchema),
+  authorize(authorizeOrganizationMember),
+  idempotent({ key: "accepted", serverErrors: "store" }),
   updateMemberRole
 );
 members.delete(

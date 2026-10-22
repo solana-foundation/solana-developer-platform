@@ -10,8 +10,22 @@ import {
   listMembersQuerySchema,
   updateMemberRoleRequestSchema,
 } from "@/openapi/schemas/organizations";
-import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
+import {
+  errorResponses,
+  jsonContent,
+  projectScopeWithDeclaredIdempotencyHeaders,
+} from "./helpers";
 import { inviteMemberResponse, listMembersResponse, memberRoleResponse } from "./responses";
+
+// Matches each route's `idempotent()` step (ADR 0009); spec.test.ts checks.
+const keyAcceptedStoredHeaders = projectScopeWithDeclaredIdempotencyHeaders({
+  key: "accepted",
+  serverErrors: "store",
+});
+const keyAcceptedRerunHeaders = projectScopeWithDeclaredIdempotencyHeaders({
+  key: "accepted",
+  serverErrors: "rerun",
+});
 
 export function registerMemberPaths(registry: OpenAPIRegistry) {
   registry.registerPath({
@@ -59,10 +73,11 @@ export function registerMemberPaths(registry: OpenAPIRegistry) {
     tags: ["Members"],
     summary: "Invite member",
     operationId: "inviteMember",
-    description: "Creates an invitation for a new organization member.",
+    description:
+      "Invites an address to the organization at the given role. The invitation, and Clerk's emailed link, expire after 7 days. An address can hold one pending invitation per organization: a second one is refused (409) before any email is sent.",
     security: [{ clerkBearerAuth: [] }],
     request: {
-      headers: projectScopeHeaders,
+      headers: keyAcceptedStoredHeaders,
       body: {
         required: true,
         content: jsonContent(inviteMemberRequestSchema),
@@ -84,10 +99,10 @@ export function registerMemberPaths(registry: OpenAPIRegistry) {
     summary: "Revoke invitation",
     operationId: "revokeInvitation",
     description:
-      "Withdraws a pending invitation, in Clerk as well as locally. Only a pending invitation can be revoked.",
+      "Withdraws a pending invitation, in SDP and then in Clerk. An accepted or expired invitation cannot be revoked (400). Revoking an invitation already revoked withdraws whatever is still pending in Clerk, so a retry after a failed Clerk call completes the revocation.",
     security: [{ clerkBearerAuth: [] }],
     request: {
-      headers: projectScopeHeaders,
+      headers: keyAcceptedRerunHeaders,
       params: z.object({
         invitationId: invitationIdSchema,
       }),
@@ -127,6 +142,7 @@ export function registerMemberPaths(registry: OpenAPIRegistry) {
       "Changes another member's Organization Role. An admin cannot change their own role, and the last active admin cannot be demoted (409). Takes effect on the member's next request.",
     security: [{ clerkBearerAuth: [] }],
     request: {
+      headers: keyAcceptedStoredHeaders,
       params: z.object({
         memberId: memberIdParamSchema,
       }),
@@ -151,10 +167,10 @@ export function registerMemberPaths(registry: OpenAPIRegistry) {
     summary: "Remove member",
     operationId: "removeMember",
     description:
-      "Removes another member from the organization, along with their project memberships in it and their pending invitations, so an unspent invitation cannot readmit them. The last active admin cannot be removed, and nobody can remove themselves (409). Re-inviting the removed member issues a fresh invitation that works normally.",
+      "Removes another member from the organization, along with their project memberships in it and their pending invitations, so an unspent invitation cannot readmit them. The last active admin cannot be removed, and nobody can remove themselves (409). Removing a member already removed withdraws their Clerk membership again and changes nothing else, so a retry after a failed Clerk call completes the removal. Re-inviting the removed member issues a fresh invitation that works normally.",
     security: [{ clerkBearerAuth: [] }],
     request: {
-      headers: projectScopeHeaders,
+      headers: keyAcceptedRerunHeaders,
       params: z.object({
         memberId: memberIdParamSchema,
       }),

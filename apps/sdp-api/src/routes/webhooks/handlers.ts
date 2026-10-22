@@ -43,7 +43,11 @@ async function syncOrganization(c: AppContext, data: OrganizationJSON) {
  * @param resource - What the event is about.
  * @param clerkId - The Clerk id it names.
  */
-function logIgnoredClerkEvent(c: AppContext, resource: string, clerkId: string | undefined) {
+function logIgnoredClerkEvent(
+  c: AppContext,
+  resource: "organization" | "user" | "organization_membership",
+  clerkId: string | undefined
+) {
   getLogger().info(
     { requestId: c.get("requestId"), resource, clerkId },
     "webhooks: ignored a Clerk event SDP does not act on"

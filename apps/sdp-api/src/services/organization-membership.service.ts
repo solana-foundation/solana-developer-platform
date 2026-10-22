@@ -40,16 +40,16 @@ export async function applyMembershipChange(
     change.kind === "leave"
       ? await tx
           .prepare(
-            "SELECT id, user_id FROM organization_members WHERE organization_id = ? AND user_id = ?"
+            "SELECT id, user_id, status FROM organization_members WHERE organization_id = ? AND user_id = ?"
           )
           .bind(organizationId, actorUserId)
-          .first<{ id: string; user_id: string }>()
+          .first<{ id: string; user_id: string; status: string }>()
       : await tx
           .prepare(
-            "SELECT id, user_id FROM organization_members WHERE organization_id = ? AND id = ?"
+            "SELECT id, user_id, status FROM organization_members WHERE organization_id = ? AND id = ?"
           )
           .bind(organizationId, change.memberId)
-          .first<{ id: string; user_id: string }>();
+          .first<{ id: string; user_id: string; status: string }>();
   if (!target) {
     throw notFound("Member");
   }
@@ -57,7 +57,9 @@ export async function applyMembershipChange(
   // Invitations lock before memberships, the order admission and organization
   // deletion take them. A pending invitation outliving a removal would readmit
   // the person at their next sign-in, so it is revoked in the same transaction.
-  if (change.kind !== "set_role") {
+  // A member already removed keeps any invitation raised since: retrying the
+  // removal must not withdraw a later re-invite.
+  if (change.kind !== "set_role" && target.status !== "removed") {
     await revokePendingInvitations(tx, organizationId, target.user_id);
   }
 

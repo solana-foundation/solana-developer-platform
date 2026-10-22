@@ -33,6 +33,12 @@ function resolveActor(c: AppContext): { organizationId: string; userId: string }
 /** How long an invitation admits its address, in SDP and in Clerk's link alike. */
 const INVITATION_TTL_DAYS = 7;
 
+/**
+ * Members an organization may hold, pending invitations included, as Clerk
+ * counts its own membership limit: refusing here spends no Clerk call.
+ */
+const MAX_ORGANIZATION_MEMBERS = 20;
+
 async function getClerkOrgId(db: DatabaseClient, organizationId: string): Promise<string | null> {
   const row = await db
     .prepare(
@@ -373,9 +379,15 @@ export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>)
   // The SDP invitation is the claim (ADR 0012): its INSERT decides concurrent
   // invites to one address on idx_invitations_one_pending_per_email, so the
   // loser spends no Clerk call. A pending row past its expiry no longer
-  // admits anyone, so it gives the address up first.
+  // admits anyone, so it gives the address up first. The organization row is
+  // locked before the seat count, so concurrent invites cannot both take the
+  // last seat; it locks before invitations, the order admission takes them.
   try {
     await new AuditService(getDb(c.env)).logWithin(c, async (tx) => {
+      await tx
+        .prepare("SELECT id FROM organizations WHERE id = ? FOR UPDATE")
+        .bind(organizationId)
+        .first();
       await tx
         .prepare(
           `UPDATE invitations SET status = 'expired'
@@ -383,6 +395,20 @@ export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>)
         )
         .bind(organizationId, normalizedEmail, now.toISOString())
         .run();
+      const seats = await tx
+        .prepare(
+          `SELECT (SELECT COUNT(*) FROM organization_members
+                    WHERE organization_id = ? AND status = 'active')
+                + (SELECT COUNT(*) FROM invitations
+                    WHERE organization_id = ? AND status = 'pending' AND expires_at > ?) AS taken`
+        )
+        .bind(organizationId, organizationId, now.toISOString())
+        .first<{ taken: number }>();
+      if (Number(seats?.taken) >= MAX_ORGANIZATION_MEMBERS) {
+        throw conflict(
+          `The organization has reached its limit of ${MAX_ORGANIZATION_MEMBERS} members, pending invitations included`
+        );
+      }
       await tx
         .prepare(
           `INSERT INTO invitations (id, organization_id, email, role, invited_by, token_hash, expires_at, status)
@@ -447,8 +473,8 @@ export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>)
 };
 
 export const updateMemberRole = async (c: ValidatedBodyContext<typeof updateMemberRoleSchema>) => {
-  const { memberId } = c.req.param();
   const { organizationId, userId } = resolveActor(c);
+  const { id: memberId } = getAuthorized<{ id: string }>(c);
   const { role } = c.req.valid("json");
 
   const updated = await new AuditService(getDb(c.env)).logWithin(c, async (tx) => {
@@ -476,7 +502,7 @@ export const updateMemberRole = async (c: ValidatedBodyContext<typeof updateMemb
 };
 
 /**
- * The remove route's access check: the member belongs to the caller's
+ * The role change and remove routes' access check: the member belongs to the caller's
  * organization. Scoped by organization, so an id from another one reads as
  * missing rather than as a permission failure.
  *
@@ -602,7 +628,7 @@ export const revokeInvitation = async (c: AppContext) => {
   // invitation, so the revoked row keeps the person out whatever Clerk still
   // holds. An invitation already revoked is a retry whose Clerk half failed,
   // so only that half runs again.
-  await new AuditService(getDb(c.env)).logWithin(c, async (tx) => {
+  const revokedNow = await new AuditService(getDb(c.env)).logWithin(c, async (tx) => {
     const revoked = await tx
       .prepare("UPDATE invitations SET status = 'revoked' WHERE id = ? AND status = 'pending'")
       .bind(invitation.id)
@@ -615,7 +641,7 @@ export const revokeInvitation = async (c: AppContext) => {
       if (current?.status !== "revoked") {
         throw badRequest("Only a pending invitation can be revoked");
       }
-      return { entry: null, result: undefined };
+      return { entry: null, result: false };
     }
     return {
       entry: {
@@ -626,10 +652,16 @@ export const revokeInvitation = async (c: AppContext) => {
         organizationId,
         userId,
       },
-      result: undefined,
+      result: true,
     };
   });
 
+  // A row with no Clerk id is matched by address, which is safe only while it
+  // is the address's one pending invitation: on a retry a newer invitation may
+  // hold the address, so only a stored Clerk id is acted on.
+  if (!revokedNow && invitation.clerk_invitation_id === null) {
+    return noContent(c);
+  }
   await revokeClerkInvitations(c, organizationId, invitation);
   return noContent(c);
 };
