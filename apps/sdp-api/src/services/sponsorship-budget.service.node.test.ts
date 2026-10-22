@@ -40,6 +40,7 @@ vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
 
 const FEE_PAYER = TEST_MOCK_FEE_PAYER;
 const BLOCKHASH = getBase58Codec().decode(new Uint8Array(32).fill(7)) as Blockhash;
+const PRICED_LAST_VALID_BLOCK_HEIGHT = 160n;
 const SCOPE: SponsorshipMovementScope = {
   organizationId: "org_1",
   projectId: "project_1",
@@ -143,7 +144,10 @@ function harnessIn(environment: SdpEnvironment, scope: SponsorshipMovementScope)
       new BudgetedFeePayment({ SOLANA_NETWORK: "devnet" } as Env, scope, parts.provider, {
         repository: parts.repository,
         budgetRedis: parts.budgetRedis,
-        getNetworkFee: vi.fn().mockResolvedValue(5_000n),
+        priceTransaction: vi.fn().mockResolvedValue({
+          networkFee: 5_000n,
+          lastValidBlockHeight: PRICED_LAST_VALID_BLOCK_HEIGHT,
+        }),
         now: () => new Date("2026-08-03T10:15:00.000Z"),
       })
   );
@@ -167,6 +171,17 @@ describe("BudgetedFeePayment", () => {
       expect(repository.createReservation).toHaveBeenCalledOnce();
     }
   );
+
+  it("stores the priced last valid block height bound on the reservation", async () => {
+    const { feePayment, repository } = harness();
+    await expect(feePayment.signAsFeePayer(buildTransaction())).resolves.toBeInstanceOf(Uint8Array);
+    expect(repository.createReservation).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        recentBlockhash: BLOCKHASH,
+        lastValidBlockHeight: PRICED_LAST_VALID_BLOCK_HEIGHT,
+      })
+    );
+  });
 
   it("commits the durable reservation before touching the Redis budget gate", async () => {
     const { feePayment, repository, budgetRedis } = harness();

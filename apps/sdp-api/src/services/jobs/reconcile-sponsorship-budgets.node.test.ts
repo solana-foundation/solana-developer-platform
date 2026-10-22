@@ -73,7 +73,9 @@ const PROVIDER_CONFIGURATION = {
 const TEST_SIGNATURE =
   "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy";
 const TEST_BLOCKHASH = "29d2S7vB453rNYFdR5Ycwt7y9haRT5fwVwL9zTmBhfV2";
-const EXPIRY_SLOT = 41n;
+const LAST_VALID_BLOCK_HEIGHT = 500n;
+const FINALIZED_SLOT = 41n;
+const PRICING_SLOT = 37n;
 const LANDED_STATUS: solanaRpc.SignatureStatusInfo = {
   slot: 40n,
   confirmations: 3n,
@@ -97,7 +99,7 @@ function reservation(
     projectId: "project_1",
     feePayer: PROVIDER_CONFIGURATION.signerAddress,
     providerConfigFingerprint: sponsorshipProviderConfigFingerprint(PROVIDER_CONFIGURATION),
-    recentBlockhash: TEST_BLOCKHASH,
+    lastValidBlockHeight: LAST_VALID_BLOCK_HEIGHT,
     hourBucket: "2026-08-03T10:00:00.000Z",
     dayBucket: "2026-08-03T00:00:00.000Z",
     missCount: 0,
@@ -150,9 +152,9 @@ function harness(candidate: SponsorshipReconciliationReservation) {
     postBalances: [7n],
     instructions: [],
   });
-  const blockhashValidity = vi
-    .fn<typeof feePaymentChainReads.sponsoredBlockhashValidity>()
-    .mockResolvedValue({ valid: true, contextSlot: 1n });
+  const finalizedHeight = vi
+    .fn<typeof feePaymentChainReads.sponsoredFinalizedHeight>()
+    .mockResolvedValue({ blockHeight: 1n, absoluteSlot: 1n });
   const getSignatureStatus = vi.fn<typeof feePaymentChainReads.getSponsoredSignatureStatus>();
   const run = () =>
     runInEnvironmentClusterScope("sandbox", () =>
@@ -160,22 +162,22 @@ function harness(candidate: SponsorshipReconciliationReservation) {
         repository,
         budgetRedis,
         getTransaction,
-        blockhashValidity,
+        finalizedHeight,
         getSignatureStatus,
         getProviderConfiguration: vi.fn().mockResolvedValue(PROVIDER_CONFIGURATION),
         now: () => new Date("2026-08-03T10:05:00.000Z"),
         sleep: vi.fn().mockResolvedValue(undefined),
       })
     );
-  return { repository, budgetRedis, getTransaction, blockhashValidity, getSignatureStatus, run };
+  return { repository, budgetRedis, getTransaction, finalizedHeight, getSignatureStatus, run };
 }
 
 function expiredHarness(candidate: SponsorshipReconciliationReservation) {
   const reconciliation = harness(candidate);
   reconciliation.getTransaction.mockResolvedValueOnce(null);
-  reconciliation.blockhashValidity.mockResolvedValueOnce({
-    valid: false,
-    contextSlot: EXPIRY_SLOT,
+  reconciliation.finalizedHeight.mockResolvedValueOnce({
+    blockHeight: LAST_VALID_BLOCK_HEIGHT + 1n,
+    absoluteSlot: FINALIZED_SLOT,
   });
   return reconciliation;
 }
@@ -188,9 +190,9 @@ describe("reconcileSponsorshipBudgets", () => {
     const getSponsoredTransaction = vi
       .spyOn(feePaymentChainReads, "getSponsoredTransaction")
       .mockResolvedValueOnce(null);
-    const sponsoredBlockhashValidity = vi
-      .spyOn(feePaymentChainReads, "sponsoredBlockhashValidity")
-      .mockResolvedValueOnce({ valid: true, contextSlot: 1n });
+    const sponsoredFinalizedHeight = vi
+      .spyOn(feePaymentChainReads, "sponsoredFinalizedHeight")
+      .mockResolvedValueOnce({ blockHeight: 1n, absoluteSlot: 1n });
 
     await runInEnvironmentClusterScope("sandbox", () =>
       reconcileSponsorshipBudgets(testEnv, {
@@ -203,7 +205,7 @@ describe("reconcileSponsorshipBudgets", () => {
     );
 
     expect(getSponsoredTransaction).toHaveBeenCalledExactlyOnceWith(TEST_SIGNATURE);
-    expect(sponsoredBlockhashValidity).toHaveBeenCalledExactlyOnceWith(TEST_BLOCKHASH);
+    expect(sponsoredFinalizedHeight).toHaveBeenCalledOnce();
     expect(repository.settleReservation).not.toHaveBeenCalled();
   });
 
@@ -230,7 +232,7 @@ describe("reconcileSponsorshipBudgets", () => {
   });
 
   it("reports a network with outstanding reservations but no readable paymaster as a failed pass", async () => {
-    const { repository, budgetRedis, getTransaction, blockhashValidity } = harness(
+    const { repository, budgetRedis, getTransaction, finalizedHeight } = harness(
       reservation({ id: "reservation_mainnet", network: "mainnet" })
     );
     const getProviderConfiguration = vi
@@ -243,7 +245,7 @@ describe("reconcileSponsorshipBudgets", () => {
           repository,
           budgetRedis,
           getTransaction,
-          blockhashValidity,
+          finalizedHeight,
           getProviderConfiguration,
           now: () => new Date("2026-08-03T10:05:00.000Z"),
           sleep: vi.fn().mockResolvedValue(undefined),
@@ -382,33 +384,49 @@ describe("reconcileSponsorshipBudgets", () => {
     expect(budgetRedis.settle).not.toHaveBeenCalled();
   });
 
-  it("releases a reservation whose expired signature is absent from history on the second pass", async () => {
-    const first = expiredHarness(reservation({ status: "signed", missCount: 0 }));
-    await first.run();
-    expect(first.repository.listReconciliationCandidates).toHaveBeenCalledWith(
+  it("keeps a reservation open while the finalized height has not passed its bound", async () => {
+    const { repository, budgetRedis, getTransaction, finalizedHeight, getSignatureStatus, run } =
+      harness(reservation());
+    getTransaction.mockResolvedValueOnce(null);
+    finalizedHeight.mockResolvedValueOnce({
+      blockHeight: LAST_VALID_BLOCK_HEIGHT,
+      absoluteSlot: FINALIZED_SLOT,
+    });
+
+    await expect(run()).resolves.toBeUndefined();
+
+    expect(getSignatureStatus).not.toHaveBeenCalled();
+    expect(repository.recordReconciliationMiss).not.toHaveBeenCalled();
+    expect(repository.settleReservation).not.toHaveBeenCalled();
+    expect(repository.markChargedUnknown).not.toHaveBeenCalled();
+    expect(budgetRedis.settle).not.toHaveBeenCalled();
+  });
+
+  it("releases a reservation past its bound whose signature is absent from history", async () => {
+    const { repository, budgetRedis, getSignatureStatus, run } = expiredHarness(
+      reservation({ status: "signed" })
+    );
+    getSignatureStatus.mockResolvedValueOnce(null);
+
+    await expect(run()).resolves.toBeUndefined();
+
+    expect(repository.listReconciliationCandidates).toHaveBeenCalledWith(
       "devnet",
       "2026-08-03T10:03:00.000Z",
       250
     );
-    expect(first.repository.recordReconciliationMiss).toHaveBeenCalledWith("reservation_1", 1, 0);
-    expect(first.getSignatureStatus).not.toHaveBeenCalled();
-    expect(first.repository.settleReservation).not.toHaveBeenCalled();
-
-    const second = expiredHarness(reservation({ status: "signed", missCount: 1 }));
-    second.getSignatureStatus.mockResolvedValueOnce(null);
-    await expect(second.run()).resolves.toBeUndefined();
-    expect(second.getSignatureStatus).toHaveBeenCalledExactlyOnceWith(TEST_SIGNATURE, EXPIRY_SLOT);
-    expect(second.repository.settleReservation).toHaveBeenCalledExactlyOnceWith(
+    expect(getSignatureStatus).toHaveBeenCalledExactlyOnceWith(TEST_SIGNATURE, FINALIZED_SLOT);
+    expect(repository.settleReservation).toHaveBeenCalledExactlyOnceWith(
       "reservation_1",
       1,
       "released",
       0,
       expect.stringContaining("absent from history")
     );
-    expect(second.budgetRedis.settle).toHaveBeenCalledWith(
+    expect(budgetRedis.settle).toHaveBeenCalledWith(
       expect.objectContaining({ reservationId: "reservation_1", attempt: 1, actualLamports: 0 })
     );
-    expect(second.repository.markChargedUnknown).not.toHaveBeenCalled();
+    expect(repository.markChargedUnknown).not.toHaveBeenCalled();
   });
 
   it("waits for finality while an expired reservation's signature has landed", async () => {
@@ -447,7 +465,7 @@ describe("reconcileSponsorshipBudgets", () => {
     expect(budgetRedis.settle).not.toHaveBeenCalled();
   });
 
-  it("retains an expired reservation when the status node refuses to answer from the expiry slot", async () => {
+  it("retains an expired reservation when the status node refuses to answer from the height read's slot", async () => {
     const { repository, budgetRedis, getSignatureStatus, run } = expiredHarness(
       reservation({ missCount: 1 })
     );
@@ -461,6 +479,39 @@ describe("reconcileSponsorshipBudgets", () => {
     expect(repository.settleReservation).not.toHaveBeenCalled();
     expect(repository.markChargedUnknown).not.toHaveBeenCalled();
     expect(budgetRedis.settle).not.toHaveBeenCalled();
+  });
+
+  it("charges a reservation admitted before the stored bound as unknown without reading the height", async () => {
+    const { repository, budgetRedis, getTransaction, finalizedHeight, getSignatureStatus, run } =
+      harness(reservation({ lastValidBlockHeight: null }));
+    getTransaction.mockResolvedValueOnce(null);
+
+    await expect(run()).resolves.toBeUndefined();
+
+    expect(repository.markChargedUnknown).toHaveBeenCalledExactlyOnceWith(
+      "reservation_1",
+      1,
+      expect.stringContaining("predates the stored last valid block height")
+    );
+    expect(finalizedHeight).not.toHaveBeenCalled();
+    expect(getSignatureStatus).not.toHaveBeenCalled();
+    expect(repository.settleReservation).not.toHaveBeenCalled();
+    expect(budgetRedis.settle).not.toHaveBeenCalled();
+  });
+
+  it("commits a finalized transaction's spend even when its reservation predates the stored bound", async () => {
+    const { repository, run } = harness(reservation({ lastValidBlockHeight: null }));
+
+    await expect(run()).resolves.toBeUndefined();
+
+    expect(repository.settleReservation).toHaveBeenCalledExactlyOnceWith(
+      "reservation_1",
+      1,
+      "committed",
+      3,
+      undefined
+    );
+    expect(repository.markChargedUnknown).not.toHaveBeenCalled();
   });
 
   it("charges stale signature-less provider outcomes as unknown", async () => {
@@ -515,7 +566,7 @@ describe("reconcileSponsorshipBudgets", () => {
           repository,
           budgetRedis,
           getTransaction,
-          blockhashValidity: vi.fn(),
+          finalizedHeight: vi.fn(),
           getProviderConfiguration,
           now: () => new Date("2026-08-03T10:05:00.000Z"),
           sleep,
@@ -546,7 +597,7 @@ describe("reconcileSponsorshipBudgets", () => {
           repository,
           budgetRedis,
           getTransaction,
-          blockhashValidity: vi.fn(),
+          finalizedHeight: vi.fn(),
           getProviderConfiguration: vi.fn().mockRejectedValue(new Error("Kora unavailable")),
           now: () => new Date("2026-08-03T10:05:00.000Z"),
           sleep: vi.fn().mockResolvedValue(undefined),
@@ -570,7 +621,7 @@ describe("reconcileSponsorshipBudgets", () => {
 
   it("does not trip the breaker when a config read succeeds on retry", async () => {
     const candidate = reservation();
-    const { repository, budgetRedis, getTransaction, blockhashValidity } = harness(candidate);
+    const { repository, budgetRedis, getTransaction, finalizedHeight } = harness(candidate);
     const getProviderConfiguration = vi
       .fn()
       .mockRejectedValueOnce(new Error("Kora unavailable"))
@@ -581,7 +632,7 @@ describe("reconcileSponsorshipBudgets", () => {
           repository,
           budgetRedis,
           getTransaction,
-          blockhashValidity,
+          finalizedHeight,
           getProviderConfiguration,
           now: () => new Date("2026-08-03T10:05:00.000Z"),
           sleep: vi.fn().mockResolvedValue(undefined),
@@ -751,7 +802,7 @@ describe("reconcileSponsorshipBudgets", () => {
           repository,
           budgetRedis,
           getTransaction,
-          blockhashValidity: vi.fn(),
+          finalizedHeight: vi.fn(),
           getProviderConfiguration: vi.fn().mockRejectedValue(new Error("Kora unavailable")),
           now: () => new Date("2026-08-03T10:05:00.000Z"),
           sleep: vi.fn().mockResolvedValue(undefined),
@@ -800,30 +851,56 @@ describe("getSponsoredTransaction", () => {
   });
 });
 
-describe("sponsored expiry reads", () => {
+describe("sponsored chain reads", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
   });
 
-  it("reads blockhash validity from Kora's upstream at finalized", async () => {
+  it("bounds the last valid block height from a bank at or past the pricing slot", async () => {
     vi.stubEnv("KORA_DEVNET_RPC_URL", "https://kora-devnet-rpc.sdp.test");
-    const getBlockhashValidity = vi
-      .spyOn(solanaRpc, "getBlockhashValidity")
-      .mockResolvedValueOnce({ valid: false, contextSlot: EXPIRY_SLOT });
+    const transaction = new Uint8Array([1, 2, 3]);
+    const getTransactionNetworkFee = vi
+      .spyOn(solanaRpc, "getTransactionNetworkFee")
+      .mockResolvedValueOnce({ fee: 5_000n, contextSlot: PRICING_SLOT });
+    const getRecentBlockhash = vi.spyOn(solanaRpc, "getRecentBlockhash").mockResolvedValueOnce({
+      blockhash: blockhash(TEST_BLOCKHASH),
+      lastValidBlockHeight: LAST_VALID_BLOCK_HEIGHT,
+    });
 
-    await runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
-      feePaymentChainReads.sponsoredBlockhashValidity(blockhash(TEST_BLOCKHASH))
-    );
+    await expect(
+      runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+        feePaymentChainReads.priceSponsoredTransaction(transaction)
+      )
+    ).resolves.toEqual({ networkFee: 5_000n, lastValidBlockHeight: LAST_VALID_BLOCK_HEIGHT });
 
-    expect(getBlockhashValidity).toHaveBeenCalledExactlyOnceWith(
+    expect(getTransactionNetworkFee).toHaveBeenCalledExactlyOnceWith(
       expect.anything(),
-      TEST_BLOCKHASH,
-      "finalized"
+      transaction,
+      "confirmed"
+    );
+    expect(getRecentBlockhash).toHaveBeenCalledExactlyOnceWith(
+      expect.anything(),
+      "confirmed",
+      PRICING_SLOT
     );
   });
 
-  it("searches signature history on a node at least as current as the expiry proof", async () => {
+  it("reads the chain height from Kora's upstream at finalized", async () => {
+    vi.stubEnv("KORA_DEVNET_RPC_URL", "https://kora-devnet-rpc.sdp.test");
+    const getChainHeight = vi.spyOn(solanaRpc, "getChainHeight").mockResolvedValueOnce({
+      blockHeight: LAST_VALID_BLOCK_HEIGHT,
+      absoluteSlot: FINALIZED_SLOT,
+    });
+
+    await runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+      feePaymentChainReads.sponsoredFinalizedHeight()
+    );
+
+    expect(getChainHeight).toHaveBeenCalledExactlyOnceWith(expect.anything(), "finalized");
+  });
+
+  it("searches signature history on a node at least as current as the height read", async () => {
     vi.stubEnv("KORA_DEVNET_RPC_URL", "https://kora-devnet-rpc.sdp.test");
     const getSignatureStatuses = vi
       .spyOn(solanaRpc, "getSignatureStatuses")
@@ -831,14 +908,14 @@ describe("sponsored expiry reads", () => {
 
     await expect(
       runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
-        feePaymentChainReads.getSponsoredSignatureStatus(signature(TEST_SIGNATURE), EXPIRY_SLOT)
+        feePaymentChainReads.getSponsoredSignatureStatus(signature(TEST_SIGNATURE), FINALIZED_SLOT)
       )
     ).resolves.toBeNull();
 
     expect(getSignatureStatuses).toHaveBeenCalledExactlyOnceWith(
       expect.anything(),
       [TEST_SIGNATURE],
-      { searchTransactionHistory: true, minContextSlot: EXPIRY_SLOT }
+      { searchTransactionHistory: true, minContextSlot: FINALIZED_SLOT }
     );
   });
 });

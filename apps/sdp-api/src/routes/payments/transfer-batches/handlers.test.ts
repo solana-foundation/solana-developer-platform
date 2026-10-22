@@ -37,10 +37,10 @@ import {
   createKoraAdapterMock,
   enableMainnetSponsorship,
   MAINNET_USDC_MINT,
+  priceSponsoredTransactionMock,
   seedProjectPrivyWallet,
   sendTransactionMock,
-  sponsoredNetworkFeeMock,
-  TEST_SPONSORED_NETWORK_FEE_LAMPORTS,
+  TEST_SPONSORED_PRICE,
   TEST_SPONSORSHIP_PROVIDER_CONFIG,
   testKoraAdapter,
 } from "@/test/helpers/payments-routes";
@@ -406,7 +406,7 @@ describe("payment transfer batches", () => {
     vi.clearAllMocks();
     labeledSignatures.clear();
 
-    sponsoredNetworkFeeMock.mockResolvedValue(TEST_SPONSORED_NETWORK_FEE_LAMPORTS);
+    priceSponsoredTransactionMock.mockResolvedValue(TEST_SPONSORED_PRICE);
     getAccountInfoMock.mockResolvedValue({
       lamports: 4200000000n,
       owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",

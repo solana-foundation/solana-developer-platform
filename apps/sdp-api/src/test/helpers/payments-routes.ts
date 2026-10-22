@@ -57,9 +57,12 @@ export const getSplTokenAccountAddressesMock = vi.spyOn(
 
 export const createKoraAdapterMock = vi.spyOn(feePaymentAdapters, "createKoraAdapter");
 
-export const sponsoredNetworkFeeMock = vi.spyOn(feePaymentChainReads, "sponsoredNetworkFee");
+export const priceSponsoredTransactionMock = vi.spyOn(
+  feePaymentChainReads,
+  "priceSponsoredTransaction"
+);
 
-export const TEST_SPONSORED_NETWORK_FEE_LAMPORTS = 5000n;
+export const TEST_SPONSORED_PRICE = { networkFee: 5000n, lastValidBlockHeight: 1000n };
 
 export function testKoraAdapter(
   methods: Pick<KoraAdapter, "getFeePayer" | "getSponsorshipConfiguration" | "signAsFeePayer">
@@ -497,7 +500,7 @@ export function installPaymentsRouteTestHooks(): void {
         send: async () => ({ value: { decimals: 6 } }),
       }),
     } as unknown as ReturnType<typeof solanaRpc.createRpc>);
-    sponsoredNetworkFeeMock.mockResolvedValue(TEST_SPONSORED_NETWORK_FEE_LAMPORTS);
+    priceSponsoredTransactionMock.mockResolvedValue(TEST_SPONSORED_PRICE);
     getAccountInfoMock.mockResolvedValue({
       lamports: 4200000000n,
       owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
