@@ -17,19 +17,24 @@ import { useTranslations } from "@/i18n/provider";
 export function CreateOrganizationForm() {
   const t = useTranslations();
   const router = useRouter();
-  const { setActive } = useClerk();
+  const clerk = useClerk();
   const [name, setName] = useState("");
   const [isPending, startTransition] = useTransition();
   const trimmedName = name.trim();
 
   const submit = () => {
     startTransition(async () => {
+      // SDP creates an organization only for a session that names none: a
+      // person refused by their active organization leaves it first.
+      if (clerk.organization) {
+        await clerk.setActive({ organization: null });
+      }
       const result = await createOrganization(trimmedName);
       if (!result.ok) {
         toast.error(t("Shared.SharedComponents.createOrganizationFailed", { error: result.error }));
         return;
       }
-      await setActive({ organization: result.clerkOrganizationId });
+      await clerk.setActive({ organization: result.clerkOrganizationId });
       router.refresh();
     });
   };

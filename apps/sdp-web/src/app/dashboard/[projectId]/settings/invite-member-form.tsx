@@ -7,6 +7,7 @@ import { useActionState, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { type InviteMemberResult, inviteMember } from "@/app/members/actions";
 import { useTranslations } from "@/i18n/provider";
+import { useActionIdempotencyKey } from "@/lib/use-action-idempotency-key";
 
 type InviteState = InviteMemberResult | null;
 
@@ -14,22 +15,19 @@ const ROLE_LABEL_ID = "invite-role-label";
 
 export function InviteMemberForm() {
   const t = useTranslations();
-  // One key per invitation being sent: kept while the same address and role are
-  // retried, new once either changes or the invitation lands.
-  const keyed = useRef<{ email: FormDataEntryValue | null; role: string; key: string } | null>(
-    null
-  );
+  // One key per address and role sent, kept across retries of them and
+  // retired by the answer that settles it; editing either is a new key.
+  const actionKey = useActionIdempotencyKey(null);
   const submitInvite = async (_previous: InviteState, formData: FormData): Promise<InviteState> => {
-    const email = formData.get("email");
-    const submittedRole = String(formData.get("role"));
-    if (keyed.current?.email !== email || keyed.current.role !== submittedRole) {
-      keyed.current = { email, role: submittedRole, key: crypto.randomUUID() };
-    }
-    formData.set("idempotencyKey", keyed.current.key);
+    const input = JSON.stringify([
+      "invite",
+      String(formData.get("email")).trim().toLowerCase(),
+      String(formData.get("role")),
+    ]);
+    const key = actionKey.keyFor(input);
+    formData.set("idempotencyKey", key);
     const result = await inviteMember(formData);
-    if (result.ok) {
-      keyed.current = null;
-    }
+    actionKey.settled(input, key, result);
     return result;
   };
   const [state, formAction, isPending] = useActionState<InviteState, FormData>(submitInvite, null);
@@ -45,7 +43,7 @@ export function InviteMemberForm() {
     }
     reportedState.current = state;
 
-    if (state.ok) {
+    if (state.status === "success") {
       toast.success(t("Shared.members.inviteSent", { email: state.email }));
       // Clear the field only on success, so a rejected address stays editable.
       formRef.current?.reset();
@@ -53,7 +51,7 @@ export function InviteMemberForm() {
       return;
     }
 
-    toast.error(t("Shared.members.inviteFailed", { error: state.error }));
+    toast.error(t("Shared.members.inviteFailed", { error: state.message }));
   }, [state, t]);
 
   return (
@@ -72,7 +70,7 @@ export function InviteMemberForm() {
             type="email"
             autoComplete="email"
             placeholder={t("Shared.members.inviteEmailPlaceholder")}
-            aria-invalid={state?.ok === false}
+            aria-invalid={state?.status === "error"}
           />
         </div>
 

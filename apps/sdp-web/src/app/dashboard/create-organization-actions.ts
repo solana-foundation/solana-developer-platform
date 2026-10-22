@@ -20,12 +20,13 @@ const createdOrganizationSchema = z.object({ clerkOrganizationId: z.string() });
  * @returns The Clerk organization to make active, or the API's refusal.
  */
 export async function createOrganization(name: string): Promise<CreateOrganizationResult> {
+  const parsedName = z.string().trim().min(1).max(100).parse(name);
   try {
     const client = await createSignupSdpApiClient();
     const created = createdOrganizationSchema.parse(
       await client.fetch<unknown>("/v1/organizations", {
         method: "POST",
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({ name: parsedName }),
       })
     );
     return { ok: true, clerkOrganizationId: created.clerkOrganizationId };

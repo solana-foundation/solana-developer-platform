@@ -26,11 +26,19 @@ export function LeaveOrganizationCard() {
   const confirmLeave = () => {
     startTransition(async () => {
       const result = await leaveOrganization();
-      if (!result.ok) {
-        toast.error(t("Shared.members.leaveFailed", { error: result.error }));
+      if (result.status === "error") {
+        // The membership may have ended before the request failed (its Clerk
+        // half runs after the commit): refreshing lets the layout's own check
+        // show the no-access panel if it did.
+        toast.error(t("Shared.members.leaveFailed", { error: result.message }));
+        router.refresh();
         return;
       }
-      await setActive({ organization: null });
+      try {
+        await setActive({ organization: null });
+      } catch (error) {
+        toast.error(t("Shared.members.leaveFailed", { error: String(error) }));
+      }
       router.push("/dashboard");
     });
   };

@@ -17,11 +17,6 @@ export interface DashboardAccess {
   capabilities: DashboardCapabilities;
 }
 
-/** Whether this member's organization role holds an action, as the API decides it. */
-export function dashboardRoleMayPerform(role: OrganizationRole, action: Action): boolean {
-  return organizationRoleMayPerform(role, action);
-}
-
 /**
  * What the dashboard shows the member, from the role SDP holds for them
  * (`requestMemberRole`), never Clerk's.

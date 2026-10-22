@@ -1,3 +1,4 @@
+import { organizationRoleMayPerform } from "@sdp/types/actions";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@sdp/ui/card";
 import { requirePrivateChannelsAccess } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-access";
 import { PrivateChannelsLoadError } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-load-error";
@@ -6,7 +7,6 @@ import {
   loadEvents,
 } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-page.data";
 import { getTranslations } from "@/i18n/server";
-import { dashboardRoleMayPerform } from "@/lib/dashboard-access";
 import { createSdpApiClient, requestMemberRole, requestProjectId } from "@/lib/sdp-api";
 import { EventsList } from "./events-list";
 
@@ -22,7 +22,7 @@ export default async function PrivateChannelsEventsPage() {
     createSdpApiClient(),
     requestProjectId(),
   ]);
-  const canViewRawPayload = dashboardRoleMayPerform(role, "organizations.manage");
+  const canViewRawPayload = organizationRoleMayPerform(role, "organizations.manage");
   const [events, references] = await Promise.all([loadEvents(client), loadEventReferences(client)]);
 
   return (

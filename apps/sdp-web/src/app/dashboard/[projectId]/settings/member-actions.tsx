@@ -11,10 +11,11 @@ import {
 import { Modal } from "@sdp/ui/modal";
 import { MoreHorizontalIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useRef, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { changeMemberRole, removeMember } from "@/app/members/actions";
 import { useTranslations } from "@/i18n/provider";
+import { useActionIdempotencyKey } from "@/lib/use-action-idempotency-key";
 
 export function MemberActions({
   memberId,
@@ -33,10 +34,9 @@ export function MemberActions({
   const router = useRouter();
   const [isConfirmOpen, setConfirmOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
-  // One key per attempted change, kept across retries of it and cleared once
-  // it lands, so a retry after a failed Clerk call finishes the same request.
-  const removeKey = useRef<string | null>(null);
-  const roleKey = useRef<string | null>(null);
+  // One key per change, kept across its retries (a retry after a failed Clerk
+  // call finishes the same request) and retired by the answer that settles it.
+  const actionKey = useActionIdempotencyKey(null);
   const nextRole = role === "admin" ? "member" : "admin";
 
   let blockedRoleReason: string | null = null;
@@ -47,15 +47,15 @@ export function MemberActions({
   }
 
   const confirmRoleChange = () => {
-    roleKey.current ??= crypto.randomUUID();
-    const key = roleKey.current;
+    const input = JSON.stringify(["role", memberId, nextRole]);
     startTransition(async () => {
+      const key = actionKey.keyFor(input);
       const result = await changeMemberRole(memberId, nextRole, key);
-      if (!result.ok) {
-        toast.error(t("Shared.members.roleChangeFailed", { error: result.error }));
+      actionKey.settled(input, key, result);
+      if (result.status === "error") {
+        toast.error(t("Shared.members.roleChangeFailed", { error: result.message }));
         return;
       }
-      roleKey.current = null;
       toast.success(t("Shared.members.roleChanged", { member: label }));
       router.refresh();
     });
@@ -71,17 +71,17 @@ export function MemberActions({
   }
 
   const confirmRemove = () => {
-    removeKey.current ??= crypto.randomUUID();
-    const key = removeKey.current;
+    const input = JSON.stringify(["remove", memberId]);
     startTransition(async () => {
+      const key = actionKey.keyFor(input);
       const result = await removeMember(memberId, key);
+      actionKey.settled(input, key, result);
 
-      if (!result.ok) {
-        toast.error(t("Shared.members.removeFailed", { error: result.error }));
+      if (result.status === "error") {
+        toast.error(t("Shared.members.removeFailed", { error: result.message }));
         return;
       }
 
-      removeKey.current = null;
       setConfirmOpen(false);
       toast.success(t("Shared.members.removed", { member: label }));
       router.refresh();

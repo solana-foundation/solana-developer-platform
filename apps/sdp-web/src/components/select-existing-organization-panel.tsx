@@ -1,6 +1,6 @@
 "use client";
 
-import { useOrganizationList } from "@clerk/nextjs";
+import { useOrganization, useOrganizationList } from "@clerk/nextjs";
 import { ChevronRightIcon, LoaderCircleIcon } from "lucide-react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
@@ -90,7 +90,11 @@ export function SelectExistingOrganizationPanel({ noAccess }: { noAccess: boolea
     userInvitations: { infinite: true },
   });
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
-  const memberships = userMemberships.data ?? [];
+  const { organization: activeOrganization } = useOrganization();
+  // The organization SDP refused is no way forward, so it is not offered again.
+  const memberships = (userMemberships.data ?? []).filter(
+    (membership) => !noAccess || membership.organization.id !== activeOrganization?.id
+  );
   const invitations = userInvitations.data ?? [];
   const copy = entryCopy(
     resolveEntryState({
@@ -136,11 +140,20 @@ export function SelectExistingOrganizationPanel({ noAccess }: { noAccess: boolea
                   setSwitchingTo(organization.id);
                   try {
                     await invitation.accept();
+                  } catch {
+                    setSwitchingTo(null);
+                    toast.error(t("Shared.SharedComponents.acceptInvitationFailed"));
+                    return;
+                  }
+                  // Accepted: the invitation becomes a membership, so a failed
+                  // switch leaves it to pick from the list rather than accept again.
+                  await Promise.all([userInvitations.revalidate(), userMemberships.revalidate()]);
+                  try {
                     await setActive({ organization: organization.id });
                     router.refresh();
                   } catch {
                     setSwitchingTo(null);
-                    toast.error(t("Shared.SharedComponents.acceptInvitationFailed"));
+                    toast.error(t("Shared.SharedComponents.switchOrganizationFailed"));
                   }
                 }}
                 className="flex w-full items-center gap-3 rounded-2xl border border-border-default bg-surface-raised px-4 py-3 text-left transition-colors hover:border-border-strong hover:bg-surface-sunken focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50"

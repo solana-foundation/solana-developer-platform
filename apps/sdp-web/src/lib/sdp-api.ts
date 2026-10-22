@@ -37,6 +37,11 @@ function getApiBaseUrl(): string {
 
 type ClerkGetToken = () => Promise<string | null>;
 
+/** A fresh trace id for a web-originated chain of sdp-api requests. */
+function newWebTraceId(): string {
+  return `web_${crypto.randomUUID().replaceAll("-", "")}`;
+}
+
 /**
  * Acquires the sdp-api bearer token: the Clerk session token, whose custom
  * claims (org_id, org_role, org_slug, email) come from the instance's
@@ -83,7 +88,7 @@ function createSdpApiRequest(
     const url = `${getApiBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`;
     requestSequence += 1;
 
-    const traceId = traceContext?.traceId ?? `web_${crypto.randomUUID().replaceAll("-", "")}`;
+    const traceId = traceContext?.traceId ?? newWebTraceId();
     const requestId = createTraceRequestId(traceId, requestSequence);
     const source = traceContext?.source ?? "sdp-web";
     const headers = new Headers(options.headers);
@@ -259,7 +264,7 @@ export interface SdpApiClient {
 const fetchRequestProjects = cache(async (token: string): Promise<Project[]> => {
   const client = assembleSdpApiClient(
     createSdpApiRequest(token, null, {
-      traceId: `web_${crypto.randomUUID().replaceAll("-", "")}`,
+      traceId: newWebTraceId(),
       source: "dashboard.projects.bootstrap",
     })
   );
@@ -280,7 +285,7 @@ const currentMemberSchema = z.object({ role: z.enum(ORGANIZATION_ROLES) });
 const getRequestMemberRole = cache(async (): Promise<OrganizationRole> => {
   const client = assembleSdpApiClient(
     createSdpApiRequest(await getRequestClerkToken(), null, {
-      traceId: `web_${crypto.randomUUID().replaceAll("-", "")}`,
+      traceId: newWebTraceId(),
       source: "dashboard.members.me",
     })
   );
