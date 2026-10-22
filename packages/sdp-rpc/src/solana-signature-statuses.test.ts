@@ -91,3 +91,13 @@ test("forwards minContextSlot with a history search", async () => {
     params: [[SIG], { searchTransactionHistory: true, minContextSlot: 123n }],
   });
 });
+
+test("refuses a history search answered from below minContextSlot", async () => {
+  const rpc = createSolanaRpcFromTransport(async () =>
+    JSON.parse('{"jsonrpc":"2.0","id":1,"result":{"context":{"slot":122},"value":[null]}}')
+  );
+  await assert.rejects(
+    getSignatureStatuses(rpc, [SIG], { searchTransactionHistory: true, minContextSlot: 123n }),
+    { name: "SdpRpcError", code: "SOLANA_RPC_ERROR" }
+  );
+});

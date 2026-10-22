@@ -33,3 +33,15 @@ test("reads the chain height and slot from one epoch info response", async () =>
     absoluteSlot: 300n,
   });
 });
+
+test("refuses a latest blockhash answered from below minContextSlot", async () => {
+  const rpc = createSolanaRpcFromTransport(async () =>
+    JSON.parse(
+      `{"jsonrpc":"2.0","id":1,"result":{"context":{"slot":36},"value":{"blockhash":"${BLOCKHASH}","lastValidBlockHeight":200}}}`
+    )
+  );
+  await assert.rejects(getRecentBlockhash(rpc, "confirmed", 37n), {
+    name: "SdpRpcError",
+    code: "SOLANA_RPC_ERROR",
+  });
+});
