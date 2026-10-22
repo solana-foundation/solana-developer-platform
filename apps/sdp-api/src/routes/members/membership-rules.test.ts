@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
-import { ClerkOrganizationsService } from "@/services/clerk-organizations.service";
+import { readAuditActions } from "@/test/helpers/audit-logs";
 import { clerkHeaders, clerkHeadersWithoutProject } from "@/test/helpers/clerk";
+import { type ClerkBackend, stubClerkBackend } from "@/test/helpers/clerk-backend";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
 import { readInvitationStatus, seedInvitation } from "@/test/helpers/invitations";
@@ -21,6 +22,7 @@ const ADMIN_B = organizationMember("rules_admin_b", "admin");
 const MEMBER = organizationMember("rules_member", "member");
 const FOREIGN_MEMBER = organizationMember("rules_foreign", "member");
 let sandboxProjectId: string;
+let clerk: ClerkBackend;
 
 async function requestAs(
   actor: SeededOrganizationMember,
@@ -40,6 +42,27 @@ async function requestAs(
   );
 }
 
+async function removeWithKey(
+  target: SeededOrganizationMember,
+  idempotencyKey: string
+): Promise<Response> {
+  const token = await signSeededClerkMember(env, getDb(env), ADMIN_A.userId, ORGANIZATION.id);
+  return app.request(
+    `/v1/members/${target.memberId}`,
+    {
+      method: "DELETE",
+      headers: { ...clerkHeaders(token, sandboxProjectId), "Idempotency-Key": idempotencyKey },
+    },
+    env
+  );
+}
+
+const CLERK_MEMBERSHIP_DELETE = {
+  method: "DELETE",
+  path: `/organizations/clerk_org_${ORGANIZATION.id}/memberships/clerk_user_${MEMBER.userId}`,
+  body: null,
+};
+
 function membership(member: SeededOrganizationMember) {
   return getDb(env).queryOne("SELECT role, status FROM organization_members WHERE id = ?", [
     member.memberId,
@@ -58,10 +81,6 @@ async function expectConflict(response: Response, message: string): Promise<void
 describe("organization membership rules", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
-    env.CLERK_SECRET_KEY = "sk_test_membership_rules";
-    vi.spyOn(ClerkOrganizationsService.prototype, "deleteOrganizationMembership").mockResolvedValue(
-      undefined
-    );
     const db = getDb(env);
     await seedOrganizationMembers(db, {
       organization: ORGANIZATION,
@@ -77,12 +96,14 @@ describe("organization membership rules", () => {
       members: [ADMIN_A.userId, ADMIN_B.userId, MEMBER.userId],
     });
     sandboxProjectId = projects.sandbox.id;
+    clerk = stubClerkBackend(env);
   });
 
   afterEach(async () => {
     vi.restoreAllMocks();
     await clearKVStores(env);
     env.CLERK_SECRET_KEY = undefined;
+    env.CLERK_API_URL = undefined;
   });
 
   it("refuses an admin changing their own role", async () => {
@@ -145,6 +166,8 @@ describe("organization membership rules", () => {
       expiresInDays: 7,
     });
 
+    clerk.answer({ status: 200, body: {} });
+
     expect((await requestAs(MEMBER, "DELETE", "me", null)).status).toBe(204);
     expect(await membership(MEMBER)).toEqual({ role: "member", status: "removed" });
     expect(await projectMemberships(MEMBER)).toEqual([]);
@@ -190,5 +213,38 @@ describe("organization membership rules", () => {
     expect((await requestAs(ADMIN_A, "DELETE", ADMIN_B.memberId, null)).status).toBe(204);
     expect(await membership(ADMIN_B)).toEqual({ role: "admin", status: "removed" });
     expect(await projectMemberships(ADMIN_B)).toEqual([]);
+  });
+
+  it("commits and audits a removal whose Clerk half fails, and a retry finishes only the Clerk half", async () => {
+    await signSeededClerkMember(env, getDb(env), MEMBER.userId, ORGANIZATION.id);
+    clerk.answer({ status: 500, body: { errors: [] } });
+
+    expect((await removeWithKey(MEMBER, "idem_rules_remove_retry")).status).toBe(500);
+    expect(await membership(MEMBER)).toEqual({ role: "member", status: "removed" });
+
+    clerk.answer({ status: 200, body: {} });
+
+    expect((await removeWithKey(MEMBER, "idem_rules_remove_retry")).status).toBe(204);
+    expect(clerk.requests).toEqual([CLERK_MEMBERSHIP_DELETE, CLERK_MEMBERSHIP_DELETE]);
+    expect(await readAuditActions(getDb(env), { type: "member", id: MEMBER.memberId })).toEqual([
+      "delete",
+    ]);
+  });
+
+  it("treats a membership Clerk no longer has as removed there", async () => {
+    await signSeededClerkMember(env, getDb(env), MEMBER.userId, ORGANIZATION.id);
+    clerk.answer({ status: 404, body: { errors: [] } });
+
+    expect((await removeWithKey(MEMBER, "idem_rules_remove_gone")).status).toBe(204);
+    expect(clerk.requests).toEqual([CLERK_MEMBERSHIP_DELETE]);
+    expect(await membership(MEMBER)).toEqual({ role: "member", status: "removed" });
+  });
+
+  it("ends a leaving member's membership even when Clerk fails", async () => {
+    clerk.answer({ status: 500, body: { errors: [] } });
+
+    expect((await requestAs(MEMBER, "DELETE", "me", null)).status).toBe(500);
+    expect(clerk.requests).toEqual([CLERK_MEMBERSHIP_DELETE]);
+    expect(await membership(MEMBER)).toEqual({ role: "member", status: "removed" });
   });
 });

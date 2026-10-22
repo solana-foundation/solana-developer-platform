@@ -28,16 +28,33 @@ export async function seedOrganizationMembers(
         "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active')"
       )
       .bind(organization.id, organization.slug, organization.slug),
-    ...members.flatMap((member) => [
-      db
-        .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
-        .bind(member.userId, member.email),
-      db
-        .prepare(
-          `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-           VALUES (?, ?, ?, ?, 'active')`
-        )
-        .bind(member.memberId, organization.id, member.userId, member.role),
-    ]),
+    ...activeMembershipStatements(db, organization.id, members),
+  ]);
+}
+
+/** Seeds users and their active memberships of an organization already seeded. */
+export async function seedActiveMemberships(
+  db: DatabaseClient,
+  organizationId: string,
+  members: readonly SeededOrganizationMember[]
+): Promise<void> {
+  await db.batch(activeMembershipStatements(db, organizationId, members));
+}
+
+function activeMembershipStatements(
+  db: DatabaseClient,
+  organizationId: string,
+  members: readonly SeededOrganizationMember[]
+) {
+  return members.flatMap((member) => [
+    db
+      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
+      .bind(member.userId, member.email),
+    db
+      .prepare(
+        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+         VALUES (?, ?, ?, ?, 'active')`
+      )
+      .bind(member.memberId, organizationId, member.userId, member.role),
   ]);
 }

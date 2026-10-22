@@ -3,12 +3,14 @@ import { hashString } from "@sdp/payments/hash";
 import type { PaymentTransferStatus } from "@sdp/types/payments";
 import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import type { ExecutionContext } from "hono";
-import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
+import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
-import { startJsonServer } from "@/test/helpers/json-server";
+import { readInvitationStatus, seedInvitation } from "@/test/helpers/invitations";
+import { organizationMember, seedOrganizationMembers } from "@/test/helpers/organization-members";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
@@ -41,149 +43,109 @@ async function simulateClerkWebhook(event: { type: string; data: Record<string, 
   );
 }
 
-const clerkResponses = new Map<string, unknown>();
+const KNOWN_ORGANIZATION = { id: "org_webhook_known", slug: "webhook-known" };
+const KNOWN_CLERK_ORG_ID = `clerk_org_${KNOWN_ORGANIZATION.id}`;
+const KNOWN_ADMIN = organizationMember("webhook_known_admin", "admin");
+const OUTSIDER = organizationMember("webhook_outsider", "member");
 
-function mockClerkUserLookup(
-  userId: string,
-  email: string,
-  options: {
-    verificationStatus: "verified" | "unverified";
-    memberships: Array<{
-      role: string;
-      organization: Record<string, unknown>;
-    }>;
-  }
-) {
-  env.CLERK_SECRET_KEY = "sk_test_clerk_webhook_user_lookup";
-  clerkResponses.set(`/users/${userId}`, {
-    id: userId,
-    primary_email_address_id: "email_primary",
-    email_addresses: [
-      {
-        id: "email_primary",
-        email_address: email,
-        verification: { status: options.verificationStatus },
-      },
-    ],
+async function seedKnownOrganization(): Promise<void> {
+  const db = getDb(env);
+  await seedOrganizationMembers(db, { organization: KNOWN_ORGANIZATION, members: [KNOWN_ADMIN] });
+  await seedOrganizationMembers(db, {
+    organization: { id: "org_webhook_outsider", slug: "webhook-outsider" },
+    members: [OUTSIDER],
   });
-  clerkResponses.set(`/users/${userId}/organization_memberships?limit=500&offset=0`, {
-    data: options.memberships,
-    total_count: options.memberships.length,
-  });
+  await signSeededClerkMember(env, db, KNOWN_ADMIN.userId, KNOWN_ORGANIZATION.id);
+  await signSeededClerkMember(env, db, OUTSIDER.userId, "org_webhook_outsider");
+}
+
+function knownOrganizationMemberships() {
+  return getDb(env).queryMany(
+    "SELECT user_id, role, status FROM organization_members WHERE organization_id = ? ORDER BY user_id",
+    [KNOWN_ORGANIZATION.id]
+  );
 }
 
 describe("Clerk webhooks", () => {
-  let clerkServer: Awaited<ReturnType<typeof startJsonServer>>;
-  let originalDeploymentMode: "managed" | "self_hosted" | undefined;
   beforeEach(async () => {
     await seedTestDatabase(env);
-    clerkResponses.clear();
-    clerkServer = await startJsonServer((request) => {
-      assert(request.url);
-      if (!clerkResponses.has(request.url)) {
-        return { status: 404, body: { error: "Unknown test Clerk endpoint" } };
-      }
-      return { status: 200, body: clerkResponses.get(request.url) };
-    });
-    env.CLERK_API_URL = clerkServer.url;
     env.CLERK_WEBHOOK_SECRET = WEBHOOK_SECRET;
-    originalDeploymentMode = env.SDP_DEPLOYMENT_MODE;
-    env.SDP_DEPLOYMENT_MODE = undefined;
   });
   afterEach(async () => {
     vi.restoreAllMocks();
-    await clerkServer.close();
     env.CLERK_WEBHOOK_SECRET = undefined;
-    env.CLERK_SECRET_KEY = undefined;
-    env.CLERK_API_URL = undefined;
-    env.SDP_DEPLOYMENT_MODE = originalDeploymentMode;
     await clearKVStores(env);
   });
-  it("creates and updates the SDP organization mapping from Clerk organization events", async () => {
-    const created = await simulateClerkWebhook({
-      type: "organization.created",
-      data: {
-        id: "org_clerk_shared_identity",
-        name: "Bookface",
-        slug: "bookface",
-        private_metadata: {
-          sdp: {
-            tier: "pro",
-            providerOverrides: {
-              compliance: {
-                elliptic: true,
-              },
-            },
-          },
+  it.each(["organization.created", "organization.updated"])(
+    "%s syncs a known organization's name and creates nothing for one SDP never created",
+    async (type) => {
+      await seedKnownOrganization();
+
+      const known = await simulateClerkWebhook({
+        type,
+        data: { id: KNOWN_CLERK_ORG_ID, name: "Renamed Org", slug: "renamed-org" },
+      });
+      const unknown = await simulateClerkWebhook({
+        type,
+        data: { id: "org_clerk_webhook_unknown", name: "Stranger Org", slug: "stranger-org" },
+      });
+
+      expect([known.status, unknown.status]).toEqual([200, 200]);
+      expect(
+        await getDb(env).queryOne("SELECT name, slug FROM organizations WHERE id = ?", [
+          KNOWN_ORGANIZATION.id,
+        ])
+      ).toEqual({ name: "Renamed Org", slug: "renamed-org" });
+      expect(
+        await getDb(env).queryMany(
+          "SELECT id FROM auth_organization_identities WHERE provider_org_id = ? UNION ALL SELECT id FROM organizations WHERE slug = ?",
+          ["org_clerk_webhook_unknown", "stranger-org"]
+        )
+      ).toEqual([]);
+    }
+  );
+  it.each([
+    "organizationMembership.created",
+    "organizationMembership.updated",
+    "organizationMembership.deleted",
+  ])("%s writes no membership", async (type) => {
+    await seedKnownOrganization();
+    const before = await knownOrganizationMemberships();
+
+    for (const [clerkUserId, role] of [
+      [`clerk_user_${KNOWN_ADMIN.userId}`, "org:member"],
+      [`clerk_user_${OUTSIDER.userId}`, "org:admin"],
+    ]) {
+      const response = await simulateClerkWebhook({
+        type,
+        data: {
+          id: `orgmem_${clerkUserId}`,
+          organization: { id: KNOWN_CLERK_ORG_ID, name: KNOWN_ORGANIZATION.slug },
+          role,
+          public_user_data: { user_id: clerkUserId },
         },
-      },
+      });
+      expect(response.status).toBe(200);
+    }
+
+    expect(before).toEqual([{ user_id: KNOWN_ADMIN.userId, role: "admin", status: "active" }]);
+    expect(await knownOrganizationMemberships()).toEqual(before);
+  });
+  it("leaves the user and their memberships untouched when Clerk deletes the user", async () => {
+    await seedKnownOrganization();
+
+    const response = await simulateClerkWebhook({
+      type: "user.deleted",
+      data: { id: `clerk_user_${KNOWN_ADMIN.userId}`, object: "user", deleted: true },
     });
-    expect(created.status).toBe(200);
-    const createdOrg = await getDb(env)
-      .prepare(`SELECT o.id, o.name, o.slug, o.tier, o.settings, aoi.provider_org_id
-         FROM organizations o
-         JOIN auth_organization_identities aoi ON aoi.organization_id = o.id
-         WHERE aoi.provider = 'clerk' AND aoi.provider_org_id = ?`)
-      .bind("org_clerk_shared_identity")
-      .first<{
-        id: string;
-        name: string;
-        slug: string;
-        tier: string;
-        settings: string | null;
-        provider_org_id: string;
-      }>();
-    expect(createdOrg).toMatchObject({
-      name: "Bookface",
-      slug: "bookface",
-      tier: "enterprise",
-      provider_org_id: "org_clerk_shared_identity",
-    });
+
+    expect(response.status).toBe(200);
     expect(
-      required(createdOrg).settings ? JSON.parse(required(required(createdOrg).settings)) : null
-    ).toMatchObject({
-      providerOverrides: {
-        compliance: {
-          elliptic: true,
-        },
-      },
-    });
-    const updated = await simulateClerkWebhook({
-      type: "organization.updated",
-      data: {
-        id: "org_clerk_shared_identity",
-        name: "Bookface Labs",
-        slug: "bookface-labs",
-        private_metadata: {
-          sdp: {
-            tier: "individual",
-          },
-        },
-      },
-    });
-    expect(updated.status).toBe(200);
-    const updatedOrg = await getDb(env)
-      .prepare(`SELECT o.name, o.slug, o.tier, o.settings, aoi.slug AS identity_slug
-         FROM organizations o
-         JOIN auth_organization_identities aoi ON aoi.organization_id = o.id
-         WHERE o.id = ?`)
-      .bind(required(createdOrg).id)
-      .first<{
-        name: string;
-        slug: string;
-        tier: string;
-        settings: string | null;
-        identity_slug: string;
-      }>();
-    expect(updatedOrg).toMatchObject({
-      name: "Bookface Labs",
-      slug: "bookface-labs",
-      identity_slug: "bookface-labs",
-      tier: "individual",
-    });
-    expect(
-      required(updatedOrg).settings ? JSON.parse(required(required(updatedOrg).settings)) : null
-    ).toBeNull();
+      await getDb(env).queryOne("SELECT status FROM users WHERE id = ?", [KNOWN_ADMIN.userId])
+    ).toEqual({ status: "active" });
+    expect(await knownOrganizationMemberships()).toEqual([
+      { user_id: KNOWN_ADMIN.userId, role: "admin", status: "active" },
+    ]);
   });
   it("refuses the organization's API keys once Clerk deletes it", async () => {
     const clerkOrgId = "org_clerk_webhook_cache_invalidation";
@@ -249,33 +211,6 @@ describe("Clerk webhooks", () => {
     expect(res.status).toBe(200);
     expect((await authedRequest()).status).toBe(401);
   });
-  it("defaults new Clerk organizations to enterprise when SDP tier metadata is missing", async () => {
-    const created = await simulateClerkWebhook({
-      type: "organization.created",
-      data: {
-        id: "org_clerk_enterprise_default",
-        name: "Enterprise By Default",
-        slug: "enterprise-by-default",
-      },
-    });
-    expect(created.status).toBe(200);
-    const createdOrg = await getDb(env)
-      .prepare(`SELECT o.name, o.slug, o.tier
-         FROM organizations o
-         JOIN auth_organization_identities aoi ON aoi.organization_id = o.id
-         WHERE aoi.provider = 'clerk' AND aoi.provider_org_id = ?`)
-      .bind("org_clerk_enterprise_default")
-      .first<{
-        name: string;
-        slug: string;
-        tier: string;
-      }>();
-    expect(createdOrg).toEqual({
-      name: "Enterprise By Default",
-      slug: "enterprise-by-default",
-      tier: "enterprise",
-    });
-  });
   it("keeps Clerk identity email aligned with the local user when a new email is taken", async () => {
     await getDb(env).batch([
       getDb(env)
@@ -289,10 +224,6 @@ describe("Clerk webhooks", () => {
            VALUES (?, 'clerk', ?, ?, ?)`)
         .bind("aui_existing", "user_clerk_existing", "usr_clerk_existing", "old@example.com"),
     ]);
-    mockClerkUserLookup("user_clerk_existing", "taken@example.com", {
-      verificationStatus: "verified",
-      memberships: [],
-    });
     const updated = await simulateClerkWebhook({
       type: "user.updated",
       data: {
@@ -352,45 +283,6 @@ describe("Clerk webhooks", () => {
         user_id: string;
       }>();
     expect(identity).toBeNull();
-    mockClerkUserLookup("user_unverified_collision", "victim@example.com", {
-      verificationStatus: "unverified",
-      memberships: [
-        {
-          role: "org:admin",
-          organization: {
-            id: "org_unverified_collision",
-            name: "Unverified Collision Org",
-            slug: "unverified-collision-org",
-          },
-        },
-      ],
-    });
-    const membershipCreated = await simulateClerkWebhook({
-      type: "organizationMembership.created",
-      data: {
-        organization: {
-          id: "org_unverified_collision",
-          name: "Unverified Collision Org",
-          slug: "unverified-collision-org",
-        },
-        role: "org:admin",
-        public_user_data: {
-          user_id: "user_unverified_collision",
-          identifier: "victim@example.com",
-        },
-      },
-    });
-    expect(membershipCreated.status).toBe(200);
-    const unverifiedMembership = await getDb(env)
-      .prepare(`SELECT om.id
-         FROM organization_members om
-         JOIN auth_user_identities aui ON aui.user_id = om.user_id
-         WHERE aui.provider = 'clerk' AND aui.provider_user_id = ?`)
-      .bind("user_unverified_collision")
-      .first<{
-        id: string;
-      }>();
-    expect(unverifiedMembership).toBeNull();
     const verified = await simulateClerkWebhook({
       type: "user.updated",
       data: {
@@ -415,403 +307,34 @@ describe("Clerk webhooks", () => {
         user_id: string;
       }>();
     expect(required(verifiedIdentity).user_id).toBe("usr_verified_email_owner");
-    const reconciledMembership = await getDb(env)
-      .prepare(`SELECT om.role, om.status
-         FROM organization_members om
-         JOIN auth_user_identities aui ON aui.user_id = om.user_id
-         WHERE aui.provider = 'clerk' AND aui.provider_user_id = ?`)
-      .bind("user_unverified_collision")
-      .first<{
-        role: string;
-        status: string;
-      }>();
-    expect(reconciledMembership).toEqual({ role: "admin", status: "active" });
   });
-  async function syncMembershipAfterInvitation(invitationStatuses: string[]): Promise<{
-    status: string;
-  } | null> {
-    const clerkOrgId = `org_clerk_revoked_${invitationStatuses.join("_")}`;
-    const organizationId = `org_revoked_${invitationStatuses.join("_")}`;
-    const email = "withdrawn@example.com";
-    const db = getDb(env);
-    await db.batch([
-      db
-        .prepare(
-          "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, 'Revoked Invite Org', ?, 'individual', 'active')"
-        )
-        .bind(organizationId, organizationId),
-      db
-        .prepare(`INSERT INTO auth_organization_identities (id, provider, provider_org_id, organization_id, slug)
-           VALUES (?, 'clerk', ?, ?, ?)`)
-        .bind(`aoi_${organizationId}`, clerkOrgId, organizationId, organizationId),
-      db
-        .prepare(
-          "INSERT INTO users (id, email, email_verified, status) VALUES (?, 'revoked-inviter@example.com', 1, 'active')"
-        )
-        .bind(`usr_inviter_${organizationId}`),
-    ]);
-    for (const [index, status] of invitationStatuses.entries()) {
-      await db
-        .prepare(`INSERT INTO invitations
-             (id, organization_id, email, role, invited_by, token_hash, expires_at, status, created_at)
-           VALUES (?, ?, ?, 'member', ?, ?, ?, ?, ?)`)
-        .bind(
-          `inv_${organizationId}_${index}`,
-          organizationId,
-          email,
-          `usr_inviter_${organizationId}`,
-          `hash_${organizationId}_${index}`,
-          new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-          status,
-          new Date(Date.UTC(2026, 0, index + 1)).toISOString()
-        )
-        .run();
-    }
-    mockClerkUserLookup(`user_revoked_${organizationId}`, email, {
-      verificationStatus: "verified",
-      memberships: [],
+  it("revokes pending invitations and ends memberships when Clerk deletes a known organization", async () => {
+    await seedKnownOrganization();
+    await seedInvitation(getDb(env), {
+      id: "inv_webhook_known_pending",
+      organizationId: KNOWN_ORGANIZATION.id,
+      email: "pending@example.com",
+      role: "member",
+      invitedBy: KNOWN_ADMIN.userId,
+      status: "pending",
+      expiresInDays: 7,
     });
+
     const response = await simulateClerkWebhook({
-      type: "organizationMembership.created",
-      data: {
-        organization: { id: clerkOrgId, name: "Revoked Invite Org", slug: organizationId },
-        role: "org:member",
-        public_user_data: { user_id: `user_revoked_${organizationId}`, identifier: email },
-      },
-    });
-    expect(response.status).toBe(200);
-    return db
-      .prepare(`SELECT om.status
-           FROM organization_members om
-           JOIN users u ON u.id = om.user_id
-          WHERE om.organization_id = ? AND u.email = ?`)
-      .bind(organizationId, email)
-      .first<{
-        status: string;
-      }>();
-  }
-  it("declines a Clerk membership when the invitation was revoked", async () => {
-    expect(await syncMembershipAfterInvitation(["revoked"])).toBeNull();
-  });
-  it("admits a Clerk membership when a revoked invitation was superseded by a new one", async () => {
-    const membership = await syncMembershipAfterInvitation(["revoked", "pending"]);
-    expect(required(membership).status).toBe("active");
-  });
-  it("syncs organization memberships without creating records on delete-only events", async () => {
-    const deleteOnly = await simulateClerkWebhook({
-      type: "organizationMembership.deleted",
-      data: {
-        organization: {
-          id: "org_clerk_delete_only",
-        },
-        public_user_data: {
-          user_id: "user_delete_only",
-        },
-      },
-    });
-    expect(deleteOnly.status).toBe(200);
-    const missingOrg = await getDb(env)
-      .prepare(`SELECT organization_id
-         FROM auth_organization_identities
-         WHERE provider = 'clerk' AND provider_org_id = ?`)
-      .bind("org_clerk_delete_only")
-      .first<{
-        organization_id: string;
-      }>();
-    expect(missingOrg).toBeNull();
-    mockClerkUserLookup("user_clerk_member", "admin@example.com", {
-      verificationStatus: "verified",
-      memberships: [
-        {
-          role: "org:admin",
-          organization: {
-            id: "org_clerk_membership",
-            name: "Membership Org",
-            slug: "membership-org",
-          },
-        },
-      ],
-    });
-    const created = await simulateClerkWebhook({
-      type: "organizationMembership.created",
-      data: {
-        organization: {
-          id: "org_clerk_membership",
-          name: "Membership Org",
-          slug: "membership-org",
-        },
-        role: "org:admin",
-        public_user_data: {
-          user_id: "user_clerk_member",
-          identifier: "Admin@Example.com",
-        },
-      },
-    });
-    expect(created.status).toBe(200);
-    const membership = await getDb(env)
-      .prepare(`SELECT u.email, om.user_id, om.organization_id, om.role, om.status
-         FROM organization_members om
-         JOIN users u ON u.id = om.user_id
-         JOIN auth_user_identities aui ON aui.user_id = u.id
-         WHERE aui.provider = 'clerk' AND aui.provider_user_id = ?`)
-      .bind("user_clerk_member")
-      .first<{
-        email: string;
-        user_id: string;
-        organization_id: string;
-        role: string;
-        status: string;
-      }>();
-    expect(membership).toMatchObject({
-      email: "admin@example.com",
-      role: "admin",
-      status: "active",
-    });
-    assert(membership, "Expected the Clerk membership to exist");
-    const roleUpdated = await simulateClerkWebhook({
-      type: "organizationMembership.updated",
-      data: {
-        organization: {
-          id: "org_clerk_membership",
-          name: "Membership Org",
-          slug: "membership-org",
-        },
-        role: "org:member",
-        public_user_data: {
-          user_id: "user_clerk_member",
-          identifier: "admin@example.com",
-        },
-      },
-    });
-    expect(roleUpdated.status).toBe(200);
-    const deleted = await simulateClerkWebhook({
-      type: "organizationMembership.deleted",
-      data: {
-        organization: {
-          id: "org_clerk_membership",
-        },
-        public_user_data: {
-          user_id: "user_clerk_member",
-        },
-      },
-    });
-    expect(deleted.status).toBe(200);
-    const removed = await getDb(env)
-      .prepare(`SELECT om.status
-         FROM organization_members om
-         JOIN auth_user_identities aui ON aui.user_id = om.user_id
-         WHERE aui.provider = 'clerk' AND aui.provider_user_id = ?`)
-      .bind("user_clerk_member")
-      .first<{
-        status: string;
-      }>();
-    expect(required(removed).status).toBe("removed");
-    const delayedUserUpdate = await simulateClerkWebhook({
-      type: "user.updated",
-      data: {
-        id: "user_clerk_member",
-        primary_email_address_id: "email_primary",
-        email_addresses: [
-          {
-            id: "email_primary",
-            email_address: "admin@example.com",
-            verification: { status: "verified" },
-          },
-        ],
-      },
-    });
-    expect(delayedUserUpdate.status).toBe(200);
-    const stillRemoved = await getDb(env)
-      .prepare(`SELECT om.status
-         FROM organization_members om
-         JOIN auth_user_identities aui ON aui.user_id = om.user_id
-         WHERE aui.provider = 'clerk' AND aui.provider_user_id = ?`)
-      .bind("user_clerk_member")
-      .first<{
-        status: string;
-      }>();
-    expect(required(stillRemoved).status).toBe("removed");
-    const readded = await simulateClerkWebhook({
-      type: "organizationMembership.created",
-      data: {
-        organization: {
-          id: "org_clerk_membership",
-          name: "Membership Org",
-          slug: "membership-org",
-        },
-        role: "org:admin",
-        public_user_data: {
-          user_id: "user_clerk_member",
-          identifier: "admin@example.com",
-        },
-      },
-    });
-    expect(readded.status).toBe(200);
-    const activeAgain = await getDb(env)
-      .prepare(`SELECT om.status
-         FROM organization_members om
-         JOIN auth_user_identities aui ON aui.user_id = om.user_id
-         WHERE aui.provider = 'clerk' AND aui.provider_user_id = ?`)
-      .bind("user_clerk_member")
-      .first<{
-        status: string;
-      }>();
-    expect(required(activeAgain).status).toBe("active");
-  });
-  it("syncs user lifecycle and Clerk organization deletion", async () => {
-    mockClerkUserLookup("user_clerk_lifecycle", "member@example.com", {
-      verificationStatus: "verified",
-      memberships: [],
-    });
-    await simulateClerkWebhook({
-      type: "organizationMembership.created",
-      data: {
-        organization: {
-          id: "org_clerk_lifecycle",
-          name: "Lifecycle Org",
-          slug: "lifecycle-org",
-        },
-        role: "org:member",
-        public_user_data: {
-          user_id: "user_clerk_lifecycle",
-          identifier: "member@example.com",
-        },
-      },
-    });
-    const updatedUser = await simulateClerkWebhook({
-      type: "user.updated",
-      data: {
-        id: "user_clerk_lifecycle",
-        first_name: "Ada",
-        last_name: "Lovelace",
-        primary_email_address_id: "email_primary",
-        email_addresses: [
-          {
-            id: "email_primary",
-            email_address: "ada@example.com",
-            verification: { status: "verified" },
-          },
-        ],
-      },
-    });
-    expect(updatedUser.status).toBe(200);
-    const user = await getDb(env)
-      .prepare(`SELECT u.id, u.email, u.name, u.status
-         FROM users u
-         JOIN auth_user_identities aui ON aui.user_id = u.id
-         WHERE aui.provider = 'clerk' AND aui.provider_user_id = ?`)
-      .bind("user_clerk_lifecycle")
-      .first<{
-        id: string;
-        email: string;
-        name: string | null;
-        status: string;
-      }>();
-    expect(user).toMatchObject({
-      email: "ada@example.com",
-      name: "Ada Lovelace",
-      status: "active",
-    });
-    const userId = required(user).id;
-    expect(userId).toBeTruthy();
-    assert(userId, "Expected the Clerk user mapping to exist");
-    const organization = await getDb(env)
-      .prepare(`SELECT organization_id
-         FROM auth_organization_identities
-         WHERE provider = 'clerk' AND provider_org_id = ?`)
-      .bind("org_clerk_lifecycle")
-      .first<{
-        organization_id: string;
-      }>();
-    assert(organization, "Expected the Clerk organization mapping to exist");
-    const apiKeyHash = "webhook_lifecycle_key_hash";
-    const lifecycleProject = await getDb(env)
-      .prepare(`SELECT p.id
-         FROM projects p
-         JOIN auth_organization_identities aoi ON aoi.organization_id = p.organization_id
-         WHERE aoi.provider = 'clerk' AND aoi.provider_org_id = ? AND p.environment = 'sandbox'`)
-      .bind("org_clerk_lifecycle")
-      .first<{
-        id: string;
-      }>();
-    assert(lifecycleProject, "Expected the Clerk organization sandbox project to exist");
-    await getDb(env)
-      .prepare(`INSERT INTO api_keys
-         (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status)
-         SELECT ?, aoi.organization_id, ?, ?, ?, ?, ?, ?, ?
-         FROM auth_organization_identities aoi
-         WHERE aoi.provider = 'clerk' AND aoi.provider_org_id = ?`)
-      .bind(
-        "key_webhook_lifecycle",
-        lifecycleProject.id,
-        userId,
-        "Lifecycle Key",
-        "sk_test_web",
-        apiKeyHash,
-        ALL_API_KEY_GRANTS,
-        "active",
-        "org_clerk_lifecycle"
-      )
-      .run();
-    const deletedUser = await simulateClerkWebhook({
-      type: "user.deleted",
-      data: {
-        id: "user_clerk_lifecycle",
-      },
-    });
-    expect(deletedUser.status).toBe(200);
-    const removedUser = await getDb(env)
-      .prepare("SELECT status FROM users WHERE id = ?")
-      .bind(userId)
-      .first<{
-        status: string;
-      }>();
-    expect(required(removedUser).status).toBe("deleted");
-    await getDb(env)
-      .prepare(
-        `INSERT INTO invitations (id, organization_id, email, role, invited_by, token_hash, expires_at, status)
-         VALUES (?, ?, ?, 'member', ?, ?, ?, 'pending')`
-      )
-      .bind(
-        "inv_clerk_lifecycle_pending",
-        organization.organization_id,
-        "pending@example.com",
-        userId,
-        "hash_clerk_lifecycle_pending",
-        "2099-01-01T00:00:00.000Z"
-      )
-      .run();
-    const deletedOrg = await simulateClerkWebhook({
       type: "organization.deleted",
-      data: {
-        id: "org_clerk_lifecycle",
-      },
+      data: { id: KNOWN_CLERK_ORG_ID, object: "organization", deleted: true },
     });
-    expect(deletedOrg.status).toBe(200);
-    // A pending invitation would be a way back in; deletion revokes it.
-    const invitation = await getDb(env)
-      .prepare("SELECT status FROM invitations WHERE id = ?")
-      .bind("inv_clerk_lifecycle_pending")
-      .first<{ status: string }>();
-    expect(invitation?.status).toBe("revoked");
-    const lifecycleState = await getDb(env)
-      .prepare(`SELECT o.status AS org_status, om.status AS member_status, ak.status AS api_key_status
-         FROM auth_organization_identities aoi
-         JOIN organizations o ON o.id = aoi.organization_id
-         JOIN organization_members om ON om.organization_id = o.id
-         JOIN api_keys ak ON ak.organization_id = o.id
-         WHERE aoi.provider = 'clerk' AND aoi.provider_org_id = ?`)
-      .bind("org_clerk_lifecycle")
-      .first<{
-        org_status: string;
-        member_status: string;
-        api_key_status: string;
-      }>();
-    expect(lifecycleState).toEqual({
-      org_status: "deleted",
-      member_status: "removed",
-      api_key_status: "revoked",
-    });
+
+    expect(response.status).toBe(200);
+    expect(await readInvitationStatus(getDb(env), "inv_webhook_known_pending")).toBe("revoked");
+    expect(
+      await getDb(env).queryOne("SELECT status FROM organizations WHERE id = ?", [
+        KNOWN_ORGANIZATION.id,
+      ])
+    ).toEqual({ status: "deleted" });
+    expect(await knownOrganizationMemberships()).toEqual([
+      { user_id: KNOWN_ADMIN.userId, role: "admin", status: "removed" },
+    ]);
   });
 });
 

@@ -1,3 +1,4 @@
+import type { MemberStatus } from "@sdp/types/organizations";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import {
@@ -30,6 +31,13 @@ function change(actor: SeededOrganizationMember, membershipChange: MembershipCha
       change: membershipChange,
     })
   );
+}
+
+async function setMemberStatus(member: SeededOrganizationMember, status: MemberStatus) {
+  await getDb(env).execute("UPDATE organization_members SET status = ? WHERE id = ?", [
+    status,
+    member.memberId,
+  ]);
 }
 
 function activeAdminIds() {
@@ -107,4 +115,35 @@ describe("applyMembershipChange", () => {
     await expect(staleRemoval).rejects.toMatchObject(MISSING_MANAGE);
     expect(await activeAdminIds()).toEqual([{ id: ADMIN_A.memberId }, { id: MEMBER_C.memberId }]);
   });
+
+  it("changes nothing when removing a member already removed", async () => {
+    await setMemberStatus(MEMBER_C, "removed");
+
+    await expect(change(ADMIN_A, { kind: "remove", memberId: MEMBER_C.memberId })).resolves.toEqual(
+      {
+        memberId: MEMBER_C.memberId,
+        userId: MEMBER_C.userId,
+        previousRole: "member",
+        changed: false,
+      }
+    );
+  });
+
+  it.each([
+    { status: "suspended", membershipChange: { kind: "remove", memberId: MEMBER_C.memberId } },
+    {
+      status: "removed",
+      membershipChange: { kind: "set_role", memberId: MEMBER_C.memberId, role: "admin" },
+    },
+  ] as const satisfies readonly { status: MemberStatus; membershipChange: MembershipChange }[])(
+    "refuses $membershipChange.kind of a $status member",
+    async ({ status, membershipChange }) => {
+      await setMemberStatus(MEMBER_C, status);
+
+      await expect(change(ADMIN_A, membershipChange)).rejects.toMatchObject({
+        code: "CONFLICT",
+        message: "Member is not active",
+      });
+    }
+  );
 });
