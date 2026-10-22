@@ -20,6 +20,9 @@ export function InviteMemberForm() {
   const t = useTranslations();
   const [state, formAction, isPending] = useActionState<InviteState, FormData>(submitInvite, null);
   const [role, setRole] = useState<"admin" | "member">("member");
+  // One key per invitation, kept across retries until one lands, so a
+  // repeated submit replays the first answer instead of inviting again.
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
   const formRef = useRef<HTMLFormElement>(null);
   // useActionState keeps the last result, so react to identity changes rather
   // than value: two failures with the same message must still both surface.
@@ -36,6 +39,7 @@ export function InviteMemberForm() {
       // Clear the field only on success, so a rejected address stays editable.
       formRef.current?.reset();
       setRole("member");
+      setIdempotencyKey(crypto.randomUUID());
       return;
     }
 
@@ -70,6 +74,7 @@ export function InviteMemberForm() {
               control, so the value is mirrored into a hidden input to reach the
               server action's FormData. */}
           <input type="hidden" name="role" value={role} />
+          <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
           <Select
             ariaLabel={t("Shared.members.inviteRole")}
             value={role}

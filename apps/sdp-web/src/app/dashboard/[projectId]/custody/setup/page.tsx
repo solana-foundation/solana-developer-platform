@@ -15,6 +15,7 @@ import { fetchProjectProviderAvailability } from "@/lib/provider-availability.se
 import { createTimedTrace } from "@/lib/request-tracing";
 import {
   createRequestScopedSdpApiClients,
+  requestMemberRole,
   requestProjectHref,
   type SdpApiClient,
 } from "@/lib/sdp-api";
@@ -60,7 +61,7 @@ async function getConnectedCustodyProviders(
 }
 
 async function CustodySetupPage({ searchParams }: CustodySetupPageProps) {
-  const { userId, orgId, orgRole } = await auth();
+  const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
   }
@@ -74,7 +75,7 @@ async function CustodySetupPage({ searchParams }: CustodySetupPageProps) {
 
   // The custody reads below are `custody:admin`, so a member would hit a 403 on
   // each one. Send them to the provider page, which names the role they need.
-  if (!resolveDashboardAccess(orgRole).capabilities.canManageCustody) {
+  if (!resolveDashboardAccess(await requestMemberRole()).capabilities.canManageCustody) {
     redirect(
       await requestProjectHref(
         initialProvider === null

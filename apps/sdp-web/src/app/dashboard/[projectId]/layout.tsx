@@ -14,7 +14,7 @@ import { isDesignModuleOn } from "@/lib/design-modules";
 import { PAYMENTS_DEMO_COOKIE_NAME } from "@/lib/payments-demo/demo-cookie";
 import { loadQuickStartStep } from "@/lib/quick-start-server";
 import { loadQuickStartStatus } from "@/lib/quick-start-server.redesign";
-import { listSdpProjects } from "@/lib/sdp-api";
+import { listSdpProjects, requestMemberRole } from "@/lib/sdp-api";
 import { getSdpAuth } from "@/lib/sdp-auth";
 import { WORKSPACE_LOADING_PATH } from "@/lib/workspace-loading";
 
@@ -37,8 +37,13 @@ export default async function ProjectLayout({
   children: ReactNode;
   params: Promise<{ projectId: string }>;
 }) {
-  const [{ projectId }, projects, { orgRole, orgId, userId }, flags, cookieStore] =
-    await Promise.all([params, listSdpProjects(), getSdpAuth(), getDashboardFlags(), cookies()]);
+  const [{ projectId }, projects, { orgId, userId }, flags, cookieStore] = await Promise.all([
+    params,
+    listSdpProjects(),
+    getSdpAuth(),
+    getDashboardFlags(),
+    cookies(),
+  ]);
   // Each design has its own quick start, the new one part of the Overview module; only the one
   // on screen is read.
   const overviewNewDesign = isDesignModuleOn(flags, "overview");
@@ -51,11 +56,12 @@ export default async function ProjectLayout({
       throw new Error("The dashboard layout admits only signed-in members of an organization");
     }
     const dashboardCacheScope = { orgId, userId } satisfies DashboardCacheScope;
+    const dashboardAccess = resolveDashboardAccess(await requestMemberRole());
     return (
       <DashboardWorkspaceProvider
         key={getDashboardCacheScopeKey(dashboardCacheScope)}
         scopeRefreshFallback={<DashboardScopeLoadingScreen />}
-        dashboardAccess={resolveDashboardAccess(orgRole)}
+        dashboardAccess={dashboardAccess}
         initialQuickStartStatus={initialQuickStartStatus}
         initialQuickStartStep={initialQuickStartStep}
         flags={flags}

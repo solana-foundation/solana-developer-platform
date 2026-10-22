@@ -10,19 +10,21 @@ import {
 import { Modal } from "@sdp/ui/modal";
 import { MoreHorizontalIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { removeMember } from "@/app/members/actions";
+import { changeMemberRole, removeMember } from "@/app/members/actions";
 import { useTranslations } from "@/i18n/provider";
 
 export function MemberActions({
   memberId,
   label,
+  role,
   isSelf,
   isLastAdmin,
 }: {
   memberId: string;
   label: string;
+  role: string;
   isSelf: boolean;
   isLastAdmin: boolean;
 }) {
@@ -30,6 +32,32 @@ export function MemberActions({
   const router = useRouter();
   const [isConfirmOpen, setConfirmOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
+  // One key per attempted change, kept across retries of it and cleared once
+  // it lands, so a retry after a failed Clerk call finishes the same request.
+  const removeKey = useRef<string | null>(null);
+  const roleKey = useRef<string | null>(null);
+  const nextRole = role === "admin" ? "member" : "admin";
+
+  const blockedRoleReason = isSelf
+    ? t("Shared.members.cannotChangeOwnRole")
+    : nextRole === "member" && isLastAdmin
+      ? t("Shared.members.cannotDemoteLastAdmin")
+      : null;
+
+  const confirmRoleChange = () => {
+    roleKey.current ??= crypto.randomUUID();
+    const key = roleKey.current;
+    startTransition(async () => {
+      const result = await changeMemberRole(memberId, nextRole, key);
+      if (!result.ok) {
+        toast.error(t("Shared.members.roleChangeFailed", { error: result.error }));
+        return;
+      }
+      roleKey.current = null;
+      toast.success(t("Shared.members.roleChanged", { member: label }));
+      router.refresh();
+    });
+  };
 
   // The API rejects both of these; disabling the row menu means the rule is
   // visible before someone commits to a destructive action rather than after.
@@ -40,14 +68,17 @@ export function MemberActions({
       : null;
 
   const confirmRemove = () => {
+    removeKey.current ??= crypto.randomUUID();
+    const key = removeKey.current;
     startTransition(async () => {
-      const result = await removeMember(memberId);
+      const result = await removeMember(memberId, key);
 
       if (!result.ok) {
         toast.error(t("Shared.members.removeFailed", { error: result.error }));
         return;
       }
 
+      removeKey.current = null;
       setConfirmOpen(false);
       toast.success(t("Shared.members.removed", { member: label }));
       router.refresh();
@@ -61,13 +92,26 @@ export function MemberActions({
           <Button
             variant="ghost"
             size="icon-sm"
+            disabled={isPending}
             aria-label={t("Shared.members.memberActions", { member: label })}
           >
             <MoreHorizontalIcon className="size-4" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuItem disabled={Boolean(blockedReason)} onSelect={() => setConfirmOpen(true)}>
+          <DropdownMenuItem
+            disabled={isPending || Boolean(blockedRoleReason)}
+            onSelect={confirmRoleChange}
+          >
+            {blockedRoleReason ??
+              (nextRole === "admin"
+                ? t("Shared.members.makeAdmin")
+                : t("Shared.members.makeMember"))}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={isPending || Boolean(blockedReason)}
+            onSelect={() => setConfirmOpen(true)}
+          >
             {blockedReason ?? t("Shared.members.removeMember")}
           </DropdownMenuItem>
         </DropdownMenuContent>

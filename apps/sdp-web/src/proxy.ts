@@ -32,8 +32,10 @@ const isBrowserWriteGated = createRouteMatcher(["/api/dashboard(.*)", "/api/play
 const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 /**
- * CSRF backstop for the BFF write routes (threat model EARN-021, PRO-1865).
- * The only ambient credential on these routes is the Clerk session cookie, so
+ * CSRF backstop for the BFF write routes and every Server Action (threat model
+ * EARN-021, PRO-1865): an action posts to the page's own URL with a
+ * `Next-Action` header, so it is gated by that header rather than by path.
+ * The only ambient credential on these requests is the Clerk session cookie, so
  * a write arriving with a cross-origin `Origin` (including the sandboxed
  * literal "null") is never legitimate. A write without an `Origin` header
  * passes unless `Sec-Fetch-Site` positively marks it cross-site: origin-less
@@ -41,7 +43,10 @@ const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
  * CSRF to ride on.
  */
 export function rejectCrossSiteWrite(req: NextRequest): NextResponse | null {
-  if (!WRITE_METHODS.has(req.method) || !isBrowserWriteGated(req)) {
+  if (
+    !WRITE_METHODS.has(req.method) ||
+    !(isBrowserWriteGated(req) || req.headers.has("next-action"))
+  ) {
     return null;
   }
 

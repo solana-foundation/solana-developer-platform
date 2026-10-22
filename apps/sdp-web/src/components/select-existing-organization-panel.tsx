@@ -5,6 +5,8 @@ import { ChevronRightIcon, LoaderCircleIcon } from "lucide-react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { toast } from "sonner";
+import { CreateOrganizationForm } from "@/components/create-organization-form";
 import { useTranslations } from "@/i18n/provider";
 
 function OrganizationMark({ name, imageUrl }: { name: string; imageUrl?: string }) {
@@ -33,28 +35,42 @@ function OrganizationMark({ name, imageUrl }: { name: string; imageUrl?: string 
 }
 
 /**
- * Entry state for a signed-in user who belongs to an organization but has not
- * selected one for the current Clerk session. It deliberately exposes only
- * existing memberships: organization creation belongs outside SDP.
+ * Entry state for a signed-in person with no organization selected for the
+ * session: their organizations to pick from, their pending invitations to
+ * accept, or, with neither, the step that creates their organization in SDP
+ * (ADR 0012). With `noAccess`, the session's organization is one SDP refused,
+ * so the same choices are offered under that explanation.
+ *
+ * @param props.noAccess - Whether SDP refused the session's organization.
  */
-export function SelectExistingOrganizationPanel() {
+export function SelectExistingOrganizationPanel({ noAccess }: { noAccess: boolean }) {
   const t = useTranslations();
   const router = useRouter();
-  const { userMemberships, setActive, isLoaded } = useOrganizationList({
+  const { userMemberships, userInvitations, setActive, isLoaded } = useOrganizationList({
     userMemberships: { infinite: true },
+    userInvitations: { infinite: true },
   });
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
   const memberships = userMemberships.data ?? [];
+  const invitations = userInvitations.data ?? [];
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-[var(--sdp-shell-bg)] px-4 py-10 text-primary">
       <section className="w-full max-w-md rounded-3xl border border-border-subtle bg-surface-raised p-6 shadow-sm">
         <div className="space-y-2">
           <h1 className="text-2xl font-medium tracking-tight">
-            {t("Shared.SharedComponents.selectOrganization")}
+            {noAccess
+              ? t("Shared.SharedComponents.noOrganizationAccessTitle")
+              : isLoaded && memberships.length === 0 && invitations.length === 0
+                ? t("Shared.SharedComponents.createOrganizationTitle")
+                : t("Shared.SharedComponents.selectOrganization")}
           </h1>
           <p className="text-sm leading-6 text-tertiary">
-            {t("Shared.SharedComponents.selectExistingOrganizationDescription")}
+            {noAccess
+              ? t("Shared.SharedComponents.noOrganizationAccessDescription")
+              : isLoaded && memberships.length === 0 && invitations.length === 0
+                ? t("Shared.SharedComponents.createOrganizationDescription")
+                : t("Shared.SharedComponents.selectExistingOrganizationDescription")}
           </p>
         </div>
 
@@ -69,11 +85,48 @@ export function SelectExistingOrganizationPanel() {
             </div>
           ) : null}
 
-          {isLoaded && memberships.length === 0 ? (
-            <p className="rounded-2xl bg-fill-subtle px-4 py-3 text-sm text-tertiary">
-              {t("Shared.SharedComponents.noOrganizations")}
-            </p>
+          {isLoaded && memberships.length === 0 && invitations.length === 0 ? (
+            <CreateOrganizationForm />
           ) : null}
+
+          {invitations.map((invitation) => {
+            const organization = invitation.publicOrganizationData;
+            return (
+              <button
+                key={invitation.id}
+                type="button"
+                disabled={!setActive || switchingTo !== null}
+                onClick={async () => {
+                  if (!setActive) return;
+                  setSwitchingTo(organization.id);
+                  try {
+                    await invitation.accept();
+                    await setActive({ organization: organization.id });
+                    router.refresh();
+                  } catch {
+                    setSwitchingTo(null);
+                    toast.error(t("Shared.SharedComponents.acceptInvitationFailed"));
+                  }
+                }}
+                className="flex w-full items-center gap-3 rounded-2xl border border-border-default bg-surface-raised px-4 py-3 text-left transition-colors hover:border-border-strong hover:bg-surface-sunken focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50"
+              >
+                <OrganizationMark name={organization.name} imageUrl={organization.imageUrl} />
+                <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                  {t("Shared.SharedComponents.acceptInvitation", {
+                    organization: organization.name,
+                  })}
+                </span>
+                {switchingTo === organization.id ? (
+                  <LoaderCircleIcon
+                    className="size-4 animate-spin text-tertiary"
+                    aria-hidden="true"
+                  />
+                ) : (
+                  <ChevronRightIcon className="size-4 text-tertiary" aria-hidden="true" />
+                )}
+              </button>
+            );
+          })}
 
           {memberships.map((membership) => {
             const organization = membership.organization;

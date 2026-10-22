@@ -1,5 +1,5 @@
 import { type Action, organizationRoleMayPerform } from "@sdp/types/actions";
-import { normalizeOrganizationRole, type OrganizationRole } from "@sdp/types/roles";
+import type { OrganizationRole } from "@sdp/types/roles";
 
 export interface DashboardCapabilities {
   canManageApiKeys: boolean;
@@ -17,21 +17,23 @@ export interface DashboardAccess {
   capabilities: DashboardCapabilities;
 }
 
-export function mapClerkRoleToDashboardRole(role: string | null | undefined): OrganizationRole {
-  return normalizeOrganizationRole(role);
-}
-
 /** Whether this member's organization role holds an action, as the API decides it. */
-export function dashboardRoleMayPerform(role: string | null | undefined, action: Action): boolean {
-  return organizationRoleMayPerform(mapClerkRoleToDashboardRole(role), action);
+export function dashboardRoleMayPerform(role: OrganizationRole, action: Action): boolean {
+  return organizationRoleMayPerform(role, action);
 }
 
-export function resolveDashboardAccess(role: string | null | undefined): DashboardAccess {
-  const resolvedRole = mapClerkRoleToDashboardRole(role);
-  const mayPerform = (action: Action) => organizationRoleMayPerform(resolvedRole, action);
+/**
+ * What the dashboard shows the member, from the role SDP holds for them
+ * (`requestMemberRole`), never Clerk's.
+ *
+ * @param role - The caller's Organization Role.
+ * @returns The role and the capabilities it grants.
+ */
+export function resolveDashboardAccess(role: OrganizationRole): DashboardAccess {
+  const mayPerform = (action: Action) => organizationRoleMayPerform(role, action);
 
   return {
-    role: resolvedRole,
+    role,
     capabilities: {
       canManageApiKeys: mayPerform("api_keys.manage"),
       canManageCustody: mayPerform("wallets.configure"),

@@ -9,7 +9,7 @@ import {
 } from "@sdp/ui/dropdown-menu";
 import { MoreHorizontalIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { revokeInvitation } from "@/app/members/actions";
 import { useTranslations } from "@/i18n/provider";
@@ -27,6 +27,8 @@ export function InvitationActions({
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [isRevoking, setIsRevoking] = useState(false);
+  // Kept across retries of one revocation, so a retry finishes its Clerk half.
+  const revokeKey = useRef<string | null>(null);
 
   const copyLink = async () => {
     if (!acceptUrl) return;
@@ -42,9 +44,11 @@ export function InvitationActions({
   };
 
   const revoke = () => {
+    revokeKey.current ??= crypto.randomUUID();
+    const key = revokeKey.current;
     setIsRevoking(true);
     startTransition(async () => {
-      const result = await revokeInvitation(invitationId);
+      const result = await revokeInvitation(invitationId, key);
       setIsRevoking(false);
 
       if (!result.ok) {
@@ -52,6 +56,7 @@ export function InvitationActions({
         return;
       }
 
+      revokeKey.current = null;
       toast.success(t("Shared.members.revoked", { email }));
       router.refresh();
     });

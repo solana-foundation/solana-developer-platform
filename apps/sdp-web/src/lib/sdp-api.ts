@@ -3,9 +3,11 @@
 // loaders that call it need no `import "server-only"`.
 import { auth } from "@clerk/nextjs/server";
 import type { ListProjectsResponse, Project } from "@sdp/types/projects";
+import { ORGANIZATION_ROLES, type OrganizationRole } from "@sdp/types/roles";
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { cache } from "react";
+import { z } from "zod";
 import { readApiErrorMessage } from "./api-error";
 import { projectHref } from "./dashboard-project-path";
 import { type ApiAnswer, apiErrorCode, IDEMPOTENCY_KEY_HEADER } from "./idempotency";
@@ -271,6 +273,40 @@ const getRequestProjects = cache(
 
 export function listSdpProjects(): Promise<Project[]> {
   return getRequestProjects();
+}
+
+const currentMemberSchema = z.object({ role: z.enum(ORGANIZATION_ROLES) });
+
+const getRequestMemberRole = cache(async (): Promise<OrganizationRole> => {
+  const client = assembleSdpApiClient(
+    createSdpApiRequest(await getRequestClerkToken(), null, {
+      traceId: `web_${crypto.randomUUID().replaceAll("-", "")}`,
+      source: "dashboard.members.me",
+    })
+  );
+  return currentMemberSchema.parse(await client.fetch<unknown>("/v1/members/me")).role;
+});
+
+/**
+ * The signed-in person's Organization Role in the active organization, as SDP
+ * holds it (ADR 0012), read once per request. Every page gate takes it from
+ * here, never from the Clerk session's role claim.
+ *
+ * @returns The caller's Organization Role.
+ */
+export function requestMemberRole(): Promise<OrganizationRole> {
+  return getRequestMemberRole();
+}
+
+/**
+ * An org-less SDP API client for a signed-in person with no active
+ * organization: the only call it serves is creating their organization.
+ *
+ * @returns A client bearing the session token, with no organization or project.
+ */
+export async function createSignupSdpApiClient(): Promise<SdpApiClient> {
+  const { getToken } = await getSdpAuth();
+  return assembleSdpApiClient(createSdpApiRequest(await acquireClerkToken(getToken), null));
 }
 
 function assembleSdpApiClient(request: SdpApiRequestFn): SdpApiClient {

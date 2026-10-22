@@ -11,7 +11,7 @@ import { issuance } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
-import { createSdpApiClient, type SdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient, requestMemberRole, type SdpApiClient } from "@/lib/sdp-api";
 import { getWalletMetadataPath } from "@/lib/sdp-api-paths";
 import { resolveWalletConnectionRow } from "./wallet-connection-row";
 import type {
@@ -139,7 +139,7 @@ function toWalletPageView(
  * page); balances and the issued-token names are handed to the view as promises, so each part streams in on its own instead of holding the page.
  */
 export async function WalletDetailPage({ params }: { params: Promise<{ walletId: string }> }) {
-  const [t, { userId, orgId, orgRole }, { walletId }, issuanceEnabled] = await Promise.all([
+  const [t, { userId, orgId }, { walletId }, issuanceEnabled] = await Promise.all([
     getTranslations(),
     auth(),
     params,
@@ -163,7 +163,8 @@ export async function WalletDetailPage({ params }: { params: Promise<{ walletId:
   const issuedTokensPromise = getIssuedTokens(apiClient.request);
   const wallet = await walletPromise;
 
-  const canManageCustody = resolveDashboardAccess(orgRole).capabilities.canManageCustody;
+  const canManageCustody = resolveDashboardAccess(await requestMemberRole()).capabilities
+    .canManageCustody;
   const connection = await resolveWalletConnectionRow({
     client: apiClient,
     connectionId: wallet.custodyConnectionId,

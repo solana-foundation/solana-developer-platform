@@ -26,7 +26,7 @@ function roleLabel(role: string, t: Translate): string {
   return role === "admin" ? t("Shared.members.roleAdmin") : t("Shared.members.roleMember");
 }
 
-export async function MembersSection({ page = 1 }: { page?: number }) {
+export async function MembersSection({ page }: { page: number }) {
   const t = await getTranslations();
 
   let members: Member[] = [];
@@ -117,6 +117,7 @@ export async function MembersSection({ page = 1 }: { page?: number }) {
                       <MemberActions
                         memberId={member.id}
                         label={identity.actionLabel}
+                        role={member.role}
                         isSelf={Boolean(member.isSelf)}
                         isLastAdmin={member.role === "admin" && meta.activeAdminCount <= 1}
                       />
