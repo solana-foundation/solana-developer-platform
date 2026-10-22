@@ -742,6 +742,18 @@ describe("payment search", () => {
     );
   });
 
+  it("verifies candidates against the full signature history", async () => {
+    mockSignatures(signatureInfo(SIGNATURE));
+    verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
+    validateTransferSpy.mockResolvedValue(validatedTransfer());
+
+    await reconcileOnSandbox(await createRequest({ token: SOL_MINT, expiresAt: null }));
+
+    expect(verifyTransactionLandedSpy).toHaveBeenCalledWith(expect.anything(), SIGNATURE, {
+      searchTransactionHistory: true,
+    });
+  });
+
   it("settles a valid payment that follows a failed transaction on the same reference", async () => {
     mockSignatures(signatureInfo(LATER_SIGNATURE), signatureInfo(FAILED_SIGNATURE, { err: {} }));
     verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
@@ -754,7 +766,8 @@ describe("payment search", () => {
     expect(settled.status).toBe("paid");
     expect(verifyTransactionLandedSpy).not.toHaveBeenCalledWith(
       expect.anything(),
-      FAILED_SIGNATURE
+      FAILED_SIGNATURE,
+      expect.anything()
     );
     expect(await listInboundTransfers()).toMatchObject([{ signature: LATER_SIGNATURE }]);
   });

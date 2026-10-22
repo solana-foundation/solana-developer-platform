@@ -192,3 +192,28 @@ test("rethrows a persistent RPC failure", async () => {
   } as unknown as SolanaRpc;
   await assert.rejects(verifyTransactionLanded(rpc, SIG), /401/);
 });
+
+for (const searchTransactionHistory of [true, undefined]) {
+  test(`asks for signature statuses with searchTransactionHistory=${searchTransactionHistory}`, async () => {
+    const calls: unknown[][] = [];
+    const rpc = {
+      ...fakeRpc({
+        status: CONFIRMED_STATUS,
+        account: null,
+        transaction: INITIALIZE_MINT_TRANSACTION,
+      }),
+      getSignatureStatuses: (...args: unknown[]) => {
+        calls.push(args);
+        return { send: async () => ({ context: { slot: 100n }, value: [CONFIRMED_STATUS] }) };
+      },
+    } as unknown as SolanaRpc;
+
+    const result = await verifyTransactionLanded(rpc, SIG, { searchTransactionHistory });
+
+    assert.ok(result.ok);
+    assert.deepEqual(
+      calls[0]?.[1],
+      searchTransactionHistory ? { searchTransactionHistory: true } : undefined
+    );
+  });
+}

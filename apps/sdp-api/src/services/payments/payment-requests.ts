@@ -139,7 +139,9 @@ async function findValidPayment(
 
   let pending = false;
   for (const candidate of candidates) {
-    const verified = await verifyTransactionLanded(rpc, candidate.signature);
+    const verified = await verifyTransactionLanded(rpc, candidate.signature, {
+      searchTransactionHistory: true,
+    });
     if (!verified.ok) {
       pending ||= verified.reason === "not_indexed";
       continue;
