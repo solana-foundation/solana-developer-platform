@@ -43,6 +43,8 @@ export interface PaymentRequestRow {
   paid_late: boolean;
   signature_scan_cursor: string | null;
   signature_scan_before: string | null;
+  signature_scan_stuck_signature: string | null;
+  signature_scan_stuck_since: string | null;
 }
 
 export interface CreatePaymentRequestInput {
@@ -78,6 +80,8 @@ export interface MarkExpiredPaymentRequestPaidInput {
 export interface SignatureScanPosition {
   cursor: string | null;
   before: string | null;
+  stuckSignature: string | null;
+  stuckSince: string | null;
 }
 
 export interface AdvanceSignatureScanInput {

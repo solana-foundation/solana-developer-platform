@@ -61,6 +61,20 @@ const candidateVerdictSchema = z.discriminatedUnion("kind", [
 ]);
 type CandidateVerdict = z.infer<typeof candidateVerdictSchema>;
 
+interface StuckSignature {
+  signature: string | null;
+  since: string | null;
+}
+
+const NOT_STUCK: StuckSignature = { signature: null, since: null };
+
+interface SignatureScanOutcome {
+  cursor: Signature | null;
+  exhausted: boolean;
+  found: FoundPayment | null;
+  stuck: StuckSignature;
+}
+
 interface PaymentRequestKey {
   requestId: string;
   organizationId: string;
@@ -158,6 +172,8 @@ async function findValidPayment(
   const from: SignatureScanPosition = {
     cursor: row.signature_scan_cursor,
     before: row.signature_scan_before,
+    stuckSignature: row.signature_scan_stuck_signature,
+    stuckSince: row.signature_scan_stuck_since,
   };
   const fetched = await fetchUnscannedSignatures(rpc, reference, from);
   const resumeBefore = fetched.newestFirst.at(-2);
@@ -170,16 +186,18 @@ async function findValidPayment(
       fetched: fetched.newestFirst.length,
       resumed: from.before !== null,
     });
-    await advanceSignatureScan(env, row, from, {
-      cursor: from.cursor,
-      before: resumeBefore.signature,
-    });
+    await advanceSignatureScan(env, row, from, { ...from, before: resumeBefore.signature });
     return { kind: "pending" };
   }
-  const scan = await evaluateOldestFirst(rpc, row, reference, [...fetched.newestFirst].reverse());
+  const scan = await evaluateOldestFirst(rpc, row, reference, [...fetched.newestFirst].reverse(), {
+    signature: from.stuckSignature,
+    since: from.stuckSince,
+  });
   await advanceSignatureScan(env, row, from, {
     cursor: scan.cursor ?? from.cursor,
     before: scan.exhausted ? null : from.before,
+    stuckSignature: scan.stuck.signature,
+    stuckSince: scan.stuck.since,
   });
   if (scan.found !== null) {
     return { kind: "paid", found: scan.found };
@@ -216,45 +234,60 @@ async function evaluateOldestFirst(
   rpc: SolanaRpc,
   row: PaymentRequestRow,
   reference: Address,
-  oldestFirst: readonly SignatureInfo[]
-): Promise<{ cursor: Signature | null; exhausted: boolean; found: FoundPayment | null }> {
+  oldestFirst: readonly SignatureInfo[],
+  stuckFrom: StuckSignature
+): Promise<SignatureScanOutcome> {
   let cursor: Signature | null = null;
   let contiguous = true;
   let verified = 0;
+  let stuck = stuckFrom;
   for (const candidate of oldestFirst) {
     let verdict: CandidateVerdict = { kind: "rejected" };
     if (candidate.err === null) {
       if (verified >= VERIFY_BUDGET) {
-        return { cursor, exhausted: false, found: null };
+        return { cursor, exhausted: false, found: null, stuck };
       }
       verified++;
       verdict = await judgeCandidate(rpc, row, reference, candidate);
     }
-    if (verdict.kind === "retry" && isPastUnreadableGiveUp(candidate.blockTime)) {
-      logEvent("warn", {
-        event: "payment_requests.signature_unreadable",
-        payment_request_id: row.id,
-        signature: candidate.signature,
-        reason: verdict.reason,
-      });
-      verdict = { kind: "rejected" };
+    if (verdict.kind === "retry" && contiguous) {
+      const stuckSince =
+        stuck.signature === candidate.signature && stuck.since !== null
+          ? Date.parse(stuck.since)
+          : Number.NaN;
+      if (Number.isNaN(stuckSince)) {
+        stuck = { signature: candidate.signature, since: new Date().toISOString() };
+      } else if (Date.now() - stuckSince >= UNREADABLE_SIGNATURE_GIVE_UP_MS) {
+        logEvent("warn", {
+          event: "payment_requests.signature_unreadable",
+          payment_request_id: row.id,
+          signature: candidate.signature,
+          reason: verdict.reason,
+        });
+        verdict = { kind: "rejected" };
+        stuck = NOT_STUCK;
+      }
+    } else if (verdict.kind !== "retry" && candidate.signature === stuck.signature) {
+      stuck = NOT_STUCK;
     }
-    if (verdict.kind === "paid") {
-      return { cursor, exhausted: false, found: verdict.found };
-    }
-    if (verdict.kind === "retry") {
-      contiguous = false;
-    } else if (contiguous) {
-      cursor = candidate.signature;
+    switch (verdict.kind) {
+      case "paid":
+        return { cursor, exhausted: false, found: verdict.found, stuck: NOT_STUCK };
+      case "retry":
+        contiguous = false;
+        break;
+      case "rejected":
+        if (contiguous) {
+          cursor = candidate.signature;
+        }
+        break;
+      default: {
+        const unreachable: never = verdict;
+        throw internalError(`Unhandled candidate verdict ${String(unreachable)}`);
+      }
     }
   }
-  return { cursor, exhausted: contiguous, found: null };
-}
-
-function isPastUnreadableGiveUp(blockTime: bigint | null): boolean {
-  return (
-    blockTime !== null && Date.now() - Number(blockTime) * 1000 > UNREADABLE_SIGNATURE_GIVE_UP_MS
-  );
+  return { cursor, exhausted: contiguous, found: null, stuck };
 }
 
 async function judgeCandidate(
@@ -302,7 +335,12 @@ async function advanceSignatureScan(
   from: SignatureScanPosition,
   to: SignatureScanPosition
 ): Promise<void> {
-  if (from.cursor === to.cursor && from.before === to.before) {
+  if (
+    from.cursor === to.cursor &&
+    from.before === to.before &&
+    from.stuckSignature === to.stuckSignature &&
+    from.stuckSince === to.stuckSince
+  ) {
     return;
   }
   const key = paymentRequestKey(row);

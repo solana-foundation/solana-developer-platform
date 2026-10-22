@@ -50,6 +50,8 @@ function mapPaymentRequestRow(row: Record<string, unknown>): PaymentRequestRow {
     paid_late: row.paid_late === true,
     signature_scan_cursor: nullableText(row.signature_scan_cursor),
     signature_scan_before: nullableText(row.signature_scan_before),
+    signature_scan_stuck_signature: nullableText(row.signature_scan_stuck_signature),
+    signature_scan_stuck_since: nullableText(row.signature_scan_stuck_since),
   };
 }
 
@@ -437,21 +439,29 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
         .prepare(
           `UPDATE payment_requests
              SET signature_scan_cursor = ?,
-                 signature_scan_before = ?
+                 signature_scan_before = ?,
+                 signature_scan_stuck_signature = ?,
+                 signature_scan_stuck_since = ?
            WHERE id = ?
              AND organization_id = ?
              AND project_id = ?
              AND signature_scan_cursor IS NOT DISTINCT FROM ?
-             AND signature_scan_before IS NOT DISTINCT FROM ?`
+             AND signature_scan_before IS NOT DISTINCT FROM ?
+             AND signature_scan_stuck_signature IS NOT DISTINCT FROM ?
+             AND signature_scan_stuck_since IS NOT DISTINCT FROM ?`
         )
         .bind(
           input.to.cursor,
           input.to.before,
+          input.to.stuckSignature,
+          input.to.stuckSince,
           input.requestId,
           input.organizationId,
           input.projectId,
           input.from.cursor,
-          input.from.before
+          input.from.before,
+          input.from.stuckSignature,
+          input.from.stuckSince
         )
         .run();
       return changed > 0;

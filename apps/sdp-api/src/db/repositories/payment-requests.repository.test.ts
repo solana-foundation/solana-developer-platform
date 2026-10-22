@@ -15,12 +15,17 @@ import {
   seedDefaultProjects,
 } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-import type { PaymentRequestRow, PaymentRequestsRepository } from "./payment-requests.repository";
+import type {
+  PaymentRequestRow,
+  PaymentRequestsRepository,
+  SignatureScanPosition,
+} from "./payment-requests.repository";
 import { createPostgresPaymentRequestsRepository } from "./payment-requests.repository.postgres";
 
 const TEST_PROJECT_ID = "prj_preq_repo_test";
 const TEST_CUSTODY_WALLET_ID = "cwlt_preq_repo_test";
 const PAST = "2020-01-01T00:00:00.000Z";
+const FUTURE = "2099-01-01T00:00:00.000Z";
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;
 const DAY = 24 * 60 * MINUTE;
@@ -1153,9 +1158,18 @@ describe("PaymentRequestsRepository (postgres)", () => {
         return { requestId: request.id, organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID };
       }
 
+      function scanAt(position: Partial<SignatureScanPosition>): SignatureScanPosition {
+        return { cursor: null, before: null, stuckSignature: null, stuckSince: null, ...position };
+      }
+
       it("starts with no scan position", async () => {
         const created = await repo.createPaymentRequest(createInput());
-        expect(created).toMatchObject({ signature_scan_cursor: null, signature_scan_before: null });
+        expect(created).toMatchObject({
+          signature_scan_cursor: null,
+          signature_scan_before: null,
+          signature_scan_stuck_signature: null,
+          signature_scan_stuck_since: null,
+        });
       });
 
       it("moves the scan position when the expected position matches", async () => {
@@ -1163,14 +1177,21 @@ describe("PaymentRequestsRepository (postgres)", () => {
 
         const advanced = await repo.advanceSignatureScan({
           ...scanKey(created),
-          from: { cursor: null, before: null },
-          to: { cursor: "sigA", before: "sigB" },
+          from: scanAt({}),
+          to: scanAt({
+            cursor: "sigA",
+            before: "sigB",
+            stuckSignature: "sigC",
+            stuckSince: PAST,
+          }),
         });
 
         expect(advanced).toBe(true);
         expect(await repo.getPaymentRequestById(scanKey(created))).toMatchObject({
           signature_scan_cursor: "sigA",
           signature_scan_before: "sigB",
+          signature_scan_stuck_signature: "sigC",
+          signature_scan_stuck_since: PAST,
         });
       });
 
@@ -1178,19 +1199,19 @@ describe("PaymentRequestsRepository (postgres)", () => {
         const created = await repo.createPaymentRequest(createInput());
         await repo.advanceSignatureScan({
           ...scanKey(created),
-          from: { cursor: null, before: null },
-          to: { cursor: "sigNewer", before: null },
+          from: scanAt({}),
+          to: scanAt({ cursor: "sigNewer" }),
         });
 
         const stale = await repo.advanceSignatureScan({
           ...scanKey(created),
-          from: { cursor: null, before: null },
-          to: { cursor: "sigOlder", before: null },
+          from: scanAt({}),
+          to: scanAt({ cursor: "sigOlder" }),
         });
         const staleBefore = await repo.advanceSignatureScan({
           ...scanKey(created),
-          from: { cursor: "sigNewer", before: "sigOther" },
-          to: { cursor: "sigOlder", before: null },
+          from: scanAt({ cursor: "sigNewer", before: "sigOther" }),
+          to: scanAt({ cursor: "sigOlder" }),
         });
 
         expect(stale).toBe(false);
@@ -1201,14 +1222,42 @@ describe("PaymentRequestsRepository (postgres)", () => {
         });
       });
 
+      it("does not overwrite a position whose stuck signature changed meanwhile", async () => {
+        const created = await repo.createPaymentRequest(createInput());
+        await repo.advanceSignatureScan({
+          ...scanKey(created),
+          from: scanAt({}),
+          to: scanAt({ stuckSignature: "sigStuck", stuckSince: PAST }),
+        });
+
+        const staleStuck = await repo.advanceSignatureScan({
+          ...scanKey(created),
+          from: scanAt({ stuckSignature: "sigStuck", stuckSince: FUTURE }),
+          to: scanAt({ cursor: "sigStuck" }),
+        });
+        const staleClear = await repo.advanceSignatureScan({
+          ...scanKey(created),
+          from: scanAt({}),
+          to: scanAt({ stuckSignature: "sigOther", stuckSince: FUTURE }),
+        });
+
+        expect(staleStuck).toBe(false);
+        expect(staleClear).toBe(false);
+        expect(await repo.getPaymentRequestById(scanKey(created))).toMatchObject({
+          signature_scan_cursor: null,
+          signature_scan_stuck_signature: "sigStuck",
+          signature_scan_stuck_since: PAST,
+        });
+      });
+
       it("does not move another project's scan position", async () => {
         const created = await repo.createPaymentRequest(createInput());
 
         const advanced = await repo.advanceSignatureScan({
           ...scanKey(created),
           projectId: `${TEST_PROJECT_ID}_production`,
-          from: { cursor: null, before: null },
-          to: { cursor: "sigA", before: null },
+          from: scanAt({}),
+          to: scanAt({ cursor: "sigA" }),
         });
 
         expect(advanced).toBe(false);
@@ -1227,8 +1276,8 @@ describe("PaymentRequestsRepository (postgres)", () => {
         expect(
           await tenant.advanceSignatureScan({
             ...scanKey(created),
-            from: { cursor: null, before: null },
-            to: { cursor: "sigA", before: null },
+            from: scanAt({}),
+            to: scanAt({ cursor: "sigA" }),
           })
         ).toBe(true);
       });

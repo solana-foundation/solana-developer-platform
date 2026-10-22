@@ -29,7 +29,10 @@ import {
   vi,
 } from "vitest";
 import { getDb } from "@/db/client";
-import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
+import type {
+  PaymentRequestRow,
+  SignatureScanPosition,
+} from "@/db/repositories/payment-requests.repository";
 import * as repositoryFactory from "@/db/repositories/repository-factory";
 import {
   createPaymentRequestsRepository,
@@ -949,7 +952,8 @@ describe("closeLapsedPaymentRequest while a payment is indexing", () => {
   });
 
   describe("when a listed signature stays unreadable", () => {
-    const secondsAgo = (seconds: number) => BigInt(Math.floor(Date.now() / 1000) - seconds);
+    const HOUR_MS = 60 * 60 * 1000;
+    const isoAgo = (ms: number) => new Date(Date.now() - ms).toISOString();
     const unreadableVerdicts = [
       {
         reason: "not_indexed",
@@ -977,13 +981,54 @@ describe("closeLapsedPaymentRequest while a payment is indexing", () => {
       },
     ];
 
+    function expectNoGiveUp(logSpy: MockInstance<typeof moneyPathEvents.logEvent>) {
+      expect(logSpy).not.toHaveBeenCalledWith(
+        "warn",
+        expect.objectContaining({ event: "payment_requests.signature_unreadable" })
+      );
+    }
+
+    function expectRecentlyStuck(stored: PaymentRequestRow, sig: Signature) {
+      expect(stored.signature_scan_stuck_signature).toBe(sig);
+      expect(Date.now() - Date.parse(stored.signature_scan_stuck_since ?? "")).toBeLessThan(60_000);
+    }
+
     it.for(unreadableVerdicts)(
-      "gives up on a $reason signature listed over an hour ago and stores expired",
-      async ({ reason, setup }) => {
+      "keeps waiting on an hours-old $reason payment after one unreadable check, then settles it",
+      async ({ setup }) => {
         const logSpy = vi.spyOn(moneyPathEvents, "logEvent");
-        mockSignatures(signatureInfo(SIGNATURE, { blockTime: secondsAgo(2 * 60 * 60) }));
+        const listedHoursAgo = BigInt(Math.floor((Date.now() - 2 * HOUR_MS) / 1000));
+        mockSignatures(signatureInfo(SIGNATURE, { blockTime: listedHoursAgo }));
         setup();
         const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
+
+        const first = await onSandbox(() => closeLapsedPaymentRequest(env, request));
+
+        expect(first.status).toBe("awaiting_payment");
+        const stored = await readStored(request.id);
+        expect(stored).toMatchObject({ status: "awaiting_payment", signature_scan_cursor: null });
+        expectRecentlyStuck(stored, SIGNATURE);
+        expectNoGiveUp(logSpy);
+
+        verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
+        validateTransferSpy.mockResolvedValue(validatedTransfer());
+        const second = await onSandbox(() => closeLapsedPaymentRequest(env, stored));
+
+        expect(second.status).toBe("paid");
+        expect(await listInboundTransfers()).toMatchObject([{ signature: SIGNATURE }]);
+      }
+    );
+
+    it.for(unreadableVerdicts)(
+      "gives up on a signature that stayed $reason for over an hour and stores expired",
+      async ({ reason, setup }) => {
+        const logSpy = vi.spyOn(moneyPathEvents, "logEvent");
+        mockSignatures(signatureInfo(SIGNATURE));
+        setup();
+        const request = await storeScanPosition(
+          await createRequest({ token: SOL_MINT, expiresAt: PAST }),
+          { stuckSignature: SIGNATURE, stuckSince: isoAgo(HOUR_MS + 60_000) }
+        );
 
         const result = await onSandbox(() => closeLapsedPaymentRequest(env, request));
 
@@ -991,6 +1036,8 @@ describe("closeLapsedPaymentRequest while a payment is indexing", () => {
         expect(await readStored(request.id)).toMatchObject({
           status: "expired",
           signature_scan_cursor: SIGNATURE,
+          signature_scan_stuck_signature: null,
+          signature_scan_stuck_since: null,
         });
         expect(logSpy).toHaveBeenCalledWith("warn", {
           event: "payment_requests.signature_unreadable",
@@ -1002,55 +1049,109 @@ describe("closeLapsedPaymentRequest while a payment is indexing", () => {
       }
     );
 
-    it.for(unreadableVerdicts)(
-      "keeps waiting on a $reason signature listed minutes ago",
-      async ({ setup }) => {
-        const logSpy = vi.spyOn(moneyPathEvents, "logEvent");
-        mockSignatures(signatureInfo(SIGNATURE, { blockTime: secondsAgo(5 * 60) }));
-        setup();
-        const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
-
-        const result = await onSandbox(() => closeLapsedPaymentRequest(env, request));
-
-        expect(result.status).toBe("awaiting_payment");
-        expect(await readStored(request.id)).toMatchObject({
-          status: "awaiting_payment",
-          signature_scan_cursor: null,
-        });
-        expect(logSpy).not.toHaveBeenCalledWith(
-          "warn",
-          expect.objectContaining({ event: "payment_requests.signature_unreadable" })
-        );
-      }
-    );
-
-    it("keeps waiting on an unreadable signature listed without a block time", async () => {
-      mockSignatures(signatureInfo(SIGNATURE, { blockTime: null }));
+    it("keeps waiting on a signature unreadable for less than an hour without restarting its clock", async () => {
+      const logSpy = vi.spyOn(moneyPathEvents, "logEvent");
+      mockSignatures(signatureInfo(SIGNATURE));
       verifyTransactionLandedSpy.mockResolvedValue({ ok: false, reason: "not_indexed" });
-      const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
+      const stuckSince = isoAgo(50 * 60_000);
+      const request = await storeScanPosition(
+        await createRequest({ token: SOL_MINT, expiresAt: PAST }),
+        { stuckSignature: SIGNATURE, stuckSince }
+      );
 
       const result = await onSandbox(() => closeLapsedPaymentRequest(env, request));
 
       expect(result.status).toBe("awaiting_payment");
-      expect(await readStored(request.id)).toMatchObject({ signature_scan_cursor: null });
+      expect(await readStored(request.id)).toMatchObject({
+        signature_scan_cursor: null,
+        signature_scan_stuck_signature: SIGNATURE,
+        signature_scan_stuck_since: stuckSince,
+      });
+      expectNoGiveUp(logSpy);
+    });
+
+    it("restarts the clock when a different signature becomes the first unreadable one", async () => {
+      const logSpy = vi.spyOn(moneyPathEvents, "logEvent");
+      mockSignatures(signatureInfo(SIGNATURE));
+      verifyTransactionLandedSpy.mockResolvedValue({ ok: false, reason: "not_indexed" });
+      const request = await storeScanPosition(
+        await createRequest({ token: SOL_MINT, expiresAt: PAST }),
+        { stuckSignature: FAILED_SIGNATURE, stuckSince: isoAgo(2 * HOUR_MS) }
+      );
+
+      const result = await onSandbox(() => closeLapsedPaymentRequest(env, request));
+
+      expect(result.status).toBe("awaiting_payment");
+      const stored = await readStored(request.id);
+      expect(stored.signature_scan_cursor).toBeNull();
+      expectRecentlyStuck(stored, SIGNATURE);
+      expectNoGiveUp(logSpy);
+    });
+
+    it("tracks only the oldest unreadable signature", async () => {
+      mockSignatures(signatureInfo(LATER_SIGNATURE), signatureInfo(SIGNATURE));
+      verifyTransactionLandedSpy.mockResolvedValue({ ok: false, reason: "not_indexed" });
+      const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
+
+      await onSandbox(() => closeLapsedPaymentRequest(env, request));
+
+      expectRecentlyStuck(await readStored(request.id), SIGNATURE);
+    });
+
+    it("clears the stuck signature once it reads as definitive", async () => {
+      mockSignatures(signatureInfo(SIGNATURE));
+      verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
+      validateTransferSpy.mockRejectedValue(new ValidateTransferError("wrong amount"));
+      const request = await storeScanPosition(
+        await createRequest({ token: SOL_MINT, expiresAt: PAST }),
+        { stuckSignature: SIGNATURE, stuckSince: isoAgo(5 * 60_000) }
+      );
+
+      const result = await onSandbox(() => closeLapsedPaymentRequest(env, request));
+
+      expect(result.status).toBe("expired");
+      expect(await readStored(request.id)).toMatchObject({
+        signature_scan_cursor: SIGNATURE,
+        signature_scan_stuck_signature: null,
+        signature_scan_stuck_since: null,
+      });
+    });
+
+    it("starts the clock on the next unreadable signature after giving up on one", async () => {
+      mockSignatures(signatureInfo(LATER_SIGNATURE), signatureInfo(SIGNATURE));
+      verifyTransactionLandedSpy.mockResolvedValue({ ok: false, reason: "not_indexed" });
+      const request = await storeScanPosition(
+        await createRequest({ token: SOL_MINT, expiresAt: PAST }),
+        { stuckSignature: SIGNATURE, stuckSince: isoAgo(2 * HOUR_MS) }
+      );
+
+      const result = await onSandbox(() => closeLapsedPaymentRequest(env, request));
+
+      expect(result.status).toBe("awaiting_payment");
+      const stored = await readStored(request.id);
+      expect(stored.signature_scan_cursor).toBe(SIGNATURE);
+      expectRecentlyStuck(stored, LATER_SIGNATURE);
     });
 
     it("settles a valid payment listed after an abandoned unreadable signature", async () => {
-      mockSignatures(
-        signatureInfo(LATER_SIGNATURE),
-        signatureInfo(SIGNATURE, { blockTime: secondsAgo(2 * 60 * 60) })
-      );
+      mockSignatures(signatureInfo(LATER_SIGNATURE), signatureInfo(SIGNATURE));
       verifyTransactionLandedSpy.mockImplementation(async (_rpc, sig) =>
         sig === SIGNATURE ? { ok: false, reason: "not_indexed" } : verifiedOk()
       );
       validateTransferSpy.mockResolvedValue(validatedTransfer());
-      const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+      const request = await storeScanPosition(
+        await createRequest({ token: SOL_MINT, expiresAt: null }),
+        { stuckSignature: SIGNATURE, stuckSince: isoAgo(2 * HOUR_MS) }
+      );
 
       const result = await reconcileOnSandbox(request);
 
       expect(result.status).toBe("paid");
       expect(await listInboundTransfers()).toMatchObject([{ signature: LATER_SIGNATURE }]);
-      expect(await readStored(request.id)).toMatchObject({ signature_scan_cursor: SIGNATURE });
+      expect(await readStored(request.id)).toMatchObject({
+        signature_scan_cursor: SIGNATURE,
+        signature_scan_stuck_signature: null,
+      });
     });
   });
 
@@ -1115,10 +1216,7 @@ async function checkUntilSettled(request: PaymentRequestRow, maxChecks: number) 
   return row;
 }
 
-async function storeScanPosition(
-  request: PaymentRequestRow,
-  to: { cursor: string | null; before: string | null }
-) {
+async function storeScanPosition(request: PaymentRequestRow, to: Partial<SignatureScanPosition>) {
   await createPaymentRequestsRepository(
     env,
     createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID })
@@ -1126,8 +1224,8 @@ async function storeScanPosition(
     requestId: request.id,
     organizationId: TEST_ORG.id,
     projectId: TEST_PROJECT_ID,
-    from: { cursor: null, before: null },
-    to,
+    from: { cursor: null, before: null, stuckSignature: null, stuckSince: null },
+    to: { cursor: null, before: null, stuckSignature: null, stuckSince: null, ...to },
   });
   return readStored(request.id);
 }
