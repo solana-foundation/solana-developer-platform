@@ -3,6 +3,7 @@ import { currentClusterScope } from "@sdp/rpc/scope";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
 import { createSystemPaymentRequestsRepository } from "@/db/repositories/repository-factory";
+import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { describeError, logEvent } from "@/runtime/money-path-events";
 import {
   checkAwaitingPaymentRequest,
@@ -115,32 +116,35 @@ async function checkEach(
   check: RowCheck,
   lane: Lane
 ): Promise<void> {
+  const results = await mapSettledWithConcurrency([...rows], CHECK_CONCURRENCY, (row) =>
+    check(env, row)
+  );
   let failed = 0;
   let settled = 0;
-  await forEachConcurrently(rows, CHECK_CONCURRENCY, async (row) => {
-    try {
-      const after = await check(env, row);
-      if (after.status !== row.status) {
+  for (const [index, row] of rows.entries()) {
+    const result = results[index];
+    if (result?.status === "fulfilled") {
+      if (result.value.status !== row.status) {
         settled += 1;
         logEvent("info", {
           event: "payment_requests.settled",
           lane,
           payment_request_id: row.id,
           from: row.status,
-          to: after.status,
-          paid_late: after.paid_late,
+          to: result.value.status,
+          paid_late: result.value.paid_late,
         });
       }
-    } catch (error) {
-      failed += 1;
-      logEvent("error", {
-        event: "payment_requests.check_failed",
-        lane,
-        payment_request_id: row.id,
-        ...describeError(error),
-      });
+      continue;
     }
-  });
+    failed += 1;
+    logEvent("error", {
+      event: "payment_requests.check_failed",
+      lane,
+      payment_request_id: row.id,
+      ...describeError(result?.reason),
+    });
+  }
   if (rows.length > 0) {
     await createSystemPaymentRequestsRepository(env).markPaymentRequestsChecked(
       rows.map((row) => row.id)
@@ -154,18 +158,4 @@ async function checkEach(
     failed,
     settled,
   });
-}
-
-async function forEachConcurrently<T>(
-  items: readonly T[],
-  concurrency: number,
-  run: (item: T) => Promise<void>
-): Promise<void> {
-  const queue = items.values();
-  const worker = async () => {
-    for (const item of queue) {
-      await run(item);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
 }
