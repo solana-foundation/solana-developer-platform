@@ -1,3 +1,4 @@
+import { SdpRpcError } from "@sdp/rpc/errors";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { verifyTransactionLanded } from "@sdp/rpc/verified-confirmation";
 import { assertValidAddress } from "@sdp/solana/address";
@@ -69,7 +70,12 @@ export async function reconcilePaymentRequest(
   try {
     return await settlePaymentRequestIfPaid(env, row, row.custody_wallet_id);
   } catch (err) {
-    if (!options.bestEffort || err instanceof AppError) {
+    // Best effort degrades on RPC transport failures only; configuration and scope errors stay loud.
+    if (
+      !options.bestEffort ||
+      err instanceof AppError ||
+      (err instanceof SdpRpcError && err.code !== "SOLANA_RPC_ERROR")
+    ) {
       throw err;
     }
     getLogger().error(
