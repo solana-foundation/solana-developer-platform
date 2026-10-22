@@ -40,7 +40,9 @@ const PAY_LINK_TOKEN_PATTERN = /\/pay\/[^/\s?#"'<>\\]+/g;
 // a URL carries it: plain, URL-encoded inside another parameter (once or more,
 // `%3D`, `%253D`, ...), or as a serialized JSON field.
 const CLERK_TICKET_PATTERN = /(__clerk_ticket(?:=|%(?:25)*3D))[^&\s"'#%<>]+/gi;
-const CLERK_TICKET_FIELD_PATTERN = /(\\*["']__clerk_ticket\\*["']\s*:\s*\\*["'])[^"'\\]+/gi;
+// Starts only where a backslash run starts (the lookbehind), so a long run is
+// scanned once, as SENSITIVE_JSON_FIELD_START does.
+const CLERK_TICKET_FIELD_PATTERN = /(?<!\\)(\\*["']__clerk_ticket\\*["']\s*:\s*\\*["'])[^"'\\]+/gi;
 
 export function redactCredentialString(value: string): string {
   const withoutHeaders = value
