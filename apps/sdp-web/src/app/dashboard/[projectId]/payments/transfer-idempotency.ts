@@ -37,13 +37,14 @@ export function resetTransferIdempotencyStateForTests(): void {
 
 /**
  * What makes two sends the SAME payment: the source wallet, the destination, the
- * token, the amount and the memo. Change any one and it is a different payment,
- * not a retry.
+ * counterparty account, the token, the amount and the memo. Change any one and
+ * it is a different payment, not a retry.
  */
 export function transferRequestFingerprint(input: CreateTransferInput): string {
   return JSON.stringify([
     input.sourceCustodyWalletId,
     input.destination,
+    input.counterpartyAccountId === undefined ? null : input.counterpartyAccountId,
     input.token,
     input.amount,
     input.memo === undefined ? null : input.memo,

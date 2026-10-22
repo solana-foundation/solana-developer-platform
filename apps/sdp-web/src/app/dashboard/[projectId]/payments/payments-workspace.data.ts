@@ -541,6 +541,8 @@ export interface CreateTransferInput {
   transferId?: string;
   sourceCustodyWalletId: string;
   destination: string;
+  /** The counterparty account reviewed as the recipient; its address is `destination`. */
+  counterpartyAccountId?: string;
   token: Address;
   amount: string;
   memo?: string;
@@ -618,6 +620,7 @@ export async function createTransfer(
       ...(input.transferId ? { transferId: input.transferId } : {}),
       sourceCustodyWalletId: input.sourceCustodyWalletId,
       destination: input.destination,
+      counterpartyAccountId: input.counterpartyAccountId,
       token: input.token,
       amount: input.amount,
       ...(input.memo ? { memo: input.memo } : {}),

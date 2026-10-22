@@ -39,6 +39,7 @@ import { getTransferSolInstruction } from "@solana-program/system";
 import { z } from "zod";
 import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
+import type { CounterpartyAccountWithCounterpartyStatusRow } from "@/db/repositories/counterparty-account.repository";
 import {
   generatePaymentTransferId,
   type PaymentTransferDirection as TransferDirection,
@@ -77,7 +78,11 @@ import type { MovementStepInput, RecordAnswer } from "@/middleware/movement-step
 import { callerMayPerform } from "@/middleware/require-action";
 import { assertTransferRampProviderInChannel } from "@/middleware/require-module";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { type AppContext, getPaymentsRepository } from "@/routes/payments/context";
+import {
+  type AppContext,
+  getCounterpartyAccountsRepository,
+  getPaymentsRepository,
+} from "@/routes/payments/context";
 import { mapTransferRow } from "@/routes/payments/mappers";
 import { transferIdParamsSchema } from "@/routes/payments/schemas";
 import {
@@ -103,6 +108,7 @@ import {
   type OutboundPaymentOperation,
   resolveOutboundPaymentOperation,
 } from "@/services/payment-operation.service";
+import { resolveCounterpartyAccountDestination } from "@/services/payments/counterparty-account-resolution";
 import { createTransferSignedSubmissionStore } from "@/services/payments/signed-submission";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
@@ -131,6 +137,7 @@ async function createTransferRecord(
     projectId: string;
     custodyWalletId: string;
     walletId: string;
+    counterpartyId: string | null;
     sourceAddress: string;
     destinationAddress: string;
     token: string;
@@ -161,7 +168,7 @@ async function createTransferRecord(
       projectId: input.projectId,
       custodyWalletId: input.custodyWalletId,
       walletId: input.walletId,
-      counterpartyId: null,
+      counterpartyId: input.counterpartyId,
       sourceAddress: input.sourceAddress,
       destinationAddress: input.destinationAddress,
       token: input.token,
@@ -218,6 +225,8 @@ interface TransferResolved {
   operation: OutboundPaymentOperation;
   /** The ramp deposit a `transferId` request funds, in the caller's project, whatever its state. */
   rampTransfer: TransferRow | null;
+  /** The account a `counterpartyAccountId` request pays, in the caller's project, whatever its state. */
+  counterpartyAccount: CounterpartyAccountWithCounterpartyStatusRow | null;
 }
 
 function rampTransferHasOnchainValues(transfer: TransferRow): boolean {
@@ -399,19 +408,45 @@ export async function authorizeTransfer(
     });
     if (!rampTransfer) throw notFound("Ramp transfer");
   }
-  return { scope, operation, rampTransfer };
+  let counterpartyAccount: CounterpartyAccountWithCounterpartyStatusRow | null = null;
+  if (body.counterpartyAccountId !== undefined) {
+    // An off-ramp deposit pays the provider's deposit address, never a counterparty account.
+    if (body.transferId) {
+      throw badRequest("counterpartyAccountId cannot be combined with transferId");
+    }
+    const [account] = await getCounterpartyAccountsRepository(
+      c
+    ).listCounterpartyAccountsWithCounterpartyStatus({
+      counterpartyAccountIds: [body.counterpartyAccountId],
+      organizationId: scope.auth.organizationId,
+      projectId: requireProjectId(c),
+    });
+    if (!account) throw notFound("Counterparty account");
+    counterpartyAccount = account;
+  }
+  return { scope, operation, rampTransfer, counterpartyAccount };
 }
 
 /**
  * Admits a new transfer: the ramp provider is still in the release channel,
- * and the custody runtime takes the wallet (active, provider usable). State,
- * so it runs after the replay exits.
+ * a named counterparty account (and its counterparty) still takes money at
+ * the requested destination, and the custody runtime takes the wallet
+ * (active, provider usable). State, so it runs after the replay exits.
  */
 export async function admitTransferExecution(
   c: AppContext,
   input: MovementStepInput<TransferResolved>
 ): Promise<void> {
-  const { rampTransfer } = input.authorized;
+  const { rampTransfer, counterpartyAccount, operation } = input.authorized;
+  if (counterpartyAccount) {
+    const accountAddress = resolveCounterpartyAccountDestination({
+      account: counterpartyAccount,
+      field: "counterpartyAccountId",
+    });
+    if (accountAddress !== operation.destinationAddress) {
+      throw conflict("counterparty account address does not match destination");
+    }
+  }
   if (rampTransfer) {
     // An excluded provider's deposit is never funded.
     assertTransferRampProviderInChannel(c, rampTransfer);
@@ -867,7 +902,8 @@ function compareTransferRows(
 
 export async function createTransfer(c: ValidatedBodyContext<typeof createTransferSchema>) {
   const body = c.req.valid("json");
-  const { scope, operation, rampTransfer } = getAuthorized<TransferResolved>(c);
+  const { scope, operation, rampTransfer, counterpartyAccount } =
+    getAuthorized<TransferResolved>(c);
   // The credential-bound record key (ADR 0009), never the raw client key.
   const recordKey = getIdempotencyRecordKey(c);
   const fingerprint = getIdempotencyFingerprint(c);
@@ -890,6 +926,7 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
         projectId: requireProjectId(c),
         custodyWalletId: operation.sourceWallet.id,
         walletId: operation.sourceWallet.walletId,
+        counterpartyId: counterpartyAccount === null ? null : counterpartyAccount.counterparty_id,
         sourceAddress: operation.sourceWallet.publicKey,
         destinationAddress: body.destination,
         token: operation.token,

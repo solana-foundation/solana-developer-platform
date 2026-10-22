@@ -1,14 +1,18 @@
-import type {
-  CounterpartyAccountDetails,
-  CounterpartyAccountKind,
-  CounterpartyAccountProviderData,
-  CounterpartyAccountStatus,
+import {
+  COUNTERPARTY_STATUSES,
+  type CounterpartyAccountDetails,
+  type CounterpartyAccountKind,
+  type CounterpartyAccountProviderData,
+  type CounterpartyAccountStatus,
 } from "@sdp/types/counterparties";
+import { z } from "zod";
 import type { DatabaseClient as AppDb } from "@/db/client";
+import { internalError } from "@/lib/errors";
 import type {
   ArchiveCounterpartyAccountInput,
   CounterpartyAccountRow,
   CounterpartyAccountsRepository,
+  CounterpartyAccountWithCounterpartyStatusRow,
   CreateCounterpartyAccountInput,
   ListCounterpartyAccountsByCounterpartyInput,
   ListCounterpartyAccountsResult,
@@ -53,6 +57,24 @@ function mapCounterpartyAccountRow(row: Record<string, unknown>): CounterpartyAc
     created_at: assertString(row.created_at, "created_at"),
     updated_at: assertString(row.updated_at, "updated_at"),
   };
+}
+
+const counterpartyStatusSchema = z.enum(COUNTERPARTY_STATUSES);
+
+/**
+ * Maps a counterparty account row joined with its parent's `counterparty_status`.
+ *
+ * @param row - A `counterparty_accounts` row plus the joined `counterparty_status` column.
+ * @returns The account row with its parent counterparty's status.
+ */
+function mapCounterpartyAccountWithCounterpartyStatusRow(
+  row: Record<string, unknown>
+): CounterpartyAccountWithCounterpartyStatusRow {
+  const counterpartyStatus = counterpartyStatusSchema.safeParse(row.counterparty_status);
+  if (!counterpartyStatus.success) {
+    throw internalError(`Counterparty status is invalid: ${String(row.counterparty_status)}`);
+  }
+  return { ...mapCounterpartyAccountRow(row), counterparty_status: counterpartyStatus.data };
 }
 
 export function createPostgresCounterpartyAccountsRepository(
@@ -211,6 +233,28 @@ export function createPostgresCounterpartyAccountsRepository(
         .bind(...params.counterpartyAccountIds, params.organizationId, params.projectId)
         .all<Record<string, unknown>>();
       return result.results.map((row) => mapCounterpartyAccountRow(row));
+    },
+
+    async listCounterpartyAccountsWithCounterpartyStatus(params) {
+      if (params.counterpartyAccountIds.length === 0) {
+        return [];
+      }
+      const placeholders = params.counterpartyAccountIds.map(() => "?").join(", ");
+      const result = await db
+        .prepare(
+          `SELECT ca.*, c.status AS counterparty_status
+             FROM counterparty_accounts ca
+             JOIN counterparties c
+               ON c.id = ca.counterparty_id
+              AND c.organization_id = ca.organization_id
+              AND c.project_id = ca.project_id
+            WHERE ca.id IN (${placeholders})
+              AND ca.organization_id = ?
+              AND ca.project_id = ?`
+        )
+        .bind(...params.counterpartyAccountIds, params.organizationId, params.projectId)
+        .all<Record<string, unknown>>();
+      return result.results.map((row) => mapCounterpartyAccountWithCounterpartyStatusRow(row));
     },
 
     async listCounterpartyAccountsByCounterparty(

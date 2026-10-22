@@ -1,12 +1,15 @@
 import type { CounterpartyRow } from "@sdp/payments/counterparty";
 import { assertValidAddress } from "@sdp/solana/address";
 import type { Address } from "@solana/kit";
-import type { CounterpartyAccountRow } from "@/db/repositories/counterparty-account.repository";
+import type {
+  CounterpartyAccountRow,
+  CounterpartyAccountWithCounterpartyStatusRow,
+} from "@/db/repositories/counterparty-account.repository";
 import {
   createCounterpartiesRepository,
   createCounterpartyAccountsRepository,
 } from "@/db/repositories/repository-factory";
-import { AppError } from "@/lib/errors";
+import { AppError, badRequest, conflict } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import type { Env } from "@/types/env";
 
@@ -33,6 +36,44 @@ export function readSolanaCryptoWalletAddress(details: Record<string, unknown>):
   }
 
   return assertValidAddress(details.address, "details.address");
+}
+
+/**
+ * The Solana address new money to a counterparty account goes to: the one
+ * decision single transfers and transfer-batch recipients both make. The
+ * account and its counterparty must both be active (an archived counterparty
+ * does not archive its accounts), and the account must be a Solana crypto
+ * wallet with an address. It reads only the row the access check loaded, so a
+ * replay never reaches it.
+ *
+ * @param params.account - The named account with its counterparty's status, loaded whatever either status is.
+ * @param params.field - The request field that named the account (`counterpartyAccountId`, `recipients.2.counterpartyAccountId`), for error messages.
+ * @returns The validated destination address.
+ */
+export function resolveCounterpartyAccountDestination(params: {
+  account: CounterpartyAccountWithCounterpartyStatusRow;
+  field: string;
+}): Address {
+  const { account, field } = params;
+  if (account.status !== "active") {
+    throw conflict(`${field} references an archived counterparty account`);
+  }
+  if (account.counterparty_status !== "active") {
+    throw conflict(`${field} belongs to an archived counterparty`);
+  }
+  if (account.account_kind !== "crypto_wallet") {
+    throw badRequest(`${field} must be a crypto wallet account`);
+  }
+
+  const { network, address } = account.details;
+  if (network !== "solana") {
+    throw badRequest(`${field} must be a Solana wallet account`);
+  }
+  if (typeof address !== "string") {
+    throw badRequest(`${field} is missing a wallet address`);
+  }
+
+  return assertValidAddress(address, field);
 }
 
 export async function resolveSolanaCounterpartyAccount(input: {

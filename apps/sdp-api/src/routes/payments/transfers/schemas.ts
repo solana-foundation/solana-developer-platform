@@ -12,6 +12,7 @@ export const createTransferSchema = z.strictObject({
   transferId: z.string().min(1).optional(),
   sourceCustodyWalletId: z.string().min(1),
   destination: solanaAddressSchema("destination"),
+  counterpartyAccountId: z.string().min(1).optional(),
   token: paymentTokenSchema,
   amount: paymentAmountSchema,
   memo: z.string().max(256).optional(),

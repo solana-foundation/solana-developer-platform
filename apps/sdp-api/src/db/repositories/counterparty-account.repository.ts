@@ -3,6 +3,7 @@ import type {
   CounterpartyAccountKind,
   CounterpartyAccountProviderData,
   CounterpartyAccountStatus,
+  CounterpartyStatus,
 } from "@sdp/types/counterparties";
 import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
@@ -22,6 +23,11 @@ export interface CounterpartyAccountRow {
   status: CounterpartyAccountStatus;
   created_at: string;
   updated_at: string;
+}
+
+/** An account with its parent counterparty's status, read in one statement. */
+export interface CounterpartyAccountWithCounterpartyStatusRow extends CounterpartyAccountRow {
+  counterparty_status: CounterpartyStatus;
 }
 
 export interface CreateCounterpartyAccountInput {
@@ -130,6 +136,16 @@ export interface CounterpartyAccountsRepository {
      */
     status?: "active" | "any";
   }): Promise<CounterpartyAccountRow[]>;
+  /**
+   * The named accounts in the project with their parent counterparty's status,
+   * whatever either status is: an access check loads them, and whether new
+   * money may go to them is decided later from both statuses.
+   */
+  listCounterpartyAccountsWithCounterpartyStatus(params: {
+    counterpartyAccountIds: string[];
+    organizationId: string;
+    projectId: string;
+  }): Promise<CounterpartyAccountWithCounterpartyStatusRow[]>;
   listCounterpartyAccountsByCounterparty(
     params: ListCounterpartyAccountsByCounterpartyInput
   ): Promise<ListCounterpartyAccountsResult>;

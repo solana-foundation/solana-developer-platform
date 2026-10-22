@@ -4,7 +4,8 @@ import type { PersistedRampProviderId } from "./provider-access";
 export const COUNTERPARTY_ENTITY_TYPES = ["individual", "business"] as const;
 export type CounterpartyEntityType = (typeof COUNTERPARTY_ENTITY_TYPES)[number];
 
-export type CounterpartyStatus = "active" | "archived";
+export const COUNTERPARTY_STATUSES = ["active", "archived"] as const;
+export type CounterpartyStatus = (typeof COUNTERPARTY_STATUSES)[number];
 
 export type CounterpartyProviderData = Record<string, unknown>;
 

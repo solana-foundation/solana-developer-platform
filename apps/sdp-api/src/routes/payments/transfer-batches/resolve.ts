@@ -4,7 +4,7 @@ import { assertValidAddress } from "@sdp/solana/address";
 import { AmountError, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import { SOL_DECIMALS, SOL_MINT } from "@sdp/types/well-known-tokens";
 import type { Address } from "@solana/kit";
-import type { CounterpartyAccountRow } from "@/db/repositories/counterparty-account.repository";
+import type { CounterpartyAccountWithCounterpartyStatusRow } from "@/db/repositories/counterparty-account.repository";
 import { requireProjectId } from "@/lib/auth";
 import { badRequest, notFound } from "@/lib/errors";
 import { type AppContext, getCounterpartyAccountsRepository } from "@/routes/payments/context";
@@ -23,6 +23,7 @@ import {
   isNativePaymentToken,
   normalizePaymentToken,
 } from "@/services/payment-operation.service";
+import { resolveCounterpartyAccountDestination } from "@/services/payments/counterparty-account-resolution";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type {
   CreateTransferBatchInput,
@@ -90,33 +91,9 @@ async function resolveTokenContext(
 }
 
 /**
- * Reads the Solana wallet address off a counterparty account, rejecting
- * non-crypto and non-Solana accounts with a 400 response.
- *
- * @param account - Counterparty account row referenced by the recipient.
- * @param index - Recipient index, used in error messages.
- * @returns The validated destination address.
- */
-function readCryptoWalletAddress(account: CounterpartyAccountRow, index: number): Address {
-  if (account.account_kind !== "crypto_wallet") {
-    throw badRequest(`recipients.${index}.counterpartyAccountId must be a crypto wallet account`);
-  }
-
-  const { network, address } = account.details;
-  if (network !== "solana") {
-    throw badRequest(`recipients.${index}.counterpartyAccountId must be a Solana wallet account`);
-  }
-  if (typeof address !== "string") {
-    throw badRequest(`recipients.${index}.counterpartyAccountId is missing a wallet address`);
-  }
-
-  return assertValidAddress(address, `recipients.${index}.counterpartyAccountId`);
-}
-
-/**
  * Resolves recipient inputs against the counterparty accounts `authorize`
- * loaded, normalizing amounts. An account archived since is refused here, as
- * new work, never in the access check.
+ * loaded, normalizing amounts. An account or counterparty archived since is
+ * refused here, as new work, never in the access check.
  *
  * @param params.recipients - Recipient inputs from the request body.
  * @param params.accounts - The named accounts, by id, as authorize loaded them.
@@ -125,14 +102,18 @@ function readCryptoWalletAddress(account: CounterpartyAccountRow, index: number)
  */
 function resolveRecipients(params: {
   recipients: TransferBatchRecipientInput[];
-  accounts: ReadonlyMap<string, CounterpartyAccountRow>;
+  accounts: ReadonlyMap<string, CounterpartyAccountWithCounterpartyStatusRow>;
   decimals: number;
 }): ResolvedRecipient[] {
   return params.recipients.map((recipient, index) => {
     const account = params.accounts.get(recipient.counterpartyAccountId);
-    if (account?.status !== "active") {
+    if (!account) {
       throw notFound(`Counterparty account ${recipient.counterpartyAccountId}`);
     }
+    const destinationAddress = resolveCounterpartyAccountDestination({
+      account,
+      field: `recipients.${index}.counterpartyAccountId`,
+    });
 
     const amountBaseUnits = parseRecipientAmount(recipient.amount, params.decimals);
     return {
@@ -140,7 +121,7 @@ function resolveRecipients(params: {
       externalId: recipient.externalId ?? null,
       counterpartyId: account.counterparty_id,
       counterpartyAccountId: recipient.counterpartyAccountId,
-      destinationAddress: readCryptoWalletAddress(account, index),
+      destinationAddress,
       amount: formatDecimalAmount(amountBaseUnits, params.decimals),
       amountBaseUnits,
     };
@@ -153,8 +134,8 @@ export interface AuthorizedBatchRequest {
   projectId: string;
   sourceWallet: CustodyWallet;
   sourceAddress: Address;
-  /** Every account the recipients name, whatever its status. */
-  accounts: ReadonlyMap<string, CounterpartyAccountRow>;
+  /** Every account the recipients name, with its counterparty's status, whatever either is. */
+  accounts: ReadonlyMap<string, CounterpartyAccountWithCounterpartyStatusRow>;
 }
 
 /**
@@ -179,11 +160,12 @@ export async function authorizeBatchRequest(
 
   const sourceAddress = assertValidAddress(sourceWallet.publicKey, "source");
 
-  const rows = await getCounterpartyAccountsRepository(c).listCounterpartyAccountsByIdsInProject({
+  const rows = await getCounterpartyAccountsRepository(
+    c
+  ).listCounterpartyAccountsWithCounterpartyStatus({
     counterpartyAccountIds: [...new Set(input.recipients.map((r) => r.counterpartyAccountId))],
     organizationId: scope.auth.organizationId,
     projectId,
-    status: "any",
   });
   const accounts = new Map(rows.map((account) => [account.id, account]));
   for (const recipient of input.recipients) {

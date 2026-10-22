@@ -97,6 +97,7 @@ export function resolveReadySubmission(
   const baseSubmission = {
     sourceCustodyWalletId: fields.walletId,
     destination: destinationAddress,
+    counterpartyAccountId: fields.accountId,
     token: address(selectedMint),
     amount: fields.amount,
   };
