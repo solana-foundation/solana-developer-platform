@@ -295,6 +295,28 @@ describe("redactCredentialString: escaped quotes", () => {
   });
 });
 
+describe("redactCredentialString: Clerk invitation tickets", () => {
+  const ticket = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ0aWNrZXRfc3ludGhldGljIn0.c3ludGhldGljX3NpZw";
+
+  for (const { form, url, redacted } of [
+    {
+      form: "plain",
+      url: `https://dash.example.test/sign-in?__clerk_ticket=${ticket}&x=1`,
+      redacted: "https://dash.example.test/sign-in?__clerk_ticket=[REDACTED]&x=1",
+    },
+    {
+      form: "URL-encoded inside redirect_url",
+      url: `https://dash.example.test/sign-in?redirect_url=https%3A%2F%2Fdash.example.test%2Fdashboard%3F__clerk_ticket%3D${ticket}%26x%3D1`,
+      redacted:
+        "https://dash.example.test/sign-in?redirect_url=https%3A%2F%2Fdash.example.test%2Fdashboard%3F__clerk_ticket%3D[REDACTED]%26x%3D1",
+    },
+  ]) {
+    it(`redacts the ${form} ticket and keeps the rest of the URL`, () => {
+      assert.equal(redactCredentialString(url), redacted);
+    });
+  }
+});
+
 describe("scrubTelemetryString — pathological input", () => {
   // Regression guard for a quadratic rescan (CodeQL js/polynomial-redos): the
   // email pattern's local part used to be retried at every offset inside one
