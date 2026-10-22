@@ -31,10 +31,11 @@ import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import {
   clusterOfRpcClient,
   ENVIRONMENT_CLUSTER_CASES,
-  installClusterRpcStub,
+  installClusterRpcResponder,
 } from "@/test/helpers/cluster-rpc";
 import { seedUnreadPrivyWallet } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
+import { syntheticAddress } from "@/test/helpers/parsed-transactions";
 import {
   createKoraAdapterMock,
   getRecentBlockhashMock,
@@ -51,6 +52,7 @@ import {
   TEST_MOCK_FEE_PAYER,
   TEST_MOCK_FEE_PAYER_KEY_PAIR,
 } from "@/test/helpers/sponsor-signing";
+import { respondMintAccounts, scaledUiAmountConfig } from "@/test/helpers/token-mints";
 
 interface RequestWallet {
   projectId: string;
@@ -102,7 +104,7 @@ const sponsoredGrantMetadataSchema = z.object({
 
 describe("Public payment request routes", () => {
   installPaymentsRouteTestHooks();
-  const rpc = installClusterRpcStub();
+  const rpc = installClusterRpcResponder();
 
   beforeEach(() => {
     rpc.answer("getSignaturesForAddress", []);
@@ -110,6 +112,10 @@ describe("Public payment request routes", () => {
   });
 
   function createAwaitingPaymentRequest(wallet: RequestWallet) {
+    return createAwaitingTokenPaymentRequest(wallet, SOL_MINT);
+  }
+
+  function createAwaitingTokenPaymentRequest(wallet: RequestWallet, token: string) {
     return createPaymentRequestsRepository(
       env,
       createTenantScope({ organizationId: TEST_ORG.id, projectId: wallet.projectId })
@@ -119,7 +125,7 @@ describe("Public payment request routes", () => {
       custodyWalletId: wallet.custodyWalletId,
       walletId: wallet.walletId,
       destinationAddress: wallet.publicKey,
-      token: SOL_MINT,
+      token,
       amount: "1.5",
       expiresAt: null,
       createdBy: TEST_USER.id,
@@ -517,6 +523,52 @@ describe("Public payment request routes", () => {
       expect(sponsorship).not.toHaveBeenCalled();
 
       expect((await postTransaction(request.public_token)).status).toBe(200);
+    });
+
+    it("refuses a request in a mint whose extension rescales amounts before claiming or signing", async () => {
+      const sign = vi.fn(sponsorSignTestTransaction);
+      stubSponsorship().mockImplementation(() => ({
+        providerId: "test",
+        getFeePayer: async () => TEST_MOCK_FEE_PAYER,
+        signAsFeePayer: sign,
+        getSponsorshipConfiguration: () => Promise.reject(new Error("not used")),
+        prepareOwnedSubmission: () => Promise.reject(new Error("not used")),
+      }));
+      const mint = syntheticAddress(355);
+      const clockUnixTimestamp = 1_750_000_000n;
+      respondMintAccounts(rpc, {
+        mints: new Map([
+          [
+            mint,
+            {
+              decimals: 6,
+              extensions: [
+                scaledUiAmountConfig({
+                  multiplier: 2,
+                  newMultiplier: 2,
+                  newMultiplierEffectiveTimestamp: clockUnixTimestamp,
+                }),
+              ],
+            },
+          ],
+        ]),
+        clockUnixTimestamp,
+      });
+      const request = await createAwaitingTokenPaymentRequest(SANDBOX_REQUEST_WALLET, mint);
+
+      const response = await postTransaction(request.public_token);
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: {
+          code: "BAD_REQUEST",
+          message: "Payments do not support the ScaledUiAmountConfig mint extension",
+        },
+      });
+      expect(sign).not.toHaveBeenCalled();
+      expect(
+        await createSystemPaymentRequestsRepository(env).getSponsoredTransactionClaim(request.id)
+      ).toBeNull();
     });
   });
 });
