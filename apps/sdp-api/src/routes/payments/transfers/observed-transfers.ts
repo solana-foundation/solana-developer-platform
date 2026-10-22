@@ -150,16 +150,13 @@ function flattenParsedInstructions(
 
 /**
  * Builds the id of a synthesized observed transfer row. One transfer
- * instruction yields one row, and the instruction position keeps movements
- * that share a signature, endpoints, token and amount apart.
+ * instruction yields one row per wallet and direction, so the instruction
+ * position keeps movements that share a signature apart.
  *
  * @param params - The row's identifying fields.
  * @param params.walletId - The SDP wallet the row is listed under.
  * @param params.signature - The transaction signature.
  * @param params.position - The instruction position from flattenParsedInstructions.
- * @param params.sourceAddress - The row's source address.
- * @param params.destinationAddress - The row's destination address.
- * @param params.token - The moved token's mint.
  * @param params.direction - The row's direction relative to the wallet.
  * @returns The `xfr_observed_` row id.
  */
@@ -167,12 +164,9 @@ function observedTransferRowId(params: {
   walletId: string;
   signature: string;
   position: string;
-  sourceAddress: string;
-  destinationAddress: string;
-  token: string;
   direction: TransferDirection;
 }): string {
-  return `xfr_observed_${params.walletId}_${params.signature}_${params.position}_${params.sourceAddress}_${params.destinationAddress}_${params.token}_${params.direction}`;
+  return `xfr_observed_${params.walletId}_${params.signature}_${params.position}_${params.direction}`;
 }
 
 function resolveObservedTimestamp(blockTime: bigint | number | null | undefined): string {
@@ -574,9 +568,6 @@ function buildObservedTransferRows(
           walletId,
           signature,
           position,
-          sourceAddress,
-          destinationAddress,
-          token: SOL_MINT,
           direction,
         }),
         organization_id: context.organizationId,
@@ -667,9 +658,6 @@ function buildObservedTransferRows(
           walletId: destinationWalletId,
           signature,
           position,
-          sourceAddress,
-          destinationAddress,
-          token: mint,
           direction,
         }),
         organization_id: context.organizationId,
@@ -769,9 +757,6 @@ function buildObservedTransferRows(
         walletId,
         signature,
         position,
-        sourceAddress,
-        destinationAddress,
-        token: mint,
         direction,
       }),
       organization_id: context.organizationId,
