@@ -352,7 +352,7 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
                 pr.sponsored_tx_last_valid_block_height IS NULL
                 OR pr.sponsored_tx_last_valid_block_height < ?
               )
-            ORDER BY pr.expires_at DESC, pr.id DESC
+            ORDER BY pr.last_checked_at ASC NULLS FIRST, pr.expires_at ASC, pr.id ASC
             LIMIT ?`
         )
         .bind(environment, checkedBefore, liveClaimMinLastValidBlockHeight.toString(), limit)
@@ -465,6 +465,26 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
         .first<{ stale: number }>();
       if (!row) {
         throw internalError("payment_requests stale COUNT returned no row");
+      }
+      return row.stale;
+    },
+
+    async countStaleLapsedPaymentRequests({ environment, checkedBefore }) {
+      const row = await db
+        .prepare(
+          `SELECT COUNT(*)::int AS stale FROM payment_requests pr
+             JOIN projects p ON p.id = pr.project_id
+            WHERE p.environment = ?
+              AND pr.status = 'awaiting_payment'
+              AND pr.custody_wallet_id IS NOT NULL
+              AND pr.expires_at IS NOT NULL
+              AND pr.expires_at <= sdp_iso_now()
+              AND COALESCE(pr.last_checked_at, pr.expires_at) < ?`
+        )
+        .bind(environment, checkedBefore)
+        .first<{ stale: number }>();
+      if (!row) {
+        throw internalError("payment_requests lapsed stale COUNT returned no row");
       }
       return row.stale;
     },

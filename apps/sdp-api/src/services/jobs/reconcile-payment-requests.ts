@@ -20,6 +20,7 @@ const SWEEP_MIN_RECHECK_MS = 45_000;
 const SWEEP_AGED_RECHECK_MS = 10 * 60_000;
 const SWEEP_AGED_AFTER_MS = 24 * 60 * 60_000;
 const EXPIRY_MIN_RECHECK_MS = 45_000;
+const EXPIRY_STALE_AFTER_MS = 10 * 60_000;
 const HOT_LANE_BLOCK_MARGIN = 150n;
 const LATE_PAYMENT_WATCH_MS = 7 * 24 * 60 * 60_000;
 const LATE_PAYMENT_RECHECK_MS = 10 * 60_000;
@@ -66,6 +67,13 @@ export async function expirePaymentRequests(env: Env): Promise<void> {
   const { environment } = currentClusterScope();
   const repo = createSystemPaymentRequestsRepository(env);
   const blockHeight = await createClusterRpc().getBlockHeight({ commitment: "confirmed" }).send();
+  const staleLapsed = await repo.countStaleLapsedPaymentRequests({
+    environment,
+    checkedBefore: new Date(Date.now() - EXPIRY_STALE_AFTER_MS).toISOString(),
+  });
+  if (staleLapsed > 0) {
+    logEvent("warn", { event: "payment_requests.expiry_backlog", environment, stale: staleLapsed });
+  }
   const lapsed = await repo.listLapsedPaymentRequests({
     environment,
     checkedBefore: new Date(Date.now() - EXPIRY_MIN_RECHECK_MS).toISOString(),

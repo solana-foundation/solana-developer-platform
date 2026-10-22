@@ -165,6 +165,10 @@ export interface PaymentRequestsRepository {
     environment: SdpEnvironment;
     checkedBefore: string;
   }): Promise<number>;
+  countStaleLapsedPaymentRequests(params: {
+    environment: SdpEnvironment;
+    checkedBefore: string;
+  }): Promise<number>;
   countStaleLateWatchPaymentRequests(params: {
     environment: SdpEnvironment;
     expiredSince: string;

@@ -359,6 +359,36 @@ describe("expirePaymentRequests", () => {
     expect((await getRow(outside.id)).last_checked_at).toBe(PAST);
   });
 
+  it("logs the expiry backlog when lapsed rows go unchecked", async () => {
+    const log = vi.spyOn(moneyPathEvents, "logEvent");
+    vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);
+    const stale = await createRequest({ token: SOL_MINT, expiresAt: PAST });
+    await createRequest({ token: SOL_MINT, expiresAt: ago(MINUTE) });
+    await updateRow(stale.id, { last_checked_at: ago(DAY) });
+
+    await onSandbox(() => expirePaymentRequests(env));
+
+    expect(log).toHaveBeenCalledWith("warn", {
+      event: "payment_requests.expiry_backlog",
+      environment: "sandbox",
+      stale: 1,
+    });
+  });
+
+  it("does not report an expiry backlog for lapses checked recently", async () => {
+    const log = vi.spyOn(moneyPathEvents, "logEvent");
+    vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);
+    const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
+    await updateRow(request.id, { last_checked_at: ago(MINUTE) });
+
+    await onSandbox(() => expirePaymentRequests(env));
+
+    expect(log).not.toHaveBeenCalledWith(
+      "warn",
+      expect.objectContaining({ event: "payment_requests.expiry_backlog" })
+    );
+  });
+
   it("logs the late-watch backlog when expired rows go unchecked", async () => {
     const log = vi.spyOn(moneyPathEvents, "logEvent");
     vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);
