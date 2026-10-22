@@ -474,12 +474,23 @@ export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>)
     )
     .bind(clerkInvitation.id, invitationId, organizationId)
     .run();
+  // A sign-in can also accept the invitation while Clerk is inviting (a Clerk
+  // membership that survived a failed removal names the organization): the
+  // person joined, so the invite succeeded.
   if (recorded === 0) {
-    await clerk.revokeOrganizationInvitation({
-      organizationId: clerkOrgId,
-      invitationId: clerkInvitation.id,
-    });
-    throw conflict("The invitation was revoked while it was being sent");
+    const current = invitationStatusSchema.parse(
+      await getDb(c.env)
+        .prepare("SELECT status FROM invitations WHERE id = ? AND organization_id = ?")
+        .bind(invitationId, organizationId)
+        .first<Record<string, unknown>>()
+    );
+    if (current.status !== "accepted") {
+      await clerk.revokeOrganizationInvitation({
+        organizationId: clerkOrgId,
+        invitationId: clerkInvitation.id,
+      });
+      throw conflict("The invitation was revoked while it was being sent");
+    }
   }
 
   return created(c, {

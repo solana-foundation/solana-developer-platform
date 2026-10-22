@@ -217,7 +217,7 @@ export async function mirrorClerkMembershipDeletion(
 
 const pendingInvitationSchema = z.object({
   id: z.string(),
-  role: z.string(),
+  role: z.string().transform(normalizeOrganizationRole),
   expires_at: z.string(),
 });
 
@@ -235,7 +235,7 @@ const pendingInvitationSchema = z.object({
 export async function findPendingInvitation(
   db: DatabaseExecutor,
   params: { organizationId: string; email: string }
-): Promise<{ id: string; role: string; expiresAt: string } | null> {
+): Promise<{ id: string; role: OrganizationRole; expiresAt: string } | null> {
   const row = await db
     .prepare(
       `SELECT id, role, expires_at
@@ -268,21 +268,7 @@ async function revokePendingInvitations(
   organizationId: string,
   userId: string
 ): Promise<number> {
-  const emailRows = await tx
-    .prepare(
-      `SELECT email FROM users WHERE id = ?
-       UNION
-       SELECT email FROM auth_user_identities WHERE user_id = ? AND email IS NOT NULL`
-    )
-    .bind(userId, userId)
-    .all<{ email: string | null }>();
-  const emails = [
-    ...new Set(
-      emailRows.results
-        .map((row) => row.email?.trim().toLowerCase())
-        .filter((email): email is string => Boolean(email))
-    ),
-  ];
+  const emails = await personEmails(tx, userId);
   if (emails.length === 0) {
     return 0;
   }
@@ -294,6 +280,62 @@ async function revokePendingInvitations(
     )
     .bind(organizationId, ...emails)
     .run();
+}
+
+/**
+ * Every organization a deleted Clerk user still reaches: one where their
+ * membership is not removed, or one holding a pending invitation to any email
+ * SDP has for them (someone deleted before their first sign-in).
+ *
+ * @param db - The database.
+ * @param userId - The person.
+ * @returns The organization ids.
+ */
+export async function organizationsReachingPerson(
+  db: DatabaseExecutor,
+  userId: string
+): Promise<string[]> {
+  const emails = await personEmails(db, userId);
+  const invited =
+    emails.length === 0
+      ? ""
+      : `UNION
+         SELECT organization_id FROM invitations
+          WHERE status = 'pending' AND LOWER(email) IN (${emails.map(() => "?").join(", ")})`;
+  const rows = await db
+    .prepare(
+      `SELECT organization_id FROM organization_members WHERE user_id = ? AND status <> 'removed'
+       ${invited}`
+    )
+    .bind(userId, ...emails)
+    .all<{ organization_id: string }>();
+  return rows.results.map((row) => row.organization_id);
+}
+
+/**
+ * Every email SDP holds for the person, lowercased, since any of them could
+ * become the verified email a later sign-in is admitted on.
+ *
+ * @param db - The database or open transaction.
+ * @param userId - The person.
+ * @returns The distinct addresses.
+ */
+async function personEmails(db: DatabaseExecutor, userId: string): Promise<string[]> {
+  const emailRows = await db
+    .prepare(
+      `SELECT email FROM users WHERE id = ?
+       UNION
+       SELECT email FROM auth_user_identities WHERE user_id = ? AND email IS NOT NULL`
+    )
+    .bind(userId, userId)
+    .all<{ email: string | null }>();
+  return [
+    ...new Set(
+      emailRows.results
+        .map((row) => row.email?.trim().toLowerCase())
+        .filter((email): email is string => Boolean(email))
+    ),
+  ];
 }
 
 /**

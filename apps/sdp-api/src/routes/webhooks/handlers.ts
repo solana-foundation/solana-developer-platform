@@ -9,7 +9,7 @@ import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { Context } from "hono";
 import { getDb } from "@/db/client";
 import { createPostgresRampWebhookEventsRepository } from "@/db/repositories/ramp-webhook-event.repository";
-import { AppError } from "@/lib/errors";
+import { AppError, badRequest } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { getLogger } from "@/runtime/logger";
 import { type AuditLogEntry, AuditService } from "@/services/audit.service";
@@ -20,7 +20,10 @@ import {
 import { ClerkOrganizationsService } from "@/services/clerk-organizations.service";
 import { verifiedPrimaryEmailFromClerkUser } from "@/services/clerk-users.service";
 import { applyStoredRampWebhookEvent } from "@/services/jobs/replay-ramp-webhook-events";
-import { mirrorClerkMembershipDeletion } from "@/services/organization-membership.service";
+import {
+  mirrorClerkMembershipDeletion,
+  organizationsReachingPerson,
+} from "@/services/organization-membership.service";
 import type { WebhookProcessor } from "@/services/ramps/webhooks/processor";
 import {
   parseRampWebhookProvider,
@@ -217,29 +220,24 @@ async function mirrorMembershipDeletion(c: AppContext, data: OrganizationMembers
 }
 
 /**
- * Mirrors a deleted Clerk user into every organization they have not already
- * left. A deleted Clerk user never comes back, so no fresh read is needed.
+ * Mirrors a deleted Clerk user into every organization they still reach,
+ * through a membership or a pending invitation. A deleted Clerk user never
+ * comes back, so no fresh read is needed.
  *
  * @param c - The request context.
  * @param data - The deleted Clerk user.
  */
 async function mirrorUserDeletion(c: AppContext, data: DeletedObjectJSON) {
-  const userId = data.id ? await findClerkUserMapping(c, data.id) : null;
+  if (!data.id) {
+    throw badRequest("user.deleted event names no user");
+  }
+  const userId = await findClerkUserMapping(c, data.id);
   if (userId === null) {
     logIgnoredClerkEvent(c, "user", data.id);
     return;
   }
-  const memberships = await getDb(c.env)
-    .prepare(
-      "SELECT organization_id FROM organization_members WHERE user_id = ? AND status <> 'removed'"
-    )
-    .bind(userId)
-    .all<{ organization_id: string }>();
-  for (const membership of memberships.results) {
-    await auditedMembershipDeletionMirror(c, {
-      organizationId: membership.organization_id,
-      userId,
-    });
+  for (const organizationId of await organizationsReachingPerson(getDb(c.env), userId)) {
+    await auditedMembershipDeletionMirror(c, { organizationId, userId });
   }
 }
 

@@ -284,7 +284,7 @@ async function ensureMembership(
       throw unauthorized("Invitation to this organization has expired");
     }
 
-    const role = normalizeOrganizationRole(pendingInvite.role);
+    const role = pendingInvite.role;
     const memberId = `mem_${crypto.randomUUID()}`;
 
     // The claim, the membership, its project memberships and the audit record
