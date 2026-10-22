@@ -1,4 +1,5 @@
-import { isIdempotencyKeyOutcomeUnknown } from "@sdp/types/idempotency";
+import { isDecimalString } from "@sdp/solana/amount";
+import { isIdempotencyKeyOutcomeUnknown, normalizeDecimalString } from "@sdp/types/idempotency";
 import {
   isMoneyMovementInFlight,
   isMoneyMovementStatus,
@@ -232,4 +233,43 @@ export function storageFingerprint(material: string): string {
     hash = BigInt.asUintN(64, (hash ^ BigInt(byte)) * 0x100000001b3n);
   }
   return hash.toString(16).padStart(16, "0");
+}
+
+/**
+ * An amount as the dashboard both keys and sends it: a decimal string in its
+ * canonical spelling (`normalizeDecimalString`), so `"1.0"` and `"1"` are one
+ * payment to the browser's key as they are to the API's fingerprint. Anything
+ * that is not a decimal string is left as typed, for the API to refuse as typed.
+ */
+export function canonicalDecimalAmount(value: string): string {
+  return isDecimalString(value) ? normalizeDecimalString(value) : value;
+}
+
+const jsonValueSchema = z.json();
+
+/** A JSON value as `JSON.parse` returns it. */
+export type JsonValue = z.infer<typeof jsonValueSchema>;
+
+/** Parses JSON text into a {@link JsonValue}; throws on text that is not JSON. */
+export function parseJsonValue(text: string): JsonValue {
+  return jsonValueSchema.parse(JSON.parse(text));
+}
+
+/**
+ * Serializes a JSON value with object keys sorted by UTF-16 code unit and
+ * array order kept, so two bodies that differ only in key order produce the
+ * same text, as they produce the same fingerprint in sdp-api (`canonicalJson`).
+ */
+export function canonicalJson(value: JsonValue): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJson).join(",")}]`;
+  }
+  // Keys compare by UTF-16 code unit, as RFC 8785 orders them.
+  const members = Object.entries(value)
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([key, member]) => `${JSON.stringify(key)}:${canonicalJson(member)}`);
+  return `{${members.join(",")}}`;
 }

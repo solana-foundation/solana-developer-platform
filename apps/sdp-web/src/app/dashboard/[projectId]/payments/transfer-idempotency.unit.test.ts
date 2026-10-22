@@ -3,6 +3,7 @@
 
 import { address } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { MOVEMENT_POLL_INTERVAL_MS, resetMovementWatchesForTests } from "@/lib/dashboard-fetch";
 import type { Translate } from "./payments-workspace.data";
 import {
@@ -30,8 +31,42 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+describe("transferRequestFingerprint", () => {
+  // SOLA9-773: the API fingerprints the canonical amount, so a browser key
+  // over the raw spelling minted a new key for `1` after a lost `1.0`.
+  it("is one payment however the amount is spelled", () => {
+    const fingerprint = (amount: string) => transferRequestFingerprint({ ...SUBMISSION, amount });
+    expect(fingerprint("1.0")).toBe(fingerprint("1"));
+    expect(fingerprint("01.50")).toBe(fingerprint("1.5"));
+    expect(fingerprint("1.01")).not.toBe(fingerprint("1"));
+    expect(fingerprint("10")).not.toBe(fingerprint("1"));
+  });
+});
+
 describe("sendTransferUnderKey", () => {
   const t: Translate = (key) => key;
+
+  it("resends a lost `1.0` as `1` under the same key, spelled as it is keyed", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>(async () =>
+        Response.json({ data: { transfer: { id: "xfr_1", status: "confirmed" } } })
+      )
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(sendTransferUnderKey({ ...SUBMISSION, amount: "1.0" }, t)).rejects.toThrow(
+      "Failed to fetch"
+    );
+    await sendTransferUnderKey({ ...SUBMISSION, amount: "1" }, t);
+
+    const calls = fetchMock.mock.calls.map(([, init]) => ({
+      key: new Headers(init?.headers).get("Idempotency-Key"),
+      amount: z.object({ amount: z.string() }).parse(JSON.parse(String(init?.body))).amount,
+    }));
+    expect(calls).toHaveLength(2);
+    expect(calls[1]?.key).toBe(calls[0]?.key);
+    expect(calls.map((call) => call.amount)).toEqual(["1", "1"]);
+  });
 
   /** The key the request actually carried. */
   function sentKey(fetchMock: ReturnType<typeof vi.fn<typeof fetch>>): string | null {

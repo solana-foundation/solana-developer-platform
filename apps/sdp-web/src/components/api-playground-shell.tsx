@@ -27,7 +27,9 @@ import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 import {
   answerRetiresKey,
   apiErrorCode,
+  canonicalJson,
   IDEMPOTENCY_KEY_HEADER,
+  parseJsonValue,
   storageFingerprint,
 } from "@/lib/idempotency";
 import { createIdempotencyKeyStore } from "@/lib/idempotency-key-store";
@@ -553,7 +555,19 @@ async function executePlaygroundRequest({
   // The request runs as the signed-in member against the tab's Project, so the
   // Project is part of what makes two Sends the same request.
   const { projectId } = parseDashboardPathname(window.location.pathname);
-  const sendRequest = JSON.stringify([projectId, activeEndpoint.method, resolvedPath, requestBody]);
+  // The body exactly as it goes out, read back in canonical form (keys sorted,
+  // arrays in order), so a Send that only reorders an object's keys is the same
+  // request to its key as it is to the API's fingerprint.
+  const sentBody =
+    hasRequestBody(activeEndpoint.method) && requestBody !== null
+      ? JSON.stringify(requestBody)
+      : undefined;
+  const sendRequest = canonicalJson([
+    projectId,
+    activeEndpoint.method,
+    resolvedPath,
+    sentBody === undefined ? null : parseJsonValue(sentBody),
+  ]);
   const claimed = hasRequestBody(activeEndpoint.method) ? keyForSend(sendRequest) : undefined;
   if (
     claimed !== undefined &&
@@ -571,10 +585,6 @@ async function executePlaygroundRequest({
   try {
     // The dashboard proxies the call itself: same method, path, query and
     // body, run as the session. The key is the one header it forwards.
-    const sentBody =
-      hasRequestBody(activeEndpoint.method) && requestBody !== null
-        ? JSON.stringify(requestBody)
-        : undefined;
     const headers = new Headers();
     if (sentBody !== undefined) {
       headers.set("Content-Type", "application/json");
