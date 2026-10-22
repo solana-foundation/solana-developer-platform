@@ -5405,6 +5405,33 @@ describe("Payments routes — recurring", () => {
       }
     );
 
+    it("cancels an active schedule from a specialized wallet, signing the exit", async () => {
+      const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      await getDb(env)
+        .prepare("UPDATE custody_wallets SET purpose = 'dvp_settlement_authority' WHERE id = ?")
+        .bind(TEST_CUSTODY_WALLET_ID)
+        .run();
+
+      const response = await app.request(
+        actionPath(activated.id, "cancel"),
+        { method: "POST", headers: keyed(crypto.randomUUID()), body: "{}" },
+        env
+      );
+
+      expect(response.status).toBe(200);
+      expect((await parseRecurringResponse(response)).data.recurringPayment).toMatchObject({
+        id: activated.id,
+        status: "canceled",
+      });
+      expect(createOrgSignerForCustodyWalletMock).toHaveBeenLastCalledWith(
+        env,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        TEST_CUSTODY_WALLET_ID,
+        "recurring.cancel"
+      );
+    });
+
     /** The original request crashed after its effects: its key is in progress, its lease lapsed. */
     async function crashIdempotencyKey(key: string) {
       await getDb(env)

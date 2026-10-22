@@ -635,11 +635,7 @@ describe("CustodyRuntimeTargets", () => {
         "recurring.collect",
         getConfigAdapter
       )
-    ).rejects.toMatchObject({
-      code: "FORBIDDEN",
-      statusCode: 403,
-      details: { reason: "wallet_purpose", purpose: "dvp_settlement_authority" },
-    });
+    ).rejects.toStrictEqual(new MoneyMovementRefusedError("wallet_purpose"));
     expect(getConfigAdapter).not.toHaveBeenCalled();
   });
 
