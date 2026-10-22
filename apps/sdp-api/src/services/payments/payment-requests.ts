@@ -12,7 +12,10 @@ import {
   validateTransfer,
 } from "@solana/pay";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
-import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
+import type {
+  PaymentRequestRow,
+  PaymentRequestsRepository,
+} from "@/db/repositories/payment-requests.repository";
 import {
   generatePaymentTransferId,
   type PaymentTransferRow,
@@ -23,91 +26,98 @@ import {
 } from "@/db/repositories/repository-factory";
 import { AppError, internalError, nullOnExpected } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
-import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 
 export function isPaymentRequestExpired(expiresAt: string | null): boolean {
   return expiresAt !== null && Date.parse(expiresAt) <= Date.now();
 }
 
-/**
- * Checks the chain for a transaction referencing this payment request and,
- * when a valid payment is found, records the inbound transfer and marks the
- * request paid.
- *
- * Reads the chain on the open cluster scope's cluster (the row's Project).
- *
- * @param env - API environment for database access.
- * @param row - The stored payment request row to reconcile.
- * @param options.bestEffort - When true, unexpected infra failures (e.g. an
- *   RPC outage) degrade to the stored row with a log so one bad row cannot
- *   take down a whole list read or the public pay page; the next read
- *   retries. An unresolved legacy wallet also returns the stored row because
- *   the exact-identity backfill intentionally leaves ambiguous rows unpinned.
- *   Other invariant violations (AppError) always rethrow — they do
- *   not self-heal and must not hide behind a stale row. When false, every
- *   failure rethrows, for paths that must not act on stale state.
- * @returns The settled row when a valid payment was found, otherwise the
- *   stored row.
- * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope, or
- *   `RPC_NOT_CONFIGURED` when the cluster has no endpoint, even when best-effort.
- */
+type FoundPayment = Awaited<ReturnType<typeof findReference>>;
+
+type SettlementTiming = "on_time" | "late" | "after_expired";
+
+interface PaymentRequestKey {
+  requestId: string;
+  organizationId: string;
+  projectId: string;
+}
+
 export async function reconcilePaymentRequest(
   env: Env,
-  row: PaymentRequestRow,
-  options: { bestEffort: boolean }
+  row: PaymentRequestRow
 ): Promise<PaymentRequestRow> {
-  if (row.status !== "awaiting_payment") {
-    return row;
-  }
-  if (isPaymentRequestExpired(row.expires_at)) {
+  if (row.status !== "awaiting_payment" || isPaymentRequestExpired(row.expires_at)) {
     return row;
   }
   if (row.custody_wallet_id === null) {
-    if (options.bestEffort) {
-      return row;
-    }
     throw new AppError("CONFLICT", "Payment request wallet identity is unresolved");
   }
-
-  const rpc = createClusterRpc();
-  try {
-    return await settlePaymentRequestIfPaid(env, rpc, row, row.custody_wallet_id);
-  } catch (err) {
-    if (!options.bestEffort || err instanceof AppError) {
-      throw err;
-    }
-    getLogger().error(
-      {
-        payment_request_id: row.id,
-        error: err instanceof Error ? err.message : String(err),
-      },
-      "reconcilePaymentRequest: best-effort reconcile failed, returning stored row"
-    );
-    return row;
-  }
+  return checkAwaitingPaymentRequest(env, row);
 }
 
-/**
- * Looks up the request's reference on chain, validates the referenced
- * transaction pays the right recipient/amount/mint, and settles the row to
- * `paid`.
- *
- * @returns The settled row, or the row unchanged when no valid payment
- *   exists yet.
- */
-async function settlePaymentRequestIfPaid(
+export async function checkAwaitingPaymentRequest(
   env: Env,
-  rpc: SolanaRpc,
-  row: PaymentRequestRow,
-  custodyWalletId: string
+  row: PaymentRequestRow
 ): Promise<PaymentRequestRow> {
-  const projectId = row.project_id;
-  // TODO: once migration 0129 makes payment_requests.project_id NOT NULL (HOO-1966), narrow PaymentRequestRow.project_id to string and delete this guard.
-  if (projectId === null) {
-    throw internalError("payment_requests row is missing project_id");
+  if (
+    row.status !== "awaiting_payment" ||
+    isPaymentRequestExpired(row.expires_at) ||
+    row.custody_wallet_id === null
+  ) {
+    return row;
   }
+  const found = await findValidPayment(createClusterRpc(), row);
+  if (found === null) {
+    return row;
+  }
+  return settlePaymentRequest(env, row, row.custody_wallet_id, found, "on_time");
+}
 
+export async function closeLapsedPaymentRequest(
+  env: Env,
+  row: PaymentRequestRow
+): Promise<PaymentRequestRow> {
+  if (row.status !== "awaiting_payment" || !isPaymentRequestExpired(row.expires_at)) {
+    return row;
+  }
+  if (row.custody_wallet_id !== null) {
+    const found = await findValidPayment(createClusterRpc(), row);
+    if (found !== null) {
+      const timing = landedAfterExpiry(found, row.expires_at) ? "late" : "on_time";
+      return settlePaymentRequest(env, row, row.custody_wallet_id, found, timing);
+    }
+  }
+  return markExpired(env, row);
+}
+
+export async function checkExpiredPaymentRequestForLatePayment(
+  env: Env,
+  row: PaymentRequestRow
+): Promise<PaymentRequestRow> {
+  if (row.status !== "expired" || row.custody_wallet_id === null) {
+    return row;
+  }
+  const found = await findValidPayment(createClusterRpc(), row);
+  if (found === null) {
+    return row;
+  }
+  return settlePaymentRequest(env, row, row.custody_wallet_id, found, "after_expired");
+}
+
+function landedAfterExpiry(found: FoundPayment, expiresAt: string | null): boolean {
+  if (expiresAt === null) {
+    return false;
+  }
+  if (found.blockTime === null) {
+    return true;
+  }
+  return Number(found.blockTime) * 1000 > Date.parse(expiresAt);
+}
+
+async function findValidPayment(
+  rpc: SolanaRpc,
+  row: PaymentRequestRow
+): Promise<FoundPayment | null> {
   const reference = assertValidAddress(row.reference, "reference");
 
   const found = await nullOnExpected(
@@ -115,12 +125,12 @@ async function settlePaymentRequestIfPaid(
     FindReferenceError
   );
   if (found === null) {
-    return row;
+    return null;
   }
 
   const verified = await verifyTransactionLanded(rpc, found.signature as unknown as Signature);
   if (!verified.ok) {
-    return row;
+    return null;
   }
 
   const validated = await nullOnExpected(
@@ -132,37 +142,73 @@ async function settlePaymentRequestIfPaid(
     }),
     ValidateTransferError
   );
-  if (validated === null) {
-    return row;
-  }
+  return validated === null ? null : found;
+}
 
-  const transfer = await recordInboundTransfer(env, row, projectId, custodyWalletId, found);
+async function settlePaymentRequest(
+  env: Env,
+  row: PaymentRequestRow,
+  custodyWalletId: string,
+  found: FoundPayment,
+  timing: SettlementTiming
+): Promise<PaymentRequestRow> {
+  const key = paymentRequestKey(row);
+  const transfer = await recordInboundTransfer(env, row, key.projectId, custodyWalletId, found);
+  const requestsRepo = paymentRequestsRepositoryFor(env, key);
 
-  const scope = createTenantScope({
-    organizationId: row.organization_id,
-    projectId,
-  });
-  const requestsRepo = createPaymentRequestsRepository(env, scope);
-  const settled = await requestsRepo.markPaymentRequest({
-    requestId: row.id,
-    organizationId: row.organization_id,
-    projectId,
-    status: "paid",
-    fulfilledByTransferId: transfer.id,
+  const settled =
+    timing === "after_expired"
+      ? await requestsRepo.markExpiredPaymentRequestPaidLate({
+          ...key,
+          fulfilledByTransferId: transfer.id,
+        })
+      : await requestsRepo.markPaymentRequest({
+          ...key,
+          status: "paid",
+          fulfilledByTransferId: transfer.id,
+          canceledBy: null,
+          paidLate: timing === "late",
+        });
+  return settled ?? (await reread(requestsRepo, key));
+}
+
+async function markExpired(env: Env, row: PaymentRequestRow): Promise<PaymentRequestRow> {
+  const key = paymentRequestKey(row);
+  const requestsRepo = paymentRequestsRepositoryFor(env, key);
+  const expired = await requestsRepo.markPaymentRequest({
+    ...key,
+    status: "expired",
+    fulfilledByTransferId: null,
     canceledBy: null,
   });
-  if (settled) {
-    return settled;
-  }
-  const current = await requestsRepo.getPaymentRequestById({
-    requestId: row.id,
-    organizationId: row.organization_id,
-    projectId,
-  });
+  return expired ?? (await reread(requestsRepo, key));
+}
+
+async function reread(
+  requestsRepo: PaymentRequestsRepository,
+  key: PaymentRequestKey
+): Promise<PaymentRequestRow> {
+  const current = await requestsRepo.getPaymentRequestById(key);
   if (!current) {
     throw internalError("payment request not found after settlement");
   }
   return current;
+}
+
+function paymentRequestsRepositoryFor(env: Env, key: PaymentRequestKey): PaymentRequestsRepository {
+  return createPaymentRequestsRepository(
+    env,
+    createTenantScope({ organizationId: key.organizationId, projectId: key.projectId })
+  );
+}
+
+function paymentRequestKey(row: PaymentRequestRow): PaymentRequestKey {
+  const projectId = row.project_id;
+  // TODO: once migration 0129 makes payment_requests.project_id NOT NULL (HOO-1966), narrow PaymentRequestRow.project_id to string and delete this guard.
+  if (projectId === null) {
+    throw internalError("payment_requests row is missing project_id");
+  }
+  return { requestId: row.id, organizationId: row.organization_id, projectId };
 }
 
 /**

@@ -7,7 +7,6 @@ import { createPaymentRequestsRepository } from "@/db/repositories/repository-fa
 import { app } from "@/index";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
-import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -51,14 +50,10 @@ async function get(path: string, key: typeof READ_KEY): Promise<Response> {
 }
 
 describe("payment request public tokens", () => {
-  // Reads reconcile an awaiting request on chain; nothing has paid it, so
-  // every read returns the stored row.
-  const rpc = installClusterRpcStub();
   let requestId: string;
   let publicToken: string;
 
   beforeEach(async () => {
-    rpc.answer("getSignaturesForAddress", []);
     await seedTestDatabase(env);
     const db = getDb(env);
     await db

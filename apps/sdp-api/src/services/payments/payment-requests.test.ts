@@ -33,17 +33,20 @@ import {
   createPaymentsRepository,
 } from "@/db/repositories/repository-factory";
 import { createTenantScope } from "@/lib/tenant-scope";
-import { rootLogger } from "@/runtime/logger";
 import { TEST_CUSTODY_PUBLIC_KEY } from "@/test/fixtures/custody";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { seedProjectCryptoWalletCounterparty } from "@/test/helpers/counterparties";
 import { env } from "@/test/helpers/env";
-import { BLANK_MANAGED_POOL_ENV } from "@/test/helpers/managed-pool-env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { reconcilePaymentRequest } from "./payment-requests";
+import {
+  checkAwaitingPaymentRequest,
+  checkExpiredPaymentRequestForLatePayment,
+  closeLapsedPaymentRequest,
+  reconcilePaymentRequest,
+} from "./payment-requests";
 
 const TEST_PROJECT_ID = "prj_preq_handler_test";
 const TEST_CONFIG_ID = "cust_cfg_preq_handler_test";
@@ -51,6 +54,8 @@ const TEST_CUSTODY_WALLET_ID = "cwlt_preq_handler_test";
 const TEST_WALLET_ID = "wal_preq_handler_test";
 const SIGNATURE = signature(getBase58Decoder().decode(new Uint8Array(64).fill(5)));
 const DEVNET_USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
+const PAST = "2020-01-01T00:00:00.000Z";
+const PAST_SECONDS = BigInt(Date.parse(PAST) / 1000);
 
 let findReferenceSpy: MockInstance<typeof solanaPay.findReference>;
 let validateTransferSpy: MockInstance<typeof solanaPay.validateTransfer>;
@@ -131,10 +136,16 @@ async function createRequest(params: { token: string; expiresAt: string | null }
   });
 }
 
-function reconcileOnSandbox(row: PaymentRequestRow, options: { bestEffort: boolean }) {
-  return runInClusterScope({ projectId: TEST_PROJECT_ID, environment: "sandbox" }, () =>
-    reconcilePaymentRequest(env, row, options)
-  );
+function onSandbox<T>(fn: () => Promise<T>) {
+  return runInClusterScope({ projectId: TEST_PROJECT_ID, environment: "sandbox" }, fn);
+}
+
+function reconcileOnSandbox(row: PaymentRequestRow) {
+  return onSandbox(() => reconcilePaymentRequest(env, row));
+}
+
+function foundAt(blockTime: bigint | null): Awaited<ReturnType<typeof solanaPay.findReference>> {
+  return { ...foundSignature(), blockTime };
 }
 
 async function listInboundTransfers() {
@@ -145,7 +156,7 @@ async function listInboundTransfers() {
   return result.results;
 }
 
-describe("reconcilePaymentRequest", () => {
+function installSettlementHooks() {
   installClusterRpcStub();
 
   beforeAll(async () => {
@@ -202,6 +213,10 @@ describe("reconcilePaymentRequest", () => {
       .bind(TEST_CUSTODY_WALLET_ID, TEST_CONFIG_ID, TEST_WALLET_ID, TEST_CUSTODY_PUBLIC_KEY)
       .run();
   });
+}
+
+describe("reconcilePaymentRequest", () => {
+  installSettlementHooks();
 
   it("settles an awaiting request and links an inbound transfer attributed to no counterparty", async () => {
     mockSettlementSucceeds();
@@ -219,7 +234,7 @@ describe("reconcilePaymentRequest", () => {
       .bind("cp_preq_handler_legacy_payer", request.id)
       .run();
 
-    const settled = await reconcileOnSandbox(request, { bestEffort: false });
+    const settled = await reconcileOnSandbox(request);
 
     expect(settled.status).toBe("paid");
     expect(settled.fulfilled_by_transfer_id).not.toBeNull();
@@ -238,10 +253,7 @@ describe("reconcilePaymentRequest", () => {
     mockSettlementSucceeds();
 
     const settled = await reconcileOnSandbox(
-      await createRequest({ token: DEVNET_USDC_MINT, expiresAt: null }),
-      {
-        bestEffort: false,
-      }
+      await createRequest({ token: DEVNET_USDC_MINT, expiresAt: null })
     );
 
     expect(settled.status).toBe("paid");
@@ -253,10 +265,7 @@ describe("reconcilePaymentRequest", () => {
     mockSettlementSucceeds();
     const request = await createRequest({ token: SOL_MINT, expiresAt: null });
 
-    const [a, b] = await Promise.all([
-      reconcileOnSandbox(request, { bestEffort: false }),
-      reconcileOnSandbox(request, { bestEffort: false }),
-    ]);
+    const [a, b] = await Promise.all([reconcileOnSandbox(request), reconcileOnSandbox(request)]);
 
     expect(a.status).toBe("paid");
     expect(b.status).toBe("paid");
@@ -301,9 +310,7 @@ describe("reconcilePaymentRequest", () => {
       .run();
     mockSettlementSucceeds();
 
-    await expect(reconcileOnSandbox(request, { bestEffort: false })).rejects.toThrow(
-      "does not match payment request"
-    );
+    await expect(reconcileOnSandbox(request)).rejects.toThrow("does not match payment request");
     expect(await listInboundTransfers()).toMatchObject([{ custody_wallet_id: null }]);
   });
 
@@ -313,10 +320,7 @@ describe("reconcilePaymentRequest", () => {
     validateTransferSpy.mockResolvedValue(validatedTransfer());
 
     const result = await reconcileOnSandbox(
-      await createRequest({ token: SOL_MINT, expiresAt: null }),
-      {
-        bestEffort: false,
-      }
+      await createRequest({ token: SOL_MINT, expiresAt: null })
     );
 
     expect(result.status).toBe("awaiting_payment");
@@ -329,10 +333,7 @@ describe("reconcilePaymentRequest", () => {
     verifyTransactionLandedSpy.mockResolvedValue({ ok: false, reason: "not_indexed" });
 
     const result = await reconcileOnSandbox(
-      await createRequest({ token: SOL_MINT, expiresAt: null }),
-      {
-        bestEffort: false,
-      }
+      await createRequest({ token: SOL_MINT, expiresAt: null })
     );
 
     expect(result.status).toBe("awaiting_payment");
@@ -344,8 +345,7 @@ describe("reconcilePaymentRequest", () => {
     findReferenceSpy.mockRejectedValue(new FindReferenceError("not found"));
 
     const result = await reconcileOnSandbox(
-      await createRequest({ token: SOL_MINT, expiresAt: null }),
-      { bestEffort: false }
+      await createRequest({ token: SOL_MINT, expiresAt: null })
     );
 
     expect(result.status).toBe("awaiting_payment");
@@ -360,8 +360,7 @@ describe("reconcilePaymentRequest", () => {
     validateTransferSpy.mockRejectedValue(new ValidateTransferError("wrong amount"));
 
     const result = await reconcileOnSandbox(
-      await createRequest({ token: SOL_MINT, expiresAt: null }),
-      { bestEffort: false }
+      await createRequest({ token: SOL_MINT, expiresAt: null })
     );
 
     expect(result.status).toBe("awaiting_payment");
@@ -373,52 +372,8 @@ describe("reconcilePaymentRequest", () => {
     findReferenceSpy.mockRejectedValue(new Error("rpc exploded"));
 
     await expect(
-      reconcileOnSandbox(await createRequest({ token: SOL_MINT, expiresAt: null }), {
-        bestEffort: false,
-      })
+      reconcileOnSandbox(await createRequest({ token: SOL_MINT, expiresAt: null }))
     ).rejects.toThrow("rpc exploded");
-  });
-
-  it("best-effort returns the stored row and logs when reconcile errors unexpectedly", async () => {
-    const errorSpy = vi.spyOn(rootLogger, "error").mockImplementation(() => {});
-    findReferenceSpy.mockRejectedValue(new Error("rpc exploded"));
-    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
-
-    const result = await reconcileOnSandbox(request, { bestEffort: true });
-
-    expect(result).toBe(request);
-    expect(errorSpy).toHaveBeenCalled();
-    expect(await listInboundTransfers()).toHaveLength(0);
-  });
-
-  it("best-effort rethrows RPC_NOT_CONFIGURED instead of degrading to the stored row", async () => {
-    const errorSpy = vi.spyOn(rootLogger, "error").mockImplementation(() => {});
-    for (const [envKey, blankValue] of Object.entries(BLANK_MANAGED_POOL_ENV)) {
-      vi.stubEnv(envKey, blankValue);
-    }
-    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
-
-    await expect(reconcileOnSandbox(request, { bestEffort: true })).rejects.toMatchObject({
-      name: "SdpRpcError",
-      code: "RPC_NOT_CONFIGURED",
-      details: { cluster: "devnet" },
-    });
-    expect(errorSpy).not.toHaveBeenCalled();
-    expect(findReferenceSpy).not.toHaveBeenCalled();
-    expect(await listInboundTransfers()).toHaveLength(0);
-  });
-
-  it("returns an unresolved legacy request on best-effort reads without touching the chain", async () => {
-    const request: PaymentRequestRow = {
-      ...(await createRequest({ token: SOL_MINT, expiresAt: null })),
-      custody_wallet_id: null,
-    };
-
-    const result = await reconcileOnSandbox(request, { bestEffort: true });
-
-    expect(result).toBe(request);
-    expect(findReferenceSpy).not.toHaveBeenCalled();
-    expect(await listInboundTransfers()).toHaveLength(0);
   });
 
   it("rejects an unresolved legacy request when current state is required", async () => {
@@ -427,7 +382,7 @@ describe("reconcilePaymentRequest", () => {
       custody_wallet_id: null,
     };
 
-    await expect(reconcileOnSandbox(request, { bestEffort: false })).rejects.toMatchObject({
+    await expect(reconcileOnSandbox(request)).rejects.toMatchObject({
       code: "CONFLICT",
       statusCode: 409,
     });
@@ -441,7 +396,7 @@ describe("reconcilePaymentRequest", () => {
       status: "canceled",
     };
 
-    const result = await reconcileOnSandbox(canceled, { bestEffort: false });
+    const result = await reconcileOnSandbox(canceled);
 
     expect(result).toBe(canceled);
     expect(findReferenceSpy).not.toHaveBeenCalled();
@@ -450,9 +405,153 @@ describe("reconcilePaymentRequest", () => {
   it("short-circuits expired requests without touching the chain", async () => {
     const expired = await createRequest({ token: SOL_MINT, expiresAt: "2000-01-01T00:00:00.000Z" });
 
-    const result = await reconcileOnSandbox(expired, { bestEffort: false });
+    const result = await reconcileOnSandbox(expired);
 
     expect(result.status).toBe("awaiting_payment");
+    expect(findReferenceSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("closeLapsedPaymentRequest", () => {
+  installSettlementHooks();
+
+  it("stores expired when the final chain check finds nothing", async () => {
+    findReferenceSpy.mockRejectedValue(new FindReferenceError("not found"));
+    const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
+
+    const closed = await onSandbox(() => closeLapsedPaymentRequest(env, request));
+
+    expect(closed).toMatchObject({ status: "expired", paid_late: false });
+    expect(await listInboundTransfers()).toHaveLength(0);
+  });
+
+  it("settles on time when the payment landed before expires_at", async () => {
+    mockSettlementSucceeds();
+    findReferenceSpy.mockResolvedValue(foundAt(PAST_SECONDS - 10n));
+    const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
+
+    const closed = await onSandbox(() => closeLapsedPaymentRequest(env, request));
+
+    expect(closed).toMatchObject({ status: "paid", paid_late: false });
+  });
+
+  it("settles late when the payment landed after expires_at", async () => {
+    mockSettlementSucceeds();
+    findReferenceSpy.mockResolvedValue(foundAt(PAST_SECONDS + 10n));
+    const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
+
+    const closed = await onSandbox(() => closeLapsedPaymentRequest(env, request));
+
+    expect(closed).toMatchObject({ status: "paid", paid_late: true });
+  });
+
+  it("settles late when the chain gives no block time", async () => {
+    mockSettlementSucceeds();
+    findReferenceSpy.mockResolvedValue(foundAt(null));
+    const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
+
+    const closed = await onSandbox(() => closeLapsedPaymentRequest(env, request));
+
+    expect(closed).toMatchObject({ status: "paid", paid_late: true });
+  });
+
+  it("expires an unresolved legacy request without touching the chain", async () => {
+    const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
+    await getDb(env)
+      .prepare("UPDATE payment_requests SET custody_wallet_id = NULL WHERE id = ?")
+      .bind(request.id)
+      .run();
+
+    const closed = await onSandbox(() =>
+      closeLapsedPaymentRequest(env, { ...request, custody_wallet_id: null })
+    );
+
+    expect(closed.status).toBe("expired");
+    expect(findReferenceSpy).not.toHaveBeenCalled();
+  });
+
+  it("leaves a request another writer already settled", async () => {
+    mockSettlementSucceeds();
+    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+    await reconcileOnSandbox(request);
+
+    const closed = await onSandbox(() =>
+      closeLapsedPaymentRequest(env, { ...request, expires_at: PAST })
+    );
+
+    expect(closed).toMatchObject({ status: "paid", paid_late: false });
+    expect(await listInboundTransfers()).toHaveLength(1);
+  });
+
+  it("leaves an unexpired request to the awaiting lanes", async () => {
+    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+
+    const closed = await onSandbox(() => closeLapsedPaymentRequest(env, request));
+
+    expect(closed).toBe(request);
+    expect(findReferenceSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("checkExpiredPaymentRequestForLatePayment", () => {
+  installSettlementHooks();
+
+  it("moves an expired request to paid late when a payment shows up", async () => {
+    findReferenceSpy.mockRejectedValue(new FindReferenceError("not found"));
+    const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
+    const expired = await onSandbox(() => closeLapsedPaymentRequest(env, request));
+
+    mockSettlementSucceeds();
+    findReferenceSpy.mockResolvedValue(foundAt(PAST_SECONDS + 60n));
+    const late = await onSandbox(() => checkExpiredPaymentRequestForLatePayment(env, expired));
+
+    expect(late).toMatchObject({ status: "paid", paid_late: true });
+    expect(late.fulfilled_by_transfer_id).not.toBeNull();
+    expect(await listInboundTransfers()).toHaveLength(1);
+  });
+
+  it("keeps an expired request expired while no payment shows up", async () => {
+    findReferenceSpy.mockRejectedValue(new FindReferenceError("not found"));
+    const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
+    const expired = await onSandbox(() => closeLapsedPaymentRequest(env, request));
+
+    const checked = await onSandbox(() => checkExpiredPaymentRequestForLatePayment(env, expired));
+
+    expect(checked).toMatchObject({ status: "expired", paid_late: false });
+    expect(await listInboundTransfers()).toHaveLength(0);
+  });
+});
+
+describe("checkAwaitingPaymentRequest", () => {
+  installSettlementHooks();
+
+  it("settles an unexpired awaiting request", async () => {
+    mockSettlementSucceeds();
+    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+
+    const checked = await onSandbox(() => checkAwaitingPaymentRequest(env, request));
+
+    expect(checked).toMatchObject({ status: "paid", paid_late: false });
+  });
+
+  it("leaves a lapsed request to the expiry cron", async () => {
+    const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
+
+    const checked = await onSandbox(() => checkAwaitingPaymentRequest(env, request));
+
+    expect(checked.status).toBe("awaiting_payment");
+    expect(findReferenceSpy).not.toHaveBeenCalled();
+  });
+
+  it("skips an unresolved legacy request without touching the chain", async () => {
+    const request: PaymentRequestRow = {
+      ...(await createRequest({ token: SOL_MINT, expiresAt: null })),
+      custody_wallet_id: null,
+    };
+
+    const checked = await onSandbox(() => checkAwaitingPaymentRequest(env, request));
+
+    expect(checked).toBe(request);
     expect(findReferenceSpy).not.toHaveBeenCalled();
   });
 });

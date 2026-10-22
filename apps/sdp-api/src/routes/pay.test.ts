@@ -153,7 +153,7 @@ describe("Public payment request routes", () => {
   }
 
   it.for(ENVIRONMENT_CLUSTER_CASES)(
-    "reports and reads a $environment request on $cluster only",
+    "reports a $environment request on $cluster from stored state without reading the chain",
     async ({ environment, cluster }) => {
       const request = await createAwaitingPaymentRequest(
         await REQUEST_WALLET_BY_ENVIRONMENT[environment]()
@@ -166,8 +166,7 @@ describe("Public payment request routes", () => {
         status: "awaiting_payment",
         network: cluster,
       });
-      expect(rpc.calls).toContainEqual({ cluster, method: "getSignaturesForAddress" });
-      expect(calledClusters()).toEqual(new Set([cluster]));
+      expect(rpc.calls).toEqual([]);
     }
   );
 

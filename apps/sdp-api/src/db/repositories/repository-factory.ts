@@ -148,7 +148,6 @@ export function createPaymentRequestsRepository(
       "listLapsedPaymentRequests",
       "listExpiredPaymentRequestsForLateCheck",
       "markPaymentRequestsChecked",
-      "markExpiredPaymentRequestPaidLate",
       "countStaleAwaitingPaymentRequests",
     ]
   );
