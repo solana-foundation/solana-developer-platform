@@ -305,6 +305,48 @@ describe("Payments routes — list transfers", () => {
       });
     });
 
+    // A channel without Ramps discloses no ramp rows, whatever the caller holds (APE SOLA9-698).
+    describe("on a release channel without Ramps", () => {
+      const asStable = (path: string) =>
+        app.request(
+          path,
+          { method: "GET", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+          { ...env, SDP_RELEASE_CHANNEL: "stable" }
+        );
+      const transferIdsSchema = z.object({ data: z.array(z.object({ id: z.string() })) });
+
+      beforeEach(async () => {
+        await seedTransfer({ id: "xfr_stable_plain", status: "confirmed" });
+        await seedTransfer({ id: "xfr_stable_onramp", status: "confirmed", type: "onramp" });
+        await seedTransfer({ id: "xfr_stable_offramp", status: "confirmed", type: "offramp" });
+      });
+
+      it("leaves ramp rows out of the default list", async () => {
+        const res = await asStable("/v1/payments/transfers");
+
+        expect(res.status).toBe(200);
+        expect(
+          transferIdsSchema.parse(await res.json()).data.map((transfer) => transfer.id)
+        ).toEqual(["xfr_stable_plain"]);
+      });
+
+      it.each(["/v1/payments/transfers?category=ramp", "/v1/payments/transfers?type=onramp"])(
+        "refuses %s as outside the channel",
+        async (path) => {
+          const res = await asStable(path);
+
+          expect(res.status).toBe(403);
+          expect(await res.json()).toMatchObject({ error: { code: "FORBIDDEN" } });
+        }
+      );
+
+      it("does not disclose a ramp row by id", async () => {
+        expect((await asStable("/v1/payments/transfers/xfr_stable_onramp")).status).toBe(404);
+        expect((await asStable("/v1/payments/transfers/xfr_stable_offramp")).status).toBe(404);
+        expect((await asStable("/v1/payments/transfers/xfr_stable_plain")).status).toBe(200);
+      });
+    });
+
     it("matches a token filter against every form the ledger stores it in", async () => {
       const solMint = "So11111111111111111111111111111111111111112";
       await seedTransfer({ id: "xfr_tok_sym_1", status: "confirmed", token: "SOL" });
