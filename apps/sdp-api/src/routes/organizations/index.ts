@@ -4,19 +4,33 @@
 
 import { Hono } from "hono";
 import { unifiedAuthMiddleware } from "@/middleware/auth";
+import { clerkSignupSessionMiddleware } from "@/middleware/clerk-auth";
 import { requireHumanSession } from "@/middleware/human-session";
-import { requireAction } from "@/middleware/require-action";
+import { publicRoute, requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
+import { createOrganization } from "./create";
 import {
   deleteOrganization,
   getOrganization,
   getOrganizationProviderAccess,
   updateOrganization,
 } from "./handlers";
-import { updateOrgSchema } from "./schemas";
+import { createOrganizationSchema, updateOrgSchema } from "./schemas";
 
 export const organizations = new Hono<{ Bindings: Env }>();
+
+// A new person has no organization, so the member middleware would refuse
+// them; this is the one route a verified Clerk session with none may call.
+organizations.post(
+  "/",
+  clerkSignupSessionMiddleware(),
+  publicRoute(
+    "signed-in people with no organization: creates the caller's own organization, one per person"
+  ),
+  validateBody(createOrganizationSchema),
+  createOrganization
+);
 
 // Protected routes below require authentication
 organizations.use("/:orgId/*", unifiedAuthMiddleware());

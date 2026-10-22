@@ -13,7 +13,7 @@ import type {
 } from "@sdp/types/projects";
 import { z } from "zod";
 import { parseOptionalPostgresJson } from "@/db/postgres-utils";
-import { badRequest, internalError, notFound } from "@/lib/errors";
+import { internalError, notFound } from "@/lib/errors";
 
 /**
  * Stored project settings as the API exposes them. Unknown keys are stripped,
@@ -227,67 +227,6 @@ export class ProjectService {
   // ═══════════════════════════════════════════════════════════════════════════
   // Project Members
   // ═══════════════════════════════════════════════════════════════════════════
-
-  /**
-   * Add a member to a project
-   */
-  async addMember(projectId: string, userId: string): Promise<ProjectMember> {
-    // Check if already a member
-    const existing = await this.getMembership(projectId, userId);
-    if (existing) {
-      throw badRequest("User is already a member of this project");
-    }
-
-    const id = `pm_${crypto.randomUUID()}`;
-    const now = new Date().toISOString();
-
-    const member: ProjectMember = {
-      id,
-      projectId,
-      userId,
-      createdAt: now,
-    };
-
-    await this.db
-      .prepare(
-        `INSERT INTO project_members (id, project_id, user_id, created_at)
-         VALUES (?, ?, ?, ?)`
-      )
-      .bind(member.id, member.projectId, member.userId, member.createdAt)
-      .run();
-
-    return member;
-  }
-
-  /**
-   * Get a user's membership in a project
-   */
-  async getMembership(projectId: string, userId: string): Promise<ProjectMember | null> {
-    const row = await this.db
-      .prepare(
-        `SELECT id, project_id, user_id, created_at
-         FROM project_members
-         WHERE project_id = ? AND user_id = ?`
-      )
-      .bind(projectId, userId)
-      .first<{
-        id: string;
-        project_id: string;
-        user_id: string;
-        created_at: string;
-      }>();
-
-    if (!row) {
-      return null;
-    }
-
-    return {
-      id: row.id,
-      projectId: row.project_id,
-      userId: row.user_id,
-      createdAt: row.created_at,
-    };
-  }
 
   /**
    * List all members of a project

@@ -11,6 +11,7 @@ import {
   findClerkOrganizationMapping,
   syncClerkOrganization,
 } from "@/services/clerk-organization-provisioning.service";
+import { ClerkOrganizationsService } from "@/services/clerk-organizations.service";
 import { verifiedPrimaryEmailFromClerkUser } from "@/services/clerk-users.service";
 import { applyStoredRampWebhookEvent } from "@/services/jobs/replay-ramp-webhook-events";
 import type { WebhookProcessor } from "@/services/ramps/webhooks/processor";
@@ -28,10 +29,20 @@ async function findOrganizationMapping(c: AppContext, clerkOrgId: string) {
 }
 
 async function syncOrganization(c: AppContext, data: OrganizationJSON) {
-  const synced = await syncClerkOrganization({ db: getDb(c.env), organization: data });
-  if (!synced) {
+  const mapping = await findClerkOrganizationMapping(getDb(c.env), data.id);
+  if (!mapping) {
     logIgnoredClerkEvent(c, "organization", data.id);
+    return;
   }
+  // Entitlements ride in Clerk's private metadata, and events can arrive out
+  // of order: syncing the payload could re-grant what a later edit removed,
+  // so the organization is read as Clerk holds it now.
+  const current = await new ClerkOrganizationsService(c.env).getOrganization(data.id);
+  if (!current) {
+    logIgnoredClerkEvent(c, "organization", data.id);
+    return;
+  }
+  await syncClerkOrganization({ db: getDb(c.env), organization: current });
 }
 
 /**

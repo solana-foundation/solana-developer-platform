@@ -9,7 +9,11 @@ import type { OrganizationRole } from "./roles";
 export const ORGANIZATION_TIERS = ["individual", "enterprise"] as const;
 export type OrganizationTier = (typeof ORGANIZATION_TIERS)[number];
 
-export const ORGANIZATION_STATUSES = ["active", "suspended", "deleted"] as const;
+/**
+ * `provisioning` is an organization SDP is still creating (ADR 0012): it holds
+ * its creator's one-organization slot but may not authenticate until active.
+ */
+export const ORGANIZATION_STATUSES = ["provisioning", "active", "suspended", "deleted"] as const;
 export type OrganizationStatus = (typeof ORGANIZATION_STATUSES)[number];
 
 /**

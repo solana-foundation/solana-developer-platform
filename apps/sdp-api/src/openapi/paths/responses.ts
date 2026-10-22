@@ -72,6 +72,7 @@ import {
 } from "@/openapi/schemas/issuance";
 import { onboardingStatusResponseSchema } from "@/openapi/schemas/onboarding";
 import {
+  createOrganizationResponseSchema,
   inviteMemberResponseSchema,
   listMembersResponseSchema,
   memberRoleSchema,
@@ -111,6 +112,7 @@ import {
 } from "@/openapi/schemas/projects";
 
 export const organizationResponse = successResponseSchema(organizationSchema);
+export const createOrganizationResponse = successResponseSchema(createOrganizationResponseSchema);
 
 export const listMembersResponse = successResponseSchema(listMembersResponseSchema);
 export const inviteMemberResponse = successResponseSchema(inviteMemberResponseSchema);

@@ -1,12 +1,9 @@
-import type { ListProjectMembersResponse, ProjectMemberResponse } from "@sdp/types/projects";
+import type { ListProjectMembersResponse } from "@sdp/types/projects";
 import type { Context } from "hono";
 import { getDb } from "@/db/client";
 import { getAuth } from "@/lib/auth";
-import { badRequest, notFound } from "@/lib/errors";
-import { created, success } from "@/lib/response";
-import type { ValidatedBodyContext } from "@/middleware/validate";
-import type { addMemberSchema } from "@/routes/projects/schemas";
-import { AuditService } from "@/services/audit.service";
+import { notFound } from "@/lib/errors";
+import { success } from "@/lib/response";
 import { ProjectService } from "@/services/project.service";
 import type { Env } from "@/types/env";
 
@@ -28,56 +25,4 @@ export const listProjectMembers = async (c: AppContext) => {
 
   const response: ListProjectMembersResponse = { members };
   return success(c, response);
-};
-
-export const addProjectMember = async (c: ValidatedBodyContext<typeof addMemberSchema>) => {
-  const { projectId } = c.req.param();
-  const auth = getAuth(c);
-
-  const body = c.req.valid("json");
-
-  const projectService = new ProjectService(getDb(c.env));
-
-  // Verify project belongs to org
-  const project = await projectService.getProject(projectId);
-  if (!project || project.organizationId !== auth.organizationId) {
-    throw notFound("Project");
-  }
-
-  // Verify user is a member of the organization
-  const orgMember = await getDb(c.env)
-    .prepare(
-      "SELECT id FROM organization_members WHERE user_id = ? AND organization_id = ? AND status = 'active'"
-    )
-    .bind(body.userId, auth.organizationId)
-    .first();
-
-  if (!orgMember) {
-    throw badRequest("User is not a member of this organization");
-  }
-
-  const member = await projectService.addMember(projectId, body.userId);
-
-  // Get user details
-  const user = await getDb(c.env)
-    .prepare("SELECT id, email, name FROM users WHERE id = ?")
-    .bind(body.userId)
-    .first<{ id: string; email: string; name: string | null }>();
-
-  // Audit log
-  const auditService = new AuditService(getDb(c.env));
-  await auditService.log(c, {
-    action: "create",
-    resourceType: "project_member",
-    resourceId: member.id,
-    metadata: { projectId, userId: body.userId },
-  });
-
-  const response: ProjectMemberResponse = {
-    member: {
-      ...member,
-      user: user ?? { id: body.userId, email: "", name: null },
-    },
-  };
-  return created(c, response);
 };

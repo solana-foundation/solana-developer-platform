@@ -11,7 +11,3 @@ export const updateProjectSchema = z.object({
     .nullable()
     .optional(),
 });
-
-export const addMemberSchema = z.object({
-  userId: z.string(),
-});

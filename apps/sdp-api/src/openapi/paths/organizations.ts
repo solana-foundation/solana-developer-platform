@@ -1,11 +1,35 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import { z } from "zod";
 import { errorResponseSchema, orgIdParamSchema } from "@/openapi/schemas/base";
-import { updateOrganizationRequestSchema } from "@/openapi/schemas/organizations";
+import {
+  createOrganizationRequestSchema,
+  updateOrganizationRequestSchema,
+} from "@/openapi/schemas/organizations";
 import { errorResponses, jsonContent } from "./helpers";
-import { organizationResponse } from "./responses";
+import { createOrganizationResponse, organizationResponse } from "./responses";
 
 export function registerOrganizationPaths(registry: OpenAPIRegistry) {
+  registry.registerPath({
+    method: "post",
+    path: "/v1/organizations",
+    tags: ["Organizations"],
+    summary: "Create organization",
+    operationId: "createOrganization",
+    description:
+      "Creates the caller's organization and makes them its admin, with a Sandbox and a Production project. Called with a signed-in Clerk session that has no active organization. A person creates one organization: repeating the request with the same name finishes or returns it, and another name is refused (409).",
+    security: [{ clerkBearerAuth: [] }],
+    request: {
+      body: { required: true, content: jsonContent(createOrganizationRequestSchema) },
+    },
+    responses: {
+      201: {
+        description: "Organization created",
+        content: jsonContent(createOrganizationResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 409, 429, 500]),
+    },
+  });
+
   registry.registerPath({
     method: "get",
     path: "/v1/organizations/{orgId}",

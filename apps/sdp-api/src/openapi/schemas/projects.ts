@@ -4,10 +4,7 @@ import {
   projectProviderAvailabilitySchema,
 } from "@sdp/types/provider-access";
 import { z } from "zod";
-import {
-  addMemberSchema as addMemberSchemaBase,
-  updateProjectSchema as updateProjectSchemaBase,
-} from "@/routes/projects/schemas";
+import { updateProjectSchema as updateProjectSchemaBase } from "@/routes/projects/schemas";
 import { apiKeyListItemSchema } from "./api-keys";
 import {
   isoDateTimeSchema,
@@ -203,12 +200,3 @@ export const updateProjectRequestSchema = updateProjectSchemaBase
     }),
   })
   .openapi({ description: "Update project request body." });
-
-export const addProjectMemberRequestSchema = addMemberSchemaBase
-  .extend({
-    userId: withOpenApi(addMemberSchemaBase.shape.userId, {
-      description: "User identifier to add to the project.",
-      example: "usr_example",
-    }),
-  })
-  .openapi({ description: "Add project member request body." });

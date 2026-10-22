@@ -17,7 +17,7 @@ import {
   resolveClerkOrganizationClaims,
   verifyClerkSessionToken,
 } from "@/lib/clerk-token";
-import { AppError, internalError, unauthorized } from "@/lib/errors";
+import { AppError, badRequest, internalError, unauthorized } from "@/lib/errors";
 import { runAsMoneyPrincipal } from "@/lib/money-principal";
 import { organizationNotActive, readActiveOrganizationSettings } from "@/lib/organization-access";
 import { recordOrganizationEntitlements } from "@/lib/production-entitlement";
@@ -269,7 +269,7 @@ async function ensureMembership(
       .prepare(
         `SELECT id, role, expires_at
          FROM invitations
-         WHERE organization_id = ? AND email = ? AND status = 'pending'
+         WHERE organization_id = ? AND LOWER(email) = ? AND status = 'pending'
          ORDER BY created_at DESC
          LIMIT 1`
       )
@@ -466,7 +466,6 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
       clerkOrgId: organizationClaims.organizationId,
       email: resolvedEmail,
       orgSlug: organizationClaims.organizationSlug ?? existingContext.org_slug,
-      orgRole: organizationClaims.organizationRole,
     };
   }
 
@@ -486,7 +485,6 @@ async function buildClerkContext(c: Context<{ Bindings: Env }>, payload: ClerkJw
     clerkOrgId: organizationClaims.organizationId,
     email: userIdentity.email,
     orgSlug: organizationClaims.organizationSlug ?? knownOrganization.slug,
-    orgRole: organizationClaims.organizationRole,
   };
 }
 
@@ -546,6 +544,45 @@ export function clerkAuthMiddleware() {
     });
 
     await runAsSignedInMember(clerkContext, next);
+  };
+}
+
+/**
+ * Authenticates a verified Clerk session that names no organization, for the
+ * one route that creates a person's organization (ADR 0012): a new person has
+ * no organization yet, so the member middleware refuses them. The rest of the
+ * request runs under a system database identity, since it writes the
+ * organization before any tenant exists.
+ *
+ * @returns The middleware.
+ */
+export function clerkSignupSessionMiddleware() {
+  return async (c: Context<{ Bindings: Env }>, next: Next) => {
+    await runWithSystemDatabaseIdentity("http:organization-signup", async () => {
+      const token = extractBearerToken(c);
+      if (!token) {
+        throw unauthorized("Clerk session required");
+      }
+      const payload = await verifyClerkSessionToken(c, token);
+      if (!payload.sub) {
+        throw unauthorized("Clerk token missing subject");
+      }
+      if (resolveClerkOrganizationClaims(payload).organizationId) {
+        throw badRequest("Clear the active organization before creating one");
+      }
+      const email = resolveClerkEmail(payload);
+      if (!email) {
+        throw unauthorized("Clerk token has no usable email claim");
+      }
+      const user = await ensureClerkUser(c.env, getDb(c.env), payload.sub, email);
+      await enforceRateLimit(
+        c,
+        `user:${user.userId}:organization-signup`,
+        DASHBOARD_ACTOR_MAX_REQUESTS
+      );
+      c.set("clerkSignup", { userId: user.userId, clerkUserId: payload.sub, email: user.email });
+      await next();
+    });
   };
 }
 

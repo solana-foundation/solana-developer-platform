@@ -22,6 +22,10 @@ const organizationAllowedIpSchema = z.string().transform((value, ctx) => {
   return canonical;
 });
 
+export const createOrganizationSchema = z.object({
+  name: z.string().trim().min(1).max(100),
+});
+
 export const updateOrgSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   settings: z

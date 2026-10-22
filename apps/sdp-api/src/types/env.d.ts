@@ -365,7 +365,12 @@ declare module "hono" {
       clerkOrgId: string;
       email: string | null;
       orgSlug: string | null;
-      orgRole: string | null;
+    };
+    // Set by clerkSignupSessionMiddleware: a verified person with no organization
+    clerkSignup?: {
+      userId: string;
+      clerkUserId: string;
+      email: string;
     };
     clerkOnboarding?: {
       clerkUserId: string;

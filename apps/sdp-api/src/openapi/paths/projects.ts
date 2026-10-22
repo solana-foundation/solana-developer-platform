@@ -6,17 +6,13 @@ import {
   includeArchivedQuerySchema,
   projectIdParamSchema,
 } from "@/openapi/schemas/base";
-import {
-  addProjectMemberRequestSchema,
-  updateProjectRequestSchema,
-} from "@/openapi/schemas/projects";
+import { updateProjectRequestSchema } from "@/openapi/schemas/projects";
 import { errorResponses, jsonContent } from "./helpers";
 import {
   apiKeyCreateResponse,
   listProjectApiKeysResponse,
   listProjectMembersResponse,
   listProjectsResponse,
-  projectMemberResponse,
   projectProviderAvailabilityResponse,
   projectResponse,
 } from "./responses";
@@ -149,32 +145,6 @@ export function registerProjectAdministrationPaths(registry: OpenAPIRegistry) {
         content: jsonContent(listProjectMembersResponse),
       },
       ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
-    },
-  });
-
-  registry.registerPath({
-    method: "post",
-    path: "/v1/projects/{projectId}/members",
-    tags: ["Projects"],
-    summary: "Add project member",
-    operationId: "addProjectMember",
-    description: "Adds an organization member to the project.",
-    security: [{ clerkBearerAuth: [] }],
-    request: {
-      params: z.object({
-        projectId: projectIdParamSchema,
-      }),
-      body: {
-        required: true,
-        content: jsonContent(addProjectMemberRequestSchema),
-      },
-    },
-    responses: {
-      201: {
-        description: "Project member added",
-        content: jsonContent(projectMemberResponse),
-      },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
     },
   });
 

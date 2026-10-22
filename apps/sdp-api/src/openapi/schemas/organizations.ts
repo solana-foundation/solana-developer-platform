@@ -5,7 +5,10 @@ import {
   inviteSchema as inviteSchemaBase,
   updateMemberRoleSchema as updateMemberRoleSchemaBase,
 } from "@/routes/members/schemas";
-import { updateOrgSchema as updateOrgSchemaBase } from "@/routes/organizations/schemas";
+import {
+  createOrganizationSchema as createOrganizationSchemaBase,
+  updateOrgSchema as updateOrgSchemaBase,
+} from "@/routes/organizations/schemas";
 import {
   invitationIdSchema,
   isoDateTimeSchema,
@@ -225,6 +228,25 @@ export const inviteMemberResponseSchema = z
     invitation: invitationSchema.openapi({ description: "Invitation details." }),
   })
   .openapi({ description: "Invitation details." });
+
+export const createOrganizationRequestSchema = createOrganizationSchemaBase
+  .extend({
+    name: withOpenApi(createOrganizationSchemaBase.shape.name, {
+      description: "The new organization's name.",
+      example: "Example Org",
+    }),
+  })
+  .openapi({ description: "Create organization request body." });
+
+export const createOrganizationResponseSchema = z
+  .object({
+    organization: organizationSchema,
+    clerkOrganizationId: z.string().openapi({
+      description: "The Clerk organization the dashboard makes active for the session.",
+      example: "org_2example",
+    }),
+  })
+  .openapi({ description: "The created organization." });
 
 export const updateOrganizationRequestSchema = updateOrgSchemaBase
   .extend({

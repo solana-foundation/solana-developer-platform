@@ -22,29 +22,26 @@ export interface ClerkJwtPayload extends JWTPayload {
 
 export interface ClerkOrganizationClaims {
   organizationId: string | null;
-  organizationRole: string | null;
   organizationSlug: string | null;
 }
 
 /**
  * Read organization context from both Clerk JWT formats.
  *
- * Version 2 session tokens compact the organization fields under `o`, with
- * role values such as `admin` that need the `org:` prefix restored. Older
- * tokens and customized templates expose the long-form `org_*` claims.
+ * Version 2 session tokens compact the organization fields under `o`; older
+ * tokens and customized templates expose the long-form `org_*` claims. The
+ * Clerk role claim is not read: SDP holds the only Organization Role (ADR 0012).
  */
 export function resolveClerkOrganizationClaims(payload: ClerkJwtPayload): ClerkOrganizationClaims {
   if (payload.v === 2 && payload.o) {
     return {
       organizationId: payload.o.id ?? null,
-      organizationRole: payload.o.rol ? `org:${payload.o.rol}` : null,
       organizationSlug: payload.o.slg ?? null,
     };
   }
 
   return {
     organizationId: payload.org_id ?? null,
-    organizationRole: payload.org_role ?? null,
     organizationSlug: payload.org_slug ?? null,
   };
 }

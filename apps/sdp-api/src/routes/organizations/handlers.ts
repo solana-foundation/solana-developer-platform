@@ -21,7 +21,7 @@ import type { updateOrgSchema } from "./schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
 
-type OrganizationRow = {
+export type OrganizationRow = {
   id: string;
   name: string;
   slug: string;
@@ -64,7 +64,7 @@ function parseOrganizationStatus(value: string): OrganizationStatus {
   throw new AppError("INTERNAL_ERROR", `Organization status '${value}' is invalid`);
 }
 
-function toOrganizationResponse(row: OrganizationRow): Organization {
+export function toOrganizationResponse(row: OrganizationRow): Organization {
   return {
     id: row.id,
     name: row.name,

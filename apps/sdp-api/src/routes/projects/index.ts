@@ -11,11 +11,11 @@ import { validateBody } from "@/middleware/validate";
 import { apiKeyCreateSchema } from "@/routes/api-keys/schemas";
 import type { Env } from "@/types/env";
 import { createProjectApiKey, listProjectApiKeys } from "./handlers/api-keys";
-import { addProjectMember, listProjectMembers } from "./handlers/members";
+import { listProjectMembers } from "./handlers/members";
 import { getProject, listProjects, updateProject } from "./handlers/projects";
 import { apiKeyProjectAccessMiddleware } from "./project-access";
 import { projectProviderAvailability } from "./provider-availability";
-import { addMemberSchema, updateProjectSchema } from "./schemas";
+import { updateProjectSchema } from "./schemas";
 
 export const projects = new Hono<{ Bindings: Env }>();
 
@@ -60,12 +60,6 @@ projects.patch(
 // ═══════════════════════════════════════════════════════════════════════════
 
 projects.get("/:projectId/members", requireAction("members.read"), listProjectMembers);
-projects.post(
-  "/:projectId/members",
-  requireAction("members.manage"),
-  validateBody(addMemberSchema),
-  addProjectMember
-);
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Project API Keys

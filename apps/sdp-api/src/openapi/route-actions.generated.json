@@ -260,7 +260,6 @@
   "POST /v1/private-channels/wallets/:_/verify": "private_channels.execute",
   "POST /v1/private-channels/withdrawals": "private_channels.execute",
   "POST /v1/projects/:_/api-keys": "api_keys.manage",
-  "POST /v1/projects/:_/members": "members.manage",
   "POST /v1/wallets": "wallets.manage",
   "POST /v1/wallets/initialize": "wallets.configure",
   "POST /v1/wallets/signer-check": "wallets.execute",

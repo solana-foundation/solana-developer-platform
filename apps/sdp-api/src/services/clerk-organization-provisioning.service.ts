@@ -14,7 +14,15 @@ function slugify(input: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-async function ensureUniqueSlug(
+/**
+ * A slug no other organization holds, derived from `base`.
+ *
+ * @param db - The database.
+ * @param base - The name or slug to derive it from.
+ * @param organizationId - The organization the slug is for, which may already hold it.
+ * @returns The slug.
+ */
+export async function ensureUniqueSlug(
   db: DatabaseClient,
   base: string,
   organizationId: string
