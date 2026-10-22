@@ -1,9 +1,13 @@
+import { MOSAIC_AMOUNT_REFUSALS, MosaicAmountError } from "@sdp/solana/mosaic-amount";
+import { parseTokenAmount } from "@sdp/solana/token-amount";
+import { TOKEN_TERMS_REFUSALS, TokenTermsError } from "@sdp/solana/token-terms";
 import { describe, expect, it } from "vitest";
 import { AppError } from "@/lib/errors";
 import {
   assertTokenAllowsOperation,
   parsePositiveTokenAmount,
   resolveMintOperationAmount,
+  withLiveIssuanceTerms,
 } from "./token-operation.service";
 
 describe("token-operation.service", () => {
@@ -38,8 +42,8 @@ describe("token-operation.service", () => {
   describe("parsePositiveTokenAmount", () => {
     it("parses valid decimal amounts", () => {
       expect(parsePositiveTokenAmount("1.25", 2)).toEqual({
+        amount: parseTokenAmount("1.25", 2),
         amountBaseUnits: BigInt(125),
-        mosaicAmount: 1.25,
       });
     });
 
@@ -76,9 +80,9 @@ describe("token-operation.service", () => {
 
     it("returns parsed mint amount with deployed mint address", () => {
       expect(resolveMintOperationAmount(mintableToken, "2.5")).toEqual({
+        amount: parseTokenAmount("2.5", mintableToken.decimals),
         amountBaseUnits: BigInt(250),
         mintAddress: mintableToken.mintAddress,
-        mosaicAmount: 2.5,
       });
     });
 
@@ -100,6 +104,50 @@ describe("token-operation.service", () => {
         expect(error).toBeInstanceOf(AppError);
         expect((error as AppError).code).toBe("MAX_SUPPLY_EXCEEDED");
       }
+    });
+  });
+
+  describe("withLiveIssuanceTerms", () => {
+    const refusedWith = (error: Error) =>
+      withLiveIssuanceTerms(() => Promise.reject(error)).then(
+        () => {
+          throw new Error("Expected the call to be refused");
+        },
+        (cause: unknown) => cause
+      );
+
+    it("answers the live mint's refusals as 400s, a paused mint as TOKEN_PAUSED", async () => {
+      expect(
+        await refusedWith(
+          new MosaicAmountError(
+            MOSAIC_AMOUNT_REFUSALS.unsupported,
+            "This token is paused",
+            "paused"
+          )
+        )
+      ).toMatchObject({ code: "TOKEN_PAUSED", statusCode: 400 });
+      expect(
+        await refusedWith(
+          new MosaicAmountError(
+            MOSAIC_AMOUNT_REFUSALS.unsupported,
+            "This token runs a transfer hook",
+            "transfer_hook"
+          )
+        )
+      ).toMatchObject({ code: "BAD_REQUEST", details: { reason: "transfer_hook" } });
+      for (const reason of [MOSAIC_AMOUNT_REFUSALS.scaleMismatch, MOSAIC_AMOUNT_REFUSALS.inexact]) {
+        expect(await refusedWith(new MosaicAmountError(reason, "no", null))).toMatchObject({
+          code: "INVALID_TOKEN_AMOUNT",
+        });
+      }
+      expect(
+        await refusedWith(new TokenTermsError(TOKEN_TERMS_REFUSALS.notMint, "No account"))
+      ).toMatchObject({ code: "BAD_REQUEST", details: { reason: "not_a_mint" } });
+    });
+
+    it("passes every other error through", async () => {
+      const failure = new Error("RPC down");
+      expect(await refusedWith(failure)).toBe(failure);
     });
   });
 });

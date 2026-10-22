@@ -1,5 +1,14 @@
-import { AmountError, parseDecimalAmount, toMosaicAmount } from "@sdp/solana/amount";
-import { AppError } from "@/lib/errors";
+import { AmountError, parseDecimalAmount } from "@sdp/solana/amount";
+import { MOSAIC_AMOUNT_REFUSALS, MosaicAmountError } from "@sdp/solana/mosaic-amount";
+import {
+  type BaseUnits,
+  parseTokenAmount,
+  type TokenAmount,
+  toBaseUnits,
+} from "@sdp/solana/token-amount";
+import { TOKEN_MOVEMENT_REFUSALS } from "@sdp/solana/token-movement";
+import { TokenTermsError } from "@sdp/solana/token-terms";
+import { AppError, badRequest } from "@/lib/errors";
 
 type TokenWithStatus = {
   status: "pending" | "active" | "paused" | "revoked";
@@ -49,16 +58,25 @@ function toInvalidTokenAmountError(message: string): AppError {
   });
 }
 
+/**
+ * Parses an issuance amount at the token's recorded decimals. The issuance
+ * services check that scale against the mint read live before Mosaic converts
+ * the amount (`@sdp/solana/mosaic-amount`).
+ *
+ * @returns The exact token amount and its base units.
+ * @throws AppError (`INVALID_TOKEN_AMOUNT`) when the amount is not a positive
+ * decimal the mint can hold.
+ */
 export function parsePositiveTokenAmount(
   amount: string,
   decimals: number
 ): {
-  amountBaseUnits: bigint;
-  mosaicAmount: number;
+  amount: TokenAmount;
+  amountBaseUnits: BaseUnits;
 } {
-  let amountBaseUnits: bigint;
+  let tokenAmount: TokenAmount;
   try {
-    amountBaseUnits = parseDecimalAmount(amount, decimals);
+    tokenAmount = parseTokenAmount(amount, decimals);
   } catch (error) {
     if (error instanceof AmountError) {
       throw toInvalidTokenAmountError(error.message);
@@ -67,20 +85,36 @@ export function parsePositiveTokenAmount(
     throw error;
   }
 
+  const amountBaseUnits = toBaseUnits(tokenAmount);
   if (amountBaseUnits <= 0n) {
     throw toInvalidTokenAmountError("Amount must be greater than zero.");
   }
+  return { amount: tokenAmount, amountBaseUnits };
+}
 
+/**
+ * Runs an issuance service call, answering its live-terms refusals as 400s:
+ * a paused mint as `TOKEN_PAUSED`, an amount Mosaic cannot take exactly or a
+ * recorded scale the mint no longer has as `INVALID_TOKEN_AMOUNT`, and a mint
+ * state the issuance row refuses (or an account that is no mint) as
+ * `BAD_REQUEST`. Nothing was built or signed when one is thrown.
+ */
+export async function withLiveIssuanceTerms<T>(call: () => Promise<T>): Promise<T> {
   try {
-    return {
-      amountBaseUnits,
-      mosaicAmount: toMosaicAmount(amount, decimals),
-    };
+    return await call();
   } catch (error) {
-    if (error instanceof AmountError) {
+    if (error instanceof MosaicAmountError) {
+      if (error.movementRefusal === TOKEN_MOVEMENT_REFUSALS.paused) {
+        throw new AppError("TOKEN_PAUSED", error.message);
+      }
+      if (error.reason === MOSAIC_AMOUNT_REFUSALS.unsupported) {
+        throw badRequest(error.message, { reason: error.movementRefusal });
+      }
       throw toInvalidTokenAmountError(error.message);
     }
-
+    if (error instanceof TokenTermsError) {
+      throw badRequest(error.message, { reason: error.reason });
+    }
     throw error;
   }
 }
@@ -89,9 +123,9 @@ export function resolveMintOperationAmount(
   token: TokenWithStatus,
   amount: string
 ): {
-  amountBaseUnits: bigint;
+  amount: TokenAmount;
+  amountBaseUnits: BaseUnits;
   mintAddress: string;
-  mosaicAmount: number;
 } {
   assertTokenAllowsOperation(token, "mint");
   assertTokenIsDeployed(token);

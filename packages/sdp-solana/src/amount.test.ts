@@ -8,7 +8,6 @@ import {
   parseDecimalAmount,
   parseTokenAmount,
   scaleDecimalAmountByBps,
-  toMosaicAmount,
   toNumberAmount,
 } from "./amount";
 
@@ -27,12 +26,6 @@ describe("toNumberAmount", () => {
   it("rejects non-decimal input", () => {
     assert.throws(() => toNumberAmount("1e-7"), AmountError);
     assert.throws(() => toNumberAmount(""), AmountError);
-  });
-});
-
-describe("toMosaicAmount", () => {
-  it("survives amounts whose float form uses scientific notation", () => {
-    assert.equal(toMosaicAmount("0.0000001", 9), 0.0000001);
   });
 });
 

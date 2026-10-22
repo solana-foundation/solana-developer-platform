@@ -7,6 +7,7 @@
 import { type ApiTestCustodyWallet, type ApiTestEnv, apiTestSupport } from "@sdp/api/test-support";
 import { resolveDefaultCluster } from "@sdp/rpc/config";
 import { runInClusterScope } from "@sdp/rpc/scope";
+import { parseTokenAmount } from "@sdp/solana/token-amount";
 import { SDP_ENVIRONMENT_BY_CLUSTER } from "@sdp/types/well-known-tokens";
 import { address, generateKeyPairSigner } from "@solana/kit";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -204,7 +205,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("DvP creation and 
             await mosaic.mintTo({
               mint: side === "a" ? asset.mint : cash.mint,
               destination: address(wallet.publicKey),
-              amount: side === "a" ? ASSET_UNITS : CASH_UNITS,
+              amount: parseTokenAmount(String(side === "a" ? ASSET_UNITS : CASH_UNITS), DECIMALS),
               mintAuthority: signer.address, // Matches the signer bound to MosaicService above.
               feePayer: signer.address,
             });

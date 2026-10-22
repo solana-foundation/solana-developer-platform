@@ -19,10 +19,20 @@
       "import": "./src/asset-ref.ts",
       "default": "./src/asset-ref.ts"
     },
+    "./mosaic-amount": {
+      "types": "./src/mosaic-amount.ts",
+      "import": "./src/mosaic-amount.ts",
+      "default": "./src/mosaic-amount.ts"
+    },
     "./movement-quote": {
       "types": "./src/movement-quote.ts",
       "import": "./src/movement-quote.ts",
       "default": "./src/movement-quote.ts"
+    },
+    "./read-token-terms": {
+      "types": "./src/read-token-terms.ts",
+      "import": "./src/read-token-terms.ts",
+      "default": "./src/read-token-terms.ts"
     },
     "./token-2022": {
       "types": "./src/token-2022.ts",

@@ -1,18 +1,21 @@
 import type { AssetRef } from "@sdp/solana/asset-ref";
 import { type MovementQuote, quoteMovement } from "@sdp/solana/movement-quote";
 import { baseUnits, parseTokenAmount, toBaseUnits } from "@sdp/solana/token-amount";
-import { NATIVE_TOKEN_TERMS } from "@sdp/solana/token-terms";
+import { decodeTokenTerms, type MintTokenTerms, NATIVE_TOKEN_TERMS } from "@sdp/solana/token-terms";
 import type { TokenMovementBasis } from "@sdp/types/token-movements";
 import { SPL_TOKEN_PROGRAMS, type TokenProgramKind } from "@sdp/types/well-known-tokens";
 import {
   type Address,
   address,
   decompileTransactionMessage,
+  type EncodedAccount,
   getAddressDecoder,
   getBase64Decoder,
+  getBase64Encoder,
   getCompiledTransactionMessageDecoder,
   getTransactionDecoder,
   type Instruction,
+  lamports,
   type ReadonlyUint8Array,
   unixTimestamp,
 } from "@solana/kit";
@@ -215,3 +218,39 @@ export function testExpectation(
 ): PaymentRequestExpectation {
   return { asset, decimals, credit: toBaseUnits(parseTokenAmount(amount, decimals)) };
 }
+
+/**
+ * A mint's Token Terms as `fetchTokenTerms` reads them at {@link TEST_CLOCK},
+ * for a test that stubs the read itself.
+ */
+export function mintTermsAt(
+  mint: string,
+  program: TokenProgramKind,
+  options: { decimals: number; extensions: ExtensionArgs[] | null }
+): MintTokenTerms {
+  const toEncoded = (at: string, account: JsonRpcResult): EncodedAccount => {
+    const parsed = encodedAccountSchema.parse(account);
+    const data = getBase64Encoder().encode(parsed.data[0]);
+    return {
+      address: address(at),
+      data: new Uint8Array(data),
+      executable: false,
+      lamports: lamports(BigInt(parsed.lamports)),
+      programAddress: address(parsed.owner),
+      space: BigInt(data.length),
+    };
+  };
+  return decodeTokenTerms(
+    { kind: "token", mint: address(mint), program },
+    {
+      mint: toEncoded(mint, mintRpcAccount(program, options)),
+      clock: toEncoded(SYSVAR_CLOCK_ADDRESS, CLOCK_RPC_ACCOUNT),
+    }
+  );
+}
+
+const encodedAccountSchema = z.object({
+  data: z.tuple([z.string(), z.literal("base64")]),
+  lamports: z.number(),
+  owner: z.string(),
+});
