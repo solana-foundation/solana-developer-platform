@@ -250,7 +250,9 @@ async function failStrandedTransferBatches(env: Env, now: Date): Promise<void> {
  * Upgrade-only by design: a confirmed transfer whose status reads null or err
  * keeps its status and rotates to the back of the poll queue — the funds were
  * already observed on chain, so this pass never introduces a new failure
- * path. Every finalized row — batch parents included — upgrades through one
+ * path. Each such read is logged as `sdp_api_payment_finalization_unproven`
+ * instead: a null can be an honest archival miss, so it is not proof of a
+ * fork. Every finalized row — batch parents included — upgrades through one
  * set-based update guarded on still being confirmed (never
  * settleTransferBatch, which only claims from processing and whose recipient
  * settlement already ran): the upgrade changes no recipient or batch state.
@@ -365,6 +367,23 @@ async function finalizeConfirmedTransfers(
   );
 
   await repo.advanceConfirmedTransfers({ polled, updatedAt: nowIso });
+
+  for (const [i, transfer] of confirmedTransfers.entries()) {
+    const status = statuses[i];
+    if (status && !status.err) continue;
+    logEvent("warn", {
+      event: "sdp_api_payment_finalization_unproven",
+      flow: "reconciler",
+      reason: status ? "transaction_error" : "status_missing",
+      organization_id: transfer.organization_id,
+      project_id: transfer.project_id,
+      transfer_id: transfer.id,
+      transfer_type: transfer.type,
+      signature: transfer.signature,
+      confirmed_at: transfer.confirmed_at,
+      transaction_error: status ? JSON.stringify(status.err) : null,
+    });
+  }
 
   const finalized = polled.filter((transfer) => transfer.finalized);
   for (const transfer of finalized) {

@@ -387,8 +387,9 @@ export type RampTransferTransitionId = keyof typeof RAMP_TRANSFER_TRANSITIONS;
 /** The transition a funded off-ramp deposit takes for the status a wallet send would land on. */
 export const OFFRAMP_DEPOSIT_OUTCOME_TRANSITIONS = {
   confirmed: "offramp_deposit_confirmed",
+  finalized: "offramp_deposit_confirmed",
   failed: "offramp_deposit_failed",
-} as const satisfies Record<"confirmed" | "failed", RampTransferTransitionId>;
+} as const satisfies Record<TransferChainVerdictStatus, RampTransferTransitionId>;
 
 /** Lifecycle of a wallet-to-address onchain transfer; the ramp-only statuses never apply to it. */
 export const ONCHAIN_TRANSFER_STATUSES = [

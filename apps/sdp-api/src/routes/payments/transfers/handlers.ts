@@ -17,6 +17,7 @@ import {
   PAYMENT_TRANSFER_TYPES,
   RAMP_TRANSFER_TYPES,
   TRANSFER_CHAIN_VERDICT_STATUSES,
+  type TransferChainVerdictStatus,
   type PaymentTransferStatus as TransferStatus,
   type PaymentTransferType as TransferType,
   WALLET_TRANSFER_TYPES,
@@ -544,6 +545,22 @@ function resolveTransferUpdateResult(
   throw conflict("Payment transfer was concurrently updated without a chain verdict");
 }
 
+/** The commitment a transfer's in-request wait reaches, which is also the status it lands on. */
+type TransferLandingStatus = Exclude<TransferChainVerdictStatus, "failed">;
+
+/**
+ * The commitment the request waits for before it answers. A wallet send
+ * reports success only once the cluster finalizes it (APE-419); a funded
+ * off-ramp deposit still settles at confirmed, since the provider's payout
+ * decides its outcome.
+ *
+ * @param type - The transfer's type.
+ * @returns The status the transfer lands on when its wait succeeds.
+ */
+function transferLandingStatus(type: TransferType): TransferLandingStatus {
+  return isRampTransferType(type) ? "confirmed" : "finalized";
+}
+
 /** A chain verdict or preflight simulation proves this exact transaction cannot land. */
 function isDefiniteExecutionFailure(error: unknown): boolean {
   return (
@@ -597,7 +614,9 @@ async function releaseUnsentRampDeposit(
 
 /**
  * A failure after the durable start marker remains processing for chain
- * reconciliation. Before that marker, no broadcast was possible and the
+ * reconciliation, and the request answers with the row as it stands now, so a
+ * verdict reconciliation already wrote is what the caller sees (APE-892).
+ * Before that marker, no broadcast was possible and the
  * transfer can fail normally; an unsigned off-ramp deposit is released.
  */
 async function settleTransferExecutionFailure(
@@ -611,7 +630,15 @@ async function settleTransferExecutionFailure(
   const submitted = await recorder.submittedRow();
   if (submitted && !isDefiniteExecutionFailure(error)) {
     logSubmittedUnconfirmed(transfer, submitted.signature, error);
-    return success(c, toPayload(submitted));
+    const current = await getPaymentsRepository(c).getTransferById({
+      transferId: transfer.id,
+      organizationId: transfer.organization_id,
+      projectId: transfer.project_id,
+    });
+    if (!current) {
+      throw internalError("Payment transfer record not found after submission");
+    }
+    return success(c, toPayload(current));
   }
   const message = error instanceof Error ? error.message : "Unknown transfer error";
   const answer = mapTransferExecutionError(error);
@@ -660,6 +687,7 @@ async function executeSponsoredTransfer(
   params: {
     sourceWallet: CustodyWallet;
     submissionStore: SignedSubmissionStore;
+    landingStatus: TransferLandingStatus;
     buildInstructions: (context: {
       signer: TransactionSigner;
       feePayer: Address;
@@ -710,7 +738,7 @@ async function executeSponsoredTransfer(
   });
 
   const confirmation = await confirmTransaction(rpc, signature, {
-    commitment: "confirmed",
+    commitment: params.landingStatus,
   });
 
   if (confirmation.err) {
@@ -729,7 +757,8 @@ async function executeSolTransfer(
   sourceWallet: CustodyWallet,
   destinationAddress: Address,
   amount: string,
-  submissionStore: SignedSubmissionStore
+  submissionStore: SignedSubmissionStore,
+  landingStatus: TransferLandingStatus
 ): Promise<{ signature: string; slot: number | null; blockTime: string | null }> {
   const lamports = parseDecimalAmount(amount, 9);
   if (lamports <= 0n) {
@@ -738,6 +767,7 @@ async function executeSolTransfer(
   return executeSponsoredTransfer(c, {
     sourceWallet,
     submissionStore,
+    landingStatus,
     buildInstructions: async ({ signer }) => [
       getTransferSolInstruction({
         source: signer,
@@ -755,11 +785,13 @@ async function executeSplTransfer(
   mintAddress: Address,
   amount: string,
   submissionStore: SignedSubmissionStore,
-  source: SplTransferSource | undefined
+  source: SplTransferSource | undefined,
+  landingStatus: TransferLandingStatus
 ): Promise<{ signature: string; slot: number | null; blockTime: string | null }> {
   return executeSponsoredTransfer(c, {
     sourceWallet,
     submissionStore,
+    landingStatus,
     buildInstructions: async ({ signer, feePayer, rpc }) => {
       const { createDestinationAtaInstruction, transferInstruction } =
         await buildSplTransferInstructions(rpc, {
@@ -908,6 +940,7 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
   markIdempotencyCommitted(c);
 
   const submissionStore = createTransferSignedSubmissionStore(getPaymentsRepository(c), transfer);
+  const landingStatus = transferLandingStatus(transfer.type);
   // The tamper-evident ledger admits the movement before any bytes can reach
   // the chain; a submission whose confirmation never lands leaves the intent
   // unresolved, which is exactly the state reconciliation pages on.
@@ -949,11 +982,12 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
         operation.sourceWallet,
         operation.destinationAddress,
         operation.amount,
-        submissionStore
+        submissionStore,
+        landingStatus
       );
       const updated = resolveTransferUpdateResult(
         await updateTransferRecord(c, transfer, {
-          status: "confirmed",
+          status: landingStatus,
           signature: solResult.signature,
           slot: solResult.slot,
           blockTime: solResult.blockTime,
@@ -974,12 +1008,13 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
       mintAddress,
       operation.amount,
       submissionStore,
-      rampClaim?.splSource
+      rampClaim?.splSource,
+      landingStatus
     );
 
     const updated = resolveTransferUpdateResult(
       await updateTransferRecord(c, transfer, {
-        status: "confirmed",
+        status: landingStatus,
         signature: result.signature,
         slot: result.slot,
         blockTime: result.blockTime,
