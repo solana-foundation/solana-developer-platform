@@ -248,7 +248,10 @@ describe("Payments routes — subscriptions", () => {
       env
     );
     expect(response.status).toBe(201);
-    const planId = (await response.json()).data.subscriptionPlan.id;
+    const body = successResponseSchema(paymentSubscriptionPlanResponseSchema).parse(
+      await response.json()
+    );
+    const planId = body.data.subscriptionPlan.id;
     await seedCachedKey({
       walletScope: "selected",
       walletIds: [],
