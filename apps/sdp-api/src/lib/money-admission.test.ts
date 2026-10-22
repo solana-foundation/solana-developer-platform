@@ -1,6 +1,7 @@
 import { MOVEMENTS, type MovementId } from "@sdp/types/movements";
-import { ORGANIZATION_STATUSES } from "@sdp/types/organizations";
+import { type MemberStatus, ORGANIZATION_STATUSES } from "@sdp/types/organizations";
 import type { ProjectEnvironment } from "@sdp/types/projects";
+import type { LegacyOrganizationRole } from "@sdp/types/roles";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db/identity";
@@ -461,18 +462,22 @@ describe("decidePrincipal", () => {
     });
   });
 
-  const member = (status: string, role: string, inProject = true): MoneyPrincipalFacts => ({
+  const member = (
+    status: MemberStatus,
+    role: LegacyOrganizationRole,
+    inProject: boolean
+  ): MoneyPrincipalFacts => ({
     kind: "member",
     member: { status, role, inProject },
   });
 
   it("admits an active member whose role holds the action, and refuses one who left", () => {
-    expect(decide(member("active", "member"))).toEqual({ admitted: true });
-    expect(decide(member("removed", "admin"))).toEqual({
+    expect(decide(member("active", "member", true))).toEqual({ admitted: true });
+    expect(decide(member("removed", "admin", true))).toEqual({
       admitted: false,
       reason: "principal_not_live",
     });
-    expect(decide(member("active", "member"), WALLET, "issuance.seize")).toEqual({
+    expect(decide(member("active", "member", true), WALLET, "issuance.seize")).toEqual({
       admitted: false,
       reason: "action_not_held",
       action: "issuance.enforce",
@@ -482,7 +487,7 @@ describe("decidePrincipal", () => {
   // SOLA9-790: ingress admits a dashboard member to a project by their
   // `project_members` row; one removed from the project since starts nothing
   // there, whatever their organization role, and still unwinds.
-  it.each(["member", "admin", "owner"])(
+  it.each(["member", "admin", "owner"] as const satisfies readonly LegacyOrganizationRole[])(
     "refuses a start by an active %s no longer in the project",
     (role) => {
       expect(decide(member("active", role, false))).toEqual({

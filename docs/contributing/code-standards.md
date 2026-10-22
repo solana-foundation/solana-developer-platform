@@ -36,7 +36,7 @@ Every on-chain path reads its cluster from the open cluster scope (`currentClust
 | Helius DAS | `services/helius-das.service.ts` | A direct Helius call |
 | Open a scope | Project middleware, `/pay` context, the cron runner (`runInClusterScope`; tests may too) | Opening a scope in a service |
 | The Fee Payer's chain reads (fee price, settlement) | `priceSponsoredTransaction`, `getSponsoredTransaction`, `sponsoredFinalizedHeight`, `getSponsoredSignatureStatus` (`@sdp/fee-payment/chain-reads`) | `createKoraUpstreamRpc()` outside `@sdp/fee-payment`; the managed pool for budget reads |
-| A sponsor that signs | `createSponsorshipFeePayment(env, scope, movement)`, with `resolveRequestSponsorshipScope(c)` or `resolveProjectSponsorshipScope(env, owner)` (refuses a project from another environment) | `createKoraAdapter`, `KoraAdapter`, `KoraClient` (`pnpm check:value-movement` pins them) |
+| A sponsor that signs | `createSponsorshipFeePayment(env, scope, movement, { custodyWalletId })` (the custody wallet that signs the sponsored transaction; null only when none does, as on `/pay`), with `resolveRequestSponsorshipScope(c)` or `resolveProjectSponsorshipScope(env, owner)` (refuses a project from another environment) | `createKoraAdapter`, `KoraAdapter`, `KoraClient` (`pnpm check:value-movement` pins them) |
 | Only the fee-payer address | `resolveSponsoredFeePayer(env, scope)` | Building a sponsor to read its address |
 | Send a sponsored transaction | `submitSponsoredTransaction({ feePayment, rpc: createClusterRpc(), transaction, lastValidBlockHeight, store })` | Kora's `signAndSendTransaction`; `signAsFeePayer` followed by your own send |
 

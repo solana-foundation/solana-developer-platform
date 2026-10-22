@@ -64,6 +64,7 @@ const SPONSORED_WALLET: SponsorshipScope = {
 
 /** The custody wallet the sponsored transfer signs with. */
 const SIGNING_WALLET = { custodyWalletId: "cwlt_1" } as const;
+const NO_CUSTODY_WALLET = { custodyWalletId: null } as const;
 
 const KORA_URLS = {
   devnet: "https://kora-devnet.sponsorship.sdp.test",
@@ -193,7 +194,7 @@ describe("sponsorship identity boundary", () => {
   );
   function selfHostedFeePayment(
     signAsFeePayer: (transaction: Uint8Array) => Promise<Uint8Array>,
-    subject: MoneyAdmissionSubject = SIGNING_WALLET
+    subject: MoneyAdmissionSubject
   ) {
     vi.spyOn(KoraAdapter.prototype, "getFeePayer").mockResolvedValue(FEE_PAYER);
     vi.spyOn(KoraAdapter.prototype, "signAsFeePayer").mockImplementation(signAsFeePayer);
@@ -215,7 +216,7 @@ describe("sponsorship identity boundary", () => {
       admittedMoneyFacts({ organizationStatus: "deleted" })
     );
     const signAsFeePayer = vi.fn(async (transaction: Uint8Array) => transaction);
-    const feePayment = selfHostedFeePayment(signAsFeePayer);
+    const feePayment = selfHostedFeePayment(signAsFeePayer, SIGNING_WALLET);
 
     await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toMatchObject({
       code: "FORBIDDEN",
@@ -243,7 +244,7 @@ describe("sponsorship identity boundary", () => {
   it("reads the sponsored custody wallet and refuses a key whose scope no longer lists it", async () => {
     readMoneyAdmissionFacts.mockResolvedValue(selectedKey(false));
     const signAsFeePayer = vi.fn(async (transaction: Uint8Array) => transaction);
-    const feePayment = selfHostedFeePayment(signAsFeePayer);
+    const feePayment = selfHostedFeePayment(signAsFeePayer, SIGNING_WALLET);
 
     await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toMatchObject({
       code: "FORBIDDEN",
@@ -259,7 +260,7 @@ describe("sponsorship identity boundary", () => {
   it("sponsors a key that still lists the custody wallet", async () => {
     readMoneyAdmissionFacts.mockResolvedValue(selectedKey(true));
     const signedTransaction = await sponsorSignTestTransaction(buildTransaction());
-    const feePayment = selfHostedFeePayment(async () => signedTransaction);
+    const feePayment = selfHostedFeePayment(async () => signedTransaction, SIGNING_WALLET);
 
     await expect(feePayment.signAsFeePayer(buildTransaction())).resolves.toStrictEqual(
       signedTransaction
@@ -290,9 +291,7 @@ describe("sponsorship identity boundary", () => {
   it("sponsors a `/pay` transaction, which names no custody wallet, without a wallet check", async () => {
     readMoneyAdmissionFacts.mockResolvedValue(selectedKey(null));
     const signedTransaction = await sponsorSignTestTransaction(buildTransaction());
-    const feePayment = selfHostedFeePayment(async () => signedTransaction, {
-      custodyWalletId: null,
-    });
+    const feePayment = selfHostedFeePayment(async () => signedTransaction, NO_CUSTODY_WALLET);
 
     await expect(feePayment.signAsFeePayer(buildTransaction())).resolves.toStrictEqual(
       signedTransaction
@@ -302,21 +301,25 @@ describe("sponsorship identity boundary", () => {
     });
   });
   it("refuses self-hosted sponsor bytes without the sponsor signature", async () => {
-    const feePayment = selfHostedFeePayment(async (transaction) => transaction);
+    const feePayment = selfHostedFeePayment(async (transaction) => transaction, SIGNING_WALLET);
     await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toThrow(
       "missing the sponsor fee-payer signature"
     );
   });
   it("refuses self-hosted sponsor bytes whose signature does not verify", async () => {
-    const feePayment = selfHostedFeePayment(async (transaction) =>
-      garbageSignTestTransaction(transaction)
+    const feePayment = selfHostedFeePayment(
+      async (transaction) => garbageSignTestTransaction(transaction),
+      SIGNING_WALLET
     );
     await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toThrow(
       "invalid sponsor fee-payer signature"
     );
   });
   it("refuses self-hosted sponsor bytes returned over a different message", async () => {
-    const feePayment = selfHostedFeePayment(() => sponsorSignTestTransaction(otherTransaction()));
+    const feePayment = selfHostedFeePayment(
+      () => sponsorSignTestTransaction(otherTransaction()),
+      SIGNING_WALLET
+    );
     const lifecycle = {
       persistSigned: vi.fn(),
       markStarted: vi.fn(),
@@ -329,7 +332,7 @@ describe("sponsorship identity boundary", () => {
   });
   it("adapts self-hosted providers to the owned persist-before-marker lifecycle", async () => {
     const signedTransaction = await sponsorSignTestTransaction(buildTransaction());
-    const feePayment = selfHostedFeePayment(async () => signedTransaction);
+    const feePayment = selfHostedFeePayment(async () => signedTransaction, SIGNING_WALLET);
     const lifecycle = {
       persistSigned: vi.fn().mockResolvedValue(undefined),
       markStarted: vi.fn().mockResolvedValue(undefined),
