@@ -238,6 +238,42 @@ describe("Clerk webhooks", () => {
       { organization_id: "org_webhook_outsider", user_id: OUTSIDER.userId, status: "active" },
     ]);
   });
+  it("user.deleted revokes and audits the linked user's pending invitation to an organization they never joined", async () => {
+    await seedKnownOrganization();
+    await seedInvitation(getDb(env), {
+      id: "inv_webhook_deleted_invitee",
+      organizationId: "org_webhook_outsider",
+      email: KNOWN_ADMIN.email.toUpperCase(),
+      role: "member",
+      invitedBy: OUTSIDER.userId,
+      status: "pending",
+      expiresInDays: 7,
+    });
+    const clerk = stubClerkBackend(env);
+
+    const response = await simulateClerkWebhook({
+      type: "user.deleted",
+      data: { id: `clerk_user_${KNOWN_ADMIN.userId}`, object: "user", deleted: true },
+    });
+
+    expect(response.status).toBe(200);
+    expect(clerk.requests).toEqual([]);
+    expect(await readInvitationStatus(getDb(env), "inv_webhook_deleted_invitee")).toBe("revoked");
+    expect(
+      await getDb(env).queryMany(
+        "SELECT action, organization_id FROM audit_logs WHERE resource_type = 'invitation'"
+      )
+    ).toEqual([{ action: "revoke", organization_id: "org_webhook_outsider" }]);
+  });
+  it("user.deleted naming no user is refused", async () => {
+    const response = await simulateClerkWebhook({ type: "user.deleted", data: {} });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: { code: "BAD_REQUEST", message: "user.deleted event names no user" },
+      meta: { requestId: expect.any(String) },
+    });
+  });
   it("refuses the organization's API keys once Clerk deletes it", async () => {
     const clerkOrgId = "org_clerk_webhook_cache_invalidation";
     const orgId = "org_webhook_cache_invalidation";

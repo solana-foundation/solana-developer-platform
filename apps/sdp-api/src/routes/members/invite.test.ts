@@ -283,4 +283,44 @@ describe("POST /v1/members/invite", () => {
       }),
     ]);
   });
+
+  it("completes the invite without withdrawing the Clerk invitation when a sign-in accepted it while Clerk was inviting", async () => {
+    const createInvitation = ClerkOrganizationsService.prototype.createOrganizationInvitation;
+    vi.spyOn(
+      ClerkOrganizationsService.prototype,
+      "createOrganizationInvitation"
+    ).mockImplementation(async function (this: ClerkOrganizationsService, params) {
+      await getDb(env).execute(
+        "UPDATE invitations SET status = 'accepted' WHERE organization_id = ?",
+        [ORGANIZATION.id]
+      );
+      return createInvitation.call(this, params);
+    });
+    clerk.answer({ status: 200, body: { id: CLERK_INVITATION_ID, status: "pending" } });
+
+    const response = await invite(INVITEE_EMAIL);
+
+    expect(response.status).toBe(201);
+    expect(clerk.requests).toEqual([
+      {
+        method: "POST",
+        path: `/organizations/${CLERK_ORG_ID}/invitations`,
+        body: CLERK_INVITATION_BODY,
+      },
+    ]);
+    const [row] = await invitationRows();
+    expect(row.status).toBe("accepted");
+    expect(await response.json()).toEqual({
+      data: {
+        invitation: {
+          id: row.id,
+          email: INVITEE_EMAIL,
+          role: "admin",
+          expiresAt: row.expires_at,
+          clerkInvitationId: CLERK_INVITATION_ID,
+        },
+      },
+      meta: { requestId: expect.any(String), timestamp: expect.any(String) },
+    });
+  });
 });
