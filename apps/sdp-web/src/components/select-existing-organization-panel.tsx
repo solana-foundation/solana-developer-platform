@@ -213,14 +213,19 @@ export function SelectExistingOrganizationPanel({ noAccess }: { noAccess: boolea
             );
           })}
 
-          {isLoaded && userMemberships.hasNextPage ? (
+          {isLoaded && (userMemberships.hasNextPage || userInvitations.hasNextPage) ? (
             <button
               type="button"
-              disabled={switchingTo !== null || userMemberships.isFetching}
-              onClick={() => userMemberships.fetchNext()}
+              disabled={
+                switchingTo !== null || userMemberships.isFetching || userInvitations.isFetching
+              }
+              onClick={() => {
+                if (userMemberships.hasNextPage) userMemberships.fetchNext();
+                if (userInvitations.hasNextPage) userInvitations.fetchNext();
+              }}
               className="flex w-full items-center justify-center gap-2 rounded-2xl border border-border-default px-4 py-3 text-sm font-medium transition-colors hover:border-border-strong hover:bg-surface-sunken focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50"
             >
-              {userMemberships.isFetching ? (
+              {userMemberships.isFetching || userInvitations.isFetching ? (
                 <LoaderCircleIcon className="size-4 animate-spin" aria-hidden="true" />
               ) : null}
               {t("Shared.SharedComponents.loadMore")}
