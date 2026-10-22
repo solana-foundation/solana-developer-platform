@@ -2,21 +2,15 @@ import type { OrganizationRole } from "@sdp/types/roles";
 import { Children, isValidElement, type ReactElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DashboardQuickStart } from "@/components/dashboard-quick-start.redesign";
+import * as sdpApi from "@/lib/sdp-api";
 import { PRODUCTION_PROJECT } from "@/test/projects";
 import { setPageRequest } from "@/test/request-project";
 
-const mocks = vi.hoisted(() => ({
-  auth: vi.fn(),
-  requestMemberRole: vi.fn<() => Promise<OrganizationRole>>(),
-}));
+const mocks = vi.hoisted(() => ({ auth: vi.fn() }));
 
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("next/headers", () => import("@/test/next-headers"));
-vi.mock("@/lib/sdp-api", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/sdp-api")>()),
-  requestMemberRole: mocks.requestMemberRole,
-}));
 
 import { LeaveOrganizationCard } from "./leave-organization-card";
 import { MembersSection } from "./members-section";
@@ -40,7 +34,7 @@ describe("settings page", () => {
     ["admin", [DashboardQuickStart, MembersSection, OrganizationAccessSection]],
     ["member", [LeaveOrganizationCard]],
   ])("renders the sections SDP's %s role holds", async (role, sections) => {
-    mocks.requestMemberRole.mockResolvedValue(role);
+    vi.spyOn(sdpApi, "requestMemberRole").mockResolvedValue(role);
 
     const page = await SettingsPage({ searchParams: Promise.resolve({}) });
 

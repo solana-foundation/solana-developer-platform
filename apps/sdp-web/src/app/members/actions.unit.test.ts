@@ -1,24 +1,16 @@
 import type { OrganizationRole } from "@sdp/types/roles";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ZodError } from "zod";
+import * as sdpApi from "@/lib/sdp-api";
 import { PRODUCTION_PROJECT } from "@/test/projects";
 import { setPageRequest } from "@/test/request-project";
 
-const mocks = vi.hoisted(() => ({
-  createOrgSdpApiClient: vi.fn(),
-  createSdpApiClient: vi.fn(),
-  revalidatePath: vi.fn(),
-}));
+const mocks = vi.hoisted(() => ({ revalidatePath: vi.fn() }));
 
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
 vi.mock("next/headers", () => import("@/test/next-headers"));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/i18n/server", () => ({ getTranslations: async () => (key: string) => key }));
-vi.mock("@/lib/sdp-api", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/sdp-api")>()),
-  createOrgSdpApiClient: mocks.createOrgSdpApiClient,
-  createSdpApiClient: mocks.createSdpApiClient,
-}));
 
 import {
   changeMemberRole,
@@ -28,13 +20,13 @@ import {
   revokeInvitation,
 } from "./actions";
 
-const client = { fetch: vi.fn() };
+const client = { request: vi.fn(), fetch: vi.fn() };
 
 beforeEach(() => {
   vi.clearAllMocks();
   setPageRequest(`/dashboard/${PRODUCTION_PROJECT.id}/settings`);
-  mocks.createOrgSdpApiClient.mockResolvedValue(client);
-  mocks.createSdpApiClient.mockResolvedValue(client);
+  vi.spyOn(sdpApi, "createOrgSdpApiClient").mockResolvedValue(client);
+  vi.spyOn(sdpApi, "createSdpApiClient").mockResolvedValue(client);
   client.fetch.mockResolvedValue({});
 });
 
