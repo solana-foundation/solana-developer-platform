@@ -252,36 +252,6 @@ describe("ProjectService", () => {
   describe("Project Members", () => {
     const projectId = TEST_PROJECT.id;
 
-    describe("addMember", () => {
-      it("adds a member", async () => {
-        // Create another user
-        await db
-          .prepare(
-            "INSERT OR REPLACE INTO users (id, email, email_verified, status) VALUES ('usr_new123', 'new@example.com', 1, 'active')"
-          )
-          .run();
-
-        const member = await projectService.addMember(projectId, "usr_new123");
-
-        expect(member.id).toMatch(/^pm_/);
-        expect(member.userId).toBe("usr_new123");
-      });
-
-      it("throws for duplicate membership", async () => {
-        await db
-          .prepare(
-            "INSERT OR REPLACE INTO users (id, email, email_verified, status) VALUES ('usr_dup123', 'dup@example.com', 1, 'active')"
-          )
-          .run();
-
-        await projectService.addMember(projectId, "usr_dup123");
-
-        await expect(projectService.addMember(projectId, "usr_dup123")).rejects.toThrow(
-          "User is already a member of this project"
-        );
-      });
-    });
-
     describe("listMembers", () => {
       it("returns all project members with user details", async () => {
         const members = await projectService.listMembers(projectId);

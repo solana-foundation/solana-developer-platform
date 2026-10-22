@@ -71,7 +71,6 @@ describe("human-only routes", () => {
       "POST /v1/api-keys/:keyId/rotate",
       "POST /v1/members/invite",
       "POST /v1/projects/:projectId/api-keys",
-      "POST /v1/projects/:projectId/members",
     ]);
   });
 

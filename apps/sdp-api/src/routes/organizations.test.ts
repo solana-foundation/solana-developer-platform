@@ -51,25 +51,6 @@ describe("Organizations routes", () => {
   afterEach(async () => {
     await clearKVStores(env);
   });
-  describe("POST /v1/organizations", () => {
-    it("does not expose local organization self-registration", async () => {
-      const res = await app.request(
-        "/v1/organizations",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            name: "New Org",
-            email: "new@example.com",
-          }),
-        },
-        env
-      );
-      expect(res.status).toBe(404);
-    });
-  });
   describe("GET /v1/organizations/:orgId", () => {
     beforeEach(async () => {
       await getDb(env)

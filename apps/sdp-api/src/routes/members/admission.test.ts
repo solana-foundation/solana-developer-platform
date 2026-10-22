@@ -105,7 +105,7 @@ async function inviteeProjectIds(): Promise<string[]> {
 }
 
 const PENDING_INVITATION_READ =
-  /FROM invitations\s+WHERE organization_id = \? AND email = \? AND status = 'pending'/;
+  /FROM invitations\s+WHERE organization_id = \? AND LOWER\(email\) = \? AND status = 'pending'/;
 
 function readAfter(settled: Promise<Response>, statement: PreparedStatement): PreparedStatement {
   return {
@@ -198,6 +198,23 @@ describe("sign-in admission", () => {
     expect(await readInvitationStatus(getDb(env), INVITATION_ID)).toBe("accepted");
     expect(await inviteeProjectIds()).toEqual([projects.production.id, projects.sandbox.id]);
     expect(await acceptInviteAudits()).toEqual([ACCEPT_INVITE_AUDIT]);
+  });
+
+  it("admits on a pending invitation stored in other letter case", async () => {
+    await setInviteeMembership(null);
+    await seedInvitation(getDb(env), {
+      id: INVITATION_ID,
+      organizationId: ORGANIZATION.id,
+      email: INVITEE.email.toUpperCase(),
+      role: "admin",
+      invitedBy: ADMIN.userId,
+      status: "pending",
+      expiresInDays: 7,
+    });
+
+    expect((await signIn("member", CLERK_ORG_ID)).status).toBe(200);
+    expect(await inviteeMembership()).toMatchObject({ role: "admin", status: "active" });
+    expect(await readInvitationStatus(getDb(env), INVITATION_ID)).toBe("accepted");
   });
 
   it("reactivates a removed membership at the new invitation's role", async () => {

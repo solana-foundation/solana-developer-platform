@@ -335,64 +335,6 @@ describe("Projects Routes", () => {
       // Creator should be added as admin
       expect(body.data.members.length).toBeGreaterThan(0);
     });
-
-    it("adds a member to project", async () => {
-      // Create another user
-      const db = getDb(env);
-      await db
-        .prepare(
-          "INSERT OR REPLACE INTO users (id, email, email_verified, status) VALUES ('usr_test_member123', 'member@example.com', 1, 'active')"
-        )
-        .run();
-      await db
-        .prepare(
-          "INSERT OR REPLACE INTO organization_members (id, organization_id, user_id, role, status) VALUES ('mem_member123', ?, 'usr_test_member123', 'developer', 'active')"
-        )
-        .bind(TEST_ORG.id)
-        .run();
-
-      const res = await app.request(
-        `/v1/projects/${projectId}/members`,
-        {
-          method: "POST",
-          headers: {
-            ...clerkHeaders(clerkToken, projectId),
-          },
-          body: JSON.stringify({ userId: "usr_test_member123" }),
-        },
-        env
-      );
-
-      expect(res.status).toBe(201);
-      const body = await res.json();
-      expect(body.data.member.userId).toBe("usr_test_member123");
-    });
-
-    it("returns 400 for non-org member", async () => {
-      // Create user not in org
-      const db = getDb(env);
-      await db
-        .prepare(
-          "INSERT OR REPLACE INTO users (id, email, email_verified, status) VALUES ('usr_test_outside123', 'outside@example.com', 1, 'active')"
-        )
-        .run();
-
-      const res = await app.request(
-        `/v1/projects/${projectId}/members`,
-        {
-          method: "POST",
-          headers: {
-            ...clerkHeaders(clerkToken, projectId),
-          },
-          body: JSON.stringify({ userId: "usr_test_outside123" }),
-        },
-        env
-      );
-
-      expect(res.status).toBe(400);
-      const body = await res.json();
-      expect(body.error.message).toContain("not a member of this organization");
-    });
   });
 
   describe("Dashboard Clerk project access", () => {
@@ -425,44 +367,6 @@ describe("Projects Routes", () => {
         env
       );
       expect(updateRes.status).toBe(200);
-    });
-
-    it("retains org-wide project member administration", async () => {
-      const db = getDb(env);
-      await db
-        .prepare(
-          "INSERT INTO users (id, email, email_verified, status) VALUES ('usr_test_clerk_member', 'session-member@example.com', 1, 'active')"
-        )
-        .run();
-      await db
-        .prepare(
-          `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-           VALUES ('mem_test_clerk_member', ?, 'usr_test_clerk_member', 'member', 'active')`
-        )
-        .bind(TEST_ORG.id)
-        .run();
-
-      const res = await app.request(
-        `/v1/projects/${TEST_PRODUCTION_PROJECT.id}/members`,
-        {
-          method: "POST",
-          headers: {
-            ...clerkHeaders(clerkToken, TEST_PRODUCTION_PROJECT.id),
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ userId: "usr_test_clerk_member" }),
-        },
-        env
-      );
-
-      expect(res.status).toBe(201);
-      const membership = await db
-        .prepare(
-          "SELECT id FROM project_members WHERE project_id = ? AND user_id = 'usr_test_clerk_member'"
-        )
-        .bind(TEST_PRODUCTION_PROJECT.id)
-        .first<{ id: string }>();
-      expect(membership).not.toBeNull();
     });
   });
 });

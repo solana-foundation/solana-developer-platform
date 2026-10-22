@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
+import { stubClerkBackend } from "@/test/helpers/clerk-backend";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
 import { readInvitationStatus, seedInvitation } from "@/test/helpers/invitations";
@@ -59,6 +60,19 @@ async function seedKnownOrganization(): Promise<void> {
   await signSeededClerkMember(env, db, OUTSIDER.userId, "org_webhook_outsider");
 }
 
+const STALE_ORGANIZATION_EVENT = {
+  id: KNOWN_CLERK_ORG_ID,
+  name: "Stale Org",
+  slug: "stale-org",
+  private_metadata: { sdp: { enableProductionProject: true } },
+};
+
+function knownOrganizationState() {
+  return getDb(env).queryOne("SELECT name, slug, tier, settings FROM organizations WHERE id = ?", [
+    KNOWN_ORGANIZATION.id,
+  ]);
+}
+
 function knownOrganizationMemberships() {
   return getDb(env).queryMany(
     "SELECT user_id, role, status FROM organization_members WHERE organization_id = ? ORDER BY user_id",
@@ -74,28 +88,40 @@ describe("Clerk webhooks", () => {
   afterEach(async () => {
     vi.restoreAllMocks();
     env.CLERK_WEBHOOK_SECRET = undefined;
+    env.CLERK_API_URL = undefined;
+    env.CLERK_SECRET_KEY = undefined;
     await clearKVStores(env);
   });
   it.each(["organization.created", "organization.updated"])(
-    "%s syncs a known organization's name and creates nothing for one SDP never created",
+    "%s syncs a known organization from Clerk's current state, not the event, and creates nothing for one SDP never created",
     async (type) => {
       await seedKnownOrganization();
-
-      const known = await simulateClerkWebhook({
-        type,
-        data: { id: KNOWN_CLERK_ORG_ID, name: "Renamed Org", slug: "renamed-org" },
+      const clerk = stubClerkBackend(env);
+      clerk.answer({
+        status: 200,
+        body: {
+          id: KNOWN_CLERK_ORG_ID,
+          name: "Renamed Org",
+          slug: "renamed-org",
+          private_metadata: {},
+        },
       });
+
+      const known = await simulateClerkWebhook({ type, data: STALE_ORGANIZATION_EVENT });
       const unknown = await simulateClerkWebhook({
         type,
         data: { id: "org_clerk_webhook_unknown", name: "Stranger Org", slug: "stranger-org" },
       });
 
       expect([known.status, unknown.status]).toEqual([200, 200]);
-      expect(
-        await getDb(env).queryOne("SELECT name, slug FROM organizations WHERE id = ?", [
-          KNOWN_ORGANIZATION.id,
-        ])
-      ).toEqual({ name: "Renamed Org", slug: "renamed-org" });
+      expect(clerk.requests).toEqual([
+        { method: "GET", path: `/organizations/${KNOWN_CLERK_ORG_ID}`, body: null },
+      ]);
+      expect(await knownOrganizationState()).toMatchObject({
+        name: "Renamed Org",
+        slug: "renamed-org",
+        settings: null,
+      });
       expect(
         await getDb(env).queryMany(
           "SELECT id FROM auth_organization_identities WHERE provider_org_id = ? UNION ALL SELECT id FROM organizations WHERE slug = ?",
@@ -104,6 +130,23 @@ describe("Clerk webhooks", () => {
       ).toEqual([]);
     }
   );
+  it("changes nothing when Clerk no longer has the organization an event names", async () => {
+    await seedKnownOrganization();
+    const before = await knownOrganizationState();
+    const clerk = stubClerkBackend(env);
+    clerk.answer({ status: 404, body: { errors: [{ code: "resource_not_found" }] } });
+
+    const response = await simulateClerkWebhook({
+      type: "organization.updated",
+      data: STALE_ORGANIZATION_EVENT,
+    });
+
+    expect(response.status).toBe(200);
+    expect(clerk.requests).toEqual([
+      { method: "GET", path: `/organizations/${KNOWN_CLERK_ORG_ID}`, body: null },
+    ]);
+    expect(await knownOrganizationState()).toEqual(before);
+  });
   it.each([
     "organizationMembership.created",
     "organizationMembership.updated",

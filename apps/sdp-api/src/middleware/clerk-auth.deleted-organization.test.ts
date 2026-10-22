@@ -162,6 +162,32 @@ describe("Clerk auth into a deleted organization", () => {
     expect(res.status).toBe(401);
   });
 
+  it("refuses an active member while the organization is still provisioning", async () => {
+    await getDb(env)
+      .prepare(
+        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+         VALUES ('om_provisioning', ?, ?, 'admin', 'active')`
+      )
+      .bind(ORG_ID, USER_ID)
+      .run();
+    await getDb(env)
+      .prepare("UPDATE organizations SET status = 'provisioning' WHERE id = ?")
+      .bind(ORG_ID)
+      .run();
+    const { app, token } = await createApp();
+
+    const res = await app.request(
+      "/protected",
+      { headers: { Authorization: `Bearer ${token}` } },
+      env
+    );
+
+    expect(res.status).toBe(401);
+    expect(await res.json()).toMatchObject({
+      error: { code: "UNAUTHORIZED", message: "Organization is not active" },
+    });
+  });
+
   it("refuses to provision a membership when the deletion lands after the door's read", async () => {
     // The door read the organization as active; the deletion commits before
     // the membership insert, which must then find the organization gone.

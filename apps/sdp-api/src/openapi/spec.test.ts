@@ -129,7 +129,6 @@ describe("OpenAPI spec", () => {
       ["/v1/projects/{projectId}/api-keys", "get"],
       ["/v1/projects/{projectId}/api-keys", "post"],
       ["/v1/projects/{projectId}/members", "get"],
-      ["/v1/projects/{projectId}/members", "post"],
       ["/v1/members", "get"],
       ["/v1/members/me", "get"],
       ["/v1/members/me", "delete"],
@@ -139,6 +138,7 @@ describe("OpenAPI spec", () => {
       ["/v1/members/{memberId}", "delete"],
       ["/v1/organizations/{orgId}", "patch"],
       ["/v1/organizations/{orgId}", "delete"],
+      ["/v1/organizations", "post"],
     ] as const) {
       expect(doc.paths?.[path]?.[method]?.security, `${method} ${path}`).toEqual([
         { clerkBearerAuth: [] },
@@ -166,13 +166,6 @@ describe("OpenAPI spec", () => {
     expect(doc.info.version).toBe("0.1.0");
     expect(doc.info.description).toContain("API versioning is path-based");
     expect(doc.info.description).toContain("/v1");
-  });
-
-  it("does not document local organization self-registration", () => {
-    const doc = createOpenApiDocument();
-
-    expect(doc.components?.securitySchemes?.organizationRegistrationToken).toBeUndefined();
-    expect(doc.paths?.["/v1/organizations"]?.post).toBeUndefined();
   });
 
   it("documents token supply refresh endpoint", () => {
