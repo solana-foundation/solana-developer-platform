@@ -179,6 +179,31 @@ describe("DELETE /v1/members/invitations/:invitationId", () => {
     ]);
   });
 
+  it("leaves an address-matched Clerk invitation another SDP invitation recorded when the row has no Clerk id", async () => {
+    await seedOwnPendingTarget(null);
+    await seedInvitation(getDb(env), {
+      id: "inv_revocation_earlier",
+      organizationId: ORGANIZATION.id,
+      email: INVITEE_EMAIL,
+      role: "member",
+      invitedBy: ADMIN.userId,
+      status: "expired",
+      expiresInDays: -1,
+    });
+    await getDb(env).execute("UPDATE invitations SET clerk_invitation_id = ? WHERE id = ?", [
+      OTHER_CLERK_INVITATION_ID,
+      "inv_revocation_earlier",
+    ]);
+    clerk.answer(listAnswer([OUR_CLERK_INVITATION_ID, OTHER_CLERK_INVITATION_ID]), {
+      status: 200,
+      body: { id: OUR_CLERK_INVITATION_ID, status: "revoked" },
+    });
+
+    expect((await revoke("idem_revocation_recorded_elsewhere")).status).toBe(204);
+    expect(clerk.requests).toEqual([LIST_REQUEST, revokeRequest(OUR_CLERK_INVITATION_ID)]);
+    expect(await readInvitationStatus(getDb(env), INVITATION_ID)).toBe("revoked");
+  });
+
   it("does not match newer Clerk invitations by address when retrying a revoked row with no Clerk id", async () => {
     await seedTarget({
       organizationId: ORGANIZATION.id,

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
+import { ClerkOrganizationsService } from "@/services/clerk-organizations.service";
 import { readAuditActions } from "@/test/helpers/audit-logs";
 import { clerkHeaders } from "@/test/helpers/clerk";
 import { type ClerkBackend, stubClerkBackend } from "@/test/helpers/clerk-backend";
@@ -226,6 +227,51 @@ describe("POST /v1/members/invite", () => {
       expect.objectContaining({
         email: INVITEE_EMAIL,
         status: "pending",
+        clerk_invitation_id: null,
+      }),
+    ]);
+  });
+
+  it("withdraws the Clerk invitation it created when the invitation was revoked while Clerk was inviting", async () => {
+    const createInvitation = ClerkOrganizationsService.prototype.createOrganizationInvitation;
+    vi.spyOn(
+      ClerkOrganizationsService.prototype,
+      "createOrganizationInvitation"
+    ).mockImplementation(async function (this: ClerkOrganizationsService, params) {
+      await getDb(env).execute(
+        "UPDATE invitations SET status = 'revoked' WHERE organization_id = ?",
+        [ORGANIZATION.id]
+      );
+      return createInvitation.call(this, params);
+    });
+    clerk.answer(
+      { status: 200, body: { id: CLERK_INVITATION_ID, status: "pending" } },
+      { status: 200, body: { id: CLERK_INVITATION_ID, status: "revoked" } }
+    );
+
+    const response = await invite(INVITEE_EMAIL);
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: { code: "CONFLICT", message: "The invitation was revoked while it was being sent" },
+      meta: { requestId: expect.any(String) },
+    });
+    expect(clerk.requests).toEqual([
+      {
+        method: "POST",
+        path: `/organizations/${CLERK_ORG_ID}/invitations`,
+        body: { email_address: INVITEE_EMAIL, role: "org:member", expires_in_days: 7 },
+      },
+      {
+        method: "POST",
+        path: `/organizations/${CLERK_ORG_ID}/invitations/${CLERK_INVITATION_ID}/revoke`,
+        body: null,
+      },
+    ]);
+    expect(await invitationRows()).toEqual([
+      expect.objectContaining({
+        email: INVITEE_EMAIL,
+        status: "revoked",
         clerk_invitation_id: null,
       }),
     ]);

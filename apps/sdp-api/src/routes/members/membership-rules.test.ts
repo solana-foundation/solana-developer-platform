@@ -232,6 +232,27 @@ describe("organization membership rules", () => {
     ]);
   });
 
+  it("keeps the Clerk membership of a removed member re-invited since when the removal is retried", async () => {
+    await signSeededClerkMember(env, getDb(env), MEMBER.userId, ORGANIZATION.id);
+    await getDb(env).execute("UPDATE organization_members SET status = 'removed' WHERE id = ?", [
+      MEMBER.memberId,
+    ]);
+    await seedInvitation(getDb(env), {
+      id: "inv_rules_reinvited",
+      organizationId: ORGANIZATION.id,
+      email: MEMBER.email,
+      role: "member",
+      invitedBy: ADMIN_A.userId,
+      status: "pending",
+      expiresInDays: 7,
+    });
+
+    expect((await removeWithKey(MEMBER, "idem_rules_remove_reinvited")).status).toBe(204);
+    expect(clerk.requests).toEqual([]);
+    expect(await membership(MEMBER)).toEqual({ role: "member", status: "removed" });
+    expect(await readInvitationStatus(getDb(env), "inv_rules_reinvited")).toBe("pending");
+  });
+
   it("treats a membership Clerk no longer has as removed there", async () => {
     await signSeededClerkMember(env, getDb(env), MEMBER.userId, ORGANIZATION.id);
     clerk.answer({ status: 404, body: { errors: [] } });

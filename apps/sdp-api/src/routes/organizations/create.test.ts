@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
+import { DASHBOARD_ACTOR_MAX_REQUESTS } from "@/middleware/rate-limit";
 import { readAuditActions } from "@/test/helpers/audit-logs";
 import {
   clerkHeadersWithoutProject,
@@ -17,7 +18,7 @@ import {
 } from "@/test/helpers/clerk-backend";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores } from "@/test/mocks/kv";
+import { clearKVStores, seedRateLimit } from "@/test/mocks/kv";
 
 const NAME = "Acme Labs";
 const CLERK_USER_ID = "user_clerk_org_creator";
@@ -235,6 +236,48 @@ describe("POST /v1/organizations", () => {
       expect(await storedState(created.id)).toEqual(before);
     }
   );
+
+  it("refuses a creator removed from their organization, reaching Clerk not at all", async () => {
+    const { created } = await createActiveOrganization();
+    await getDb(env).execute(
+      "UPDATE organization_members SET status = 'removed' WHERE organization_id = ?",
+      [created.id]
+    );
+    const before = await storedState(created.id);
+    const requestsBefore = clerk.requests.length;
+
+    const refused = await postOrganization(await signupHeaders(), NAME);
+
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toEqual({
+      error: { code: "CONFLICT", message: "You have already created an organization" },
+      meta: { requestId: expect.any(String) },
+    });
+    expect(clerk.requests.slice(requestsBefore)).toEqual([]);
+    expect(await storedState(created.id)).toEqual(before);
+  });
+
+  it("rate-limits signup on the Clerk subject before writing the user or reaching Clerk", async () => {
+    await seedRateLimit(
+      env,
+      `clerk:${CLERK_USER_ID}:organization-signup`,
+      DASHBOARD_ACTOR_MAX_REQUESTS
+    );
+
+    const limited = await postOrganization(await signupHeaders(), NAME);
+
+    expect(limited.status).toBe(429);
+    expect(await limited.json()).toEqual({
+      error: {
+        code: "RATE_LIMITED",
+        message: expect.stringMatching(/^Rate limit exceeded\. Retry after \d+ seconds\.$/),
+      },
+      meta: { requestId: expect.any(String) },
+    });
+    expect(clerk.requests).toEqual([]);
+    expect(await getDb(env).queryMany("SELECT id FROM users")).toEqual([]);
+    expect(await getDb(env).queryMany("SELECT id FROM organizations")).toEqual([]);
+  });
 
   it("refuses a session naming an organization and a request with none, reaching Clerk for neither", async () => {
     const withOrganization = await signTestClerkJwt({

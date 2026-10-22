@@ -12,7 +12,7 @@
  * treasury vault "Access unavailable").
  */
 
-import type { InvitationStatus } from "@sdp/types/organizations";
+import type { InvitationStatus, MemberStatus } from "@sdp/types/organizations";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
@@ -40,6 +40,27 @@ function invite(invitation: { email: string; status: InvitationStatus; expiresIn
     invitedBy: INVITER.userId,
     ...invitation,
   });
+}
+
+async function seedSessionMembership(status: MemberStatus) {
+  const db = getDb(env);
+  await db.execute(
+    "INSERT INTO users (id, email, email_verified, status) VALUES ('usr_onboarding_isolation', ?, 1, 'active')",
+    [SESSION_EMAIL]
+  );
+  await seedClerkIdentity(db, {
+    userId: "usr_onboarding_isolation",
+    email: SESSION_EMAIL,
+    clerkUserId: "user_clerk_onboarding_isolation",
+    organizationId: ORGANIZATION_ID,
+    clerkOrgId: CLERK_ORG_ID,
+    orgSlug: "onboarding-isolation",
+    role: "admin",
+  });
+  await db.execute(
+    "UPDATE organization_members SET status = ? WHERE organization_id = ? AND user_id = 'usr_onboarding_isolation'",
+    [status, ORGANIZATION_ID]
+  );
 }
 
 function clerkPayload(clerkOrgId: string) {
@@ -146,35 +167,56 @@ describe("onboarding status under database tenant isolation", () => {
     }
   );
 
-  it("answers an invitee whose pending invitation names their address in other letter case, without management", async () => {
-    await invite({ email: SESSION_EMAIL.toUpperCase(), status: "pending", expiresInDays: 7 });
+  it.each([
+    { holder: "an invitee SDP never admitted", formerAdmin: false },
+    { holder: "an admin removed since", formerAdmin: true },
+  ])(
+    "answers $holder whose pending invitation names their address in other letter case, without management",
+    async ({ formerAdmin }) => {
+      if (formerAdmin) {
+        await seedSessionMembership("removed");
+      }
+      await invite({ email: SESSION_EMAIL.toUpperCase(), status: "pending", expiresInDays: 7 });
+
+      const res = await getStatus(CLERK_ORG_ID);
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        data: {
+          linked: true,
+          organization: {
+            id: ORGANIZATION_ID,
+            name: "Onboarding isolation",
+            slug: "onboarding-isolation",
+            tier: "individual",
+            status: "active",
+            settings: null,
+            createdAt: expect.any(String),
+            updatedAt: expect.any(String),
+          },
+          setup: {
+            status: "not_started",
+            currentStep: "custody",
+            custodyProviders: [],
+            completedAt: null,
+            version: ONBOARDING_VERSION,
+            canManage: false,
+          },
+        },
+        meta: { requestId: expect.any(String), timestamp: expect.any(String) },
+      });
+    }
+  );
+
+  it("refuses a suspended member even while an invitation to their address is pending", async () => {
+    await seedSessionMembership("suspended");
+    await invite({ email: SESSION_EMAIL, status: "pending", expiresInDays: 7 });
 
     const res = await getStatus(CLERK_ORG_ID);
 
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({
-      data: {
-        linked: true,
-        organization: {
-          id: ORGANIZATION_ID,
-          name: "Onboarding isolation",
-          slug: "onboarding-isolation",
-          tier: "individual",
-          status: "active",
-          settings: null,
-          createdAt: expect.any(String),
-          updatedAt: expect.any(String),
-        },
-        setup: {
-          status: "not_started",
-          currentStep: "custody",
-          custodyProviders: [],
-          completedAt: null,
-          version: ONBOARDING_VERSION,
-          canManage: false,
-        },
-      },
-      meta: { requestId: expect.any(String), timestamp: expect.any(String) },
+    expect(res.status).toBe(401);
+    expect(await res.json()).toMatchObject({
+      error: { code: "UNAUTHORIZED", message: "Organization membership is inactive" },
     });
   });
 });

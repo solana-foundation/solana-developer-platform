@@ -93,7 +93,7 @@ describe("Clerk webhooks", () => {
     await clearKVStores(env);
   });
   it.each(["organization.created", "organization.updated"])(
-    "%s syncs a known organization from Clerk's current state, not the event, and creates nothing for one SDP never created",
+    "%s syncs a known organization's entitlements from Clerk's current state, not the event, keeps SDP's name and slug, and creates nothing for one SDP never created",
     async (type) => {
       await seedKnownOrganization();
       const clerk = stubClerkBackend(env);
@@ -117,9 +117,10 @@ describe("Clerk webhooks", () => {
       expect(clerk.requests).toEqual([
         { method: "GET", path: `/organizations/${KNOWN_CLERK_ORG_ID}`, body: null },
       ]);
-      expect(await knownOrganizationState()).toMatchObject({
-        name: "Renamed Org",
-        slug: "renamed-org",
+      expect(await knownOrganizationState()).toEqual({
+        name: KNOWN_ORGANIZATION.slug,
+        slug: KNOWN_ORGANIZATION.slug,
+        tier: "enterprise",
         settings: null,
       });
       expect(

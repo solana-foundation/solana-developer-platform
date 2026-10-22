@@ -6,6 +6,7 @@ import { app } from "@/index";
 import { API_KEY_PRE_READ_MAX_REQUESTS, apiKeyFloodGuardIdentifier } from "@/middleware/rate-limit";
 import { ALL_API_KEY_GRANTS, TEST_API_KEY, TEST_SEEDED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_MEMBER, TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { stubClerkBackend } from "@/test/helpers/clerk-backend";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -111,6 +112,9 @@ describe("Organization access settings", () => {
     await seedApiKeyRow(env, validKeyHash, { ...TEST_SEEDED_API_KEY, grants: ALL_API_KEY_GRANTS });
   });
   afterEach(async () => {
+    vi.restoreAllMocks();
+    env.CLERK_API_URL = undefined;
+    env.CLERK_SECRET_KEY = undefined;
     await clearKVStores(env);
   });
   describe("writing settings.allowedIpAddresses", () => {
@@ -211,6 +215,8 @@ describe("Organization access settings", () => {
       expect(required(settings).defaultEnvironment).toBe("production");
     });
     it("keeps the restriction when a rename lands at the same moment", async () => {
+      const clerk = stubClerkBackend(env);
+      clerk.answer({ status: 200, body: {} });
       const [first, second] = await Promise.all([
         patch({ settings: { allowedIpAddresses: ["203.0.113.0/24"] } }, "203.0.113.42"),
         patch({ name: "Renamed Organization" }, "203.0.113.42"),
