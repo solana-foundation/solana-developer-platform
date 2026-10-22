@@ -3,11 +3,11 @@ import { normalizeOrganizationTier } from "@sdp/types/organizations";
 import type { Context } from "hono";
 import { getDb } from "@/db/client";
 import { parseOptionalPostgresJson } from "@/db/postgres-utils";
-import { AppError, badRequest, forbidden, notFound } from "@/lib/errors";
+import { notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
-import type { ValidatedBodyContext } from "@/middleware/validate";
+import { getAuthorized } from "@/middleware/authorize";
 import type { Env } from "@/types/env";
-import type { completeOnboardingSchema } from "./schemas";
+import type { OnboardingAccess } from "./access";
 import { ONBOARDING_VERSION, resolveOnboardingSetup } from "./state";
 
 type AppContext = Context<{ Bindings: Env }>;
@@ -93,12 +93,8 @@ async function fetchCustodyProviders(
   return CUSTODY_PROVIDERS.filter((provider) => backed.has(provider));
 }
 
-function canManageOnboarding(orgRole: string | null): boolean {
-  return orgRole === "org:admin" || orgRole === "admin";
-}
-
 async function buildOnboardingSetup(params: {
-  clerkOrgRole: string | null;
+  canManage: boolean;
   db: DatabaseClient;
   organization: Awaited<ReturnType<typeof fetchOrganization>>;
 }) {
@@ -107,89 +103,24 @@ async function buildOnboardingSetup(params: {
     completedAt: params.organization.onboardingCompletedAt,
     custodyProviders,
     version: params.organization.onboardingVersion ?? ONBOARDING_VERSION,
-    canManage: canManageOnboarding(params.clerkOrgRole),
+    canManage: params.canManage,
   });
 }
 
 export const getOnboardingStatus = async (c: AppContext) => {
-  const clerk = c.get("clerkOnboarding");
-  if (!clerk) {
-    throw new AppError("UNAUTHORIZED", "Clerk session required");
-  }
+  const { session, memberRole } = getAuthorized<OnboardingAccess>(c);
 
-  const mapping = await getDb(c.env)
-    .prepare(
-      `SELECT organization_id
-     FROM auth_organization_identities
-     WHERE provider = 'clerk' AND provider_org_id = ?`
-    )
-    .bind(clerk.clerkOrgId)
-    .first<{ organization_id: string }>();
-
-  if (!mapping) {
+  if (!session.organizationId) {
     return success(c, { linked: false, organization: null, setup: null });
   }
 
   const db = getDb(c.env);
-  const organization = await fetchOrganization(db, mapping.organization_id);
+  const organization = await fetchOrganization(db, session.organizationId);
   const setup = await buildOnboardingSetup({
-    clerkOrgRole: clerk.orgRole,
+    canManage: memberRole === "admin",
     db,
     organization,
   });
   const { onboardingCompletedAt: _, onboardingVersion: __, ...organizationResponse } = organization;
   return success(c, { linked: true, organization: organizationResponse, setup });
-};
-
-export const completeOnboarding = async (
-  c: ValidatedBodyContext<typeof completeOnboardingSchema>
-) => {
-  const clerk = c.get("clerkOnboarding");
-  if (!clerk) {
-    throw new AppError("UNAUTHORIZED", "Clerk session required");
-  }
-  if (!canManageOnboarding(clerk.orgRole)) {
-    throw forbidden("Only organization admins can finish setup");
-  }
-
-  const db = getDb(c.env);
-  const mapping = await db
-    .prepare(
-      `SELECT organization_id
-       FROM auth_organization_identities
-       WHERE provider = 'clerk' AND provider_org_id = ?`
-    )
-    .bind(clerk.clerkOrgId)
-    .first<{ organization_id: string }>();
-  if (!mapping) {
-    throw notFound("Organization");
-  }
-
-  const organization = await fetchOrganization(db, mapping.organization_id);
-  const requestedProvider = c.req.valid("json").custodyProvider;
-  const custodyProviders = await fetchCustodyProviders(db, organization.id);
-  if (!custodyProviders.includes(requestedProvider)) {
-    throw badRequest(
-      "Set up the requested custody provider for the sandbox project before finishing setup"
-    );
-  }
-
-  await db
-    .prepare(
-      `UPDATE organizations
-       SET onboarding_completed_at = COALESCE(onboarding_completed_at, sdp_datetime_now()),
-           onboarding_version = ?,
-           updated_at = sdp_datetime_now()
-       WHERE id = ?`
-    )
-    .bind(ONBOARDING_VERSION, organization.id)
-    .run();
-
-  const completed = await fetchOrganization(db, organization.id);
-  const setup = await buildOnboardingSetup({
-    clerkOrgRole: clerk.orgRole,
-    db,
-    organization: completed,
-  });
-  return success(c, { setup });
 };

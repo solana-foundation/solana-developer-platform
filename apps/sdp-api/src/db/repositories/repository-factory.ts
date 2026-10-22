@@ -28,6 +28,8 @@ import type { HeliusRingsZoneRepository } from "./helius-rings-zone.repository";
 import { createPostgresHeliusRingsZoneRepository } from "./helius-rings-zone.repository.postgres";
 import type { KycWalletsRepository } from "./kyc-wallet.repository";
 import { createPostgresKycWalletsRepository } from "./kyc-wallet.repository.postgres";
+import type { OrganizationRepository } from "./organization.repository";
+import { createPostgresOrganizationRepository } from "./organization.repository.postgres";
 import type { PaymentRecurringPaymentsRepository } from "./payment-recurring-payments.repository";
 import { createPostgresPaymentRecurringPaymentsRepository } from "./payment-recurring-payments.repository.postgres";
 import type { PaymentRequestsRepository } from "./payment-requests.repository";
@@ -327,6 +329,10 @@ export function createPrivateChannelSettlementObservationRepository(
   env: Env
 ): PrivateChannelSettlementObservationRepository {
   return createPostgresPrivateChannelSettlementObservationRepository(getDb(env));
+}
+
+export function createOrganizationRepository(env: Env): OrganizationRepository {
+  return createPostgresOrganizationRepository(getDb(env));
 }
 
 export function createProjectUserRepository(env: Env): ProjectUserRepository {

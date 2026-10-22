@@ -70,10 +70,7 @@ import {
   tokenTransactionSchema,
   tokenWithAssetProfileResponseSchema,
 } from "@/openapi/schemas/issuance";
-import {
-  onboardingCompleteResponseSchema,
-  onboardingStatusResponseSchema,
-} from "@/openapi/schemas/onboarding";
+import { onboardingStatusResponseSchema } from "@/openapi/schemas/onboarding";
 import {
   inviteMemberResponseSchema,
   listMembersResponseSchema,
@@ -279,7 +276,6 @@ export const tokenTemplateResponse = successResponseSchema(tokenTemplateResponse
 export const listTemplatesResponse = successResponseSchema(listTemplatesResponseSchema);
 
 export const onboardingStatusResponse = successResponseSchema(onboardingStatusResponseSchema);
-export const onboardingCompleteResponse = successResponseSchema(onboardingCompleteResponseSchema);
 export const walletBalancesResponse = successResponseSchema(walletBalancesResponseSchema);
 export const transferResponse = successResponseSchema(transferResponseSchema);
 export const transferListResponse = paginatedResponseSchema(transferSchema);

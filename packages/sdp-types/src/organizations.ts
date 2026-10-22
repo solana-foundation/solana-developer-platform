@@ -77,7 +77,6 @@ export interface Organization {
 
 export interface OrganizationSettings {
   defaultEnvironment?: "sandbox" | "production";
-  webhookSecret?: string;
   allowedIpAddresses?: string[];
   /**
    * Pre-enforcement allowlist parked by migration 0055 — never applied, any

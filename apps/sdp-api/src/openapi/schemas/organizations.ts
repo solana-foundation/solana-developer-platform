@@ -20,10 +20,6 @@ export const organizationSettingsSchema = z
       description: "Default environment for new resources.",
       example: "production",
     }),
-    webhookSecret: z.string().optional().openapi({
-      description: "Webhook signing secret.",
-      example: "whsec_example",
-    }),
     allowedIpAddresses: z
       .array(z.string())
       .optional()

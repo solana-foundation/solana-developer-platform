@@ -371,8 +371,8 @@ declare module "hono" {
       clerkUserId: string;
       clerkOrgId: string;
       orgSlug: string | null;
-      orgRole: string | null;
       email: string;
+      organizationId: string | null;
     };
     verifiedClerkJwt?: {
       token: string;

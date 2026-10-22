@@ -7,7 +7,8 @@ import {
   resolveClerkOrganizationClaims,
   verifyClerkSessionToken,
 } from "@/lib/clerk-token";
-import { AppError, unauthorized } from "@/lib/errors";
+import { unauthorized } from "@/lib/errors";
+import { findClerkOrganizationMapping } from "@/services/clerk-organization-provisioning.service";
 import type { Env } from "@/types/env";
 
 export function clerkOnboardingMiddleware() {
@@ -21,29 +22,21 @@ export function clerkOnboardingMiddleware() {
     const payload = await verifyClerkSessionToken(c, token);
 
     if (!payload.sub) {
-      throw new AppError("UNAUTHORIZED", "Clerk token missing subject");
+      throw unauthorized("Clerk token missing subject");
     }
 
     const organization = resolveClerkOrganizationClaims(payload);
     if (!organization.organizationId) {
-      throw new AppError("UNAUTHORIZED", "Clerk token missing organization");
+      throw unauthorized("Clerk token missing organization");
     }
+    const clerkOrgId = organization.organizationId;
 
     const email = resolveClerkEmail(payload);
     if (!email) {
-      throw new AppError(
-        "UNAUTHORIZED",
+      throw unauthorized(
         "Clerk token has no usable email claim. Check the session token customization: an invalid shortcode is passed through unsubstituted rather than resolved."
       );
     }
-
-    c.set("clerkOnboarding", {
-      clerkUserId: payload.sub,
-      clerkOrgId: organization.organizationId,
-      orgSlug: organization.organizationSlug,
-      orgRole: organization.organizationRole,
-      email,
-    });
 
     // The Clerk-org -> organization mapping lives in an RLS-forced table
     // (migration 0081) and must be read before a tenant identity exists, so
@@ -53,18 +46,19 @@ export function clerkOnboardingMiddleware() {
     // no-identity context: tenant-table reads stay empty and the handlers
     // answer linked:false / Organization not found instead of leaking anything.
     const mapping = await runWithSystemDatabaseIdentity("http:auth", () =>
-      getDb(c.env)
-        .prepare(
-          `SELECT organization_id
-           FROM auth_organization_identities
-           WHERE provider = 'clerk' AND provider_org_id = ?`
-        )
-        .bind(organization.organizationId)
-        .first<{ organization_id: string }>()
+      findClerkOrganizationMapping(getDb(c.env), clerkOrgId)
     );
 
+    c.set("clerkOnboarding", {
+      clerkUserId: payload.sub,
+      clerkOrgId,
+      orgSlug: organization.organizationSlug,
+      email,
+      organizationId: mapping ? mapping.organizationId : null,
+    });
+
     if (mapping) {
-      await runWithTenantDatabaseIdentity({ organizationId: mapping.organization_id }, next);
+      await runWithTenantDatabaseIdentity({ organizationId: mapping.organizationId }, next);
       return;
     }
 
