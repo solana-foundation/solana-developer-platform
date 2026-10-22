@@ -29,7 +29,12 @@ describe("coinbase adapter", () => {
       .spyOn(globalThis.crypto.subtle, "importKey")
       .mockRejectedValueOnce(new Error("temporary crypto failure"));
 
-    await expect(adapter.getPublicKey(`cdp_${WALLET_ADDRESS}`)).rejects.toThrow();
+    // The upstream keychain-cdp library catches the underlying crypto failure
+    // and re-brands it as a CONFIG_ERROR, so that branded message is what the
+    // adapter surfaces — pin it rather than accepting any rejection.
+    await expect(adapter.getPublicKey(`cdp_${WALLET_ADDRESS}`)).rejects.toThrow(
+      "Invalid cdpApiKeySecret"
+    );
     const callsAfterFailure = importKeySpy.mock.calls.length;
     await expect(adapter.getPublicKey(`cdp_${WALLET_ADDRESS}`)).resolves.toBe(WALLET_ADDRESS);
 

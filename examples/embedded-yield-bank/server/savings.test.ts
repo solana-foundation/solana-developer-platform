@@ -265,26 +265,30 @@ describe("amount to shares", () => {
   });
 
   it("reports an unavailable valuation as a retryable server fault", () => {
-    expect(() => sharesForAmount("1", position({}))).toThrow("still updating");
+    let caught: unknown;
     try {
       sharesForAmount("1", position({}));
-    } catch (caught) {
-      expect(caught).toMatchObject({
-        status: 503,
-        code: "VALUATION_UNAVAILABLE",
-      });
+    } catch (error) {
+      caught = error;
     }
+    expect(caught).toMatchObject({
+      status: 503,
+      code: "VALUATION_UNAVAILABLE",
+      message: "Savings balance is still updating; refresh and try again",
+    });
   });
 
   it("rejects client-input amounts as 400s, not server faults", () => {
     expect(() => sharesForAmount("88.01", live)).toThrow(ApiRequestError);
     expect(() => sharesForAmount("0.0000001", live)).toThrow(ApiRequestError);
     expect(() => sharesForAmount("0.000001", live)).toThrow(ApiRequestError);
+    let caught: unknown;
     try {
       sharesForAmount("88.01", live);
-    } catch (caught) {
-      expect(caught).toMatchObject({ status: 400, code: "INVALID_REQUEST" });
+    } catch (error) {
+      caught = error;
     }
+    expect(caught).toMatchObject({ status: 400, code: "INVALID_REQUEST" });
   });
 });
 
