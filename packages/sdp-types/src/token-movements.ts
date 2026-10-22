@@ -86,15 +86,16 @@ export const AMOUNT_VERIFICATION_REASONS = [
   /** The movement failed, or was released, before it moved anything. */
   "movement_not_executed",
   /**
-   * A movement SDP did not build itself (a program's CPI pull) landed, and the
-   * chain shows it moved the quote's debit (the instruction's amount) with a
-   * fee within the mandate's tolerance (the debit less the destination's raw
-   * token-balance delta).
+   * SDP did not build the movement itself (a program's CPI pull, an observed
+   * transfer, a provider's delivery), and the chain shows it moved what it
+   * says: the raw balance changes, in base units, agree with the quote (a
+   * pull's fee may be any fee within its mandate's tolerance), or with its
+   * instruction data and the transfer fee rule.
    */
   "chain_delta_matched",
   /**
-   * The chain shows the movement moved another debit, paid a fee above the
-   * tolerance, or moved nothing SDP can read.
+   * The chain shows other amounts than the movement says it moved (a pull's
+   * fee above its tolerance included), or none SDP can read.
    */
   "chain_delta_mismatch",
 ] as const;
@@ -183,6 +184,12 @@ export function builtMovementVerdict(
  */
 export const BUILT_OFFRAMP_DEPOSIT_VERDICTS = {
   offramp_deposit_confirmed: BUILT_TRANSFER_LANDED,
+  /**
+   * The chain verifier saw a deposit's signature finalize without error. A
+   * deposit whose own confirmation timed out stayed pending until then: it
+   * landed as SDP built it. An on-ramp has no built leg, so this writes none.
+   */
+  delivery_verified: BUILT_TRANSFER_LANDED,
   offramp_deposit_failed: MOVEMENT_NOT_EXECUTED,
   offramp_deposit_released: MOVEMENT_NOT_EXECUTED,
   delivery_verified: BUILT_TRANSFER_LANDED,

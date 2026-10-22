@@ -8,7 +8,9 @@ import type {
   RampTransferType,
 } from "@sdp/types/payments";
 import type { PersistedRampProviderId, RampProviderId } from "@sdp/types/provider-access";
+import type { AmountVerificationVerdict } from "@sdp/types/token-movements";
 import type { PaymentTransactionKind } from "@sdp/types/unified-transactions";
+import type { ChainVerifiedLeg } from "@/db/repositories/token-movement-legs.repository";
 
 export type PaymentTransferDirection = "inbound" | "outbound";
 type PaymentTransferDeliveryMode = "hosted" | "manual_instructions" | "session_widget";
@@ -153,6 +155,11 @@ export interface RampTransferTransitionInput extends TransferStatusChangeFields 
   providerObservation?: { reference: string; observedAt: string };
   /** Chain verdict must still match the provider observation and row signature it checked. */
   deliveryEvidence?: { providerSettlement: Record<string, unknown>; signature: string };
+  /**
+   * The leg a delivery the chain verified records with the transition, for a
+   * movement SDP did not build (an on-ramp's delivery). Only with `delivery_verified`.
+   */
+  chainVerifiedLeg?: ChainVerifiedLeg;
   /** Untimed providers may claim completion evidence once, never replace it by redelivery. */
   providerSettlementUnclaimed?: boolean;
   providerSettlementMissingSignature?: boolean;
@@ -328,6 +335,12 @@ export interface PaymentsRepository {
     transferId: string;
     providerSettlement: Record<string, unknown>;
     mismatch: Record<string, unknown>;
+    /**
+     * The verdict the hold writes on the row's pending legs in the same
+     * statement: an off-ramp deposit SDP built that the chain shows failed
+     * moved nothing. Null leaves them.
+     */
+    legVerdict: AmountVerificationVerdict | null;
     updatedAt: string;
   }): Promise<boolean>;
   /** Rotate polled rows without changing their business updated_at or status. */
