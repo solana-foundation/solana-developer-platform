@@ -2,12 +2,17 @@ import {
   isRampTransferType,
   type PaymentSubscriptionCollectionAttempt,
   type RampCryptoDeposit,
+  type RampFiatPayout,
   type RampTransferSettlement,
 } from "@sdp/types/payments";
 import { isRetiredRampProviderId, type PersistedRampProviderId } from "@sdp/types/provider-access";
 import type { PaymentSubscriptionCollectionAttemptRow } from "@/db/repositories/payment-subscriptions.repository";
 import type { PaymentTransferRow as TransferRow } from "@/db/repositories/payments.repository";
 import { AppError } from "@/lib/errors";
+import {
+  currentProviderSettlement,
+  readDeliveryMismatch,
+} from "@/services/payments/ramp-provider-settlement";
 
 /** The stored provider reference for a ramp transfer, including retired providers. */
 function rampProviderReference(row: TransferRow): string | undefined {
@@ -38,6 +43,25 @@ function rampTransferSettlement(
   return providerData.settlement as RampTransferSettlement | undefined;
 }
 
+/**
+ * The fiat an off-ramp's provider reports paying out, from its settlement for
+ * the transfer's current reference. Omitted until the provider names both the
+ * amount and its currency.
+ */
+function rampFiatPayout(row: TransferRow): RampFiatPayout | undefined {
+  if (row.type !== "offramp") return undefined;
+  const settled = currentProviderSettlement(row);
+  if (settled?.receivedAmount === undefined || settled.receivedCurrency === undefined) {
+    return undefined;
+  }
+  const payout: RampFiatPayout = {
+    amount: settled.receivedAmount,
+    currency: settled.receivedCurrency,
+  };
+  if (settled.observedAt) payout.reportedAt = settled.observedAt;
+  return payout;
+}
+
 export function mapTransferRow(row: TransferRow) {
   const base = {
     id: row.id,
@@ -53,6 +77,7 @@ export function mapTransferRow(row: TransferRow) {
     serializedTx: row.serialized_tx,
     slot: row.slot,
     blockTime: row.block_time,
+    confirmedAt: row.confirmed_at ?? undefined,
     fee: row.fee,
     error: row.error,
     ...(row.initiated_by_key_id
@@ -97,6 +122,8 @@ export function mapTransferRow(row: TransferRow) {
     ...(row.fiat_amount ? { fiatAmount: row.fiat_amount } : {}),
     ...(settlement ? { settlement } : {}),
     ...(cryptoDeposit ? { cryptoDeposit } : {}),
+    fiatPayout: rampFiatPayout(row),
+    deliveryMismatch: readDeliveryMismatch(row.provider_data),
   };
 }
 

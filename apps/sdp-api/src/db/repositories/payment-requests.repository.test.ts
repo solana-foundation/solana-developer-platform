@@ -9,7 +9,6 @@ import {
   seedDefaultProjects,
 } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { createPostgresCounterpartiesRepository } from "./counterparty.repository.postgres";
 import type { PaymentRequestsRepository } from "./payment-requests.repository";
 import { createPostgresPaymentRequestsRepository } from "./payment-requests.repository.postgres";
 
@@ -82,23 +81,6 @@ describe("PaymentRequestsRepository (postgres)", () => {
     repo = createPostgresPaymentRequestsRepository(db);
   });
 
-  async function seedCounterparty(externalId: string | null = null) {
-    const counterpartiesRepo = createPostgresCounterpartiesRepository(getDb(env));
-    const row = await counterpartiesRepo.createCounterparty({
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      externalId,
-      entityType: "individual",
-      displayName: "Acme Payer",
-      providerData: {},
-      createdBy: TEST_USER.id,
-    });
-    if (!row) {
-      throw new Error("failed to seed counterparty");
-    }
-    return row;
-  }
-
   async function seedTransfer(id: string) {
     await getDb(env)
       .prepare(
@@ -118,7 +100,6 @@ describe("PaymentRequestsRepository (postgres)", () => {
     return {
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
-      counterpartyId: null,
       custodyWalletId: TEST_CUSTODY_WALLET_ID,
       walletId: "wlt_receiving",
       destinationAddress: "OurWallet",
@@ -132,13 +113,10 @@ describe("PaymentRequestsRepository (postgres)", () => {
 
   describe("createPaymentRequest", () => {
     it("inserts and returns the row with a generated id and awaiting_payment status", async () => {
-      const counterparty = await seedCounterparty();
-
-      const row = await repo.createPaymentRequest(createInput({ counterpartyId: counterparty.id }));
+      const row = await repo.createPaymentRequest(createInput());
 
       expect(row).not.toBeNull();
       expect(row?.id).toMatch(/^preq_/);
-      expect(row?.counterparty_id).toBe(counterparty.id);
       expect(row?.amount).toBe("25.00");
       expect(row?.custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
       expect(row?.status).toBe("awaiting_payment");
@@ -160,11 +138,6 @@ describe("PaymentRequestsRepository (postgres)", () => {
       expect(row?.lifecycle).toHaveLength(1);
       expect(row?.lifecycle[0]).toMatchObject({ status: "awaiting_payment" });
       expect(row?.lifecycle[0].at).toEqual(expect.any(String));
-    });
-
-    it("supports an open link (null counterparty)", async () => {
-      const row = await repo.createPaymentRequest(createInput({ counterpartyId: null }));
-      expect(row?.counterparty_id).toBeNull();
     });
 
     it("generates a public_token distinct from the id", async () => {

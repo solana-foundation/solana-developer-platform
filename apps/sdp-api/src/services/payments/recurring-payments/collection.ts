@@ -93,6 +93,7 @@ import {
   assertRecurringPaymentSourceWallet,
   canonicalAttemptSignature,
   confirmSubscriptionSignature,
+  readSavedSend,
   recurringPaymentErrorMessage,
   sendSubscriptionInstructions,
 } from "./shared";
@@ -1419,25 +1420,36 @@ async function recoverRecurringPaymentCollection(input: {
     }
   }
 
-  try {
-    await confirmSubscriptionSignature(
-      recoveredSignature,
-      "Recurring payment collection failed on-chain"
-    );
-  } catch (error) {
-    if (!(error instanceof Error)) throw error;
-    if (error instanceof AppError && error.code === "TRANSACTION_FAILED") {
-      await markRecurringPaymentCollectionFailedAtomically({
-        env: input.env,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        recurringPaymentId: input.recurringPayment.id,
-        attempt: existing,
-        transfer,
-        submittedSignature: recoveredSignature,
-        error,
-      });
-      return null;
+  const failPull = async (message: string) => {
+    await markRecurringPaymentCollectionFailedAtomically({
+      env: input.env,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPaymentId: input.recurringPayment.id,
+      attempt: existing,
+      transfer,
+      submittedSignature: recoveredSignature,
+      error: transactionFailed(message),
+    });
+    return null;
+  };
+  const pullOutcome = await readSavedSend(createClusterRpc(), {
+    signature: recoveredSignature,
+    lastValidBlockHeight:
+      transfer.last_valid_block_height === null ? null : BigInt(transfer.last_valid_block_height),
+  });
+  switch (pullOutcome) {
+    case "succeeded":
+      break;
+    case "pending":
+      throw conflict("Recurring payment collection is already processing");
+    case "failed":
+      return failPull("Recurring payment collection failed on-chain");
+    case "expired":
+      return failPull("Recurring payment collection expired without landing on-chain");
+    default: {
+      const exhaustive: never = pullOutcome;
+      throw internalError(`Unknown collection pull outcome: ${exhaustive}`);
     }
   }
 

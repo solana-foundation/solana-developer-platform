@@ -536,6 +536,45 @@ function requestActor(c: Context<{ Bindings: Env }>, entry: AuditLogEntry): Audi
   };
 }
 
+/** The actor of a record written by a job or provider event: who it names, and no request. */
+function systemActor(entry: SystemAuditLogEntry): AuditActor {
+  return {
+    organizationId: entry.organizationId ?? null,
+    userId: entry.userId ?? null,
+    apiKeyId: entry.apiKeyId ?? null,
+    ipAddress: null,
+    userAgent: null,
+    requestId: entry.requestId ?? null,
+  };
+}
+
+/**
+ * Runs audited work inside the ledger's transaction under the caller's own
+ * identity, then hands the transaction back to the ledger for its record.
+ */
+async function runAuditedWork<T, E extends AuditLogEntry>(
+  tx: DatabaseExecutor,
+  identity: Exclude<DatabaseIdentity, { kind: "operator" | "none" }>,
+  work: (tx: DatabaseClient) => Promise<{ entry: E | null; result: T }>
+): Promise<{ entry: E | null; result: T }> {
+  // The ledger reads span every organization, so its transaction opens
+  // under the system identity; the work itself runs as the caller.
+  await stampTransactionIdentity(tx, identity);
+  // The work runs while the global ledger lock is held: a row-lock wait
+  // inside it must fail rather than stall every audit write.
+  await tx.execute(`SET LOCAL lock_timeout = '${AUDITED_WORK_LOCK_TIMEOUT}'`);
+  // Inside the work the ambient identity is the caller's too, so a query
+  // that reaches past `tx` (a stray `getDb()`) still runs under row-level
+  // security rather than the ledger's system grant.
+  const runWork = () => work(asTransactionalClient(tx));
+  const done = await (identity.kind === "tenant"
+    ? runWithTenantDatabaseIdentity(identity, runWork)
+    : runWithSystemDatabaseIdentity(identity.component, runWork));
+  await tx.execute("SET LOCAL lock_timeout TO DEFAULT");
+  await stampTransactionIdentity(tx, AUDIT_LEDGER_DATABASE_IDENTITY);
+  return done;
+}
+
 /** Switch an open transaction to `identity` for the statements that follow. */
 async function stampTransactionIdentity(
   tx: DatabaseExecutor,
@@ -601,27 +640,37 @@ export class AuditService {
       });
     }
     return this.persist(
-      async (tx) => {
-        // The ledger reads span every organization, so its transaction opens
-        // under the system identity; the work itself runs as the request.
-        await stampTransactionIdentity(tx, requestIdentity);
-        // The work runs while the global ledger lock is held: a row-lock wait
-        // inside it must fail rather than stall every audit write.
-        await tx.execute(`SET LOCAL lock_timeout = '${AUDITED_WORK_LOCK_TIMEOUT}'`);
-        // Inside the work the ambient identity is the request's too, so a
-        // query that reaches past `tx` (a stray `getDb()`) still runs under
-        // row-level security rather than the ledger's system grant.
-        const runWork = () => work(asTransactionalClient(tx));
-        const done = await (requestIdentity.kind === "tenant"
-          ? runWithTenantDatabaseIdentity(requestIdentity, runWork)
-          : runWithSystemDatabaseIdentity(requestIdentity.component, runWork));
-        await tx.execute("SET LOCAL lock_timeout TO DEFAULT");
-        await stampTransactionIdentity(tx, AUDIT_LEDGER_DATABASE_IDENTITY);
-        return done;
-      },
+      (tx) => runAuditedWork(tx, requestIdentity, work),
       (resolvedEntry) => requestActor(c, resolvedEntry),
       this.checkpointStore ??
         createAuditLedgerCheckpointStore(c.env, AUDIT_LEDGER_REDIS_TIMEOUT_MS),
+      { tolerateCheckpointAdvanceFailure: true }
+    );
+  }
+
+  /**
+   * `logWithin` for callers without an HTTP context (provider webhooks and
+   * jobs): `work` runs under the caller's system database identity, and it
+   * and its record commit together or not at all.
+   */
+  async logSystemWithin<T>(
+    work: (tx: DatabaseClient) => Promise<{ entry: SystemAuditLogEntry | null; result: T }>
+  ): Promise<T> {
+    if (!this.checkpointStore) {
+      throw new AuditPersistenceError({
+        cause: new Error("System audit writers require the external checkpoint store"),
+      });
+    }
+    const systemIdentity = currentDatabaseIdentity();
+    if (systemIdentity?.kind !== "system") {
+      throw new AuditPersistenceError({
+        cause: new Error("System audited work requires a system database identity"),
+      });
+    }
+    return this.persist(
+      (tx) => runAuditedWork(tx, systemIdentity, work),
+      systemActor,
+      this.checkpointStore,
       { tolerateCheckpointAdvanceFailure: true }
     );
   }
@@ -638,19 +687,9 @@ export class AuditService {
       });
     }
     const checkpointStore = this.checkpointStore;
-    await this.persist(
-      async () => ({ entry, result: undefined }),
-      () => ({
-        organizationId: entry.organizationId ?? null,
-        userId: entry.userId ?? null,
-        apiKeyId: entry.apiKeyId ?? null,
-        ipAddress: null,
-        userAgent: null,
-        requestId: entry.requestId ?? null,
-      }),
-      checkpointStore,
-      { tolerateCheckpointAdvanceFailure: false }
-    );
+    await this.persist(async () => ({ entry, result: undefined }), systemActor, checkpointStore, {
+      tolerateCheckpointAdvanceFailure: false,
+    });
   }
 
   /**
@@ -873,9 +912,9 @@ export class AuditService {
     };
   }
 
-  private async persist<T>(
-    prepare: (tx: DatabaseExecutor) => Promise<{ entry: AuditLogEntry | null; result: T }>,
-    resolveActor: (entry: AuditLogEntry) => AuditActor,
+  private async persist<T, E extends AuditLogEntry = AuditLogEntry>(
+    prepare: (tx: DatabaseExecutor) => Promise<{ entry: E | null; result: T }>,
+    resolveActor: (entry: E) => AuditActor,
     checkpointStore: KVStore,
     options: { tolerateCheckpointAdvanceFailure: boolean }
   ): Promise<T> {
@@ -888,9 +927,9 @@ export class AuditService {
     );
   }
 
-  private async persistAsLedger<T>(
-    prepare: (tx: DatabaseExecutor) => Promise<{ entry: AuditLogEntry | null; result: T }>,
-    resolveActor: (entry: AuditLogEntry) => AuditActor,
+  private async persistAsLedger<T, E extends AuditLogEntry = AuditLogEntry>(
+    prepare: (tx: DatabaseExecutor) => Promise<{ entry: E | null; result: T }>,
+    resolveActor: (entry: E) => AuditActor,
     unboundedCheckpointStore: KVStore,
     options: { tolerateCheckpointAdvanceFailure: boolean }
   ): Promise<T> {
@@ -919,7 +958,7 @@ export class AuditService {
           // restore would be skipped, and the pending witness would lock
           // every later audit write. Lifted for this transaction only.
           await tx.execute("SET LOCAL idle_in_transaction_session_timeout = 0");
-          let prepared: { entry: AuditLogEntry | null; result: T };
+          let prepared: { entry: E | null; result: T };
           try {
             prepared = await prepare(tx);
           } catch (error) {

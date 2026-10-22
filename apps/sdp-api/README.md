@@ -290,7 +290,7 @@ pnpm --filter @sdp/api-integration test
 
 **Requires:**
 - Privy credentials (`PRIVY_APP_ID`, `PRIVY_APP_SECRET`)
-- Running Kora instance (`pnpm kora:local:up`, then `KORA_DEVNET_URL=http://127.0.0.1:18081`)
+- Running Kora instance: `pnpm kora:local:up`, then `KORA_DEVNET_URL=http://127.0.0.1:18081` and the local Kora's API key, `KORA_DEVNET_API_KEY` (in `~/.config/sdp/kora-local-api-key.env` as `KORA_API_KEY`)
 - Funded Solana devnet account
 
 ## Database Migrations

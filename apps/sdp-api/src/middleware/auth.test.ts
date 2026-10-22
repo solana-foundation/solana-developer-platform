@@ -237,7 +237,7 @@ describe("Auth Middleware", () => {
       expect(res.status).toBe(200);
     });
 
-    it("uses the Cloud Run verified client instead of an untrusted forwarded prefix", async () => {
+    it("uses the load-balancer-verified client instead of an untrusted forwarded prefix", async () => {
       await seedApiKeyRow(env, validKeyHash, {
         ...TEST_SEEDED_API_KEY,
         allowedIps: ["198.51.100.99/32"],
@@ -251,7 +251,7 @@ describe("Auth Middleware", () => {
             "x-forwarded-for": "198.51.100.99, 203.0.113.10, 192.0.2.20",
           },
         },
-        { ...env, K_SERVICE: "sdp-api" }
+        { ...env, TRUST_PROXY_HEADERS: "gclb" }
       );
 
       expect(res.status).toBe(403);

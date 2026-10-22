@@ -6,6 +6,7 @@ import { RAMP_PROVIDER_CLIENTS } from "#/ramps/index";
 import {
   CONTRACT_DELIVERY_SIGNATURE,
   type RecordedExchange,
+  rampTestRuntime,
   replayExchanges,
 } from "#/ramps/test-kit";
 import {
@@ -31,10 +32,11 @@ afterEach(() => {
 async function lookUp(rampType: RampTransferType, status: number, body: RecordedExchange["body"]) {
   const replay = replayExchanges([moonpayLookupExchange(rampType, status, body)]);
   const settled = await RAMP_PROVIDER_CLIENTS.moonpay
-    .fetchTransferStatus(
-      { env: MOONPAY_TEST_KIT.env, mode: "sandbox" },
-      { transferId: TRANSFER_ID, rampType, providerReference: null }
-    )
+    .fetchTransferStatus(rampTestRuntime("sandbox", MOONPAY_TEST_KIT.credentials), {
+      transferId: TRANSFER_ID,
+      rampType,
+      providerReference: null,
+    })
     .then(
       (events) => ({ ok: true as const, events }),
       (cause: unknown) => ({ ok: false as const, cause })
@@ -79,7 +81,7 @@ describe("MoonpayRampClient.fetchTransferStatus", () => {
     };
 
     await RAMP_PROVIDER_CLIENTS.moonpay.fetchTransferStatus(
-      { env: MOONPAY_TEST_KIT.env, mode: "sandbox" },
+      rampTestRuntime("sandbox", MOONPAY_TEST_KIT.credentials),
       { transferId: TRANSFER_ID, rampType: "offramp", providerReference: null }
     );
 
@@ -87,7 +89,7 @@ describe("MoonpayRampClient.fetchTransferStatus", () => {
     const url = new URL(requested.url);
     assert.equal(url.pathname, `/v3/sell_transactions/ext/${TRANSFER_ID}`);
     assert.deepEqual([...url.searchParams.keys()], ["apiKey"]);
-    assert.equal(url.searchParams.get("apiKey"), MOONPAY_TEST_KIT.env.MOONPAY_SANDBOX_API_KEY);
+    assert.equal(url.searchParams.get("apiKey"), MOONPAY_TEST_KIT.credentials.publicKey);
     assert.equal(requested.headers.get("Authorization"), null);
   });
 

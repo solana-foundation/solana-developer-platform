@@ -35,7 +35,6 @@ const parameterizedKeys: [key: readonly unknown[], params: unknown[]][] = [
   [paymentsQueryKeys.counterpartyAccounts({ counterpartyId: "cpty_1" }), ["cpty_1"]],
   [paymentsQueryKeys.batchRecipients({ page: 3, search: "acme" }), [3, "acme"]],
   [paymentsQueryKeys.batchEstimate({ serializedRequest: '{"a":1}' }), ['{"a":1}']],
-  [paymentsQueryKeys.paymentRequestCounterpartyAccounts({ counterpartyId: "cpty_3" }), ["cpty_3"]],
   [paymentsQueryKeys.transactionFilterOptions({ projectId: "prj_1" }), ["prj_1"]],
   [custodyQueryKeys.walletActivity({ walletId: "wal_1" }), ["wal_1"]],
   [custodyQueryKeys.walletBalances({ walletId: "wal_3", readAt: 1 }), ["wal_3", 1]],

@@ -11,7 +11,7 @@ import {
   fetchTransferById,
   simulateSandboxTransfer,
 } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
-import { getRampTransferState } from "@/app/dashboard/[projectId]/payments/ramps/ramp-transfer-state";
+import { rampTransferPollInterval } from "@/app/dashboard/[projectId]/payments/ramps/ramp-phase";
 import {
   depositAmountSchema,
   depositSelectionSchema,
@@ -132,10 +132,11 @@ export function useOnrampWizard(props: UseRampWizardProps) {
     transferStatusKey,
     ([, transferId]): Promise<PaymentTransferSummary> => fetchTransferById({ transferId }, t),
     {
-      refreshInterval: (transfer) =>
-        transfer && getRampTransferState(transfer.status).terminal ? 0 : 3000,
-      revalidateOnFocus: true,
-      dedupingInterval: 0,
+      // A fresh function each render re-arms SWR's timer with the latest transfer.
+      refreshInterval: (transfer) => rampTransferPollInterval(transfer),
+      // The interval keeps it current; a focus read on top only doubles the calls.
+      revalidateOnFocus: false,
+      dedupingInterval: 2_000,
     }
   );
 

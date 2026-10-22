@@ -16,19 +16,25 @@ function parseForwardedFor(value: string | undefined): string[] {
 /**
  * Resolve the client IP supplied by the deployment's trusted reverse proxy.
  *
- * Google External Application Load Balancers append the verified client and
- * load-balancer addresses to any caller-supplied X-Forwarded-For prefix. Cloud
- * Run injects K_SERVICE itself, so in that environment the next-to-last IP is
- * the verified client and untrusted prefixes must be ignored. Other
- * deployments reject forwarding headers by default because a directly
- * reachable caller can forge them. A self-hosted operator may opt in only
- * after configuring its ingress to replace untrusted X-Forwarded-For values.
+ * Proxy trust is an explicit deployment assertion, never inferred from the
+ * runtime. Cloud Run sets K_SERVICE on directly reachable run.app services
+ * too, where every X-Forwarded-For entry except the one Cloud Run appends is
+ * caller-chosen, so its presence proves nothing about ingress (APE-810).
+ *
+ * TRUST_PROXY_HEADERS selects the asserted topology:
+ * - "gclb": ingress is restricted to a Google External Application Load
+ *   Balancer, which appends the verified client and load-balancer addresses
+ *   to any caller-supplied prefix; the next-to-last entry is the client.
+ * - "true": a self-hosted ingress replaces caller-supplied forwarding
+ *   headers, so the first entry is the client.
+ * - anything else: forwarding headers are caller-controlled; resolve nothing.
  */
 export function resolveClientIp(
   headers: Pick<Headers, "get">,
-  env: Pick<Env, "K_SERVICE" | "TRUST_PROXY_HEADERS">
+  env: Pick<Env, "TRUST_PROXY_HEADERS">
 ): string | null {
-  if (!env.K_SERVICE && env.TRUST_PROXY_HEADERS !== "true") {
+  const mode = env.TRUST_PROXY_HEADERS;
+  if (mode !== "gclb" && mode !== "true") {
     return null;
   }
 
@@ -37,7 +43,7 @@ export function resolveClientIp(
     return null;
   }
 
-  if (env.K_SERVICE) {
+  if (mode === "gclb") {
     // The Google load balancer appends [verified client, load balancer]. A
     // shorter chain has no verified client address, so fail closed instead of
     // accepting a caller-controlled single entry.

@@ -1,11 +1,11 @@
 import { hashString } from "@sdp/payments/hash";
-import { requireEnv } from "@sdp/payments/ramps/shared";
 import type { Context } from "hono";
 import { type DatabaseClient, getDb } from "@/db/client";
 import { isPostgresUniqueViolation, parsePostgresJsonOr } from "@/db/postgres-utils";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, conflict, internalError, notFound, providerUnavailable } from "@/lib/errors";
 import { normalizeForFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
+import { requireEnv } from "@/lib/runtime-env";
 import { getLogger } from "@/runtime/logger";
 import { type AuditIntent, AuditService } from "@/services/audit.service";
 import * as credentialSecretStore from "@/services/credential-secret-store";

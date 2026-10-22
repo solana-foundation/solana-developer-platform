@@ -15,7 +15,5 @@ SDP holds MoonPay test-mode keys only, so MoonPay runs for sandbox projects. Pro
 | `MOONPAY_SANDBOX_API_KEY` | conditional | Test-mode publishable key (`pk_test_…`). A live key is refused before any request. |
 | `MOONPAY_SANDBOX_SECRET_KEY` | conditional | Test-mode secret (`sk_test_…`) used to sign onramp and offramp URLs. Paired with `MOONPAY_SANDBOX_API_KEY`. |
 | `MOONPAY_SANDBOX_WEBHOOK_KEY` | conditional | Signing key of the endpoint MoonPay calls at `/webhooks/payments/ramps/sandbox/moonpay`. |
-| `MOONPAY_ONRAMP_URL` | no | Override the onramp host. Defaults to MoonPay's sandbox widget. |
-| `MOONPAY_OFFRAMP_URL` | no | Same idea for offramp. |
 
 MoonPay normalizes provider currency codes internally — SDP accepts the canonical asset rails such as `usdc.solana` and maps them to MoonPay's `usdc_sol` code.

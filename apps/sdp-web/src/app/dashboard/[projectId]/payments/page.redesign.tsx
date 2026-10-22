@@ -95,9 +95,7 @@ export async function PaymentsPage() {
         {
           id: "overview",
           className: dashboardWorkspaceOverviewPanelClassName,
-          content: (
-            <PaymentsCommandCenter apiClientPromise={apiClientPromise} organizationId={orgId} />
-          ),
+          content: <PaymentsCommandCenter apiClientPromise={apiClientPromise} />,
         },
         {
           id: "playground",

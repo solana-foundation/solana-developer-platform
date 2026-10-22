@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import { SdpPaymentsError, type SdpPaymentsErrorCode } from "#/errors";
 import { RAMP_PROVIDER_CLIENTS } from "#/ramps/index";
-import { CONTRACT_DELIVERY_SIGNATURE, CONTRACT_WALLET, replayExchanges } from "#/ramps/test-kit";
+import {
+  CONTRACT_DELIVERY_SIGNATURE,
+  CONTRACT_WALLET,
+  rampTestRuntime,
+  replayExchanges,
+} from "#/ramps/test-kit";
 import type { RampTransferLookup } from "#/ramps/types";
 import {
   STRIPE_COMPLETED_SESSION,
@@ -30,7 +35,7 @@ async function lookUp(
 ) {
   const replay = replayExchanges(exchanges);
   const settled = await RAMP_PROVIDER_CLIENTS.stripe
-    .fetchTransferStatus({ env: STRIPE_TEST_KIT.env, mode: "sandbox" }, lookup)
+    .fetchTransferStatus(rampTestRuntime("sandbox", STRIPE_TEST_KIT.credentials), lookup)
     .then(
       (events) => ({ ok: true as const, events }),
       (cause: unknown) => ({ ok: false as const, cause })

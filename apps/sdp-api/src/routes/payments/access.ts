@@ -26,27 +26,11 @@ function planIdParam(input: AuthorizeInput): string {
   return (input.params as { planId: string }).planId;
 }
 
-/** Payment-request create: the receiving wallet and any counterparty, in the caller's project. */
+/** Payment-request create: the receiving wallet, in the caller's project. */
 export async function authorizePaymentRequest(c: AppContext, input: AuthorizeInput) {
-  const { walletId, counterpartyId } = body<{ walletId: string; counterpartyId: string | null }>(
-    input
-  );
-  const [wallet, counterparty] = await Promise.all([
-    findRetainedPaymentWalletByWalletId(c, walletId),
-    counterpartyId
-      ? getCounterpartiesRepository(c).getCounterpartyById({
-          counterpartyId,
-          organizationId: getAuth(c).organizationId,
-          projectId: requireProjectId(c),
-          status: "any",
-        })
-      : null,
-  ]);
-  if (!wallet) {
+  const { walletId } = body<{ walletId: string }>(input);
+  if (!(await findRetainedPaymentWalletByWalletId(c, walletId))) {
     throw walletNotFound();
-  }
-  if (counterpartyId && !counterparty) {
-    throw notFound("Counterparty");
   }
 }
 

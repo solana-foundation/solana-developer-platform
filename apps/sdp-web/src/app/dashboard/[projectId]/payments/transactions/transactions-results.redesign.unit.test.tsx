@@ -134,7 +134,8 @@ describe("TransactionsResults", () => {
     renderResults({ transactions: [PAYMENT], nextCursor: null }, { cursors: [] });
 
     expect(screen.getByText("12.50").parentElement?.textContent).toBe("12.50 ACME");
-    expect(screen.getByText("Acme Treasury")).toBeDefined();
+    // Once in its column, and once under the type, where a phone shows it.
+    expect(screen.getAllByText("Acme Treasury")).toHaveLength(2);
     expect(screen.getByText("Treasury")).toBeDefined();
   });
 

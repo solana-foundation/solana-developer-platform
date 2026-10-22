@@ -3,6 +3,7 @@ import * as feePaymentChainReads from "@sdp/fee-payment/chain-reads";
 import { KoraAdapter } from "@sdp/fee-payment/kora.adapter";
 import type { SponsorshipProviderConfiguration } from "@sdp/fee-payment/port";
 import { hashString } from "@sdp/payments/hash";
+import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
@@ -68,6 +69,9 @@ export function testKoraAdapter(
     methods
   );
 }
+
+/** MoonPay's sale cancel, answered here so a route test never reaches MoonPay. */
+export const cancelMoonpaySaleMock = vi.spyOn(RAMP_PROVIDER_CLIENTS.moonpay, "cancelOfframpSale");
 
 export const createOrgSignerForCustodyWalletMock = vi.spyOn(
   solanaSigner,
@@ -152,10 +156,6 @@ export const MAINNET_USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"].ad
 let originalMoonPaySandboxApiKey: string | undefined;
 
 let originalMoonPaySandboxSecretKey: string | undefined;
-
-let originalMoonPayOnrampUrl: string | undefined;
-
-let originalMoonPayOfframpUrl: string | undefined;
 
 async function seedAuthAndWallet(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
@@ -459,6 +459,7 @@ export async function recurringCollectionTransactionForSignature(options: {
     });
   return {
     slot: 100n,
+    accountKeys: [row.subscription_authority_address],
     executionResultKnown: true,
     err: null,
     instructions: [
@@ -566,16 +567,13 @@ export function installPaymentsRouteTestHooks(): void {
     createOrgSignerForCustodyWalletMock.mockResolvedValue(
       createNoopSigner(address("8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ"))
     );
+    cancelMoonpaySaleMock.mockResolvedValue("canceled");
 
     originalMoonPaySandboxApiKey = env.MOONPAY_SANDBOX_API_KEY;
     originalMoonPaySandboxSecretKey = env.MOONPAY_SANDBOX_SECRET_KEY;
-    originalMoonPayOnrampUrl = env.MOONPAY_ONRAMP_URL;
-    originalMoonPayOfframpUrl = env.MOONPAY_OFFRAMP_URL;
 
     env.MOONPAY_SANDBOX_API_KEY = TEST_MOONPAY_API_KEY;
     env.MOONPAY_SANDBOX_SECRET_KEY = TEST_MOONPAY_SECRET_KEY;
-    env.MOONPAY_ONRAMP_URL = TEST_MOONPAY_ONRAMP_URL;
-    env.MOONPAY_OFFRAMP_URL = TEST_MOONPAY_OFFRAMP_URL;
 
     await seedTestDatabase(env);
     await seedAuthAndWallet();
@@ -584,8 +582,6 @@ export function installPaymentsRouteTestHooks(): void {
   afterEach(async () => {
     env.MOONPAY_SANDBOX_API_KEY = originalMoonPaySandboxApiKey;
     env.MOONPAY_SANDBOX_SECRET_KEY = originalMoonPaySandboxSecretKey;
-    env.MOONPAY_ONRAMP_URL = originalMoonPayOnrampUrl;
-    env.MOONPAY_OFFRAMP_URL = originalMoonPayOfframpUrl;
 
     await clearKVStores(env);
   });

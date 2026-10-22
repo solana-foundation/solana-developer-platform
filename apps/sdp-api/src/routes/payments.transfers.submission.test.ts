@@ -13,6 +13,7 @@ import { createPostgresPaymentsRepository } from "@/db/repositories/payments.rep
 import { AppError } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { rootLogger } from "@/runtime/logger";
+import * as signedSubmission from "@/services/payments/signed-submission";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
@@ -214,6 +215,43 @@ describe("Payments routes — signed submission", () => {
       expect(row.status).toBe("failed");
       expect(row.signature).toBeTruthy();
       expect(sendTransactionMock).toHaveBeenCalledOnce();
+    });
+
+    it("fails a transfer whose committed start marker lost its reply, releasing its sponsorship", async () => {
+      await mockSignedSubmissionAdapter();
+      const createStore = signedSubmission.createTransferSignedSubmissionStore;
+      vi.spyOn(signedSubmission, "createTransferSignedSubmissionStore").mockImplementationOnce(
+        (repository, transfer) => {
+          const store = createStore(repository, transfer);
+          return {
+            ...store,
+            markStarted: async () => {
+              await store.markStarted();
+              throw new Error("marker reply lost");
+            },
+          };
+        }
+      );
+
+      const res = await transferRequest("0.001");
+
+      expect(res.status).toBe(503);
+      expect(await res.json()).toEqual({
+        error: {
+          code: "SERVICE_UNAVAILABLE",
+          message: "The transaction could not be submitted; nothing was broadcast",
+        },
+        meta: { requestId: expect.any(String) },
+      });
+      const row = await latestTransferRow();
+      expect(row).toMatchObject({ status: "failed", signature: expect.any(String) });
+      expect(row.submission_started_at).not.toBeNull();
+      expect(
+        await getDb(env)
+          .prepare("SELECT status FROM sponsorship_budget_reservations WHERE signature = ?")
+          .bind(row.signature)
+          .first<{ status: string }>()
+      ).toEqual({ status: "released" });
     });
 
     it("fails without broadcasting when sponsored signing is rejected", async () => {

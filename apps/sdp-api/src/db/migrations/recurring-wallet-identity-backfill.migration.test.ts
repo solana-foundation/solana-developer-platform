@@ -13,7 +13,7 @@ import { seedTestDatabase } from "@/test/mocks/db";
 
 const migration = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
-  "postgres/0154_recurring_wallet_roles.sql"
+  "postgres/0156_recurring_wallet_roles.sql"
 );
 
 it("fills only unique scoped plan roles without rewriting recurring source identities", async () => {

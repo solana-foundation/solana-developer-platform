@@ -18,7 +18,7 @@ const TRANSFER_ID = "xfr_0f1e2d3c-4b5a-4c6d-8e7f-9a0b1c2d3e4f";
 
 /** A MoonPay v3 buy quote, as `GET /v3/currencies/sol/buy_quote` answers. */
 const BUY_QUOTE = {
-  baseCurrencyAmount: 50,
+  baseCurrencyAmount: 48.4,
   quoteCurrencyAmount: 0.3,
   quoteCurrencyPrice: 150,
   feeAmount: 1.5,
@@ -31,7 +31,12 @@ const BUY_QUOTE = {
 const BUY_QUOTE_EXCHANGE: RecordedExchange = {
   method: "GET",
   url: /^https:\/\/api\.moonpay\.com\/v3\/currencies\/sol\/buy_quote\?/,
-  query: { baseCurrencyCode: "usd", baseCurrencyAmount: "50" },
+  query: {
+    baseCurrencyCode: "usd",
+    baseCurrencyAmount: "50",
+    areFeesIncluded: "true",
+    paymentMethod: "credit_debit_card",
+  },
   status: 200,
   body: BUY_QUOTE,
 };
@@ -175,9 +180,9 @@ export function moonpayLookupExchange(
 }
 
 /**
- * Whether a widget URL is on `mode`'s host with `mode`'s key and signature.
+ * Whether a widget URL is on a sandbox host with the kit's key and signature.
  * The signature is recomputed here as MoonPay checks it: an HMAC-SHA256 of the
- * query without it, keyed by the mode's secret.
+ * query without it, keyed by the kit's secret.
  */
 function signedWithSandboxKeys(hostedUrl: string): boolean {
   const url = new URL(hostedUrl);
@@ -196,8 +201,8 @@ function signedWithSandboxKeys(hostedUrl: string): boolean {
  * checked by URL.
  */
 export const MOONPAY_TEST_KIT: RampProviderTestKit = {
-  env: { MOONPAY_SANDBOX_API_KEY: API_KEY, MOONPAY_SANDBOX_SECRET_KEY: SECRET_KEY },
-  managedModes: ["sandbox"],
+  credentials: { publicKey: API_KEY, secretKey: SECRET_KEY },
+  liveCredentials: { publicKey: "pk_live_contract", secretKey: "sk_live_contract" },
   onramp: {
     estimate: {
       input: { assetRail: "sol.solana", fiatCurrency: "USD", fiatAmount: "50" },
@@ -249,8 +254,8 @@ export const MOONPAY_TEST_KIT: RampProviderTestKit = {
       events: [],
     },
   },
-  usesModeCredential: (request) => new URL(request.url).searchParams.get("apiKey") === API_KEY,
-  quoteUsesModeCredential: (quote) =>
+  usesCredentials: (request) => new URL(request.url).searchParams.get("apiKey") === API_KEY,
+  quoteUsesCredentials: (quote) =>
     quote.deliveryMode === "hosted" && signedWithSandboxKeys(quote.hostedUrl),
   malformedEstimate: {
     direction: "onramp",

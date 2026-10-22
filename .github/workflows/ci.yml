@@ -32,7 +32,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: 24.22.1
           cache: pnpm
 
       - name: Install
@@ -79,7 +79,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: 24.22.1
           cache: pnpm
 
       - name: Install
@@ -106,7 +106,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
         with:
-          node-version: 24
+          node-version: 24.22.1
 
       - name: Check module boundaries
         run: pnpm check:module-boundaries
@@ -128,7 +128,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: 24.22.1
           cache: pnpm
 
       - name: Install
@@ -179,7 +179,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: 24.22.1
           cache: pnpm
           cache-dependency-path: agents/sdp-translation-agent/pnpm-lock.yaml
 
@@ -206,7 +206,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: 24.22.1
           cache: pnpm
 
       - name: Install
@@ -302,7 +302,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: 24.22.1
           cache: pnpm
 
       - name: Restore turbo cache
@@ -391,7 +391,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: 24.22.1
           cache: pnpm
 
       - name: Install
@@ -442,7 +442,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: 24.22.1
           cache: pnpm
           cache-dependency-path: examples/embedded-yield-bank/pnpm-lock.yaml
 
@@ -481,7 +481,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: 24.22.1
           cache: pnpm
 
       - name: Restore turbo cache
@@ -572,7 +572,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: 24.22.1
           cache: pnpm
 
       - name: Install
@@ -720,7 +720,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: 24.22.1
           cache: pnpm
 
       - name: Install
@@ -752,7 +752,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: 24.22.1
           cache: pnpm
 
       - name: Install
@@ -827,6 +827,11 @@ jobs:
             test_files: src/tests/payments-wallet-scope.test.ts src/tests/api-keys-flow.test.ts src/tests/api-keys-rotation.test.ts src/tests/custody-local.test.ts src/tests/kora-surfpool-shim.test.ts
             rpc_provider: alchemy
             custody_provider: local
+          - name: Surfpool / Recurring Payments
+            provider: surfpool
+            test_files: src/tests/recurring-payments-authority-revocation.test.ts
+            rpc_provider: alchemy
+            custody_provider: local
           - name: Surfpool / Token and Payment Flows (Kora)
             provider: surfpool
             kora_mode: docker
@@ -881,7 +886,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: 24.22.1
           cache: pnpm
 
       - name: Install
@@ -1074,7 +1079,7 @@ jobs:
         if: env.E2E_AFFECTED == 'true'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: 24.22.1
           cache: pnpm
 
       - name: Install

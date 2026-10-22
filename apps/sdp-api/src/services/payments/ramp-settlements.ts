@@ -1,4 +1,4 @@
-import type { RampSettlementEvent } from "@sdp/payments/ramps/types";
+import { isAuditedRampSettlementKind, type RampSettlementEvent } from "@sdp/payments/ramps/types";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { type CryptoRailId, getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import type { PaymentTransferStatus } from "@sdp/types/payments";
@@ -10,11 +10,14 @@ import {
   type RampWebhookProcessResult,
 } from "@sdp/types/payments";
 import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
+import { z } from "zod";
 import { asTransactionalClient, type DatabaseClient, getDb } from "@/db/client";
 import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
 import type { PaymentsRepository, PaymentTransferRow } from "@/db/repositories/payments.repository";
 import { createSystemTransactionalPaymentsRepository } from "@/db/repositories/repository-factory";
 import { logEvent } from "@/runtime/money-path-events";
+import type { SystemAuditLogEntry } from "@/services/audit.service";
+import { rampAuditEntry, systemRampAuditService } from "@/services/payments/ramp-audit";
 import type { Env } from "@/types/env";
 
 // Named, not derived from the event kind, so a renamed transition fails typecheck here.
@@ -63,6 +66,7 @@ function settlementObservationFields(
 > {
   const providerData: Record<string, unknown> = {};
   const receivedAmount = "receivedAmount" in event ? event.receivedAmount : undefined;
+  const receivedCurrency = "receivedCurrency" in event ? event.receivedCurrency : undefined;
   const observation: Record<string, unknown> = {
     kind: event.kind,
     reference: event.reference,
@@ -70,13 +74,17 @@ function settlementObservationFields(
   if (event.providerObservedAt) observation.observedAt = event.providerObservedAt;
   if (event.onchain) observation.onchain = event.onchain;
   if (receivedAmount !== undefined) observation.receivedAmount = receivedAmount;
+  if (receivedCurrency !== undefined) observation.receivedCurrency = receivedCurrency;
   if (event.refundAddress !== undefined) observation.refundAddress = event.refundAddress;
   providerData.observedDelivery = observation;
+  // A new provider report supersedes the one SDP held as contradicted by the chain.
+  providerData.deliveryMismatch = null;
   if (event.kind === "settled") {
     const settlement: Record<string, unknown> = { reference: event.reference };
     if (event.providerObservedAt) settlement.observedAt = event.providerObservedAt;
     if (event.onchain) settlement.onchain = event.onchain;
     if (event.receivedAmount !== undefined) settlement.receivedAmount = event.receivedAmount;
+    if (event.receivedCurrency !== undefined) settlement.receivedCurrency = event.receivedCurrency;
     if (event.refundAddress !== undefined) settlement.refundAddress = event.refundAddress;
     providerData.providerSettlement = settlement;
     if (event.providerObservedAt !== undefined) return { providerData };
@@ -146,6 +154,14 @@ function buildRampSettlementUpdate(
   return update;
 }
 
+const displacedReferencesSchema = z.array(z.string());
+
+/** The provider customer references a counterparty link has displaced; none when it lists none. */
+function displacedReferences(metadata: Record<string, unknown>): readonly string[] {
+  const references = displacedReferencesSchema.safeParse(metadata.mismatchedReferences);
+  return references.success ? references.data : [];
+}
+
 /** Whether the rail a provider reports delivering is the transfer's own asset. */
 function deliversTransferAsset(transfer: PaymentTransferRow, rail: CryptoRailId | null): boolean {
   if (rail === null) {
@@ -154,22 +170,82 @@ function deliversTransferAsset(transfer: PaymentTransferRow, rail: CryptoRailId 
   return WELL_KNOWN_TOKEN_BY_MINT.get(transfer.token)?.symbol === getCryptoRailAssetLabel(rail);
 }
 
+/** Where a provider event's work hands the audit record its transition owes. */
+export type RecordRampAudit = (entry: SystemAuditLogEntry) => void;
+
+/**
+ * Runs a provider event's work in one transaction. A settled, failed or
+ * expired event runs in the audit ledger's, so the transition the work
+ * records commits with its audit row, or neither commits.
+ */
+export async function withRampSettlementTransaction<T>(
+  env: Env,
+  kind: RampSettlementEvent["kind"],
+  work: (client: DatabaseClient, recordAudit: RecordRampAudit) => Promise<T>
+): Promise<T> {
+  if (!isAuditedRampSettlementKind(kind)) {
+    return getDb(env).transaction((tx) => work(asTransactionalClient(tx), () => undefined));
+  }
+  return systemRampAuditService(env).logSystemWithin(async (client) => {
+    // Held in an object: control flow does not follow assignments in a callback.
+    const recorded: { entry: SystemAuditLogEntry | null } = { entry: null };
+    const result = await work(client, (entry) => {
+      recorded.entry = entry;
+    });
+    return { entry: recorded.entry, result };
+  });
+}
+
+/** Runs a settlement's writes: in a transaction of their own, or in the caller's. */
+type RampSettlementWrites = <T>(
+  work: (client: DatabaseClient, recordAudit: RecordRampAudit) => Promise<T>
+) => Promise<T>;
+
+/**
+ * Applies a provider settlement event in its own transaction. The checks read
+ * first, outside it, so the audit ledger's lock covers only the writes.
+ */
+export function applyRampSettlementEvent(
+  env: Env,
+  environment: SdpEnvironment,
+  event: RampSettlementEvent
+): Promise<RampWebhookProcessResult & { applied: boolean }> {
+  return settleRampEvent(environment, event, getDb(env), (work) =>
+    withRampSettlementTransaction(env, event.kind, work)
+  );
+}
+
+/**
+ * Applies a provider settlement event inside the caller's transaction,
+ * handing any audit record its transition owes to `recordAudit`.
+ */
+export function applyRampSettlementEventIn(
+  environment: SdpEnvironment,
+  event: RampSettlementEvent,
+  client: DatabaseClient,
+  recordAudit: RecordRampAudit
+): Promise<RampWebhookProcessResult & { applied: boolean }> {
+  return settleRampEvent(environment, event, client, (work) => work(client, recordAudit));
+}
+
 /**
  * Applies a provider settlement event to the transfer it references. The
  * transition is a compare-and-swap, so concurrent or redelivered events lose
  * the CAS instead of overwriting state.
  *
- * @param env - Process environment used for repository access.
  * @param environment - Environment of the verified provider webhook.
  * @param event - The provider settlement event to apply.
+ * @param db - Where the checks read: the root client, or the caller's transaction.
+ * @param runWrites - Runs the transition and link writes, with the audit record
+ * a settled, failed or expired transition owes.
  * @returns Whether the event produced a real transition; callers release
  * provider reservations only on a real one.
  */
-export async function applyRampSettlementEvent(
-  env: Env,
+async function settleRampEvent(
   environment: SdpEnvironment,
   event: RampSettlementEvent,
-  db: DatabaseClient = getDb(env)
+  db: DatabaseClient,
+  runWrites: RampSettlementWrites
 ): Promise<RampWebhookProcessResult & { applied: boolean }> {
   if (event.kind === "ignore") {
     return { applied: false, outcome: "ignored" };
@@ -249,28 +325,47 @@ export async function applyRampSettlementEvent(
   // provider event, so they land or roll back together — and an event whose
   // transition was ignored (lost race, out-of-order redelivery) has no
   // effects at all: no link write.
-  const { applied, linkedReference } = await db.transaction(async (tx) => {
-    const client = asTransactionalClient(tx);
+  const { updated, newlyMismatchedLink } = await runWrites(async (client, recordAudit) => {
     const updated =
       await createSystemTransactionalPaymentsRepository(client).transitionRampTransfer(update);
+    if (updated !== null && isAuditedRampSettlementKind(event.kind)) {
+      recordAudit(
+        rampAuditEntry(event.kind === "settled" ? "settle" : "update", updated, {
+          source: "provider",
+          transition: update.transition,
+          fromStatus: transfer.status,
+          providerObservedAt: event.providerObservedAt ?? null,
+          receivedAmount: event.kind === "settled" ? (event.receivedAmount ?? null) : null,
+          receivedCurrency: event.kind === "settled" ? (event.receivedCurrency ?? null) : null,
+        })
+      );
+    }
     if (
       updated !== null &&
       event.providerCustomerId !== undefined &&
       transfer.counterparty_id !== null
     ) {
-      const link = await createPostgresCounterpartyProviderAccountsRepository(
-        client
-      ).upsertProviderAccount({
+      const accounts = createPostgresCounterpartyProviderAccountsRepository(client);
+      const linkScope = {
         organizationId: transfer.organization_id,
         projectId: transfer.project_id,
         counterpartyId: transfer.counterparty_id,
         provider: event.provider,
+      };
+      const prior = await accounts.getProviderAccount(linkScope);
+      const link = await accounts.upsertProviderAccount({
+        ...linkScope,
         providerCustomerReference: event.providerCustomerId,
       });
-      return { applied: true, linkedReference: link.provider_customer_reference };
+      // The link keeps every displaced reference, so only a first sighting is news.
+      const newlyMismatched =
+        link.provider_customer_reference !== event.providerCustomerId &&
+        !(prior !== null && displacedReferences(prior.metadata).includes(event.providerCustomerId));
+      return { updated, newlyMismatchedLink: newlyMismatched ? link : null };
     }
-    return { applied: updated !== null, linkedReference: null };
+    return { updated, newlyMismatchedLink: null };
   });
+  const applied = updated !== null;
 
   if (!applied && event.kind === "settled") {
     const current = await repo.getTransferById({
@@ -285,12 +380,8 @@ export async function applyRampSettlementEvent(
 
   // First-write-wins: the event reported a different provider customer than the
   // counterparty's canonical link. The displaced reference is preserved in the
-  // link row's metadata; surface it for operators.
-  if (
-    linkedReference !== null &&
-    event.providerCustomerId !== undefined &&
-    linkedReference !== event.providerCustomerId
-  ) {
+  // link row's metadata; surface it for operators the first time it appears.
+  if (newlyMismatchedLink !== null) {
     logEvent("warn", {
       event: "sdp_api_counterparty_provider_reference_mismatch",
       flow: "ramp-settlement",
@@ -299,11 +390,10 @@ export async function applyRampSettlementEvent(
       transfer_id: transfer.id,
       counterparty_id: transfer.counterparty_id,
       provider: event.provider,
-      canonical_reference: linkedReference,
+      canonical_reference: newlyMismatchedLink.provider_customer_reference,
       mismatched_reference: event.providerCustomerId,
     });
   }
-
   logEvent("info", {
     event: applied ? "sdp_api_ramp_settlement_applied" : "sdp_api_ramp_settlement_ignored",
     flow: "ramp-settlement",

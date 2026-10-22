@@ -36,7 +36,13 @@ interface ParsedInstructionRecord {
 }
 
 interface ParsedInstructionGroup {
+  index: number;
   instructions?: readonly ParsedInstructionRecord[];
+}
+
+interface PositionedParsedInstruction {
+  instruction: ParsedInstructionRecord;
+  position: string;
 }
 
 interface ParsedAccountKey {
@@ -117,12 +123,50 @@ function resolveParsedAccountKey(accountKey: string | ParsedAccountKey | undefin
   return null;
 }
 
-function flattenParsedInstructions(payload: ParsedTransactionResponse): ParsedInstructionRecord[] {
-  const topLevel = payload.result?.transaction?.message?.instructions ?? [];
-  const inner = (payload.result?.meta?.innerInstructions ?? []).flatMap(
-    (group) => group.instructions ?? []
+/**
+ * Lists every outer and inner instruction of a parsed transaction with its
+ * position: `<outer>` for an outer instruction, `<outer>.<inner>` for an inner
+ * one, where `<outer>` is the RPC's `innerInstructions[].index`. A position is
+ * unique within its transaction, so it tells apart transfers that share every
+ * other field.
+ *
+ * @param parsedTransaction - The parsed transaction body.
+ * @returns The outer instructions in message order, then the inner ones.
+ */
+function flattenParsedInstructions(
+  parsedTransaction: ParsedTransaction
+): PositionedParsedInstruction[] {
+  const topLevel = (parsedTransaction.transaction?.message?.instructions ?? []).map(
+    (instruction, outerIndex) => ({ instruction, position: `${outerIndex}` })
+  );
+  const inner = (parsedTransaction.meta?.innerInstructions ?? []).flatMap((group) =>
+    (group.instructions ?? []).map((instruction, innerIndex) => ({
+      instruction,
+      position: `${group.index}.${innerIndex}`,
+    }))
   );
   return [...topLevel, ...inner];
+}
+
+/**
+ * Builds the id of a synthesized observed transfer row. One transfer
+ * instruction yields one row per wallet and direction, so the instruction
+ * position keeps movements that share a signature apart.
+ *
+ * @param params - The row's identifying fields.
+ * @param params.walletId - The SDP wallet the row is listed under.
+ * @param params.signature - The transaction signature.
+ * @param params.position - The instruction position from flattenParsedInstructions.
+ * @param params.direction - The row's direction relative to the wallet.
+ * @returns The `xfr_observed_` row id.
+ */
+function observedTransferRowId(params: {
+  walletId: string;
+  signature: string;
+  position: string;
+  direction: TransferDirection;
+}): string {
+  return `xfr_observed_${params.walletId}_${params.signature}_${params.position}_${params.direction}`;
 }
 
 function resolveObservedTimestamp(blockTime: bigint | number | null | undefined): string {
@@ -458,7 +502,7 @@ function buildObservedTransferRows(
     string,
     { decimals: number | null; mint: string | null; owner: string | null }
   >();
-  const observedRows = new Map<string, TransferRow>();
+  const observedRows: TransferRow[] = [];
   const preTokenBalances = parsedTransaction.meta?.preTokenBalances ?? [];
   const postTokenBalances = parsedTransaction.meta?.postTokenBalances ?? [];
 
@@ -491,7 +535,7 @@ function buildObservedTransferRows(
     });
   }
 
-  for (const instruction of flattenParsedInstructions({ result: parsedTransaction })) {
+  for (const { instruction, position } of flattenParsedInstructions(parsedTransaction)) {
     const parsedType = instruction.parsed?.type;
     const info = instruction.parsed?.info;
 
@@ -518,14 +562,14 @@ function buildObservedTransferRows(
 
       const direction: TransferDirection =
         destinationWalletId && !sourceWalletId ? "inbound" : "outbound";
-      const dedupeKey = `${walletId}:${signature}:SOL:${direction}`;
 
-      if (observedRows.has(dedupeKey)) {
-        continue;
-      }
-
-      observedRows.set(dedupeKey, {
-        id: `xfr_observed_${walletId}_${signature}`,
+      observedRows.push({
+        id: observedTransferRowId({
+          walletId,
+          signature,
+          position,
+          direction,
+        }),
         organization_id: context.organizationId,
         project_id: context.projectId,
         wallet_id: walletId,
@@ -606,22 +650,23 @@ function buildObservedTransferRows(
 
       const resolvedUiAmount =
         tokenAmount?.uiAmount ?? formatDecimalAmount(rawAmount, resolvedDecimals);
-      const dedupeKey = `${destinationWalletId}:${signature}:${mint}:mint:${rawAmount.toString()}`;
-
-      if (observedRows.has(dedupeKey)) {
-        continue;
-      }
-
       const direction = "inbound";
-      observedRows.set(dedupeKey, {
-        id: `xfr_observed_${destinationWalletId}_${signature}_${mint}_mint`,
+      const sourceAddress = readInstructionInfoString(info, "mintAuthority") ?? mint;
+      const destinationAddress = destinationOwner ?? destinationTokenAccount;
+      observedRows.push({
+        id: observedTransferRowId({
+          walletId: destinationWalletId,
+          signature,
+          position,
+          direction,
+        }),
         organization_id: context.organizationId,
         project_id: context.projectId,
         wallet_id: destinationWalletId,
         custody_wallet_id: null,
         counterparty_id: null,
-        source_address: readInstructionInfoString(info, "mintAuthority") ?? mint,
-        destination_address: destinationOwner ?? destinationTokenAccount,
+        source_address: sourceAddress,
+        destination_address: destinationAddress,
         token: mint,
         amount: resolvedUiAmount,
         memo: null,
@@ -704,21 +749,23 @@ function buildObservedTransferRows(
       destinationWalletId && !sourceWalletId ? "inbound" : "outbound";
     const resolvedUiAmount =
       tokenAmount?.uiAmount ?? formatDecimalAmount(rawAmount, resolvedDecimals);
-    const dedupeKey = `${walletId}:${signature}:${mint}:${direction}:${rawAmount.toString()}`;
+    const sourceAddress = sourceOwner ?? sourceTokenAccount;
+    const destinationAddress = destinationOwner ?? destinationTokenAccount;
 
-    if (observedRows.has(dedupeKey)) {
-      continue;
-    }
-
-    observedRows.set(dedupeKey, {
-      id: `xfr_observed_${walletId}_${signature}_${mint}`,
+    observedRows.push({
+      id: observedTransferRowId({
+        walletId,
+        signature,
+        position,
+        direction,
+      }),
       organization_id: context.organizationId,
       project_id: context.projectId,
       wallet_id: walletId,
       custody_wallet_id: null,
       counterparty_id: null,
-      source_address: sourceOwner ?? sourceTokenAccount,
-      destination_address: destinationOwner ?? destinationTokenAccount,
+      source_address: sourceAddress,
+      destination_address: destinationAddress,
       token: mint,
       amount: resolvedUiAmount,
       memo: null,
@@ -753,7 +800,7 @@ function buildObservedTransferRows(
     });
   }
 
-  return [...observedRows.values()];
+  return observedRows;
 }
 
 export async function buildObservedTransfersForSignatures(

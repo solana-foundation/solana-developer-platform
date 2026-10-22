@@ -4,6 +4,7 @@ import { Combobox } from "@sdp/ui/combobox";
 import { WalletIcon } from "lucide-react";
 import { useMemo } from "react";
 import type { OfframpWizard } from "@/app/dashboard/[projectId]/payments/ramps/hooks/use-offramp-wizard.redesign";
+import { getRampTransferState } from "@/app/dashboard/[projectId]/payments/ramps/ramp-transfer-state";
 import { walletComboboxOptions } from "@/app/dashboard/[projectId]/payments/ramps/wallet-options";
 import { useTranslations } from "@/i18n/provider";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
@@ -11,6 +12,7 @@ import { hasEnabledRampProvider } from "@/lib/provider-availability";
 import { DemoProviderCheckout } from "./demo-provider-checkout";
 import { MemoStepContent } from "./memo-step-content.redesign";
 import { MoonpayRampFrame } from "./moonpay-ramp-frame";
+import { OfframpOutcome, OfframpSendError } from "./offramp-final-step";
 import { RampCompleteScreen } from "./ramp-complete-screen";
 import { RampPairProviderSelector } from "./ramp-pair-provider-selector.redesign";
 import { RampQuoteError } from "./ramp-quote-error";
@@ -149,6 +151,11 @@ function OfframpCompleteStep({ wizard }: { wizard: OfframpWizard }) {
     return <RampCompleteScreen direction="offramp" quote={quote} transfer={transferStatus} />;
   }
 
+  // A sale that ended another way has nothing left to do in the provider's window.
+  if (transferStatus && getRampTransferState(transferStatus.status).terminal) {
+    return <OfframpOutcome wizard={wizard} />;
+  }
+
   // A provider's own page or widget can't open on sample data; the demo stands in for it.
   if (demo) {
     return (
@@ -167,10 +174,13 @@ function OfframpCompleteStep({ wizard }: { wizard: OfframpWizard }) {
 
   if (quote.deliveryMode === "hosted") {
     return (
-      <MoonpayRampFrame
-        title={t("DashboardPayments.ramps.providerPayout", { provider: quote.provider })}
-        src={quote.hostedUrl}
-      />
+      <div className="space-y-4">
+        <OfframpSendError message={wizard.onchainSendError} />
+        <MoonpayRampFrame
+          title={t("DashboardPayments.ramps.providerPayout", { provider: quote.provider })}
+          src={quote.hostedUrl}
+        />
+      </div>
     );
   }
 

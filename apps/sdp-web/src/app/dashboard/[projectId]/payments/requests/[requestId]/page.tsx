@@ -1,6 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import { fetchCounterparty } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-page.data";
 import { fetchPaymentsWallets } from "@/app/dashboard/[projectId]/payments/payments-page.data";
 import { PaymentRequestDetailWorkspace } from "@/app/dashboard/[projectId]/payments/requests/payment-request-detail-workspace";
 import {
@@ -46,11 +45,6 @@ async function PaymentRequestDetailRoute({ params }: { params: Promise<{ request
       }
 
       const request = detail.status === "found" ? detail.request : null;
-      const contact = request?.counterpartyId
-        ? await trace.step("fetch_counterparty", () =>
-            fetchCounterparty(apiClient.request, request.counterpartyId as string)
-          )
-        : null;
       const wallet = request
         ? (walletsResult.data ?? []).find(
             (candidate) =>
@@ -63,7 +57,6 @@ async function PaymentRequestDetailRoute({ params }: { params: Promise<{ request
           <PaymentRequestDetailWorkspace
             request={request}
             publicToken={link.ok ? link.publicToken : null}
-            contactName={contact?.displayName ?? null}
             walletName={wallet?.label ?? null}
             error={detail.status === "error" ? detail.error : undefined}
           />

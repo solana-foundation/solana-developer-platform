@@ -148,8 +148,6 @@
     "UTILA_POLL_INTERVAL_MS",
     "UTILA_MAX_POLL_ATTEMPTS",
     "UTILA_DESIGNATED_SIGNERS",
-    "MOONPAY_ONRAMP_URL",
-    "MOONPAY_OFFRAMP_URL",
     "MOONPAY_SANDBOX_API_KEY",
     "MOONPAY_SANDBOX_SECRET_KEY",
     "MOONPAY_SANDBOX_WEBHOOK_KEY",
@@ -189,6 +187,10 @@
       "persistent": true
     },
     "dev:db": {
+      "cache": false,
+      "persistent": true
+    },
+    "dev:kora": {
       "cache": false,
       "persistent": true
     },

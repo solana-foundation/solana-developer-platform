@@ -398,16 +398,23 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     try {
       await lifecycle.markStarted();
     } catch (error) {
-      let started: boolean;
+      // The caller sends only after this method returns and nothing resends saved bytes, so a
+      // failed marker write proves this submission was never broadcast, even when the write
+      // committed and only its reply was lost (APE-841).
       try {
-        started = await lifecycle.hasStarted();
-      } catch {
-        // An unreadable marker is an ambiguous ownership boundary. Releasing
-        // here could refund a submission that has already become sendable.
-        throw error;
-      }
-      if (!started) {
         await this.releaseDeterministic(reservation, error);
+      } catch (releaseError) {
+        // The release reports its own outage (breaker, accounting log); the marker failure stays
+        // the answer so the payment row fails instead of staying processing.
+        logEvent("error", {
+          event: "sdp_api_sponsorship_unstarted_release_failed",
+          network: this.network,
+          organization_id: this.scope.organizationId,
+          project_id: this.scope.projectId,
+          reservation_id: reservation.id,
+          signature: submission.signature,
+          ...describeError(releaseError),
+        });
       }
       throw error;
     }

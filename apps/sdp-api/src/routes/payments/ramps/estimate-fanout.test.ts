@@ -26,6 +26,7 @@ vi.mock("@/routes/payments/wallets", async (importOriginal) => ({
 }));
 
 import { estimateNotAvailable, SdpPaymentsError } from "@sdp/payments/errors";
+import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import { CUSTODY_PROVIDERS, STAGED_PROVIDER_REFUSAL_REASONS } from "@sdp/types/custody";
 import type { PaymentRampEstimate } from "@sdp/types/payments";
 import {
@@ -94,9 +95,14 @@ describe("estimateAcrossProviders", () => {
   });
 
   it("keeps the per-provider error contract but emits a structured log event", async () => {
-    const results = await estimateAcrossProviders(buildContext(), ["moonpay"], async () => {
-      throw new Error("provider exploded");
-    });
+    const results = await estimateAcrossProviders(
+      buildContext(),
+      "onramp",
+      ["moonpay"],
+      async () => {
+        throw new Error("provider exploded");
+      }
+    );
 
     expect(results).toEqual([{ provider: "moonpay", status: "error", error: "provider exploded" }]);
     expect(logEvent).toHaveBeenCalledTimes(1);
@@ -113,14 +119,19 @@ describe("estimateAcrossProviders", () => {
   });
 
   it("logs a provider's wording from diagnostics and keeps it out of the result", async () => {
-    const results = await estimateAcrossProviders(buildContext(), ["moonpay"], async () => {
-      throw new SdpPaymentsError(
-        "BAD_REQUEST",
-        "moonpay request failed with status 400",
-        { provider: "moonpay", providerStatus: 400 },
-        { providerMessage: "amount too low for jane.doe@example.com" }
-      );
-    });
+    const results = await estimateAcrossProviders(
+      buildContext(),
+      "onramp",
+      ["moonpay"],
+      async () => {
+        throw new SdpPaymentsError(
+          "BAD_REQUEST",
+          "moonpay request failed with status 400",
+          { provider: "moonpay", providerStatus: 400 },
+          { providerMessage: "amount too low for jane.doe@example.com" }
+        );
+      }
+    );
 
     expect(results).toEqual([
       { provider: "moonpay", status: "error", error: "moonpay request failed with status 400" },
@@ -142,7 +153,12 @@ describe("estimateAcrossProviders", () => {
     });
     const runProvider = vi.fn();
 
-    const results = await estimateAcrossProviders(buildContext(), ["moonpay"], runProvider);
+    const results = await estimateAcrossProviders(
+      buildContext(),
+      "onramp",
+      ["moonpay"],
+      runProvider
+    );
 
     expect(results).toEqual([
       {
@@ -177,7 +193,12 @@ describe("estimateAcrossProviders", () => {
       });
       const runProvider = vi.fn();
 
-      const results = await estimateAcrossProviders(buildContext(), ["moonpay"], runProvider);
+      const results = await estimateAcrossProviders(
+        buildContext(),
+        "onramp",
+        ["moonpay"],
+        runProvider
+      );
 
       expect(results).toEqual([
         {
@@ -213,6 +234,7 @@ describe("estimateAcrossProviders", () => {
 
     const results = await estimateAcrossProviders(
       buildContext(),
+      "onramp",
       ["moonpay", "stripe"],
       runProvider
     );
@@ -227,7 +249,7 @@ describe("estimateAcrossProviders", () => {
       { provider: "stripe", status: "unsupported" },
     ]);
     expect(loadProjectProviderVerdict).toHaveBeenCalledTimes(1);
-    expect(runProvider).toHaveBeenCalledExactlyOnceWith("stripe", {});
+    expect(runProvider).toHaveBeenCalledExactlyOnceWith(RAMP_PROVIDER_CLIENTS.stripe, {});
     expect(logEvent).toHaveBeenCalledExactlyOnceWith("info", {
       event: "sdp_api_ramp_provider_refused",
       provider: "moonpay",
@@ -236,10 +258,25 @@ describe("estimateAcrossProviders", () => {
     });
   });
 
+  it("answers a provider that doesn't run the direction as unsupported, without calling it", async () => {
+    const runProvider = vi.fn();
+
+    const results = await estimateAcrossProviders(
+      buildContext(),
+      "offramp",
+      ["stripe"],
+      runProvider
+    );
+
+    expect(results).toEqual([{ provider: "stripe", status: "unsupported" }]);
+    expect(runProvider).not.toHaveBeenCalled();
+  });
+
   it("does not log when a provider succeeds or is merely unsupported", async () => {
     const estimate = { provider: "moonpay" } as unknown as PaymentRampEstimate;
     const results = await estimateAcrossProviders(
       buildContext(),
+      "onramp",
       ["moonpay"],
       async () => estimate
     );

@@ -84,6 +84,12 @@ export const MOVEMENTS = {
     actions: ["recurring.execute"],
   },
   "recurring.cancel": { module: "recurring_payments", kind: "exit" },
+  /**
+   * Revokes a wallet's per-mint delegation to the Subscriptions program once
+   * every recurring payment on it has ended (HOO-2210). It moves nothing and
+   * only takes back the spending authority the wallet granted.
+   */
+  "recurring.revoke_authority": { module: "recurring_payments", kind: "exit" },
 
   /**
    * Mint, deploy, thaw, unpause, metadata and authority changes, and

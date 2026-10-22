@@ -3,9 +3,6 @@ import { fetchHeliusDas, isHeliusDasConfigured } from "@sdp/rpc/helius-das";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { formatDecimalAmount } from "@sdp/solana/amount";
 import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
-import { WELL_KNOWN_TOKEN_BY_MINT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
-import { getDb } from "@/db/client";
-import { getLogger } from "@/runtime/logger";
 import { logVendorCallFailure } from "@/runtime/vendor-calls";
 import { fetchJupiterUsdPrices } from "@/services/jupiter-price.service";
 import { createMintLookupCache } from "@/services/mint-lookup-cache";
@@ -13,23 +10,12 @@ import type { Env } from "@/types/env";
 
 /** A symbol changes rarely, if ever; an hour keeps a renamed token from lingering long. */
 const TOKEN_SYMBOL_CACHE_TTL_MS = 60 * 60_000;
-/** Matches the Jupiter price TTL: a price older than this is not shown as current. */
-const USD_PRICE_CACHE_TTL_MS = 30_000;
 
 const tokenSymbolCache = createMintLookupCache<string>(TOKEN_SYMBOL_CACHE_TTL_MS);
-const usdPriceCache = createMintLookupCache<number>(USD_PRICE_CACHE_TTL_MS);
 
-/** @internal Test-only: forget cached symbols and prices so specs are order-independent. */
+/** @internal Test-only: forget cached symbols so specs are order-independent. */
 export function clearHeliusDasCachesForTests(): void {
   tokenSymbolCache.clearForTests();
-  usdPriceCache.clearForTests();
-}
-
-interface TrackedAssetDefinition {
-  decimals: number;
-  isUsdStable?: boolean;
-  mint: string;
-  token: string;
 }
 
 interface HeliusRpcError {
@@ -47,10 +33,6 @@ interface HeliusTokenInfo {
   ui_amount?: number | string | null;
   uiAmountString?: string | null;
   ui_amount_string?: string | null;
-  price_info?: {
-    price_per_token?: number | null;
-    currency?: string | null;
-  } | null;
 }
 
 interface HeliusGetAssetBatchItem {
@@ -66,86 +48,6 @@ interface HeliusGetAssetBatchItem {
 interface HeliusGetAssetBatchResponse {
   error?: HeliusRpcError;
   result?: HeliusGetAssetBatchItem[];
-}
-
-async function resolveTrackedAssets(env: Env): Promise<Map<string, TrackedAssetDefinition>> {
-  const network = currentClusterScope().cluster;
-  const usdc = WELL_KNOWN_TOKENS.USDC;
-  const usdcMint = usdc.mints[network];
-  const trackedAssets: TrackedAssetDefinition[] = [
-    {
-      token: usdc.symbol,
-      mint: usdcMint.address,
-      decimals: usdcMint.decimals,
-      isUsdStable: usdc.isUsdStable,
-    },
-  ];
-
-  const trackedAssetsByMint = new Map(trackedAssets.map((asset) => [asset.mint, asset]));
-
-  try {
-    const result = await getDb(env)
-      .prepare(
-        `SELECT t.mint_address, t.symbol, t.decimals
-           FROM issued_tokens t
-           JOIN projects p ON p.id = t.project_id
-          WHERE p.environment = ?
-            AND t.template = 'stablecoin'
-            AND t.mint_address IS NOT NULL
-            AND t.deployed_at IS NOT NULL`
-      )
-      .bind(currentClusterScope().environment)
-      .all<{
-        decimals?: number | null;
-        mint_address?: string | null;
-        symbol?: string | null;
-      }>();
-
-    for (const row of result.results ?? []) {
-      const mint = row.mint_address?.trim();
-      if (!mint) {
-        continue;
-      }
-
-      trackedAssetsByMint.set(mint, {
-        token: row.symbol?.trim() || mint,
-        mint,
-        decimals:
-          typeof row.decimals === "number" && Number.isInteger(row.decimals) && row.decimals >= 0
-            ? row.decimals
-            : 6,
-        isUsdStable: true,
-      });
-    }
-  } catch (error) {
-    getLogger().warn(
-      { error: error instanceof Error ? error.message : String(error) },
-      "resolveTrackedAssets: issued stablecoin lookup failed; pricing built-in assets only"
-    );
-  }
-
-  return trackedAssetsByMint;
-}
-
-function resolveKnownUsdPrice(
-  balance: Pick<CustodyWalletTokenBalance, "mint" | "token">,
-  trackedAssets: Map<string, TrackedAssetDefinition>
-): number | null {
-  const normalizedMint = balance.mint.trim();
-  const trackedAsset = trackedAssets.get(normalizedMint);
-  if (trackedAsset?.isUsdStable) {
-    return 1;
-  }
-
-  const normalizedToken = balance.token.trim().toUpperCase();
-  const wellKnown =
-    WELL_KNOWN_TOKEN_BY_MINT.get(normalizedMint) ??
-    Object.values(WELL_KNOWN_TOKENS).find((token) => token.symbol === normalizedToken);
-  if (wellKnown?.isUsdStable) {
-    return 1;
-  }
-
-  return null;
 }
 
 function parseIntegerString(value: number | string | null | undefined): string | null {
@@ -223,29 +125,6 @@ async function fetchFungibleAssetsByMint(
   return payload.result ?? [];
 }
 
-async function fetchUsdPricesByMint(mints: string[]): Promise<Map<string, number>> {
-  const assets = await fetchFungibleAssetsByMint(mints, `wallet-prices-${mints.length}`);
-  const pricesByMint = new Map<string, number>();
-
-  for (const asset of assets) {
-    const mint = asset.id?.trim();
-    const pricePerToken = asset.token_info?.price_info?.price_per_token;
-    const currency = asset.token_info?.price_info?.currency?.trim().toUpperCase() ?? "USD";
-
-    if (
-      mint &&
-      typeof pricePerToken === "number" &&
-      Number.isFinite(pricePerToken) &&
-      pricePerToken >= 0 &&
-      (currency === "USD" || currency === "USDC")
-    ) {
-      pricesByMint.set(mint, pricePerToken);
-    }
-  }
-
-  return pricesByMint;
-}
-
 function resolveAssetSymbol(asset: HeliusGetAssetBatchItem): string | null {
   const symbol = asset.token_info?.symbol?.trim() || asset.content?.metadata?.symbol?.trim() || "";
   return symbol.length > 0 ? symbol : null;
@@ -286,8 +165,8 @@ function enrichBalancesWithTokenSymbols(
   });
 }
 
-// Symbols and USD values decorate balances: with no Helius endpoint on the scope's cluster they
-// stay unset, and a balance read never fails on them.
+// Symbols decorate balances: with no Helius endpoint on the scope's cluster they stay unset,
+// and a balance read never fails on them.
 export async function attachTokenSymbolsToBalances(
   balances: CustodyWalletTokenBalance[]
 ): Promise<CustodyWalletTokenBalance[]> {
@@ -327,70 +206,24 @@ export async function attachTokenSymbolsToBalanceMap(
   );
 }
 
-async function resolveUsdPricesForBalances(
-  env: Env,
-  balances: CustodyWalletTokenBalance[]
-): Promise<{
-  pricesByMint: Map<string, number>;
-  trackedAssets: Map<string, TrackedAssetDefinition>;
-}> {
-  const trackedAssets = await resolveTrackedAssets(env);
-  const pricesByMint = new Map<string, number>();
-
-  for (const balance of balances) {
-    const knownUsdPrice = resolveKnownUsdPrice(balance, trackedAssets);
-    if (knownUsdPrice !== null) {
-      pricesByMint.set(balance.mint, knownUsdPrice);
-    }
-  }
-
-  const unresolvedMints = [...new Set(balances.map((balance) => balance.mint))].filter(
-    (mint) => !pricesByMint.has(mint)
-  );
-
-  if (unresolvedMints.length === 0) {
-    return { pricesByMint, trackedAssets };
-  }
-
-  // Jupiter first: it prices from the last swapped price across all venues, so it covers
-  // the long tail Helius DAS has no entry for — which is everything that is neither
-  // USD-stable nor in Helius's index, and is why a token like USDY rendered unpriced.
-  const jupiterPrices = await fetchJupiterUsdPrices(env, unresolvedMints);
-  for (const [mint, price] of jupiterPrices) {
-    pricesByMint.set(mint, price);
-  }
-
-  // Helius stays as a fallback rather than being deleted. Jupiter omits any mint it
-  // cannot price reliably, including anything untraded recently, and Helius still
-  // answers for some of those. Narrowing coverage is not the point of the change.
-  const stillUnresolved = unresolvedMints.filter((mint) => !pricesByMint.has(mint));
-  if (!isHeliusDasConfigured() || stillUnresolved.length === 0) {
-    return { pricesByMint, trackedAssets };
-  }
-
-  // A failed lookup answers no mints; those balances stay unpriced.
-  const fetchedPrices = await usdPriceCache.lookup(
-    currentClusterScope().cluster,
-    stillUnresolved,
-    (mints) => fetchUsdPricesByMint(mints)
-  );
-  for (const [mint, price] of fetchedPrices) {
-    pricesByMint.set(mint, price);
-  }
-
-  return { pricesByMint, trackedAssets };
-}
-
+/**
+ * Sets `usdPrice` and `usdValue` on each balance Jupiter priced. A mint it did not price
+ * stays unpriced: a symbol, a stablecoin template or a peg is not a market price, and
+ * anyone can mint a token called "USDC".
+ *
+ * @param balances - Balances to decorate.
+ * @param pricesByMint - Jupiter USD prices keyed by mint.
+ * @returns The balances, priced where a price exists.
+ */
 function enrichBalancesWithUsdValues(
   balances: CustodyWalletTokenBalance[],
-  pricesByMint: Map<string, number>,
-  trackedAssets: Map<string, TrackedAssetDefinition>
+  pricesByMint: Map<string, number>
 ): CustodyWalletTokenBalance[] {
   return balances.map((balance) => {
-    const usdPrice = pricesByMint.get(balance.mint) ?? resolveKnownUsdPrice(balance, trackedAssets);
+    const usdPrice = pricesByMint.get(balance.mint);
     const uiAmount = Number(balance.uiAmount);
 
-    if (usdPrice === null || !Number.isFinite(usdPrice) || !Number.isFinite(uiAmount)) {
+    if (usdPrice === undefined || !Number.isFinite(uiAmount)) {
       return balance;
     }
 
@@ -402,25 +235,35 @@ function enrichBalancesWithUsdValues(
   });
 }
 
+/** Jupiter USD prices for the distinct mints across `balances`. */
+function fetchUsdPricesForBalances(
+  env: Env,
+  balances: CustodyWalletTokenBalance[]
+): Promise<Map<string, number>> {
+  return fetchJupiterUsdPrices(env, [...new Set(balances.map((balance) => balance.mint))]);
+}
+
 export async function attachUsdValuesToBalances(
   env: Env,
   balances: CustodyWalletTokenBalance[]
 ): Promise<CustodyWalletTokenBalance[]> {
-  const { pricesByMint, trackedAssets } = await resolveUsdPricesForBalances(env, balances);
-  return enrichBalancesWithUsdValues(balances, pricesByMint, trackedAssets);
+  const pricesByMint = await fetchUsdPricesForBalances(env, balances);
+  return enrichBalancesWithUsdValues(balances, pricesByMint);
 }
 
 export async function attachUsdValuesToBalanceMap(
   env: Env,
   balancesByWalletId: Map<string, CustodyWalletTokenBalance[]>
 ): Promise<Map<string, CustodyWalletTokenBalance[]>> {
-  const allBalances = [...balancesByWalletId.values()].flat();
-  const { pricesByMint, trackedAssets } = await resolveUsdPricesForBalances(env, allBalances);
+  const pricesByMint = await fetchUsdPricesForBalances(
+    env,
+    [...balancesByWalletId.values()].flat()
+  );
 
   return new Map(
     [...balancesByWalletId.entries()].map(([walletId, balances]) => [
       walletId,
-      enrichBalancesWithUsdValues(balances, pricesByMint, trackedAssets),
+      enrichBalancesWithUsdValues(balances, pricesByMint),
     ])
   );
 }

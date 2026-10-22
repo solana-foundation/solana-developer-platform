@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db/client";
 import * as repositoryFactory from "@/db/repositories/repository-factory";
+import { RedisKVStore } from "@/runtime/kv-redis";
 import * as events from "@/runtime/money-path-events";
 import { moonpayWebhook } from "@/services/ramps/webhooks/moonpay";
 import { env } from "@/test/helpers/env";
@@ -14,6 +16,19 @@ const TRANSFER_ID = "xfr_157805c4-5d9f-404c-b206-1b59b13b492e";
 const MOONPAY_TRANSACTION_ID = "772f7a7f-142e-43cf-824f-8d861aefe8bd";
 const OBSERVED_AT = "2026-08-31T11:00:00.000Z";
 const SECOND_TRANSFER_ID = "xfr_second_moonpay_buy";
+
+const auditMetadataSchema = z.record(z.string(), z.unknown());
+
+async function readRampAudits(transferId: string) {
+  const { results } = await getDb(env)
+    .prepare("SELECT action, metadata FROM audit_logs WHERE resource_id = ? ORDER BY created_at")
+    .bind(transferId)
+    .all<{ action: string; metadata: string }>();
+  return results.map((row) => ({
+    action: row.action,
+    metadata: auditMetadataSchema.parse(JSON.parse(row.metadata)),
+  }));
+}
 
 async function seedTwoBuyTransfers() {
   await getDb(env)
@@ -348,7 +363,7 @@ describe("moonpayWebhook.process", () => {
     ).toEqual({ outcome: "refused", reason: "moonpay_terminal_conflict" });
   });
 
-  it("keeps a claimed sale open for reconciliation after MoonPay reports failure", async () => {
+  it("holds MoonPay's failure on a claimed sale and keeps the claim open", async () => {
     const waiting = {
       provider: "moonpay",
       kind: "awaiting_payment",
@@ -375,13 +390,36 @@ describe("moonpayWebhook.process", () => {
         ...waiting,
         kind: "failed",
         providerObservedAt: "2026-08-31T11:02:00.000Z",
+        error: "deposit_timeout",
       })
     ).toEqual({ outcome: "refused", reason: "moonpay_sell_failed" });
     const row = await getDb(env)
-      .prepare("SELECT status, provider_reference FROM payment_transfers WHERE id = ?")
+      .prepare(
+        "SELECT status, provider_reference, provider_data FROM payment_transfers WHERE id = ?"
+      )
       .bind(TRANSFER_ID)
-      .first<{ status: string; provider_reference: string | null }>();
-    expect(row).toEqual({ status: "processing", provider_reference: MOONPAY_TRANSACTION_ID });
+      .first<{ status: string; provider_reference: string | null; provider_data: object }>();
+    expect(row).toMatchObject({
+      status: "processing",
+      provider_reference: MOONPAY_TRANSACTION_ID,
+      provider_data: {
+        cryptoDeposit: null,
+        providerFailure: {
+          reference: MOONPAY_TRANSACTION_ID,
+          observedAt: "2026-08-31T11:02:00.000Z",
+          error: "deposit_timeout",
+        },
+      },
+    });
+    expect(await readRampAudits(TRANSFER_ID)).toEqual([
+      {
+        action: "update",
+        metadata: expect.objectContaining({
+          transition: "moonpay_sell_failed_while_claimed",
+          fromStatus: "processing",
+        }),
+      },
+    ]);
   });
 
   it("keeps a failed sale with a reported deposit open for reconciliation", async () => {
@@ -584,6 +622,90 @@ describe("moonpayWebhook.process", () => {
       .bind(TRANSFER_ID)
       .first<{ status: string; provider_reference: string | null }>();
     expect(row).toEqual({ status: "pending", provider_reference: null });
+  });
+
+  it("records a failed buy in the audit ledger with its transfer writes", async () => {
+    await getDb(env)
+      .prepare("UPDATE payment_transfers SET type = 'onramp', direction = 'inbound' WHERE id = ?")
+      .bind(TRANSFER_ID)
+      .run();
+    const waiting = {
+      provider: "moonpay",
+      kind: "awaiting_payment",
+      rampType: "onramp",
+      reference: MOONPAY_TRANSACTION_ID,
+      transferId: TRANSFER_ID,
+      providerObservedAt: "2026-08-31T10:59:00.000Z",
+    } as const;
+    expect(await processor.process(env, "sandbox", waiting)).toMatchObject({ outcome: "applied" });
+
+    expect(
+      await processor.process(env, "sandbox", {
+        ...waiting,
+        kind: "failed",
+        providerObservedAt: OBSERVED_AT,
+        error: "card_declined",
+      })
+    ).toEqual({ outcome: "applied" });
+
+    expect(await readRampAudits(TRANSFER_ID)).toEqual([
+      {
+        action: "update",
+        metadata: expect.objectContaining({
+          transition: "moonpay_attempt_failed",
+          fromStatus: "awaiting_payment",
+          attemptReference: MOONPAY_TRANSACTION_ID,
+        }),
+      },
+    ]);
+  });
+
+  it("rolls back all of a failed buy's writes when its audit row can't seal", async () => {
+    await getDb(env)
+      .prepare("UPDATE payment_transfers SET type = 'onramp', direction = 'inbound' WHERE id = ?")
+      .bind(TRANSFER_ID)
+      .run();
+    const waiting = {
+      provider: "moonpay",
+      kind: "awaiting_payment",
+      rampType: "onramp",
+      reference: MOONPAY_TRANSACTION_ID,
+      transferId: TRANSFER_ID,
+      providerObservedAt: "2026-08-31T10:59:00.000Z",
+    } as const;
+    expect(await processor.process(env, "sandbox", waiting)).toMatchObject({ outcome: "applied" });
+    // The ledger's pending witness is refused, so the record never seals.
+    vi.spyOn(RedisKVStore.prototype, "compareAndSet").mockResolvedValueOnce(false);
+
+    await expect(
+      processor.process(env, "sandbox", {
+        ...waiting,
+        kind: "failed",
+        providerObservedAt: OBSERVED_AT,
+      })
+    ).rejects.toThrow();
+
+    const row = await getDb(env)
+      .prepare(
+        "SELECT status, provider_reference, provider_observed_at FROM payment_transfers WHERE id = ?"
+      )
+      .bind(TRANSFER_ID)
+      .first<{
+        status: string;
+        provider_reference: string | null;
+        provider_observed_at: string | null;
+      }>();
+    expect(row).toEqual({
+      status: "awaiting_payment",
+      provider_reference: MOONPAY_TRANSACTION_ID,
+      provider_observed_at: waiting.providerObservedAt,
+    });
+    const retired = await getDb(env)
+      .prepare("SELECT transaction_id FROM moonpay_failed_transactions WHERE transaction_id = ?")
+      .bind(MOONPAY_TRANSACTION_ID)
+      .first();
+    expect(retired).toBeNull();
+    expect(await readRampAudits(TRANSFER_ID)).toEqual([]);
   });
 
   it("rolls back a failed buy when recording its retired id fails", async () => {

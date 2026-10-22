@@ -355,7 +355,6 @@ function applyRequest(world: DemoWorld, op: DemoOpOf<"request">): void {
     publicToken: `demo_pt_${demoAddress(`request-token:${op.id}`).slice(0, 22)}`,
     organizationId: ORGANIZATION_ID,
     projectId: PROJECT_ID,
-    counterpartyId: op.cp,
     walletId: wallet.walletId,
     destinationAddress: wallet.publicKey,
     token: op.token,

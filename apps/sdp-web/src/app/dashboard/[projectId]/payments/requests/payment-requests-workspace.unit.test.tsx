@@ -42,7 +42,6 @@ const requestA: PaymentRequest = {
   id: "preq_a",
   organizationId: "org_test",
   projectId: "proj_test",
-  counterpartyId: null,
   walletId: "wal_1",
   destinationAddress: "11111111111111111111111111111111",
   token: SOL_MINT,
@@ -93,7 +92,6 @@ describe("PaymentRequestsWorkspace pay link", () => {
         initialPaymentRequests={[requestA, requestB]}
         apiBaseUrl={null}
         wallets={[]}
-        counterparties={[]}
       />,
       { wrapper }
     );

@@ -2,6 +2,7 @@ import { COUNTERPARTY_ENTITY_TYPES } from "@sdp/types/counterparties";
 import { OFFRAMP_CRYPTO_RAILS, ONRAMP_CRYPTO_RAILS } from "@sdp/types/payment-rails";
 import {
   paymentSubscriptionCollectionAttemptMetadataSchema,
+  RAMP_DELIVERY_MISMATCH_REASONS,
   RAMPS_MEMO_LIMITS,
 } from "@sdp/types/payments";
 import { PERSISTED_RAMP_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types/provider-access";
@@ -235,6 +236,52 @@ export const transferInitiatorSchema = z
   })
   .openapi({ description: "Initiator metadata for the transfer." });
 
+const rampFiatPayoutSchema = z
+  .object({
+    amount: z.string().openapi({
+      description:
+        "Fiat paid out, in display units. Differs from the quoted `fiatAmount` when the provider re-prices the sale at receipt.",
+      example: "20.82",
+    }),
+    currency: z.string().openapi({
+      description: "ISO currency of the payout, as the provider reports it.",
+      example: "USD",
+    }),
+    reportedAt: isoDateTimeSchema.optional().openapi({
+      description: "When the provider reported the payout.",
+      example: "2025-01-02T00:00:00.000Z",
+    }),
+  })
+  .openapi({
+    description:
+      "What the provider reports paying out once it settles an off-ramp sale. Provider-reported: SDP cannot verify a bank payout.",
+  });
+
+const rampDeliveryMismatchSchema = z
+  .object({
+    reason: z.enum(RAMP_DELIVERY_MISMATCH_REASONS).openapi({
+      description:
+        "Why the chain contradicts the provider: `provider_report_mismatch` (its report contradicts SDP's record), `transaction_failed`, `predates_transfer` (the transaction landed before the transfer), `not_delivered` (nothing of the quoted asset reached the quoted wallet), `amount_mismatch`, or `transaction_not_found` (no finalized transaction an hour after the report; SDP keeps checking, and a later delivery completes the transfer).",
+      example: "amount_mismatch",
+    }),
+    checkedAt: isoDateTimeSchema.openapi({
+      description: "When SDP's delivery check reached this verdict.",
+      example: "2025-01-02T00:00:00.000Z",
+    }),
+    reportedAmount: z.string().optional().openapi({
+      description: "What the provider reported delivering, in display units.",
+      example: "20",
+    }),
+    observedAmount: z.string().optional().openapi({
+      description: "What the chain shows the quoted wallet received, in display units.",
+      example: "0.5",
+    }),
+  })
+  .openapi({
+    description:
+      "Present while SDP holds a provider-settled ramp in `settling` because the chain contradicts the provider's delivery. A new provider report clears it.",
+  });
+
 /** Provider-reported settlement economics for live ramp providers. */
 const moonpayRampSettlementSchema = z
   .object({
@@ -297,6 +344,11 @@ export const transferSchema = z
     blockTime: isoDateTimeSchema
       .nullable()
       .openapi({ description: "Block time, if confirmed.", example: "2025-01-01T00:00:00.000Z" }),
+    confirmedAt: isoDateTimeSchema.optional().openapi({
+      description:
+        "When SDP confirmed the transfer. A ramp is confirmed once its delivery is verified onchain.",
+      example: "2025-01-01T00:00:00.000Z",
+    }),
     fee: z
       .number()
       .int()
@@ -356,12 +408,15 @@ export const transferSchema = z
       example: "USD",
     }),
     fiatAmount: tokenAmountSchema.optional().openapi({
-      description: "Fiat amount for the ramp leg when known.",
+      description:
+        "Quoted fiat amount for the ramp leg: what the customer pays on an on-ramp, the payout quoted on an off-ramp. It never changes after the quote; an off-ramp's final payout is `fiatPayout`.",
       example: "100.00",
     }),
     settlement: rampTransferSettlementSchema.optional().openapi({
       description: "Provider-reported ramp settlement economics for live providers.",
     }),
+    fiatPayout: rampFiatPayoutSchema.optional(),
+    deliveryMismatch: rampDeliveryMismatchSchema.optional(),
     risk: transferRiskSchema
       .optional()
       .openapi({ description: "Optional risk evaluation for the transfer." }),

@@ -351,7 +351,9 @@ function estimate({ segments, body, now }: WriteContext): DemoWriteResult {
         assetRail: assetRail as PaymentRampEstimate["assetRail"],
         fiatAmount: scaled(amounts.fiat, 2),
         cryptoAmount: cryptoText(amounts),
-        exchangeRate: scaled(amounts.rate, 6),
+        // Fiat per one unit of the crypto, as the providers quote it.
+        exchangeRate: scaled(1 / amounts.rate, 6),
+        totalFiatAmount: direction === "onramp" ? scaled(amounts.fiat, 2) : undefined,
         fees: {
           currency: fiatCurrency as PaymentRampEstimate["fiatCurrency"],
           total: scaled(amounts.fee, 2),
@@ -734,7 +736,6 @@ const requestSchema = z.object({
   walletId: z.string().min(1),
   token: z.string().min(1),
   amount: amountSchema,
-  counterpartyId: z.string().nullish(),
   expiresAt: z.string().nullish(),
 });
 
@@ -743,10 +744,6 @@ function createRequest({ body, world, now }: WriteContext): DemoWriteResult {
   if ("failure" in input) return input.failure;
   const wallet = findWallet(world, input.data.walletId);
   if (!wallet) return error(404, "That wallet is not in this project.", "not_found");
-  const counterpartyId = input.data.counterpartyId ?? null;
-  if (counterpartyId !== null && !contactById(world, counterpartyId)) {
-    return error(404, "Contact not found.", "not_found");
-  }
   const expiresAt = input.data.expiresAt ?? null;
   if (expiresAt !== null && !(Date.parse(expiresAt) > now.getTime())) {
     return error(400, "Choose an expiry in the future.");
@@ -761,7 +758,6 @@ function createRequest({ body, world, now }: WriteContext): DemoWriteResult {
         wallet: wallet.id,
         token: input.data.token,
         amount: input.data.amount,
-        cp: counterpartyId,
         expires: expiresAt,
       },
     ],

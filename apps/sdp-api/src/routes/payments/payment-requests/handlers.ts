@@ -36,7 +36,6 @@ function mapPaymentRequest(row: PaymentRequestRow): PaymentRequest {
     id: row.id,
     organizationId: row.organization_id,
     projectId: row.project_id,
-    counterpartyId: row.counterparty_id,
     walletId: row.wallet_id,
     destinationAddress: row.destination_address,
     token: row.token,
@@ -126,8 +125,8 @@ export async function createPaymentRequest(
   const projectId = requireProjectId(c);
   const body = c.req.valid("json");
 
-  // Access to the wallet and counterparty was checked by authorizePaymentRequest, before the
-  // key. Whether the wallet is operational is state, checked here.
+  // Access to the wallet was checked by authorizePaymentRequest, before the key. Whether the
+  // wallet is operational is state, checked here.
   const scope = await resolveScope(c);
   const wallet = resolveWallet(scope.wallets, body.walletId);
 
@@ -137,7 +136,6 @@ export async function createPaymentRequest(
   ).createPaymentRequest({
     organizationId: scope.auth.organizationId,
     projectId,
-    counterpartyId: body.counterpartyId,
     custodyWalletId: wallet.id,
     walletId: wallet.walletId,
     destinationAddress: wallet.publicKey,

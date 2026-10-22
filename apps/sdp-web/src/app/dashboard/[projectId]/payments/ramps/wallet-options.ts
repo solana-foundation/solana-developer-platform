@@ -1,3 +1,4 @@
+import { compareDecimalAmounts, isDecimalString } from "@sdp/solana/amount";
 import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import type { ComboboxOption } from "@sdp/ui/combobox";
 import {
@@ -35,6 +36,42 @@ export function findWalletBalanceForToken(
   return wallet?.balances?.find((balance) => balance.token === token) ?? null;
 }
 
+/**
+ * What the wallet holds of `token`: "0" when its balances were read without
+ * the token, null with no wallet or when the API could not read them (it then
+ * omits `balances`), so an unread balance never passes for an empty one.
+ */
+export function walletTokenBalance(
+  wallet: PaymentsDashboardWallet | null,
+  token: string
+): string | null {
+  if (wallet?.balances === undefined) return null;
+  return findWalletBalanceForToken(wallet, token)?.uiAmount ?? "0";
+}
+
+/** Whether `amount` of `token` is more than the wallet holds; false until both are known. */
+export function exceedsWalletBalance(
+  wallet: PaymentsDashboardWallet | null,
+  token: string,
+  amount: string
+): boolean {
+  const wanted = amount.trim();
+  const held = walletTokenBalance(wallet, token);
+  return (
+    held !== null &&
+    isDecimalString(wanted) &&
+    isDecimalString(held) &&
+    compareDecimalAmounts(wanted, held) > 0
+  );
+}
+
+/** What Max fills in: a positive held balance, else null. */
+export function maxPayoutAmount(held: string | null): string | null {
+  return held !== null && isDecimalString(held) && compareDecimalAmounts(held, "0") > 0
+    ? held
+    : null;
+}
+
 export function walletBalanceAssetOptions(
   wallet: PaymentsDashboardWallet | null,
   issuedTokenSymbolsByMint: IssuedTokenSymbolsByMint,
@@ -67,6 +104,13 @@ export function walletBalanceAssetOptions(
   return assetOptions;
 }
 
+/** How the wallet pickers name a wallet: its label, else its public key. */
+export function walletPickerLabel(
+  wallet: Pick<PaymentsDashboardWallet, "label" | "publicKey">
+): string {
+  return wallet.label ?? wallet.publicKey;
+}
+
 export function walletComboboxOptions(
   wallets: PaymentsDashboardWallet[],
   signingUnavailableLabel?: string,
@@ -77,7 +121,7 @@ export function walletComboboxOptions(
     const total = resolveTotalBalance(wallet.balances ?? []);
     return {
       value: wallet.id,
-      label: wallet.label ?? wallet.publicKey,
+      label: walletPickerLabel(wallet),
       description: total !== null ? formatCurrencyAmount(total) : undefined,
       ...(signingUnavailableLabel && restricted
         ? { badge: signingUnavailableLabel, badgeVariant: "warning" as const }

@@ -76,6 +76,22 @@ export function createPaymentsRepository(env: Env, scope: TenantScope): Payments
   );
 }
 
+/**
+ * Tenant payments repository bound to a transactional client, for request
+ * paths whose writes must commit with another write, such as an audit row.
+ */
+export function createTransactionalPaymentsRepository(
+  db: AppDb,
+  scope: TenantScope
+): PaymentsRepository {
+  return bindRepositoryToTenant(
+    createPostgresPaymentsRepository(db, scope),
+    scope,
+    "PaymentsRepository",
+    ["listTransfersByStatus"]
+  );
+}
+
 export function createSystemPaymentsRepository(env: Env): PaymentsRepository {
   return createPostgresPaymentsRepository(getDb(env));
 }

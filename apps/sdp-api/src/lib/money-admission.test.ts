@@ -118,6 +118,7 @@ describe("MOVEMENTS exits", () => {
       "issuance.control",
       "private_channels.withdraw",
       "recurring.cancel",
+      "recurring.revoke_authority",
       "recurring.update_cancel_old",
     ]);
   });
