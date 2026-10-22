@@ -4,22 +4,21 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { toast } from "sonner";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { CreateOrganizationResult } from "@/app/dashboard/create-organization-actions";
+import * as createOrganizationActions from "@/app/dashboard/create-organization-actions";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
 import { CreateOrganizationForm } from "./create-organization-form";
 
-const mocks = vi.hoisted(() => ({
-  createOrganization: vi.fn<(name: string) => Promise<CreateOrganizationResult>>(),
-  setActive: vi.fn(),
-}));
+const mocks = vi.hoisted(() => {
+  const session: { organization: { id: string } | null } = { organization: null };
+  return { session, setActive: vi.fn() };
+});
 
-vi.mock("@clerk/nextjs", () => ({ useClerk: () => ({ setActive: mocks.setActive }) }));
-vi.mock("next/navigation", () => import("@/test/next-navigation"));
-vi.mock("@/app/dashboard/create-organization-actions", () => ({
-  createOrganization: mocks.createOrganization,
+vi.mock("@clerk/nextjs", () => ({
+  useClerk: () => ({ organization: mocks.session.organization, setActive: mocks.setActive }),
 }));
+vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 function renderForm() {
   return render(
@@ -33,15 +32,18 @@ describe("CreateOrganizationForm", () => {
   beforeEach(() => {
     cleanup();
     resetDashboardNavigation();
-    mocks.createOrganization.mockReset();
+    vi.restoreAllMocks();
+    mocks.session.organization = null;
     mocks.setActive.mockReset();
     mocks.setActive.mockResolvedValue(undefined);
   });
 
   it("creates the organization under the trimmed name, locked while blank or pending, then makes it active", async () => {
     const user = userEvent.setup();
-    const created = Promise.withResolvers<CreateOrganizationResult>();
-    mocks.createOrganization.mockReturnValue(created.promise);
+    const created = Promise.withResolvers<createOrganizationActions.CreateOrganizationResult>();
+    const create = vi
+      .spyOn(createOrganizationActions, "createOrganization")
+      .mockReturnValue(created.promise);
     renderForm();
     const nameInput = screen.getByRole("textbox", { name: "Organization name" });
 
@@ -53,7 +55,7 @@ describe("CreateOrganizationForm", () => {
     await user.type(nameInput, "Acme Inc  ");
     await user.click(screen.getByRole("button", { name: "Create organization" }));
 
-    expect(mocks.createOrganization).toHaveBeenCalledWith("Acme Inc");
+    expect(create).toHaveBeenCalledWith("Acme Inc");
     expect(screen.getByRole("button", { name: "Creating…" })).toHaveProperty("disabled", true);
     expect(mocks.setActive).not.toHaveBeenCalled();
 
@@ -66,7 +68,10 @@ describe("CreateOrganizationForm", () => {
   it("toasts a refusal and leaves the session's organization alone", async () => {
     const user = userEvent.setup();
     const error = vi.spyOn(toast, "error");
-    mocks.createOrganization.mockResolvedValue({ ok: false, error: "name refused" });
+    vi.spyOn(createOrganizationActions, "createOrganization").mockResolvedValue({
+      ok: false,
+      error: "name refused",
+    });
     renderForm();
 
     await user.type(screen.getByRole("textbox", { name: "Organization name" }), "Acme Inc");
@@ -79,6 +84,27 @@ describe("CreateOrganizationForm", () => {
     expect(screen.getByRole("button", { name: "Create organization" })).toHaveProperty(
       "disabled",
       false
+    );
+  });
+
+  it("clears Clerk's active organization before creating one", async () => {
+    const user = userEvent.setup();
+    mocks.session.organization = { id: "org_refused" };
+    const create = vi
+      .spyOn(createOrganizationActions, "createOrganization")
+      .mockResolvedValue({ ok: true, clerkOrganizationId: "org_created" });
+    renderForm();
+
+    await user.type(screen.getByRole("textbox", { name: "Organization name" }), "Acme Inc");
+    await user.click(screen.getByRole("button", { name: "Create organization" }));
+
+    await waitFor(() => expect(dashboardRouter.refresh).toHaveBeenCalledOnce());
+    expect(mocks.setActive.mock.calls).toEqual([
+      [{ organization: null }],
+      [{ organization: "org_created" }],
+    ]);
+    expect(mocks.setActive.mock.invocationCallOrder[0]).toBeLessThan(
+      create.mock.invocationCallOrder[0]
     );
   });
 });

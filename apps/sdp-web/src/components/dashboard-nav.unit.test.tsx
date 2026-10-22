@@ -314,6 +314,12 @@ describe("Removed Policies and Approvals navigation", () => {
   });
 });
 
+describe("Settings in the mobile More sheet", () => {
+  it("links Settings for every member, with no capability gate", () => {
+    expect(moreSheetMarkup({})).toContain(`href="${SANDBOX_DASHBOARD}/settings"`);
+  });
+});
+
 describe("subnav open state", () => {
   const closed = { wallets: false, integrations: false, payments: false, markets: false } as const;
 
