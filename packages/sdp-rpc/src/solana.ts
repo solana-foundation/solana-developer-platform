@@ -260,6 +260,8 @@ export function createRpcForSdk<TSdkRpc>(
  * @param minContextSlot - The lowest slot the answering node may be at; a node behind it errors
  * instead of answering.
  * @returns The latest blockhash and its last valid block height.
+ * @throws SdpRpcError `SOLANA_RPC_ERROR` when the response comes from a slot below
+ * `minContextSlot`, so an upstream that ignores the option cannot answer stale.
  */
 export async function getRecentBlockhash(
   rpc: SolanaRpc,
@@ -267,6 +269,12 @@ export async function getRecentBlockhash(
   minContextSlot?: Slot
 ): Promise<BlockhashWithExpiry> {
   const response = await rpc.getLatestBlockhash({ commitment, minContextSlot }).send();
+  if (minContextSlot !== undefined && response.context.slot < minContextSlot) {
+    throw solanaRpcError("Solana RPC answered from a slot below minContextSlot", {
+      contextSlot: response.context.slot.toString(),
+      minContextSlot: minContextSlot.toString(),
+    });
+  }
 
   return {
     blockhash: response.value.blockhash,
@@ -662,6 +670,8 @@ function numericTransactionError(err: TransactionError): TransactionError {
  * at; a node behind it errors instead of answering.
  * @param options.retryDelaysMs - Backoff delays between transient-failure retries.
  * @returns Each signature's status, or null where the node has none.
+ * @throws SdpRpcError `SOLANA_RPC_ERROR` when the response comes from a slot below
+ * `minContextSlot`, so an upstream that ignores the option cannot report a landed signature absent.
  */
 export async function getSignatureStatuses(
   rpc: SolanaRpc,
@@ -694,6 +704,16 @@ export async function getSignatureStatuses(
       ).send(),
     options.retryDelaysMs
   );
+  if (
+    options.searchTransactionHistory &&
+    options.minContextSlot !== undefined &&
+    response.context.slot < options.minContextSlot
+  ) {
+    throw solanaRpcError("Solana RPC answered from a slot below minContextSlot", {
+      contextSlot: response.context.slot.toString(),
+      minContextSlot: options.minContextSlot.toString(),
+    });
+  }
 
   return response.value.map((item) =>
     item
