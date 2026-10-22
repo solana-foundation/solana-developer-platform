@@ -57,12 +57,15 @@ calls, discovery and webhook verification never disagree.
    serves.
 4. **sdp-infra.** List each name a config holds in that environment's
    `app_secret_keys`, and in stage and prod also in
-   `sdp_api_runtime_app_secret_keys`, then apply and run `doppler-sync`. The
-   hourly sync copies only listed names and never deletes.
+   `sdp_api_runtime_app_secret_keys`. Merging applies dev and stage; prod
+   applies only when the next sdp-infra release (its release-please PR)
+   merges. Then run `doppler-sync` rather than wait for the hourly run, which
+   copies only listed names and never deletes.
 5. **Order.** Dashboard, Doppler, infra, then merge the code: main deploys
-   to stage and prod on merge, and dev only on dispatch. Removing a name runs
-   the other way: the code stops reading it everywhere, infra drops it, then
-   Doppler deletes it.
+   to stage on merge, to prod once no migration waits for its
+   `release-production` approval, and to dev only on dispatch. Removing a
+   name runs the other way: the code stops reading it everywhere, infra drops
+   it, then Doppler deletes it.
 6. **Retiring a provider** removes all its names in that order, then revokes
    its keys and deletes its webhook endpoints at the provider.
 
