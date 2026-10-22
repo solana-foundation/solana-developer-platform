@@ -179,6 +179,32 @@ describe("DELETE /v1/members/invitations/:invitationId", () => {
     ]);
   });
 
+  it("does not match newer Clerk invitations by address when retrying a revoked row with no Clerk id", async () => {
+    await seedTarget({
+      organizationId: ORGANIZATION.id,
+      invitedBy: ADMIN.userId,
+      status: "revoked",
+      clerkInvitationId: null,
+    });
+    await seedInvitation(getDb(env), {
+      id: "inv_revocation_newer",
+      organizationId: ORGANIZATION.id,
+      email: INVITEE_EMAIL,
+      role: "member",
+      invitedBy: ADMIN.userId,
+      status: "pending",
+      expiresInDays: 7,
+    });
+    await getDb(env).execute("UPDATE invitations SET clerk_invitation_id = ? WHERE id = ?", [
+      OTHER_CLERK_INVITATION_ID,
+      "inv_revocation_newer",
+    ]);
+
+    expect((await revoke("idem_revocation_unlinked_retry")).status).toBe(204);
+    expect(clerk.requests).toEqual([]);
+    expect(await readInvitationStatus(getDb(env), "inv_revocation_newer")).toBe("pending");
+  });
+
   it.each([
     {
       target: "an accepted invitation",

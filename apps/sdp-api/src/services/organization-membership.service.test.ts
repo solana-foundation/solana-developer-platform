@@ -6,6 +6,7 @@ import {
   type MembershipChange,
 } from "@/services/organization-membership.service";
 import { env } from "@/test/helpers/env";
+import { readInvitationStatus, seedInvitation } from "@/test/helpers/invitations";
 import {
   organizationMember,
   type SeededOrganizationMember,
@@ -116,8 +117,17 @@ describe("applyMembershipChange", () => {
     expect(await activeAdminIds()).toEqual([{ id: ADMIN_A.memberId }, { id: MEMBER_C.memberId }]);
   });
 
-  it("changes nothing when removing a member already removed", async () => {
+  it("changes nothing when removing a member already removed, keeping an invitation raised since", async () => {
     await setMemberStatus(MEMBER_C, "removed");
+    await seedInvitation(getDb(env), {
+      id: "inv_race_reinvite",
+      organizationId: ORGANIZATION.id,
+      email: MEMBER_C.email,
+      role: "member",
+      invitedBy: ADMIN_A.userId,
+      status: "pending",
+      expiresInDays: 7,
+    });
 
     await expect(change(ADMIN_A, { kind: "remove", memberId: MEMBER_C.memberId })).resolves.toEqual(
       {
@@ -127,6 +137,7 @@ describe("applyMembershipChange", () => {
         changed: false,
       }
     );
+    expect(await readInvitationStatus(getDb(env), "inv_race_reinvite")).toBe("pending");
   });
 
   it.each([
