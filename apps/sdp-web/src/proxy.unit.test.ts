@@ -165,6 +165,11 @@ describe("rejectCrossSiteWrite", () => {
         write(settingsPath, { "next-action": "action_test", cookie: "__session=session_synthetic" })
       )?.status
     ).toBe(403);
+    expect(
+      rejectCrossSiteWrite(
+        write(settingsPath, { "next-action": "action_test", cookie: "__session_abc123=synthetic" })
+      )?.status
+    ).toBe(403);
     expect(rejectCrossSiteWrite(write(settingsPath, { "next-action": "action_test" }))).toBeNull();
   });
 });
