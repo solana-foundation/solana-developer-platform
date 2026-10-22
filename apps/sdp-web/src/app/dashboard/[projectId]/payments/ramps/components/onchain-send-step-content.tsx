@@ -18,6 +18,10 @@ import { AddExternalAccountDialog } from "@/app/dashboard/[projectId]/payments/c
 import { shortenAddress } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
 import type { OnchainSendWizard } from "@/app/dashboard/[projectId]/payments/ramps/hooks/use-onchain-send-wizard";
 import { walletComboboxOptions } from "@/app/dashboard/[projectId]/payments/ramps/wallet-options";
+import {
+  AmountUnitToggle,
+  TokenAmountQuotePreview,
+} from "@/app/dashboard/[projectId]/payments/token-amount-entry-controls";
 import { useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
@@ -125,11 +129,15 @@ function DetailsStep({ wizard }: StepProps) {
     availableAmount,
     selectedAsset,
     exceedsBalance,
+    amountEntry,
     fields,
     setField,
     selectWallet,
     sourceWalletHint,
   } = wizard;
+  const assetLabel = selectedAsset === null ? fields.asset : selectedAsset.label;
+  // In display units the input holds what wallets show; Max is a token amount, so it is off.
+  const displayEntry = amountEntry.unit === "display";
   const walletOptions = useMemo(
     () =>
       walletComboboxOptions(liveWallets, t("DashboardPayments.restricted"), {
@@ -159,7 +167,9 @@ function DetailsStep({ wizard }: StepProps) {
       <div className="grid items-end gap-4 sm:grid-cols-[minmax(0,1fr)_160px]">
         <div className="flex flex-col gap-2">
           <Label className="text-tertiary" htmlFor="onchain-send-amount">
-            {t("DashboardPayments.onchainSend.amount")}
+            {displayEntry
+              ? t("DashboardPayments.tokenAmount.displayAmountLabel")
+              : t("DashboardPayments.onchainSend.amount")}
           </Label>
           <Input
             id="onchain-send-amount"
@@ -167,18 +177,22 @@ function DetailsStep({ wizard }: StepProps) {
             inputMode="decimal"
             min="0"
             step="any"
-            value={fields.amount}
-            onChange={(event) => setField("amount", event.currentTarget.value)}
+            value={displayEntry ? amountEntry.displayAmount : fields.amount}
+            onChange={(event) =>
+              displayEntry
+                ? amountEntry.setDisplayAmount(event.currentTarget.value)
+                : setField("amount", event.currentTarget.value)
+            }
             placeholder="1.0"
             size="xl"
             action={
               availableAmount === null ? undefined : (
                 <AmountBalanceReadout
                   available={availableAmount}
-                  assetLabel={selectedAsset === null ? fields.asset : selectedAsset.label}
+                  assetLabel={assetLabel}
                   exceeds={exceedsBalance}
                   onMax={
-                    compareDecimalAmounts(availableAmount, "0") > 0
+                    !displayEntry && compareDecimalAmounts(availableAmount, "0") > 0
                       ? () => setField("amount", availableAmount)
                       : undefined
                   }
@@ -186,6 +200,8 @@ function DetailsStep({ wizard }: StepProps) {
               )
             }
           />
+          <AmountUnitToggle entry={amountEntry} />
+          <TokenAmountQuotePreview entry={amountEntry} symbol={assetLabel} />
         </div>
         <Combobox
           label={t("DashboardPayments.onchainSend.asset")}
@@ -216,14 +232,15 @@ function DetailsStep({ wizard }: StepProps) {
 
 function ReviewSummary({ wizard, counterpartyName }: StepProps) {
   const t = useTranslations();
-  const { selectedWallet, destinationAddress, selectedAsset, fields } = wizard;
+  const { selectedWallet, destinationAddress, selectedAsset, fields, sendAmount, amountEntry } =
+    wizard;
   const memo = fields.memo.trim();
+  const assetLabel = selectedAsset === null ? fields.asset : selectedAsset.label;
   return (
     <>
       <div className="flex flex-col items-center gap-0.5 border-b border-border-default pb-4">
         <p className="text-3xl font-semibold tracking-tight text-primary">
-          {fields.amount === "" ? "0" : fields.amount}{" "}
-          {selectedAsset === null ? fields.asset : selectedAsset.label}
+          {sendAmount === "" ? "0" : sendAmount} {assetLabel}
         </p>
         <p className="text-sm text-tertiary">
           {t("DashboardPayments.onchainSend.toCounterparty", {
@@ -234,6 +251,7 @@ function ReviewSummary({ wizard, counterpartyName }: StepProps) {
           })}
         </p>
       </div>
+      <TokenAmountQuotePreview entry={amountEntry} symbol={assetLabel} />
       <div className="divide-y divide-border-default">
         <DetailRow
           icon={<UserRoundIcon className="size-3.5" />}

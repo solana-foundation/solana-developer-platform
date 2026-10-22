@@ -30,7 +30,18 @@ const source: PaymentsDashboardWallet = {
   publicKey: "11111111111111111111111111111111",
   label: "Treasury",
   isRuntimeExecutionAllowed: true,
-  balances: [{ token: "USDC", mint: MINT, amount: "10000000", uiAmount: "10", decimals: 6 }],
+  balances: [
+    {
+      token: "USDC",
+      mint: MINT,
+      amount: "10000000",
+      tokenAmount: "10",
+      displayAmount: "10",
+      displayAsOf: null,
+      displayRule: "plain",
+      decimals: 6,
+    },
+  ],
 };
 const recurring: PaymentRecurringPayment & { sourceCustodyWalletId: string } = {
   id: "prp_test",

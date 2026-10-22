@@ -66,15 +66,15 @@ describe("summarizeTreasuryAllocation figures", () => {
     const summary = summarize({
       wallets: [
         wallet([
-          { mint: USDC_MINT, uiAmount: "1200.50" },
+          { mint: USDC_MINT, tokenAmount: "1200.50" },
           // A SOL gas balance is not treasury cash.
-          { mint: SOL_MINT, uiAmount: "3.5" },
+          { mint: SOL_MINT, tokenAmount: "3.5" },
         ]),
         wallet(
           [
-            { mint: USDG_MINT, uiAmount: "800" },
+            { mint: USDG_MINT, tokenAmount: "800" },
             // Nor is a token nothing can price at a dollar.
-            { mint: UNKNOWN_MINT, uiAmount: "42" },
+            { mint: UNKNOWN_MINT, tokenAmount: "42" },
           ],
           "wallet-b"
         ),
@@ -99,10 +99,10 @@ describe("summarizeTreasuryAllocation figures", () => {
     const summary = summarize({
       wallets: [
         wallet([
-          { mint: ISSUED_MINT, uiAmount: "1000000", usdPrice: 1 },
-          { mint: USDC_MINT, uiAmount: "100" },
+          { mint: ISSUED_MINT, tokenAmount: "1000000", usdPrice: 1 },
+          { mint: USDC_MINT, tokenAmount: "100" },
           // Priced, but not at a dollar: not cash.
-          { mint: UNKNOWN_MINT, uiAmount: "5", usdPrice: 173.42 },
+          { mint: UNKNOWN_MINT, tokenAmount: "5", usdPrice: 173.42 },
         ]),
       ],
       positions: [],
@@ -115,8 +115,8 @@ describe("summarizeTreasuryAllocation figures", () => {
     // Org-level and project-level configs both describe one address, and the
     // balance read keys off the address, so both rows carry the same balances.
     const balances: TreasuryAllocationBalance[] = [
-      { mint: USDC_MINT, uiAmount: "500" },
-      { mint: SHARE_MINT, uiAmount: "60" },
+      { mint: USDC_MINT, tokenAmount: "500" },
+      { mint: SHARE_MINT, tokenAmount: "60" },
     ];
     const summary = summarize({
       wallets: [
@@ -137,7 +137,7 @@ describe("summarizeTreasuryAllocation figures", () => {
     // An unread wallet may hold a receipt token with no recorded position, so
     // the recorded sum cannot be certified as the total. Unreadable is not empty.
     const summary = summarize({
-      wallets: [wallet([{ mint: USDC_MINT, uiAmount: "500" }]), wallet(undefined, "wallet-b")],
+      wallets: [wallet([{ mint: USDC_MINT, tokenAmount: "500" }]), wallet(undefined, "wallet-b")],
       positions: [openPosition({ tokenValue: "125.25" })],
     });
 
@@ -159,7 +159,7 @@ describe("summarizeTreasuryAllocation figures", () => {
 
   it("makes cash unavailable when a stable balance is malformed", () => {
     const summary = summarize({
-      wallets: [wallet([{ mint: USDC_MINT, uiAmount: "12,5" }])],
+      wallets: [wallet([{ mint: USDC_MINT, tokenAmount: "12,5" }])],
       positions: [],
     });
 
@@ -168,7 +168,7 @@ describe("summarizeTreasuryAllocation figures", () => {
 
   it("makes deployed unavailable when an open position cannot be hydrated", () => {
     const summary = summarize({
-      wallets: [wallet([{ mint: USDC_MINT, uiAmount: "500" }])],
+      wallets: [wallet([{ mint: USDC_MINT, tokenAmount: "500" }])],
       positions: [openPosition({ tokenValue: undefined }), openPosition({ tokenValue: "40" })],
     });
 
@@ -178,7 +178,7 @@ describe("summarizeTreasuryAllocation figures", () => {
 
   it("makes deployed unavailable when an open position value is malformed", () => {
     const summary = summarize({
-      wallets: [wallet([{ mint: USDC_MINT, uiAmount: "500" }])],
+      wallets: [wallet([{ mint: USDC_MINT, tokenAmount: "500" }])],
       positions: [openPosition({ tokenValue: "12,5" })],
     });
 
@@ -198,8 +198,8 @@ describe("summarizeTreasuryAllocation figures", () => {
     const summary = summarize({
       wallets: [
         wallet([
-          { mint: USDC_MINT, uiAmount: "500" },
-          { mint: UNRECORDED_SHARE_MINT, uiAmount: "60" },
+          { mint: USDC_MINT, tokenAmount: "500" },
+          { mint: UNRECORDED_SHARE_MINT, tokenAmount: "60" },
         ]),
       ],
       positions: [openPosition({ tokenValue: "100" })],
@@ -217,8 +217,8 @@ describe("summarizeTreasuryAllocation figures", () => {
     const summary = summarize({
       wallets: [
         wallet([
-          { mint: USDC_MINT, uiAmount: "500" },
-          { mint: SHARE_MINT, uiAmount: "60" },
+          { mint: USDC_MINT, tokenAmount: "500" },
+          { mint: SHARE_MINT, tokenAmount: "60" },
         ]),
       ],
       positions: [openPosition({ closedAt: "2026-08-20T00:00:00.000Z", tokenValue: "100" })],
@@ -232,7 +232,7 @@ describe("summarizeTreasuryAllocation figures", () => {
 
   it("names an unusable position value as unreadable, not as a reconciliation gap", () => {
     const summary = summarize({
-      wallets: [wallet([{ mint: USDC_MINT, uiAmount: "500" }])],
+      wallets: [wallet([{ mint: USDC_MINT, tokenAmount: "500" }])],
       positions: [openPosition({ tokenValue: undefined })],
     });
 
@@ -243,10 +243,10 @@ describe("summarizeTreasuryAllocation figures", () => {
     const summary = summarize({
       wallets: [
         wallet([
-          { mint: USDC_MINT, uiAmount: "500" },
-          { mint: SHARE_MINT, uiAmount: "60" },
+          { mint: USDC_MINT, tokenAmount: "500" },
+          { mint: SHARE_MINT, tokenAmount: "60" },
         ]),
-        wallet([{ mint: SHARE_MINT, uiAmount: "25" }], "wallet-b"),
+        wallet([{ mint: SHARE_MINT, tokenAmount: "25" }], "wallet-b"),
       ],
       positions: [openPosition({ custodyWalletId: "wallet-a", tokenValue: "100" })],
     });
@@ -259,8 +259,8 @@ describe("summarizeTreasuryAllocation figures", () => {
     const summary = summarize({
       wallets: [
         wallet([
-          { mint: USDC_MINT, uiAmount: "300" },
-          { mint: SHARE_MINT, uiAmount: "60" },
+          { mint: USDC_MINT, tokenAmount: "300" },
+          { mint: SHARE_MINT, tokenAmount: "60" },
         ]),
       ],
       positions: [openPosition({ tokenValue: "100" })],
@@ -289,8 +289,8 @@ describe("Treasury presentation figures", () => {
     const summary = summarize({
       wallets: [
         wallet([
-          { mint: USDC_MINT, uiAmount: "25.5" },
-          { mint: SOL_MINT, uiAmount: "100" },
+          { mint: USDC_MINT, tokenAmount: "25.5" },
+          { mint: SOL_MINT, tokenAmount: "100" },
         ]),
       ],
       positions: [],
@@ -349,8 +349,8 @@ describe("a par intermediate left by a cancelled request", () => {
     const summary = summarize({
       wallets: [
         wallet([
-          { mint: USDC_MINT, uiAmount: "50" },
-          { mint: WYLDS_MINT, uiAmount: "2000", usdPrice: 1 },
+          { mint: USDC_MINT, tokenAmount: "50" },
+          { mint: WYLDS_MINT, tokenAmount: "2000", usdPrice: 1 },
         ]),
       ],
       positions: [residual, openPosition({ tokenValue: "100" })],
@@ -365,10 +365,10 @@ describe("a par intermediate left by a cancelled request", () => {
     const summary = summarize({
       wallets: [
         wallet([
-          { mint: USDC_MINT, uiAmount: "50" },
-          { mint: WYLDS_MINT, uiAmount: "2000", usdPrice: 1 },
+          { mint: USDC_MINT, tokenAmount: "50" },
+          { mint: WYLDS_MINT, tokenAmount: "2000", usdPrice: 1 },
         ]),
-        wallet([{ mint: WYLDS_MINT, uiAmount: "500", usdPrice: 1 }], "wallet-b"),
+        wallet([{ mint: WYLDS_MINT, tokenAmount: "500", usdPrice: 1 }], "wallet-b"),
       ],
       positions: [residual],
     });
@@ -382,8 +382,8 @@ describe("a par intermediate left by a cancelled request", () => {
   it("nets only the recorded amount, and never below zero", () => {
     const summary = summarize({
       wallets: [
-        wallet([{ mint: WYLDS_MINT, uiAmount: "2500.5", usdPrice: 1 }]),
-        wallet([{ mint: WYLDS_MINT, uiAmount: "1500", usdPrice: 1 }], "wallet-b"),
+        wallet([{ mint: WYLDS_MINT, tokenAmount: "2500.5", usdPrice: 1 }]),
+        wallet([{ mint: WYLDS_MINT, tokenAmount: "1500", usdPrice: 1 }], "wallet-b"),
       ],
       positions: [residual, { ...residual, custodyWalletId: "wallet-b" }],
     });
@@ -395,8 +395,8 @@ describe("a par intermediate left by a cancelled request", () => {
 
   it("nets once per address when several custody rows describe the wallet", () => {
     const balances: TreasuryAllocationBalance[] = [
-      { mint: USDC_MINT, uiAmount: "50" },
-      { mint: WYLDS_MINT, uiAmount: "2000", usdPrice: 1 },
+      { mint: USDC_MINT, tokenAmount: "50" },
+      { mint: WYLDS_MINT, tokenAmount: "2000", usdPrice: 1 },
     ];
     const summary = summarize({
       wallets: [
@@ -417,8 +417,8 @@ describe("a par intermediate left by a cancelled request", () => {
         wallet(undefined, "wallet-org", "pk-shared"),
         wallet(
           [
-            { mint: USDC_MINT, uiAmount: "50" },
-            { mint: WYLDS_MINT, uiAmount: "2000", usdPrice: 1 },
+            { mint: USDC_MINT, tokenAmount: "50" },
+            { mint: WYLDS_MINT, tokenAmount: "2000", usdPrice: 1 },
           ],
           "wallet-project",
           "pk-shared"
@@ -435,8 +435,8 @@ describe("a par intermediate left by a cancelled request", () => {
   it("makes the owning wallet's cash unavailable when the recorded amount is malformed", () => {
     const summary = summarize({
       wallets: [
-        wallet([{ mint: WYLDS_MINT, uiAmount: "2000", usdPrice: 1 }]),
-        wallet([{ mint: USDC_MINT, uiAmount: "10" }], "wallet-b"),
+        wallet([{ mint: WYLDS_MINT, tokenAmount: "2000", usdPrice: 1 }]),
+        wallet([{ mint: USDC_MINT, tokenAmount: "10" }], "wallet-b"),
       ],
       positions: [
         openPosition({
@@ -470,8 +470,8 @@ describe("zero-balance share accounts", () => {
     const summary = summarize({
       wallets: [
         wallet([
-          { mint: USDC_MINT, uiAmount: "500" },
-          { mint: SHARE_MINT, uiAmount: "0" },
+          { mint: USDC_MINT, tokenAmount: "500" },
+          { mint: SHARE_MINT, tokenAmount: "0" },
         ]),
       ],
       positions: [],
@@ -484,11 +484,14 @@ describe("zero-balance share accounts", () => {
 
   it("treats a trailing-zero form as zero and a dust amount as held", () => {
     expect(
-      heldVaultShareMints(wallet([{ mint: SHARE_MINT, uiAmount: "0.000" }]), new Set([SHARE_MINT]))
+      heldVaultShareMints(
+        wallet([{ mint: SHARE_MINT, tokenAmount: "0.000" }]),
+        new Set([SHARE_MINT])
+      )
     ).toEqual([]);
     expect(
       heldVaultShareMints(
-        wallet([{ mint: SHARE_MINT, uiAmount: "0.000001" }]),
+        wallet([{ mint: SHARE_MINT, tokenAmount: "0.000001" }]),
         new Set([SHARE_MINT])
       )
     ).toEqual([SHARE_MINT]);
@@ -496,7 +499,7 @@ describe("zero-balance share accounts", () => {
 
   it("treats an unparseable amount as held, since it is not evidence of empty", () => {
     expect(
-      heldVaultShareMints(wallet([{ mint: SHARE_MINT, uiAmount: "1,5" }]), new Set([SHARE_MINT]))
+      heldVaultShareMints(wallet([{ mint: SHARE_MINT, tokenAmount: "1,5" }]), new Set([SHARE_MINT]))
     ).toEqual([SHARE_MINT]);
   });
 
@@ -513,7 +516,7 @@ describe("an incomplete share-mint vocabulary", () => {
 
   it("makes the deployed figure unavailable even when every position reads", () => {
     const summary = summarize({
-      wallets: [wallet([{ mint: USDC_MINT, uiAmount: "500" }])],
+      wallets: [wallet([{ mint: USDC_MINT, tokenAmount: "500" }])],
       positions: [openPosition({ tokenValue: "100" })],
       shareMints: incomplete,
     });
@@ -529,8 +532,8 @@ describe("an incomplete share-mint vocabulary", () => {
     const summary = summarize({
       wallets: [
         wallet([
-          { mint: USDC_MINT, uiAmount: "500" },
-          { mint: SHARE_MINT, uiAmount: "60" },
+          { mint: USDC_MINT, tokenAmount: "500" },
+          { mint: SHARE_MINT, tokenAmount: "60" },
         ]),
       ],
       positions: [],
@@ -542,7 +545,7 @@ describe("an incomplete share-mint vocabulary", () => {
 
   it("makes a wallet line with open positions unavailable, not a confident value", () => {
     const summary = summarize({
-      wallets: [wallet([{ mint: SHARE_MINT, uiAmount: "60" }])],
+      wallets: [wallet([{ mint: SHARE_MINT, tokenAmount: "60" }])],
       positions: [openPosition({ tokenValue: "100" })],
       shareMints: incomplete,
     });
@@ -552,7 +555,7 @@ describe("an incomplete share-mint vocabulary", () => {
 
   it("stays silent for a wallet with nothing deployed", () => {
     const summary = summarize({
-      wallets: [wallet([{ mint: USDC_MINT, uiAmount: "500" }])],
+      wallets: [wallet([{ mint: USDC_MINT, tokenAmount: "500" }])],
       positions: [],
       shareMints: incomplete,
     });
@@ -576,7 +579,7 @@ describe("per-wallet deployment lines", () => {
 
   it("reads unavailable when the positions read failed but shares are held", () => {
     const summary = summarize({
-      wallets: [wallet([{ mint: SHARE_MINT, uiAmount: "60" }])],
+      wallets: [wallet([{ mint: SHARE_MINT, tokenAmount: "60" }])],
       positions: undefined,
     });
     expect(summary.deploymentByWalletId.get("wallet-a")).toEqual({ kind: "unavailable" });
@@ -584,7 +587,7 @@ describe("per-wallet deployment lines", () => {
 
   it("stays silent when the positions read failed and no shares are held", () => {
     const summary = summarize({
-      wallets: [wallet([{ mint: USDC_MINT, uiAmount: "10" }])],
+      wallets: [wallet([{ mint: USDC_MINT, tokenAmount: "10" }])],
       positions: undefined,
     });
     expect(summary.deploymentByWalletId.get("wallet-a")).toEqual({ kind: "none" });
@@ -595,8 +598,8 @@ describe("per-wallet deployment lines", () => {
     // would report the whole portfolio on wallet-a's line.
     const summary = summarize({
       wallets: [
-        wallet([{ mint: SHARE_MINT, uiAmount: "60" }]),
-        wallet([{ mint: SHARE_MINT, uiAmount: "60" }], "wallet-b"),
+        wallet([{ mint: SHARE_MINT, tokenAmount: "60" }]),
+        wallet([{ mint: SHARE_MINT, tokenAmount: "60" }], "wallet-b"),
       ],
       positions: [
         openPosition({ custodyWalletId: "wallet-a", tokenValue: "100" }),
@@ -610,7 +613,7 @@ describe("per-wallet deployment lines", () => {
 
   it("reads unavailable when a recorded position cannot be valued", () => {
     const summary = summarize({
-      wallets: [wallet([{ mint: SHARE_MINT, uiAmount: "60" }])],
+      wallets: [wallet([{ mint: SHARE_MINT, tokenAmount: "60" }])],
       positions: [openPosition({ tokenValue: undefined })],
     });
     expect(summary.deploymentByWalletId.get("wallet-a")).toEqual({ kind: "unavailable" });
@@ -618,7 +621,7 @@ describe("per-wallet deployment lines", () => {
 
   it("reads none for a wallet with neither shares nor open positions", () => {
     const summary = summarize({
-      wallets: [wallet([{ mint: USDC_MINT, uiAmount: "10" }])],
+      wallets: [wallet([{ mint: USDC_MINT, tokenAmount: "10" }])],
       positions: [openPosition({ shares: "0", tokenValue: "9" })],
     });
     expect(summary.deploymentByWalletId.get("wallet-a")).toEqual({ kind: "none" });
@@ -630,9 +633,9 @@ describe("no two surfaces disagree", () => {
   // line had already given up on. Every surface now reads one result, and this
   // pins the implication across the state matrix.
   const shareMints = vocabulary(SHARE_MINT, UNRECORDED_SHARE_MINT);
-  const cash = { mint: USDC_MINT, uiAmount: "500" };
-  const heldShare = { mint: SHARE_MINT, uiAmount: "60" };
-  const heldUnrecorded = { mint: UNRECORDED_SHARE_MINT, uiAmount: "60" };
+  const cash = { mint: USDC_MINT, tokenAmount: "500" };
+  const heldShare = { mint: SHARE_MINT, tokenAmount: "60" };
+  const heldUnrecorded = { mint: UNRECORDED_SHARE_MINT, tokenAmount: "60" };
 
   const scenarios: Array<{
     name: string;
@@ -680,7 +683,7 @@ describe("no two surfaces disagree", () => {
     },
     {
       name: "zero share account",
-      wallets: [wallet([cash, { mint: SHARE_MINT, uiAmount: "0" }])],
+      wallets: [wallet([cash, { mint: SHARE_MINT, tokenAmount: "0" }])],
       positions: [],
     },
     { name: "duplicate custody rows", wallets: undefined, positions: [] },

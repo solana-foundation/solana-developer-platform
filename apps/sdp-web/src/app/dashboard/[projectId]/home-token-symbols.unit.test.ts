@@ -10,7 +10,10 @@ function balance(overrides: Partial<CustodyWalletTokenBalance>): CustodyWalletTo
     token: "USDC",
     mint: "mint-usdc",
     amount: "1000000",
-    uiAmount: "1",
+    tokenAmount: "1",
+    displayAmount: "1",
+    displayAsOf: null,
+    displayRule: "plain",
     decimals: 6,
     ...overrides,
   };

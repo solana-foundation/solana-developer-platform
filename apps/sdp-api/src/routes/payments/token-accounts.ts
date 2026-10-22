@@ -1,9 +1,14 @@
 import { createClusterRpc } from "@sdp/rpc/factory";
-import type { SolanaRpc } from "@sdp/rpc/solana";
+import type { RpcParsedTokenAccount, SolanaRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
-import { type Address, address, type JsonParsedTokenAccount } from "@solana/kit";
+import {
+  SPL_TOKEN_PROGRAMS,
+  TOKEN_PROGRAM_KINDS,
+  WELL_KNOWN_TOKEN_BY_MINT,
+} from "@sdp/types/well-known-tokens";
+import { type Address, address } from "@solana/kit";
 import { badRequest } from "@/lib/errors";
+import type { HeldTokenBalance } from "@/services/token-movement/balance-display";
 
 const SPL_TOKEN_PROGRAM_ID = address(SPL_TOKEN_PROGRAMS["spl-token"]);
 const SPL_TOKEN_2022_PROGRAM_ID = address(SPL_TOKEN_PROGRAMS["token-2022"]);
@@ -53,46 +58,54 @@ export function withIssuedTokenLabels<T extends { mint: string; token: string }>
   });
 }
 
-function parseTokenAmountInfo(info: JsonParsedTokenAccount): {
+function parseTokenAmountInfo(info: RpcParsedTokenAccount): {
   mint: Address;
   amount: bigint;
   decimals: number;
-  uiAmount: string;
 } {
   return {
     mint: info.mint,
     amount: BigInt(info.tokenAmount.amount),
     decimals: info.tokenAmount.decimals,
-    uiAmount: info.tokenAmount.uiAmountString,
   };
 }
 
+/**
+ * An owner's SPL holdings: base units summed per mint over every account,
+ * under both token programs, with the program each mint's accounts are
+ * under. Display is added by `withDisplayAmounts`, which reads Token-2022
+ * terms; this read never takes the RPC's display values.
+ *
+ * RPC budget: one `getTokenAccountsByOwner` per token program, in parallel.
+ */
 export async function getSplTokenBalances(
   rpc: SolanaRpc,
   owner: Address,
   options?: GetSplTokenBalancesOptions
-): Promise<
-  Array<{ token: string; mint: string; amount: string; uiAmount: string; decimals: number }>
-> {
-  const balancesByMint = new Map<string, { amount: bigint; decimals: number; uiAmount: string }>();
+): Promise<HeldTokenBalance[]> {
+  const balancesByMint = new Map<
+    string,
+    { amount: bigint; decimals: number; program: HeldTokenBalance["program"] }
+  >();
   // One read per token program, independent of each other, so neither waits.
   const responses = await Promise.all(
-    SPL_TOKEN_PROGRAM_IDS.map((programId) =>
-      rpc
+    TOKEN_PROGRAM_KINDS.map(async (program) => ({
+      program,
+      response: await rpc
         .getTokenAccountsByOwner(
           owner,
-          { programId },
+          { programId: address(SPL_TOKEN_PROGRAMS[program]) },
           {
             encoding: "jsonParsed",
             commitment: "confirmed",
             minContextSlot: options?.minContextSlot,
           }
         )
-        .send({ abortSignal: options?.abortSignal })
-    )
+        .send({ abortSignal: options?.abortSignal }),
+    }))
   );
 
-  for (const response of responses) {
+  for (const { program, response } of responses) {
     for (const account of response.value) {
       const parsed = parseTokenAmountInfo(account.account.data.parsed.info);
       if (parsed.amount <= 0n) {
@@ -108,7 +121,7 @@ export async function getSplTokenBalances(
       balancesByMint.set(parsed.mint, {
         amount: parsed.amount,
         decimals: parsed.decimals,
-        uiAmount: parsed.uiAmount,
+        program,
       });
     }
   }
@@ -119,8 +132,8 @@ export async function getSplTokenBalances(
       token: resolveTokenLabel(mint, options?.tokenLabelsByMint),
       mint,
       amount: balance.amount.toString(),
-      uiAmount: balance.uiAmount,
       decimals: balance.decimals,
+      program: balance.program,
     }));
 }
 

@@ -1,3 +1,4 @@
+import { baseUnits, parseTokenAmount, toBaseUnits, toTokenAmount } from "@sdp/solana/token-amount";
 import type {
   Counterparty,
   CounterpartyAccount,
@@ -78,43 +79,43 @@ export const DEMO_TOKENS = {
 
 export type DemoTokenKey = keyof typeof DEMO_TOKENS;
 
-export function toBaseUnits(uiAmount: string, decimals: number): bigint {
-  const [whole = "0", fraction = ""] = uiAmount.split(".");
-  const scaledFraction = fraction.padEnd(decimals, "0").slice(0, decimals);
-  return BigInt(whole) * 10n ** BigInt(decimals) + BigInt(scaledFraction || "0");
-}
-
-/** A base-unit amount as a decimal string, keeping at least `minFractionDigits`. */
+/** A base-unit amount as a token amount, its fraction padded to at least `minFractionDigits`. */
 export function fromBaseUnits(amount: bigint, decimals: number, minFractionDigits = 0): string {
-  const scale = 10n ** BigInt(decimals);
-  const whole = amount / scale;
-  const trimmed = (amount % scale).toString().padStart(decimals, "0").replace(/0+$/, "");
-  const fraction = trimmed.padEnd(minFractionDigits, "0");
-  return fraction ? `${whole}.${fraction}` : whole.toString();
+  const [whole, fraction = ""] = toTokenAmount(baseUnits(amount), decimals).value.split(".");
+  const padded = fraction.padEnd(minFractionDigits, "0");
+  return padded ? `${whole}.${padded}` : whole;
 }
 
 function sumAmounts(amounts: readonly string[], token: DemoTokenKey): string {
   const { decimals } = DEMO_TOKENS[token];
-  const total = amounts.reduce((sum, amount) => sum + toBaseUnits(amount, decimals), 0n);
+  const total = amounts.reduce(
+    (sum, amount) => sum + toBaseUnits(parseTokenAmount(amount, decimals)),
+    0n
+  );
   return fromBaseUnits(total, decimals, 2);
 }
 
-export function usdValueOf(uiAmount: string, usdPrice: number): number {
-  return Math.round(Number(uiAmount) * usdPrice * 100) / 100;
+/** A USD price applies to the display amount, as the API's `usdValue` does. */
+export function usdValueOf(displayAmount: string, usdPrice: number): number {
+  return Math.round(Number(displayAmount) * usdPrice * 100) / 100;
 }
 
-export function tokenBalance(key: DemoTokenKey, uiAmount: string): CustodyWalletTokenBalance {
+/** A demo holding. Demo tokens are classic mints, so the display amount is the token amount. */
+export function tokenBalance(key: DemoTokenKey, tokenAmount: string): CustodyWalletTokenBalance {
   const token = DEMO_TOKENS[key];
-  const amount = toBaseUnits(uiAmount, token.decimals);
-  const normalizedUiAmount = fromBaseUnits(amount, token.decimals);
+  const amount = toBaseUnits(parseTokenAmount(tokenAmount, token.decimals));
+  const normalizedTokenAmount = fromBaseUnits(amount, token.decimals);
   return {
     token: token.symbol,
     mint: token.mint,
     amount: amount.toString(),
-    uiAmount: normalizedUiAmount,
+    tokenAmount: normalizedTokenAmount,
+    displayAmount: normalizedTokenAmount,
+    displayAsOf: null,
+    displayRule: "plain",
     decimals: token.decimals,
     usdPrice: token.usdPrice,
-    usdValue: usdValueOf(normalizedUiAmount, token.usdPrice),
+    usdValue: usdValueOf(normalizedTokenAmount, token.usdPrice),
   };
 }
 
@@ -1289,12 +1290,14 @@ function aggregateBody(world: DemoWorld) {
   const aggregate: CustodyWalletAggregate = {
     walletCount: walletList(world).length,
     balances: [...byMint.values()].map(({ balance, amount }) => {
-      const uiAmount = fromBaseUnits(amount, balance.decimals);
+      // Demo tokens are classic mints: the summed display amount is the token amount.
+      const tokenAmount = fromBaseUnits(amount, balance.decimals);
       return {
         ...balance,
         amount: amount.toString(),
-        uiAmount,
-        usdValue: usdValueOf(uiAmount, balance.usdPrice ?? 0),
+        tokenAmount,
+        displayAmount: tokenAmount,
+        usdValue: usdValueOf(tokenAmount, balance.usdPrice ?? 0),
       };
     }),
   };

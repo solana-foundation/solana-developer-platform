@@ -331,7 +331,7 @@ export function useRecurringPaymentCreate({
   const exceedsBalance =
     isDecimalString(fields.amount) &&
     selectedAssetBalance !== null &&
-    compareDecimalAmounts(fields.amount, selectedAssetBalance.uiAmount) > 0;
+    compareDecimalAmounts(fields.amount, selectedAssetBalance.tokenAmount) > 0;
   const periodHours = parsePeriodHours(fields.schedulePreset, fields.customPeriodHours);
   const currentStep = steps[stepIndex];
   const assetSelectPlaceholder = assetPlaceholder(

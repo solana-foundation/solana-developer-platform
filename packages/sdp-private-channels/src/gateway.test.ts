@@ -68,7 +68,8 @@ describe("getChannelTokenBalance", () => {
       OWNER,
       USDC
     );
-    expect(result.balance).toEqual({ amount: "1500000", decimals: 6, uiAmountString: "1.5" });
+    // The gateway's display values are not read (ADR 0012).
+    expect(result.balance).toEqual({ amount: "1500000", decimals: 6 });
   });
 
   it("treats a 403 on the existence probe as an absent (zero) account", async () => {

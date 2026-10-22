@@ -2,7 +2,11 @@ import { createHmac } from "node:crypto";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
 import { SOL_MINT, SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
-import { SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED } from "@solana/kit";
+import {
+  getAddressDecoder,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
+} from "@solana/kit";
+import { SYSVAR_CLOCK_ADDRESS } from "@solana/sysvars";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { z } from "zod";
 import { createApp } from "@/app";
@@ -43,6 +47,7 @@ import { seedDefaultProjects } from "@/test/helpers/projects";
 import { providerStages } from "@/test/helpers/provider-stages";
 import { required } from "@/test/helpers/required";
 import { installStripeTestEnv } from "@/test/helpers/stripe-env";
+import { answerMovementAccounts, mintRpcAccount, TEST_CLOCK } from "@/test/helpers/token-movement";
 import { seedRateLimit } from "@/test/mocks/kv";
 
 vi.mock("@sdp/types/release-channels", async (importOriginal) => {
@@ -465,7 +470,10 @@ describe("Payments routes — ramps", () => {
             token: "SOL",
             mint: SOL_MINT,
             amount: "2500000000",
-            uiAmount: "2.5",
+            tokenAmount: "2.5",
+            displayAmount: "2.5",
+            displayAsOf: null,
+            displayRule: "plain",
             decimals: 9,
             usdPrice: 150,
             usdValue: 375,
@@ -474,7 +482,10 @@ describe("Payments routes — ramps", () => {
             token: "USDC",
             mint: usdc.address,
             amount: "12500000",
-            uiAmount: "12.5",
+            tokenAmount: "12.5",
+            displayAmount: "12.5",
+            displayAsOf: null,
+            displayRule: "plain",
             decimals: 6,
           },
         ]);
@@ -492,6 +503,91 @@ describe("Payments routes — ramps", () => {
         expect(new Set(rpc.calls.map((call) => call.cluster))).toEqual(new Set([cluster]));
       }
     );
+
+    it("shows a Token-2022 scaled mint's display from the summed base units, in one terms read", async () => {
+      const scaledMint = getAddressDecoder().decode(new Uint8Array(32).fill(7));
+      // Two accounts of one scaled mint: the RPC's display value is per account,
+      // so its first account's 1.5 was the balance before; display is of the sum.
+      rpc.respond("getTokenAccountsByOwner", (request) => ({
+        result: tokenAccountsByOwnerResult(
+          101,
+          tokenAccountsFilterSchema.parse(request.params[1]).programId ===
+            SPL_TOKEN_PROGRAMS["token-2022"]
+            ? [
+                {
+                  pubkey: TEST_SOLANA_ADDRESSES.wallet1,
+                  mint: scaledMint,
+                  amount: "1000000",
+                  decimals: 6,
+                  uiAmountString: "1.5",
+                  state: "initialized",
+                },
+                {
+                  pubkey: TEST_SOLANA_ADDRESSES.wallet2,
+                  mint: scaledMint,
+                  amount: "500000",
+                  decimals: 6,
+                  uiAmountString: "0.75",
+                  state: "initialized",
+                },
+              ]
+            : []
+        ),
+      }));
+      answerMovementAccounts(
+        rpc,
+        new Map([
+          [
+            scaledMint,
+            mintRpcAccount("token-2022", {
+              decimals: 6,
+              extensions: [
+                {
+                  __kind: "ScaledUiAmountConfig",
+                  authority: getAddressDecoder().decode(new Uint8Array(32).fill(8)),
+                  multiplier: 1.5,
+                  newMultiplierEffectiveTimestamp: 0n,
+                  newMultiplier: 1.5,
+                },
+              ],
+            }),
+          ],
+        ])
+      );
+      const jupiterPrices = vi
+        .spyOn(jupiterPriceService, "fetchJupiterUsdPrices")
+        .mockResolvedValue(new Map([[scaledMint, 2]]));
+      onTestFinished(() => jupiterPrices.mockRestore());
+
+      const res = await requestBalances(TEST_WALLET_ID, "");
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body).toHaveProperty("data.walletBalances.balances.1", {
+        token: scaledMint,
+        mint: scaledMint,
+        amount: "1500000",
+        tokenAmount: "1.5",
+        displayAmount: "2.25",
+        displayAsOf: new Date(Number(TEST_CLOCK.unixTimestamp) * 1000).toISOString(),
+        displayRule: "scaled",
+        decimals: 6,
+        // USD prices what the wallet shows.
+        usdPrice: 2,
+        usdValue: 4.5,
+      });
+      // RPC budget: the SOL read, one read per token program, and one terms read.
+      const termsReads = balanceReads().filter(({ method }) => method === "getMultipleAccounts");
+      expect(termsReads).toHaveLength(1);
+      expect(termsReads[0]?.params[0]).toEqual([SYSVAR_CLOCK_ADDRESS, scaledMint]);
+    });
+
+    it("makes no terms read when every held mint is classic", async () => {
+      const res = await requestBalances(TEST_WALLET_ID, "");
+
+      expect(res.status).toBe(200);
+      expect(balanceReads().map(({ method }) => method)).not.toContain("getMultipleAccounts");
+    });
 
     it("sends ?minimumSlot as minContextSlot on every balance read", async () => {
       const res = await requestBalances(TEST_WALLET_ID, "?minimumSlot=101");

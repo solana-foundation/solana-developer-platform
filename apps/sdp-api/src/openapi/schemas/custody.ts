@@ -16,6 +16,7 @@ import {
   walletIdParamSchema,
   withOpenApi,
 } from "./base";
+import { tokenBalanceAmountFields } from "./token-balances";
 
 export const initializeSigningRequestSchema = withOpenApi(initializeSigningSchemaBase, {
   description:
@@ -216,26 +217,7 @@ const custodyWalletTokenBalanceSchema = z
       description: "Tracked token mint address.",
       example: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
     }),
-    amount: z.string().openapi({
-      description: "Raw token amount as a string.",
-      example: "1250000",
-    }),
-    uiAmount: z.string().openapi({
-      description: "Human-readable token balance.",
-      example: "1.25",
-    }),
-    decimals: z.number().int().nonnegative().openapi({
-      description: "Token decimals.",
-      example: 6,
-    }),
-    usdPrice: z.number().optional().openapi({
-      description: "Resolved USD price per token when available.",
-      example: 1,
-    }),
-    usdValue: z.number().optional().openapi({
-      description: "Resolved USD value of this balance when pricing is available.",
-      example: 125.5,
-    }),
+    ...tokenBalanceAmountFields,
   })
   .openapi({ description: "Tracked fungible token balance." });
 
@@ -298,14 +280,21 @@ export const custodyWalletByIdResponseSchema = z
               description: "Native SOL mint address.",
               example: "So11111111111111111111111111111111111111112",
             }),
+            ...tokenBalanceAmountFields,
             amount: z.string().openapi({
-              description: "Raw lamports balance as a string.",
+              description: "Lamports, as a string.",
               example: "123456789",
             }),
-            uiAmount: z.string().openapi({
-              description: "Human-readable SOL balance.",
+            tokenAmount: z.string().openapi({
+              description: "SOL in token units: `amount` ÷ 10^9.",
               example: "0.123456789",
             }),
+            displayAmount: z.string().openapi({
+              description: "Equal to `tokenAmount`: SOL has no display rule.",
+              example: "0.123456789",
+            }),
+            displayAsOf: z.null().openapi({ description: "Always null for SOL." }),
+            displayRule: z.literal("plain").openapi({ example: "plain" }),
             decimals: z.literal(9).openapi({
               description: "Token decimals for SOL.",
               example: 9,

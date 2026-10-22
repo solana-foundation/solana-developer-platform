@@ -16,6 +16,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { CreateApiKeyModal } from "@/app/dashboard/[projectId]/api-keys/create-api-key-modal";
 import { SectionEntry } from "@/app/dashboard/[projectId]/wallets/section-entry";
+import { TokenDisplayAmount } from "@/components/token-display-amount";
 import { TokenMark } from "@/components/token-mark";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
@@ -363,7 +364,10 @@ function BalanceAllocation({
                 </span>
                 <span className="min-w-0 flex-1" />
                 <span className="shrink-0 text-[15px] text-secondary tabular-nums">
-                  {formatDisplayAmount(slice.uiAmount, symbol)}
+                  <TokenDisplayAmount
+                    balance={slice}
+                    formatted={formatDisplayAmount(slice.displayAmount, symbol)}
+                  />
                 </span>
               </Link>
             );

@@ -1,5 +1,6 @@
 "use client";
 
+import { TOKEN_DISPLAY_RULES } from "@sdp/types/token-movements";
 import { useCallback, useRef } from "react";
 import useSWR from "swr";
 import { z } from "zod";
@@ -22,7 +23,10 @@ const walletTokenBalanceSchema = z.object({
   token: z.string(),
   mint: z.string(),
   amount: z.string(),
-  uiAmount: z.string(),
+  tokenAmount: z.string(),
+  displayAmount: z.string(),
+  displayAsOf: z.string().nullable(),
+  displayRule: z.enum(TOKEN_DISPLAY_RULES),
   decimals: z.number(),
   usdPrice: z.number().optional(),
   usdValue: z.number().optional(),

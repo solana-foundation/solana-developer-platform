@@ -1,3 +1,4 @@
+import { parseTokenAmount, toBaseUnits } from "@sdp/solana/token-amount";
 import { OFFRAMP_SUPPORT, ONRAMP_SUPPORT } from "@sdp/types/generated/ramp";
 import { type CryptoRailId, getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import type {
@@ -16,7 +17,6 @@ import {
   fromBaseUnits,
   MINUTE_MS,
   symbolForMint,
-  toBaseUnits,
 } from "./demo-fixtures";
 import { type DemoOp, newDemoId } from "./demo-ops";
 import {
@@ -101,7 +101,11 @@ function shortfall(world: DemoWorld, walletId: string, mint: string, amount: str
   if (!key) return "The demo wallets don't hold that token.";
   const { decimals } = DEMO_TOKENS[key];
   const held = walletHolding(wallet, mint);
-  if (toBaseUnits(held, decimals) >= toBaseUnits(amount, decimals)) return null;
+  if (
+    toBaseUnits(parseTokenAmount(held, decimals)) >= toBaseUnits(parseTokenAmount(amount, decimals))
+  ) {
+    return null;
+  }
   return `Not enough ${tokenSymbol(mint)} in ${wallet.label ?? "this wallet"}: ${held} available.`;
 }
 
@@ -640,7 +644,7 @@ const batchSchema = z.object({
 function batchTotal(amounts: readonly string[], mint: string): string {
   const { decimals } = DEMO_TOKENS[tokenKeyForMint(mint) ?? "USDC"];
   return fromBaseUnits(
-    amounts.reduce((sum, amount) => sum + toBaseUnits(amount, decimals), 0n),
+    amounts.reduce((sum, amount) => sum + toBaseUnits(parseTokenAmount(amount, decimals)), 0n),
     decimals,
     2
   );

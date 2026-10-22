@@ -6,6 +6,7 @@ import {
 } from "@/lib/private-channels";
 import { createSdpApiClient } from "@/lib/sdp-api";
 
+/** Both balances are token units: the deposit and withdraw forms check amounts against them. */
 export interface WalletBalanceView {
   /** Channel-side balance for the selected mint (SPC gateway). Null when the read failed. */
   channel: string | null;
@@ -41,7 +42,7 @@ export async function fetchWalletBalancesAction(
   const onChainToken =
     wantedMint && wallet?.balances ? wallet.balances.find((b) => b.mint === wantedMint) : null;
   return {
-    channel: channel?.uiAmount ?? null,
-    onChain: onChainToken?.uiAmount ?? (wallet ? "0" : null),
+    channel: channel?.tokenAmount ?? null,
+    onChain: onChainToken?.tokenAmount ?? (wallet ? "0" : null),
   };
 }

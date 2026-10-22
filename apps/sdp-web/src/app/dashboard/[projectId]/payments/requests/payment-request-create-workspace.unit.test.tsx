@@ -316,4 +316,81 @@ describe("New request page", () => {
       screen.getByRole("button", { name: "Create and copy link" }).hasAttribute("disabled")
     ).toBe(true);
   });
+
+  // A request's amount is the credit, in token units. Typed as wallets show it, the quote
+  // converts it, and the quote's credit is what the request asks for.
+  it("asks for the credit a display amount converts to, never the display amount", async () => {
+    const usdc = deriveTokenOptions("devnet").find((token) => token.symbol === "USDC");
+    const quoteBodies: unknown[] = [];
+    const creates: unknown[] = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/terms")) {
+        return Response.json({
+          data: {
+            terms: {
+              mint: usdc?.mintAddress,
+              decimals: 6,
+              transferFee: null,
+              display: {
+                rule: "scaled",
+                multiplier: 2,
+                newMultiplier: 2,
+                newMultiplierEffectiveAt: "2026-01-01T00:00:00.000Z",
+              },
+            },
+          },
+        });
+      }
+      if (url.endsWith("/quote")) {
+        quoteBodies.push(JSON.parse(String(init?.body)));
+        return Response.json({
+          data: {
+            quote: {
+              mint: usdc?.mintAddress,
+              amount: "12.5",
+              amounts: {
+                basis: "credit",
+                debit: "12.5",
+                fee: "0",
+                credit: "12.5",
+                decimals: 6,
+                display: {
+                  debit: "25",
+                  fee: "0",
+                  credit: "25",
+                  asOf: "2026-10-22T12:00:00.000Z",
+                },
+              },
+              feeEpoch: null,
+              asOf: "2026-10-22T12:00:00.000Z",
+              expiresAt: "2099-01-01T00:00:00.000Z",
+            },
+          },
+        });
+      }
+      creates.push(JSON.parse(String(init?.body)));
+      return Response.json({ data: { id: "preq_1", publicToken: "tok_1" } });
+    });
+    render(<PaymentRequestCreateWorkspace wallets={[wallet]} walletsError={null} />, { wrapper });
+    const user = userEvent.setup();
+    const create = () => screen.getByRole("button", { name: "Create and copy link" });
+
+    await user.click(await screen.findByRole("radio", { name: "Wallet display" }));
+    await user.type(screen.getByRole("textbox", { name: "Amount as wallets show it" }), "25");
+    await user.click(screen.getByRole("button", { name: "Destination wallet" }));
+    await user.click(screen.getByRole("button", { name: /Treasury/ }));
+
+    await waitFor(() => expect(screen.getByText("Token amount")).toBeTruthy());
+    expect(screen.getByText("Payer pays")).toBeTruthy();
+    expect(readsAs()).toBe("Anyone with the link can pay 12.50 USDC into Treasury.");
+    await waitFor(() => expect(create().hasAttribute("disabled")).toBe(false));
+    await user.click(create());
+
+    await waitFor(() => expect(dashboardRouter.push).toHaveBeenCalledTimes(1));
+    expect(quoteBodies).toEqual([{ displayAmount: "25", basis: "credit" }]);
+    expect(creates).toEqual([
+      { walletId: "wallet_treasury", token: usdc?.mintAddress, amount: "12.5", expiresAt: null },
+    ]);
+  });
 });

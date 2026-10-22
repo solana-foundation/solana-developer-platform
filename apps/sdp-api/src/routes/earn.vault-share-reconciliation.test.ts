@@ -274,7 +274,7 @@ async function seedCustodyWithdrawalRequest(params: {
 }
 
 function balance(mint: string, amount: string, decimals = 6) {
-  return { token: "custom", mint, amount, uiAmount: amount, decimals };
+  return { token: "custom", mint, amount, decimals, program: "spl-token" as const };
 }
 
 function getReconciliation() {
@@ -327,7 +327,8 @@ describe("GET /v1/earn/vault-share-reconciliation", () => {
         shareMint: SHARE_MINT_CATALOGUED,
         shares: "500",
         decimals: 6,
-        uiShares: "500",
+        // The shares in token units, from base units: 500 ÷ 10^6.
+        uiShares: "0.0005",
         ambiguousAttribution: false,
       },
     ]);

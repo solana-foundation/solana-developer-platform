@@ -13,6 +13,7 @@ import { CoinsIcon, KeyIcon, ReceiptIcon, WalletIcon } from "lucide-react";
 import Link from "next/link";
 import { Fragment, useMemo } from "react";
 import { DashboardQuickStart } from "@/components/dashboard-quick-start.redesign";
+import { TokenDisplayAmount } from "@/components/token-display-amount";
 import { TokenMark } from "@/components/token-mark";
 import { ActionTile } from "@/components/ui/action-tile";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
@@ -261,7 +262,10 @@ function BalanceSummary({
                       ) : null}
                     </span>
                     <span className="block text-body text-secondary tabular-nums">
-                      {formatTokenAmount(balance.uiAmount, locale)}
+                      <TokenDisplayAmount
+                        balance={balance}
+                        formatted={formatTokenAmount(balance.displayAmount, locale)}
+                      />
                     </span>
                   </span>
                   {usdValue === null ? null : (

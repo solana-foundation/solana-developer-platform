@@ -107,7 +107,8 @@ export function OnchainSendRail({
       walletsError={wizard.liveWalletsError}
       onPrimary={() => void wizard.handlePrimary()}
       onSecondary={wizard.handleSecondary}
-      onCancel={wizard.finished || wizard.submitting ? undefined : onCancel}
+      secondaryDisabled={wizard.submitting || wizard.quoteInFlight}
+      onCancel={wizard.finished || wizard.submitting || wizard.quoteInFlight ? undefined : onCancel}
       // A sent or held transfer has nothing to go back to.
       hideSecondary={wizard.finished}
       counterpartyDialog={null}

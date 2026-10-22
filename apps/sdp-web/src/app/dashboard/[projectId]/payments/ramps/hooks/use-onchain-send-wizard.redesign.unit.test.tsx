@@ -59,7 +59,16 @@ const wallets: PaymentsDashboardWallet[] = [
     publicKey: "sol-wallet",
     label: "SOL Treasury",
     balances: [
-      { token: "SOL", mint: SOL_MINT, amount: "1250000000", uiAmount: "1.25", decimals: 9 },
+      {
+        token: "SOL",
+        mint: SOL_MINT,
+        amount: "1250000000",
+        tokenAmount: "1.25",
+        displayAmount: "1.25",
+        displayAsOf: null,
+        displayRule: "plain",
+        decimals: 9,
+      },
     ],
   },
   {
@@ -70,7 +79,16 @@ const wallets: PaymentsDashboardWallet[] = [
     publicKey: "usdc-wallet",
     label: "USDC Treasury",
     balances: [
-      { token: "USDC", mint: SECOND_MINT, amount: "750000", uiAmount: "0.75", decimals: 6 },
+      {
+        token: "USDC",
+        mint: SECOND_MINT,
+        amount: "750000",
+        tokenAmount: "0.75",
+        displayAmount: "0.75",
+        displayAsOf: null,
+        displayRule: "plain",
+        decimals: 6,
+      },
     ],
   },
 ];
@@ -150,6 +168,55 @@ async function prepareReview(result: ReturnType<typeof renderWizard>["result"], 
     act(() => result.current.setField("memo", memo));
   }
   await act(async () => result.current.handlePrimary());
+}
+
+/** A scaled mint's terms and a debit quote for SECOND_MINT: 1 shown is 0.5 token units. */
+function stubScaledMint(expiresAt: string) {
+  const base = fetchMock.getMockImplementation();
+  fetchMock.mockImplementation((input, init) => {
+    const url = String(input);
+    if (url === `/api/dashboard/tokens/${SECOND_MINT}/terms`) {
+      return Promise.resolve(
+        Response.json({
+          data: {
+            terms: {
+              mint: SECOND_MINT,
+              decimals: 6,
+              transferFee: null,
+              display: {
+                rule: "scaled",
+                multiplier: 2,
+                newMultiplier: 2,
+                newMultiplierEffectiveAt: "2026-01-01T00:00:00.000Z",
+              },
+            },
+          },
+        })
+      );
+    }
+    if (url === `/api/dashboard/tokens/${SECOND_MINT}/quote`) {
+      return Promise.resolve(
+        Response.json({
+          data: {
+            quote: {
+              mint: SECOND_MINT,
+              amount: "0.5",
+              amounts: { basis: "debit", debit: "0.5", fee: "0", credit: "0.5", decimals: 6 },
+              feeEpoch: null,
+              asOf: "2026-10-22T12:00:00.000Z",
+              expiresAt,
+            },
+          },
+        })
+      );
+    }
+    if (base === undefined) throw new Error("fetch mock has no implementation");
+    return base(input, init);
+  });
+}
+
+function quotePosts() {
+  return fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/quote"));
 }
 
 function transferPosts() {
@@ -322,5 +389,59 @@ describe("useOnchainSendWizard", () => {
 
     expect(result.current.fields.accountId).toBe(cryptoAccount.id);
     expect(result.current.addAccountOpen).toBe(false);
+  });
+  it("sends the token amount a display amount is priced at, never the display amount", async () => {
+    stubScaledMint("2099-01-01T00:00:00.000Z");
+    const { result } = renderWizard();
+    await resolveAccounts();
+    act(() => result.current.setField("accountId", cryptoAccount.id));
+    act(() => result.current.selectWallet("wallet-usdc"));
+    await waitFor(() => expect(result.current.amountEntry.displayEntryAvailable).toBe(true));
+    act(() => {
+      result.current.amountEntry.setUnit("display");
+      result.current.amountEntry.setDisplayAmount("1");
+    });
+    // Continue and Back wait for the quote.
+    expect(result.current.quoteInFlight).toBe(true);
+    expect(result.current.canProceed).toBe(false);
+
+    await waitFor(() => expect(result.current.sendAmount).toBe("0.5"));
+    expect(JSON.parse(String(quotePosts()[0]?.[1]?.body))).toEqual({
+      displayAmount: "1",
+      basis: "debit",
+    });
+    await act(async () => result.current.handlePrimary());
+    expect(result.current.currentStepId).toBe("REVIEW");
+    await act(async () => result.current.handlePrimary());
+
+    expect(JSON.parse(String(transferPosts()[0]?.[1]?.body))).toEqual({
+      sourceCustodyWalletId: "wallet-usdc",
+      destination: DESTINATION,
+      token: SECOND_MINT,
+      amount: "0.5",
+    });
+  });
+
+  it("refuses to send a display amount whose quote has expired", async () => {
+    stubScaledMint("2000-01-01T00:00:00.000Z");
+    const { result } = renderWizard();
+    await resolveAccounts();
+    act(() => result.current.setField("accountId", cryptoAccount.id));
+    act(() => result.current.selectWallet("wallet-usdc"));
+    await waitFor(() => expect(result.current.amountEntry.displayEntryAvailable).toBe(true));
+    act(() => {
+      result.current.amountEntry.setUnit("display");
+      result.current.amountEntry.setDisplayAmount("1");
+    });
+    await waitFor(() => expect(result.current.canProceed).toBe(true));
+    await act(async () => result.current.handlePrimary());
+    await waitFor(() => expect(result.current.canProceed).toBe(true));
+    await act(async () => result.current.handlePrimary());
+
+    expect(transferPosts()).toHaveLength(0);
+    expect(mocks.toastError).toHaveBeenCalledWith(
+      "The price of this amount expired, so it was priced again. Check the amount and try again.",
+      expect.anything()
+    );
   });
 });

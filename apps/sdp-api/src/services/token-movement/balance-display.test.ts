@@ -1,0 +1,218 @@
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { runInClusterScope } from "@sdp/rpc/scope";
+import { SOL_MINT, SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
+import { type Address, getAddressDecoder } from "@solana/kit";
+import { SYSVAR_CLOCK_ADDRESS } from "@solana/sysvars";
+import type { ExtensionArgs } from "@solana-program/token-2022";
+import { describe, expect, it } from "vitest";
+import { installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
+import {
+  answerMovementAccounts,
+  encodedRpcAccount,
+  mintRpcAccount,
+  TEST_CLOCK,
+} from "@/test/helpers/token-movement";
+import {
+  type HeldTokenBalance,
+  nativeSolHolding,
+  sumHoldings,
+  withDisplayAmount,
+  withDisplayAmounts,
+} from "./balance-display";
+
+const testAddress = (byte: number): Address =>
+  getAddressDecoder().decode(new Uint8Array(32).fill(byte));
+
+const AUTHORITY = testAddress(2);
+const CLASSIC_MINT = testAddress(3);
+const SCALED_MINT = testAddress(4);
+const INTEREST_MINT = testAddress(5);
+const PLAIN_2022_MINT = testAddress(6);
+const UNREADABLE_MINT = testAddress(7);
+const READ_AT = new Date(Number(TEST_CLOCK.unixTimestamp) * 1000).toISOString();
+
+function holding(mint: string, amount: string, program: HeldTokenBalance["program"]) {
+  return { token: mint, mint, amount, decimals: 6, program } satisfies HeldTokenBalance;
+}
+
+const scaledExtension: ExtensionArgs = {
+  __kind: "ScaledUiAmountConfig",
+  authority: AUTHORITY,
+  multiplier: 2,
+  newMultiplierEffectiveTimestamp: 0n,
+  newMultiplier: 2,
+};
+
+/** 5% a year for 365 days before the Clock read; the program's year is 365.24 days. */
+const interestExtension: ExtensionArgs = {
+  __kind: "InterestBearingConfig",
+  rateAuthority: AUTHORITY,
+  initializationTimestamp: TEST_CLOCK.unixTimestamp - 31_536_000n,
+  preUpdateAverageRate: 500,
+  lastUpdateTimestamp: TEST_CLOCK.unixTimestamp - 31_536_000n,
+  currentRate: 500,
+};
+
+describe("balance display", () => {
+  const rpc = installClusterRpcResponder();
+
+  const termsReads = () => rpc.requests.filter(({ method }) => method === "getMultipleAccounts");
+
+  function inScope<T>(operation: () => Promise<T>): Promise<T> {
+    return runInClusterScope({ projectId: null, environment: "sandbox" }, operation);
+  }
+
+  function answerMints() {
+    answerMovementAccounts(
+      rpc,
+      new Map([
+        [SCALED_MINT, mintRpcAccount("token-2022", { decimals: 6, extensions: [scaledExtension] })],
+        [
+          INTEREST_MINT,
+          mintRpcAccount("token-2022", { decimals: 6, extensions: [interestExtension] }),
+        ],
+        [PLAIN_2022_MINT, mintRpcAccount("token-2022", { decimals: 6, extensions: null })],
+        // Not a mint: the bytes do not decode.
+        [UNREADABLE_MINT, encodedRpcAccount(SPL_TOKEN_PROGRAMS["token-2022"], new Uint8Array(90))],
+      ])
+    );
+  }
+
+  it("shows native SOL and classic mints as their token amount, with no read", async () => {
+    const displayed = await inScope(() =>
+      withDisplayAmount(
+        createClusterRpc(),
+        [nativeSolHolding(1_500_000_000n), holding(CLASSIC_MINT, "2500000", "spl-token")],
+        undefined
+      )
+    );
+
+    expect(displayed).toEqual([
+      {
+        token: "SOL",
+        mint: SOL_MINT,
+        amount: "1500000000",
+        tokenAmount: "1.5",
+        displayAmount: "1.5",
+        displayAsOf: null,
+        displayRule: "plain",
+        decimals: 9,
+      },
+      {
+        token: CLASSIC_MINT,
+        mint: CLASSIC_MINT,
+        amount: "2500000",
+        tokenAmount: "2.5",
+        displayAmount: "2.5",
+        displayAsOf: null,
+        displayRule: "plain",
+        decimals: 6,
+      },
+    ]);
+    expect(termsReads()).toEqual([]);
+  });
+
+  it("reads every wallet's Token-2022 mints once and shows each under its rule", async () => {
+    answerMints();
+
+    const displayed = await inScope(() =>
+      withDisplayAmounts(
+        createClusterRpc(),
+        new Map([
+          ["wallet_a", [holding(SCALED_MINT, "1500000", "token-2022")]],
+          [
+            "wallet_b",
+            [
+              holding(SCALED_MINT, "250000", "token-2022"),
+              holding(INTEREST_MINT, "1000000", "token-2022"),
+              holding(PLAIN_2022_MINT, "3000000", "token-2022"),
+            ],
+          ],
+        ])
+      )
+    );
+
+    expect(displayed.get("wallet_a")).toEqual([
+      expect.objectContaining({
+        tokenAmount: "1.5",
+        displayAmount: "3",
+        displayAsOf: READ_AT,
+        displayRule: "scaled",
+      }),
+    ]);
+    expect(displayed.get("wallet_b")).toEqual([
+      expect.objectContaining({ tokenAmount: "0.25", displayAmount: "0.5", displayRule: "scaled" }),
+      // e^(0.05 × 365 ÷ 365.24), in the program's f64 steps.
+      expect.objectContaining({
+        tokenAmount: "1",
+        displayAmount: "1.051237",
+        displayAsOf: READ_AT,
+        displayRule: "interest",
+      }),
+      expect.objectContaining({
+        tokenAmount: "3",
+        displayAmount: "3",
+        displayAsOf: null,
+        displayRule: "plain",
+      }),
+    ]);
+    // RPC budget: one request for the Clock and every distinct Token-2022 mint.
+    expect(termsReads()).toHaveLength(1);
+    expect(termsReads()[0]?.params[0]).toEqual([
+      SYSVAR_CLOCK_ADDRESS,
+      SCALED_MINT,
+      INTEREST_MINT,
+      PLAIN_2022_MINT,
+    ]);
+  });
+
+  it("leaves out a holding whose mint terms cannot be read, and keeps the others", async () => {
+    answerMints();
+
+    const displayed = await inScope(() =>
+      withDisplayAmount(
+        createClusterRpc(),
+        [
+          holding(UNREADABLE_MINT, "1000000", "token-2022"),
+          holding(SCALED_MINT, "1000000", "token-2022"),
+        ],
+        undefined
+      )
+    );
+
+    expect(displayed.map(({ mint }) => mint)).toEqual([SCALED_MINT]);
+  });
+
+  it("fails when the terms read itself fails", async () => {
+    rpc.respond("getMultipleAccounts", () => ({
+      error: { code: -32_005, message: "Node is unhealthy" },
+    }));
+
+    await expect(
+      inScope(() =>
+        withDisplayAmount(
+          createClusterRpc(),
+          [holding(SCALED_MINT, "1000000", "token-2022")],
+          undefined
+        )
+      )
+    ).rejects.toThrow();
+  });
+});
+
+describe("sumHoldings", () => {
+  it("sums each asset's base units across wallets and keeps native SOL apart from wrapped SOL", () => {
+    const wrappedSol = { ...holding(SOL_MINT, "5", "spl-token"), token: "wSOL", decimals: 9 };
+
+    expect(
+      sumHoldings([
+        [nativeSolHolding(1_000_000_000n), holding(SCALED_MINT, "18446744073709551", "token-2022")],
+        [nativeSolHolding(2n), wrappedSol, holding(SCALED_MINT, "1", "token-2022")],
+      ])
+    ).toEqual([
+      { ...wrappedSol, amount: "5" },
+      { token: "SOL", mint: SOL_MINT, amount: "1000000002", decimals: 9, program: null },
+      holding(SCALED_MINT, "18446744073709552", "token-2022"),
+    ]);
+  });
+});

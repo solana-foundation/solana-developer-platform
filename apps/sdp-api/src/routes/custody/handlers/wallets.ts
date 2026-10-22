@@ -1,7 +1,6 @@
 import { SigningError } from "@sdp/custody/signing";
 import { createClusterRpc } from "@sdp/rpc/factory";
-import { getAccountInfo } from "@sdp/rpc/solana";
-import { formatDecimalAmount } from "@sdp/solana/amount";
+import { getAccountInfo, type SolanaRpc } from "@sdp/rpc/solana";
 import {
   CUSTODY_PROVIDERS,
   type CustodyProvider,
@@ -14,7 +13,6 @@ import {
   type CustodyWalletTokenBalance,
   type DeleteWalletResponse,
 } from "@sdp/types/custody";
-import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import type { Address } from "@solana/kit";
 import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
@@ -54,13 +52,20 @@ import {
 } from "@/services/domain/signing/custody-runtime-target";
 import * as signingServiceModule from "@/services/domain/signing.service";
 import {
-  aggregateTrackedWalletBalances,
   attachTokenSymbolsToBalanceMap,
+  attachTokenSymbolsToBalances,
   attachUsdValuesToBalanceMap,
   attachUsdValuesToBalances,
 } from "@/services/helius-das.service";
 import { assertCustodyProviderAvailable } from "@/services/provider-availability.service";
 import type { CustodyWalletIdempotency } from "@/services/stores/custody-config.store";
+import {
+  type HeldTokenBalance,
+  nativeSolBalance,
+  sumHoldings,
+  withDisplayAmount,
+  withDisplayAmounts,
+} from "@/services/token-movement/balance-display";
 
 export function clearWalletCaches() {
   clearWalletBalanceCache();
@@ -160,34 +165,56 @@ function resolveWalletFilters(c: AppContext) {
   };
 }
 
-async function getBalancesByWalletId(
+/** Each wallet's labeled holdings, for the wallets whose read succeeded. */
+async function readHeldBalancesByWalletId(
   c: AppContext,
-  walletPublicKeys: WalletBalanceTarget[],
-  options: { includeUsdValues?: boolean } = {}
-) {
+  rpc: SolanaRpc,
+  walletPublicKeys: WalletBalanceTarget[]
+): Promise<Map<string, HeldTokenBalance[]>> {
   // Labels and chain reads start together; neither needs the other until both are in.
   const [tokenLabelsByMint, observedBalances] = await Promise.all([
     resolveIssuedTokenLabelsByMint(c),
-    readWalletBalances(
-      createClusterRpc(),
-      buildWalletBalanceCacheScope(c),
-      walletPublicKeys,
-      c.get("requestId")
-    ),
+    readWalletBalances(rpc, buildWalletBalanceCacheScope(c), walletPublicKeys, c.get("requestId")),
   ]);
-  const labeledBalances = new Map(
+  return new Map(
     [...observedBalances].map(([walletId, balances]) => [
       walletId,
       withIssuedTokenLabels(balances, tokenLabelsByMint),
     ])
   );
+}
 
-  const balancesMap = await attachTokenSymbolsToBalanceMap(labeledBalances);
-
-  if (options.includeUsdValues === false) {
-    return balancesMap;
+/**
+ * Every wallet's balances with display amounts, symbols and USD values, from
+ * one Token Terms read for all of them. When that read fails, a wallet that
+ * holds a Token-2022 mint is left out, like a wallet whose own read failed;
+ * the others need no read.
+ */
+async function getBalancesByWalletId(
+  c: AppContext,
+  walletPublicKeys: WalletBalanceTarget[]
+): Promise<Map<string, CustodyWalletTokenBalance[]>> {
+  const rpc = createClusterRpc();
+  const held = await readHeldBalancesByWalletId(c, rpc, walletPublicKeys);
+  let displayed: Map<string, CustodyWalletTokenBalance[]>;
+  try {
+    displayed = await withDisplayAmounts(rpc, held);
+  } catch (error) {
+    getLogger().error(
+      {
+        requestId: c.get("requestId"),
+        error: error instanceof Error ? error.message : String(error),
+      },
+      "getBalancesByWalletId: failed to read token terms for display"
+    );
+    const classicOnly = new Map(
+      [...held].filter(([, holdings]) =>
+        holdings.every((holding) => holding.program !== "token-2022")
+      )
+    );
+    displayed = await withDisplayAmounts(rpc, classicOnly);
   }
-
+  const balancesMap = await attachTokenSymbolsToBalanceMap(displayed);
   return attachUsdValuesToBalanceMap(c.env, balancesMap);
 }
 
@@ -527,30 +554,44 @@ export const getWalletAggregate = async (c: AppContext) => {
   const filters = resolveWalletFilters(c);
   const wallets = await getWalletSummaries(c, filters, "aggregate_wallets");
   const balancesStartedAt = performance.now();
-  const balancesByWalletId = await getBalancesByWalletId(
+  const rpc = createClusterRpc();
+  const heldByWalletId = await readHeldBalancesByWalletId(
     c,
+    rpc,
     wallets.map((wallet) => ({
       id: wallet.id,
       walletId: wallet.walletId,
       publicKey: wallet.publicKey,
-    })),
-    { includeUsdValues: false }
+    }))
   );
   logWalletStep("aggregate_wallets", "fetch_wallet_balances", balancesStartedAt, {
     walletCount: wallets.length,
   });
 
-  const walletBalances = wallets.map((wallet) => {
-    const balances = balancesByWalletId.get(wallet.id);
-    if (balances === undefined) {
+  const walletHoldings = wallets.map((wallet) => {
+    const holdings = heldByWalletId.get(wallet.id);
+    if (holdings === undefined) {
       throw serviceUnavailable("Wallet balances are temporarily unavailable. Try again.");
     }
-    return balances;
+    return holdings;
   });
   const aggregateStartedAt = performance.now();
+  // The display of the summed base units, from one terms read.
+  const displayed = await withDisplayAmount(rpc, sumHoldings(walletHoldings), undefined).catch(
+    (cause: unknown) => {
+      getLogger().error(
+        {
+          requestId: c.get("requestId"),
+          error: cause instanceof Error ? cause.message : String(cause),
+        },
+        "getWalletAggregate: failed to read token terms for display"
+      );
+      throw serviceUnavailable("Wallet balances are temporarily unavailable. Try again.");
+    }
+  );
   const aggregatedBalances = await attachUsdValuesToBalances(
     c.env,
-    aggregateTrackedWalletBalances(walletBalances)
+    await attachTokenSymbolsToBalances(displayed)
   );
   logWalletStep("aggregate_wallets", "attach_usd_values", aggregateStartedAt, {
     balanceCount: aggregatedBalances.length,
@@ -613,25 +654,7 @@ export const getWalletById = async (c: AppContext) => {
     throw providerUnavailable("Wallet balance is temporarily unavailable. Try again.");
   }
 
-  const solBalance = {
-    token: "SOL" as const,
-    mint: SOL_MINT,
-    amount: lamports.toString(),
-    uiAmount: formatDecimalAmount(lamports, 9),
-    decimals: 9 as const,
-  };
-  const [pricedSolBalanceResult] = await attachUsdValuesToBalances(c.env, [solBalance]);
-  const pricedSolBalance = pricedSolBalanceResult
-    ? {
-        ...solBalance,
-        ...(typeof pricedSolBalanceResult.usdPrice === "number"
-          ? { usdPrice: pricedSolBalanceResult.usdPrice }
-          : {}),
-        ...(typeof pricedSolBalanceResult.usdValue === "number"
-          ? { usdValue: pricedSolBalanceResult.usdValue }
-          : {}),
-      }
-    : solBalance;
+  const [pricedSolBalance] = await attachUsdValuesToBalances(c.env, [nativeSolBalance(lamports)]);
 
   const response: CustodyWalletByIdResponse = {
     wallet: {

@@ -1585,6 +1585,22 @@
         }
       }
     },
-    "noTransactions": "No transactions found yet."
+    "noTransactions": "No transactions found yet.",
+    "tokenAmount": {
+      "enterAs": "Enter the amount as",
+      "unitToken": "Token units",
+      "unitDisplay": "Wallet display",
+      "displayAmountLabel": "Amount as wallets show it",
+      "quoting": "Pricing the amount…",
+      "quoteTokenAmount": "Token amount",
+      "quoteFee": "Transfer fee",
+      "quoteRecipientReceives": "Recipient receives",
+      "quoteRecipientShows": "Recipient's wallet shows",
+      "quotePayerPays": "Payer pays",
+      "quotePayerShows": "Payer's wallet shows",
+      "quoteExpired": "The price of this amount expired, so it was priced again. Check the amount and try again.",
+      "termsInvalid": "The token's terms could not be read.",
+      "quoteInvalid": "The amount could not be priced."
+    }
   }
 }

@@ -144,7 +144,8 @@ export function loadWalletVerification(client: SdpApiClient): Promise<
 
 /** A verified wallet's channel-side balance for a single mint. */
 export interface WalletChannelBalance {
-  uiAmount: string;
+  /** Exact token units. Private Channels refuse display-rule mints, so this is what a wallet shows. */
+  tokenAmount: string;
   mint: string;
   /** Raw base-unit amount + decimals, kept so balances can be summed per mint
    * without decimal-string arithmetic (the overview aggregates across wallets). */
@@ -172,7 +173,7 @@ export async function loadChannelBalances(
         return [
           wallet.pubkey,
           {
-            uiAmount: balance.uiAmount,
+            tokenAmount: balance.tokenAmount,
             mint: balance.mint,
             amount: balance.amount,
             decimals: balance.decimals,

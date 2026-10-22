@@ -247,7 +247,7 @@ function ScheduleAmountFields({ form }: StepProps) {
       ) : selectedAssetBalance ? (
         <FieldHint tone={exceedsBalance ? "error" : "neutral"}>
           {t("DashboardPayments.payForm.available", {
-            amount: formatTokenAmount(selectedAssetBalance.uiAmount, locale),
+            amount: formatTokenAmount(selectedAssetBalance.tokenAmount, locale),
             asset: assetLabel,
           })}
         </FieldHint>

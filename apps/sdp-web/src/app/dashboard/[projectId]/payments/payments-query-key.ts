@@ -2,7 +2,9 @@ import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import type { CryptoRailId } from "@sdp/types/payment-rails";
 import type { RampDirection } from "@sdp/types/payments";
 import type { RampProviderId } from "@sdp/types/provider-access";
+import type { TokenMovementBasis } from "@sdp/types/token-movements";
 import type { Arguments } from "swr";
+import type { AmountEntryUnit } from "./token-amount-quote.data";
 
 export interface CounterpartyRequirementsParams {
   counterpartyId: string;
@@ -85,6 +87,19 @@ export const paymentsQueryKeys = {
   transactionFilterOptions: ({ projectId }: { projectId: string }) =>
     ["payments-transaction-filter-options", projectId] as const,
   counterpartyFieldOptions: () => "counterparty-field-options",
+  tokenTerms: ({ mint }: { mint: string }) => ["token-terms", mint] as const,
+  /** One priced amount: `unit` says whether `value` is token units or display units. */
+  tokenAmountQuote: ({
+    mint,
+    unit,
+    value,
+    basis,
+  }: {
+    mint: string;
+    unit: AmountEntryUnit;
+    value: string;
+    basis: TokenMovementBasis;
+  }) => ["token-amount-quote", mint, unit, value, basis] as const,
 };
 
 /**

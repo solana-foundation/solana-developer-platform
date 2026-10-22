@@ -154,7 +154,7 @@ describe("Custody wallet by ID route", () => {
     vi.clearAllMocks();
     attachUsdValuesMock.mockReset();
     clusterRpc.answer("getAccountInfo", systemAccountInfoResult(1, 4_200_000_000));
-    attachUsdValuesMock.mockImplementation(async (_env, balances) => balances);
+    attachUsdValuesMock.mockImplementation(async (_env, balances) => [...balances]);
     await seedTestDatabase(env);
     await seedAuthAndConfigs();
   });
@@ -345,7 +345,15 @@ describe("Custody wallet by ID route", () => {
           provider: "para",
           walletId: "para_wallet_a",
           publicKey: TEST_SOLANA_ADDRESSES.wallet2,
-          balance: { token: "SOL", amount: "4200000000", uiAmount: "4.2", decimals: 9 },
+          balance: {
+            token: "SOL",
+            amount: "4200000000",
+            tokenAmount: "4.2",
+            displayAmount: "4.2",
+            displayAsOf: null,
+            displayRule: "plain",
+            decimals: 9,
+          },
         },
       },
     });
@@ -567,7 +575,15 @@ describe("Custody wallet by ID route", () => {
       data: {
         wallet: {
           id: "cwlt_wallet_by_id_para_a",
-          balance: { token: "SOL", amount: "0", uiAmount: "0", decimals: 9 },
+          balance: {
+            token: "SOL",
+            amount: "0",
+            tokenAmount: "0",
+            displayAmount: "0",
+            displayAsOf: null,
+            displayRule: "plain",
+            decimals: 9,
+          },
         },
       },
     });

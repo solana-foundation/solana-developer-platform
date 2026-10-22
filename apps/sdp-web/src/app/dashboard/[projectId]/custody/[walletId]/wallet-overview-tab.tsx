@@ -26,6 +26,7 @@ import {
   RecordStack,
   StateBand,
 } from "@/components/refresh-record";
+import { TokenDisplayAmount } from "@/components/token-display-amount";
 import { TokenMark } from "@/components/token-mark";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
@@ -233,7 +234,10 @@ function TokensTable({
                 <TableCell
                   className={cn(PAYMENTS_TABLE_CELL, "text-right text-primary tabular-nums")}
                 >
-                  {formatDisplayAmount(balance.uiAmount, balance.token, locale)}
+                  <TokenDisplayAmount
+                    balance={balance}
+                    formatted={formatDisplayAmount(balance.displayAmount, balance.token, locale)}
+                  />
                 </TableCell>
                 <TableCell
                   className={cn(PAYMENTS_TABLE_CELL, "text-right text-primary tabular-nums")}

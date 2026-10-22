@@ -15,7 +15,7 @@ You provision custody wallets up front (see [Set Up Wallets](/docs/guides/setup-
 
 Payments transfer **SPL tokens** — stablecoins, tokenized assets, or any mint your project supports. The `token` field on `POST /v1/payments/transfers` requires the on-chain **mint address** for SPL tokens; the literal string `SOL` is accepted as the native-SOL shorthand. Symbols like `USDC` are not resolved at request time. The `token` filter on `GET /v1/payments/transfers` does an **exact match** against the `Transfer.token` value as stored — API-created transfers store the mint you supplied (or `SOL`), while indexed/observed transfers run mint-to-symbol resolution and may store a resolved symbol (e.g. `USDC`). Filter using the same label you see on the response, or query without `token` and filter client-side. **Balance responses always attempt symbol resolution** and return the symbol whenever the mint is known — so a wallet holding USDC reports `USDC` rather than the mint string.
 
-**Amounts on the wire are UI-unit decimal strings** — `"100.00"` means 100 tokens, regardless of the mint's decimal count. This applies to every amount SDP accepts. SDP handles the smallest-unit conversion when it builds the on-chain transaction. The one exception is wallet-balance responses, which return both a raw `amount` (smallest unit) **and** a `uiAmount` (decimal string) so balance consumers can pick whichever fits.
+**Amounts on the wire are token units** — decimal strings equal to base units ÷ 10^decimals, so `"100.00"` means 100 tokens, regardless of the mint's decimal count. This applies to every amount SDP accepts. SDP handles the smallest-unit conversion when it builds the on-chain transaction. A token amount is never the display value a scaled UI amount or interest-bearing mint shows in wallets. Wallet-balance responses return the raw `amount` (smallest unit), the `tokenAmount` (token units, for balance checks) and the `displayAmount` (what a wallet shows, for screens).
 
 ## Transfer execution
 
@@ -37,7 +37,7 @@ Every successful or attempted transfer creates a `Transfer` record. The fields t
 | `status` | Wallet transfers: `processing`, `confirmed`, `finalized`, `failed`. See [Verifying a payment](/docs/payments/accept-verification). |
 | `direction` | `inbound` (someone paid you) or `outbound` (you paid someone). |
 | `source`, `destination` | On-chain addresses. |
-| `token`, `amount` | What moved and how much. `amount` is a UI-unit decimal string (e.g. `"100.00"`). |
+| `token`, `amount` | What moved and how much. `amount` is a token-unit decimal string (e.g. `"100.00"`). |
 | `memo` | Optional UTF-8 string, up to 256 chars. See [Payment with memo](/docs/payments/send-payment-with-memo). |
 | `signature` | Solana transaction signature once confirmed. **Unique across SDP** — the natural dedup key. |
 | `slot`, `blockTime`, `fee` | On-chain settlement details, populated as the transaction lands. |

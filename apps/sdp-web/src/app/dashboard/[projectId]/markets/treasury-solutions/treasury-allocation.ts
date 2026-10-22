@@ -45,7 +45,11 @@ export interface TreasuryAllocationWallet {
 
 export interface TreasuryAllocationBalance {
   mint: string;
-  uiAmount: string;
+  /**
+   * Exact token units. Cash subtracts the par intermediates positions record,
+   * which are token units too, so the display amount would mix units.
+   */
+  tokenAmount: string;
   /**
    * The API's own price for this balance, `1` for anything it treats as
    * USD-stable. That includes SDP-ISSUED stablecoins, which a static catalogue
@@ -185,7 +189,7 @@ export function heldVaultShareMints(
   const held: string[] = [];
   for (const balance of wallet.balances) {
     if (!vaultShareMints.has(balance.mint)) continue;
-    if (compareUnsignedDecimals(balance.uiAmount, "0") === 0) continue;
+    if (compareUnsignedDecimals(balance.tokenAmount, "0") === 0) continue;
     held.push(balance.mint);
   }
   return held;
@@ -246,12 +250,12 @@ function walletStableCash(
   for (const balance of wallet.balances) {
     if (!isUsdStableBalance(balance)) continue;
     if (!unmatched.has(balance.mint)) {
-      amounts.push(balance.uiAmount);
+      amounts.push(balance.tokenAmount);
       continue;
     }
     const held = unmatched.get(balance.mint);
-    const free = held === undefined ? undefined : subtractFloored(balance.uiAmount, held);
-    const rest = held === undefined ? undefined : subtractFloored(held, balance.uiAmount);
+    const free = held === undefined ? undefined : subtractFloored(balance.tokenAmount, held);
+    const rest = held === undefined ? undefined : subtractFloored(held, balance.tokenAmount);
     // Without both amounts this wallet's cash is unknowable, not whole.
     if (free === undefined || rest === undefined) return undefined;
     amounts.push(free);

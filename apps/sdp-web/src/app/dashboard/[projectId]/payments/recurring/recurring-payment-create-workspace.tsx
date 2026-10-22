@@ -368,7 +368,7 @@ export function RecurringPaymentCreateWorkspace({
   const exceedsBalance =
     isDecimalString(fields.amount) &&
     selectedAssetBalance !== null &&
-    compareDecimalAmounts(fields.amount, selectedAssetBalance.uiAmount) > 0;
+    compareDecimalAmounts(fields.amount, selectedAssetBalance.tokenAmount) > 0;
   const periodHours = parsePeriodHours(fields.schedulePreset, fields.customPeriodHours);
   const currentStep = createSteps[stepIndex];
   const accountSelectPlaceholder = accountsLoading
@@ -751,12 +751,12 @@ export function RecurringPaymentCreateWorkspace({
                 action={
                   selectedAssetBalance !== null ? (
                     <AmountBalanceReadout
-                      available={selectedAssetBalance.uiAmount}
+                      available={selectedAssetBalance.tokenAmount}
                       assetLabel={selectedAsset?.label ?? fields.token}
                       exceeds={exceedsBalance}
                       onMax={
-                        compareDecimalAmounts(selectedAssetBalance.uiAmount, "0") > 0
-                          ? () => setField("amount", selectedAssetBalance.uiAmount)
+                        compareDecimalAmounts(selectedAssetBalance.tokenAmount, "0") > 0
+                          ? () => setField("amount", selectedAssetBalance.tokenAmount)
                           : undefined
                       }
                     />

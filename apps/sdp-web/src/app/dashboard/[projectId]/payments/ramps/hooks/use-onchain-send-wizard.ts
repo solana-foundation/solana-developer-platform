@@ -26,6 +26,7 @@ import {
   summaryAmount,
 } from "@/app/dashboard/[projectId]/payments/ramps/wizard-summary";
 import { sendTransferUnderKey } from "@/app/dashboard/[projectId]/payments/transfer-idempotency";
+import { useTokenAmountEntry } from "@/app/dashboard/[projectId]/payments/use-token-amount-entry";
 import type { WizardSummaryDetail } from "@/app/dashboard/[projectId]/payments/wizard-summary-list";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
@@ -238,11 +239,10 @@ function useOnchainAssetSelection(
   } else if (selectedAssetBalance === null) {
     availableAmount = "0";
   } else {
-    availableAmount = selectedAssetBalance.uiAmount;
+    availableAmount = selectedAssetBalance.tokenAmount;
   }
-  const exceedsBalance = onchainAmountExceedsBalance(fields.amount, availableAmount);
 
-  return { assetOptions, selectedAsset, selectedAssetBalance, availableAmount, exceedsBalance };
+  return { assetOptions, selectedAsset, selectedAssetBalance, availableAmount };
 }
 
 export function useOnchainSendWizard({
@@ -305,8 +305,17 @@ export function useOnchainSendWizard({
     signingUnavailable,
     t
   );
-  const { assetOptions, selectedAsset, selectedAssetBalance, availableAmount, exceedsBalance } =
+  const { assetOptions, selectedAsset, selectedAssetBalance, availableAmount } =
     useOnchainAssetSelection(selectedWallet, fields, issuedTokenSymbolsByMint, t);
+  // A send fixes its debit. For a display-rule mint the user may type what wallets show;
+  // the quote's token amount is what is checked and sent.
+  const amountEntry = useTokenAmountEntry({
+    mint: selectedAssetBalance === null ? null : selectedAssetBalance.mint,
+    basis: "debit",
+    tokenAmountInput: fields.amount,
+  });
+  const sendFields = { ...fields, amount: amountEntry.tokenAmount };
+  const exceedsBalance = onchainAmountExceedsBalance(sendFields.amount, availableAmount);
 
   const selectWallet = (walletId: string) => {
     setField("walletId", walletId);
@@ -322,16 +331,17 @@ export function useOnchainSendWizard({
   const currentStepId = steps[stepIndex].id;
   const isLastStep = stepIndex === steps.length - 1;
   const readySubmission = resolveReadySubmission(
-    fields,
+    sendFields,
     destinationAddress,
     selectedAssetBalance === null ? null : selectedAssetBalance.mint
   );
   const canProceed =
     finished ||
-    ((currentStepId === "DESTINATION" || !signingUnavailable) &&
+    (!amountEntry.quoteInFlight &&
+      (currentStepId === "DESTINATION" || !signingUnavailable) &&
       canProceedOnchainSend({
         stepId: currentStepId,
-        fields,
+        fields: sendFields,
         destinationAddress,
         exceedsBalance,
         selectedMint: selectedAssetBalance === null ? null : selectedAssetBalance.mint,
@@ -359,6 +369,12 @@ export function useOnchainSendWizard({
         router.push(href("/dashboard/payments"));
         return;
       }
+      // A display amount's token amount holds only until its quote expires.
+      if (!amountEntry.canSubmitAt(Date.now())) {
+        amountEntry.refreshQuote();
+        toast.error(t("DashboardPayments.tokenAmount.quoteExpired"), { position: "bottom-right" });
+        return;
+      }
       if (readySubmission !== null) {
         await submitTransfer(readySubmission);
       }
@@ -368,7 +384,7 @@ export function useOnchainSendWizard({
   };
 
   const handleSecondary = () => {
-    if (submitting || finished) {
+    if (submitting || finished || amountEntry.quoteInFlight) {
       return;
     }
     if (stepIndex === 0) {
@@ -390,7 +406,7 @@ export function useOnchainSendWizard({
       CoinsIcon
     ),
     ...optionalDetail(
-      summaryAmount(fields.amount, locale),
+      summaryAmount(sendFields.amount, locale),
       t("DashboardPayments.onchainSend.amount"),
       DollarSignIcon
     ),
@@ -419,6 +435,10 @@ export function useOnchainSendWizard({
     selectedAssetBalance,
     availableAmount,
     exceedsBalance,
+    amountEntry,
+    /** The amount sent, in token units: typed, or priced from a display amount. */
+    sendAmount: sendFields.amount,
+    quoteInFlight: amountEntry.quoteInFlight,
     fields,
     setField,
     selectWallet,

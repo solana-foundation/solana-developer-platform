@@ -75,11 +75,7 @@ import {
   withOpenApi,
 } from "./base";
 import { preparedTransactionSchema } from "./issuance";
-
-export const tokenAmountSchema = z.string().openapi({
-  description: "Token amount in UI units (decimal string).",
-  example: "100.00",
-});
+import { tokenBalanceAmountFields } from "./token-balances";
 
 const TOKEN_UNITS_NOTE =
   "token units: base units ÷ 10^decimals, as a decimal string. Never the display value a scaled or interest-bearing mint shows; see `amounts.display`.";
@@ -213,20 +209,7 @@ export const tokenBalanceSchema = z
       description: "Token mint address.",
       example: "So11111111111111111111111111111111111111112",
     }),
-    amount: z.string().openapi({
-      description: "Raw amount in smallest units.",
-      example: "100000000",
-    }),
-    uiAmount: tokenAmountSchema,
-    decimals: z.number().int().openapi({ description: "Token decimals.", example: 6 }),
-    usdPrice: z.number().optional().openapi({
-      description: "Resolved USD price per token when available.",
-      example: 1,
-    }),
-    usdValue: z.number().optional().openapi({
-      description: "Resolved USD value of this balance when pricing is available.",
-      example: 100,
-    }),
+    ...tokenBalanceAmountFields,
     confidential: z
       .boolean()
       .optional()
@@ -518,7 +501,7 @@ export const transferSchema = z
       description: "Fiat currency for the ramp leg.",
       example: "USD",
     }),
-    fiatAmount: tokenAmountSchema.optional().openapi({
+    fiatAmount: z.string().optional().openapi({
       description:
         "Quoted fiat amount for the ramp leg: what the customer pays on an on-ramp, the payout quoted on an off-ramp. It never changes after the quote; an off-ramp's final payout is `fiatPayout`.",
       example: "100.00",
@@ -1331,7 +1314,7 @@ export const paymentSubscriptionCollectionAttemptSchema = z
       .nullable()
       .openapi({ description: "Payment transfer record ID when linked." }),
     token: z.string().openapi({ description: "Token mint or normalized token identifier." }),
-    amount: tokenAmountSchema,
+    amount: tokenUnitsAmountSchema,
     dueAt: isoDateTimeSchema,
     attemptedAt: isoDateTimeSchema.nullable(),
     status: paymentSubscriptionCollectionAttemptStatusSchema,
