@@ -157,6 +157,16 @@ describe("rejectCrossSiteWrite", () => {
       )
     ).toBeNull();
   });
+
+  it("refuses a Server Action with neither Origin nor Sec-Fetch-Site only while it carries the Clerk session cookie", () => {
+    const settingsPath = `/dashboard/${PRODUCTION_PROJECT.id}/settings`;
+    expect(
+      rejectCrossSiteWrite(
+        write(settingsPath, { "next-action": "action_test", cookie: "__session=session_synthetic" })
+      )?.status
+    ).toBe(403);
+    expect(rejectCrossSiteWrite(write(settingsPath, { "next-action": "action_test" }))).toBeNull();
+  });
 });
 
 describe("proxy request project", () => {
