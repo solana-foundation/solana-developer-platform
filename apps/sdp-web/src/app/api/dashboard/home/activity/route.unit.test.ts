@@ -38,6 +38,29 @@ function transfer(id: string, createdAt: string, amount: string) {
   return { id, createdAt, amount, status: "completed", direction: "outbound", destination: "D" };
 }
 
+const LISTED_MINT: TokenTransactionListItem = {
+  token: { id: "tok_acme", name: "Acme", symbol: "ACME", mintAddress: "mint_1" },
+  transaction: {
+    id: "ttx_1",
+    tokenId: "tok_acme",
+    organizationId: "org_1",
+    type: "mint",
+    status: "confirmed",
+    idempotencyKey: null,
+    idempotencyFingerprint: null,
+    signature: "sig_1",
+    serializedTx: null,
+    params: { amount: "5", destination: "D" },
+    slot: null,
+    blockTime: null,
+    fee: null,
+    error: null,
+    initiatedByKeyId: null,
+    createdAt: TODAY,
+    updatedAt: TODAY,
+  },
+};
+
 describe("GET /api/dashboard/home/activity", () => {
   let buildHomeActivityRows: MockInstance<typeof homePageData.buildHomeActivityRows>;
   let fetchOrgIssuanceActivity: MockInstance<typeof homePageData.fetchOrgIssuanceActivity>;
@@ -72,23 +95,25 @@ describe("GET /api/dashboard/home/activity", () => {
   });
 
   it("includes issuance activity and token metadata while Issuance is enabled", async () => {
-    // SAFETY: the builder skips a listed transaction without a createdAt; only its passage counts.
-    const listed = [{ transaction: {} }] as unknown as TokenTransactionListItem[];
     mocks.issuance.mockResolvedValue(true);
-    fetchOrgIssuanceActivity.mockResolvedValue({ ok: true, data: listed });
+    fetchOrgIssuanceActivity.mockResolvedValue({ ok: true, data: [LISTED_MINT] });
     mocks.fetchPaymentsIssuedTokenSymbols.mockResolvedValue({
       ok: true,
       data: [{ mintAddress: "mint_1", symbol: "ACME" }],
     });
 
     const response = await GET(new Request("http://localhost/api/dashboard/home/activity"));
+    const body = await response.json();
 
     expect(response.status).toBe(200);
     expect(fetchOrgIssuanceActivity).toHaveBeenCalledOnce();
     expect(mocks.fetchPaymentsIssuedTokenSymbols).toHaveBeenCalledOnce();
-    expect(buildHomeActivityRows).toHaveBeenCalledWith([], listed, expect.any(Function), {
+    expect(buildHomeActivityRows).toHaveBeenCalledWith([], [LISTED_MINT], expect.any(Function), {
       mint_1: "ACME",
     });
+    expect(body.data.activityRows).toMatchObject([
+      { id: "issuance-ttx_1", token: "ACME", amount: "5", sourceKind: "issuance" },
+    ]);
   });
 
   it("reports unavailable activity sources without fabricating rows", async () => {

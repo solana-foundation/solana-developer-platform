@@ -31,8 +31,8 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useOptionalDashboardWorkspace: () => workspace,
 }));
 const SETTLED_ACTIVITY = { activityRows: [], todaysVolume: 0, todaysVolumeError: null };
-const swr = vi.hoisted(() => ({
-  activity: undefined as Record<string, unknown> | undefined,
+const swr = vi.hoisted((): { activity: Record<string, unknown> | undefined } => ({
+  activity: undefined,
 }));
 vi.mock("@/lib/dashboard-swr", () => ({
   usePersistedDashboardSWR: () => ({ data: swr.activity }),
