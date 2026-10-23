@@ -52,3 +52,62 @@ export async function fetchTokenTerms(
   assertAccountExists(clock);
   return decodeTokenTerms(request, { mint, clock });
 }
+
+/** `getMultipleAccounts` takes at most this many addresses: the Clock and 99 mints. */
+const MINTS_PER_READ = 99;
+
+/**
+ * The terms of many mints, read live for display (a balance list): one
+ * `getMultipleAccounts` request for the Clock and up to 99 mints, the next
+ * 99 in a concurrent request. A mint whose account is missing or does not
+ * decode gets its error in place of terms, so one unreadable mint does not
+ * hide the others.
+ *
+ * @param assets - Distinct mints, each with the token program its accounts are under.
+ * @param options - The caller's deadline for the read, and the slot it must
+ * see at least (the slot the holdings it displays were read at).
+ * @returns One entry per asset, in order: its terms, or why they could not be read.
+ */
+export async function fetchTokenTermsOfMints(
+  rpc: Rpc<GetMultipleAccountsApi>,
+  assets: readonly TokenAsset[],
+  options: { abortSignal: AbortSignal | undefined; minContextSlot: bigint | undefined }
+): Promise<(MintTokenTerms | TokenTermsError)[]> {
+  const pages: TokenAsset[][] = [];
+  for (let start = 0; start < assets.length; start += MINTS_PER_READ) {
+    pages.push(assets.slice(start, start + MINTS_PER_READ));
+  }
+  const results = await Promise.all(
+    pages.map(async (page) => {
+      const [clock, ...mints] = await fetchEncodedAccounts(
+        rpc,
+        [SYSVAR_CLOCK_ADDRESS, ...page.map((asset) => asset.mint)],
+        {
+          commitment: "confirmed",
+          abortSignal: options.abortSignal,
+          minContextSlot: options.minContextSlot,
+        }
+      );
+      // The Clock sysvar always exists; a node answering otherwise fails the read.
+      assertAccountExists(clock);
+      return page.map((asset, index) => {
+        const mint = mints[index];
+        if (!mint.exists) {
+          return new TokenTermsError(
+            TOKEN_TERMS_REFUSALS.notMint,
+            `No account exists at the mint address ${asset.mint}`
+          );
+        }
+        try {
+          return decodeTokenTerms(asset, { mint, clock });
+        } catch (cause) {
+          if (cause instanceof TokenTermsError) {
+            return cause;
+          }
+          throw cause;
+        }
+      });
+    })
+  );
+  return results.flat();
+}

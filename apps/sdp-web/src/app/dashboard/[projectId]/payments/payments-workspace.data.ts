@@ -35,6 +35,7 @@ import {
 } from "@sdp/types/payments";
 // biome-ignore lint/style/noRestrictedImports: validates the provider ids an estimate response names; which providers to ask comes from getEnabledRampProviders()
 import { RAMP_PROVIDERS } from "@sdp/types/provider-access";
+import type { TokenBalanceAmounts } from "@sdp/types/token-movements";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import type { Address } from "@solana/kit";
 import { z } from "zod";
@@ -58,12 +59,9 @@ import {
 } from "./payment-api-errors";
 import type { ComplianceSnapshot } from "./payments-workspace.types";
 
-export interface PaymentWalletBalance {
+export interface PaymentWalletBalance extends TokenBalanceAmounts {
   token: string;
   mint: string;
-  amount: string;
-  uiAmount: string;
-  decimals: number;
 }
 
 export interface PaymentWalletBalancesSnapshot {

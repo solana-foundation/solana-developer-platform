@@ -21,10 +21,9 @@ import {
   createRpcForSdk,
 } from "@sdp/rpc/solana";
 import type { RpcEnv } from "@sdp/rpc/types";
-import { parseDecimalAmount } from "@sdp/solana/amount";
 import { mosaicAmountUnderLiveTerms } from "@sdp/solana/mosaic-amount";
 import type { SponsoredSubmitter } from "@sdp/solana/token-2022";
-import type { TokenAmount } from "@sdp/solana/token-amount";
+import { parseTokenAmount, type TokenAmount, toBaseUnits } from "@sdp/solana/token-amount";
 import {
   type Address,
   appendTransactionMessageInstructions,
@@ -57,7 +56,6 @@ import {
   createResumeTransaction,
   createStablecoinInitTransaction,
   createTokenizedSecurityInitTransaction,
-  createTransferTransaction,
   // Types
   type FullTransaction,
   // ABL wallet management (object input pattern)
@@ -88,14 +86,12 @@ import {
   type AblWalletOptions,
   type CreateTokenOptions,
   DEFAULT_ACL_MODE,
-  type ExecuteTransferOptions,
   type FreezeThawOptions,
   MintMetadataUpdateError,
   type MintToOptions,
   type MosaicTransaction,
   type MosaicTransactionResult,
   TEMPLATE_MAP,
-  type TransferOptions,
   type UpdateMetadataOptions,
 } from "./types";
 import { safeStringify } from "./utils";
@@ -476,7 +472,7 @@ export class MosaicService {
         const interestBearing = extensions.interestBearing;
         const defaultAccountState = extensions.defaultAccountState;
         const transferFeeMaximum = transferFee
-          ? parseDecimalAmount(transferFee.maxFee, options.decimals)
+          ? toBaseUnits(parseTokenAmount(transferFee.maxFee, options.decimals))
           : undefined;
         transaction = await createCustomTokenInitTransaction(
           this.rpc,
@@ -641,46 +637,6 @@ export class MosaicService {
       ...this.toMosaicTransaction(fullTx),
       tokenAccount: tokenAccountInfo.tokenAccount,
     };
-  }
-
-  /**
-   * Prepare a Token-2022 transfer transaction (unsigned) for client signing.
-   */
-  async prepareTransfer(options: TransferOptions): Promise<MosaicTransaction> {
-    const feePayer = await this.resolveFeePayer(options.feePayer, true);
-
-    const fullTx = await createTransferTransaction({
-      rpc: this.rpc,
-      mint: options.mint,
-      from: options.from,
-      to: options.to,
-      authority: options.authority,
-      feePayer,
-      amount: options.amount,
-      memo: options.memo,
-    });
-
-    return this.toMosaicTransaction(fullTx);
-  }
-
-  /**
-   * Execute a Token-2022 transfer transaction with custody signing.
-   */
-  async transfer(options: ExecuteTransferOptions): Promise<MosaicTransactionResult> {
-    const feePayer = await this.resolveFeePayerSigner(options.feePayer);
-
-    const fullTx = await createTransferTransaction({
-      rpc: this.rpc,
-      mint: options.mint,
-      from: options.from,
-      to: options.to,
-      authority: options.authority,
-      feePayer,
-      amount: options.amount,
-      memo: options.memo,
-    });
-
-    return this.signAndSubmit(fullTx);
   }
 
   // ═════════════════════════════════════════════════════════════════════════

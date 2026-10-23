@@ -25,7 +25,10 @@ function balance(usdValue: number): CustodyWalletTokenBalance {
     token: "USDC",
     mint: "mint-1",
     amount: String(usdValue * 1_000_000),
-    uiAmount: String(usdValue),
+    tokenAmount: String(usdValue),
+    displayAmount: String(usdValue),
+    displayAsOf: null,
+    displayRule: "plain",
     decimals: 6,
     usdValue,
   };

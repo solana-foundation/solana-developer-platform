@@ -1,4 +1,4 @@
-import { formatDecimalAmount } from "@sdp/solana/amount";
+import { formatFixedDecimal, parseFixedDecimal } from "@sdp/solana/amount";
 import type { Token, TokenExtensionsConfig, TokenStatus, TokenTemplate } from "@sdp/types/tokens";
 import type { DatabaseClient as AppDb } from "@/db/client";
 import { buildInClause, parsePostgresJsonOr } from "@/db/postgres-utils";
@@ -37,12 +37,16 @@ function mapTokenRow(
     imageUrl: (row.image_url as string | null | undefined) ?? null,
     template: ((row.template as string | null | undefined) ?? "custom") as TokenTemplate,
     extensions,
-    totalSupply: formatDecimalAmount(
-      (row.total_supply_cached as string | null | undefined) ?? "0",
+    // SDP bookkeeping in base units, not one on-chain amount: the supply counts
+    // mint reservations and the cap is policy, so either may pass u64.
+    totalSupply: formatFixedDecimal(
+      parseFixedDecimal((row.total_supply_cached as string | null | undefined) ?? "0", 0),
       decimals
     ),
     totalSupplyUpdatedAt: (row.total_supply_updated_at as string | null | undefined) ?? null,
-    maxSupply: row.max_supply ? formatDecimalAmount(row.max_supply as string, decimals) : null,
+    maxSupply: row.max_supply
+      ? formatFixedDecimal(parseFixedDecimal(row.max_supply as string, 0), decimals)
+      : null,
     isMintable: (row.is_mintable as number) === 1,
     isFreezable: (row.freeze_authority_enabled as number) === 1,
     requiresAllowlist: (row.allowlist_enabled as number) === 1,

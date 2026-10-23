@@ -48,7 +48,18 @@ const WALLET: PaymentsDashboardWallet = {
   custodyConfigId: "cc_test",
   publicKey: "wallet-pubkey",
   label: "USDC Treasury",
-  balances: [{ token: "USDC", mint: USDC_MINT, amount: "1000000", uiAmount: "1", decimals: 6 }],
+  balances: [
+    {
+      token: "USDC",
+      mint: USDC_MINT,
+      amount: "1000000",
+      tokenAmount: "1",
+      displayAmount: "1",
+      displayAsOf: null,
+      displayRule: "plain",
+      decimals: 6,
+    },
+  ],
 };
 
 // A moonpay onramp requirements answer that needs no collection and no onboarding:

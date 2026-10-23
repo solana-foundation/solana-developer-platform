@@ -562,7 +562,7 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
   });
 });
 
-describe("MosaicService mint and transfer — fee payer", () => {
+describe("MosaicService mint — fee payer", () => {
   type SignAndSubmitProto = {
     signAndSubmit: (fullTx: unknown) => Promise<{ signature: string; slot: bigint }>;
   };
@@ -575,7 +575,6 @@ describe("MosaicService mint and transfer — fee payer", () => {
   let service: MosaicService;
   let fee: ReturnType<typeof makeSponsor>;
   let mintToSpy: ReturnType<typeof vi.spyOn>;
-  let transferSpy: ReturnType<typeof vi.spyOn>;
   let submitSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(async () => {
@@ -600,9 +599,6 @@ describe("MosaicService mint and transfer — fee payer", () => {
     vi.spyOn(ReadTokenTerms, "fetchTokenTerms").mockResolvedValue(
       mintTermsAt(mint, "token-2022", { decimals: 6, extensions: [] })
     );
-    transferSpy = vi
-      .spyOn(MosaicSdk, "createTransferTransaction")
-      .mockResolvedValue(FAKE_FULL_TX as never);
     vi.spyOn(MosaicSdk, "resolveTokenAccount").mockResolvedValue({
       tokenAccount: destination,
     } as never);
@@ -649,23 +645,6 @@ describe("MosaicService mint and transfer — fee payer", () => {
 
     expect(fee.getFeePayer).not.toHaveBeenCalled();
     expect(mintToSpy.mock.calls[0][5]).toBe(signer);
-  });
-
-  it("prepareTransfer uses the client signer as fee payer when Kora is configured", async () => {
-    const result = await service.prepareTransfer({
-      mint,
-      from: clientAddress,
-      to: destination,
-      amount: "1",
-      authority: clientAddress,
-      feePayer: clientAddress,
-    });
-
-    expect(fee.getFeePayer).not.toHaveBeenCalled();
-    const [args] = transferSpy.mock.calls[0] as [{ feePayer: unknown }];
-    expect(feePayerAddress(args.feePayer)).toBe(clientAddress);
-    expect(result.serializedTx).toBe("base64-tx");
-    expect(submitSpy).not.toHaveBeenCalled();
   });
 
   it("mintTo still sponsors the fee through Kora", async () => {
@@ -746,21 +725,5 @@ describe("MosaicService mint and transfer — fee payer", () => {
       })
     ).rejects.toMatchObject({ name: "MosaicAmountError", movementRefusal: "transfer_hook" });
     expect(forceTransferSpy).not.toHaveBeenCalled();
-  });
-
-  it("transfer still sponsors the fee through Kora", async () => {
-    await service.transfer({
-      mint,
-      from: signer.address,
-      to: destination,
-      amount: "1",
-      authority: signer,
-      feePayer: signer,
-    });
-
-    expect(fee.getFeePayer).toHaveBeenCalledTimes(1);
-    const [args] = transferSpy.mock.calls[0] as [{ feePayer: unknown }];
-    expect(feePayerAddress(args.feePayer)).toBe(koraAddress);
-    expect(submitSpy).toHaveBeenCalledTimes(1);
   });
 });

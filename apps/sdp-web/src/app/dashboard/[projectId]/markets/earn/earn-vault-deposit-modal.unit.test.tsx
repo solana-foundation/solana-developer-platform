@@ -240,7 +240,16 @@ beforeEach(() => {
   mocks.useEarnFundingWallets.mockReturnValue({
     wallets: [
       fundingWallet([
-        { token: "USDC", mint: USDC_MINT, amount: "2500000", uiAmount: "2.5", decimals: 6 },
+        {
+          token: "USDC",
+          mint: USDC_MINT,
+          amount: "2500000",
+          tokenAmount: "2.5",
+          displayAmount: "2.5",
+          displayAsOf: null,
+          displayRule: "plain",
+          decimals: 6,
+        },
       ]),
     ],
     error: undefined,
@@ -301,10 +310,22 @@ describe("exact vault amount helpers", () => {
             token: "USDC",
             mint: USDC_MINT,
             amount: "9007199254740993000001",
-            uiAmount: "0",
+            tokenAmount: "0",
+            displayAmount: "0",
+            displayAsOf: null,
+            displayRule: "plain",
             decimals: 6,
           },
-          { token: "USDC", mint: USDC_MINT, amount: "9", uiAmount: "0", decimals: 6 },
+          {
+            token: "USDC",
+            mint: USDC_MINT,
+            amount: "9",
+            tokenAmount: "0",
+            displayAmount: "0",
+            displayAsOf: null,
+            displayRule: "plain",
+            decimals: 6,
+          },
         ]),
         USDC_MINT,
         6
@@ -369,7 +390,16 @@ describe("EarnVaultDepositModal", () => {
     mocks.useEarnFundingWallets.mockReturnValue({
       wallets: [
         fundingWallet([
-          { token: "USDG", mint: USDG_MINT, amount: "7000000", uiAmount: "7", decimals: 6 },
+          {
+            token: "USDG",
+            mint: USDG_MINT,
+            amount: "7000000",
+            tokenAmount: "7",
+            displayAmount: "7",
+            displayAsOf: null,
+            displayRule: "plain",
+            decimals: 6,
+          },
         ]),
       ],
       error: undefined,
@@ -746,8 +776,26 @@ describe("EarnVaultDepositModal", () => {
     mocks.useEarnFundingWallets.mockReturnValue({
       wallets: [
         fundingWallet([
-          { token: "USDC", mint: USDC_MINT, amount: "2500000", uiAmount: "2.5", decimals: 6 },
-          { token: "USDG", mint: USDG_MINT, amount: "7000000", uiAmount: "7", decimals: 6 },
+          {
+            token: "USDC",
+            mint: USDC_MINT,
+            amount: "2500000",
+            tokenAmount: "2.5",
+            displayAmount: "2.5",
+            displayAsOf: null,
+            displayRule: "plain",
+            decimals: 6,
+          },
+          {
+            token: "USDG",
+            mint: USDG_MINT,
+            amount: "7000000",
+            tokenAmount: "7",
+            displayAmount: "7",
+            displayAsOf: null,
+            displayRule: "plain",
+            decimals: 6,
+          },
         ]),
       ],
       error: undefined,
@@ -1516,8 +1564,26 @@ describe("fee sponsorship copy", () => {
     mocks.useEarnFundingWallets.mockReturnValue({
       wallets: [
         fundingWallet([
-          { token: "USDC", mint: USDC_MINT, amount: "2500000", uiAmount: "2.5", decimals: 6 },
-          { token: "USDG", mint: USDG_MINT, amount: "7000000", uiAmount: "7", decimals: 6 },
+          {
+            token: "USDC",
+            mint: USDC_MINT,
+            amount: "2500000",
+            tokenAmount: "2.5",
+            displayAmount: "2.5",
+            displayAsOf: null,
+            displayRule: "plain",
+            decimals: 6,
+          },
+          {
+            token: "USDG",
+            mint: USDG_MINT,
+            amount: "7000000",
+            tokenAmount: "7",
+            displayAmount: "7",
+            displayAsOf: null,
+            displayRule: "plain",
+            decimals: 6,
+          },
         ]),
       ],
       error: undefined,

@@ -31,7 +31,14 @@ import type {
   EarnVaultWithdrawQuoteProvider,
 } from "@sdp/earn/types";
 import { contextAwareRpcFetch } from "@sdp/rpc/read-context";
-import { AmountError, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
+import { AmountError } from "@sdp/solana/amount";
+import {
+  baseUnits,
+  parseTokenAmount,
+  type TokenAmount,
+  toBaseUnits,
+  toTokenAmount,
+} from "@sdp/solana/token-amount";
 import {
   type HastraDeployment,
   hastraDeployment,
@@ -231,9 +238,9 @@ function assertDiscriminator(data: Buffer, namespace: "account" | "event", name:
 }
 
 function canonicalAmount(value: string, label: string): { text: string; atoms: bigint } {
-  let atoms: bigint;
+  let amount: TokenAmount;
   try {
-    atoms = parseDecimalAmount(value, TOKEN_DECIMALS);
+    amount = parseTokenAmount(value, TOKEN_DECIMALS);
   } catch (cause) {
     if (cause instanceof AmountError) {
       throw new SdpHastraError(
@@ -243,14 +250,16 @@ function canonicalAmount(value: string, label: string): { text: string; atoms: b
     }
     throw cause;
   }
-  if (atoms <= 0n || atoms > U64_MAX) {
+  const atoms = toBaseUnits(amount);
+  if (atoms === 0n) {
     throw new SdpHastraError("INVALID_AMOUNT", `${label} must be between one atom and u64::MAX.`);
   }
-  return { text: formatDecimalAmount(atoms, TOKEN_DECIMALS), atoms };
+  return { text: amount.value, atoms };
 }
 
+/** wYLDS or PRIME atoms as a token amount: both mints have `TOKEN_DECIMALS`. */
 function formatAtoms(atoms: bigint): string {
-  return formatDecimalAmount(atoms, TOKEN_DECIMALS);
+  return toTokenAmount(baseUnits(atoms), TOKEN_DECIMALS).value;
 }
 
 function pubkeyAt(data: Buffer, offset: number, label: string): string {

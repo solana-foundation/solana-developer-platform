@@ -51,7 +51,7 @@ export const tokenExtensionsConfigSchema = z
           example: 25,
         }),
         maxFee: z.string().openapi({
-          description: "Maximum fee in UI units.",
+          description: "Maximum fee in token units (base units ÷ 10^decimals).",
           example: "0.5",
         }),
         transferFeeConfigAuthority: solanaAddressSchema.openapi({
@@ -193,16 +193,16 @@ export const tokenSchema = z
       .openapi({ description: "Token-2022 extensions configuration." }),
     totalSupply: z.string().openapi({
       description:
-        "Cached total supply in UI units (stored to avoid frequent RPC reads). Use POST /v1/issuance/tokens/{tokenId}/supply/refresh to force an on-chain refresh.",
+        "Cached total supply in token units (base units ÷ 10^decimals; stored to avoid frequent RPC reads). Use POST /v1/issuance/tokens/{tokenId}/supply/refresh to force an on-chain refresh.",
       example: "1000000",
     }),
     totalSupplyUpdatedAt: isoDateTimeSchema
       .nullable()
       .openapi({ description: "Timestamp when supply was last refreshed.", example: null }),
-    maxSupply: z
-      .string()
-      .nullable()
-      .openapi({ description: "Maximum supply in UI units, if capped.", example: "10000000" }),
+    maxSupply: z.string().nullable().openapi({
+      description: "Maximum supply in token units (base units ÷ 10^decimals), if capped.",
+      example: "10000000",
+    }),
     isMintable: z
       .boolean()
       .openapi({ description: "Whether additional minting is allowed.", example: true }),
@@ -615,7 +615,7 @@ const extensionOverridesOpenApiSchema = z
             example: 50,
           }),
           maxFee: z.string().openapi({
-            description: "Maximum fee in UI units.",
+            description: "Maximum fee in token units (base units ÷ 10^decimals).",
             example: "0.5",
           }),
           transferFeeConfigAuthority: z.string().optional().openapi({
@@ -758,7 +758,7 @@ export const createTokenRequestSchema = createTokenSchemaBase
       example: "https://example.com/token.png",
     }),
     maxSupply: withOpenApi(createTokenSchemaBase.shape.maxSupply, {
-      description: "Maximum supply as a string (UI units).",
+      description: "Maximum supply as a string, in token units (base units ÷ 10^decimals).",
       example: "1000000",
     }),
     template: withOpenApi(createTokenSchemaBase.shape.template, {
@@ -934,7 +934,7 @@ export const updateTokenRequestSchema = updateTokenSchemaBase
     }),
     maxSupply: withOpenApi(updateTokenSchemaBase.shape.maxSupply, {
       description:
-        "Updated maximum supply as a string (UI units); null removes the cap. Enforced by SDP at mint time while it holds the mint authority, so it is rejected with 400 once the supply is locked on-chain (mint authority revoked), and cannot be set below the already-minted supply.",
+        "Updated maximum supply as a string, in token units (base units ÷ 10^decimals); null removes the cap. Enforced by SDP at mint time while it holds the mint authority, so it is rejected with 400 once the supply is locked on-chain (mint authority revoked), and cannot be set below the already-minted supply.",
       example: "1000000",
     }),
   })

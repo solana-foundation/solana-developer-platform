@@ -1,6 +1,6 @@
 "use client";
 
-import type { CustodyWalletSummary } from "@sdp/types/custody";
+import type { CustodyWalletSummary, CustodyWalletTokenBalance } from "@sdp/types/custody";
 import { Badge } from "@sdp/ui/badge";
 import { TableCell } from "@sdp/ui/table";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
@@ -10,24 +10,32 @@ import {
   formatCreatedDate,
   formatWalletMeta,
 } from "@/app/dashboard/[projectId]/custody/wallet-format-utils";
+import { TokenDisplayAmount } from "@/components/token-display-amount";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 
 /**
- * Formats a wallet's headline balance.
+ * A wallet's headline balance: its largest holding as a wallet shows it.
  *
  * Shows the largest holding rather than a total: the tokens are different
  * assets and summing them would invent a number. Wallets whose balances could
  * not be read show nothing rather than a zero, which would be a claim.
  */
-function balanceLabel(wallet: CustodyWalletSummary): string | null {
+function largestBalance(wallet: CustodyWalletSummary): CustodyWalletTokenBalance | null {
   const balances = wallet.balances;
   if (!balances || balances.length === 0) return null;
   const largest = [...balances].sort(
-    (left, right) => Number(right.uiAmount) - Number(left.uiAmount)
+    (left, right) => Number(right.displayAmount) - Number(left.displayAmount)
   )[0];
-  if (!largest) return null;
-  return `${largest.uiAmount} ${largest.token}`;
+  return largest ?? null;
+}
+
+function WalletHeadlineBalance({ wallet }: { wallet: CustodyWalletSummary }) {
+  const largest = largestBalance(wallet);
+  if (!largest) return "—";
+  return (
+    <TokenDisplayAmount balance={largest} formatted={`${largest.displayAmount} ${largest.token}`} />
+  );
 }
 
 /**
@@ -93,7 +101,7 @@ export function ConnectionWalletsCard({
                   </span>
                 </TableCell>
                 <TableCell className="text-xs text-secondary">
-                  {balanceLabel(wallet) ?? "—"}
+                  <WalletHeadlineBalance wallet={wallet} />
                 </TableCell>
                 <TableCell className="text-xs">
                   {/* A wallet on an ended connection cannot sign through it any

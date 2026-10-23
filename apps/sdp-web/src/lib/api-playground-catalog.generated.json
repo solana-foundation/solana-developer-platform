@@ -4,7 +4,7 @@
     "command": "pnpm -C apps/sdp-api playground:generate",
     "modules": {
       "wallets": 10,
-      "payments": 34,
+      "payments": 36,
       "counterparties": 13,
       "issuance": 37
     }
@@ -321,10 +321,13 @@
                   "token": "USDC",
                   "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
                   "amount": "1250000",
-                  "uiAmount": "1.25",
+                  "tokenAmount": "1.25",
+                  "displayAmount": "1.25",
+                  "displayAsOf": null,
+                  "displayRule": "plain",
                   "decimals": 6,
                   "usdPrice": 1,
-                  "usdValue": 125.5
+                  "usdValue": 1.25
                 }
               ]
             }
@@ -533,11 +536,14 @@
                 {
                   "token": "USDC",
                   "mint": "So11111111111111111111111111111111111111112",
-                  "amount": "100000000",
-                  "uiAmount": "100.00",
+                  "amount": "1250000",
+                  "tokenAmount": "1.25",
+                  "displayAmount": "1.25",
+                  "displayAsOf": null,
+                  "displayRule": "plain",
                   "decimals": 6,
                   "usdPrice": 1,
-                  "usdValue": 100,
+                  "usdValue": 1.25,
                   "confidential": false
                 }
               ]
@@ -2128,7 +2134,7 @@
               "subscriptionId": "subscription_example",
               "transferId": "xfr_example",
               "token": "example",
-              "amount": "100.00",
+              "amount": "100",
               "dueAt": "2025-01-01T00:00:00.000Z",
               "attemptedAt": "2025-01-01T00:00:00.000Z",
               "status": "pending",
@@ -3036,7 +3042,7 @@
               "subscriptionId": "subscription_example",
               "transferId": "xfr_example",
               "token": "example",
-              "amount": "100.00",
+              "amount": "100",
               "dueAt": "2025-01-01T00:00:00.000Z",
               "attemptedAt": "2025-01-01T00:00:00.000Z",
               "status": "pending",
@@ -3176,7 +3182,7 @@
                 "subscriptionId": "subscription_example",
                 "transferId": "xfr_example",
                 "token": "example",
-                "amount": "100.00",
+                "amount": "100",
                 "dueAt": "2025-01-01T00:00:00.000Z",
                 "attemptedAt": "2025-01-01T00:00:00.000Z",
                 "status": "pending",
@@ -3866,6 +3872,135 @@
               }
             ],
             "nextCursor": "example"
+          }
+        }
+      },
+      {
+        "id": "get-token-terms",
+        "operationId": "getTokenTerms",
+        "title": "Get token terms",
+        "method": "GET",
+        "path": "/v1/tokens/{mint}/terms",
+        "releaseModule": "payments",
+        "shadowedBy": [],
+        "pathFields": [
+          {
+            "key": "mint",
+            "label": "{mint}",
+            "description": "The token mint address. Native SOL has no mint and no terms.",
+            "defaultValue": "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo",
+            "required": true
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "terms": {
+              "mint": "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo",
+              "program": "token-2022",
+              "decimals": 6,
+              "readAt": {
+                "slot": "312000000",
+                "epoch": "722",
+                "time": "2025-01-01T00:00:00.000Z"
+              },
+              "transferFee": {
+                "current": {
+                  "epoch": "0",
+                  "basisPoints": 0,
+                  "maximumFee": "0"
+                },
+                "next": {
+                  "epoch": "0",
+                  "basisPoints": 0,
+                  "maximumFee": "0"
+                }
+              },
+              "display": {
+                "rule": "plain"
+              },
+              "transferHookProgram": null,
+              "paused": false,
+              "nonTransferable": false,
+              "defaultAccountState": "initialized",
+              "permanentDelegate": null,
+              "confidentialTransfers": false,
+              "support": [
+                {
+                  "path": "builder",
+                  "supported": true,
+                  "refusals": [
+                    {
+                      "reason": "non_transferable",
+                      "extension": "NonTransferable",
+                      "disposition": "refuse",
+                      "message": "example"
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "quote-token-amount",
+        "operationId": "quoteTokenAmount",
+        "title": "Quote a token amount",
+        "method": "POST",
+        "path": "/v1/tokens/{mint}/quote",
+        "releaseModule": "payments",
+        "shadowedBy": [],
+        "pathFields": [
+          {
+            "key": "mint",
+            "label": "{mint}",
+            "description": "The token mint address. Native SOL has no mint and no terms.",
+            "defaultValue": "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo",
+            "required": true
+          }
+        ],
+        "bodyFields": [
+          {
+            "key": "$body",
+            "label": "JSON request body",
+            "description": "Generated from this operation's public OpenAPI request schema.",
+            "kind": "textarea",
+            "valueType": "json",
+            "defaultValue": "{\n  \"amount\": \"100\",\n  \"basis\": \"debit\"\n}",
+            "required": true
+          }
+        ],
+        "expectedResponse": {
+          "data": {
+            "quote": {
+              "mint": "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo",
+              "amount": "100",
+              "amounts": {
+                "basis": "debit",
+                "debit": "100",
+                "fee": "0",
+                "credit": "100",
+                "decimals": 6,
+                "display": {
+                  "debit": "150",
+                  "fee": "0",
+                  "credit": "150",
+                  "asOf": "2025-01-01T00:00:00.000Z"
+                }
+              },
+              "feeEpoch": null,
+              "asOf": "2025-01-01T00:00:00.000Z",
+              "expiresAt": "2025-01-01T00:00:00.000Z"
+            }
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
           }
         }
       }
@@ -8406,6 +8541,15 @@
       "module": "issuance"
     },
     "deploy": {
+      "module": "issuance"
+    },
+    "builder": {
+      "module": "payments"
+    },
+    "recurring": {
+      "module": "recurring_payments"
+    },
+    "issuance_seize": {
       "module": "issuance"
     },
     "onramp": {

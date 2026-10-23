@@ -13,6 +13,7 @@ import {
   type SdpModule,
   type SdpReleaseChannel,
 } from "@sdp/types/release-channels";
+import { TOKEN_MOVEMENT_PATH_MODULES } from "@sdp/types/token-movements";
 import { TOKEN_TRANSACTION_TYPES } from "@sdp/types/tokens";
 import { UNIFIED_TRANSACTION_SDP_MODULES } from "@sdp/types/unified-transactions";
 import type { OpenAPIObject } from "openapi3-ts/oas30";
@@ -63,6 +64,10 @@ function buildOwners(): ReadonlyMap<string, Owner> {
     own(value, { module });
   }
   for (const value of TOKEN_TRANSACTION_TYPES) own(value, { module: "issuance" });
+  // A token's capability decision names each movement path (`GET /v1/tokens/{mint}/terms`).
+  for (const [value, module] of Object.entries(TOKEN_MOVEMENT_PATH_MODULES)) {
+    own(value, { module });
+  }
   // "ramp" is the transfer-list category that selects RAMP_TRANSFER_TYPES.
   for (const value of [...RAMP_TRANSFER_TYPES, "offramp_channel", "ramps", "ramp"]) {
     own(value, { module: "ramps" });

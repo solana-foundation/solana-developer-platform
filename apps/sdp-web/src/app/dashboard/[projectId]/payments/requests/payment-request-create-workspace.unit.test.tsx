@@ -316,4 +316,121 @@ describe("New request page", () => {
       screen.getByRole("button", { name: "Create and copy link" }).hasAttribute("disabled")
     ).toBe(true);
   });
+
+  /**
+   * Answers USDC as a scaled mint (two shown per token unit) and its credit
+   * quote: 25 shown is 12.5 token units. Records each quote body, and hands
+   * each create to `answerCreate`.
+   */
+  function stubScaledUsdc(answerCreate: (body: unknown) => Promise<Response>) {
+    const usdc = deriveTokenOptions("devnet").find((token) => token.symbol === "USDC");
+    const quoteBodies: unknown[] = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/terms")) {
+        return Response.json({
+          data: {
+            terms: {
+              mint: usdc?.mintAddress,
+              decimals: 6,
+              transferFee: null,
+              display: {
+                rule: "scaled",
+                multiplier: 2,
+                newMultiplier: 2,
+                newMultiplierEffectiveAt: "2026-01-01T00:00:00.000Z",
+              },
+            },
+          },
+        });
+      }
+      if (url.endsWith("/quote")) {
+        quoteBodies.push(JSON.parse(String(init?.body)));
+        return Response.json({
+          data: {
+            quote: {
+              mint: usdc?.mintAddress,
+              amount: "12.5",
+              amounts: {
+                basis: "credit",
+                debit: "12.5",
+                fee: "0",
+                credit: "12.5",
+                decimals: 6,
+                display: {
+                  debit: "25",
+                  fee: "0",
+                  credit: "25",
+                  asOf: "2026-10-22T12:00:00.000Z",
+                },
+              },
+              feeEpoch: null,
+              asOf: "2026-10-22T12:00:00.000Z",
+              expiresAt: "2099-01-01T00:00:00.000Z",
+            },
+          },
+        });
+      }
+      return answerCreate(JSON.parse(String(init?.body)));
+    });
+    return { usdc, quoteBodies };
+  }
+
+  /** Fills the form for 25 as wallets show it, paid into the treasury. */
+  async function fillDisplayRequest(user: ReturnType<typeof userEvent.setup>) {
+    render(<PaymentRequestCreateWorkspace wallets={[wallet]} walletsError={null} />, { wrapper });
+    await user.click(await screen.findByRole("radio", { name: "Wallet display" }));
+    await user.type(screen.getByRole("textbox", { name: "Amount as wallets show it" }), "25");
+    await user.click(screen.getByRole("button", { name: "Destination wallet" }));
+    await user.click(screen.getByRole("button", { name: /Treasury/ }));
+  }
+
+  // A request's amount is the credit, in token units. Typed as wallets show it, the quote
+  // converts it, and the quote's credit is what the request asks for.
+  it("asks for the credit a display amount converts to, never the display amount", async () => {
+    const creates: unknown[] = [];
+    const { usdc, quoteBodies } = stubScaledUsdc(async (body) => {
+      creates.push(body);
+      return Response.json({ data: { id: "preq_1", publicToken: "tok_1" } });
+    });
+    const user = userEvent.setup();
+    const create = () => screen.getByRole("button", { name: "Create and copy link" });
+    await fillDisplayRequest(user);
+
+    await waitFor(() => expect(screen.getByText("Token amount")).toBeTruthy());
+    expect(screen.getByText("Payer pays")).toBeTruthy();
+    expect(readsAs()).toBe("Anyone with the link can pay 12.50 USDC into Treasury.");
+    await waitFor(() => expect(create().hasAttribute("disabled")).toBe(false));
+    await user.click(create());
+
+    await waitFor(() => expect(dashboardRouter.push).toHaveBeenCalledTimes(1));
+    expect(quoteBodies).toEqual([{ displayAmount: "25", basis: "credit" }]);
+    expect(creates).toEqual([
+      { walletId: "wallet_treasury", token: usdc?.mintAddress, amount: "12.5", expiresAt: null },
+    ]);
+  });
+
+  // The unit decides what the request asks for, so it cannot change while the create is sent.
+  it("locks the amount unit while the request is being created", async () => {
+    let answer: (response: Response) => void = () => undefined;
+    stubScaledUsdc(
+      () =>
+        new Promise<Response>((resolve) => {
+          answer = resolve;
+        })
+    );
+    const user = userEvent.setup();
+    const create = () => screen.getByRole("button", { name: "Create and copy link" });
+    const tokenUnits = () => screen.getByRole("radio", { name: "Token units" });
+    await fillDisplayRequest(user);
+    await waitFor(() => expect(create().hasAttribute("disabled")).toBe(false));
+    expect(tokenUnits().matches(":disabled")).toBe(false);
+
+    await user.click(create());
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Creating…" })).toBeTruthy());
+    expect(tokenUnits().matches(":disabled")).toBe(true);
+    answer(Response.json({ data: { id: "preq_1", publicToken: "tok_1" } }));
+    await waitFor(() => expect(dashboardRouter.push).toHaveBeenCalledTimes(1));
+  });
 });

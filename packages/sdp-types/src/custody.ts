@@ -1,4 +1,5 @@
 import type { SdpEnvironment } from "./api-keys";
+import type { TokenBalanceAmounts } from "./token-movements";
 
 export const CUSTODY_PROVIDERS = [
   "local",
@@ -660,24 +661,25 @@ export type CustodyWalletSummary = CustodyWalletOwner & {
   balances?: CustodyWalletTokenBalance[];
 };
 
-export interface CustodyWalletBalance {
-  token: "SOL";
+/**
+ * A wallet's holding of one token (ADR 0012): `amount` in base units summed
+ * over its token accounts, `tokenAmount` in exact token units for balance
+ * checks, and `displayAmount` for screens. The USD value prices the display
+ * amount.
+ */
+export interface CustodyWalletTokenBalance extends TokenBalanceAmounts {
+  token: string;
   mint: string;
-  amount: string;
-  uiAmount: string;
-  decimals: 9;
   usdPrice?: number;
   usdValue?: number;
 }
 
-export interface CustodyWalletTokenBalance {
-  token: string;
-  mint: string;
-  amount: string;
-  uiAmount: string;
-  decimals: number;
-  usdPrice?: number;
-  usdValue?: number;
+/** A wallet's native SOL: 9 decimals, shown as token units. */
+export interface CustodyWalletBalance extends CustodyWalletTokenBalance {
+  token: "SOL";
+  decimals: 9;
+  displayRule: "plain";
+  displayAsOf: null;
 }
 
 export type CustodyWalletMetadata = CustodyWalletSummary & {

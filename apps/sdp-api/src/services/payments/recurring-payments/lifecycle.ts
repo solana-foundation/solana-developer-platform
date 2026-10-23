@@ -13,8 +13,12 @@ import {
   type PaymentRecurringPaymentLifecycleAttemptStage,
 } from "@sdp/types/payments";
 import type { Address, Instruction, MaybeAccount, Signature, TransactionSigner } from "@solana/kit";
-import type { SubscriptionDelegation } from "@solana/subscriptions";
-import * as subscriptionsProgram from "@solana/subscriptions";
+import {
+  fetchMaybeSubscriptionDelegation,
+  getCancelSubscriptionOverlayInstructionAsync,
+  getResumeSubscriptionOverlayInstructionAsync,
+  type SubscriptionDelegation,
+} from "@solana/subscriptions";
 import { getDb } from "@/db/client";
 import type {
   PaymentRecurringPaymentLifecycleAttemptRow,
@@ -82,7 +86,7 @@ async function buildResumeInstruction(input: {
   if (!input.onChainSubscription.exists) {
     throw conflict("Subscription was not found on-chain");
   }
-  return subscriptionsProgram.getResumeSubscriptionOverlayInstructionAsync({
+  return getResumeSubscriptionOverlayInstructionAsync({
     expectedExpiresAtTs: input.onChainSubscription.data.expiresAtTs,
     planPda: input.planPda,
     subscriber: input.subscriber,
@@ -611,7 +615,7 @@ async function runRecurringPaymentLifecycle(
     const subscriptionPda = assertValidAddress(claimed.subscription_pda, "subscriptionPda");
     const rpc = createClusterRpc();
     const readDelegation = (commitment: "finalized" | "confirmed") =>
-      subscriptionsProgram.fetchMaybeSubscriptionDelegation(rpc, subscriptionPda, { commitment });
+      fetchMaybeSubscriptionDelegation(rpc, subscriptionPda, { commitment });
     const lifecycleStep = {
       env: input.env,
       organizationId: input.organizationId,
@@ -695,7 +699,7 @@ async function runRecurringPaymentLifecycle(
 
     const instruction =
       input.operation === "cancel"
-        ? await subscriptionsProgram.getCancelSubscriptionOverlayInstructionAsync({
+        ? await getCancelSubscriptionOverlayInstructionAsync({
             planPda,
             subscriber: sourceSigner,
             subscriptionPda,

@@ -1160,6 +1160,9 @@ importers:
       '@sdp/rpc':
         specifier: workspace:*
         version: link:../sdp-rpc
+      '@sdp/solana':
+        specifier: workspace:*
+        version: link:../sdp-solana
       '@sdp/types':
         specifier: workspace:*
         version: link:../sdp-types

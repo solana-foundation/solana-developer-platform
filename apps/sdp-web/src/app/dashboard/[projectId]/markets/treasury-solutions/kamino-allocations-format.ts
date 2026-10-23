@@ -1,8 +1,8 @@
 import {
   decimalScale,
-  formatDecimalAmount,
+  formatFixedDecimal,
   isDecimalString,
-  parseDecimalAmount,
+  parseFixedDecimal,
 } from "@sdp/solana/amount";
 import { BASE58_ADDRESS_PATTERN } from "@/app/dashboard/[projectId]/markets/base58-address";
 import { truncateMiddle } from "@/app/dashboard/[projectId]/markets/truncate-middle";
@@ -40,7 +40,7 @@ export function formatAllocationWeight(pct: string | undefined, locale: string):
 /** Exactly zero, decided on the decimal string: "0", "0.00" and "0.000" all qualify. */
 function isZeroWeight(pct: string): boolean {
   if (!isDecimalString(pct)) return false;
-  return parseDecimalAmount(pct, decimalScale(pct)) === 0n;
+  return parseFixedDecimal(pct, decimalScale(pct)) === 0n;
 }
 
 /**
@@ -63,10 +63,10 @@ export function kaminoMarketLabel(marketName: string): string {
 export function kaminoDeployedWeightPct(unallocatedPct: string | undefined): string | undefined {
   if (unallocatedPct === undefined || !isDecimalString(unallocatedPct)) return undefined;
   const scale = decimalScale(unallocatedPct);
-  const hundred = parseDecimalAmount("100", scale);
-  const unallocated = parseDecimalAmount(unallocatedPct, scale);
+  const hundred = parseFixedDecimal("100", scale);
+  const unallocated = parseFixedDecimal(unallocatedPct, scale);
   if (unallocated < 0n || unallocated > hundred) return undefined;
-  return formatDecimalAmount(hundred - unallocated, scale);
+  return formatFixedDecimal(hundred - unallocated, scale);
 }
 
 /**

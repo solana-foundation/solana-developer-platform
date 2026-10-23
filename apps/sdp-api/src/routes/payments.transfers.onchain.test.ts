@@ -786,6 +786,7 @@ describe("Payments routes — on-chain transfers", () => {
                 owner: TEST_SOLANA_ADDRESSES.wallet2,
                 amount: 0n,
                 extensions: options.destination.extensions,
+                frozen: false,
               })
             );
           }

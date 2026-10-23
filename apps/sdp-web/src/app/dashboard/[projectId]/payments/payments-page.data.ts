@@ -6,6 +6,7 @@ import type {
   PaymentTransferSummary,
   PaymentTransferType,
 } from "@sdp/types/payments";
+import { TOKEN_DISPLAY_RULES } from "@sdp/types/token-movements";
 import { z } from "zod";
 import type { SdpApiClient } from "@/lib/sdp-api";
 import { parsePaymentApiErrorText } from "./payment-api-errors";
@@ -26,7 +27,10 @@ const paymentsWalletSchema = z
           token: z.string(),
           mint: z.string(),
           amount: z.string(),
-          uiAmount: z.string(),
+          tokenAmount: z.string(),
+          displayAmount: z.string(),
+          displayAsOf: z.string().nullable(),
+          displayRule: z.enum(TOKEN_DISPLAY_RULES),
           decimals: z.number(),
           usdPrice: z.number().optional(),
           usdValue: z.number().optional(),

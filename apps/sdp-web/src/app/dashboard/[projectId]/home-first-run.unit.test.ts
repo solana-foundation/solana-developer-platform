@@ -7,7 +7,10 @@ function balance(overrides: Partial<CustodyWalletTokenBalance>): CustodyWalletTo
     token: "USDC",
     mint: "mint-usdc",
     amount: "1000000",
-    uiAmount: "1",
+    tokenAmount: "1",
+    displayAmount: "1",
+    displayAsOf: null,
+    displayRule: "plain",
     decimals: 6,
     ...overrides,
   };
@@ -46,7 +49,7 @@ describe("resolveHomeHeroState", () => {
   it("ignores spent token accounts that still report a zero amount", () => {
     const result = resolveHomeHeroState({
       walletCount: 1,
-      balances: [balance({ uiAmount: "0" })],
+      balances: [balance({ tokenAmount: "0", displayAmount: "0" })],
       totalBalance: null,
       balancesUnavailable: false,
     });
@@ -59,7 +62,9 @@ describe("resolveHomeHeroState", () => {
     // total, so a currency figure would be a false zero rather than a balance.
     const result = resolveHomeHeroState({
       walletCount: 1,
-      balances: [balance({ mint: "atd", token: "ATD", uiAmount: "25000" })],
+      balances: [
+        balance({ mint: "atd", token: "ATD", tokenAmount: "25000", displayAmount: "25000" }),
+      ],
       totalBalance: null,
       balancesUnavailable: false,
     });

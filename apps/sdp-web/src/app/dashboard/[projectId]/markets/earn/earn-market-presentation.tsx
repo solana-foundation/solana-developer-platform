@@ -1,6 +1,6 @@
 "use client";
 
-import { formatDecimalAmount, isDecimalString, parseDecimalAmount } from "@sdp/solana/amount";
+import { isDecimalString, sumDecimalAmounts } from "@sdp/solana/amount";
 import type { EarnStrategy } from "@sdp/types/earn";
 import { type SolanaCluster, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import { Badge } from "@sdp/ui/badge";
@@ -45,15 +45,10 @@ export function earnStrategyReferenceKey(provider: string, providerReference: st
   return JSON.stringify([provider, providerReference]);
 }
 
-/** Add provider decimal strings without routing money through a JavaScript float. */
+/** Add provider decimal strings exactly; none, or any malformed one, is unavailable. */
 export function sumDecimalStrings(values: readonly string[]): string | undefined {
   if (values.length === 0 || values.some((value) => !isDecimalString(value))) return undefined;
-  const scale = values.reduce((largest, value) => {
-    const fraction = value.split(".")[1]?.length ?? 0;
-    return Math.max(largest, fraction);
-  }, 0);
-  const total = values.reduce((sum, value) => sum + parseDecimalAmount(value, scale), 0n);
-  return formatDecimalAmount(total, scale);
+  return sumDecimalAmounts(values);
 }
 
 /** APY is a decimal rate (`0.062` = 6.2%); absent and malformed values stay unavailable. */

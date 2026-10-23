@@ -10,6 +10,7 @@ import { DashboardWorkspaceProvider } from "@/contexts/dashboard-workspace-conte
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
+import { tokenUnitsEntry } from "@/test/token-amount-entry";
 import { OnchainSendStepContent } from "./onchain-send-step-content.redesign";
 
 vi.mock("@clerk/nextjs", () => ({ useAuth: () => ({ isLoaded: false }) }));
@@ -57,7 +58,18 @@ const baseWizard = {
   selectedAssetBalance: null,
   availableAmount: null,
   exceedsBalance: false,
-  fields: { accountId: "", walletId: "", asset: "", amount: "", memo: "" },
+  amountEntry: tokenUnitsEntry(""),
+  sendAmount: "",
+  quoteInFlight: false,
+  fields: {
+    accountId: "",
+    walletId: "",
+    asset: "",
+    amountUnit: "token",
+    amount: "",
+    displayAmount: "",
+    memo: "",
+  },
   setField: vi.fn(),
   selectWallet: vi.fn(),
   addAccountOpen: false,
@@ -136,7 +148,9 @@ describe("OnchainSendStepContent", () => {
         accountId: "account_test",
         walletId: labeledWallet.id,
         asset: "mint_usdc",
+        amountUnit: "token",
         amount: "2",
+        displayAmount: "",
         memo: "Invoice 7",
       },
     });
@@ -191,9 +205,12 @@ describe("OnchainSendStepContent", () => {
         accountId: "account_test",
         walletId: wallet.id,
         asset: "mint_usdc",
+        amountUnit: "token",
         amount: "3.25",
+        displayAmount: "",
         memo: "  Invoice 7  ",
       },
+      sendAmount: "3.25",
     });
 
     expect(screen.queryByText("3.25 USDC")).not.toBeNull();

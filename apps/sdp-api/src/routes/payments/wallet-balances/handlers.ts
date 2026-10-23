@@ -1,6 +1,4 @@
 import { createClusterRpc } from "@sdp/rpc/factory";
-import { formatDecimalAmount } from "@sdp/solana/amount";
-import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import type { Address } from "@solana/kit";
 import { z } from "zod";
 import { badRequestQuery, providerUnavailable } from "@/lib/errors";
@@ -14,6 +12,7 @@ import {
   attachTokenSymbolsToBalances,
   attachUsdValuesToBalances,
 } from "@/services/helius-das.service";
+import { nativeSolHolding, withDisplayAmount } from "@/services/token-movement/balance-display";
 import { walletBalancesQuerySchema } from "./schemas";
 
 const BALANCE_READ_TIMEOUT_MS = 3_000;
@@ -78,18 +77,26 @@ export async function getWalletBalances(c: AppContext) {
   if (solBalanceResult.status === "rejected" || splBalancesResult.status === "rejected") {
     throw providerUnavailable("Wallet balances are temporarily unavailable. Try again.");
   }
+  // A wallet with no account yet holds no SOL.
   const lamports = solBalanceResult.value?.lamports ?? 0n;
-  const splBalances = splBalancesResult.value;
-  const labeledBalances = await attachTokenSymbolsToBalances([
-    {
-      token: "SOL",
-      mint: SOL_MINT,
-      amount: lamports.toString(),
-      uiAmount: formatDecimalAmount(lamports, 9),
-      decimals: 9,
-    },
-    ...splBalances,
-  ]);
+  const holdings = [nativeSolHolding(lamports), ...splBalancesResult.value];
+  // Display from the summed base units under each mint's terms; one read for
+  // every Token-2022 mint held, none when all are classic.
+  const displayed = await withDisplayAmount(holdings, { abortSignal, minContextSlot }).catch(
+    (cause: unknown) => {
+      getLogger().error(
+        {
+          requestId: c.get("requestId"),
+          walletId: wallet.walletId,
+          publicKey: wallet.publicKey,
+          error: cause instanceof Error ? cause.message : String(cause),
+        },
+        "getWalletBalances: failed to read token terms for display"
+      );
+      throw providerUnavailable("Wallet balances are temporarily unavailable. Try again.");
+    }
+  );
+  const labeledBalances = await attachTokenSymbolsToBalances(displayed);
   const balances = await attachUsdValuesToBalances(c.env, labeledBalances);
 
   return success(c, {

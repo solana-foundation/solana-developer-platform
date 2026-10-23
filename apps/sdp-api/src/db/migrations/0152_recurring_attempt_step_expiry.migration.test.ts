@@ -136,6 +136,8 @@ beforeEach(async () => {
     `ALTER TABLE sponsorship_budget_reservations
        DROP COLUMN last_valid_block_height`
   );
+  // The unified transactions view reads the legs; it goes with them, and the rollback restores it.
+  await client.query("DROP VIEW unified_transactions");
   await client.query("DROP TABLE token_movement_legs");
   await client.query("DROP TABLE payment_request_transactions");
   await client.query(

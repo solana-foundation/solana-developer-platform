@@ -288,10 +288,10 @@ describe("contacts", () => {
 describe("pay", () => {
   it("sends a payment that lists in Transactions and lowers the wallet's balance", async () => {
     const before = await data<{
-      wallets: { id: string; balances: { mint: string; uiAmount: string }[] }[];
+      wallets: { id: string; balances: { mint: string; tokenAmount: string }[] }[];
     }>("/v1/wallets?includeBalances=true");
     const treasury = before.wallets.find((wallet) => wallet.id === "demo_cwlt_treasury");
-    const held = Number(treasury?.balances.find((balance) => balance.mint === USDC)?.uiAmount);
+    const held = Number(treasury?.balances.find((balance) => balance.mint === USDC)?.tokenAmount);
 
     const sent = await call("POST", "/v1/payments/transfers", {
       sourceCustodyWalletId: "demo_cwlt_treasury",
@@ -306,10 +306,10 @@ describe("pay", () => {
     const transactions = await data<{ transactions: { id: string }[] }>("/v1/transactions?limit=5");
     expect(transactions.transactions[0]?.id).toBe(sent.body.data.transfer.id);
     const after = await data<{
-      wallets: { id: string; balances: { mint: string; uiAmount: string }[] }[];
+      wallets: { id: string; balances: { mint: string; tokenAmount: string }[] }[];
     }>("/v1/wallets?includeBalances=true");
     const now = after.wallets.find((wallet) => wallet.id === "demo_cwlt_treasury");
-    expect(Number(now?.balances.find((balance) => balance.mint === USDC)?.uiAmount)).toBe(
+    expect(Number(now?.balances.find((balance) => balance.mint === USDC)?.tokenAmount)).toBe(
       held - 250
     );
   });

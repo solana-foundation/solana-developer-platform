@@ -1,5 +1,6 @@
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { describe, expect, it } from "vitest";
+import type { OnchainSendFields } from "@/app/dashboard/[projectId]/payments/ramps/schema";
 import {
   canProceedOnchainSend,
   nextAssetAfterWalletChange,
@@ -7,13 +8,22 @@ import {
   resolveReadySubmission,
 } from "./use-onchain-send-wizard.redesign";
 
-const completeFields = {
+const completeFields: OnchainSendFields = {
   accountId: "account-1",
   walletId: "wallet-1",
   asset: SOL_MINT,
+  amountUnit: "token",
   amount: "1",
+  displayAmount: "",
   memo: "",
 };
+
+/** Details typed as wallets show them, with the token amount their quote fixes. */
+const displayFields = (displayAmount: string): OnchainSendFields => ({
+  ...completeFields,
+  amountUnit: "display",
+  displayAmount,
+});
 
 describe("onchain wizard gating", () => {
   it.each([
@@ -55,6 +65,32 @@ describe("onchain wizard gating", () => {
           readySubmission: null,
         }),
       expected: true,
+    },
+    {
+      name: "accepts details typed as wallets show them once priced",
+      run: () =>
+        canProceedOnchainSend({
+          stepId: "DETAILS",
+          fields: displayFields("2"),
+          destinationAddress: "destination-address",
+          exceedsBalance: false,
+          selectedMint: SOL_MINT,
+          readySubmission: null,
+        }),
+      expected: true,
+    },
+    {
+      name: "rejects a display amount the quote route does not price",
+      run: () =>
+        canProceedOnchainSend({
+          stepId: "DETAILS",
+          fields: displayFields("0"),
+          destinationAddress: "destination-address",
+          exceedsBalance: false,
+          selectedMint: SOL_MINT,
+          readySubmission: null,
+        }),
+      expected: false,
     },
     {
       name: "rejects details exceeding balance",

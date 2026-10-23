@@ -1,4 +1,4 @@
-import { decimalScale, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
+import { decimalScale, formatFixedDecimal, parseFixedDecimal } from "@sdp/solana/amount";
 import type { EarnVaultPosition } from "@sdp/types/earn";
 import {
   compareUnsignedDecimals,
@@ -109,15 +109,19 @@ function multiplyDivideDecimal(
   const leftScale = decimalScale(parsedLeft.canonical);
   const rightScale = decimalScale(parsedRight.canonical);
   const divisorScale = decimalScale(parsedDivisor.canonical);
-  let numerator =
-    parseDecimalAmount(parsedLeft.canonical, leftScale) *
-    parseDecimalAmount(parsedRight.canonical, rightScale);
-  let denominator = parseDecimalAmount(parsedDivisor.canonical, divisorScale);
+  // The quotient's scale is the numerator's less the denominator's. Parsing
+  // one side at a finer scale lines it up at `outputDecimals`, then the
+  // integer division rounds down.
   const scaleShift = divisorScale + outputDecimals - leftScale - rightScale;
-  if (scaleShift >= 0) numerator *= 10n ** BigInt(scaleShift);
-  else denominator *= 10n ** BigInt(-scaleShift);
+  const numerator =
+    parseFixedDecimal(parsedLeft.canonical, leftScale + Math.max(scaleShift, 0)) *
+    parseFixedDecimal(parsedRight.canonical, rightScale);
+  const denominator = parseFixedDecimal(
+    parsedDivisor.canonical,
+    divisorScale + Math.max(-scaleShift, 0)
+  );
 
-  return formatDecimalAmount(numerator / denominator, outputDecimals);
+  return formatFixedDecimal(numerator / denominator, outputDecimals);
 }
 
 /** Current stablecoin value that can be redeemed immediately, rounded down. */

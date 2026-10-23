@@ -26,6 +26,7 @@ import {
   summaryAmount,
 } from "@/app/dashboard/[projectId]/payments/ramps/wizard-summary";
 import { sendTransferUnderKey } from "@/app/dashboard/[projectId]/payments/transfer-idempotency";
+import { useTokenAmountEntry } from "@/app/dashboard/[projectId]/payments/use-token-amount-entry";
 import type { WizardSummaryDetail } from "@/app/dashboard/[projectId]/payments/wizard-summary-list";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
@@ -37,6 +38,11 @@ import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useZodForm } from "@/lib/use-zod-form";
 import { usePaymentsActionWallets } from "./use-payments-action-wallets";
 import type { RampWizardStep } from "./use-ramp-wizard.redesign";
+import {
+  pinnedSendEntry,
+  type UnresolvedTransfer,
+  useUnresolvedTransfers,
+} from "./use-unresolved-transfers";
 
 // One details step (contact, destination, wallet, amount, memo) and a review that also shows the
 // outcome once sent.
@@ -177,9 +183,15 @@ export interface UseOnchainSendWizardProps {
 function useOnchainSubmission(signingUnavailable: boolean, t: Translate) {
   const [submitting, setSubmitting] = useState(false);
   const [transferResult, setTransferResult] = useState<PaymentTransferSummary | null>(null);
+  const { unresolvedFor, settle } = useUnresolvedTransfers();
   const finished = transferResult !== null;
 
-  const submitTransfer = async (submission: CreateTransferInput) => {
+  /**
+   * Sends the attempt, what the user typed as `entry`, under its key. An
+   * attempt left unresolved is what `entry` is sent as until one resolves it.
+   */
+  const submitTransfer = async (entry: string, attempt: UnresolvedTransfer) => {
+    const { submission } = attempt;
     if (signingUnavailable) return;
     setSubmitting(true);
     const toastId = toast.loading(t("DashboardPayments.onchainSend.submittingTransfer"), {
@@ -203,11 +215,12 @@ function useOnchainSubmission(signingUnavailable: boolean, t: Translate) {
         position: "bottom-right",
       });
     } finally {
+      settle(entry, attempt);
       setSubmitting(false);
     }
   };
 
-  return { submitting, transferResult, finished, submitTransfer };
+  return { submitting, transferResult, finished, submitTransfer, unresolvedFor };
 }
 
 function useOnchainAssetSelection(
@@ -239,11 +252,10 @@ function useOnchainAssetSelection(
   } else if (selectedAssetBalance === null) {
     availableAmount = "0";
   } else {
-    availableAmount = selectedAssetBalance.uiAmount;
+    availableAmount = selectedAssetBalance.tokenAmount;
   }
-  const exceedsBalance = onchainAmountExceedsBalance(fields.amount, availableAmount);
 
-  return { assetOptions, selectedAsset, selectedAssetBalance, availableAmount, exceedsBalance };
+  return { assetOptions, selectedAsset, selectedAssetBalance, availableAmount };
 }
 
 export function useOnchainSendWizard({
@@ -260,11 +272,17 @@ export function useOnchainSendWizard({
   const steps = getOnchainSendSteps(t);
   const [stepIndex, setStepIndex] = useState(0);
   const demo = usePaymentsDemo();
-  const { values: fields, setField } = useZodForm(onchainSendSchema, {
+  const {
+    values: fields,
+    setField,
+    setFields,
+  } = useZodForm(onchainSendSchema, {
     accountId: "",
     walletId: "",
     asset: "",
+    amountUnit: "token",
     amount: demo ? DEMO_PREFILL_AMOUNTS.send : "",
+    displayAmount: "",
     memo: "",
   });
   const [addAccountOpen, setAddAccountOpen] = useState(false);
@@ -311,12 +329,29 @@ export function useOnchainSendWizard({
     return account === undefined ? null : account;
   }, [cryptoAccounts, fields.accountId]);
   const destinationAddress = selectedAccount === null ? null : cryptoWalletAddress(selectedAccount);
-  const { submitting, transferResult, finished, submitTransfer } = useOnchainSubmission(
-    signingUnavailable,
-    t
-  );
-  const { assetOptions, selectedAsset, selectedAssetBalance, availableAmount, exceedsBalance } =
+  const { submitting, transferResult, finished, submitTransfer, unresolvedFor } =
+    useOnchainSubmission(signingUnavailable, t);
+  const { assetOptions, selectedAsset, selectedAssetBalance, availableAmount } =
     useOnchainAssetSelection(selectedWallet, fields, issuedTokenSymbolsByMint, t);
+  const selectedMint = selectedAssetBalance === null ? null : selectedAssetBalance.mint;
+  // A send fixes its debit. For a display-rule mint the user may type what wallets show;
+  // the quote's token amount is what is checked and sent.
+  const amountEntry = useTokenAmountEntry({
+    mint: selectedMint,
+    basis: "debit",
+    fields,
+    setFields,
+  });
+  // The payment as the user typed it. While its last attempt is unresolved it is
+  // shown and sent as that attempt was, never at a token amount a later quote priced.
+  const { typedEntry, unresolved, shownEntry } = pinnedSendEntry(
+    { ...fields, destinationAddress, mint: selectedMint },
+    amountEntry,
+    unresolvedFor
+  );
+  // As sent: the unit the input is in, and the amount in token units.
+  const sendFields = { ...fields, amountUnit: amountEntry.unit, amount: shownEntry.tokenAmount };
+  const exceedsBalance = onchainAmountExceedsBalance(sendFields.amount, availableAmount);
 
   const selectWallet = (walletId: string) => {
     setField("walletId", walletId);
@@ -331,20 +366,20 @@ export function useOnchainSendWizard({
 
   const currentStepId = steps[stepIndex].id;
   const isLastStep = stepIndex === steps.length - 1;
-  const readySubmission = resolveReadySubmission(
-    fields,
-    destinationAddress,
-    selectedAssetBalance === null ? null : selectedAssetBalance.mint
-  );
+  const readySubmission =
+    unresolved === null
+      ? resolveReadySubmission(sendFields, destinationAddress, selectedMint)
+      : unresolved.submission;
   const canProceed =
     finished ||
-    (!signingUnavailable &&
+    (!amountEntry.quoteInFlight &&
+      !signingUnavailable &&
       canProceedOnchainSend({
         stepId: currentStepId,
-        fields,
+        fields: sendFields,
         destinationAddress,
         exceedsBalance,
-        selectedMint: selectedAssetBalance === null ? null : selectedAssetBalance.mint,
+        selectedMint,
         readySubmission,
       }));
 
@@ -369,8 +404,15 @@ export function useOnchainSendWizard({
         router.push(href("/dashboard/payments"));
         return;
       }
+      // A display amount's token amount holds only until its quote expires. A retry
+      // of an unresolved attempt resends that attempt's amount, so it needs no quote.
+      if (unresolved === null && !amountEntry.canSubmitAt(Date.now())) {
+        amountEntry.refreshQuote();
+        toast.error(t("DashboardPayments.tokenAmount.quoteExpired"), { position: "bottom-right" });
+        return;
+      }
       if (readySubmission !== null) {
-        await submitTransfer(readySubmission);
+        await submitTransfer(typedEntry, { submission: readySubmission, quote: shownEntry.quote });
       }
       return;
     }
@@ -378,7 +420,7 @@ export function useOnchainSendWizard({
   };
 
   const handleSecondary = () => {
-    if (submitting || finished) {
+    if (submitting || finished || amountEntry.quoteInFlight) {
       return;
     }
     if (stepIndex === 0) {
@@ -400,7 +442,7 @@ export function useOnchainSendWizard({
       CoinsIcon
     ),
     ...optionalDetail(
-      summaryAmount(fields.amount, locale),
+      summaryAmount(sendFields.amount, locale),
       t("DashboardPayments.onchainSend.amount"),
       DollarSignIcon
     ),
@@ -429,6 +471,11 @@ export function useOnchainSendWizard({
     selectedAssetBalance,
     availableAmount,
     exceedsBalance,
+    /** The amount entry as shown: an unresolved attempt's quote and token amount while it is kept. */
+    amountEntry: shownEntry,
+    /** The amount sent, in token units: typed, priced from a display amount, or an unresolved attempt's. */
+    sendAmount: sendFields.amount,
+    quoteInFlight: amountEntry.quoteInFlight,
     fields,
     setField,
     selectWallet,

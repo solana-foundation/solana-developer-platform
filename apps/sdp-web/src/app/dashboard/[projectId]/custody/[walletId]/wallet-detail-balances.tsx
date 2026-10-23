@@ -2,6 +2,7 @@
 
 import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
 import Link from "next/link";
+import type { ReactNode } from "react";
 import useSWR from "swr";
 import { custodyQueryKeys } from "@/app/dashboard/[projectId]/custody/custody-query-key";
 import {
@@ -14,6 +15,7 @@ import {
   resolveTotalBalance,
   shortenAddress,
 } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import { TokenDisplayAmount } from "@/components/token-display-amount";
 import { TokenMark } from "@/components/token-mark";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 
@@ -113,7 +115,12 @@ export function WalletBalanceRows({
               <WalletBalanceRow
                 key={`${balance.mint}-${balance.token}`}
                 label={ownedToken?.name ?? balance.token}
-                value={formatDisplayAmount(balance.uiAmount, balance.token)}
+                value={
+                  <TokenDisplayAmount
+                    balance={balance}
+                    formatted={formatDisplayAmount(balance.displayAmount, balance.token)}
+                  />
+                }
                 mint={balance.mint}
                 href={
                   issuanceEnabled && ownedToken
@@ -140,7 +147,7 @@ function WalletBalanceRow({
   href = null,
 }: {
   label: string;
-  value: string;
+  value: ReactNode;
   mint: string;
   href?: string | null;
 }) {

@@ -19,7 +19,12 @@
  * client. Everything else is pure and client-safe.
  */
 
-import type { TokenMovementRefusalReason } from "@sdp/types/token-movements";
+import type {
+  CapabilityExtension,
+  TokenMovementDisposition,
+  TokenMovementPath,
+  TokenMovementRefusalReason,
+} from "@sdp/types/token-movements";
 import { MEMO_PROGRAM_ADDRESS } from "@sdp/types/well-known-programs";
 import { SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
 import {
@@ -71,39 +76,6 @@ import {
   type TransferFeeRate,
 } from "./token-terms";
 
-/**
- * The paths a movement takes, each with its own capability row (ADR 0012,
- * "one capability decision"). `builder` is the instructions built here; the
- * others are registered adapters: each moves tokens through its own engine
- * (an SDK or an on-chain program), so its row holds that engine's rules.
- */
-export const TOKEN_MOVEMENT_PATHS = [
-  /** Instructions built here: Payments transfers, batches, off-ramp funding, /pay and DvP funding. */
-  "builder",
-  // ── Registered adapters ────────────────────────────────────────────────
-  /**
-   * A recurring pull: the subscriptions program moves the mandate's debit with
-   * a plain `TransferChecked` through CPI, so no fee guard is on chain and the
-   * destination cannot get a memo first.
-   */
-  "recurring",
-  /** Issuance mint and burn through Mosaic. Neither is a transfer, so no fee or hook applies. */
-  "issuance",
-  /** Issuance seize: the permanent delegate's `TransferChecked`, which Mosaic builds. */
-  "issuance_seize",
-  /** DvP trades: the DvP program settles, cancels and reclaims each escrow. */
-  "dvp",
-  /** Private Channels deposits, transfers and withdrawals, through SPC's escrow and encoding. */
-  "private_channels",
-  /**
-   * Earn deposit mints, moved by each provider's own builder or program. Exits
-   * never inherit a money-in gate; the deposit-mint guard reports this row.
-   */
-  "earn",
-] as const;
-
-export type TokenMovementPath = (typeof TOKEN_MOVEMENT_PATHS)[number];
-
 export const TOKEN_MOVEMENT_REFUSALS = {
   nonTransferable: "non_transferable",
   paused: "paused",
@@ -137,14 +109,6 @@ export class TokenMovementError extends Error {
   }
 }
 
-/**
- * What a path does with a movement it will not make now. A `hold` may pass
- * later without anything SDP stores changing (a paused mint can be unpaused),
- * so a path that can wait, a recurring pull, waits instead of failing; a
- * `refuse` cannot.
- */
-export type TokenMovementDisposition = "refuse" | "hold";
-
 /** Whether a path can move a token under its terms, and why not. */
 export type TokenMovementSupport =
   | Readonly<{ supported: true }>
@@ -154,16 +118,6 @@ export type TokenMovementSupport =
       message: string;
       disposition: TokenMovementDisposition;
     }>;
-
-/** The Token-2022 mint extension, as the client names it, whose state a row refuses. */
-export type CapabilityExtension =
-  | "NonTransferable"
-  | "PausableConfig"
-  | "DefaultAccountState"
-  | "TransferFeeConfig"
-  | "ScaledUiAmountConfig"
-  | "InterestBearingConfig"
-  | "TransferHook";
 
 /** One reason a path refuses, or holds, a mint. */
 export type TokenMovementRefusalNotice = Readonly<{

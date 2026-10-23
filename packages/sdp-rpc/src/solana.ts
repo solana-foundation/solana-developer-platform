@@ -6,6 +6,9 @@
  */
 
 import {
+  type AccountInfoBase,
+  type AccountInfoWithBase64EncodedData,
+  type AccountInfoWithPubkey,
   type Address,
   type Base64EncodedWireTransaction,
   type Blockhash,
@@ -17,9 +20,13 @@ import {
   fetchEncodedAccount,
   getBase64Decoder,
   getTransactionDecoder,
+  type JsonParsedTokenAccount,
+  type Rpc,
   type RpcTransport,
   type Signature,
   type Slot,
+  type SolanaRpcResponse,
+  type StringifiedBigInt,
   type TransactionError,
   type TransactionMessageBytesBase64,
 } from "@solana/kit";
@@ -77,8 +84,79 @@ export interface RpcClientOptions {
 
 export const DEFAULT_RPC_REQUEST_TIMEOUT_MS = 30_000;
 
-// Type for RPC client
-export type SolanaRpc = ReturnType<typeof createSolanaRpc>;
+/**
+ * A token amount as SDP reads it from the RPC: base units and the mint's
+ * decimals (ADR 0012). The RPC's `uiAmount` and `uiAmountString` are display
+ * values: they already apply a scaled or interest-bearing mint's multiplier,
+ * and a JSON number loses precision above 2^53. No type above this layer
+ * exposes them; display comes from Token Terms (`@sdp/solana/token-terms`).
+ */
+export type RpcTokenAmount = Readonly<{ amount: StringifiedBigInt; decimals: number }>;
+
+/** A `jsonParsed` token account, without the RPC's display values. */
+export type RpcParsedTokenAccount = Readonly<
+  Omit<JsonParsedTokenAccount, "tokenAmount" | "delegatedAmount" | "rentExemptReserve"> & {
+    tokenAmount: RpcTokenAmount;
+    delegatedAmount?: RpcTokenAmount;
+    rentExemptReserve?: RpcTokenAmount;
+  }
+>;
+
+/** The filter `getTokenAccountsByOwner` takes: one mint, or one token program. */
+type TokenAccountsFilter = Readonly<{ mint: Address }> | Readonly<{ programId: Address }>;
+
+type TokenAccountsConfig = Readonly<{ commitment?: Commitment; minContextSlot?: Slot }>;
+
+type ParsedTokenAccountInfo = Readonly<{
+  data: Readonly<{
+    parsed: { info: RpcParsedTokenAccount; type: "account" };
+    program: Address;
+    space: bigint;
+  }>;
+}>;
+
+/**
+ * The token reads SDP makes, typed without display values. Each one replaces
+ * kit's method of the same name on {@link SolanaRpc}; the token reads SDP
+ * does not make are left off it, so a new one is added here, stripped.
+ */
+type TokenReadApi = {
+  getTokenAccountBalance(
+    address: Address,
+    config?: Readonly<{ commitment?: Commitment }>
+  ): SolanaRpcResponse<RpcTokenAmount>;
+  getTokenAccountsByOwner(
+    owner: Address,
+    filter: TokenAccountsFilter,
+    config: TokenAccountsConfig & Readonly<{ encoding: "base64" }>
+  ): SolanaRpcResponse<
+    readonly AccountInfoWithPubkey<AccountInfoBase & AccountInfoWithBase64EncodedData>[]
+  >;
+  getTokenAccountsByOwner(
+    owner: Address,
+    filter: TokenAccountsFilter,
+    config: TokenAccountsConfig & Readonly<{ encoding: "jsonParsed" }>
+  ): SolanaRpcResponse<readonly AccountInfoWithPubkey<AccountInfoBase & ParsedTokenAccountInfo>[]>;
+};
+
+/** Kit's token reads, every one of which returns display values. */
+type DisplayValueTokenReads =
+  | "getTokenAccountBalance"
+  | "getTokenAccountsByDelegate"
+  | "getTokenAccountsByOwner"
+  | "getTokenLargestAccounts"
+  | "getTokenSupply";
+
+/** `Omit` over each member of a union: kit types its client as every cluster's union. */
+type OmitEach<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+
+/**
+ * The Solana RPC client SDP code holds: kit's client, with its token reads
+ * replaced by {@link TokenReadApi} so no result carries `uiAmount` or
+ * `uiAmountString`. The runtime client is kit's; only the type narrows.
+ */
+export type SolanaRpc = OmitEach<ReturnType<typeof createSolanaRpc>, DisplayValueTokenReads> &
+  Rpc<TokenReadApi>;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // RPC Client Factory

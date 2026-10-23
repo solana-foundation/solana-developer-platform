@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { acceptAtMintScale, formatBaseUnits } from "./amounts";
+import { acceptAtMintScale } from "./amounts";
 import { SdpWisdomTreeError } from "./errors";
 
 describe("acceptAtMintScale", () => {
@@ -33,18 +33,15 @@ describe("acceptAtMintScale", () => {
     expect(() => acceptAtMintScale(bad, 6, "Deposit amount")).toThrowError(SdpWisdomTreeError);
   });
 
-  it("handles quantities beyond 2^53 exactly", () => {
-    const { baseUnits, canonical } = acceptAtMintScale("92233720368.547758079", 9, "Shares");
-    expect(baseUnits).toBe(92_233_720_368_547_758_079n);
-    expect(canonical).toBe("92233720368.547758079");
+  it("handles quantities beyond 2^53 exactly, up to u64", () => {
+    const { baseUnits, canonical } = acceptAtMintScale("18446744073.709551615", 9, "Shares");
+    expect(baseUnits).toBe(18_446_744_073_709_551_615n);
+    expect(canonical).toBe("18446744073.709551615");
   });
-});
 
-describe("formatBaseUnits", () => {
-  it('serializes exactly, zero as "0", no trailing fractional zeroes', () => {
-    expect(formatBaseUnits(0n, 9)).toBe("0");
-    expect(formatBaseUnits(1n, 9)).toBe("0.000000001");
-    expect(formatBaseUnits(37_969_751_026n, 9)).toBe("37.969751026");
-    expect(formatBaseUnits(1_500_000n, 6)).toBe("1.5");
+  it("refuses a quantity above u64, which no instruction can encode", () => {
+    expect(() => acceptAtMintScale("18446744073.709551616", 9, "Shares")).toThrowError(
+      SdpWisdomTreeError
+    );
   });
 });

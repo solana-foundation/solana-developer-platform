@@ -117,10 +117,16 @@ export function transferFeeScheduleExtension(
   };
 }
 
-/** An owner's existing token account of `mint`. */
+/** An owner's existing token account of `mint`, frozen or not. */
 export function tokenRpcAccount(
   program: TokenProgramKind,
-  account: { mint: string; owner: string; amount: bigint; extensions: ExtensionArgs[] | null }
+  account: {
+    mint: string;
+    owner: string;
+    amount: bigint;
+    extensions: ExtensionArgs[] | null;
+    frozen: boolean;
+  }
 ): JsonRpcResult {
   return encodedRpcAccount(
     SPL_TOKEN_PROGRAMS[program],
@@ -129,7 +135,7 @@ export function tokenRpcAccount(
       owner: address(account.owner),
       amount: account.amount,
       delegate: null,
-      state: AccountState.Initialized,
+      state: account.frozen ? AccountState.Frozen : AccountState.Initialized,
       isNative: null,
       delegatedAmount: 0n,
       closeAuthority: null,

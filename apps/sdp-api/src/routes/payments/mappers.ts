@@ -1,5 +1,6 @@
-import { formatDecimalAmount } from "@sdp/solana/amount";
+import { formatFixedDecimal } from "@sdp/solana/amount";
 import type { MovementQuote } from "@sdp/solana/movement-quote";
+import { toTokenAmount } from "@sdp/solana/token-amount";
 import { displayUnder } from "@sdp/solana/token-terms";
 import {
   isRampTransferType,
@@ -27,6 +28,7 @@ import {
   currentProviderSettlement,
   readDeliveryMismatch,
 } from "@/services/payments/ramp-provider-settlement";
+import { chainTimeIso } from "@/services/token-movement/chain-time";
 
 /** The stored provider reference for a ramp transfer, including retired providers. */
 function rampProviderReference(row: TransferRow): string | undefined {
@@ -141,13 +143,17 @@ export function mapTransferRow(row: TransferRow) {
   };
 }
 
-/** Summed amounts in token units, with no display: a sum shows no single wallet's view. */
+/**
+ * Summed amounts in token units, with no display: a sum shows no single wallet's
+ * view. A sum may pass u64, so it is no `BaseUnits`: it formats as generic
+ * fixed-point at the mint's scale.
+ */
 export function totalsAmounts(totals: LegTotals): TokenMovementAmounts {
   return {
     basis: totals.basis,
-    debit: formatDecimalAmount(totals.debit, totals.decimals),
-    fee: formatDecimalAmount(totals.fee, totals.decimals),
-    credit: formatDecimalAmount(totals.credit, totals.decimals),
+    debit: formatFixedDecimal(totals.debit, totals.decimals),
+    fee: formatFixedDecimal(totals.fee, totals.decimals),
+    credit: formatFixedDecimal(totals.credit, totals.decimals),
     decimals: totals.decimals,
   };
 }
@@ -200,7 +206,7 @@ export function movementAmounts(
       debit: shown("debit"),
       fee: shown("fee"),
       credit: shown("credit"),
-      asOf: new Date(Number(asOf.unixTimestamp) * 1000).toISOString(),
+      asOf: chainTimeIso(asOf.unixTimestamp),
     };
   }
   return amounts;
@@ -238,9 +244,9 @@ export function mapObservedTransfer(row: TransferRow, movement: ObservedMovement
   const { amounts, decimals } = movement;
   transfer.amounts = {
     basis: movement.basis,
-    debit: formatDecimalAmount(amounts.debit, decimals),
-    fee: formatDecimalAmount(amounts.fee, decimals),
-    credit: formatDecimalAmount(amounts.credit, decimals),
+    debit: toTokenAmount(amounts.debit, decimals).value,
+    fee: toTokenAmount(amounts.fee, decimals).value,
+    credit: toTokenAmount(amounts.credit, decimals).value,
     decimals,
   };
   const verification: AmountVerification = { state: movement.verification.state };
@@ -251,13 +257,22 @@ export function mapObservedTransfer(row: TransferRow, movement: ObservedMovement
   return transfer;
 }
 
-/** A transfer row with its legs' amounts and verification. */
+/**
+ * A transfer row with its legs' amounts and verification. An on-ramp's stored
+ * `amount` is the provider's quote; once the chain verifies its delivery (its
+ * leg), `amount` is what its wallet received, the leg's credit. The unified
+ * transactions view reports the same value.
+ */
 export function mapTransferWithLegs(row: TransferRow, legs: readonly TokenMovementLeg[]) {
   const transfer: ReturnType<typeof mapTransferRow> & MovementFields = mapTransferRow(row);
   const [first, ...rest] = legs;
   if (first !== undefined) {
-    transfer.amounts = movementAmounts([first, ...rest]);
+    const amounts = movementAmounts([first, ...rest]);
+    transfer.amounts = amounts;
     transfer.amountVerification = movementVerification([first, ...rest]);
+    if (row.type === "onramp") {
+      transfer.amount = amounts.credit;
+    }
   }
   return transfer;
 }

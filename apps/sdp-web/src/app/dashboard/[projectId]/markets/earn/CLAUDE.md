@@ -582,7 +582,10 @@ distinguish every six-decimal value once balances exceed 2^53. So:
 
 - `earn-decimal.ts` parses and canonicalizes without a `Number` cast, and
   delegates scale and ordering to `@sdp/solana/amount` (`decimalScale`,
-  `compareDecimalAmounts`) rather than restating that arithmetic.
+  `compareDecimalAmounts`) rather than restating that arithmetic. Share math
+  (`earn-vault-withdraw-amount.ts`) is generic fixed-point there too
+  (`parseFixedDecimal`, `formatFixedDecimal`); a mint's base units ↔ token
+  units go through `@sdp/solana/token-amount`.
 - `earn-format.ts` hands the decimal string straight to `Intl.NumberFormat`,
   which formats it exactly — no `Number` round trip, no manual grouping.
 - Dollars are `formatUsd`: two decimals, truncated, `<$0.01` for a non-zero

@@ -6,31 +6,33 @@
  * you get a trade off by three orders of magnitude. So the form takes the human
  * amount wherever the mint's decimals are known, and converts here.
  *
- * Thin adapters over `@sdp/solana/amount`: the conversion, malformed check and
- * precision check are all delegated, so this file stays about the contract the
- * form holds (the `AmountResult` tagged union), not about string decimal
- * arithmetic.
+ * The conversion is `@sdp/solana/token-amount`'s, at the decimals the API
+ * already returns (the token list, or the pasted mint's inspection), so this
+ * file stays about the contract the form holds (the `AmountResult` tagged
+ * union), not about string decimal arithmetic.
  *
- * TODO(ADR 0012, token movements): this conversion belongs on the server, at
- * the mint's live decimals (Token Terms), as every other movement path does.
- * It stays here because the DvP API takes `amountA`/`amountB` as base units,
- * so moving it is an API contract change, not a dashboard change.
+ * TODO(ADR 0012): this conversion belongs on the server, at the mint's live
+ * decimals (Token Terms), as every other movement path does. Moving it needs a
+ * DvP contract change: `POST /v1/dvp/trades` takes `amountA`/`amountB` in
+ * token units and the API converts them at each mint's terms, instead of the
+ * u64 base-unit strings it takes now.
  */
 
-import { decimalScale, isDecimalString, parseDecimalAmount } from "@sdp/solana/amount";
+import { AmountError, decimalScale, isDecimalString } from "@sdp/solana/amount";
+import { parseTokenAmount, type TokenAmount, toBaseUnits } from "@sdp/solana/token-amount";
 
 export type AmountResult =
   | { ok: true; baseUnits: string }
-  | { ok: false; reason: "malformed" | "too-precise" };
+  | { ok: false; reason: "malformed" | "too-precise" | "out-of-range" };
 
 /**
- * Converts a decimal amount to base units.
+ * Converts a token amount to base units at the mint's decimals.
  *
  * @param input - What the user typed, e.g. "10.5".
  * @param decimals - The mint's decimals.
  * @returns The base-unit string, or why it could not be converted.
  */
-export function toBaseUnits(input: string, decimals: number): AmountResult {
+export function amountToBaseUnits(input: string, decimals: number): AmountResult {
   const trimmed = input.trim();
   if (!isDecimalString(trimmed)) {
     return { ok: false, reason: "malformed" };
@@ -41,5 +43,13 @@ export function toBaseUnits(input: string, decimals: number): AmountResult {
     return { ok: false, reason: "too-precise" };
   }
 
-  return { ok: true, baseUnits: parseDecimalAmount(trimmed, decimals).toString() };
+  let amount: TokenAmount;
+  try {
+    amount = parseTokenAmount(trimmed, decimals);
+  } catch (error) {
+    // The checks above passed, so the parse refuses only an amount above u64.
+    if (error instanceof AmountError) return { ok: false, reason: "out-of-range" };
+    throw error;
+  }
+  return { ok: true, baseUnits: toBaseUnits(amount).toString() };
 }

@@ -10,6 +10,7 @@ import {
   formatDisplayAmount,
   resolveTransferTokenLabel,
 } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import { TokenDisplayAmount } from "@/components/token-display-amount";
 import { TokenMark } from "@/components/token-mark";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
@@ -87,7 +88,10 @@ export function HoldingsWorkspace({ balances }: { balances: CustodyWalletTokenBa
                       </Link>
                     </TableCell>
                     <TableCell className="text-right tabular-nums text-secondary">
-                      {formatDisplayAmount(row.uiAmount, symbol)}
+                      <TokenDisplayAmount
+                        balance={row}
+                        formatted={formatDisplayAmount(row.displayAmount, symbol)}
+                      />
                     </TableCell>
                     <TableCell className="hidden text-right tabular-nums text-tertiary sm:table-cell">
                       {/* Unpriced holdings are not part of the priced total, so they

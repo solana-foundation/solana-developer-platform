@@ -147,7 +147,10 @@ const mocks = vi.hoisted(() => ({
         token: string;
         mint: string;
         amount: string;
-        uiAmount: string;
+        tokenAmount: string;
+        displayAmount: string;
+        displayAsOf: string | null;
+        displayRule: "plain";
         decimals: number;
         usdPrice?: number;
       }>
@@ -172,7 +175,16 @@ const mocks = vi.hoisted(() => ({
   walletsEmpty: false,
   corruptStableShareMint: false,
   secondWalletBalances: undefined as
-    | Array<{ token: string; mint: string; amount: string; uiAmount: string; decimals: number }>
+    | Array<{
+        token: string;
+        mint: string;
+        amount: string;
+        tokenAmount: string;
+        displayAmount: string;
+        displayAsOf: string | null;
+        displayRule: "plain";
+        decimals: number;
+      }>
     | undefined,
   // Vault address -> "loading" | "error" | a Kamino allocations payload.
   allocationsByVault: {} as Record<string, "loading" | "error" | Record<string, unknown>>,
@@ -815,11 +827,29 @@ beforeEach(() => {
   mocks.vaultDepositModal = undefined;
   mocks.vaultWithdrawalModal = undefined;
   mocks.walletBalances = [
-    { token: "USDC", mint: USDC_MINT, amount: "2500000000", uiAmount: "2500", decimals: 6 },
+    {
+      token: "USDC",
+      mint: USDC_MINT,
+      amount: "2500000000",
+      tokenAmount: "2500",
+      displayAmount: "2500",
+      displayAsOf: null,
+      displayRule: "plain",
+      decimals: 6,
+    },
     // The vault receipt token the custody wallet actually holds on chain, for
     // a position that IS recorded. It must render as vault ownership, never as
     // a token tile.
-    { token: "kUSDC", mint: SHARE_MINT, amount: "119500000", uiAmount: "119.5", decimals: 6 },
+    {
+      token: "kUSDC",
+      mint: SHARE_MINT,
+      amount: "119500000",
+      tokenAmount: "119.5",
+      displayAmount: "119.5",
+      displayAsOf: null,
+      displayRule: "plain",
+      decimals: 6,
+    },
   ];
   mocks.livePositionTokenValue = "125.25";
   mocks.positionsReadStartedAt = 1_000;
@@ -2105,14 +2135,20 @@ describe("TreasurySolutionsWorkspace", () => {
         token: "kUSDC",
         mint: SHARE_MINT,
         amount: "119500000",
-        uiAmount: "119.5",
+        tokenAmount: "119.5",
+        displayAmount: "119.5",
+        displayAsOf: null,
+        displayRule: "plain",
         decimals: 6,
       },
       {
         token: "ACME",
         mint: "Issued11111111111111111111111111111111111111",
         amount: "1000000000",
-        uiAmount: "1000",
+        tokenAmount: "1000",
+        displayAmount: "1000",
+        displayAsOf: null,
+        displayRule: "plain",
         decimals: 6,
         usdPrice: 1,
       },
@@ -2128,12 +2164,24 @@ describe("TreasurySolutionsWorkspace", () => {
     // "No active vault positions" is a claim of absence like any other.
     mocks.positionsEmpty = true;
     mocks.walletBalances = [
-      { token: "USDC", mint: USDC_MINT, amount: "2500000000", uiAmount: "2500", decimals: 6 },
+      {
+        token: "USDC",
+        mint: USDC_MINT,
+        amount: "2500000000",
+        tokenAmount: "2500",
+        displayAmount: "2500",
+        displayAsOf: null,
+        displayRule: "plain",
+        decimals: 6,
+      },
       {
         token: "kPYUSD",
         mint: CATALOGUE_SHARE_MINT,
         amount: "7000000",
-        uiAmount: "7",
+        tokenAmount: "7",
+        displayAmount: "7",
+        displayAsOf: null,
+        displayRule: "plain",
         decimals: 6,
       },
     ];
@@ -2152,7 +2200,16 @@ describe("TreasurySolutionsWorkspace", () => {
     // is a floor. The summary and that wallet's card both read unavailable, and
     // the row must not disagree with them.
     mocks.secondWalletBalances = [
-      { token: "kUSDC", mint: SHARE_MINT, amount: "5000000", uiAmount: "5", decimals: 6 },
+      {
+        token: "kUSDC",
+        mint: SHARE_MINT,
+        amount: "5000000",
+        tokenAmount: "5",
+        displayAmount: "5",
+        displayAsOf: null,
+        displayRule: "plain",
+        decimals: 6,
+      },
     ];
     renderWorkspace();
 
@@ -2265,13 +2322,34 @@ describe("TreasurySolutionsWorkspace", () => {
     // in full. Also pins the catalogue half of the share-mint union: drop it
     // and the tile reappears here.
     mocks.walletBalances = [
-      { token: "USDC", mint: USDC_MINT, amount: "2500000000", uiAmount: "2500", decimals: 6 },
-      { token: "kUSDC", mint: SHARE_MINT, amount: "119500000", uiAmount: "119.5", decimals: 6 },
+      {
+        token: "USDC",
+        mint: USDC_MINT,
+        amount: "2500000000",
+        tokenAmount: "2500",
+        displayAmount: "2500",
+        displayAsOf: null,
+        displayRule: "plain",
+        decimals: 6,
+      },
+      {
+        token: "kUSDC",
+        mint: SHARE_MINT,
+        amount: "119500000",
+        tokenAmount: "119.5",
+        displayAmount: "119.5",
+        displayAsOf: null,
+        displayRule: "plain",
+        decimals: 6,
+      },
       {
         token: "kPYUSD",
         mint: CATALOGUE_SHARE_MINT,
         amount: "7000000",
-        uiAmount: "7",
+        tokenAmount: "7",
+        displayAmount: "7",
+        displayAsOf: null,
+        displayRule: "plain",
         decimals: 6,
       },
     ];

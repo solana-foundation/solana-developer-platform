@@ -1,13 +1,6 @@
-import {
-  decimalScale,
-  formatDecimalAmount,
-  isDecimalString,
-  parseDecimalAmount,
-} from "@sdp/solana/amount";
+import { AmountError, decimalScale, isDecimalString } from "@sdp/solana/amount";
+import { parseTokenAmount, type TokenAmount, toBaseUnits } from "@sdp/solana/token-amount";
 import { amountOutOfRange, amountTooPrecise, invalidAmount } from "./errors";
-
-/** Every amount Veda serializes into an instruction is an unsigned 64-bit integer. */
-const MAX_U64_BASE_UNITS = (1n << 64n) - 1n;
 
 /**
  * Amount conversion at the MINT's precision.
@@ -15,8 +8,8 @@ const MAX_U64_BASE_UNITS = (1n << 64n) - 1n;
  * A separate module from `./sdk.ts` for one reason: none of this needs
  * `@vedatech/svm-sdk`, so keeping it outside the firewall module makes it
  * unit-testable without loading the SDK or its nested `@solana/kit` 7.
- * `@sdp/solana/amount` is the repo's fixed-point arithmetic and is exact —
- * `bigint` base units throughout, never a float.
+ * `@sdp/solana/token-amount` converts at the mint's decimals and is exact —
+ * `bigint` base units in the u64 range throughout, never a float.
  */
 
 export interface AcceptedAmount {
@@ -62,15 +55,21 @@ export function acceptAtMintScale(field: string, value: string, decimals: number
     throw amountTooPrecise(field, value, decimals);
   }
 
-  const baseUnits = parseDecimalAmount(canonicalScaleInput, decimals);
   // Scale-valid decimals can still overflow the u64 Veda encodes. Letting those
   // through defers the failure into the SDK's own `assertU64` after several RPC
-  // round trips, far from the caller that can fix it.
-  if (baseUnits > MAX_U64_BASE_UNITS) throw amountOutOfRange(field, value);
+  // round trips, far from the caller that can fix it. The syntax and scale gates
+  // above already passed, so the parse refuses only a value above u64.
+  let amount: TokenAmount;
+  try {
+    amount = parseTokenAmount(canonicalScaleInput, decimals);
+  } catch (error) {
+    if (error instanceof AmountError) throw amountOutOfRange(field, value);
+    throw error;
+  }
 
-  // Re-serialised through the repo's fixed-point helpers so what leaves this
-  // package is scaled exactly like every other amount in SDP ("1.500" -> "1.5").
-  return { baseUnits, canonical: formatDecimalAmount(baseUnits, decimals) };
+  // The token amount is canonical to the mint's scale, like every other amount
+  // in SDP ("1.500" -> "1.5").
+  return { baseUnits: toBaseUnits(amount), canonical: amount.value };
 }
 
 /**

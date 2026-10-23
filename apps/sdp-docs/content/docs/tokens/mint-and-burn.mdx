@@ -46,7 +46,7 @@ POST /v1/issuance/tokens/{tokenId}/burn
 POST /v1/issuance/tokens/{tokenId}/force-burn
 ```
 
-The `amount` field is a decimal string in **UI units** (human-readable token amounts). `"1"` means one token; `"1.5"` means one and a half. SDP converts to on-chain base units using the token's `decimals`.
+The `amount` field is a decimal string in **token units** (base units ÷ 10^decimals; never the display value a scaled UI amount mint shows). `"1"` means one token; `"1.5"` means one and a half. SDP converts to on-chain base units using the token's `decimals`.
 
 `signingCustodyWalletId` always means the exact SDP Wallet `id`, not a provider-specific `walletId` or public key. It is required for a standard burn because that wallet owns and signs for the source. For mint and force-burn it is optional, but when supplied it must control the current mint or permanent-delegate authority. When omitted, SDP requires exactly one accessible wallet to match that live authority. Later actions never fall back to the token's deployment wallet.
 

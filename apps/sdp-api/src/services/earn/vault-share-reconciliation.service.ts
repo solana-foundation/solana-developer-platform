@@ -1,4 +1,9 @@
-import { parseDecimalAmount } from "@sdp/solana/amount";
+import {
+  parseBaseUnits,
+  parseTokenAmount,
+  toBaseUnits,
+  toTokenAmount,
+} from "@sdp/solana/token-amount";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { getLogger } from "@/runtime/logger";
 import type { VaultDeadline } from "@/services/earn/vault-deadline";
@@ -21,10 +26,14 @@ import type { VaultDeadline } from "@/services/earn/vault-deadline";
  * support (the same rule hydration follows).
  */
 
-/** One wallet's SPL balances; absence of a mint means a zero balance. */
+/**
+ * One wallet's SPL balances in base units; absence of a mint means a zero
+ * balance. Reconciliation compares base units and needs no display, so the
+ * read makes no Token Terms request (RPC budget: the two token-program reads).
+ */
 export type VaultShareBalanceReader = (
   ownerAddress: string
-) => Promise<ReadonlyArray<{ mint: string; amount: string; decimals: number; uiAmount: string }>>;
+) => Promise<ReadonlyArray<{ mint: string; amount: string; decimals: number }>>;
 
 export interface ReconcilableVaultWallet {
   /** `custody_wallets.id` (`cwlt_…`) — the id claim rows are scoped by. */
@@ -83,6 +92,7 @@ export interface UnrecordedVaultHolding {
   /** Raw share-token amount, base units. */
   shares: string;
   decimals: number;
+  /** The shares in exact token units: `shares` ÷ 10^decimals. */
   uiShares: string;
   /**
    * True when more than one catalogued vault identity claims this share mint,
@@ -148,7 +158,7 @@ function sumAtoms(mint: string, amounts: readonly string[], decimals: number): b
   let total = 0n;
   for (const amount of amounts) {
     try {
-      total += parseDecimalAmount(amount, decimals);
+      total += toBaseUnits(parseTokenAmount(amount, decimals));
     } catch (error) {
       getLogger().warn(
         { mint, amount, decimals, error },
@@ -351,7 +361,7 @@ export async function reconcileVaultShareHoldings(input: {
         shareMint: balance.mint,
         shares: balance.amount,
         decimals: balance.decimals,
-        uiShares: balance.uiAmount,
+        uiShares: toTokenAmount(parseBaseUnits(balance.amount), balance.decimals).value,
         ambiguousAttribution: attribution.ambiguous,
       });
     }

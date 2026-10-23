@@ -71,4 +71,4 @@ jurisdiction and on how the instrument is structured.
 
 ## Amount format
 
-Mint, burn, seize, and force-burn request bodies accept `amount` as a **decimal string in UI units** — the human-readable token value (for example `"1"` or `"1.5"`). SDP converts to on-chain base units using the token's `decimals`. This differs from wallet balance responses, which return both raw `amount` and `uiAmount`.
+Mint, burn, seize, and force-burn request bodies accept `amount` as a **decimal string in token units** — base units ÷ 10^decimals (for example `"1"` or `"1.5"`), never the display value a scaled UI amount mint shows. SDP converts to on-chain base units using the token's `decimals`. Wallet balance responses return the raw `amount`, the `tokenAmount` and the `displayAmount`.

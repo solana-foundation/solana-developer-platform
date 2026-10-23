@@ -12,6 +12,7 @@ import { ArrowDownIcon, Link2Icon, ReceiptTextIcon, Repeat2Icon } from "lucide-r
 import Link from "next/link";
 import { Fragment, Suspense } from "react";
 import { loadOrganizationProviderAccess } from "@/app/dashboard/[projectId]/payments/payments-provider-access.server";
+import { TokenDisplayAmount } from "@/components/token-display-amount";
 import { TokenMark } from "@/components/token-mark";
 import { ActionTile } from "@/components/ui/action-tile";
 import { getEnabledRampProviders } from "@/flags/ramps";
@@ -187,7 +188,10 @@ async function AvailableBalance({ apiClientPromise }: { apiClientPromise: ApiCli
                     ) : null}
                   </span>
                   <span className="block text-meta text-secondary tabular-nums">
-                    {formatTokenAmount(balance.uiAmount, locale)}
+                    <TokenDisplayAmount
+                      balance={balance}
+                      formatted={formatTokenAmount(balance.displayAmount, locale)}
+                    />
                   </span>
                 </span>
                 {usdValue === null ? null : (

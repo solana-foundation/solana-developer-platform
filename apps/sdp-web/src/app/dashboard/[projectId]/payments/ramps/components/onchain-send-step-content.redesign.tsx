@@ -27,6 +27,10 @@ import {
 } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
 import type { OnchainSendWizard } from "@/app/dashboard/[projectId]/payments/ramps/hooks/use-onchain-send-wizard.redesign";
 import { walletComboboxOptions } from "@/app/dashboard/[projectId]/payments/ramps/wallet-options";
+import {
+  AmountUnitToggle,
+  TokenAmountQuotePreview,
+} from "@/app/dashboard/[projectId]/payments/token-amount-entry-controls";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
 import { useProjectHref } from "@/lib/use-dashboard-project";
@@ -292,19 +296,35 @@ function PaySourceWalletField({ wizard }: { wizard: OnchainSendWizard }) {
 function PayAmountFields({ wizard }: { wizard: OnchainSendWizard }) {
   const t = useTranslations();
   const locale = useLocale();
-  const { assetOptions, availableAmount, selectedAsset, exceedsBalance, fields, setField } = wizard;
+  const {
+    assetOptions,
+    availableAmount,
+    selectedAsset,
+    exceedsBalance,
+    amountEntry,
+    fields,
+    setField,
+    submitting,
+  } = wizard;
   const assetSelectOptions = useMemo(
     () => assetOptions.map((asset) => ({ value: asset.value, label: asset.label })),
     [assetOptions]
   );
   const assetLabel = selectedAsset === null ? fields.asset : selectedAsset.label;
-  const canMax = availableAmount !== null && compareDecimalAmounts(availableAmount, "0") > 0;
+  // In display units the input holds what wallets show; Max is a token amount, so it is off.
+  const displayEntry = amountEntry.unit === "display";
+  const canMax =
+    !displayEntry && availableAmount !== null && compareDecimalAmounts(availableAmount, "0") > 0;
   return (
     <AmountFields
       id="onchain-send-amount"
-      label={t("DashboardPayments.onchainSend.amount")}
-      value={fields.amount}
-      onChange={(amount) => setField("amount", amount)}
+      label={
+        displayEntry
+          ? t("DashboardPayments.tokenAmount.displayAmountLabel")
+          : t("DashboardPayments.onchainSend.amount")
+      }
+      value={displayEntry ? fields.displayAmount : fields.amount}
+      onChange={(amount) => setField(displayEntry ? "displayAmount" : "amount", amount)}
       onMax={() => {
         if (availableAmount !== null) setField("amount", availableAmount);
       }}
@@ -326,6 +346,11 @@ function PayAmountFields({ wizard }: { wizard: OnchainSendWizard }) {
         </p>
       )}
       <NoAssetsHint walletId={fields.walletId} assetCount={assetSelectOptions.length} />
+      <AmountUnitToggle entry={amountEntry} busy={submitting} />
+      <TokenAmountQuotePreview
+        entry={amountEntry}
+        symbol={WELL_KNOWN_TOKEN_BY_MINT.get(assetLabel)?.symbol ?? assetLabel}
+      />
     </AmountFields>
   );
 }
@@ -361,14 +386,15 @@ function DetailsStep({ wizard, contact, privateSend, onPayByBank }: StepProps) {
 
 function ReviewSummary({ wizard, counterpartyName }: StepProps) {
   const t = useTranslations();
-  const { selectedWallet, destinationAddress, selectedAsset, fields } = wizard;
+  const { selectedWallet, destinationAddress, selectedAsset, fields, sendAmount, amountEntry } =
+    wizard;
   const memo = fields.memo.trim();
+  const assetLabel = selectedAsset === null ? fields.asset : selectedAsset.label;
   return (
     <>
       <div className="flex flex-col items-center gap-0.5 border-b border-border-default pb-4 refresh:items-start refresh:pb-6">
         <p className="text-3xl font-semibold tracking-tight text-primary refresh:text-amount refresh:font-medium">
-          {fields.amount === "" ? "0" : fields.amount}{" "}
-          {selectedAsset === null ? fields.asset : selectedAsset.label}
+          {sendAmount === "" ? "0" : sendAmount} {assetLabel}
         </p>
         <p className="text-sm text-tertiary refresh:text-body refresh:text-secondary">
           {t("DashboardPayments.onchainSend.toCounterparty", {
@@ -379,6 +405,7 @@ function ReviewSummary({ wizard, counterpartyName }: StepProps) {
           })}
         </p>
       </div>
+      <TokenAmountQuotePreview entry={amountEntry} symbol={assetLabel} />
       <DetailList variant="summary">
         <DetailRow
           icon={<UserRoundIcon className="size-3.5" />}

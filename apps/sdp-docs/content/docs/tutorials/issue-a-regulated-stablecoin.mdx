@@ -158,7 +158,7 @@ Four boolean flags on token creation determine the posture you deploy with:
 - **`isFreezable`**. Set to `true`. If `false` at create time, the token deploys with no freeze authority and freezing becomes impossible afterward.
 - **`isMintable`**. Set to `true` for an active stablecoin. You will mint as new fiat reserves arrive at the custody bank.
 - **`requiresAllowlist`**. Turns on Token Access Control's allowlist mode — only listed addresses may receive the token. Leave off for a payment stablecoin: the institutional pattern is screen-before-transfer, not gate-by-allowlist. The `tokenized-security` template flips this on automatically.
-- **`maxSupply`**. Optional cap in UI units (decimal string). Useful for pilot programs with a hard ceiling. Omit for uncapped supply.
+- **`maxSupply`**. Optional cap in token units (decimal string: base units ÷ 10^decimals). Useful for pilot programs with a hard ceiling. Omit for uncapped supply.
 
 ### 3. Plan the authorities
 
@@ -468,7 +468,7 @@ Four field rules to keep clear:
 
 - **`signingCustodyWalletId`** is the exact SDP Wallet `id` from Section 2. SDP verifies that this wallet controls the current mint authority; the historical deployment wallet is not used as a fallback.
 - **`destination`** is a Solana base58 address. For the initial issuer-holds-supply pattern, this is your custody wallet's public key. For subsequent mints to client wallets, it's the recipient's wallet.
-- **`amount`** is a decimal string in UI units (post-decimals). Not a BigInt, not a number. `"1000000"` mints one million TPUSD because the token has 6 decimals.
+- **`amount`** is a decimal string in token units (base units ÷ 10^decimals). Not a BigInt, not a number. `"1000000"` mints one million TPUSD because the token has 6 decimals.
 - **`memo`** is up to 100 characters. SDP stores it on the transaction record. This is the institutional audit attribution: the reference your compliance officer will use months later when reconciling the mint against the reserve custodian's monthly report.
 
 ### 2. Read the response

@@ -39,14 +39,16 @@ export function createChannelGatewayRpc(
   return createRpc(env, { rpcUrl: gatewayUrl, headers: options?.headers });
 }
 
-/** A channel token-account balance as reported by the gateway. */
+/**
+ * A channel token-account balance as reported by the gateway: base units and
+ * decimals only. The gateway's `uiAmountString` is a display value and is not
+ * read (ADR 0012).
+ */
 export interface ChannelTokenAccountBalance {
   /** Raw base-unit amount (string to stay JSON- and precision-safe). */
   amount: string;
   /** Mint decimals reported by the gateway. */
   decimals: number;
-  /** Human-readable amount string (prefer `amount` for arithmetic). */
-  uiAmountString: string;
 }
 
 /** Result of reading an owner's channel token balance. */
@@ -113,7 +115,6 @@ export async function getChannelTokenBalance(
     balance: {
       amount: value.amount,
       decimals: value.decimals,
-      uiAmountString: value.uiAmountString,
     },
   };
 }

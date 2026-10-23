@@ -4,92 +4,69 @@ import {
   AmountError,
   addDecimalAmounts,
   compareDecimalAmounts,
-  formatDecimalAmount,
-  parseDecimalAmount,
+  formatFixedDecimal,
+  parseFixedDecimal,
   parseTokenAmount,
   scaleDecimalAmountByBps,
-  toNumberAmount,
+  sumDecimalAmounts,
 } from "./amount";
 
-describe("toNumberAmount", () => {
-  it("converts exactly representable amounts", () => {
-    assert.equal(toNumberAmount("0.15"), 0.15);
-    assert.equal(toNumberAmount("1234567.12345678"), 1234567.12345678);
-    assert.equal(toNumberAmount("0.0000001"), 0.0000001);
-  });
-
-  it("throws when the float cannot represent the decimal", () => {
-    assert.throws(() => toNumberAmount("12345678901234567.8"), AmountError);
-    assert.throws(() => toNumberAmount("0.12345678901234567891"), AmountError);
-  });
-
-  it("rejects non-decimal input", () => {
-    assert.throws(() => toNumberAmount("1e-7"), AmountError);
-    assert.throws(() => toNumberAmount(""), AmountError);
-  });
-});
-
-describe("kit-backed amount helpers", () => {
+describe("kit-backed fixed-point helpers", () => {
   it("formats trailing zeros as trimmed", () => {
-    assert.equal(formatDecimalAmount(1500000n, 6), "1.5");
-    assert.equal(formatDecimalAmount("1500000", 6), "1.5");
+    assert.equal(formatFixedDecimal(1500000n, 6), "1.5");
   });
 
   it("drops the decimal point for whole numbers", () => {
-    assert.equal(formatDecimalAmount(2000000n, 6), "2");
+    assert.equal(formatFixedDecimal(2000000n, 6), "2");
   });
 
   it("formats negative bigints with a leading minus", () => {
-    assert.equal(formatDecimalAmount(-1500000n, 6), "-1.5");
-    assert.equal(formatDecimalAmount(-2000000n, 6), "-2");
+    assert.equal(formatFixedDecimal(-1500000n, 6), "-1.5");
+    assert.equal(formatFixedDecimal(-2000000n, 6), "-2");
   });
 
-  it("formats an empty string as zero", () => {
-    assert.equal(formatDecimalAmount("", 6), "0");
-  });
-
-  it("passes through base units when decimals is zero", () => {
-    assert.equal(formatDecimalAmount(42n, 0), "42");
-    assert.equal(formatDecimalAmount(-7n, 0), "-7");
+  it("passes the units through at scale zero", () => {
+    assert.equal(formatFixedDecimal(42n, 0), "42");
+    assert.equal(formatFixedDecimal(-7n, 0), "-7");
   });
 
   it("round-trips a value just above 2^53 exactly", () => {
     const value = "9007199254740993.5";
-    const baseUnits = parseDecimalAmount(value, 1);
-    assert.equal(baseUnits, 90071992547409935n);
-    const formatted = formatDecimalAmount(baseUnits, 1);
+    const units = parseFixedDecimal(value, 1);
+    assert.equal(units, 90071992547409935n);
+    const formatted = formatFixedDecimal(units, 1);
     assert.equal(formatted, value);
-    assert.equal(parseDecimalAmount(formatted, 1), baseUnits);
+    assert.equal(parseFixedDecimal(formatted, 1), units);
   });
 
-  it("parses base units at the target scale", () => {
-    assert.equal(parseDecimalAmount("10.5", 6), 10500000n);
+  it("parses units at the target scale", () => {
+    assert.equal(parseFixedDecimal("10.5", 6), 10500000n);
   });
 
   it("parses leading zeros", () => {
-    assert.equal(parseDecimalAmount("007.10", 2), 710n);
+    assert.equal(parseFixedDecimal("007.10", 2), 710n);
   });
 
   it("rejects malformed strings with the exact error message", () => {
     assert.throws(
-      () => parseDecimalAmount("1e-7", 6),
+      () => parseFixedDecimal("1e-7", 6),
       (error: unknown) => error instanceof AmountError && error.message === "Invalid decimal amount"
     );
   });
 
-  it("rejects invalid decimals configuration with the exact error message", () => {
+  it("rejects an invalid scale with the exact error message", () => {
     assert.throws(
-      () => parseDecimalAmount("1.5", 1.5),
+      () => parseFixedDecimal("1.5", 1.5),
       (error: unknown) =>
         error instanceof AmountError && error.message === "Invalid decimals configuration"
     );
     assert.throws(
-      () => parseDecimalAmount("1.5", -1),
+      () => parseFixedDecimal("1.5", -1),
       (error: unknown) =>
         error instanceof AmountError && error.message === "Invalid decimals configuration"
     );
     assert.throws(
-      () => formatDecimalAmount(1n, -1),
+      () => formatFixedDecimal(1n, -1),
       (error: unknown) =>
         error instanceof AmountError && error.message === "Invalid decimals configuration"
     );
@@ -97,7 +74,7 @@ describe("kit-backed amount helpers", () => {
 
   it("rejects excess precision with the exact error message", () => {
     assert.throws(
-      () => parseDecimalAmount("1.5", 0),
+      () => parseFixedDecimal("1.5", 0),
       (error: unknown) =>
         error instanceof AmountError && error.message === "Amount has too many decimal places"
     );
@@ -106,7 +83,7 @@ describe("kit-backed amount helpers", () => {
   it("throws Amount is out of range beyond 256 bits", () => {
     const absurd = `1${"0".repeat(78)}`;
     assert.throws(
-      () => parseDecimalAmount(absurd, 0),
+      () => parseFixedDecimal(absurd, 0),
       (error: unknown) => error instanceof AmountError && error.message === "Amount is out of range"
     );
   });
@@ -166,5 +143,21 @@ describe("parseTokenAmount", () => {
   it("rejects excess precision and u64 overflow", () => {
     assert.throws(() => parseTokenAmount("1.0000001", 6), AmountError);
     assert.throws(() => parseTokenAmount("18446744073709.551616", 6), AmountError);
+  });
+});
+
+describe("sumDecimalAmounts", () => {
+  it("adds at the largest scale, exactly, past a float's precision", () => {
+    assert.equal(sumDecimalAmounts(["1.25", "0.75", "2"]), "4");
+    assert.equal(sumDecimalAmounts(["0.1", "0.2"]), "0.3");
+    assert.equal(
+      sumDecimalAmounts(["9007199254740993.000000001", "1.000000001"]),
+      "9007199254740994.000000002"
+    );
+  });
+
+  it("is 0 for no amounts and refuses a malformed one", () => {
+    assert.equal(sumDecimalAmounts([]), "0");
+    assert.throws(() => sumDecimalAmounts(["1", "1e3"]), AmountError);
   });
 });

@@ -7,7 +7,7 @@
 import { type ApiTestCustodyWallet, type ApiTestEnv, apiTestSupport } from "@sdp/api/test-support";
 import { resolveDefaultCluster } from "@sdp/rpc/config";
 import { runInClusterScope } from "@sdp/rpc/scope";
-import { parseTokenAmount } from "@sdp/solana/token-amount";
+import { parseTokenAmount, toBaseUnits } from "@sdp/solana/token-amount";
 import { SDP_ENVIRONMENT_BY_CLUSTER } from "@sdp/types/well-known-tokens";
 import { address, generateKeyPairSigner } from "@solana/kit";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -68,8 +68,9 @@ type DvpFundResponse = {
   data: { tradeId: string; leg: "a" | "b"; amount: string; signature: string };
 };
 
-function baseUnits(amount: number): string {
-  return String(BigInt(amount) * 10n ** BigInt(DECIMALS));
+/** Whole tokens of the test mint as the base-unit string the DvP API takes. */
+function baseUnits(wholeTokens: number): string {
+  return toBaseUnits(parseTokenAmount(String(wholeTokens), DECIMALS)).toString();
 }
 
 /** Reads a token account balance straight from the cluster. */

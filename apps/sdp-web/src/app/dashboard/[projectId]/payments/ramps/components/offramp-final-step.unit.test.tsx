@@ -145,7 +145,18 @@ describe("exceedsWalletBalance", () => {
     publicKey: "treasury",
     label: "Treasury",
     isRuntimeExecutionAllowed: true,
-    balances: [{ token: "USDC", mint: "mint", amount: "5000000", uiAmount: "5", decimals: 6 }],
+    balances: [
+      {
+        token: "USDC",
+        mint: "mint",
+        amount: "5000000",
+        tokenAmount: "5",
+        displayAmount: "5",
+        displayAsOf: null,
+        displayRule: "plain",
+        decimals: 6,
+      },
+    ],
   };
 
   it("is true only once the amount is more than the wallet holds", () => {

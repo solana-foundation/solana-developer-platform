@@ -1,5 +1,5 @@
 import type { AssetBalance } from "@sdp/helius-rings/types";
-import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
+import { parseBaseUnits, toTokenAmount } from "@sdp/solana/token-amount";
 import { mapHeliusRingsOperationSummaryRow } from "@/db/repositories/helius-rings-operation.repository";
 import { mapHeliusRingsWalletRow } from "@/db/repositories/helius-rings-wallet.repository";
 import { mapHeliusRingsZoneRow } from "@/db/repositories/helius-rings-zone.repository";
@@ -203,20 +203,17 @@ async function priceRingsBalances(
 }> {
   if (balances.length === 0) return { balances: [], totalUsd: 0 };
 
-  const asCustody: CustodyWalletTokenBalance[] = balances.map((balance) => {
-    const decimals = balance.decimals ?? 0;
-    return {
-      token: balance.symbol,
-      mint: balance.mint,
-      amount: balance.amountRaw,
-      uiAmount: decimalFromBaseUnits(balance.amountRaw, decimals),
-      decimals,
-    };
-  });
+  // Shielded notes hold token units: no mint display rule applies inside a
+  // ring, so the priced amount is the token amount. `amountRaw` is the SDK's
+  // bigint note sum as digits; anything else fails loudly here.
+  const pricingInputs = balances.map((balance) => ({
+    mint: balance.mint,
+    displayAmount: toTokenAmount(parseBaseUnits(balance.amountRaw), balance.decimals ?? 0).value,
+  }));
 
-  let priced: CustodyWalletTokenBalance[];
+  let priced: { usdPrice?: number; usdValue?: number }[];
   try {
-    priced = await attachUsdValuesToBalances(env, asCustody);
+    priced = await attachUsdValuesToBalances(env, pricingInputs);
   } catch {
     return { balances: balances.map((balance) => ({ ...balance })), totalUsd: null };
   }
@@ -235,21 +232,6 @@ async function priceRingsBalances(
     ? Number(enriched.reduce((sum, balance) => sum + (balance.usdValue ?? 0), 0).toFixed(2))
     : null;
   return { balances: enriched, totalUsd };
-}
-
-/**
- * BigInt-safe base10 conversion — bare Number(amountRaw) rounds past 2^53. Mirrors
- * the client's readShieldedAmount so the string produced here parses the same on
- * the receiving side.
- */
-function decimalFromBaseUnits(amountRaw: string, decimals: number): string {
-  if (!/^\d+$/.test(amountRaw)) return "0";
-  if (decimals === 0) return amountRaw;
-  const padded = amountRaw.padStart(decimals + 1, "0");
-  const whole = padded.slice(0, padded.length - decimals);
-  const fraction = padded.slice(padded.length - decimals);
-  const trimmed = fraction.replace(/0+$/, "");
-  return trimmed === "" ? whole : `${whole}.${trimmed}`;
 }
 
 /** GET /wallets/:walletId/identity */

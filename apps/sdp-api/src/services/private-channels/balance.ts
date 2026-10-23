@@ -14,6 +14,7 @@
 
 import { getChannelTokenBalance } from "@sdp/private-channels/gateway";
 import { assertValidAddress } from "@sdp/solana/address";
+import { parseBaseUnits, toTokenAmount } from "@sdp/solana/token-amount";
 import type { PrivateChannelBalance, PrivateChannelInstance } from "@sdp/types/private-channels";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
@@ -69,12 +70,13 @@ export async function getChannelBalance(
   // A missing token account is a zero balance; fall back to the mint's known
   // decimals so the DTO stays accurate even before the owner is first credited.
   const decimals = balance?.decimals ?? knownMint?.decimals ?? 0;
+  const amount = balance?.amount ?? "0";
   return {
     owner: ownerAddress,
     mint: mintAddress,
     tokenAccount,
-    amount: balance?.amount ?? "0",
+    amount,
     decimals,
-    uiAmount: balance?.uiAmountString ?? "0",
+    tokenAmount: toTokenAmount(parseBaseUnits(amount), decimals).value,
   };
 }

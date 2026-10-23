@@ -1,4 +1,4 @@
-import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
+import { baseUnits, parseTokenAmount, toBaseUnits, toTokenAmount } from "@sdp/solana/token-amount";
 import { SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
 import { getBase58Encoder, signature } from "@solana/kit";
 import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
@@ -215,7 +215,7 @@ export function parseKaminoDepositReceipt(
   const view = new DataView(Uint8Array.from(bytes).buffer);
   const maximum = view.getBigUint64(8, true);
   try {
-    if (maximum !== parseDecimalAmount(input.requestedAmount, decimals)) return null;
+    if (maximum !== toBaseUnits(parseTokenAmount(input.requestedAmount, decimals))) return null;
   } catch {
     return null;
   }
@@ -229,8 +229,8 @@ export function parseKaminoDepositReceipt(
   if (debit <= 0n || debit > maximum || minted <= 0n || minted > U64_MAX) return null;
   if (hasFloor && minted < view.getBigUint64(16, true)) return null;
   return {
-    amount: formatDecimalAmount(debit, decimals),
-    sharesOut: formatDecimalAmount(minted, shareDecimals),
+    amount: toTokenAmount(baseUnits(debit), decimals).value,
+    sharesOut: toTokenAmount(baseUnits(minted), shareDecimals).value,
   };
 }
 

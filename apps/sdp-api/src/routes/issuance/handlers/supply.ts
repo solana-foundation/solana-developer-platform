@@ -1,4 +1,6 @@
-import { getSolanaConfig } from "@sdp/rpc/config";
+import { createRpc } from "@sdp/rpc/solana";
+import { address, assertAccountExists, fetchEncodedAccount } from "@solana/kit";
+import { decodeMint } from "@solana-program/token-2022";
 import type { Context } from "hono";
 import { getDb } from "@/db/client";
 import { AppError, notFound } from "@/lib/errors";
@@ -10,46 +12,17 @@ import { toPublicToken } from "./public-response";
 
 type AppContext = Context<{ Bindings: Env }>;
 
-interface TokenSupplyRpcResponse {
-  result?: {
-    value?: {
-      amount?: string;
-    };
-  };
-  error?: {
-    message?: string;
-  };
-}
-
-async function fetchTokenSupplyBaseUnits(rpcUrl: string, mintAddress: string): Promise<string> {
-  const rpcResponse = await fetch(rpcUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: crypto.randomUUID(),
-      method: "getTokenSupply",
-      params: [mintAddress, { commitment: "confirmed" }],
-    }),
+/**
+ * The mint's supply in base units, decoded from the mint account itself (both
+ * token programs share the base mint layout). RPC budget: one `getAccountInfo`,
+ * as the `getTokenSupply` it replaces; the account carries no display value.
+ */
+async function readMintSupplyBaseUnits(env: Env, mintAddress: string): Promise<string> {
+  const account = await fetchEncodedAccount(createRpc(env), address(mintAddress), {
+    commitment: "confirmed",
   });
-
-  if (!rpcResponse.ok) {
-    throw new Error(`RPC request failed with status ${rpcResponse.status}`);
-  }
-
-  const payload = (await rpcResponse.json()) as TokenSupplyRpcResponse;
-  if (payload.error) {
-    throw new Error(payload.error.message ?? "RPC returned an error");
-  }
-
-  const amount = payload.result?.value?.amount;
-  if (!amount || !/^\d+$/.test(amount)) {
-    throw new Error("RPC returned an invalid token supply");
-  }
-
-  return amount;
+  assertAccountExists(account);
+  return decodeMint(account).data.supply.toString();
 }
 
 export const refreshTokenSupply = async (c: AppContext) => {
@@ -73,8 +46,7 @@ export const refreshTokenSupply = async (c: AppContext) => {
 
   let supplyBaseUnits: string;
   try {
-    const { rpcUrl } = getSolanaConfig(c.env);
-    supplyBaseUnits = await fetchTokenSupplyBaseUnits(rpcUrl, token.mintAddress);
+    supplyBaseUnits = await readMintSupplyBaseUnits(c.env, token.mintAddress);
   } catch (error) {
     throw new AppError(
       "SOLANA_RPC_ERROR",

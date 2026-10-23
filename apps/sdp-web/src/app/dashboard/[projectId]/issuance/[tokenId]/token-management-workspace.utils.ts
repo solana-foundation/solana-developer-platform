@@ -1190,7 +1190,7 @@ export function getBurnValidationErrors({
     const amountBaseUnits = parseTokenAmountToBaseUnits(normalizedAmount, token.decimals);
     if (amountBaseUnits !== null && amountBaseUnits > BigInt(signerBalance.amount)) {
       amountError = t("DashboardIssuance.management.selectedWalletOnlyShows", {
-        amount: signerBalance.uiAmount,
+        amount: signerBalance.tokenAmount,
         symbol: getTokenDisplaySymbol(token, t),
       });
     }
@@ -1282,7 +1282,7 @@ export function getSeizeValidationErrors({
     amountBaseUnits > BigInt(sourceBalance.amount)
   ) {
     amountError = t("DashboardIssuance.management.selectedWalletOnlyShows", {
-      amount: sourceBalance.uiAmount,
+      amount: sourceBalance.tokenAmount,
       symbol: getTokenDisplaySymbol(token, t),
     });
   }
@@ -1354,7 +1354,7 @@ export function getForceBurnValidationErrors({
     amountBaseUnits > BigInt(sourceBalance.amount)
   ) {
     amountError = t("DashboardIssuance.management.selectedWalletOnlyShows", {
-      amount: sourceBalance.uiAmount,
+      amount: sourceBalance.tokenAmount,
       symbol: getTokenDisplaySymbol(token, t),
     });
   }

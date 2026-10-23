@@ -1,4 +1,4 @@
-import { formatDecimalAmount } from "@sdp/solana/amount";
+import { parseBaseUnits, toTokenAmount } from "@sdp/solana/token-amount";
 import { MEMO_PROGRAM_ADDRESS } from "@sdp/types/well-known-programs";
 import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { describe, expect, it } from "vitest";
@@ -126,7 +126,7 @@ describe("Payments routes — funding an off-ramp token deposit", () => {
           mint: DEVNET_USDC_MINT,
           amount: baseUnits,
           decimals: 6,
-          uiAmountString: formatDecimalAmount(BigInt(baseUnits), 6),
+          uiAmountString: toTokenAmount(parseBaseUnits(baseUnits), 6).value,
           state,
         },
       ])
@@ -323,7 +323,7 @@ describe("Payments routes — funding an off-ramp token deposit", () => {
             mint: DEVNET_PYUSD_MINT,
             amount: baseUnits,
             decimals: 6,
-            uiAmountString: formatDecimalAmount(BigInt(baseUnits), 6),
+            uiAmountString: toTokenAmount(parseBaseUnits(baseUnits), 6).value,
             state: "initialized",
           },
         ])
@@ -381,6 +381,7 @@ describe("Payments routes — funding an off-ramp token deposit", () => {
               { __kind: "ImmutableOwner" },
               { __kind: "MemoTransfer", requireIncomingTransferMemos: true },
             ],
+            frozen: false,
           }),
         ],
       ])
