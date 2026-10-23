@@ -54,7 +54,7 @@ describe("WalletCardBalanceValue", () => {
       "fetch",
       vi.fn(async () =>
         Response.json({
-          data: { wallets: [{ walletId: WALLET_ID }, { walletId: "empty-wallet", balances: [] }] },
+          data: { wallets: [{ id: WALLET_ID }, { id: "empty-wallet", balances: [] }] },
         })
       )
     );
@@ -69,7 +69,7 @@ describe("WalletCardBalanceValue", () => {
       .mockReturnValueOnce({ data: [balance(10)], error: undefined });
     expect(renderBalance()).toContain("$10.00");
     expect(mockUsePersistedDashboardSWR.mock.calls[1]?.[0]).toBe(
-      `wallet-card-balance-fallback:${WALLET_ID}`
+      `wallet-card-balance-fallback:v2:${WALLET_ID}`
     );
   });
 
@@ -94,7 +94,7 @@ describe("WalletCardBalanceValue", () => {
     const markup = renderBalance();
 
     expect(mockUsePersistedDashboardSWR.mock.calls[1]?.[0]).toBe(
-      `wallet-card-balance-fallback:${WALLET_ID}`
+      `wallet-card-balance-fallback:v2:${WALLET_ID}`
     );
     expect(markup).toContain("$10.00");
     expect(markup).not.toContain("DashboardCustody.stale");

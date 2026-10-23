@@ -60,12 +60,12 @@ import {
 import { walletIdParamsSchema as walletIdParamsSchemaBase } from "@/routes/payments/wallet-balances/schemas";
 import {
   base64Schema,
+  custodyWalletIdParamSchema,
   isoDateTimeSchema,
   orgIdParamSchema,
   projectIdParamSchema,
   solanaAddressSchema,
   transferIdParamSchema,
-  WALLET_ID_INPUT_NOTE,
   walletIdParamSchema,
   withOpenApi,
 } from "./base";
@@ -79,8 +79,9 @@ export const tokenAmountSchema = z.string().openapi({
 export const paymentWalletIdParamsSchema = walletIdParamsSchemaBase
   .extend({
     walletId: withOpenApi(walletIdParamsSchemaBase.shape.walletId, {
-      description: `Provider wallet ID — ${WALLET_ID_INPUT_NOTE}`,
-      example: "privy_wallet_123",
+      description:
+        "Exact SDP Wallet ID — the `id` field returned by GET /v1/wallets. Provider wallet references are not accepted.",
+      example: "cwlt_example",
     }),
   })
   .openapi({ description: "Payment wallet path parameters." });
@@ -133,7 +134,7 @@ export const tokenBalanceSchema = z
 
 export const walletBalancesSchema = z
   .object({
-    walletId: walletIdParamSchema,
+    custodyWalletId: custodyWalletIdParamSchema,
     address: solanaAddressSchema.openapi({ description: "Wallet address." }),
     balances: z.array(tokenBalanceSchema).openapi({ description: "Token balances." }),
   })

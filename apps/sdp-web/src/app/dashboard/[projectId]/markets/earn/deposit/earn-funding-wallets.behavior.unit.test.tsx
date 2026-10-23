@@ -67,8 +67,8 @@ describe("shared funding wallet sweeps", () => {
     });
     expect(urls()).toEqual([
       "/api/dashboard/wallets?view=summary&includeBalances=true",
-      "/api/dashboard/payments/wallets/provider-a/balances?minimumSlot=101",
-      "/api/dashboard/payments/wallets/provider-b/balances",
+      "/api/dashboard/payments/wallets/wallet-a/balances?minimumSlot=101",
+      "/api/dashboard/payments/wallets/wallet-b/balances",
     ]);
   });
 
@@ -80,9 +80,9 @@ describe("shared funding wallet sweeps", () => {
         result.current.refreshBalances(102, ["wallet-a"]),
       ]);
     });
-    expect(urls().filter((url) => url.includes("provider-a"))).toEqual([
-      "/api/dashboard/payments/wallets/provider-a/balances?minimumSlot=102",
-      "/api/dashboard/payments/wallets/provider-a/balances?minimumSlot=102",
+    expect(urls().filter((url) => url.includes("wallet-a"))).toEqual([
+      "/api/dashboard/payments/wallets/wallet-a/balances?minimumSlot=102",
+      "/api/dashboard/payments/wallets/wallet-a/balances?minimumSlot=102",
     ]);
     expect(urls().filter((url) => url.startsWith("/api/dashboard/wallets?"))).toHaveLength(2);
   });

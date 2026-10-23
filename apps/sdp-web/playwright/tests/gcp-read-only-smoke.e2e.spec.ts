@@ -296,7 +296,7 @@ test.describe("GCP dev dashboard read-only smoke", () => {
     await expect(page).toHaveURL(
       projectHref(
         fixture.project.id,
-        `/dashboard/wallets/${encodeURIComponent(drillDownWallet.walletId)}`
+        `/dashboard/wallets/${encodeURIComponent(drillDownWallet.id)}`
       ),
       { timeout: 20_000 }
     );

@@ -45,4 +45,20 @@ describe("buildPaymentsPlaygroundEndpointConfigs (NEW DESIGN)", () => {
     expect(field?.options).toBeUndefined();
     expect(field?.required).toBe(true);
   });
+  it("selects exact wallet IDs without exposing provider references in balances", () => {
+    const configs = buildPaymentsPlaygroundEndpointConfigs(
+      {
+        transfers: [],
+        wallets: [{ id: "cwlt_1", walletId: "privy_1", publicKey: "address_1", label: "Treasury" }],
+        rampProviders: [],
+      },
+      t
+    );
+    const balance = configs.find(({ id }) => id === "wallet-balances");
+    expect(balance?.pathFields[0]?.defaultValue).toBe("cwlt_1");
+    expect(balance?.expectedResponse).toMatchObject({
+      data: { walletBalances: { custodyWalletId: "cwlt_1" } },
+    });
+    expect(balance?.expectedResponse).not.toHaveProperty("data.walletBalances.walletId");
+  });
 });

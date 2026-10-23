@@ -23,7 +23,6 @@ import { WalletDetailView } from "./wallet-detail-view";
 
 interface WalletBalancesResponse {
   walletBalances?: {
-    walletId: string;
     address: string;
     balances: WalletBalancesResult["balances"];
   };
@@ -154,14 +153,13 @@ export async function WalletDetailPage({ params }: { params: Promise<{ walletId:
 
   const resolvedWalletId = decodeURIComponent(walletId);
   const apiClient = await createSdpApiClient();
-  const walletPromise = getWalletDetail(apiClient.request, resolvedWalletId);
+  const wallet = await getWalletDetail(apiClient.request, resolvedWalletId);
   const balancesPromise = getWalletTrackedBalances(
     apiClient.request,
-    resolvedWalletId,
+    wallet.id,
     t("DashboardCustody.trackedBalancesUnavailable")
   );
   const issuedTokensPromise = getIssuedTokens(apiClient.request);
-  const wallet = await walletPromise;
 
   const canManageCustody = resolveDashboardAccess(orgRole).capabilities.canManageCustody;
   const connection = await resolveWalletConnectionRow({

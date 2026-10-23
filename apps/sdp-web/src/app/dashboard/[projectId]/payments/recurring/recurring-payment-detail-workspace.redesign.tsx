@@ -432,7 +432,7 @@ function SchedulePlan({
       <RecordLine label={t("DashboardPayments.recurring.from")}>
         {wallet && custodyEnabled ? (
           <Link
-            href={projectHref(`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`)}
+            href={projectHref(`/dashboard/wallets/${encodeURIComponent(wallet.id)}`)}
             className={ROW_LINK}
           >
             {sourceWalletLabel}

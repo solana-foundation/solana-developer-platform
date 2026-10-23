@@ -21,7 +21,7 @@ describe("buildPaymentsPlaygroundEndpointConfigs", () => {
     );
   });
 
-  it("uses exact wallet identity only for the Transfer contract", () => {
+  it("uses exact wallet identity for balances and Transfers", () => {
     const messages = getMessages("en");
     const t = (
       key: Parameters<typeof translate<typeof messages>>[1],
@@ -35,6 +35,12 @@ describe("buildPaymentsPlaygroundEndpointConfigs", () => {
       t
     );
 
+    const balance = configs.find(({ id }) => id === "wallet-balances");
+    expect(balance?.pathFields[0]?.defaultValue).toBe("cwlt_1");
+    expect(balance?.expectedResponse).toMatchObject({
+      data: { walletBalances: { custodyWalletId: "cwlt_1" } },
+    });
+    expect(balance?.expectedResponse).not.toHaveProperty("data.walletBalances.walletId");
     const execute = configs.find(({ id }) => id === "execute-transfer");
     const onramp = configs.find(({ id }) => id === "create-onramp-quote");
     const offramp = configs.find(({ id }) => id === "create-offramp-quote");

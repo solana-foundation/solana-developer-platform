@@ -42,7 +42,6 @@ import {
 
 interface WalletBalancesResponse {
   walletBalances?: {
-    walletId: string;
     address: string;
     balances: CustodyWalletTokenBalance[];
   };
@@ -165,14 +164,13 @@ export async function WalletDetailPage({ params }: { params: Promise<{ walletId:
 
   const resolvedWalletId = decodeURIComponent(walletId);
   const apiClient = await createSdpApiClient();
-  const walletPromise = getWalletDetail(apiClient.request, resolvedWalletId);
+  const wallet = await getWalletDetail(apiClient.request, resolvedWalletId);
   const trackedBalancesPromise = getWalletTrackedBalances(
     apiClient.request,
-    resolvedWalletId,
+    wallet.id,
     t("DashboardCustody.trackedBalancesUnavailable")
   );
   const ownedTokensByMintPromise = getOwnedTokenRoutes(apiClient.request);
-  const wallet = await walletPromise;
 
   const { provider } = wallet;
   const category = getCustodyProviderCategory(provider);
@@ -251,11 +249,7 @@ export async function WalletDetailPage({ params }: { params: Promise<{ walletId:
                 monospace
                 trailing={<WalletAddressCopyButton address={wallet.publicKey} />}
               />
-              <WalletInfoRow
-                label={t("DashboardCustody.walletId")}
-                value={wallet.walletId}
-                monospace
-              />
+              <WalletInfoRow label={t("DashboardCustody.walletId")} value={wallet.id} monospace />
               <WalletInfoRow
                 label={t("DashboardCustody.status")}
                 value={formatDisplayLabel(wallet.status)}
@@ -277,7 +271,7 @@ export async function WalletDetailPage({ params }: { params: Promise<{ walletId:
 
         <Suspense fallback={<WalletBalanceSummarySkeleton />}>
           <WalletBalanceSummary
-            walletId={resolvedWalletId}
+            walletId={wallet.id}
             balancesPromise={trackedBalancesPromise}
             providerLabel={providerLabel}
             publicKey={wallet.publicKey}
@@ -289,7 +283,7 @@ export async function WalletDetailPage({ params }: { params: Promise<{ walletId:
 
       <Suspense fallback={<WalletBalancesSkeleton />}>
         <WalletBalancesSection
-          walletId={resolvedWalletId}
+          walletId={wallet.id}
           balancesPromise={trackedBalancesPromise}
           ownedTokensByMintPromise={ownedTokensByMintPromise}
           issuanceEnabled={issuanceEnabled}
@@ -297,9 +291,9 @@ export async function WalletDetailPage({ params }: { params: Promise<{ walletId:
         />
       </Suspense>
 
-      <Suspense fallback={<WalletActivityViewport walletId={resolvedWalletId} />}>
+      <Suspense fallback={<WalletActivityViewport walletId={wallet.id} />}>
         <WalletActivityWithBalanceSymbols
-          walletId={resolvedWalletId}
+          walletId={wallet.id}
           balancesPromise={trackedBalancesPromise}
           ownedTokensByMintPromise={ownedTokensByMintPromise}
         />

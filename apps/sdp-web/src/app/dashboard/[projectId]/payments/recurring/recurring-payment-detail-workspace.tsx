@@ -772,7 +772,7 @@ export function RecurringPaymentDetailWorkspace({
                     ) : null}
                     {wallet && custodyEnabled ? (
                       <EntityLink
-                        href={href(`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`)}
+                        href={href(`/dashboard/wallets/${encodeURIComponent(wallet.id)}`)}
                       >
                         {sourceWalletLabel}
                       </EntityLink>

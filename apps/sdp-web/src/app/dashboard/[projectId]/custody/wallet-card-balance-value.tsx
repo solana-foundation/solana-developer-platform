@@ -40,7 +40,7 @@ export function useWalletCardBalances(enabled = true) {
     {
       key: "wallet-card-balances",
       ttlMs: WALLET_BALANCE_CACHE_TTL_MS,
-      version: 2,
+      version: 3,
     }
   );
 }
@@ -64,6 +64,7 @@ export function WalletCardBalanceValue({ walletId, initialBalances }: WalletCard
     },
     {
       key: `wallet-card-balance-fallback.${walletId}`,
+      version: 2,
       ttlMs: WALLET_BALANCE_CACHE_TTL_MS,
     }
   );

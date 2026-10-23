@@ -54,13 +54,13 @@ export function WalletDetailView({
     () => (
       <WalletFavoriteStar
         favorite={{
-          walletId: wallet.walletId,
+          walletId: wallet.custodyWalletId,
           name: wallet.name,
           provider: wallet.provider,
         }}
       />
     ),
-    [wallet.walletId, wallet.name, wallet.provider]
+    [wallet.custodyWalletId, wallet.name, wallet.provider]
   );
 
   return (

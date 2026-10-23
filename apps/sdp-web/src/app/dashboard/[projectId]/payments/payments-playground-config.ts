@@ -28,15 +28,6 @@ const fiatCurrencyOptions: ApiPlaygroundFieldOption[] = [{ label: "USD", value: 
 const exampleWalletAddressFallback = "1".repeat(32);
 const exampleMintAddress = ["USDCMint", "1".repeat(30)].join("");
 
-function buildProviderWalletOptions(
-  wallets: PaymentsPlaygroundWalletView[]
-): ApiPlaygroundFieldOption[] {
-  return wallets.map((wallet) => ({
-    value: wallet.walletId,
-    label: wallet.label?.trim() ? `${wallet.label} (${wallet.walletId})` : wallet.walletId,
-  }));
-}
-
 function buildCustodyWalletOptions(
   wallets: PaymentsPlaygroundWalletView[]
 ): ApiPlaygroundFieldOption[] {
@@ -93,14 +84,13 @@ export function buildPaymentsPlaygroundEndpointConfigs(
   t: (key: MessageKey, values?: TranslationValues) => string
 ): ApiPlaygroundEndpointConfig[] {
   const rampProviderOptions = buildRampProviderOptions(t);
-  const providerWalletOptions = buildProviderWalletOptions(wallets);
   const custodyWalletOptions = buildCustodyWalletOptions(wallets);
   const transferOptions = buildTransferOptions(transfers);
   const walletIdField = buildSelectBackedField(
     "walletId",
     "{walletId}",
     t("DashboardPayments.playground.walletIdPlaceholder"),
-    providerWalletOptions
+    custodyWalletOptions
   );
   const transferIdField = buildSelectBackedField(
     "transferId",
@@ -122,7 +112,7 @@ export function buildPaymentsPlaygroundEndpointConfigs(
   );
   const firstWallet = wallets[0];
   const firstTransfer = transfers[0];
-  const exampleWalletId = firstWallet?.walletId ?? "wal_ops_123";
+  const exampleCustodyWalletId = firstWallet?.id ?? "cwlt_ops_123";
   const exampleWalletAddress = firstWallet?.publicKey ?? exampleWalletAddressFallback;
   const exampleTransferId = firstTransfer?.id ?? "xfr_live_123";
 
@@ -136,17 +126,19 @@ export function buildPaymentsPlaygroundEndpointConfigs(
       bodyFields: [],
       expectedResponse: {
         data: {
-          walletId: exampleWalletId,
-          address: exampleWalletAddress,
-          balances: [
-            {
-              token: "USDC",
-              mint: exampleMintAddress,
-              amount: "100000000",
-              uiAmount: "100.00",
-              decimals: 6,
-            },
-          ],
+          walletBalances: {
+            custodyWalletId: exampleCustodyWalletId,
+            address: exampleWalletAddress,
+            balances: [
+              {
+                token: "USDC",
+                mint: exampleMintAddress,
+                amount: "100000000",
+                uiAmount: "100.00",
+                decimals: 6,
+              },
+            ],
+          },
         },
       },
     },
