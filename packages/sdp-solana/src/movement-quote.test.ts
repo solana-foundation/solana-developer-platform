@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { TokenMovementBasis } from "@sdp/types/token-movements";
 import { type Address, getAddressDecoder, unixTimestamp } from "@solana/kit";
 import { AmountError } from "./amount";
 import { NATIVE_ASSET, type TokenAsset } from "./asset-ref";
-import { type MovementBasis, quoteMovement } from "./movement-quote";
+import { quoteMovement } from "./movement-quote";
 import { baseUnits, parseTokenAmount } from "./token-amount";
 import {
   type DisplayRule,
@@ -49,7 +50,7 @@ function mintTerms(
 const PLAIN: DisplayRule = { kind: "plain" };
 const FIFTY_BPS = rate(0n, 50, 5_000n);
 
-function intent(amount: string, basis: MovementBasis) {
+function intent(amount: string, basis: TokenMovementBasis) {
   return { asset: ASSET, amount: parseTokenAmount(amount, 6), basis };
 }
 

@@ -209,6 +209,11 @@
       "import": "./src/tokens.ts",
       "default": "./src/tokens.ts"
     },
+    "./token-movements": {
+      "types": "./src/token-movements.ts",
+      "import": "./src/token-movements.ts",
+      "default": "./src/token-movements.ts"
+    },
     "./unified-transactions": {
       "types": "./src/unified-transactions.ts",
       "import": "./src/unified-transactions.ts",
