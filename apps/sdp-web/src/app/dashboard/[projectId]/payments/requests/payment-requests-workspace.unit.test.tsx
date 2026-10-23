@@ -42,7 +42,7 @@ const requestA: PaymentRequest = {
   id: "preq_a",
   organizationId: "org_test",
   projectId: "proj_test",
-  walletId: "wal_1",
+  custodyWalletId: "cwlt_1",
   destinationAddress: "11111111111111111111111111111111",
   token: SOL_MINT,
   amount: "5",

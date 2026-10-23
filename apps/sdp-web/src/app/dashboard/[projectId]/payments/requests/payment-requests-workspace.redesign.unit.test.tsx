@@ -39,6 +39,7 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
 
 const paymentRequest = {
   id: "preq_1",
+  custodyWalletId: "cwlt_recipient",
   destinationAddress: "11111111111111111111111111111111",
   token: "So11111111111111111111111111111111111111112",
   amount: "5",

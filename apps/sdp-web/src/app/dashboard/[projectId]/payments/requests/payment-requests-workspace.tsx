@@ -202,7 +202,7 @@ function CreateRequestModal({
   });
   const [submitting, setSubmitting] = useState(false);
 
-  // Option values are the unique id/mint/walletId (not the display label), so
+  // Option values are the exact SDP wallet ID or mint, so
   // wallets or tokens sharing a label/symbol can't collapse onto each other. The
   // DS Select mirrors each item's text in the trigger, so the label still shows.
 
@@ -235,7 +235,7 @@ function CreateRequestModal({
       {
         method: "POST",
         body: {
-          walletId: result.data.wallet,
+          custodyWalletId: result.data.wallet,
           token: result.data.token,
           amount: result.data.amount,
           expiresAt,
@@ -334,7 +334,7 @@ function CreateRequestModal({
             {wallets.map((wallet) => {
               const name = wallet.label ? wallet.label : shortenAddress(wallet.publicKey);
               return (
-                <SelectItem key={wallet.walletId} value={wallet.walletId}>
+                <SelectItem key={wallet.id} value={wallet.id}>
                   {name}
                 </SelectItem>
               );
@@ -439,14 +439,16 @@ export function PaymentRequestsWorkspace({
   };
 
   const walletNameById = useMemo(
-    () => new Map(wallets.map((wallet) => [wallet.walletId, wallet.label])),
+    () => new Map(wallets.map((wallet) => [wallet.id, wallet.label])),
     [wallets]
   );
   const tokenSymbolByMint = useMemo(
     () => new Map(tokens.map((token) => [token.mintAddress, token.symbol])),
     [tokens]
   );
-  const selectedWalletName = selected ? walletNameById.get(selected.walletId) : null;
+  const selectedWalletName = selected?.custodyWalletId
+    ? walletNameById.get(selected.custodyWalletId)
+    : null;
   const selectedTokenSymbol = selected ? tokenSymbolByMint.get(selected.token) : undefined;
 
   return (

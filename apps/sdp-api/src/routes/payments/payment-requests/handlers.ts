@@ -14,7 +14,7 @@ import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import type { AppContext } from "@/routes/payments/context";
-import { resolveScope, resolveWallet } from "@/routes/payments/wallets";
+import { resolveScope, resolveWalletByCustodyWalletId } from "@/routes/payments/wallets";
 import { normalizePaymentToken } from "@/services/payment-operation.service";
 import {
   isPaymentRequestExpired,
@@ -38,7 +38,7 @@ function mapPaymentRequest(row: PaymentRequestRow): PaymentRequest {
     id: row.id,
     organizationId: row.organization_id,
     projectId: row.project_id,
-    walletId: row.wallet_id,
+    custodyWalletId: row.custody_wallet_id,
     destinationAddress: row.destination_address,
     token: row.token,
     amount: row.amount,
@@ -130,7 +130,7 @@ export async function createPaymentRequest(
   // Access to the wallet was checked by authorizePaymentRequest, before the key. Whether the
   // wallet is operational is state, checked here.
   const scope = await resolveScope(c);
-  const wallet = resolveWallet(scope.wallets, body.walletId);
+  const wallet = resolveWalletByCustodyWalletId(scope.wallets, body.custodyWalletId);
   const token = assertValidAddress(normalizePaymentToken(body.token), "token");
   await parseStaticPaymentAmount(body.amount, token);
 

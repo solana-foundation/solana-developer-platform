@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { paymentAmountSchema, solanaAddressSchema } from "@/routes/payments/schemas";
 
-export const createPaymentRequestSchema = z.object({
-  walletId: z.string().min(1),
+export const createPaymentRequestSchema = z.strictObject({
+  custodyWalletId: z.string().min(1).regex(/^\S+$/, "Wallet ID must not contain whitespace"),
   token: solanaAddressSchema("token"),
   amount: paymentAmountSchema,
   expiresAt: z.iso.datetime().nullable().default(null),

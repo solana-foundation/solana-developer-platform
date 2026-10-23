@@ -45,11 +45,8 @@ async function PaymentRequestDetailRoute({ params }: { params: Promise<{ request
       }
 
       const request = detail.status === "found" ? detail.request : null;
-      const wallet = request
-        ? (walletsResult.data ?? []).find(
-            (candidate) =>
-              candidate.walletId === request.walletId || candidate.id === request.walletId
-          )
+      const wallet = request?.custodyWalletId
+        ? (walletsResult.data ?? []).find((candidate) => candidate.id === request.custodyWalletId)
         : undefined;
 
       return (

@@ -9,7 +9,7 @@ import type { PaymentRequestTokenOption } from "./payment-requests-page.data";
 
 const exampleRequest = {
   id: "preq_abc123",
-  publicToken: "example-public-token",
+  custodyWalletId: "cwlt_example",
   status: "awaiting_payment",
   amount: "10.00",
   token: "EXAMPLE_TOKEN_MINT",
@@ -25,7 +25,7 @@ export function buildPaymentRequestsPlaygroundEndpointConfigs(
   t: (key: MessageKey, values?: TranslationValues) => string
 ): ApiPlaygroundEndpointConfig[] {
   const walletOptions = wallets.map((wallet) => ({
-    value: wallet.walletId,
+    value: wallet.id,
     label: wallet.label ? wallet.label : wallet.publicKey,
   }));
   const tokenOptions = tokens.map((token) => ({ value: token.mintAddress, label: token.symbol }));
@@ -33,16 +33,16 @@ export function buildPaymentRequestsPlaygroundEndpointConfigs(
   const firstWallet = walletOptions.at(0);
   const walletField: ApiPlaygroundFieldConfig = firstWallet
     ? {
-        key: "walletId",
-        label: "walletId",
+        key: "custodyWalletId",
+        label: "custodyWalletId",
         kind: "select",
         options: walletOptions,
         defaultValue: firstWallet.value,
         required: true,
       }
     : {
-        key: "walletId",
-        label: "walletId",
+        key: "custodyWalletId",
+        label: "custodyWalletId",
         placeholder: t("DashboardPayments.requests.destinationWalletId"),
         required: true,
       };
@@ -90,7 +90,7 @@ export function buildPaymentRequestsPlaygroundEndpointConfigs(
           placeholder: "2026-07-01T00:00:00.000Z",
         },
       ],
-      expectedResponse: exampleRequest,
+      expectedResponse: { ...exampleRequest, publicToken: "example-public-token" },
     },
   ];
 }
