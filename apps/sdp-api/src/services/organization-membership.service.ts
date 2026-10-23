@@ -173,17 +173,22 @@ export async function applyMembershipChange(
  * invitation raised since must survive it. An active membership is removed
  * only if Clerk still lacks it once the row is locked: a re-admission that
  * committed after the caller's earlier Clerk read holds a new Clerk membership,
- * and one that has not committed waits behind the lock.
+ * possibly under another Clerk user linked to the same person, and one that has
+ * not committed waits behind the lock.
  *
  * @param tx - An open transaction.
  * @param params.organizationId - The organization.
  * @param params.userId - The person Clerk no longer lists.
- * @param params.heldInClerk - Reads whether Clerk lists the person in the organization now.
+ * @param params.heldInClerk - Reads, through the open transaction, whether Clerk lists the person in the organization now.
  * @returns The membership removed, or null when none was, and how many invitations were revoked.
  */
 export async function mirrorClerkMembershipDeletion(
   tx: DatabaseExecutor,
-  params: { organizationId: string; userId: string; heldInClerk: () => Promise<boolean> }
+  params: {
+    organizationId: string;
+    userId: string;
+    heldInClerk: (tx: DatabaseExecutor) => Promise<boolean>;
+  }
 ): Promise<{ removedMemberId: string | null; revokedInvitations: number }> {
   const { organizationId, userId } = params;
 
@@ -212,7 +217,7 @@ export async function mirrorClerkMembershipDeletion(
     return { removedMemberId: null, revokedInvitations };
   }
   const member = membershipTargetSchema.parse(lockedRow);
-  if (member.status === "removed" || (await params.heldInClerk())) {
+  if (member.status === "removed" || (await params.heldInClerk(tx))) {
     return { removedMemberId: null, revokedInvitations };
   }
   await removeMembership(tx, organizationId, member);

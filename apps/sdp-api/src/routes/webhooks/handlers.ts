@@ -7,13 +7,14 @@ import type {
 import { verifyWebhook, type WebhookEvent } from "@clerk/backend/webhooks";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { Context } from "hono";
-import { getDb } from "@/db/client";
+import { type DatabaseExecutor, getDb } from "@/db/client";
 import { createPostgresRampWebhookEventsRepository } from "@/db/repositories/ramp-webhook-event.repository";
 import { AppError, badRequest } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { getLogger } from "@/runtime/logger";
 import { type AuditLogEntry, AuditService } from "@/services/audit.service";
 import {
+  findClerkOrganizationId,
   findClerkOrganizationMapping,
   syncClerkOrganization,
 } from "@/services/clerk-organization-provisioning.service";
@@ -137,16 +138,70 @@ async function findClerkUserMapping(c: AppContext, clerkUserId: string): Promise
 }
 
 /**
+ * Whether Clerk lists any Clerk user linked to the person in the organization
+ * now, read through the transaction holding the membership lock. One SDP person
+ * can hold several Clerk users: a deleted account and the one they signed up
+ * with again under the same verified email. A deletion naming the old one is
+ * stale while the new one holds the membership.
+ *
+ * @param c - The request context.
+ * @param params.clerkOrganizationId - The Clerk organization, or null when SDP maps none.
+ * @param params.userId - The SDP person.
+ * @param params.deletedClerkUserId - A Clerk user Clerk deleted and so lists nowhere, or null.
+ * @returns The check, run with the open transaction.
+ */
+function heldByAnyLinkedClerkUser(
+  c: AppContext,
+  params: {
+    clerkOrganizationId: string | null;
+    userId: string;
+    deletedClerkUserId: string | null;
+  }
+): (tx: DatabaseExecutor) => Promise<boolean> {
+  return async (tx) => {
+    const { clerkOrganizationId } = params;
+    if (clerkOrganizationId === null) {
+      return false;
+    }
+    const identities = await tx
+      .prepare(
+        `SELECT provider_user_id
+         FROM auth_user_identities
+         WHERE provider = 'clerk' AND user_id = ?
+         ORDER BY provider_user_id`
+      )
+      .bind(params.userId)
+      .all<{ provider_user_id: string }>();
+    const clerk = new ClerkOrganizationsService(c.env);
+    const held = await Promise.all(
+      identities.results
+        .filter((identity) => identity.provider_user_id !== params.deletedClerkUserId)
+        .map((identity) =>
+          clerk.hasOrganizationMembership({
+            organizationId: clerkOrganizationId,
+            userId: identity.provider_user_id,
+          })
+        )
+    );
+    return held.some((isHeld) => isHeld);
+  };
+}
+
+/**
  * Mirrors a Clerk membership deletion into SDP, in one audited transaction.
  *
  * @param c - The request context.
  * @param params.organizationId - The SDP organization.
  * @param params.userId - The SDP person Clerk no longer lists.
- * @param params.heldInClerk - Reads whether Clerk lists the person in the organization now.
+ * @param params.heldInClerk - Reads, through the open transaction, whether Clerk lists the person in the organization now.
  */
 async function auditedMembershipDeletionMirror(
   c: AppContext,
-  params: { organizationId: string; userId: string; heldInClerk: () => Promise<boolean> }
+  params: {
+    organizationId: string;
+    userId: string;
+    heldInClerk: (tx: DatabaseExecutor) => Promise<boolean>;
+  }
 ): Promise<void> {
   await new AuditService(getDb(c.env)).logWithin(c, async (tx) => {
     const mirrored = await mirrorClerkMembershipDeletion(tx, params);
@@ -196,8 +251,9 @@ function membershipDeletionMirrorAuditEntry(
  * Mirrors a membership an operator deleted in the Clerk Dashboard. Deletions
  * arrive late and out of order, and SDP's own removals come back as these same
  * events, so only a membership Clerk still lacks when read now is mirrored.
- * Clerk is read again under the membership lock before an active membership is
- * removed, so a re-admission between this read and the removal survives.
+ * Clerk is read again under the membership lock, for every Clerk user linked to
+ * the person, before an active membership is removed, so a re-admission between
+ * this read and the removal survives, under the same Clerk user or a new one.
  *
  * @param c - The request context.
  * @param data - The deleted Clerk membership.
@@ -210,10 +266,11 @@ async function mirrorMembershipDeletion(c: AppContext, data: OrganizationMembers
     logIgnoredClerkEvent(c, "organization_membership", data.id);
     return;
   }
-  const clerk = new ClerkOrganizationsService(c.env);
-  const heldInClerk = () =>
-    clerk.hasOrganizationMembership({ organizationId: clerkOrganizationId, userId: clerkUserId });
-  const userId = (await heldInClerk()) ? null : await findClerkUserMapping(c, clerkUserId);
+  const stillMember = await new ClerkOrganizationsService(c.env).hasOrganizationMembership({
+    organizationId: clerkOrganizationId,
+    userId: clerkUserId,
+  });
+  const userId = stillMember ? null : await findClerkUserMapping(c, clerkUserId);
   if (userId === null) {
     logIgnoredClerkEvent(c, "organization_membership", data.id);
     return;
@@ -221,14 +278,19 @@ async function mirrorMembershipDeletion(c: AppContext, data: OrganizationMembers
   await auditedMembershipDeletionMirror(c, {
     organizationId: mapping.organization_id,
     userId,
-    heldInClerk,
+    heldInClerk: heldByAnyLinkedClerkUser(c, {
+      clerkOrganizationId,
+      userId,
+      deletedClerkUserId: null,
+    }),
   });
 }
 
 /**
  * Mirrors a deleted Clerk user into every organization they still reach,
  * through a membership or a pending invitation. A deleted Clerk user never
- * comes back, so Clerk holds none of their memberships and no read is needed.
+ * comes back, so Clerk lists none of their memberships, but the person may have
+ * signed up again under a new Clerk user that holds one: that membership stays.
  *
  * @param c - The request context.
  * @param data - The deleted Clerk user.
@@ -246,7 +308,11 @@ async function mirrorUserDeletion(c: AppContext, data: DeletedObjectJSON) {
     await auditedMembershipDeletionMirror(c, {
       organizationId,
       userId,
-      heldInClerk: async () => false,
+      heldInClerk: heldByAnyLinkedClerkUser(c, {
+        clerkOrganizationId: await findClerkOrganizationId(getDb(c.env), organizationId),
+        userId,
+        deletedClerkUserId: data.id,
+      }),
     });
   }
 }
