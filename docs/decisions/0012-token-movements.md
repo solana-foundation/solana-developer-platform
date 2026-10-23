@@ -149,8 +149,8 @@ them in one place, not adding special cases to every flow.
   claim refuses an expired request, and a new window while a signed one is still open, which may
   have landed in its last blocks; settlement refuses a request whose expiry came before the
   paying transaction was issued. `findReference` and main's `validatePaymentRequestTransfer` are
-  gone (SOLA9-699). /pay leaves `loadPaymentMint`: a scaled or interest-bearing request is paid in
-  token units.
+  gone (SOLA9-699). /pay leaves `loadPaymentMint`; a scaled or interest-bearing mint is still
+  refused, at creation and at /pay, since the builder refuses it until PR 5.
 - **Recurring mandates (PR 3).** A recurring payment and its plan store the mandate once: the
   debit in base units, the decimals and the fee tolerance (`maxFeePerPull`, the larger of the
   current and next epoch's fee for the debit; migration 0163). Each pull reads the terms once
@@ -164,8 +164,8 @@ them in one place, not adding special cases to every flow.
   tolerance, which a pull landing in the next epoch may pay instead of the quote's fee. Create,
   plan create and an update that changes the token or amount make the mandate before any row (the
   precision check `loadPaymentMint` made); token admission stays start admission, so cancel and
-  recovery never ask it. Interest-bearing and scaled mints are no longer refused: a mandate is
-  base units.
+  recovery never ask it. Interest-bearing and scaled mints are still refused until PR 5: the
+  recurring row takes the builder's refusals.
 - **Mint watch.** `pnpm check:well-known-mints` decodes every catalogue mint with the same
   decoder, prints its extension state, and fails when a 1 000-token transfer would pay a fee
   under the current or the newer fee entry (bps alone is not the signal, since `maximumFee` is

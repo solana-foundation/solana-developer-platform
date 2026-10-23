@@ -958,15 +958,13 @@ describe("Payments routes — recurring", () => {
     );
     await expectTokenRejected(pausedMint);
 
-    // Main refused a scaled UI amount mint, its per-period cap fixed in base units. A mandate is
-    // base units (ADR 0012): the multiplier changes only what a wallet shows, never the pull.
+    // Main refused a scaled UI amount mint, and the builder's row still does until PR 5: balances
+    // show its scaled amount, so a mandate typed from them would pull another.
     const scaledRes = await createRecurring(scaledMint);
-    expect(scaledRes.status).toBe(201);
-    const scaledBody = await parseRecurringResponse(scaledRes);
-    expect(scaledBody.data.recurringPayment).toMatchObject({
-      token: scaledMint,
-      amounts: { basis: "debit", debit: "25", decimals: 6 },
-    });
+    expect(scaledRes.status).toBe(400);
+    expect(errorResponseSchema.parse(await scaledRes.json()).error.message).toBe(
+      "Payments does not move tokens whose wallets show a scaled or interest-bearing amount yet"
+    );
 
     const issuedRes = await createRecurring(issuedMint);
     expect(issuedRes.status).toBe(201);
