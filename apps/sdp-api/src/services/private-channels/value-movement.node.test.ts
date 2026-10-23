@@ -46,7 +46,13 @@ beforeEach(async () => {
   projectRpc = {
     cluster: "devnet",
     probe: async () => ({ ok: true, latencyMs: 0, version: "test" }),
-    rpc: privateChannelWriteRpc(null),
+    rpc: privateChannelWriteRpc(
+      {
+        escrowProgramId: PRIVATE_CHANNEL_ESCROW_PROGRAM_ADDRESS,
+        escrowInstanceAddr: signer.address,
+      },
+      null
+    ),
   };
   const db = getDb(env);
   await db.batch([
