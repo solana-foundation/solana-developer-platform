@@ -899,6 +899,12 @@ async function markRecurringPaymentCollectionFailedAtomically(input: {
   attempt: PaymentSubscriptionCollectionAttemptRow;
   transfer: PaymentTransferRow | null;
   submittedSignature: Signature | null;
+  /**
+   * Fail the transfer only while it still holds no signature and no submission
+   * start: what recovery read before deciding the run never sent (APE SOLA9-816).
+   * A collector that saved its send since then keeps it, and recovery retries.
+   */
+  requireUnsubmitted: boolean;
   error: Error;
 }): Promise<void> {
   const failedAt = new Date().toISOString();
@@ -923,7 +929,8 @@ async function markRecurringPaymentCollectionFailedAtomically(input: {
             WHERE id = ?
               AND organization_id = ?
               AND project_id = ?
-              AND status IN ('pending', 'processing', 'failed')`
+              AND status IN ('pending', 'processing', 'failed')
+              AND (NOT ?::boolean OR (signature IS NULL AND submission_started_at IS NULL))`
         )
         .bind(
           input.submittedSignature !== null,
@@ -932,7 +939,8 @@ async function markRecurringPaymentCollectionFailedAtomically(input: {
           failedAt,
           input.transfer.id,
           input.organizationId,
-          input.projectId
+          input.projectId,
+          input.requireUnsubmitted
         )
         .run();
       if (transferRows === 0) {
@@ -947,6 +955,16 @@ async function markRecurringPaymentCollectionFailedAtomically(input: {
           .bind(input.transfer.id, input.organizationId, input.projectId)
           .first<{ status: string; signature: string | null }>();
 
+        if (
+          input.requireUnsubmitted &&
+          currentTransfer !== null &&
+          currentTransfer.status !== "confirmed" &&
+          currentTransfer.signature !== null
+        ) {
+          // The collector saved its send after recovery read the row: it may land, so
+          // the next recovery reads that send instead of failing the cycle under it.
+          throw conflict("Recurring payment collection saved a send while recovering it; retry");
+        }
         if (currentTransfer === null || currentTransfer.status !== "confirmed") {
           throw internalError("Failed to mark collection transfer failed");
         }
@@ -1195,7 +1213,7 @@ async function journalRecurringPaymentCollectionError(input: {
     return;
   }
 
-  await markRecurringPaymentCollectionFailedAtomically(input);
+  await markRecurringPaymentCollectionFailedAtomically({ ...input, requireUnsubmitted: false });
 }
 
 async function safeJournalRecurringPaymentCollectionError(input: {
@@ -1342,6 +1360,7 @@ async function recoverRecurringPaymentCollection(input: {
       attempt: existing,
       transfer: null,
       submittedSignature: null,
+      requireUnsubmitted: false,
       error: new Error("Recurring payment collection was interrupted before transfer creation"),
     });
     return null;
@@ -1368,6 +1387,7 @@ async function recoverRecurringPaymentCollection(input: {
       attempt: existing,
       transfer,
       submittedSignature: null,
+      requireUnsubmitted: true,
       error: new Error("Recurring payment collection was interrupted before submission"),
     });
     return null;
@@ -1389,6 +1409,7 @@ async function recoverRecurringPaymentCollection(input: {
       attempt: existing,
       transfer,
       submittedSignature: recoveredSignature,
+      requireUnsubmitted: false,
       error: new Error("Recurring payment collection was interrupted before broadcast"),
     });
     return null;
@@ -1421,6 +1442,7 @@ async function recoverRecurringPaymentCollection(input: {
       attempt: existing,
       transfer,
       submittedSignature: recoveredSignature,
+      requireUnsubmitted: false,
       error: transactionFailed(message),
     });
     return null;
@@ -1498,6 +1520,7 @@ async function recoverRecurringPaymentCollection(input: {
         attempt: existing,
         transfer,
         submittedSignature: recoveredSignature,
+        requireUnsubmitted: false,
         error,
       });
       return null;

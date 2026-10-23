@@ -3961,6 +3961,102 @@ describe("Payments routes — recurring", () => {
     expect(sendTransactionMock).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps a collection whose send was saved after recovery read it unsent (APE SOLA9-816)", async () => {
+    const sourceSigner = recurringExecution.sourceSigner();
+    const savedSignature = signature(
+      "4hdAMf5sGEHn2UAjViFvX9YtZQdRfeHEGwNEc8GjVKFG5MGNs27jVrNuQXHcr1JAkzjcJtS4Lo6z33Z5fbT2gq13"
+    );
+    const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    const dueAt = new Date(Date.now() - 60 * 1000).toISOString();
+    const staleAt = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+    const transferId = `xfr_${crypto.randomUUID()}`;
+    const attemptId = `psca_${crypto.randomUUID()}`;
+    await setRecurringCollectionDue({
+      recurringPaymentId: activated.id,
+      subscriptionId: activated.subscriptionId,
+      dueAt,
+    });
+    await seedRecurringCollectionJournal({
+      stage: "submitted",
+      attemptId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      recurringPaymentId: activated.id,
+      subscriptionId: activated.subscriptionId,
+      collectionDueAt: dueAt,
+      token: DEVNET_USDC_MINT,
+      amount: "25.00",
+      attemptedAt: staleAt,
+      transfer: {
+        id: transferId,
+        walletId: TEST_WALLET_ID,
+        counterpartyId: activated.counterpartyId,
+        sourceAddress: sourceSigner.address,
+        destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
+        signature: savedSignature,
+      },
+    });
+    // A stale run that never saved its send: no signature on the transfer or the attempt.
+    await getDb(env)
+      .prepare("UPDATE payment_transfers SET signature = NULL WHERE id = ?")
+      .bind(transferId)
+      .run();
+    await getDb(env)
+      .prepare("UPDATE payment_subscription_collection_attempts SET signature = NULL WHERE id = ?")
+      .bind(attemptId)
+      .run();
+    // Right after recovery reads the transfer unsent, the original collector saves and starts
+    // its send: the interleaving SOLA9-816 describes.
+    const createPaymentsRepository = paymentsRepositoryPostgres.createPostgresPaymentsRepository;
+    let raced = false;
+    vi.spyOn(paymentsRepositoryPostgres, "createPostgresPaymentsRepository").mockImplementation(
+      (...args) => {
+        const repo = createPaymentsRepository(...args);
+        return {
+          ...repo,
+          getTransferById: async (params) => {
+            const row = await repo.getTransferById(params);
+            if (row?.id === transferId && !raced) {
+              raced = true;
+              await getDb(env)
+                .prepare(
+                  `UPDATE payment_transfers
+                      SET signature = ?, signed_transaction = 'AQ==', last_valid_block_height = '1',
+                          submission_started_at = ?
+                    WHERE id = ?`
+                )
+                .bind(savedSignature, new Date().toISOString(), transferId)
+                .run();
+            }
+            return row;
+          },
+        };
+      }
+    );
+
+    const sendsBeforeCollect = sendTransactionMock.mock.calls.length;
+    const collectRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/collect`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+
+    expect(raced).toBe(true);
+    expect(collectRes.status).toBe(409);
+    const transfer = await getDb(env)
+      .prepare("SELECT status, signature FROM payment_transfers WHERE id = ?")
+      .bind(transferId)
+      .first<{ status: string; signature: string | null }>();
+    expect(transfer).toEqual({ status: "processing", signature: savedSignature });
+    const attempt = await getDb(env)
+      .prepare("SELECT status FROM payment_subscription_collection_attempts WHERE id = ?")
+      .bind(attemptId)
+      .first<{ status: string }>();
+    expect(attempt?.status).toBe("processing");
+    // Recovery sends nothing of its own.
+    expect(sendTransactionMock).toHaveBeenCalledTimes(sendsBeforeCollect);
+  });
+
   it("journals failed recovered recurring payment collection attempts and allows retry", async () => {
     const sourceSigner = recurringExecution.sourceSigner();
     const submittedSignature = signature(
