@@ -317,7 +317,7 @@ export async function provisionPrivyWallet(
       authHeader,
       appId,
       method: "GET",
-      path: `/wallets/${options.walletId}`,
+      path: `/wallets/${encodeURIComponent(options.walletId)}`,
     });
 
     if (!existing?.id || !existing?.address) {

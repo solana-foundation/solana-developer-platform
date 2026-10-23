@@ -70,6 +70,24 @@ describe("scrubTelemetry", () => {
     });
   });
 
+  it("redacts a bare derivation seed and a wallet passphrase by key", () => {
+    // A signer helper that logs its derivation input does so under `seed`,
+    // and custodian configs carry `walletPassphrase` — both key material no
+    // suffix rule catches. A sibling PDA `seeds` array is public derivation
+    // data and survives.
+    const scrubbed = scrubTelemetry({
+      seed: "jZ2ZCg8BfJqknAfGCgerDECGjTzXAHAqdBPLDdBZqMkEAAAAAAAAAAQ==",
+      walletPassphrase: "correct horse battery staple",
+      seeds: ["owner", "aux"],
+    });
+
+    assert.deepEqual(scrubbed, {
+      seed: "[REDACTED]",
+      walletPassphrase: "[REDACTED]",
+      seeds: ["owner", "aux"],
+    });
+  });
+
   it("redacts an end-user owner address by key while the treasury address survives", () => {
     const scrubbed = scrubTelemetry({
       event: "sdp_api_earn_split_swap_orphaned",
@@ -206,6 +224,21 @@ describe("scrubTelemetryString — prefixed keys in a serialized body", () => {
 
     assert.ok(!scrubbed.includes("sk_live_supersecret"));
     assert.ok(scrubbed.includes("x-api-key"));
+  });
+
+  it("redacts a cookie that arrives inside a serialized header blob", () => {
+    // A Sentry request-header dump serializes headers to a string, where the
+    // object-key `cookie` rule cannot reach; the string forms have to cover it.
+    const scrubbed = scrubTelemetryString(
+      '{"headers":{"accept":"*/*","cookie":"session=supersecret-value"}}'
+    );
+
+    assert.ok(!scrubbed.includes("supersecret-value"));
+    assert.ok(scrubbed.includes("cookie"));
+
+    const assignment = scrubTelemetryString("Cookie: session=supersecret-value; theme=dark");
+
+    assert.ok(!assignment.includes("supersecret-value"));
   });
 
   it("keeps a key that merely contains a denied name as a prefix", () => {

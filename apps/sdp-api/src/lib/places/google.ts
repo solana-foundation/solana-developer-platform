@@ -13,6 +13,8 @@ const API_KEY_ENV = "GOOGLE_ADDRESS_COMPLETION_API_KEY";
 const REQUEST_TIMEOUT_MS = 10_000;
 /** Suggestions and a place's details are a few kilobytes. */
 const MAX_RESPONSE_BYTES = 1024 * 1024;
+/** A 576×112 map at 2× is a few tens of kilobytes; anything larger is refused. */
+const MAX_MAP_RESPONSE_BYTES = 2 * 1024 * 1024;
 
 function googleJson<TSchema extends z.ZodType>(
   schema: TSchema,
@@ -153,12 +155,59 @@ export async function fetchStaticMap(
   url.searchParams.set("markers", `${input.latitude},${input.longitude}`);
   url.searchParams.set("key", requireEnv(env, API_KEY_ENV));
 
-  const response = await fetch(url.toString());
+  // The same deadline and byte cap the JSON calls apply: the upstream host is
+  // fixed, but a stalled or oversized answer should still fail the request
+  // rather than hold a Cloud Run slot or fill memory.
+  const response = await fetch(url.toString(), {
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
   if (!response.ok) {
     throw providerUnavailable(`Google Static Maps request failed with status ${response.status}`, {
       provider: "google",
       providerStatus: response.status,
     });
   }
-  return response;
+  const bytes = await readCappedResponseBytes(response, MAX_MAP_RESPONSE_BYTES).catch(() => {
+    throw providerUnavailable("Google Static Maps response could not be read", {
+      provider: "google",
+      providerStatus: response.status,
+    });
+  });
+  return new Response(bytes, { status: 200, headers: { "Content-Type": "image/png" } });
+}
+
+/**
+ * Reads a binary provider body under a byte cap, so an oversized or endless
+ * answer never fills memory — the same discipline `readProviderBody` applies
+ * to text answers.
+ */
+async function readCappedResponseBytes(
+  response: Response,
+  maxBytes: number
+): Promise<Uint8Array<ArrayBuffer>> {
+  if (response.body === null) {
+    return new Uint8Array();
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    received += value.byteLength;
+    if (received > maxBytes) {
+      await reader.cancel();
+      throw new Error(`provider response passed ${maxBytes} bytes`);
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(received);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
 }
