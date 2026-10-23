@@ -416,6 +416,7 @@ describe("Fireblocks BYOK lifecycle", () => {
       projectId: PROJECT_ID,
       connectionId: connected.connectionId,
       label: "Operations",
+      purpose: "transfer",
     });
     expect(wallet).toMatchObject({
       walletId: "fb_42",
@@ -899,12 +900,12 @@ describe("Fireblocks vault discovery and selection", () => {
     expect((await complete.json()).data.completion.status).toBe("success");
     expect(fetch).toHaveBeenCalledTimes(4);
     const wallets = await getDb(env).queryMany(
-      "SELECT wallet_id, public_key, label FROM custody_wallets WHERE custody_connection_id = ? ORDER BY wallet_id",
+      "SELECT wallet_id, public_key, label, purpose FROM custody_wallets WHERE custody_connection_id = ? ORDER BY wallet_id",
       [connectionId]
     );
     expect(wallets).toEqual([
-      { wallet_id: "fb_0", public_key: ADDRESS, label: "Treasury" },
-      { wallet_id: "fb_7", public_key: OTHER_ADDRESS, label: "Operations" },
+      { wallet_id: "fb_0", public_key: ADDRESS, label: "Treasury", purpose: "transfer" },
+      { wallet_id: "fb_7", public_key: OTHER_ADDRESS, label: "Operations", purpose: "transfer" },
     ]);
     expect((await request(`/connections/${connectionId}/complete`, {})).status).toBe(200);
     expect(

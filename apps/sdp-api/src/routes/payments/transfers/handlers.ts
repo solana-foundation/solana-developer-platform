@@ -743,7 +743,6 @@ async function executeSponsoredTransfer(
   );
 
   const partiallySigned = await signWithFreshBlockhash({
-    rpc,
     blockhash,
     sign: () => partiallySignTransactionMessageWithSigners(message),
   });
@@ -957,8 +956,6 @@ async function executeFireblocksTransfer(
 export async function createTransfer(c: ValidatedBodyContext<typeof createTransferSchema>) {
   const body = c.req.valid("json");
   const { scope, operation, rampTransfer } = getAuthorized<TransferResolved>(c);
-  // Before the row: a too-precise amount is the caller's 400, never a failed transfer.
-  await parseStaticPaymentAmount(operation.amount, assertValidAddress(operation.token, "token"));
   // The credential-bound record key (ADR 0009), never the raw client key.
   const recordKey = getIdempotencyRecordKey(c);
   const fingerprint = getIdempotencyFingerprint(c);
@@ -970,6 +967,9 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
     requireProjectId(c),
     operation
   );
+  // Reject unsupported Fireblocks mints before attempting an unused Solana read.
+  // Before the row: a too-precise amount is the caller's 400, never a failed transfer.
+  await parseStaticPaymentAmount(operation.amount, assertValidAddress(operation.token, "token"));
   if (fireblocks && body.transferId)
     throw badRequest("Fireblocks native transfers currently support direct wallet payments only");
 

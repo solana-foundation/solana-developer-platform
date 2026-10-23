@@ -122,7 +122,6 @@ export async function executeChunk(params: {
 }): Promise<void> {
   const { c, resolved, chunk } = params;
   const partiallySigned = await signWithFreshBlockhash({
-    rpc: resolved.rpc,
     blockhash: chunk.message.lifetimeConstraint.blockhash,
     sign: () => partiallySignTransactionMessageWithSigners(chunk.message),
   });

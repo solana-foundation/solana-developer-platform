@@ -6,11 +6,10 @@ import { link, mkdir, open, readFile, unlink, writeFile } from "node:fs/promises
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
+import { SOL_MINT } from "../packages/sdp-types/src/well-known-tokens.ts";
 
 // biome-ignore lint/security/noSecrets: Public Solana mainnet genesis hash.
 const MAINNET_GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
-// biome-ignore lint/security/noSecrets: Public wrapped SOL mint address.
-const SOL_MINT = "So11111111111111111111111111111111111111112";
 const ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 export function validateConfig(config) {

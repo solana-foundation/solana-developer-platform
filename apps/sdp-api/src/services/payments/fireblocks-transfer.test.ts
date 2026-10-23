@@ -491,13 +491,19 @@ describe("native Fireblocks BYOK payment routes", () => {
     expect(mock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
   });
   it("maps USDC by exact mint and network and rejects unsupported assets and precision", async () => {
-    await ready();
+    const mock = await ready();
     const response = await send("usdc", { token: USDC, amount: "0.123456" });
     expect(response.status, await response.clone().text()).toBe(200);
     expect(createBody.assetId).toBe("SOL_USDC_JKVK");
     expect(createBody.amount).toBe("0.123456");
-    expect((await send("unsupported", { token: ADDRESS })).status).toBe(400);
+    const callsBeforeRejection = mock.mock.calls.length;
+    const unsupported = await send("unsupported", { token: ADDRESS });
+    expect(unsupported.status).toBe(400);
+    expect((await unsupported.json()).error.message).toBe(
+      "Fireblocks payments currently support SOL and USDC only"
+    );
     expect((await send("too-precise", { token: USDC, amount: "0.0000001" })).status).toBe(400);
+    expect(mock).toHaveBeenCalledTimes(callsBeforeRejection);
   });
   it("recovers an accepted payment after a lost response without resubmitting", async () => {
     const mock = await ready();

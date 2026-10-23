@@ -3,11 +3,11 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { SOL_MINT } from "../packages/sdp-types/src/well-known-tokens.ts";
 import { paymentAttempt, runLive, validateConfig } from "./fireblocks-live.mjs";
 
 const source = "11111111111111111111111111111111";
-// biome-ignore lint/security/noSecrets: Public wrapped SOL mint used as a synthetic recipient.
-const recipient = "So11111111111111111111111111111111111111112";
+const recipient = SOL_MINT;
 const config = {
   baseUrl: "http://127.0.0.1:8787",
   network: "mainnet-beta",

@@ -1,42 +1,49 @@
-import * as solana from "@sdp/rpc/solana";
-import { createRpcFromTransport, isBlockhashValid } from "@sdp/rpc/solana";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { blockhash } from "@solana/kit";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { ENVIRONMENT_CLUSTER_CASES, installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
 import { signWithFreshBlockhash } from "./sign-with-fresh-blockhash";
 
-const rpc = createRpcFromTransport(async () => {
-  throw new Error("Unexpected RPC call");
-});
-beforeEach(() => {
-  vi.spyOn(solana, "isBlockhashValid");
-});
 const hash = blockhash("11111111111111111111111111111111");
 afterEach(() => vi.restoreAllMocks());
 
 describe("payment approval lifetime", () => {
+  const rpc = installClusterRpcResponder();
+  const inSandbox = <T>(operation: () => T) =>
+    runInClusterScope({ projectId: null, environment: "sandbox" }, operation);
+
   it("adds no RPC read for fast signing", async () => {
     vi.spyOn(performance, "now").mockReturnValueOnce(0).mockReturnValueOnce(20);
-    vi.mocked(isBlockhashValid).mockClear();
-    expect(await signWithFreshBlockhash({ rpc, blockhash: hash, sign: async () => "signed" })).toBe(
-      "signed"
-    );
-    expect(isBlockhashValid).not.toHaveBeenCalled();
+    expect(
+      await inSandbox(() => signWithFreshBlockhash({ blockhash: hash, sign: async () => "signed" }))
+    ).toBe("signed");
+    expect(rpc.requests).toEqual([]);
   });
 
-  it("checks the exact blockhash once after slow approval", async () => {
-    vi.spyOn(performance, "now").mockReturnValueOnce(0).mockReturnValueOnce(30_000);
-    vi.mocked(isBlockhashValid).mockReset().mockResolvedValue(true);
-    expect(await signWithFreshBlockhash({ rpc, blockhash: hash, sign: async () => "signed" })).toBe(
-      "signed"
-    );
-    expect(isBlockhashValid).toHaveBeenCalledExactlyOnceWith(rpc, hash, "confirmed");
-  });
+  it.each(ENVIRONMENT_CLUSTER_CASES)(
+    "checks the exact blockhash once on $cluster after slow approval",
+    async ({ environment, cluster }) => {
+      vi.spyOn(performance, "now").mockReturnValueOnce(0).mockReturnValueOnce(30_000);
+      rpc.answer("isBlockhashValid", { context: { slot: 1 }, value: true });
+      expect(
+        await runInClusterScope({ projectId: null, environment }, () =>
+          signWithFreshBlockhash({ blockhash: hash, sign: async () => "signed" })
+        )
+      ).toBe("signed");
+      expect(rpc.requests.filter((request) => request.method === "isBlockhashValid")).toEqual([
+        { cluster, method: "isBlockhashValid", params: [hash, { commitment: "confirmed" }] },
+      ]);
+      expect(rpc.requests.every((request) => request.cluster === cluster)).toBe(true);
+    }
+  );
 
   it("refuses expired signatures without retrying custody signing", async () => {
     vi.spyOn(performance, "now").mockReturnValueOnce(0).mockReturnValueOnce(80_000);
-    vi.mocked(isBlockhashValid).mockReset().mockResolvedValue(false);
+    rpc.answer("isBlockhashValid", { context: { slot: 1 }, value: false });
     const sign = vi.fn(async () => "signed");
-    await expect(signWithFreshBlockhash({ rpc, blockhash: hash, sign })).rejects.toMatchObject({
+    await expect(
+      inSandbox(() => signWithFreshBlockhash({ blockhash: hash, sign }))
+    ).rejects.toMatchObject({
       code: "TRANSACTION_FAILED",
       message: expect.stringContaining("was not submitted"),
     });
@@ -45,9 +52,20 @@ describe("payment approval lifetime", () => {
 
   it("fails closed when the lifetime check is unavailable", async () => {
     vi.spyOn(performance, "now").mockReturnValueOnce(0).mockReturnValueOnce(30_000);
-    vi.mocked(isBlockhashValid).mockReset().mockRejectedValue(new Error("RPC unavailable"));
+    rpc.respond("isBlockhashValid", () => ({
+      error: { code: -32603, message: "RPC unavailable" },
+    }));
     await expect(
-      signWithFreshBlockhash({ rpc, blockhash: hash, sign: async () => "signed" })
+      inSandbox(() => signWithFreshBlockhash({ blockhash: hash, sign: async () => "signed" }))
     ).rejects.toThrow("RPC unavailable");
+  });
+
+  it("requires an open cluster scope before custody signing", async () => {
+    const sign = vi.fn(async () => "signed");
+    await expect(signWithFreshBlockhash({ blockhash: hash, sign })).rejects.toMatchObject({
+      code: "CLUSTER_SCOPE_MISSING",
+    });
+    expect(sign).not.toHaveBeenCalled();
+    expect(rpc.requests).toEqual([]);
   });
 });

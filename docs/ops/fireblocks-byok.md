@@ -10,25 +10,39 @@ a beta deployment can connect to mainnet.
 
 Fireblocks connections use the same project-scoped encrypted credential lifecycle as Privy:
 installation, credential checks, replacement, rotation, rollback, deactivation, and secret
-retirement. Organization entitlement to Fireblocks is still required. Deploy the Fireblocks migrations `0153`, `0154`, `0156` and `0157` before the API. They extend
+retirement. Organization entitlement to Fireblocks is still required. Deploy the Fireblocks migrations `0160`–`0163` before the API. They extend
 the GCP reservation and cleanup constraints, enforce one unfinished Fireblocks installation,
 and add tenant-isolated, encrypted CSR registration storage.
 
-If a local development database already applied `0152_fireblocks_byok.sql` from an
-earlier PR revision, record its new filename before running migrations. Its SQL is
-unchanged; `main` now uses `0152` for recurring-payment expiry. This prevents replaying
-the Fireblocks constraint changes after their validation migration already ran:
+If a local development database already applied Fireblocks migrations from an earlier
+PR revision, record their new filenames before running migrations. Their SQL is unchanged;
+`main` now uses the earlier numbers for other features. This prevents replaying the CSR
+table creation or constraint changes after their validation migration already ran:
 
 ```sql
 UPDATE schema_migrations
-SET version = '0154_fireblocks_byok.sql'
+SET version = '0161_fireblocks_byok.sql'
 WHERE version = '0152_fireblocks_byok.sql'
   AND NOT EXISTS (
-    SELECT 1 FROM schema_migrations WHERE version = '0154_fireblocks_byok.sql'
+    SELECT 1 FROM schema_migrations WHERE version = '0161_fireblocks_byok.sql'
+  );
+
+WITH renames(old_version, new_version) AS (VALUES
+  ('0153_fireblocks_csr_requests.sql', '0160_fireblocks_csr_requests.sql'),
+  ('0154_fireblocks_byok.sql', '0161_fireblocks_byok.sql'),
+  ('0156_fireblocks_unfinished_index.sql', '0162_fireblocks_unfinished_index.sql'),
+  ('0157_fireblocks_credential_checks.sql', '0163_fireblocks_credential_checks.sql')
+)
+UPDATE schema_migrations AS applied
+SET version = renames.new_version
+FROM renames
+WHERE applied.version = renames.old_version
+  AND NOT EXISTS (
+    SELECT 1 FROM schema_migrations WHERE version = renames.new_version
   );
 ```
 
-If a development database already applied an earlier PR version of `0153` without
+If a development database already applied an earlier PR version of the CSR migration without
 the status column, apply this compatibility update before starting the new API.
 Preserve the database and payment receipts used for mainnet testing.
 
@@ -175,7 +189,9 @@ deployment credentials or another connection's signer cache.
 Payment RPC budget for non-native-provider signing: single-payment builds still use one `getLatestBlockhash` call, moved after
 instruction preparation. Fast signing adds zero reads. Signing lasting at least 15 seconds
 adds one `isBlockhashValid` call per signed transaction (including each slow batch chunk),
-whose result gates sponsorship and broadcast. There is no automatic rebuild or signing retry.
+whose result gates sponsorship and broadcast. The helper resolves the memoized RPC client
+from the open cluster scope; it does not accept a caller-supplied client. This adds no RPC
+requests beyond the lifetime check above. There is no automatic rebuild or signing retry.
 
 ## Opt-in live tests on local mainnet
 
