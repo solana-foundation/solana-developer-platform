@@ -178,7 +178,10 @@ signature. Initiated movements keep their signature uniqueness. Caller keys
 still share the existing ledger constraint, so use distinct keys for direct
 and queued intents; ADR 0003 records the unresolved collision and rollout gate.
 
-The custody options/preview/create/list/detail/cancel routes are keyed. External
+The custody options/preview/create/list/detail/cancel routes are keyed. The
+custody cancel takes `earn.manage`, the action its movement
+(`earn.queued_withdraw_cancel`) needs at the custody signer, so a key without it
+is refused before sponsorship, a build and a simulation. External
 wallet options and previews use the optional-auth contract: anonymous calls are
 per-IP RPC-metered and persist nothing. External request/cancellation builds,
 submits, and request history are keyed so every share escrow has the durable
@@ -1603,7 +1606,9 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
   `isEarnExitOrRead` (exits.ts) allows: every GET plus an explicit list of
   withdrawal POSTs. It is an allowlist, so a new route is refused until filed;
   `production-exits.test.ts` forces every state-changing route to be filed as
-  an exit or an entry.
+  an exit or an entry. `exits.ts` also files the starts (deposits,
+  cancellations), and `movement-actions.test.ts` fails any route filed with a
+  start whose declared action that start's `actions` do not admit (HOO-2099).
 - Route tests in `../earn-program.test.ts` encode the asymmetry: the money-in
   half (create and re-target both refused when the organization is not entitled
   or credentials are missing) and the money-out half (the "withdrawals (ADR 0002

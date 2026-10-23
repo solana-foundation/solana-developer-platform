@@ -45,7 +45,7 @@ const EARN_ROUTE_ACTIONS: Record<string, EarnRouteDeclaration> = {
   "POST /vault-withdrawal-requests": keyed("earn.execute"),
   "GET /vault-withdrawal-requests": keyed("earn.read"),
   "GET /vault-withdrawal-requests/:withdrawalRequestId": keyed("earn.read"),
-  "POST /vault-withdrawal-requests/:withdrawalRequestId/cancel": keyed("earn.execute"),
+  "POST /vault-withdrawal-requests/:withdrawalRequestId/cancel": keyed("earn.manage"),
   "GET /vault-positions": keyed("earn.read"),
   "GET /vault-share-reconciliation": keyed("earn.read"),
   "POST /external-wallet/deposit-transactions": keyless("earn.execute"),
