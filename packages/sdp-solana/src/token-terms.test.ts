@@ -542,6 +542,16 @@ describe("display rules", () => {
     assert.throws(() => fromDisplay(terms, "1e3", at, "atLeast"), AmountError);
   });
 
+  it("inverts a display above 256 bits exactly", () => {
+    // 10^60 × the u64 maximum shows about 10^79, past a 256-bit parse.
+    const terms = scaled(1e60, 0);
+    const at = unixTimestamp(0n);
+    assert.equal(fromDisplay(terms, "1", at, "atLeast"), 1n);
+    assert.equal(fromDisplay(terms, "1", at, "atMost"), 0n);
+    assertRoundTrip(terms, U64_MAX, at);
+    assertRoundTrip(terms, 2n ** 60n + 12_345n, at);
+  });
+
   /**
    * `fromDisplay` brackets every amount that shows the same value: `atLeast`
    * is the first amount showing it, `atMost` the last.

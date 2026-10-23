@@ -43,7 +43,7 @@ import {
   type Mint,
   type TransferFee,
 } from "@solana-program/token-2022";
-import { AmountError, compareDecimalAmounts, isDecimalString } from "./amount";
+import { AmountError, isDecimalString } from "./amount";
 import { NATIVE_ASSET, type NativeAsset, type TokenAsset, type UnreadMint } from "./asset-ref";
 import { type BaseUnits, baseUnits, U64_MAX } from "./token-amount";
 
@@ -672,6 +672,32 @@ function displayString(terms: TokenTerms, units: bigint, at: UnixTimestamp): str
   }
 }
 
+/** A plain decimal string split at its point; either side may be empty, never both. */
+function decimalParts(value: string): Readonly<{ whole: string; fraction: string }> {
+  const dot = value.indexOf(".");
+  if (dot === -1) {
+    return { whole: value, fraction: "" };
+  }
+  return { whole: value.slice(0, dot), fraction: value.slice(dot + 1) };
+}
+
+/**
+ * Compares two plain unsigned decimal strings exactly, at any size. A display
+ * value can pass the 256 bits `compareDecimalAmounts` parses: a 10^60
+ * multiplier on a zero-decimal mint shows about 10^79 for the u64 maximum.
+ */
+function compareDisplayValues(left: string, right: string): number {
+  const leftParts = decimalParts(left);
+  const rightParts = decimalParts(right);
+  const scale = Math.max(leftParts.fraction.length, rightParts.fraction.length);
+  const leftDigits = BigInt(`${leftParts.whole}${leftParts.fraction.padEnd(scale, "0")}`);
+  const rightDigits = BigInt(`${rightParts.whole}${rightParts.fraction.padEnd(scale, "0")}`);
+  if (leftDigits === rightDigits) {
+    return 0;
+  }
+  return leftDigits < rightDigits ? -1 : 1;
+}
+
 /**
  * What a wallet shows for `units` at `at`, by the mint's display rule. A
  * scaled mint uses `newMultiplier` once `at` reaches its effective time.
@@ -711,7 +737,7 @@ export function fromDisplay(
   /** -1, 0 or 1 as the display of `units` is below, at or above the target; overflow is above. */
   const compareShown = (units: bigint) => {
     const shown = displayString(terms, units, at);
-    return shown === null ? 1 : compareDecimalAmounts(shown, target);
+    return shown === null ? 1 : compareDisplayValues(shown, target);
   };
 
   let low = 0n;
