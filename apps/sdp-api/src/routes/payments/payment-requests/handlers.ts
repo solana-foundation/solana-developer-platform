@@ -16,10 +16,7 @@ import type { ValidatedBodyContext } from "@/middleware/validate";
 import type { AppContext } from "@/routes/payments/context";
 import { resolveScope, resolveWallet } from "@/routes/payments/wallets";
 import { normalizePaymentToken } from "@/services/payment-operation.service";
-import {
-  isPaymentRequestExpired,
-  reconcilePaymentRequest,
-} from "@/services/payments/payment-requests";
+import { isPaymentRequestExpired } from "@/services/payments/payment-requests";
 import { parseStaticPaymentAmount } from "@/services/payments/token-amount";
 import {
   type createPaymentRequestSchema,
@@ -46,6 +43,8 @@ function mapPaymentRequest(row: PaymentRequestRow): PaymentRequest {
     status: expired && row.status === "awaiting_payment" ? "expired" : row.status,
     expiresAt: row.expires_at,
     fulfilledByTransferId: row.fulfilled_by_transfer_id,
+    paidLate: row.paid_late,
+    lastCheckedAt: row.last_verified_at,
     canceledBy: row.canceled_by,
     lifecycle: row.lifecycle,
     createdBy: row.created_by,
@@ -72,12 +71,8 @@ export async function listPaymentRequests(c: AppContext) {
     offset: (page - 1) * pageSize,
   });
 
-  const reconciledRows = await Promise.all(
-    rows.map((row) => reconcilePaymentRequest(c.env, row, { bestEffort: true }))
-  );
-
   const response: ListPaymentRequestsResponse = {
-    paymentRequests: reconciledRows.map(mapPaymentRequest),
+    paymentRequests: rows.map(mapPaymentRequest),
     total,
     page,
     pageSize,
@@ -104,9 +99,7 @@ async function readPaymentRequest(c: AppContext): Promise<PaymentRequestRow> {
 }
 
 export async function getPaymentRequest(c: AppContext) {
-  const row = await readPaymentRequest(c);
-  const reconciled = await reconcilePaymentRequest(c.env, row, { bestEffort: true });
-  return success(c, mapPaymentRequest(reconciled));
+  return success(c, mapPaymentRequest(await readPaymentRequest(c)));
 }
 
 /**

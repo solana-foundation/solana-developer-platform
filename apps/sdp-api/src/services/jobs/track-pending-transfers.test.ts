@@ -293,6 +293,29 @@ describe("trackPendingTransfers", () => {
       expect(updated?.error).toContain("InsufficientFunds");
     });
 
+    it("keeps a transfer processing when its error is seen only at processed (APE SOLA9-708)", async () => {
+      rpc.respondSignatureStatuses(() => ({
+        slot: 55556,
+        confirmations: 0,
+        confirmationStatus: "processed",
+        err: { InstructionError: [0, "InsufficientFunds"] },
+      }));
+
+      await insertTransfer({
+        id: "xfr_processing_processed_error",
+        status: "processing",
+        signature: String(TEST_SIG_1),
+        createdAt: minutesAgo(1),
+        updatedAt: minutesAgo(1),
+      });
+
+      await trackSandboxTransfers();
+
+      const unchanged = await getTransfer("xfr_processing_processed_error");
+      expect(unchanged?.status).toBe("processing");
+      expect(unchanged?.error).toBeNull();
+    });
+
     it("marks old processing transfer as failed when signature is absent from transaction history", async () => {
       await insertTransfer({
         id: "xfr_processing_not_found",

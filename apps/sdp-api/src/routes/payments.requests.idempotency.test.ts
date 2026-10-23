@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
@@ -60,6 +61,24 @@ describe("Payments routes — payment request access before the key", () => {
 
     expect(response.status).toBe(201);
     expect(await storedKeyCount("payreq-own-wallet")).toBe(1);
+  });
+
+  it("replays a retry that only re-spells the amount (APE SOLA9-734)", async () => {
+    const first = await postPaymentRequest(
+      { walletId: TEST_WALLET_ID, token: DEVNET_USDC_MINT, amount: "1" },
+      "payreq-respelled"
+    );
+    const retry = await postPaymentRequest(
+      { walletId: TEST_WALLET_ID, token: DEVNET_USDC_MINT, amount: "1.00" },
+      "payreq-respelled"
+    );
+
+    expect(first.status).toBe(201);
+    expect(retry.status).toBe(201);
+    const createdSchema = z.object({ data: z.object({ id: z.string() }) });
+    const created = createdSchema.parse(await first.json());
+    const replayed = createdSchema.parse(await retry.json());
+    expect(replayed.data.id).toBe(created.data.id);
   });
 });
 
@@ -151,5 +170,17 @@ describe("Payments routes — subscription plan wallets before the key", () => {
     );
     expect(response.status).toBe(404);
     expect(await storedKeyCount("plan-foreign-puller")).toBe(0);
+  });
+
+  it("replays a retry that only re-spells the amount (APE SOLA9-759)", async () => {
+    const first = await postPlan({ ownerWalletId: TEST_WALLET_ID, amount: "25" }, "plan-respelled");
+    const retry = await postPlan(
+      { ownerWalletId: TEST_WALLET_ID, amount: "25.0" },
+      "plan-respelled"
+    );
+
+    expect(first.status).toBe(201);
+    expect(retry.status).toBe(201);
+    expect(await retry.json()).toEqual(await first.clone().json());
   });
 });

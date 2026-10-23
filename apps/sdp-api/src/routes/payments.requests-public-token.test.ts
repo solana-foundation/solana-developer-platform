@@ -7,7 +7,6 @@ import { createPaymentRequestsRepository } from "@/db/repositories/repository-fa
 import { app } from "@/index";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
-import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -51,14 +50,10 @@ async function get(path: string, key: typeof READ_KEY): Promise<Response> {
 }
 
 describe("payment request public tokens", () => {
-  // Reads reconcile an awaiting request on chain; nothing has paid it, so
-  // every read returns the stored row.
-  const rpc = installClusterRpcStub();
   let requestId: string;
   let publicToken: string;
 
   beforeEach(async () => {
-    rpc.answer("getSignaturesForAddress", []);
     await seedTestDatabase(env);
     const db = getDb(env);
     await db
@@ -179,5 +174,55 @@ describe("payment request public tokens", () => {
   it("answers 404 for a request in another project", async () => {
     const res = await get("/v1/payments/requests/preq_missing", MANAGE_KEY);
     expect(res.status).toBe(404);
+  });
+
+  it("returns paidLate false and lastCheckedAt null for a fresh request", async () => {
+    const res = await get(`/v1/payments/requests/${requestId}`, MANAGE_KEY);
+
+    expect(res.status).toBe(200);
+    const body = z.object({ data: z.record(z.string(), z.unknown()) }).parse(await res.json());
+    expect(body.data).toMatchObject({ paidLate: false, lastCheckedAt: null });
+  });
+
+  it("reports lastCheckedAt from the last verified check, not the last attempt", async () => {
+    const db = getDb(env);
+    await db
+      .prepare("UPDATE payment_requests SET last_checked_at = ?, last_verified_at = ? WHERE id = ?")
+      .bind("2026-10-23T10:05:00.000Z", "2026-10-23T10:00:00.000Z", requestId)
+      .run();
+
+    const res = await get(`/v1/payments/requests/${requestId}`, MANAGE_KEY);
+
+    expect(res.status).toBe(200);
+    const body = z.object({ data: z.record(z.string(), z.unknown()) }).parse(await res.json());
+    expect(body.data).toMatchObject({ lastCheckedAt: "2026-10-23T10:00:00.000Z" });
+  });
+
+  it("returns paidLate true for a request settled late", async () => {
+    const db = getDb(env);
+    const transferId = "xfr_payment_request_token_late";
+    await db
+      .prepare(
+        `INSERT INTO payment_transfers (
+           id, organization_id, project_id, custody_wallet_id, wallet_id, source_address,
+           destination_address, token, amount, type, direction, status, created_at, updated_at
+         ) VALUES (?, ?, ?, 'cwlt_request_token', 'wlt_request_token', 'PayerAddr', ?, ?, '25.00',
+                   'transfer', 'inbound', 'confirmed', '2026-06-23T00:00:00.000Z', '2026-06-23T00:00:00.000Z')`
+      )
+      .bind(transferId, ORGANIZATION_ID, PROJECT_ID, WALLET_ADDRESS, DEVNET_USDC)
+      .run();
+    await db
+      .prepare(
+        `UPDATE payment_requests SET status = 'paid', paid_late = true, fulfilled_by_transfer_id = ?
+         WHERE id = ?`
+      )
+      .bind(transferId, requestId)
+      .run();
+
+    const res = await get(`/v1/payments/requests/${requestId}`, MANAGE_KEY);
+
+    expect(res.status).toBe(200);
+    const body = z.object({ data: z.record(z.string(), z.unknown()) }).parse(await res.json());
+    expect(body.data).toMatchObject({ status: "paid", paidLate: true });
   });
 });

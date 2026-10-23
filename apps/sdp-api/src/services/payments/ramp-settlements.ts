@@ -16,8 +16,8 @@ import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repos
 import type { PaymentsRepository, PaymentTransferRow } from "@/db/repositories/payments.repository";
 import { createSystemTransactionalPaymentsRepository } from "@/db/repositories/repository-factory";
 import { logEvent } from "@/runtime/money-path-events";
-import type { SystemAuditLogEntry } from "@/services/audit.service";
-import { rampAuditEntry, systemRampAuditService } from "@/services/payments/ramp-audit";
+import { createSystemAuditService, type SystemAuditLogEntry } from "@/services/audit.service";
+import { rampAuditEntry } from "@/services/payments/ramp-audit";
 import type { Env } from "@/types/env";
 
 // Named, not derived from the event kind, so a renamed transition fails typecheck here.
@@ -186,7 +186,7 @@ export async function withRampSettlementTransaction<T>(
   if (!isAuditedRampSettlementKind(kind)) {
     return getDb(env).transaction((tx) => work(asTransactionalClient(tx), () => undefined));
   }
-  return systemRampAuditService(env).logSystemWithin(async (client) => {
+  return createSystemAuditService(env).logSystemWithin(async (client) => {
     // Held in an object: control flow does not follow assignments in a callback.
     const recorded: { entry: SystemAuditLogEntry | null } = { entry: null };
     const result = await work(client, (entry) => {

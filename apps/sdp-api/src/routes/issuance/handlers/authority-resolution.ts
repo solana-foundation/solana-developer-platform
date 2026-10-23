@@ -401,6 +401,8 @@ export type IssuanceMovement = MovementOf<"issuance">;
 export interface IssuanceAuthority {
   signer: TransactionSigner;
   movement: IssuanceMovement;
+  /** The custody wallet row the signer signs with; the sponsor is scoped by it too. */
+  custodyWalletId: string;
 }
 
 async function loadResolvedAuthoritySigner(params: {
@@ -454,7 +456,11 @@ export async function createResolvedAuthoritySigner(params: {
   if (wallet.publicKey !== params.currentAuthority) {
     throw badRequest("Selected custody wallet does not control the current authority");
   }
-  return { signer: await loadResolvedAuthoritySigner(params), movement: params.movement };
+  return {
+    signer: await loadResolvedAuthoritySigner(params),
+    movement: params.movement,
+    custodyWalletId: params.custodyWalletId,
+  };
 }
 
 /**
@@ -521,7 +527,7 @@ export async function createLegacyResolvedAuthoritySigner(params: {
     throw badRequest("Current authority is not controlled by custody");
   }
 
-  return { signer, movement };
+  return { signer, movement, custodyWalletId: wallet.id };
 }
 
 export function getInitialPermanentDelegateAuthority(

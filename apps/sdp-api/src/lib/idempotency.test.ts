@@ -1,9 +1,9 @@
+import { canonicalJson } from "@sdp/types/idempotency";
 import { describe, expect, it } from "vitest";
 import { AppError } from "@/lib/errors";
 import {
   buildEarnVaultDepositFingerprint,
   buildEarnVaultParRedemptionFingerprint,
-  canonicalJson,
   normalizeForFingerprint,
   resolveIdempotencyReplay,
 } from "./idempotency";

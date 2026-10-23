@@ -3,17 +3,11 @@ import {
   assertMovementAdmitted,
   decideMovement,
   type MoneyAdmissionFacts,
+  type MoneyAdmissionSubject,
   movementNeedsAdmissionFacts,
   readMoneyAdmissionFacts,
 } from "@/lib/money-admission";
 import type { Env } from "@/types/env";
-
-/**
- * A sponsor signs fees, never with a custody wallet, so no wallet scope
- * applies to it; the custody signature in the same transaction, if any, is
- * scoped by the custody signer.
- */
-const SPONSOR_SUBJECT = { custodyWalletId: null } as const;
 
 /** What sponsorship admission needs to know about a scope. */
 export interface SponsorshipAdmissionScope {
@@ -21,6 +15,16 @@ export interface SponsorshipAdmissionScope {
   projectId: string;
   actor: { type: string; id: string };
   movement: MovementId;
+  /**
+   * The custody wallet whose transaction the sponsor pays for, so a key's
+   * wallet scope decides the sponsor signature as it does the custody one
+   * (SOLA9-834); null when the transaction has none (`/pay`).
+   */
+  custodyWalletId: string | null;
+}
+
+function sponsorSubject(scope: SponsorshipAdmissionScope): MoneyAdmissionSubject {
+  return { custodyWalletId: scope.custodyWalletId };
 }
 
 /**
@@ -38,7 +42,7 @@ export async function readSponsorshipAdmissionFacts(
   return readMoneyAdmissionFacts(
     env,
     { organizationId: scope.organizationId, projectId: scope.projectId },
-    SPONSOR_SUBJECT
+    sponsorSubject(scope)
   );
 }
 
@@ -47,7 +51,7 @@ export function assertSponsorshipAdmitted(
   scope: SponsorshipAdmissionScope,
   facts: MoneyAdmissionFacts | null
 ): void {
-  assertMovementAdmitted(decideMovement(scope.movement, facts, SPONSOR_SUBJECT), {
+  assertMovementAdmitted(decideMovement(scope.movement, facts, sponsorSubject(scope)), {
     surface: "sponsor",
     movement: scope.movement,
     organizationId: scope.organizationId,

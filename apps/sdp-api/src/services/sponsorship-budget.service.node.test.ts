@@ -49,6 +49,7 @@ const SCOPE: SponsorshipMovementScope = {
   projectId: "project_1",
   actor: { type: "api_key", id: "key_1" },
   movement: "payments.transfer",
+  custodyWalletId: "cwlt_1",
 };
 
 const ACTIVE_SANDBOX: MoneyAdmissionFacts = admittedMoneyFacts();
@@ -790,11 +791,11 @@ describe("BudgetedFeePayment", () => {
 
       expect(refusal).toBeInstanceOf(MoneyMovementRefusedError);
       expect(refusal).toMatchObject({ reason: "organization_inactive" });
-      // A sponsor signs for no custody wallet.
+      // The sponsor reads the custody wallet it pays for (SOLA9-834).
       expect(readAdmissionFacts).toHaveBeenCalledWith(
         expect.anything(),
         { organizationId: "org_1", projectId: "project_1" },
-        { custodyWalletId: null }
+        { custodyWalletId: "cwlt_1" }
       );
       expect(repository.createReservation).not.toHaveBeenCalled();
       expect(provider.signAsFeePayer).not.toHaveBeenCalled();

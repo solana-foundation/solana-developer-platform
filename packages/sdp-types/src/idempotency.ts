@@ -57,3 +57,60 @@ export function isIdempotencyErrorCode(code: string | null): code is Idempotency
 export function isIdempotencyKeyOutcomeUnknown(status: number, code: string | null): boolean {
   return status === 409 && code === "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN";
 }
+
+function isAsciiDigit(character: string | undefined): boolean {
+  return character !== undefined && character >= "0" && character <= "9";
+}
+
+/**
+ * A decimal string's canonical spelling, without rounding or passing through a
+ * float: no leading integer zeroes, no trailing fraction zeroes, no bare point.
+ * `"1.0"`, `"01"` and `"1"` are one amount. The API's Idempotency-Key
+ * fingerprints and the dashboard's browser keys both spell amounts with it, so
+ * one intent gets one key on either side.
+ */
+export function normalizeDecimalString(value: string): string {
+  const [integer = "0", fraction = ""] = value.split(".");
+  // Index scans, not regular expressions: linear in the input whatever it holds.
+  let start = 0;
+  // A leading zero goes only while a digit follows it, so "0" and "0x" keep theirs.
+  while (integer[start] === "0" && isAsciiDigit(integer[start + 1])) start += 1;
+  let end = fraction.length;
+  while (end > 0 && fraction[end - 1] === "0") end -= 1;
+  const normalizedInteger = integer.slice(start) || "0";
+  const normalizedFraction = fraction.slice(0, end);
+  return normalizedFraction === ""
+    ? normalizedInteger
+    : `${normalizedInteger}.${normalizedFraction}`;
+}
+
+/** A JSON value as `JSON.parse` returns it. */
+export type CanonicalJsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | CanonicalJsonValue[]
+  | { [key: string]: CanonicalJsonValue };
+
+/**
+ * Serializes a JSON value with object keys sorted by UTF-16 code unit and array
+ * order kept (RFC 8785's ordering; numbers use ECMAScript's canonical form), so
+ * equal values always produce equal text whatever the runtime's locale. The
+ * API's Idempotency-Key fingerprints and the dashboard's browser keys both use
+ * it, so a body that only reorders keys is one request on either side.
+ */
+export function canonicalJson(value: CanonicalJsonValue): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJson).join(",")}]`;
+  }
+  const members = Object.keys(value)
+    // With no comparator, sort orders strings by UTF-16 code unit: RFC 8785's order.
+    .sort()
+    // SAFETY: every key comes from Object.keys(value), so the member is present.
+    .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key] as CanonicalJsonValue)}`);
+  return `{${members.join(",")}}`;
+}

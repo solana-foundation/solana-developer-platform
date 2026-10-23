@@ -1,3 +1,4 @@
+import * as solanaRpc from "@sdp/rpc/solana";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import {
@@ -13,12 +14,14 @@ import {
   pipe,
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
+  signature,
 } from "@solana/kit";
 import { getTransferSolInstruction } from "@solana-program/system";
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
+import * as repositoryFactory from "@/db/repositories/repository-factory";
 import {
   createPaymentRequestsRepository,
   createSystemPaymentRequestsRepository,
@@ -26,6 +29,7 @@ import {
 import { app } from "@/index";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
+import * as paymentRequests from "@/services/payments/payment-requests";
 import * as sponsorshipService from "@/services/sponsorship.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import {
@@ -39,6 +43,7 @@ import { syntheticAddress } from "@/test/helpers/parsed-transactions";
 import {
   createKoraAdapterMock,
   getRecentBlockhashMock,
+  getSignaturesForAddressMock,
   installPaymentsRouteTestHooks,
   TEST_CUSTODY_WALLET_ID,
   TEST_ORG,
@@ -185,7 +190,7 @@ describe("Public payment request routes", () => {
   }
 
   it.for(ENVIRONMENT_CLUSTER_CASES)(
-    "reports and reads a $environment request on $cluster only",
+    "reports a $environment request on $cluster from stored state without reading the chain",
     async ({ environment, cluster }) => {
       const request = await createAwaitingPaymentRequest(
         await REQUEST_WALLET_BY_ENVIRONMENT[environment]()
@@ -198,8 +203,7 @@ describe("Public payment request routes", () => {
         status: "awaiting_payment",
         network: cluster,
       });
-      expect(rpc.calls).toContainEqual({ cluster, method: "getSignaturesForAddress" });
-      expect(calledClusters()).toEqual(new Set([cluster]));
+      expect(rpc.calls).toEqual([]);
     }
   );
 
@@ -356,9 +360,14 @@ describe("Public payment request routes", () => {
         expect(sponsorship).toHaveBeenCalledWith(
           env,
           expect.objectContaining({ projectId: wallet.projectId }),
-          "payments.pay_request"
+          "payments.pay_request",
+          { custodyWalletId: null }
         );
-        expect(rpc.calls).toContainEqual({ cluster, method: "getSignaturesForAddress" });
+        expect(
+          new Set(
+            getSignaturesForAddressMock.mock.calls.map(([client]) => clusterOfRpcClient(client))
+          )
+        ).toEqual(new Set([cluster]));
         expect(rpc.calls).toContainEqual({ cluster, method: "getBlockHeight" });
         expect(calledClusters()).toEqual(new Set([cluster]));
         expect(
@@ -444,6 +453,77 @@ describe("Public payment request routes", () => {
       );
       expect(other.status).toBe(429);
       expect(Number(other.headers.get("Retry-After"))).toBeGreaterThan(0);
+    });
+
+    it("answers 429 with Retry-After instead of a new transaction while a payment is still confirming", async () => {
+      const sponsorship = stubSponsorship();
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+      getSignaturesForAddressMock.mockResolvedValueOnce([
+        {
+          signature: signature(getBase58Decoder().decode(new Uint8Array(64).fill(5))),
+          slot: 1n,
+          blockTime: null,
+          err: null,
+          confirmationStatus: "confirmed",
+        },
+      ]);
+      const verify = vi
+        .spyOn(solanaRpc, "getSignatureStatuses")
+        .mockResolvedValue([
+          { slot: 1n, confirmations: null, confirmationStatus: "confirmed", err: null },
+        ]);
+      onTestFinished(() => verify.mockRestore());
+
+      const response = await postTransaction(request.public_token);
+
+      expect(response.status).toBe(429);
+      expect(Number(response.headers.get("Retry-After"))).toBeGreaterThan(0);
+      expect(await response.json()).toMatchObject({ error: { code: "RATE_LIMITED" } });
+      expect(verify).toHaveBeenCalledTimes(1);
+      expect(sponsorship).not.toHaveBeenCalled();
+    });
+
+    it("does not replay the stored transaction once the request passes its deadline", async () => {
+      stubSponsorship();
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+      expect((await postTransaction(request.public_token)).status).toBe(200);
+
+      const expiry = vi
+        .spyOn(paymentRequests, "isPaymentRequestExpired")
+        .mockReturnValueOnce(false)
+        .mockReturnValue(true);
+      onTestFinished(() => expiry.mockRestore());
+
+      const replay = await postTransaction(request.public_token);
+      expect(replay.status).toBe(400);
+      expect(await replay.json()).not.toHaveProperty("transaction");
+    });
+
+    it("answers no longer payable when the claim is lost to the deadline", async () => {
+      const sponsorship = stubSponsorship();
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+      const systemRepository = repositoryFactory.createSystemPaymentRequestsRepository;
+      const factory = vi
+        .spyOn(repositoryFactory, "createSystemPaymentRequestsRepository")
+        .mockImplementation((bindings) => {
+          const repository = systemRepository(bindings);
+          vi.spyOn(repository, "claimSponsoredTransactionWindow").mockResolvedValue(false);
+          return repository;
+        });
+      onTestFinished(() => factory.mockRestore());
+      const expiry = vi
+        .spyOn(paymentRequests, "isPaymentRequestExpired")
+        .mockReturnValueOnce(false)
+        .mockReturnValue(true);
+      onTestFinished(() => expiry.mockRestore());
+
+      const response = await postTransaction(request.public_token);
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: { message: "Payment request is no longer payable" },
+      });
+      expect(sponsorship).toHaveBeenCalledTimes(1);
     });
 
     it("lets a new account claim after the window expires", async () => {

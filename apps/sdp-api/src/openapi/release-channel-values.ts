@@ -63,7 +63,8 @@ function buildOwners(): ReadonlyMap<string, Owner> {
     own(value, { module });
   }
   for (const value of TOKEN_TRANSACTION_TYPES) own(value, { module: "issuance" });
-  for (const value of [...RAMP_TRANSFER_TYPES, "offramp_channel", "ramps"]) {
+  // "ramp" is the transfer-list category that selects RAMP_TRANSFER_TYPES.
+  for (const value of [...RAMP_TRANSFER_TYPES, "offramp_channel", "ramps", "ramp"]) {
     own(value, { module: "ramps" });
   }
   for (const provider of RAMP_PROVIDERS) own(provider, { rampProvider: provider });
