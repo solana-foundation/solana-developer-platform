@@ -3,6 +3,7 @@
 import { cn } from "@sdp/ui/cn";
 import { useState } from "react";
 import { tokenMarkInitial } from "@/app/dashboard/[projectId]/issuance/issuance-token-fields";
+import { isRenderableLogoUrl } from "@/lib/token-logo-url";
 
 /**
  * The identity mark for a token: the issuer's artwork, or a quiet monogram
@@ -11,7 +12,9 @@ import { tokenMarkInitial } from "@/app/dashboard/[projectId]/issuance/issuance-
  * hosts — and it falls back to the monogram when it fails to load, so a broken
  * URL never leaves an empty circle.
  *
- * @param imageUrl - The issuer's artwork URL, or null for the monogram.
+ * @param imageUrl - The issuer's artwork URL, or null for the monogram. A URL
+ *   that is not a credential-free https address renders the monogram too — see
+ *   `isRenderableLogoUrl`.
  * @param symbol - The token's display symbol; its first character is the monogram.
  * @param className - The mark's box size as layout tokens, e.g. `h-11 w-11` on
  *   the asset header, `h-9 w-9` on a leg card. The image and monogram fill it.
@@ -31,7 +34,7 @@ export function TokenLogo({
       aria-hidden="true"
       className={cn("shrink-0 overflow-hidden rounded-full border border-border-subtle", className)}
     >
-      {imageUrl !== null && imageUrl !== failedUrl ? (
+      {imageUrl !== null && isRenderableLogoUrl(imageUrl) && imageUrl !== failedUrl ? (
         // biome-ignore lint/performance/noImgElement: user-supplied external logo URL; next/image can't be configured for arbitrary hosts here.
         <img
           src={imageUrl}

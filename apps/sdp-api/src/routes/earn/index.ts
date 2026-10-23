@@ -54,6 +54,7 @@ import {
 } from "./handlers/queued-withdrawals";
 import { getEarnStrategy, listEarnStrategies } from "./handlers/strategies";
 import {
+  admitEarnVaultDeposit,
   admitEarnVaultRuntimeExecution,
   assertEarnVaultWithdrawalFloor,
   createEarnVaultDeposit,
@@ -262,7 +263,12 @@ earn.post(
   requestGate({
     extract: extractEarnVaultDeposit,
     findIdempotentKeyReplay: findEarnVaultDepositIdempotentKeyReplay,
-    admit: admitEarnVaultRuntimeExecution,
+    // The money-in gates run AFTER the completed-replay exit so a recorded
+    // deposit stays replayable when its strategy pauses or a policy flips.
+    admit: async (c, extraction) => {
+      await admitEarnVaultDeposit(c, extraction);
+      await admitEarnVaultRuntimeExecution(c, extraction);
+    },
   }),
   createEarnVaultDeposit
 );
@@ -348,10 +354,12 @@ earn.get(
 // Recovery is intentionally not request-gated: it only releases the caller's
 // provider request. Solver queues return escrowed shares after their deadline;
 // operator redemptions revoke the claim and leave the redeemed intermediate
-// asset in the same owner wallet.
+// asset in the same owner wallet. `earn.manage`, the action its movement
+// (`earn.queued_withdraw_cancel`) needs at the signer, so a key without it is
+// refused here rather than after sponsorship, a build and a simulation.
 earn.post(
   "/vault-withdrawal-requests/:withdrawalRequestId/cancel",
-  requireAction("earn.execute"),
+  requireAction("earn.manage"),
   validateBody(earnVaultWithdrawalRequestCancelSchema),
   cancelEarnVaultWithdrawalRequest
 );

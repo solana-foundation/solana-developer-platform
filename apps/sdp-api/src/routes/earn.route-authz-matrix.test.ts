@@ -34,7 +34,7 @@ const EARN_ROUTE_ACTIONS = {
   "POST /vault-withdrawal-requests": "earn.execute",
   "GET /vault-withdrawal-requests": "earn.read",
   "GET /vault-withdrawal-requests/:withdrawalRequestId": "earn.read",
-  "POST /vault-withdrawal-requests/:withdrawalRequestId/cancel": "earn.execute",
+  "POST /vault-withdrawal-requests/:withdrawalRequestId/cancel": "earn.manage",
   "GET /vault-positions": "earn.read",
   "GET /vault-share-reconciliation": "earn.read",
   "POST /external-wallet/deposit-transactions": "earn.execute",

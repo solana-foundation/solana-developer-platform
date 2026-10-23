@@ -130,7 +130,7 @@
   },
   "devDependencies": {
     "@types/node": "26.6.2",
-    "vitest": "4.1.11"
+    "vitest": "4.1.12"
   },
   "dependencies": {
     "@sdp/redaction": "workspace:*",
