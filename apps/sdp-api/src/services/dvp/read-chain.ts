@@ -20,6 +20,7 @@ import {
 } from "@solana/kit";
 import { getSysvarClockDecoder, SYSVAR_CLOCK_ADDRESS } from "@solana/sysvars";
 import { AccountState, getTokenDecoder } from "@solana-program/token-2022";
+import type { DvpTradeRow } from "@/db/repositories/dvp-trade.repository";
 import { conflict } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import type { DvpLegObservation, DvpTradeObservation } from "./observe";
@@ -120,6 +121,70 @@ export async function readEscrowState(
     );
   }
   return observed.exists ? { amount: observed.amount, frozen: observed.frozen } : null;
+}
+
+/**
+ * The two legs of a trade row, as `readDvpAccounts` wants them. One spelling
+ * for every caller so a new column cannot be adopted by one flow and missed by
+ * another.
+ */
+export function dvpTradeLegAddresses(
+  trade: Pick<
+    DvpTradeRow,
+    "escrowA" | "escrowB" | "mintA" | "mintB" | "tokenProgramA" | "tokenProgramB"
+  >
+): { a: DvpLegAddress; b: DvpLegAddress } {
+  return {
+    a: { escrow: trade.escrowA, tokenProgram: trade.tokenProgramA, mint: trade.mintA },
+    b: { escrow: trade.escrowB, tokenProgram: trade.tokenProgramB, mint: trade.mintB },
+  };
+}
+
+/**
+ * Refuses a trade account that is no longer a verifiable SwapDvp: missing
+ * (settle and cancel both close the account), owned by something else, or not
+ * at its canonical PDA. Every one of those is a settled fact about the chain,
+ * and acting on the escrows of a trade that is not there sends money nobody is
+ * watching.
+ */
+export async function assertDvpTradeOnChain(
+  trade: Awaited<ReturnType<typeof fetchEncodedAccounts>>[number],
+  tradeId: string
+): Promise<void> {
+  try {
+    await verifySwapDvpAccount(trade);
+  } catch (error) {
+    if (error instanceof SwapDvpVerificationError) {
+      throw conflict(`DvP trade ${tradeId}: the trade is no longer on chain; nothing was sent`, {
+        reason: DVP_LEG_REFUSAL.tradeNotOnChain,
+      });
+    }
+    throw error;
+  }
+}
+
+/**
+ * Refuses a leg whose escrow cannot be read as the trade's token account:
+ * tampered (an owner/mint/program mismatch) or missing. Returns the leg
+ * narrowed to its readable form, so callers reach `amount` and `frozen`
+ * directly.
+ */
+export function assertDvpLegEscrowReadable(
+  tradeId: string,
+  leg: DvpLegObservation
+): Extract<DvpLegObservation, { exists: true }> {
+  if (!leg.exists) {
+    if (leg.tampered) {
+      throw conflict(
+        `DvP trade ${tradeId}: the escrow for this leg is not the trade's token account (owner/mint/program mismatch); refusing to touch it`,
+        { reason: DVP_LEG_REFUSAL.escrowMismatch }
+      );
+    }
+    throw conflict(`DvP trade ${tradeId}: the escrow for this leg is missing; nothing was sent`, {
+      reason: DVP_LEG_REFUSAL.escrowMissing,
+    });
+  }
+  return leg;
 }
 
 /**

@@ -53,7 +53,10 @@ const fetchMaybeMint = vi.hoisted(() => vi.fn());
 let partySigner: Awaited<ReturnType<typeof generateKeyPairSigner>>;
 
 vi.mock("@/services/solana/signer", () => ({ createOrgSignerForCustodyWallet }));
-vi.mock("./read-chain", () => ({ readDvpAccounts }));
+vi.mock("./read-chain", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./read-chain")>()),
+  readDvpAccounts,
+}));
 vi.mock("./funding-receipt", () => ({ readDvpFundingReceipt }));
 vi.mock("@sdp/dvp", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@sdp/dvp")>()),

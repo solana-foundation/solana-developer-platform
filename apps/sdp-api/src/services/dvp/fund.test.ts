@@ -54,7 +54,11 @@ const fetchMaybeToken = vi.hoisted(() => vi.fn());
 let sponsor: Awaited<ReturnType<typeof createTestSponsor>>;
 
 vi.mock("@/services/solana/signer", () => ({ createOrgSignerForCustodyWallet }));
-vi.mock("./read-chain", () => ({ readEscrowState, readDvpAccounts }));
+vi.mock("./read-chain", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./read-chain")>()),
+  readEscrowState,
+  readDvpAccounts,
+}));
 vi.mock("@sdp/dvp", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@sdp/dvp")>()),
   verifySwapDvpAccount,

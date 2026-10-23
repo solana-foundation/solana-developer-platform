@@ -5,21 +5,9 @@
  * fees and ATA rent; closing never selects or provisions another wallet.
  */
 
-import { confirmTransaction, createRpc, getRecentBlockhash } from "@sdp/rpc/solana";
+import { confirmTransaction, createRpc } from "@sdp/rpc/solana";
 import { DVP_CLOSE_REFUSAL, type DvpTradeStatus } from "@sdp/types/dvp";
-import {
-  appendTransactionMessageInstructions,
-  createNoopSigner,
-  createTransactionMessage,
-  getBase58Decoder,
-  getTransactionEncoder,
-  pipe,
-  type Signature,
-  setTransactionMessageFeePayer,
-  setTransactionMessageLifetimeUsingBlockhash,
-  signature,
-} from "@solana/kit";
-import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
+import { createNoopSigner, type Signature } from "@solana/kit";
 import type { Context } from "hono";
 import { getDb } from "@/db/client";
 import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dvp-leg-funding-claim.repository";
@@ -32,15 +20,10 @@ import {
   createSponsorshipFeePayment,
   resolveRequestSponsorshipScope,
 } from "@/services/sponsorship.service";
-import {
-  isDefiniteSubmissionError,
-  type SignedSubmissionStore,
-  submitSponsoredTransaction,
-} from "@/services/sponsorship-submission";
 import type { Env } from "@/types/env";
 import type { RecordDvpLegActionAttempt } from "./leg-action-idempotency";
 import { isPastDvpExpiry } from "./observe";
-import { readDvpAccounts } from "./read-chain";
+import { dvpTradeLegAddresses, readDvpAccounts } from "./read-chain";
 import { deriveDvpSettleAtas } from "./settle-atas";
 import {
   buildCancelInstruction,
@@ -48,6 +31,10 @@ import {
   buildSettleInstruction,
 } from "./settle-instructions";
 import type { DvpSettlementWallet } from "./settlement-wallet";
+import {
+  signSponsoredDvpTransaction,
+  submitSponsoredDvpTransaction,
+} from "./sponsored-transaction";
 
 /** Statuses from which a trade can still be acted on. */
 const OPEN: ReadonlySet<DvpTradeStatus> = new Set([
@@ -151,10 +138,7 @@ export async function closeDvpTrade(
   // without a chain read, and an unreachable RPC cannot mask that answer. Before
   // the custody signer, so a refusal here never calls the provider.
   const rpc = createRpc(env);
-  const snapshot = await readDvpAccounts(rpc, trade.swapDvp, {
-    a: { escrow: trade.escrowA, tokenProgram: trade.tokenProgramA, mint: trade.mintA },
-    b: { escrow: trade.escrowB, tokenProgram: trade.tokenProgramB, mint: trade.mintB },
-  });
+  const snapshot = await readDvpAccounts(rpc, trade.swapDvp, dvpTradeLegAddresses(trade));
   if (
     (!snapshot.legA.exists && snapshot.legA.tampered) ||
     (!snapshot.legB.exists && snapshot.legB.tampered)
@@ -206,19 +190,17 @@ export async function closeDvpTrade(
       : buildCancelInstruction(trade, atas, signer),
   ];
 
-  const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
-  const message = pipe(
-    createTransactionMessage({ version: 0 }),
-    (m) => setTransactionMessageFeePayer(sponsor, m),
-    (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
-    (m) => appendTransactionMessageInstructions(instructions, m)
-  );
-  const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
-  const authoritySignatureBytes = partiallySigned.signatures[signer.address];
-  if (authoritySignatureBytes === null || authoritySignatureBytes === undefined) {
-    throw new Error("DvP close transaction is missing the settlement authority signature");
-  }
-  const claimSignature = signature(getBase58Decoder().decode(authoritySignatureBytes));
+  const {
+    transaction,
+    lastValidBlockHeight,
+    signature: claimSignature,
+  } = await signSponsoredDvpTransaction({
+    rpc,
+    sponsor,
+    instructions,
+    signerAddress: signer.address,
+    missingSignatureError: "DvP close transaction is missing the settlement authority signature",
+  });
 
   // The trade's close lock, before anything is sponsored or sent, so of two
   // closes only one goes out. Then the leg locks, which a funding or reclaim
@@ -245,13 +227,22 @@ export async function closeDvpTrade(
     });
   }
 
-  let heldSignature: Signature = claimSignature;
-  const store: SignedSubmissionStore = {
-    persistSigned: async ({ signature: sponsored }) => {
+  // Broadcasts under the close lock. A refusal that proves nothing was sent
+  // hands the claim to `release` here; anything ambiguous keeps the lock until
+  // its blockhash expires.
+  const closeSignature = await submitSponsoredDvpTransaction({
+    feePayment,
+    rpc,
+    transaction,
+    lastValidBlockHeight,
+    claimSignature,
+    rebind: async (sponsored) => {
       if (!(await trades.rebindCloseClaim(trade.id, claimSignature, sponsored))) {
         throw new Error("close lock was released before the sponsored signature could be attached");
       }
-      heldSignature = sponsored;
+    },
+    hasStarted: async () => false,
+    onSigned: async (sponsored) => {
       // The sponsored signature is the one that lands, and this runs before the
       // send, so a retry on the same Idempotency-Key asks the chain about the
       // transaction that actually went out (PRO-1993). No amount: a close moves
@@ -263,29 +254,8 @@ export async function closeDvpTrade(
       });
       getLogger().info({ tradeId: trade.id, action, signature: sponsored }, "DvP close signed");
     },
-    markStarted: async () => {},
-    hasStarted: async () => false,
-    // A refused close releases its claim in the caller.
-    clearSigned: async () => {},
-  };
-
-  let closeSignature: Signature;
-  try {
-    closeSignature = await submitSponsoredTransaction({
-      feePayment,
-      rpc,
-      transaction: new Uint8Array(getTransactionEncoder().encode(partiallySigned)),
-      lastValidBlockHeight,
-      store,
-    });
-  } catch (error) {
-    // Never signed, or refused before the network: nothing can land. Anything
-    // ambiguous keeps the lock until its blockhash expires.
-    if (heldSignature === claimSignature || isDefiniteSubmissionError(error)) {
-      await trades.releaseCloseClaim(trade.id, heldSignature);
-    }
-    throw error;
-  }
+    release: (held) => trades.releaseCloseClaim(trade.id, held),
+  });
 
   return {
     signature: closeSignature,

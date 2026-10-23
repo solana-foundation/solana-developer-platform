@@ -9,23 +9,9 @@
  * back. The trade stays open, and the leg can be funded again.
  */
 
-import { SwapDvpVerificationError, verifySwapDvpAccount } from "@sdp/dvp";
-import { confirmTransaction, createRpc, getRecentBlockhash } from "@sdp/rpc/solana";
+import { confirmTransaction, createRpc } from "@sdp/rpc/solana";
 import { DVP_LEG_REFUSAL, type DvpTradeSide, type DvpTradeStatus } from "@sdp/types/dvp";
-import {
-  type Address,
-  appendTransactionMessageInstructions,
-  createNoopSigner,
-  createTransactionMessage,
-  getBase58Decoder,
-  getTransactionEncoder,
-  pipe,
-  type Signature,
-  setTransactionMessageFeePayer,
-  setTransactionMessageLifetimeUsingBlockhash,
-  signature,
-} from "@solana/kit";
-import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
+import { type Address, createNoopSigner, type Signature } from "@solana/kit";
 import { fetchMaybeMint, findAssociatedTokenPda } from "@solana-program/token-2022";
 import type { Context } from "hono";
 import { getDb } from "@/db/client";
@@ -38,17 +24,22 @@ import {
   createSponsorshipFeePayment,
   resolveProjectSponsorshipScope,
 } from "@/services/sponsorship.service";
-import {
-  isDefiniteSubmissionError,
-  submitSponsoredTransaction,
-} from "@/services/sponsorship-submission";
 import type { Env } from "@/types/env";
 import { assertTradeNotClosing } from "./close-exclusion";
 import { readDvpFundingReceipt } from "./funding-receipt";
 import type { RecordDvpLegActionAttempt } from "./leg-action-idempotency";
 import { UNSUPPORTED_MINT_EXTENSIONS } from "./mints";
-import { readDvpAccounts } from "./read-chain";
+import {
+  assertDvpLegEscrowReadable,
+  assertDvpTradeOnChain,
+  dvpTradeLegAddresses,
+  readDvpAccounts,
+} from "./read-chain";
 import { buildReclaimInstructions } from "./reclaim-instructions";
+import {
+  signSponsoredDvpTransaction,
+  submitSponsoredDvpTransaction,
+} from "./sponsored-transaction";
 
 /** How long a reclaim waits for its own confirmation before leaving the lock to the sweep. */
 const RECLAIM_CONFIRM_TIMEOUT_MS = 15_000;
@@ -157,19 +148,17 @@ export async function reclaimDvpTradeLeg(
     createNoopSigner(sponsor)
   );
 
-  const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
-  const message = pipe(
-    createTransactionMessage({ version: 0 }),
-    (m) => setTransactionMessageFeePayer(sponsor, m),
-    (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
-    (m) => appendTransactionMessageInstructions(instructions, m)
-  );
-  const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
-  const walletSignatureBytes = partiallySigned.signatures[party];
-  if (walletSignatureBytes === null || walletSignatureBytes === undefined) {
-    throw new Error("DvP reclaim transaction is missing the custody wallet signature");
-  }
-  const claimSignature = signature(getBase58Decoder().decode(walletSignatureBytes));
+  const {
+    transaction,
+    lastValidBlockHeight,
+    signature: claimSignature,
+  } = await signSponsoredDvpTransaction({
+    rpc,
+    sponsor,
+    instructions,
+    signerAddress: party,
+    missingSignatureError: "DvP reclaim transaction is missing the custody wallet signature",
+  });
 
   // The leg's lock, the same one funding takes, held from before the broadcast
   // until the reclaim confirms. Without it a funding could start between a check
@@ -205,54 +194,35 @@ export async function reclaimDvpTradeLeg(
     throw error;
   }
 
-  let heldSignature: Signature = claimSignature;
-  let reclaimSignature: Signature;
-  try {
-    reclaimSignature = await submitSponsoredTransaction({
-      feePayment,
-      rpc,
-      transaction: new Uint8Array(getTransactionEncoder().encode(partiallySigned)),
-      lastValidBlockHeight,
-      store: {
-        // The sponsorship port verifies the sponsor signed this exact message
-        // before it hands the signature here.
-        persistSigned: async ({ signature: sponsored }) => {
-          if (!(await claims.rebindSignature(trade.id, side, claimSignature, sponsored))) {
-            throw new Error(
-              "reclaim lock was released before the sponsored signature could be attached"
-            );
-          }
-          heldSignature = sponsored;
-          await params.recordAttempt({
-            signature: sponsored,
-            amount: held.toString(),
-            expiryHeight: lastValidBlockHeight.toString(),
-          });
-          getLogger().info({ tradeId: trade.id, side, signature: sponsored }, "DvP reclaim signed");
-        },
-        markStarted: async () => {},
-        hasStarted: async () => claims.hasClaim(trade.id, side, heldSignature),
-        // A refused send releases its claim in the caller.
-        clearSigned: async () => {},
-      },
-    });
-  } catch (error) {
-    // Rejected before the network, or never signed: nothing can land, so the
-    // leg is free again. Anything ambiguous keeps the lock until its blockhash
-    // expires, because the reclaim may still land.
-    if (heldSignature === claimSignature || isDefiniteSubmissionError(error)) {
-      await claims.release(trade.id, side, heldSignature);
-    }
-    throw error;
-  }
-
-  await releaseOnceConfirmed(
-    claims,
+  // Broadcasts under the claim, which is released only when nothing went out:
+  // rejected before the network, or never signed. Anything ambiguous keeps the
+  // lock until its blockhash expires, because the reclaim may still land.
+  const reclaimSignature = await submitSponsoredDvpTransaction({
+    feePayment,
     rpc,
-    { tradeId: trade.id, side },
-    heldSignature,
-    reclaimSignature
-  );
+    transaction,
+    lastValidBlockHeight,
+    claimSignature,
+    rebind: async (sponsored) => {
+      if (!(await claims.rebindSignature(trade.id, side, claimSignature, sponsored))) {
+        throw new Error(
+          "reclaim lock was released before the sponsored signature could be attached"
+        );
+      }
+    },
+    hasStarted: (held) => claims.hasClaim(trade.id, side, held),
+    onSigned: async (sponsored) => {
+      await params.recordAttempt({
+        signature: sponsored,
+        amount: held.toString(),
+        expiryHeight: lastValidBlockHeight.toString(),
+      });
+      getLogger().info({ tradeId: trade.id, side, signature: sponsored }, "DvP reclaim signed");
+    },
+    release: (held) => claims.release(trade.id, side, held),
+  });
+
+  await releaseOnceConfirmed(claims, rpc, { tradeId: trade.id, side }, reclaimSignature);
 
   return { signature: reclaimSignature, leg: side, amount: held.toString() };
 }
@@ -267,33 +237,10 @@ type Rpc = ReturnType<typeof createRpc>;
  * @returns The escrow balance, in base units.
  */
 async function readReclaimableEscrow(rpc: Rpc, trade: DvpTradeRow, side: DvpTradeSide) {
-  const snapshot = await readDvpAccounts(rpc, trade.swapDvp, {
-    a: { escrow: trade.escrowA, tokenProgram: trade.tokenProgramA, mint: trade.mintA },
-    b: { escrow: trade.escrowB, tokenProgram: trade.tokenProgramB, mint: trade.mintB },
-  });
-  try {
-    await verifySwapDvpAccount(snapshot.trade);
-  } catch (error) {
-    if (error instanceof SwapDvpVerificationError) {
-      throw conflict(`DvP trade ${trade.id}: the trade is no longer on chain; nothing was sent`, {
-        reason: DVP_LEG_REFUSAL.tradeNotOnChain,
-      });
-    }
-    throw error;
-  }
+  const snapshot = await readDvpAccounts(rpc, trade.swapDvp, dvpTradeLegAddresses(trade));
+  await assertDvpTradeOnChain(snapshot.trade, trade.id);
 
-  const leg = side === "a" ? snapshot.legA : snapshot.legB;
-  if (!leg.exists) {
-    if (leg.tampered) {
-      throw conflict(
-        `DvP trade ${trade.id}: the escrow for this leg is not the trade's token account (owner/mint/program mismatch); refusing to touch it`,
-        { reason: DVP_LEG_REFUSAL.escrowMismatch }
-      );
-    }
-    throw conflict(`DvP trade ${trade.id}: the escrow for this leg is missing; nothing was sent`, {
-      reason: DVP_LEG_REFUSAL.escrowMissing,
-    });
-  }
+  const leg = assertDvpLegEscrowReadable(trade.id, side === "a" ? snapshot.legA : snapshot.legB);
   // The program no-ops an empty escrow, so sending one would spend a sponsored
   // fee to move nothing.
   if (leg.amount === 0n) {
@@ -371,6 +318,9 @@ async function takeoverableReceipt(
 /**
  * Releases the reclaim's lock once its transaction is confirmed.
  *
+ * The lock's key by then is the sponsored signature: the submission rebind
+ * moved the claim onto it, and it is the one this confirms and releases.
+ *
  * On the wire is not landed. Until it confirms the balance anyone reads is
  * stale, and a second reclaim or a funding let in now would read the escrow
  * still full and send on top of it. A confirmed failure is final too, so it
@@ -381,7 +331,6 @@ async function releaseOnceConfirmed(
   claims: FundingClaims,
   rpc: Rpc,
   leg: { tradeId: string; side: DvpTradeSide },
-  heldSignature: Signature,
   reclaimSignature: Signature
 ) {
   try {
@@ -392,7 +341,7 @@ async function releaseOnceConfirmed(
       confirmation.confirmationStatus === "confirmed" ||
       confirmation.confirmationStatus === "finalized"
     ) {
-      await claims.release(leg.tradeId, leg.side, heldSignature);
+      await claims.release(leg.tradeId, leg.side, reclaimSignature);
     }
   } catch (error) {
     getLogger().warn(
