@@ -418,7 +418,7 @@ describe("token movement legs (postgres)", () => {
         sourceAddress: "Source111",
         destinationAddress: "Deposit111",
         token: SOL_MINT,
-        initiatedByKeyId: null,
+        initiatedByKeyId: "key_leg_offramp_settled_first",
         idempotency: null,
         updatedAt: new Date().toISOString(),
       },
