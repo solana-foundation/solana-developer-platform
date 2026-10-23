@@ -6,7 +6,10 @@
 -- verified from the landed transaction, the instruction's debit and the
 -- destination's raw token-balance delta. `verified_by` says which, so a
 -- confirmation never marks a `chain` leg verified by construction. Every leg
--- written before this migration is a builder leg.
+-- written before this migration is a builder leg. The column's constant default
+-- fills those rows without a rewrite, and its CHECK is added NOT VALID so the
+-- table is not scanned under the ACCESS EXCLUSIVE lock; a later migration
+-- validates it.
 --
 -- Two verification reasons join the set: the chain shows the quote moved
 -- (`chain_delta_matched`), or it shows other amounts or none SDP can read
@@ -14,8 +17,11 @@
 -- the new one is added NOT VALID: every row before it holds an older reason.
 
 ALTER TABLE token_movement_legs
-    ADD COLUMN IF NOT EXISTS verified_by TEXT NOT NULL DEFAULT 'construction'
-        CHECK (verified_by IN ('construction', 'chain'));
+    ADD COLUMN IF NOT EXISTS verified_by TEXT NOT NULL DEFAULT 'construction';
+
+ALTER TABLE token_movement_legs
+    ADD CONSTRAINT token_movement_legs_verified_by_known
+        CHECK (verified_by IN ('construction', 'chain')) NOT VALID;
 
 ALTER TABLE token_movement_legs
     DROP CONSTRAINT token_movement_legs_verification_reason_check,
