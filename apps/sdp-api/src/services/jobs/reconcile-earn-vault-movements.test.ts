@@ -23,19 +23,17 @@ vi.mock("@sdp/kamino/deposit-receipt", async (importOriginal) => ({
 
 vi.mock("@sdp/rpc/solana", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@sdp/rpc/solana")>()),
-  createRpc: () => ({
-    getBlockHeight: (config: unknown) => ({ send: () => getBlockHeight(config) }),
-  }),
   getSignatureStatuses,
   getTransaction,
 }));
-vi.mock("@sdp/rpc/config", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@sdp/rpc/config")>()),
-  resolveClusterRpcUrl: () => "https://rpc.example.invalid",
+vi.mock("@/services/earn/cluster-rpc", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/earn/cluster-rpc")>()),
+  earnClusterRpc: () => ({
+    getBlockHeight: (config: unknown) => ({ send: () => getBlockHeight(config) }),
+  }),
 }));
 vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/earn/execution-registry")>()),
-  assertClusterEndpoint: vi.fn(async () => {}),
   resolveVaultDirectClient: () => ({ readVaultPositions }),
 }));
 vi.mock("@/services/earn/vault-execution.service", () => ({ broadcastVaultTransaction }));
@@ -1200,8 +1198,7 @@ describe("reconcileEarnVaultMovements", () => {
     await reconcileEarnVaultMovements(env);
 
     expect(broadcastVaultTransaction).toHaveBeenCalledWith(
-      env,
-      expect.objectContaining({ bytes: new Uint8Array([1, 2, 3]) })
+      expect.objectContaining({ cluster: "devnet", bytes: new Uint8Array([1, 2, 3]) })
     );
     await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({ status: "submitted" });
   });

@@ -31,7 +31,7 @@ Every on-chain path reads its cluster from the open cluster scope (`currentClust
 
 | Need | Use | Never |
 | -- | -- | -- |
-| Solana reads, builds and sends | `createClusterRpc()` (`@sdp/rpc/factory`) | `createRpc`, kit's `createSolanaRpc`, an RPC URL from env. Legacy `createRpc` survives only in the modules HOO-1879 exempts (Earn, DvP, issuance, Private Channels, Rings) |
+| Solana reads, builds and sends | `createClusterRpc()` (`@sdp/rpc/factory`); Earn calls `earnClusterRpc(cluster)` (`services/earn/cluster-rpc.ts`), the same managed pool for a named cluster, until it reads the scope (HOO-1881) | `createRpc`, kit's `createSolanaRpc`, an RPC URL from env. Legacy `createRpc` survives only in the modules HOO-1879 exempts (DvP, issuance, Private Channels, Rings) |
 | Wallet signature history | `createClusterHistoryRpc()`, observed transfers only | Reordering the pool anywhere else |
 | Helius DAS | `services/helius-das.service.ts` | A direct Helius call |
 | Open a scope | Project middleware, `/pay` context, the cron runner (`runInClusterScope`; tests may too) | Opening a scope in a service |

@@ -1,10 +1,8 @@
-import { resolveClusterRpcUrl } from "@sdp/rpc/config";
-import { createRpc } from "@sdp/rpc/solana";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { address } from "@solana/kit";
 import { z } from "zod";
-import { assertClusterEndpoint, earnClusterFor } from "@/services/earn/execution-registry";
-import type { Env } from "@/types/env";
+import { earnClusterRpc } from "@/services/earn/cluster-rpc";
+import { earnClusterFor } from "@/services/earn/execution-registry";
 
 /**
  * One owner's balance of ONE mint, in base units, on the environment's own
@@ -12,8 +10,8 @@ import type { Env } from "@/types/env";
  *
  * Written for the orphaned split-swap detector and its build-time baseline,
  * which must be the SAME measurement or the difference between them means
- * nothing: same cluster resolution, same genesis check, same filtered RPC call,
- * same summing rule. `getSplTokenBalances` (routes/payments/token-accounts.ts)
+ * nothing: same cluster pool, same genesis guard, same filtered RPC call, same
+ * summing rule. `getSplTokenBalances` (routes/payments/token-accounts.ts)
  * is the wrong tool here: it walks every token account of both token programs
  * to answer a question about one mint, and it returns decimal strings where the
  * comparison needs atoms.
@@ -21,9 +19,9 @@ import type { Env } from "@/types/env";
  * Filtering by `mint` rather than `programId` is one call, not two: a mint
  * belongs to exactly one token program, and the RPC resolves it.
  *
- * The genesis assertion is not optional. `createRpc` with an empty URL falls
- * back to the process-default cluster, so without it a mis-pointed sandbox
- * would judge devnet advisories against mainnet balances and never notice.
+ * The read goes to the environment's own cluster pool, whose genesis guard is
+ * not optional: without it a mis-pointed sandbox would judge devnet advisories
+ * against mainnet balances and never notice.
  */
 export interface OwnerMintBalance {
   /** Sum across the owner's token accounts for the mint, base units. */
@@ -55,15 +53,11 @@ const mintFilteredTokenAccountsResponseSchema = z.object({
 });
 
 export async function readOwnerMintBalance(
-  env: Env,
   environment: SdpEnvironment,
   ownerAddress: string,
   mint: string
 ): Promise<OwnerMintBalance> {
-  const cluster = earnClusterFor(environment);
-  const rpcUrl = resolveClusterRpcUrl(env, cluster);
-  await assertClusterEndpoint(env, cluster, rpcUrl);
-  const response = await createRpc(env, { rpcUrl })
+  const response = await earnClusterRpc(earnClusterFor(environment))
     .getTokenAccountsByOwner(
       address(ownerAddress),
       { mint: address(mint) },

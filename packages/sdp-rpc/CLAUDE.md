@@ -62,3 +62,25 @@ an older entry for later callers. Hydration runs each read under the stamp
 taken right after its position rows were read, and reconciliation close-out
 under a fresh stamp, so neither reuses a request sent before that point. A
 floor does not make an RPC node current; the minimum-slot scope does.
+
+## Earn's door (transitional, HOO-1881)
+
+`createClusterRpc()` reads the cluster scope, but Earn still names its cluster:
+anonymous Earn and the global Earn crons open no scope yet (HOO-1881,
+HOO-2148). `factory.ts` therefore exports three Earn-only functions, fenced by
+Biome to `apps/sdp-api/src/services/earn/cluster-rpc.ts`:
+
+- `createEarnClusterRpc(cluster, { timeoutMs? })`: the named cluster's managed
+  pool. Without `timeoutMs` it is the very client `createClusterRpc()` returns
+  in that cluster's scope; with one, a bounded client over the same pool
+  transport, so failover, cooldowns and genesis proofs stay shared.
+- `earnClusterEndpointUrls(cluster)`: the pool's URLs in failover order, or
+  none. Earn's provider packages still build their own transports from a URL
+  and pin one endpoint per operation, until `withConsistentRpcReads` (HOO-2025).
+- `proveEarnClusterEndpoint(cluster, url)`: the pool's own genesis probe and
+  proof cache for one of its URLs, so an endpoint the pool proved costs Earn no
+  second probe, and the other way round.
+
+All three answer the named cluster's pool or nothing, never another cluster's
+and never `SOLANA_RPC_URL`, and throw `CLUSTER_SCOPE_CONFLICT` inside a scope for
+the other cluster. Delete them once Earn reads the scope.

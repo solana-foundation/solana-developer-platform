@@ -22,6 +22,12 @@ vi.mock("@sdp/rpc/solana", async (original) => ({
   ...(await original<typeof import("@sdp/rpc/solana")>()),
   getSignatureStatuses: signatureStatuses,
 }));
+// The confirmation context reads statuses through the mock above; the client it
+// hands that read is never used, so the Earn door needs no pool here.
+vi.mock("@/services/earn/cluster-rpc", async (original) => ({
+  ...(await original<typeof import("@/services/earn/cluster-rpc")>()),
+  earnClusterRpc: () => ({}),
+}));
 
 const { readVaultPositions, resolveVaultDirectClient } = vi.hoisted(() => {
   const readVaultPositions = vi.fn();
@@ -39,7 +45,6 @@ const reconcileEarnVaultMovementReadThrough = vi.hoisted(() =>
 vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/earn/execution-registry")>()),
   resolveVaultDirectClient,
-  assertClusterEndpoint: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("@/services/earn/vault-movement-reconciliation.service", () => ({
   reconcileEarnVaultMovementReadThrough,

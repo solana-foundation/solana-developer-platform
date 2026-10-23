@@ -62,9 +62,20 @@ export function runInClusterScope<TResult>(
  * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` when no scope is open.
  */
 export function currentClusterScope(): ClusterScope {
-  const openScope = scopes.getStore();
+  const openScope = optionalClusterScope();
   if (openScope === undefined) {
     throw new SdpRpcError("CLUSTER_SCOPE_MISSING", "No cluster scope is open for this work");
   }
   return openScope;
+}
+
+/**
+ * The open scope's facts, or `undefined` outside one. For `@sdp/rpc`'s own Earn door, which runs
+ * both inside project scopes and outside any (anonymous Earn, global Earn crons); the Biome fence
+ * keeps it out of every other caller.
+ *
+ * @returns The open scope, if any.
+ */
+export function optionalClusterScope(): ClusterScope | undefined {
+  return scopes.getStore();
 }

@@ -206,6 +206,13 @@ active. Atomic failed-action recovery owns that transition. A rejected create
 may leave `closed_or_unknown` as failed only before provider existence is
 established by a nonce or creation timestamp.
 
+Each tick first deletes abandoned external request/cancel builds whose
+blockhash expired, against the block height of the build's OWN environment's
+cluster pool, and reads that height only when the environment holds an
+unconsumed build (`hasUnconsumedExternalBuilds`, the DELETE's own predicate), so
+an idle tick asks no cluster anything. A cluster without a pool defers its
+cleanup; it never borrows the other cluster's height.
+
 Open requests are a durable due queue, not a full-table poll.
 `next_check_at` is both the next useful provider read and a two-minute claim
 lease. `claimOpenRequests` takes only due rows with `FOR UPDATE SKIP LOCKED`.
@@ -968,10 +975,11 @@ transaction signed by the organization custody wallet or external owner.
   (`CUSTODY_VAULT_CLAIM_VISIBILITY_SQL` — a broader match would mark a holding
   recorded while `/vault-positions` still hides it), and wallet-binding scope is
   the same `listReadableEarnVaultWallets`. No provider gate (ADR 0002: money the
-  org already holds). The endpoint is genesis-proven before any balance read — a
-  wrong-cluster RPC would report every position unbacked — and a per-wallet
-  read failure degrades to a named `unreadableWallets` entry whose claims go
-  unjudged, never a zero-share finding. The whole pass runs under one
+  org already holds). Every balance read goes to the environment's own cluster
+  pool, whose genesis guard refuses a wrong-cluster endpoint before it answers
+  (a wrong chain would report every position unbacked), and a per-wallet read
+  failure, that refusal included, degrades to a named `unreadableWallets` entry
+  whose claims go unjudged, never a zero-share finding. The whole pass runs under one
   `VaultDeadline`, so a data-driven wallet count bounds what gets READ, never
   how long the request runs: an over-budget wallet is unreadable, not a hung
   request and not a silent skip. Registered in the INTERNAL OpenAPI document
@@ -1450,10 +1458,23 @@ retired path-addressed shapes (`positions/:ownerAddress`,
 `EARN_PROVIDER_DEPLOYED_CLUSTERS` scopes new deposits to the clusters
 each provider is deployed on; withdrawals remain open independently.
 
-**Per-cluster RPC.** Explicit `SOLANA_DEVNET_RPC_URL` / `SOLANA_MAINNET_RPC_URL`
-pins remain isolated. Otherwise, executing provider read/build operations use
-the ordered managed-provider pool only for `SOLANA_NETWORK`. Each candidate
-must prove its genesis hash before SDK work. Transient nested transport errors
+**Per-cluster RPC.** Every Earn read and send goes to the named cluster's
+managed pool (`SOLANA_RPC_<PROVIDER>_<CLUSTER>_API_KEY_URL`, the pool
+`createClusterRpc()` serves) through `services/earn/cluster-rpc.ts`, the one
+module allowed to import Earn's door from `@sdp/rpc/factory`. Nothing in Earn
+reads `SOLANA_RPC_URL`, `SOLANA_<CLUSTER>_RPC_URL` or `SOLANA_NETWORK`: a
+cluster with no pool fails closed (`RPC_NOT_CONFIGURED` on the pooled client,
+`PROVIDER_NOT_CONFIGURED` on a provider operation) and never reads the other
+cluster. Earn names the cluster (`earnClusterFor` of the project, strategy or
+row environment) because anonymous Earn and the global Earn crons open no
+cluster scope yet (HOO-1881, HOO-2148); inside a scope, naming the other
+cluster throws `CLUSTER_SCOPE_CONFLICT`. One-shot reads, simulation and
+broadcast use `earnClusterRpc(cluster)`: per-request failover and the pool's
+genesis guard, a send never failing over once it left SDP. Executing provider
+read/build operations instead pin one pool endpoint per attempt
+(`vault-rpc-failover.ts`, until `withConsistentRpcReads` replaces it under
+HOO-2025), so a plan never mixes endpoints; each candidate must prove its
+genesis hash before SDK work, sharing the pool's proof cache. Transient nested transport errors
 may retry the unsigned read/build within the same workflow deadline; deterministic
 refusals and cluster mismatches do not. A per-vault fan-out (Veda and Kamino
 `readVaultPositions` throw an `AggregateError` cause) retries only when every
@@ -1659,7 +1680,10 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
   refresh ends by reading each Token-2022 deposit mint per cluster and emitting
   `sdp_api_earn_deposit_mint_drift` when the hook program, hook authority or
   permanent delegate differs from the pins in
-  `services/earn/deposit-mint-guard.ts`. Report-only. Adding a Token-2022
+  `services/earn/deposit-mint-guard.ts`. One `getMultipleAccounts` per cluster,
+  from that cluster's managed pool. A cluster with no pool cannot be watched,
+  so its skip is `sdp_api_earn_deposit_mint_guard_skipped` at error wherever
+  Earn is enabled, never a quiet info line. Report-only. Adding a Token-2022
   stablecoin to `EARN_DEPOSIT_TOKEN_SYMBOLS` without pinning it fails the
   guard's unit suite; adding any deposit token without its devnet mint in
   `infra/kora/kora.toml` `allowed_tokens` fails
@@ -1690,7 +1714,8 @@ movement ids. Resolve organization, project, environment and readable custody
 wallet scope before looking up their confirmed/finalized signature slots. A
 finalized status that passed those checks is memoised per (cluster, signature),
 bounded and for 10 minutes, so later polls skip `getSignatureStatuses` for it;
-a confirmed-only one is read on every poll, and the endpoint proof always runs.
+a confirmed-only one is read on every poll. A poll answered entirely from that
+memo builds no client and sends nothing, not even a genesis probe.
 The response's `balanceReadContext` acknowledges the ids and maximum slot.
 Only affected positions receive their own maximum confirmation slot. Hydration
 batches separate differing bounds even within the same provider and owner.

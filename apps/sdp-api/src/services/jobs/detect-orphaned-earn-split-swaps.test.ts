@@ -14,16 +14,9 @@ const getBlockHeight = vi.hoisted(() => vi.fn());
 const readOwnerMintBalance = vi.hoisted(() => vi.fn());
 const logEvent = vi.hoisted(() => vi.fn());
 
-vi.mock("@sdp/rpc/solana", () => ({
-  createRpc: () => ({ getBlockHeight: () => ({ send: getBlockHeight }) }),
-}));
-vi.mock("@sdp/rpc/config", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@sdp/rpc/config")>()),
-  resolveClusterRpcUrl: () => "https://rpc.example.invalid",
-}));
-vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/services/earn/execution-registry")>()),
-  assertClusterEndpoint: vi.fn(async () => {}),
+vi.mock("@/services/earn/cluster-rpc", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/earn/cluster-rpc")>()),
+  earnClusterRpc: () => ({ getBlockHeight: () => ({ send: getBlockHeight }) }),
 }));
 vi.mock("@/services/earn/owner-token-balance", () => ({ readOwnerMintBalance }));
 vi.mock("@/runtime/money-path-events", async (importOriginal) => ({

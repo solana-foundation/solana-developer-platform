@@ -7,7 +7,6 @@ import type {
   EarnVaultQueuedWithdrawalRequestPlan,
   EarnVaultTransactionPlan,
 } from "@sdp/earn/types";
-import { resolveClusterRpcUrl } from "@sdp/rpc/config";
 import { compareDecimalAmounts } from "@sdp/solana/amount";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { address } from "@solana/kit";
@@ -394,7 +393,6 @@ async function prepareCustodyTransaction(
 ): Promise<{ signed: SignedVaultTransaction; fee: VaultFeeMode }> {
   const deadline = createVaultDeadline();
   const cluster = earnClusterFor(input.actor.environment);
-  const rpcUrl = resolveClusterRpcUrl(env, cluster);
   const fee = await resolveVaultSponsorship(env, {
     movement: "earn.queued_withdraw_cancel",
     organizationId: input.actor.organizationId,
@@ -407,13 +405,12 @@ async function prepareCustodyTransaction(
     depositTokenMint: input.position.tokenMint,
     shareMint: input.position.shareMint,
   };
-  const simulation = await simulateVaultPlan(env, {
+  const simulation = await simulateVaultPlan({
     cluster,
     deadline,
     expectedAssetIdentity,
     plan: input.plan,
     owner: address(input.actor.custodyWalletPublicKey),
-    rpcUrl,
     fee,
   });
   if (!simulation.ok) {
@@ -434,13 +431,12 @@ async function prepareCustodyTransaction(
   if (signer.address !== input.actor.custodyWalletPublicKey) {
     throw badRequest("Resolved signing wallet does not match the queued withdrawal position");
   }
-  const signed = await signVaultPlan(env, {
+  const signed = await signVaultPlan({
     cluster,
     deadline,
     expectedAssetIdentity,
     plan: input.plan,
     owner: signer,
-    rpcUrl,
     fee,
     prepared: simulation.prepared,
   });
@@ -453,13 +449,11 @@ async function broadcastQueuedAction(
 ): Promise<QueuedWithdrawalMutationResult> {
   if (result.replayed) return result;
   const cluster = earnClusterFor(result.request.environment);
-  const rpcUrl = resolveClusterRpcUrl(env, cluster);
   try {
-    await broadcastVaultTransaction(env, {
+    await broadcastVaultTransaction({
       cluster,
       deadline: createVaultDeadline(),
       bytes: Uint8Array.from(Buffer.from(result.action.signed_transaction, "base64")),
-      rpcUrl,
     });
   } catch (error) {
     getLogger().error(
@@ -551,19 +545,17 @@ export async function createCustodyQueuedWithdrawal(
     // Reuse the already resolved sponsorship identity in signing. Resolving it
     // twice could put a different payer in the message than in the plan.
     const cluster = earnClusterFor(input.actor.environment);
-    const rpcUrl = resolveClusterRpcUrl(env, cluster);
     const executionDeadline = createVaultDeadline();
     const expectedAssetIdentity = {
       depositTokenMint: input.position.tokenMint,
       shareMint: input.position.shareMint,
     };
-    const simulation = await simulateVaultPlan(env, {
+    const simulation = await simulateVaultPlan({
       cluster,
       deadline: executionDeadline,
       expectedAssetIdentity,
       plan,
       owner: address(input.actor.custodyWalletPublicKey),
-      rpcUrl,
       fee,
     });
     if (!simulation.ok) {
@@ -584,13 +576,12 @@ export async function createCustodyQueuedWithdrawal(
     if (signer.address !== input.actor.custodyWalletPublicKey) {
       throw badRequest("Resolved signing wallet does not match the queued withdrawal position");
     }
-    const signed = await signVaultPlan(env, {
+    const signed = await signVaultPlan({
       cluster,
       deadline: executionDeadline,
       expectedAssetIdentity,
       plan,
       owner: signer,
-      rpcUrl,
       fee,
       prepared: simulation.prepared,
     });
@@ -808,20 +799,16 @@ function isKeyedExternalActor(actor: ExternalBuildActor): actor is QueuedWithdra
   return "organizationId" in actor;
 }
 
-async function compileExternalPlan(
-  env: Env,
-  input: {
-    actor: ExternalBuildActor;
-    position: QueuedWithdrawalPosition;
-    plan: EarnVaultTransactionPlan;
-    feePayer?: string;
-  }
-) {
+async function compileExternalPlan(input: {
+  actor: ExternalBuildActor;
+  position: QueuedWithdrawalPosition;
+  plan: EarnVaultTransactionPlan;
+  feePayer?: string;
+}) {
   if (!isKeyedExternalActor(input.actor) && input.feePayer !== undefined) {
     throw badRequest("feePayer requires an API key; anonymous builds are paid by the owner");
   }
   const cluster = earnClusterFor(input.actor.environment);
-  const rpcUrl = resolveClusterRpcUrl(env, cluster);
   const deadline = createVaultDeadline();
   const fee: VaultFeeMode = input.feePayer
     ? { kind: "caller-provided", feePayer: address(input.feePayer) }
@@ -830,13 +817,12 @@ async function compileExternalPlan(
     depositTokenMint: input.position.tokenMint,
     shareMint: input.position.shareMint,
   };
-  const simulation = await simulateVaultPlan(env, {
+  const simulation = await simulateVaultPlan({
     cluster,
     deadline,
     expectedAssetIdentity,
     plan: input.plan,
     owner: address(input.position.ownerAddress),
-    rpcUrl,
     fee,
   });
   if (!simulation.ok)
@@ -874,7 +860,7 @@ export async function buildExternalQueuedWithdrawalRequest(
     rentPayer: feePayer,
     memoKind: "external-withdrawal-request",
   });
-  const unsigned = await compileExternalPlan(env, {
+  const unsigned = await compileExternalPlan({
     actor: input.actor,
     position: input.position,
     plan,
@@ -908,8 +894,7 @@ export async function buildExternalQueuedWithdrawalRequest(
   };
   if (!isKeyedExternalActor(input.actor)) return built;
   const currentBlockHeight = await readConfirmedBlockHeight(
-    env,
-    resolveClusterRpcUrl(env, earnClusterFor(input.actor.environment))
+    earnClusterFor(input.actor.environment)
   );
   return createPostgresEarnVaultWithdrawalRequestsRepository(
     getDb(env)
@@ -1062,7 +1047,7 @@ export async function buildExternalQueuedWithdrawalCancel(
     );
   }
   const feePayer = input.feePayer === input.position.ownerAddress ? undefined : input.feePayer;
-  const unsigned = await compileExternalPlan(env, {
+  const unsigned = await compileExternalPlan({
     actor: input.actor,
     position: input.position,
     plan,

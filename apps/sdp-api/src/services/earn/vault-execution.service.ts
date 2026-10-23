@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { EarnVaultAssetIdentity, EarnVaultTransactionPlan } from "@sdp/earn/types";
-import { createRpc, getRecentBlockhash, sendTransaction } from "@sdp/rpc/solana";
+import { getRecentBlockhash, sendTransaction } from "@sdp/rpc/solana";
 import { withTransientRpcRetry } from "@sdp/rpc/transient";
 import { MEMO_PROGRAM_ADDRESS } from "@sdp/types/well-known-programs";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
@@ -31,8 +31,7 @@ import {
   partiallySignTransactionMessageWithSigners,
   signTransactionMessageWithSigners,
 } from "@solana/signers";
-import type { Env } from "@/types/env";
-import { assertClusterEndpoint } from "./execution-registry";
+import { earnClusterRpc } from "./cluster-rpc";
 import type { VaultDeadline } from "./vault-deadline";
 import { describeVaultSimulationError } from "./vault-simulation-error";
 import type { VaultFeeMode } from "./vault-sponsorship";
@@ -129,7 +128,6 @@ export interface SignVaultPlanInput extends VaultPlanExecutionScope {
   plan: EarnVaultTransactionPlan;
   /** The custody wallet signer — the vault `user`, and the only real signer. */
   owner: TransactionSigner;
-  rpcUrl: string;
   fee: VaultFeeMode;
   /** Successful simulation preparation reused to sign the exact same plan. */
   prepared?: PreparedVaultPlanExecution;
@@ -179,15 +177,6 @@ function assertExpectedPlan(
   }
 }
 
-async function verifyVaultRpc(
-  env: Env,
-  input: Pick<VaultExecutionScope, "cluster" | "deadline"> & { rpcUrl: string }
-): Promise<void> {
-  await input.deadline.run(`Verifying the ${input.cluster} RPC endpoint`, () =>
-    assertClusterEndpoint(env, input.cluster, input.rpcUrl)
-  );
-}
-
 /**
  * Resolve a plan's declared lookup tables to their address lists.
  *
@@ -199,11 +188,10 @@ async function verifyVaultRpc(
  * fallback.
  */
 async function resolveLookupTables(
-  env: Env,
-  input: VaultExecutionScope & { plan: EarnVaultTransactionPlan; rpcUrl: string }
+  input: VaultExecutionScope & { plan: EarnVaultTransactionPlan }
 ): Promise<AddressesByLookupTableAddress> {
   if (input.plan.lookupTables.length === 0) return {};
-  const rpc = createRpc(env, { rpcUrl: input.rpcUrl });
+  const rpc = earnClusterRpc(input.cluster);
   return input.deadline.run("Fetching the vault lookup tables", () =>
     withTransientRpcRetry(() =>
       fetchAddressesForLookupTables(
@@ -284,10 +272,7 @@ function assertVaultTransactionFits(
 }
 
 /** Sign exactly one complete vault transaction without broadcasting it. */
-export async function signVaultPlan(
-  env: Env,
-  input: SignVaultPlanInput
-): Promise<SignedVaultTransaction> {
+export async function signVaultPlan(input: SignVaultPlanInput): Promise<SignedVaultTransaction> {
   assertExpectedPlan(input.plan, input.cluster, input.expectedAssetIdentity);
   const instructions = planInstructions(input.plan).map(toKitInstruction);
   let prepared = input.prepared;
@@ -295,10 +280,9 @@ export async function signVaultPlan(
     throw new Error("Vault execution preparation belongs to a different plan");
   }
   if (!prepared) {
-    await verifyVaultRpc(env, input);
-    const rpc = createRpc(env, { rpcUrl: input.rpcUrl });
+    const rpc = earnClusterRpc(input.cluster);
     const [lookupTables, { blockhash, lastValidBlockHeight }] = await Promise.all([
-      resolveLookupTables(env, input),
+      resolveLookupTables(input),
       input.deadline.run("Fetching the vault transaction blockhash", () =>
         getRecentBlockhash(rpc, "confirmed")
       ),
@@ -465,11 +449,9 @@ export function compileUnsignedVaultTransaction(
  * failed.
  */
 export async function broadcastVaultTransaction(
-  env: Env,
-  input: VaultExecutionScope & { bytes: Uint8Array; rpcUrl: string }
+  input: VaultExecutionScope & { bytes: Uint8Array }
 ): Promise<void> {
-  await verifyVaultRpc(env, input);
-  const rpc = createRpc(env, { rpcUrl: input.rpcUrl });
+  const rpc = earnClusterRpc(input.cluster);
   await input.deadline.run("Broadcasting the vault transaction", () =>
     sendTransaction(rpc, input.bytes)
   );
@@ -493,11 +475,9 @@ function planInstructions(plan: EarnVaultTransactionPlan) {
  *
  */
 export async function simulateVaultPlan(
-  env: Env,
   input: VaultPlanExecutionScope & {
     plan: EarnVaultTransactionPlan;
     owner: Address;
-    rpcUrl: string;
     /**
      * The SAME fee mode signing will use. Simulation enforces that the fee
      * payer can cover the fee, so simulating as the owner while signing as a
@@ -542,13 +522,12 @@ export async function simulateVaultPlan(
     };
   }
 
-  await verifyVaultRpc(env, input);
-  const rpc = createRpc(env, { rpcUrl: input.rpcUrl });
+  const rpc = earnClusterRpc(input.cluster);
   // Lookup-table transport failures are infrastructure failures, not a
   // program simulation verdict. Let them reject so callers preserve their
   // idempotency key and return a retryable 5xx instead of a caller-fault 400.
   const [lookupTables, { blockhash, lastValidBlockHeight }] = await Promise.all([
-    resolveLookupTables(env, input),
+    resolveLookupTables(input),
     input.deadline.run("Fetching the vault simulation blockhash", () =>
       getRecentBlockhash(rpc, "confirmed")
     ),

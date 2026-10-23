@@ -360,6 +360,11 @@ export interface EarnVaultWithdrawalRequestsRepository {
   claimUnsettledActions(limit: number): Promise<EarnVaultWithdrawalRequestActionRow[]>;
   claimOpenRequests(limit: number): Promise<EarnVaultWithdrawalRequestRow[]>;
   cleanupExpiredReservations(): Promise<number>;
+  /**
+   * Whether `environment` holds any unconsumed external build, so the cleanup
+   * reads that cluster's block height only when something could expire.
+   */
+  hasUnconsumedExternalBuilds(params: { environment: SdpEnvironment }): Promise<boolean>;
   cleanupExpiredExternalBuilds(params: {
     environment: SdpEnvironment;
     currentBlockHeight: string;
@@ -1585,6 +1590,18 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
           .run();
         return result;
       });
+    },
+
+    async hasUnconsumedExternalBuilds(params) {
+      const row = await db
+        .prepare(
+          `SELECT 1 AS present FROM earn_external_wallet_withdrawal_request_transactions
+            WHERE environment = ? AND consumed_action_id IS NULL
+            LIMIT 1`
+        )
+        .bind(params.environment)
+        .first<{ present: number }>();
+      return row !== null;
     },
 
     async cleanupExpiredExternalBuilds(params) {

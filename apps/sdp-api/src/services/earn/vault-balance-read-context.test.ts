@@ -6,7 +6,7 @@ import {
   resolveVaultBalanceReadContext,
 } from "./vault-balance-read-context";
 
-const mocks = vi.hoisted(() => ({ movement: vi.fn(), statuses: vi.fn(), prove: vi.fn() }));
+const mocks = vi.hoisted(() => ({ movement: vi.fn(), statuses: vi.fn(), rpc: vi.fn() }));
 vi.mock("@/db/client", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/db/client")>()),
   getDb: vi.fn(),
@@ -14,13 +14,9 @@ vi.mock("@/db/client", async (importOriginal) => ({
 vi.mock("@/db/repositories/earn-movements.repository", () => ({
   createPostgresEarnMovementsRepository: () => ({ getMovementById: mocks.movement }),
 }));
-vi.mock("@sdp/rpc/solana", () => ({ createRpc: vi.fn(), getSignatureStatuses: mocks.statuses }));
-vi.mock("@sdp/rpc/config", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@sdp/rpc/config")>()),
-  resolveClusterRpcUrl: () => "https://rpc.invalid",
-}));
+vi.mock("@sdp/rpc/solana", () => ({ getSignatureStatuses: mocks.statuses }));
+vi.mock("./cluster-rpc", () => ({ earnClusterRpc: mocks.rpc }));
 vi.mock("./execution-registry", () => ({
-  assertClusterEndpoint: mocks.prove,
   earnClusterFor: (environment: string) =>
     environment === "production" ? "mainnet-beta" : "devnet",
 }));
@@ -46,7 +42,7 @@ beforeEach(() => {
   resetFinalizedSignatureStatuses();
   mocks.movement.mockResolvedValue(movement);
   mocks.statuses.mockResolvedValue([status(100n), status(103n), status(102n)]);
-  mocks.prove.mockResolvedValue(undefined);
+  mocks.rpc.mockReturnValue({});
 });
 
 describe("vault balance confirmation context", () => {
@@ -57,7 +53,7 @@ describe("vault balance confirmation context", () => {
       minimumSlotByPositionId: new Map([["position", 103]]),
     });
     expect(mocks.movement).toHaveBeenCalledWith({ movementId: "one", organizationId: "org" });
-    expect(mocks.prove).toHaveBeenCalledWith({}, "devnet", "https://rpc.invalid");
+    expect(mocks.rpc).toHaveBeenCalledWith("devnet", { timeoutMs: 3_000 });
   });
 
   it("keeps each position's bound separate while retaining the overall wallet bound", async () => {
@@ -83,7 +79,7 @@ describe("vault balance confirmation context", () => {
     await expect(resolveVaultBalanceReadContext({} as Env, input)).rejects.toMatchObject({
       statusCode: 404,
     });
-    expect(mocks.prove).not.toHaveBeenCalled();
+    expect(mocks.rpc).not.toHaveBeenCalled();
     expect(mocks.statuses).not.toHaveBeenCalled();
   });
 
@@ -150,7 +146,9 @@ describe("finalized signature statuses are read once", () => {
 
     expect(mocks.statuses).toHaveBeenCalledTimes(1);
     expect(mocks.statuses.mock.calls[0]?.[1]).toEqual(["sig-one", "sig-two", "sig-three"]);
-    expect(mocks.prove).toHaveBeenCalledTimes(3);
+    // A poll answered entirely from finalized statuses builds no client, so it
+    // costs no request at all, not even the pool's genesis probe.
+    expect(mocks.rpc).toHaveBeenCalledTimes(1);
   });
 
   it("keeps reading a confirmed-only movement, and only that one", async () => {

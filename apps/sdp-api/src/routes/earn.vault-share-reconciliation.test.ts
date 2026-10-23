@@ -18,20 +18,12 @@ vi.mock("@/routes/payments/token-accounts", async (importOriginal) => ({
   getSplTokenBalances,
 }));
 
-// The endpoint genesis-proof and per-cluster URL resolution are chain-facing;
-// balances themselves come from the mocked read above, so no RPC request is
-// ever issued by these tests.
-const { assertClusterEndpoint, resolveClusterRpcUrl } = vi.hoisted(() => ({
-  assertClusterEndpoint: vi.fn(async () => {}),
-  resolveClusterRpcUrl: vi.fn(() => "http://127.0.0.1:8899"),
-}));
-vi.mock("@sdp/rpc/config", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@sdp/rpc/config")>()),
-  resolveClusterRpcUrl,
-}));
-vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/services/earn/execution-registry")>()),
-  assertClusterEndpoint,
+// Balances come from the mocked read above, so the client the handler builds is
+// never asked anything and no RPC request is issued by these tests.
+const earnClusterRpc = vi.hoisted(() => vi.fn(() => ({})));
+vi.mock("@/services/earn/cluster-rpc", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/earn/cluster-rpc")>()),
+  earnClusterRpc,
 }));
 
 // Lets one test shrink the pass budget to prove the deadline posture; null
@@ -302,8 +294,6 @@ beforeEach(async () => {
   await seedScope();
   vi.clearAllMocks();
   deadlineTimeoutOverride.ms = null;
-  assertClusterEndpoint.mockResolvedValue(undefined);
-  resolveClusterRpcUrl.mockReturnValue("http://127.0.0.1:8899");
   getSplTokenBalances.mockResolvedValue([]);
 });
 

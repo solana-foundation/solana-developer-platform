@@ -501,6 +501,50 @@ describe("Earn queued withdrawal repository", () => {
     expect(occupancy).toEqual({ lease_token: signed.requestId, occupied: true });
   });
 
+  it("reports unconsumed builds per environment until the cleanup expires them", async () => {
+    await expect(repository.hasUnconsumedExternalBuilds({ environment: "sandbox" })).resolves.toBe(
+      false
+    );
+    await repository.createExternalWalletTransaction({
+      id: "earn_external_wallet_withdrawal_request_transaction_cleanup_gate",
+      organizationId: ORG,
+      projectId: PROJECT,
+      environment: "sandbox",
+      provider: "veda",
+      positionId: EXTERNAL_POSITION,
+      action: "request",
+      ownerAddress: EXTERNAL_OWNER,
+      vaultAddress: VAULT,
+      tokenMint: TOKEN_MINT,
+      shareMint: SHARE_MINT,
+      requestAddress: "CleanupGateQueueRequest11111111111111111",
+      shares: "1",
+      quotedAssets: "0.99",
+      shareDecimals: 6,
+      assetDecimals: 6,
+      discountBps: 25,
+      maturityTimestamp: "1700000060",
+      deadlineTimestamp: "1700000120",
+      unsignedTransaction: "AQ==",
+      lastValidBlockHeight: "100",
+      currentBlockHeight: "50",
+    });
+
+    // The gate and the DELETE share one predicate: unconsumed, in this environment.
+    await expect(repository.hasUnconsumedExternalBuilds({ environment: "sandbox" })).resolves.toBe(
+      true
+    );
+    await expect(
+      repository.hasUnconsumedExternalBuilds({ environment: "production" })
+    ).resolves.toBe(false);
+    await expect(
+      repository.cleanupExpiredExternalBuilds({ environment: "sandbox", currentBlockHeight: "101" })
+    ).resolves.toBe(1);
+    await expect(repository.hasUnconsumedExternalBuilds({ environment: "sandbox" })).resolves.toBe(
+      false
+    );
+  });
+
   it("lets another tenant take over an expired build through the shared PDA lease", async () => {
     const requestAddress = "ExpiredCrossTenantQueueRequest111111111111";
     await repository.createExternalWalletTransaction({

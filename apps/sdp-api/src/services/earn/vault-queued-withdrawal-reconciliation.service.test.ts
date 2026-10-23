@@ -25,20 +25,15 @@ vi.mock("@/services/earn/vault-execution.service", () => ({
   broadcastVaultTransaction: broadcast,
 }));
 
-vi.mock("@sdp/rpc/config", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@sdp/rpc/config")>()),
-  resolveClusterRpcUrl: () => "http://rpc.invalid",
+vi.mock("@/services/earn/cluster-rpc", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/earn/cluster-rpc")>()),
+  earnClusterRpc: () => sweepRpc.current,
 }));
 vi.mock("@/services/earn/execution-registry", () => ({
   earnClusterFor: () => "devnet",
   resolveVaultQueuedWithdrawClient: () => provider.client,
   resolveVaultParRedemptionClient: () => parProvider.client,
 }));
-
-vi.mock("@sdp/rpc/solana", async (importOriginal) => {
-  const actual = await importOriginal<Record<string, unknown>>();
-  return { ...actual, createRpc: () => sweepRpc.current };
-});
 
 const OWNER = "7YfVedaQueueOwner111111111111111111111111111";
 const VAULT = "8VfVedaQueueVault111111111111111111111111111";
@@ -282,7 +277,6 @@ describe("queued withdrawal reconciliation", () => {
     await expect(
       reconcileAction(env, ledger, action(), null, {
         rpc: emptyRpc as never,
-        rpcUrl: "http://rpc.invalid",
         currentHeight: 2n,
       })
     ).resolves.toBe("advanced");
@@ -326,7 +320,6 @@ describe("queued withdrawal reconciliation", () => {
     await expect(
       reconcileAction(env, ledger, action({ action: "cancel" }), null, {
         rpc: emptyRpc as never,
-        rpcUrl: "http://rpc.invalid",
         currentHeight: 2n,
       })
     ).resolves.toBe("failed");
@@ -367,7 +360,6 @@ describe("queued withdrawal reconciliation", () => {
     await expect(
       reconcileAction(env, ledger, action({ action: "cancel", status: "submitted" }), null, {
         rpc: emptyRpc as never,
-        rpcUrl: "http://rpc.invalid",
         currentHeight: 2n,
       })
     ).resolves.toBe("failed");
@@ -393,7 +385,7 @@ describe("queued withdrawal reconciliation", () => {
           ledger,
           action(),
           { err: "fork-local rejection", confirmationStatus } as never,
-          { rpc: emptyRpc as never, rpcUrl: "http://rpc.invalid", currentHeight: 2n }
+          { rpc: emptyRpc as never, currentHeight: 2n }
         )
       ).resolves.toBe("unchanged");
       expect(ledger.failActionAndRecoverRequest).not.toHaveBeenCalled();
@@ -412,12 +404,11 @@ describe("queued withdrawal reconciliation", () => {
           ledger,
           action({ action: kind, status: "submitted", last_valid_block_height: "10" }),
           null,
-          { rpc: emptyRpc as never, rpcUrl: "http://rpc.invalid", currentHeight: 10n }
+          { rpc: emptyRpc as never, currentHeight: 10n }
         )
       ).resolves.toBe("rebroadcast");
       expect(broadcast).toHaveBeenCalledWith(
-        env,
-        expect.objectContaining({ bytes: Uint8Array.of(1), rpcUrl: "http://rpc.invalid" })
+        expect.objectContaining({ cluster: "devnet", bytes: Uint8Array.of(1) })
       );
       expect(ledger.failActionAndRecoverRequest).not.toHaveBeenCalled();
     }
@@ -433,7 +424,6 @@ describe("queued withdrawal reconciliation", () => {
         { err: "program rejected the queued request", confirmationStatus: "finalized" } as never,
         {
           rpc: emptyRpc as never,
-          rpcUrl: "http://rpc.invalid",
           currentHeight: 2n,
         }
       )
@@ -482,7 +472,6 @@ describe("queued withdrawal reconciliation", () => {
         { err: null, confirmationStatus: "finalized" } as never,
         {
           rpc: rpc as never,
-          rpcUrl: "http://rpc.invalid",
           currentHeight: null,
         }
       )
@@ -537,7 +526,7 @@ describe("queued withdrawal reconciliation", () => {
         ledger,
         action(),
         { err: null, confirmationStatus: "finalized" } as never,
-        { rpc: rpc as never, rpcUrl: "http://rpc.invalid", currentHeight: null }
+        { rpc: rpc as never, currentHeight: null }
       )
     ).resolves.toBe("advanced");
 
@@ -578,7 +567,6 @@ describe("queued withdrawal reconciliation", () => {
     await expect(
       reconcileAction(env, ledger, action({ action: "cancel", status: "submitted" }), null, {
         rpc: emptyRpc as never,
-        rpcUrl: "http://rpc.invalid",
         currentHeight: 2n,
       })
     ).resolves.toBe("failed");
@@ -628,7 +616,6 @@ describe("queued withdrawal reconciliation", () => {
     await expect(
       reconcileAction(env, ledger, action(), null, {
         rpc: rpc as never,
-        rpcUrl: "http://rpc.invalid",
         currentHeight: 2n,
       })
     ).resolves.toBe("advanced");

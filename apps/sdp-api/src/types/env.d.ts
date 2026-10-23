@@ -98,14 +98,10 @@ export interface Env extends ManagedRpcEnv {
   // Solana configuration
   SOLANA_RPC_URL?: string;
   /**
-   * Optional PER-CLUSTER overrides for the Earn execution path.
-   *
-   * One API process serves both clusters — sandbox projects are devnet,
-   * production projects are mainnet-beta — so a single `SOLANA_RPC_URL` cannot
-   * be correct for both. Unset falls back to `SOLANA_RPC_URL`, which must then
-   * prove its chain by genesis hash before anything is built against it
-   * (`assertClusterEndpoint`), so a single-cluster deployment keeps working and
-   * a mismatch is a refusal rather than a confidently wrong transaction.
+   * Optional per-cluster pins, read only by the deprecated `createClusterRpc(env, cluster)` in
+   * `@sdp/rpc/solana` (Private Channels, HOO-1879) and the local Kora harness. Earn reads each
+   * cluster's managed pool (`SOLANA_RPC_<PROVIDER>_<CLUSTER>_API_KEY_URL`) instead, through
+   * `services/earn/cluster-rpc.ts`, and never falls back to `SOLANA_RPC_URL`.
    */
   SOLANA_DEVNET_RPC_URL?: string;
   SOLANA_MAINNET_RPC_URL?: string;

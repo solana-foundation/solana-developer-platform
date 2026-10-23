@@ -1,8 +1,7 @@
 import { createServer, type Server } from "node:http";
 import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types/well-known-tokens";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { resetClusterEndpointProofs } from "./execution-registry";
 import { readOwnerMintBalance } from "./owner-token-balance";
 
 const OWNER = "3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF";
@@ -17,7 +16,7 @@ const rpcRequestSchema = z.object({
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
 afterEach(async () => {
-  resetClusterEndpointProofs();
+  vi.unstubAllEnvs();
   await Promise.all(servers.splice(0).map((server) => closeServer(server)));
 });
 
@@ -85,18 +84,10 @@ describe("readOwnerMintBalance", () => {
   });
 });
 
+/** Each test's server is a fresh devnet pool endpoint, so no proof carries over. */
 function readBalance(rpcUrl: string) {
-  return readOwnerMintBalance(
-    {
-      ENVIRONMENT: "development",
-      API_VERSION: "v1",
-      SOLANA_NETWORK: "devnet",
-      SOLANA_DEVNET_RPC_URL: rpcUrl,
-    },
-    "sandbox",
-    OWNER,
-    USDC
-  );
+  vi.stubEnv("SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL", rpcUrl);
+  return readOwnerMintBalance("sandbox", OWNER, USDC);
 }
 
 function tokenAccount(

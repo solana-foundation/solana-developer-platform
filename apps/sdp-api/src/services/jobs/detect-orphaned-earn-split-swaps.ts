@@ -1,5 +1,3 @@
-import { resolveClusterRpcUrl } from "@sdp/rpc/config";
-import { createRpc } from "@sdp/rpc/solana";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { getDb } from "@/db/client";
@@ -10,7 +8,8 @@ import {
   type EarnSplitSwapAdvisoryRow,
 } from "@/db/repositories/earn-split-swap-advisories.repository";
 import { describeError, logEvent } from "@/runtime/money-path-events";
-import { assertClusterEndpoint, earnClusterFor } from "@/services/earn/execution-registry";
+import { earnClusterRpc } from "@/services/earn/cluster-rpc";
+import { earnClusterFor } from "@/services/earn/execution-registry";
 import { readOwnerMintBalance } from "@/services/earn/owner-token-balance";
 import type { Env } from "@/types/env";
 
@@ -133,10 +132,7 @@ export async function detectOrphanedEarnSplitSwaps(
   for (const [environment, rows] of byEnvironment) {
     let blockHeight: bigint | null = null;
     try {
-      const cluster = earnClusterFor(environment);
-      const rpcUrl = resolveClusterRpcUrl(env, cluster);
-      await assertClusterEndpoint(env, cluster, rpcUrl);
-      blockHeight = await createRpc(env, { rpcUrl })
+      blockHeight = await earnClusterRpc(earnClusterFor(environment))
         .getBlockHeight({ commitment: "confirmed" })
         .send();
     } catch (error) {
@@ -153,7 +149,7 @@ export async function detectOrphanedEarnSplitSwaps(
     for (const advisory of rows) {
       // Sequential on purpose: one filtered RPC read per judged advisory.
       // react-doctor-disable-next-line react-doctor/async-await-in-loop -- pacing is intentional.
-      await judgeAdvisory(env, advisories, ledger, advisory, blockHeight, now(), stats);
+      await judgeAdvisory(advisories, ledger, advisory, blockHeight, now(), stats);
     }
   }
 
@@ -185,7 +181,6 @@ export async function detectOrphanedEarnSplitSwaps(
 }
 
 async function judgeAdvisory(
-  env: Env,
   advisories: ReturnType<typeof createPostgresEarnSplitSwapAdvisoriesRepository>,
   ledger: ReturnType<typeof createPostgresEarnMovementsRepository>,
   advisory: EarnSplitSwapAdvisoryRow,
@@ -255,7 +250,6 @@ async function judgeAdvisory(
   let balance: Awaited<ReturnType<typeof readOwnerMintBalance>>;
   try {
     balance = await readOwnerMintBalance(
-      env,
       advisory.environment,
       advisory.owner_address,
       advisory.deposit_token_mint

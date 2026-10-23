@@ -1,11 +1,11 @@
-import { resolveClusterRpcUrl } from "@sdp/rpc/config";
-import { createRpc, getSignatureStatuses, type SignatureStatusInfo } from "@sdp/rpc/solana";
+import { getSignatureStatuses, type SignatureStatusInfo } from "@sdp/rpc/solana";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { Signature } from "@solana/kit";
 import { getDb } from "@/db/client";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import { notFound, providerUnavailable } from "@/lib/errors";
-import { assertClusterEndpoint, earnClusterFor } from "@/services/earn/execution-registry";
+import { earnClusterRpc } from "@/services/earn/cluster-rpc";
+import { earnClusterFor } from "@/services/earn/execution-registry";
 import type { Env } from "@/types/env";
 
 /** How long a finalized signature's status is reused before it is read again. */
@@ -89,15 +89,13 @@ export async function resolveVaultBalanceReadContext(
     movements.push(movement);
   }
   const cluster = earnClusterFor(input.environment);
-  const rpcUrl = resolveClusterRpcUrl(env, cluster);
-  await assertClusterEndpoint(env, cluster, rpcUrl);
   const keys = movements.map((movement) => `${cluster}\n${movement.signature}`);
   const statuses: Array<SignatureStatusInfo | null | undefined> = keys.map(finalizedStatus);
   const unread = movements.flatMap((movement, index) =>
     statuses[index] ? [] : [{ index, signature: movement.signature as Signature }]
   );
   if (unread.length > 0) {
-    const rpc = createRpc(env, { rpcUrl, requestTimeoutMs: 3_000 });
+    const rpc = earnClusterRpc(cluster, { timeoutMs: 3_000 });
     const read = await getSignatureStatuses(
       rpc,
       unread.map(({ signature }) => signature),

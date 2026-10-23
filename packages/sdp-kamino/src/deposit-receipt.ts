@@ -1,9 +1,8 @@
 import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import { SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
-import { getBase58Encoder, signature } from "@solana/kit";
+import { type GetTransactionApi, getBase58Encoder, type Rpc, signature } from "@solana/kit";
 import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import { kaminoClusterConfig } from "./programs";
-import { createKaminoRpc } from "./rpc";
 import type { KaminoRuntime } from "./types";
 
 const DEPOSIT = [242, 35, 198, 137, 82, 225, 242, 182];
@@ -234,17 +233,20 @@ export function parseKaminoDepositReceipt(
   };
 }
 
-/** Finalized-only receipt lookup; callers must verify the runtime's cluster. */
+/**
+ * Finalized-only receipt lookup on the caller's client. The caller owns the
+ * client, so it owns the cluster proof: `rpc` must serve `chain.cluster`.
+ */
 export async function readKaminoDepositReceipt(
-  runtime: KaminoRuntime,
+  chain: { cluster: KaminoRuntime["cluster"]; rpc: Rpc<GetTransactionApi> },
   input: KaminoDepositReceiptInput
 ): Promise<KaminoDepositReceipt | null> {
-  const transaction = await createKaminoRpc(runtime.rpcUrl)
+  const transaction = await chain.rpc
     .getTransaction(signature(input.signature), {
       encoding: "jsonParsed",
       commitment: "finalized",
       maxSupportedTransactionVersion: 0,
     })
     .send();
-  return parseKaminoDepositReceipt(transaction, runtime.cluster, input);
+  return parseKaminoDepositReceipt(transaction, chain.cluster, input);
 }
