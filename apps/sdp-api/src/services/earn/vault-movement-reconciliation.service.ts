@@ -32,6 +32,7 @@ import {
   resolveRecordedVaultWithdrawClient,
   resolveVaultDirectClient,
 } from "@/services/earn/execution-registry";
+import { reReadExpiredStatuses } from "@/services/earn/expired-status-proof";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import { broadcastVaultTransaction } from "@/services/earn/vault-execution.service";
 import { describeVaultSimulationError } from "@/services/earn/vault-simulation-error";
@@ -302,7 +303,7 @@ async function reconcileEnvironment(
   const expiry =
     finalized === null
       ? { statuses, unproven: new Set<number>() }
-      : await reReadExpiredStatuses(rpc, environment, rows, signatures, statuses, finalized);
+      : await proveExpiredAbsence(rpc, environment, rows, signatures, statuses, finalized);
   if (expiry.unproven.size > 0) stats.statusReadFailures = 1;
   const currentBlockHeight = finalized?.blockHeight ?? null;
 
@@ -347,10 +348,9 @@ interface FinalizedHeight {
 }
 
 /**
- * Re-read the status of every row whose blockhash the finalized height shows expired, from a node
- * at least as current as that height read (`minContextSlot`), as sponsorship budget reconciliation
- * does. The batch statuses can come from a pool endpoint behind the one that answered the height,
- * and a null status from a lagging endpoint must never expire a transaction that landed.
+ * Prove the absence of every row whose blockhash the finalized height shows expired while its
+ * batch status was null, by re-reading those statuses at the height's slot
+ * (`reReadExpiredStatuses`).
  *
  * @param rpc - The cluster's pool client.
  * @param environment - The environment the rows belong to, for the failure event.
@@ -361,7 +361,7 @@ interface FinalizedHeight {
  * @returns The statuses with every expired row's re-read applied, and the indexes of expired rows
  * whose re-read failed, which stay unjudged this tick.
  */
-async function reReadExpiredStatuses(
+async function proveExpiredAbsence(
   rpc: SolanaRpc,
   environment: SdpEnvironment,
   rows: readonly EarnMovementRow[],
@@ -380,18 +380,11 @@ async function reReadExpiredStatuses(
       ? [{ index, signature }]
       : [];
   });
-  const reRead = [...statuses];
-  if (expired.length === 0) return { statuses: reRead, unproven: new Set() };
   try {
-    const current = await getSignatureStatuses(
-      rpc,
-      expired.map(({ signature }) => signature),
-      { searchTransactionHistory: true, minContextSlot: finalized.absoluteSlot }
-    );
-    for (const [position, { index }] of expired.entries()) {
-      reRead[index] = current[position] ?? null;
-    }
-    return { statuses: reRead, unproven: new Set() };
+    return {
+      statuses: await reReadExpiredStatuses(rpc, statuses, expired, finalized.absoluteSlot),
+      unproven: new Set(),
+    };
   } catch (error) {
     logEvent("error", {
       event: "sdp_api_earn_vault_reconciliation_status_read_failed",
@@ -401,7 +394,7 @@ async function reReadExpiredStatuses(
       ...describeError(error),
       error_message: errorMessage(error),
     });
-    return { statuses: reRead, unproven: new Set(expired.map(({ index }) => index)) };
+    return { statuses: [...statuses], unproven: new Set(expired.map(({ index }) => index)) };
   }
 }
 

@@ -1,4 +1,4 @@
-import { providerNotConfigured } from "@sdp/earn/errors";
+import { providerNotConfigured, type SdpEarnError } from "@sdp/earn/errors";
 import { SdpRpcError } from "@sdp/rpc/errors";
 // biome-ignore-start lint/style/noRestrictedImports: Earn's door names its cluster until Earn reads the cluster scope (HOO-1881)
 import {
@@ -40,7 +40,8 @@ export function earnClusterRpc(cluster: SolanaCluster, options?: EarnClusterRpcO
 /**
  * The managed endpoints a provider operation pins, one per attempt, in failover order. Provider
  * packages build their own transports from these URLs, so each must pass `assertClusterEndpoint`
- * first. Empty when `cluster` has no managed pool; never another cluster's endpoints.
+ * first. Empty when `cluster` has no managed pool (raise `earnPoolNotConfigured`); never another
+ * cluster's endpoints.
  *
  * @param cluster - The cluster the operation runs on.
  * @returns The pool's endpoint URLs, possibly none.
@@ -54,6 +55,19 @@ function clusterEnvSuffix(cluster: SolanaCluster): string {
 }
 
 /**
+ * The refusal for a provider operation on a cluster whose managed pool has no endpoint.
+ *
+ * @param cluster - The cluster the operation runs on.
+ * @returns A `PROVIDER_NOT_CONFIGURED` error naming the pool keys to set.
+ */
+export function earnPoolNotConfigured(cluster: SolanaCluster): SdpEarnError {
+  return providerNotConfigured(
+    `No Solana RPC endpoint is configured for ${cluster}. Configure its managed pool ` +
+      `(SOLANA_RPC_<PROVIDER>_${clusterEnvSuffix(cluster)}_API_KEY_URL).`
+  );
+}
+
+/**
  * Refuse to build against an endpoint that has not proved it serves `cluster`.
  *
  * A cluster mismatch does not surface as an error on its own: Kamino's mainnet kvault program id
@@ -63,17 +77,11 @@ function clusterEnvSuffix(cluster: SolanaCluster): string {
  * in the last 30 s costs no probe here.
  *
  * @param cluster - The cluster the endpoint must serve.
- * @param rpcUrl - One of `earnProviderEndpointUrls(cluster)`, or "" when there is none.
- * @throws SdpEarnError `PROVIDER_NOT_CONFIGURED` when there is no endpoint, the probe fails, or
- * the endpoint serves another cluster.
+ * @param rpcUrl - One of `earnProviderEndpointUrls(cluster)`.
+ * @throws SdpEarnError `PROVIDER_NOT_CONFIGURED` when the probe fails or the endpoint serves
+ * another cluster.
  */
 export async function assertClusterEndpoint(cluster: SolanaCluster, rpcUrl: string): Promise<void> {
-  if (rpcUrl === "") {
-    throw providerNotConfigured(
-      `No Solana RPC endpoint is configured for ${cluster}. Configure its managed pool ` +
-        `(SOLANA_RPC_<PROVIDER>_${clusterEnvSuffix(cluster)}_API_KEY_URL).`
-    );
-  }
   try {
     await proveEarnClusterEndpoint(cluster, rpcUrl);
   } catch (cause) {

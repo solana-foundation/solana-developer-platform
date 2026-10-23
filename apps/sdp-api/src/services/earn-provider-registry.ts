@@ -24,7 +24,11 @@ import {
   assertWisdomTreeNotPortfolioProvider,
   WisdomTreeVaultDirectClient,
 } from "@sdp/wisdomtree/client";
-import { assertClusterEndpoint, earnProviderEndpointUrls } from "@/services/earn/cluster-rpc";
+import {
+  assertClusterEndpoint,
+  earnPoolNotConfigured,
+  earnProviderEndpointUrls,
+} from "@/services/earn/cluster-rpc";
 import type { Env } from "@/types/env";
 import { createHastraSwapPort } from "./earn/hastra-swap-port";
 import { createOndoSwapPort } from "./earn/ondo-swap-port";
@@ -39,7 +43,8 @@ async function resolveProvenRpcUrl(
   _ctx: EarnRuntimeContext,
   cluster: SolanaCluster
 ): Promise<string> {
-  const rpcUrl = earnProviderEndpointUrls(cluster)[0] ?? "";
+  const [rpcUrl] = earnProviderEndpointUrls(cluster);
+  if (rpcUrl === undefined) throw earnPoolNotConfigured(cluster);
   await assertClusterEndpoint(cluster, rpcUrl);
   return rpcUrl;
 }

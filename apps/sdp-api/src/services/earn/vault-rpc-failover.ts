@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { EarnRuntimeContext } from "@sdp/earn/types";
 import { isTransientRpcError } from "@sdp/rpc/transient";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
-import { earnProviderEndpointUrls } from "./cluster-rpc";
+import { earnPoolNotConfigured, earnProviderEndpointUrls } from "./cluster-rpc";
 import type { VaultDeadline } from "./vault-deadline";
 
 /**
@@ -58,7 +58,8 @@ export function createVaultRpcFailover(
       const attempt = attempts.getStore();
       const urls = earnProviderEndpointUrls(cluster);
       if (attempt) attempt.urls = urls;
-      const url = urls[attempt?.index ?? 0] ?? "";
+      const url = urls[attempt?.index ?? 0];
+      if (url === undefined) throw earnPoolNotConfigured(cluster);
       await prove(cluster, url);
       return url;
     },

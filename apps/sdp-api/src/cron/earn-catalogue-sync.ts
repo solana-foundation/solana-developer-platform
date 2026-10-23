@@ -106,7 +106,7 @@ function catalogueRuntime(env: Env, environment: SdpEnvironment): EarnRuntimeCon
   return {
     env,
     environment,
-    catalogueRpcUrl: (cluster) => earnProviderEndpointUrls(cluster)[0] ?? "",
+    catalogueRpcUrl: (cluster) => earnProviderEndpointUrls(cluster)[0] ?? null,
   };
 }
 

@@ -31,6 +31,10 @@ const EARN_API_FILES = [
   join(API_SRC, "services/earn-provider-registry.ts"),
   join(API_SRC, "services/jobs/detect-orphaned-earn-split-swaps.ts"),
   join(API_SRC, "services/jobs/reconcile-earn-vault-movements.ts"),
+  // Operator-run catalogue inventories read the chain like the catalogue sync does.
+  ...readdirSync(join(API_SRC, "../scripts"))
+    .filter((file) => file.startsWith("inventory-") && file.endsWith("-catalogue.ts"))
+    .map((file) => join(API_SRC, "../scripts", file)),
 ];
 
 /** The catalogue package, whose shelf reads must take the caller's endpoint. */
