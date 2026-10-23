@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   issuance: vi.fn(),
   buildHomeActivityRows: vi.fn((): unknown[] => []),
+  computeTodaysVolume: vi.fn((): number | null => 0),
   fetchOrgIssuanceActivity: vi.fn(),
   fetchDashboardPaymentTransfers: vi.fn(),
   fetchPaymentsIssuedTokenSymbols: vi.fn(),
@@ -12,6 +13,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/flags", () => ({ issuance: mocks.issuance }));
 vi.mock("@/app/dashboard/[projectId]/home-page.data", () => ({
   buildHomeActivityRows: mocks.buildHomeActivityRows,
+  computeTodaysVolume: mocks.computeTodaysVolume,
   fetchOrgIssuanceActivity: mocks.fetchOrgIssuanceActivity,
 }));
 vi.mock("@/app/dashboard/[projectId]/payments/payments-page.data", () => ({
@@ -34,7 +36,7 @@ vi.mock("@/lib/sdp-api", () => ({ createSdpApiClient: mocks.createSdpApiClient }
 
 import { GET } from "./route";
 
-describe("GET /api/dashboard/home/activity feature gates", () => {
+describe("GET /api/dashboard/home/activity", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.issuance.mockResolvedValue(false);
@@ -103,12 +105,47 @@ describe("GET /api/dashboard/home/activity feature gates", () => {
 
     expect(body.data.activityError).toBeNull();
     expect(body.data.activityNotice).toBe("Shared.homeWorkspace.somePaymentsActivityUnavailable");
-    // Volume is its own read, so the list carries no total to understate.
-    expect(body.data).not.toHaveProperty("todaysVolume");
     // Home is the caller that can say the list is partial, so it is the one that sets a deadline.
     expect(mocks.fetchDashboardPaymentTransfers).toHaveBeenCalledWith(expect.anything(), 20, {
       walletDeadlineMs: 2_500,
     });
+  });
+
+  it("totals today's volume from the list's own read once every wallet loaded", async () => {
+    mocks.fetchDashboardPaymentTransfers.mockResolvedValue({
+      ok: true,
+      data: [{ id: "transfer_1" }],
+      walletsNotLoaded: 0,
+    });
+    mocks.computeTodaysVolume.mockReturnValueOnce(125);
+
+    const response = await GET(new Request("http://localhost/api/dashboard/home/activity"));
+    const body = await response.json();
+
+    expect(mocks.fetchDashboardPaymentTransfers).toHaveBeenCalledOnce();
+    expect(mocks.computeTodaysVolume).toHaveBeenCalledWith([{ id: "transfer_1" }]);
+    expect(body.data).toMatchObject({ todaysVolume: 125, todaysVolumeError: null });
+  });
+
+  // The list can say it is partial; a total cannot, since a sum over some wallets is smaller.
+  it.each([
+    [
+      "a wallet failed or missed its deadline",
+      { ok: true, data: [{ id: "transfer_1" }], walletsNotLoaded: 1 },
+    ],
+    ["the wallet list failed", { ok: true, data: [{ id: "transfer_1" }], walletsNotLoaded: null }],
+    ["the transfers read failed", { ok: false, data: null, walletsNotLoaded: 0 }],
+  ])("reports the volume unavailable, not understated, when %s", async (_label, result) => {
+    mocks.fetchDashboardPaymentTransfers.mockResolvedValue(result);
+
+    const response = await GET(new Request("http://localhost/api/dashboard/home/activity"));
+    const body = await response.json();
+
+    expect(body.data).toMatchObject({
+      todaysVolume: null,
+      todaysVolumeError: "Shared.homeWorkspace.paymentsActivityUnavailable",
+    });
+    expect(mocks.computeTodaysVolume).not.toHaveBeenCalled();
   });
 
   it("reports activity unavailable, not empty, when no wallet loaded and nothing else did", async () => {

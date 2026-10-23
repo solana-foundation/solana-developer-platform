@@ -23,7 +23,6 @@ import {
   DASHBOARD_PAYMENTS_SUBNAV_HREFS,
   DASHBOARD_SIDE_NAV_HREFS,
 } from "@/lib/dashboard-navigation-loading";
-import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { explorerAddressUrl, explorerTxUrl } from "@/lib/explorer";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
@@ -35,9 +34,8 @@ import {
   type HomeActivityExplorerRef,
   type HomeActivityRow,
 } from "./home-page.data";
-import { homeQueryKeys } from "./home-query-key";
 import { buildTokenSymbolsByMint } from "./home-token-symbols";
-import { fetchHomeActivity, fetchHomeVolume } from "./home-workspace.data";
+import { useHomeActivitySnapshot } from "./home-workspace.data";
 import { OverviewNetwork } from "./overview-network";
 import { useOverviewNetwork } from "./overview-network.data";
 import {
@@ -65,7 +63,6 @@ interface HomeWorkspaceProps {
   issuedTokens: PaymentsIssuedTokenSymbol[];
 }
 
-const HOME_ACTIVITY_CACHE_TTL_MS = 60_000;
 const BALANCE_ROW_COUNT = 3;
 
 function explorerHref(ref: HomeActivityExplorerRef, cluster: SolanaCluster): string {
@@ -532,49 +529,17 @@ function RecentActivity({
 }
 
 /**
- * Today's volume, read apart from the activity list: it waits on every wallet so the total is
- * never a sum over some of them, and the list does not wait on it.
+ * Recent activity and today's volume, from the one read that builds both. Before the first wallet
+ * neither section is on screen, so `enabled` is false and nothing is read.
  */
-function useHomeVolume() {
-  const { data: volumeSnapshot, error: volumeRequestError } = usePersistedDashboardSWR(
-    homeQueryKeys.volume(),
-    () => fetchHomeVolume(),
-    {
-      revalidateOnFocus: true,
-      refreshInterval: 20_000,
-    },
-    {
-      key: "home-volume",
-      ttlMs: HOME_ACTIVITY_CACHE_TTL_MS,
-    }
-  );
-  return {
-    todaysVolume: volumeSnapshot?.todaysVolume ?? null,
-    todaysVolumeUnavailable:
-      Boolean(volumeRequestError) ||
-      volumeSnapshot === undefined ||
-      Boolean(volumeSnapshot.todaysVolumeError),
-  };
-}
-
 function useHomeActivity(
+  enabled: boolean,
   balances: CustodyWalletTokenBalance[],
   issuanceEnabled: boolean,
   isWalletEmptyState: boolean
 ) {
   const t = useTranslations();
-  const { data: activitySnapshot, error: activityRequestError } = usePersistedDashboardSWR(
-    homeQueryKeys.activity(),
-    () => fetchHomeActivity(),
-    {
-      revalidateOnFocus: true,
-      refreshInterval: 20_000,
-    },
-    {
-      key: "home-activity",
-      ttlMs: HOME_ACTIVITY_CACHE_TTL_MS,
-    }
-  );
+  const { data: activitySnapshot, error: activityRequestError } = useHomeActivitySnapshot(enabled);
   const activityRows = filterHomeActivityRowsByFlags(activitySnapshot?.activityRows ?? [], {
     issuance: issuanceEnabled,
   });
@@ -595,6 +560,13 @@ function useHomeActivity(
     activityError,
     activityNotice,
     emptyActivityMessage,
+    todaysVolume: activitySnapshot?.todaysVolume ?? null,
+    // The list may be missing a wallet; a total over the rest would understate the day, so the
+    // route sends none and the census shows a dash.
+    todaysVolumeUnavailable:
+      Boolean(activityRequestError) ||
+      activitySnapshot === undefined ||
+      Boolean(activitySnapshot.todaysVolumeError),
   };
 }
 
@@ -624,10 +596,16 @@ export function HomeWorkspace({
   const issuedTokensByMint = Object.fromEntries(
     issuedTokens.map((token) => [token.mintAddress, token])
   );
-  const { todaysVolume, todaysVolumeUnavailable } = useHomeVolume();
   const network = useOverviewNetwork();
-  const { activityRows, symbolsByMint, activityError, activityNotice, emptyActivityMessage } =
-    useHomeActivity(balances, flags.issuance, wallets.length === 0);
+  const {
+    activityRows,
+    symbolsByMint,
+    activityError,
+    activityNotice,
+    emptyActivityMessage,
+    todaysVolume,
+    todaysVolumeUnavailable,
+  } = useHomeActivity(!firstRun, balances, flags.issuance, wallets.length === 0);
 
   const canCreateWallet = flags.custody && capabilities.canManageCustody;
   const tiles: OverviewTile[] = [

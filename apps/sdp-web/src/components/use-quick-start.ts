@@ -7,6 +7,7 @@ import { dashboardFetch } from "@/lib/dashboard-fetch";
 import {
   EMPTY_QUICK_START_PREFS,
   isQuickStartComplete,
+  type QuickStartPrefs,
   type QuickStartStatus,
   quickStartKey,
   quickStartStatusSchema,
@@ -47,8 +48,22 @@ function useQuickStartEligibility(): boolean {
   );
 }
 
-/** The server's setup status, re-read on focus, on an interval and when a flow marks it stale. */
-function useQuickStartStatus(live: boolean): QuickStartStatus | null {
+/** Every step done for this status; an unknown status is never complete. */
+function isGuideComplete(
+  status: QuickStartStatus | null | undefined,
+  skipped: QuickStartPrefs["skipped"]
+): boolean {
+  return status ? isQuickStartComplete(resolveQuickStartSteps({ status, skipped })) : false;
+}
+
+/**
+ * The server's setup status, re-read on focus, on an interval and when a flow marks it stale.
+ * The interval stops once the guide is complete: there is nothing left on screen to update.
+ */
+function useQuickStartStatus(
+  live: boolean,
+  skipped: QuickStartPrefs["skipped"]
+): QuickStartStatus | null {
   const { initialQuickStartStatus } = useDashboardWorkspace();
   const { data: status, mutate: refreshStatus } = usePersistedDashboardSWR(
     live ? quickStartQueryKeys.status() : null,
@@ -57,7 +72,10 @@ function useQuickStartStatus(live: boolean): QuickStartStatus | null {
       fallbackData: initialQuickStartStatus ?? undefined,
       revalidateIfStale: false,
       revalidateOnFocus: true,
-      refreshInterval: STATUS_REFRESH_MS,
+      // Inline, so the read that completes the guide ends the poll (apps/sdp-web/AGENTS.md). SWR
+      // passes only what it fetched, so the server's seed stands in until the first read.
+      refreshInterval: (latest) =>
+        isGuideComplete(latest ?? initialQuickStartStatus, skipped) ? 0 : STATUS_REFRESH_MS,
     }
   );
 
@@ -86,7 +104,7 @@ export function useQuickStart() {
   );
   const eligible = useQuickStartEligibility();
   const live = eligible && !prefs.dismissed;
-  const knownStatus = useQuickStartStatus(live);
+  const knownStatus = useQuickStartStatus(live, prefs.skipped);
 
   const steps = knownStatus
     ? resolveQuickStartSteps({ status: knownStatus, skipped: prefs.skipped })
