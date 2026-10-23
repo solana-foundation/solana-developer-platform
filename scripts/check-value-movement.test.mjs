@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { findValueMovementViolations } from "./check-value-movement.mjs";
+import { findBrandedCastViolations, findValueMovementViolations } from "./check-value-movement.mjs";
 
 function fixture(files) {
   const rootDir = mkdtempSync(path.join(tmpdir(), "value-movement-"));
@@ -332,4 +332,134 @@ ns[name]();
 
   const lines = found.map((violation) => violation.split(": ")[0]).sort();
   assert.deepEqual(lines, ["src/allowed.ts:5", "src/allowed.ts:6", "src/allowed.ts:8"]);
+});
+
+const BRANDED_SOURCE = `declare const brand: unique symbol;
+export type Units = bigint & { readonly [brand]: true };
+export type Intent = { readonly amount: Units };
+export function units(value: bigint): Units {
+  return value as Units;
+}
+`;
+
+const BRANDED_TYPES = [
+  { file: "src/lib/units.ts", name: "Units" },
+  { file: "src/lib/units.ts", name: "Intent" },
+];
+
+function castViolations(files, tsconfigs = ["tsconfig.json"]) {
+  const rootDir = fixture({ "src/lib/units.ts": BRANDED_SOURCE, ...files });
+  try {
+    return findBrandedCastViolations({
+      rootDir,
+      tsconfigs: tsconfigs.map((tsconfig) => path.join(rootDir, tsconfig)),
+      brandedTypes: BRANDED_TYPES,
+      scanRoots: ["src/", "web/"],
+    });
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+}
+
+test("flags every assertion to a branded type outside its module, however it is spelled", () => {
+  const found = castViolations({
+    "src/casts.ts": `import type { Intent, Units } from "./lib/units";
+import type { Units as Renamed } from "./lib/units";
+type Local = Units;
+declare const raw: bigint;
+declare const sample: Units;
+export const a = raw as Units;
+export const b = raw as unknown as Units;
+export const c = <Units>raw;
+export const d = raw as Renamed;
+export const e = raw as Local;
+export const f = [] as Units[];
+export const g = {} as { amount: Units };
+export const h = {} as Intent;
+export const i = raw as typeof sample;
+interface Forged extends Intent {}
+interface Holder { amount: Units }
+interface Deeper extends Holder {}
+class Minted implements Intent { readonly amount = 1n; }
+class Spender { spend(): bigint { const local: Units = 1n as never; return local; } }
+export const j = {} as Forged;
+export const k = {} as Holder;
+export const l = {} as Deeper;
+export const m = {} as Minted;
+export const n = {} as Spender;
+declare function make(): Units;
+declare function take(amount: Units): void;
+export const o: Units = raw as never;
+export const p: { amount?: Units } = { amount: raw as any };
+take(raw as never);
+export const q = raw as ReturnType<typeof make>;
+export const r = raw as Parameters<typeof take>[0];
+export const s: bigint = raw as never;
+export const t = [raw] as never[];
+`,
+  });
+
+  assert.deepEqual(
+    found.map((violation) => violation.split(": ")[0]),
+    [6, 7, 8, 9, 10, 11, 12, 13, 14, 19, 20, 21, 22, 23, 27, 28, 29, 30, 31].map(
+      (line) => `src/casts.ts:${line}`
+    )
+  );
+  assert.match(found[0], /asserts Units \(Units\)/);
+  assert.match(found[9], /asserts Units \(never\)/);
+});
+
+test("allows the defining module, tests, `as const` and other types", () => {
+  const found = castViolations({
+    "src/fine.ts": `import { units } from "./lib/units";
+export const one = units(1n);
+export const literal = "x" as const;
+export const plain = 1n as bigint;
+`,
+    "src/fine.test.ts": `import type { Units } from "./lib/units";\nexport const t = 1n as Units;\n`,
+  });
+
+  assert.deepEqual(found, []);
+});
+
+test("checks a file two programs load once", () => {
+  const found = castViolations(
+    {
+      "src/cast.ts": `import type { Units } from "./lib/units";\nexport const a = 1n as Units;\n`,
+      "web/tsconfig.json": JSON.stringify({
+        compilerOptions: { strict: true, module: "esnext", moduleResolution: "bundler" },
+        include: ["**/*.ts"],
+      }),
+      "web/page.ts": `import type { Units } from "../src/lib/units";
+import { a } from "../src/cast";
+export const b = a as Units;
+`,
+    },
+    ["tsconfig.json", "web/tsconfig.json"]
+  );
+
+  assert.deepEqual(
+    found.map((violation) => violation.split(": ")[0]),
+    ["src/cast.ts:2", "web/page.ts:3"]
+  );
+});
+
+test("fails when a branded type is missing from its module or from every program", () => {
+  const rootDir = fixture({ "src/lib/units.ts": "export const nothing = 1;\n" });
+  try {
+    const check = (tsconfigs) =>
+      findBrandedCastViolations({
+        rootDir,
+        tsconfigs,
+        brandedTypes: BRANDED_TYPES,
+        scanRoots: ["src/"],
+      });
+    assert.throws(() => check([]), /No program loads src\/lib\/units\.ts/);
+    assert.throws(
+      () => check([path.join(rootDir, "tsconfig.json")]),
+      /does not export the type Units/
+    );
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
 });
