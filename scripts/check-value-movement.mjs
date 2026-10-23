@@ -37,7 +37,8 @@
  * movements): `BaseUnits`, `TokenAmount`, `DisplayAmount`, `MovementQuote`,
  * `MovementIntent` and `AssetRef`. Their constructors check the u64 range, the
  * mint's scale and `debit = credit + fee`; an `as` or `<T>` assertion skips
- * them. Only each type's defining module may assert it, and tests are free.
+ * them, and so does an `as never` or `as any` that lands in one. Only each
+ * type's defining module may assert it, and tests are free.
  * This part scans the API, the dashboard and every package.
  *
  * Adding a file to any list below is a security-reviewed change.
@@ -684,10 +685,6 @@ function repoPath(rootDir, fileName) {
   return path.relative(rootDir, fileName).split(path.sep).join("/");
 }
 
-/**
- * The branded type a type node names, directly or through a local type alias,
- * a type argument, a union or an object member; or undefined.
- */
 /** The type symbol a type node names, through import aliases; undefined for anything else. */
 function namedTypeSymbol(checker, node) {
   let named;
@@ -728,6 +725,10 @@ function typeDeclarationParts(symbol) {
   return parts;
 }
 
+/**
+ * The branded type a type node names, directly or through a local type alias,
+ * a type argument, a union or an object member; or undefined.
+ */
 function brandedTypeIn(checker, typeNode, targets) {
   const seen = new Set();
   const visit = (node) => {
@@ -743,6 +744,18 @@ function brandedTypeIn(checker, typeNode, targets) {
     return ts.forEachChild(node, visit);
   };
   return visit(typeNode);
+}
+
+/**
+ * The branded type a resolved type is, or one member of the union it is; or
+ * undefined. It catches what no type node names, such as `ReturnType<typeof f>`.
+ */
+function brandedTypeOf(type, targets) {
+  for (const candidate of [type, ...(type.isUnion() ? type.types : [])]) {
+    const brandedType = targets.get(candidate.aliasSymbol) ?? targets.get(candidate.symbol);
+    if (brandedType) return brandedType;
+  }
+  return undefined;
 }
 
 /**
@@ -771,8 +784,18 @@ function brandedTargets(program, rootDir, brandedTypes) {
 function brandedCastsIn(checker, source, relativePath, targets) {
   const violations = [];
   const visit = (node) => {
-    if (ts.isAsExpression(node) || ts.isTypeAssertionExpression(node)) {
-      const brandedType = brandedTypeIn(checker, node.type, targets);
+    const assertion = ts.isAsExpression(node) || ts.isTypeAssertionExpression(node);
+    if (assertion && !ts.isConstTypeReference(node.type)) {
+      const asserted = checker.getTypeFromTypeNode(node.type);
+      // `as never` and `as any` fit every type, so the forged type is the one the value lands in.
+      const landsIn =
+        asserted.flags & (ts.TypeFlags.Any | ts.TypeFlags.Never)
+          ? checker.getContextualType(node)
+          : undefined;
+      const brandedType =
+        brandedTypeIn(checker, node.type, targets) ??
+        brandedTypeOf(asserted, targets) ??
+        (landsIn ? brandedTypeOf(landsIn, targets) : undefined);
       if (brandedType && brandedType.file !== relativePath) {
         const { line } = source.getLineAndCharacterOfPosition(node.getStart(source));
         violations.push(
@@ -787,9 +810,10 @@ function brandedCastsIn(checker, source, relativePath, targets) {
 }
 
 /**
- * Finds every `as T` and `<T>` assertion to a branded type outside the
- * type's defining file and tests. Each tsconfig is its own program; a file
- * two programs load is checked once.
+ * Finds every `as T` and `<T>` assertion to a branded type, and every
+ * `as never` or `as any` that lands in one, outside the type's defining file
+ * and tests. Each tsconfig is its own program; a file two programs load is
+ * checked once.
  *
  * @param {{ rootDir: string, tsconfigs: string[], brandedTypes: BrandedType[], scanRoots: string[] }} options
  */

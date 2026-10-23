@@ -107,8 +107,9 @@ them in one place, not adding special cases to every flow.
 
 - PR 1 changes no behavior: no call site uses the new modules yet.
 - **No casts.** `pnpm check:value-movement` fails any `as` or `<T>` assertion to `BaseUnits`,
-  `TokenAmount`, `DisplayAmount`, `MovementQuote`, `MovementIntent` or `AssetRef` outside the
-  type's own module and tests, in the API, the dashboard and every package. It lands now because
+  `TokenAmount`, `DisplayAmount`, `MovementQuote`, `MovementIntent` or `AssetRef`, and any
+  `as never` or `as any` that lands in one, outside the type's own module and tests, in the API,
+  the dashboard and every package. It lands now because
   nothing uses the types yet. The pins on transfer builders and conversion helpers land in PR 5,
   with no allowlist of offenders: each PR moves its paths first.
 - **Target RPC budget.** A classic-mint transfer keeps its two reads; the mint read now brings the Clock
