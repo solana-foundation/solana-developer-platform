@@ -209,9 +209,13 @@ describe("readWalletBalances", () => {
     expect(accountReads).toHaveLength(1);
 
     vi.advanceTimersByTime(10_000);
-    void readWalletBalances(rpc, SCOPE, [wallet(1)], "req_expired");
+    const refreshed = readWalletBalances(rpc, SCOPE, [wallet(1)], "req_expired");
     await flush();
     expect(accountReads).toHaveLength(2);
+    accountReads[1]?.resolve({ value: [{ lamports: 5n }] });
+    answerTokenReadsEmpty(tokenReads.slice(2));
+
+    expect((await refreshed).get("cwlt_1")?.[0]).toMatchObject({ amount: "5" });
   });
 
   it("does not cache a read that finished after the cache was cleared", async () => {
@@ -224,8 +228,12 @@ describe("readWalletBalances", () => {
     answerTokenReadsEmpty(tokenReads);
     await stale;
 
-    void readWalletBalances(rpc, SCOPE, [wallet(1)], "req_after_clear");
+    const refreshed = readWalletBalances(rpc, SCOPE, [wallet(1)], "req_after_clear");
     await flush();
     expect(accountReads).toHaveLength(2);
+    accountReads[1]?.resolve({ value: [{ lamports: 3n }] });
+    answerTokenReadsEmpty(tokenReads.slice(2));
+
+    expect((await refreshed).get("cwlt_1")?.[0]).toMatchObject({ amount: "3" });
   });
 });
