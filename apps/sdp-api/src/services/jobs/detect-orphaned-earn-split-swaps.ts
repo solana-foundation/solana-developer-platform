@@ -1,5 +1,6 @@
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import { parseDecimalAmount } from "@sdp/solana/amount";
-import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
@@ -8,8 +9,6 @@ import {
   type EarnSplitSwapAdvisoryRow,
 } from "@/db/repositories/earn-split-swap-advisories.repository";
 import { describeError, logEvent } from "@/runtime/money-path-events";
-import { earnClusterRpc } from "@/services/earn/cluster-rpc";
-import { earnClusterFor } from "@/services/earn/execution-registry";
 import { readOwnerMintBalance } from "@/services/earn/owner-token-balance";
 import type { Env } from "@/types/env";
 
@@ -71,6 +70,10 @@ import type { Env } from "@/types/env";
  * counted, emits its own error event, marks the tick error-level and THROWS so
  * `sdp_cron_run` records error. The job's own database queries failing emit no
  * tick at all: a fabricated tick with zero counts would read as a healthy sweep.
+ *
+ * A `cluster` Cron Definition: each environment runs its own sweep inside its
+ * cluster scope, claims and counts only its own advisories, and reads the block
+ * height through `createClusterRpc()`. The tick names the environment.
  */
 
 const BATCH_SIZE = 128;
@@ -106,7 +109,8 @@ export async function detectOrphanedEarnSplitSwaps(
   const advisories = createPostgresEarnSplitSwapAdvisoriesRepository(db);
   const ledger = createPostgresEarnMovementsRepository(db);
 
-  const batch = await advisories.claimOpenForDetection(BATCH_SIZE);
+  const { environment } = currentClusterScope();
+  const batch = await advisories.claimOpenForDetection({ environment, limit: BATCH_SIZE });
   const stats: EarnSplitSwapDetectionStats = {
     checked: batch.length,
     depositObserved: 0,
@@ -120,43 +124,36 @@ export async function detectOrphanedEarnSplitSwaps(
     blockHeightReadFailures: 0,
   };
 
-  // One block height per environment, read once for the whole batch so every
-  // advisory in a tick is judged against the same moment on its own cluster.
-  const byEnvironment = new Map<SdpEnvironment, EarnSplitSwapAdvisoryRow[]>();
-  for (const advisory of batch) {
-    const rows = byEnvironment.get(advisory.environment);
-    if (rows) rows.push(advisory);
-    else byEnvironment.set(advisory.environment, [advisory]);
-  }
-
-  for (const [environment, rows] of byEnvironment) {
-    let blockHeight: bigint | null = null;
+  // One block height for the whole batch, read only when there is something
+  // to judge, so every advisory in a tick is judged against the same moment on
+  // the scope's cluster.
+  let blockHeight: bigint | null = null;
+  if (batch.length > 0) {
     try {
-      blockHeight = await earnClusterRpc(earnClusterFor(environment))
-        .getBlockHeight({ commitment: "confirmed" })
-        .send();
+      blockHeight = await createClusterRpc().getBlockHeight({ commitment: "confirmed" }).send();
     } catch (error) {
       logEvent("error", {
         event: "sdp_api_earn_split_swap_block_height_read_failed",
         environment,
-        rows: rows.length,
+        rows: batch.length,
         ...describeError(error),
         error_message: errorMessage(error),
       });
       stats.blockHeightReadFailures += 1;
     }
-
-    for (const advisory of rows) {
-      // Sequential on purpose: one filtered RPC read per judged advisory.
-      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- pacing is intentional.
-      await judgeAdvisory(advisories, ledger, advisory, blockHeight, now(), stats);
-    }
   }
 
-  const openBacklog = await advisories.countOpen();
+  for (const advisory of batch) {
+    // Sequential on purpose: one filtered RPC read per judged advisory.
+    // react-doctor-disable-next-line react-doctor/async-await-in-loop -- pacing is intentional.
+    await judgeAdvisory(advisories, ledger, advisory, blockHeight, now(), stats);
+  }
+
+  const openBacklog = await advisories.countOpen({ environment });
   const failures = stats.balanceReadFailures + stats.blockHeightReadFailures;
   logEvent(failures > 0 ? "error" : "info", {
     event: "sdp_api_earn_split_swap_detection_tick",
+    environment,
     checked: stats.checked,
     deposit_observed: stats.depositObserved,
     follow_up_pending: stats.followUpPending,

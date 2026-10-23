@@ -1,3 +1,4 @@
+import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types/api-keys";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { createPostgresEarnExternalWalletTransactionsRepository } from "@/db/repositories/earn-external-wallet-transactions.repository";
@@ -6,18 +7,15 @@ import {
   createPostgresEarnSplitSwapAdvisoriesRepository,
   generateEarnSplitSwapAdvisoryId,
 } from "@/db/repositories/earn-split-swap-advisories.repository";
+import { runInEnvironmentClusterScope } from "@/runtime/cluster-scope-runs";
+import { ENVIRONMENT_CLUSTER_CASES, installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
-const getBlockHeight = vi.hoisted(() => vi.fn());
 const readOwnerMintBalance = vi.hoisted(() => vi.fn());
 const logEvent = vi.hoisted(() => vi.fn());
 
-vi.mock("@/services/earn/cluster-rpc", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/services/earn/cluster-rpc")>()),
-  earnClusterRpc: () => ({ getBlockHeight: () => ({ send: getBlockHeight }) }),
-}));
 vi.mock("@/services/earn/owner-token-balance", () => ({ readOwnerMintBalance }));
 vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/runtime/money-path-events")>()),
@@ -28,6 +26,10 @@ const { detectOrphanedEarnSplitSwaps } = await import("./detect-orphaned-earn-sp
 
 const ORG = "org_split_swap";
 const PROJECT = "prj_split_swap";
+const PROJECT_BY_ENVIRONMENT = {
+  sandbox: PROJECT,
+  production: `${PROJECT}_production`,
+} as const satisfies Record<SdpEnvironment, string>;
 const USER = "usr_split_swap";
 const OWNER = "3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF";
 const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -57,11 +59,14 @@ beforeEach(async () => {
     organizationId: ORG,
     createdBy: USER,
     members: [],
-    ids: { sandbox: PROJECT, production: `${PROJECT}_production` },
+    ids: PROJECT_BY_ENVIRONMENT,
   });
-  // The swap's blockhash is long expired by default; judgement is on.
-  getBlockHeight.mockResolvedValue(10_000n);
 });
+
+/** One sweep, as the Worker runs it: inside the environment's cluster scope. */
+function detectIn(environment: SdpEnvironment): Promise<void> {
+  return runInEnvironmentClusterScope(environment, () => detectOrphanedEarnSplitSwaps(env));
+}
 
 function advisories() {
   return createPostgresEarnSplitSwapAdvisoriesRepository(getDb(env));
@@ -194,12 +199,19 @@ async function movementCount(): Promise<number> {
 }
 
 describe("detectOrphanedEarnSplitSwaps", () => {
+  const clusterRpc = installClusterRpcResponder();
+
+  beforeEach(() => {
+    // The swap's blockhash is long expired by default; judgement is on.
+    clusterRpc.answer("getBlockHeight", 10_000);
+  });
+
   it("flags an owner whose balance rose by the swap floor with no follow-up deposit", async () => {
     const id = await seedAdvisory(2 * HOUR);
     readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE + FLOOR, decimals: 6 });
     const before = await movementCount();
 
-    await detectOrphanedEarnSplitSwaps(env);
+    await detectIn("sandbox");
 
     const [orphan] = eventsNamed("sdp_api_earn_split_swap_orphaned");
     expect(orphan?.[0]).toBe("warn");
@@ -230,7 +242,7 @@ describe("detectOrphanedEarnSplitSwaps", () => {
     const id = await seedAdvisory(2 * HOUR);
     readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE, decimals: 6 });
 
-    await detectOrphanedEarnSplitSwaps(env);
+    await detectIn("sandbox");
 
     expect(eventsNamed("sdp_api_earn_split_swap_orphaned")).toHaveLength(0);
     expect(tick().payload).toMatchObject({ unfunded: 1, orphaned: 0, open_backlog: 0 });
@@ -245,7 +257,7 @@ describe("detectOrphanedEarnSplitSwaps", () => {
     const id = await seedAdvisory(2 * HOUR);
     readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE + FLOOR / 2n, decimals: 6 });
 
-    await detectOrphanedEarnSplitSwaps(env);
+    await detectIn("sandbox");
 
     expect(eventsNamed("sdp_api_earn_split_swap_orphaned")).toHaveLength(0);
     expect(tick().payload).toMatchObject({ indeterminate: 1, open_backlog: 1 });
@@ -259,7 +271,7 @@ describe("detectOrphanedEarnSplitSwaps", () => {
     // The swapped tokens went into the vault: the balance is back at baseline.
     readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE, decimals: 6 });
 
-    await detectOrphanedEarnSplitSwaps(env);
+    await detectIn("sandbox");
 
     expect(tick().payload).toMatchObject({ deposit_observed: 1, orphaned: 0 });
     expect(await advisoryRow(id)).toMatchObject({
@@ -273,7 +285,7 @@ describe("detectOrphanedEarnSplitSwaps", () => {
     await seedFollowUpMovement("failed");
     readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE + FLOOR, decimals: 6 });
 
-    await detectOrphanedEarnSplitSwaps(env);
+    await detectIn("sandbox");
 
     // The failed deposit moved nothing, so the balance judgement runs and flags it.
     expect(tick().payload).toMatchObject({ orphaned: 1, deposit_observed: 0 });
@@ -286,7 +298,7 @@ describe("detectOrphanedEarnSplitSwaps", () => {
     await seedFollowUpMovement("finalized");
     readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE, decimals: 6 });
 
-    await detectOrphanedEarnSplitSwaps(env);
+    await detectIn("sandbox");
 
     const rows = [await advisoryRow(first), await advisoryRow(second)];
     expect(rows.filter((r) => r?.resolution === "deposit_observed")).toHaveLength(1);
@@ -302,7 +314,7 @@ describe("detectOrphanedEarnSplitSwaps", () => {
     const followUp = await seedFollowUpMovement("confirmed");
     readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE + FLOOR, decimals: 6 });
 
-    await detectOrphanedEarnSplitSwaps(env);
+    await detectIn("sandbox");
 
     expect(readOwnerMintBalance).not.toHaveBeenCalled();
     expect(eventsNamed("sdp_api_earn_split_swap_orphaned")).toHaveLength(0);
@@ -324,7 +336,7 @@ describe("detectOrphanedEarnSplitSwaps", () => {
     });
     readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE + FLOOR, decimals: 6 });
 
-    await detectOrphanedEarnSplitSwaps(env);
+    await detectIn("sandbox");
 
     expect(tick().payload).toMatchObject({ ambiguous: 1, orphaned: 0, deposit_observed: 0 });
     expect(eventsNamed("sdp_api_earn_split_swap_orphaned")).toHaveLength(0);
@@ -345,7 +357,7 @@ describe("detectOrphanedEarnSplitSwaps", () => {
     });
     readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE + FLOOR, decimals: 6 });
 
-    await detectOrphanedEarnSplitSwaps(env);
+    await detectIn("sandbox");
 
     expect(tick().payload).toMatchObject({ ambiguous: 1, orphaned: 0, deposit_observed: 0 });
     expect(eventsNamed("sdp_api_earn_split_swap_orphaned")).toHaveLength(0);
@@ -366,7 +378,7 @@ describe("detectOrphanedEarnSplitSwaps", () => {
     await seedFollowUpMovement("confirmed", { amount: "1" });
     readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE + FLOOR, decimals: 6 });
 
-    await detectOrphanedEarnSplitSwaps(env);
+    await detectIn("sandbox");
 
     expect(tick().payload).toMatchObject({ orphaned: 1, ambiguous: 0 });
     expect((await advisoryRow(id))?.resolved_at).toBeNull();
@@ -377,7 +389,7 @@ describe("detectOrphanedEarnSplitSwaps", () => {
     await seedFollowUpMovement("requested");
     readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE + FLOOR, decimals: 6 });
 
-    await detectOrphanedEarnSplitSwaps(env);
+    await detectIn("sandbox");
 
     expect(readOwnerMintBalance).not.toHaveBeenCalled();
     expect(tick().payload).toMatchObject({ follow_up_pending: 1, orphaned: 0 });
@@ -390,7 +402,7 @@ describe("detectOrphanedEarnSplitSwaps", () => {
     await seedFollowUpBuild(5 * MINUTE);
     readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE + FLOOR, decimals: 6 });
 
-    await detectOrphanedEarnSplitSwaps(env);
+    await detectIn("sandbox");
 
     expect(readOwnerMintBalance).not.toHaveBeenCalled();
     expect(tick().payload).toMatchObject({ follow_up_pending: 1 });
@@ -402,7 +414,7 @@ describe("detectOrphanedEarnSplitSwaps", () => {
     await seedFollowUpBuild(2 * HOUR);
     readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE + FLOOR, decimals: 6 });
 
-    await detectOrphanedEarnSplitSwaps(env);
+    await detectIn("sandbox");
 
     expect(tick().payload).toMatchObject({ orphaned: 1, follow_up_pending: 0 });
   });
@@ -414,7 +426,7 @@ describe("detectOrphanedEarnSplitSwaps", () => {
     await seedAdvisory(5 * MINUTE);
     readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE + FLOOR, decimals: 6 });
 
-    await detectOrphanedEarnSplitSwaps(env);
+    await detectIn("sandbox");
 
     expect(readOwnerMintBalance).not.toHaveBeenCalled();
     expect(tick().payload).toMatchObject({ pending: 2, orphaned: 0 });
@@ -424,7 +436,7 @@ describe("detectOrphanedEarnSplitSwaps", () => {
     const id = await seedAdvisory(2 * HOUR);
     readOwnerMintBalance.mockRejectedValue(new Error("rpc unavailable"));
 
-    await expect(detectOrphanedEarnSplitSwaps(env)).rejects.toThrow(/1 balance failures/);
+    await expect(detectIn("sandbox")).rejects.toThrow(/1 balance failures/);
 
     expect(tick().level).toBe("error");
     expect(tick().payload).toMatchObject({ balance_read_failures: 1 });
@@ -443,7 +455,7 @@ describe("detectOrphanedEarnSplitSwaps", () => {
     await seedAdvisory(2 * HOUR);
     readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE + FLOOR, decimals: 9 });
 
-    await expect(detectOrphanedEarnSplitSwaps(env)).rejects.toThrow(/balance failures/);
+    await expect(detectIn("sandbox")).rejects.toThrow(/balance failures/);
 
     expect(eventsNamed("sdp_api_earn_split_swap_orphaned")).toHaveLength(0);
     expect(logEvent).toHaveBeenCalledWith(
@@ -454,9 +466,11 @@ describe("detectOrphanedEarnSplitSwaps", () => {
 
   it("fails the tick when the block height cannot be read, leaving every advisory open", async () => {
     const id = await seedAdvisory(2 * HOUR);
-    getBlockHeight.mockRejectedValue(new Error("rpc unavailable"));
+    clusterRpc.respond("getBlockHeight", () => ({
+      error: { code: -32000, message: "rpc unavailable" },
+    }));
 
-    await expect(detectOrphanedEarnSplitSwaps(env)).rejects.toThrow(/1 block-height/);
+    await expect(detectIn("sandbox")).rejects.toThrow(/1 block-height/);
 
     expect(readOwnerMintBalance).not.toHaveBeenCalled();
     expect(tick().level).toBe("error");
@@ -464,11 +478,11 @@ describe("detectOrphanedEarnSplitSwaps", () => {
   });
 
   it("emits an idle tick with a zero backlog and touches nothing", async () => {
-    await detectOrphanedEarnSplitSwaps(env);
+    await detectIn("sandbox");
 
     expect(tick().level).toBe("info");
-    expect(tick().payload).toMatchObject({ checked: 0, open_backlog: 0 });
-    expect(getBlockHeight).not.toHaveBeenCalled();
+    expect(tick().payload).toMatchObject({ environment: "sandbox", checked: 0, open_backlog: 0 });
+    expect(clusterRpc.calls).toEqual([]);
   });
 
   it("rotates the scan so a standing orphan cannot pin the head of the queue", async () => {
@@ -476,7 +490,7 @@ describe("detectOrphanedEarnSplitSwaps", () => {
     const newer = await seedAdvisory(2 * HOUR);
     readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE + FLOOR, decimals: 6 });
 
-    await detectOrphanedEarnSplitSwaps(env);
+    await detectIn("sandbox");
 
     const olderRow = await advisoryRow(older);
     const newerRow = await advisoryRow(newer);
@@ -484,7 +498,72 @@ describe("detectOrphanedEarnSplitSwaps", () => {
     expect(newerRow?.last_checked_at).not.toBeNull();
     // Both were visited in one tick; the cursor now orders by the visit, not
     // by creation, so the next tick cannot re-serve the oldest one first alone.
-    const next = await advisories().claimOpenForDetection(1);
+    const next = await advisories().claimOpenForDetection({ environment: "sandbox", limit: 1 });
     expect(next.map((r) => r.id)).toHaveLength(1);
+  });
+
+  it.each(ENVIRONMENT_CLUSTER_CASES)(
+    "judges only $environment advisories, against $cluster's block height",
+    async ({ environment, cluster }) => {
+      const ids = new Map<SdpEnvironment, string>();
+      for (const seeded of SDP_ENVIRONMENTS) {
+        ids.set(
+          seeded,
+          await seedAdvisory(2 * HOUR, {
+            environment: seeded,
+            projectId: PROJECT_BY_ENVIRONMENT[seeded],
+          })
+        );
+      }
+      readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE + FLOOR, decimals: 6 });
+
+      await detectIn(environment);
+
+      for (const [seeded, id] of ids) {
+        const row = await advisoryRow(id);
+        if (seeded === environment) {
+          expect(row?.first_flagged_at).not.toBeNull();
+        } else {
+          expect(row).toMatchObject({ last_checked_at: null, first_flagged_at: null });
+        }
+      }
+      expect(tick().payload).toMatchObject({ environment, checked: 1, orphaned: 1 });
+      expect(
+        clusterRpc.requests
+          .filter((request) => request.method === "getBlockHeight")
+          .map((request) => request.cluster)
+      ).toEqual([cluster]);
+    }
+  );
+});
+
+describe("advisory repository environment scope", () => {
+  // Each environment's detector registration (a `cluster` Cron Definition)
+  // claims and counts only its own advisories; the other environment's rows
+  // are neither returned, counted, nor touched.
+  it.each(SDP_ENVIRONMENTS)("claims and counts only %s open advisories", async (environment) => {
+    const other = environment === "sandbox" ? "production" : "sandbox";
+    const own = await seedAdvisory(2 * HOUR, {
+      environment,
+      projectId: PROJECT_BY_ENVIRONMENT[environment],
+    });
+    const others = [
+      await seedAdvisory(2 * HOUR, {
+        environment: other,
+        projectId: PROJECT_BY_ENVIRONMENT[other],
+      }),
+      await seedAdvisory(2 * HOUR, {
+        environment: other,
+        projectId: PROJECT_BY_ENVIRONMENT[other],
+      }),
+    ];
+
+    const claimed = await advisories().claimOpenForDetection({ environment, limit: 128 });
+
+    expect(claimed.map((row) => row.id)).toEqual([own]);
+    for (const id of others) {
+      expect((await advisoryRow(id))?.last_checked_at).toBeNull();
+    }
+    await expect(advisories().countOpen({ environment })).resolves.toBe(1);
   });
 });

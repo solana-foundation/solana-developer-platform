@@ -27,6 +27,8 @@
  * shipping unmonitored.
  */
 
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import type { SolanaRpc } from "@sdp/rpc/solana";
 import { EARN_DEPOSIT_TOKEN_SYMBOLS, type EarnDepositTokenSymbol } from "@sdp/types/earn";
 import {
@@ -39,7 +41,6 @@ import { z } from "zod";
 import { isEarnEnabled } from "@/lib/feature-flags";
 import { getLogger } from "@/runtime/logger";
 import { describeError, logEvent } from "@/runtime/money-path-events";
-import { earnClusterRpc } from "@/services/earn/cluster-rpc";
 import type { Env } from "@/types/env";
 
 export const EARN_DEPOSIT_MINT_DRIFT_EVENT = "sdp_api_earn_deposit_mint_drift";
@@ -51,7 +52,7 @@ export const EARN_DEPOSIT_MINT_DRIFT_EVENT = "sdp_api_earn_deposit_mint_drift";
  */
 export const EARN_DEPOSIT_MINT_GUARD_SKIPPED_EVENT = "sdp_api_earn_deposit_mint_guard_skipped";
 
-/** Deadline for the guard's one batched mint read per cluster. */
+/** Deadline for the guard's one batched mint read per pass. */
 export const DEPOSIT_MINT_READ_TIMEOUT_MS = 10_000;
 
 /** The extension state a Token-2022 deposit mint is expected to hold. */
@@ -231,11 +232,12 @@ function skipLevel(env: Env): "error" | "info" {
 }
 
 /**
- * Read every Token-2022 deposit mint on `cluster` and report drift from its pin.
+ * Read every Token-2022 deposit mint on the open cluster scope's cluster and
+ * report drift from its pin.
  *
  * Never throws and never blocks the pass that called it. One
- * `getMultipleAccounts` reads every pinned mint of the cluster from its managed
- * pool, whose genesis guard proves the chain. A cluster with no managed pool is
+ * `getMultipleAccounts` through `createClusterRpc()` reads every pinned mint of
+ * the cluster from its managed pool, whose genesis guard proves the chain. A cluster with no managed pool is
  * a skip the guard cannot honestly call quiet: it logs
  * `EARN_DEPOSIT_MINT_GUARD_SKIPPED_EVENT` at error where Earn is enabled. A read
  * that fails is a warning, not an alert, because an RPC outage is already
@@ -244,7 +246,8 @@ function skipLevel(env: Env): "error" | "info" {
  *
  * Returns the number of drift events emitted, for the caller's summary log.
  */
-export async function guardDepositMints(env: Env, cluster: SolanaCluster): Promise<number> {
+export async function guardDepositMints(env: Env): Promise<number> {
+  const { cluster } = currentClusterScope();
   const mints = token2022DepositMints(cluster).flatMap((entry) => {
     const pinned = PINNED_TOKEN_2022_DEPOSIT_MINTS[entry.mint];
     if (pinned) return [{ ...entry, pinned }];
@@ -257,7 +260,7 @@ export async function guardDepositMints(env: Env, cluster: SolanaCluster): Promi
 
   let rpc: SolanaRpc;
   try {
-    rpc = earnClusterRpc(cluster, { timeoutMs: DEPOSIT_MINT_READ_TIMEOUT_MS });
+    rpc = createClusterRpc();
   } catch (err) {
     logEvent(skipLevel(env), {
       event: EARN_DEPOSIT_MINT_GUARD_SKIPPED_EVENT,
@@ -275,7 +278,7 @@ export async function guardDepositMints(env: Env, cluster: SolanaCluster): Promi
         mints.map(({ mint }) => address(mint)),
         { encoding: "jsonParsed" }
       )
-      .send();
+      .send({ abortSignal: AbortSignal.timeout(DEPOSIT_MINT_READ_TIMEOUT_MS) });
     accounts = response.value;
   } catch (err) {
     getLogger().warn(

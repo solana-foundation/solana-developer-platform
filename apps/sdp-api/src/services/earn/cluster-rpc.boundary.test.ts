@@ -4,8 +4,10 @@ import { describe, expect, it } from "vitest";
 
 /**
  * Structural tests over Earn's source: every Earn read and send reaches Solana
- * through `services/earn/cluster-rpc.ts`, the named cluster's managed pool, and
- * nothing in Earn picks an endpoint from a URL in env. A source grep is the honest
+ * through a cluster's managed pool, either `createClusterRpc()` under a cluster
+ * scope (the Earn crons, HOO-2148) or the Earn door in
+ * `services/earn/cluster-rpc.ts` for the named cluster, and nothing in Earn
+ * picks an endpoint from a URL in env. A source grep is the honest
  * tool: a stray `createRpc(env, { rpcUrl })` type-checks and runs, and on a
  * deployment whose process default serves devnet it reads devnet for mainnet work.
  */
@@ -98,11 +100,12 @@ describe("Earn's cluster RPC boundary", () => {
     expect(offenders(EARN_API_FILES, (body) => importsModule(body, "@sdp/rpc/config"))).toEqual([]);
   });
 
-  it("reaches the door only through services/earn/cluster-rpc.ts", () => {
+  it("reaches the Earn door only through services/earn/cluster-rpc.ts", () => {
     expect(
       offenders(
         EARN_API_FILES.filter((file) => file !== DOOR),
-        (body) => importsModule(body, "@sdp/rpc/factory")
+        (body) =>
+          importedNames(body, "@sdp/rpc/factory").some((name) => name !== "createClusterRpc")
       )
     ).toEqual([]);
   });

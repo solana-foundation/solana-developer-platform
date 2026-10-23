@@ -357,9 +357,18 @@ export interface EarnVaultWithdrawalRequestsRepository {
     /** Earliest time this failed request may be claimed again. */
     retryAt: string;
   }): Promise<void>;
-  claimUnsettledActions(limit: number): Promise<EarnVaultWithdrawalRequestActionRow[]>;
-  claimOpenRequests(limit: number): Promise<EarnVaultWithdrawalRequestRow[]>;
-  cleanupExpiredReservations(): Promise<number>;
+  /** One environment's open signed actions, least recently checked first. */
+  claimUnsettledActions(params: {
+    environment: SdpEnvironment;
+    limit: number;
+  }): Promise<EarnVaultWithdrawalRequestActionRow[]>;
+  /** One environment's open requests that are due for a provider read. */
+  claimOpenRequests(params: {
+    environment: SdpEnvironment;
+    limit: number;
+  }): Promise<EarnVaultWithdrawalRequestRow[]>;
+  /** Drop one environment's expired, never-broadcast reservations and free PDA leases. */
+  cleanupExpiredReservations(params: { environment: SdpEnvironment }): Promise<number>;
   /**
    * Whether `environment` holds any unconsumed external build, so the cleanup
    * reads that cluster's block height only when something could expire.
@@ -1501,7 +1510,7 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
         .run();
     },
 
-    async claimUnsettledActions(limit) {
+    async claimUnsettledActions({ environment, limit }) {
       if (!Number.isInteger(limit) || limit < 1 || limit > 256) {
         throw new Error("Queued withdrawal action claim limit must be from 1 to 256");
       }
@@ -1520,6 +1529,7 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
                  ON request.id = action.withdrawal_request_id
               WHERE action.status IN ('requested', 'submitted', 'confirmed')
                 AND request.status NOT IN ('fulfilled', 'cancelled', 'failed')
+                AND action.environment = ?
               ORDER BY COALESCE(action.last_checked_at, action.updated_at), action.id
               LIMIT ?
                FOR UPDATE OF action SKIP LOCKED
@@ -1530,12 +1540,12 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
              WHERE action.id = candidates.id
              RETURNING action.*`
         )
-        .bind(limit)
+        .bind(environment, limit)
         .all<Record<string, unknown>>();
       return result.results.map(mapAction);
     },
 
-    async claimOpenRequests(limit) {
+    async claimOpenRequests({ environment, limit }) {
       if (!Number.isInteger(limit) || limit < 1 || limit > 256) {
         throw new Error("Queued withdrawal request claim limit must be from 1 to 256");
       }
@@ -1548,6 +1558,7 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
                 'creating', 'pending', 'fulfillable', 'expired_cancelable',
                 'cancelling', 'closed_or_unknown'
               )
+                AND request.environment = ?
                 AND COALESCE(request.next_check_at, request.updated_at) <= sdp_iso_now()
                 AND EXISTS (
                   SELECT 1 FROM earn_vault_withdrawal_request_actions action
@@ -1566,27 +1577,31 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
             WHERE request.id = candidates.id
             RETURNING request.*`
         )
-        .bind(limit, new Date(Date.now() + 2 * 60_000).toISOString())
+        .bind(environment, limit, new Date(Date.now() + 2 * 60_000).toISOString())
         .all<Record<string, unknown>>();
       return result.results.map(mapRequest);
     },
 
-    async cleanupExpiredReservations() {
+    async cleanupExpiredReservations({ environment }) {
       return db.transaction(async (executor) => {
         const tx = asTransactionalClient(executor);
         const result = await tx
           .prepare(
             `DELETE FROM earn_vault_withdrawal_request_reservations
-              WHERE last_valid_block_height IS NULL AND expires_at <= sdp_iso_now()`
+              WHERE environment = ?
+                AND last_valid_block_height IS NULL AND expires_at <= sdp_iso_now()`
           )
+          .bind(environment)
           .run();
         await tx
           .prepare(
             `DELETE FROM earn_vault_withdrawal_request_pda_leases
-              WHERE NOT occupied
+              WHERE environment = ?
+                AND NOT occupied
                 AND reuse_not_before <= sdp_iso_now()
                 AND last_valid_block_height IS NULL AND expires_at <= sdp_iso_now()`
           )
+          .bind(environment)
           .run();
         return result;
       });

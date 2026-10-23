@@ -280,8 +280,9 @@ refresh is update-only.
   one or two calls and rewrites `current_apy` plus volatile `risk_metadata`
   (TVL, holders) on rows the catalogue already holds.
 - **When it runs:** every 5 minutes as the `refresh-earn-metrics` Cron
-  Definition behind `isEarnEnabled`, unslotted: duplicates only rewrite the
-  same figures. It logs its own `sdp_cron_run`, and that is the point: "the
+  Definition behind `isEarnEnabled`, once per environment (`scope: "cluster"`):
+  each registration refreshes its own environment's shelf and guards its
+  cluster's deposit mints. Unslotted: duplicates only rewrite the same figures. It logs its own `sdp_cron_run`, and that is the point: "the
   refresh silently stopped running" is this pass's worst failure (rates quietly
   go stale) and is invisible from the catalogue sync's run events.
 - **What it cannot do**, and this is the whole safety argument:
@@ -348,7 +349,9 @@ refresh is update-only.
   floor is reported as `sdp_api_earn_split_swap_orphaned` on every visit while
   it persists. It alerts and never acts (PRO-1864, threat model EARN-026).
 - **When it runs:** every minute as the `detect-orphaned-earn-split-swaps` Cron
-  Definition, always enabled (no earn flag gate: an advisory written before an
+  Definition, once per environment (`scope: "cluster"`), each registration
+  claiming only its environment's advisories and reading its cluster's block
+  height. Always enabled (no earn flag gate: an advisory written before an
   incident flag flip must keep being watched), under the system database
   identity like every sweep.
 - **Failure behaviour:** a chain read failure emits its own error event, marks

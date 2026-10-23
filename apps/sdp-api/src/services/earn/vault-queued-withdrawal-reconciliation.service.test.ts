@@ -1,3 +1,4 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   EarnVaultWithdrawalRequestActionRow,
@@ -25,12 +26,11 @@ vi.mock("@/services/earn/vault-execution.service", () => ({
   broadcastVaultTransaction: broadcast,
 }));
 
-vi.mock("@/services/earn/cluster-rpc", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/services/earn/cluster-rpc")>()),
-  earnClusterRpc: () => sweepRpc.current,
+vi.mock("@sdp/rpc/factory", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/rpc/factory")>()),
+  createClusterRpc: () => sweepRpc.current,
 }));
 vi.mock("@/services/earn/execution-registry", () => ({
-  earnClusterFor: () => "devnet",
   resolveVaultQueuedWithdrawClient: () => provider.client,
   resolveVaultParRedemptionClient: () => parProvider.client,
 }));
@@ -153,6 +153,11 @@ const emptyRpc = {
   getSignaturesForAddress: vi.fn(),
 };
 
+/** Sweep work runs inside its environment's cluster scope, as the Worker opens it. */
+function inSandboxScope<T>(work: () => Promise<T>): Promise<T> {
+  return runInClusterScope({ projectId: null, environment: "sandbox" }, work);
+}
+
 describe("queued withdrawal reconciliation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -185,7 +190,7 @@ describe("queued withdrawal reconciliation", () => {
     });
 
     await expect(
-      visitOpenRequestsJustInTime({ claimOpenRequests }, 3, async (row) => {
+      visitOpenRequestsJustInTime({ claimOpenRequests }, "sandbox", 3, async (row) => {
         events.push(`start:${row.id}`);
         await Promise.resolve();
         events.push(`finish:${row.id}`);
@@ -193,7 +198,7 @@ describe("queued withdrawal reconciliation", () => {
     ).resolves.toBe(2);
 
     expect(claimOpenRequests).toHaveBeenCalledTimes(3);
-    expect(claimOpenRequests).toHaveBeenCalledWith(1);
+    expect(claimOpenRequests).toHaveBeenCalledWith({ environment: "sandbox", limit: 1 });
     expect(events).toEqual([
       "claim",
       "start:request-1",
@@ -277,6 +282,7 @@ describe("queued withdrawal reconciliation", () => {
     await expect(
       reconcileAction(env, ledger, action(), null, {
         rpc: emptyRpc as never,
+        cluster: "devnet",
         currentHeight: 2n,
       })
     ).resolves.toBe("advanced");
@@ -320,6 +326,7 @@ describe("queued withdrawal reconciliation", () => {
     await expect(
       reconcileAction(env, ledger, action({ action: "cancel" }), null, {
         rpc: emptyRpc as never,
+        cluster: "devnet",
         currentHeight: 2n,
       })
     ).resolves.toBe("failed");
@@ -360,6 +367,7 @@ describe("queued withdrawal reconciliation", () => {
     await expect(
       reconcileAction(env, ledger, action({ action: "cancel", status: "submitted" }), null, {
         rpc: emptyRpc as never,
+        cluster: "devnet",
         currentHeight: 2n,
       })
     ).resolves.toBe("failed");
@@ -385,7 +393,7 @@ describe("queued withdrawal reconciliation", () => {
           ledger,
           action(),
           { err: "fork-local rejection", confirmationStatus } as never,
-          { rpc: emptyRpc as never, currentHeight: 2n }
+          { rpc: emptyRpc as never, cluster: "devnet", currentHeight: 2n }
         )
       ).resolves.toBe("unchanged");
       expect(ledger.failActionAndRecoverRequest).not.toHaveBeenCalled();
@@ -404,7 +412,7 @@ describe("queued withdrawal reconciliation", () => {
           ledger,
           action({ action: kind, status: "submitted", last_valid_block_height: "10" }),
           null,
-          { rpc: emptyRpc as never, currentHeight: 10n }
+          { rpc: emptyRpc as never, cluster: "devnet", currentHeight: 10n }
         )
       ).resolves.toBe("rebroadcast");
       expect(broadcast).toHaveBeenCalledWith(
@@ -424,6 +432,7 @@ describe("queued withdrawal reconciliation", () => {
         { err: "program rejected the queued request", confirmationStatus: "finalized" } as never,
         {
           rpc: emptyRpc as never,
+          cluster: "devnet",
           currentHeight: 2n,
         }
       )
@@ -472,6 +481,7 @@ describe("queued withdrawal reconciliation", () => {
         { err: null, confirmationStatus: "finalized" } as never,
         {
           rpc: rpc as never,
+          cluster: "devnet",
           currentHeight: null,
         }
       )
@@ -526,7 +536,7 @@ describe("queued withdrawal reconciliation", () => {
         ledger,
         action(),
         { err: null, confirmationStatus: "finalized" } as never,
-        { rpc: rpc as never, currentHeight: null }
+        { rpc: rpc as never, cluster: "devnet", currentHeight: null }
       )
     ).resolves.toBe("advanced");
 
@@ -567,6 +577,7 @@ describe("queued withdrawal reconciliation", () => {
     await expect(
       reconcileAction(env, ledger, action({ action: "cancel", status: "submitted" }), null, {
         rpc: emptyRpc as never,
+        cluster: "devnet",
         currentHeight: 2n,
       })
     ).resolves.toBe("failed");
@@ -616,6 +627,7 @@ describe("queued withdrawal reconciliation", () => {
     await expect(
       reconcileAction(env, ledger, action(), null, {
         rpc: rpc as never,
+        cluster: "devnet",
         currentHeight: 2n,
       })
     ).resolves.toBe("advanced");
@@ -696,9 +708,9 @@ describe("queued withdrawal reconciliation", () => {
     };
 
     const before = Date.now();
-    await expect(reconcileParRequest(env, ledger, parRequest({ status: "pending" }))).resolves.toBe(
-      "unchanged"
-    );
+    await expect(
+      inSandboxScope(() => reconcileParRequest(env, ledger, parRequest({ status: "pending" })))
+    ).resolves.toBe("unchanged");
     expect(ledger.advanceRequest).toHaveBeenCalledWith(
       expect.objectContaining({ toStatus: "pending", lastIndexError: null })
     );
@@ -726,7 +738,9 @@ describe("queued withdrawal reconciliation", () => {
     };
 
     await expect(
-      reconcileParRequest(env, ledger, parRequest({ status: "closed_or_unknown" }))
+      inSandboxScope(() =>
+        reconcileParRequest(env, ledger, parRequest({ status: "closed_or_unknown" }))
+      )
     ).resolves.toBe("closedUnknown");
     expect(ledger.advanceRequest).toHaveBeenCalledWith(
       expect.objectContaining({

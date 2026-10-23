@@ -1,8 +1,27 @@
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { EarnVaultWithdrawalRequestsRepository } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
-import { installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
-import { cleanupAbandonedExternalBuilds } from "./vault-queued-withdrawal-reconciliation.service";
+import { runInEnvironmentClusterScope } from "@/runtime/cluster-scope-runs";
+import { ENVIRONMENT_CLUSTER_CASES, installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
+import { env } from "@/test/helpers/env";
+import {
+  cleanupAbandonedExternalBuilds,
+  reconcileEarnVaultQueuedWithdrawals,
+} from "./vault-queued-withdrawal-reconciliation.service";
+
+const sweepLedger = vi.hoisted(() => ({
+  cleanupExpiredReservations: vi.fn(),
+  hasUnconsumedExternalBuilds: vi.fn(),
+  cleanupExpiredExternalBuilds: vi.fn(),
+  claimUnsettledActions: vi.fn(),
+  claimOpenRequests: vi.fn(),
+  recordIndexError: vi.fn(),
+}));
+
+vi.mock("@/db/client", () => ({ getDb: () => ({}) }));
+vi.mock("@/db/repositories/earn-vault-withdrawal-requests.repository", () => ({
+  createPostgresEarnVaultWithdrawalRequestsRepository: () => sweepLedger,
+}));
 
 /** The confirmed height each cluster's endpoint reports, so a cleanup shows whose height it got. */
 const HEIGHTS = { devnet: 111, "mainnet-beta": 222 } as const;
@@ -31,33 +50,32 @@ describe("queued withdrawal build cleanup", () => {
       .map(({ cluster }) => cluster);
   }
 
-  it("asks no cluster anything while no environment holds an unconsumed build", async () => {
-    const ledger = ledgerWithBuildsIn();
+  it.each(ENVIRONMENT_CLUSTER_CASES)(
+    "asks $cluster nothing while $environment holds no unconsumed build",
+    async ({ environment }) => {
+      const ledger = ledgerWithBuildsIn(environment === "sandbox" ? "production" : "sandbox");
 
-    await cleanupAbandonedExternalBuilds(ledger);
+      await runInEnvironmentClusterScope(environment, () => cleanupAbandonedExternalBuilds(ledger));
 
-    expect(rpc.calls).toEqual([]);
-    expect(ledger.cleanupExpiredExternalBuilds).not.toHaveBeenCalled();
-  });
+      expect(rpc.calls).toEqual([]);
+      expect(ledger.hasUnconsumedExternalBuilds.mock.calls).toEqual([[{ environment }]]);
+      expect(ledger.cleanupExpiredExternalBuilds).not.toHaveBeenCalled();
+    }
+  );
 
-  it("reads one height, from that environment's own cluster, per environment with builds", async () => {
-    const production = ledgerWithBuildsIn("production");
-    await cleanupAbandonedExternalBuilds(production);
+  it.each(ENVIRONMENT_CLUSTER_CASES)(
+    "expires only $environment builds, against $cluster's own height",
+    async ({ environment, cluster }) => {
+      const ledger = ledgerWithBuildsIn("sandbox", "production");
 
-    expect(blockHeightReads()).toEqual(["mainnet-beta"]);
-    expect(production.cleanupExpiredExternalBuilds.mock.calls).toEqual([
-      [{ environment: "production", currentBlockHeight: String(HEIGHTS["mainnet-beta"]) }],
-    ]);
+      await runInEnvironmentClusterScope(environment, () => cleanupAbandonedExternalBuilds(ledger));
 
-    const both = ledgerWithBuildsIn("sandbox", "production");
-    await cleanupAbandonedExternalBuilds(both);
-
-    expect(blockHeightReads()).toEqual(["mainnet-beta", "devnet", "mainnet-beta"]);
-    expect(both.cleanupExpiredExternalBuilds.mock.calls).toEqual([
-      [{ environment: "sandbox", currentBlockHeight: String(HEIGHTS.devnet) }],
-      [{ environment: "production", currentBlockHeight: String(HEIGHTS["mainnet-beta"]) }],
-    ]);
-  });
+      expect(blockHeightReads()).toEqual([cluster]);
+      expect(ledger.cleanupExpiredExternalBuilds.mock.calls).toEqual([
+        [{ environment, currentBlockHeight: String(HEIGHTS[cluster]) }],
+      ]);
+    }
+  );
 
   it("defers production cleanup rather than judge it by a devnet height", async () => {
     // How stage and prod are configured without a mainnet pool: a devnet process default.
@@ -65,9 +83,35 @@ describe("queued withdrawal build cleanup", () => {
     vi.stubEnv("SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL", "");
     const ledger = ledgerWithBuildsIn("production");
 
-    await cleanupAbandonedExternalBuilds(ledger);
+    await runInEnvironmentClusterScope("production", () => cleanupAbandonedExternalBuilds(ledger));
 
     expect(rpc.calls).toEqual([]);
     expect(ledger.cleanupExpiredExternalBuilds).not.toHaveBeenCalled();
   });
+});
+
+describe("queued withdrawal sweep environment", () => {
+  installClusterRpcResponder();
+
+  beforeEach(() => {
+    for (const fn of Object.values(sweepLedger)) fn.mockReset();
+    sweepLedger.cleanupExpiredReservations.mockResolvedValue(0);
+    sweepLedger.hasUnconsumedExternalBuilds.mockResolvedValue(false);
+    sweepLedger.claimUnsettledActions.mockResolvedValue([]);
+    sweepLedger.claimOpenRequests.mockResolvedValue([]);
+  });
+
+  it.each(ENVIRONMENT_CLUSTER_CASES)(
+    "claims and cleans only $environment rows",
+    async ({ environment }) => {
+      await runInEnvironmentClusterScope(environment, () =>
+        reconcileEarnVaultQueuedWithdrawals(env)
+      );
+
+      expect(sweepLedger.cleanupExpiredReservations.mock.calls).toEqual([[{ environment }]]);
+      expect(sweepLedger.hasUnconsumedExternalBuilds.mock.calls).toEqual([[{ environment }]]);
+      expect(sweepLedger.claimUnsettledActions.mock.calls).toEqual([[{ environment, limit: 128 }]]);
+      expect(sweepLedger.claimOpenRequests.mock.calls).toEqual([[{ environment, limit: 1 }]]);
+    }
+  );
 });

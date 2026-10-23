@@ -1020,6 +1020,23 @@ interactive detail reads. The sweep additionally rebroadcasts the recorded signe
 the blockhash remains valid and marks an expired, unlanded movement failed.
 Never rebuild a transaction during recovery.
 
+**The Earn sweeps run once per environment** (HOO-2148, ADR 0011). The vault
+movement sweep (with its queued-withdrawal sibling), split-swap detection and
+the metrics refresh are `cluster` Cron Definitions: each registration runs
+inside its environment's cluster scope, selects only that environment's rows
+(`currentClusterScope().environment` into every claim, repair, backlog and
+cleanup query) and takes its cluster from the scope, never from a row. Each
+tick event carries `environment`, and the sdp-infra rules group by it. The
+chain reads the sweeps make themselves go through `createClusterRpc()`:
+statuses, heights and history, the payout and receipt repairs, the
+queued-withdrawal build cleanup (its height read only when
+`hasUnconsumedExternalBuilds` says something could expire), the split-swap
+height and the deposit-mint guard. Shared services they call with the scope's
+cluster (rebroadcast, provider position and queue reads) and every request
+path still name their cluster through the Earn door (`earnClusterRpc`) until
+the packages take door clients and the services read the scope (HOO-1881).
+The catalogue sync stays `global`: its sandbox mirror lane reads mainnet.
+
 **The sweep must fail LOUDLY, and that is a correctness property** (PRO-1863,
 threat model EARN-006). A chain read failure used to `return` cleanly, so the
 batch went unjudged while `sdp_cron_run` recorded `ok`: the only trace was an
@@ -1233,8 +1250,8 @@ guarantee durable status and recovery (`handlers/external-wallet.ts`,
   builds, the insert and baseline read are FAIL-CLOSED: money in may
   refuse, and a blind advisory could only ever page on any wallet that held
   the deposit token. `services/jobs/detect-orphaned-earn-split-swaps.ts` then
-  judges each open advisory every minute (a Cron Definition run by the
-  Worker): an in-flight deposit or
+  judges each open advisory every minute, once per environment (a `cluster`
+  Cron Definition run by the Worker): an in-flight deposit or
   an unconsumed follow-up BUILD inside a 30-minute window is the partner still
   working; once the swap's blockhash is dead and a 30-minute grace has run, the
   intended follow-up is checked first and is DEFINITIVE: a `confirmed`/`finalized`
@@ -1474,9 +1491,11 @@ reads `SOLANA_RPC_URL`, `SOLANA_<CLUSTER>_RPC_URL` or `SOLANA_NETWORK`: a
 cluster with no pool fails closed (`RPC_NOT_CONFIGURED` on the pooled client,
 `PROVIDER_NOT_CONFIGURED` on a provider operation) and never reads the other
 cluster. Earn names the cluster (`earnClusterFor` of the project, strategy or
-row environment) because anonymous Earn and the global Earn crons open no
-cluster scope yet (HOO-1881, HOO-2148); inside a scope, naming the other
-cluster throws `CLUSTER_SCOPE_CONFLICT`. One-shot reads, simulation and
+row environment) because anonymous Earn opens no cluster scope yet and the
+services the Earn crons share with request paths still take one (HOO-1881).
+The crons themselves run once per environment inside its scope and make their
+own reads through `createClusterRpc()` (HOO-2148). Inside a scope, naming the
+other cluster throws `CLUSTER_SCOPE_CONFLICT`. One-shot reads, simulation and
 broadcast use `earnClusterRpc(cluster)`: per-request failover and the pool's
 genesis guard, a send never failing over once it left SDP. Executing provider
 read/build operations instead pin one pool endpoint per attempt
@@ -1684,14 +1703,14 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
   write; the alert exists so a human looks at the provider.
 - **Token-2022 deposit mints are watched, not trusted blindly** (PRO-1962).
   Kora co-signs PYUSD and USDG movements under `transfer_hook_policy =
-  "allow_all"` (both mints keep a mutable Paxos hook authority), so the metrics
-  refresh ends by reading each Token-2022 deposit mint per cluster and emitting
-  `sdp_api_earn_deposit_mint_drift` when the hook program, hook authority or
-  permanent delegate differs from the pins in
-  `services/earn/deposit-mint-guard.ts`. One `getMultipleAccounts` per cluster,
-  from that cluster's managed pool. A cluster with no pool cannot be watched,
-  so its skip is `sdp_api_earn_deposit_mint_guard_skipped` at error wherever
-  Earn is enabled, never a quiet info line. Report-only. Adding a Token-2022
+  "allow_all"` (both mints keep a mutable Paxos hook authority), so each
+  environment's metrics refresh ends by reading its cluster's Token-2022
+  deposit mints in one `getMultipleAccounts` through `createClusterRpc()` and
+  emitting `sdp_api_earn_deposit_mint_drift` when the hook program, hook
+  authority or permanent delegate differs from the pins in
+  `services/earn/deposit-mint-guard.ts`. A cluster with no pool cannot be
+  watched, so its skip is `sdp_api_earn_deposit_mint_guard_skipped` at error
+  wherever Earn is enabled, never a quiet info line. Report-only. Adding a Token-2022
   stablecoin to `EARN_DEPOSIT_TOKEN_SYMBOLS` without pinning it fails the
   guard's unit suite; adding any deposit token without its devnet mint in
   `infra/kora/kora.toml` `allowed_tokens` fails

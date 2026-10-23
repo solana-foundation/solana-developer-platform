@@ -66,8 +66,10 @@ floor does not make an RPC node current; the minimum-slot scope does.
 ## Earn's door (transitional, HOO-1881)
 
 `createClusterRpc()` reads the cluster scope, but Earn still names its cluster:
-anonymous Earn and the global Earn crons open no scope yet (HOO-1881,
-HOO-2148). `factory.ts` therefore exports three Earn-only functions, fenced by
+anonymous Earn opens no scope yet, and the services the Earn crons share with
+request paths still take a cluster (HOO-1881). The crons themselves run per
+environment in their scope since HOO-2148 and read through `createClusterRpc()`.
+`factory.ts` therefore exports three Earn-only functions, fenced by
 Biome to `apps/sdp-api/src/services/earn/cluster-rpc.ts`:
 
 - `createEarnClusterRpc(cluster, { timeoutMs? })`: the named cluster's managed

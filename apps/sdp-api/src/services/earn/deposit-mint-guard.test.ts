@@ -1,4 +1,6 @@
 // biome-ignore-all lint/security/noSecrets: public Solana mint and authority addresses, verified against chain; not secrets.
+import { runInClusterScope } from "@sdp/rpc/scope";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import {
   GENESIS_HASH_BY_CLUSTER,
   SOLANA_CLUSTERS,
@@ -95,7 +97,16 @@ beforeEach(() => {
   poolSequence += 1;
   requests.length = 0;
   failNextRead = false;
-  accountFor.mockReset().mockImplementation(() => mintAccount({}));
+  accountFor.mockReset().mockImplementation((mint) => {
+    const pinned = PINNED_TOKEN_2022_DEPOSIT_MINTS[mint];
+    return pinned
+      ? mintAccount({
+          hookProgram: pinned.transferHookProgram,
+          hookAuthority: pinned.transferHookAuthority,
+          delegate: pinned.permanentDelegate,
+        })
+      : null;
+  });
   vi.stubEnv("SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL", poolUrl("devnet"));
   vi.stubEnv("SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL", poolUrl("mainnet"));
   vi.stubGlobal("fetch", async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
@@ -125,6 +136,11 @@ afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
 });
+
+/** One guard pass, as the metrics refresh runs it: inside the environment's cluster scope. */
+function guardIn(environment: SdpEnvironment, guardEnv: Env): Promise<number> {
+  return runInClusterScope({ projectId: null, environment }, () => guardDepositMints(guardEnv));
+}
 
 describe("pins", () => {
   it.each(SOLANA_CLUSTERS)("cover every Token-2022 deposit mint on %s", (cluster) => {
@@ -204,23 +220,29 @@ describe("detectMintDrift", () => {
 });
 
 describe("guardDepositMints", () => {
-  it("reads every pinned mint of the cluster in one request, from that cluster's pool", async () => {
-    await expect(guardDepositMints(env, "mainnet-beta")).resolves.toBe(0);
+  it.each([
+    ["sandbox", "devnet", "devnet"],
+    ["production", "mainnet-beta", "mainnet"],
+  ] as const)(
+    "reads every pinned mint of the %s scope's cluster (%s) in one request, from its pool",
+    async (environment, cluster, pool) => {
+      await expect(guardIn(environment, env)).resolves.toBe(0);
 
-    expect(requests).toEqual([
-      { url: poolUrl("mainnet"), method: "getGenesisHash" },
-      { url: poolUrl("mainnet"), method: "getMultipleAccounts" },
-    ]);
-    expect(accountFor.mock.calls.map(([mint]) => mint)).toEqual(
-      token2022DepositMints("mainnet-beta").map(({ mint }) => mint)
-    );
-    expect(mocks.logEvent).not.toHaveBeenCalled();
-  });
+      expect(requests).toEqual([
+        { url: poolUrl(pool), method: "getGenesisHash" },
+        { url: poolUrl(pool), method: "getMultipleAccounts" },
+      ]);
+      expect(accountFor.mock.calls.map(([mint]) => mint)).toEqual(
+        token2022DepositMints(cluster).map(({ mint }) => mint)
+      );
+      expect(mocks.logEvent).not.toHaveBeenCalled();
+    }
+  );
 
   it("reads mainnet from the mainnet pool on a devnet-default process", async () => {
     stubDevnetDefaultProcess();
 
-    await expect(guardDepositMints(earnEnabledEnv, "mainnet-beta")).resolves.toBe(0);
+    await expect(guardIn("production", earnEnabledEnv)).resolves.toBe(0);
 
     expect(new Set(requests.map(({ url }) => url))).toEqual(new Set([poolUrl("mainnet")]));
     expect(mocks.logEvent).not.toHaveBeenCalled();
@@ -233,7 +255,7 @@ describe("guardDepositMints", () => {
         : mintAccount({})
     );
 
-    await expect(guardDepositMints(env, "mainnet-beta")).resolves.toBe(1);
+    await expect(guardIn("production", env)).resolves.toBe(1);
 
     expect(mocks.logEvent).toHaveBeenCalledTimes(1);
     expect(mocks.logEvent).toHaveBeenCalledWith("error", {
@@ -257,7 +279,7 @@ describe("guardDepositMints", () => {
       stubDevnetDefaultProcess();
       vi.stubEnv("SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL", "");
 
-      await expect(guardDepositMints(guardEnv, "mainnet-beta")).resolves.toBe(0);
+      await expect(guardIn("production", guardEnv)).resolves.toBe(0);
 
       expect(requests).toEqual([]);
       expect(mocks.logEvent).toHaveBeenCalledOnce();
@@ -274,10 +296,10 @@ describe("guardDepositMints", () => {
 
   it("treats a failed or unparseable read as a warning, never as drift", async () => {
     failNextRead = true;
-    await expect(guardDepositMints(env, "mainnet-beta")).resolves.toBe(0);
+    await expect(guardIn("production", env)).resolves.toBe(0);
 
     accountFor.mockReturnValue(null);
-    await expect(guardDepositMints(env, "mainnet-beta")).resolves.toBe(0);
+    await expect(guardIn("production", env)).resolves.toBe(0);
 
     expect(mocks.logEvent).not.toHaveBeenCalled();
   });

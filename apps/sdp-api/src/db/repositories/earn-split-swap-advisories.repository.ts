@@ -79,14 +79,19 @@ export interface CreateEarnSplitSwapAdvisoryInput {
 export interface EarnSplitSwapAdvisoriesRepository {
   create(input: CreateEarnSplitSwapAdvisoryInput): Promise<EarnSplitSwapAdvisoryRow>;
   /**
-   * The detector's batch: open rows, least-recently-visited first, and every
-   * returned row's `last_checked_at` advanced in the same statement so an
-   * orphan that stays open rotates behind its peers instead of pinning the
-   * head of the queue (the fairness cursor `claimUnsettledVaultMovements`
-   * uses). A cursor, not a lease: nothing else is excluded by it.
+   * The detector's batch: one environment's open rows, least-recently-visited
+   * first, and every returned row's `last_checked_at` advanced in the same
+   * statement so an orphan that stays open rotates behind its peers instead of
+   * pinning the head of the queue (the fairness cursor
+   * `claimUnsettledVaultMovements` uses). A cursor, not a lease: nothing else
+   * is excluded by it.
    */
-  claimOpenForDetection(limit: number): Promise<EarnSplitSwapAdvisoryRow[]>;
-  countOpen(): Promise<number>;
+  claimOpenForDetection(params: {
+    environment: SdpEnvironment;
+    limit: number;
+  }): Promise<EarnSplitSwapAdvisoryRow[]>;
+  /** How many of one environment's advisories are still open. */
+  countOpen(params: { environment: SdpEnvironment }): Promise<number>;
   /** Stamp what a visit observed without resolving. */
   recordObservation(params: {
     advisoryId: string;
@@ -196,7 +201,7 @@ export function createPostgresEarnSplitSwapAdvisoriesRepository(
       return mapRow(row);
     },
 
-    async claimOpenForDetection(limit) {
+    async claimOpenForDetection({ environment, limit }) {
       if (!Number.isInteger(limit) || limit < 1 || limit > 256) {
         throw new Error("claimOpenForDetection limit must be an integer from 1 to 256");
       }
@@ -204,7 +209,7 @@ export function createPostgresEarnSplitSwapAdvisoriesRepository(
         .prepare(
           `WITH visited AS (
              SELECT id FROM earn_split_swap_advisories
-              WHERE resolved_at IS NULL
+              WHERE resolved_at IS NULL AND environment = ?
               ORDER BY COALESCE(last_checked_at, created_at) ASC, created_at ASC, id ASC
               LIMIT ?
               FOR UPDATE SKIP LOCKED
@@ -217,16 +222,18 @@ export function createPostgresEarnSplitSwapAdvisoriesRepository(
            )
            SELECT * FROM touched ORDER BY created_at ASC, id ASC`
         )
-        .bind(limit)
+        .bind(environment, limit)
         .all<Record<string, unknown>>();
       return (result.results ?? []).map(mapRow);
     },
 
-    async countOpen() {
+    async countOpen({ environment }) {
       const row = await db
         .prepare(
-          "SELECT COUNT(*) AS open FROM earn_split_swap_advisories WHERE resolved_at IS NULL"
+          `SELECT COUNT(*) AS open FROM earn_split_swap_advisories
+            WHERE resolved_at IS NULL AND environment = ?`
         )
+        .bind(environment)
         .first<{ open: number | string }>();
       return Number(row?.open ?? 0);
     },
