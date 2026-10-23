@@ -371,6 +371,87 @@ describe("token movement legs (postgres)", () => {
     });
   });
 
+  it("verifies an off-ramp deposit's leg on delivery when the provider settled it first, never an on-ramp's", async () => {
+    const deliver = async (row: { id: string }) => {
+      const signature = `sig_${row.id}`;
+      const settlement = { onchain: { signature } };
+      await payments().transitionRampTransfer({
+        transferId: row.id,
+        organizationId: TEST_ORG.id,
+        projectId: PROJECT_ID,
+        transition: "provider_settled",
+        signature,
+        providerData: { providerSettlement: settlement },
+        updatedAt: new Date().toISOString(),
+      });
+      // offramp_deposit_confirmed matches only `processing`, so delivery is the leg's verdict.
+      return payments().transitionRampTransfer({
+        transferId: row.id,
+        organizationId: TEST_ORG.id,
+        projectId: PROJECT_ID,
+        transition: "delivery_verified",
+        deliveryEvidence: { providerSettlement: settlement, signature },
+        updatedAt: new Date().toISOString(),
+      });
+    };
+    const offramp = required(
+      await payments().createTransfer({
+        ...transferInput("xfr_leg_offramp_settled_first"),
+        token: SOL_MINT,
+        amount: "1",
+        destinationAddress: null,
+        type: "offramp",
+        status: "awaiting_payment",
+        provider: "moonpay",
+        providerData: { cryptoDeposit: { destinationAddress: "Deposit111", amount: "1" } },
+      })
+    );
+    const claimed = await claimOfframpDepositWithLeg(
+      db(),
+      tenant,
+      {
+        transferId: offramp.id,
+        organizationId: TEST_ORG.id,
+        projectId: PROJECT_ID,
+        custodyWalletId: CUSTODY_WALLET_ID,
+        walletId: WALLET_ID,
+        sourceAddress: "Source111",
+        destinationAddress: "Deposit111",
+        token: SOL_MINT,
+        initiatedByKeyId: null,
+        idempotency: null,
+        updatedAt: new Date().toISOString(),
+      },
+      nativeQuote("1", "credit")
+    );
+    expect(claimed).toMatchObject({ status: "processing" });
+    const onramp = await recordQuotedTransfer(
+      db(),
+      tenant,
+      {
+        ...transferInput("xfr_leg_onramp"),
+        type: "onramp",
+        direction: "inbound",
+        status: "processing",
+        provider: "moonpay",
+      },
+      nativeQuote("1", "credit")
+    );
+
+    expect(await deliver(offramp)).toMatchObject({ status: "completed" });
+    expect(await deliver(onramp)).toMatchObject({ status: "completed" });
+
+    const byTransfer = await legs().listLegsByTransfers([offramp.id, onramp.id]);
+    expect(byTransfer.get(offramp.id)?.[0]?.verification).toEqual({
+      state: "verified",
+      reason: "sdp_built_transfer_landed",
+    });
+    expect(byTransfer.get(onramp.id)?.[0]?.verification).toEqual({
+      state: "pending",
+      reason: null,
+    });
+  });
+
   it("writes a leg per batch recipient and settles them with their chunk", async () => {
     await seedProjectCryptoWalletCounterparty(db(), {
       organizationId: TEST_ORG.id,
