@@ -1440,10 +1440,12 @@ describe("Unified earn movement ledger (postgres)", () => {
         .prepare("SELECT reconciliation_attempted_at FROM earn_movements WHERE id = ?")
         .bind(movementId)
         .first<{ reconciliation_attempted_at: string | null }>();
-      return row?.reconciliation_attempted_at ?? null;
+      if (row === null) throw new Error(`movement ${movementId} is missing`);
+      return row.reconciliation_attempted_at;
     }
 
-    async function finalize(movementId: string, tokenAmountSettled?: null): Promise<void> {
+    /** Finalize with no observed payout: a withdrawal's token amount stays NULL. */
+    async function finalize(movementId: string): Promise<void> {
       const settledAt = new Date().toISOString();
       await ledger.advanceVaultMovement({
         movementId,
@@ -1451,7 +1453,6 @@ describe("Unified earn movement ledger (postgres)", () => {
         toStatus: "finalized",
         confirmedAt: settledAt,
         settledAt,
-        ...(tokenAmountSettled === null ? { tokenAmountSettled } : {}),
       });
     }
 
@@ -1481,10 +1482,10 @@ describe("Unified earn movement ledger (postgres)", () => {
       return id;
     }
 
-    /** An owner-signed Kamino deposit in `environment`, still `requested`. */
+    /** An owner-signed Kamino deposit in `environment`, still `requested`, into a fresh vault. */
     async function depositIn(environment: SdpEnvironment) {
       const vaultAddress = `vault_${crypto.randomUUID()}`;
-      return ledger.createSignedExternalWalletDepositIntent({
+      const deposit = await ledger.createSignedExternalWalletDepositIntent({
         organizationId: ORG,
         projectId: PROJECT_BY_ENVIRONMENT[environment],
         environment,
@@ -1505,13 +1506,14 @@ describe("Unified earn movement ledger (postgres)", () => {
           vaultAddress,
         }),
       });
+      return { ...deposit, vaultAddress };
     }
 
     /** A finalized owner-signed withdrawal in `environment` whose payout was never observed. */
     async function unvaluedWithdrawalIn(environment: SdpEnvironment): Promise<string> {
       const deposit = await depositIn(environment);
       await finalize(deposit.movement.id);
-      const vaultAddress = deposit.position.vault_address ?? "";
+      const { vaultAddress } = deposit;
       const withdrawal = await ledger.createSignedExternalWalletWithdrawalIntent({
         organizationId: ORG,
         projectId: PROJECT_BY_ENVIRONMENT[environment],
@@ -1532,7 +1534,7 @@ describe("Unified earn movement ledger (postgres)", () => {
           vaultAddress,
         }),
       });
-      await finalize(withdrawal.movement.id, null);
+      await finalize(withdrawal.movement.id);
       return withdrawal.movement.id;
     }
 

@@ -521,8 +521,9 @@ describe("detectOrphanedEarnSplitSwaps", () => {
 
       for (const [seeded, id] of ids) {
         const row = await advisoryRow(id);
+        if (row === null) throw new Error(`advisory ${id} is missing`);
         if (seeded === environment) {
-          expect(row?.first_flagged_at).not.toBeNull();
+          expect(row.first_flagged_at).not.toBeNull();
         } else {
           expect(row).toMatchObject({ last_checked_at: null, first_flagged_at: null });
         }
@@ -562,7 +563,9 @@ describe("advisory repository environment scope", () => {
 
     expect(claimed.map((row) => row.id)).toEqual([own]);
     for (const id of others) {
-      expect((await advisoryRow(id))?.last_checked_at).toBeNull();
+      const row = await advisoryRow(id);
+      if (row === null) throw new Error(`advisory ${id} is missing`);
+      expect(row.last_checked_at).toBeNull();
     }
     await expect(advisories().countOpen({ environment })).resolves.toBe(1);
   });

@@ -9,8 +9,6 @@ import type {
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { getSignatureStatuses, type SignatureStatusInfo, type SolanaRpc } from "@sdp/rpc/solana";
-import type { SdpEnvironment } from "@sdp/types/api-keys";
-import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { address, type Signature } from "@solana/kit";
 import { getDb } from "@/db/client";
 import {
@@ -175,7 +173,6 @@ export async function reconcileEarnVaultQueuedWithdrawals(env: Env): Promise<voi
 
   stats.requestsClaimed = await visitOpenRequestsJustInTime(
     ledger,
-    environment,
     REQUEST_BATCH_SIZE,
     async (request) => {
       try {
@@ -225,7 +222,7 @@ async function reconcileActions(
   stats: QueueReconciliationStats
 ): Promise<void> {
   if (actions.length === 0) return;
-  const { environment, cluster } = currentClusterScope();
+  const { environment } = currentClusterScope();
   let rpc: SolanaRpc;
   let statuses: Array<SignatureStatusInfo | null>;
   try {
@@ -266,7 +263,6 @@ async function reconcileActions(
       // react-doctor-disable-next-line react-doctor/async-await-in-loop -- bounded reconciliation pacing protects the RPC and pool.
       const outcome = await reconcileAction(env, ledger, actionRow, statuses[index] ?? null, {
         rpc: rpc as unknown as RawHistoryRpc,
-        cluster,
         currentHeight,
       });
       if (outcome === "advanced") stats.actionsAdvanced += 1;
@@ -291,10 +287,10 @@ async function reconcileActions(
  */
 export async function visitOpenRequestsJustInTime(
   ledger: Pick<QueueLedger, "claimOpenRequests">,
-  environment: SdpEnvironment,
   maxRequests: number,
   visit: (request: EarnVaultWithdrawalRequestRow) => Promise<void>
 ): Promise<number> {
+  const { environment } = currentClusterScope();
   let claimed = 0;
   while (claimed < maxRequests) {
     // react-doctor-disable-next-line react-doctor/async-await-in-loop -- claiming immediately before serial provider work keeps the durable lease fresh.
@@ -312,7 +308,7 @@ export async function reconcileAction(
   ledger: QueueLedger,
   actionRow: EarnVaultWithdrawalRequestActionRow,
   status: SignatureStatusInfo | null,
-  chain: { rpc: RawHistoryRpc; cluster: SolanaCluster; currentHeight: bigint | null }
+  chain: { rpc: RawHistoryRpc; currentHeight: bigint | null }
 ): Promise<"advanced" | "failed" | "rebroadcast" | "unchanged"> {
   if (status?.err) {
     // A rejection on an unrooted fork cannot release the durable PDA claim.
@@ -384,7 +380,7 @@ export async function reconcileAction(
   if (chain.currentHeight === null) return "unchanged";
 
   await broadcastVaultTransaction({
-    cluster: chain.cluster,
+    cluster: currentClusterScope().cluster,
     deadline: createVaultDeadline(),
     bytes: Uint8Array.from(Buffer.from(actionRow.signed_transaction, "base64")),
   });

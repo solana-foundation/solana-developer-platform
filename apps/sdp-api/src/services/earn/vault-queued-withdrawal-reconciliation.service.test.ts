@@ -190,11 +190,13 @@ describe("queued withdrawal reconciliation", () => {
     });
 
     await expect(
-      visitOpenRequestsJustInTime({ claimOpenRequests }, "sandbox", 3, async (row) => {
-        events.push(`start:${row.id}`);
-        await Promise.resolve();
-        events.push(`finish:${row.id}`);
-      })
+      inSandboxScope(() =>
+        visitOpenRequestsJustInTime({ claimOpenRequests }, 3, async (row) => {
+          events.push(`start:${row.id}`);
+          await Promise.resolve();
+          events.push(`finish:${row.id}`);
+        })
+      )
     ).resolves.toBe(2);
 
     expect(claimOpenRequests).toHaveBeenCalledTimes(3);
@@ -282,7 +284,6 @@ describe("queued withdrawal reconciliation", () => {
     await expect(
       reconcileAction(env, ledger, action(), null, {
         rpc: emptyRpc as never,
-        cluster: "devnet",
         currentHeight: 2n,
       })
     ).resolves.toBe("advanced");
@@ -326,7 +327,6 @@ describe("queued withdrawal reconciliation", () => {
     await expect(
       reconcileAction(env, ledger, action({ action: "cancel" }), null, {
         rpc: emptyRpc as never,
-        cluster: "devnet",
         currentHeight: 2n,
       })
     ).resolves.toBe("failed");
@@ -367,7 +367,6 @@ describe("queued withdrawal reconciliation", () => {
     await expect(
       reconcileAction(env, ledger, action({ action: "cancel", status: "submitted" }), null, {
         rpc: emptyRpc as never,
-        cluster: "devnet",
         currentHeight: 2n,
       })
     ).resolves.toBe("failed");
@@ -393,7 +392,7 @@ describe("queued withdrawal reconciliation", () => {
           ledger,
           action(),
           { err: "fork-local rejection", confirmationStatus } as never,
-          { rpc: emptyRpc as never, cluster: "devnet", currentHeight: 2n }
+          { rpc: emptyRpc as never, currentHeight: 2n }
         )
       ).resolves.toBe("unchanged");
       expect(ledger.failActionAndRecoverRequest).not.toHaveBeenCalled();
@@ -407,12 +406,14 @@ describe("queued withdrawal reconciliation", () => {
     async (kind) => {
       const ledger = fakeLedger(request());
       await expect(
-        reconcileAction(
-          env,
-          ledger,
-          action({ action: kind, status: "submitted", last_valid_block_height: "10" }),
-          null,
-          { rpc: emptyRpc as never, cluster: "devnet", currentHeight: 10n }
+        inSandboxScope(() =>
+          reconcileAction(
+            env,
+            ledger,
+            action({ action: kind, status: "submitted", last_valid_block_height: "10" }),
+            null,
+            { rpc: emptyRpc as never, currentHeight: 10n }
+          )
         )
       ).resolves.toBe("rebroadcast");
       expect(broadcast).toHaveBeenCalledWith(
@@ -432,7 +433,6 @@ describe("queued withdrawal reconciliation", () => {
         { err: "program rejected the queued request", confirmationStatus: "finalized" } as never,
         {
           rpc: emptyRpc as never,
-          cluster: "devnet",
           currentHeight: 2n,
         }
       )
@@ -481,7 +481,6 @@ describe("queued withdrawal reconciliation", () => {
         { err: null, confirmationStatus: "finalized" } as never,
         {
           rpc: rpc as never,
-          cluster: "devnet",
           currentHeight: null,
         }
       )
@@ -536,7 +535,7 @@ describe("queued withdrawal reconciliation", () => {
         ledger,
         action(),
         { err: null, confirmationStatus: "finalized" } as never,
-        { rpc: rpc as never, cluster: "devnet", currentHeight: null }
+        { rpc: rpc as never, currentHeight: null }
       )
     ).resolves.toBe("advanced");
 
@@ -577,7 +576,6 @@ describe("queued withdrawal reconciliation", () => {
     await expect(
       reconcileAction(env, ledger, action({ action: "cancel", status: "submitted" }), null, {
         rpc: emptyRpc as never,
-        cluster: "devnet",
         currentHeight: 2n,
       })
     ).resolves.toBe("failed");
@@ -627,7 +625,6 @@ describe("queued withdrawal reconciliation", () => {
     await expect(
       reconcileAction(env, ledger, action(), null, {
         rpc: rpc as never,
-        cluster: "devnet",
         currentHeight: 2n,
       })
     ).resolves.toBe("advanced");

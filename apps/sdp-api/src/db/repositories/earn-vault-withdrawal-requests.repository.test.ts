@@ -4,6 +4,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { runWithTenantDatabaseIdentity } from "@/db/identity";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
+import { runInEnvironmentClusterScope } from "@/runtime/cluster-scope-runs";
+import { reconcileEarnVaultQueuedWithdrawals } from "@/services/earn/vault-queued-withdrawal-reconciliation.service";
+import { ENVIRONMENT_CLUSTER_CASES, installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
 import { insertTestCustodyConfigRow, insertTestCustodyWalletRow } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -1753,7 +1756,8 @@ describe("Earn queued withdrawal repository", () => {
         .prepare(`SELECT last_checked_at FROM ${table} WHERE id = ?`)
         .bind(id)
         .first<{ last_checked_at: string | null }>();
-      return row?.last_checked_at ?? null;
+      if (row === null) throw new Error(`${table} row ${id} is missing`);
+      return row.last_checked_at;
     }
 
     async function countIn(table: string, environment: SdpEnvironment): Promise<number> {
@@ -1761,7 +1765,25 @@ describe("Earn queued withdrawal repository", () => {
         .prepare(`SELECT COUNT(*) AS rows FROM ${table} WHERE environment = ?`)
         .bind(environment)
         .first<{ rows: number | string }>();
-      return Number(row?.rows ?? 0);
+      if (row === null) throw new Error(`COUNT over ${table} returned no row`);
+      return Number(row.rows);
+    }
+
+    async function expiredReservationIn(environment: SdpEnvironment): Promise<void> {
+      sequence += 1;
+      await repository.acquireRequestReservation({
+        id: `earn_vault_withdrawal_reservation_scope_${sequence}`,
+        organizationId: ORG,
+        projectId: SCOPE[environment].projectId,
+        environment,
+        provider: "veda",
+        vaultAddress: VAULT,
+        ownerAddress: EXTERNAL_OWNER,
+        requestAddress: `ScopeReservationAddress${String(sequence).padStart(16, "1")}`,
+        clientRequestId: `scope-reservation-key-${sequence}`,
+        idempotencyFingerprint: `scope-reservation-fingerprint-${sequence}`,
+        expiresAt: "2000-01-01T00:00:00.000Z",
+      });
     }
 
     /** An unconsumed owner-signed request build in `environment`. */
@@ -1840,20 +1862,7 @@ describe("Earn queued withdrawal repository", () => {
 
     it.each(SDP_ENVIRONMENTS)("expires only %s abandoned reservations", async (environment) => {
       for (const reserved of SDP_ENVIRONMENTS) {
-        sequence += 1;
-        await repository.acquireRequestReservation({
-          id: `earn_vault_withdrawal_reservation_scope_${sequence}`,
-          organizationId: ORG,
-          projectId: SCOPE[reserved].projectId,
-          environment: reserved,
-          provider: "veda",
-          vaultAddress: VAULT,
-          ownerAddress: EXTERNAL_OWNER,
-          requestAddress: `ScopeReservationAddress${String(sequence).padStart(16, "1")}`,
-          clientRequestId: `scope-reservation-key-${sequence}`,
-          idempotencyFingerprint: `scope-reservation-fingerprint-${sequence}`,
-          expiresAt: "2000-01-01T00:00:00.000Z",
-        });
+        await expiredReservationIn(reserved);
       }
 
       await repository.cleanupExpiredReservations({ environment });
@@ -1886,5 +1895,38 @@ describe("Earn queued withdrawal repository", () => {
         ).resolves.toBe(true);
       }
     );
+
+    describe("queued-withdrawal sweep", () => {
+      const clusterRpc = installClusterRpcResponder();
+
+      it.each(ENVIRONMENT_CLUSTER_CASES)(
+        "a $environment sweep claims, cleans and reads nothing of the other environment",
+        async ({ environment }) => {
+          const other = otherThan(environment);
+          const open = await openRequestIn(other);
+          await buildIn(other, "100");
+          await expiredReservationIn(other);
+          const reservations = await countIn("earn_vault_withdrawal_request_reservations", other);
+          const leases = await countIn("earn_vault_withdrawal_request_pda_leases", other);
+
+          await runInEnvironmentClusterScope(environment, () =>
+            reconcileEarnVaultQueuedWithdrawals(env)
+          );
+
+          expect(
+            await lastCheckedAt("earn_vault_withdrawal_request_actions", open.action.id)
+          ).toBeNull();
+          expect(await lastCheckedAt("earn_vault_withdrawal_requests", open.request.id)).toBeNull();
+          expect(await countIn("earn_vault_withdrawal_request_reservations", other)).toBe(
+            reservations
+          );
+          expect(await countIn("earn_vault_withdrawal_request_pda_leases", other)).toBe(leases);
+          await expect(
+            repository.hasUnconsumedExternalBuilds({ environment: other })
+          ).resolves.toBe(true);
+          expect(clusterRpc.calls).toEqual([]);
+        }
+      );
+    });
   });
 });

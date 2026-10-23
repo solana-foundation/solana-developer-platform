@@ -3,25 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { EarnVaultWithdrawalRequestsRepository } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
 import { runInEnvironmentClusterScope } from "@/runtime/cluster-scope-runs";
 import { ENVIRONMENT_CLUSTER_CASES, installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
-import { env } from "@/test/helpers/env";
-import {
-  cleanupAbandonedExternalBuilds,
-  reconcileEarnVaultQueuedWithdrawals,
-} from "./vault-queued-withdrawal-reconciliation.service";
-
-const sweepLedger = vi.hoisted(() => ({
-  cleanupExpiredReservations: vi.fn(),
-  hasUnconsumedExternalBuilds: vi.fn(),
-  cleanupExpiredExternalBuilds: vi.fn(),
-  claimUnsettledActions: vi.fn(),
-  claimOpenRequests: vi.fn(),
-  recordIndexError: vi.fn(),
-}));
-
-vi.mock("@/db/client", () => ({ getDb: () => ({}) }));
-vi.mock("@/db/repositories/earn-vault-withdrawal-requests.repository", () => ({
-  createPostgresEarnVaultWithdrawalRequestsRepository: () => sweepLedger,
-}));
+import { cleanupAbandonedExternalBuilds } from "./vault-queued-withdrawal-reconciliation.service";
 
 /** The confirmed height each cluster's endpoint reports, so a cleanup shows whose height it got. */
 const HEIGHTS = { devnet: 111, "mainnet-beta": 222 } as const;
@@ -88,30 +70,4 @@ describe("queued withdrawal build cleanup", () => {
     expect(rpc.calls).toEqual([]);
     expect(ledger.cleanupExpiredExternalBuilds).not.toHaveBeenCalled();
   });
-});
-
-describe("queued withdrawal sweep environment", () => {
-  installClusterRpcResponder();
-
-  beforeEach(() => {
-    for (const fn of Object.values(sweepLedger)) fn.mockReset();
-    sweepLedger.cleanupExpiredReservations.mockResolvedValue(0);
-    sweepLedger.hasUnconsumedExternalBuilds.mockResolvedValue(false);
-    sweepLedger.claimUnsettledActions.mockResolvedValue([]);
-    sweepLedger.claimOpenRequests.mockResolvedValue([]);
-  });
-
-  it.each(ENVIRONMENT_CLUSTER_CASES)(
-    "claims and cleans only $environment rows",
-    async ({ environment }) => {
-      await runInEnvironmentClusterScope(environment, () =>
-        reconcileEarnVaultQueuedWithdrawals(env)
-      );
-
-      expect(sweepLedger.cleanupExpiredReservations.mock.calls).toEqual([[{ environment }]]);
-      expect(sweepLedger.hasUnconsumedExternalBuilds.mock.calls).toEqual([[{ environment }]]);
-      expect(sweepLedger.claimUnsettledActions.mock.calls).toEqual([[{ environment, limit: 128 }]]);
-      expect(sweepLedger.claimOpenRequests.mock.calls).toEqual([[{ environment, limit: 1 }]]);
-    }
-  );
 });

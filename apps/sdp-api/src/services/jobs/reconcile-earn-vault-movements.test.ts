@@ -190,7 +190,7 @@ async function ledgerRow(movementId: string) {
  * that rides this service, via the detail read's read-through. Same ledger
  * table, `owner_address` instead of a custody wallet, and a consumed build row.
  */
-async function seedExternalWalletMovement(environment: SdpEnvironment = "sandbox") {
+async function seedExternalWalletMovement(environment: SdpEnvironment) {
   const projectId = environment === "sandbox" ? PROJECT : `${PROJECT}_production`;
   const repository = createPostgresEarnMovementsRepository(getDb(env));
   const transactionId = `earn_ewt_${crypto.randomUUID()}`;
@@ -247,7 +247,7 @@ const SHARE = "So11111111111111111111111111111111111111112";
  */
 async function seedExternalWalletWithdrawal(shares = "1") {
   const repository = createPostgresEarnMovementsRepository(getDb(env));
-  const deposit = await seedExternalWalletMovement();
+  const deposit = await seedExternalWalletMovement("sandbox");
   const settledAt = new Date().toISOString();
   await repository.advanceVaultMovement({
     movementId: deposit.movement.id,
@@ -349,7 +349,7 @@ async function positionRow(positionId: string) {
 
 describe("Kamino deposit receipts", () => {
   it("settles the actual debit and minted shares, preserving the requested maximum", async () => {
-    const seeded = await seedExternalWalletMovement();
+    const seeded = await seedExternalWalletMovement("sandbox");
     readKaminoDepositReceipt.mockResolvedValue({ amount: "0.4", sharesOut: "0.39" });
     getSignatureStatuses.mockResolvedValue([
       { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
@@ -937,7 +937,7 @@ describe("reconcileEarnVaultMovementReadThrough", () => {
     // The embedded-yield detail read adopted this read-through; an
     // owner-signed row is the same vault_direct ledger shape with a signature
     // recorded at submit, so nothing here may depend on a custody wallet.
-    const seeded = await seedExternalWalletMovement();
+    const seeded = await seedExternalWalletMovement("sandbox");
     getSignatureStatuses.mockResolvedValue([
       { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
     ]);
@@ -953,7 +953,7 @@ describe("reconcileEarnVaultMovementReadThrough", () => {
   });
 
   it("short-circuits a terminal movement without touching the RPC", async () => {
-    const seeded = await seedExternalWalletMovement();
+    const seeded = await seedExternalWalletMovement("sandbox");
     const repository = createPostgresEarnMovementsRepository(getDb(env));
     await repository.advanceVaultMovement({
       movementId: seeded.movement.id,
