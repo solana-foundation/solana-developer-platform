@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { SOL_MINT } from "../packages/sdp-types/src/well-known-tokens.ts";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { paymentAttempt, runLive, validateConfig } from "./fireblocks-live.mjs";
 
 const source = "11111111111111111111111111111111";

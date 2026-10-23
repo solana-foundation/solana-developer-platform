@@ -75,6 +75,9 @@ importers:
       '@biomejs/biome':
         specifier: 2.5.14
         version: 2.5.14
+      '@sdp/types':
+        specifier: workspace:*
+        version: link:packages/sdp-types
       turbo:
         specifier: 2.11.4
         version: 2.11.4

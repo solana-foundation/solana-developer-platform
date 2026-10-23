@@ -3,7 +3,12 @@ import { SignerError, SignerErrorCode } from "@solana/keychain-core";
 import { FireblocksSigner } from "@solana/keychain-fireblocks";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { env as testEnv } from "@/test/helpers/env";
-import { checkByokCredential, credentialPayload, parseByokCredential } from "./byok-credential";
+import {
+  byokCredentialCheckSchema,
+  checkByokCredential,
+  credentialPayload,
+  parseByokCredential,
+} from "./byok-credential";
 
 const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const fields = {
@@ -17,6 +22,44 @@ const address = "11111111111111111111111111111111";
 afterEach(() => vi.restoreAllMocks());
 
 describe("Fireblocks BYOK credentials", () => {
+  it("parses only the stored provider's credential variant", () => {
+    expect(parseByokCredential("privy", { appId: "app", appSecret: "secret" })).toEqual({
+      provider: "privy",
+      appId: "app",
+      appSecret: "secret",
+    });
+    expect(() => parseByokCredential("unknown", { appId: "app", appSecret: "secret" })).toThrow();
+    expect(() =>
+      parseByokCredential("fireblocks", {
+        provider: "privy",
+        appId: "app",
+        appSecret: "secret",
+      })
+    ).toThrow();
+    expect(() =>
+      parseByokCredential("privy", {
+        appId: "app",
+        appSecret: "secret",
+        apiKey: fields.apiKey,
+      })
+    ).toThrow();
+    expect(() => parseByokCredential("fireblocks", { ...fields, assetId: "ETH" })).toThrow();
+  });
+
+  it("requires success evidence and forbids it on a failed or unknown check", () => {
+    expect(byokCredentialCheckSchema.safeParse({ status: "success" }).success).toBe(false);
+    expect(
+      byokCredentialCheckSchema.safeParse({ status: "success", fingerprint: "" }).success
+    ).toBe(false);
+    for (const status of ["failed", "retry_unknown"] as const) {
+      expect(byokCredentialCheckSchema.parse({ status })).toEqual({ status });
+      expect(byokCredentialCheckSchema.safeParse({ status, fingerprint: "stale" }).success).toBe(
+        false
+      );
+    }
+    expect(byokCredentialCheckSchema.safeParse({ status: "unknown" }).success).toBe(false);
+  });
+
   it("normalizes RSA PEM and pins the asset to the project environment", () => {
     const sandbox = credentialPayload("fireblocks", fields, "sandbox");
     expect(sandbox.assetId).toBe("SOL_TEST");

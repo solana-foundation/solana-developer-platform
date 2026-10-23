@@ -41,11 +41,14 @@ export type ByokCredentialFields = ByokRegistration["fields"];
 export type ByokCredentialSecretFields =
   | z.infer<typeof privyAuthenticationSchema>
   | z.infer<typeof fireblocksAuthenticationSchema>;
-export type ByokCredentialAuthentication =
-  | ({ provider: "privy" } & z.infer<typeof privyAuthenticationSchema>)
-  | ({ provider: "fireblocks"; assetId: "SOL" | "SOL_TEST" } & z.infer<
-      typeof fireblocksAuthenticationSchema
-    >);
+export const byokCredentialAuthenticationSchema = z.discriminatedUnion("provider", [
+  privyAuthenticationSchema.extend({ provider: z.literal("privy") }),
+  fireblocksAuthenticationSchema.extend({
+    provider: z.literal("fireblocks"),
+    assetId: z.enum(["SOL", "SOL_TEST"]),
+  }),
+]);
+export type ByokCredentialAuthentication = z.infer<typeof byokCredentialAuthenticationSchema>;
 
 /** Accept PKCS#1 and PKCS#8 exports, then store the PKCS#8 form keychain consumes. */
 export function credentialPayload(
@@ -80,16 +83,9 @@ export function parseByokCredential(
   provider: string,
   payload: Record<string, unknown>
 ): ByokCredentialAuthentication {
-  if (provider === "privy") {
-    const parsed = privyAuthenticationSchema.safeParse(payload);
-    if (parsed.success) return { provider, ...parsed.data };
-  }
-  if (provider === "fireblocks") {
-    const parsed = fireblocksAuthenticationSchema
-      .extend({ assetId: z.enum(["SOL", "SOL_TEST"]) })
-      .safeParse(payload);
-    if (parsed.success) return { provider, ...parsed.data };
-  }
+  // The stored provider owns dispatch; a payload cannot override its discriminator.
+  const parsed = byokCredentialAuthenticationSchema.safeParse({ ...payload, provider });
+  if (parsed.success) return parsed.data;
   throw internalError("Custody credential payload is unavailable");
 }
 
@@ -106,9 +102,20 @@ export function credentialDisplayMetadata(fields: ByokCredentialFields): {
   };
 }
 
-export type ByokCredentialCheck =
-  | { status: "success"; fingerprint: string; wallet?: { walletId: string; address: string } }
-  | { status: "failed" | "retry_unknown" };
+export const byokCredentialCheckSchema = z.discriminatedUnion("status", [
+  z
+    .object({
+      status: z.literal("success"),
+      fingerprint: z.string().min(1),
+      wallet: z
+        .object({ walletId: z.string().min(1), address: z.string().min(1) })
+        .strict()
+        .optional(),
+    })
+    .strict(),
+  z.object({ status: z.enum(["failed", "retry_unknown"]) }).strict(),
+]);
+export type ByokCredentialCheck = z.infer<typeof byokCredentialCheckSchema>;
 
 /** One authenticated provider read; checking a Fireblocks connection never proposes a signature. */
 export async function checkByokCredential(

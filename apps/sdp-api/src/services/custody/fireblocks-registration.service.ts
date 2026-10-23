@@ -5,6 +5,10 @@ import {
 } from "@sdp/types/custody";
 import type { Context } from "hono";
 import { type DatabaseClient, getDb } from "@/db/client";
+import {
+  type FireblocksCsrPublicRow,
+  FireblocksCsrRepository,
+} from "@/db/repositories/fireblocks-csr.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import {
   badRequest,
@@ -35,19 +39,12 @@ import { generateFireblocksCsr } from "./fireblocks-csr";
 import { listFireblocksVaults } from "./provisioning";
 
 type AppContext = Context<{ Bindings: Env }>;
-interface CsrRow {
-  id: string;
-  csr_pem: string;
-  expires_at: string;
-  encrypted_private_key: string | null;
-  claim_fingerprint: string | null;
-}
 export interface FireblocksCsr {
   id: string;
   csrPem: string;
   expiresAt: string;
 }
-function publicCsr(row: CsrRow): FireblocksCsr {
+function publicCsr(row: FireblocksCsrPublicRow): FireblocksCsr {
   return { id: row.id, csrPem: row.csr_pem, expiresAt: row.expires_at };
 }
 export async function admitFireblocksRegistration(c: AppContext) {
@@ -63,13 +60,7 @@ export async function admitFireblocksRegistration(c: AppContext) {
 /** Reloads public onboarding material only; this endpoint never decrypts a key. */
 export async function getPendingFireblocksCsr(c: AppContext): Promise<FireblocksCsr | null> {
   const scope = await admitFireblocksRegistration(c);
-  const row = await getDb(c.env).queryOne<CsrRow>(
-    `SELECT id, csr_pem, expires_at FROM fireblocks_csr_requests
-     WHERE organization_id = ? AND project_id = ? AND status = 'active' AND encrypted_private_key IS NOT NULL
-       AND claim_fingerprint IS NULL AND expires_at > sdp_iso_now()
-     ORDER BY created_at DESC LIMIT 1`,
-    [scope.organizationId, scope.projectId]
-  );
+  const row = await new FireblocksCsrRepository(getDb(c.env)).getPending(scope);
   return row ? publicCsr(row) : null;
 }
 
@@ -81,11 +72,7 @@ export async function createFireblocksCsr(
   const scope = await admitFireblocksRegistration(c);
   assertCustodyEncryptionScheme(c.env);
   const db = getDb(c.env);
-  const existing = await db.queryOne<CsrRow>(
-    `SELECT id, csr_pem, expires_at, encrypted_private_key, claim_fingerprint
-     FROM fireblocks_csr_requests WHERE organization_id = ? AND project_id = ? AND idempotency_key = ?`,
-    [scope.organizationId, scope.projectId, idempotencyKey]
-  );
+  const existing = await new FireblocksCsrRepository(db).getByIdempotencyKey(scope, idempotencyKey);
   if (existing) return publicCsr(existing);
   await enforceMeteredQuota(c, { name: "fireblocks-csr", actorMax: 3, orgMax: 10 });
   const id = `fbcsr_${crypto.randomUUID()}`;
@@ -113,27 +100,18 @@ export async function createFireblocksCsr(
     )
       throw forbidden("Requested project is not accessible");
     // Recheck after generation under the project lock to serialize concurrent retries.
-    const replay = await tx.queryOne<CsrRow>(
-      `SELECT id, csr_pem, expires_at FROM fireblocks_csr_requests
-       WHERE organization_id = ? AND project_id = ? AND idempotency_key = ?`,
-      [scope.organizationId, scope.projectId, idempotencyKey]
-    );
+    const csrs = new FireblocksCsrRepository(tx);
+    const replay = await csrs.getByIdempotencyKey(scope, idempotencyKey);
     if (replay) return replay;
-    const pending = await tx.queryOne<{ count: string }>(
-      `SELECT count(*)::text AS count FROM fireblocks_csr_requests
-       WHERE organization_id = ? AND project_id = ? AND status = 'active' AND encrypted_private_key IS NOT NULL
-         AND expires_at > sdp_iso_now()`,
-      [scope.organizationId, scope.projectId]
-    );
-    if (Number(pending?.count) >= 5)
+    if ((await csrs.countPending(scope)) >= 5)
       throw conflict("Finish an existing Fireblocks registration before generating another CSR");
-    const inserted = await tx.queryOne<CsrRow>(
-      `INSERT INTO fireblocks_csr_requests
-       (id, organization_id, project_id, idempotency_key, csr_pem, encrypted_private_key, created_by, expires_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, to_char(timezone('UTC', now()) + interval '7 days', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
-       RETURNING id, csr_pem, expires_at`,
-      [id, scope.organizationId, scope.projectId, idempotencyKey, csrPem, encrypted, scope.userId]
-    );
+    const inserted = await csrs.create(scope, {
+      id,
+      idempotencyKey,
+      csrPem,
+      encryptedKey: encrypted,
+      userId: scope.userId,
+    });
     if (!inserted) throw internalError();
     return inserted;
   });
@@ -176,15 +154,12 @@ export async function resolveRegistrationPayload(
   if (cached) return cached;
   const payload = (async () => {
     const scope = await admitFireblocksRegistration(c);
-    const row = await getDb(c.env).queryOne<CsrRow>(
-      `UPDATE fireblocks_csr_requests SET claim_fingerprint = ?
-       WHERE id = ? AND organization_id = ? AND project_id = ?
-         AND status = 'active' AND encrypted_private_key IS NOT NULL AND expires_at > sdp_iso_now()
-         AND (claim_fingerprint IS NULL OR claim_fingerprint = ?)
-       RETURNING id, csr_pem, expires_at, encrypted_private_key, claim_fingerprint`,
-      [fingerprint, input.signingKeyId, scope.organizationId, scope.projectId, fingerprint]
+    const row = await new FireblocksCsrRepository(getDb(c.env)).claimForRegistration(
+      scope,
+      input.signingKeyId,
+      fingerprint
     );
-    if (!row?.encrypted_private_key) throw notFound("Available Fireblocks CSR");
+    if (!row) throw notFound("Available Fireblocks CSR");
     const secret = JSON.parse(
       await createCustodyCipher(c.env).decrypt(scope.organizationId, row.encrypted_private_key)
     );
@@ -217,27 +192,16 @@ export async function retireFireblocksCsr(
   if (!("signingKeyId" in fields) || isProviderCredentialCreationInProgress(credential.status))
     return;
   const auth = getAuth(c);
-  await getDb(c.env).execute(
-    `UPDATE fireblocks_csr_requests SET status = 'archived', encrypted_private_key = NULL, consumed_at = sdp_iso_now()
-     WHERE id = ? AND organization_id = ? AND project_id = ?
-       AND EXISTS (SELECT 1 FROM provider_credentials WHERE id = ? AND organization_id = ?
-         AND (encrypted_secret_payload IS NOT NULL OR secret_version_ref IS NOT NULL))`,
-    [
-      fields.signingKeyId,
-      auth.organizationId,
-      requireProjectId(c),
-      credential.id,
-      auth.organizationId,
-    ]
+  await new FireblocksCsrRepository(getDb(c.env)).retire(
+    { organizationId: auth.organizationId, projectId: requireProjectId(c) },
+    fields.signingKeyId,
+    credential.id
   );
 }
 
 /** Called by the existing secret-retirement worker; bounded and idempotent. */
 export async function eraseExpiredFireblocksCsrs(db: DatabaseClient): Promise<void> {
-  await db.execute(`UPDATE fireblocks_csr_requests SET status = 'archived', encrypted_private_key = NULL
-    WHERE id IN (SELECT id FROM fireblocks_csr_requests
-      WHERE encrypted_private_key IS NOT NULL AND expires_at <= sdp_iso_now()
-      ORDER BY expires_at LIMIT 100 FOR UPDATE SKIP LOCKED)`);
+  await new FireblocksCsrRepository(db).eraseExpired();
 }
 
 /** Authenticated discovery uses only this project's unconsumed registration key. */
@@ -252,14 +216,11 @@ export async function discoverFireblocksVaults(
 ) {
   const scope = await admitFireblocksRegistration(c);
   await enforceMeteredQuota(c, { name: "fireblocks-vault-discovery", actorMax: 30, orgMax: 100 });
-  const row = await getDb(c.env).queryOne<CsrRow>(
-    `SELECT id, encrypted_private_key FROM fireblocks_csr_requests
-     WHERE id = ? AND organization_id = ? AND project_id = ?
-       AND status = 'active' AND encrypted_private_key IS NOT NULL AND claim_fingerprint IS NULL
-       AND expires_at > sdp_iso_now()`,
-    [input.signingKeyId, scope.organizationId, scope.projectId]
+  const row = await new FireblocksCsrRepository(getDb(c.env)).getForDiscovery(
+    scope,
+    input.signingKeyId
   );
-  if (!row?.encrypted_private_key) throw notFound("Available Fireblocks CSR");
+  if (!row) throw notFound("Available Fireblocks CSR");
   const secret = JSON.parse(
     await createCustodyCipher(c.env).decrypt(scope.organizationId, row.encrypted_private_key)
   );

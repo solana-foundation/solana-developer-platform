@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
 import { runWithTenantDatabaseIdentity } from "@/db/identity";
+import { FireblocksCsrRepository } from "@/db/repositories/fireblocks-csr.repository";
 import { verifyClerkJwt } from "@/lib/clerk-token";
 import { AppError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
@@ -470,6 +471,31 @@ describe("Fireblocks BYOK lifecycle", () => {
 });
 
 describe("Fireblocks CSR security", () => {
+  it("keeps repository reads, claims and retirement bound to the CSR's project and tenant", async () => {
+    providerResponse();
+    const connected = await connect();
+    const { signingKeyId } = await newRegistration();
+    const repo = new FireblocksCsrRepository(getDb(env));
+    const scope = { organizationId: ORGANIZATION_ID, projectId: PROJECT_ID };
+    const original = await repo.getForDiscovery(scope, signingKeyId);
+    expect(original).not.toBeNull();
+    for (const other of [
+      { ...scope, projectId: `${PROJECT_ID}_production` },
+      { ...scope, organizationId: "org_another" },
+    ]) {
+      expect(await repo.getForDiscovery(other, signingKeyId)).toBeNull();
+      expect(await repo.claimForRegistration(other, signingKeyId, "another-request")).toBeNull();
+      await repo.retire(other, signingKeyId, connected.providerCredential.id);
+      expect(await repo.getForDiscovery(scope, signingKeyId)).toEqual(original);
+    }
+    expect(await repo.claimForRegistration(scope, signingKeyId, "owner-request")).toEqual(original);
+    expect(await repo.claimForRegistration(scope, signingKeyId, "other-request")).toBeNull();
+    expect(await repo.claimForRegistration(scope, signingKeyId, "owner-request")).toEqual(original);
+    expect(await repo.getForDiscovery(scope, signingKeyId)).toBeNull();
+    await repo.retire(scope, signingKeyId, connected.providerCredential.id);
+    expect(await repo.claimForRegistration(scope, signingKeyId, "owner-request")).toBeNull();
+  });
+
   it("returns only public material, encrypts the key, and isolates projects and tenants", async () => {
     const response = await request("/fireblocks/csr");
     const { data } = await response.json();

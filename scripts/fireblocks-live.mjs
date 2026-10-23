@@ -6,7 +6,7 @@ import { link, mkdir, open, readFile, unlink, writeFile } from "node:fs/promises
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
-import { SOL_MINT } from "../packages/sdp-types/src/well-known-tokens.ts";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 
 // biome-ignore lint/security/noSecrets: Public Solana mainnet genesis hash.
 const MAINNET_GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
