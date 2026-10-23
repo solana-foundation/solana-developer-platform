@@ -398,14 +398,24 @@ describe("reconcilePaymentRequest", () => {
   });
 
   it.for([
-    { reason: "not confirmed", status: null },
-    { reason: "not finalized", status: CONFIRMED_ONLY },
+    {
+      reason: "not confirmed",
+      setup: () => {
+        mockStatus(null);
+        validateTransferSpy.mockResolvedValue(validatedTransfer(null));
+      },
+      validated: false,
+    },
+    {
+      reason: "not indexed",
+      setup: () => mockUnindexed(SIGNATURE, async () => validatedTransfer(null)),
+      validated: true,
+    },
   ])(
     "asks the payer to retry instead of answering payable while a candidate is $reason",
-    async ({ status }) => {
+    async ({ setup, validated }) => {
       mockSignatures(signatureInfo(SIGNATURE, { blockTime: null, err: null }));
-      mockStatus(status);
-      validateTransferSpy.mockResolvedValue(validatedTransfer(null));
+      setup();
       const setRetryAfter = vi.fn();
       const request = await createRequest({ token: SOL_MINT, expiresAt: null });
 
@@ -416,7 +426,7 @@ describe("reconcilePaymentRequest", () => {
 
       expect(setRetryAfter).toHaveBeenCalledWith(expect.any(Number));
       expect(setRetryAfter.mock.calls[0]?.[0]).toBeGreaterThan(0);
-      expect(validateTransferSpy).not.toHaveBeenCalled();
+      expect(validateTransferSpy).toHaveBeenCalledTimes(validated ? 1 : 0);
       expect(await listInboundTransfers()).toHaveLength(0);
       expect(await readStored(request.id)).toMatchObject({ status: "awaiting_payment" });
     }
@@ -751,6 +761,28 @@ describe("settlement audit", () => {
         metadata: expect.objectContaining({ fromStatus: "expired", paidLate: true }),
       },
     ]);
+  });
+});
+
+describe("verified check stamp", () => {
+  installSettlementHooks();
+
+  it("stamps last_verified_at when a payer-path check settles the request", async () => {
+    mockSettlementSucceeds(null);
+    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+
+    await reconcileOnSandbox(request);
+
+    expect((await readStored(request.id)).last_verified_at).not.toBeNull();
+  });
+
+  it("stamps last_verified_at when the expiry lane stores expired", async () => {
+    mockNoSignatures();
+    const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
+
+    await onSandbox(() => closeLapsedPaymentRequest(env, request));
+
+    expect((await readStored(request.id)).last_verified_at).not.toBeNull();
   });
 });
 

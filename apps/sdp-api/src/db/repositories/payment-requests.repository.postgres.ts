@@ -151,6 +151,7 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
                    jsonb_build_object('status', ?::text, 'at', sdp_iso_now())
                  ),
                  last_checked_at = sdp_iso_now(),
+                 last_verified_at = sdp_iso_now(),
                  updated_at = sdp_iso_now()
            WHERE id = ?
              AND organization_id = ?
@@ -433,6 +434,7 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
                    jsonb_build_object('status', 'paid', 'at', sdp_iso_now())
                  ),
                  last_checked_at = sdp_iso_now(),
+                 last_verified_at = sdp_iso_now(),
                  updated_at = sdp_iso_now()
            WHERE id = ?
              AND organization_id = ?

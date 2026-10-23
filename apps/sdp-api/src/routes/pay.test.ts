@@ -21,6 +21,7 @@ import { getTransferSolInstruction } from "@solana-program/system";
 import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
+import * as repositoryFactory from "@/db/repositories/repository-factory";
 import {
   createPaymentRequestsRepository,
   createSystemPaymentRequestsRepository,
@@ -496,6 +497,33 @@ describe("Public payment request routes", () => {
       const replay = await postTransaction(request.public_token);
       expect(replay.status).toBe(400);
       expect(await replay.json()).not.toHaveProperty("transaction");
+    });
+
+    it("answers no longer payable when the claim is lost to the deadline", async () => {
+      const sponsorship = stubSponsorship();
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+      const systemRepository = repositoryFactory.createSystemPaymentRequestsRepository;
+      const factory = vi
+        .spyOn(repositoryFactory, "createSystemPaymentRequestsRepository")
+        .mockImplementation((bindings) => {
+          const repository = systemRepository(bindings);
+          vi.spyOn(repository, "claimSponsoredTransactionWindow").mockResolvedValue(false);
+          return repository;
+        });
+      onTestFinished(() => factory.mockRestore());
+      const expiry = vi
+        .spyOn(paymentRequests, "isPaymentRequestExpired")
+        .mockReturnValueOnce(false)
+        .mockReturnValue(true);
+      onTestFinished(() => expiry.mockRestore());
+
+      const response = await postTransaction(request.public_token);
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: { message: "Payment request is no longer payable" },
+      });
+      expect(sponsorship).toHaveBeenCalledTimes(1);
     });
 
     it("lets a new account claim after the window expires", async () => {
