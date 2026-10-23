@@ -1,5 +1,5 @@
 import type { SdpEnvironment } from "@sdp/types/api-keys";
-import { address } from "@solana/kit";
+import { address, type Slot } from "@solana/kit";
 import { z } from "zod";
 import { earnClusterRpc } from "@/services/earn/cluster-rpc";
 import { earnClusterFor } from "@/services/earn/execution-registry";
@@ -31,6 +31,7 @@ export interface OwnerMintBalance {
 }
 
 const mintFilteredTokenAccountsResponseSchema = z.object({
+  context: z.object({ slot: z.bigint() }),
   value: z.array(
     z.object({
       account: z.object({
@@ -52,16 +53,32 @@ const mintFilteredTokenAccountsResponseSchema = z.object({
   ),
 });
 
+/**
+ * @param environment - The environment whose cluster holds the balance.
+ * @param ownerAddress - The wallet whose accounts are summed.
+ * @param mint - The one mint to sum.
+ * @param options - `minContextSlot`: the lowest slot the answering node may be at. A node behind it
+ * errors instead of answering (and the pool tries the next endpoint), so a balance judged against a
+ * height read can never come from a node that predates that height.
+ * @returns The summed atoms and the mint's decimals.
+ * @throws Error when the response is malformed, out of scope, or answered below `minContextSlot`.
+ */
 export async function readOwnerMintBalance(
   environment: SdpEnvironment,
   ownerAddress: string,
-  mint: string
+  mint: string,
+  options?: { minContextSlot: Slot }
 ): Promise<OwnerMintBalance> {
+  const minContextSlot = options?.minContextSlot;
   const response = await earnClusterRpc(earnClusterFor(environment))
     .getTokenAccountsByOwner(
       address(ownerAddress),
       { mint: address(mint) },
-      { encoding: "jsonParsed", commitment: "confirmed" }
+      {
+        encoding: "jsonParsed",
+        commitment: "confirmed",
+        ...(minContextSlot === undefined ? {} : { minContextSlot }),
+      }
     )
     .send();
   const parsed = mintFilteredTokenAccountsResponseSchema.safeParse(response);
@@ -69,6 +86,12 @@ export async function readOwnerMintBalance(
     throw new Error("Mint-filtered token-account RPC response was malformed", {
       cause: parsed.error,
     });
+  }
+  if (minContextSlot !== undefined && parsed.data.context.slot < minContextSlot) {
+    throw new Error(
+      `Mint-filtered token-account RPC answered at slot ${parsed.data.context.slot}, ` +
+        `below its floor ${minContextSlot}`
+    );
   }
 
   let atoms = 0n;

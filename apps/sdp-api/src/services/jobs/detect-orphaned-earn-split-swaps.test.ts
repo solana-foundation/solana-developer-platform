@@ -10,13 +10,18 @@ import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
-const getBlockHeight = vi.hoisted(() => vi.fn());
+const confirmedHeight = vi.hoisted(() => vi.fn());
+const HEIGHT_SLOT = vi.hoisted(() => 777n);
 const readOwnerMintBalance = vi.hoisted(() => vi.fn());
 const logEvent = vi.hoisted(() => vi.fn());
 
 vi.mock("@/services/earn/cluster-rpc", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/earn/cluster-rpc")>()),
-  earnClusterRpc: () => ({ getBlockHeight: () => ({ send: getBlockHeight }) }),
+  earnClusterRpc: () => ({
+    getEpochInfo: () => ({
+      send: async () => ({ blockHeight: await confirmedHeight(), absoluteSlot: HEIGHT_SLOT }),
+    }),
+  }),
 }));
 vi.mock("@/services/earn/owner-token-balance", () => ({ readOwnerMintBalance }));
 vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
@@ -60,7 +65,7 @@ beforeEach(async () => {
     ids: { sandbox: PROJECT, production: `${PROJECT}_production` },
   });
   // The swap's blockhash is long expired by default; judgement is on.
-  getBlockHeight.mockResolvedValue(10_000n);
+  confirmedHeight.mockResolvedValue(10_000n);
 });
 
 function advisories() {
@@ -215,6 +220,10 @@ describe("detectOrphanedEarnSplitSwaps", () => {
     });
     expect(tick().level).toBe("info");
     expect(tick().payload).toMatchObject({ checked: 1, orphaned: 1, open_backlog: 1 });
+    // The balance read must come from a node at least as current as the height read.
+    expect(readOwnerMintBalance).toHaveBeenCalledWith("sandbox", OWNER, USDC, {
+      minContextSlot: HEIGHT_SLOT,
+    });
     // Stays open, stamped, and reported again on the next visit.
     const row = await advisoryRow(id);
     expect(row?.resolved_at).toBeNull();
@@ -420,24 +429,34 @@ describe("detectOrphanedEarnSplitSwaps", () => {
     expect(tick().payload).toMatchObject({ pending: 2, orphaned: 0 });
   });
 
-  it("fails the tick loudly when the balance read is unavailable", async () => {
-    const id = await seedAdvisory(2 * HOUR);
-    readOwnerMintBalance.mockRejectedValue(new Error("rpc unavailable"));
+  it.each([
+    ["is unavailable", "rpc unavailable"],
+    // A node behind the height read's slot could predate a landed swap.
+    [
+      "comes from a node behind the height's slot",
+      "Mint-filtered token-account RPC answered at slot 776, below its floor 777",
+    ],
+  ])(
+    "fails the tick loudly and judges nothing when the balance read %s",
+    async (_label, message) => {
+      const id = await seedAdvisory(2 * HOUR);
+      readOwnerMintBalance.mockRejectedValue(new Error(message));
 
-    await expect(detectOrphanedEarnSplitSwaps(env)).rejects.toThrow(/1 balance failures/);
+      await expect(detectOrphanedEarnSplitSwaps(env)).rejects.toThrow(/1 balance failures/);
 
-    expect(tick().level).toBe("error");
-    expect(tick().payload).toMatchObject({ balance_read_failures: 1 });
-    expect(logEvent).toHaveBeenCalledWith(
-      "error",
-      expect.objectContaining({
-        event: "sdp_api_earn_split_swap_balance_read_failed",
-        advisory_id: id,
-        error_message: "rpc unavailable",
-      })
-    );
-    expect((await advisoryRow(id))?.resolved_at).toBeNull();
-  });
+      expect(tick().level).toBe("error");
+      expect(tick().payload).toMatchObject({ balance_read_failures: 1 });
+      expect(logEvent).toHaveBeenCalledWith(
+        "error",
+        expect.objectContaining({
+          event: "sdp_api_earn_split_swap_balance_read_failed",
+          advisory_id: id,
+          error_message: message,
+        })
+      );
+      expect((await advisoryRow(id))?.resolved_at).toBeNull();
+    }
+  );
 
   it("refuses to judge atoms of a different scale", async () => {
     await seedAdvisory(2 * HOUR);
@@ -454,7 +473,7 @@ describe("detectOrphanedEarnSplitSwaps", () => {
 
   it("fails the tick when the block height cannot be read, leaving every advisory open", async () => {
     const id = await seedAdvisory(2 * HOUR);
-    getBlockHeight.mockRejectedValue(new Error("rpc unavailable"));
+    confirmedHeight.mockRejectedValue(new Error("rpc unavailable"));
 
     await expect(detectOrphanedEarnSplitSwaps(env)).rejects.toThrow(/1 block-height/);
 
@@ -468,7 +487,7 @@ describe("detectOrphanedEarnSplitSwaps", () => {
 
     expect(tick().level).toBe("info");
     expect(tick().payload).toMatchObject({ checked: 0, open_backlog: 0 });
-    expect(getBlockHeight).not.toHaveBeenCalled();
+    expect(confirmedHeight).not.toHaveBeenCalled();
   });
 
   it("rotates the scan so a standing orphan cannot pin the head of the queue", async () => {

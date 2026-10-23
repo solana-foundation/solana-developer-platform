@@ -79,7 +79,9 @@ export function earnPoolNotConfigured(cluster: SolanaCluster): SdpEarnError {
  * @param cluster - The cluster the endpoint must serve.
  * @param rpcUrl - One of `earnProviderEndpointUrls(cluster)`.
  * @throws SdpEarnError `PROVIDER_NOT_CONFIGURED` when the probe fails or the endpoint serves
- * another cluster.
+ * another cluster. A failed probe keeps its error as the cause, so the provider failover can
+ * tell a transient one (node unhealthy, timeout) and try the next endpoint; a cluster mismatch
+ * carries none and stops it.
  */
 export async function assertClusterEndpoint(cluster: SolanaCluster, rpcUrl: string): Promise<void> {
   try {
@@ -95,7 +97,8 @@ export async function assertClusterEndpoint(cluster: SolanaCluster, rpcUrl: stri
     }
     throw providerNotConfigured(
       `Could not verify that the configured ${cluster} RPC endpoint serves ${cluster}: ` +
-        `${cause instanceof Error ? cause.message : String(cause)}`
+        `${cause instanceof Error ? cause.message : String(cause)}`,
+      { cause }
     );
   }
 }

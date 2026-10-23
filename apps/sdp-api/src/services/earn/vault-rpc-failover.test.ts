@@ -68,6 +68,37 @@ describe("Earn RPC fallback", () => {
     expect(probedUrls).toEqual([primary, fallback]);
   });
 
+  it("fails over past a primary whose genesis probe answers node-unhealthy", async () => {
+    // A code-classified failure: its message matches no transient text, so only the probe
+    // error kept as the cause tells the failover that the next endpoint could succeed.
+    vi.stubGlobal("fetch", async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const { id, method } = parseJsonRpcRequest(init);
+      if (method !== "getGenesisHash") throw new Error(`Unexpected ${method}`);
+      const url = String(input);
+      probedUrls.push(url);
+      if (url === primary) {
+        return Response.json({
+          jsonrpc: "2.0",
+          id,
+          error: { code: -32005, message: "Node is unhealthy", data: { numSlotsBehind: 900 } },
+        });
+      }
+      return Response.json({ jsonrpc: "2.0", id, result: genesisFor(url) });
+    });
+    const rpc = createVaultRpcFailover(createVaultDeadline(), assertClusterEndpoint);
+    const visited: string[] = [];
+
+    const result = await rpc.run("Read vault", async () => {
+      const url = await rpc.resolve(runtime, "devnet");
+      visited.push(url);
+      return "verified vault state";
+    });
+
+    expect(result).toBe("verified vault state");
+    expect(visited).toEqual([fallback]);
+    expect(probedUrls).toEqual([primary, fallback]);
+  });
+
   it("draws only the requested cluster's pool, never the process default", async () => {
     vi.stubEnv("SOLANA_NETWORK", "devnet");
     vi.stubEnv("SOLANA_RPC_URL", "https://process-default.failover.test");
