@@ -163,11 +163,17 @@ export const quoteTokenAmountRequestSchema = z
       example: "debit",
     }),
   })
-  .openapi({ description: "An amount to price under the mint's live terms." });
+  .openapi({
+    description:
+      "An amount to price under the mint's live terms: exactly one of `amount` (token units) or `displayAmount` (what the mint's wallets show), with an optional `basis`. A body with both, or neither, is a 400.",
+    example: { amount: "100", basis: "debit" },
+  });
 
 export const tokenAmountQuoteSchema = z
   .object({
-    mint: solanaAddressSchema,
+    mint: solanaAddressSchema.openapi({
+      example: WELL_KNOWN_TOKENS.PYUSD.mints["mainnet-beta"].address,
+    }),
     amount: z.string().openapi({
       description: `The token amount the quote prices, in ${TOKEN_UNITS}: \`amount\` as sent, or \`displayAmount\` converted. Send this amount, with the same basis, on the request that moves it.`,
       example: "100",
