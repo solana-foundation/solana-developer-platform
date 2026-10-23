@@ -70,7 +70,7 @@ describe("Payments write requests", () => {
 
   it("names a token by its mint and native SOL by symbol, for a transfer and a batch", async () => {
     const fetch = vi
-      .fn()
+      .fn<(path: string, init: RequestInit) => Promise<Response>>()
       .mockResolvedValueOnce(
         jsonResponse({ data: { transfer: { id: "trf_1", status: "pending", signature: null } } })
       )
@@ -88,9 +88,7 @@ describe("Payments write requests", () => {
       t
     );
 
-    const tokens = fetch.mock.calls.map(
-      ([, init]) => JSON.parse(String((init as RequestInit).body)).token
-    );
+    const tokens = fetch.mock.calls.map(([, init]) => JSON.parse(String(init.body)).token);
     expect(tokens).toEqual([usdc, "SOL"]);
   });
 
