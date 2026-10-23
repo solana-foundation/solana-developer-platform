@@ -49,6 +49,8 @@ const KNOWN_ORGANIZATION = { id: "org_webhook_known", slug: "webhook-known" };
 const KNOWN_CLERK_ORG_ID = `clerk_org_${KNOWN_ORGANIZATION.id}`;
 const KNOWN_ADMIN = organizationMember("webhook_known_admin", "admin");
 const OUTSIDER = organizationMember("webhook_outsider", "member");
+const OLD_CLERK_USER_ID = `clerk_user_${KNOWN_ADMIN.userId}`;
+const NEW_CLERK_USER_ID = `clerk_user_${KNOWN_ADMIN.userId}_new`;
 
 async function seedKnownOrganization(): Promise<void> {
   const db = getDb(env);
@@ -212,6 +214,61 @@ describe("Clerk webhooks", () => {
       expect(
         await readAuditActions(getDb(env), { type: "member", id: KNOWN_ADMIN.memberId })
       ).toEqual(auditActions);
+    }
+  );
+  it.each([
+    {
+      type: "organizationMembership.deleted",
+      data: {
+        id: `orgmem_${OLD_CLERK_USER_ID}`,
+        organization: { id: KNOWN_CLERK_ORG_ID, name: KNOWN_ORGANIZATION.slug },
+        role: "org:admin",
+        public_user_data: { user_id: OLD_CLERK_USER_ID },
+      },
+      clerkAnswers: [
+        { clerkUserId: OLD_CLERK_USER_ID, totalCount: 0 },
+        { clerkUserId: OLD_CLERK_USER_ID, totalCount: 0 },
+        { clerkUserId: NEW_CLERK_USER_ID, totalCount: 1 },
+      ],
+    },
+    {
+      type: "user.deleted",
+      data: { id: OLD_CLERK_USER_ID, object: "user", deleted: true },
+      clerkAnswers: [{ clerkUserId: NEW_CLERK_USER_ID, totalCount: 1 }],
+    },
+  ])(
+    "$type naming a person's old Clerk user keeps the membership their new Clerk user holds",
+    async ({ type, data, clerkAnswers }) => {
+      await seedKnownOrganization();
+      await getDb(env).execute(
+        `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
+         VALUES (?, 'clerk', ?, ?, ?)`,
+        ["aui_webhook_known_admin_new", NEW_CLERK_USER_ID, KNOWN_ADMIN.userId, KNOWN_ADMIN.email]
+      );
+      const clerk = stubClerkBackend(env);
+      clerk.answer(
+        ...clerkAnswers.map(({ totalCount }) => ({
+          status: 200,
+          body: { data: [], total_count: totalCount },
+        }))
+      );
+
+      const response = await simulateClerkWebhook({ type, data });
+
+      expect(response.status).toBe(200);
+      expect(clerk.requests).toEqual(
+        clerkAnswers.map(({ clerkUserId }) => ({
+          method: "GET",
+          path: `/organizations/${KNOWN_CLERK_ORG_ID}/memberships?user_id=${clerkUserId}`,
+          body: null,
+        }))
+      );
+      expect(await knownOrganizationMemberships()).toEqual([
+        { user_id: KNOWN_ADMIN.userId, role: "admin", status: "active" },
+      ]);
+      expect(
+        await readAuditActions(getDb(env), { type: "member", id: KNOWN_ADMIN.memberId })
+      ).toEqual([]);
     }
   );
   it("user.deleted removes every membership of the linked user without asking Clerk", async () => {
