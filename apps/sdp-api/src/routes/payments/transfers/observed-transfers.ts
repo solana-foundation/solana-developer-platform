@@ -133,7 +133,11 @@ export interface ObservedTransfer {
 interface ObservedMove {
   /** The instruction's position, from flattenParsedInstructions. */
   position: string;
-  walletId: string;
+  /**
+   * The tracked wallet the move belongs to; null for a move between accounts
+   * no tracked wallet owns, read only to check balance changes.
+   */
+  walletId: string | null;
   direction: TransferDirection;
   asset: AssetRef;
   /** The row's `token`: the mint, or the wrapped SOL mint for native SOL. */
@@ -620,9 +624,6 @@ function readObservedMoves(
       const sourceWalletId = context.walletIdsByAddress.get(sourceAddress) ?? null;
       const destinationWalletId = context.walletIdsByAddress.get(destinationAddress) ?? null;
       const walletId = sourceWalletId ?? destinationWalletId;
-      if (!walletId) {
-        continue;
-      }
       moves.push({
         position,
         walletId,
@@ -659,9 +660,6 @@ function readObservedMoves(
         destinationTokenAccount,
         destinationOwner
       );
-      if (!destinationWalletId) {
-        continue;
-      }
       const tokenAmount = readTokenAmountInfo(info, "tokenAmount");
       const decimals = tokenAmount?.decimals ?? destinationTokenMetadata?.decimals ?? null;
       const rawAmount = u64OrNull(
@@ -714,9 +712,6 @@ function readObservedMoves(
       destinationOwner
     );
     const walletId = sourceWalletId ?? destinationWalletId;
-    if (!walletId) {
-      continue;
-    }
 
     const tokenAmount = readTokenAmountInfo(info, "tokenAmount");
     const decimals =
@@ -878,12 +873,18 @@ function observedMovements(
     if (delta === expected) {
       return movement(split(stated(move.statedFee)), CHAIN_DELTA_MATCHED);
     }
+    // Only a Token-2022 mint can withhold a fee, and every move into and out
+    // of the account is counted (tracked wallet or not), so the shortfall is it.
+    // The whole debit can be withheld: fees round up, so a tiny transfer can
+    // credit nothing.
     if (
+      move.asset.kind === "token" &&
+      move.asset.program === "token-2022" &&
       into.length === 1 &&
       outOf.length === 0 &&
       paidFee === 0n &&
       move.statedFee === null &&
-      delta > 0n &&
+      delta >= 0n &&
       delta < move.debit
     ) {
       return movement(split(baseUnits(move.debit - delta)), CHAIN_DELTA_MATCHED);
@@ -920,22 +921,27 @@ function buildObservedTransfers(
     context,
     tokenAccountMetadata(parsedTransaction, accountKeys)
   );
+  // Every move checks the balances; only a tracked wallet's move is a row.
   const movements = observedMovements(parsedTransaction, accountKeys, moves);
 
-  return moves.map((move, index) => {
+  return moves.flatMap((move, index) => {
+    const { walletId } = move;
+    if (walletId === null) {
+      return [];
+    }
     const movement = movements[index];
     // The row's amount is its own wallet's effect: what it received, or what it sent.
     const ownEffect = move.direction === "inbound" ? movement.amounts.credit : move.debit;
     const row: TransferRow = {
       id: observedTransferRowId({
-        walletId: move.walletId,
+        walletId,
         signature,
         position: move.position,
         direction: move.direction,
       }),
       organization_id: context.organizationId,
       project_id: context.projectId,
-      wallet_id: move.walletId,
+      wallet_id: walletId,
       custody_wallet_id: null,
       counterparty_id: null,
       source_address: move.sourceAddress,
@@ -972,7 +978,7 @@ function buildObservedTransfers(
       created_at: timestamp,
       updated_at: timestamp,
     };
-    return { row, movement };
+    return [{ row, movement }];
   });
 }
 
