@@ -307,8 +307,11 @@ function generateTokenMovementLegId(): string {
   return `tml_${crypto.randomUUID()}`;
 }
 
+/** A value a leg statement binds: text (base units travel as decimal text), a number or NULL. */
+export type LegBinding = string | number | null;
+
 /** One leg's values, in `LEG_COLUMNS` order. */
-function legValues(tenant: TenantScope, id: string, leg: NewTokenMovementLeg): unknown[] {
+function legValues(tenant: TenantScope, id: string, leg: NewTokenMovementLeg): LegBinding[] {
   const { quote, owner } = leg;
   const asset = quote.intent.asset;
   const displayRule = storedDisplayRule(quoteDisplayRule(quote));
@@ -346,7 +349,7 @@ export function legVerdictStatement(params: {
   ownerColumn: "payment_transfer_id" | "payment_transfer_recipient_id";
   verdict: AmountVerificationVerdict;
   updatedAt: string;
-}): { cte: string; values: unknown[] } {
+}): { cte: string; values: LegBinding[] } {
   return {
     cte: `settled_legs AS (
       UPDATE token_movement_legs leg
@@ -472,6 +475,7 @@ export function createPostgresTokenMovementLegsRepository(
             AND recipient.project_id = leg.project_id
           WHERE leg.organization_id = ?
             AND leg.project_id = ?
+            AND leg.status <> 'archived'
             AND (leg.payment_transfer_id IN (${placeholders})
                  OR recipient.transfer_id IN (${placeholders}))
           ORDER BY leg.created_at, leg.id`,
@@ -513,6 +517,7 @@ export function createPostgresTokenMovementLegsRepository(
             AND recipient.project_id = leg.project_id
           WHERE leg.organization_id = ?
             AND leg.project_id = ?
+            AND leg.status <> 'archived'
             AND recipient.batch_id IN (${buildInClause(batchIds.length)})
           GROUP BY recipient.batch_id`,
         [tenant.organizationId, projectId, ...batchIds]
@@ -545,6 +550,7 @@ export function createPostgresTokenMovementLegsRepository(
         `SELECT * FROM token_movement_legs
           WHERE organization_id = ?
             AND project_id = ?
+            AND status <> 'archived'
             AND payment_transfer_recipient_id IN (${buildInClause(recipientIds.length)})`,
         [tenant.organizationId, projectId, ...recipientIds]
       );

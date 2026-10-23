@@ -20,6 +20,7 @@ import { seedProjectCryptoWalletCounterparty } from "@/test/helpers/counterparti
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { required } from "@/test/helpers/required";
 import { nativeQuote, transferFeeExtension } from "@/test/helpers/token-movement";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { createPostgresPaymentTransferBatchesRepository } from "./payment-transfer-batches.repository.postgres";
@@ -442,6 +443,90 @@ describe("token movement legs (postgres)", () => {
       fee: 0n,
       credit: 2_000_000_000n,
     });
+  });
+
+  /** A two-recipient native SOL batch whose recipients each have a leg. */
+  async function recipientBatch() {
+    await seedProjectCryptoWalletCounterparty(db(), {
+      organizationId: TEST_ORG.id,
+      projectId: PROJECT_ID,
+      createdBy: TEST_USER.id,
+      counterpartyId: "cpty_legs",
+      counterpartyAccountId: "cpacct_legs",
+      walletAddress: "Dest111",
+    });
+    const batches = createPostgresPaymentTransferBatchesRepository(db());
+    const recipient = (amount: string) => ({
+      organizationId: TEST_ORG.id,
+      projectId: PROJECT_ID,
+      externalId: null,
+      counterpartyId: "cpty_legs",
+      counterpartyAccountId: "cpacct_legs",
+      destinationAddress: "Dest111",
+      quote: nativeQuote(amount, "debit"),
+      status: "pending" as const,
+      error: null,
+    });
+    const { recipients } = await batches.createTransferBatchWithRecipients({
+      batch: {
+        organizationId: TEST_ORG.id,
+        projectId: PROJECT_ID,
+        sourceCustodyWalletId: CUSTODY_WALLET_ID,
+        sourceWalletId: WALLET_ID,
+        sourceAddress: "Source111",
+        token: "So11111111111111111111111111111111111111112",
+        status: "processing",
+        recipientCount: 2,
+        transactionCount: 1,
+      },
+      recipients: [recipient("1.25"), recipient("0.75")],
+    });
+    return { batches, recipientIds: recipients.map((row) => row.id) };
+  }
+
+  it("fails recipients no chunk carried together with their legs", async () => {
+    const { batches, recipientIds } = await recipientBatch();
+
+    const failed = await batches.updateTransferRecipientsStatus({
+      recipientIds,
+      organizationId: TEST_ORG.id,
+      projectId: PROJECT_ID,
+      transferId: null,
+      status: "failed",
+      error: "Simulation failed",
+    });
+
+    expect(failed.map((row) => row.status)).toEqual(["failed", "failed"]);
+    const byRecipient = await legs().listLegsByRecipients(recipientIds);
+    expect(recipientIds.map((id) => required(byRecipient.get(id)).verification)).toEqual([
+      { state: "not_required", reason: "movement_not_executed" },
+      { state: "not_required", reason: "movement_not_executed" },
+    ]);
+  });
+
+  it("archives a recipient's leg with it", async () => {
+    const { batches, recipientIds } = await recipientBatch();
+    const [archivedId, keptId] = recipientIds;
+
+    const archived = await batches.deleteTransferRecipient({
+      recipientId: archivedId,
+      organizationId: TEST_ORG.id,
+      projectId: PROJECT_ID,
+    });
+
+    expect(required(archived).status).toBe("archived");
+    const byRecipient = await legs().listLegsByRecipients(recipientIds);
+    expect([...byRecipient.keys()]).toEqual([keptId]);
+    const statuses = await db()
+      .prepare(
+        "SELECT payment_transfer_recipient_id AS id, status FROM token_movement_legs WHERE payment_transfer_recipient_id = ANY(?::text[]) ORDER BY status"
+      )
+      .bind(recipientIds)
+      .all<{ id: string; status: string }>();
+    expect(statuses.results).toEqual([
+      { id: keptId, status: "active" },
+      { id: archivedId, status: "archived" },
+    ]);
   });
 
   it("reads no leg of another project's transfer", async () => {
