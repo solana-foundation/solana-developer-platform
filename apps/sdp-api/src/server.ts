@@ -18,6 +18,7 @@ import { assertCronConfig, type CronHandle, startCron } from "@/cron/runner";
 import { parseDatabaseEnv } from "@/db/database-env";
 import { warmClerkSigningKeys } from "@/lib/clerk-token";
 import { assertSdpReleaseChannelConfigured } from "@/lib/feature-flags";
+import { resolveGatewayIdentityConfig } from "@/lib/gateway-identity";
 import { getProcessEnv, isSelfHostedDeployment } from "@/lib/runtime-env";
 import { createNodeExecutionContext, NodeBackgroundRunner } from "@/runtime/background-node";
 import { startEgressGate } from "@/runtime/egress-gate";
@@ -117,6 +118,7 @@ export function assertRequiredEnv(env: Env): void {
   if (!env.API_KEY_PEPPER?.trim()) {
     throw new Error("API_KEY_PEPPER is required");
   }
+  resolveGatewayIdentityConfig(env);
   parseDatabaseEnv(env);
   assertCustodyEncryptionScheme(env);
   assertSigningProviderAllowed(env);

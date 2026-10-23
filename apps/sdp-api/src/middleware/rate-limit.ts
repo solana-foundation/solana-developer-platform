@@ -1,6 +1,6 @@
 import type { RateLimitTier } from "@sdp/types/api-keys";
 import type { Context, Next } from "hono";
-import { extractApiKey, looksLikeApiKey } from "@/lib/api-key-format";
+import { presentsApiKey } from "@/lib/api-key-format";
 import { BoundedLruMap } from "@/lib/bounded-lru";
 import { verifyClerkJwtForRequest } from "@/lib/clerk-token";
 import { getClientIp } from "@/lib/client-ip";
@@ -488,11 +488,8 @@ export function skipRateLimitPaths(...paths: string[]) {
       // limit below, which is what bounds signature-spray against the JWKS check.
     }
 
-    const apiKey = extractApiKey(c);
-    const presentsApiKey = apiKey !== null && looksLikeApiKey(apiKey);
-
     const clientIp = getClientIp(c) ?? "unknown";
-    if (presentsApiKey) {
+    if (presentsApiKey(c)) {
       await enforceRateLimit(c, clientIp, KEYED_IP_BACKSTOP_MAX_REQUESTS, {
         fallback: keyedIpBackstopFallback,
       });

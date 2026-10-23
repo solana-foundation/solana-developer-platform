@@ -53,6 +53,14 @@ export function resolveClientIp(
   return forwarded[0] ?? null;
 }
 
+/**
+ * The client IP for this request: the gateway's verified `client_ip` when it
+ * forwarded the request (HOO-2256), else the trusted proxy's.
+ */
 export function getClientIp(c: Context<{ Bindings: Env }>): string | null {
+  const gatewayIdentity = c.get("gatewayIdentity");
+  if (gatewayIdentity) {
+    return gatewayIdentity.clientIp;
+  }
   return resolveClientIp({ get: (name) => c.req.header(name) ?? null }, c.env ?? {});
 }

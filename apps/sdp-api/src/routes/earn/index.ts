@@ -1,5 +1,5 @@
 import { type Context, Hono, type Next } from "hono";
-import { extractApiKey, looksLikeApiKey } from "@/lib/api-key-format";
+import { presentsApiKey } from "@/lib/api-key-format";
 import { AppError } from "@/lib/errors";
 import { isEarnEnabled } from "@/lib/feature-flags";
 import { optionalAuth, unifiedAuthMiddleware } from "@/middleware/auth";
@@ -125,11 +125,11 @@ earnRoutes.use("*", requireEarnFeature);
 const tryApiKey = optionalAuth({ rejectInvalid: true });
 const tryClerk = optionalClerkAuth({ rejectInvalid: true });
 async function optionalEarnAuth(c: Context<{ Bindings: Env }>, next: Next) {
-  const presentedApiKey = extractApiKey(c);
+  const presentedApiKey = presentsApiKey(c);
   await tryApiKey(c, async () => {
-    // Do not reinterpret an sk_-shaped token as Clerk auth. Unknown, revoked,
+    // Do not reinterpret a key-shaped token as Clerk auth. Unknown, revoked,
     // or expired keys were already rejected by strict optional auth.
-    if (c.get("apiKey") || (presentedApiKey && looksLikeApiKey(presentedApiKey))) {
+    if (c.get("apiKey") || presentedApiKey) {
       await next();
       return;
     }

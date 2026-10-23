@@ -1,0 +1,140 @@
+import { isIP } from "node:net";
+import { createRemoteJWKSet, errors, jwtVerify } from "jose";
+import { z } from "zod";
+import type { Env } from "@/types/env";
+
+/**
+ * The Foundation API gateway's signed caller identity (HOO-2256).
+ *
+ * The gateway authenticates the caller (an `sf_` key or a Clerk session),
+ * then forwards the request with `X-SF-Identity`: an ES256 JWT, valid for 60
+ * seconds, signed by the gateway's JWKS. SDP keeps its own authorization
+ * (grants, wallet bindings, row-level security); the identity only says who
+ * the caller is and where the request came from.
+ *
+ * Until the gateway fronts every request, both paths are accepted: a request
+ * with a verified identity, and a request that presents its key directly. The
+ * header is read only when `SF_GATEWAY_ISSUER` and `SF_GATEWAY_JWKS_URL` are
+ * set; without them it is caller-chosen and ignored.
+ */
+export const GATEWAY_IDENTITY_HEADER = "X-SF-Identity";
+
+/** The app the gateway names SDP by; a token minted for another app is refused. */
+export const GATEWAY_AUDIENCE = "sdp";
+
+const GATEWAY_MAX_TOKEN_AGE_SECONDS = 60;
+const GATEWAY_CLOCK_TOLERANCE_SECONDS = 5;
+
+const claimsSchema = z
+  .object({
+    project_id: z.string().min(1),
+    key_id: z
+      .string()
+      .regex(/^[0-9a-f]{16}$/)
+      .optional(),
+    clerk_user_id: z.string().min(1).optional(),
+    plan: z.string().min(1).optional(),
+    client_ip: z.string().refine((value) => isIP(value) !== 0, "client_ip must be an IP address"),
+    request_id: z.string().min(1).optional(),
+  })
+  .refine((claims) => (claims.key_id === undefined) !== (claims.clerk_user_id === undefined), {
+    message: "exactly one of key_id and clerk_user_id",
+  });
+
+export interface GatewayIdentity {
+  /** The gateway project: the customer team, one per SDP organization. */
+  projectId: string;
+  /** The `sf_` key ID the gateway authenticated, or null for a Clerk session. */
+  keyId: string | null;
+  /** The Clerk user the gateway authenticated, or null for a key. */
+  clerkUserId: string | null;
+  plan: string | null;
+  /** The client address the gateway saw; replaces any forwarding header. */
+  clientIp: string;
+  requestId: string | null;
+}
+
+export interface GatewayIdentityConfig {
+  issuer: string;
+  jwksUrl: string;
+}
+
+/** The configured gateway, or null when no gateway fronts this deployment. */
+export function resolveGatewayIdentityConfig(
+  env: Pick<Env, "SF_GATEWAY_ISSUER" | "SF_GATEWAY_JWKS_URL">
+): GatewayIdentityConfig | null {
+  const issuer = env.SF_GATEWAY_ISSUER?.trim();
+  const jwksUrl = env.SF_GATEWAY_JWKS_URL?.trim();
+  if (!issuer && !jwksUrl) {
+    return null;
+  }
+  if (!issuer || !jwksUrl) {
+    throw new Error("SF_GATEWAY_ISSUER and SF_GATEWAY_JWKS_URL must be set together");
+  }
+  return { issuer, jwksUrl };
+}
+
+/** The gateway's signing keys could not be fetched; nothing about the token is known. */
+export class GatewayKeysUnavailableError extends Error {
+  constructor(options: { cause: unknown }) {
+    super("Gateway signing keys are unavailable", options);
+    this.name = "GatewayKeysUnavailableError";
+  }
+}
+
+const signingKeysCache = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
+
+function getSigningKeys(jwksUrl: string): ReturnType<typeof createRemoteJWKSet> {
+  let keys = signingKeysCache.get(jwksUrl);
+  if (!keys) {
+    keys = createRemoteJWKSet(new URL(jwksUrl));
+    signingKeysCache.set(jwksUrl, keys);
+  }
+  return keys;
+}
+
+/**
+ * Verifies an `X-SF-Identity` token: ES256 only, the configured issuer, the
+ * `sdp` audience, and at most 60 seconds old.
+ *
+ * @throws GatewayKeysUnavailableError when the JWKS cannot be fetched; any
+ *   other error means the token is not a valid identity.
+ */
+export async function verifyGatewayIdentity(
+  token: string,
+  config: GatewayIdentityConfig
+): Promise<GatewayIdentity> {
+  const keys = getSigningKeys(config.jwksUrl);
+  const { payload } = await jwtVerify(
+    token,
+    async (header, input) => {
+      try {
+        return await keys(header, input);
+      } catch (error) {
+        // A failed fetch is not a JOSE error; a key the set lacks is.
+        const unavailable =
+          !(error instanceof errors.JOSEError) ||
+          error instanceof errors.JWKSTimeout ||
+          error instanceof errors.JWKSInvalid;
+        throw unavailable ? new GatewayKeysUnavailableError({ cause: error }) : error;
+      }
+    },
+    {
+      issuer: config.issuer,
+      audience: GATEWAY_AUDIENCE,
+      algorithms: ["ES256"],
+      maxTokenAge: GATEWAY_MAX_TOKEN_AGE_SECONDS,
+      clockTolerance: GATEWAY_CLOCK_TOLERANCE_SECONDS,
+      requiredClaims: ["iat", "exp"],
+    }
+  );
+  const claims = claimsSchema.parse(payload);
+  return {
+    projectId: claims.project_id,
+    keyId: claims.key_id ?? null,
+    clerkUserId: claims.clerk_user_id ?? null,
+    plan: claims.plan ?? null,
+    clientIp: claims.client_ip,
+    requestId: claims.request_id ?? null,
+  };
+}
