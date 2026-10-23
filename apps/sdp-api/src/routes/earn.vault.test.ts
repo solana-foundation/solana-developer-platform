@@ -9,7 +9,9 @@ import { required } from "@/test/helpers/required";
 
 const surfacing = vi.hoisted(() => ({ forceOn: false }));
 /** While set, replaces every deposit floor policy, as a policy change would. */
-const floorPolicy = vi.hoisted(() => ({ forced: null as { defaultToleranceBps: number } | null }));
+const floorPolicy = vi.hoisted((): { forced: { defaultToleranceBps: number } | null } => ({
+  forced: null,
+}));
 
 vi.mock("@sdp/types/provider-access", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@sdp/types/provider-access")>();
@@ -793,7 +795,7 @@ interface DepositStateChange {
   change: string;
   /** The recorded deposit carried no floor, which the policy allowed at the time. */
   floorless: boolean;
-  apply: (strategy: EarnStrategyRow) => unknown;
+  apply: (strategy: EarnStrategyRow) => Promise<void>;
   refusal: { status: number; error: Record<string, unknown> };
 }
 
@@ -804,17 +806,18 @@ describe("POST /v1/earn/vault-deposits: replay before admission (ADR 0009)", () 
     {
       change: "its strategy is paused",
       floorless: false,
-      apply: (strategy) =>
-        getDb(env)
+      apply: async (strategy) => {
+        await getDb(env)
           .prepare("UPDATE earn_strategies SET status = 'paused' WHERE id = ?")
           .bind(strategy.id)
-          .run(),
+          .run();
+      },
       refusal: { status: 400, error: { details: { status: "paused" } } },
     },
     {
       change: "the floor policy starts requiring minSharesOut",
       floorless: true,
-      apply: () => {
+      apply: async () => {
         floorPolicy.forced = { defaultToleranceBps: 10 };
       },
       refusal: {
@@ -825,11 +828,12 @@ describe("POST /v1/earn/vault-deposits: replay before admission (ADR 0009)", () 
     {
       change: "the organization loses the provider entitlement",
       floorless: false,
-      apply: () =>
-        getDb(env)
+      apply: async () => {
+        await getDb(env)
           .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
           .bind(JSON.stringify({ providerOverrides: { earn: { kamino: false } } }), TEST_ORG.id)
-          .run(),
+          .run();
+      },
       refusal: { status: 403, error: { details: { reason: "provider_not_entitled" } } },
     },
   ])("replays a recorded deposit after $change, refusing only new work", async (scenario) => {

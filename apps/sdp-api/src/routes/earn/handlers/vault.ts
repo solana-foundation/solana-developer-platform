@@ -399,7 +399,7 @@ export async function admitEarnVaultDeposit(
   extraction: RequestGateExtraction
 ): Promise<void> {
   // SAFETY: wired only beside extractEarnVaultDeposit in index.ts.
-  const { strategy, environment } = extraction.resolved as EarnVaultDepositResolved;
+  const { strategy } = extraction.resolved as EarnVaultDepositResolved;
   const body = extraction.body as EarnVaultDepositBody;
 
   // The share floor the catalogue promised (`depositSlippage`) is the one the
@@ -410,7 +410,7 @@ export async function admitEarnVaultDeposit(
   // settlement.
   assertDepositFloorPresent(
     strategy.provider,
-    environment,
+    resolveSdpEnvironment(c),
     body.minSharesOut,
     strategy.host_cluster
   );
@@ -446,7 +446,7 @@ export async function admitEarnVaultDeposit(
   // shares it instead of re-deriving it. Money-OUT must never inherit any of
   // these (ADR 0002): un-offering a provider closes the door in, never the
   // door out.
-  await assertVaultDepositAdmissible(c, strategy, body.amount, { environment });
+  await assertVaultDepositAdmissible(c, strategy, body.amount);
 }
 
 /** Check custody execution separately from Earn strategy availability. */
