@@ -971,6 +971,28 @@ describe("verifyRampDeliveries", () => {
       expect(await legOf("xfr_leg_old_fee")).toBeNull();
     });
 
+    it("records the chain's debit and fee for a credit report whose fee entries came after it", async () => {
+      await settleOnramp("xfr_leg_old_fee_credit", PYUSD_MINT, "0.995");
+      getTransactionMock.mockResolvedValue(landedFeeMint("995000", "transferChecked", null));
+      const later = { epoch: 950n, maximumFee: 0n, transferFeeBasisPoints: 0 };
+      readTokenTermsMock.mockResolvedValue(
+        mintTermsAt(PYUSD_MINT, "token-2022", {
+          decimals: 6,
+          extensions: [transferFeeScheduleExtension(later, { ...later, epoch: 960n })],
+        })
+      );
+
+      await sweep();
+
+      expect(await row("xfr_leg_old_fee_credit")).toMatchObject({ status: "completed" });
+      expect(await legOf("xfr_leg_old_fee_credit")).toMatchObject({
+        observed_debit: "1000000",
+        observed_fee: "5000",
+        observed_credit: "995000",
+        verification_state: "verified",
+      });
+    });
+
     it("still holds a short delivery whose fee entries came after it, which no fee could explain", async () => {
       // The quote is 2 PYUSD; the transfer debited 1 and credited 0.995.
       await seedTransfer({

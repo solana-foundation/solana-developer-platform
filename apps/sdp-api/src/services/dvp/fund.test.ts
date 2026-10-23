@@ -44,6 +44,7 @@ import {
 import { env } from "@/test/helpers/env";
 import { required } from "@/test/helpers/required";
 import { mintTermsAt, sentInstructions } from "@/test/helpers/token-movement";
+import * as dvpMints from "./mints";
 
 const createOrgSignerForCustodyWallet = vi.hoisted(() => vi.fn());
 const sendTransaction = vi.hoisted(() => vi.fn());
@@ -51,7 +52,6 @@ const readEscrowState = vi.hoisted(() => vi.fn());
 const readDvpAccounts = vi.hoisted(() => vi.fn());
 const verifySwapDvpAccount = vi.hoisted(() => vi.fn());
 const decodeSwapDvpChecked = vi.hoisted(() => vi.fn());
-const readDvpFundingAccounts = vi.hoisted(() => vi.fn());
 const claimFunding = vi.hoisted(() => vi.fn());
 const releaseFunding = vi.hoisted(() => vi.fn());
 const recordFundingTx = vi.hoisted(() => vi.fn());
@@ -85,7 +85,6 @@ vi.mock("@/db/repositories/dvp-leg-funding-claim.repository", () => ({
     recordFundingTx,
   }),
 }));
-vi.mock("./mints", () => ({ readDvpFundingAccounts }));
 vi.mock("@sdp/rpc/solana", () => ({
   createRpc: () => ({}),
   getRecentBlockhash: async () => ({
@@ -158,6 +157,9 @@ const FUNDER_A = {
 };
 
 const context = { env } as never;
+
+// The chain read stays the module's own export, spied (code standards: no module mock of a chain reader).
+const readDvpFundingAccounts = vi.spyOn(dvpMints, "readDvpFundingAccounts");
 
 describe("fundDvpTradeLeg", () => {
   beforeEach(async () => {

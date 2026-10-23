@@ -171,6 +171,64 @@ describe("observed transfer amounts", () => {
     expect(observed?.movement.verification.state).toBe("verified");
   });
 
+  /** A transaction with `instructions` into the wallet's token account, which ends `credited` above where it started. */
+  function tokenTransactionOf(
+    instructions: JsonRpcResult[],
+    debited: string,
+    credited: string
+  ): JsonRpcResult {
+    return parsedTransactionResult({
+      signature: "1".repeat(64),
+      slot: 50,
+      blockTime: 1700000000,
+      accountKeys: [SENDER, SOURCE_TOKEN_ACCOUNT, WALLET_TOKEN_ACCOUNT],
+      instructions,
+      innerInstructions: [],
+      preTokenBalances: [feeBalance(1, SENDER, "10000000"), feeBalance(2, WALLET, "0")],
+      postTokenBalances: [feeBalance(1, SENDER, debited), feeBalance(2, WALLET, credited)],
+    });
+  }
+
+  it("counts a burn from the destination, so it never reads as a withheld fee", async () => {
+    const burn = {
+      program: "spl-token-2022",
+      programId: TOKEN_2022,
+      parsed: {
+        type: "burnChecked",
+        info: {
+          account: WALLET_TOKEN_ACCOUNT,
+          mint: FEE_MINT,
+          authority: WALLET,
+          tokenAmount: scaledAmount("900000"),
+        },
+      },
+      stackHeight: 1,
+    };
+    const [observed] = await observe(
+      tokenTransactionOf(
+        [token2022Transfer("transferChecked", "1000000", null), burn],
+        "9000000",
+        "100000"
+      )
+    );
+
+    expect(observed?.movement.amounts).toEqual({ debit: 1_000_000n, fee: 0n, credit: 1_000_000n });
+    expect(observed?.movement.verification).toEqual({
+      state: "verified",
+      reason: "chain_delta_matched",
+    });
+  });
+
+  it("leaves two plain transfers into one fee account unverified, as the chain does not split their fees", async () => {
+    const transfer = token2022Transfer("transferChecked", "1000000", null);
+    const observed = await observe(tokenTransactionOf([transfer, transfer], "8000000", "1980000"));
+
+    expect(observed).toHaveLength(2);
+    for (const entry of observed) {
+      expect(entry.movement.verification).toEqual({ state: "pending", reason: null });
+    }
+  });
+
   it("counts moves between accounts no tracked wallet owns before inferring a fee", async () => {
     // The wallet sends 100 to an outside account, which forwards 90 in the same
     // transaction: the outside account keeps 10 and no fee was withheld.
