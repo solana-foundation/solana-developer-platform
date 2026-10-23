@@ -28,7 +28,10 @@ import {
 } from "@/app/dashboard/[projectId]/integrations/integrations-status";
 import type { OnboardingStatusResponse } from "@/app/dashboard/[projectId]/onboarding-status";
 import { getOfferedRampProviders } from "@/flags/ramps";
-import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
+import {
+  deploymentReleaseChannel,
+  isModuleInDeploymentReleaseChannel,
+} from "@/flags/release-channel";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import {
@@ -319,6 +322,7 @@ export default async function IntegrationDetailPage({
       detail={detail}
       custodyConnections={connectionsRead?.context ?? null}
       canManageCustody={dashboardAccess.capabilities.canManageCustody}
+      releaseChannel={deploymentReleaseChannel()}
     />
   );
 }

@@ -1,4 +1,11 @@
+import type { CustodyProviderUseCase } from "@sdp/types/custody";
 import { COMPLIANCE_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
+import {
+  isModuleInReleaseChannel,
+  SDP_RAMP_PROVIDER_STAGES,
+  type SdpModule,
+  type SdpReleaseChannel,
+} from "@sdp/types/release-channels";
 import { isKnownCustodyProvider } from "@/app/dashboard/[projectId]/custody/provider-catalog";
 import type { DashboardFlags } from "@/flags/dashboard";
 import { rampProvidersInReleaseChannel } from "@/flags/release-channel";
@@ -56,6 +63,34 @@ export function isIntegrationProviderEnabled(
   if (flags.rampProviders.some((offered) => offered === provider)) return true;
   if ((COMPLIANCE_PROVIDERS as readonly string[]).includes(provider)) return flags.compliance;
   return false;
+}
+
+/** The module that delivers each custody use case. Transfers are custody wallets' own. */
+const CUSTODY_USE_CASE_MODULES = {
+  issuance: "issuance",
+  transfers: "custody",
+  compliance: "compliance",
+} as const satisfies Record<CustodyProviderUseCase, SdpModule>;
+
+/**
+ * A custody provider's use cases the release channel runs, so its Capabilities never
+ * advertise a module the deployment refuses (Issuance on `stable`).
+ *
+ * @param useCases - The provider's use cases.
+ * @param releaseChannel - The deployment's release channel.
+ * @returns The use cases whose module the channel runs, in their given order.
+ */
+export function custodyUseCasesInReleaseChannel(
+  useCases: readonly CustodyProviderUseCase[],
+  releaseChannel: SdpReleaseChannel
+): CustodyProviderUseCase[] {
+  return useCases.filter((useCase) =>
+    isModuleInReleaseChannel(
+      releaseChannel,
+      CUSTODY_USE_CASE_MODULES[useCase],
+      SDP_RAMP_PROVIDER_STAGES
+    )
+  );
 }
 
 /** What the catalog will render, so its loading placeholder reserves exactly that. */

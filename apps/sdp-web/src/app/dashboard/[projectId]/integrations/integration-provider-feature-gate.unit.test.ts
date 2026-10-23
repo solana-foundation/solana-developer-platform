@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }));
 // Custody and Payments have no flag of their own: the release channel alone decides (HOO-1956).
 vi.mock("@/flags/release-channel", () => ({
+  deploymentReleaseChannel: () => "experimental",
   isModuleInDeploymentReleaseChannel: (module: SdpModule) => {
     if (module === "custody") return mocks.custody();
     if (module === "payments") return mocks.payments();

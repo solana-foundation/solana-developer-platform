@@ -1,4 +1,9 @@
 import { RAMP_PROVIDERS } from "@sdp/types/provider-access";
+import {
+  isModuleInReleaseChannel,
+  SDP_RAMP_PROVIDER_STAGES,
+  type SdpReleaseChannel,
+} from "@sdp/types/release-channels";
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { prerender } from "react-dom/static";
@@ -10,6 +15,7 @@ import {
   resolveCustodyIntegrations,
   resolveRampIntegrations,
 } from "@/app/dashboard/[projectId]/integrations/integrations-status";
+import { getMessages } from "@/i18n/messages";
 import {
   availableComplianceProviders,
   availableCustodyProviders,
@@ -51,10 +57,20 @@ async function markupOf(node: ReactNode): Promise<string> {
   return new Response(prelude).text();
 }
 
-async function render(provider: string): Promise<string> {
+async function render(
+  provider: string,
+  releaseChannel: SdpReleaseChannel = "experimental"
+): Promise<string> {
   const detail = resolveIntegrationDetail({ provider, ...INPUTS });
   if (!detail) throw new Error(`unknown provider ${provider}`);
-  return markupOf(<IntegrationDetailView detail={detail} />);
+  return markupOf(<IntegrationDetailView detail={detail} releaseChannel={releaseChannel} />);
+}
+
+/** The Capabilities section's chips, by visible label. */
+function capabilityChips(markup: string): string[] {
+  return [...markup.matchAll(/<li class="rounded-full[^"]*">([^<]*)<\/li>/g)].map(
+    ([, label]) => label
+  );
 }
 
 beforeEach(() => {
@@ -93,6 +109,22 @@ describe("IntegrationDetailView", () => {
     expect(compliance).toContain("Provisioned per deployment");
   });
 
+  it("advertises no capability whose module the release channel leaves out", async () => {
+    // Privy lists Issuance and Compliance; the chips outlived the modules on stable (HOO-1977).
+    const labels = getMessages("en").DashboardCustody;
+    expect(capabilityChips(await render("privy"))).toEqual(
+      expect.arrayContaining([labels.issuance, labels.transfers, labels.compliance])
+    );
+
+    const stable = capabilityChips(await render("privy", "stable"));
+    expect(stable).toContain(labels.transfers);
+    for (const module of ["issuance", "compliance"] as const) {
+      expect(stable.includes(labels[module]), module).toBe(
+        isModuleInReleaseChannel("stable", module, SDP_RAMP_PROVIDER_STAGES)
+      );
+    }
+  });
+
   it("keeps the shared skeleton within one block of every family", async () => {
     const skeleton = (
       renderToStaticMarkup(<IntegrationDetailSkeleton />).match(/rounded-2xl/g) ?? []
@@ -101,7 +133,9 @@ describe("IntegrationDetailView", () => {
     for (const provider of ["privy", "moonpay", "range"]) {
       const detail = resolveIntegrationDetail({ provider, ...INPUTS });
       if (!detail) throw new Error(provider);
-      const markup = await markupOf(<IntegrationDetailView detail={detail} />);
+      const markup = await markupOf(
+        <IntegrationDetailView detail={detail} releaseChannel="experimental" />
+      );
       const blocks =
         (markup.match(/<section/g) ?? []).length + (markup.match(/<header/g) ?? []).length;
       expect(Math.abs(blocks - skeleton)).toBeLessThanOrEqual(1);
