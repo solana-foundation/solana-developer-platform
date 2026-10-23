@@ -481,7 +481,11 @@ describe("Payments routes — recurring mandates in base units (ADR 0012)", () =
   });
 
   it("skips a period still held when it ends, as the subscriptions program forfeits it", async () => {
-    await answerPyusd({ extensions: [transferFeeExtension(0, 0n)], destinationExtensions: [] });
+    await answerPyusd({
+      extensions: [transferFeeExtension(0, 0n)],
+      destinationExtensions: [],
+      destinationFrozen: false,
+    });
     const activated = await activateRecurringPaymentFixture({
       ...DEFAULT_RECURRING_FIXTURE,
       token: PYUSD,
@@ -497,6 +501,7 @@ describe("Payments routes — recurring mandates in base units (ADR 0012)", () =
     await answerPyusd({
       extensions: [transferFeeExtension(50, 1_000_000n)],
       destinationExtensions: [],
+      destinationFrozen: false,
     });
     const sendsBefore = sendTransactionMock.mock.calls.length;
 
