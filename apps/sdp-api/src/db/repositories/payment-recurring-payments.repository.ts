@@ -24,7 +24,7 @@ export interface PaymentRecurringPaymentRow {
   destination_token_account: string | null;
   token: string;
   amount: string;
-  /** The mandate in base units (migration 0163); null for a row written before mandates. */
+  /** The mandate in base units (migration 0176); null for a row written before mandates. */
   mandate: RecurringMandate | null;
   period_hours: number;
   first_collection_at: string | null;
