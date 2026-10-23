@@ -231,6 +231,25 @@ describe("gateway identity (X-SF-Identity)", () => {
     expect((await from("198.51.100.8", valid)).status).toBe(200);
   });
 
+  it("never lets forgeries without a trusted client IP block valid identities", async () => {
+    await seedSfKey();
+    const bindings = { ...gatewayEnv(), TRUST_PROXY_HEADERS: undefined };
+    const forged = await identityToken(
+      { key_id: sfKey.keyId },
+      { key: (await generateKeyPair("ES256")).privateKey }
+    );
+
+    for (let i = 0; i < 25; i++) {
+      expect((await request({ [GATEWAY_IDENTITY_HEADER]: forged }, bindings)).status).toBe(401);
+    }
+    const res = await request(
+      { [GATEWAY_IDENTITY_HEADER]: await identityToken({ key_id: sfKey.keyId }) },
+      bindings
+    );
+
+    expect(res.status).toBe(200);
+  });
+
   it("answers 503, not 401, when the gateway's signing keys cannot be fetched", async () => {
     await seedSfKey();
 
