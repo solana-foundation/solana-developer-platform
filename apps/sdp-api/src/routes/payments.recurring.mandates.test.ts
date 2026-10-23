@@ -335,6 +335,46 @@ describe("Payments routes — recurring mandates in base units (ADR 0012)", () =
     expect(after.data.recurringPayment.nextCollectionDueAt).toBe(dueAt);
   });
 
+  it("recovers a landed pull of a payment written before mandates from its plan's mandate, reading no terms", async () => {
+    const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    // A payment row written before mandates; its plan holds the mandate that is on chain.
+    await getDb(env)
+      .prepare(
+        `UPDATE payment_recurring_payments
+            SET asset_kind = NULL, mint = NULL, token_program = NULL, decimals = NULL,
+                mandate_debit = NULL, max_fee_per_pull = NULL
+          WHERE id = ?`
+      )
+      .bind(activated.id)
+      .run();
+    await dueNow(activated);
+    sendTransactionMock.mockRejectedValueOnce(new Error("RPC response lost"));
+    const ambiguous = await parseCollectionResponse(await collect(activated.id));
+    expect(ambiguous.data.collectionAttempt.status).toBe("processing");
+    await getDb(env)
+      .prepare(
+        "UPDATE payment_subscription_collection_attempts SET idempotency_key = NULL WHERE subscription_id = ?"
+      )
+      .bind(activated.subscriptionId)
+      .run();
+    const landed = required(ambiguous.data.collectionAttempt.signature);
+    recurringExecution.rpc.respondSignatureStatuses((signature) =>
+      signature === landed
+        ? { slot: 100, confirmations: null, confirmationStatus: "finalized", err: null }
+        : null
+    );
+    // The mint can no longer be read: recovery proves the landed pull from the
+    // stored mandate alone.
+    answerMovementAccounts(recurringExecution.rpc, new Map());
+
+    const recovered = await collect(activated.id);
+
+    const recoveredText = await recovered.text();
+    expect(recovered.status, recoveredText).toBe(200);
+    const body = await parseCollectionResponse(new Response(recoveredText));
+    expect(body.data.collectionAttempt).toMatchObject({ status: "confirmed", signature: landed });
+  });
+
   it("holds a pull while the mint is paused", async () => {
     await answerPyusd({
       extensions: [{ __kind: "PausableConfig", authority: MINT_AUTHORITY, paused: false }],
