@@ -173,7 +173,7 @@ export async function closeLapsedPaymentRequest(
     return skippedCheck(row);
   }
   if (row.custody_wallet_id === null) {
-    return skippedCheck(await markExpired(env, row));
+    return skippedCheck(await markExpired(env, row, false));
   }
   const result = await findValidPayment(env, row);
   switch (result.kind) {
@@ -181,9 +181,9 @@ export async function closeLapsedPaymentRequest(
     case "pending":
       return settleIfPaid(env, row, row.custody_wallet_id, result);
     case "none":
-      return { row: await markExpired(env, row), chainRead: true };
+      return { row: await markExpired(env, row, true), chainRead: true };
     case "skipped":
-      return skippedCheck(await markExpired(env, row));
+      return skippedCheck(await markExpired(env, row, false));
     default: {
       const unreachable: never = result;
       throw internalError(`Unhandled payment search result ${String(unreachable)}`);
@@ -485,6 +485,7 @@ async function transitionToPaid(
       ...paid,
       status: "paid",
       canceledBy: null,
+      chainRead: true,
     });
     if (settled) {
       return { row: settled, from: "awaiting_payment" };
@@ -526,7 +527,11 @@ function settlementAuditEntry(
   };
 }
 
-async function markExpired(env: Env, row: PaymentRequestRow): Promise<PaymentRequestRow> {
+async function markExpired(
+  env: Env,
+  row: PaymentRequestRow,
+  chainRead: boolean
+): Promise<PaymentRequestRow> {
   const key = paymentRequestKey(row);
   const scope = createTenantScope({ organizationId: key.organizationId, projectId: key.projectId });
   return createSystemAuditService(env).logSystemWithin(async (db) => {
@@ -537,6 +542,7 @@ async function markExpired(env: Env, row: PaymentRequestRow): Promise<PaymentReq
       fulfilledByTransferId: null,
       canceledBy: null,
       paidLate: false,
+      chainRead,
     });
     return {
       entry: expired === null ? null : expiryAuditEntry(expired),

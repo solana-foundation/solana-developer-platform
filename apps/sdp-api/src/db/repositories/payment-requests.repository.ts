@@ -68,6 +68,8 @@ export interface MarkPaymentRequestInput {
   fulfilledByTransferId: string | null;
   canceledBy: string | null;
   paidLate: boolean;
+  /** Whether the transition follows a read of the chain; only then does last_verified_at move. */
+  chainRead: boolean;
 }
 
 export interface MarkExpiredPaymentRequestPaidInput {

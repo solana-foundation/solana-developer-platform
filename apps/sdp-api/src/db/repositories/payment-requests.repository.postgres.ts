@@ -151,7 +151,7 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
                    jsonb_build_object('status', ?::text, 'at', sdp_iso_now())
                  ),
                  last_checked_at = sdp_iso_now(),
-                 last_verified_at = sdp_iso_now(),
+                 last_verified_at = CASE WHEN ?::boolean THEN sdp_iso_now() ELSE last_verified_at END,
                  updated_at = sdp_iso_now()
            WHERE id = ?
              AND organization_id = ?
@@ -165,6 +165,7 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
           input.canceledBy,
           input.paidLate,
           input.status,
+          input.chainRead,
           input.requestId,
           input.organizationId,
           input.projectId

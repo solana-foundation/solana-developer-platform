@@ -671,6 +671,7 @@ describe("closeLapsedPaymentRequest", () => {
     );
 
     expect(closed.status).toBe("expired");
+    expect(closed.last_verified_at).toBeNull();
     expect(signaturesSpy).not.toHaveBeenCalled();
   });
 
@@ -847,7 +848,10 @@ describe("verified check stamp", () => {
 
     const check = await onSandbox(() => paymentRequests.closeLapsedPaymentRequest(env, request));
 
-    expect(check).toMatchObject({ row: { status: "expired" }, chainRead: false });
+    expect(check).toMatchObject({
+      row: { status: "expired", last_verified_at: null },
+      chainRead: false,
+    });
     expect(signaturesSpy).not.toHaveBeenCalled();
   });
 

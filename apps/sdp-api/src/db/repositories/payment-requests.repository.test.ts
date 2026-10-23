@@ -316,6 +316,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
         fulfilledByTransferId: null,
         canceledBy: TEST_USER.id,
         paidLate: false,
+        chainRead: true,
       });
 
       const { rows, total } = await repo.listPaymentRequests({
@@ -343,6 +344,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
         fulfilledByTransferId: null,
         canceledBy: TEST_USER.id,
         paidLate: false,
+        chainRead: true,
       });
 
       expect(canceled?.status).toBe("canceled");
@@ -363,6 +365,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
           fulfilledByTransferId: null,
           canceledBy: TEST_USER.id,
           paidLate: false,
+          chainRead: true,
         });
       await expectProjectScoped(
         transition,
@@ -383,6 +386,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
         fulfilledByTransferId: "xfr_settle",
         canceledBy: null,
         paidLate: false,
+        chainRead: true,
       });
 
       expect(paid?.status).toBe("paid");
@@ -403,6 +407,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
           fulfilledByTransferId: null,
           canceledBy: null,
           paidLate: false,
+          chainRead: true,
         })
       ).rejects.toThrow();
     });
@@ -419,6 +424,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
           fulfilledByTransferId: null,
           canceledBy: TEST_USER.id,
           paidLate: false,
+          chainRead: true,
         })
       ).rejects.toThrow();
     });
@@ -434,6 +440,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
         fulfilledByTransferId: null,
         canceledBy: null,
         paidLate: false,
+        chainRead: true,
       });
       expect(expired?.status).toBe("expired");
     });
@@ -448,6 +455,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
         fulfilledByTransferId: null,
         canceledBy: TEST_USER.id,
         paidLate: false,
+        chainRead: true,
       });
 
       const second = await repo.markPaymentRequest({
@@ -458,6 +466,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
         fulfilledByTransferId: null,
         canceledBy: null,
         paidLate: false,
+        chainRead: true,
       });
       expect(second).toBeNull();
 
@@ -629,6 +638,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
         fulfilledByTransferId: null,
         canceledBy: TEST_USER.id,
         paidLate: false,
+        chainRead: true,
       });
       expect(
         await repo.claimSponsoredTransactionWindow({
@@ -931,6 +941,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
         fulfilledByTransferId: null,
         canceledBy: null,
         paidLate: false,
+        chainRead: true,
       });
       await updateRow(request.id, { last_verified_at: null });
       const paid = await systemRepo.markExpiredPaymentRequestPaid({
@@ -968,6 +979,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
         fulfilledByTransferId: null,
         canceledBy: null,
         paidLate: false,
+        chainRead: true,
       });
 
       const paid = await createSystemPaymentRequestsRepository(env).markExpiredPaymentRequestPaid({
