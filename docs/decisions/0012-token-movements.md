@@ -150,14 +150,17 @@ them in one place, not adding special cases to every flow.
   debit in base units, the decimals and the fee tolerance (`maxFeePerPull`, the larger of the
   current and next epoch's fee for the debit; migration 0163). Each pull reads the terms once
   before its claim; a paused mint, a fee above the tolerance or a destination that requires memos
-  holds it as a `failed` attempt with `holdReason`, the period still due. Activation refuses a
-  memo-required destination. A pull's leg is `verified_by` the chain (migration 0164): its
-  observed debit is the instruction's amount and its credit the destination's raw balance delta,
-  read from the `getTransaction` the collection proof already makes. It is verified when that debit
-  is the quote's and the fee is within the tolerance, which a pull landing in the next epoch may
-  pay instead of the quote's fee. Create, plan create and an update that changes the token or
-  amount make the mandate before any row (the precision check `loadPaymentMint` made); token
-  admission stays start admission, so cancel and recovery never ask it. Interest-bearing and scaled mints are no longer refused: a mandate is base units.
+  holds it as a `failed` attempt with `holdReason`, the period still due. A pull the cron finds
+  still held once its period has ended skips the period, as the subscriptions program forfeits an
+  elapsed period's allowance. Activation refuses a memo-required destination. A pull's leg is
+  `verified_by` the chain (migration 0164): its observed debit is the instruction's amount and its
+  credit the destination's raw balance delta, read from the `getTransaction` the collection proof
+  already makes. It is verified when that debit is the quote's and the fee is within the
+  tolerance, which a pull landing in the next epoch may pay instead of the quote's fee. Create,
+  plan create and an update that changes the token or amount make the mandate before any row (the
+  precision check `loadPaymentMint` made); token admission stays start admission, so cancel and
+  recovery never ask it. Interest-bearing and scaled mints are no longer refused: a mandate is
+  base units.
 - **Mint watch.** `pnpm check:well-known-mints` decodes every catalogue mint with the same
   decoder, prints its extension state, and fails when a 1 000-token transfer would pay a fee
   under the current or the newer fee entry (bps alone is not the signal, since `maximumFee` is
