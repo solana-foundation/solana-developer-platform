@@ -143,7 +143,8 @@ export async function reclaimDvpTradeLeg(
       projectId: params.projectId,
       actor: { type: "wallet", id: params.custodyWalletId },
     }),
-    "dvp.reclaim"
+    "dvp.reclaim",
+    { custodyWalletId: params.custodyWalletId }
   );
   const sponsor = await feePayment.getFeePayer();
 

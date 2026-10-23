@@ -86,45 +86,65 @@ export function isIso3166Alpha2CountryCode(value: string): boolean {
   return displayName !== undefined && displayName !== normalized;
 }
 
-/** The format of each key in each mode: a provider's keys name the mode they run in. */
-export type RampKeyFormats = Readonly<
-  Record<SdpEnvironment, Readonly<Record<keyof RampProviderCredentials, RegExp>>>
->;
-
 const KEY_MODE_NAMES = {
   sandbox: "test-mode",
   production: "live-mode",
 } as const satisfies Record<SdpEnvironment, string>;
 
+/** The part of a provider its key checks read. */
+type RampKeyedProvider = Pick<RampProvider, "label" | "keyFormats">;
+
 /**
- * Every provider's `checkCredentials`: why `credentials` can't serve `mode`
- * under `formats`, or null when both keys fit it.
+ * Why `credentials` can't serve `provider` in `mode`, or null when both keys
+ * fit the mode's formats.
  *
- * @param label - The provider's name in the refusal.
- * @param formats - The provider's key formats by mode.
+ * @param provider - The provider the keys belong to.
  * @param credentials - The keys to check.
  * @param mode - The mode the call runs in.
  * @returns The refusal, or null.
  */
-export function checkRampKeyFormats(
-  label: string,
-  formats: RampKeyFormats,
+export function checkRampCredentials(
+  provider: RampKeyedProvider,
   credentials: RampProviderCredentials,
   mode: SdpEnvironment
 ): string | null {
-  const format = formats[mode];
+  const format = provider.keyFormats[mode];
   if (
     format.publicKey.test(credentials.publicKey) &&
     format.secretKey.test(credentials.secretKey)
   ) {
     return null;
   }
-  return `${label} ${mode} keys must be ${KEY_MODE_NAMES[mode]} keys.`;
+  return `${provider.label} ${mode} keys must be ${KEY_MODE_NAMES[mode]} keys.`;
 }
 
 /**
- * `ctx`'s keys, once `provider` confirms they fit `ctx.mode`. Every provider
- * call reads its keys here, so a key from the other mode never makes a request.
+ * Why `secret` can't verify `provider`'s webhooks in `mode`, or null when it
+ * fits the mode's format.
+ *
+ * @param provider - The provider the secret belongs to.
+ * @param secret - The webhook signing secret to check.
+ * @param mode - The mode the webhook route serves.
+ * @returns The refusal, or null.
+ */
+export function checkRampWebhookSecret(
+  provider: RampKeyedProvider,
+  secret: string,
+  mode: SdpEnvironment
+): string | null {
+  const format = provider.keyFormats[mode].webhookSecret;
+  if (format === undefined) {
+    return `${provider.label} takes no webhooks.`;
+  }
+  return format.test(secret)
+    ? null
+    : `${provider.label} ${mode} webhook secret has the wrong format.`;
+}
+
+/**
+ * `ctx`'s keys, once they fit `provider`'s formats for `ctx.mode`. Every
+ * provider call reads its keys here, so a key from the other mode never makes
+ * a request.
  *
  * @param provider - The provider making the call.
  * @param ctx - The call's runtime.
@@ -132,10 +152,10 @@ export function checkRampKeyFormats(
  * @throws SdpPaymentsError PROVIDER_NOT_CONFIGURED when they don't fit the mode.
  */
 export function rampCredentials(
-  provider: Pick<RampProvider, "checkCredentials">,
+  provider: RampKeyedProvider,
   ctx: RampRuntimeContext
 ): RampProviderCredentials {
-  const refusal = provider.checkCredentials(ctx.credentials, ctx.mode);
+  const refusal = checkRampCredentials(provider, ctx.credentials, ctx.mode);
   if (refusal !== null) {
     throw providerNotConfigured(refusal);
   }

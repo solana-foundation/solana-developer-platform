@@ -1,10 +1,11 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
+import type { ManagedRampKeysEnv } from "@/services/ramps/runtime";
 import { stripeWebhook } from "@/services/ramps/webhooks/stripe";
 
 const STRIPE_ENV = {
   STRIPE_SANDBOX_WEBHOOK_SECRET: "whsec_test",
-};
+} satisfies ManagedRampKeysEnv;
 
 function signStripeBody(rawBody: string, timestamp: string, secret: string): string {
   return createHmac("sha256", secret).update(`${timestamp}.${rawBody}`).digest("hex");
@@ -14,13 +15,17 @@ function parseStripeEvent(body: Record<string, unknown>) {
   return stripeWebhook.parse(JSON.stringify(body));
 }
 
-/** Verifies `body` signed with the sandbox secret at the `environment` endpoint. */
-async function verifySigned(body: Record<string, unknown>, environment: "sandbox" | "production") {
+/** Verifies `body` signed with `secret` (the sandbox one by default) at the `environment` endpoint. */
+async function verifySigned(
+  body: Record<string, unknown>,
+  environment: "sandbox" | "production",
+  { env = STRIPE_ENV, secret = "whsec_test" }: { env?: ManagedRampKeysEnv; secret?: string } = {}
+) {
   const rawBody = JSON.stringify(body);
   const timestamp = Math.floor(Date.now() / 1000).toString();
-  const signature = signStripeBody(rawBody, timestamp, "whsec_test");
+  const signature = signStripeBody(rawBody, timestamp, secret);
   await stripeWebhook.verify({
-    env: STRIPE_ENV,
+    env,
     environment,
     headers: new Headers({ "stripe-signature": `t=${timestamp},v1=${signature}` }),
     rawBody,
@@ -224,12 +229,26 @@ describe("stripeWebhook", () => {
     ).rejects.toThrow("Stripe webhook is missing livemode");
   });
 
-  it("refuses the production endpoint, which has no managed secret", async () => {
+  it("refuses the production endpoint while no production secret is mounted", async () => {
     await expect(
       verifySigned(
         { type: "crypto.onramp_session.updated", livemode: true, data: {} },
         "production"
       )
     ).rejects.toMatchObject({ code: "PROVIDER_NOT_CONFIGURED" });
+  });
+
+  it("verifies the production endpoint with the production secret, never the sandbox one", async () => {
+    const env = {
+      ...STRIPE_ENV,
+      STRIPE_PRODUCTION_WEBHOOK_SECRET: "whsec_live_test",
+    } satisfies ManagedRampKeysEnv;
+    const liveEvent = { type: "crypto.onramp_session.created", livemode: true, data: {} };
+    await expect(verifySigned(liveEvent, "production", { env })).rejects.toMatchObject({
+      code: "UNAUTHORIZED",
+    });
+    await expect(
+      verifySigned(liveEvent, "production", { env, secret: "whsec_live_test" })
+    ).resolves.toMatchObject({ kind: "ignore" });
   });
 });

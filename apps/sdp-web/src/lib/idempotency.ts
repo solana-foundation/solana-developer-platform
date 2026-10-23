@@ -1,4 +1,5 @@
-import { isIdempotencyKeyOutcomeUnknown } from "@sdp/types/idempotency";
+import { isDecimalString } from "@sdp/solana/amount";
+import { isIdempotencyKeyOutcomeUnknown, normalizeDecimalString } from "@sdp/types/idempotency";
 import {
   isMoneyMovementInFlight,
   isMoneyMovementStatus,
@@ -232,4 +233,50 @@ export function storageFingerprint(material: string): string {
     hash = BigInt.asUintN(64, (hash ^ BigInt(byte)) * 0x100000001b3n);
   }
   return hash.toString(16).padStart(16, "0");
+}
+
+/**
+ * An amount as the dashboard both keys and sends it: a decimal string in its
+ * canonical spelling (`normalizeDecimalString`), so `"1.0"` and `"1"` are one
+ * payment to the browser's key as they are to the API's fingerprint. Anything
+ * that is not a decimal string is left as typed, for the API to refuse as typed.
+ */
+export function canonicalDecimalAmount(value: string): string {
+  return isDecimalString(value) ? normalizeDecimalString(value) : value;
+}
+
+const jsonValueSchema = z.json();
+
+/** A JSON value as `JSON.parse` returns it. */
+export type JsonValue = z.infer<typeof jsonValueSchema>;
+
+/**
+ * A JSON value with every `amount` decimal string at any depth spelled by
+ * {@link canonicalDecimalAmount}, so a batch's recipient amounts are covered too.
+ * Keys a money request's retry the way the API fingerprints it: `"100.00"` and
+ * `"100"` are one payment.
+ *
+ * @param value - The parsed request body.
+ * @returns The same value with its amounts canonical; nothing else changes.
+ */
+export function canonicalizeAmounts(value: JsonValue): JsonValue {
+  if (Array.isArray(value)) {
+    return value.map(canonicalizeAmounts);
+  }
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.entries(value).map(([key, member]) => [
+      key,
+      key === "amount" && typeof member === "string"
+        ? canonicalDecimalAmount(member)
+        : canonicalizeAmounts(member),
+    ])
+  );
+}
+
+/** Parses JSON text into a {@link JsonValue}; throws on text that is not JSON. */
+export function parseJsonValue(text: string): JsonValue {
+  return jsonValueSchema.parse(JSON.parse(text));
 }

@@ -6,7 +6,7 @@ import { createTenantScope } from "@/lib/tenant-scope";
 import { resolveSolanaCounterpartyAccount } from "@/services/payments/counterparty-account-resolution";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
-import { assertRecurringPaymentTokenMint } from "./shared";
+import { assertRecurringPaymentTerms } from "./shared";
 
 /** A create request's Idempotency-Key and the fingerprint of the schedule it creates. */
 export interface RecurringPaymentIdempotency {
@@ -31,7 +31,13 @@ export async function createRecurringPayment(input: {
   idempotency: RecurringPaymentIdempotency | null;
 }): Promise<PaymentRecurringPaymentRow> {
   const [tokenMint, destination] = await Promise.all([
-    assertRecurringPaymentTokenMint(input.token, input.organizationId, input.projectId, input.env),
+    assertRecurringPaymentTerms({
+      token: input.token,
+      amount: input.amount,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      env: input.env,
+    }),
     resolveSolanaCounterpartyAccount({
       env: input.env,
       organizationId: input.organizationId,

@@ -253,13 +253,28 @@ export function createRpcForSdk<TSdkRpc>(
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * Get a recent blockhash for transaction construction
+ * Get a recent blockhash for transaction construction.
+ *
+ * @param rpc - The Solana RPC to ask.
+ * @param commitment - The commitment whose bank supplies the blockhash.
+ * @param minContextSlot - The lowest slot the answering node may be at; a node behind it errors
+ * instead of answering.
+ * @returns The latest blockhash and its last valid block height.
+ * @throws SdpRpcError `SOLANA_RPC_ERROR` when the response comes from a slot below
+ * `minContextSlot`, so an upstream that ignores the option cannot answer stale.
  */
 export async function getRecentBlockhash(
   rpc: SolanaRpc,
-  commitment: Commitment = "confirmed"
+  commitment: Commitment = "confirmed",
+  minContextSlot?: Slot
 ): Promise<BlockhashWithExpiry> {
-  const response = await rpc.getLatestBlockhash({ commitment }).send();
+  const response = await rpc.getLatestBlockhash({ commitment, minContextSlot }).send();
+  if (minContextSlot !== undefined && response.context.slot < minContextSlot) {
+    throw solanaRpcError("Solana RPC answered from a slot below minContextSlot", {
+      contextSlot: response.context.slot.toString(),
+      minContextSlot: minContextSlot.toString(),
+    });
+  }
 
   return {
     blockhash: response.value.blockhash,
@@ -268,31 +283,44 @@ export async function getRecentBlockhash(
 }
 
 /**
- * Check if a blockhash is still valid
+ * The chain's block height and slot as of the highest bank at a commitment, read together from
+ * one bank so a follow-up read can demand a node at least that current (`minContextSlot`).
+ *
+ * @param rpc - The Solana RPC to ask.
+ * @param commitment - The commitment whose bank answers.
+ * @returns The bank's block height and absolute slot.
  */
-export async function isBlockhashValid(
+export async function getChainHeight(
   rpc: SolanaRpc,
-  blockhash: Blockhash,
-  commitment: Commitment = "confirmed"
-): Promise<boolean> {
-  const response = await rpc.isBlockhashValid(blockhash, { commitment }).send();
+  commitment: Commitment
+): Promise<{ blockHeight: bigint; absoluteSlot: Slot }> {
+  const epochInfo = await rpc.getEpochInfo({ commitment }).send();
 
-  return response.value;
+  return { blockHeight: epochInfo.blockHeight, absoluteSlot: epochInfo.absoluteSlot };
 }
 
-/** Estimate only the Solana network fee from the exact compiled message. */
+/**
+ * Estimate only the Solana network fee from the exact compiled message.
+ *
+ * @param rpc - The Solana RPC to ask.
+ * @param transaction - The wire transaction to price.
+ * @param commitment - The commitment whose bank prices the message.
+ * @returns The fee in lamports and the slot of the bank that priced it.
+ * @throws SdpRpcError `SOLANA_RPC_ERROR` when the bank cannot price the message (its blockhash is
+ * unknown there).
+ */
 export async function getTransactionNetworkFee(
   rpc: SolanaRpc,
   transaction: Uint8Array,
-  commitment: Commitment = "confirmed"
-): Promise<bigint> {
+  commitment: Commitment
+): Promise<{ fee: bigint; contextSlot: Slot }> {
   const { messageBytes } = getTransactionDecoder().decode(transaction);
   const message = getBase64Decoder().decode(messageBytes) as TransactionMessageBytesBase64;
   const response = await rpc.getFeeForMessage(message, { commitment }).send();
   if (response.value === null) {
     throw solanaRpcError("Solana RPC could not price the transaction message");
   }
-  return response.value;
+  return { fee: response.value, contextSlot: response.context.slot };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -404,11 +432,13 @@ export async function confirmTransaction(
     const result = await getSignatureStatusOrNull(rpc, signature);
 
     if (result) {
+      // An error short of the commitment is not terminal: it may be from a fork
+      // the cluster drops, and the same transaction can still land (APE SOLA9-708).
       const isConfirmed =
         result.confirmationStatus !== null &&
         commitmentComparator(result.confirmationStatus, commitment) >= 0;
 
-      if (isConfirmed || result.err) {
+      if (isConfirmed) {
         return {
           signature,
           slot: result.slot,
@@ -632,12 +662,29 @@ function numericTransactionError(err: TransactionError): TransactionError {
 }
 
 /**
- * Batch-fetch status for multiple transaction signatures
+ * Batch-fetch status for multiple transaction signatures, retrying transient RPC failures.
+ *
+ * @param rpc - The Solana RPC to ask.
+ * @param signatures - The signatures to look up, in the order statuses are returned.
+ * @param options - Lookup options.
+ * @param options.searchTransactionHistory - Search ledger history beyond the recent status cache.
+ * @param options.minContextSlot - With history search, the lowest slot the answering node may be
+ * at; a node behind it errors instead of answering.
+ * @param options.retryDelaysMs - Backoff delays between transient-failure retries.
+ * @returns Each signature's status, or null where the node has none.
+ * @throws SdpRpcError `SOLANA_RPC_ERROR` when the response comes from a slot below
+ * `minContextSlot`, so an upstream that ignores the option cannot report a landed signature absent.
  */
 export async function getSignatureStatuses(
   rpc: SolanaRpc,
   signatures: Signature[],
-  options: { searchTransactionHistory?: boolean; retryDelaysMs?: readonly number[] } = {}
+  options:
+    | { searchTransactionHistory?: false; retryDelaysMs?: readonly number[] }
+    | {
+        searchTransactionHistory: true;
+        minContextSlot?: Slot;
+        retryDelaysMs?: readonly number[];
+      } = {}
 ): Promise<Array<SignatureStatusInfo | null>> {
   if (signatures.length === 0) {
     return [];
@@ -646,11 +693,29 @@ export async function getSignatureStatuses(
   const response = await withTransientRpcRetry(
     () =>
       (options.searchTransactionHistory
-        ? rpc.getSignatureStatuses(signatures, { searchTransactionHistory: true })
+        ? rpc.getSignatureStatuses(
+            signatures,
+            // SAFETY: Agave's RpcSignatureStatusConfig accepts minContextSlot (a node behind it
+            // errors instead of answering); kit's config type lags the server and omits it.
+            {
+              searchTransactionHistory: true,
+              minContextSlot: options.minContextSlot,
+            } as Parameters<SolanaRpc["getSignatureStatuses"]>[1]
+          )
         : rpc.getSignatureStatuses(signatures)
       ).send(),
     options.retryDelaysMs
   );
+  if (
+    options.searchTransactionHistory &&
+    options.minContextSlot !== undefined &&
+    response.context.slot < options.minContextSlot
+  ) {
+    throw solanaRpcError("Solana RPC answered from a slot below minContextSlot", {
+      contextSlot: response.context.slot.toString(),
+      minContextSlot: options.minContextSlot.toString(),
+    });
+  }
 
   return response.value.map((item) =>
     item

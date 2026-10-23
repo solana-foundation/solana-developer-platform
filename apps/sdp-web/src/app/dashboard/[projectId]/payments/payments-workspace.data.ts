@@ -57,20 +57,6 @@ import {
 } from "./payment-api-errors";
 import type { ComplianceSnapshot } from "./payments-workspace.types";
 
-export interface PaymentWalletBalance {
-  token: string;
-  mint: string;
-  amount: string;
-  uiAmount: string;
-  decimals: number;
-}
-
-export interface PaymentWalletBalancesSnapshot {
-  custodyWalletId: string;
-  address: string;
-  balances: PaymentWalletBalance[];
-}
-
 export type RiskTone = "green" | "yellow" | "red" | "neutral";
 export type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
@@ -249,15 +235,6 @@ export async function fetchWalletAggregate(
 
 interface TransferListEnvelope {
   data?: TransferRecord[];
-  error?: {
-    message?: string;
-  };
-}
-
-interface WalletBalancesEnvelope {
-  data?: {
-    walletBalances?: PaymentWalletBalancesSnapshot;
-  };
   error?: {
     message?: string;
   };
@@ -469,37 +446,6 @@ function withUsableRate(
     status: "error",
     error: t("DashboardPayments.workspace.rampEstimateInvalidRate"),
   };
-}
-
-export async function fetchWalletBalances(
-  walletId: string,
-  t: Translate,
-  signal?: AbortSignal
-): Promise<PaymentWalletBalancesSnapshot> {
-  const response = await dashboardRequest(
-    `/api/dashboard/payments/wallets/${encodeURIComponent(walletId)}/balances`,
-    {
-      method: "GET",
-      cache: "no-store",
-      signal,
-    }
-  );
-  const body = (await response.json().catch(() => ({}))) as WalletBalancesEnvelope;
-  if (!response.ok) {
-    throw new Error(
-      getApiError(
-        body,
-        t("DashboardPayments.workspace.walletBalancesRequestFailed", { status: response.status })
-      )
-    );
-  }
-
-  const snapshot = body.data?.walletBalances;
-  if (!snapshot) {
-    throw new Error(t("DashboardPayments.workspace.walletBalancesMissing"));
-  }
-
-  return snapshot;
 }
 
 export interface CreateTransferInput {

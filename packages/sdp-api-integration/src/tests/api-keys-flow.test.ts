@@ -169,7 +169,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("API Key Integrati
     }
 
     const transfer = JSON.parse(transferPayload) as TransferApiResponse;
-    expect(transfer.data.transfer.status).toBe("confirmed");
+    expect(transfer.data.transfer.status).toBe("finalized");
     expect(transfer.data.transfer.signature).toBeTruthy();
   });
 });

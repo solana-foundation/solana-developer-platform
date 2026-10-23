@@ -1,5 +1,6 @@
 import type { PaymentRecurringPaymentResponse } from "@sdp/types/payments";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { IdempotencyOutcomeUnknownError } from "@/lib/idempotency";
 import { setWindowPathname } from "@/test/window-location";
 import {
@@ -7,6 +8,10 @@ import {
   runRecurringPaymentAction,
   updateRecurringPayment,
 } from "./recurring-payments.data";
+import {
+  createRecurringPayment as createRecurringPaymentRedesign,
+  updateRecurringPayment as updateRecurringPaymentRedesign,
+} from "./recurring-payments.data.redesign";
 
 const t: Parameters<typeof createRecurringPayment>[2] = (key) => key;
 
@@ -135,5 +140,66 @@ describe("recurring payment unknown outcomes", () => {
     await expect(runRecurringPaymentAction("prp_1", "cancel", undefined, t)).rejects.toBeInstanceOf(
       IdempotencyOutcomeUnknownError
     );
+  });
+});
+
+// SOLA9-775: the action key is derived from the body text, and the API
+// fingerprints the canonical amount, so `25.00` re-entered after a lost `25.0`
+// minted a new key and could create the schedule twice.
+describe.each([
+  ["legacy", createRecurringPayment, updateRecurringPayment],
+  ["redesign", createRecurringPaymentRedesign, updateRecurringPaymentRedesign],
+])("recurring payment amount spelling (%s)", (_label, create, update) => {
+  beforeEach(() => setWindowPathname("/dashboard/prj_test_sandbox/payments/recurring"));
+  afterEach(() => vi.unstubAllGlobals());
+
+  const sentBodySchema = z.object({ amount: z.string() });
+
+  /** Every request fails before an answer, so each keeps its key for the retry. */
+  function lostAnswers() {
+    const fetchMock = vi.fn<typeof globalThis.fetch>(() =>
+      Promise.reject(new TypeError("Failed to fetch"))
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const sent = () =>
+      fetchMock.mock.calls.map(([, init]) => ({
+        key: new Headers(init?.headers).get("Idempotency-Key"),
+        amount: sentBodySchema.parse(JSON.parse(String(init?.body))).amount,
+      }));
+    return sent;
+  }
+
+  it("creates one schedule under one key however the amount is spelled", async () => {
+    const sent = lostAnswers();
+    const input = (amount: string) => ({
+      sourceCustodyWalletId: "cwlt_create",
+      counterpartyId: "cpty_1",
+      counterpartyAccountId: "cpa_1",
+      token: "USDC" as const,
+      amount,
+      periodHours: 24,
+    });
+
+    for (const amount of ["25.0", "25.00", "25.5"]) {
+      await expect(create(input(amount), undefined, t)).rejects.toThrow("Failed to fetch");
+    }
+
+    const [first, respelled, different] = sent();
+    expect(respelled?.key).toBe(first?.key);
+    expect(different?.key).not.toBe(first?.key);
+    expect(sent().map((call) => call.amount)).toEqual(["25", "25", "25.5"]);
+  });
+
+  it("updates under one key however the amount is spelled", async () => {
+    const sent = lostAnswers();
+
+    for (const amount of ["1.0", "1", "1.01"]) {
+      await expect(update("prp_1", { amount }, undefined, t)).rejects.toThrow("Failed to fetch");
+    }
+
+    const [first, respelled, different] = sent();
+    expect(respelled?.key).toBe(first?.key);
+    expect(different?.key).not.toBe(first?.key);
+    expect(sent().map((call) => call.amount)).toEqual(["1", "1", "1.01"]);
   });
 });

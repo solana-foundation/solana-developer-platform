@@ -231,6 +231,11 @@ A removed ramp provider's id moves from `RAMP_PROVIDERS` to
   and SQL predicates alone. The fixtures in
   `../../routes/payments.retired-ramp-providers.test.ts` run over every
   retired id.
+- **Retire its managed keys after the code.** Dropping the id drops its names
+  from `MANAGED_RAMP_KEY_NAMES`, so the drift test fails until `env.d.ts`,
+  `scripts/secret-keys.mjs`, `turbo.json` and `.env.local.example` lose them.
+  sdp-infra and Doppler drop them only once that deploy is live
+  (`docs/contributing/ramp-provider-safety.md`, "Managed keys").
 - **Delete its `.ramp-support/<id>.currency.json`, then run
   `ramp-support:generate` only** (not `currencies:discover`, which needs
   Doppler and re-pulls live provider snapshots). Fiat currencies only it

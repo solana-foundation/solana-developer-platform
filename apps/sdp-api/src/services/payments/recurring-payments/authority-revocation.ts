@@ -17,10 +17,10 @@ import {
   type SubscriptionAuthorityRevocationsRepository,
 } from "@/db/repositories/subscription-authority-revocations.repository";
 import { badRequest, conflict } from "@/lib/errors";
-import { resolveMintTokenProgram } from "@/routes/payments/token-accounts";
 import { getLogger } from "@/runtime/logger";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { normalizePaymentToken } from "@/services/payment-operation.service";
+import { loadPaymentMintFacts } from "@/services/payments/token-amount";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
   isDefiniteSubmissionError,
@@ -345,7 +345,7 @@ async function sendRevoke(
   const instruction = await getRevokeSubscriptionAuthorityOverlayInstructionAsync({
     user,
     tokenMint,
-    tokenProgram: await resolveMintTokenProgram(createClusterRpc(), tokenMint),
+    tokenProgram: (await loadPaymentMintFacts(tokenMint)).tokenProgram,
     // Valid whoever paid: the program requires the recorded payer when it is not the wallet.
     receiver: input.rentReceiver,
   });

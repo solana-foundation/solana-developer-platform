@@ -50,12 +50,16 @@ describe("createIssuanceSponsor", () => {
     const send = vi.spyOn(solanaRpc, "sendTransaction").mockRejectedValueOnce(refusal);
     const rpc: solanaRpc.SolanaRpc = createSolanaRpc("http://127.0.0.1:8899");
 
-    const sponsor = createIssuanceSponsor(env, SCOPE, "issuance.authority");
+    const sponsor = createIssuanceSponsor(env, SCOPE, "issuance.authority", {
+      custodyWalletId: "cwlt_authority",
+    });
 
     await expect(
       sponsor.submitSponsored({ transaction: custodySigned, lastValidBlockHeight: 123n, rpc })
     ).rejects.toMatchObject({ code: "TRANSACTION_FAILED" });
-    expect(createSponsor).toHaveBeenCalledExactlyOnceWith(env, SCOPE, "issuance.authority");
+    expect(createSponsor).toHaveBeenCalledExactlyOnceWith(env, SCOPE, "issuance.authority", {
+      custodyWalletId: "cwlt_authority",
+    });
     expect(prepareOwnedSubmission).toHaveBeenCalledOnce();
     expect(prepareOwnedSubmission.mock.calls[0][0]).toBe(custodySigned);
     expect(send).toHaveBeenCalledOnce();

@@ -9,10 +9,12 @@ import {
 } from "@solana/kit";
 import { describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
+import type { UpdatePaymentTransferInput } from "@/db/repositories/payments.repository";
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
 import { AppError } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { rootLogger } from "@/runtime/logger";
+import { AuditService } from "@/services/audit.service";
 import * as signedSubmission from "@/services/payments/signed-submission";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
@@ -119,27 +121,33 @@ describe("Payments routes — signed submission", () => {
       expect(sendTransactionMock).toHaveBeenCalledOnce();
     });
 
+    async function settleProcessingTransfer(
+      signature: string,
+      verdict: Pick<UpdatePaymentTransferInput, "status" | "slot" | "error">
+    ) {
+      const processing = (await listTransferRows()).find(
+        (row) => row.status === "processing" && row.signature === signature
+      );
+      if (!processing) throw new Error("processing transfer not found");
+
+      const reconciled = await createPostgresPaymentsRepository(
+        getDb(env),
+        createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+      ).updateTransfer({
+        transferId: processing.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        expectedStatus: "processing",
+        ...verdict,
+        updatedAt: new Date().toISOString(),
+      });
+      expect(reconciled).toMatchObject(verdict);
+    }
+
     it("does not regress a transfer finalized while the route waits for confirmation", async () => {
       await mockSignedSubmissionAdapter();
       confirmTransactionMock.mockImplementationOnce(async (_rpc, signature) => {
-        const processing = (await listTransferRows()).find(
-          (row) => row.status === "processing" && row.signature === signature
-        );
-        if (!processing) throw new Error("processing transfer not found");
-
-        const reconciled = await createPostgresPaymentsRepository(
-          getDb(env),
-          createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
-        ).updateTransfer({
-          transferId: processing.id,
-          organizationId: TEST_ORG.id,
-          projectId: TEST_PROJECT.id,
-          expectedStatus: "processing",
-          status: "finalized",
-          slot: 200,
-          updatedAt: new Date().toISOString(),
-        });
-        expect(reconciled?.status).toBe("finalized");
+        await settleProcessingTransfer(signature, { status: "finalized", slot: 200 });
 
         return {
           signature,
@@ -157,6 +165,86 @@ describe("Payments routes — signed submission", () => {
 
       const row = await readTransferRow(json.data.transfer.id);
       expect(row).toMatchObject({ status: "finalized", slot: 200 });
+    });
+
+    it("upgrades a transfer reconciliation confirmed during the finalized wait to finalized", async () => {
+      await mockSignedSubmissionAdapter();
+      confirmTransactionMock.mockImplementationOnce(async (_rpc, signature) => {
+        await settleProcessingTransfer(signature, { status: "confirmed", slot: 150 });
+        return {
+          signature,
+          slot: 100n,
+          confirmationStatus: "finalized",
+          err: null,
+        };
+      });
+
+      const res = await transferRequest("0.001");
+
+      expect(res.status).toBe(200);
+      const json = await readTransferResponse(res);
+      expect(json.data.transfer).toMatchObject({ status: "finalized", slot: 100 });
+      expect(await readTransferRow(json.data.transfer.id)).toMatchObject({ status: "finalized" });
+      expect(
+        await new AuditService(getDb(env)).findCriticalOutcome({
+          organizationId: TEST_ORG.id,
+          action: "transfer",
+          resourceType: "payment_transfer",
+          resourceId: json.data.transfer.id,
+        })
+      ).toMatchObject({ status: "success", metadata: { slot: "100" } });
+    });
+
+    it("answers an ambiguous confirmation failure with the row reconciliation already finalized", async () => {
+      await mockSignedSubmissionAdapter();
+      confirmTransactionMock.mockImplementationOnce(async (_rpc, signature) => {
+        await settleProcessingTransfer(signature, { status: "finalized", slot: 200 });
+        throw new Error("confirmation timed out");
+      });
+
+      const res = await transferRequest("0.001");
+
+      expect(res.status).toBe(200);
+      const json = await readTransferResponse(res);
+      expect(json.data.transfer).toMatchObject({ status: "finalized", slot: 200 });
+      expect(
+        await new AuditService(getDb(env)).findCriticalOutcome({
+          organizationId: TEST_ORG.id,
+          action: "transfer",
+          resourceType: "payment_transfer",
+          resourceId: json.data.transfer.id,
+        })
+      ).toMatchObject({ status: "success", metadata: { slot: "200" } });
+    });
+
+    it("answers an ambiguous confirmation failure on a row reconciliation already failed like its replay", async () => {
+      await mockSignedSubmissionAdapter();
+      confirmTransactionMock.mockImplementationOnce(async (_rpc, signature) => {
+        await settleProcessingTransfer(signature, { status: "failed", error: "Blockhash expired" });
+        throw new Error("confirmation timed out");
+      });
+
+      const res = await transferRequest("0.001");
+
+      expect(res.status).toBe(400);
+      const failed = await latestTransferRow();
+      expect(await readErrorResponse(res)).toEqual({
+        error: {
+          code: "TRANSACTION_FAILED",
+          message:
+            "Blockhash expired. This Idempotency-Key belongs to a transfer that failed; send the request again with a new Idempotency-Key to try again.",
+          details: { transferId: failed.id, status: "failed" },
+        },
+        meta: { requestId: expect.stringMatching(/^req_/) },
+      });
+      expect(
+        await new AuditService(getDb(env)).findCriticalOutcome({
+          organizationId: TEST_ORG.id,
+          action: "transfer",
+          resourceType: "payment_transfer",
+          resourceId: failed.id,
+        })
+      ).toMatchObject({ status: "failure", metadata: { error: "confirmation timed out" } });
     });
 
     it("returns the durable processing transfer when its first broadcast is ambiguous", async () => {

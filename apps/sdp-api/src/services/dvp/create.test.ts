@@ -418,7 +418,8 @@ describe("createDvpTrade", () => {
     expect(createSponsorshipFeePayment).toHaveBeenCalledWith(
       env,
       expect.objectContaining({ actor: { type: "wallet", id: "cwlt_settlement" } }),
-      "dvp.create"
+      "dvp.create",
+      { custodyWalletId: "cwlt_settlement" }
     );
   });
   it("replays the recorded create after BYOK leaves the release channel without sponsoring again", async () => {
@@ -789,7 +790,8 @@ describe("createDvpTrade", () => {
         projectId: TEST_PROJECT_ID,
         actor: { type: "wallet", id: "cwlt_settlement" },
       },
-      "dvp.create"
+      "dvp.create",
+      { custodyWalletId: "cwlt_settlement" }
     );
   });
   it("fails the claim when the port refuses the sponsor response and never attaches a signature", async () => {

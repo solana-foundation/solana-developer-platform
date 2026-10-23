@@ -20,11 +20,9 @@ import {
 } from "#/ramps/fetch";
 import { readyCounterparty } from "#/ramps/requirements";
 import {
-  checkRampKeyFormats,
   isActiveIso4217CurrencyCode,
   isIso3166Alpha2CountryCode,
   RAMP_RAIL_DUMPS,
-  type RampKeyFormats,
   rampCredentials,
   unreportedCurrencyLimit,
 } from "#/ramps/shared";
@@ -34,11 +32,11 @@ import type {
   RampDiscoveryContext,
   RampEstimateOfframpInput,
   RampEstimateOnrampInput,
+  RampKeyFormats,
   RampOfframpQuoteInput,
   RampOnrampQuoteInput,
   RampProvider,
   RampProviderCancelOutcome,
-  RampProviderCredentials,
   RampRuntimeContext,
   RampTransferLookup,
   ValidateCounterpartyOptions,
@@ -67,9 +65,10 @@ const MOONPAY_WIDGET_URLS = {
   production: { onramp: "https://buy.moonpay.com", offramp: "https://sell.moonpay.com" },
 } as const satisfies Record<SdpEnvironment, Record<RampTransferType, string>>;
 
+/** MoonPay's webhook key is one per account and mode. */
 const MOONPAY_KEY_FORMATS = {
-  sandbox: { publicKey: /^pk_test_/, secretKey: /^sk_test_/ },
-  production: { publicKey: /^pk_live_/, secretKey: /^sk_live_/ },
+  sandbox: { publicKey: /^pk_test_/, secretKey: /^sk_test_/, webhookSecret: /^wk_test_/ },
+  production: { publicKey: /^pk_live_/, secretKey: /^sk_live_/, webhookSecret: /^wk_live_/ },
 } as const satisfies RampKeyFormats;
 
 /**
@@ -443,10 +442,7 @@ export class MoonpayRampClient implements RampProvider<MoonpaySettlementEvent> {
   readonly id = "moonpay";
   readonly label = "MoonPay";
   readonly declaredRailSupport = MOONPAY_DECLARED_RAIL_SUPPORT;
-
-  checkCredentials(credentials: RampProviderCredentials, mode: SdpEnvironment): string | null {
-    return checkRampKeyFormats(this.label, MOONPAY_KEY_FORMATS, credentials, mode);
-  }
+  readonly keyFormats = MOONPAY_KEY_FORMATS;
 
   validateCounterparty(
     _counterparty: Counterparty,

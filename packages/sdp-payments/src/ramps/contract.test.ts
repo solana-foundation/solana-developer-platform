@@ -12,6 +12,7 @@ import { SdpPaymentsError } from "#/errors";
 import { RAMP_PROVIDER_CLIENTS } from "./index";
 import { MOONPAY_TEST_KIT } from "./providers/moonpay/test-kit";
 import { STRIPE_TEST_KIT } from "./providers/stripe/test-kit";
+import { checkRampCredentials, checkRampWebhookSecret } from "./shared";
 import {
   type RampProviderTestKit,
   type RecordedExchange,
@@ -209,14 +210,14 @@ describe("ramp provider contract", () => {
 
       it("accepts keys only in the mode they name", () => {
         const { credentials, liveCredentials } = kit;
-        assert.equal(client.checkCredentials(credentials, "sandbox"), null);
-        assert.equal(client.checkCredentials(liveCredentials, "production"), null);
+        assert.equal(checkRampCredentials(client, credentials, "sandbox"), null);
+        assert.equal(checkRampCredentials(client, liveCredentials, "production"), null);
         assert.equal(
-          client.checkCredentials(liveCredentials, "sandbox"),
+          checkRampCredentials(client, liveCredentials, "sandbox"),
           `${client.label} sandbox keys must be test-mode keys.`
         );
         assert.equal(
-          client.checkCredentials(credentials, "production"),
+          checkRampCredentials(client, credentials, "production"),
           `${client.label} production keys must be live-mode keys.`
         );
         for (const mixed of [
@@ -224,8 +225,59 @@ describe("ramp provider contract", () => {
           { ...credentials, secretKey: liveCredentials.secretKey },
         ]) {
           for (const mode of SDP_ENVIRONMENTS) {
-            assert.notEqual(client.checkCredentials(mixed, mode), null, `mixed keys in ${mode}`);
+            assert.notEqual(
+              checkRampCredentials(client, mixed, mode),
+              null,
+              `mixed keys in ${mode}`
+            );
           }
+        }
+      });
+
+      it("declares the same keys in both modes", () => {
+        assert.deepEqual(
+          Object.keys(client.keyFormats.sandbox).sort(),
+          Object.keys(client.keyFormats.production).sort()
+        );
+      });
+
+      // sdp-infra mounts `placeholder` for a listed secret Doppler hasn't synced.
+      it("refuses an unsynced `placeholder` for every key in both modes", () => {
+        for (const mode of SDP_ENVIRONMENTS) {
+          for (const [role, format] of Object.entries(client.keyFormats[mode])) {
+            assert.equal(format.test("placeholder"), false, `${mode} ${role}`);
+          }
+        }
+      });
+
+      it("declares a webhook secret exactly when its kit carries webhook secrets", () => {
+        assert.equal(
+          client.keyFormats.sandbox.webhookSecret !== undefined,
+          kit.webhookSecrets !== undefined
+        );
+      });
+
+      it("accepts a webhook secret in its mode, and the other mode's where its format names one", (t) => {
+        const secrets = kit.webhookSecrets;
+        if (secrets === undefined) {
+          t.skip(`${provider} takes no webhooks`);
+          return;
+        }
+        for (const mode of SDP_ENVIRONMENTS) {
+          assert.equal(checkRampWebhookSecret(client, secrets[mode], mode), null, mode);
+        }
+        const namesMode =
+          client.keyFormats.sandbox.webhookSecret?.source !==
+          client.keyFormats.production.webhookSecret?.source;
+        if (namesMode) {
+          assert.equal(
+            checkRampWebhookSecret(client, secrets.production, "sandbox"),
+            `${client.label} sandbox webhook secret has the wrong format.`
+          );
+          assert.equal(
+            checkRampWebhookSecret(client, secrets.sandbox, "production"),
+            `${client.label} production webhook secret has the wrong format.`
+          );
         }
       });
 

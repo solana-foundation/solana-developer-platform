@@ -821,7 +821,7 @@ describe("MoonPay ramp webhook", () => {
   const USER_ID = "usr_moonpay_webhook";
   const TRANSFER_ID = "xfr_moonpay_webhook";
   const MOONPAY_TRANSACTION_ID = "0a5bb889-9afb-4b8d-835b-9b9855d67509";
-  const MOONPAY_WEBHOOK_KEY = "moonpay_test_webhook_key";
+  const MOONPAY_WEBHOOK_KEY = "wk_test_moonpay_webhook";
   const COUNTERPARTY_ID = "cpty_moonpay_webhook";
   const MOONPAY_CUSTOMER_ID = "6e9fd8db-98e4-46f4-bd6e-6a3c30fdda19";
   const SOL_MINT = required(wellKnownMint("SOL", "devnet"));
@@ -920,11 +920,11 @@ describe("MoonPay ramp webhook", () => {
   }
   beforeEach(async () => {
     await seedTestDatabase(env);
-    env.MOONPAY_SANDBOX_WEBHOOK_KEY = MOONPAY_WEBHOOK_KEY;
+    env.MOONPAY_SANDBOX_WEBHOOK_SECRET = MOONPAY_WEBHOOK_KEY;
     await seedMoonpayOnrampTransfer();
   });
   afterEach(async () => {
-    env.MOONPAY_SANDBOX_WEBHOOK_KEY = undefined;
+    env.MOONPAY_SANDBOX_WEBHOOK_SECRET = undefined;
   });
   const completedPayload = {
     type: "transaction_updated",

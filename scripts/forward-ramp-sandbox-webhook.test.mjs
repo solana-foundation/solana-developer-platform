@@ -120,14 +120,14 @@ test("refuses a live-mode Stripe session", () => {
 test("names a bad environment key without printing any key", () => {
   const env = {
     MOONPAY_SANDBOX_API_KEY: "fixture-api-key-value",
-    MOONPAY_SANDBOX_WEBHOOK_KEY: " ",
+    MOONPAY_SANDBOX_WEBHOOK_SECRET: " ",
     SDP_API_URL: "not a url",
   };
 
   assert.throws(
     () => parseInput("environment", moonpayEnvSchema, env),
     (error) => {
-      assert.match(error.message, /MOONPAY_SANDBOX_WEBHOOK_KEY/);
+      assert.match(error.message, /MOONPAY_SANDBOX_WEBHOOK_SECRET/);
       assert.match(error.message, /SDP_API_URL/);
       assert.doesNotMatch(error.message, /fixture-api-key-value/);
       return true;
@@ -138,7 +138,7 @@ test("names a bad environment key without printing any key", () => {
 test("defaults SDP_API_URL to the local API", () => {
   const env = parseInput("environment", moonpayEnvSchema, {
     MOONPAY_SANDBOX_API_KEY: "fixture-api-key",
-    MOONPAY_SANDBOX_WEBHOOK_KEY: "fixture-webhook-key",
+    MOONPAY_SANDBOX_WEBHOOK_SECRET: "fixture-webhook-key",
   });
 
   assert.equal(env.SDP_API_URL, "http://127.0.0.1:8787");

@@ -2,7 +2,7 @@
 
 import type { PaymentTransferSummary as TransferRecord } from "@sdp/types/payments";
 import { MOVEMENT_READ_PATHS, settleWhenMovementFinal } from "@/lib/dashboard-fetch";
-import { uncertainMoneyAnswerMessage } from "@/lib/idempotency";
+import { canonicalDecimalAmount, uncertainMoneyAnswerMessage } from "@/lib/idempotency";
 import {
   createIdempotencyKeyStore,
   resetIdempotencyKeyStoresForTests,
@@ -36,17 +36,27 @@ export function resetTransferIdempotencyStateForTests(): void {
 }
 
 /**
+ * The transfer as it is both keyed and sent: the amount in its canonical
+ * spelling, as the API fingerprints it, so re-entering `1` for `1.0` after a
+ * lost answer is the same payment under the same key, not a second one.
+ */
+export function canonicalTransferInput(input: CreateTransferInput): CreateTransferInput {
+  return { ...input, amount: canonicalDecimalAmount(input.amount) };
+}
+
+/**
  * What makes two sends the SAME payment: the source wallet, the destination, the
- * token, the amount and the memo. Change any one and it is a different payment,
- * not a retry.
+ * token, the amount (in canonical spelling) and the memo. Change any one and it
+ * is a different payment, not a retry.
  */
 export function transferRequestFingerprint(input: CreateTransferInput): string {
+  const canonical = canonicalTransferInput(input);
   return JSON.stringify([
-    input.sourceCustodyWalletId,
-    input.destination,
-    input.token,
-    input.amount,
-    input.memo === undefined ? null : input.memo,
+    canonical.sourceCustodyWalletId,
+    canonical.destination,
+    canonical.token,
+    canonical.amount,
+    canonical.memo === undefined ? null : canonical.memo,
   ]);
 }
 
@@ -123,13 +133,16 @@ export function sendTransferUnderKey(
   t: Translate,
   providerSessionId?: string
 ): Promise<TransferSendResult> {
-  const payment = transferRequestFingerprint(submission);
+  // Sent in the spelling it is keyed by, so the API's fingerprint of the body
+  // and this key agree on what one payment is.
+  const canonical = canonicalTransferInput(submission);
+  const payment = transferRequestFingerprint(canonical);
   const fingerprint =
     providerSessionId === undefined ? payment : JSON.stringify([providerSessionId, payment]);
   const pending = pendingSends.get(fingerprint);
   if (pending) return pending;
   const send = performTransferUnderKey(
-    submission,
+    canonical,
     t,
     fingerprint,
     providerSessionId !== undefined
