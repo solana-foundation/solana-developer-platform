@@ -13,7 +13,7 @@ import { clearKVStores } from "@/test/mocks/kv";
  * Each Earn route's one action (coarse until Earn is promoted: reads `read`,
  * cancels and program setup `manage`, builds, submits and movements `execute`).
  */
-const EARN_ROUTE_ACTIONS: Record<string, Action> = {
+const EARN_ROUTE_ACTIONS = {
   "GET /strategies": "earn.read",
   "GET /strategies/:strategyId": "earn.read",
   "GET /external-wallet/positions/summary": "earn.read",
@@ -60,7 +60,7 @@ const EARN_ROUTE_ACTIONS: Record<string, Action> = {
   "POST /programs/:programId/withdrawals": "earn.execute",
   "GET /programs/:programId/withdrawals": "earn.read",
   "GET /programs/:programId/withdrawals/:withdrawalRef": "earn.read",
-};
+} as const satisfies Record<string, Action>;
 
 const EARN_ACTIONS = actionsInModule("earn");
 
@@ -147,8 +147,10 @@ function requestAnonymously(route: string) {
 
 const ROUTES = Object.keys(EARN_ROUTE_ACTIONS).sort();
 
+const ACTION_BY_ROUTE: ReadonlyMap<string, Action> = new Map(Object.entries(EARN_ROUTE_ACTIONS));
+
 function actionFor(route: string): Action {
-  const action = EARN_ROUTE_ACTIONS[route];
+  const action = ACTION_BY_ROUTE.get(route);
   assert(action);
   return action;
 }

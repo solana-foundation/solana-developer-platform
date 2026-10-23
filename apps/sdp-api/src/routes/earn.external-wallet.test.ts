@@ -469,9 +469,7 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
       });
 
       expect(res.status).toBe(200);
-      expect(buildExternalWalletDepositTransaction.mock.calls[0]?.[1]).not.toHaveProperty(
-        "feePayer"
-      );
+      expect(buildExternalWalletDepositTransaction.mock.calls[0]?.[1]?.feePayer).toBeUndefined();
       const body = (await res.json()) as { data: { transaction: { feePayer?: string } } };
       expect(body.data.transaction).not.toHaveProperty("feePayer");
     });

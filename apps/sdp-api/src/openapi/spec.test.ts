@@ -269,16 +269,17 @@ describe("OpenAPI spec", () => {
 
     // Every Earn operation requires a credential in both documents: no empty
     // security requirement, so no request may be anonymous.
-    for (const operation of publicEarnOperations) {
-      const [method, path] = operation.split(" ") as [string, string];
-      const key = method.toLowerCase() as "get" | "post";
-      expect(publicDocument.paths?.[path]?.[key]?.security, operation).toEqual([
-        { apiKeyAuth: [] },
-      ]);
-      expect(internal.paths?.[path]?.[key]?.security, operation).toEqual([
-        { apiKeyAuth: [] },
-        { clerkBearerAuth: [] },
-      ]);
+    for (const [path, item] of Object.entries(publicDocument.paths ?? {})) {
+      if (!path.startsWith("/v1/earn")) continue;
+      for (const method of ["get", "post", "put", "patch", "delete"] as const) {
+        const operation = item[method];
+        if (!operation) continue;
+        expect(operation.security, `${method} ${path}`).toEqual([{ apiKeyAuth: [] }]);
+        expect(internal.paths?.[path]?.[method]?.security, `${method} ${path}`).toEqual([
+          { apiKeyAuth: [] },
+          { clerkBearerAuth: [] },
+        ]);
+      }
     }
 
     const depositPreviewRequest = getJsonSchema(
