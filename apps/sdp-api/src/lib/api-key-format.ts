@@ -74,7 +74,8 @@ const CRC32_TABLE = (() => {
 export function crc32(input: string): number {
   let crc = 0xffffffff;
   for (const byte of new TextEncoder().encode(input)) {
-    crc = (CRC32_TABLE[(crc ^ byte) & 0xff] as number) ^ (crc >>> 8);
+    // The index is masked to 0-255, inside the 256-entry table.
+    crc = (CRC32_TABLE[(crc ^ byte) & 0xff] ?? 0) ^ (crc >>> 8);
   }
   return (crc ^ 0xffffffff) >>> 0;
 }
@@ -109,7 +110,10 @@ export function parseSfApiKey(token: string): SfApiKey | null {
   if (!match) {
     return null;
   }
-  const [, keyId, secret, checksum] = match as unknown as [string, string, string, string];
+  const [, keyId, secret, checksum] = match;
+  if (keyId === undefined || secret === undefined || checksum === undefined) {
+    return null;
+  }
   if (sfChecksum(`${SF_API_KEY_PREFIX}${keyId}_${secret}`) !== checksum) {
     return null;
   }

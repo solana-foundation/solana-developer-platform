@@ -121,6 +121,21 @@ type ApiKeyAuthorizationRow = ApiKeyLifecycleColumns & {
 };
 
 /** Everything an API key may do on this request, all from one read. */
+/**
+ * What the instance's refusal and throttle caches remember a presented key by.
+ * An `sf_` key's hash covers its secret alone, so its key ID is part of the
+ * entry: a secret refused under a wrong key ID must not refuse the real key.
+ */
+export function apiKeyRefusalKey({
+  keyHash,
+  publicId,
+}: {
+  keyHash: string;
+  publicId: string | null;
+}): string {
+  return publicId === null ? keyHash : `sf:${publicId}:${keyHash}`;
+}
+
 export interface ApiKeyAuthorization {
   id: string;
   organizationId: string;
@@ -161,6 +176,7 @@ export async function authorizeApiKey(
     publicId: string | null;
   }
 ): Promise<ApiKeyAuthorization> {
+  const refusalKey = apiKeyRefusalKey({ keyHash, publicId });
   const row = await getDb(c.env)
     .prepare(
       `SELECT ak.id, ak.organization_id, ak.project_id, ak.grants, ak.grants_assigned,
@@ -185,7 +201,7 @@ export async function authorizeApiKey(
     .first<ApiKeyAuthorizationRow>();
 
   if (!row) {
-    throw refuseTerminally(keyHash, "INVALID_API_KEY");
+    throw refuseTerminally(refusalKey, "INVALID_API_KEY");
   }
   // Organization and project status before the key's own: a key created or
   // rotated after an organization deletion enumerated its keys is covered by
@@ -200,10 +216,10 @@ export async function authorizeApiKey(
   // A dead key never comes back, so its refusal is remembered; the
   // organization and project refusals above can lift and are not.
   if (refusal === "revoked") {
-    throw refuseTerminally(keyHash, "REVOKED_API_KEY");
+    throw refuseTerminally(refusalKey, "REVOKED_API_KEY");
   }
   if (refusal === "expired") {
-    throw refuseTerminally(keyHash, "EXPIRED_API_KEY");
+    throw refuseTerminally(refusalKey, "EXPIRED_API_KEY");
   }
   // A key from before grants holds none until a person gives it some; it is
   // refused by name rather than failing every route. Not remembered: setting
