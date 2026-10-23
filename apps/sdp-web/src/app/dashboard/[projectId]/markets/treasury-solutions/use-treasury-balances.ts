@@ -7,7 +7,7 @@ import { useEarnVaultPositions } from "@/app/dashboard/[projectId]/markets/earn/
 import {
   displayedVaultBalance,
   hasUnconfirmedVaultMovement,
-  isCommittedVaultMovement,
+  isObservedVaultMovement,
   pendingVaultBalanceReads,
   type VaultActivity,
 } from "./treasury-vault-balance";
@@ -64,10 +64,7 @@ export function useTreasuryBalances(activities: readonly VaultActivity[]) {
           ...pendingPairs.current.keys(),
           ...(movementIds ??
             activities
-              .filter(
-                ({ movement }) =>
-                  isCommittedVaultMovement(movement) && movement.committedObservedAt !== undefined
-              )
+              .filter(({ movement }) => isObservedVaultMovement(movement))
               .map(({ movement }) => movement.movementId)),
         ]),
       };
@@ -162,10 +159,7 @@ export function useTreasuryBalances(activities: readonly VaultActivity[]) {
       if (!currentIds.has(id) && !pendingPairs.current.has(id))
         movementWalletIds.current.delete(id);
     }
-    const confirmed = activities.filter(
-      ({ movement }) =>
-        isCommittedVaultMovement(movement) && movement.committedObservedAt !== undefined
-    );
+    const confirmed = activities.filter(({ movement }) => isObservedVaultMovement(movement));
     const unrequested = confirmed.filter(
       ({ movement }) => !requested.current.has(movement.movementId)
     );
@@ -201,8 +195,7 @@ export function useTreasuryBalances(activities: readonly VaultActivity[]) {
         activities.some(
           ({ movement }) =>
             movement.positionId === position.id &&
-            isCommittedVaultMovement(movement) &&
-            movement.committedObservedAt !== undefined &&
+            isObservedVaultMovement(movement) &&
             !pairedMovementIds.has(movement.movementId)
         ) ||
         refreshes.some((read) =>
@@ -249,9 +242,7 @@ export function useTreasuryBalances(activities: readonly VaultActivity[]) {
       refreshes.length > 0 ||
       activities.some(
         ({ movement }) =>
-          isCommittedVaultMovement(movement) &&
-          movement.committedObservedAt !== undefined &&
-          !pairedMovementIds.has(movement.movementId)
+          isObservedVaultMovement(movement) && !pairedMovementIds.has(movement.movementId)
       ) ||
       pendingVaultBalanceReads(activities, latestRead).length > 0,
     balanceOf,

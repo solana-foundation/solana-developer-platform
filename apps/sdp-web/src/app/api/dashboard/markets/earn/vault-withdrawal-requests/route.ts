@@ -1,7 +1,5 @@
-import {
-  proxyQueryErrorResponse,
-  vaultWithdrawalRequestsProxyQuery,
-} from "@/app/api/dashboard/markets/earn/provider-query";
+import { vaultWithdrawalRequestsProxyQuery } from "@/app/api/dashboard/markets/earn/provider-query";
+import { proxyValidatedGet } from "@/app/api/dashboard/markets/proxy-read";
 import { proxyToSdpApi } from "@/lib/sdp-api";
 
 export async function POST(request: Request) {
@@ -13,11 +11,9 @@ export async function POST(request: Request) {
 }
 
 export async function GET(request: Request) {
-  const validated = vaultWithdrawalRequestsProxyQuery(request);
-  if (!validated.ok) return proxyQueryErrorResponse(validated);
-  return proxyToSdpApi({
-    request,
+  return proxyValidatedGet(request, {
+    validate: vaultWithdrawalRequestsProxyQuery,
     traceSource: "route.dashboard.earn.vault_withdrawal_requests.list",
-    path: `/v1/earn/vault-withdrawal-requests${validated.query}`,
+    path: (query) => `/v1/earn/vault-withdrawal-requests${query}`,
   });
 }

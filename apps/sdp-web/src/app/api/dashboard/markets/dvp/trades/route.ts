@@ -1,4 +1,5 @@
-import { NextResponse } from "next/server";
+import type { ProxyQueryValidation } from "@/app/api/dashboard/markets/proxy-read";
+import { proxyValidatedGet } from "@/app/api/dashboard/markets/proxy-read";
 import { proxyToSdpApi } from "@/lib/sdp-api";
 
 /**
@@ -7,9 +8,7 @@ import { proxyToSdpApi } from "@/lib/sdp-api";
  * API as a silently ignored filter — a caller who thinks they filtered and did
  * not is worse served than one who gets a 400.
  */
-function tradesQuery(
-  request: Request
-): { ok: true; query: string } | { ok: false; message: string } {
+function tradesQuery(request: Request): ProxyQueryValidation {
   const url = new URL(request.url);
   for (const key of url.searchParams.keys()) {
     if (key !== "limit") {
@@ -28,15 +27,10 @@ function tradesQuery(
 }
 
 export async function GET(request: Request) {
-  const validated = tradesQuery(request);
-  if (!validated.ok) {
-    return NextResponse.json({ error: { message: validated.message } }, { status: 400 });
-  }
-
-  return proxyToSdpApi({
-    request,
+  return proxyValidatedGet(request, {
+    validate: tradesQuery,
     traceSource: "route.dashboard.dvp.trades.list",
-    path: `/v1/dvp/trades${validated.query}`,
+    path: (query) => `/v1/dvp/trades${query}`,
   });
 }
 

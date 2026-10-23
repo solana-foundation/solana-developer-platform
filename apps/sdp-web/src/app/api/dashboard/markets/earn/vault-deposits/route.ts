@@ -1,7 +1,5 @@
-import {
-  proxyQueryErrorResponse,
-  vaultDepositsProxyQuery,
-} from "@/app/api/dashboard/markets/earn/provider-query";
+import { vaultDepositsProxyQuery } from "@/app/api/dashboard/markets/earn/provider-query";
+import { proxyValidatedGet } from "@/app/api/dashboard/markets/proxy-read";
 import { proxyToSdpApi } from "@/lib/sdp-api";
 
 export async function POST(request: Request) {
@@ -18,12 +16,9 @@ export async function POST(request: Request) {
  * this read accepts no client-owned transport metadata.
  */
 export async function GET(request: Request) {
-  const validated = vaultDepositsProxyQuery(request);
-  if (!validated.ok) return proxyQueryErrorResponse(validated);
-
-  return proxyToSdpApi({
-    request,
+  return proxyValidatedGet(request, {
+    validate: vaultDepositsProxyQuery,
     traceSource: "route.dashboard.earn.vault_deposits.list",
-    path: `/v1/earn/vault-deposits${validated.query}`,
+    path: (query) => `/v1/earn/vault-deposits${query}`,
   });
 }

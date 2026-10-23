@@ -1,4 +1,5 @@
 import {
+  compareDecimalAmounts,
   decimalScale,
   formatDecimalAmount,
   isDecimalString,
@@ -39,8 +40,7 @@ export function formatAllocationWeight(pct: string | undefined, locale: string):
 
 /** Exactly zero, decided on the decimal string: "0", "0.00" and "0.000" all qualify. */
 function isZeroWeight(pct: string): boolean {
-  if (!isDecimalString(pct)) return false;
-  return parseDecimalAmount(pct, decimalScale(pct)) === 0n;
+  return isDecimalString(pct) && compareDecimalAmounts(pct, "0") === 0;
 }
 
 /**

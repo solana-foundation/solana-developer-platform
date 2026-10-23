@@ -1,16 +1,10 @@
-import {
-  proxyQueryErrorResponse,
-  vaultPositionsProxyQuery,
-} from "@/app/api/dashboard/markets/earn/provider-query";
-import { proxyToSdpApi } from "@/lib/sdp-api";
+import { vaultPositionsProxyQuery } from "@/app/api/dashboard/markets/earn/provider-query";
+import { proxyValidatedGet } from "@/app/api/dashboard/markets/proxy-read";
 
 export async function GET(request: Request) {
-  const validated = vaultPositionsProxyQuery(request);
-  if (!validated.ok) return proxyQueryErrorResponse(validated);
-
-  return proxyToSdpApi({
-    request,
+  return proxyValidatedGet(request, {
+    validate: vaultPositionsProxyQuery,
     traceSource: "route.dashboard.earn.vault_positions.list",
-    path: `/v1/earn/vault-positions${validated.query}`,
+    path: (query) => `/v1/earn/vault-positions${query}`,
   });
 }

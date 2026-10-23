@@ -1,7 +1,5 @@
-import {
-  proxyQueryErrorResponse,
-  vaultWithdrawalsProxyQuery,
-} from "@/app/api/dashboard/markets/earn/provider-query";
+import { vaultWithdrawalsProxyQuery } from "@/app/api/dashboard/markets/earn/provider-query";
+import { proxyValidatedGet } from "@/app/api/dashboard/markets/proxy-read";
 import { proxyToSdpApi } from "@/lib/sdp-api";
 
 export async function POST(request: Request) {
@@ -18,12 +16,9 @@ export async function POST(request: Request) {
  * POST above, this read accepts no client-owned transport metadata.
  */
 export async function GET(request: Request) {
-  const validated = vaultWithdrawalsProxyQuery(request);
-  if (!validated.ok) return proxyQueryErrorResponse(validated);
-
-  return proxyToSdpApi({
-    request,
+  return proxyValidatedGet(request, {
+    validate: vaultWithdrawalsProxyQuery,
     traceSource: "route.dashboard.earn.vault_withdrawals.list",
-    path: `/v1/earn/vault-withdrawals${validated.query}`,
+    path: (query) => `/v1/earn/vault-withdrawals${query}`,
   });
 }

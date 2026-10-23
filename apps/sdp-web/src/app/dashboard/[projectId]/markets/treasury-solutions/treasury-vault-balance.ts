@@ -33,6 +33,18 @@ export function isCommittedVaultMovement(movement: Pick<TrackedVaultMovement, "s
   return movement.status === "confirmed" || movement.status === "finalized";
 }
 
+/**
+ * A movement whose commitment the client has actually observed — the trigger
+ * for every re-read of the balances it changed. Status alone is not evidence:
+ * a committed status with no observation time is still waiting for the read
+ * that observed it.
+ */
+export function isObservedVaultMovement(
+  movement: Pick<TrackedVaultMovement, "status" | "committedObservedAt">
+): boolean {
+  return isCommittedVaultMovement(movement) && movement.committedObservedAt !== undefined;
+}
+
 export function hasUnconfirmedVaultMovement(
   activities: readonly VaultActivity[],
   positionId?: string
@@ -81,8 +93,7 @@ export function pendingVaultBalanceReads<Activity extends VaultActivity>(
   return activities.filter(
     ({ movement }) =>
       (positionId === undefined || movement.positionId === positionId) &&
-      isCommittedVaultMovement(movement) &&
-      movement.committedObservedAt !== undefined &&
+      isObservedVaultMovement(movement) &&
       (!acknowledgedMovements.has(movement.movementId) ||
         unreadablePositions.has(movement.positionId))
   );

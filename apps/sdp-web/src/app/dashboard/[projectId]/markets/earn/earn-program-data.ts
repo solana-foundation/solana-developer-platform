@@ -425,15 +425,19 @@ export interface EarnVaultPositionsRead {
 }
 
 /**
- * Keep each position's evidence together. A position with more than 100
- * movements gets its own batches, so their minimum slots can be compared
- * without borrowing the slot of an unrelated position.
+ * Keep each position's evidence together. A position with more than
+ * `VAULT_BALANCE_READ_BATCH_SIZE` movements gets its own batches, so their
+ * minimum slots can be compared without borrowing the slot of an unrelated
+ * position.
  */
+/** One balance read's id cap: the API answers at most 100 `afterMovementIds`. */
+const VAULT_BALANCE_READ_BATCH_SIZE = 100;
+
 function vaultBalanceReadBatches(
   movementIds: readonly string[],
   positionIds?: ReadonlyMap<string, string>
 ): string[][] {
-  if (movementIds.length <= 100) return [[...movementIds]];
+  if (movementIds.length <= VAULT_BALANCE_READ_BATCH_SIZE) return [[...movementIds]];
   const byPosition = new Map<string, string[]>();
   for (const id of movementIds) {
     const positionId = positionIds?.get(id);
@@ -445,13 +449,13 @@ function vaultBalanceReadBatches(
   const batches: string[][] = [];
   let batch: string[] = [];
   for (const group of byPosition.values()) {
-    if (batch.length + group.length > 100) {
+    if (batch.length + group.length > VAULT_BALANCE_READ_BATCH_SIZE) {
       if (batch.length > 0) batches.push(batch);
       batch = [];
     }
-    if (group.length > 100) {
-      for (let index = 0; index < group.length; index += 100)
-        batches.push(group.slice(index, index + 100));
+    if (group.length > VAULT_BALANCE_READ_BATCH_SIZE) {
+      for (let index = 0; index < group.length; index += VAULT_BALANCE_READ_BATCH_SIZE)
+        batches.push(group.slice(index, index + VAULT_BALANCE_READ_BATCH_SIZE));
     } else batch.push(...group);
   }
   if (batch.length > 0) batches.push(batch);
@@ -743,6 +747,19 @@ const earnVaultDepositOutcomeSchema = z
 export type EarnVaultDepositOutcome = z.infer<typeof earnVaultDepositOutcomeSchema>;
 
 /**
+ * The failure a value-moving write answers when its success envelope does not
+ * parse: only the schema's verdict separates it from an honest refusal.
+ * `status` and `body` pass through so the key-settling rules see the same
+ * evidence they would have from an API-named error.
+ */
+function unparsedWriteResponse(
+  result: { status: number; data: unknown },
+  error: string
+): Extract<DashboardFetchResult<never>, { ok: false }> {
+  return { ok: false, error, status: result.status, body: result.data };
+}
+
+/**
  * Deposits from an SDP custody wallet into a non-custodial vault. The caller's
  * idempotency key is transport metadata and is never copied into the JSON body.
  */
@@ -771,15 +788,8 @@ export async function createEarnVaultDeposit(
 
   if (!result.ok) return result;
 
-  const invalid = {
-    ok: false,
-    error: "Invalid vault deposit response",
-    status: result.status,
-    body: result.data,
-  } as const;
-
   const parsed = earnVaultDepositOutcomeSchema.safeParse(result.data);
-  if (!parsed.success) return invalid;
+  if (!parsed.success) return unparsedWriteResponse(result, "Invalid vault deposit response");
 
   return { ok: true, status: result.status, data: parsed.data };
 }
@@ -1202,15 +1212,8 @@ export async function createEarnVaultWithdrawal(
 
   if (!result.ok) return result;
 
-  const invalid = {
-    ok: false,
-    error: "Invalid vault withdrawal response",
-    status: result.status,
-    body: result.data,
-  } as const;
-
   const parsed = earnVaultWithdrawalOutcomeSchema.safeParse(result.data);
-  if (!parsed.success) return invalid;
+  if (!parsed.success) return unparsedWriteResponse(result, "Invalid vault withdrawal response");
 
   return { ok: true, status: result.status, data: parsed.data };
 }
@@ -1451,46 +1454,61 @@ const earnVaultWithdrawalRequestRecordSchema: z.ZodType<EarnVaultWithdrawalReque
     replayed: z.boolean().optional(),
   });
 
-type QueuedReadResult<T> = { kind: "ready"; value: T } | { kind: "unavailable" };
+export type QueuedReadResult<T> = { kind: "ready"; value: T } | { kind: "unavailable" };
+
+/**
+ * POST one read-only preview and parse its `{ data }` envelope: a ready read
+ * yields the parsed payload, and EVERY other answer — a transport failure, a
+ * non-2xx, or an envelope that does not parse — is the same `unavailable`
+ * verdict the callers fail closed on.
+ */
+async function fetchReadyEnvelope<T>(
+  path: string,
+  body: unknown,
+  schema: z.ZodType<T>,
+  signal?: AbortSignal
+): Promise<QueuedReadResult<T>> {
+  const result = await dashboardFetch<unknown>(path, { method: "POST", body, signal });
+  if (!result.ok) return { kind: "unavailable" };
+  const parsed = z.object({ data: schema }).safeParse(result.data);
+  return parsed.success ? { kind: "ready", value: parsed.data.data } : { kind: "unavailable" };
+}
 
 /** Read settlement routes independently. No client-side provider list chooses one. */
 export async function fetchEarnVaultWithdrawalOptions(
   positionId: string,
   signal?: AbortSignal
 ): Promise<QueuedReadResult<EarnVaultWithdrawalOptions>> {
-  const result = await dashboardFetch<unknown>(
+  return fetchReadyEnvelope(
     "/api/dashboard/markets/earn/vault-withdrawal-options",
-    { method: "POST", body: { positionId }, signal }
+    { positionId },
+    earnVaultWithdrawalOptionsSchema,
+    signal
   );
-  if (!result.ok) return { kind: "unavailable" };
-  const parsed = z.object({ data: earnVaultWithdrawalOptionsSchema }).safeParse(result.data);
-  return parsed.success ? { kind: "ready", value: parsed.data.data } : { kind: "unavailable" };
 }
 
 export async function fetchEarnVaultQueuedWithdrawalPreview(
   input: EarnVaultQueuedWithdrawalTermsRequest,
   signal?: AbortSignal
 ): Promise<QueuedReadResult<EarnVaultQueuedWithdrawalPreview>> {
-  const result = await dashboardFetch<unknown>(
+  return fetchReadyEnvelope(
     "/api/dashboard/markets/earn/vault-queued-withdrawal-previews",
-    { method: "POST", body: input, signal }
+    input,
+    earnVaultQueuedWithdrawalPreviewSchema,
+    signal
   );
-  if (!result.ok) return { kind: "unavailable" };
-  const parsed = z.object({ data: earnVaultQueuedWithdrawalPreviewSchema }).safeParse(result.data);
-  return parsed.success ? { kind: "ready", value: parsed.data.data } : { kind: "unavailable" };
 }
 
 export async function fetchEarnVaultParRedemptionPreview(
   input: EarnVaultParRedemptionTermsRequest,
   signal?: AbortSignal
 ): Promise<QueuedReadResult<EarnVaultParRedemptionPreview>> {
-  const result = await dashboardFetch<unknown>(
+  return fetchReadyEnvelope(
     "/api/dashboard/markets/earn/vault-queued-withdrawal-previews",
-    { method: "POST", body: input, signal }
+    input,
+    earnVaultParRedemptionPreviewSchema,
+    signal
   );
-  if (!result.ok) return { kind: "unavailable" };
-  const parsed = z.object({ data: earnVaultParRedemptionPreviewSchema }).safeParse(result.data);
-  return parsed.success ? { kind: "ready", value: parsed.data.data } : { kind: "unavailable" };
 }
 
 const queuedMutationEnvelopeSchema = z.object({
@@ -1539,12 +1557,7 @@ export async function createEarnVaultWithdrawalRequest(
   if (!result.ok) return result;
   const parsed = earnVaultQueuedWithdrawalOutcomeSchema.safeParse(result.data);
   if (!parsed.success) {
-    return {
-      ok: false,
-      error: "Invalid queued withdrawal response",
-      status: result.status,
-      body: result.data,
-    };
+    return unparsedWriteResponse(result, "Invalid queued withdrawal response");
   }
   if (
     (input.mechanism === "operatorRedemption" &&
@@ -1552,12 +1565,7 @@ export async function createEarnVaultWithdrawalRequest(
     (input.mechanism !== "operatorRedemption" &&
       parsed.data.withdrawalRequest.mechanism === "operatorRedemption")
   ) {
-    return {
-      ok: false,
-      error: "Invalid queued withdrawal response",
-      status: result.status,
-      body: result.data,
-    };
+    return unparsedWriteResponse(result, "Invalid queued withdrawal response");
   }
   return { ok: true, status: result.status, data: parsed.data };
 }
@@ -1577,12 +1585,7 @@ export async function cancelEarnVaultWithdrawalRequest(
   if (!result.ok) return result;
   const parsed = queuedMutationEnvelopeSchema.safeParse(result.data);
   if (!parsed.success) {
-    return {
-      ok: false,
-      error: "Invalid queued withdrawal cancellation response",
-      status: result.status,
-      body: result.data,
-    };
+    return unparsedWriteResponse(result, "Invalid queued withdrawal cancellation response");
   }
   return { ok: true, status: result.status, data: parsed.data.data.withdrawalRequest };
 }
