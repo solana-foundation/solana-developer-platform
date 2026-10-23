@@ -22,7 +22,7 @@ function canonicalAsset(token: string): string {
  * The Idempotency-Key fingerprint form of a create-transfer body (ADR 0009,
  * ADR 0012): the canonical intent. `token` becomes `asset`, the asset it
  * names on the project's cluster, so "USDC" and its mint are one request and
- * native SOL and the wrapped SOL mint are two; the amount is canonical, so
+ * the wrapped SOL mint is refused; the amount is canonical, so
  * "1.0" and "1" are one; and the basis has its default applied, so an omitted
  * and an explicit default `amountBasis` are one. No earlier form has an
  * `asset` key, so this form never equals one of them for another request. A

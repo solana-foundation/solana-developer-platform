@@ -322,7 +322,7 @@ describe("Payments routes — transfer idempotency", () => {
     expect(await countTransferRows()).toBe(1);
   });
 
-  it("fingerprints native SOL's spellings as one transfer, and the wrapped SOL mint as another (APE SOLA9-695, ADR 0012)", async () => {
+  it("fingerprints native SOL's spellings as one transfer, and refuses the wrapped SOL mint (APE SOLA9-695, ADR 0012)", async () => {
     const body = {
       sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
       destination: TEST_SOLANA_ADDRESSES.wallet2,
@@ -335,12 +335,12 @@ describe("Payments routes — transfer idempotency", () => {
 
     expect(aliased.status).toBe(200);
     expect(aliased.headers.get("Idempotent-Replayed")).toBe("true");
-    // "SOL" moves native SOL; the wrapped SOL mint is an SPL token, so it is another request.
+    // "SOL" moves native SOL; the wrapped SOL mint is refused before the key is read.
     const wrapped = await postTransfer(
       { ...body, token: SOL_MINT },
       { idempotencyKey: "xfer-alias" }
     );
-    expect(wrapped.status).toBe(422);
+    expect(wrapped.status).toBe(400);
     expect(await countTransferRows()).toBe(1);
   });
 

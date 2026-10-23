@@ -26,7 +26,7 @@ function isDefaultedOption(name: string): name is DefaultedOption {
  * The Idempotency-Key fingerprint form of a create-batch body (HOO-1918,
  * ADR 0012): `token` becomes `asset`, the asset it names on the project's
  * cluster ("native" for native SOL, else the mint), so "USDC" and its mint
- * are one batch while native SOL and the wrapped SOL mint are two. No earlier
+ * are one batch; the wrapped SOL mint is refused. No earlier
  * form has an `asset` key, so this form never equals one of them for another
  * request. Recipients have canonical amounts ("1.0" and "1" move the same) and
  * are sorted by their own canonical JSON, because the order they are listed in

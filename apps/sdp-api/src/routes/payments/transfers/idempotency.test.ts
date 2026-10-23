@@ -33,18 +33,12 @@ describe("canonicalizeTransferBody", () => {
     expect(canonical({ ...body, amountBasis: "credit" })).not.toEqual(canonical(body));
   });
 
-  it("keeps native SOL and the wrapped SOL mint apart", () => {
+  it("spells native SOL as native and refuses the wrapped SOL mint", () => {
     expect(canonical({ ...body, token: "SOL" })).toMatchObject({ asset: "native" });
-    expect(canonical({ ...body, token: SOL_MINT })).toMatchObject({ asset: SOL_MINT });
-  });
-
-  it("never gives a new request the earlier form's fingerprint of another asset", () => {
-    // A new wrapped SOL transfer on a credit basis and a retry naming native SOL are two assets.
-    for (const amountBasis of ["debit", "credit"] as const) {
-      const wrapped = canonical({ ...body, token: SOL_MINT, amountBasis });
-      expect(previous({ ...body, token: "SOL", amountBasis })).not.toEqual(wrapped);
-      expect(previous({ ...body, token: SOL_MINT, amountBasis })).not.toEqual(wrapped);
-    }
+    // Rows store native SOL under the wrapped SOL mint, so a wrapped SOL move would read as native.
+    expect(() => canonical({ ...body, token: SOL_MINT })).toThrow(
+      'Payments does not move wrapped SOL: send token "SOL" to move native SOL'
+    );
   });
 
   it("defaults an off-ramp deposit's basis to credit", () => {
