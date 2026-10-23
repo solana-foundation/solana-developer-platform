@@ -210,7 +210,12 @@ export async function verifyClerkJwtForRequest(
   // A session presented alongside a gateway identity must be the session the
   // gateway authenticated (HOO-2256).
   const gatewayIdentity = c.get("gatewayIdentity");
-  if (gatewayIdentity && gatewayIdentity.clerkUserId !== payload.sub) {
+  if (
+    gatewayIdentity &&
+    (gatewayIdentity.clerkUserId !== payload.sub ||
+      (gatewayIdentity.orgId !== null &&
+        gatewayIdentity.orgId !== (payload.o?.id ?? payload.org_id ?? null)))
+  ) {
     throw new Error("Clerk session does not match the gateway identity");
   }
   c.set("verifiedClerkJwt", { token, payload });

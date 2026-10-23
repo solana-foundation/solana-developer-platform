@@ -27,7 +27,8 @@ const GATEWAY_CLOCK_TOLERANCE_SECONDS = 5;
 
 const claimsSchema = z
   .object({
-    project_id: z.string().min(1),
+    project_id: z.string().min(1).optional(),
+    org_id: z.string().min(1).optional(),
     key_id: z
       .string()
       .regex(/^[0-9a-f]{16}$/)
@@ -43,7 +44,9 @@ const claimsSchema = z
 
 export interface GatewayIdentity {
   /** The gateway project: the customer team, one per SDP organization. */
-  projectId: string;
+  projectId: string | null;
+  /** The Clerk organization of a forwarded session, or null for a key. */
+  orgId: string | null;
   /** The `sf_` key ID the gateway authenticated, or null for a Clerk session. */
   keyId: string | null;
   /** The Clerk user the gateway authenticated, or null for a key. */
@@ -145,7 +148,8 @@ export async function verifyGatewayIdentity(
   );
   const claims = claimsSchema.parse(payload);
   return {
-    projectId: claims.project_id,
+    projectId: claims.project_id ?? null,
+    orgId: claims.org_id ?? null,
     keyId: claims.key_id ?? null,
     clerkUserId: claims.clerk_user_id ?? null,
     plan: claims.plan ?? null,
