@@ -153,6 +153,20 @@ export const addDecimalAmounts = (left: string, right: string): string => {
 };
 
 /**
+ * Sums decimal amount strings exactly, at their largest shared scale: the one
+ * sum the dashboard uses, as `@sdp/payments/decimal` is the API's.
+ *
+ * @param values - Decimal amount strings; surrounding whitespace is ignored.
+ * @returns The canonical decimal sum (trailing zeros trimmed); "0" for none.
+ * @throws {AmountError} When any string fails the parse guards.
+ */
+export const sumDecimalAmounts = (values: readonly string[]): string => {
+  const scale = values.reduce((largest, value) => Math.max(largest, decimalScale(value)), 0);
+  const sum = values.reduce((total, value) => total + parseFixedDecimal(value, scale), 0n);
+  return formatFixedDecimal(sum, scale);
+};
+
+/**
  * Scales a decimal amount string by a basis-point share, rounding DOWN to the
  * amount's own scale. `scaleDecimalAmountByBps("50000000", 1000)` is
  * `"5000000"` (10%). Truncation is deliberate: the one caller is a ceiling

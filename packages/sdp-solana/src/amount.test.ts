@@ -8,6 +8,7 @@ import {
   parseFixedDecimal,
   parseTokenAmount,
   scaleDecimalAmountByBps,
+  sumDecimalAmounts,
 } from "./amount";
 
 describe("kit-backed fixed-point helpers", () => {
@@ -142,5 +143,21 @@ describe("parseTokenAmount", () => {
   it("rejects excess precision and u64 overflow", () => {
     assert.throws(() => parseTokenAmount("1.0000001", 6), AmountError);
     assert.throws(() => parseTokenAmount("18446744073709.551616", 6), AmountError);
+  });
+});
+
+describe("sumDecimalAmounts", () => {
+  it("adds at the largest scale, exactly, past a float's precision", () => {
+    assert.equal(sumDecimalAmounts(["1.25", "0.75", "2"]), "4");
+    assert.equal(sumDecimalAmounts(["0.1", "0.2"]), "0.3");
+    assert.equal(
+      sumDecimalAmounts(["9007199254740993.000000001", "1.000000001"]),
+      "9007199254740994.000000002"
+    );
+  });
+
+  it("is 0 for no amounts and refuses a malformed one", () => {
+    assert.equal(sumDecimalAmounts([]), "0");
+    assert.throws(() => sumDecimalAmounts(["1", "1e3"]), AmountError);
   });
 });

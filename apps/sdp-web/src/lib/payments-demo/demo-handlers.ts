@@ -1,3 +1,4 @@
+import { sumDecimalAmounts } from "@sdp/solana/amount";
 import { parseTokenAmount, toBaseUnits } from "@sdp/solana/token-amount";
 import { OFFRAMP_SUPPORT, ONRAMP_SUPPORT } from "@sdp/types/generated/ramp";
 import { type CryptoRailId, getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
@@ -644,7 +645,7 @@ const batchSchema = z.object({
 function batchTotal(amounts: readonly string[], mint: string): string {
   const { decimals } = DEMO_TOKENS[tokenKeyForMint(mint) ?? "USDC"];
   return fromBaseUnits(
-    amounts.reduce((sum, amount) => sum + toBaseUnits(parseTokenAmount(amount, decimals)), 0n),
+    toBaseUnits(parseTokenAmount(sumDecimalAmounts(amounts), decimals)),
     decimals,
     2
   );
