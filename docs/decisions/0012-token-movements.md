@@ -142,7 +142,8 @@ them in one place, not adding special cases to every flow.
   signature is the transaction id. Settlement reads only those signatures, every window still
   `open`, and closes a window that landed, failed, or has no record past its blockhash's last
   valid block height (the `readSavedSend` rule). A landed one is verified by construction. The
-  claim refuses an expired request, and settlement refuses one whose expiry came before the
+  claim refuses an expired request, and a new window while a signed one is still open, which may
+  have landed in its last blocks; settlement refuses a request whose expiry came before the
   paying transaction was issued. `findReference` and main's `validatePaymentRequestTransfer` are
   gone (SOLA9-699). /pay leaves `loadPaymentMint`: a scaled or interest-bearing request is paid in
   token units.
