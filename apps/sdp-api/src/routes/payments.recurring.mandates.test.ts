@@ -10,7 +10,7 @@ import { TOKEN_PROGRAM_KINDS, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-to
 import { address } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
 import type { ExtensionArgs } from "@solana-program/token-2022";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
 import { app as baseApp } from "@/index";
@@ -21,6 +21,7 @@ import { epochInfoResult, type JsonRpcResult } from "@/test/helpers/cluster-rpc"
 import { env } from "@/test/helpers/env";
 import { withIdempotencyKeys } from "@/test/helpers/idempotency-keys";
 import {
+  confirmTransactionMock,
   getTransactionMock,
   installPaymentsRouteTestHooks,
   recurringCollectionTransactionForSignature,
@@ -36,6 +37,7 @@ import {
   RECURRING_HEADERS,
   recurringMintAccounts,
   setRecurringCollectionDue,
+  testSignature,
 } from "@/test/helpers/recurring-payments";
 import { required } from "@/test/helpers/required";
 import {
@@ -217,6 +219,55 @@ describe("Payments routes — recurring mandates in base units (ADR 0012)", () =
       verification_state: "verified",
       verification_reason: "chain_delta_matched",
     });
+  });
+
+  it("makes the plan from an amount edited after a failed activation, and pulls that amount", async () => {
+    // The plan creation fails on chain: the payment goes back to pending
+    // activation and keeps the plan row that activation wrote.
+    confirmTransactionMock.mockResolvedValueOnce({
+      signature: testSignature(1),
+      slot: 100n,
+      confirmationStatus: "confirmed",
+      err: { InstructionError: [0, "Custom"] },
+    });
+    const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    const activate = () =>
+      app.request(
+        `/v1/payments/recurring-payments/${created.id}/activate`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+    expect((await activate()).status).toBe(400);
+    const edited = await app.request(
+      `/v1/payments/recurring-payments/${created.id}`,
+      { method: "PATCH", headers: RECURRING_HEADERS, body: JSON.stringify({ amount: "30.00" }) },
+      env
+    );
+    expect(edited.status).toBe(200);
+    // The failed plan never landed, so the retry finds no plan at either commitment.
+    const noPlan = { exists: false, address: address(TEST_SOLANA_ADDRESSES.wallet3) } as const;
+    vi.mocked(subscriptionsProgram.fetchMaybePlan)
+      .mockResolvedValueOnce(noPlan)
+      .mockResolvedValueOnce(noPlan);
+
+    const activated = (await parseRecurringResponse(await activate())).data.recurringPayment;
+
+    expect(activated.status).toBe("active");
+    await dueNow({ id: activated.id, subscriptionId: required(activated.subscriptionId) });
+    const response = await collect(activated.id);
+    expect(response.status).toBe(200);
+    const [, sent] = required(sendTransactionMock.mock.calls.at(-1));
+    const pull = required(
+      sentInstructions(sent).find(
+        (instruction) =>
+          instruction.programAddress === subscriptionsProgram.SUBSCRIPTIONS_PROGRAM_ADDRESS
+      )
+    );
+    expect(
+      subscriptionsProgram
+        .getTransferSubscriptionInstructionDataDecoder()
+        .decode(required(pull.data)).transferData.amount
+    ).toBe(30_000_000n);
   });
 
   it("records a mismatch from the destination's raw balance delta and still confirms the pull", async () => {
