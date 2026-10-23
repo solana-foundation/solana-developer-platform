@@ -1,6 +1,7 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
 import type { ParsedTransaction } from "@sdp/rpc/solana";
 import { SOL_MINT, SPL_TOKEN_PROGRAMS, wellKnownMint } from "@sdp/types/well-known-tokens";
+import { SYSTEM_PROGRAM_ADDRESS } from "@solana-program/system";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { applyRampSettlementEvent } from "@/services/payments/ramp-settlements";
@@ -354,6 +355,56 @@ describe("verifyRampDeliveries", () => {
     expect((await row("xfr_sol_delivery"))?.status).toBe("completed");
     expect((await row("xfr_sol_delivery"))?.amount).toBe("0.5");
     expect(getTransactionMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("verifies a token delivery whose new account the ATA program topped up with lamports", async () => {
+    await seedTransfer({ id: "xfr_prefunded_ata", reference: "moonpay_prefunded_ata" });
+    await applyRampSettlementEvent(env, "sandbox", {
+      provider: "moonpay",
+      kind: "settled",
+      reference: "moonpay_prefunded_ata",
+      onchain: { signature: SIG_1, destinationAddress: "quoted-destination", amount: "0.5" },
+      receivedAmount: "0.5",
+    });
+    // Someone sent the wallet's future token account 1 lamport, so creating it
+    // ran an inner System transfer of the rest of its rent into it.
+    getTransactionMock.mockResolvedValue({
+      slot: 42n,
+      blockTime: LANDED_AFTER_TRANSFER,
+      accountKeys: ["fee-payer", "provider-account", "destination-account"],
+      executionResultKnown: true,
+      err: null,
+      preTokenBalances: [],
+      postTokenBalances: [
+        { accountIndex: 2, mint: MINT, owner: "quoted-destination", amount: "500000", decimals: 6 },
+      ],
+      instructions: [
+        {
+          programId: SYSTEM_PROGRAM_ADDRESS,
+          accounts: [],
+          parsedType: "transfer",
+          info: { source: "fee-payer", destination: "destination-account", lamports: 2_039_279 },
+        },
+        {
+          programId: SPL_TOKEN_PROGRAMS["spl-token"],
+          accounts: [],
+          parsedType: "transferChecked",
+          info: {
+            source: "provider-account",
+            destination: "destination-account",
+            mint: MINT,
+            tokenAmount: { amount: "500000", decimals: 6, uiAmountString: "0.5" },
+          },
+        },
+      ],
+    });
+
+    await sweep();
+
+    expect(await row("xfr_prefunded_ata")).toMatchObject({
+      status: "completed",
+      provider_data: { deliveryMismatch: null, verifiedDelivery: { amount: "0.5" } },
+    });
   });
 
   it("does not complete when the provider observation changes during the chain read", async () => {
