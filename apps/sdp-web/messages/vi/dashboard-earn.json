@@ -1100,7 +1100,6 @@
       "fundRefusedBalanceShort": "Wallet này không đủ {symbol} để nạp cho phần này. Không có gì được gửi đi.",
       "fundRefusedBalanceShortUnnamed": "Wallet này không có đủ Token này để nạp cho phần này. Không có gì được gửi đi.",
       "fundRefusedFrozen": "Escrow của phần này đang bị freeze, nên khoản chuyển vào sẽ bị từ chối. Issuer của Token phải unfreeze nó trước.",
-      "fundRefusedMintUnsupported": "Token của phần này không thể nạp thêm nữa: mint của nó hiện ở trạng thái mà DvP settlement từ chối, như phí chuyển, tạm dừng hoặc Transfer Hook. Không có gì được gửi đi.",
       "fundRefusedInProgress": "Phần này đang được xử lý. Hãy quay lại sau một chút.",
       "fundRefusedNoToken": "Wallet này chưa có {symbol} nào. Hãy gửi một ít vào, rồi nạp cho phần này.",
       "fundRefusedNoTokenUnnamed": "Wallet này chưa có Token này. Hãy gửi một ít vào, rồi nạp cho phần này.",
