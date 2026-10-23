@@ -118,8 +118,10 @@ them in one place, not adding special cases to every flow.
   decoder, prints its extension state, and fails when a 1 000-token transfer would pay a fee
   under the current or the newer fee entry (bps alone is not the signal, since `maximumFee` is
   0), or when a hook program is set. While Payments still refuses display-changing mints, it
-  also fails on an interest-bearing, scaled or non-transferable catalogue mint. CI runs it only on
-  pull requests that touch the catalogue or the script, because it uses public RPC.
+  also fails on an interest-bearing, scaled or non-transferable catalogue mint. CI runs it on
+  pull requests that touch the catalogue, the decoder or the script, because it uses public RPC,
+  and daily (`.github/workflows/well-known-mints-watch.yml`): a failure fails the run and posts
+  to the alert Slack channel. The daily run never gates a pull request.
 - **Mint matrix.** `packages/sdp-solana/src/test/mint-matrix.ts` creates one mint per profile
   on an embedded offline surfnet: classic, Token-2022 plain, fee 0 bps, fee 50 bps with a cap,
   scaled 1.5×, a scaled multiplier switch, interest ±5%, a hook program set, paused, and frozen
@@ -156,7 +158,8 @@ Each PR ships alone.
    `amounts.display` for wallet display" in PR 2. This is a stable-surface change and needs
    sign-off. For classic mints, and for every movement SDP has made so far, the values do not
    change.
-2. **Mint watch schedule:** where it runs and who gets the alert.
+2. **Mint watch alerts:** decided in PR 1 (daily, Slack on failure). Open: whether a fee or hook
+   finding should also hold the affected token's flows automatically.
 3. **Credit-basis recurring mandates**, after v1.
 4. **When the DvP, Private Channels and Earn refusals lift:** when those programs support
    `TransferCheckedWithFee` and hooks.
