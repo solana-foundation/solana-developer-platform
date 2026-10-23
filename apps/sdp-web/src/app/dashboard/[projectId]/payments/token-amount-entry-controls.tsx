@@ -12,10 +12,17 @@ import { useLocale, useTranslations } from "@/i18n/provider";
 
 /**
  * Picks what the amount input holds, for a mint with a display rule only:
- * token units, or what wallets show. Locked while a quote is read, since it
- * changes what gets sent.
+ * token units, or what wallets show. It changes what gets sent, so it is
+ * locked while a quote is read and while the form's own request is in flight.
  */
-export function AmountUnitToggle({ entry }: { entry: TokenAmountEntry }) {
+export function AmountUnitToggle({
+  entry,
+  busy,
+}: {
+  entry: TokenAmountEntry;
+  /** True while the form that holds the amount sends its request. */
+  busy: boolean;
+}) {
   const t = useTranslations();
   if (!entry.displayEntryAvailable) return null;
   return (
@@ -31,7 +38,7 @@ export function AmountUnitToggle({ entry }: { entry: TokenAmountEntry }) {
         const unit = AMOUNT_ENTRY_UNITS.find((candidate) => candidate === value);
         if (unit !== undefined) entry.setUnit(unit);
       }}
-      disabled={entry.quoteInFlight}
+      disabled={busy || entry.quoteInFlight}
     />
   );
 }

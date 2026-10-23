@@ -134,6 +134,7 @@ function DetailsStep({ wizard }: StepProps) {
     setField,
     selectWallet,
     sourceWalletHint,
+    submitting,
   } = wizard;
   const assetLabel = selectedAsset === null ? fields.asset : selectedAsset.label;
   // In display units the input holds what wallets show; Max is a token amount, so it is off.
@@ -200,7 +201,7 @@ function DetailsStep({ wizard }: StepProps) {
               )
             }
           />
-          <AmountUnitToggle entry={amountEntry} />
+          <AmountUnitToggle entry={amountEntry} busy={submitting} />
           <TokenAmountQuotePreview entry={amountEntry} symbol={assetLabel} />
         </div>
         <Combobox
