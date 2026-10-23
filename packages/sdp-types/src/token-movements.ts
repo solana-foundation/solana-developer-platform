@@ -7,6 +7,7 @@
  * value a scaled or interest-bearing mint shows.
  */
 
+import { z } from "zod";
 import type {
   PaymentTransferStatus,
   RampTransferTransitionId,
@@ -223,19 +224,18 @@ export interface TokenMovementDisplay {
  * mandate fixes the debit of each pull; the fee, and so the credit, depend on
  * the epoch the pull runs in, up to `maxFeePerPull`.
  */
-export type TokenMovementExpectation =
-  | {
-      basis: "credit";
-      credit: string;
-      decimals: number;
-    }
-  | {
-      basis: "debit";
-      debit: string;
-      decimals: number;
-      /** The largest transfer fee one pull may pay; a pull that would pay more is held. */
-      maxFeePerPull: string;
-    };
+export const tokenMovementExpectationSchema = z.discriminatedUnion("basis", [
+  z.object({ basis: z.literal("credit"), credit: z.string(), decimals: z.number().int() }),
+  z.object({
+    basis: z.literal("debit"),
+    debit: z.string(),
+    decimals: z.number().int(),
+    /** The largest transfer fee one pull may pay; a pull that would pay more is held. */
+    maxFeePerPull: z.string(),
+  }),
+]);
+
+export type TokenMovementExpectation = z.infer<typeof tokenMovementExpectationSchema>;
 
 /**
  * What a movement moves, in token units. `debit = credit + fee`; the fee is

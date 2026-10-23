@@ -19,6 +19,7 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
 import type { Context } from "hono";
+import { z } from "zod";
 import { getDb } from "@/db/client";
 import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
 import { createSystemPaymentRequestsRepository } from "@/db/repositories/repository-factory";
@@ -53,9 +54,18 @@ export type PayablePaymentRequest = PaymentRequestRow & { project_id: string };
  * What a payer scanning a payment request gets: the sponsored transaction to sign with the quote
  * it moves, or how long another payer's live claim on the request still holds.
  */
-export type SponsoredPaymentTransaction =
-  | { kind: "signed"; transaction: string; quote: RecordedLegQuote }
-  | { kind: "held"; retryAfterSeconds: number };
+const sponsoredPaymentTransactionSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("signed"),
+    transaction: z.string(),
+    // Built in memory from the quote this request's window recorded; the
+    // ledger's own columns and checks are its validation.
+    quote: z.custom<RecordedLegQuote>(),
+  }),
+  z.object({ kind: z.literal("held"), retryAfterSeconds: z.number().int().positive() }),
+]);
+
+export type SponsoredPaymentTransaction = z.infer<typeof sponsoredPaymentTransactionSchema>;
 
 /** Saved claims retain their original sponsor even after the configured signer rotates. */
 function assertSavedPayerIsNotSponsor(payer: Address, unsignedBase64: string): void {
