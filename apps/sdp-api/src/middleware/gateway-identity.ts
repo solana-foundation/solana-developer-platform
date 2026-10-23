@@ -1,4 +1,5 @@
 import type { Context, Next } from "hono";
+import { resolveClientIp } from "@/lib/client-ip";
 import { AppError } from "@/lib/errors";
 import {
   GATEWAY_IDENTITY_HEADER,
@@ -8,6 +9,23 @@ import {
 } from "@/lib/gateway-identity";
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
+import { InProcessRateLimiter } from "./rate-limit";
+
+/** Failed `X-SF-Identity` verifications one client IP may cause per window. */
+const INVALID_IDENTITY_MAX_FAILURES = 20;
+const INVALID_IDENTITY_WINDOW_MS = 60_000;
+
+/**
+ * Bounds signature checks on forged identities, which reach verification
+ * before any request limit. It counts failures only, per the proxy-reported
+ * client IP (never the token's own `client_ip`): the gateway's traffic shares
+ * a few egress IPs, so a limit on every identity would throttle it. Per
+ * instance, in memory, so it needs no counter store before verification.
+ */
+export const invalidGatewayIdentityLimiter = new InProcessRateLimiter(
+  "gateway_identity_invalid",
+  10_000
+);
 
 /**
  * Reads the gateway's signed caller identity (HOO-2256) before anything that
@@ -27,6 +45,15 @@ export function gatewayIdentityMiddleware() {
       return;
     }
 
+    const failureBucket =
+      resolveClientIp({ get: (name) => c.req.header(name) ?? null }, c.env) ?? "unknown";
+    invalidGatewayIdentityLimiter.assertNotExhausted(
+      c,
+      failureBucket,
+      INVALID_IDENTITY_MAX_FAILURES,
+      INVALID_IDENTITY_WINDOW_MS
+    );
+
     try {
       c.set("gatewayIdentity", await verifyGatewayIdentity(token, config));
     } catch (error) {
@@ -34,6 +61,13 @@ export function gatewayIdentityMiddleware() {
         getLogger().error({ error }, "Gateway signing keys are unavailable");
         throw new AppError("SERVICE_UNAVAILABLE", "Gateway identity cannot be verified right now");
       }
+      // Counts the failure; the one that reaches the limit is refused as such.
+      invalidGatewayIdentityLimiter.enforce(
+        c,
+        failureBucket,
+        INVALID_IDENTITY_MAX_FAILURES,
+        INVALID_IDENTITY_WINDOW_MS
+      );
       throw new AppError("UNAUTHORIZED", "Invalid gateway identity");
     }
     await next();

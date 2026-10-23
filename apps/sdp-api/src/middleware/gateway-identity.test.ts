@@ -12,6 +12,7 @@ import {
   GATEWAY_IDENTITY_HEADER,
   resolveGatewayIdentityConfig,
 } from "@/lib/gateway-identity";
+import { invalidGatewayIdentityLimiter } from "@/middleware/gateway-identity";
 import { TEST_REVOKED_KEY, TEST_SEEDED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
@@ -101,6 +102,7 @@ describe("gateway identity (X-SF-Identity)", () => {
   }
 
   beforeEach(async () => {
+    invalidGatewayIdentityLimiter.resetForTesting();
     await seedTestDatabase(env);
     await getDb(env)
       .prepare(
@@ -208,6 +210,25 @@ describe("gateway identity (X-SF-Identity)", () => {
 
     expect(allowed.status).toBe(200);
     expect(refused.status).toBe(403);
+  });
+
+  it("stops verifying identities from an IP once its forgeries reach the limit", async () => {
+    await seedSfKey();
+    const bindings = { ...gatewayEnv(), TRUST_PROXY_HEADERS: "true" };
+    const forged = await identityToken(
+      { key_id: sfKey.keyId },
+      { key: (await generateKeyPair("ES256")).privateKey }
+    );
+    const from = (ip: string, token: string) =>
+      request({ [GATEWAY_IDENTITY_HEADER]: token, "X-Forwarded-For": ip }, bindings);
+
+    for (let i = 0; i < 20; i++) {
+      expect((await from("198.51.100.7", forged)).status).toBe(401);
+    }
+    const valid = await identityToken({ key_id: sfKey.keyId });
+
+    expect((await from("198.51.100.7", valid)).status).toBe(429);
+    expect((await from("198.51.100.8", valid)).status).toBe(200);
   });
 
   it("answers 503, not 401, when the gateway's signing keys cannot be fetched", async () => {

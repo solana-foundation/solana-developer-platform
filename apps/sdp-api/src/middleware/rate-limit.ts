@@ -251,6 +251,23 @@ export class InProcessRateLimiter {
     maxRequests: number,
     windowMs: number
   ): void {
+    const { windowStart, count } = this.assertNotExhausted(c, identifier, maxRequests, windowMs);
+    this.windows.set(identifier, { windowStart, count: count + 1 });
+  }
+
+  /**
+   * Refuses, as `enforce` would, an identifier that has used `maxRequests` in
+   * the current window, without counting this call: for a limit that counts
+   * only failures, checked before the work that might fail.
+   *
+   * @throws AppError RATE_LIMITED (429) with a Retry-After header.
+   */
+  assertNotExhausted(
+    c: Context<{ Bindings: Env }>,
+    identifier: string,
+    maxRequests: number,
+    windowMs: number
+  ): { windowStart: number; count: number } {
     const now = Date.now();
     const windowStart = Math.floor(now / windowMs) * windowMs;
     const current = this.windows.get(identifier);
@@ -270,7 +287,7 @@ export class InProcessRateLimiter {
       );
       throw rateLimited(`Rate limit exceeded. Retry after ${retryAfter} seconds.`);
     }
-    this.windows.set(identifier, { windowStart, count: count + 1 });
+    return { windowStart, count };
   }
 
   /** Forget every count, so a test starts from an empty instance. */
