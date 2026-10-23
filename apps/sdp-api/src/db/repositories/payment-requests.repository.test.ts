@@ -814,10 +814,9 @@ describe("PaymentRequestsRepository (postgres)", () => {
         });
 
       const firstRun = await listDue();
-      await systemRepo.markPaymentRequestsChecked({
-        checked: firstRun.map((row) => row.id),
-        verified: [],
-      });
+      await systemRepo.markPaymentRequestsChecked(
+        firstRun.map((row) => ({ id: row.id, verified: false, blockedReason: null }))
+      );
       const secondRun = await listDue();
 
       expect(firstRun.map((row) => row.id)).toEqual([first, second]);
@@ -996,7 +995,10 @@ describe("PaymentRequestsRepository (postgres)", () => {
       const b = await repo.createPaymentRequest(createInput({ token: SOL_MINT, expiresAt: null }));
       const systemRepo = createSystemPaymentRequestsRepository(env);
 
-      await systemRepo.markPaymentRequestsChecked({ checked: [a.id, b.id], verified: [a.id] });
+      await systemRepo.markPaymentRequestsChecked([
+        { id: a.id, verified: true, blockedReason: null },
+        { id: b.id, verified: false, blockedReason: null },
+      ]);
 
       const rows = await Promise.all(
         [a, b].map((row) =>
@@ -1335,9 +1337,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
         env,
         createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID })
       );
-      expect(() => tenant.markPaymentRequestsChecked({ checked: [], verified: [] })).toThrow(
-        /system-only/
-      );
+      expect(() => tenant.markPaymentRequestsChecked([])).toThrow(/system-only/);
       expect(() =>
         tenant.countStaleLapsedPaymentRequests({ environment: "sandbox", checkedBefore: PAST })
       ).toThrow(/system-only/);

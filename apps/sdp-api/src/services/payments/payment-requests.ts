@@ -7,10 +7,12 @@ import { type Address, type Signature, signature } from "@solana/kit";
 import { ValidateTransferError } from "@solana/pay";
 import { z } from "zod";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
-import type {
-  PaymentRequestRow,
-  PaymentRequestsRepository,
-  SignatureScanPosition,
+import {
+  type PaymentRequestRow,
+  type PaymentRequestsRepository,
+  SETTLEMENT_BLOCKED_REASONS,
+  type SettlementBlockedReason,
+  type SignatureScanPosition,
 } from "@/db/repositories/payment-requests.repository";
 import {
   generatePaymentTransferId,
@@ -58,7 +60,7 @@ type FoundPayment = z.infer<typeof foundPaymentSchema>;
 const paymentSearchResultSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("paid"), found: foundPaymentSchema }),
   z.object({ kind: z.literal("pending") }),
-  z.object({ kind: z.literal("skipped") }),
+  z.object({ kind: z.literal("skipped"), reason: z.enum(SETTLEMENT_BLOCKED_REASONS) }),
   z.object({ kind: z.literal("none") }),
 ]);
 type PaymentSearchResult = z.infer<typeof paymentSearchResultSchema>;
@@ -83,6 +85,10 @@ interface SignatureScanOutcome {
   found: FoundPayment | null;
   stuck: StuckSignature;
 }
+
+type TransferExpectation =
+  | { kind: "expected"; fields: PaymentRequestTransferFields }
+  | { kind: "blocked"; reason: SettlementBlockedReason };
 
 interface PaidTransition {
   row: PaymentRequestRow;
@@ -117,14 +123,29 @@ export async function reconcilePaymentRequest(
   return settlePaymentRequest(env, row, row.custody_wallet_id, result.found);
 }
 
-/** A background check's outcome: the row after it, and whether the chain was actually read. */
+/**
+ * A background check's outcome: the row after it, whether the chain was actually read, and why
+ * the request cannot be settled when its mint or amount blocks the search.
+ */
 export interface PaymentRequestCheck {
   row: PaymentRequestRow;
   chainRead: boolean;
+  blockedReason: SettlementBlockedReason | null;
 }
 
 function skippedCheck(row: PaymentRequestRow): PaymentRequestCheck {
-  return { row, chainRead: false };
+  return { row, chainRead: false, blockedReason: null };
+}
+
+function readCheck(row: PaymentRequestRow): PaymentRequestCheck {
+  return { row, chainRead: true, blockedReason: null };
+}
+
+function blockedCheck(
+  row: PaymentRequestRow,
+  reason: SettlementBlockedReason
+): PaymentRequestCheck {
+  return { row, chainRead: false, blockedReason: reason };
 }
 
 async function settleIfPaid(
@@ -135,15 +156,12 @@ async function settleIfPaid(
 ): Promise<PaymentRequestCheck> {
   switch (result.kind) {
     case "paid":
-      return {
-        row: await settlePaymentRequest(env, row, custodyWalletId, result.found),
-        chainRead: true,
-      };
+      return readCheck(await settlePaymentRequest(env, row, custodyWalletId, result.found));
     case "pending":
     case "none":
-      return { row, chainRead: true };
+      return readCheck(row);
     case "skipped":
-      return skippedCheck(row);
+      return blockedCheck(row, result.reason);
     default: {
       const unreachable: never = result;
       throw internalError(`Unhandled payment search result ${String(unreachable)}`);
@@ -181,9 +199,9 @@ export async function closeLapsedPaymentRequest(
     case "pending":
       return settleIfPaid(env, row, row.custody_wallet_id, result);
     case "none":
-      return { row: await markExpired(env, row, true), chainRead: true };
+      return readCheck(await markExpired(env, row, true));
     case "skipped":
-      return skippedCheck(await markExpired(env, row, false));
+      return blockedCheck(await markExpired(env, row, false), result.reason);
     default: {
       const unreachable: never = result;
       throw internalError(`Unhandled payment search result ${String(unreachable)}`);
@@ -212,10 +230,11 @@ function isPaidLate(blockTime: bigint | null, expiresAt: string | null): boolean
 
 async function findValidPayment(env: Env, row: PaymentRequestRow): Promise<PaymentSearchResult> {
   const reference = assertValidAddress(row.reference, "reference");
-  const expected = await expectedTransfer(row, reference);
-  if (expected === null) {
-    return { kind: "skipped" };
+  const expectation = await expectedTransfer(row, reference);
+  if (expectation.kind === "blocked") {
+    return { kind: "skipped", reason: expectation.reason };
   }
+  const expected = expectation.fields;
   const from: SignatureScanPosition = {
     cursor: row.signature_scan_cursor,
     before: row.signature_scan_before,
@@ -375,7 +394,7 @@ async function judgeCandidate(
 async function expectedTransfer(
   row: PaymentRequestRow,
   reference: Address
-): Promise<PaymentRequestTransferFields | null> {
+): Promise<TransferExpectation> {
   let mint: PaymentMint;
   try {
     mint = await loadPaymentMint(assertValidAddress(row.token, "token"));
@@ -385,7 +404,7 @@ async function expectedTransfer(
       { payment_request_id: row.id, reason: "mint_not_admitted", error: error.message },
       "Payment request settlement skipped"
     );
-    return null;
+    return { kind: "blocked", reason: "mint_not_admitted" };
   }
   let amount: bigint;
   try {
@@ -398,9 +417,9 @@ async function expectedTransfer(
       { payment_request_id: row.id, reason: "invalid_amount", error: error.message },
       "Payment request settlement skipped"
     );
-    return null;
+    return { kind: "blocked", reason: "invalid_amount" };
   }
-  return {
+  const fields: PaymentRequestTransferFields = {
     recipient: assertValidAddress(row.destination_address, "destinationAddress"),
     amount,
     decimals: mint.decimals,
@@ -408,6 +427,7 @@ async function expectedTransfer(
     reference,
     ...(row.token === SOL_MINT ? {} : { splToken: assertValidAddress(row.token, "token") }),
   };
+  return { kind: "expected", fields };
 }
 
 async function advanceSignatureScan(

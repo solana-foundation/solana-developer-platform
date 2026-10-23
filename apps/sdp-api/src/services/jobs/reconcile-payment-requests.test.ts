@@ -188,6 +188,7 @@ describe("reconcilePaymentRequests", () => {
       checked: 2,
       failed: 1,
       settled: 0,
+      blocked: 0,
     });
   });
 
@@ -212,6 +213,7 @@ describe("reconcilePaymentRequests", () => {
       checked: 2,
       failed: 2,
       settled: 0,
+      blocked: 0,
     });
   });
 
@@ -233,6 +235,7 @@ describe("reconcilePaymentRequests", () => {
       checked: 1,
       failed: 0,
       settled: 0,
+      blocked: 0,
     });
   });
 
@@ -287,6 +290,43 @@ describe("reconcilePaymentRequests", () => {
     expect(signatures).not.toHaveBeenCalled();
     expect(row.last_checked_at).not.toBeNull();
     expect(row.last_verified_at).toBeNull();
+    expect(row.settlement_blocked_reason).toBe("mint_not_admitted");
+  });
+
+  it("keeps a request blocked by its mint out of the backlog", async () => {
+    const log = vi.spyOn(moneyPathEvents, "logEvent");
+    vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);
+    vi.spyOn(paymentAmounts, "loadPaymentMint").mockRejectedValue(
+      badRequest("Token mint account does not exist")
+    );
+    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+    await updateRow(request.id, { created_at: PAST, last_checked_at: PAST });
+
+    await onSandbox(() => reconcilePaymentRequests(env));
+    log.mockClear();
+    await updateRow(request.id, { last_checked_at: PAST });
+    await onSandbox(() => reconcilePaymentRequests(env));
+
+    expect(log).not.toHaveBeenCalledWith(
+      "warn",
+      expect.objectContaining({ event: "payment_requests.reconcile_backlog" })
+    );
+    expect(log).toHaveBeenCalledWith(
+      "info",
+      expect.objectContaining({ event: "payment_requests.lane_run", lane: "sweep", blocked: 1 })
+    );
+  });
+
+  it("clears the block once the chain can be read again", async () => {
+    vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);
+    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+    await updateRow(request.id, { settlement_blocked_reason: "mint_not_admitted" });
+
+    await onSandbox(() => reconcilePaymentRequests(env));
+
+    const row = await getRow(request.id);
+    expect(row.settlement_blocked_reason).toBeNull();
+    expect(row.last_verified_at).not.toBeNull();
   });
 
   it("reports a row whose checks keep failing as backlog", async () => {
@@ -398,6 +438,7 @@ describe("expirePaymentRequests", () => {
       checked: 1,
       failed: 0,
       settled: 1,
+      blocked: 0,
     });
   });
 
@@ -448,6 +489,7 @@ describe("expirePaymentRequests", () => {
       checked: 1,
       failed: 0,
       settled: 0,
+      blocked: 0,
     });
   });
 

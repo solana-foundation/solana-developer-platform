@@ -1,7 +1,6 @@
 import type { PaymentRequestLifecycleEvent, PaymentRequestStatus } from "@sdp/types/payments";
 import { z } from "zod";
 import type { DatabaseClient as AppDb } from "@/db/client";
-import { buildInClause } from "@/db/postgres-utils";
 import { internalError } from "@/lib/errors";
 import { parseNullableCustodyWalletId } from "./payment-execution-identity";
 import type {
@@ -18,12 +17,14 @@ import {
   generatePaymentRequestId,
   generatePaymentRequestPublicToken,
   generatePaymentRequestReference,
+  SETTLEMENT_BLOCKED_REASONS,
 } from "./payment-requests.repository";
 
 const reconcilerColumnsSchema = z.object({
   project_id: z.string(),
   last_checked_at: z.string().nullable(),
   last_verified_at: z.string().nullable(),
+  settlement_blocked_reason: z.enum(SETTLEMENT_BLOCKED_REASONS).nullable(),
   paid_late: z.boolean(),
   signature_scan_cursor: z.string().nullable(),
   signature_scan_before: z.string().nullable(),
@@ -58,6 +59,7 @@ function mapPaymentRequestRow(row: Record<string, unknown>): PaymentRequestRow {
     updated_at: row.updated_at as string,
     last_checked_at: reconciler.last_checked_at,
     last_verified_at: reconciler.last_verified_at,
+    settlement_blocked_reason: reconciler.settlement_blocked_reason,
     paid_late: reconciler.paid_late,
     signature_scan_cursor: reconciler.signature_scan_cursor,
     signature_scan_before: reconciler.signature_scan_before,
@@ -406,21 +408,31 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
       return result.results.map(mapPaymentRequestRow);
     },
 
-    async markPaymentRequestsChecked({ checked, verified }) {
-      if (checked.length === 0) {
+    async markPaymentRequestsChecked(checks) {
+      if (checks.length === 0) {
         return;
       }
-      const verifiedAt =
-        verified.length === 0
-          ? "last_verified_at"
-          : `CASE WHEN id IN (${buildInClause(verified.length)}) THEN sdp_iso_now() ELSE last_verified_at END`;
       await db
         .prepare(
-          `UPDATE payment_requests
-              SET last_checked_at = sdp_iso_now(), last_verified_at = ${verifiedAt}
-            WHERE id IN (${buildInClause(checked.length)})`
+          `UPDATE payment_requests AS pr
+              SET last_checked_at = sdp_iso_now(),
+                  last_verified_at = CASE WHEN c.verified THEN sdp_iso_now() ELSE pr.last_verified_at END,
+                  settlement_blocked_reason = CASE
+                    WHEN c.verified THEN NULL
+                    ELSE COALESCE(c.blocked_reason, pr.settlement_blocked_reason)
+                  END
+             FROM jsonb_to_recordset(?::jsonb) AS c(id text, verified boolean, blocked_reason text)
+            WHERE pr.id = c.id`
         )
-        .bind(...verified, ...checked)
+        .bind(
+          JSON.stringify(
+            checks.map((check) => ({
+              id: check.id,
+              verified: check.verified,
+              blocked_reason: check.blockedReason,
+            }))
+          )
+        )
         .run();
     },
 
@@ -496,6 +508,7 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
               AND pr.status = 'awaiting_payment'
               AND pr.custody_wallet_id IS NOT NULL
               AND (pr.expires_at IS NULL OR pr.expires_at > sdp_iso_now())
+              AND pr.settlement_blocked_reason IS NULL
               AND COALESCE(pr.last_verified_at, pr.created_at) < ?`
         )
         .bind(environment, checkedBefore)
@@ -516,6 +529,7 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
               AND pr.custody_wallet_id IS NOT NULL
               AND pr.expires_at IS NOT NULL
               AND pr.expires_at <= sdp_iso_now()
+              AND pr.settlement_blocked_reason IS NULL
               AND COALESCE(pr.last_verified_at, pr.expires_at) < ?`
         )
         .bind(environment, checkedBefore)
@@ -535,6 +549,7 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
               AND pr.status = 'expired'
               AND pr.custody_wallet_id IS NOT NULL
               AND pr.expires_at >= ?
+              AND pr.settlement_blocked_reason IS NULL
               AND COALESCE(pr.last_verified_at, pr.updated_at) < ?`
         )
         .bind(environment, expiredSince, checkedBefore)

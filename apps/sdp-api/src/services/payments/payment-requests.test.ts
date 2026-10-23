@@ -827,7 +827,7 @@ describe("verified check stamp", () => {
 
     const check = await onSandbox(() => paymentRequests.checkAwaitingPaymentRequest(env, request));
 
-    expect(check).toEqual({ row: request, chainRead: false });
+    expect(check).toEqual({ row: request, chainRead: false, blockedReason: null });
     expect(signaturesSpy).not.toHaveBeenCalled();
   });
 
@@ -837,7 +837,7 @@ describe("verified check stamp", () => {
 
     const check = await onSandbox(() => paymentRequests.checkAwaitingPaymentRequest(env, request));
 
-    expect(check).toEqual({ row: request, chainRead: true });
+    expect(check).toEqual({ row: request, chainRead: true, blockedReason: null });
   });
 
   it("expires a lapsed request whose mint is no longer admitted without claiming a chain read", async () => {
@@ -851,6 +851,7 @@ describe("verified check stamp", () => {
     expect(check).toMatchObject({
       row: { status: "expired", last_verified_at: null },
       chainRead: false,
+      blockedReason: "mint_not_admitted",
     });
     expect(signaturesSpy).not.toHaveBeenCalled();
   });

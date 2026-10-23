@@ -1,6 +1,9 @@
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
-import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
+import type {
+  PaymentRequestCheckStamp,
+  PaymentRequestRow,
+} from "@/db/repositories/payment-requests.repository";
 import { createSystemPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { describeError, logEvent } from "@/runtime/money-path-events";
@@ -137,13 +140,15 @@ async function checkEach(
   );
   let failed = 0;
   let settled = 0;
-  const verified: string[] = [];
+  let blocked = 0;
+  const stamps: PaymentRequestCheckStamp[] = [];
   for (const [index, row] of rows.entries()) {
     const result = results[index];
     if (result?.status === "fulfilled") {
-      const { row: after, chainRead } = result.value;
-      if (chainRead) {
-        verified.push(row.id);
+      const { row: after, chainRead, blockedReason } = result.value;
+      stamps.push({ id: row.id, verified: chainRead, blockedReason });
+      if (blockedReason !== null) {
+        blocked += 1;
       }
       if (after.status !== row.status) {
         settled += 1;
@@ -158,6 +163,7 @@ async function checkEach(
       }
       continue;
     }
+    stamps.push({ id: row.id, verified: false, blockedReason: null });
     failed += 1;
     logEvent("error", {
       event: "payment_requests.check_failed",
@@ -166,12 +172,7 @@ async function checkEach(
       ...describeError(result?.reason),
     });
   }
-  if (rows.length > 0) {
-    await createSystemPaymentRequestsRepository(env).markPaymentRequestsChecked({
-      checked: rows.map((row) => row.id),
-      verified,
-    });
-  }
+  await createSystemPaymentRequestsRepository(env).markPaymentRequestsChecked(stamps);
   logEvent(failed > 0 ? "warn" : "info", {
     event: "payment_requests.lane_run",
     environment: currentClusterScope().environment,
@@ -179,6 +180,7 @@ async function checkEach(
     checked: rows.length,
     failed,
     settled,
+    blocked,
   });
   return { lane, checked: rows.length, failed };
 }

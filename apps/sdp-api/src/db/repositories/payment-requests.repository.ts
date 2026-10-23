@@ -41,6 +41,7 @@ export interface PaymentRequestRow {
   updated_at: string;
   last_checked_at: string | null;
   last_verified_at: string | null;
+  settlement_blocked_reason: SettlementBlockedReason | null;
   paid_late: boolean;
   signature_scan_cursor: string | null;
   signature_scan_before: string | null;
@@ -58,6 +59,17 @@ export interface CreatePaymentRequestInput {
   amount: string;
   expiresAt: string | null;
   createdBy: string | null;
+}
+
+/** Why a request cannot be settled until its mint or amount changes; checks skip the chain. */
+export const SETTLEMENT_BLOCKED_REASONS = ["mint_not_admitted", "invalid_amount"] as const;
+export type SettlementBlockedReason = (typeof SETTLEMENT_BLOCKED_REASONS)[number];
+
+/** What one background check leaves on its row: verified moves last_verified_at and clears a block. */
+export interface PaymentRequestCheckStamp {
+  id: string;
+  verified: boolean;
+  blockedReason: SettlementBlockedReason | null;
 }
 
 export interface MarkPaymentRequestInput {
@@ -163,10 +175,7 @@ export interface PaymentRequestsRepository {
     checkedBefore: string;
     limit: number;
   }): Promise<PaymentRequestRow[]>;
-  markPaymentRequestsChecked(params: {
-    checked: readonly string[];
-    verified: readonly string[];
-  }): Promise<void>;
+  markPaymentRequestsChecked(checks: readonly PaymentRequestCheckStamp[]): Promise<void>;
   markExpiredPaymentRequestPaid(
     input: MarkExpiredPaymentRequestPaidInput
   ): Promise<PaymentRequestRow | null>;
