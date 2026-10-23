@@ -1,0 +1,54 @@
+/* the payments API: the bubble and the words in two even columns, reading as the interfaces'
+   neighbour rather than a new chapter */
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: clamp(56px, 6.6vw, 104px);
+  align-items: center;
+  padding: calc(var(--pad) * 0.35) 0 0;
+}
+
+.text {
+  order: 2;
+}
+
+.title {
+  margin-top: -6px;
+  font-size: var(--title);
+  line-height: 1.04;
+  letter-spacing: -0.028em;
+}
+
+.body {
+  margin-top: 24px;
+  max-width: 42ch;
+  font: 500 clamp(16px, 1.3vw, 19px) / 1.45 var(--font);
+  letter-spacing: -0.01em;
+  color: var(--sub);
+}
+
+/* the bubble's box is far taller than the bubble (its glow): it gives that height back to the row,
+   and the glow still spills over */
+.vis {
+  min-width: 0;
+  margin-block: calc(-1 * clamp(30px, 8vw, 140px));
+}
+
+@media (max-width: 1000px) {
+  /* stacked under the interfaces' links: a section's distance */
+  .row {
+    grid-template-columns: minmax(0, 1fr);
+    padding-top: calc(var(--pad) * 1.2);
+  }
+
+  /* the bubble's box rides up over the words: they, and their link, stay on top */
+  .text {
+    position: relative;
+    z-index: 1;
+    order: 0;
+  }
+
+  .vis {
+    order: 1;
+  }
+}

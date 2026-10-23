@@ -1,0 +1,60 @@
+/*
+ * Privacy; its rhythm (--pad, --title,
+ * --sub) is the page's. The picture sits on the left and the words on the right; the words stay
+ * first in the DOM so they are read first. It follows the chart in the panel they share, closer
+ * than two sections apart, and its link draws in privacy's green.
+ */
+
+.section {
+  --more-accent: var(--green);
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: clamp(48px, 6vw, 96px);
+  align-items: center;
+  padding: calc(var(--pad) * 0.35) 0 calc(var(--pad) * 0.7);
+}
+
+.text {
+  order: 2;
+}
+
+/* the bubble's box is far taller than the bubble (its glow): it gives that height back to the row,
+   and the glow still spills over */
+.vis {
+  min-width: 0;
+  margin-block: calc(-1 * clamp(30px, 8vw, 140px));
+}
+
+.title {
+  font-size: var(--title);
+  line-height: 1.04;
+  letter-spacing: -0.028em;
+}
+
+.body {
+  max-width: 42ch;
+  margin-top: 24px;
+  font: 500 clamp(16px, 1.3vw, 19px) / 1.45 var(--font);
+  letter-spacing: -0.01em;
+  color: #fbfaf9b3;
+}
+
+@media (max-width: 1000px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* the bubble's box rides up over the words: they, and their link, stay on top */
+  .text {
+    position: relative;
+    z-index: 1;
+    order: 0;
+  }
+
+  .vis {
+    order: 2;
+  }
+}

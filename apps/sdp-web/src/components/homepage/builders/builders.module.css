@@ -1,0 +1,152 @@
+/*
+ * Meet the builders, still. A dark panel (homepage.module.css `.panel`) on the night ground,
+ * rounded at the top only: the walkthroughs and the close run on from it as one dark block, its
+ * violet only at the top right. The faces in grey, in colour under the pointer, beside the words.
+ */
+.section {
+  --panel-light: radial-gradient(40% 50% at 100% 0%, #9945ff14 0%, #9945ff00 70%);
+  --pnl: var(--night);
+  --panel-radius: var(--pr) var(--pr) 0 0;
+  /* the walkthroughs tuck 1px under the panel: at a fractional height its clipped bottom edge
+     would otherwise antialias over the paper and draw a light hairline at the seam */
+  --panel-after: -1px;
+  padding: calc(var(--pad) * 1.1) 0 0;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: clamp(40px, 6vw, 104px);
+  align-items: center;
+}
+
+.faces {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: clamp(8px, 0.9vw, 14px);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.face {
+  --face-radius: 14px;
+  position: relative;
+  isolation: isolate;
+  display: block;
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
+  border-radius: var(--face-radius);
+  background: #141219;
+  text-decoration: none;
+}
+
+.face img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: grayscale(1) contrast(1.04);
+  opacity: 0.82;
+  transition:
+    filter 420ms var(--e),
+    opacity 420ms var(--e);
+}
+
+/* the name stands on a shade rising from the foot */
+.face::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, #08080ad9 0%, #08080a00 52%);
+  pointer-events: none;
+}
+
+.face span {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 10px;
+  z-index: 1;
+  font: 500 clamp(12px, 0.95vw, 14px) / 1.2 var(--font);
+  letter-spacing: -0.005em;
+  color: var(--night-ink);
+}
+
+.face:hover img,
+.face:focus-visible img {
+  filter: none;
+  opacity: 1;
+}
+
+.faces .face:focus-visible {
+  outline: 2px solid var(--magenta);
+  outline-offset: 3px;
+  border-radius: var(--face-radius);
+}
+
+.title {
+  font-size: var(--display);
+  line-height: 1.02;
+  letter-spacing: -0.03em;
+}
+
+/* scoped to the text to outrank the page's `p { margin: 0 }` */
+.text .body {
+  max-width: 34ch;
+  margin-top: 24px;
+  font: 500 clamp(16px, 1.3vw, 19px) / 1.45 var(--font);
+  letter-spacing: -0.01em;
+  color: var(--sub-n);
+}
+
+.cta {
+  margin-top: 36px;
+}
+
+.series {
+  min-height: 44px;
+}
+
+.section .series {
+  border-color: #ffffff33;
+  color: var(--night-ink);
+}
+
+.section .series:hover {
+  background: #ffffff0f;
+}
+
+.ytm {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 14px;
+  margin-right: 3px;
+}
+
+@media (max-width: 900px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .text {
+    order: -1;
+  }
+
+  .face {
+    --face-radius: 10px;
+  }
+
+  .face span {
+    left: 8px;
+    right: 8px;
+    bottom: 7px;
+    font-size: 11px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .face img {
+    transition: none;
+  }
+}

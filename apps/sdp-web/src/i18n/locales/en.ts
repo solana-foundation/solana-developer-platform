@@ -6,6 +6,7 @@ import dashboardHeliusRings from "@/messages/en/dashboard-helius-rings.json";
 import dashboardIssuance from "@/messages/en/dashboard-issuance.json";
 import dashboardPayments from "@/messages/en/dashboard-payments.json";
 import dashboardPrivateChannels from "@/messages/en/dashboard-private-channels.json";
+import homepage from "@/messages/en/homepage.json";
 import shared from "@/messages/en/shared.json";
 import en from "@/messages/en.json";
 
@@ -17,5 +18,6 @@ export const englishSourceMessages = {
   ...dashboardIssuance,
   ...dashboardPayments,
   ...dashboardPrivateChannels,
+  ...homepage,
   Shared: shared,
 };

@@ -11,6 +11,8 @@
     "check:i18n": "node scripts/audit-ui-copy.mjs",
     "check:i18n:baseline": "node scripts/audit-ui-copy.mjs --write",
     "check:i18n:strict": "node scripts/audit-ui-copy.mjs --strict",
+    "check:globe-land": "node scripts/generate-globe-land.mjs --check",
+    "generate:globe-land": "node scripts/generate-globe-land.mjs",
     "test:e2e": "playwright test --config=playwright.config.ts --project=public --project=dashboard --project=issuance",
     "test:e2e:dashboard": "playwright test --config=playwright.config.ts --project=public --project=dashboard",
     "test:e2e:dashboard-transactions": "playwright test --config=playwright.config.ts --project=dashboard-transactions",
@@ -46,6 +48,7 @@
     "shiki": "4.4.3",
     "sonner": "2.0.8",
     "swr": "2.5.1",
+    "three": "0.170.0",
     "zod": "4.6.5"
   },
   "devDependencies": {
@@ -63,13 +66,16 @@
     "@types/qrcode": "1.5.6",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
+    "@types/three": "0.170.0",
     "@vitest/coverage-istanbul": "4.1.11",
     "eslint": "10.11.0",
     "eslint-config-next": "16.3.6",
     "jsdom": "30.1.1",
     "pg": "8.23.0",
     "tailwindcss": "4.3.3",
+    "topojson-client": "3.1.0",
     "typescript": "6.0.3",
-    "vitest": "4.1.11"
+    "vitest": "4.1.11",
+    "world-atlas": "2.0.2"
   }
 }
