@@ -4,6 +4,7 @@ import { JUPITER_LEND_USDT } from "@sdp/types/jupiter-lend-programs";
 import { ONDO_DEPLOYMENTS } from "@sdp/types/ondo-programs";
 import { type SolanaCluster, wellKnownMint } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { required } from "@/test/helpers/required";
@@ -366,6 +367,11 @@ describe("Earn routes — retired program surfaces (PRO-1670)", () => {
   });
 });
 
+const shelfPageSchema = z.object({
+  data: z.object({ strategies: z.array(z.object({ id: z.string(), fundable: z.boolean() })) }),
+});
+const errorBodySchema = z.object({ error: z.object({ code: z.string(), message: z.string() }) });
+
 describe("Earn routes — environment scoping", () => {
   it("hides production strategies from a sandbox API key", async () => {
     await seedAuth();
@@ -385,40 +391,74 @@ describe("Earn routes — environment scoping", () => {
     expect(listBody.data.strategies.map((s) => s.id)).toEqual([sandbox.id]);
   });
 
-  it("lets an anonymous caller pick the shelf, production unless it asks for sandbox", async () => {
+  it("lets an anonymous caller read the shelf it names", async () => {
     const sandbox = await seedStrategy({});
     const production = await seedStrategy({
       environment: "production",
       hostCluster: "mainnet-beta",
     });
 
-    const defaulted = await getEarnAnonymously("/v1/earn/strategies", {});
-    expect(defaulted.status).toBe(200);
-    const defaultedBody = (await defaulted.json()) as {
-      data: { strategies: Array<{ id: string }> };
-    };
-    expect(defaultedBody.data.strategies.map((s) => s.id)).toEqual([production.id]);
-
     const sandboxShelf = await getEarnAnonymously("/v1/earn/strategies?environment=sandbox", {});
     expect(sandboxShelf.status).toBe(200);
-    const sandboxBody = (await sandboxShelf.json()) as {
-      data: { strategies: Array<{ id: string }> };
-    };
-    expect(sandboxBody.data.strategies.map((s) => s.id)).toEqual([sandbox.id]);
+    const sandboxBody = shelfPageSchema.parse(await sandboxShelf.json());
+    expect(sandboxBody.data.strategies.map((s) => [s.id, s.fundable])).toEqual([
+      [sandbox.id, true],
+    ]);
+
+    const productionShelf = await getEarnAnonymously(
+      "/v1/earn/strategies?environment=production",
+      {}
+    );
+    expect(productionShelf.status).toBe(200);
+    const productionBody = shelfPageSchema.parse(await productionShelf.json());
+    expect(productionBody.data.strategies.map((s) => [s.id, s.fundable])).toEqual([
+      [production.id, true],
+    ]);
 
     expect((await getEarnAnonymously(`/v1/earn/strategies/${sandbox.id}`, {})).status).toBe(200);
     expect((await getEarnAnonymously(`/v1/earn/strategies/${production.id}`, {})).status).toBe(200);
   });
 
-  it("refuses a key that names a shelf other than its project's", async () => {
+  it("refuses an anonymous list that names no shelf, or an unknown one", async () => {
+    await seedStrategy({ environment: "production", hostCluster: "mainnet-beta" });
+
+    for (const path of ["/v1/earn/strategies", "/v1/earn/strategies?environment=staging"]) {
+      const res = await getEarnAnonymously(path, {});
+      expect(res.status, path).toBe(400);
+      const body = errorBodySchema.parse(await res.json());
+      expect(body.error, path).toMatchObject({
+        code: "BAD_REQUEST",
+        message: "Invalid query parameters",
+      });
+    }
+  });
+
+  it("404s an anonymous detail read of an unknown strategy", async () => {
+    await seedStrategy({});
+
+    const res = await getEarnAnonymously("/v1/earn/strategies/strat_missing", {});
+
+    expect(res.status).toBe(404);
+    const body = errorBodySchema.parse(await res.json());
+    expect(body.error.code).toBe("NOT_FOUND");
+  });
+
+  it("refuses a credential that names a shelf other than its project's", async () => {
     await seedAuth();
+    await seedClerkAuth();
     await seedStrategy({});
 
     const mismatch = await getEarn("/v1/earn/strategies?environment=production", {});
-    expect(mismatch.status).toBe(400);
-    const mismatchBody = (await mismatch.json()) as { error: { code: string; message: string } };
-    expect(mismatchBody.error.code).toBe("BAD_REQUEST");
+    expect(mismatch.status).toBe(409);
+    const mismatchBody = errorBodySchema.parse(await mismatch.json());
+    expect(mismatchBody.error.code).toBe("CONFLICT");
     expect(mismatchBody.error.message).toContain("follows the project");
+
+    const clerkMismatch = await getEarnAsClerk(
+      "/v1/earn/strategies?environment=sandbox",
+      TEST_PRODUCTION_PROJECT.id
+    );
+    expect(clerkMismatch.status).toBe(409);
 
     const same = await getEarn("/v1/earn/strategies?environment=sandbox", {});
     expect(same.status).toBe(200);

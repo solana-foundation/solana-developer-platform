@@ -308,7 +308,8 @@
         "**/packages/**/test/**/*.ts",
         "**/apps/sdp-api/src/middleware/project-context.ts",
         "**/apps/sdp-api/src/runtime/cluster-scope-runs.ts",
-        "**/apps/sdp-api/src/routes/pay/context.ts"
+        "**/apps/sdp-api/src/routes/pay/context.ts",
+        "**/apps/sdp-api/src/routes/earn/keyless-scope.ts"
       ],
       "linter": {
         "rules": {

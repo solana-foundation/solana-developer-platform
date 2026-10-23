@@ -1370,3 +1370,26 @@ automatic share-account close. Other providers' behavior is unchanged.
 This supersedes the Kamino requested-amount and rent-refund assumptions above.
 See [the audit](../earn/kamino-audit-2026-09-29.md) for validation, threat analysis
 and rollout requirements for previously issued transactions.
+
+## Addendum: 2026-10-23 Keyless requests open their own cluster scope (HOO-1881)
+
+Keyless requests now run in a cluster scope (ADR 0007), as keyed requests do
+through their project. The scope comes from the shelf the caller names: a
+keyless strategy list must pass `?environment=sandbox|production` (400 when
+omitted; the production default above is gone), and a keyless strategy read,
+quote or build opens the scope from the named strategy row's `environment`
+before its handler runs. An unknown strategy answers 404, and a keyless exit
+naming only a `positionId` keeps its 400.
+
+Keyed requests keep their project's scope, so no request opens two. A keyed
+list naming another environment answers 409 (was 400), and a strategy row from
+another environment stays 404. The access tiers do not move: an anonymous
+request carries no tenant identity and persists nothing, and a presented
+invalid credential still answers 401.
+
+A sandbox row mirroring a mainnet instrument (PRO-1742) opens the sandbox
+(devnet) scope, as its environment says, where its vault does not exist. A
+keyless exit naming one therefore answers 400 before any RPC call and names the
+production row that holds the vault, which stays exitable (HOO-2178). Deposits
+already refuse it at admission, and the catalogue list and detail, which read
+only the database, keep serving it.

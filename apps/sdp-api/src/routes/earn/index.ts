@@ -16,6 +16,7 @@ import { requireAction, requireActionWhenAuthenticated } from "@/middleware/requ
 import { validateBody } from "@/middleware/validate";
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
+import { hasEarnAuth } from "./context";
 import { isEarnExitOrRead } from "./exits";
 import {
   createEarnExternalWalletDeposit,
@@ -80,6 +81,11 @@ import {
 } from "./handlers/vault";
 import { getEarnVaultShareReconciliation } from "./handlers/vault-reconciliation";
 import {
+  openKeylessCatalogueScope,
+  openKeylessStrategyBodyScope,
+  openKeylessStrategyParamScope,
+} from "./keyless-scope";
+import {
   earnExternalWalletDepositTransactionSchema,
   earnExternalWalletQueuedWithdrawalPreviewSchema,
   earnExternalWalletSubmitSchema,
@@ -142,12 +148,10 @@ const earnProjectContextOptions = {
     isEarnExitOrRead(c.req.method, c.req.path),
 };
 
-// Authenticated callers keep their verified project selection. Anonymous
-// callers have no organization or project to resolve and continue untouched.
+// Authenticated callers keep their verified project selection and its cluster
+// scope. Anonymous callers have no organization or project to resolve: each
+// route opens their scope just before its handler (keyless-scope.ts).
 const resolveProjectContext = projectContextMiddleware(earnProjectContextOptions);
-function hasEarnAuth(c: Context<{ Bindings: Env }>): boolean {
-  return Boolean(c.get("apiKey") || c.get("clerk"));
-}
 
 async function optionalEarnProjectContext(c: Context<{ Bindings: Env }>, next: Next) {
   if (!hasEarnAuth(c)) {
@@ -224,6 +228,7 @@ optionalAuthEarn.get(
   ...OPTIONAL_EARN_ACCESS_MIDDLEWARE,
   requireActionWhenAuthenticated("earn.read"),
   cacheEarnCatalogue,
+  openKeylessCatalogueScope,
   listEarnStrategies
 );
 optionalAuthEarn.get(
@@ -231,6 +236,7 @@ optionalAuthEarn.get(
   ...OPTIONAL_EARN_ACCESS_MIDDLEWARE,
   requireActionWhenAuthenticated("earn.read"),
   cacheEarnCatalogue,
+  openKeylessStrategyParamScope,
   getEarnStrategy
 );
 
@@ -250,6 +256,7 @@ optionalAuthEarn.post(
   validateBody(earnVaultDepositPreviewSchema),
   authenticatedMeteredQuota(EARN_PROVIDER_READ_QUOTA),
   anonymousEarnRpcQuota,
+  openKeylessStrategyBodyScope,
   createEarnVaultDepositPreview
 );
 // The deposit BUILD is money-IN, so it takes the same keyed meter as the
@@ -262,6 +269,7 @@ optionalAuthEarn.post(
   validateBody(earnExternalWalletDepositTransactionSchema),
   authenticatedMeteredQuota(EARN_PROVIDER_READ_QUOTA),
   anonymousEarnRpcQuota,
+  openKeylessStrategyBodyScope,
   createEarnExternalWalletDepositTransaction
 );
 optionalAuthEarn.post(
@@ -270,6 +278,7 @@ optionalAuthEarn.post(
   requireActionWhenAuthenticated("earn.read"),
   anonymousEarnRpcQuota,
   validateBody(earnExternalWalletWithdrawalPreviewSchema),
+  openKeylessStrategyBodyScope,
   createEarnExternalWalletWithdrawalPreview
 );
 optionalAuthEarn.post(
@@ -278,6 +287,7 @@ optionalAuthEarn.post(
   requireActionWhenAuthenticated("earn.execute"),
   anonymousEarnRpcQuota,
   validateBody(earnExternalWalletWithdrawalTransactionSchema),
+  openKeylessStrategyBodyScope,
   createEarnExternalWalletWithdrawalTransaction
 );
 optionalAuthEarn.post(
@@ -286,6 +296,7 @@ optionalAuthEarn.post(
   requireActionWhenAuthenticated("earn.read"),
   anonymousEarnRpcQuota,
   validateBody(earnExternalWalletWithdrawalOptionsSchema),
+  openKeylessStrategyBodyScope,
   getEarnExternalWalletWithdrawalOptions
 );
 optionalAuthEarn.post(
@@ -294,6 +305,7 @@ optionalAuthEarn.post(
   requireActionWhenAuthenticated("earn.read"),
   anonymousEarnRpcQuota,
   validateBody(earnExternalWalletQueuedWithdrawalPreviewSchema),
+  openKeylessStrategyBodyScope,
   createEarnExternalWalletQueuedWithdrawalPreview
 );
 // Queue action builds live on the keyed router below. Unlike an instant exit,

@@ -1,3 +1,4 @@
+import { SDP_ENVIRONMENTS } from "@sdp/types/api-keys";
 import {
   EARN_APY_TYPES,
   EARN_LIQUIDITY_TERMS,
@@ -33,9 +34,19 @@ export const listEarnStrategiesQuerySchema = z.object({
   // foreign cluster browses its mirrored sub-shelf; rows stay fundable: false.
   cluster: z.enum(SOLANA_CLUSTERS).optional(),
   // The shelf an ANONYMOUS caller reads (PRO-1998). It has no project, so it
-  // picks: production, the real-money shelf, unless it asks for sandbox. A
-  // tenant caller's shelf is its project's; naming a different one is a 400.
-  environment: z.enum(["sandbox", "production"]).optional(),
+  // must name one (earnCatalogueEnvironmentQuerySchema). A tenant caller's
+  // shelf is its project's; naming a different one is a 409.
+  environment: z
+    .enum(SDP_ENVIRONMENTS)
+    .describe(
+      "Required without an API key (400 if omitted): the catalogue shelf to read. With a key, the project decides, and naming another environment answers 409."
+    )
+    .optional(),
+});
+
+/** The shelf a keyless catalogue list names: required, since it has no project to take one from. */
+export const earnCatalogueEnvironmentQuerySchema = z.object({
+  environment: z.enum(SDP_ENVIRONMENTS),
 });
 
 // ---------------------------------------------------------------------------
