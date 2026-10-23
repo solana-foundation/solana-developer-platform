@@ -257,7 +257,9 @@ export async function reconcilePaymentRequest(
     return degrade(err);
   }
   if (open.length === 0) {
-    return row;
+    // No window left to read: either none was issued, or a concurrent
+    // reconcile settled the request and closed them. Answer the current row.
+    return currentPaymentRequest(env, row);
   }
   // Outside the best-effort net: a cluster with no endpoint is a configuration error.
   const rpc = createClusterRpc();
@@ -287,6 +289,22 @@ function requestOwner(row: PaymentRequestRow): RequestOwner {
     throw internalError("payment_requests row is missing project_id");
   }
   return { organizationId: row.organization_id, projectId: row.project_id };
+}
+
+/** The request as stored now, read in its own tenant. */
+async function currentPaymentRequest(
+  env: Env,
+  row: PaymentRequestRow
+): Promise<PaymentRequestRow> {
+  const owner = requestOwner(row);
+  const current = await createPaymentRequestsRepository(
+    env,
+    createTenantScope(owner)
+  ).getPaymentRequestById({ requestId: row.id, ...owner });
+  if (current === null) {
+    throw internalError(`Payment request ${row.id} disappeared while it was reconciled`);
+  }
+  return current;
 }
 
 /** The request's signed issued transactions still open, read in its own tenant. */
