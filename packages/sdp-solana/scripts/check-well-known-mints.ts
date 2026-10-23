@@ -35,6 +35,8 @@
 // it: it needs public RPC, and a rate-limited endpoint would make every
 // pipeline flaky for no safety gain.
 
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   SOLANA_CLUSTERS,
   type SolanaCluster,
@@ -134,7 +136,7 @@ function describeTerms(terms: MintTokenTerms): string[] {
   return lines;
 }
 
-function findProblems(
+export function findProblems(
   accounts: MintAndClock,
   mint: WellKnownTokenMint,
   tokenProgram: TokenProgramKind
@@ -202,33 +204,44 @@ async function checkMint(
   }
 }
 
-const tokens: [string, WellKnownToken][] = Object.entries(WELL_KNOWN_TOKENS);
-const failures: string[] = [];
-let verified = 0;
+async function main(): Promise<void> {
+  const tokens: [string, WellKnownToken][] = Object.entries(WELL_KNOWN_TOKENS);
+  const failures: string[] = [];
+  let verified = 0;
 
-for (const [key, token] of tokens) {
-  for (const cluster of SOLANA_CLUSTERS) {
-    const mint = token.mints[cluster];
-    if (mint === undefined) continue;
-    await delay(REQUEST_SPACING_MS);
+  for (const [key, token] of tokens) {
+    for (const cluster of SOLANA_CLUSTERS) {
+      const mint = token.mints[cluster];
+      if (mint === undefined) continue;
+      await delay(REQUEST_SPACING_MS);
 
-    const result = await checkMint(cluster, mint, token.tokenProgram);
-    if (result.problems.length > 0) {
-      const failure = `${key} on ${cluster}: ${result.problems.join("; ")}`;
-      failures.push(failure);
-      console.error(`FAIL  ${failure}`);
-    } else {
-      verified += 1;
-      console.log(`ok    ${key} on ${cluster} — ${mint.decimals} decimals, ${token.tokenProgram}`);
+      const result = await checkMint(cluster, mint, token.tokenProgram);
+      if (result.problems.length > 0) {
+        const failure = `${key} on ${cluster}: ${result.problems.join("; ")}`;
+        failures.push(failure);
+        console.error(`FAIL  ${failure}`);
+      } else {
+        verified += 1;
+        console.log(
+          `ok    ${key} on ${cluster} — ${mint.decimals} decimals, ${token.tokenProgram}`
+        );
+      }
+      for (const line of result.details) {
+        console.log(`        ${line}`);
+      }
     }
-    for (const line of result.details) {
-      console.log(`        ${line}`);
-    }
+  }
+
+  console.log(`\n${verified} verified, ${failures.length} failed`);
+
+  if (failures.length > 0) {
+    process.exitCode = 1;
   }
 }
 
-console.log(`\n${verified} verified, ${failures.length} failed`);
-
-if (failures.length > 0) {
-  process.exitCode = 1;
+// Tests import `findProblems`; only a direct run reads the chain.
+const isMain =
+  process.argv[1] !== undefined && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+if (isMain) {
+  await main();
 }
