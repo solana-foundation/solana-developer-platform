@@ -314,8 +314,8 @@ describe("CustodyRuntimeTargets", () => {
           .bind(ORGANIZATION_ID, USER_ID),
         db
           .prepare(
-            `INSERT INTO project_members (id, project_id, user_id, role)
-             VALUES ('pm_runtime_targets', ?, ?, 'admin') ON CONFLICT DO NOTHING`
+            `INSERT INTO project_members (id, project_id, user_id)
+             VALUES ('pm_runtime_targets', ?, ?) ON CONFLICT DO NOTHING`
           )
           .bind(PROJECT_ID, USER_ID),
       ]);

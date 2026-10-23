@@ -139,7 +139,7 @@ beforeEach(async () => {
     ),
     // The member's project scope, which the custody signer re-reads (SOLA9-790).
     db.prepare(
-      "INSERT INTO project_members (id, project_id, user_id, role) VALUES ('pm_pc_wallet', 'prj_1', 'usr_test_pc_wallet', 'admin')"
+      "INSERT INTO project_members (id, project_id, user_id) VALUES ('pm_pc_wallet', 'prj_1', 'usr_test_pc_wallet')"
     ),
     db.prepare(
       "INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, status) VALUES ('cfg_verify', 'org_test_pc_wallet', 'prj_1', 'privy', '{}', 'active')"
