@@ -16,8 +16,8 @@ function readMigration(file: string): string {
   );
 }
 
-const cleanupSql = readMigration("0162_membership_cleanup.sql");
-const validateSql = readMigration("0163_membership_cleanup_validate.sql");
+const cleanupSql = readMigration("0165_membership_cleanup.sql");
+const validateSql = readMigration("0166_membership_cleanup_validate.sql");
 const memberRowsSchema = z.array(
   z.object({ id: z.string(), role: z.enum(ORGANIZATION_ROLES), status: z.enum(MEMBER_STATUSES) })
 );
@@ -56,15 +56,15 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await client.query("BEGIN");
-  organizationId = (await seedOrgProject(client, "0162")).organizationId;
+  organizationId = (await seedOrgProject(client, "0165")).organizationId;
 });
 
 afterEach(async () => {
   await client.query("ROLLBACK");
 });
 
-describe("0162/0163 membership cleanup", () => {
-  it("0162 folds Clerk-era roles into admin and any other role into member, then 0163 validates", async () => {
+describe("0165/0166 membership cleanup", () => {
+  it("0165 folds Clerk-era roles into admin and any other role into member, then 0166 validates", async () => {
     await client.query(
       `ALTER TABLE organization_members
          DROP CONSTRAINT organization_members_role_check,
@@ -107,7 +107,7 @@ describe("0162/0163 membership cleanup", () => {
     });
   });
 
-  it("0162 drops the project member role column", async () => {
+  it("0165 drops the project member role column", async () => {
     const { rows } = await client.query(
       `SELECT column_name FROM information_schema.columns
        WHERE table_schema = current_schema() AND table_name = 'project_members' AND column_name = 'role'`

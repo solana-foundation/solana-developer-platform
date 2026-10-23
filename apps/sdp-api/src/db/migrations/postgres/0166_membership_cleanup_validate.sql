@@ -1,4 +1,4 @@
--- Validates the constraints 0162 added NOT VALID. 0162 rewrote every non-conforming role, and
+-- Validates the constraints 0165 added NOT VALID. 0165 rewrote every non-conforming role, and
 -- member statuses were only ever written as one of the three, so the scan finds nothing; VALIDATE
 -- does not block writes.
 ALTER TABLE organization_members VALIDATE CONSTRAINT organization_members_role_check;

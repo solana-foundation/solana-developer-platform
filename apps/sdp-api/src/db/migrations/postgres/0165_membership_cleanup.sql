@@ -2,7 +2,7 @@
 -- Membership cleanup after SDP took ownership of organization membership (HOO-1972, ADR 0012).
 -- Organization roles are SDP's own two (`admin`, `member`); Clerk-era spellings fold into them
 -- before the CHECK is added. Member statuses are the three in `MEMBER_STATUSES`. Both
--- constraints are added NOT VALID so they take no blocking scan; 0163 validates them.
+-- constraints are added NOT VALID so they take no blocking scan; 0166 validates them.
 -- Project members carry no role (the API never reads one), so the column goes. Breaking for a
 -- traffic rollback by intent: an image from before ADR 0012 reads project roles and Clerk-era
 -- role spellings, and ships only with the membership reset.
