@@ -14,8 +14,10 @@ import type { Env } from "@/types/env";
  *   any hash or read, and lets secret scanners match a leaked key exactly.
  *
  * There is no product or environment in the key. SDP issues these itself until
- * the gateway's control plane takes over issuance, so this layout must stay in
- * step with the gateway's key spec.
+ * the gateway's control plane takes over issuance and imports them without a
+ * reissue, so this layout must stay in step with the gateway's key spec: CRC32
+ * (IEEE) over `sf_<key id>_<secret>`, base62 `0-9A-Za-z`, and
+ * HMAC-SHA256(pepper, secret) stored with its `pepper_version`.
  */
 export const SF_API_KEY_PREFIX = "sf_";
 /** Issued before HOO-2256; still accepted, no longer issued. */
