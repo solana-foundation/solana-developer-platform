@@ -96,7 +96,9 @@ const pathSupportSchema = z
 
 export const tokenTermsSchema = z
   .object({
-    mint: solanaAddressSchema,
+    mint: solanaAddressSchema.openapi({
+      example: WELL_KNOWN_TOKENS.PYUSD.mints["mainnet-beta"].address,
+    }),
     program: z.enum(TOKEN_PROGRAM_KINDS).openapi({ example: "token-2022" }),
     decimals: z.number().int().nonnegative().openapi({ example: 6 }),
     readAt: z
@@ -121,6 +123,7 @@ export const tokenTermsSchema = z
     display: displayTermsSchema,
     transferHookProgram: solanaAddressSchema.nullable().openapi({
       description: "The program a transfer hook runs; null when none is set.",
+      example: null,
     }),
     paused: z.boolean(),
     nonTransferable: z.boolean(),
@@ -129,6 +132,7 @@ export const tokenTermsSchema = z
     }),
     permanentDelegate: solanaAddressSchema.nullable().openapi({
       description: "An authority that can move any holder's balance; null when none.",
+      example: null,
     }),
     confidentialTransfers: z.boolean().openapi({
       description: "Whether the mint allows confidential transfers.",
