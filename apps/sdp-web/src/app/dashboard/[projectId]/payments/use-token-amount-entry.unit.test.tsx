@@ -81,7 +81,7 @@ function useAmountForm({
   basis,
   amount,
 }: {
-  mint: string;
+  mint: string | null;
   basis: TokenMovementBasis;
   amount: string;
 }) {
@@ -190,5 +190,30 @@ describe("useTokenAmountEntry", () => {
       displayAmount: "",
     });
     expect(result.current.tokenAmount).toBe("3");
+  });
+
+  // A wallet list that came back without the wallet's balances set the mint to null for a
+  // moment; read as another token, it reset the entry and sent the old token amount.
+  it("keeps the unit and the display amount while the mint is unknown for a moment", async () => {
+    stubTokenRoutes(scaledTerms, quote("debit", "5", "5", "4"));
+    const { result, rerender } = renderHook(
+      ({ mint }: { mint: string | null }) => useAmountForm({ mint, basis: "debit", amount: "3" }),
+      { wrapper, initialProps: { mint: MINT } }
+    );
+
+    await waitFor(() => expect(result.current.displayEntryAvailable).toBe(true));
+    act(() => {
+      result.current.setUnit("display");
+      result.current.form.setField("displayAmount", "10");
+    });
+    rerender({ mint: null });
+    rerender({ mint: MINT });
+
+    expect(result.current.form.values).toEqual({
+      amountUnit: "display",
+      amount: "3",
+      displayAmount: "10",
+    });
+    await waitFor(() => expect(result.current.tokenAmount).toBe("5"));
   });
 });

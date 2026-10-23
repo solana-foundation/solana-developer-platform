@@ -204,8 +204,10 @@ export function useTokenAmountEntry({
   const displayEntryAvailable = terms !== null && terms.display.rule !== "plain";
 
   // Another token starts over in token units: a display amount means nothing for it.
+  // A mint that goes null for a moment (the wallet list came back without this
+  // wallet's balances) is no other token, so the entry is kept for when it returns.
   const [entryMint, setEntryMint] = useState(mint);
-  if (entryMint !== mint) {
+  if (mint !== null && entryMint !== mint) {
     setEntryMint(mint);
     setFields({ amountUnit: "token", displayAmount: "" });
   }
