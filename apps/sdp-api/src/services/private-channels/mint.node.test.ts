@@ -1,5 +1,5 @@
 import { createRpcFromTransport } from "@sdp/rpc/solana";
-import { PRIVATE_CHANNEL_ESCROW_PROGRAM_ADDRESS } from "@sdp/spc-escrow";
+import { findAllowedMintPda, PRIVATE_CHANNEL_ESCROW_PROGRAM_ADDRESS } from "@sdp/spc-escrow";
 import type { PrivateChannelToken } from "@sdp/types/private-channels";
 import { SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
 import { address, type RpcTransport } from "@solana/kit";
@@ -43,6 +43,12 @@ const requestSchema = z.object({
 
 let reads: string[][];
 
+/** The instance's allowlist entry for the token: the one account other than the mint and Clock a read may name. */
+const [ALLOWLIST_ENTRY] = await findAllowedMintPda(
+  { instance: address(INSTANCE.escrowInstanceAddr), mint: address(TOKEN.mint) },
+  { programAddress: address(INSTANCE.escrowProgramId) }
+);
+
 /** A project RPC whose allowlist entry enables the token (or not) and whose mint carries `extensions`. */
 function projectRpc(options: { enabled: boolean; extensions: ExtensionArgs[] }) {
   const transport: RpcTransport = async <TResponse>({ payload }: Parameters<RpcTransport>[0]) => {
@@ -53,6 +59,9 @@ function projectRpc(options: { enabled: boolean; extensions: ExtensionArgs[] }) 
       if (at === SYSVAR_CLOCK_ADDRESS) return CLOCK_RPC_ACCOUNT;
       if (at === TOKEN.mint) {
         return mintRpcAccount("token-2022", { decimals: 6, extensions: options.extensions });
+      }
+      if (at !== ALLOWLIST_ENTRY) {
+        throw new Error(`Private Channels read an unexpected account: ${at}`);
       }
       return options.enabled
         ? encodedRpcAccount(PRIVATE_CHANNEL_ESCROW_PROGRAM_ADDRESS, new Uint8Array())
@@ -83,7 +92,7 @@ describe("resolveChannelToken", () => {
       program: "token-2022",
     });
     expect(reads).toHaveLength(1);
-    expect(reads[0]?.slice(1)).toEqual([TOKEN.mint, SYSVAR_CLOCK_ADDRESS]);
+    expect(reads[0]).toEqual([ALLOWLIST_ENTRY, TOKEN.mint, SYSVAR_CLOCK_ADDRESS]);
     expect(channelAmountBaseUnits("1.25", terms)).toBe(1_250_000n);
   });
 

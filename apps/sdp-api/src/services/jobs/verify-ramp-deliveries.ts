@@ -391,9 +391,10 @@ async function judgeOnrampDelivery(
   } catch {
     return mismatch("amount_mismatch", observedAmount);
   }
+  // What the chain shows, whether or not the provider may report the debit.
   const amounts = {
-    debit: baseUnits(debitCounts ? delivery.debit : delivery.credit),
-    fee: baseUnits(debitCounts ? delivery.debit - delivery.credit : 0n),
+    debit: baseUnits(delivery.debit),
+    fee: baseUnits(delivery.debit - delivery.credit),
     credit: baseUnits(delivery.credit),
   };
   return {

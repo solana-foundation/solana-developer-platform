@@ -35,6 +35,7 @@ import * as sponsorshipService from "@/services/sponsorship.service";
 import { acceptTransaction, buildDvpTradeRow, createTestSponsor } from "@/test/fixtures/dvp";
 import { env } from "@/test/helpers/env";
 import { mintTermsAt } from "@/test/helpers/token-movement";
+import * as dvpMints from "./mints";
 
 const createOrgSignerForCustodyWallet = vi.hoisted(() => vi.fn());
 const sendTransaction = vi.hoisted(() => vi.fn());
@@ -50,7 +51,6 @@ const confirmTransaction = vi.hoisted(() => vi.fn());
 const resolveProjectSponsorshipScope = vi.fn();
 const createSponsorshipFeePayment = vi.fn();
 const prepareOwnedSubmission = vi.hoisted(() => vi.fn());
-const readDvpLegMint = vi.hoisted(() => vi.fn());
 
 let partySigner: Awaited<ReturnType<typeof generateKeyPairSigner>>;
 
@@ -76,7 +76,6 @@ vi.mock("@/db/repositories/dvp-leg-funding-claim.repository", () => ({
     release: releaseClaim,
   }),
 }));
-vi.mock("./mints", () => ({ readDvpLegMint }));
 vi.mock("@sdp/rpc/solana", () => ({
   createRpc: () => ({}),
   getRecentBlockhash: async () => ({
@@ -142,6 +141,9 @@ function sentInstructions() {
     };
   });
 }
+
+// The chain read stays the module's own export, spied (code standards: no module mock of a chain reader).
+const readDvpLegMint = vi.spyOn(dvpMints, "readDvpLegMint");
 
 describe("reclaimDvpTradeLeg", () => {
   beforeEach(async () => {

@@ -803,16 +803,44 @@ function balanceDeltas(
 }
 
 /**
+ * The base units each token account burned in the transaction: a burn lowers
+ * a balance without a move, so the balance check counts it.
+ */
+function burnedByAccount(parsedTransaction: ParsedTransaction): Map<string, bigint> {
+  const burned = new Map<string, bigint>();
+  for (const { instruction } of flattenParsedInstructions(parsedTransaction)) {
+    const parsedType = instruction.parsed?.type;
+    const info = instruction.parsed?.info;
+    if (
+      (parsedType !== "burn" && parsedType !== "burnChecked") ||
+      !info ||
+      tokenProgramOf(instruction.program) === null
+    ) {
+      continue;
+    }
+    const account = readInstructionInfoString(info, "account");
+    const amount = u64OrNull(
+      readTokenAmountInfo(info, "tokenAmount")?.amount ?? readInstructionInfoInteger(info, "amount")
+    );
+    if (account && amount !== null) {
+      burned.set(account, (burned.get(account) ?? 0n) + amount);
+    }
+  }
+  return burned;
+}
+
+/**
  * What each move moved, checked against the chain (ADR 0012, verification
  * where the program does not already guarantee it): the credits instruction
  * data implies into each destination account, less what the transaction
- * moved out of it (and, for lamports, the network fee its fee payer paid),
- * must equal that account's balance change.
+ * moved out of it or burned from it (and, for lamports, the network fee its
+ * fee payer paid), must equal that account's balance change.
  *
  * A plain `TransferChecked` (or `Transfer`) on a fee mint does not state its
- * fee: when it is the only move into an account that received less than it
- * debited, the program withheld the difference, so that is the fee and the
- * change is the credit. A failed transaction moved nothing.
+ * fee: when it is the only such move into an account that received less than
+ * expected, the program withheld the difference, so that is the fee. Between
+ * several, the chain does not say how the fees split, so they stay unverified.
+ * A failed transaction moved nothing.
  */
 function observedMovements(
   parsedTransaction: ParsedTransaction,
@@ -821,6 +849,7 @@ function observedMovements(
 ): ObservedMovement[] {
   const executed = !parsedTransaction.meta?.err;
   const deltas = balanceDeltas(parsedTransaction, accountKeys);
+  const burned = burnedByAccount(parsedTransaction);
   const feePayer = accountKeys[0];
   // The fee the fee payer paid; when the transaction does not state it, no
   // move into the fee payer's lamports can be checked.
@@ -869,6 +898,7 @@ function observedMovements(
     const expected =
       into.reduce((total, other) => total + other.debit - stated(other.statedFee), 0n) -
       outOf.reduce((total, other) => total + other.debit, 0n) -
+      (native ? 0n : (burned.get(move.destinationAccount) ?? 0n)) -
       paidFee;
     if (delta === expected) {
       return movement(split(stated(move.statedFee)), CHAIN_DELTA_MATCHED);
@@ -880,23 +910,25 @@ function observedMovements(
     if (native) {
       return movement(split(stated(move.statedFee)), { state: "pending", reason: null });
     }
-    // Only a Token-2022 mint can withhold a fee, and every move into and out
-    // of the account is counted (tracked wallet or not), so the shortfall is it.
-    // The whole debit can be withheld: fees round up, so a tiny transfer can
-    // credit nothing.
+    // Only a Token-2022 mint can withhold a fee, and every move into, out of
+    // and burned from the account is counted (tracked wallet or not), so a
+    // shortfall no stated fee explains is the withheld fees. The whole debit
+    // can be withheld: fees round up, so a tiny transfer can credit nothing.
+    const shortfall = expected - delta;
+    const unstated = into.filter((other) => other.statedFee === null);
     if (
-      move.asset.kind === "token" &&
-      move.asset.program === "token-2022" &&
-      into.length === 1 &&
-      outOf.length === 0 &&
-      paidFee === 0n &&
-      move.statedFee === null &&
-      delta >= 0n &&
-      delta < move.debit
+      move.asset.kind !== "token" ||
+      move.asset.program !== "token-2022" ||
+      paidFee !== 0n ||
+      shortfall <= 0n ||
+      shortfall > unstated.reduce((total, other) => total + other.debit, 0n)
     ) {
-      return movement(split(baseUnits(move.debit - delta)), CHAIN_DELTA_MATCHED);
+      return movement(split(stated(move.statedFee)), CHAIN_DELTA_MISMATCH);
     }
-    return movement(split(stated(move.statedFee)), CHAIN_DELTA_MISMATCH);
+    if (unstated.length === 1 && unstated[0] === move) {
+      return movement(split(baseUnits(shortfall)), CHAIN_DELTA_MATCHED);
+    }
+    return movement(split(stated(move.statedFee)), { state: "pending", reason: null });
   });
 }
 
