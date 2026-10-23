@@ -23,3 +23,14 @@ test("rejects invalid output sizes and signed values", () => {
   assert.throws(() => toBufferLE(1n, -1), RangeError);
   assert.throws(() => toBufferBE(1n, 1.5), RangeError);
 });
+
+test("rejects values wider than the requested width instead of truncating", () => {
+  // A silent truncation would encode a different (smaller) amount than the
+  // caller asked for; this package must fail closed like the native binding.
+  assert.throws(() => toBufferBE(1n << 64n, 8), RangeError);
+  assert.throws(() => toBufferBE((1n << 80n) | 1n, 8), RangeError);
+  assert.throws(() => toBufferLE(1n << 64n, 8), RangeError);
+  // Boundary values still encode exactly.
+  assert.deepEqual(toBufferBE((1n << 64n) - 1n, 8), Buffer.from("ffffffffffffffff", "hex"));
+  assert.deepEqual(toBufferLE((1n << 64n) - 1n, 8), Buffer.from("ffffffffffffffff", "hex"));
+});

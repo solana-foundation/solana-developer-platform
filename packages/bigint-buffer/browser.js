@@ -41,8 +41,11 @@ function toBufferLE(value, width) {
 function toBufferBE(value, width) {
   assertBigInt(value);
   assertWidth(width);
+  if (value >> BigInt(width * 8) !== 0n) {
+    throw new RangeError("BigInt is too large to fit in the requested width");
+  }
   const hex = value.toString(16);
-  return Buffer.from(hex.padStart(width * 2, "0").slice(0, width * 2), "hex");
+  return Buffer.from(hex.padStart(width * 2, "0"), "hex");
 }
 
 module.exports = { toBigIntBE, toBigIntLE, toBufferBE, toBufferLE };
