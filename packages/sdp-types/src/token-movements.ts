@@ -13,6 +13,7 @@ import type {
   RampTransferTransitionId,
   TransferChainVerdictStatus,
 } from "./payments";
+import type { SdpModule } from "./release-channels";
 
 /**
  * Which side of a transfer an amount fixes: `debit` is what leaves the
@@ -63,6 +64,79 @@ export const TOKEN_MOVEMENT_REFUSAL_REASONS = [
 ] as const;
 
 export type TokenMovementRefusalReason = (typeof TOKEN_MOVEMENT_REFUSAL_REASONS)[number];
+
+/**
+ * The paths a movement takes, each with its own capability row (ADR 0012,
+ * "one capability decision"). `builder` is the instructions
+ * `@sdp/solana/token-movement` builds; the others are registered adapters:
+ * each moves tokens through its own engine (an SDK or an on-chain program),
+ * so its row holds that engine's rules.
+ */
+export const TOKEN_MOVEMENT_PATHS = [
+  /** Instructions built by the builder: Payments transfers, batches, off-ramp funding, /pay and DvP funding. */
+  "builder",
+  // ── Registered adapters ────────────────────────────────────────────────
+  /**
+   * A recurring pull: the subscriptions program moves the mandate's debit with
+   * a plain `TransferChecked` through CPI, so no fee guard is on chain and the
+   * destination cannot get a memo first.
+   */
+  "recurring",
+  /** Issuance mint and burn through Mosaic. Neither is a transfer, so no fee or hook applies. */
+  "issuance",
+  /** Issuance seize: the permanent delegate's `TransferChecked`, which Mosaic builds. */
+  "issuance_seize",
+  /** DvP trades: the DvP program settles, cancels and reclaims each escrow. */
+  "dvp",
+  /** Private Channels deposits, transfers and withdrawals, through SPC's escrow and encoding. */
+  "private_channels",
+  /**
+   * Earn deposit mints, moved by each provider's own builder or program. Exits
+   * never inherit a money-in gate; the deposit-mint guard reports this row.
+   */
+  "earn",
+] as const;
+
+export type TokenMovementPath = (typeof TOKEN_MOVEMENT_PATHS)[number];
+
+/**
+ * The module each movement path belongs to. A deployment reports, and its
+ * public documents name, only the paths of modules its release channel runs.
+ * The builder serves Payments, which every channel runs.
+ */
+export const TOKEN_MOVEMENT_PATH_MODULES = {
+  builder: "payments",
+  recurring: "recurring_payments",
+  issuance: "issuance",
+  issuance_seize: "issuance",
+  dvp: "dvp",
+  private_channels: "private_channels",
+  earn: "earn",
+} as const satisfies Record<TokenMovementPath, SdpModule>;
+
+/**
+ * What a path does with a movement it will not make now. A `hold` may pass
+ * later without anything SDP stores changing (a paused mint can be unpaused),
+ * so a path that can wait, a recurring pull, waits instead of failing; a
+ * `refuse` cannot.
+ */
+export const TOKEN_MOVEMENT_DISPOSITIONS = ["refuse", "hold"] as const;
+
+export type TokenMovementDisposition = (typeof TOKEN_MOVEMENT_DISPOSITIONS)[number];
+
+/** The Token-2022 mint extensions, as the client names them, whose state a capability row refuses. */
+export const CAPABILITY_EXTENSIONS = [
+  "NonTransferable",
+  "PausableConfig",
+  "DefaultAccountState",
+  "TransferFeeConfig",
+  // biome-ignore lint/security/noSecrets: an extension name, not a secret.
+  "ScaledUiAmountConfig",
+  "InterestBearingConfig",
+  "TransferHook",
+] as const;
+
+export type CapabilityExtension = (typeof CAPABILITY_EXTENSIONS)[number];
 
 /**
  * Whether SDP has checked what a movement moved against its quote. It is
@@ -238,6 +312,48 @@ export function chainDeltaVerdict(matched: boolean): AmountVerificationVerdict {
   return matched ? CHAIN_DELTA_MATCHED : CHAIN_DELTA_MISMATCH;
 }
 
+/**
+ * How a mint's wallets show an amount: as token units (`plain`), scaled by a
+ * multiplier (Token-2022 scaled UI amount), or with interest accrued
+ * (Token-2022 interest-bearing). Base units never change with it.
+ */
+export const TOKEN_DISPLAY_RULES = ["plain", "scaled", "interest"] as const;
+
+export type TokenDisplayRule = (typeof TOKEN_DISPLAY_RULES)[number];
+
+/**
+ * Whether a display rule gives an approximate value: an interest-bearing
+ * mint accrues every second, so its display is true only at its `asOf`. A
+ * scaled mint's display is exact; screens mark only approximate ones ("≈").
+ */
+export const APPROXIMATE_TOKEN_DISPLAY_RULES = {
+  plain: false,
+  scaled: false,
+  interest: true,
+} as const satisfies Record<TokenDisplayRule, boolean>;
+
+/**
+ * A held amount in its three units (ADR 0012). Balance checks and "Max" use
+ * `tokenAmount`; screens show `displayAmount`, which is never sent back as an
+ * amount.
+ */
+export interface TokenBalanceAmounts {
+  /** Base units, summed over every token account the owner holds for the mint. */
+  amount: string;
+  /** Exact token units: `amount` ÷ 10^decimals. */
+  tokenAmount: string;
+  /**
+   * What a wallet shows for the summed base units under the mint's display
+   * rule. Equal to `tokenAmount` under the `plain` rule. Interest-bearing
+   * values are approximate and change every second.
+   */
+  displayAmount: string;
+  /** The chain time `displayAmount` was computed at (ISO 8601); null under the `plain` rule. */
+  displayAsOf: string | null;
+  displayRule: TokenDisplayRule;
+  decimals: number;
+}
+
 /** The three amounts as a scaled or interest-bearing mint's wallets show them. */
 export interface TokenMovementDisplay {
   debit: string;
@@ -279,4 +395,93 @@ export interface TokenMovementAmounts {
   decimals: number;
   /** Present only for a scaled or interest-bearing mint. */
   display?: TokenMovementDisplay;
+}
+
+/** One fee entry of a mint's transfer-fee schedule, as the terms route reports it. */
+export interface TokenTransferFeeEntry {
+  /** First epoch the entry applies in. */
+  epoch: string;
+  /** Fee rate in hundredths of a percent, at most 10 000. */
+  basisPoints: number;
+  /** Cap on the fee of one transfer, in token units. */
+  maximumFee: string;
+}
+
+/** A mint's display rule, as the terms route reports it. */
+export type TokenDisplayTerms =
+  | { rule: "plain" }
+  | {
+      rule: "scaled";
+      multiplier: number;
+      newMultiplier: number;
+      /** When `newMultiplier` replaces `multiplier` (ISO 8601). */
+      newMultiplierEffectiveAt: string;
+    }
+  | {
+      rule: "interest";
+      /** Rate in basis points from `lastUpdateAt` on; may be negative. */
+      currentRate: number;
+      /** Average rate in basis points from `initializedAt` to `lastUpdateAt`. */
+      preUpdateAverageRate: number;
+      initializedAt: string;
+      lastUpdateAt: string;
+    };
+
+/** One reason a movement path refuses, or holds, a mint. */
+export interface TokenMovementRefusalSummary {
+  reason: TokenMovementRefusalReason;
+  extension: CapabilityExtension;
+  disposition: TokenMovementDisposition;
+  message: string;
+}
+
+/** Whether one movement path can move the mint now, with every reason it cannot. */
+export interface TokenMovementPathSupport {
+  path: TokenMovementPath;
+  supported: boolean;
+  /** Empty when `supported`. */
+  refusals: TokenMovementRefusalSummary[];
+}
+
+/** A mint's Token Terms at one read, as `GET /v1/tokens/{mint}/terms` reports them. */
+export interface TokenTermsSummary {
+  mint: string;
+  program: "spl-token" | "token-2022";
+  decimals: number;
+  /** The Clock read with the mint. */
+  readAt: { slot: string; epoch: string; time: string };
+  /** Null when the mint has no transfer-fee config. */
+  transferFee: {
+    /** The entry in force in `readAt.epoch`. */
+    current: TokenTransferFeeEntry;
+    /** The entry in force in the next epoch: a fee change shows here first. */
+    next: TokenTransferFeeEntry;
+  } | null;
+  display: TokenDisplayTerms;
+  transferHookProgram: string | null;
+  paused: boolean;
+  nonTransferable: boolean;
+  defaultAccountState: "initialized" | "frozen";
+  permanentDelegate: string | null;
+  confidentialTransfers: boolean;
+  /** One entry per movement path this deployment runs. */
+  support: TokenMovementPathSupport[];
+}
+
+/** A movement priced under one read of a mint's terms, as `POST /v1/tokens/{mint}/quote` reports it. */
+export interface TokenAmountQuote {
+  mint: string;
+  /** The token amount the quote prices, in token units: the input, or a display input converted. */
+  amount: string;
+  amounts: TokenMovementAmounts;
+  /** The epoch whose fee entry priced the fee; null when the mint has no fee config. */
+  feeEpoch: string | null;
+  /** The chain time of the terms read (ISO 8601). */
+  asOf: string;
+  /**
+   * Submit the token amount before this time (ISO 8601). It is never later
+   * than a pending multiplier switch, after which the same display amount is
+   * another token amount.
+   */
+  expiresAt: string;
 }

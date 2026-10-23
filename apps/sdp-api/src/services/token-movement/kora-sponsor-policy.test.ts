@@ -1,8 +1,9 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type CapabilityExtension, support } from "@sdp/solana/token-movement";
+import { support } from "@sdp/solana/token-movement";
 import { decodeTokenTerms, type MintTokenTerms } from "@sdp/solana/token-terms";
+import type { CapabilityExtension } from "@sdp/types/token-movements";
 import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import {
   type Address,

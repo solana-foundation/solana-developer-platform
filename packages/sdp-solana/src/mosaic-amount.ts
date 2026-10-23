@@ -15,11 +15,12 @@
  * the capability table gate the mint state.
  */
 
+import type { TokenMovementPath } from "@sdp/types/token-movements";
 import type { Address, GetMultipleAccountsApi, Rpc } from "@solana/kit";
 import { decimalAmountToRaw } from "@solana/mosaic-sdk";
 import { fetchTokenTerms } from "./read-token-terms";
 import { type TokenAmount, toBaseUnits } from "./token-amount";
-import { support, type TokenMovementPath, type TokenMovementRefusal } from "./token-movement";
+import { support, type TokenMovementRefusal } from "./token-movement";
 
 /** The capability rows Mosaic's issuance entry points move under. */
 export type MosaicIssuancePath = Extract<TokenMovementPath, "issuance" | "issuance_seize">;

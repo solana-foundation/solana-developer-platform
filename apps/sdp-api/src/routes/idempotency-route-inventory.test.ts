@@ -49,6 +49,7 @@ const EXEMPT = {
   "POST /pay/:token/tx":
     "public and unauthenticated (no organization to scope a key to); the payment request token is the unit of retry",
   "POST /v1/payments/transfer-batches/estimate": "read-only estimate; moves and stores nothing",
+  "POST /v1/tokens/:mint/quote": "read-only quote; moves and stores nothing",
   "POST /v1/payments/subscription-plans/:planId/prepare-create": PREPARE,
   "POST /v1/payments/subscriptions/:subscriptionId/prepare-authorization": PREPARE,
   "POST /v1/payments/subscriptions/:subscriptionId/prepare-cancel": PREPARE,

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { TOKEN_MOVEMENT_PATHS, type TokenMovementPath } from "@sdp/types/token-movements";
 import { MEMO_PROGRAM_ADDRESS } from "@sdp/types/well-known-programs";
 import { SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
 import {
@@ -60,12 +61,10 @@ import {
   resolveTokenAclThaws,
   resolveTransferHookAccounts,
   support,
-  TOKEN_MOVEMENT_PATHS,
   TOKEN_MOVEMENT_REFUSALS,
   type TokenMovementAccounts,
   type TokenMovementContext,
   TokenMovementError,
-  type TokenMovementPath,
   type TokenMovementRefusal,
 } from "./token-movement";
 import {
