@@ -10,12 +10,13 @@ import {
 
 // Known-answer vectors, computed independently (Python zlib.crc32 and base62
 // over 0-9A-Za-z). They pin the layout the gateway must also verify.
+const FIRST_VECTOR = {
+  keyId: "0018a3cae6a0a034",
+  secret: "sc7Mv6ineTCew5AEgraQLmN8OgapWiFzDF9DUPEXDUI",
+  key: "sf_0018a3cae6a0a034_sc7Mv6ineTCew5AEgraQLmN8OgapWiFzDF9DUPEXDUI3NoYh3",
+};
 const VECTORS = [
-  {
-    keyId: "0018a3cae6a0a034",
-    secret: "sc7Mv6ineTCew5AEgraQLmN8OgapWiFzDF9DUPEXDUI",
-    key: "sf_0018a3cae6a0a034_sc7Mv6ineTCew5AEgraQLmN8OgapWiFzDF9DUPEXDUI3NoYh3",
-  },
+  FIRST_VECTOR,
   {
     keyId: "0000000000000000",
     secret: "0000000000000000000000000000000000000000000",
@@ -44,7 +45,7 @@ describe("sf_ keys", () => {
   });
 
   it("rejects a typo through the checksum", () => {
-    const { key } = VECTORS[0] as (typeof VECTORS)[number];
+    const { key } = FIRST_VECTOR;
     const typo = `${key.slice(0, 30)}${key[30] === "a" ? "b" : "a"}${key.slice(31)}`;
     expect(parseSfApiKey(typo)).toBeNull();
   });
@@ -62,7 +63,7 @@ describe("sf_ keys", () => {
 
 describe("parsePresentedApiKey", () => {
   it("classifies sf_ and legacy keys", () => {
-    const { key, keyId, secret } = VECTORS[0] as (typeof VECTORS)[number];
+    const { key, keyId, secret } = FIRST_VECTOR;
     expect(parsePresentedApiKey(key)).toEqual({ format: "sf", keyId, secret });
     expect(parsePresentedApiKey("sk_live_abc")).toEqual({ format: "legacy", key: "sk_live_abc" });
     expect(parsePresentedApiKey("sk_test_abc")).toEqual({ format: "legacy", key: "sk_test_abc" });

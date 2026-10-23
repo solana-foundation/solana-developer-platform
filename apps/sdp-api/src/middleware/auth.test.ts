@@ -401,6 +401,17 @@ describe("Auth Middleware", () => {
       expect(errorBodySchema.parse(await res.json()).error.code).toBe("INVALID_API_KEY");
     });
 
+    it("still accepts the real key right after its secret was refused under another key ID", async () => {
+      await seedSfKey();
+      const otherId = sfKey.keyId === "0".repeat(16) ? "1".repeat(16) : "0".repeat(16);
+
+      const wrong = await requestWith(formatSfApiKey({ keyId: otherId, secret: sfKey.secret }));
+      const right = await requestWith(sfKey.key);
+
+      expect(wrong.status).toBe(401);
+      expect(right.status).toBe(200);
+    });
+
     it("rejects an sf_ secret seeded without a key ID", async () => {
       await seedApiKeyRow(
         env,

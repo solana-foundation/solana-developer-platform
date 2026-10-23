@@ -130,11 +130,16 @@ export type ApiKeyLookup =
 
 /**
  * What the instance's refusal and throttle caches remember a lookup by: the
- * hash of a presented key, or the key ID the gateway named. Prefixed so a
- * gateway entry can never collide with a hash.
+ * hash of a presented key, or the key ID the gateway named. An `sf_` key's
+ * hash covers its secret alone, so its key ID is part of the entry: a secret
+ * refused under a wrong key ID must not refuse the real key. Prefixed so no
+ * two kinds of entry can collide.
  */
 export function apiKeyRefusalKey(lookup: ApiKeyLookup): string {
-  return lookup.kind === "secret" ? lookup.keyHash : `gateway:${lookup.publicId}`;
+  if (lookup.kind === "gateway") {
+    return `gateway:${lookup.publicId}`;
+  }
+  return lookup.publicId === null ? lookup.keyHash : `sf:${lookup.publicId}:${lookup.keyHash}`;
 }
 
 export interface ApiKeyAuthorization {
