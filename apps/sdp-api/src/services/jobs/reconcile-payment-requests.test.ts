@@ -272,11 +272,32 @@ describe("reconcilePaymentRequests", () => {
     expect((await getRow(request.id)).last_checked_at).not.toBe(PAST);
   });
 
+  it("reports a row whose checks keep failing as backlog", async () => {
+    const log = vi.spyOn(moneyPathEvents, "logEvent");
+    vi.spyOn(solanaRpc, "getSignaturesForAddress").mockRejectedValue(new Error("rpc down"));
+    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+    await updateRow(request.id, { created_at: PAST, last_checked_at: PAST });
+
+    await expect(onSandbox(() => reconcilePaymentRequests(env))).rejects.toThrow(/checks failed/);
+    log.mockClear();
+    await onSandbox(() => reconcilePaymentRequests(env));
+
+    expect((await getRow(request.id)).last_checked_at).not.toBe(PAST);
+    expect(log).toHaveBeenCalledWith(
+      "warn",
+      expect.objectContaining({ event: "payment_requests.reconcile_backlog", stale: 1 })
+    );
+  });
+
   it("does not report a backlog for aged rows on their slower recheck cadence", async () => {
     const log = vi.spyOn(moneyPathEvents, "logEvent");
     vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);
     const request = await createRequest({ token: SOL_MINT, expiresAt: null });
-    await updateRow(request.id, { created_at: ago(2 * DAY), last_checked_at: ago(11 * MINUTE) });
+    await updateRow(request.id, {
+      created_at: ago(2 * DAY),
+      last_checked_at: ago(11 * MINUTE),
+      last_verified_at: ago(11 * MINUTE),
+    });
 
     await onSandbox(() => reconcilePaymentRequests(env));
 
@@ -469,7 +490,7 @@ describe("expirePaymentRequests", () => {
     const log = vi.spyOn(moneyPathEvents, "logEvent");
     vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);
     const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
-    await updateRow(request.id, { last_checked_at: ago(MINUTE) });
+    await updateRow(request.id, { last_checked_at: ago(MINUTE), last_verified_at: ago(MINUTE) });
 
     await onSandbox(() => expirePaymentRequests(env));
 
@@ -483,7 +504,12 @@ describe("expirePaymentRequests", () => {
     const log = vi.spyOn(moneyPathEvents, "logEvent");
     vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);
     const request = await createRequest({ token: SOL_MINT, expiresAt: null });
-    await updateRow(request.id, { status: "expired", expires_at: ago(DAY), last_checked_at: PAST });
+    await updateRow(request.id, {
+      status: "expired",
+      expires_at: ago(DAY),
+      last_checked_at: PAST,
+      last_verified_at: PAST,
+    });
 
     await onSandbox(() => expirePaymentRequests(env));
 

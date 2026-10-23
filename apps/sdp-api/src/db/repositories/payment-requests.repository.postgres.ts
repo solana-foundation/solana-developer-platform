@@ -495,7 +495,7 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
               AND pr.status = 'awaiting_payment'
               AND pr.custody_wallet_id IS NOT NULL
               AND (pr.expires_at IS NULL OR pr.expires_at > sdp_iso_now())
-              AND COALESCE(pr.last_checked_at, pr.created_at) < ?`
+              AND COALESCE(pr.last_verified_at, pr.created_at) < ?`
         )
         .bind(environment, checkedBefore)
         .first<{ stale: number }>();
@@ -515,7 +515,7 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
               AND pr.custody_wallet_id IS NOT NULL
               AND pr.expires_at IS NOT NULL
               AND pr.expires_at <= sdp_iso_now()
-              AND COALESCE(pr.last_checked_at, pr.expires_at) < ?`
+              AND COALESCE(pr.last_verified_at, pr.expires_at) < ?`
         )
         .bind(environment, checkedBefore)
         .first<{ stale: number }>();
@@ -534,7 +534,7 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
               AND pr.status = 'expired'
               AND pr.custody_wallet_id IS NOT NULL
               AND pr.expires_at >= ?
-              AND COALESCE(pr.last_checked_at, pr.updated_at) < ?`
+              AND COALESCE(pr.last_verified_at, pr.updated_at) < ?`
         )
         .bind(environment, expiredSince, checkedBefore)
         .first<{ stale: number }>();

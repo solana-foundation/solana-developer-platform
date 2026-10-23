@@ -1058,16 +1058,22 @@ describe("PaymentRequestsRepository (postgres)", () => {
         const request = await repo.createPaymentRequest(
           createInput({ token: SOL_MINT, expiresAt })
         );
-        await updateRow(request.id, { created_at: PAST, last_checked_at: PAST, ...fields });
+        await updateRow(request.id, { created_at: PAST, last_verified_at: PAST, ...fields });
         return request;
       }
 
       it("counts unexpired awaiting requests not checked since the cutoff", async () => {
         await staleRequest(null);
         await staleRequest("2099-01-01T00:00:00.000Z");
-        await staleRequest(null, { last_checked_at: ago(MINUTE) });
+        await staleRequest(null, { last_verified_at: ago(MINUTE) });
 
         expect(await countStale()).toBe(2);
+      });
+
+      it("counts a request attempted recently but not verified since the cutoff", async () => {
+        await staleRequest(null, { last_checked_at: ago(MINUTE) });
+
+        expect(await countStale()).toBe(1);
       });
 
       it("excludes lapsed requests, which the expiry lane owns", async () => {
@@ -1096,7 +1102,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
         );
         await updateRow(request.id, {
           status: "expired",
-          last_checked_at: PAST,
+          last_verified_at: PAST,
           ...fields,
         });
         return request;
@@ -1113,10 +1119,11 @@ describe("PaymentRequestsRepository (postgres)", () => {
       it("counts expired requests inside the window not checked since the cutoff", async () => {
         await expiredRequest({ expires_at: ago(DAY) });
         await expiredRequest({ expires_at: ago(8 * DAY) });
+        await expiredRequest({ expires_at: ago(DAY), last_verified_at: ago(MINUTE) });
         await expiredRequest({ expires_at: ago(DAY), last_checked_at: ago(MINUTE) });
         await expiredRequest({ expires_at: ago(DAY), custody_wallet_id: null });
 
-        expect(await countStaleLateWatch()).toBe(1);
+        expect(await countStaleLateWatch()).toBe(2);
         expect(await countStaleLateWatch("production")).toBe(0);
       });
     });
@@ -1144,11 +1151,17 @@ describe("PaymentRequestsRepository (postgres)", () => {
 
       it("counts lapsed awaiting requests not checked since the cutoff", async () => {
         await lapsedRequest(PAST);
-        await lapsedRequest(PAST, { last_checked_at: ago(DAY) });
-        await lapsedRequest(PAST, { last_checked_at: ago(MINUTE) });
+        await lapsedRequest(PAST, { last_verified_at: ago(DAY) });
+        await lapsedRequest(PAST, { last_verified_at: ago(MINUTE) });
         await lapsedRequest(ago(MINUTE));
 
         expect(await countStaleLapsed()).toBe(2);
+      });
+
+      it("counts a lapse attempted recently but not verified since the cutoff", async () => {
+        await lapsedRequest(PAST, { last_checked_at: ago(MINUTE), last_verified_at: ago(DAY) });
+
+        expect(await countStaleLapsed()).toBe(1);
       });
 
       it("excludes unexpired requests, which the awaiting lanes own", async () => {
