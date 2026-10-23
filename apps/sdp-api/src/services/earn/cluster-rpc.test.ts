@@ -3,7 +3,12 @@ import { runInClusterScope } from "@sdp/rpc/scope";
 import { GENESIS_HASH_BY_CLUSTER, type SolanaCluster } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseJsonRpcRequest } from "@/test/helpers/cluster-rpc";
-import { assertClusterEndpoint, earnClusterRpc, earnProviderEndpointUrls } from "./cluster-rpc";
+import {
+  assertClusterEndpoint,
+  earnClusterRpc,
+  earnPoolNotConfigured,
+  earnProviderEndpointUrls,
+} from "./cluster-rpc";
 
 let poolSequence = 0;
 /** Every request of the current test, by endpoint and method, in arrival order. */
@@ -122,8 +127,9 @@ describe("earnClusterRpc on a devnet-default process", () => {
 describe("assertClusterEndpoint", () => {
   const cluster: SolanaCluster = "devnet";
 
-  it("names the managed pool keys when the cluster has no endpoint", async () => {
-    await expect(assertClusterEndpoint(cluster, "")).rejects.toMatchObject({
+  it("names the managed pool keys when the cluster has no endpoint", () => {
+    expect(earnProviderEndpointUrls(cluster)).toEqual([]);
+    expect(earnPoolNotConfigured(cluster)).toMatchObject({
       code: "PROVIDER_NOT_CONFIGURED",
       message: expect.stringContaining("SOLANA_RPC_<PROVIDER>_DEVNET_API_KEY_URL"),
     });

@@ -25,19 +25,27 @@ export const CATALOGUE_RPC_TIMEOUT_MS = 20_000;
 
 /**
  * The RPC endpoint a catalogue read should use for `cluster`, as the caller
- * supplied it on `ctx.catalogueRpcUrl`, or "" when there is none.
+ * supplied it on `ctx.catalogueRpcUrl`.
  *
  * The catalogue sync walks BOTH environments in one process, so the endpoint
  * must be the requested cluster's own: the API hands over that cluster's
  * managed RPC pool and never a process default, which is what keeps a
  * mainnet-only provider (Ondo) readable from a deployment whose other traffic
- * is mostly devnet. An empty answer makes `assertRpcServesCluster` throw
- * `PROVIDER_NOT_CONFIGURED` before any read, a steady-state skip for the sync,
- * and `assertRpcServesCluster` still measures whatever URL comes back: an
- * endpoint pointed at the wrong chain is refused by its genesis hash.
+ * is mostly devnet. `assertRpcServesCluster` still measures the URL that comes
+ * back: an endpoint pointed at the wrong chain is refused by its genesis hash.
+ *
+ * @param ctx - The catalogue runtime context.
+ * @param cluster - The cluster the read targets.
+ * @returns The endpoint to read.
+ * @throws SdpEarnError `PROVIDER_NOT_CONFIGURED` when the caller supplied no
+ * resolver or the cluster has no endpoint, a steady-state skip for the sync.
  */
 export function resolveCatalogueRpcUrl(ctx: EarnRuntimeContext, cluster: SolanaCluster): string {
-  return ctx.catalogueRpcUrl?.(cluster).trim() ?? "";
+  const rpcUrl = ctx.catalogueRpcUrl === undefined ? null : ctx.catalogueRpcUrl(cluster);
+  if (rpcUrl === null) {
+    throw providerNotConfigured(`No ${cluster} RPC endpoint is configured for catalogue reads`);
+  }
+  return rpcUrl;
 }
 
 // biome-ignore lint/security/noSecrets: the bitcoin/Solana base58 alphabet

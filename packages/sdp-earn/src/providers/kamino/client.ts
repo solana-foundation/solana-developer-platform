@@ -446,7 +446,7 @@ export function distillKaminoVault(
  *
  * - **No API credential.** The REST shelf is public — there is no
  *   `KAMINO_API_KEY` anywhere. The devnet path reads the endpoint the caller
- *   supplies for devnet (`ctx.catalogueRpcUrl`), and a blank one fails closed
+ *   supplies for devnet (`ctx.catalogueRpcUrl`), and a missing one fails closed
  *   with PROVIDER_NOT_CONFIGURED rather than silently emptying the shelf.
  * - **Two clusters, two SOURCES.** `ctx.environment` selects between them:
  *   production reads the mainnet REST shelf (`hostCluster: "mainnet-beta"`),

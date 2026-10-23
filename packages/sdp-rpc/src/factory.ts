@@ -497,20 +497,21 @@ function assertEarnClusterInScope(cluster: SolanaCluster): void {
  */
 export function createEarnClusterRpc(
   cluster: SolanaCluster,
-  options: EarnClusterRpcOptions = {}
+  options?: EarnClusterRpcOptions
 ): SolanaRpc {
   assertEarnClusterInScope(cluster);
   const endpointUrls = managedEndpointUrls(cluster);
-  if (options.timeoutMs === undefined) return pooledClusterRpc(cluster, endpointUrls, managedPools);
+  const timeoutMs = options?.timeoutMs;
+  if (timeoutMs === undefined) return pooledClusterRpc(cluster, endpointUrls, managedPools);
   const { poolKey, poolTransport } = pooledClusterTransport(
     cluster,
     endpointUrls,
     managedPools.transports
   );
-  const clientKey = `${options.timeoutMs} ${poolKey}`;
+  const clientKey = `${timeoutMs} ${poolKey}`;
   const memoizedRpc = earnBoundedRpcs.get(clientKey);
   if (memoizedRpc) return memoizedRpc;
-  const rpc = createSolanaRpcFromTransport(withAttemptDeadline(poolTransport, options.timeoutMs));
+  const rpc = createSolanaRpcFromTransport(withAttemptDeadline(poolTransport, timeoutMs));
   earnBoundedRpcs.set(clientKey, rpc);
   return rpc;
 }

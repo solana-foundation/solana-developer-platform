@@ -8,8 +8,14 @@ import type {
 } from "@sdp/earn/types";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
-import { getSignatureStatuses, type SignatureStatusInfo, type SolanaRpc } from "@sdp/rpc/solana";
-import { address, type Signature } from "@solana/kit";
+import {
+  getChainHeight,
+  getSignatureStatuses,
+  type SignatureStatusInfo,
+  type SolanaRpc,
+} from "@sdp/rpc/solana";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import { address, type Signature, type Slot } from "@solana/kit";
 import { getDb } from "@/db/client";
 import {
   createPostgresEarnVaultWithdrawalRequestsRepository,
@@ -23,6 +29,7 @@ import {
   resolveVaultParRedemptionClient,
   resolveVaultQueuedWithdrawClient,
 } from "@/services/earn/execution-registry";
+import { reReadExpiredStatuses } from "@/services/earn/expired-status-proof";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import { broadcastVaultTransaction } from "@/services/earn/vault-execution.service";
 import type { Env } from "@/types/env";
@@ -118,6 +125,102 @@ function emptyStats(actions: number, requests: number): QueueReconciliationStats
     requestsAdvanced: 0,
     requestsClosedUnknown: 0,
     errors: 0,
+  };
+}
+
+interface ChainHeight {
+  blockHeight: bigint;
+  absoluteSlot: Slot;
+}
+
+/** Whether an action still waits on the chain: its batch status is null and it is not confirmed. */
+function awaitsChain(
+  row: EarnVaultWithdrawalRequestActionRow,
+  status: SignatureStatusInfo | null | undefined
+): boolean {
+  return status === null && (row.status === "requested" || row.status === "submitted");
+}
+
+/**
+ * Prove the absence of every action whose blockhash the confirmed height shows expired while its
+ * batch status was null, by re-reading those statuses at the height's slot
+ * (`reReadExpiredStatuses`), before any expired request or cancel recovery runs.
+ *
+ * @param rpc - The cluster's pool client.
+ * @param environment - The environment the actions belong to, for the failure log.
+ * @param rows - The claimed actions.
+ * @param statuses - The batch statuses, by index.
+ * @param height - The confirmed height read and the slot it was read at.
+ * @returns The statuses with every expired action's re-read applied, and the indexes of expired
+ * actions whose re-read failed, which stay unjudged this tick.
+ */
+async function proveExpiredActions(
+  rpc: SolanaRpc,
+  environment: SdpEnvironment,
+  rows: readonly EarnVaultWithdrawalRequestActionRow[],
+  statuses: ReadonlyArray<SignatureStatusInfo | null>,
+  height: ChainHeight
+): Promise<{ statuses: Array<SignatureStatusInfo | null>; unproven: Set<number> }> {
+  const expired = rows.flatMap((row, index) =>
+    awaitsChain(row, statuses[index]) && height.blockHeight > BigInt(row.last_valid_block_height)
+      ? [{ index, signature: row.signature as Signature }]
+      : []
+  );
+  try {
+    return {
+      statuses: await reReadExpiredStatuses(rpc, statuses, expired, height.absoluteSlot),
+      unproven: new Set(),
+    };
+  } catch (error) {
+    getLogger().error(
+      { environment, actions: expired.length, error },
+      "earn queued withdrawal reconciliation: expired signatures unreadable at the height's slot"
+    );
+    return { statuses: [...statuses], unproven: new Set(expired.map(({ index }) => index)) };
+  }
+}
+
+/**
+ * Read the confirmed height a batch's actions are judged against, once and only when one of them
+ * still waits on the chain, then prove each expired action's absence at that height's slot.
+ *
+ * @param rpc - The cluster's pool client.
+ * @param environment - The environment the actions belong to, for the failure logs.
+ * @param rows - The claimed actions.
+ * @param statuses - The batch statuses, by index.
+ * @param stats - The tick's stats; an unreadable height or re-read counts as an error.
+ * @returns The statuses with every expired action's re-read applied, and the height each action is
+ * judged against: none when the height is unreadable, or for an expired action whose absence could
+ * not be proven, so this tick neither rebroadcasts, expires nor recovers it.
+ */
+async function readActionExpiry(
+  rpc: SolanaRpc,
+  environment: SdpEnvironment,
+  rows: readonly EarnVaultWithdrawalRequestActionRow[],
+  statuses: Array<SignatureStatusInfo | null>,
+  stats: QueueReconciliationStats
+): Promise<{
+  statuses: Array<SignatureStatusInfo | null>;
+  heightFor: (index: number) => bigint | null;
+}> {
+  const unjudged = { statuses, heightFor: () => null };
+  if (!rows.some((row, index) => awaitsChain(row, statuses[index]))) return unjudged;
+  let height: ChainHeight;
+  try {
+    height = await getChainHeight(rpc, "confirmed");
+  } catch (error) {
+    stats.errors += 1;
+    getLogger().error(
+      { environment, error },
+      "earn queued withdrawal reconciliation: block height unreadable"
+    );
+    return unjudged;
+  }
+  const expiry = await proveExpiredActions(rpc, environment, rows, statuses, height);
+  if (expiry.unproven.size > 0) stats.errors += 1;
+  return {
+    statuses: expiry.statuses,
+    heightFor: (index) => (expiry.unproven.has(index) ? null : height.blockHeight),
   };
 }
 
@@ -241,30 +344,21 @@ async function reconcileActions(
     return;
   }
 
-  const needsHeight = actions.some(
-    (row, index) =>
-      statuses[index] === null && (row.status === "requested" || row.status === "submitted")
-  );
-  let currentHeight: bigint | null = null;
-  if (needsHeight) {
-    try {
-      currentHeight = await rpc.getBlockHeight({ commitment: "confirmed" }).send();
-    } catch (error) {
-      stats.errors += 1;
-      getLogger().error(
-        { environment, error },
-        "earn queued withdrawal reconciliation: block height unreadable"
-      );
-    }
-  }
+  const expiry = await readActionExpiry(rpc, environment, actions, statuses, stats);
 
   for (const [index, actionRow] of actions.entries()) {
     try {
       // react-doctor-disable-next-line react-doctor/async-await-in-loop -- bounded reconciliation pacing protects the RPC and pool.
-      const outcome = await reconcileAction(env, ledger, actionRow, statuses[index] ?? null, {
-        rpc: rpc as unknown as RawHistoryRpc,
-        currentHeight,
-      });
+      const outcome = await reconcileAction(
+        env,
+        ledger,
+        actionRow,
+        expiry.statuses[index] ?? null,
+        {
+          rpc: rpc as unknown as RawHistoryRpc,
+          currentHeight: expiry.heightFor(index),
+        }
+      );
       if (outcome === "advanced") stats.actionsAdvanced += 1;
       else if (outcome === "failed") stats.actionsFailed += 1;
       else if (outcome === "rebroadcast") stats.actionsRebroadcast += 1;

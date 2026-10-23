@@ -43,7 +43,7 @@ export interface EarnRuntimeContext {
   env: EarnRuntimeEnvironment;
   environment: SdpEnvironment;
   /**
-   * The endpoint an on-chain CATALOGUE read of `cluster` uses, or "" when the
+   * The endpoint an on-chain CATALOGUE read of `cluster` uses, or null when the
    * deployment has none for it. The API answers from that cluster's managed
    * RPC pool and never from a process default, so a catalogue pass walking
    * both environments in one process can never read one cluster for the other
@@ -51,7 +51,7 @@ export interface EarnRuntimeContext {
    * catalogue sync: quotes and builds take their endpoint from the executing
    * client's injected resolver instead.
    */
-  catalogueRpcUrl?: (cluster: SolanaCluster) => string;
+  catalogueRpcUrl?: (cluster: SolanaCluster) => string | null;
 }
 
 /**

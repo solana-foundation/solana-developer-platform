@@ -494,8 +494,8 @@ the five-minute pass would re-pay the whole catalogue cost for the rate alone.
 - **An on-chain catalogue read takes its endpoint from `ctx.catalogueRpcUrl`**
   (`resolveCatalogueRpcUrl`, src/solana-rpc.ts), never from `ctx.env`. The
   catalogue sync answers it with the preferred endpoint of the requested
-  cluster's managed pool; "" means no endpoint, which the genesis proof turns
-  into `PROVIDER_NOT_CONFIGURED` before any read. `EarnRuntimeEnvironment`
+  cluster's managed pool; null means no endpoint, which `resolveCatalogueRpcUrl`
+  refuses with `PROVIDER_NOT_CONFIGURED` before any read. `EarnRuntimeEnvironment`
   carries credentials only: `SOLANA_RPC_URL` and the `SOLANA_<CLUSTER>_RPC_URL`
   pins are gone from it, so a provider cannot fall back to the process default.
 - Registry: `EARN_PROVIDER_CLIENTS` (src/index.ts) + fail-closed
