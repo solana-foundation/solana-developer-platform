@@ -192,7 +192,6 @@ export const BUILT_OFFRAMP_DEPOSIT_VERDICTS = {
   delivery_verified: BUILT_TRANSFER_LANDED,
   offramp_deposit_failed: MOVEMENT_NOT_EXECUTED,
   offramp_deposit_released: MOVEMENT_NOT_EXECUTED,
-  delivery_verified: BUILT_TRANSFER_LANDED,
 } as const satisfies Partial<Record<RampTransferTransitionId, AmountVerificationVerdict>>;
 
 /**
