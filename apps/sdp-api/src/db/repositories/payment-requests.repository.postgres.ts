@@ -431,6 +431,7 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
                 updated_at = sdp_iso_now()
            FROM jsonb_to_recordset(?::jsonb) AS closing(signature text, outcome text, landed_slot text)
           WHERE issued.signature = closing.signature
+            AND issued.payment_request_id = ?
             AND issued.organization_id = ?
             AND issued.project_id = ?
             AND issued.outcome = 'open'
@@ -443,6 +444,7 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
               landed_slot: entry.landedSlot === null ? null : entry.landedSlot.toString(),
             }))
           ),
+          params.requestId,
           params.organizationId,
           params.projectId,
         ]
