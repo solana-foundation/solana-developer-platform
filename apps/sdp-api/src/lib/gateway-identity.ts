@@ -59,7 +59,16 @@ export interface GatewayIdentityConfig {
   jwksUrl: string;
 }
 
-/** The configured gateway, or null when no gateway fronts this deployment. */
+const configSchema = z.object({
+  issuer: z.string().min(1),
+  jwksUrl: z.url({ protocol: /^https?$/ }),
+});
+
+/**
+ * The configured gateway, or null when no gateway fronts this deployment.
+ * Parsed at boot (`assertRequiredEnv`), so a malformed value fails startup
+ * rather than every signed request.
+ */
 export function resolveGatewayIdentityConfig(
   env: Pick<Env, "SF_GATEWAY_ISSUER" | "SF_GATEWAY_JWKS_URL">
 ): GatewayIdentityConfig | null {
@@ -71,7 +80,11 @@ export function resolveGatewayIdentityConfig(
   if (!issuer || !jwksUrl) {
     throw new Error("SF_GATEWAY_ISSUER and SF_GATEWAY_JWKS_URL must be set together");
   }
-  return { issuer, jwksUrl };
+  const parsed = configSchema.safeParse({ issuer, jwksUrl });
+  if (!parsed.success) {
+    throw new Error("SF_GATEWAY_JWKS_URL must be an http(s) URL");
+  }
+  return parsed.data;
 }
 
 /** The gateway's signing keys could not be fetched; nothing about the token is known. */
@@ -111,11 +124,13 @@ export async function verifyGatewayIdentity(
       try {
         return await keys(header, input);
       } catch (error) {
-        // A failed fetch is not a JOSE error; a key the set lacks is.
+        // A failed fetch is not a JOSE error, and an HTTP error from the
+        // JWKS endpoint is the generic one; a key the set lacks is specific.
         const unavailable =
           !(error instanceof errors.JOSEError) ||
           error instanceof errors.JWKSTimeout ||
-          error instanceof errors.JWKSInvalid;
+          error instanceof errors.JWKSInvalid ||
+          error.code === errors.JOSEError.code;
         throw unavailable ? new GatewayKeysUnavailableError({ cause: error }) : error;
       }
     },

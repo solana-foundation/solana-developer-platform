@@ -302,7 +302,8 @@ optionalAuthEarn.post(
 // existing permission matrix. Give anonymous callers the API-facing contract
 // before projectContextMiddleware can turn a missing project into a 400.
 async function requireKeyedEarnCredential(c: Context<{ Bindings: Env }>, next: Next) {
-  if (!c.req.header("Authorization")) {
+  // A credential in Authorization, or a key the gateway authenticated.
+  if (!c.req.header("Authorization") && !presentsApiKey(c)) {
     throw new AppError("UNAUTHORIZED", "API key required for this Earn route");
   }
   await next();

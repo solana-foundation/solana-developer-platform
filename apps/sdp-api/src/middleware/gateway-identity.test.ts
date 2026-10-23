@@ -43,6 +43,11 @@ beforeAll(async () => {
       response.end(jwks);
       return;
     }
+    if (request.method === "GET" && request.url === "/broken/jwks.json") {
+      response.writeHead(500);
+      response.end();
+      return;
+    }
     response.writeHead(404);
     response.end();
   });
@@ -205,6 +210,39 @@ describe("gateway identity (X-SF-Identity)", () => {
     expect(refused.status).toBe(403);
   });
 
+  it("answers 503, not 401, when the gateway's signing keys cannot be fetched", async () => {
+    await seedSfKey();
+
+    const res = await request(
+      { [GATEWAY_IDENTITY_HEADER]: await identityToken({ key_id: sfKey.keyId }) },
+      { ...gatewayEnv(), SF_GATEWAY_JWKS_URL: `${issuer}/broken/jwks.json` }
+    );
+
+    expect(res.status).toBe(503);
+  });
+
+  it("reaches a keyed Earn route with only the gateway identity, as with the key itself", async () => {
+    await seedSfKey();
+    const earnEnv = { ...gatewayEnv(), EARN_ENABLED: "true", MARKETS_ENABLED: "true" };
+    const path = "/v1/earn/external-wallet/positions";
+
+    const viaGateway = await app.request(
+      path,
+      { headers: { [GATEWAY_IDENTITY_HEADER]: await identityToken({ key_id: sfKey.keyId }) } },
+      earnEnv
+    );
+    const viaKey = await app.request(
+      path,
+      { headers: { Authorization: `Bearer ${sfKey.key}` } },
+      earnEnv
+    );
+    const anonymous = await app.request(path, {}, earnEnv);
+
+    expect(viaGateway.status).not.toBe(401);
+    expect(viaGateway.status).toBe(viaKey.status);
+    expect(anonymous.status).toBe(401);
+  });
+
   describe("refuses an identity that does not verify, never falling back to the key", () => {
     const cases: Array<[string, () => Promise<string>]> = [
       ["for another app", () => identityToken({ key_id: sfKey.keyId }, { audience: "tokens" })],
@@ -266,5 +304,14 @@ describe("resolveGatewayIdentityConfig", () => {
     expect(() =>
       resolveGatewayIdentityConfig({ SF_GATEWAY_JWKS_URL: "https://gw.test/jwks.json" })
     ).toThrow("SF_GATEWAY_ISSUER and SF_GATEWAY_JWKS_URL must be set together");
+  });
+
+  it("refuses a JWKS URL that does not parse", () => {
+    expect(() =>
+      resolveGatewayIdentityConfig({
+        SF_GATEWAY_ISSUER: "https://gw.test",
+        SF_GATEWAY_JWKS_URL: "not a url",
+      })
+    ).toThrow("SF_GATEWAY_JWKS_URL must be an http(s) URL");
   });
 });
