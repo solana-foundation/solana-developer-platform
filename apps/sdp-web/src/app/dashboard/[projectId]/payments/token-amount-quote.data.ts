@@ -110,9 +110,19 @@ export function quotedTokenAmount(quote: TokenAmountQuote): string {
   }
 }
 
-/** Whether a quote may still be submitted at `now` (epoch ms). */
-export function isQuoteCurrent(quote: TokenAmountQuote, now: number): boolean {
-  return Date.parse(quote.expiresAt) > now;
+/** A quote, and when this browser received it (epoch ms, on its own clock). */
+export interface ReceivedTokenAmountQuote {
+  quote: TokenAmountQuote;
+  receivedAt: number;
+}
+
+/**
+ * When a quote stops being good on this browser's clock (epoch ms). `asOf`
+ * and `expiresAt` are chain time, which a browser clock can be a minute or
+ * more away from, so the quote's lifetime is counted from when it arrived.
+ */
+export function quoteExpiresAt({ quote, receivedAt }: ReceivedTokenAmountQuote): number {
+  return receivedAt + Date.parse(quote.expiresAt) - Date.parse(quote.asOf);
 }
 
 /**
@@ -137,7 +147,7 @@ export async function fetchTokenAmountQuote(
   mint: string,
   request: TokenAmountQuoteRequest,
   t: Translate
-): Promise<TokenAmountQuote> {
+): Promise<ReceivedTokenAmountQuote> {
   const res = await dashboardFetch(`/api/dashboard/tokens/${encodeURIComponent(mint)}/quote`, {
     method: "POST",
     body: request,
@@ -145,5 +155,5 @@ export async function fetchTokenAmountQuote(
   if (!res.ok) throw new Error(res.error);
   const parsed = tokenAmountQuoteEnvelopeSchema.safeParse(res.data);
   if (!parsed.success) throw new Error(t("DashboardPayments.tokenAmount.quoteInvalid"));
-  return parsed.data.data.quote;
+  return { quote: parsed.data.data.quote, receivedAt: Date.now() };
 }

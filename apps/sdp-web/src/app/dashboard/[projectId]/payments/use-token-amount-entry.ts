@@ -15,8 +15,9 @@ import {
   type AmountEntryUnit,
   fetchTokenAmountQuote,
   fetchTokenAmountTerms,
-  isQuoteCurrent,
   quotedTokenAmount,
+  quoteExpiresAt,
+  type ReceivedTokenAmountQuote,
   type TokenAmountTerms,
   tokenAmountQuoteRequest,
 } from "@/app/dashboard/[projectId]/payments/token-amount-quote.data";
@@ -105,11 +106,11 @@ function termsMintOf(mint: string | null): string | null {
 }
 
 /** When to price a quote again: at its expiry, never sooner than a second, never past a timer's range. */
-function quoteRefreshDelay(quote: TokenAmountQuote | undefined): number {
-  if (quote === undefined) {
+function quoteRefreshDelay(received: ReceivedTokenAmountQuote | undefined): number {
+  if (received === undefined) {
     return 0;
   }
-  const untilExpiry = Date.parse(quote.expiresAt) - Date.now();
+  const untilExpiry = quoteExpiresAt(received) - Date.now();
   return Math.min(Math.max(untilExpiry, MIN_QUOTE_REFRESH_MS), MAX_TIMER_DELAY_MS);
 }
 
@@ -130,7 +131,7 @@ function useTokenTerms(termsMint: string | null): TokenAmountTerms | null {
 }
 
 interface AmountQuoteRead {
-  quote: TokenAmountQuote | null;
+  received: ReceivedTokenAmountQuote | null;
   quoteError: string | null;
   quoteInFlight: boolean;
   refresh: () => void;
@@ -176,7 +177,7 @@ function useAmountQuote(input: {
   );
   const settled = value !== null && !debouncing;
   return {
-    quote: settled && data !== undefined ? data : null,
+    received: settled && data !== undefined ? data : null,
     quoteError: settled && error instanceof Error ? error.message : null,
     quoteInFlight: value !== null && (debouncing || isValidating),
     refresh: () => {
@@ -213,12 +214,13 @@ export function useTokenAmountEntry({
   }
   const unit: AmountEntryUnit = displayEntryAvailable ? fields.amountUnit : "token";
 
-  const { quote, quoteError, quoteInFlight, refresh } = useAmountQuote({
+  const { received, quoteError, quoteInFlight, refresh } = useAmountQuote({
     termsMint,
     unit,
     value: quoteValue(unit, fields, terms),
     basis,
   });
+  const quote = received === null ? null : received.quote;
   const quotedAmount = quote === null ? "" : quotedTokenAmount(quote);
 
   return {
@@ -231,7 +233,7 @@ export function useTokenAmountEntry({
     quoteError,
     quoteInFlight,
     canSubmitAt: (now) =>
-      !quoteInFlight && (unit === "token" || (quote !== null && isQuoteCurrent(quote, now))),
+      !quoteInFlight && (unit === "token" || (received !== null && quoteExpiresAt(received) > now)),
     refreshQuote: refresh,
   };
 }

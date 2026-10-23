@@ -18,6 +18,7 @@ vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 const MINT = requiredWellKnownMint("USDC", "devnet");
 const OTHER_MINT = requiredWellKnownMint("EURC", "devnet");
+const AS_OF = "2026-10-22T12:00:00.000Z";
 const EXPIRES_AT = "2099-01-01T00:00:00.000Z";
 
 const scaledTerms: TokenAmountTerms = {
@@ -46,7 +47,7 @@ function quote(basis: TokenMovementBasis, amount: string, debit: string, credit:
     amount,
     amounts: { basis, debit, fee: "1", credit, decimals: 6 },
     feeEpoch: "700",
-    asOf: "2026-10-22T12:00:00.000Z",
+    asOf: AS_OF,
     expiresAt: EXPIRES_AT,
   };
 }
@@ -102,6 +103,7 @@ function useAmountForm({
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe("useTokenAmountEntry", () => {
@@ -134,9 +136,34 @@ describe("useTokenAmountEntry", () => {
     await waitFor(() => expect(result.current.tokenAmount).toBe("5"));
     expect(quoteBodies).toEqual([{ displayAmount: "10", basis: "debit" }]);
     expect(result.current.quoteInFlight).toBe(false);
-    expect(result.current.canSubmitAt(Date.parse(EXPIRES_AT) - 1)).toBe(true);
+    expect(result.current.canSubmitAt(Date.now())).toBe(true);
+  });
+
+  // A quote's times are chain time. Checked against a browser clock an hour ahead, every
+  // quote arrived expired, and the form priced it again every second.
+  it("expires a quote its lifetime after it arrived, whatever the browser clock says", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.parse(AS_OF) + 3_600_000);
+    stubTokenRoutes(scaledTerms, {
+      ...quote("debit", "5", "5", "4"),
+      expiresAt: new Date(Date.parse(AS_OF) + 60_000).toISOString(),
+    });
+    const { result } = renderHook(() => useAmountForm({ mint: MINT, basis: "debit", amount: "" }), {
+      wrapper,
+    });
+
+    await waitFor(() => expect(result.current.displayEntryAvailable).toBe(true));
+    act(() => {
+      result.current.setUnit("display");
+      result.current.form.setField("displayAmount", "10");
+    });
+    await waitFor(() => expect(result.current.tokenAmount).toBe("5"));
+
+    // The clock is frozen, so the quote arrived now; it is good for its 60 seconds.
+    const receivedAt = Date.now();
+    expect(result.current.canSubmitAt(receivedAt + 59_999)).toBe(true);
     // Past its expiry the quote's token amount is no longer the display amount.
-    expect(result.current.canSubmitAt(Date.parse(EXPIRES_AT))).toBe(false);
+    expect(result.current.canSubmitAt(receivedAt + 60_000)).toBe(false);
   });
 
   it("submits a credit quote's credit when the amount is what the recipient receives", async () => {
