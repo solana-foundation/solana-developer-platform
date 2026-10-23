@@ -55,6 +55,14 @@ export const AMOUNT_VERIFICATION_REASONS = [
   "sdp_built_transfer_landed",
   /** The movement failed, or was released, before it moved anything. */
   "movement_not_executed",
+  /**
+   * A movement SDP did not build itself (a program's CPI pull) landed, and the
+   * chain shows it moved exactly the quote: the instruction's debit, and the
+   * destination's raw token-balance delta as the credit.
+   */
+  "chain_delta_matched",
+  /** The chain shows the movement moved other amounts than the quote, or none SDP can read. */
+  "chain_delta_mismatch",
 ] as const;
 
 export type AmountVerificationReason = (typeof AMOUNT_VERIFICATION_REASONS)[number];
