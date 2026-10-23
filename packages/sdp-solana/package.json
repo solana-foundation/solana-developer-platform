@@ -14,6 +14,16 @@
       "import": "./src/amount.ts",
       "default": "./src/amount.ts"
     },
+    "./asset-ref": {
+      "types": "./src/asset-ref.ts",
+      "import": "./src/asset-ref.ts",
+      "default": "./src/asset-ref.ts"
+    },
+    "./movement-quote": {
+      "types": "./src/movement-quote.ts",
+      "import": "./src/movement-quote.ts",
+      "default": "./src/movement-quote.ts"
+    },
     "./token-2022": {
       "types": "./src/token-2022.ts",
       "import": "./src/token-2022.ts",
@@ -23,22 +33,41 @@
       "types": "./src/token-2022.utils.ts",
       "import": "./src/token-2022.utils.ts",
       "default": "./src/token-2022.utils.ts"
+    },
+    "./token-amount": {
+      "types": "./src/token-amount.ts",
+      "import": "./src/token-amount.ts",
+      "default": "./src/token-amount.ts"
+    },
+    "./token-terms": {
+      "types": "./src/token-terms.ts",
+      "import": "./src/token-terms.ts",
+      "default": "./src/token-terms.ts"
     }
+  },
+  "imports": {
+    "#/*": "./src/*.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test \"src/**/*.test.ts\"",
-    "lint": "biome check src/"
+    "lint": "biome check src/ scripts/",
+    "check:well-known-mints": "tsx scripts/check-well-known-mints.ts"
   },
   "dependencies": {
     "@sdp/rpc": "workspace:*",
+    "@sdp/types": "workspace:*",
+    "@solana-program/token-2022": "catalog:",
     "@solana/addresses": "catalog:",
     "@solana/fixed-points": "7.1.1",
     "@solana/kit": "catalog:",
     "@solana/mosaic-sdk": "catalog:",
-    "@solana/signers": "catalog:"
+    "@solana/signers": "catalog:",
+    "@solana/sysvars": "catalog:"
   },
   "devDependencies": {
+    "@solana-program/system": "catalog:",
+    "@solana/surfpool": "1.5.0",
     "tsx": "4.23.15"
   }
 }

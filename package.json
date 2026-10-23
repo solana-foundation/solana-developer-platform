@@ -64,7 +64,7 @@
     "check:pinned-dependencies": "node scripts/check-pinned-dependency-versions.mjs",
     "check:ui-flow-coverage": "node scripts/check-ui-flow-coverage.mjs",
     "check:secretref-serialization": "node scripts/check-secretref-serialization.mjs",
-    "check:well-known-mints": "pnpm --filter @sdp/api exec tsx ../../scripts/check-well-known-mints.mjs",
+    "check:well-known-mints": "pnpm --filter @sdp/solana check:well-known-mints",
     "check:api-playground": "pnpm -C apps/sdp-api playground:check",
     "generate:api-playground": "pnpm -C apps/sdp-api playground:generate",
     "generate:module-map": "node scripts/check-module-boundaries.mjs --write",
@@ -92,6 +92,7 @@
     "jupiter-lend:surfpool:e2e": "scripts/kora-surfpool/e2e-jupiter-lend.sh",
     "veda:surfpool:e2e": "scripts/kora-surfpool/e2e-veda.sh",
     "wisdomtree:surfpool:e2e": "scripts/kora-surfpool/e2e-wisdomtree.sh",
+    "token-movements:surfpool:e2e": "TOKEN_MOVEMENT_SURFPOOL_E2E=true pnpm --filter @sdp/solana exec node --import tsx --test src/token-terms.surfpool.test.ts",
     "kora:surfpool:integration": "scripts/kora-surfpool/integration.sh",
     "kora:surfpool:test": "scripts/kora-surfpool/test.sh",
     "kora:devnet:test": "TEST_DATABASE_URL=${KORA_DEVNET_DATABASE_URL:-${TEST_DATABASE_URL:-postgresql://sdp:sdp@127.0.0.1:5432/sdp_test}} node scripts/run-workspace-tests.mjs integration -- src/tests/kora.test.ts src/tests/kora-flow.test.ts src/tests/kora-earn-sponsorship.test.ts"
