@@ -32,6 +32,7 @@ import {
   isSignerRole,
   type MaybeEncodedAccount,
   type Rpc,
+  type RpcSendOptions,
   type TransactionSigner,
 } from "@solana/kit";
 import { getTransferSolInstruction, SYSTEM_PROGRAM_ADDRESS } from "@solana-program/system";
@@ -265,6 +266,38 @@ function accountRole(isSigner: boolean, isWritable: boolean): AccountRole {
 }
 
 /**
+ * `rpc` with each account's `getAccountInfo` sent once: a later read of the
+ * address shares the first one's answer, and a failed read is dropped so the
+ * next one retries. A hook's seeds read the same source, mint and owner for
+ * every transfer of a movement. Keyed by address alone, since its one reader,
+ * `resolveExtraAccountMeta`, always reads base64 with no other config.
+ */
+function withSharedAccountReads(rpc: Rpc<GetAccountInfoApi>): Rpc<GetAccountInfoApi> {
+  const send = (at: Address, config: Readonly<{ encoding: "base64" }>, options?: RpcSendOptions) =>
+    rpc.getAccountInfo(at, config).send(options);
+  const reads = new Map<Address, ReturnType<typeof send>>();
+  return new Proxy(rpc, {
+    get(target, property, receiver) {
+      if (property !== "getAccountInfo") {
+        return Reflect.get(target, property, receiver);
+      }
+      return (at: Address, config: Readonly<{ encoding: "base64" }>) => ({
+        send: (options?: RpcSendOptions) => {
+          const shared = reads.get(at);
+          if (shared !== undefined) {
+            return shared;
+          }
+          const read = send(at, config, options);
+          reads.set(at, read);
+          read.catch(() => reads.delete(at));
+          return read;
+        },
+      });
+    },
+  });
+}
+
+/**
  * The extra accounts each transfer of a hook mint needs, ready to append to
  * its transfer instruction: every configured extra account (resolved and
  * de-escalated against the transfer's base accounts), then the hook program
@@ -273,8 +306,8 @@ function accountRole(isSigner: boolean, isWritable: boolean): AccountRole {
  * for all the transfers instead of once each.
  *
  * RPC budget: none for a mint without a hook program; one `getAccountInfo`
- * for the validation account, plus one read for each extra account whose
- * address comes from another account's data.
+ * for the validation account, plus one for each distinct account whose data
+ * an extra account's address or seeds read, shared by every transfer.
  *
  * @returns One list per transfer, in order; empty lists when the mint has no hook program.
  * @throws {TokenMovementError} When the hook program has no validation
@@ -301,6 +334,7 @@ export async function resolveTransferHookAccounts(
     );
   }
   const extraMetas = getExtraAccountMetasDecoder().decode(validationAccount.data);
+  const accountReads = withSharedAccountReads(rpc);
 
   return Promise.all(
     transfers.map(async (transfer) => {
@@ -320,7 +354,7 @@ export async function resolveTransferHookAccounts(
           previousAddresses,
           instructionData,
           hookProgram,
-          rpc
+          accountReads
         );
         const deEscalated = deEscalateAccountMeta(
           { address: meta.address, role: accountRole(meta.isSigner, meta.isWritable) },
