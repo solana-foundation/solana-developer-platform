@@ -296,6 +296,19 @@ describe("reconcilePaymentRequest (ADR 0012: settlement on the signatures SDP is
     expect(await listInboundTransfers()).toHaveLength(1);
   });
 
+  it("answers the settled request to a reconcile that read it before another settled it", async () => {
+    const request = await createRequest({ expiresAt: null });
+    const issued = await issueTransaction(request, 1, { lastValidBlockHeight: 1_000n });
+    answerStatuses((candidate) => (candidate === issued ? CONFIRMED : null));
+    expect((await reconcileOnSandbox(request, { bestEffort: false })).status).toBe("paid");
+
+    // The stale row still says awaiting_payment; its windows are closed now.
+    const late = await reconcileOnSandbox(request, { bestEffort: false });
+
+    expect(late.status).toBe("paid");
+    expect(await listInboundTransfers()).toHaveLength(1);
+  });
+
   it("does not link a request to a conflicting transfer with the same signature", async () => {
     const request = await createRequest({ expiresAt: null });
     const issued = await issueTransaction(request, 1, { lastValidBlockHeight: 1_000n });
