@@ -9,7 +9,6 @@
 
 import {
   confirmTransaction,
-  createRpc,
   createRpcForSdk,
   type SimulationResult,
   type SolanaRpc,
@@ -190,12 +189,7 @@ export class Token2022Service {
       rpc,
       options.mint,
       options.authority,
-      await mosaicAmountUnderLiveTerms(
-        createRpc(this.env),
-        options.mint,
-        options.amount,
-        "issuance"
-      ),
+      await mosaicAmountUnderLiveTerms(rpc, options.mint, options.amount, "issuance"),
       feePayer
     );
 
@@ -231,12 +225,7 @@ export class Token2022Service {
       rpc,
       options.mint,
       authority,
-      await mosaicAmountUnderLiveTerms(
-        createRpc(this.env),
-        options.mint,
-        options.amount,
-        "issuance"
-      ),
+      await mosaicAmountUnderLiveTerms(rpc, options.mint, options.amount, "issuance"),
       authority
     );
 
