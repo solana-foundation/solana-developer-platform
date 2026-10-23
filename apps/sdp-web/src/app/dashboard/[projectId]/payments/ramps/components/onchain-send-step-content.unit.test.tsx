@@ -169,6 +169,38 @@ describe("OnchainSendStepContent", () => {
     expect(screen.queryByText("25.5 USDC")).not.toBeNull();
   });
 
+  // A scaled mint's wallets show 1.5 per token unit. Typed as wallets show it, the
+  // balance beside the input is the wallet's display amount, never its token amount.
+  it("shows the available balance in display units when the amount is typed in them", () => {
+    renderStep({
+      ...baseWizard,
+      currentStepId: "DETAILS",
+      liveWallets: [labeledWallet],
+      assetOptions: [{ value: "mint_usdc", label: "USDC" }],
+      selectedAsset: { value: "mint_usdc", label: "USDC" },
+      selectedAssetBalance: {
+        token: "USDC",
+        mint: "mint_usdc",
+        amount: "100000000",
+        tokenAmount: "100",
+        displayAmount: "150",
+        displayAsOf: "2026-10-22T12:00:00.000Z",
+        displayRule: "scaled",
+        decimals: 6,
+      },
+      availableAmount: "100",
+      amountEntry: { ...tokenUnitsEntry(""), displayEntryAvailable: true, unit: "display" },
+      fields: {
+        ...baseWizard.fields,
+        walletId: labeledWallet.id,
+        asset: "mint_usdc",
+        amountUnit: "display",
+      },
+    });
+
+    expect(screen.queryByText("150 USDC")).not.toBeNull();
+  });
+
   it("hides balance and disables assets until a wallet is selected", () => {
     renderStep({ ...baseWizard, currentStepId: "DETAILS" });
 

@@ -300,6 +300,7 @@ function PayAmountFields({ wizard }: { wizard: OnchainSendWizard }) {
     assetOptions,
     availableAmount,
     selectedAsset,
+    selectedAssetBalance,
     exceedsBalance,
     amountEntry,
     fields,
@@ -315,6 +316,11 @@ function PayAmountFields({ wizard }: { wizard: OnchainSendWizard }) {
   const displayEntry = amountEntry.unit === "display";
   const canMax =
     !displayEntry && availableAmount !== null && compareDecimalAmounts(availableAmount, "0") > 0;
+  // The balance in the unit typed; the balance check stays on the token amount.
+  const shownAvailable =
+    displayEntry && selectedAssetBalance !== null
+      ? selectedAssetBalance.displayAmount
+      : availableAmount;
   return (
     <AmountFields
       id="onchain-send-amount"
@@ -337,10 +343,10 @@ function PayAmountFields({ wizard }: { wizard: OnchainSendWizard }) {
         disabled: fields.walletId === "" || assetSelectOptions.length === 0,
       }}
     >
-      {availableAmount === null ? null : (
+      {shownAvailable === null ? null : (
         <p className={cn("text-meta", exceedsBalance ? "text-error" : "text-tertiary")}>
           {t("DashboardPayments.payForm.available", {
-            amount: formatTokenAmount(availableAmount, locale),
+            amount: formatTokenAmount(shownAvailable, locale),
             asset: WELL_KNOWN_TOKEN_BY_MINT.get(assetLabel)?.symbol ?? assetLabel,
           })}
         </p>

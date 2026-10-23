@@ -128,6 +128,7 @@ function DetailsStep({ wizard }: StepProps) {
     assetOptions,
     availableAmount,
     selectedAsset,
+    selectedAssetBalance,
     exceedsBalance,
     amountEntry,
     fields,
@@ -139,6 +140,11 @@ function DetailsStep({ wizard }: StepProps) {
   const assetLabel = selectedAsset === null ? fields.asset : selectedAsset.label;
   // In display units the input holds what wallets show; Max is a token amount, so it is off.
   const displayEntry = amountEntry.unit === "display";
+  // The balance in the unit typed; the balance check stays on the token amount.
+  const shownAvailable =
+    displayEntry && selectedAssetBalance !== null
+      ? selectedAssetBalance.displayAmount
+      : availableAmount;
   const walletOptions = useMemo(
     () =>
       walletComboboxOptions(liveWallets, t("DashboardPayments.restricted"), {
@@ -187,7 +193,7 @@ function DetailsStep({ wizard }: StepProps) {
             action={
               availableAmount === null ? undefined : (
                 <AmountBalanceReadout
-                  available={availableAmount}
+                  available={shownAvailable}
                   assetLabel={assetLabel}
                   exceeds={exceedsBalance}
                   onMax={
