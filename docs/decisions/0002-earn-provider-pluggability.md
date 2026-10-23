@@ -1388,5 +1388,8 @@ request carries no tenant identity and persists nothing, and a presented
 invalid credential still answers 401.
 
 A sandbox row mirroring a mainnet instrument (PRO-1742) opens the sandbox
-(devnet) scope, as its environment says. Refusing a keyless request that names
-one before any RPC call is HOO-2178.
+(devnet) scope, as its environment says, where its vault does not exist. A
+keyless exit naming one therefore answers 400 before any RPC call and names the
+production row that holds the vault, which stays exitable (HOO-2178). Deposits
+already refuse it at admission, and the catalogue list and detail, which read
+only the database, keep serving it.

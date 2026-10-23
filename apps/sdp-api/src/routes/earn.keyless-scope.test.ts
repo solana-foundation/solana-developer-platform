@@ -437,3 +437,73 @@ describe("cross-environment requests", () => {
     }
   );
 });
+
+describe("mirrored strategies (PRO-1742)", () => {
+  // A sandbox row that lists a mainnet vault opens the sandbox (devnet) scope,
+  // where that vault does not exist. Every keyless quote and build refuses it
+  // before any chain call (HOO-2178); the catalogue list and detail still serve
+  // it, but they read only the database.
+  it.each(Object.entries(EXIT_ROUTES))(
+    "%s refuses a keyless exit on a mirrored row and names the host row",
+    async (path, route) => {
+      const host = await seedStrategy({
+        environment: "production",
+        hostCluster: "mainnet-beta",
+        providerReference: VAULT,
+      });
+      const mirror = await seedStrategy({
+        environment: "sandbox",
+        hostCluster: "mainnet-beta",
+        providerReference: VAULT,
+      });
+
+      const res = await postEarn(path, route.strategyBody(mirror.id), null);
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as {
+        error: { code: string; message: string; details: Record<string, unknown> };
+      };
+      expect(body.error.code).toBe("BAD_REQUEST");
+      expect(body.error.message).toContain(`production strategy ${host.id}`);
+      expect(body.error.details).toEqual({
+        strategyId: mirror.id,
+        hostCluster: "mainnet-beta",
+        environment: "sandbox",
+        hostStrategyId: host.id,
+      });
+      expect(route.reached()).not.toHaveBeenCalled();
+    }
+  );
+
+  it("points a mirrored exit at the host shelf when the host row is gone", async () => {
+    const mirror = await seedStrategy({ environment: "sandbox", hostCluster: "mainnet-beta" });
+
+    const res = await postEarn(
+      "/external-wallet/withdrawal-previews",
+      { strategyId: mirror.id, ownerAddress: OWNER, shares: "10" },
+      null
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as {
+      error: { message: string; details: Record<string, unknown> };
+    };
+    expect(body.error.message).toContain("exit through the production shelf");
+    expect(body.error.details).toMatchObject({ hostStrategyId: null });
+    expect(providerClient.quoteVaultWithdrawal).not.toHaveBeenCalled();
+  });
+
+  it.each(Object.entries(MONEY_IN_ROUTES))(
+    "%s refuses a keyless deposit on a mirrored row before any chain call",
+    async (path, route) => {
+      const mirror = await seedStrategy({ environment: "sandbox", hostCluster: "mainnet-beta" });
+
+      const res = await postEarn(path, route.strategyBody(mirror.id), null);
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: { details: Record<string, unknown> } };
+      expect(body.error.details).toMatchObject({ hostCluster: "mainnet-beta" });
+      expect(route.reached()).not.toHaveBeenCalled();
+    }
+  );
+});

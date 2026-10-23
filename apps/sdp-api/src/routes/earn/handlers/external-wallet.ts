@@ -1,6 +1,7 @@
 import { isEarnProviderId } from "@sdp/earn";
 import { supportsVaultWithdrawQuote } from "@sdp/earn/capabilities";
 import { notImplemented, providerNotConfigured } from "@sdp/earn/errors";
+import { isClusterFundableInEnvironment } from "@sdp/earn/support";
 import type { EarnVaultWithdrawQuote } from "@sdp/earn/types";
 import {
   addDecimalAmounts,
@@ -34,8 +35,10 @@ import {
   earnProviderWithdrawalSettlement,
   earnWithdrawSlippageFloor,
 } from "@sdp/types/provider-access";
+import { SDP_ENVIRONMENT_BY_CLUSTER } from "@sdp/types/well-known-tokens";
 import type { z } from "zod";
 import { getDb } from "@/db/client";
+import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
 import {
   createPostgresEarnMovementsRepository,
   type EarnMovementRow,
@@ -51,7 +54,11 @@ import { success } from "@/lib/response";
 import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { type AppContext, requireEarnStrategyForCaller } from "@/routes/earn/context";
+import {
+  type AppContext,
+  getEarnRepository,
+  requireEarnStrategyForCaller,
+} from "@/routes/earn/context";
 import { movementStatusOnWire } from "@/routes/earn/handlers/movement-settlement-wire";
 import {
   type earnExternalWalletDepositTransactionSchema,
@@ -739,6 +746,45 @@ export function anonymousExitNeedsStrategy(): AppError {
 }
 
 /**
+ * Refuse a keyless exit that names a mirrored catalogue row (PRO-1742) before any RPC
+ * (HOO-2178). The row's environment opened the request's cluster scope, but its vault lives on
+ * the other cluster, so every provider read would answer for a vault that is not there. The 400
+ * names the row of the environment the vault lives in, which stays exitable, so no funds are
+ * trapped (ADR 0002).
+ *
+ * @param c - The request context.
+ * @param strategy - The strategy row the keyless exit names.
+ * @param environment - The request's environment: its cluster scope's.
+ * @throws AppError `BAD_REQUEST` when the vault lives on another cluster.
+ */
+async function assertKeylessExitOnHostCluster(
+  c: AppContext,
+  strategy: EarnStrategyRow,
+  environment: SdpEnvironment
+): Promise<void> {
+  if (isClusterFundableInEnvironment(strategy.host_cluster, environment)) return;
+  const hostEnvironment = SDP_ENVIRONMENT_BY_CLUSTER[strategy.host_cluster];
+  const hostStrategy = await getEarnRepository(c).getStrategyByReference({
+    provider: strategy.provider,
+    providerReference: strategy.provider_reference,
+    environment: hostEnvironment,
+  });
+  const exitThrough =
+    hostStrategy === null
+      ? `the ${hostEnvironment} shelf`
+      : `${hostEnvironment} strategy ${hostStrategy.id}`;
+  throw badRequest(
+    `Strategy ${strategy.id} is a browse-only ${environment} copy of a ${strategy.host_cluster} vault; exit through ${exitThrough}.`,
+    {
+      strategyId: strategy.id,
+      hostCluster: strategy.host_cluster,
+      environment,
+      hostStrategyId: hostStrategy === null ? null : hostStrategy.id,
+    }
+  );
+}
+
+/**
  * Resolve one exit without ever crossing the tier boundary. Authenticated
  * requests resolve their tenant position exactly as before. Anonymous requests
  * resolve only global strategy metadata supplied in the public body. The
@@ -780,6 +826,7 @@ export async function resolveExternalWalletExit(
   if (!("strategyId" in locator)) throw anonymousExitNeedsStrategy();
   // The row names the shelf; an anonymous caller chose it (PRO-1998).
   const { strategy, environment } = await requireEarnStrategyForCaller(c, locator.strategyId);
+  await assertKeylessExitOnHostCluster(c, strategy, environment);
   if (earnDepositStyle(strategy.provider) !== "vault_direct") {
     throw badRequest(`${strategy.provider} does not support external-wallet exits.`);
   }

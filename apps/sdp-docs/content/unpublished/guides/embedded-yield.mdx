@@ -112,7 +112,7 @@ Every per-owner read addresses the customer's wallet the same way: a required `o
 
 Two fields gate what you may offer:
 
-- **`fundable`** answers whether the instrument exists on your environment's cluster. `false` is definitive: the row is browse-only (a mainnet strategy seen from sandbox, for example).
+- **`fundable`** answers whether the instrument exists on your environment's cluster. `false` is definitive: the row is browse-only (a mainnet strategy seen from sandbox, for example), and a keyless exit naming it answers 400 with the strategy that holds the vault.
 - **`status`** is the catalogue lifecycle; only `active` strategies accept new deposits. Positions in a strategy that later pauses stay fully withdrawable: money out is never gated by money-in rules.
 
 `depositSlippage` and `withdrawalSlippage` say whether that direction needs a quote-derived floor in your environment. Most production deposits do; an asynchronous next-NAV subscription can answer null when its Solana transaction cannot enforce the later share price. See [Floors and previews](#floors-and-previews). `feeSponsored` describes SDP's own Treasury paymaster and has no effect on Embedded Yield builds: your customer pays unless you name a `feePayer`.

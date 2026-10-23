@@ -1165,7 +1165,10 @@ fork a keyed and anonymous route with duplicate behavior.
   Earn entry in the Biome `runInClusterScope` override, and
   `earn.keyless-scope.test.ts` fails a keyless route that does not mount an
   opener. `resolveEarnCatalogueEnvironment` and `requireEarnStrategyForCaller`
-  (context.ts) read the open scope for both tiers. The deployment's
+  (context.ts) read the open scope for both tiers. A keyless exit naming a
+  mirrored row (PRO-1742) would read the scope's cluster for a vault on the
+  other one, so it answers 400 before any RPC, naming the host environment's
+  row (`assertKeylessExitOnHostCluster`, HOO-2178). The deployment's
   `ENVIRONMENT` never selects a cluster (PRO-1998).
 - **Anonymous accounting:** catalogue reads use a generous per-IP tier. Quotes
   and builds use a tighter per-IP tier plus an independently configurable RPC
@@ -1589,6 +1592,10 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
   only provider-shaped refusal. It also ignores
   `assertVaultDepositEnvironmentOpen`: the environment fail-close guards the
   way IN only.
+- **A keyless exit naming a mirrored row is a 400, and that is not a money-in
+  gate** (HOO-2178): the vault is not on the request's scope cluster, so the
+  exit could never run there, and the 400 names the host environment's row,
+  which stays exitable.
 - **The vault deposit preview** (`POST /vault-deposit-previews`) is the one
   deliberate EXCEPTION among previews: a live read shaped like MONEY-IN,
   because a deposit quote exists only to open a new position. It takes the
