@@ -1,4 +1,4 @@
-import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
+import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import { inspectRoutes } from "hono/dev";
 import { describe, expect, it } from "vitest";
 import { createApp } from "@/app";
@@ -26,7 +26,7 @@ const EARN_ENTRY_ROUTES = [
 
 function earnRoutes(): Array<{ method: string; path: string }> {
   const app = createApp({
-    rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
+    rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY,
   });
   const routes = new Map<string, { method: string; path: string }>();
   for (const { method, path, isMiddleware } of inspectRoutes(app)) {

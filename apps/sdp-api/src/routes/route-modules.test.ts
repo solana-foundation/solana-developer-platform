@@ -1,6 +1,6 @@
 import {
   SDP_MODULES,
-  SDP_RAMP_PROVIDER_STAGES,
+  SDP_RAMP_PROVIDER_MATURITY,
   SDP_RELEASE_CHANNEL_NAMES,
   SDP_RELEASE_CHANNELS,
 } from "@sdp/types/release-channels";
@@ -12,7 +12,7 @@ import { env as baseEnv } from "@/test/helpers/env";
 
 function registeredRoutes() {
   const app = createApp({
-    rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
+    rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY,
   });
   const routes = new Map<string, { method: string; path: string }>();
   for (const { method, path, isMiddleware } of inspectRoutes(app)) {

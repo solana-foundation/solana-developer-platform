@@ -1,5 +1,5 @@
 import { invalidateFireblocksAddressBook } from "@sdp/custody/provisioning/fireblocks-address-book";
-import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
+import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -143,7 +143,7 @@ beforeEach(async () => {
 afterEach(() => vi.restoreAllMocks());
 
 const api = createApp({
-  rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
+  rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY,
 });
 const contactId = "cpty_book";
 const accountId = "counterparty_account_book";

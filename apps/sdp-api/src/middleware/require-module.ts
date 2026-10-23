@@ -1,7 +1,7 @@
 import { resolveRampProviderClient } from "@sdp/payments/ramps";
 import { isRampTransferType, type PaymentTransferType } from "@sdp/types/payments";
 import type { PersistedRampProviderId, RampProviderId } from "@sdp/types/provider-access";
-import type { SdpModule, SdpRampProviderStages } from "@sdp/types/release-channels";
+import type { SdpModule, SdpRampProviderMaturity } from "@sdp/types/release-channels";
 import type { Context, Next } from "hono";
 import { forbidden, internalError } from "@/lib/errors";
 import { isModuleAvailable, isRampProviderAvailable } from "@/lib/feature-flags";
@@ -10,9 +10,9 @@ import type { Env } from "@/types/env";
 
 type ReleaseChannelContext = Context<{ Bindings: Env }>;
 
-/** The ramp provider stages `createApp` runs the release channel against. */
-function rampProviderStages(c: ReleaseChannelContext): SdpRampProviderStages {
-  return c.get("rampProviderStages");
+/** The ramp provider maturity `createApp` runs the release channel against. */
+function rampProviderMaturity(c: ReleaseChannelContext): SdpRampProviderMaturity {
+  return c.get("rampProviderMaturity");
 }
 
 /** Whether the deployment's release channel includes ramp `provider`. */
@@ -20,7 +20,7 @@ export function isRampProviderInChannel(
   c: ReleaseChannelContext,
   provider: RampProviderId
 ): boolean {
-  return isRampProviderAvailable(c.env, provider, rampProviderStages(c));
+  return isRampProviderAvailable(c.env, provider, rampProviderMaturity(c));
 }
 
 /** Refuses a request that names a ramp provider the release channel leaves out. */
@@ -35,7 +35,7 @@ export function assertRampProviderInChannel(
 
 /** Whether the deployment's release channel includes `module`. */
 export function isModuleInChannel(c: ReleaseChannelContext, module: SdpModule): boolean {
-  return isModuleAvailable(c.env, module, rampProviderStages(c));
+  return isModuleAvailable(c.env, module, rampProviderMaturity(c));
 }
 
 /** Refuses a request that names a module the release channel leaves out. */

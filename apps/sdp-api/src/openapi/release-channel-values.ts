@@ -8,7 +8,7 @@ import {
 } from "@sdp/types/provider-access";
 import {
   isRampProviderInReleaseChannel,
-  SDP_RAMP_PROVIDER_STAGES,
+  SDP_RAMP_PROVIDER_MATURITY,
   SDP_RELEASE_CHANNELS,
   type SdpModule,
   type SdpReleaseChannel,
@@ -108,7 +108,7 @@ export function isValuePublished(
   if ("module" in owner) return modules.has(owner.module);
   return (
     modules.has("ramps") &&
-    isRampProviderInReleaseChannel(releaseChannel, owner.rampProvider, SDP_RAMP_PROVIDER_STAGES)
+    isRampProviderInReleaseChannel(releaseChannel, owner.rampProvider, SDP_RAMP_PROVIDER_MATURITY)
   );
 }
 

@@ -1,5 +1,5 @@
 import type { EgressReadiness } from "@sdp/types/health";
-import type { SdpRampProviderStages } from "@sdp/types/release-channels";
+import type { SdpRampProviderMaturity } from "@sdp/types/release-channels";
 /**
  * SDP API — Hono application factory.
  *
@@ -75,10 +75,10 @@ export interface AppDeps {
   plugins?: SdpPlugin[];
   /**
    * Ramp provider stages to run the release channel against. Production passes
-   * `SDP_RAMP_PROVIDER_STAGES`; tests may put one provider in a release channel and
+   * `SDP_RAMP_PROVIDER_MATURITY`; tests may put one provider in a release channel and
    * leave another out, which today's all-`experimental` stages cannot show.
    */
-  rampProviderStages: SdpRampProviderStages;
+  rampProviderMaturity: SdpRampProviderMaturity;
   /**
    * The Node entrypoint's egress gate, so `/health/ready` keeps a fresh instance
    * out of rotation until it can reach the internet. Absent where nothing gates
@@ -272,7 +272,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   // ═══════════════════════════════════════════════════════════════════════════
 
   app.use("*", async (c, next) => {
-    c.set("rampProviderStages", deps.rampProviderStages);
+    c.set("rampProviderMaturity", deps.rampProviderMaturity);
     c.set("egressReadiness", deps.egressReadiness);
     await next();
   });

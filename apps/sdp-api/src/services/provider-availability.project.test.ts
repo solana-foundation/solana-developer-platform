@@ -15,15 +15,15 @@ import {
   type SeededProject,
   seedDefaultProjects,
 } from "@/test/helpers/projects";
-import { providerStages } from "@/test/helpers/provider-stages";
+import { providerMaturity } from "@/test/helpers/provider-maturity";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { Env } from "@/types/env";
 
 vi.mock("@sdp/types/release-channels", async (importOriginal) => {
   const { mockCustodyReleaseChannels } = await import("@/test/helpers/custody-release-channel");
-  const { mockReleaseChannelStages } = await import("@/test/helpers/provider-stages");
+  const { mockReleaseChannelMaturity } = await import("@/test/helpers/provider-maturity");
   const { RAMP_PROVIDERS } = await import("@sdp/types/provider-access");
-  return mockReleaseChannelStages(
+  return mockReleaseChannelMaturity(
     mockCustodyReleaseChannels(
       await importOriginal<typeof import("@sdp/types/release-channels")>()
     ),
@@ -32,7 +32,7 @@ vi.mock("@sdp/types/release-channels", async (importOriginal) => {
 });
 
 vi.mock("@sdp/types/provider-access", async (importOriginal) => {
-  const { mockEarnProviderSurfacing } = await import("@/test/helpers/provider-stages");
+  const { mockEarnProviderSurfacing } = await import("@/test/helpers/provider-maturity");
   return mockEarnProviderSurfacing(
     await importOriginal<typeof import("@sdp/types/provider-access")>()
   );
@@ -114,8 +114,8 @@ describe("assertProjectProviderAdmitted", () => {
   beforeEach(async () => {
     custodyReleaseChannel.outOfChannelMode = null;
     custodyReleaseChannel.stageOverride = null;
-    providerStages.moduleStageOverride = null;
-    providerStages.surfacedEarnProvider = null;
+    providerMaturity.moduleMaturityOverride = null;
+    providerMaturity.surfacedEarnProvider = null;
     await seedTestDatabase(env);
     const db = getDb(env);
     await db.execute(
@@ -177,7 +177,7 @@ describe("assertProjectProviderAdmitted", () => {
   });
 
   it("checks a below-stable compliance provider's channel, entitlement and credentials in that order in a Production project", async () => {
-    providerStages.moduleStageOverride = { module: "compliance", stage: "experimental" };
+    providerMaturity.moduleMaturityOverride = { module: "compliance", stage: "experimental" };
 
     await expect(
       admit(projects.production, deploymentEnv(BETA_CHANNEL), RANGE)
@@ -222,7 +222,7 @@ describe("assertProjectProviderAdmitted", () => {
     await expect(
       admit(projects.production, deploymentEnv(EARN_ENABLED_FLAGS), UPSHIFT)
     ).rejects.toMatchObject(refusal("Upshift is not currently offered.", "provider_not_offered"));
-    providerStages.surfacedEarnProvider = "upshift";
+    providerMaturity.surfacedEarnProvider = "upshift";
     await expect(
       admit(projects.production, deploymentEnv(EARN_ENABLED_FLAGS), UPSHIFT)
     ).rejects.toMatchObject(
@@ -256,7 +256,7 @@ describe("assertProjectProviderAdmitted", () => {
   it.for(EARN_FLAG_OFF_CASES)(
     "refuses an otherwise admissible Earn provider as outside the release channel while $flag is off",
     async ({ flags }) => {
-      providerStages.surfacedEarnProvider = "upshift";
+      providerMaturity.surfacedEarnProvider = "upshift";
       await setProviderOverrides({ earn: { upshift: true } });
 
       await expect(

@@ -1,4 +1,4 @@
-import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
+import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import { describe, expect, it } from "vitest";
 import type { DatabaseClient, PreparedStatement, QueryManyResult } from "@/db/client";
 import { createTenantScope } from "@/lib/tenant-scope";
@@ -8,11 +8,11 @@ import type { ApiKeyGrantChannel } from "./api-key-scope.service";
 const TEST_SCOPE = createTenantScope({ organizationId: "org_1", projectId: "prj_1" });
 const EXPERIMENTAL: ApiKeyGrantChannel = {
   releaseChannel: "experimental",
-  rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
+  rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY,
 };
 const STABLE: ApiKeyGrantChannel = {
   releaseChannel: "stable",
-  rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
+  rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY,
 };
 
 type RunCall = { sql: string; values: unknown[] };

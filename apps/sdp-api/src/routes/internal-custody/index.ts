@@ -91,7 +91,7 @@ internalCustody.get("/connections", requireAction("wallets.configure"), async (c
   const [{ connections, total }, availability] = await Promise.all([
     store.listProjectConnectionsPage(auth.organizationId, projectId, { limit, offset, provider }),
     getProviderAvailability(c.env, getDb(c.env), auth.organizationId, {
-      rampProviderStages: c.get("rampProviderStages"),
+      rampProviderMaturity: c.get("rampProviderMaturity"),
     }),
   ]);
 

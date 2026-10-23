@@ -11,7 +11,7 @@ import { pathToFileURL } from "node:url";
 import { type ServerType, serve } from "@hono/node-server";
 import { assertKoraConfigured } from "@sdp/fee-payment";
 import { assertManagedRpcConfigured } from "@sdp/rpc/factory";
-import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
+import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 
 import { createApp } from "@/app";
 import { assertCronConfig, type CronHandle, startCron } from "@/cron/runner";
@@ -151,7 +151,7 @@ async function main(): Promise<void> {
 
   const app = createNodeHttpApp(
     createApp({
-      rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
+      rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY,
       egressReadiness: egress?.state,
     })
   );

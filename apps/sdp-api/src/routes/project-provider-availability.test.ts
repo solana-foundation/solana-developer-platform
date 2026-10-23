@@ -22,16 +22,16 @@ import {
   type SeededDefaultProjects,
   seedDefaultProjects,
 } from "@/test/helpers/projects";
-import { providerStages } from "@/test/helpers/provider-stages";
+import { providerMaturity } from "@/test/helpers/provider-maturity";
 import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 
 vi.mock("@sdp/types/release-channels", async (importOriginal) => {
   const { mockCustodyReleaseChannels } = await import("@/test/helpers/custody-release-channel");
-  const { mockReleaseChannelStages } = await import("@/test/helpers/provider-stages");
+  const { mockReleaseChannelMaturity } = await import("@/test/helpers/provider-maturity");
   const { RAMP_PROVIDERS } = await import("@sdp/types/provider-access");
-  return mockReleaseChannelStages(
+  return mockReleaseChannelMaturity(
     mockCustodyReleaseChannels(
       await importOriginal<typeof import("@sdp/types/release-channels")>()
     ),
@@ -40,7 +40,7 @@ vi.mock("@sdp/types/release-channels", async (importOriginal) => {
 });
 
 vi.mock("@sdp/types/provider-access", async (importOriginal) => {
-  const { mockEarnProviderSurfacing } = await import("@/test/helpers/provider-stages");
+  const { mockEarnProviderSurfacing } = await import("@/test/helpers/provider-maturity");
   return mockEarnProviderSurfacing(
     await importOriginal<typeof import("@sdp/types/provider-access")>()
   );
@@ -412,8 +412,8 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
   beforeEach(async () => {
     custodyReleaseChannel.outOfChannelMode = null;
     custodyReleaseChannel.stageOverride = null;
-    providerStages.moduleStageOverride = null;
-    providerStages.surfacedEarnProvider = null;
+    providerMaturity.moduleMaturityOverride = null;
+    providerMaturity.surfacedEarnProvider = null;
     earnPublication.published = true;
     await seedTestDatabase(env);
     await clearKVStores(env);
@@ -466,7 +466,7 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
 
   it("reports custody and compliance providers the release channel leaves out as unavailable", async () => {
     custodyReleaseChannel.outOfChannelMode = "managed";
-    providerStages.moduleStageOverride = { module: "compliance", stage: "experimental" };
+    providerMaturity.moduleMaturityOverride = { module: "compliance", stage: "experimental" };
 
     const availability = await readAvailability(
       "sandbox",
@@ -576,7 +576,7 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
 
   it("reports below-stable providers the release channel offers the same in a Production project as in a Sandbox one, Managed custody aside", async () => {
     custodyReleaseChannel.stageOverride = { provider: "privy", mode: "byok", stage: "beta" };
-    providerStages.moduleStageOverride = { module: "compliance", stage: "beta" };
+    providerMaturity.moduleMaturityOverride = { module: "compliance", stage: "beta" };
 
     const production = await readAvailability("production", deploymentEnv({}));
     const sandbox = await readAvailability("sandbox", deploymentEnv({}));
@@ -586,7 +586,7 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
   });
 
   it("reports providers the deployment holds no credentials for as unavailable, except BYOK custody", async () => {
-    providerStages.surfacedEarnProvider = "upshift";
+    providerMaturity.surfacedEarnProvider = "upshift";
     await setProviderOverrides({
       ...FIXTURE_PROVIDER_OVERRIDES,
       earn: { veda: true, upshift: true },

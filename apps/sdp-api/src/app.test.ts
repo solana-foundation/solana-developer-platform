@@ -2,7 +2,7 @@ import { SigningError } from "@sdp/custody/signing";
 import { FeePaymentError } from "@sdp/fee-payment/port";
 import { SdpPaymentsError } from "@sdp/payments/errors";
 import { SdpRpcError } from "@sdp/rpc/errors";
-import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
+import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createApp, type SdpPlugin } from "@/app";
@@ -32,7 +32,7 @@ const IDEMPOTENCY_REUSED_PATH = "/__idempotency_reused_test_throw";
 const DATABASE_UNAVAILABLE_PATH = "/__database_unavailable_test_throw";
 
 function buildApp() {
-  const app = createApp({ rampProviderStages: SDP_RAMP_PROVIDER_STAGES });
+  const app = createApp({ rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY });
   // Mount a route that throws after createApp returns, so we exercise the
   // onError path without modifying the production createApp surface.
   app.all(THROW_PATH, () => {
@@ -158,7 +158,7 @@ describe("createApp plugin registration", () => {
       },
     };
     const app = createApp({
-      rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
+      rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY,
       plugins: [plugin],
     });
 
@@ -177,7 +177,7 @@ describe("createApp plugin registration", () => {
       },
     };
     const app = createApp({
-      rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
+      rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY,
       plugins: [plugin],
     });
 
@@ -197,7 +197,7 @@ describe("createApp plugin registration", () => {
   });
 
   it("returns 404 for an unregistered route when no plugins are passed", async () => {
-    const app = createApp({ rampProviderStages: SDP_RAMP_PROVIDER_STAGES });
+    const app = createApp({ rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY });
 
     const res = await app.request("/v1/test-plugin", {}, baseEnv);
 
@@ -209,7 +209,7 @@ describe("createApp plugin registration", () => {
 
     expect(() =>
       createApp({
-        rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
+        rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY,
         plugins: [make("dup"), make("dup")],
       })
     ).toThrow(/dup/);

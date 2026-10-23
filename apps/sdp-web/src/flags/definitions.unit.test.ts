@@ -2,7 +2,7 @@ import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access"
 import {
   isModuleInReleaseChannel,
   isRampProviderInReleaseChannel,
-  SDP_RAMP_PROVIDER_STAGES,
+  SDP_RAMP_PROVIDER_MATURITY,
   type SdpModule,
   type SdpReleaseChannel,
 } from "@sdp/types/release-channels";
@@ -47,11 +47,11 @@ const vercelServesOn: Adapter<boolean, DashboardFlagEntities> = {
 
 function defineFlags(
   releaseChannel: SdpReleaseChannel,
-  rampProviderStages: Record<RampProviderId, SdpReleaseChannel> = SDP_RAMP_PROVIDER_STAGES
+  rampProviderMaturity: Record<RampProviderId, SdpReleaseChannel> = SDP_RAMP_PROVIDER_MATURITY
 ) {
   return defineDashboardFlags({
     releaseChannel: () => releaseChannel,
-    rampProviderStages,
+    rampProviderMaturity,
     vercel: () => vercelServesOn,
     identify: () => ({}),
   });
@@ -72,9 +72,13 @@ async function decideAll(flags: DashboardFlags): Promise<Record<string, boolean>
 function inReleaseChannel(releaseChannel: SdpReleaseChannel, cap: FlagCap): boolean {
   if (cap === "uncapped") return true;
   if ("module" in cap) {
-    return isModuleInReleaseChannel(releaseChannel, cap.module, SDP_RAMP_PROVIDER_STAGES);
+    return isModuleInReleaseChannel(releaseChannel, cap.module, SDP_RAMP_PROVIDER_MATURITY);
   }
-  return isRampProviderInReleaseChannel(releaseChannel, cap.rampProvider, SDP_RAMP_PROVIDER_STAGES);
+  return isRampProviderInReleaseChannel(
+    releaseChannel,
+    cap.rampProvider,
+    SDP_RAMP_PROVIDER_MATURITY
+  );
 }
 
 const EXCLUDED_FROM_STABLE = Object.entries(FLAG_CAPS)
@@ -124,7 +128,7 @@ describe("defineDashboardFlags", () => {
 
   it("caps each ramp provider flag by that provider's own stage, not by Ramps as a whole", async () => {
     const onlyMoonpayStable = {
-      ...SDP_RAMP_PROVIDER_STAGES,
+      ...SDP_RAMP_PROVIDER_MATURITY,
       moonpay: "stable",
     } as const satisfies Record<RampProviderId, SdpReleaseChannel>;
     const values = await decideAll(defineFlags("stable", onlyMoonpayStable));

@@ -8,7 +8,7 @@ import type { EgressReadiness } from "@sdp/types/health";
 import type { OrganizationEntitlements } from "@sdp/types/organization-entitlements";
 import type { OrganizationRpcProvider } from "@sdp/types/organizations";
 import type { OrganizationRole } from "@sdp/types/roles";
-import type { SdpRampProviderStages } from "@sdp/types/release-channels";
+import type { SdpRampProviderMaturity } from "@sdp/types/release-channels";
 import type { ManagedRpcEnv } from "@sdp/rpc/types";
 import type { RequestGateContext } from "@/middleware/request-gate";
 import type { KVStoreSet } from "@/runtime/kv";
@@ -315,8 +315,8 @@ export interface Env extends ManagedRpcEnv {
 // Extend Hono's context with our bindings
 declare module "hono" {
   interface ContextVariableMap {
-    // Set by createApp on every request; see AppDeps.rampProviderStages
-    rampProviderStages: SdpRampProviderStages;
+    // Set by createApp on every request; see AppDeps.rampProviderMaturity
+    rampProviderMaturity: SdpRampProviderMaturity;
     // Set by createApp on every request; see AppDeps.egressReadiness
     egressReadiness?: () => EgressReadiness;
     // API key auth context set by middleware

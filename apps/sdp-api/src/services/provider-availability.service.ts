@@ -32,7 +32,10 @@ import {
   type RampProviderId,
   resolveOrganizationProviderEntitlements,
 } from "@sdp/types/provider-access";
-import { SDP_RAMP_PROVIDER_STAGES, type SdpRampProviderStages } from "@sdp/types/release-channels";
+import {
+  SDP_RAMP_PROVIDER_MATURITY,
+  type SdpRampProviderMaturity,
+} from "@sdp/types/release-channels";
 import type { Context } from "hono";
 import { type DatabaseExecutor, getDb } from "@/db/client";
 import { parsePostgresJson } from "@/db/postgres-utils";
@@ -527,17 +530,17 @@ function getProviderLabel(family: OrganizationProviderFamily, providerId: string
   return familyDefinitions[providerId]?.label ?? providerId;
 }
 
-/** The ramp provider stages to evaluate: the request's `rampProviderStages`, else `SDP_RAMP_PROVIDER_STAGES`. */
+/** The ramp provider stages to evaluate: the request's `rampProviderMaturity`, else `SDP_RAMP_PROVIDER_MATURITY`. */
 export interface ProviderAvailabilityOptions {
-  rampProviderStages: SdpRampProviderStages;
+  rampProviderMaturity: SdpRampProviderMaturity;
 }
 
 /**
  * For callers that never read a ramp entry (custody, Earn, compliance checks).
  * Ramp provider stages only change the ramps entries, so the manifest is exact here.
  */
-const MANIFEST_RAMP_STAGES: ProviderAvailabilityOptions = {
-  rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
+const MANIFEST_RAMP_MATURITY: ProviderAvailabilityOptions = {
+  rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY,
 };
 
 export async function getProviderAvailability(
@@ -564,10 +567,10 @@ export async function getProviderAvailability(
       compliance: buildAvailabilityEntries(
         resolved.providers.compliance,
         configured.compliance,
-        () => isModuleAvailable(env, "compliance", options.rampProviderStages)
+        () => isModuleAvailable(env, "compliance", options.rampProviderMaturity)
       ),
       ramps: buildAvailabilityEntries(resolved.providers.ramps, configured.ramps, (provider) =>
-        isRampProviderAvailable(env, provider, options.rampProviderStages)
+        isRampProviderAvailable(env, provider, options.rampProviderMaturity)
       ),
       earn: buildAvailabilityEntries(resolved.providers.earn, configured.earn, () =>
         isEarnEnabled(env)
@@ -594,7 +597,12 @@ export async function assertCustodyProviderEntitled(
   organizationId: string,
   provider: CustodyProvider
 ): Promise<void> {
-  const availability = await getProviderAvailability(env, db, organizationId, MANIFEST_RAMP_STAGES);
+  const availability = await getProviderAvailability(
+    env,
+    db,
+    organizationId,
+    MANIFEST_RAMP_MATURITY
+  );
   const entry = availability.providers.custody[provider];
   if (!isCustodyProviderEntitled(availability, provider)) {
     logEvent("warn", {
@@ -809,7 +817,7 @@ async function loadProjectProviderFacts(
       env,
       db,
       scope.organizationId,
-      MANIFEST_RAMP_STAGES
+      MANIFEST_RAMP_MATURITY
     ),
   };
 }
@@ -1050,7 +1058,7 @@ function decideProjectProvider(
   env: Env,
   facts: ProjectProviderFacts,
   request: ProjectProviderRequest,
-  rampProviderStages: SdpRampProviderStages = SDP_RAMP_PROVIDER_STAGES
+  rampProviderMaturity: SdpRampProviderMaturity = SDP_RAMP_PROVIDER_MATURITY
 ): ProjectProviderDecision {
   switch (request.family) {
     case "custody": {
@@ -1077,14 +1085,14 @@ function decideProjectProvider(
     }
     case "ramps":
       return decideStagedProvider(facts, request, {
-        inReleaseChannel: isRampProviderAvailable(env, request.provider, rampProviderStages),
+        inReleaseChannel: isRampProviderAvailable(env, request.provider, rampProviderMaturity),
         offered: isRampProviderSurfaced(request.provider, facts.environment),
         entry: facts.availability.providers.ramps[request.provider],
         configured: isProviderConfiguredForProject(env, facts, request.family, request.provider),
       });
     case "compliance":
       return decideStagedProvider(facts, request, {
-        inReleaseChannel: isModuleAvailable(env, "compliance", rampProviderStages),
+        inReleaseChannel: isModuleAvailable(env, "compliance", rampProviderMaturity),
         // Compliance has no surfacing table: every compliance provider is offered.
         offered: true,
         entry: facts.availability.providers.compliance[request.provider],
@@ -1475,7 +1483,7 @@ export async function assertCustodyProviderEnabled(
   organizationId: string,
   provider: CustodyProvider
 ): Promise<void> {
-  const access = await getProviderAvailability(env, db, organizationId, MANIFEST_RAMP_STAGES);
+  const access = await getProviderAvailability(env, db, organizationId, MANIFEST_RAMP_MATURITY);
   const entry = access.providers.custody[provider];
   if (!entry.enabled) {
     throw new AppError(
@@ -1523,7 +1531,8 @@ export async function loadProjectProviderVerdict(
     projectId: requireProjectId(c),
   });
   return {
-    decide: (request) => decideProjectProvider(c.env, facts, request, c.get("rampProviderStages")),
+    decide: (request) =>
+      decideProjectProvider(c.env, facts, request, c.get("rampProviderMaturity")),
     availability: facts.availability,
   };
 }

@@ -1,6 +1,6 @@
 import {
   isModuleInReleaseChannel,
-  SDP_RAMP_PROVIDER_STAGES,
+  SDP_RAMP_PROVIDER_MATURITY,
   SDP_RELEASE_CHANNEL_NAMES,
   type SdpModule,
   type SdpReleaseChannel,
@@ -27,5 +27,5 @@ export async function fetchApiReleaseChannel(apiBaseUrl: string): Promise<SdpRel
 }
 
 export function isModuleServed(releaseChannel: SdpReleaseChannel, module: SdpModule): boolean {
-  return isModuleInReleaseChannel(releaseChannel, module, SDP_RAMP_PROVIDER_STAGES);
+  return isModuleInReleaseChannel(releaseChannel, module, SDP_RAMP_PROVIDER_MATURITY);
 }

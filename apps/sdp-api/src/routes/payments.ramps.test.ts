@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
-import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
+import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import { SOL_MINT, SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
@@ -40,15 +40,15 @@ import {
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { providerStages } from "@/test/helpers/provider-stages";
+import { providerMaturity } from "@/test/helpers/provider-maturity";
 import { required } from "@/test/helpers/required";
 import { installStripeTestEnv } from "@/test/helpers/stripe-env";
 import { seedRateLimit } from "@/test/mocks/kv";
 
 vi.mock("@sdp/types/release-channels", async (importOriginal) => {
-  const { mockReleaseChannelStages } = await import("@/test/helpers/provider-stages");
+  const { mockReleaseChannelMaturity } = await import("@/test/helpers/provider-maturity");
   const { RAMP_PROVIDERS } = await import("@sdp/types/provider-access");
-  return mockReleaseChannelStages(
+  return mockReleaseChannelMaturity(
     await importOriginal<typeof import("@sdp/types/release-channels")>(),
     RAMP_PROVIDERS
   );
@@ -134,7 +134,7 @@ async function seedActiveConnectionWallet(params: {
 // Today every ramp provider is `experimental`; these stages put only MoonPay in
 // `beta`, so a `beta` deployment runs Ramps with MoonPay alone.
 const moonpayOnlyBetaApp = createApp({
-  rampProviderStages: { ...SDP_RAMP_PROVIDER_STAGES, moonpay: "beta" },
+  rampProviderMaturity: { ...SDP_RAMP_PROVIDER_MATURITY, moonpay: "beta" },
 });
 const betaEnv = () => ({ ...env, SDP_RELEASE_CHANNEL: "beta" });
 
@@ -927,11 +927,11 @@ describe("Payments routes — ramps", () => {
 
   describe("in a stable release channel", () => {
     beforeEach(() => {
-      providerStages.rampStageOverride = { provider: "moonpay", stage: "stable" };
+      providerMaturity.rampMaturityOverride = { provider: "moonpay", stage: "stable" };
     });
 
     afterEach(() => {
-      providerStages.rampStageOverride = null;
+      providerMaturity.rampMaturityOverride = null;
     });
 
     it("refuses a quote for an experimental provider through the shared provider gate", async () => {

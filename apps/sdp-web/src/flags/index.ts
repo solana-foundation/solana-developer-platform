@@ -1,5 +1,5 @@
 import { vercelAdapter } from "@flags-sdk/vercel";
-import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
+import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import { dedupe } from "flags/next";
 import { getSdpAuth } from "@/lib/sdp-auth";
 import { type DashboardFlagEntities, defineDashboardFlags } from "./definitions";
@@ -37,7 +37,7 @@ const identifyDashboardEntities = dedupe(async (): Promise<DashboardFlagEntities
 // Only flag definitions may be exported here: the flags discovery endpoint serves this module wholesale.
 const flags = defineDashboardFlags({
   releaseChannel: deploymentReleaseChannel,
-  rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
+  rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY,
   vercel: () => vercelAdapter<boolean, DashboardFlagEntities>(),
   identify: identifyDashboardEntities,
 });

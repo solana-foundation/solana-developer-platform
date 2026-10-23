@@ -5,7 +5,7 @@ import {
   RAMP_PROVIDERS,
   resolveOrganizationProviderEntitlements,
 } from "@sdp/types/provider-access";
-import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
+import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { getLogger } from "@/runtime/logger";
@@ -40,7 +40,7 @@ vi.mock("@sdp/types/release-channels", async (importOriginal) => {
   );
 });
 
-const MANIFEST_STAGES = { rampProviderStages: SDP_RAMP_PROVIDER_STAGES };
+const MANIFEST_MATURITY = { rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY };
 
 const TEST_ORG_ID = "org_provider_availability_test";
 const TEST_USER_ID = "usr_provider_availability_test";
@@ -257,7 +257,7 @@ describe("provider-availability.service", () => {
       env,
       getDb(env),
       TEST_ORG_ID,
-      MANIFEST_STAGES
+      MANIFEST_MATURITY
     );
 
     expect(availability.tier).toBe("individual");
@@ -318,13 +318,13 @@ describe("provider-availability.service", () => {
       env,
       getDb(env),
       TEST_ORG_ID,
-      MANIFEST_STAGES
+      MANIFEST_MATURITY
     );
     const onStable = await getProviderAvailability(
       { ...env, SDP_RELEASE_CHANNEL: "stable" },
       getDb(env),
       TEST_ORG_ID,
-      MANIFEST_STAGES
+      MANIFEST_MATURITY
     );
 
     const enabledRamps = RAMP_PROVIDERS.filter((p) => onExperimental.providers.ramps[p]?.enabled);
@@ -369,12 +369,12 @@ describe("provider-availability.service", () => {
       env,
       getDb(env),
       TEST_ORG_ID,
-      MANIFEST_STAGES
+      MANIFEST_MATURITY
     );
     expect(onExperimental.providers.ramps.moonpay?.enabled).toBe(true);
 
     const availability = await getProviderAvailability(onBeta, getDb(env), TEST_ORG_ID, {
-      rampProviderStages: { ...SDP_RAMP_PROVIDER_STAGES, moonpay: "beta" },
+      rampProviderMaturity: { ...SDP_RAMP_PROVIDER_MATURITY, moonpay: "beta" },
     });
 
     expect(availability.providers.ramps.moonpay?.enabled).toBe(true);
@@ -398,7 +398,12 @@ describe("provider-availability.service", () => {
       },
     });
 
-    const withoutKey = await getProviderAvailability(env, getDb(env), TEST_ORG_ID, MANIFEST_STAGES);
+    const withoutKey = await getProviderAvailability(
+      env,
+      getDb(env),
+      TEST_ORG_ID,
+      MANIFEST_MATURITY
+    );
     expect(withoutKey.providers.custody.local).toEqual({
       entitled: true,
       configured: false,
@@ -412,7 +417,7 @@ describe("provider-availability.service", () => {
       env,
       getDb(env),
       TEST_ORG_ID,
-      MANIFEST_STAGES
+      MANIFEST_MATURITY
     );
     expect(managedWithKey.providers.custody.local).toEqual({
       entitled: true,
@@ -425,7 +430,7 @@ describe("provider-availability.service", () => {
       env,
       getDb(env),
       TEST_ORG_ID,
-      MANIFEST_STAGES
+      MANIFEST_MATURITY
     );
     expect(selfHostedWithKey.providers.custody.local).toEqual({
       entitled: true,
@@ -478,7 +483,7 @@ describe("provider-availability.service", () => {
       env,
       getDb(env),
       TEST_ORG_ID,
-      MANIFEST_STAGES
+      MANIFEST_MATURITY
     );
 
     expect(availability.tier).toBe("individual");
@@ -522,7 +527,7 @@ describe("provider-availability.service", () => {
       env,
       getDb(env),
       TEST_ORG_ID,
-      MANIFEST_STAGES
+      MANIFEST_MATURITY
     );
 
     expect(availability.providers.custody.local).toEqual({
@@ -542,7 +547,7 @@ describe("provider-availability.service", () => {
       env,
       getDb(env),
       TEST_ORG_ID,
-      MANIFEST_STAGES
+      MANIFEST_MATURITY
     );
 
     expect(availability.tier).toBe("individual");
@@ -734,7 +739,7 @@ describe("provider-availability.service", () => {
       env,
       getDb(env),
       TEST_ORG_ID,
-      MANIFEST_STAGES
+      MANIFEST_MATURITY
     );
 
     expect(availability.providers.earn.upshift).toEqual({
@@ -762,7 +767,7 @@ describe("provider-availability.service", () => {
         { ...env, ...flags },
         getDb(env),
         TEST_ORG_ID,
-        MANIFEST_STAGES
+        MANIFEST_MATURITY
       );
 
       expect(availability.providers.earn.upshift).toEqual({
@@ -789,7 +794,7 @@ describe("provider-availability.service", () => {
       env,
       getDb(env),
       TEST_ORG_ID,
-      MANIFEST_STAGES
+      MANIFEST_MATURITY
     );
 
     expect(availability.providers.earn.veda).toEqual({
@@ -812,7 +817,7 @@ describe("provider-availability.service", () => {
       .run();
 
     env.JUPITER_SWAP_API_KEY = undefined;
-    const without = await getProviderAvailability(env, getDb(env), TEST_ORG_ID, MANIFEST_STAGES);
+    const without = await getProviderAvailability(env, getDb(env), TEST_ORG_ID, MANIFEST_MATURITY);
     expect(without.providers.earn.ondo).toEqual({
       entitled: true,
       configured: false,
@@ -823,7 +828,7 @@ describe("provider-availability.service", () => {
     );
 
     env.JUPITER_SWAP_API_KEY = "jup_test_key";
-    const withKey = await getProviderAvailability(env, getDb(env), TEST_ORG_ID, MANIFEST_STAGES);
+    const withKey = await getProviderAvailability(env, getDb(env), TEST_ORG_ID, MANIFEST_MATURITY);
     expect(withKey.providers.earn.ondo).toEqual({
       entitled: true,
       configured: true,
@@ -841,7 +846,7 @@ describe("provider-availability.service", () => {
 
     env.JUPITER_SWAP_API_KEY = undefined;
     env.EARN_HASTRA_DEX_EXIT_ENABLED = undefined;
-    const without = await getProviderAvailability(env, getDb(env), TEST_ORG_ID, MANIFEST_STAGES);
+    const without = await getProviderAvailability(env, getDb(env), TEST_ORG_ID, MANIFEST_MATURITY);
     expect(without.providers.earn.hastra).toEqual({
       entitled: true,
       configured: true,
@@ -856,7 +861,7 @@ describe("provider-availability.service", () => {
       env,
       getDb(env),
       TEST_ORG_ID,
-      MANIFEST_STAGES
+      MANIFEST_MATURITY
     );
     expect(dexMisconfigured.providers.earn.hastra).toEqual({
       entitled: true,

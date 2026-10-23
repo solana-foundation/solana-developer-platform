@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import type { PaymentsDashboardWallet } from "@sdp/types/payments";
-import { isModuleInReleaseChannel, SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
+import { isModuleInReleaseChannel, SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -55,7 +55,7 @@ const WALLETS = [WALLET_A, WALLET_B];
 
 // A stable deployment, as production runs (code standards: gate with stable-capped flags).
 const STABLE_ACTIONS = grantableActionsInChannel((module) =>
-  isModuleInReleaseChannel("stable", module, SDP_RAMP_PROVIDER_STAGES)
+  isModuleInReleaseChannel("stable", module, SDP_RAMP_PROVIDER_MATURITY)
 );
 
 async function openPermissionsStep(wallets: PaymentsDashboardWallet[] = WALLETS) {
