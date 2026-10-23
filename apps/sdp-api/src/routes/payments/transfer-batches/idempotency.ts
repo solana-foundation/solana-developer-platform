@@ -1,7 +1,7 @@
 import { canonicalJson } from "@sdp/types/idempotency";
 import type { z } from "zod";
 import { canonicalizeDecimalFields, type JsonValue } from "@/lib/idempotency";
-import { normalizePaymentToken, resolvePaymentAsset } from "@/services/payment-operation.service";
+import { normalizePaymentToken, paymentAssetOf } from "@/services/payment-operation.service";
 import type { transferBatchOptionsSchema } from "./schemas";
 import { DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION } from "./transaction";
 
@@ -26,7 +26,7 @@ function isDefaultedOption(name: string): name is DefaultedOption {
  * The Idempotency-Key fingerprint form of a create-batch body (HOO-1918,
  * ADR 0012): `token` becomes `asset`, the asset it names on the project's
  * cluster ("native" for native SOL, else the mint), so "USDC" and its mint
- * are one batch; the wrapped SOL mint is refused. No earlier
+ * are one batch; the wrapped SOL mint is its own asset (refused when it runs). No earlier
  * form has an `asset` key, so this form never equals one of them for another
  * request. Recipients have canonical amounts ("1.0" and "1" move the same) and
  * are sorted by their own canonical JSON, because the order they are listed in
@@ -44,7 +44,7 @@ export function canonicalizeTransferBatchBody(body: JsonValue): JsonValue {
   if (typeof token !== "string") {
     return canonical;
   }
-  const asset = resolvePaymentAsset(token);
+  const asset = paymentAssetOf(token);
   return { ...rest, asset: asset.kind === "native" ? "native" : asset.mint };
 }
 

@@ -2,7 +2,7 @@ import { TOKEN_MOVEMENT_BASES } from "@sdp/types/token-movements";
 import { z } from "zod";
 import { canonicalizeDecimalFields, type JsonValue } from "@/lib/idempotency";
 import { canonicalizePaymentBody } from "@/routes/payments/fingerprint";
-import { resolvePaymentAsset } from "@/services/payment-operation.service";
+import { paymentAssetOf } from "@/services/payment-operation.service";
 import { defaultTransferBasis } from "./schemas";
 
 /** The fields of a create-transfer body its canonical form rewrites; the rest stay as sent. */
@@ -14,7 +14,7 @@ const intentFieldsSchema = z.looseObject({
 
 /** "native" for native SOL, the mint for a token: one spelling per asset. */
 function canonicalAsset(token: string): string {
-  const asset = resolvePaymentAsset(token);
+  const asset = paymentAssetOf(token);
   return asset.kind === "native" ? "native" : asset.mint;
 }
 
@@ -22,7 +22,7 @@ function canonicalAsset(token: string): string {
  * The Idempotency-Key fingerprint form of a create-transfer body (ADR 0009,
  * ADR 0012): the canonical intent. `token` becomes `asset`, the asset it
  * names on the project's cluster, so "USDC" and its mint are one request and
- * the wrapped SOL mint is refused; the amount is canonical, so
+ * the wrapped SOL mint is its own asset (refused when it runs); the amount is canonical, so
  * "1.0" and "1" are one; and the basis has its default applied, so an omitted
  * and an explicit default `amountBasis` are one. No earlier form has an
  * `asset` key, so this form never equals one of them for another request. A

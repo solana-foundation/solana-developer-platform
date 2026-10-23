@@ -322,7 +322,7 @@ describe("Payments routes — transfer idempotency", () => {
     expect(await countTransferRows()).toBe(1);
   });
 
-  it("fingerprints native SOL's spellings as one transfer, and refuses the wrapped SOL mint (APE SOLA9-695, ADR 0012)", async () => {
+  it("fingerprints native SOL's spellings as one transfer, and refuses a new wrapped SOL request (APE SOLA9-695, ADR 0012)", async () => {
     const body = {
       sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
       destination: TEST_SOLANA_ADDRESSES.wallet2,
@@ -335,12 +335,42 @@ describe("Payments routes — transfer idempotency", () => {
 
     expect(aliased.status).toBe(200);
     expect(aliased.headers.get("Idempotent-Replayed")).toBe("true");
-    // "SOL" moves native SOL; the wrapped SOL mint is refused before the key is read.
+    // "SOL" moves native SOL; a new request for the wrapped SOL mint is refused before it moves.
     const wrapped = await postTransfer(
       { ...body, token: SOL_MINT },
-      { idempotencyKey: "xfer-alias" }
+      { idempotencyKey: "xfer-wrapped" }
     );
     expect(wrapped.status).toBe(400);
+    expect(await countTransferRows()).toBe(1);
+  });
+
+  it("replays a native SOL transfer saved under the wrapped SOL mint before ADR 0012", async () => {
+    const idempotencyKey = crypto.randomUUID();
+    const body = {
+      sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+      destination: TEST_SOLANA_ADDRESSES.wallet2,
+      amount: "1",
+    };
+    const first = await postTransfer({ ...body, token: "SOL" }, { idempotencyKey });
+    expect(first.status).toBe(200);
+    // Before ADR 0012 the wrapped SOL mint named native SOL, and the fingerprint kept it.
+    const before = requestFingerprint({
+      operation: "POST /v1/payments/transfers",
+      params: {},
+      query: {},
+      body: runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+        canonicalizePaymentBody({ ...body, token: SOL_MINT })
+      ),
+    });
+    await getDb(env).execute(
+      "UPDATE idempotency_keys SET fingerprint = ? WHERE idempotency_key = ?",
+      [before, idempotencyKey]
+    );
+
+    const retry = await postTransfer({ ...body, token: SOL_MINT }, { idempotencyKey });
+
+    expect(retry.status).toBe(200);
+    expect(retry.headers.get("Idempotent-Replayed")).toBe("true");
     expect(await countTransferRows()).toBe(1);
   });
 

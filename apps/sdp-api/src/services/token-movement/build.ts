@@ -116,6 +116,16 @@ function quoteDestination(
 }
 
 /**
+ * A transfer into the account it leaves moves nothing, so it is refused
+ * rather than recorded as moved.
+ */
+function refuseSelfTransfer(source: Address, destination: Address): void {
+  if (source === destination) {
+    throw badRequest("The destination is the source account: the transfer would move nothing");
+  }
+}
+
+/**
  * Reads, gates and quotes a movement from `source` to each destination, on
  * the open cluster scope.
  *
@@ -125,7 +135,8 @@ function quoteDestination(
  * @param input.memo - The movement's memo, sent where a destination requires one.
  * @throws AppError (400) for every refusal: an unreadable mint, the
  * capability decision, no source token account, an amount the mint cannot
- * hold, a fee that leaves nothing, an unresolved hook or a missing memo.
+ * hold, a fee that leaves nothing, an unresolved hook, a missing memo, or a
+ * destination that is the source account.
  */
 export async function planTokenMovement(input: {
   asset: AssetRequest;
@@ -137,6 +148,7 @@ export async function planTokenMovement(input: {
   if (input.asset.kind === "native") {
     const terms = NATIVE_TOKEN_TERMS;
     const legs = input.destinations.map((destination) => {
+      refuseSelfTransfer(input.source, destination.owner);
       const quote = quoteDestination(terms, destination, input.basis);
       const accounts: TokenMovementAccounts = { kind: "native", destination: destination.owner };
       refusedAsBadRequest(() =>
@@ -164,6 +176,9 @@ export async function planTokenMovement(input: {
     throw badRequest(decision.message, { reason: decision.refusal });
   }
   const source = knownSource === null ? await readSource(terms.asset.program) : knownSource;
+  for (const destination of read.destinations) {
+    refuseSelfTransfer(source.tokenAccount, destination.tokenAccount);
+  }
   const quotes = input.destinations.map((destination) =>
     quoteDestination(terms, destination, input.basis)
   );

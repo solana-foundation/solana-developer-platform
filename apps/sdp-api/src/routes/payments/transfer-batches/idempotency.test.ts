@@ -86,18 +86,19 @@ describe("canonicalizeTransferBatchBody", () => {
     });
   });
 
-  it("fingerprints a symbol and its mint as one asset, and refuses wrapped SOL (APE SOLA9-695)", () => {
+  it("fingerprints a symbol and its mint as one asset, and wrapped SOL apart from native (APE SOLA9-695)", () => {
     expect(canonicalizeTransferBatchBody({ ...BODY, token: "usdc" })).toEqual(
       canonicalizeTransferBatchBody({ ...BODY, token: USDC })
     );
-    // ADR 0012: "SOL" moves native SOL; rows store it under the wrapped SOL mint, which is refused.
+    // ADR 0012: "SOL" moves native SOL; a wrapped SOL batch is refused when it runs, after the replay step.
     expect(canonicalizeTransferBatchBody({ ...BODY, token: "sol" })).toEqual({
       ...BODY,
       asset: "native",
     });
-    expect(() => canonicalizeTransferBatchBody({ ...BODY, token: SOL_MINT })).toThrow(
-      'Payments does not move wrapped SOL: send token "SOL" to move native SOL'
-    );
+    expect(canonicalizeTransferBatchBody({ ...BODY, token: SOL_MINT })).toEqual({
+      ...BODY,
+      asset: SOL_MINT,
+    });
   });
 
   it("keeps both earlier forms, so a key or row saved under either still matches", () => {

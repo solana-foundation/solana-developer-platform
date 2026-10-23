@@ -138,28 +138,47 @@ export function normalizePaymentToken(token: string): string {
 
 /**
  * The asset a Payments request's token names on the open scope's cluster
- * (ADR 0012), resolved once: "SOL" is native SOL and a catalogue symbol is the
- * cluster's mint. The wrapped SOL mint is refused: rows and balances store
- * native SOL under that mint, so a wrapped SOL move would read back as native.
+ * (ADR 0012): "SOL" is native SOL, a catalogue symbol is the cluster's mint,
+ * and the wrapped SOL mint is wrapped SOL. Authorization and fingerprints read
+ * it this way, so a retry of a request saved before the wrapped SOL refusal
+ * still replays; what moves goes through {@link refuseWrappedSol}.
  *
  * @param token - A symbol or a mint address.
  * @returns The asset; an uncatalogued mint stays unread until its terms are read.
- * @throws AppError (400) when the token names no asset on the cluster, or is
- * the wrapped SOL mint.
+ * @throws AppError (400) when the token names no asset on the cluster.
  */
-export function resolvePaymentAsset(token: string): AssetRequest {
-  let asset: AssetRequest;
+export function paymentAssetOf(token: string): AssetRequest {
   try {
-    asset = resolveAssetRequest(token, currentClusterScope().cluster);
+    return resolveAssetRequest(token, currentClusterScope().cluster);
   } catch (error) {
     if (error instanceof AssetResolutionError) {
       throw badRequest(error.message);
     }
     throw error;
   }
+}
+
+/**
+ * Refuses the wrapped SOL mint: rows and balances store native SOL under that
+ * mint, so a wrapped SOL move would read back as native.
+ *
+ * @throws AppError (400) for the wrapped SOL mint.
+ */
+export function refuseWrappedSol(asset: AssetRequest): void {
   if (asset.kind !== "native" && asset.mint === SOL_MINT) {
     throw badRequest('Payments does not move wrapped SOL: send token "SOL" to move native SOL');
   }
+}
+
+/**
+ * {@link paymentAssetOf} for a request that moves it, refusing wrapped SOL.
+ *
+ * @throws AppError (400) when the token names no asset on the cluster, or is
+ * the wrapped SOL mint.
+ */
+export function resolvePaymentAsset(token: string): AssetRequest {
+  const asset = paymentAssetOf(token);
+  refuseWrappedSol(asset);
   return asset;
 }
 
@@ -209,7 +228,8 @@ export function resolveOutboundPaymentOperation(input: {
     sourceAddress: assertValidAddress(sourceWallet.publicKey, "source"),
     destinationAddress: assertValidAddress(input.destination, "destination"),
     token: normalizePaymentToken(input.token),
-    asset: resolvePaymentAsset(input.token),
+    // Resolved, not refused: authorization runs before a replay (planTokenMovement refuses).
+    asset: paymentAssetOf(input.token),
     amount,
   };
 }
