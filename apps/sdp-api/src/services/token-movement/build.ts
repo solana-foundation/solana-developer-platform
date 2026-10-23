@@ -18,7 +18,8 @@
  *   accounts (concurrent pages past 100 accounts); for a catalogue mint the
  *   two reads run at once.
  * - a hook mint: + one read of the hook's validation account for the whole
- *   movement, + one per extra account whose address comes from account data.
+ *   movement, + one per distinct account whose data an extra account's
+ *   address or seeds read, shared by every destination.
  * - native SOL: none → none.
  */
 

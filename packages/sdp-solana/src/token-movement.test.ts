@@ -609,6 +609,27 @@ describe("resolveTransferHookAccounts", () => {
     assert.notDeepEqual(resolved[0], resolved[1]);
   });
 
+  it("reads an account a seed takes data from once for all the transfers", async () => {
+    const { validation, accounts } = await validationAccounts([
+      {
+        config: {
+          __kind: "ProgramPda",
+          seeds: [{ __kind: "AccountData", accountIndex: 0, dataIndex: 0, length: 32 }],
+        },
+        isSigner: false,
+        isWritable: false,
+      },
+    ]);
+    accounts.set(SOURCE, { owner: TOKEN_2022, data: new Uint8Array(165).fill(1) });
+    const { rpc, reads } = stubRpc(accounts);
+    const destinations = [DESTINATION_ACCOUNT, testAddress(13), testAddress(14)];
+
+    await resolveTransferHookAccounts(rpc, HOOKED, destinations.map(transfer));
+
+    // The source is the same for every transfer: one read of it, not one per transfer.
+    assert.deepEqual(reads, [validation, SOURCE]);
+  });
+
   it("refuses an extra account that must sign", async () => {
     const { accounts } = await validationAccounts([
       { config: { __kind: "Literal", address: HOOK_STATE }, isSigner: true, isWritable: false },
