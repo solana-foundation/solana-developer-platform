@@ -110,19 +110,21 @@ export function quotedTokenAmount(quote: TokenAmountQuote): string {
   }
 }
 
-/** A quote, and when this browser received it (epoch ms, on its own clock). */
+/** A quote, and when this browser asked for it (epoch ms, on its own clock). */
 export interface ReceivedTokenAmountQuote {
   quote: TokenAmountQuote;
-  receivedAt: number;
+  requestedAt: number;
 }
 
 /**
  * When a quote stops being good on this browser's clock (epoch ms). `asOf`
  * and `expiresAt` are chain time, which a browser clock can be a minute or
- * more away from, so the quote's lifetime is counted from when it arrived.
+ * more away from, so the quote's lifetime is counted on this clock from when
+ * it was asked for: the read happened after that, so the time the answer took
+ * counts against the lifetime instead of extending it.
  */
-export function quoteExpiresAt({ quote, receivedAt }: ReceivedTokenAmountQuote): number {
-  return receivedAt + Date.parse(quote.expiresAt) - Date.parse(quote.asOf);
+export function quoteExpiresAt({ quote, requestedAt }: ReceivedTokenAmountQuote): number {
+  return requestedAt + Date.parse(quote.expiresAt) - Date.parse(quote.asOf);
 }
 
 /**
@@ -148,6 +150,7 @@ export async function fetchTokenAmountQuote(
   request: TokenAmountQuoteRequest,
   t: Translate
 ): Promise<ReceivedTokenAmountQuote> {
+  const requestedAt = Date.now();
   const res = await dashboardFetch(`/api/dashboard/tokens/${encodeURIComponent(mint)}/quote`, {
     method: "POST",
     body: request,
@@ -155,5 +158,5 @@ export async function fetchTokenAmountQuote(
   if (!res.ok) throw new Error(res.error);
   const parsed = tokenAmountQuoteEnvelopeSchema.safeParse(res.data);
   if (!parsed.success) throw new Error(t("DashboardPayments.tokenAmount.quoteInvalid"));
-  return { quote: parsed.data.data.quote, receivedAt: Date.now() };
+  return { quote: parsed.data.data.quote, requestedAt };
 }
