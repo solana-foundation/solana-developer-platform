@@ -20,44 +20,6 @@ export const RATE_LIMIT_TIERS = {
 } as const satisfies Record<RateLimitTier, number>;
 
 export const ANONYMOUS_MAX_REQUESTS = 20;
-export const ANONYMOUS_EARN_CATALOGUE_MAX_REQUESTS = 120;
-export const ANONYMOUS_EARN_BUILD_MAX_REQUESTS = 30;
-
-const ANONYMOUS_EARN_BUILD_PATHS = new Set([
-  "/v1/earn/vault-deposit-previews",
-  "/v1/earn/external-wallet/deposit-transactions",
-  "/v1/earn/external-wallet/withdrawal-previews",
-  "/v1/earn/external-wallet/withdrawal-transactions",
-]);
-
-function anonymousRequestLimit(c: Context<{ Bindings: Env }>): {
-  identifierPrefix: string | null;
-  maxRequests: number;
-  metricTier: string;
-} {
-  if (
-    c.req.method === "GET" &&
-    (c.req.path === "/v1/earn/strategies" || c.req.path.startsWith("/v1/earn/strategies/"))
-  ) {
-    return {
-      identifierPrefix: "anonymous:earn:catalogue",
-      maxRequests: ANONYMOUS_EARN_CATALOGUE_MAX_REQUESTS,
-      metricTier: "anonymous_earn_catalogue",
-    };
-  }
-  if (c.req.method === "POST" && ANONYMOUS_EARN_BUILD_PATHS.has(c.req.path)) {
-    return {
-      identifierPrefix: "anonymous:earn:build",
-      maxRequests: ANONYMOUS_EARN_BUILD_MAX_REQUESTS,
-      metricTier: "anonymous_earn_build",
-    };
-  }
-  return {
-    identifierPrefix: null,
-    maxRequests: ANONYMOUS_MAX_REQUESTS,
-    metricTier: "anonymous_default",
-  };
-}
 
 /**
  * Per-user-per-org ceiling for dashboard traffic (Clerk JWT). Dashboard
@@ -497,13 +459,9 @@ export function skipRateLimitPaths(...paths: string[]) {
         fallback: keyedIpBackstopFallback,
       });
     } else {
-      const limit = anonymousRequestLimit(c);
-      await enforceRateLimit(
-        c,
-        limit.identifierPrefix ? `${limit.identifierPrefix}:ip:${clientIp}` : clientIp,
-        limit.maxRequests,
-        { metricTier: limit.metricTier }
-      );
+      await enforceRateLimit(c, clientIp, ANONYMOUS_MAX_REQUESTS, {
+        metricTier: "anonymous_default",
+      });
     }
     await next();
   };

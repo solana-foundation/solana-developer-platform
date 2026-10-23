@@ -6,23 +6,15 @@ multi-provider — keep every provider-specific detail behind the provider-neutr
 seams below. Read `README.md` here for the full architecture (including the
 custody boundary); ADR 0002 (`docs/decisions/`) for the invariants.
 
-## Hosted API access tiers
+## Hosted API access
 
 This package defines provider capabilities; the API router defines caller
 authentication. Do not confuse a provider's own upstream credential with an
 integrator's SDP API key.
 
-- Strategy catalogue reads, deposit and withdrawal previews, withdrawal-route
-  discovery, and unsigned instant deposit/direct-withdrawal builds accept either
-  a valid SDP credential or no credential. The anonymous form has no organization
-  or project context, picks its own shelf (`?environment=` on the list, the named
-  strategy's environment on quotes and builds), and persists nothing. Queued
-  request/cancellation builds are control-plane actions and always require a key.
-- Submits, programs, custody vault operations, movements, positions, earnings,
-  and aggregate reads require an authenticated tenant and their existing Earn
-  permissions.
-- A credentialed call to an optional-auth route preserves the existing tenant
-  environment, entitlement, custom fee-payer, persistence, and submit flow.
+- Every Earn route, catalogue reads and previews included, requires an
+  authenticated SDP credential with its Earn permission, and runs in that
+  credential's project environment.
 - Missing credentials for a provider that requires them are a provider
   configuration failure. They say nothing about whether an integrator supplied
   an SDP API key.
@@ -74,12 +66,8 @@ DATABASE_URL=postgresql://sdp:sdp@127.0.0.1:5433/sdp pnpm db:seed:local
   no dev-only default-on: `MARKETS_ENABLED=true` and `EARN_ENABLED=true`, needed
   by **both** apps (same unprefixed names). Under the Doppler wrapper, plain
   shell exports are ignored unless named in `DOPPLER_PRESERVE_ENV`.
-- **Keyless environment** is caller-selected on strategy lists with
-  `?environment=sandbox|production`, which is required (400 when omitted).
-  Strategy detail, quotes and builds follow the named strategy row's
-  environment, and that choice opens the request's cluster scope.
-  Authenticated calls derive environment from the selected project; a list
-  naming another environment answers 409.
+- **Environment** comes from the credential's project: an API key's, or the
+  dashboard session's selected project.
 - **Sponsored vault movements** (`EARN_VAULT_FEE_SPONSORSHIP_ENABLED=true`, API
   only) additionally need a Kora to sign against: `pnpm kora:local:up`, which
   hands the API `KORA_DEVNET_URL` via `.secrets/kora-local/api.env`. `infra/kora/kora.toml` already carries the Kamino program
@@ -294,11 +282,10 @@ The current packages are `@sdp/kamino`, `@sdp/veda`, `@sdp/jupiter-lend`,
 (`POST /v1/earn/vault-deposits`). Since PRO-1722 the same builders also serve
 the EXTERNAL-WALLET flow (`/v1/earn/external-wallet/*`), where the plan's
 `owner` is a wallet SDP does not custody and the OWNER signs instead of SDP.
-A keyed caller may submit those signed bytes through SDP; an anonymous caller
-broadcasts them directly. Nothing changes on the packages' side because the
-builders always took the owner as a parameter. Those packages depend on this
-one, never the reverse: the hourly catalogue cron must not load a chain SDK it
-never calls.
+The caller submits those signed bytes through SDP. Nothing changes on the
+packages' side because the builders always took the owner as a parameter.
+Those packages depend on this one, never the reverse: the hourly catalogue cron
+must not load a chain SDK it never calls.
 
 Three Kamino facts drive most of its code, all measured against the live API on
 2026-08-13 (Kamino publishes an agent-readable API index at

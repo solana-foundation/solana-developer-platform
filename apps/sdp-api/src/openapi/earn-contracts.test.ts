@@ -28,18 +28,12 @@ describe("Earn API contract coverage", () => {
     expect([...documented].sort()).toEqual([...runtime].sort());
   });
 
-  it("keeps every Treasury operation authenticated and unpublished", () => {
+  it("keeps every Earn operation authenticated and unpublished", () => {
     const internal = createOpenApiDocument();
     const published = createPublicOpenApiDocument({ releaseChannel: "experimental" });
     for (const [path, item] of Object.entries(internal.paths)) {
       if (!path.startsWith("/v1/earn/")) continue;
       expect(published.paths[path]).toBeUndefined();
-      if (
-        path.includes("external-wallet") ||
-        path.includes("strategies") ||
-        path.endsWith("vault-deposit-previews")
-      )
-        continue;
       for (const [method, operation] of Object.entries(item)) {
         if (!["get", "post", "put"].includes(method)) continue;
         expect(operation).toHaveProperty("security");

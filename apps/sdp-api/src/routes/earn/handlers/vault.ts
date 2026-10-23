@@ -103,18 +103,15 @@ import {
  *
  * A READ that takes the deposit's own money-in gates through
  * `assertVaultDepositAdmissible`, the function both deposit builds call: the
- * quote exists only to open a NEW position, so surfacing, admission, and
- * environment capability always apply, and an authenticated caller takes the
- * project provider rule (an anonymous caller has no project for it to decide
- * from). There is no wallet, persistence, or idempotency
+ * quote exists only to open a NEW position, so surfacing, admission,
+ * environment capability and the project provider rule always apply. There is
+ * no wallet, persistence, or idempotency
  * key because the preview moves and holds nothing.
  */
 export async function createEarnVaultDepositPreview(
   c: ValidatedBodyContext<typeof earnVaultDepositPreviewSchema>
 ) {
   const body = c.req.valid("json");
-  // The row names the shelf: a tenant caller must own it, an anonymous caller
-  // chose it (PRO-1998).
   const { strategy, environment } = await requireEarnStrategyForCaller(c, body.strategyId);
   // No amount: the preview reports the cap below as a blocking issue instead
   // of throwing it.

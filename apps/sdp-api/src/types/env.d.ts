@@ -29,9 +29,6 @@ export interface Env extends ManagedRpcEnv {
 
   // Environment variables
   ENVIRONMENT: "development" | "production";
-  /** Anonymous Earn paid-upstream budget, per client IP. */
-  EARN_ANONYMOUS_RPC_MAX_REQUESTS?: string;
-  EARN_ANONYMOUS_RPC_WINDOW_SECONDS?: string;
   API_VERSION: string;
   /** Build SHA baked into the image; shared by the api and worker services. */
   SDP_BUILD_SHA?: string;

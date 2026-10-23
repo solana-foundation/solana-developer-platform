@@ -794,22 +794,20 @@ export interface EarnVaultWithdrawalRequestsPage {
  * External-wallet (caller-signed) vault flows — the B2B2C money path (PRO-1722).
  *
  * An external wallet is a NON-CUSTODIAL wallet the partner's platform
- * connects; SDP holds no key for it and never signs. A BUILD always returns an
- * unsigned transaction. A keyed integration can SUBMIT the signed bytes for a
- * durable movement and SDP broadcast. A keyless integration broadcasts and
- * tracks the transaction itself. These surfaces postdate the unified ledger,
+ * connects; SDP holds no key for it and never signs. A BUILD returns an
+ * unsigned transaction, and the integration SUBMITs the signed bytes for a
+ * durable movement and SDP broadcast. These surfaces postdate the unified ledger,
  * so recorded statuses use its vault vocabulary (`requested … finalized`).
  */
 
 /** One unsigned transaction SDP built for an external wallet to sign. */
 export interface EarnExternalWalletTransaction {
-  /** Opaque build id. A durable keyed build is single-use on submit. */
+  /** Opaque build id, single-use on submit. */
   transactionId: string;
   /**
    * Base64 wire bytes of the UNSIGNED transaction. The external wallet signs
    * exactly these bytes. The fee payer is the owner, or the partner's
-   * `feePayer` on a keyed build. A keyed integration returns the signed
-   * encoding on submit; a keyless integration broadcasts it directly.
+   * `feePayer`. The integration returns the signed encoding on submit.
    */
   transaction: string;
   /** Block height after which these exact bytes can no longer land. */
@@ -818,7 +816,7 @@ export interface EarnExternalWalletTransaction {
   sponsored: boolean;
   ownerAddress: string;
   /**
-   * The partner fee payer compiled into a keyed transaction, echoed from the
+   * The partner fee payer compiled into the transaction, echoed from the
    * build request. Present, the transaction requires this wallet's signature
    * IN ADDITION to the owner's — co-sign server-side before submitting — and
    * this wallet pays the network fee plus any account rent the transaction
@@ -862,10 +860,9 @@ export interface EarnExternalWalletDepositTransactionResponse {
  * instructions). No CONSUMABLE build is persisted for this answer: SDP hands
  * back an unsigned SWAP-ONLY transaction for the owner to sign and broadcast
  * itself, plus the exact follow-up deposit to build once the swap lands. The
- * follow-up build then takes the ordinary single-transaction path. SDP does
- * records an advisory for a keyed split and flags owners whose swap landed
- * without a follow-up deposit (PRO-1864). An anonymous split writes nothing;
- * recovery stays the caller's duty in both tiers.
+ * follow-up build then takes the ordinary single-transaction path. SDP
+ * records an advisory and flags owners whose swap landed without a follow-up
+ * deposit (PRO-1864); recovery stays the caller's duty.
  */
 export interface EarnExternalWalletDepositSwapSplitResponse {
   /** Discriminates from the atomic response, which carries `transaction`. */
@@ -878,8 +875,7 @@ export interface EarnExternalWalletDepositSwapSplitResponse {
      * the owner, or the original request's `feePayer` (which then co-signs
      * this transaction too). The partner broadcasts it itself; it moves only
      * the owner's own funds between the owner's own token accounts, so SDP
-     * records no movement. Only a keyed request creates an orphan-detection
-     * advisory.
+     * records no movement; the build records an orphan-detection advisory.
      */
     transaction: string;
     /** Block height after which these exact bytes can no longer land. */
@@ -907,17 +903,10 @@ export interface EarnExternalWalletDepositSwapSplitResponse {
   };
 }
 
-type EarnExternalWalletExitReference =
-  | {
-      /** The tenant position being exited on an authenticated build. */
-      positionId: string;
-      strategyId?: never;
-    }
-  | {
-      /** The catalogue strategy being exited on an anonymous build. */
-      strategyId: string;
-      positionId?: never;
-    };
+interface EarnExternalWalletExitReference {
+  /** The tenant position being exited. */
+  positionId: string;
+}
 
 /** Response body of POST /v1/earn/external-wallet/withdrawal-transactions. */
 export interface EarnExternalWalletWithdrawalTransactionResponse {

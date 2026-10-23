@@ -4,7 +4,6 @@ import { JUPITER_LEND_USDT } from "@sdp/types/jupiter-lend-programs";
 import { ONDO_DEPLOYMENTS } from "@sdp/types/ondo-programs";
 import { type SolanaCluster, wellKnownMint } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { z } from "zod";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { required } from "@/test/helpers/required";
@@ -178,10 +177,6 @@ function getEarn(path: string, headers: Record<string, string>) {
     },
     env
   );
-}
-
-function getEarnAnonymously(path: string, headers: Record<string, string>) {
-  return app.request(path, { method: "GET", headers }, env);
 }
 
 async function getEarnAsClerk(path: string, projectId: string) {
@@ -367,11 +362,6 @@ describe("Earn routes — retired program surfaces (PRO-1670)", () => {
   });
 });
 
-const shelfPageSchema = z.object({
-  data: z.object({ strategies: z.array(z.object({ id: z.string(), fundable: z.boolean() })) }),
-});
-const errorBodySchema = z.object({ error: z.object({ code: z.string(), message: z.string() }) });
-
 describe("Earn routes — environment scoping", () => {
   it("hides production strategies from a sandbox API key", async () => {
     await seedAuth();
@@ -389,79 +379,6 @@ describe("Earn routes — environment scoping", () => {
     const list = await getEarn("/v1/earn/strategies", {});
     const listBody = (await list.json()) as { data: { strategies: Array<{ id: string }> } };
     expect(listBody.data.strategies.map((s) => s.id)).toEqual([sandbox.id]);
-  });
-
-  it("lets an anonymous caller read the shelf it names", async () => {
-    const sandbox = await seedStrategy({});
-    const production = await seedStrategy({
-      environment: "production",
-      hostCluster: "mainnet-beta",
-    });
-
-    const sandboxShelf = await getEarnAnonymously("/v1/earn/strategies?environment=sandbox", {});
-    expect(sandboxShelf.status).toBe(200);
-    const sandboxBody = shelfPageSchema.parse(await sandboxShelf.json());
-    expect(sandboxBody.data.strategies.map((s) => [s.id, s.fundable])).toEqual([
-      [sandbox.id, true],
-    ]);
-
-    const productionShelf = await getEarnAnonymously(
-      "/v1/earn/strategies?environment=production",
-      {}
-    );
-    expect(productionShelf.status).toBe(200);
-    const productionBody = shelfPageSchema.parse(await productionShelf.json());
-    expect(productionBody.data.strategies.map((s) => [s.id, s.fundable])).toEqual([
-      [production.id, true],
-    ]);
-
-    expect((await getEarnAnonymously(`/v1/earn/strategies/${sandbox.id}`, {})).status).toBe(200);
-    expect((await getEarnAnonymously(`/v1/earn/strategies/${production.id}`, {})).status).toBe(200);
-  });
-
-  it("refuses an anonymous list that names no shelf, or an unknown one", async () => {
-    await seedStrategy({ environment: "production", hostCluster: "mainnet-beta" });
-
-    for (const path of ["/v1/earn/strategies", "/v1/earn/strategies?environment=staging"]) {
-      const res = await getEarnAnonymously(path, {});
-      expect(res.status, path).toBe(400);
-      const body = errorBodySchema.parse(await res.json());
-      expect(body.error, path).toMatchObject({
-        code: "BAD_REQUEST",
-        message: "Invalid query parameters",
-      });
-    }
-  });
-
-  it("404s an anonymous detail read of an unknown strategy", async () => {
-    await seedStrategy({});
-
-    const res = await getEarnAnonymously("/v1/earn/strategies/strat_missing", {});
-
-    expect(res.status).toBe(404);
-    const body = errorBodySchema.parse(await res.json());
-    expect(body.error.code).toBe("NOT_FOUND");
-  });
-
-  it("refuses a credential that names a shelf other than its project's", async () => {
-    await seedAuth();
-    await seedClerkAuth();
-    await seedStrategy({});
-
-    const mismatch = await getEarn("/v1/earn/strategies?environment=production", {});
-    expect(mismatch.status).toBe(409);
-    const mismatchBody = errorBodySchema.parse(await mismatch.json());
-    expect(mismatchBody.error.code).toBe("CONFLICT");
-    expect(mismatchBody.error.message).toContain("follows the project");
-
-    const clerkMismatch = await getEarnAsClerk(
-      "/v1/earn/strategies?environment=sandbox",
-      TEST_PRODUCTION_PROJECT.id
-    );
-    expect(clerkMismatch.status).toBe(409);
-
-    const same = await getEarn("/v1/earn/strategies?environment=sandbox", {});
-    expect(same.status).toBe(200);
   });
 
   it("publishes depositSlippage for the caller's environment, the same answer the build gates on", async () => {
@@ -532,58 +449,48 @@ describe("Earn routes — Clerk-caller environment resolution", () => {
 });
 
 describe("Earn routes — strategy catalogue", () => {
-  it("answers anonymous and keyed readers with the same public catalogue", async () => {
+  it("answers the catalogue privately cacheable, with CORS", async () => {
     await seedAuth();
     await seedStrategy({});
-    const corsHeaders = { Origin: "http://localhost:3000" };
 
-    const anonymous = await getEarnAnonymously(
-      "/v1/earn/strategies?environment=sandbox",
-      corsHeaders
-    );
-    const keyed = await getEarn("/v1/earn/strategies", corsHeaders);
+    const keyed = await getEarn("/v1/earn/strategies", { Origin: "http://localhost:3000" });
 
-    expect(anonymous.status).toBe(200);
     expect(keyed.status).toBe(200);
-    const anonymousBody = (await anonymous.json()) as { data: unknown };
-    const keyedBody = (await keyed.json()) as { data: unknown };
-    expect(anonymousBody.data).toEqual(keyedBody.data);
-    expect(anonymous.headers.get("cache-control")).toBe(
-      "public, max-age=30, stale-while-revalidate=30"
-    );
     expect(keyed.headers.get("cache-control")).toBe("private, max-age=30");
-    expect(anonymous.headers.get("access-control-allow-origin")).toBe("http://localhost:3000");
-    expect(keyed.headers.get("access-control-allow-origin")).toBe(
-      anonymous.headers.get("access-control-allow-origin")
-    );
+    expect(keyed.headers.get("access-control-allow-origin")).toBe("http://localhost:3000");
   });
 
-  it("keeps hidden and unsurfaced strategies out of the anonymous catalogue", async () => {
-    const visible = await seedStrategy({ providerReference: "anonymous-visible-usdc" });
+  it("refuses a catalogue read with no credential", async () => {
+    await seedStrategy({});
+
+    const res = await app.request("/v1/earn/strategies", { method: "GET" }, env);
+
+    expect(res.status).toBe(401);
+  });
+
+  it("keeps hidden and unsurfaced strategies out of the catalogue", async () => {
+    await seedAuth();
+    const visible = await seedStrategy({ providerReference: "catalogue-visible-usdc" });
     const hiddenByTerms = await seedStrategy({
-      providerReference: "anonymous-morpho-usdc",
+      providerReference: "catalogue-morpho-usdc",
       name: "Morpho USDC",
       underlyingSource: "morpho",
     });
     const hiddenByProvider = await seedStrategy({
       provider: "upshift",
-      providerReference: "anonymous-upshift-usdc",
+      providerReference: "catalogue-upshift-usdc",
       name: "Upshift USDC",
     });
 
-    const list = await getEarnAnonymously("/v1/earn/strategies?environment=sandbox", {});
+    const list = await getEarn("/v1/earn/strategies", {});
     expect(list.status).toBe(200);
     const body = (await list.json()) as {
       data: { strategies: Array<{ id: string }>; total: number };
     };
     expect(body.data.strategies.map((strategy) => strategy.id)).toEqual([visible.id]);
     expect(body.data.total).toBe(1);
-    expect((await getEarnAnonymously(`/v1/earn/strategies/${hiddenByTerms.id}`, {})).status).toBe(
-      404
-    );
-    expect(
-      (await getEarnAnonymously(`/v1/earn/strategies/${hiddenByProvider.id}`, {})).status
-    ).toBe(404);
+    expect((await getEarn(`/v1/earn/strategies/${hiddenByTerms.id}`, {})).status).toBe(404);
+    expect((await getEarn(`/v1/earn/strategies/${hiddenByProvider.id}`, {})).status).toBe(404);
   });
 
   it("returns the paginated list envelope and omits non-active strategies", async () => {

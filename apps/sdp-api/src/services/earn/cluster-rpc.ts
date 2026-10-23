@@ -19,9 +19,9 @@ import { GENESIS_HASH_BY_CLUSTER, type SolanaCluster } from "@sdp/types/well-kno
  * reading the other one.
  *
  * Earn names the cluster (`earnClusterFor` of the project, strategy or row environment) because
- * anonymous Earn opens no cluster scope yet and the services the Earn crons share with request
- * paths still take one (HOO-1881). The crons themselves run once per environment inside its scope
- * and make their own reads through `createClusterRpc()` (HOO-2148). Inside a scope, naming the
+ * the services the Earn crons share with request paths still take one (HOO-1881). The crons
+ * themselves run once per environment inside its scope and make their own reads through
+ * `createClusterRpc()` (HOO-2148). Inside a scope, naming the
  * other cluster throws `CLUSTER_SCOPE_CONFLICT`.
  */
 

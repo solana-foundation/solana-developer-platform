@@ -108,18 +108,17 @@ Things that will bite:
   of `earn_external_wallet_transactions`, locked FIRST and consumable at most
   once, inside the same transaction that inserts the movement. One durable
   build can therefore never ledger twice; that consume is written HERE, with
-  the single ledger writer, not in the built-transactions repository. A
-  PRO-1943 anonymous build never reaches this repository and writes no row.
+  the single ledger writer, not in the built-transactions repository.
 - **`earn_split_swap_advisories` is advisory state, never a movement**
-  (PRO-1864, migration 0091). A row records that an authenticated split-swap
-  build handed a partner a standalone swap. An anonymous split build writes no
-  advisory. The detector writes nothing but back to this table and never
-  touches `earn_movements`. Its amount columns carry ONE declared unit each:
-  the floor and both balance samples are deposit-mint ATOMS with the decimals
-  recorded beside them, and the two `*_amount` columns are display-only
-  decimal strings. Compare atoms to atoms. `listExternalWalletDepositsSince`
-  on the movements repository is its status-aware follow-up read: a `failed`
-  deposit must not discharge an advisory.
+  (PRO-1864, migration 0091). A row records that a split-swap build handed a
+  partner a standalone swap. The detector writes nothing but back to this
+  table and never touches `earn_movements`. Its amount columns carry ONE
+  declared unit each: the floor and both balance samples are deposit-mint ATOMS
+  with the decimals recorded beside them, and the two `*_amount` columns are
+  display-only decimal strings. Compare atoms to atoms.
+  `listExternalWalletDepositsSince` on the movements repository is its
+  status-aware follow-up read: a `failed` deposit must not discharge an
+  advisory.
 
 The full rule set is in [`../../routes/earn/CLAUDE.md`](../../routes/earn/CLAUDE.md).
 Architecture and the migration inventory are in

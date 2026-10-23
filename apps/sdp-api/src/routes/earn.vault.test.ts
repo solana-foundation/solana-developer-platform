@@ -1182,13 +1182,13 @@ describe("POST /v1/earn/vault-deposits — Veda", () => {
 });
 
 describe("POST /v1/earn/vault-deposit-previews", () => {
-  function postVaultDepositPreview(body: Record<string, unknown>, authenticated: boolean) {
+  function postVaultDepositPreview(body: Record<string, unknown>) {
     return app.request(
       "/v1/earn/vault-deposit-previews",
       {
         method: "POST",
         headers: {
-          ...(authenticated ? { Authorization: `Bearer ${TEST_API_KEY.raw}` } : {}),
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify(body),
@@ -1207,72 +1207,6 @@ describe("POST /v1/earn/vault-deposit-previews", () => {
     };
   }
 
-  it("quotes anonymously without resolving tenant entitlement", async () => {
-    const strategy = await seedStrategy({ provider: "veda" });
-    const client = quoteCapableClient({
-      sharesOut: "9.99999",
-      shareDecimals: 6,
-      blockingIssues: [],
-    });
-    vaultDirectClientOverride.current = client;
-
-    const res = await postVaultDepositPreview({ strategyId: strategy.id, amount: "10" }, false);
-
-    expect(res.status).toBe(200);
-    await expect(res.json()).resolves.toMatchObject({
-      data: { strategyId: strategy.id, sharesOut: "9.99999" },
-    });
-  });
-
-  it("refuses an anonymous quote for a deployed but un-surfaced provider", async () => {
-    const strategy = await seedStrategy({
-      provider: "hastra",
-      name: "Hastra PRIME",
-      underlyingSource: undefined,
-      hostCluster: "mainnet-beta",
-      environment: "production",
-    });
-    const client = quoteCapableClient({
-      sharesOut: "9.99999",
-      shareDecimals: 6,
-      blockingIssues: [],
-    });
-    vaultDirectClientOverride.current = client;
-
-    const res = await postVaultDepositPreview({ strategyId: strategy.id, amount: "10" }, false);
-
-    expect(res.status).toBe(403);
-    expect(await res.json()).toEqual({
-      error: {
-        code: "FORBIDDEN",
-        message: "Hastra / Figure is not currently offered.",
-        details: { reason: "provider_not_offered" },
-      },
-      meta: { requestId: expect.any(String) },
-    });
-    expect(client.quoteVaultDeposit).not.toHaveBeenCalled();
-  });
-
-  it("quotes anonymously on the shelf the strategy names, not the deployment's", async () => {
-    const strategy = await seedStrategy({
-      provider: "kamino",
-      environment: "production",
-      hostCluster: "mainnet-beta",
-    });
-    vaultDirectClientOverride.current = quoteCapableClient({
-      sharesOut: "9.99999",
-      shareDecimals: 6,
-      blockingIssues: [],
-    });
-
-    const res = await postVaultDepositPreview({ strategyId: strategy.id, amount: "10" }, false);
-
-    expect(res.status).toBe(200);
-    await expect(res.json()).resolves.toMatchObject({
-      data: { strategyId: strategy.id, sharesOut: "9.99999" },
-    });
-  });
-
   it("answers the provider's own quote for a surfaced, quotable strategy", async () => {
     await seedAuth();
     const strategy = await seedStrategy({ provider: "veda" });
@@ -1283,7 +1217,7 @@ describe("POST /v1/earn/vault-deposit-previews", () => {
     });
     vaultDirectClientOverride.current = client;
 
-    const res = await postVaultDepositPreview({ strategyId: strategy.id, amount: "10" }, true);
+    const res = await postVaultDepositPreview({ strategyId: strategy.id, amount: "10" });
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as { data: Record<string, unknown> };
@@ -1312,7 +1246,7 @@ describe("POST /v1/earn/vault-deposit-previews", () => {
     );
     vaultDirectClientOverride.current = client;
 
-    const res = await postVaultDepositPreview({ strategyId: strategy.id, amount: "10" }, true);
+    const res = await postVaultDepositPreview({ strategyId: strategy.id, amount: "10" });
 
     expect(res.status).toBe(503);
     const body = (await res.json()) as { error: { code: string; message: string } };
@@ -1329,17 +1263,22 @@ describe("POST /v1/earn/vault-deposit-previews", () => {
     const client = quoteCapableClient({ sharesOut: "1", shareDecimals: 6, blockingIssues: [] });
     vaultDirectClientOverride.current = client;
 
-    const res = await postVaultDepositPreview({ strategyId: strategy.id, amount: "10" }, true);
+    const res = await postVaultDepositPreview({ strategyId: strategy.id, amount: "10" });
 
     expect(res.status).toBe(403);
     expect(client.quoteVaultDeposit).not.toHaveBeenCalled();
   });
 
-  it("answers 501 for a provider that cannot quote, measured against the real registry", async () => {
-    surfacing.forceOn = true;
-    const strategy = await seedStrategy({ provider: "upshift" });
+  it("answers 501 for a provider client that cannot quote", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy({});
+    vaultDirectClientOverride.current = {
+      buildVaultDeposit: vi.fn(),
+      readVaultPositions: vi.fn(),
+      sponsoredPrograms: vi.fn(() => []),
+    };
 
-    const res = await postVaultDepositPreview({ strategyId: strategy.id, amount: "10" }, false);
+    const res = await postVaultDepositPreview({ strategyId: strategy.id, amount: "10" });
 
     expect(res.status).toBe(501);
     const body = (await res.json()) as { error: { code: string } };
@@ -1355,10 +1294,7 @@ describe("POST /v1/earn/vault-deposit-previews", () => {
   it("answers 404 for a strategy this workspace cannot see", async () => {
     await seedAuth();
 
-    const res = await postVaultDepositPreview(
-      { strategyId: "earn_strategy_missing", amount: "1" },
-      true
-    );
+    const res = await postVaultDepositPreview({ strategyId: "earn_strategy_missing", amount: "1" });
 
     expect(res.status).toBe(404);
   });

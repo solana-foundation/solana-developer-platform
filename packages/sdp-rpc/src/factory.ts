@@ -464,8 +464,8 @@ export type EarnClusterRpcOptions = Readonly<{
 
 /**
  * Refuse Earn work that names a cluster other than the open scope's, so an Earn request inside a
- * project scope can never read the other cluster. Outside a scope (anonymous Earn, the global Earn
- * crons) the named cluster stands.
+ * project scope can never read the other cluster. Outside a scope (the global Earn crons) the
+ * named cluster stands.
  *
  * @param cluster - The cluster the Earn work named.
  * @throws SdpRpcError `CLUSTER_SCOPE_CONFLICT` inside a scope for the other cluster.

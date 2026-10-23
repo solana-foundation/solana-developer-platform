@@ -793,21 +793,12 @@ export async function cancelCustodyQueuedWithdrawal(
   return broadcastQueuedAction(env, result);
 }
 
-type ExternalBuildActor = QueuedWithdrawalActor | { environment: SdpEnvironment };
-
-function isKeyedExternalActor(actor: ExternalBuildActor): actor is QueuedWithdrawalActor {
-  return "organizationId" in actor;
-}
-
 async function compileExternalPlan(input: {
-  actor: ExternalBuildActor;
+  actor: QueuedWithdrawalActor;
   position: QueuedWithdrawalPosition;
   plan: EarnVaultTransactionPlan;
   feePayer?: string;
 }) {
-  if (!isKeyedExternalActor(input.actor) && input.feePayer !== undefined) {
-    throw badRequest("feePayer requires an API key; anonymous builds are paid by the owner");
-  }
   const cluster = earnClusterFor(input.actor.environment);
   const deadline = createVaultDeadline();
   const fee: VaultFeeMode = input.feePayer
@@ -844,7 +835,7 @@ async function compileExternalPlan(input: {
 export async function buildExternalQueuedWithdrawalRequest(
   env: Env,
   input: {
-    actor: ExternalBuildActor;
+    actor: QueuedWithdrawalActor;
     position: QueuedWithdrawalPosition;
     terms: AsyncWithdrawalTermsInput;
     feePayer?: string;
@@ -870,7 +861,7 @@ export async function buildExternalQueuedWithdrawalRequest(
     id: transactionId,
     environment: input.actor.environment,
     provider: input.position.provider,
-    position_id: input.position.id || null,
+    position_id: input.position.id,
     withdrawal_request_id: null,
     action: "request",
     mechanism,
@@ -892,7 +883,6 @@ export async function buildExternalQueuedWithdrawalRequest(
     unsigned_transaction: Buffer.from(unsigned.bytes).toString("base64"),
     last_valid_block_height: unsigned.lastValidBlockHeight,
   };
-  if (!isKeyedExternalActor(input.actor)) return built;
   const currentBlockHeight = await readConfirmedBlockHeight(
     earnClusterFor(input.actor.environment)
   );
@@ -931,13 +921,12 @@ export async function buildExternalQueuedWithdrawalRequest(
   });
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: authenticated and anonymous cancellation both validate provider truth before sharing one build/persist path.
 export async function buildExternalQueuedWithdrawalCancel(
   env: Env,
   input: {
-    actor: ExternalBuildActor;
+    actor: QueuedWithdrawalActor;
     position: QueuedWithdrawalPosition;
-    request: EarnVaultWithdrawalRequestRow | null;
+    request: EarnVaultWithdrawalRequestRow;
     requestAddress: string;
     feePayer?: string;
   }
@@ -947,70 +936,8 @@ export async function buildExternalQueuedWithdrawalCancel(
     input.position.provider,
     createVaultDeadline()
   );
-  const mechanism: EarnVaultWithdrawalMechanism =
-    input.request?.mechanism === "operator_redemption" || (!input.request && parClient)
-      ? "operator_redemption"
-      : "solver_queue";
-  if (input.request) {
-    await requireCancelableProviderRequest(env, input.request, input.position.ownerAddress);
-  } else if (mechanism === "operator_redemption") {
-    if (!parClient) throw notImplemented(input.position.provider, "par redemptions");
-    let lookup: Awaited<ReturnType<typeof parClient.readParRedemptionRequest>>;
-    try {
-      lookup = await parClient.readParRedemptionRequest(
-        { env, environment: input.actor.environment },
-        {
-          providerReference: input.position.vaultAddress,
-          requestAddress: input.requestAddress,
-        }
-      );
-    } catch (error) {
-      rethrowVaultProviderFailure(error);
-    }
-    if (lookup.status === "closedOrUnknown") throw conflict("Par redemption is already closed");
-    if (
-      lookup.requestAddress !== input.requestAddress ||
-      lookup.request.requestAddress !== input.requestAddress ||
-      lookup.request.owner !== input.position.ownerAddress ||
-      lookup.request.providerReference !== input.position.vaultAddress
-    ) {
-      throw badRequest("Par-redemption request does not match the supplied owner and strategy");
-    }
-  } else {
-    const readClient = resolveVaultQueuedWithdrawClient(
-      env,
-      input.position.provider,
-      createVaultDeadline()
-    );
-    if (!readClient) throw notImplemented(input.position.provider, "queued vault withdrawals");
-    let lookup: Awaited<ReturnType<typeof readClient.readQueuedWithdrawalRequest>>;
-    try {
-      lookup = await readClient.readQueuedWithdrawalRequest(
-        { env, environment: input.actor.environment },
-        {
-          providerReference: input.position.vaultAddress,
-          requestAddress: input.requestAddress,
-        }
-      );
-    } catch (error) {
-      rethrowVaultProviderFailure(error);
-    }
-    if (lookup.status === "closedOrUnknown") {
-      throw conflict("Queued withdrawal is already closed");
-    }
-    if (
-      lookup.requestAddress !== input.requestAddress ||
-      lookup.request.requestAddress !== input.requestAddress ||
-      lookup.request.owner !== input.position.ownerAddress ||
-      lookup.request.providerReference !== input.position.vaultAddress ||
-      lookup.request.assetMint !== input.position.tokenMint
-    ) {
-      throw badRequest("Queued withdrawal request does not match the supplied owner and strategy");
-    }
-    if (lookup.status !== "expiredCancelable") {
-      throw conflict(`Queued withdrawal cannot be cancelled while status is ${lookup.status}`);
-    }
-  }
+  const mechanism = input.request.mechanism;
+  await requireCancelableProviderRequest(env, input.request, input.position.ownerAddress);
   const transactionId = generateEarnExternalWalletWithdrawalRequestTransactionId();
   let plan: EarnVaultTransactionPlan;
   try {
@@ -1057,8 +984,8 @@ export async function buildExternalQueuedWithdrawalCancel(
     id: transactionId,
     environment: input.actor.environment,
     provider: input.position.provider,
-    position_id: input.position.id || null,
-    withdrawal_request_id: input.request?.id ?? null,
+    position_id: input.position.id,
+    withdrawal_request_id: input.request.id,
     action: "cancel",
     mechanism,
     owner_address: input.position.ownerAddress,
@@ -1079,10 +1006,6 @@ export async function buildExternalQueuedWithdrawalCancel(
     unsigned_transaction: Buffer.from(unsigned.bytes).toString("base64"),
     last_valid_block_height: unsigned.lastValidBlockHeight,
   };
-  if (!isKeyedExternalActor(input.actor)) return built;
-  if (!input.request) {
-    throw internalError("Authenticated queued cancellation requires a recorded request");
-  }
   return createPostgresEarnVaultWithdrawalRequestsRepository(
     getDb(env)
   ).createExternalWalletTransaction({

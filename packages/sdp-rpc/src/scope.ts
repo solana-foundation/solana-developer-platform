@@ -71,8 +71,8 @@ export function currentClusterScope(): ClusterScope {
 
 /**
  * The open scope's facts, or `undefined` outside one. For `@sdp/rpc`'s own Earn door, which runs
- * both inside project scopes and outside any (anonymous Earn, global Earn crons); the Biome fence
- * keeps it out of every other caller.
+ * both inside project scopes and outside any (the global Earn crons); the Biome fence keeps it out
+ * of every other caller.
  *
  * @returns The open scope, if any.
  */

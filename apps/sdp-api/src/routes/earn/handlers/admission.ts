@@ -10,15 +10,11 @@ import {
 } from "@sdp/types/provider-access";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
-import { getOptionalAuth } from "@/lib/auth";
 import { badRequest, forbidden } from "@/lib/errors";
 import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import type { AppContext } from "@/routes/earn/context";
 import { assertVaultExposureWithinCap } from "@/services/earn/vault-exposure";
-import {
-  assertAnonymousEarnProviderOffered,
-  assertProviderAvailable,
-} from "@/services/provider-availability.service";
+import { assertProviderAvailable } from "@/services/provider-availability.service";
 
 /**
  * The ONE money-in admission predicate for an Earn catalogue row.
@@ -94,9 +90,7 @@ export function assertVaultDepositEnvironmentOpen(
  * `POST /external-wallet/deposit-transactions` (caller-signed), and
  * `POST /vault-deposit-previews` (the quote that opens either). Runs, in
  * order: deposit-style shape, provider registration, environment capability,
- * the project provider rule for an authenticated caller (an anonymous caller
- * has no project for it to decide from, so only its surfacing check applies),
- * catalogue admission,
+ * the project provider rule, catalogue admission,
  * and LAST, when the caller passes the deposit `amount`, the SDP-wide vault
  * exposure cap (ADR 0004 layer 1, `services/earn/vault-exposure.ts`). Keep it shared: a second copy
  * is a second thing that can drift toward permissive.
@@ -137,11 +131,7 @@ export async function assertVaultDepositAdmissible(
   const provider = strategy.provider;
 
   assertVaultDepositEnvironmentOpen(environment, provider);
-  if (getOptionalAuth(c)) {
-    await assertProviderAvailable(c, { family: "earn", provider });
-  } else {
-    assertAnonymousEarnProviderOffered(provider);
-  }
+  await assertProviderAvailable(c, { family: "earn", provider });
   assertStrategyDepositable(strategy, environment);
 
   if (amount !== undefined) {

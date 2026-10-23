@@ -160,20 +160,6 @@ function depositInput(
   };
 }
 
-function anonymousDepositInput(): ExternalWalletDepositBuildInput {
-  return {
-    environment: "sandbox",
-    provider: "kamino",
-    strategyId: "strategy_ext_test",
-    providerReference: VAULT,
-    ownerAddress,
-    tokenMint: TOKEN_MINT,
-    shareMint: SHARE_MINT,
-    label: "Test USDC Vault",
-    amount: "25",
-  };
-}
-
 async function seedTenancy(): Promise<void> {
   const db = getDb(env);
   await db.batch([
@@ -235,21 +221,6 @@ function withdrawalInput(
     shares: "10",
     userId: USER,
     ...overrides,
-  };
-}
-
-function anonymousWithdrawalInput(): ExternalWalletWithdrawalBuildInput {
-  return {
-    environment: "sandbox",
-    provider: "kamino",
-    positionId: null,
-    vaultAddress: VAULT,
-    tokenMint: TOKEN_MINT,
-    shareMint: SHARE_MINT,
-    ownerAddress,
-    label: "Exit Vault",
-    shareAtaRentFunder: null,
-    shares: "10",
   };
 }
 
@@ -379,33 +350,6 @@ describe("buildExternalWalletDepositTransaction", () => {
     );
     // The provider build was NOT asked to name a separate rent payer.
     expect(buildVaultDeposit.mock.calls[0][1]).not.toHaveProperty("rentPayer");
-  });
-
-  it("returns an anonymous owner-paid build without persisting it", async () => {
-    const result = await buildExternalWalletDepositTransaction(env, anonymousDepositInput());
-    if (result.kind !== "built") throw new Error(`expected built, got ${result.kind}`);
-
-    expect(result.built.owner_address).toBe(ownerAddress);
-    expect(result.built.fee_payer).toBeNull();
-    expect(simulateVaultPlan).toHaveBeenCalledWith(
-      expect.objectContaining({ owner: ownerAddress, fee: { kind: "wallet-pays" } })
-    );
-    const row = await getDb(env)
-      .prepare("SELECT COUNT(*)::int AS builds FROM earn_external_wallet_transactions")
-      .first<{ builds: number }>();
-    expect(row?.builds).toBe(0);
-  });
-
-  it("rejects a separate fee payer without tenant context", async () => {
-    await expect(
-      buildExternalWalletDepositTransaction(env, {
-        ...anonymousDepositInput(),
-        feePayer: VAULT,
-      })
-    ).rejects.toMatchObject({
-      code: "BAD_REQUEST",
-      message: "Anonymous external-wallet builds must use the owner as fee payer",
-    });
   });
 
   it("answers 501 when the provider has no vault-direct capability", async () => {
@@ -1309,32 +1253,6 @@ describe("partner fee payer (caller-provided)", () => {
 });
 
 describe("external-wallet withdrawals", () => {
-  it("returns an anonymous owner-paid exit build without persisting it", async () => {
-    const built = await buildExternalWalletWithdrawalTransaction(env, anonymousWithdrawalInput());
-
-    expect(built.position_id).toBeNull();
-    expect(built.fee_payer).toBeNull();
-    expect(simulateVaultPlan).toHaveBeenCalledWith(
-      expect.objectContaining({ owner: ownerAddress, fee: { kind: "wallet-pays" } })
-    );
-    const row = await getDb(env)
-      .prepare("SELECT COUNT(*)::int AS builds FROM earn_external_wallet_transactions")
-      .first<{ builds: number }>();
-    expect(row?.builds).toBe(0);
-  });
-
-  it("rejects a separate exit fee payer without tenant context", async () => {
-    await expect(
-      buildExternalWalletWithdrawalTransaction(env, {
-        ...anonymousWithdrawalInput(),
-        feePayer: VAULT,
-      })
-    ).rejects.toMatchObject({
-      code: "BAD_REQUEST",
-      message: "Anonymous external-wallet builds must use the owner as fee payer",
-    });
-  });
-
   it("builds and submits the exit against the recorded position", async () => {
     const positionId = await seedExternalWalletPosition();
     const built = await buildExternalWalletWithdrawalTransaction(env, withdrawalInput(positionId));
