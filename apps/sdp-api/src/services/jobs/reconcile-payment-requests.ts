@@ -1,6 +1,5 @@
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
-import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
 import { createSystemPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
@@ -9,6 +8,7 @@ import {
   checkAwaitingPaymentRequest,
   checkExpiredPaymentRequestForLatePayment,
   closeLapsedPaymentRequest,
+  type PaymentRequestCheck,
 } from "@/services/payments/payment-requests";
 import type { Env } from "@/types/env";
 
@@ -28,7 +28,7 @@ const LATE_PAYMENT_RECHECK_MS = 10 * 60_000;
 const STALE_AFTER_MS = 2 * SWEEP_AGED_RECHECK_MS;
 const LATE_PAYMENT_STALE_AFTER_MS = 2 * LATE_PAYMENT_RECHECK_MS;
 
-type RowCheck = (env: Env, row: PaymentRequestRow) => Promise<PaymentRequestRow>;
+type RowCheck = (env: Env, row: PaymentRequestRow) => Promise<PaymentRequestCheck>;
 type Lane = "hot" | "sweep" | "expiry" | "late_watch";
 
 interface LaneRun {
@@ -45,9 +45,7 @@ export async function reconcileHotPaymentRequests(env: Env): Promise<void> {
     minLastValidBlockHeight: blockHeight - HOT_LANE_BLOCK_MARGIN,
     limit: HOT_BATCH_SIZE,
   });
-  throwIfEveryCheckFailed(
-    await checkEach(env, environment, rows, checkAwaitingPaymentRequest, "hot")
-  );
+  throwIfEveryCheckFailed(await checkEach(env, rows, checkAwaitingPaymentRequest, "hot"));
 }
 
 export async function reconcilePaymentRequests(env: Env): Promise<void> {
@@ -69,9 +67,7 @@ export async function reconcilePaymentRequests(env: Env): Promise<void> {
     agedCreatedBefore: new Date(now - SWEEP_AGED_AFTER_MS).toISOString(),
     limit: SWEEP_BATCH_SIZE,
   });
-  throwIfEveryCheckFailed(
-    await checkEach(env, environment, rows, checkAwaitingPaymentRequest, "sweep")
-  );
+  throwIfEveryCheckFailed(await checkEach(env, rows, checkAwaitingPaymentRequest, "sweep"));
 }
 
 export async function expirePaymentRequests(env: Env): Promise<void> {
@@ -91,7 +87,7 @@ export async function expirePaymentRequests(env: Env): Promise<void> {
     liveClaimMinLastValidBlockHeight: blockHeight - HOT_LANE_BLOCK_MARGIN,
     limit: EXPIRY_BATCH_SIZE,
   });
-  const expiry = await checkEach(env, environment, lapsed, closeLapsedPaymentRequest, "expiry");
+  const expiry = await checkEach(env, lapsed, closeLapsedPaymentRequest, "expiry");
 
   const now = Date.now();
   const expiredSince = new Date(now - LATE_PAYMENT_WATCH_MS).toISOString();
@@ -112,7 +108,6 @@ export async function expirePaymentRequests(env: Env): Promise<void> {
   });
   const lateWatch = await checkEach(
     env,
-    environment,
     watched,
     checkExpiredPaymentRequestForLatePayment,
     "late_watch"
@@ -133,7 +128,6 @@ function throwIfEveryCheckFailed(...runs: readonly LaneRun[]): void {
 
 async function checkEach(
   env: Env,
-  environment: SdpEnvironment,
   rows: readonly PaymentRequestRow[],
   check: RowCheck,
   lane: Lane
@@ -147,16 +141,19 @@ async function checkEach(
   for (const [index, row] of rows.entries()) {
     const result = results[index];
     if (result?.status === "fulfilled") {
-      verified.push(row.id);
-      if (result.value.status !== row.status) {
+      const { row: after, chainRead } = result.value;
+      if (chainRead) {
+        verified.push(row.id);
+      }
+      if (after.status !== row.status) {
         settled += 1;
         logEvent("info", {
           event: "payment_requests.settled",
           lane,
           payment_request_id: row.id,
           from: row.status,
-          to: result.value.status,
-          paid_late: result.value.paid_late,
+          to: after.status,
+          paid_late: after.paid_late,
         });
       }
       continue;
@@ -177,7 +174,7 @@ async function checkEach(
   }
   logEvent(failed > 0 ? "warn" : "info", {
     event: "payment_requests.lane_run",
-    environment,
+    environment: currentClusterScope().environment,
     lane,
     checked: rows.length,
     failed,

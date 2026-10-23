@@ -70,12 +70,8 @@ import { syntheticAddress } from "@/test/helpers/parsed-transactions";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import * as paymentRequestTransfer from "./payment-request-transfer";
-import {
-  checkAwaitingPaymentRequest,
-  checkExpiredPaymentRequestForLatePayment,
-  closeLapsedPaymentRequest,
-  reconcilePaymentRequest,
-} from "./payment-requests";
+import * as paymentRequests from "./payment-requests";
+import { reconcilePaymentRequest } from "./payment-requests";
 
 const TEST_PROJECT_ID = "prj_preq_handler_test";
 const TEST_CONFIG_ID = "cust_cfg_preq_handler_test";
@@ -87,6 +83,24 @@ const FAILED_SIGNATURE = signature(getBase58Decoder().decode(new Uint8Array(64).
 const DEVNET_USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
 const PAST = "2020-01-01T00:00:00.000Z";
 const PAST_SECONDS = BigInt(Date.parse(PAST) / 1000);
+
+async function checkAwaitingPaymentRequest(
+  ...args: Parameters<typeof paymentRequests.checkAwaitingPaymentRequest>
+) {
+  return (await paymentRequests.checkAwaitingPaymentRequest(...args)).row;
+}
+
+async function closeLapsedPaymentRequest(
+  ...args: Parameters<typeof paymentRequests.closeLapsedPaymentRequest>
+) {
+  return (await paymentRequests.closeLapsedPaymentRequest(...args)).row;
+}
+
+async function checkExpiredPaymentRequestForLatePayment(
+  ...args: Parameters<typeof paymentRequests.checkExpiredPaymentRequestForLatePayment>
+) {
+  return (await paymentRequests.checkExpiredPaymentRequestForLatePayment(...args)).row;
+}
 
 let signaturesSpy: MockInstance<typeof solanaRpc.getSignaturesForAddress>;
 let validateTransferSpy: MockInstance<typeof paymentRequestTransfer.validatePaymentRequestTransfer>;
@@ -395,6 +409,46 @@ describe("reconcilePaymentRequest", () => {
 
     await expect(reconcileOnSandbox(request)).rejects.toThrow("does not match payment request");
     expect(await listInboundTransfers()).toMatchObject([{ custody_wallet_id: null }]);
+  });
+
+  it("finalizes a matching transfer an earlier check recorded as confirmed", async () => {
+    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+    const transfer = await createPaymentsRepository(
+      env,
+      createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID })
+    ).createTransfer({
+      id: "xfr_confirmed_earlier",
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      custodyWalletId: TEST_CUSTODY_WALLET_ID,
+      walletId: TEST_WALLET_ID,
+      counterpartyId: null,
+      sourceAddress: null,
+      destinationAddress: TEST_CUSTODY_PUBLIC_KEY,
+      token: SOL_MINT,
+      amount: "1.5",
+      memo: null,
+      type: "transfer",
+      direction: "inbound",
+      status: "confirmed",
+      provider: null,
+      providerReference: null,
+      deliveryMode: null,
+      fiatCurrency: null,
+      fiatAmount: null,
+      providerData: {},
+      serializedTx: null,
+      signature: SIGNATURE,
+      slot: 1,
+      initiatedByKeyId: null,
+    });
+    if (!transfer) throw new Error("Expected confirmed transfer fixture creation to succeed");
+    mockSettlementSucceeds(null);
+
+    const settled = await reconcileOnSandbox(request);
+
+    expect(settled).toMatchObject({ status: "paid", fulfilled_by_transfer_id: transfer.id });
+    expect(await listInboundTransfers()).toMatchObject([{ id: transfer.id, status: "finalized" }]);
   });
 
   it.for([
@@ -766,6 +820,36 @@ describe("settlement audit", () => {
 
 describe("verified check stamp", () => {
   installSettlementHooks();
+
+  it("reports a check on a request that lapsed after selection as not reading the chain", async () => {
+    const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
+
+    const check = await onSandbox(() => paymentRequests.checkAwaitingPaymentRequest(env, request));
+
+    expect(check).toEqual({ row: request, chainRead: false });
+    expect(signaturesSpy).not.toHaveBeenCalled();
+  });
+
+  it("reports a completed search as reading the chain even when it finds nothing", async () => {
+    mockNoSignatures();
+    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+
+    const check = await onSandbox(() => paymentRequests.checkAwaitingPaymentRequest(env, request));
+
+    expect(check).toEqual({ row: request, chainRead: true });
+  });
+
+  it("expires a lapsed request whose mint is no longer admitted without claiming a chain read", async () => {
+    vi.spyOn(paymentAmounts, "loadPaymentMint").mockRejectedValue(
+      badRequest("Token mint account does not exist")
+    );
+    const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
+
+    const check = await onSandbox(() => paymentRequests.closeLapsedPaymentRequest(env, request));
+
+    expect(check).toMatchObject({ row: { status: "expired" }, chainRead: false });
+    expect(signaturesSpy).not.toHaveBeenCalled();
+  });
 
   it("stamps last_verified_at when a payer-path check settles the request", async () => {
     mockSettlementSucceeds(null);
@@ -1240,13 +1324,13 @@ describe("settlement atomicity", () => {
   it("records no transfer when the status transition fails", async () => {
     const real = repositoryFactory.createTransactionalPaymentRequestsRepository;
     vi.spyOn(repositoryFactory, "createTransactionalPaymentRequestsRepository").mockImplementation(
-      (db, scope) =>
-        new Proxy(real(db, scope), {
-          get: (target, property, receiver) =>
-            property === "markPaymentRequest"
-              ? () => Promise.reject(new Error("transition failed"))
-              : Reflect.get(target, property, receiver),
-        })
+      (db, scope) => {
+        const repository = real(db, scope);
+        vi.spyOn(repository, "markPaymentRequest").mockRejectedValue(
+          new Error("transition failed")
+        );
+        return repository;
+      }
     );
     mockSettlementSucceeds(null);
     const request = await createRequest({ token: SOL_MINT, expiresAt: null });
@@ -1296,13 +1380,14 @@ describe("settlement convergence", () => {
     const real = repositoryFactory.createTransactionalPaymentsRepository;
     let lookups = 0;
     vi.spyOn(repositoryFactory, "createTransactionalPaymentsRepository").mockImplementation(
-      (db, scope) =>
-        new Proxy(real(db, scope), {
-          get: (target, property, receiver) =>
-            property === "listTransfersBySignatures" && lookups++ === 0
-              ? () => Promise.resolve([])
-              : Reflect.get(target, property, receiver),
-        })
+      (db, scope) => {
+        const repository = real(db, scope);
+        const lookup = repository.listTransfersBySignatures.bind(repository);
+        vi.spyOn(repository, "listTransfersBySignatures").mockImplementation((params) =>
+          lookups++ === 0 ? Promise.resolve([]) : lookup(params)
+        );
+        return repository;
+      }
     );
     mockSettlementSucceeds(null);
 

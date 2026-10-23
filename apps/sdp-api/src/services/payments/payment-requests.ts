@@ -58,6 +58,7 @@ type FoundPayment = z.infer<typeof foundPaymentSchema>;
 const paymentSearchResultSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("paid"), found: foundPaymentSchema }),
   z.object({ kind: z.literal("pending") }),
+  z.object({ kind: z.literal("skipped") }),
   z.object({ kind: z.literal("none") }),
 ]);
 type PaymentSearchResult = z.infer<typeof paymentSearchResultSchema>;
@@ -110,61 +111,94 @@ export async function reconcilePaymentRequest(
     setRetryAfter(PAYMENT_SEARCH_RETRY_AFTER_SECONDS);
     throw rateLimited("A payment to this request may still be confirming; retry shortly");
   }
-  if (result.kind === "none") {
+  if (result.kind === "none" || result.kind === "skipped") {
     return row;
   }
   return settlePaymentRequest(env, row, row.custody_wallet_id, result.found);
+}
+
+/** A background check's outcome: the row after it, and whether the chain was actually read. */
+export interface PaymentRequestCheck {
+  row: PaymentRequestRow;
+  chainRead: boolean;
+}
+
+function skippedCheck(row: PaymentRequestRow): PaymentRequestCheck {
+  return { row, chainRead: false };
+}
+
+async function settleIfPaid(
+  env: Env,
+  row: PaymentRequestRow,
+  custodyWalletId: string,
+  result: PaymentSearchResult
+): Promise<PaymentRequestCheck> {
+  switch (result.kind) {
+    case "paid":
+      return {
+        row: await settlePaymentRequest(env, row, custodyWalletId, result.found),
+        chainRead: true,
+      };
+    case "pending":
+    case "none":
+      return { row, chainRead: true };
+    case "skipped":
+      return skippedCheck(row);
+    default: {
+      const unreachable: never = result;
+      throw internalError(`Unhandled payment search result ${String(unreachable)}`);
+    }
+  }
 }
 
 export async function checkAwaitingPaymentRequest(
   env: Env,
   row: PaymentRequestRow
-): Promise<PaymentRequestRow> {
+): Promise<PaymentRequestCheck> {
   if (
     row.status !== "awaiting_payment" ||
     isPaymentRequestExpired(row.expires_at) ||
     row.custody_wallet_id === null
   ) {
-    return row;
+    return skippedCheck(row);
   }
-  const result = await findValidPayment(env, row);
-  if (result.kind !== "paid") {
-    return row;
-  }
-  return settlePaymentRequest(env, row, row.custody_wallet_id, result.found);
+  return settleIfPaid(env, row, row.custody_wallet_id, await findValidPayment(env, row));
 }
 
 export async function closeLapsedPaymentRequest(
   env: Env,
   row: PaymentRequestRow
-): Promise<PaymentRequestRow> {
+): Promise<PaymentRequestCheck> {
   if (row.status !== "awaiting_payment" || !isPaymentRequestExpired(row.expires_at)) {
-    return row;
+    return skippedCheck(row);
   }
-  if (row.custody_wallet_id !== null) {
-    const result = await findValidPayment(env, row);
-    if (result.kind === "paid") {
-      return settlePaymentRequest(env, row, row.custody_wallet_id, result.found);
-    }
-    if (result.kind === "pending") {
-      return row;
+  if (row.custody_wallet_id === null) {
+    return skippedCheck(await markExpired(env, row));
+  }
+  const result = await findValidPayment(env, row);
+  switch (result.kind) {
+    case "paid":
+    case "pending":
+      return settleIfPaid(env, row, row.custody_wallet_id, result);
+    case "none":
+      return { row: await markExpired(env, row), chainRead: true };
+    case "skipped":
+      return skippedCheck(await markExpired(env, row));
+    default: {
+      const unreachable: never = result;
+      throw internalError(`Unhandled payment search result ${String(unreachable)}`);
     }
   }
-  return markExpired(env, row);
 }
 
 export async function checkExpiredPaymentRequestForLatePayment(
   env: Env,
   row: PaymentRequestRow
-): Promise<PaymentRequestRow> {
+): Promise<PaymentRequestCheck> {
   if (row.status !== "expired" || row.custody_wallet_id === null) {
-    return row;
+    return skippedCheck(row);
   }
-  const result = await findValidPayment(env, row);
-  if (result.kind !== "paid") {
-    return row;
-  }
-  return settlePaymentRequest(env, row, row.custody_wallet_id, result.found);
+  return settleIfPaid(env, row, row.custody_wallet_id, await findValidPayment(env, row));
 }
 
 function isPaidLate(blockTime: bigint | null, expiresAt: string | null): boolean {
@@ -180,7 +214,7 @@ async function findValidPayment(env: Env, row: PaymentRequestRow): Promise<Payme
   const reference = assertValidAddress(row.reference, "reference");
   const expected = await expectedTransfer(row, reference);
   if (expected === null) {
-    return { kind: "none" };
+    return { kind: "skipped" };
   }
   const from: SignatureScanPosition = {
     cursor: row.signature_scan_cursor,
@@ -569,7 +603,16 @@ async function recordInboundTransfer(
     ) {
       throw new AppError("CONFLICT", "Recorded transfer does not match payment request");
     }
-    return existing;
+    const finalized = await paymentsRepo.updateTransfer({
+      transferId: existing.id,
+      organizationId: row.organization_id,
+      projectId,
+      expectedStatus: "confirmed",
+      status: "finalized",
+      slot: Number(found.slot),
+      updatedAt: new Date().toISOString(),
+    });
+    return finalized ?? existing;
   }
   const transfer = await paymentsRepo.createTransfer({
     id: generatePaymentTransferId(),

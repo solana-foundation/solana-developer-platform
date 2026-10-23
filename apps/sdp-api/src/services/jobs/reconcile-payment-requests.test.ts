@@ -7,8 +7,10 @@ import {
   createPaymentRequestsRepository,
   createSystemPaymentRequestsRepository,
 } from "@/db/repositories/repository-factory";
+import { badRequest } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import * as moneyPathEvents from "@/runtime/money-path-events";
+import * as paymentAmounts from "@/services/payments/token-amount";
 import { TEST_CUSTODY_PUBLIC_KEY } from "@/test/fixtures/custody";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
@@ -270,6 +272,21 @@ describe("reconcilePaymentRequests", () => {
       expect.objectContaining({ event: "payment_requests.reconcile_backlog", stale: 1 })
     );
     expect((await getRow(request.id)).last_checked_at).not.toBe(PAST);
+  });
+
+  it("does not mark a request verified when its check never read the chain", async () => {
+    const signatures = vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);
+    vi.spyOn(paymentAmounts, "loadPaymentMint").mockRejectedValue(
+      badRequest("Token mint account does not exist")
+    );
+    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+
+    await onSandbox(() => reconcilePaymentRequests(env));
+
+    const row = await getRow(request.id);
+    expect(signatures).not.toHaveBeenCalled();
+    expect(row.last_checked_at).not.toBeNull();
+    expect(row.last_verified_at).toBeNull();
   });
 
   it("reports a row whose checks keep failing as backlog", async () => {
