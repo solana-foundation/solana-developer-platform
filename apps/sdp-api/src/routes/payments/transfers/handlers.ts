@@ -323,6 +323,8 @@ async function updateOnchainTransferForRamp(
     operation: OutboundPaymentOperation;
     basis: TokenMovementBasis;
     destinationAddress: string;
+    /** The request's memo: a provider destination that requires memos refuses a deposit without one. */
+    memo: string | null;
     idempotency: { key: string; fingerprint: string } | null;
   }
 ): Promise<{ row: TransferRow; plan: PlannedTokenMovement }> {
@@ -364,7 +366,7 @@ async function updateOnchainTransferForRamp(
     basis: input.basis,
     source: operation.sourceAddress,
     destinations: [{ owner: operation.destinationAddress, amount: operation.amount }],
-    memo: null,
+    memo: input.memo,
   });
   assertRampDepositFunded(existing, plan);
 
@@ -983,6 +985,7 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
       operation,
       basis,
       destinationAddress: body.destination,
+      memo: body.memo ?? null,
       idempotency,
     });
     transfer = claimed.row;
