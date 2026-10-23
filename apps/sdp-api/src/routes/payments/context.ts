@@ -1,6 +1,7 @@
 import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import type { Context } from "hono";
+import { getDb } from "@/db/client";
 import {
   createCounterpartiesRepository,
   createCounterpartyAccountsRepository,
@@ -9,6 +10,7 @@ import {
   createPaymentsRepository,
   createPaymentTransferBatchesRepository,
 } from "@/db/repositories/repository-factory";
+import { createPostgresTokenMovementLegsRepository } from "@/db/repositories/token-movement-legs.repository";
 import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { rampRuntimeFor } from "@/services/ramps/runtime";
@@ -43,4 +45,8 @@ export function getPaymentRecurringPaymentsRepository(c: AppContext) {
 
 export function getPaymentTransferBatchesRepository(c: AppContext) {
   return createPaymentTransferBatchesRepository(c.env, getRequestTenantScope(c));
+}
+
+export function getTokenMovementLegsRepository(c: AppContext) {
+  return createPostgresTokenMovementLegsRepository(getDb(c.env), getRequestTenantScope(c));
 }

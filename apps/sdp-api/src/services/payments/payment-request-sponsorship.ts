@@ -24,15 +24,21 @@ import {
   pipe,
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
+  type TransactionSigner,
 } from "@solana/kit";
 import { getTransferSolInstruction } from "@solana-program/system";
+import {
+  findAssociatedTokenPda,
+  getCreateAssociatedTokenIdempotentInstruction,
+  getTransferCheckedInstruction,
+} from "@solana-program/token-2022";
 import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db/client";
 import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
 import { createSystemPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { badRequest, rateLimited } from "@/lib/errors";
-import { buildSplTransferInstructions } from "@/routes/payments/token-accounts";
+import { resolveSourceTokenAccount } from "@/routes/payments/token-accounts";
 import { AuditService } from "@/services/audit.service";
 import { loadPaymentMint } from "@/services/payments/token-amount";
 import {
@@ -240,10 +246,69 @@ export async function issuePaymentRequestTransaction(
 }
 
 /**
+ * The SPL transfer a payer signs for a payment request: an idempotent create
+ * of the recipient's token account (rent from the sponsor) and a
+ * `TransferChecked` from the payer's largest token account, the request's
+ * amount as the debit.
+ *
+ * Payment requests still settle through `validatePaymentRequestTransfer`,
+ * which accepts only a final transfer instruction carrying the reference. So
+ * /pay keeps this shape, and `loadPaymentMint`'s refusal of mints that rescale
+ * or cannot move, until it settles on the signatures SDP issued (ADR 0012,
+ * PR 3), and then builds with `buildTokenMovement`, whose
+ * `TransferCheckedWithFee` and hook accounts that validation would refuse.
+ *
+ * RPC budget: the mint (none for a catalogue mint) and the payer's token
+ * accounts, as before.
+ */
+async function buildPaymentRequestSplTransfer(input: {
+  payer: TransactionSigner;
+  destination: Address;
+  mint: Address;
+  amount: string;
+  ataRentPayer: Address;
+}) {
+  const { tokenProgram, decimals, toBaseUnits } = await loadPaymentMint(input.mint);
+  const sourceTokenAccount = await resolveSourceTokenAccount(
+    input.payer.address,
+    input.mint,
+    tokenProgram
+  );
+  const transferAmount = toBaseUnits(input.amount);
+  if (transferAmount <= 0n) {
+    throw badRequest("Transfer amount must be greater than zero");
+  }
+  const [destinationTokenAccount] = await findAssociatedTokenPda({
+    owner: input.destination,
+    tokenProgram,
+    mint: input.mint,
+  });
+  return {
+    createDestinationAtaInstruction: getCreateAssociatedTokenIdempotentInstruction({
+      payer: createNoopSigner(input.ataRentPayer),
+      ata: destinationTokenAccount,
+      owner: input.destination,
+      mint: input.mint,
+      tokenProgram,
+    }),
+    transferInstruction: getTransferCheckedInstruction(
+      {
+        source: sourceTokenAccount.tokenAccount,
+        mint: input.mint,
+        destination: destinationTokenAccount,
+        authority: input.payer,
+        amount: transferAmount,
+        decimals,
+      },
+      { programAddress: tokenProgram }
+    ),
+  };
+}
+
+/**
  * Compile the unsigned transfer a payment request asks for, with the request's reference account
  * on the transfer instruction so the payment can be found on chain.
  *
- * @param rpc - Solana RPC, for the SPL destination account lookup.
  * @param params - The transfer and its lifetime.
  * @param params.request - The payment request: token and amount.
  * @param params.payer - The account that pays and signs client-side.
@@ -285,8 +350,8 @@ async function buildPaymentTransaction(params: {
     instructions = [withReference(transferInstruction)];
   } else {
     const { createDestinationAtaInstruction, transferInstruction } =
-      await buildSplTransferInstructions({
-        authority: payerSigner,
+      await buildPaymentRequestSplTransfer({
+        payer: payerSigner,
         destination: recipient,
         mint: assertValidAddress(request.token, "token"),
         amount: request.amount,

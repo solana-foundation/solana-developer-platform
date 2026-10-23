@@ -6,6 +6,11 @@ import {
   RAMPS_MEMO_LIMITS,
 } from "@sdp/types/payments";
 import { PERSISTED_RAMP_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types/provider-access";
+import {
+  AMOUNT_VERIFICATION_REASONS,
+  AMOUNT_VERIFICATION_STATES,
+  TOKEN_MOVEMENT_BASES,
+} from "@sdp/types/token-movements";
 import { UNIFIED_TRANSACTION_MODULE_CONTRACTS } from "@sdp/types/unified-transactions";
 import { z } from "zod";
 import { listOfframpCurrenciesQuerySchema as listOfframpCurrenciesQuerySchemaBase } from "@/routes/payments/ramps/offramp/schemas";
@@ -75,6 +80,77 @@ export const tokenAmountSchema = z.string().openapi({
   description: "Token amount in UI units (decimal string).",
   example: "100.00",
 });
+
+const TOKEN_UNITS_NOTE =
+  "token units: base units ÷ 10^decimals, as a decimal string. Never the display value a scaled or interest-bearing mint shows; see `amounts.display`.";
+
+/** A token amount in token units, for the fields token movements define. */
+export const tokenUnitsAmountSchema = z.string().openapi({
+  description: `Token amount in ${TOKEN_UNITS_NOTE}`,
+  example: "100",
+});
+
+export const tokenMovementBasisSchema = z.enum(TOKEN_MOVEMENT_BASES).openapi({
+  description:
+    "Which side of the transfer `amount` fixes: `debit` is what leaves the source wallet, `credit` is what the destination receives. When the mint charges a transfer fee, the other side differs by the fee.",
+  example: "debit",
+});
+
+export const tokenMovementAmountsSchema = z
+  .object({
+    basis: tokenMovementBasisSchema,
+    debit: z.string().openapi({
+      description: `What leaves the source wallet, in ${TOKEN_UNITS_NOTE}`,
+      example: "100",
+    }),
+    fee: z.string().openapi({
+      description:
+        "The mint's transfer fee, withheld in the destination token account, in token units. Zero for a mint without a transfer fee. Never the network fee, which is `fee` in lamports.",
+      example: "0",
+    }),
+    credit: z.string().openapi({
+      description: `What the destination receives: \`debit\` − \`fee\`, in ${TOKEN_UNITS_NOTE}`,
+      example: "100",
+    }),
+    decimals: z
+      .number()
+      .int()
+      .openapi({ description: "The mint's decimals the amounts are in.", example: 6 }),
+    display: z
+      .object({
+        debit: z.string().openapi({ description: "`debit` as wallets show it.", example: "150" }),
+        fee: z.string().openapi({ description: "`fee` as wallets show it.", example: "0" }),
+        credit: z.string().openapi({ description: "`credit` as wallets show it.", example: "150" }),
+        asOf: isoDateTimeSchema.openapi({
+          description:
+            "The chain time the display values are for. An interest-bearing mint's display changes every second, so they are approximate.",
+          example: "2025-01-01T00:00:00.000Z",
+        }),
+      })
+      .optional()
+      .openapi({
+        description:
+          "The amounts as wallets show them, for one movement of a scaled or interest-bearing mint only.",
+      }),
+  })
+  .openapi({
+    description:
+      "What the movement moves, in token units, as SDP quoted and signed it: `debit` = `credit` + `fee`. Present only for movements SDP built with a quote; earlier records have none.",
+  });
+
+export const amountVerificationSchema = z
+  .object({
+    state: z.enum(AMOUNT_VERIFICATION_STATES).openapi({
+      description:
+        "`pending` until SDP knows the outcome, `verified` once the chain shows the movement moved exactly `amounts` (a transfer SDP built and signed is verified when it lands), `mismatch` when the chain shows otherwise, `not_required` when the movement never executed. Independent of `status`.",
+      example: "verified",
+    }),
+    reason: z.enum(AMOUNT_VERIFICATION_REASONS).optional().openapi({
+      description: "Why the state was reached; absent while pending.",
+      example: "sdp_built_transfer_landed",
+    }),
+  })
+  .openapi({ description: "Whether SDP has checked what the movement moved against `amounts`." });
 
 export const paymentWalletIdParamsSchema = walletIdParamsSchemaBase
   .extend({
@@ -166,11 +242,17 @@ export const createTransferRequestSchema = createTransferSchemaBase
       example: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     }),
     amount: withOpenApi(createTransferSchemaBase.shape.amount, {
-      description: "Token amount in UI units (decimal string).",
+      description: `Token amount in ${TOKEN_UNITS_NOTE} With \`transferId\`, the provider's deposit amount: a receipt the destination must get in full.`,
       example: "100.00",
     }),
+    amountBasis: withOpenApi(createTransferSchemaBase.shape.amountBasis, {
+      description:
+        "Which side of the transfer `amount` fixes. `debit` (the default) sends `amount` from the source wallet, and the destination receives it less any transfer fee; `credit` delivers `amount` to the destination, and the source wallet is debited it plus the fee. With `transferId` the default is `credit`, and `debit` is refused.",
+      example: "debit",
+    }),
     memo: withOpenApi(createTransferSchemaBase.shape.memo, {
-      description: "Optional memo for the transfer.",
+      description:
+        "Optional memo for the transfer. When the destination token account requires memos on incoming transfers, it is sent on chain directly before the transfer, and such a transfer without a memo is refused.",
     }),
   })
   .openapi({
@@ -378,7 +460,11 @@ export const transferSchema = z
         example: { invoice: "INV-123", po: "PO-9" },
       }),
     token: z.string().optional().openapi({ description: "Token symbol or mint address." }),
-    amount: tokenAmountSchema.optional(),
+    amount: tokenUnitsAmountSchema.optional().openapi({
+      description: `What the transfer moved from or to its own wallet, in ${TOKEN_UNITS_NOTE} An off-ramp keeps the provider's deposit amount.`,
+    }),
+    amounts: tokenMovementAmountsSchema.optional(),
+    amountVerification: amountVerificationSchema.optional(),
     provider: z.enum(PERSISTED_RAMP_PROVIDERS).optional().openapi({
       description:
         "Ramp provider for on-ramp and off-ramp transfer records. A retired provider's records keep its id.",
@@ -546,7 +632,11 @@ export const transferBatchRecipientSchema = z
     destination: solanaAddressSchema.openapi({
       description: "Resolved Solana destination address.",
     }),
-    amount: tokenAmountSchema,
+    amount: tokenUnitsAmountSchema.openapi({
+      description: `What the recipient's transfer debits from the source wallet, in ${TOKEN_UNITS_NOTE}`,
+    }),
+    amounts: tokenMovementAmountsSchema.optional(),
+    amountVerification: amountVerificationSchema.optional(),
     status: paymentTransferBatchRecipientStatusSchema,
     error: z.string().nullable().openapi({
       description: "Recipient-level failure reason, when available.",
@@ -581,9 +671,13 @@ export const transferBatchSchema = z
     }),
     token: z.string().openapi({ description: "Token symbol or mint address.", example: "SOL" }),
     status: paymentTransferBatchStatusSchema,
-    totalAmount: tokenAmountSchema.nullable().openapi({
-      description: "Total requested batch amount in UI units, when computed.",
+    totalAmount: tokenUnitsAmountSchema.nullable().openapi({
+      description: `The sum of the recipients' debits, in ${TOKEN_UNITS_NOTE}`,
       example: "1000.00",
+    }),
+    amounts: tokenMovementAmountsSchema.optional().openapi({
+      description:
+        "The recipients' amounts summed: total debit, transfer fee and credit, in token units. Absent for a batch recorded before quotes.",
     }),
     recipientCount: z.number().int().openapi({
       description: "Number of recipient rows in the batch.",
@@ -603,6 +697,10 @@ export const transferBatchEstimateSchema = z
     recipientCount: z.number().int().openapi({ description: "Requested recipient count." }),
     transactionCount: z.number().int().openapi({
       description: "Estimated number of Solana transaction chunks.",
+    }),
+    amounts: tokenMovementAmountsSchema.openapi({
+      description:
+        "The recipients' amounts summed under the mint's current terms: total debit, transfer fee and credit, in token units.",
     }),
     estimatedFees: z
       .object({
