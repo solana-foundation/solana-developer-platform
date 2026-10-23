@@ -86,19 +86,18 @@ describe("canonicalizeTransferBatchBody", () => {
     });
   });
 
-  it("fingerprints a symbol and its mint as one asset, and native SOL apart from wrapped SOL (APE SOLA9-695)", () => {
+  it("fingerprints a symbol and its mint as one asset, and refuses wrapped SOL (APE SOLA9-695)", () => {
     expect(canonicalizeTransferBatchBody({ ...BODY, token: "usdc" })).toEqual(
       canonicalizeTransferBatchBody({ ...BODY, token: USDC })
     );
-    // ADR 0012: "SOL" moves native SOL, the wrapped SOL mint is an SPL token.
+    // ADR 0012: "SOL" moves native SOL; rows store it under the wrapped SOL mint, which is refused.
     expect(canonicalizeTransferBatchBody({ ...BODY, token: "sol" })).toEqual({
       ...BODY,
       asset: "native",
     });
-    expect(canonicalizeTransferBatchBody({ ...BODY, token: SOL_MINT })).toEqual({
-      ...BODY,
-      asset: SOL_MINT,
-    });
+    expect(() => canonicalizeTransferBatchBody({ ...BODY, token: SOL_MINT })).toThrow(
+      'Payments does not move wrapped SOL: send token "SOL" to move native SOL'
+    );
   });
 
   it("keeps both earlier forms, so a key or row saved under either still matches", () => {
@@ -118,15 +117,6 @@ describe("canonicalizeTransferBatchBody", () => {
       token: "sol",
       options: { maxRecipientsPerTransaction: 20 },
     });
-  });
-
-  it("never gives a new request an earlier form's fingerprint of another asset", () => {
-    // A new wrapped SOL batch and a retry naming native SOL are two assets.
-    const wrapped = canonicalizeTransferBatchBody({ ...BODY, token: SOL_MINT });
-    for (const form of [beforeAdr0012, beforeApe665]) {
-      expect(form({ ...BODY, token: "SOL" })).not.toEqual(wrapped);
-      expect(form({ ...BODY, token: SOL_MINT })).not.toEqual(wrapped);
-    }
   });
 
   it("leaves a body without a recipients array untouched for validation to refuse", () => {

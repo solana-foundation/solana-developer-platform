@@ -946,13 +946,7 @@ describe("Payments routes — on-chain transfers", () => {
       });
     });
 
-    it("moves the wrapped SOL mint as an SPL token, and SOL as native", async () => {
-      answerMovementAccounts(
-        rpc,
-        new Map([[SOL_MINT, mintRpcAccount("spl-token", { decimals: 9, extensions: null })]])
-      );
-      rpc.answer("getTokenAccountsByOwner", tokenAccountsByOwnerResult(1, []));
-
+    it("refuses the wrapped SOL mint with a 400 before reading the chain", async () => {
       const wrapped = await postTransfer(
         {
           sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
@@ -963,13 +957,15 @@ describe("Payments routes — on-chain transfers", () => {
         {}
       );
 
-      // The wallet holds no wrapped SOL account: the SPL path read it, and native SOL was not sent.
+      // Rows and balances store native SOL under the wrapped SOL mint, so a wrapped SOL move
+      // would read back as native SOL: the caller names native SOL as "SOL".
       expect(wrapped.status).toBe(400);
       expect((await readErrorResponse(wrapped)).error.message).toBe(
-        "Source wallet has no token account for this mint"
+        'Payments does not move wrapped SOL: send token "SOL" to move native SOL'
       );
       expect(sendTransactionMock).not.toHaveBeenCalled();
-      expect(rpc.calls.map((call) => call.method)).toContain("getTokenAccountsByOwner");
+      expect(rpc.calls).toEqual([]);
+      expect(await countTransferRows()).toBe(0);
     });
   });
 

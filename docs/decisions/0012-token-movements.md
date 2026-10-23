@@ -59,7 +59,9 @@ them in one place, not adding special cases to every flow.
 2. **One asset identity.** `AssetRef = { kind: "native" } | { kind: "token", mint, program }`
    (`@sdp/solana/asset-ref`). `resolveAssetRequest(token, cluster)` resolves a request once:
    "SOL" is native, a catalogue symbol is that cluster's mint, the wrapped SOL mint is an SPL
-   token, and any other mint is read to learn its program.
+   token, and any other mint is read to learn its program. Payments refuses the wrapped SOL mint
+   with `400` (`resolvePaymentAsset`): its rows and balances still store native SOL under that
+   mint, so a wrapped SOL move would read back as native SOL.
 3. **Token Terms are read live, once per movement.** `readTokenTerms(asset)`
    (`apps/sdp-api/src/services/token-movement/read-terms.ts`) makes one
    `getMultipleAccounts([mint, Clock])` request, so the fee epoch and display time belong to the
