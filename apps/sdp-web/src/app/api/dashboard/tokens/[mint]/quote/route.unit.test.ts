@@ -1,17 +1,15 @@
+import { NextResponse } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as sdpApi from "@/lib/sdp-api";
 import { requiredWellKnownMint } from "@/test/well-known-mints";
-
-const mocks = vi.hoisted(() => ({ proxyToSdpApi: vi.fn() }));
-vi.mock("@/lib/sdp-api", () => mocks);
-
 import { POST } from "./route";
 
 const USDC = requiredWellKnownMint("USDC", "devnet");
+const proxy = vi.spyOn(sdpApi, "proxyToSdpApi");
 
 describe("token amount quote proxy", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
-    mocks.proxyToSdpApi.mockResolvedValue(new Response(null));
+    proxy.mockReset().mockResolvedValue(new NextResponse(null));
   });
 
   it("forwards the quote request, body included, to the quote route", async () => {
@@ -23,7 +21,7 @@ describe("token amount quote proxy", () => {
       }
     );
     await POST(request, { params: Promise.resolve({ mint: USDC }) });
-    expect(mocks.proxyToSdpApi).toHaveBeenCalledWith(
+    expect(proxy).toHaveBeenCalledWith(
       expect.objectContaining({ request, path: `/v1/tokens/${USDC}/quote` })
     );
   });
@@ -34,6 +32,6 @@ describe("token amount quote proxy", () => {
       { params: Promise.resolve({ mint: "SOL" }) }
     );
     expect(response.status).toBe(400);
-    expect(mocks.proxyToSdpApi).not.toHaveBeenCalled();
+    expect(proxy).not.toHaveBeenCalled();
   });
 });
