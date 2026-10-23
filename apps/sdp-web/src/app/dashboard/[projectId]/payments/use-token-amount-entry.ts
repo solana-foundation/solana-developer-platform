@@ -99,25 +99,24 @@ function quoteValue(
   }
 }
 
-/**
- * An amount input that knows the token's terms (ADR 0012). For a scaled or
- * interest-bearing mint the user may type what wallets show; the quote route
- * converts it, and the token amount it returns is what gets sent. For a mint
- * with a transfer fee, a token amount is priced too, to show the fee and the
- * other side of the movement. SOL and classic mints behave as before. What
- * the user typed lives in the caller's form (`tokenAmountFieldsSchema`).
- */
-export function useTokenAmountEntry({
-  mint,
-  basis,
-  fields,
-  setFields,
-}: UseTokenAmountEntryArgs): TokenAmountEntry {
-  const t = useTranslations();
-  const termsMint = mint !== null && mint !== SOL_MINT && isAddress(mint) ? mint : null;
+/** The mint a terms read is for: a real mint address, never native SOL or a partial input. */
+function termsMintOf(mint: string | null): string | null {
+  return mint !== null && mint !== SOL_MINT && isAddress(mint) ? mint : null;
+}
 
-  // Terms change only by an issuer's action; one read per mint serves the session.
-  const { data: termsData } = useSWR(
+/** When to price a quote again: at its expiry, never sooner than a second, never past a timer's range. */
+function quoteRefreshDelay(quote: TokenAmountQuote | undefined): number {
+  if (quote === undefined) {
+    return 0;
+  }
+  const untilExpiry = Date.parse(quote.expiresAt) - Date.now();
+  return Math.min(Math.max(untilExpiry, MIN_QUOTE_REFRESH_MS), MAX_TIMER_DELAY_MS);
+}
+
+/** A mint's terms, read once per session: they change only by an issuer's action. */
+function useTokenTerms(termsMint: string | null): TokenAmountTerms | null {
+  const t = useTranslations();
+  const { data } = useSWR(
     termsMint === null ? null : paymentsQueryKeys.tokenTerms({ mint: termsMint }),
     ([, wanted]: readonly [string, string]) => fetchTokenAmountTerms(wanted, t),
     {
@@ -127,27 +126,31 @@ export function useTokenAmountEntry({
       shouldRetryOnError: false,
     }
   );
-  const terms = termsMint === null || termsData === undefined ? null : termsData;
-  const displayEntryAvailable = terms !== null && terms.display.rule !== "plain";
+  return termsMint === null || data === undefined ? null : data;
+}
 
-  // Another token starts over in token units: a display amount means nothing for it.
-  const [entryMint, setEntryMint] = useState(mint);
-  if (entryMint !== mint) {
-    setEntryMint(mint);
-    setFields({ amountUnit: "token", displayAmount: "" });
-  }
-  const unit: AmountEntryUnit = displayEntryAvailable ? fields.amountUnit : "token";
+interface AmountQuoteRead {
+  quote: TokenAmountQuote | null;
+  quoteError: string | null;
+  quoteInFlight: boolean;
+  refresh: () => void;
+}
 
-  const value = quoteValue(unit, fields, terms);
+/**
+ * The quote for `value` once typing stops, priced again when it expires so
+ * the amount on screen stays one that may be sent.
+ */
+function useAmountQuote(input: {
+  termsMint: string | null;
+  unit: AmountEntryUnit;
+  value: string | null;
+  basis: TokenMovementBasis;
+}): AmountQuoteRead {
+  const t = useTranslations();
+  const { termsMint, unit, value, basis } = input;
   const debouncedValue = useDebounce(value, QUOTE_DEBOUNCE_MS);
   const debouncing = value !== debouncedValue;
-
-  const {
-    data: quoteData,
-    error: quoteFailure,
-    isValidating,
-    mutate,
-  } = useSWR(
+  const { data, error, isValidating, mutate } = useSWR(
     termsMint !== null && value !== null && !debouncing
       ? paymentsQueryKeys.tokenAmountQuote({ mint: termsMint, unit, value, basis })
       : null,
@@ -168,40 +171,65 @@ export function useTokenAmountEntry({
       revalidateOnFocus: false,
       revalidateOnReconnect: false,
       shouldRetryOnError: false,
-      // A quote is priced again when it expires, so the amount on screen stays one that may be sent.
-      refreshInterval: (data) =>
-        data === undefined
-          ? 0
-          : Math.min(
-              Math.max(Date.parse(data.expiresAt) - Date.now(), MIN_QUOTE_REFRESH_MS),
-              MAX_TIMER_DELAY_MS
-            ),
+      refreshInterval: quoteRefreshDelay,
     }
   );
-  const quote = value === null || debouncing || quoteData === undefined ? null : quoteData;
-  const quoteInFlight = value !== null && (debouncing || isValidating);
+  const settled = value !== null && !debouncing;
+  return {
+    quote: settled && data !== undefined ? data : null,
+    quoteError: settled && error instanceof Error ? error.message : null,
+    quoteInFlight: value !== null && (debouncing || isValidating),
+    refresh: () => {
+      void mutate();
+    },
+  };
+}
 
-  let tokenAmount: string;
-  if (unit === "token") {
-    tokenAmount = fields.amount;
-  } else {
-    tokenAmount = quote === null ? "" : quotedTokenAmount(quote);
+/**
+ * An amount input that knows the token's terms (ADR 0012). For a scaled or
+ * interest-bearing mint the user may type what wallets show; the quote route
+ * converts it, and the token amount it returns is what gets sent. For a mint
+ * with a transfer fee, a token amount is priced too, to show the fee and the
+ * other side of the movement. SOL and classic mints behave as before. What
+ * the user typed lives in the caller's form (`tokenAmountFieldsSchema`).
+ */
+export function useTokenAmountEntry({
+  mint,
+  basis,
+  fields,
+  setFields,
+}: UseTokenAmountEntryArgs): TokenAmountEntry {
+  const termsMint = termsMintOf(mint);
+  const terms = useTokenTerms(termsMint);
+  const displayEntryAvailable = terms !== null && terms.display.rule !== "plain";
+
+  // Another token starts over in token units: a display amount means nothing for it.
+  const [entryMint, setEntryMint] = useState(mint);
+  if (entryMint !== mint) {
+    setEntryMint(mint);
+    setFields({ amountUnit: "token", displayAmount: "" });
   }
+  const unit: AmountEntryUnit = displayEntryAvailable ? fields.amountUnit : "token";
+
+  const { quote, quoteError, quoteInFlight, refresh } = useAmountQuote({
+    termsMint,
+    unit,
+    value: quoteValue(unit, fields, terms),
+    basis,
+  });
+  const quotedAmount = quote === null ? "" : quotedTokenAmount(quote);
 
   return {
     terms,
     displayEntryAvailable,
     unit,
     setUnit: (next) => setFields({ amountUnit: next }),
-    tokenAmount,
+    tokenAmount: unit === "token" ? fields.amount : quotedAmount,
     quote,
-    quoteError:
-      value !== null && !debouncing && quoteFailure instanceof Error ? quoteFailure.message : null,
+    quoteError,
     quoteInFlight,
     canSubmitAt: (now) =>
       !quoteInFlight && (unit === "token" || (quote !== null && isQuoteCurrent(quote, now))),
-    refreshQuote: () => {
-      void mutate();
-    },
+    refreshQuote: refresh,
   };
 }
