@@ -9,10 +9,10 @@ import {
   type RampTransferSettlement,
 } from "@sdp/types/payments";
 import { isRetiredRampProviderId, type PersistedRampProviderId } from "@sdp/types/provider-access";
-import type {
-  AmountVerification,
-  AmountVerificationState,
-  TokenMovementAmounts,
+import {
+  type AmountVerification,
+  summarizeAmountVerificationStates,
+  type TokenMovementAmounts,
 } from "@sdp/types/token-movements";
 import type { PaymentSubscriptionCollectionAttemptRow } from "@/db/repositories/payment-subscriptions.repository";
 import type { PaymentTransferRow as TransferRow } from "@/db/repositories/payments.repository";
@@ -153,14 +153,6 @@ export function mapTransferRow(row: TransferRow) {
   };
 }
 
-/** Which leg state a summary of several legs reports: the first in this order any leg is in. */
-const VERIFICATION_SUMMARY_ORDER = [
-  "mismatch",
-  "pending",
-  "verified",
-  "not_required",
-] as const satisfies readonly AmountVerificationState[];
-
 /** Summed amounts in token units, with no display: a sum shows no single wallet's view. */
 export function totalsAmounts(totals: LegTotals): TokenMovementAmounts {
   return {
@@ -230,11 +222,9 @@ export function movementAmounts(
 export function movementVerification(
   legs: readonly [TokenMovementLeg, ...TokenMovementLeg[]]
 ): AmountVerification {
-  const state = VERIFICATION_SUMMARY_ORDER.find((candidate) =>
-    legs.some((leg) => leg.verification.state === candidate)
-  );
+  const state = summarizeAmountVerificationStates(legs.map((leg) => leg.verification.state));
   const reporting = legs.find((leg) => leg.verification.state === state);
-  if (state === undefined || reporting === undefined) {
+  if (reporting === undefined) {
     throw new AppError("INTERNAL_ERROR", "Movement leg has an unknown verification state");
   }
   const verification: AmountVerification = { state };
