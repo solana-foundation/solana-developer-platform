@@ -1,4 +1,4 @@
-import * as verifiedConfirmation from "@sdp/rpc/verified-confirmation";
+import * as solanaRpc from "@sdp/rpc/solana";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import {
@@ -467,8 +467,10 @@ describe("Public payment request routes", () => {
         },
       ]);
       const verify = vi
-        .spyOn(verifiedConfirmation, "verifyTransactionLanded")
-        .mockResolvedValue({ ok: false, reason: "not_indexed" });
+        .spyOn(solanaRpc, "getSignatureStatuses")
+        .mockResolvedValue([
+          { slot: 1n, confirmations: null, confirmationStatus: "confirmed", err: null },
+        ]);
       onTestFinished(() => verify.mockRestore());
 
       const response = await postTransaction(request.public_token);

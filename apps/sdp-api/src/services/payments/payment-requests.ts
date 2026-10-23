@@ -1,6 +1,5 @@
 import { createClusterRpc } from "@sdp/rpc/factory";
-import { getSignaturesForAddress, type SignatureInfo } from "@sdp/rpc/solana";
-import { verifyTransactionLanded } from "@sdp/rpc/verified-confirmation";
+import { getSignatureStatuses, getSignaturesForAddress, type SignatureInfo } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { AmountError, parseTokenAmount } from "@sdp/solana/amount";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
@@ -306,15 +305,16 @@ async function judgeCandidate(
   expected: PaymentRequestTransferFields,
   candidate: SignatureInfo
 ): Promise<CandidateVerdict> {
-  const landed = await verifyTransactionLanded(createClusterRpc(), candidate.signature, {
+  const [status] = await getSignatureStatuses(createClusterRpc(), [candidate.signature], {
     searchTransactionHistory: true,
   });
-  if (!landed.ok) {
-    return landed.reason === "failed" || landed.reason === "account_missing"
-      ? { kind: "rejected" }
-      : { kind: "retry", reason: landed.reason };
+  if (status === null || status === undefined) {
+    return { kind: "retry", reason: "not_confirmed" };
   }
-  if (landed.status.confirmationStatus !== "finalized") {
+  if (status.err !== null) {
+    return { kind: "rejected" };
+  }
+  if (status.confirmationStatus !== "finalized") {
     return { kind: "retry", reason: "not_finalized" };
   }
   let validated: Awaited<ReturnType<typeof validatePaymentRequestTransfer>>;
@@ -333,7 +333,7 @@ async function judgeCandidate(
     found: {
       signature: candidate.signature,
       slot: candidate.slot,
-      blockTime: validated.blockTime ?? candidate.blockTime ?? landed.transaction.blockTime ?? null,
+      blockTime: validated.blockTime ?? candidate.blockTime,
     },
   };
 }

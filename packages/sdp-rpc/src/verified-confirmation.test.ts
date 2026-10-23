@@ -71,19 +71,15 @@ const INITIALIZE_MINT_TRANSACTION = jsonParsedTransactionResponse({
   ],
 });
 
-type SignatureStatusesConfig = Parameters<SolanaRpc["getSignatureStatuses"]>[1];
-
 function fakeRpc(responses: {
   status: SignatureStatus | null;
   account: EncodedAccountValue | null;
   transaction: JsonParsedTransactionResponse | null;
-  onGetSignatureStatuses?: (config: SignatureStatusesConfig) => void;
 }): SolanaRpc {
   return {
-    getSignatureStatuses: (_signatures: readonly Signature[], config?: SignatureStatusesConfig) => {
-      responses.onGetSignatureStatuses?.(config);
-      return { send: async () => ({ context: { slot: 100n }, value: [responses.status] }) };
-    },
+    getSignatureStatuses: () => ({
+      send: async () => ({ context: { slot: 100n }, value: [responses.status] }),
+    }),
     getAccountInfo: () => ({
       send: async () => ({ context: { slot: 100n }, value: responses.account }),
     }),
@@ -113,7 +109,7 @@ test("not_confirmed when the RPC has no status for the signature", async () => {
   assert.deepEqual(result, { ok: false, reason: "not_confirmed" });
 });
 
-test("failed when the transaction errored on-chain", async () => {
+test("not_confirmed when the transaction errored on-chain", async () => {
   const result = await verifyTransactionLanded(
     fakeRpc({
       status: signatureStatus({
@@ -125,7 +121,7 @@ test("failed when the transaction errored on-chain", async () => {
     }),
     SIG
   );
-  assert.deepEqual(result, { ok: false, reason: "failed" });
+  assert.deepEqual(result, { ok: false, reason: "not_confirmed" });
 });
 
 test("not_confirmed when the status is processed-only", async () => {
@@ -196,22 +192,3 @@ test("rethrows a persistent RPC failure", async () => {
   } as unknown as SolanaRpc;
   await assert.rejects(verifyTransactionLanded(rpc, SIG), /401/);
 });
-
-for (const searchTransactionHistory of [true, undefined]) {
-  test(`asks for signature statuses with searchTransactionHistory=${searchTransactionHistory}`, async () => {
-    const configs: SignatureStatusesConfig[] = [];
-    const rpc = fakeRpc({
-      status: CONFIRMED_STATUS,
-      account: null,
-      transaction: INITIALIZE_MINT_TRANSACTION,
-      onGetSignatureStatuses: (config) => configs.push(config),
-    });
-
-    const result = await verifyTransactionLanded(rpc, SIG, { searchTransactionHistory });
-
-    assert.ok(result.ok);
-    assert.deepEqual(configs, [
-      searchTransactionHistory ? { searchTransactionHistory: true } : undefined,
-    ]);
-  });
-}

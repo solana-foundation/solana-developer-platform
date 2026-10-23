@@ -968,7 +968,7 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
     const verified = await verifyTransactionLanded(rpc, signature, { expectAccount: mint });
 
     if (!verified.ok) {
-      if (verified.reason === "not_confirmed" || verified.reason === "failed") {
+      if (verified.reason === "not_confirmed") {
         throw badRequest("Deploy transaction is not confirmed on-chain");
       }
       if (verified.reason === "account_missing") {
