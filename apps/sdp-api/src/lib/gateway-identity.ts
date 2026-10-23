@@ -117,12 +117,24 @@ export class GatewayKeysUnavailableError extends Error {
   }
 }
 
+/**
+ * How long a fetched JWKS is trusted, and the shortest gap between refetches
+ * for an unknown key. A key the gateway removes stops verifying within a
+ * minute; a new key must be published at least two minutes before the
+ * gateway signs with it. One small fetch a minute per instance at most.
+ */
+const JWKS_CACHE_MAX_AGE_MS = 60_000;
+const JWKS_COOLDOWN_MS = 10_000;
+
 const signingKeysCache = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
 
 function getSigningKeys(jwksUrl: string): ReturnType<typeof createRemoteJWKSet> {
   let keys = signingKeysCache.get(jwksUrl);
   if (!keys) {
-    keys = createRemoteJWKSet(new URL(jwksUrl));
+    keys = createRemoteJWKSet(new URL(jwksUrl), {
+      cacheMaxAge: JWKS_CACHE_MAX_AGE_MS,
+      cooldownDuration: JWKS_COOLDOWN_MS,
+    });
     signingKeysCache.set(jwksUrl, keys);
   }
   return keys;

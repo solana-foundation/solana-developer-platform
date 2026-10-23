@@ -57,6 +57,10 @@ describe("a Clerk session forwarded with a gateway identity (HOO-2256)", () => {
     expect(await verifyUnder(identity({ orgId: "org_other" }))).toBe(401);
   });
 
+  it("refuses a session for an organization when the identity names none", async () => {
+    expect(await verifyUnder(identity({ orgId: null }))).toBe(401);
+  });
+
   it("refuses a session when the identity names a key", async () => {
     expect(await verifyUnder(identity({ clerkUserId: null, keyId: "0123456789abcdef" }))).toBe(401);
   });
