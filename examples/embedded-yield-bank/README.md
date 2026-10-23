@@ -233,7 +233,7 @@ uncommitted changes ship too. Run the [validation](#validation) commands before 
 | Variable | Required | Purpose |
 | --- | --- | --- |
 | `SDP_API_BASE_URL` | No | SDP API origin. Defaults to local port `8787`; Vercel needs a reachable origin. |
-| `SDP_API_KEY` | Yes | Project key with Embedded Yield read and write permissions. Use a sandbox key for devnet or production key for mainnet. |
+| `SDP_API_KEY` | Yes | Project key granted Earn `execute` and `manage` (`manage` covers withdrawal-request cancellations). Use a sandbox key for devnet or production key for mainnet. |
 | `DEMO_ACCESS_USERNAME` | No | HTTP Basic username. Defaults to `northstar`. |
 | `DEMO_ACCESS_PASSWORD` | Yes | HTTP Basic password protecting the page and all API routes. |
 | `DEMO_WALLET_PRIVATE_KEY` | Yes | Base58 or JSON-array Solana keypair used only by the server. Its token balance is checking. |

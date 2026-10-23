@@ -556,9 +556,10 @@ earn.post(
   validateBody(earnExternalWalletSubmitSchema),
   createEarnExternalWalletWithdrawalRequest
 );
+// `earn.manage`, like its build: the action `earn.queued_withdraw_cancel` names.
 earn.post(
   "/external-wallet/withdrawal-request-cancellations",
-  requireAction("earn.execute"),
+  requireAction("earn.manage"),
   validateBody(earnExternalWalletSubmitSchema),
   createEarnExternalWalletWithdrawalRequestCancellation
 );

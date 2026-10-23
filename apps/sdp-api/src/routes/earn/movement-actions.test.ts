@@ -14,12 +14,6 @@ import { earnPostRouteMovement } from "./exits";
  * an action that start admits.
  */
 
-/** Routes whose action their start does not name, harmless only while SDP never signs there. */
-const PINNED_MISMATCHES = {
-  "POST /v1/earn/external-wallet/withdrawal-request-cancellations":
-    "the owner signs; SDP neither signs nor sponsors it (PRO-1744), so no waist reads its action",
-} as const satisfies Record<string, string>;
-
 interface EarnStartRoute {
   route: string;
   movement: MovementOf<"earn">;
@@ -71,19 +65,11 @@ describe("Earn routes declare an action their movement admits (HOO-2099)", () =>
   it("declares an action each start admits", () => {
     expect(
       routes
-        .filter((route) => !waistAdmits(route) && !(route.route in PINNED_MISMATCHES))
+        .filter((route) => !waistAdmits(route))
         .map(
           ({ route, movement, actions, declared }) =>
             `${route} declares ${declared ?? "no single action"}; ${movement} admits ${actions.join(", ")}`
         )
     ).toEqual([]);
-  });
-
-  it("keeps each pinned mismatch real, so the list only shrinks", () => {
-    for (const pinned of Object.keys(PINNED_MISMATCHES)) {
-      const route = routes.find(({ route }) => route === pinned);
-      expect(route, `${pinned} is filed with a start`).toBeDefined();
-      expect(route && waistAdmits(route), `${pinned} now agrees; unpin it`).toBe(false);
-    }
   });
 });

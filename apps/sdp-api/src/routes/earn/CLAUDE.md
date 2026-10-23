@@ -178,10 +178,11 @@ signature. Initiated movements keep their signature uniqueness. Caller keys
 still share the existing ledger constraint, so use distinct keys for direct
 and queued intents; ADR 0003 records the unresolved collision and rollout gate.
 
-The custody options/preview/create/list/detail/cancel routes are keyed. The
-custody cancel takes `earn.manage`, the action its movement
-(`earn.queued_withdraw_cancel`) needs at the custody signer, so a key without it
-is refused before sponsorship, a build and a simulation. External
+The custody options/preview/create/list/detail/cancel routes are keyed. Every
+cancellation route (the custody cancel, and the external-wallet cancellation
+build and submit) takes `earn.manage`, the action its movement
+(`earn.queued_withdraw_cancel`) names, so the custody signer never refuses a key
+the route admitted after sponsorship, a build and a simulation. External
 wallet options and previews use the optional-auth contract: anonymous calls are
 per-IP RPC-metered and persist nothing. External request/cancellation builds,
 submits, and request history are keyed so every share escrow has the durable

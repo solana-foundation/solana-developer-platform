@@ -176,7 +176,7 @@
   "POST /v1/earn/external-wallet/withdrawal-options": "earn.read",
   "POST /v1/earn/external-wallet/withdrawal-previews": "earn.read",
   "POST /v1/earn/external-wallet/withdrawal-request-cancel-transactions": "earn.manage",
-  "POST /v1/earn/external-wallet/withdrawal-request-cancellations": "earn.execute",
+  "POST /v1/earn/external-wallet/withdrawal-request-cancellations": "earn.manage",
   "POST /v1/earn/external-wallet/withdrawal-request-transactions": "earn.execute",
   "POST /v1/earn/external-wallet/withdrawal-requests": "earn.execute",
   "POST /v1/earn/external-wallet/withdrawal-transactions": "earn.execute",
