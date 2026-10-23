@@ -223,9 +223,10 @@ describe("useTokenAmountEntry", () => {
   // moment; read as another token, it reset the entry and sent the old token amount.
   it("keeps the unit and the display amount while the mint is unknown for a moment", async () => {
     stubTokenRoutes(scaledTerms, quote("debit", "5", "5", "4"));
+    const initialProps: { mint: string | null } = { mint: MINT };
     const { result, rerender } = renderHook(
-      ({ mint }: { mint: string | null }) => useAmountForm({ mint, basis: "debit", amount: "3" }),
-      { wrapper, initialProps: { mint: MINT } }
+      ({ mint }) => useAmountForm({ mint, basis: "debit", amount: "3" }),
+      { wrapper, initialProps }
     );
 
     await waitFor(() => expect(result.current.displayEntryAvailable).toBe(true));
