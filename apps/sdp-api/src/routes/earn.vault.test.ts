@@ -8,10 +8,12 @@ import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { required } from "@/test/helpers/required";
 
 const surfacing = vi.hoisted(() => ({ forceOn: false }));
-/** While set, replaces every deposit floor policy, as a policy change would. */
-const floorPolicy = vi.hoisted((): { forced: { defaultToleranceBps: number } | null } => ({
-  forced: null,
-}));
+/**
+ * Devnet's kvault gaining the floor instruction: the flip of the
+ * `KAMINO_KVAULT_DEPOSIT_FLOOR_SUPPORT` deployment constant that turns Kamino's
+ * devnet deposit floor policy on.
+ */
+const kvaultFloor = vi.hoisted(() => ({ onDevnet: false }));
 
 vi.mock("@sdp/types/provider-access", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@sdp/types/provider-access")>();
@@ -21,8 +23,19 @@ vi.mock("@sdp/types/provider-access", async (importOriginal) => {
       surfacing.forceOn || actual.isEarnProviderSurfaced(provider),
     isVaultDirectDepositEnabled: (environment: string, provider: string) =>
       surfacing.forceOn || actual.isVaultDirectDepositEnabled(environment, provider),
-    earnDepositSlippagePolicy: (...args: Parameters<typeof actual.earnDepositSlippagePolicy>) =>
-      floorPolicy.forced ?? actual.earnDepositSlippagePolicy(...args),
+  };
+});
+
+vi.mock("@sdp/types/kamino-programs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@sdp/types/kamino-programs")>();
+  return {
+    ...actual,
+    KAMINO_KVAULT_DEPOSIT_FLOOR_SUPPORT: {
+      ...actual.KAMINO_KVAULT_DEPOSIT_FLOOR_SUPPORT,
+      get devnet() {
+        return kvaultFloor.onDevnet || actual.KAMINO_KVAULT_DEPOSIT_FLOOR_SUPPORT.devnet;
+      },
+    },
   };
 });
 
@@ -398,7 +411,7 @@ afterEach(() => {
   env.CUSTODY_ENCRYPTION_KEY = originalEncryptionKey;
   env.JUPITER_SWAP_API_KEY = originalJupiterSwapApiKey;
   surfacing.forceOn = false;
-  floorPolicy.forced = null;
+  kvaultFloor.onDevnet = false;
   vaultDirectClientOverride.current = null;
   vi.restoreAllMocks();
 });
@@ -815,10 +828,10 @@ describe("POST /v1/earn/vault-deposits: replay before admission (ADR 0009)", () 
       refusal: { status: 400, error: { details: { status: "paused" } } },
     },
     {
-      change: "the floor policy starts requiring minSharesOut",
+      change: "devnet's kvault gains the floor instruction",
       floorless: true,
       apply: async () => {
-        floorPolicy.forced = { defaultToleranceBps: 10 };
+        kvaultFloor.onDevnet = true;
       },
       refusal: {
         status: 400,
