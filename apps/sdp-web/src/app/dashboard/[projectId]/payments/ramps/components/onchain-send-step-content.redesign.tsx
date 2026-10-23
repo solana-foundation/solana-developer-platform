@@ -323,10 +323,8 @@ function PayAmountFields({ wizard }: { wizard: OnchainSendWizard }) {
           ? t("DashboardPayments.tokenAmount.displayAmountLabel")
           : t("DashboardPayments.onchainSend.amount")
       }
-      value={displayEntry ? amountEntry.displayAmount : fields.amount}
-      onChange={(amount) =>
-        displayEntry ? amountEntry.setDisplayAmount(amount) : setField("amount", amount)
-      }
+      value={displayEntry ? fields.displayAmount : fields.amount}
+      onChange={(amount) => setField(displayEntry ? "displayAmount" : "amount", amount)}
       onMax={() => {
         if (availableAmount !== null) setField("amount", availableAmount);
       }}

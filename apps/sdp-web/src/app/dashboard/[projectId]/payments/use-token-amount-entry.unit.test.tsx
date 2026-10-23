@@ -8,7 +8,9 @@ import { SWRConfig } from "swr";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { useZodForm } from "@/lib/use-zod-form";
 import { requiredWellKnownMint } from "@/test/well-known-mints";
+import { tokenAmountFieldsSchema } from "./token-amount-fields";
 import type { TokenAmountTerms } from "./token-amount-quote.data";
 import { useTokenAmountEntry } from "./use-token-amount-entry";
 
@@ -73,6 +75,30 @@ function wrapper({ children }: { children: ReactNode }) {
   );
 }
 
+/** The entry inside a form that holds its fields, as the send and request forms do. */
+function useAmountForm({
+  mint,
+  basis,
+  amount,
+}: {
+  mint: string;
+  basis: TokenMovementBasis;
+  amount: string;
+}) {
+  const form = useZodForm(tokenAmountFieldsSchema, {
+    amountUnit: "token",
+    amount,
+    displayAmount: "",
+  });
+  const entry = useTokenAmountEntry({
+    mint,
+    basis,
+    fields: form.values,
+    setFields: form.setFields,
+  });
+  return { ...entry, form };
+}
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -82,7 +108,7 @@ describe("useTokenAmountEntry", () => {
   it("reads no terms for SOL and keeps the typed token amount", () => {
     const { fetchMock } = stubTokenRoutes(scaledTerms, quote("debit", "1", "1", "1"));
     const { result } = renderHook(
-      () => useTokenAmountEntry({ mint: SOL_MINT, basis: "debit", tokenAmountInput: "1.5" }),
+      () => useAmountForm({ mint: SOL_MINT, basis: "debit", amount: "1.5" }),
       { wrapper }
     );
 
@@ -94,14 +120,13 @@ describe("useTokenAmountEntry", () => {
 
   it("prices a display amount as a debit and sends the quote's token amount", async () => {
     const { quoteBodies } = stubTokenRoutes(scaledTerms, quote("debit", "5", "5", "4"));
-    const { result } = renderHook(
-      () => useTokenAmountEntry({ mint: MINT, basis: "debit", tokenAmountInput: "" }),
-      { wrapper }
-    );
+    const { result } = renderHook(() => useAmountForm({ mint: MINT, basis: "debit", amount: "" }), {
+      wrapper,
+    });
 
     await waitFor(() => expect(result.current.displayEntryAvailable).toBe(true));
     act(() => result.current.setUnit("display"));
-    act(() => result.current.setDisplayAmount("10"));
+    act(() => result.current.form.setField("displayAmount", "10"));
     // Nothing is sent until a quote for this input lands.
     expect(result.current.tokenAmount).toBe("");
     expect(result.current.quoteInFlight).toBe(true);
@@ -117,14 +142,14 @@ describe("useTokenAmountEntry", () => {
   it("submits a credit quote's credit when the amount is what the recipient receives", async () => {
     stubTokenRoutes(scaledTerms, quote("credit", "12.5", "13.5", "12.5"));
     const { result } = renderHook(
-      () => useTokenAmountEntry({ mint: MINT, basis: "credit", tokenAmountInput: "" }),
+      () => useAmountForm({ mint: MINT, basis: "credit", amount: "" }),
       { wrapper }
     );
 
     await waitFor(() => expect(result.current.displayEntryAvailable).toBe(true));
     act(() => {
       result.current.setUnit("display");
-      result.current.setDisplayAmount("25");
+      result.current.form.setField("displayAmount", "25");
     });
 
     await waitFor(() => expect(result.current.tokenAmount).toBe("12.5"));
@@ -133,7 +158,7 @@ describe("useTokenAmountEntry", () => {
   it("previews the fee of a token amount for a mint with a transfer fee", async () => {
     const { quoteBodies } = stubTokenRoutes(feeTerms, quote("credit", "100", "101", "100"));
     const { result } = renderHook(
-      () => useTokenAmountEntry({ mint: MINT, basis: "credit", tokenAmountInput: "100" }),
+      () => useAmountForm({ mint: MINT, basis: "credit", amount: "100" }),
       { wrapper }
     );
 
@@ -147,20 +172,23 @@ describe("useTokenAmountEntry", () => {
   it("starts over in token units when the token changes", async () => {
     stubTokenRoutes(scaledTerms, quote("debit", "5", "5", "4"));
     const { result, rerender } = renderHook(
-      ({ mint }: { mint: string }) =>
-        useTokenAmountEntry({ mint, basis: "debit", tokenAmountInput: "3" }),
+      ({ mint }: { mint: string }) => useAmountForm({ mint, basis: "debit", amount: "3" }),
       { wrapper, initialProps: { mint: MINT } }
     );
 
     await waitFor(() => expect(result.current.displayEntryAvailable).toBe(true));
     act(() => {
       result.current.setUnit("display");
-      result.current.setDisplayAmount("10");
+      result.current.form.setField("displayAmount", "10");
     });
     rerender({ mint: OTHER_MINT });
 
     expect(result.current.unit).toBe("token");
-    expect(result.current.displayAmount).toBe("");
+    expect(result.current.form.values).toEqual({
+      amountUnit: "token",
+      amount: "3",
+      displayAmount: "",
+    });
     expect(result.current.tokenAmount).toBe("3");
   });
 });

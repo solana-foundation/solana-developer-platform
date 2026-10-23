@@ -178,11 +178,9 @@ function DetailsStep({ wizard }: StepProps) {
             inputMode="decimal"
             min="0"
             step="any"
-            value={displayEntry ? amountEntry.displayAmount : fields.amount}
+            value={displayEntry ? fields.displayAmount : fields.amount}
             onChange={(event) =>
-              displayEntry
-                ? amountEntry.setDisplayAmount(event.currentTarget.value)
-                : setField("amount", event.currentTarget.value)
+              setField(displayEntry ? "displayAmount" : "amount", event.currentTarget.value)
             }
             placeholder="1.0"
             size="xl"

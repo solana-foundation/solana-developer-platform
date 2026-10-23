@@ -13,6 +13,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { z } from "zod";
 import { shortenAddress } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
 import {
   formatDateTime,
@@ -22,6 +23,11 @@ import {
   AmountUnitToggle,
   TokenAmountQuotePreview,
 } from "@/app/dashboard/[projectId]/payments/token-amount-entry-controls";
+import {
+  displayAmountSchema,
+  type TokenAmountFields,
+  tokenAmountFieldsSchema,
+} from "@/app/dashboard/[projectId]/payments/token-amount-fields";
 import {
   type TokenAmountEntry,
   useTokenAmountEntry,
@@ -37,6 +43,7 @@ import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { PAYMENT_REQUESTS_HREF, paymentRequestHref } from "@/lib/payments-routes";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useOutcomeUnknownNotice } from "@/lib/use-outcome-unknown";
+import { useZodForm } from "@/lib/use-zod-form";
 import { expiresAtForAction, settleExpiresAt } from "./payment-request-expiry";
 import { deriveTokenOptions, type PaymentRequestTokenOption } from "./payment-requests-page.data";
 
@@ -52,6 +59,17 @@ const EMPTY_STEP = [{ label: "", title: "" }];
 
 /** The token a new request starts on, as the design's does. */
 const DEFAULT_TOKEN_SYMBOL = "USDC";
+
+/** The new request's fields, as the user edits them. */
+const paymentRequestFormSchema = z.object({
+  ...tokenAmountFieldsSchema.shape,
+  /** The picked token's mint; "" until one is picked. */
+  token: z.string(),
+  /** The picked wallet's id; "" until one is picked. */
+  wallet: z.string(),
+  /** The picked `EXPIRY_OPTIONS` id. */
+  expiry: z.string(),
+});
 
 /**
  * Resolves the absolute expiry instant from a preset. Computed from the browser clock; callers
@@ -69,6 +87,23 @@ function resolveExpiryDate(expiryId: string): Date | null {
 function isValidAmount(value: string): boolean {
   const trimmed = value.trim();
   return /^\d+(\.\d+)?$/.test(trimmed) && Number(trimmed) > 0;
+}
+
+/**
+ * Whether the amount input holds one the request can be made from: a token
+ * amount the API takes, or a display amount the quote route prices.
+ */
+function isValidTypedAmount(unit: TokenAmountFields["amountUnit"], typed: string): boolean {
+  switch (unit) {
+    case "token":
+      return isValidAmount(typed);
+    case "display":
+      return displayAmountSchema.safeParse(typed).success;
+    default: {
+      const unreachable: never = unit;
+      throw new Error(`Unknown amount entry unit: ${String(unreachable)}`);
+    }
+  }
 }
 
 async function copyToClipboard(text: string): Promise<boolean> {
@@ -208,14 +243,14 @@ function CreateFooter({
  * with a display rule it may be typed as wallets show it; the quote's credit is what is asked.
  */
 function AmountField({
-  amount,
-  onChange,
+  fields,
+  setField,
   entry,
   symbol,
   busy,
 }: {
-  amount: string;
-  onChange: (next: string) => void;
+  fields: TokenAmountFields;
+  setField: (key: "amount" | "displayAmount", value: string) => void;
   entry: TokenAmountEntry;
   symbol: string;
   /** True while the request is being created. */
@@ -223,7 +258,7 @@ function AmountField({
 }) {
   const t = useTranslations();
   const displayEntry = entry.unit === "display";
-  const typed = displayEntry ? entry.displayAmount : amount;
+  const typed = displayEntry ? fields.displayAmount : fields.amount;
   return (
     <div className="flex flex-col gap-2">
       <Label htmlFor="payment-request-amount">
@@ -240,12 +275,10 @@ function AmountField({
         className="tabular-nums"
         value={typed}
         onChange={(event) =>
-          displayEntry
-            ? entry.setDisplayAmount(event.currentTarget.value)
-            : onChange(event.currentTarget.value)
+          setField(displayEntry ? "displayAmount" : "amount", event.currentTarget.value)
         }
       />
-      {typed.trim() && !isValidAmount(typed) ? (
+      {typed.trim() && !isValidTypedAmount(entry.unit, typed) ? (
         <p className="text-meta text-error">{t("DashboardPayments.requests.invalidAmount")}</p>
       ) : null}
       <AmountUnitToggle entry={entry} busy={busy} />
@@ -320,10 +353,19 @@ function PaymentRequestCreateForm({ wallets, walletsError }: PaymentRequestCreat
   );
 
   const demo = usePaymentsDemo();
-  const [amount, setAmount] = useState(demo ? DEMO_PREFILL_AMOUNTS.request : "");
-  const [pickedToken, setPickedToken] = useState("");
-  const [pickedWallet, setPickedWallet] = useState("");
-  const [expiry, setExpiry] = useState<string>("none");
+  const {
+    values: fields,
+    setField,
+    setFields,
+  } = useZodForm(paymentRequestFormSchema, {
+    amountUnit: "token",
+    amount: demo ? DEMO_PREFILL_AMOUNTS.request : "",
+    displayAmount: "",
+    token: "",
+    wallet: "",
+    expiry: "none",
+  });
+  const { expiry } = fields;
   const [submitting, setSubmitting] = useState(false);
   // Once the link exists the page stays busy: it is on its way to the request, and a second
   // press must not make a second link.
@@ -334,14 +376,15 @@ function PaymentRequestCreateForm({ wallets, walletsError }: PaymentRequestCreat
   // back rather than being sent.
   const defaultToken =
     tokens.find((token) => token.symbol === DEFAULT_TOKEN_SYMBOL) ?? tokens.at(0) ?? null;
-  const token = tokens.find((option) => option.mintAddress === pickedToken) ?? defaultToken;
-  const wallet = wallets.find((option) => option.walletId === pickedWallet) ?? null;
+  const token = tokens.find((option) => option.mintAddress === fields.token) ?? defaultToken;
+  const wallet = wallets.find((option) => option.walletId === fields.wallet) ?? null;
 
   // A request's amount is what the recipient receives, so it is quoted as a credit.
   const amountEntry = useTokenAmountEntry({
     mint: token === null ? null : token.mintAddress,
     basis: "credit",
-    tokenAmountInput: amount,
+    fields,
+    setFields,
   });
   const requestAmount = amountEntry.tokenAmount.trim();
 
@@ -444,8 +487,8 @@ function PaymentRequestCreateForm({ wallets, walletsError }: PaymentRequestCreat
         ) : null}
         <div className="grid gap-6 sm:grid-cols-2">
           <AmountField
-            amount={amount}
-            onChange={setAmount}
+            fields={fields}
+            setField={setField}
             entry={amountEntry}
             symbol={token === null ? "" : token.symbol}
             busy={busy}
@@ -453,7 +496,7 @@ function PaymentRequestCreateForm({ wallets, walletsError }: PaymentRequestCreat
           <Combobox
             label={t("DashboardPayments.requests.token")}
             value={token ? token.mintAddress : null}
-            onChange={setPickedToken}
+            onChange={(next) => setField("token", next)}
             options={tokens.map((option) => ({
               value: option.mintAddress,
               label: option.symbol,
@@ -472,7 +515,7 @@ function PaymentRequestCreateForm({ wallets, walletsError }: PaymentRequestCreat
             />
           }
           value={wallet ? wallet.walletId : null}
-          onChange={setPickedWallet}
+          onChange={(next) => setField("wallet", next)}
           options={wallets.map((option) => ({
             value: option.walletId,
             label: option.label ?? shortenAddress(option.publicKey),
@@ -483,7 +526,7 @@ function PaymentRequestCreateForm({ wallets, walletsError }: PaymentRequestCreat
           disabled={wallets.length === 0}
         />
 
-        <ExpiryField expiry={expiry} onChange={setExpiry} />
+        <ExpiryField expiry={expiry} onChange={(next) => setField("expiry", next)} />
 
         <ReadsAs
           amount={readsAsAmount(requestAmount, token, locale)}

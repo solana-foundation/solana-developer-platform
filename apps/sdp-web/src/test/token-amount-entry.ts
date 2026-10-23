@@ -10,8 +10,6 @@ export function tokenUnitsEntry(tokenAmount: string): TokenAmountEntry {
     displayEntryAvailable: false,
     unit: "token",
     setUnit: () => undefined,
-    displayAmount: "",
-    setDisplayAmount: () => undefined,
     tokenAmount,
     quote: null,
     quoteError: null,

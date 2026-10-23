@@ -7,6 +7,10 @@ import {
   type RequirementField,
 } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
+import {
+  displayAmountSchema,
+  tokenAmountFieldsSchema,
+} from "@/app/dashboard/[projectId]/payments/token-amount-fields";
 
 const providerField = z
   .enum(RAMP_PROVIDERS)
@@ -106,17 +110,31 @@ export const onchainSendSelectionSchema = z.object({
 });
 
 export const onchainDestinationSchema = onchainSendSelectionSchema.pick({ accountId: true });
-export const onchainDetailsSchema = onchainSendSelectionSchema.pick({
+
+const onchainDetailsFields = onchainSendSelectionSchema.pick({
   walletId: true,
   asset: true,
   amount: true,
 });
 
+/**
+ * The details step, checked against the fields as they are sent: `amount` is
+ * the token amount, typed or priced from a display amount. A display amount
+ * must be one the quote route prices.
+ */
+export const onchainDetailsSchema = z.discriminatedUnion("amountUnit", [
+  onchainDetailsFields.extend({ amountUnit: z.literal("token") }),
+  onchainDetailsFields.extend({
+    amountUnit: z.literal("display"),
+    displayAmount: displayAmountSchema,
+  }),
+]);
+
 export const onchainSendSchema = z.object({
   accountId: z.string(),
   walletId: z.string(),
   asset: z.string(),
-  amount: z.string(),
+  ...tokenAmountFieldsSchema.shape,
   memo: z.string(),
 });
 

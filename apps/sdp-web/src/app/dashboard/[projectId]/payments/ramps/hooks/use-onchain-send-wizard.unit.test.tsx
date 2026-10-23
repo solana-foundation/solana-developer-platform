@@ -397,7 +397,7 @@ describe("useOnchainSendWizard", () => {
     await waitFor(() => expect(result.current.amountEntry.displayEntryAvailable).toBe(true));
     act(() => {
       result.current.amountEntry.setUnit("display");
-      result.current.amountEntry.setDisplayAmount("1");
+      result.current.setField("displayAmount", "1");
     });
     // Continue and Back wait for the quote.
     expect(result.current.quoteInFlight).toBe(true);
@@ -430,7 +430,7 @@ describe("useOnchainSendWizard", () => {
     await waitFor(() => expect(result.current.amountEntry.displayEntryAvailable).toBe(true));
     act(() => {
       result.current.amountEntry.setUnit("display");
-      result.current.amountEntry.setDisplayAmount("1");
+      result.current.setField("displayAmount", "1");
     });
     await waitFor(() => expect(result.current.canProceed).toBe(true));
     await act(async () => result.current.handlePrimary());

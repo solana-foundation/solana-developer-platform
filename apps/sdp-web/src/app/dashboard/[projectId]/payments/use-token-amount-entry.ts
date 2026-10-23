@@ -8,6 +8,10 @@ import { useState } from "react";
 import useSWR from "swr";
 import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
 import {
+  displayAmountSchema,
+  type TokenAmountFields,
+} from "@/app/dashboard/[projectId]/payments/token-amount-fields";
+import {
   type AmountEntryUnit,
   fetchTokenAmountQuote,
   fetchTokenAmountTerms,
@@ -33,8 +37,10 @@ interface UseTokenAmountEntryArgs {
   mint: string | null;
   /** The side of the movement the amount fixes: a send fixes its debit, a request its credit. */
   basis: TokenMovementBasis;
-  /** What the user typed in token units. */
-  tokenAmountInput: string;
+  /** The form's amount fields: what the user typed, and in which unit. */
+  fields: TokenAmountFields;
+  /** Sets the form's amount fields, as `useZodForm`'s `setFields` does. */
+  setFields: (patch: Partial<TokenAmountFields>) => void;
 }
 
 export interface TokenAmountEntry {
@@ -42,10 +48,9 @@ export interface TokenAmountEntry {
   terms: TokenAmountTerms | null;
   /** True when the mint has a display rule, so the user may type what wallets show. */
   displayEntryAvailable: boolean;
+  /** What the amount input holds: the form's unit, or token units for a mint with no display rule. */
   unit: AmountEntryUnit;
   setUnit: (unit: AmountEntryUnit) => void;
-  displayAmount: string;
-  setDisplayAmount: (value: string) => void;
   /**
    * The movement's amount in token units: what the user typed, or the
    * token amount the display input's quote fixes ("" until it is priced).
@@ -62,28 +67,31 @@ export interface TokenAmountEntry {
   refreshQuote: () => void;
 }
 
-function isPositiveDecimal(value: string): boolean {
-  return isDecimalString(value) && compareDecimalAmounts(value, "0") > 0;
-}
-
 /**
- * What the entry prices, if anything: a display amount always (it has no
- * token amount until priced); a token amount only when the mint charges a
+ * What the entry prices, if anything: a valid display amount always (it has
+ * no token amount until priced); a token amount only when the mint charges a
  * transfer fee, so the user sees the fee and the other side first.
  */
 function quoteValue(
   unit: AmountEntryUnit,
-  input: string,
+  fields: TokenAmountFields,
   terms: TokenAmountTerms | null
 ): string | null {
-  if (!isPositiveDecimal(input)) return null;
   switch (unit) {
-    case "display":
-      return input;
-    case "token":
-      return terms !== null && terms.transferFee !== null && decimalScale(input) <= terms.decimals
+    case "display": {
+      const display = displayAmountSchema.safeParse(fields.displayAmount);
+      return display.success ? display.data : null;
+    }
+    case "token": {
+      const input = fields.amount.trim();
+      return isDecimalString(input) &&
+        compareDecimalAmounts(input, "0") > 0 &&
+        terms !== null &&
+        terms.transferFee !== null &&
+        decimalScale(input) <= terms.decimals
         ? input
         : null;
+    }
     default: {
       const unreachable: never = unit;
       throw new Error(`Unknown amount entry unit: ${String(unreachable)}`);
@@ -96,12 +104,14 @@ function quoteValue(
  * interest-bearing mint the user may type what wallets show; the quote route
  * converts it, and the token amount it returns is what gets sent. For a mint
  * with a transfer fee, a token amount is priced too, to show the fee and the
- * other side of the movement. SOL and classic mints behave as before.
+ * other side of the movement. SOL and classic mints behave as before. What
+ * the user typed lives in the caller's form (`tokenAmountFieldsSchema`).
  */
 export function useTokenAmountEntry({
   mint,
   basis,
-  tokenAmountInput,
+  fields,
+  setFields,
 }: UseTokenAmountEntryArgs): TokenAmountEntry {
   const t = useTranslations();
   const termsMint = mint !== null && mint !== SOL_MINT && isAddress(mint) ? mint : null;
@@ -120,19 +130,15 @@ export function useTokenAmountEntry({
   const terms = termsMint === null || termsData === undefined ? null : termsData;
   const displayEntryAvailable = terms !== null && terms.display.rule !== "plain";
 
-  const [chosenUnit, setUnit] = useState<AmountEntryUnit>("token");
-  const [displayAmount, setDisplayAmount] = useState("");
   // Another token starts over in token units: a display amount means nothing for it.
   const [entryMint, setEntryMint] = useState(mint);
   if (entryMint !== mint) {
     setEntryMint(mint);
-    setUnit("token");
-    setDisplayAmount("");
+    setFields({ amountUnit: "token", displayAmount: "" });
   }
-  const unit: AmountEntryUnit = displayEntryAvailable ? chosenUnit : "token";
+  const unit: AmountEntryUnit = displayEntryAvailable ? fields.amountUnit : "token";
 
-  const input = (unit === "display" ? displayAmount : tokenAmountInput).trim();
-  const value = quoteValue(unit, input, terms);
+  const value = quoteValue(unit, fields, terms);
   const debouncedValue = useDebounce(value, QUOTE_DEBOUNCE_MS);
   const debouncing = value !== debouncedValue;
 
@@ -177,7 +183,7 @@ export function useTokenAmountEntry({
 
   let tokenAmount: string;
   if (unit === "token") {
-    tokenAmount = tokenAmountInput;
+    tokenAmount = fields.amount;
   } else {
     tokenAmount = quote === null ? "" : quotedTokenAmount(quote);
   }
@@ -186,9 +192,7 @@ export function useTokenAmountEntry({
     terms,
     displayEntryAvailable,
     unit,
-    setUnit,
-    displayAmount,
-    setDisplayAmount,
+    setUnit: (next) => setFields({ amountUnit: next }),
     tokenAmount,
     quote,
     quoteError:
