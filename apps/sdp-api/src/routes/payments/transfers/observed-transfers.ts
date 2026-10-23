@@ -873,6 +873,13 @@ function observedMovements(
     if (delta === expected) {
       return movement(split(stated(move.statedFee)), CHAIN_DELTA_MATCHED);
     }
+    // The System program moves exactly the lamports it states. A lamport
+    // change that differs comes from moves this reader does not count (a
+    // wrapped SOL account's rent, a wrapped SOL transfer or close), so it
+    // leaves the move unverified rather than contradicted.
+    if (native) {
+      return movement(split(stated(move.statedFee)), { state: "pending", reason: null });
+    }
     // Only a Token-2022 mint can withhold a fee, and every move into and out
     // of the account is counted (tracked wallet or not), so the shortfall is it.
     // The whole debit can be withheld: fees round up, so a tiny transfer can
