@@ -304,13 +304,22 @@ async function judgeCandidate(
       ? { kind: "rejected" }
       : { kind: "retry", reason: landed.reason };
   }
+  if (landed.status.confirmationStatus !== "finalized") {
+    return { kind: "retry", reason: "not_finalized" };
+  }
+  let validated: Awaited<ReturnType<typeof validateTransfer>>;
   try {
-    await validateTransfer(rpc, candidate.signature, {
-      recipient: assertValidAddress(row.destination_address, "destinationAddress"),
-      amount: toNumberAmount(row.amount),
-      reference,
-      splToken: row.token === SOL_MINT ? undefined : assertValidAddress(row.token, "token"),
-    });
+    validated = await validateTransfer(
+      rpc,
+      candidate.signature,
+      {
+        recipient: assertValidAddress(row.destination_address, "destinationAddress"),
+        amount: toNumberAmount(row.amount),
+        reference,
+        splToken: row.token === SOL_MINT ? undefined : assertValidAddress(row.token, "token"),
+      },
+      { commitment: "finalized" }
+    );
   } catch (err) {
     if (!(err instanceof ValidateTransferError)) {
       throw err;
@@ -324,7 +333,7 @@ async function judgeCandidate(
     found: {
       signature: candidate.signature,
       slot: candidate.slot,
-      blockTime: candidate.blockTime ?? landed.transaction.blockTime ?? null,
+      blockTime: validated.blockTime ?? candidate.blockTime ?? landed.transaction.blockTime ?? null,
     },
   };
 }
@@ -485,7 +494,7 @@ async function recordInboundTransfer(
     memo: null,
     type: "transfer",
     direction: "inbound",
-    status: "confirmed",
+    status: "finalized",
     provider: null,
     providerReference: null,
     deliveryMode: null,

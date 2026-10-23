@@ -15,6 +15,8 @@ import {
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
   signature,
+  type UnixTimestamp,
+  unixTimestamp,
 } from "@solana/kit";
 import * as solanaPay from "@solana/pay";
 import { ValidateTransferError } from "@solana/pay";
@@ -73,9 +75,18 @@ let verifyTransactionLandedSpy: MockInstance<typeof verifiedConfirmation.verifyT
 function verifiedOk(): Awaited<ReturnType<typeof verifiedConfirmation.verifyTransactionLanded>> {
   return {
     ok: true,
-    status: { slot: 1n, confirmations: 5n, confirmationStatus: "confirmed", err: null },
+    status: { slot: 1n, confirmations: null, confirmationStatus: "finalized", err: null },
     transaction: { slot: 1n, executionResultKnown: true, err: null, instructions: [] },
   };
+}
+
+function verifiedConfirmedOnly(): Awaited<
+  ReturnType<typeof verifiedConfirmation.verifyTransactionLanded>
+> {
+  const verified = verifiedOk();
+  return verified.ok
+    ? { ...verified, status: { ...verified.status, confirmationStatus: "confirmed" } }
+    : verified;
 }
 
 function signatureInfo(
@@ -100,7 +111,9 @@ function mockNoSignatures() {
   signaturesSpy.mockResolvedValue([]);
 }
 
-function validatedTransfer(): Awaited<ReturnType<typeof solanaPay.validateTransfer>> {
+function validatedTransfer(
+  blockTime: UnixTimestamp | null = null
+): Awaited<ReturnType<typeof solanaPay.validateTransfer>> {
   const transaction = compileTransaction(
     pipe(
       createTransactionMessage({ version: 0 }),
@@ -117,7 +130,7 @@ function validatedTransfer(): Awaited<ReturnType<typeof solanaPay.validateTransf
   );
   return {
     slot: 1n,
-    blockTime: null,
+    blockTime,
     version: 0,
     meta: {
       err: null,
@@ -263,7 +276,7 @@ describe("reconcilePaymentRequest", () => {
     expect(transfers).toHaveLength(1);
     expect(transfers[0].id).toBe(settled.fulfilled_by_transfer_id);
     expect(transfers[0].direction).toBe("inbound");
-    expect(transfers[0].status).toBe("confirmed");
+    expect(transfers[0].status).toBe("finalized");
     expect(transfers[0].signature).toBe(SIGNATURE);
     expect(transfers[0].custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
     expect(transfers[0].counterparty_id).toBeNull();
@@ -366,6 +379,27 @@ describe("reconcilePaymentRequest", () => {
       expect(await readStored(request.id)).toMatchObject({ status: "awaiting_payment" });
     }
   );
+
+  it("asks the payer to retry while the payment is confirmed but not finalized", async () => {
+    mockSignatures(signatureInfo(SIGNATURE));
+    verifyTransactionLandedSpy.mockResolvedValue(verifiedConfirmedOnly());
+    validateTransferSpy.mockResolvedValue(validatedTransfer());
+    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+
+    await expect(reconcileOnSandbox(request)).rejects.toMatchObject({ code: "RATE_LIMITED" });
+
+    expect(validateTransferSpy).not.toHaveBeenCalled();
+    expect(await listInboundTransfers()).toHaveLength(0);
+    expect(await readStored(request.id)).toMatchObject({ status: "awaiting_payment" });
+  });
+
+  it("validates the transfer against the finalized transaction", async () => {
+    mockSettlementSucceeds();
+
+    await reconcileOnSandbox(await createRequest({ token: SOL_MINT, expiresAt: null }));
+
+    expect(validateTransferSpy.mock.calls[0]?.[3]).toEqual({ commitment: "finalized" });
+  });
 
   it("asks the payer to retry while the verify budget leaves candidates unchecked", async () => {
     mockSignatures(
@@ -492,6 +526,28 @@ describe("closeLapsedPaymentRequest", () => {
     const closed = await onSandbox(() => closeLapsedPaymentRequest(env, request));
 
     expect(closed).toMatchObject({ status: "paid", paid_late: true });
+  });
+
+  it("keeps the request awaiting while the payment is confirmed but not finalized", async () => {
+    mockSignatures(signatureInfo(SIGNATURE, { blockTime: PAST_SECONDS - 10n }));
+    verifyTransactionLandedSpy.mockResolvedValue(verifiedConfirmedOnly());
+    const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
+
+    const closed = await onSandbox(() => closeLapsedPaymentRequest(env, request));
+
+    expect(closed).toMatchObject({ status: "awaiting_payment" });
+    expect(await listInboundTransfers()).toHaveLength(0);
+  });
+
+  it("judges lateness by the finalized transaction's block time", async () => {
+    mockSignatures(signatureInfo(SIGNATURE, { blockTime: PAST_SECONDS + 10n }));
+    verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
+    validateTransferSpy.mockResolvedValue(validatedTransfer(unixTimestamp(PAST_SECONDS - 10n)));
+    const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
+
+    const closed = await onSandbox(() => closeLapsedPaymentRequest(env, request));
+
+    expect(closed).toMatchObject({ status: "paid", paid_late: false });
   });
 
   it("settles late when the chain gives no block time", async () => {
