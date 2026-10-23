@@ -306,7 +306,11 @@ describe("Payments routes — recurring mandates in base units (ADR 0012)", () =
   });
 
   it("finishes a stale amount update from its saved replacement plan after the fee grew to take the debit", async () => {
-    await answerPyusd({ extensions: [transferFeeExtension(0, 0n)], destinationExtensions: [] });
+    await answerPyusd({
+      extensions: [transferFeeExtension(0, 0n)],
+      destinationExtensions: [],
+      destinationFrozen: false,
+    });
     const activated = await activateRecurringPaymentFixture({
       ...DEFAULT_RECURRING_FIXTURE,
       token: PYUSD,
@@ -367,6 +371,7 @@ describe("Payments routes — recurring mandates in base units (ADR 0012)", () =
     await answerPyusd({
       extensions: [transferFeeExtension(10_000, 1_000_000_000n)],
       destinationExtensions: [],
+      destinationFrozen: false,
     });
 
     const response = await app.request(
