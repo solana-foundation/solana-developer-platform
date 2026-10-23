@@ -1243,6 +1243,25 @@ export const PAYMENT_REQUEST_STATUSES = [
 ] as const;
 export type PaymentRequestStatus = (typeof PAYMENT_REQUEST_STATUSES)[number];
 
+/**
+ * Where a transaction /pay issued for a request stands (ADR 0012): `open`
+ * until its signature lands (`landed`), lands with an error (`failed`), or can
+ * never land (`lapsed`). Every outcome but `open` is final.
+ */
+export const PAYMENT_REQUEST_TRANSACTION_OUTCOMES = ["open", "landed", "failed", "lapsed"] as const;
+export type PaymentRequestTransactionOutcome =
+  (typeof PAYMENT_REQUEST_TRANSACTION_OUTCOMES)[number];
+
+/** The outcomes a closed window takes. */
+export type FinalPaymentRequestTransactionOutcome = Exclude<
+  PaymentRequestTransactionOutcome,
+  "open"
+>;
+
+/** An issued transaction's lifecycle (soft delete only), separate from its outcome. */
+export const PAYMENT_REQUEST_TRANSACTION_STATUSES = ["active", "archived"] as const;
+export type PaymentRequestTransactionStatus = (typeof PAYMENT_REQUEST_TRANSACTION_STATUSES)[number];
+
 export interface PaymentRequestLifecycleEvent {
   status: PaymentRequestStatus;
   at: string;

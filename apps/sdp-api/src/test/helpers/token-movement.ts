@@ -1,5 +1,6 @@
+import type { AssetRef } from "@sdp/solana/asset-ref";
 import { type MovementQuote, quoteMovement } from "@sdp/solana/movement-quote";
-import { parseTokenAmount } from "@sdp/solana/token-amount";
+import { parseTokenAmount, toBaseUnits } from "@sdp/solana/token-amount";
 import { NATIVE_TOKEN_TERMS } from "@sdp/solana/token-terms";
 import type { TokenMovementBasis } from "@sdp/types/token-movements";
 import { SPL_TOKEN_PROGRAMS, type TokenProgramKind } from "@sdp/types/well-known-tokens";
@@ -24,6 +25,7 @@ import {
   getTokenEncoder,
 } from "@solana-program/token-2022";
 import { z } from "zod";
+import type { PaymentRequestExpectation } from "@/db/repositories/payment-requests.repository";
 import type { ClusterRpcResponder, JsonRpcResult } from "@/test/helpers/cluster-rpc";
 
 /** The Clock a stubbed chain answers with: slot 4 200, epoch 900, 2027-01-15. */
@@ -172,4 +174,13 @@ export function sentInstructions(transactionBytes: Uint8Array) {
     accounts: (instruction.accounts ?? []).map((account) => account.address),
     data: instruction.data,
   }));
+}
+
+/** A payment request's expectation: `amount` token units of `asset` at `decimals`, as a credit. */
+export function testExpectation(
+  asset: AssetRef,
+  amount: string,
+  decimals: number
+): PaymentRequestExpectation {
+  return { asset, decimals, credit: toBaseUnits(parseTokenAmount(amount, decimals)) };
 }
