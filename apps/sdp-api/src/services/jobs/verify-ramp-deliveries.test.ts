@@ -6,17 +6,23 @@ import { getDb } from "@/db/client";
 import { applyRampSettlementEvent } from "@/services/payments/ramp-settlements";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
-import { mintTermsAt, transferFeeExtension } from "@/test/helpers/token-movement";
+import {
+  mintTermsAt,
+  transferFeeExtension,
+  transferFeeScheduleExtension,
+} from "@/test/helpers/token-movement";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { type RampChainReader, verifyRampDeliveries } from "./verify-ramp-deliveries";
+import { epochAt, type RampChainReader, verifyRampDeliveries } from "./verify-ramp-deliveries";
 
 const getTransactionMock = vi.fn<RampChainReader["getTransaction"]>();
 const getSignatureStatusesMock = vi.fn<RampChainReader["getSignatureStatuses"]>();
 const readTokenTermsMock = vi.fn<RampChainReader["readTokenTerms"]>();
+const epochOfSlotMock = vi.fn<RampChainReader["epochOfSlot"]>();
 const chain: RampChainReader = {
   getTransaction: getTransactionMock,
   getSignatureStatuses: getSignatureStatusesMock,
   readTokenTerms: readTokenTermsMock,
+  epochOfSlot: epochOfSlotMock,
 };
 
 const ORG = "org_ramp_delivery_test";
@@ -123,6 +129,8 @@ function landedToken(amount: string, owner = "quoted-destination", mint = MINT):
 describe("verifyRampDeliveries", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
+    // Every test delivery lands in epoch 900, after the fee entries test mints carry.
+    epochOfSlotMock.mockResolvedValue(900n);
     await seedTestDatabase(env);
     const db = getDb(env);
     await db.batch([
@@ -717,11 +725,15 @@ describe("verifyRampDeliveries", () => {
         .first<Record<string, unknown>>();
     }
 
-    /** A fee-mint delivery: the instruction debits 1 PYUSD, the destination receives `credit`. */
+    /**
+     * A fee-mint delivery: each instruction debits 1 PYUSD (one by default), the
+     * destination receives `credit`.
+     */
     function landedFeeMint(
       credit: string,
       type: "transferChecked" | "transferCheckedWithFee",
-      fee: string | null
+      fee: string | null,
+      transfers = 1
     ): ParsedTransaction {
       const transfer = {
         source: "provider-account",
@@ -747,14 +759,12 @@ describe("verifyRampDeliveries", () => {
             decimals: 6,
           },
         ],
-        instructions: [
-          {
-            programId: SPL_TOKEN_PROGRAMS["token-2022"],
-            accounts: [],
-            parsedType: type,
-            info,
-          },
-        ],
+        instructions: Array.from({ length: transfers }, () => ({
+          programId: SPL_TOKEN_PROGRAMS["token-2022"],
+          accounts: [],
+          parsedType: type,
+          info,
+        })),
       };
     }
 
@@ -859,6 +869,47 @@ describe("verifyRampDeliveries", () => {
       });
     });
 
+    it("charges the fee per transfer: two capped transfers withhold two caps", async () => {
+      await settleOnramp("xfr_leg_split", PYUSD_MINT, "2");
+      // 1% of each 1 PYUSD transfer is 10 000, capped at 5 000 per transfer.
+      getTransactionMock.mockResolvedValue(landedFeeMint("1990000", "transferChecked", null, 2));
+      readTokenTermsMock.mockResolvedValue(
+        mintTermsAt(PYUSD_MINT, "token-2022", {
+          decimals: 6,
+          extensions: [transferFeeExtension(100, 5_000n)],
+        })
+      );
+
+      await sweep();
+
+      expect((await row("xfr_leg_split"))?.status).toBe("completed");
+      expect(await legOf("xfr_leg_split")).toMatchObject({
+        quoted_debit: "2000000",
+        quoted_fee: "10000",
+        quoted_credit: "1990000",
+      });
+    });
+
+    it("leaves a debit report pending when both of the mint's fee entries came after the delivery", async () => {
+      await settleOnramp("xfr_leg_old_fee", PYUSD_MINT, "1");
+      getTransactionMock.mockResolvedValue(landedFeeMint("995000", "transferChecked", null));
+      // The delivery landed in epoch 900; the mint now keeps entries from 950 and 960.
+      const later = { epoch: 950n, maximumFee: 0n, transferFeeBasisPoints: 0 };
+      readTokenTermsMock.mockResolvedValue(
+        mintTermsAt(PYUSD_MINT, "token-2022", {
+          decimals: 6,
+          extensions: [transferFeeScheduleExtension(later, { ...later, epoch: 960n })],
+        })
+      );
+
+      await sweep();
+
+      const pending = await row("xfr_leg_old_fee");
+      expect(pending?.status).toBe("settling");
+      expect(pending?.provider_data).toMatchObject({ deliveryMismatch: null });
+      expect(await legOf("xfr_leg_old_fee")).toBeNull();
+    });
+
     it("holds amount_mismatch when no fee rule explains a debit report, and records no leg", async () => {
       await settleOnramp("xfr_leg_unexplained", PYUSD_MINT, "1");
       getTransactionMock.mockResolvedValue(landedFeeMint("995000", "transferChecked", null));
@@ -946,5 +997,30 @@ describe("verifyRampDeliveries", () => {
         verification_reason: "movement_not_executed",
       });
     });
+  });
+});
+
+describe("epochAt", () => {
+  it("divides a schedule without warmup evenly, as mainnet and devnet are", () => {
+    const schedule = { firstNormalEpoch: 0n, firstNormalSlot: 0n, slotsPerEpoch: 432_000n };
+    expect(epochAt(schedule, 0n)).toBe(0n);
+    expect(epochAt(schedule, 431_999n)).toBe(0n);
+    expect(epochAt(schedule, 432_000n)).toBe(1n);
+    expect(epochAt(schedule, 514_177_405n)).toBe(1_190n);
+  });
+
+  it("doubles warmup epochs from 32 slots until the first normal slot", () => {
+    // Warmup epochs 0..13 are 32, 64, ... 262 144 slots long; epoch 14 starts at slot 524 256.
+    const schedule = { firstNormalEpoch: 14n, firstNormalSlot: 524_256n, slotsPerEpoch: 432_000n };
+    expect([0n, 31n, 32n, 95n, 96n].map((slot) => epochAt(schedule, slot))).toEqual([
+      0n,
+      0n,
+      1n,
+      1n,
+      2n,
+    ]);
+    expect(epochAt(schedule, 524_255n)).toBe(13n);
+    expect(epochAt(schedule, 524_256n)).toBe(14n);
+    expect(epochAt(schedule, 524_256n + 432_000n)).toBe(15n);
   });
 });
