@@ -18,7 +18,6 @@ import { getAuthorized } from "@/middleware/authorize";
 import { requireHumanActor } from "@/middleware/human-session";
 import { callerMayPerform } from "@/middleware/require-action";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
 import { findClerkOrganizationId } from "@/services/clerk-organization-provisioning.service";
 import {
@@ -274,15 +273,9 @@ export const listMembers = async (c: AppContext) => {
           .all<PendingInvitationRow>()
       : { results: [] as PendingInvitationRow[] };
 
-  // Clerk mints the accept link and we only keep a hash of our own token, so
-  // the shareable URL has to come from Clerk. Delivery of the invitation email
-  // is not observable from here, so surfacing the link is the only way an
-  // admin can unblock someone whose mail never arrived. Skipped when this page
-  // carries no invitations, so listing members never waits on Clerk for links
-  // nobody asked for.
-  const clerkInvitations =
-    invitationRows.results.length > 0 ? await resolveClerkInvitations(c, organizationId) : [];
-
+  // Clerk's accept link is never returned: its ticket signs an existing Clerk
+  // user in as the invitee, so whoever reads it, the inviting admin included,
+  // could take over the invitee's account. Only the invitee's inbox receives it.
   const invitationList = invitationRows.results.map((row) => ({
     id: row.id,
     email: row.email,
@@ -290,10 +283,6 @@ export const listMembers = async (c: AppContext) => {
     status: row.status,
     createdAt: row.created_at,
     expiresAt: row.expires_at,
-    // Matched by Clerk's invitation id, so two pending invitations for the same
-    // address each surface their own link rather than both showing whichever
-    // one an email-keyed lookup happened to land on.
-    acceptUrl: clerkInvitations.find(matchesClerkInvitation(row))?.url ?? null,
   }));
 
   const adminCountRow = await getDb(c.env)
@@ -323,36 +312,6 @@ export const listMembers = async (c: AppContext) => {
     },
   });
 };
-
-/**
- * Best-effort lookup of Clerk's pending invitations, which carry the accept
- * URLs. A Clerk outage must not take the member list down with it, so a failure
- * degrades to no links rather than an error.
- */
-async function resolveClerkInvitations(
-  c: AppContext,
-  organizationId: string
-): Promise<ClerkOrganizationInvitation[]> {
-  try {
-    const clerkOrgId = await findClerkOrganizationId(getDb(c.env), organizationId);
-    if (!clerkOrgId) {
-      return [];
-    }
-
-    const clerkService = new ClerkOrganizationsService(c.env);
-    return await clerkService.listPendingOrganizationInvitations(clerkOrgId);
-  } catch (error) {
-    getLogger().error(
-      {
-        requestId: c.get("requestId"),
-        organizationId,
-        error: error instanceof Error ? error.message : String(error),
-      },
-      "listMembers: failed to resolve Clerk invitation URLs"
-    );
-    return [];
-  }
-}
 
 export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>) => {
   const { organizationId, userId } = resolveActor(c);

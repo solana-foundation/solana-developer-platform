@@ -146,11 +146,7 @@ export async function MembersSection({ page }: { page: number }) {
                   </TableCell>
                   <TableCell className="text-muted text-sm">—</TableCell>
                   <TableCell className="text-right">
-                    <InvitationActions
-                      invitationId={invitation.id}
-                      email={invitation.email}
-                      acceptUrl={invitation.acceptUrl}
-                    />
+                    <InvitationActions invitationId={invitation.id} email={invitation.email} />
                   </TableCell>
                 </TableRow>
               ))}

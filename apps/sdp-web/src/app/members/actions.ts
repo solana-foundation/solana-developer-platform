@@ -35,8 +35,6 @@ const pendingInvitationSchema = z.object({
   status: z.literal("pending"),
   createdAt: z.string(),
   expiresAt: z.string(),
-  /** Clerk's shareable accept link; null when Clerk could not be reached. */
-  acceptUrl: z.string().nullable(),
 });
 
 const memberDirectorySchema = z.object({

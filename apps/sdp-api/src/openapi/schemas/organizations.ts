@@ -180,11 +180,6 @@ export const pendingInvitationSchema = z
       description: "Invitation expiration timestamp.",
       example: "2025-02-01T00:00:00.000Z",
     }),
-    acceptUrl: z.string().url().nullable().openapi({
-      description:
-        "Clerk's shareable acceptance link, for an invitee whose email never arrived. Null when Clerk could not be reached.",
-      example: "https://accounts.example.com/accept?__clerk_ticket=example",
-    }),
   })
   .openapi({
     description: "Pending invitation, returned only to callers holding `members.manage`.",

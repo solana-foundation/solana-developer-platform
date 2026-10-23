@@ -18,11 +18,9 @@ import { useActionIdempotencyKey } from "@/lib/use-action-idempotency-key";
 export function InvitationActions({
   invitationId,
   email,
-  acceptUrl,
 }: {
   invitationId: string;
   email: string;
-  acceptUrl: string | null;
 }) {
   const t = useTranslations();
   const router = useRouter();
@@ -30,19 +28,6 @@ export function InvitationActions({
   const [isRevoking, setIsRevoking] = useState(false);
   // Kept across retries of one revocation, so a retry finishes its Clerk half.
   const actionKey = useActionIdempotencyKey(null);
-
-  const copyLink = async () => {
-    if (!acceptUrl) return;
-
-    try {
-      await navigator.clipboard.writeText(acceptUrl);
-      toast.success(t("Shared.members.inviteLinkCopied"));
-    } catch {
-      // Clipboard access is refused on insecure origins and when the document
-      // is not focused, so say so rather than appearing to do nothing.
-      toast.error(t("Shared.members.inviteLinkCopyFailed"));
-    }
-  };
 
   const revoke = () => {
     const input = JSON.stringify(["revoke", invitationId]);
@@ -76,13 +61,6 @@ export function InvitationActions({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        {/* Absent when Clerk could not be reached; offering a copy action that
-            silently copies nothing would be worse than hiding it. */}
-        {acceptUrl ? (
-          <DropdownMenuItem onSelect={() => void copyLink()}>
-            {t("Shared.members.copyInviteLink")}
-          </DropdownMenuItem>
-        ) : null}
         <DropdownMenuItem onSelect={revoke}>
           {isRevoking ? t("Shared.members.revoking") : t("Shared.members.revokeInvite")}
         </DropdownMenuItem>
