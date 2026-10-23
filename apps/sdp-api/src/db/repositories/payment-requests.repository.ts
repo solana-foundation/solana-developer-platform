@@ -174,8 +174,12 @@ export interface PaymentRequestsRepository {
     organizationId: string;
     projectId: string;
   }): Promise<SignedPaymentRequestTransaction[]>;
-  /** Writes final outcomes of open issued transactions; an outcome already final is kept. */
+  /**
+   * Writes final outcomes of one request's open issued transactions; an
+   * outcome already final is kept, and another request's window is untouched.
+   */
   closePaymentRequestTransactions(params: {
+    requestId: string;
     organizationId: string;
     projectId: string;
     outcomes: readonly {

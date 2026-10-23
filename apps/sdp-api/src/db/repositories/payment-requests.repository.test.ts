@@ -631,6 +631,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
         ).toEqual([signatureOf(1), signatureOf(2)]);
 
         await repo.closePaymentRequestTransactions({
+          requestId: request.id,
           ...OWNER,
           outcomes: [{ signature: signatureOf(1), outcome: "lapsed", landedSlot: null }],
         });
@@ -660,6 +661,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
         ).toEqual([signatureOf(1), signatureOf(2)]);
 
         await repo.closePaymentRequestTransactions({
+          requestId: request.id,
           ...OWNER,
           outcomes: [
             { signature: signatureOf(1), outcome: "failed", landedSlot: 77n },
@@ -679,6 +681,31 @@ describe("PaymentRequestsRepository (postgres)", () => {
           { signature: signatureOf(2), outcome: "lapsed", landed_slot: null },
           { signature: signatureOf(3), outcome: "open", landed_slot: null },
         ]);
+      });
+
+      it("closes only the named request's windows, never another request's", async () => {
+        const request = await repo.createPaymentRequest(createInput());
+        const other = await repo.createPaymentRequest(createInput());
+        await claimAndSign(request.id, "dHhB", 1);
+        await claimAndSign(other.id, "dHhC", 2);
+
+        await repo.closePaymentRequestTransactions({
+          requestId: request.id,
+          ...OWNER,
+          outcomes: [
+            { signature: signatureOf(1), outcome: "lapsed", landedSlot: null },
+            { signature: signatureOf(2), outcome: "lapsed", landedSlot: null },
+          ],
+        });
+
+        expect(
+          await repo.listOpenPaymentRequestTransactions({ requestId: request.id, ...OWNER })
+        ).toEqual([]);
+        expect(
+          (await repo.listOpenPaymentRequestTransactions({ requestId: other.id, ...OWNER })).map(
+            (issued) => issued.signature
+          )
+        ).toEqual([signatureOf(2)]);
       });
 
       it("never signs a claim with no issued record (the previous revision's)", async () => {

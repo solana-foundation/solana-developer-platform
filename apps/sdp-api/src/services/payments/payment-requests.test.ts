@@ -353,6 +353,27 @@ describe("reconcilePaymentRequest (ADR 0012: settlement on the signatures SDP is
     expect(await listInboundTransfers()).toHaveLength(0);
   });
 
+  it("keeps a window open on a processed failure, which its fork can still undo, and settles it once confirmed", async () => {
+    const request = await createRequest({ expiresAt: null });
+    const issued = await issueTransaction(request, 1, { lastValidBlockHeight: 1_000n });
+    answerStatuses(() => ({
+      ...CONFIRMED,
+      confirmationStatus: "processed",
+      err: { InstructionError: [0, "Custom"] },
+    }));
+
+    const pending = await reconcileOnSandbox(request, { bestEffort: false });
+
+    expect(pending.status).toBe("awaiting_payment");
+    expect(await issuedOutcome(issued)).toEqual({ outcome: "open", landed_slot: null });
+
+    answerStatuses(() => CONFIRMED);
+    const paid = await reconcileOnSandbox(pending, { bestEffort: false });
+
+    expect(paid.status).toBe("paid");
+    expect(await listInboundTransfers()).toHaveLength(1);
+  });
+
   it("closes a window whose transaction landed with an error, and settles nothing", async () => {
     const request = await createRequest({ expiresAt: null });
     const issued = await issueTransaction(request, 1, { lastValidBlockHeight: 1_000n });

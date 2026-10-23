@@ -346,17 +346,22 @@ async function readIssuedTransactions(
     page.forEach((entry, index) => {
       const status = statuses.value[index];
       if (status) {
-        if (status.err !== null) {
+        // Below confirmed, the result can still change with its fork: a
+        // processed failure may land later, so it leaves the window open.
+        const confirmed =
+          status.confirmationStatus !== null &&
+          commitmentComparator(status.confirmationStatus, "confirmed") >= 0;
+        if (!confirmed) {
+          return;
+        }
+        if (status.err === null) {
+          read.landed.push({ issued: entry, slot: status.slot });
+        } else {
           read.closed.push({
             signature: entry.signature,
             outcome: "failed",
             landedSlot: status.slot,
           });
-        } else if (
-          status.confirmationStatus !== null &&
-          commitmentComparator(status.confirmationStatus, "confirmed") >= 0
-        ) {
-          read.landed.push({ issued: entry, slot: status.slot });
         }
         return;
       }
@@ -391,7 +396,7 @@ async function settlePaymentRequestIfPaid(
     await createPaymentRequestsRepository(
       env,
       createTenantScope(owner)
-    ).closePaymentRequestTransactions({ ...owner, outcomes: read.closed });
+    ).closePaymentRequestTransactions({ requestId: row.id, ...owner, outcomes: read.closed });
     return row;
   }
   if (alsoLanded.length > 0) {
@@ -439,6 +444,7 @@ async function settleWithIssuedTransaction(
     throw internalError("payment request not found during settlement");
   }
   await requests.closePaymentRequestTransactions({
+    requestId: input.requestId,
     ...owner,
     outcomes: [
       ...input.closed,
