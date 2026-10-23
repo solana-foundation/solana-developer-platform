@@ -1,3 +1,4 @@
+import { createClusterRpc } from "@sdp/rpc/factory";
 /**
  * Balances in their three units (ADR 0012): base units summed per mint, the
  * exact token amount, and the display value a wallet shows.
@@ -14,7 +15,6 @@
  * mint's display changes every second.
  */
 
-import type { SolanaRpc } from "@sdp/rpc/solana";
 import { AmountError } from "@sdp/solana/amount";
 import type { TokenAsset } from "@sdp/solana/asset-ref";
 import { fetchTokenTermsOfMints } from "@sdp/solana/read-token-terms";
@@ -131,6 +131,16 @@ export function sumHoldings(sets: readonly (readonly HeldTokenBalance[])[]): Hel
 }
 
 /**
+ * The balance read a display follows: the caller's deadline (undefined for
+ * none), and the slot the holdings were read at or after (undefined when the
+ * read named none), which the terms read must see too.
+ */
+export type BalanceRead = Readonly<{
+  abortSignal: AbortSignal | undefined;
+  minContextSlot: bigint | undefined;
+}>;
+
+/**
  * Each set of holdings with its display amounts, reading the terms of every
  * Token-2022 mint across all sets once.
  *
@@ -140,39 +150,34 @@ export function sumHoldings(sets: readonly (readonly HeldTokenBalance[])[]): Hel
  * neither show nor move it, and anyone can send a wallet such a token, so it
  * must not fail the whole read.
  *
- * @param rpc - The cluster the holdings were read on.
  * @param sets - Holdings by key (a wallet id, or one aggregate).
+ * @param read - The read the holdings came from: its deadline, and the slot
+ *   it was at, which the terms read must see too.
  * @returns The same keys, each holding with `tokenAmount` and its display.
  * @throws When the terms read itself fails.
  */
 export async function withDisplayAmounts<K>(
-  rpc: SolanaRpc,
-  sets: ReadonlyMap<K, readonly HeldTokenBalance[]>
+  sets: ReadonlyMap<K, readonly HeldTokenBalance[]>,
+  read: BalanceRead
 ): Promise<Map<K, CustodyWalletTokenBalance[]>> {
   const keys = [...sets.keys()];
-  const displayed = await displaySets(rpc, [...sets.values()], undefined);
+  const displayed = await displaySets([...sets.values()], read);
   return new Map(keys.map((key, index) => [key, displayed[index]]));
 }
 
-/**
- * {@link withDisplayAmounts} for one wallet or one aggregate.
- *
- * @param abortSignal - The caller's read deadline, or undefined for none.
- */
+/** {@link withDisplayAmounts} for one wallet or one aggregate. */
 export async function withDisplayAmount(
-  rpc: SolanaRpc,
   holdings: readonly HeldTokenBalance[],
-  abortSignal: AbortSignal | undefined
+  read: BalanceRead
 ): Promise<CustodyWalletTokenBalance[]> {
-  const [displayed] = await displaySets(rpc, [holdings], abortSignal);
+  const [displayed] = await displaySets([holdings], read);
   return displayed;
 }
 
 /** Each set displayed, in order, from one terms read for all of them. */
 async function displaySets(
-  rpc: SolanaRpc,
   sets: readonly (readonly HeldTokenBalance[])[],
-  abortSignal: AbortSignal | undefined
+  read: BalanceRead
 ): Promise<CustodyWalletTokenBalance[][]> {
   const token2022Mints = [
     ...new Set(
@@ -189,8 +194,8 @@ async function displaySets(
   }));
   const termsByMint = new Map<string, MintTokenTerms | TokenTermsError>();
   if (assets.length > 0) {
-    const read = await fetchTokenTermsOfMints(rpc, assets, { abortSignal });
-    read.forEach((terms, index) => {
+    const termsRead = await fetchTokenTermsOfMints(createClusterRpc(), assets, read);
+    termsRead.forEach((terms, index) => {
       termsByMint.set(token2022Mints[index], terms);
     });
   }

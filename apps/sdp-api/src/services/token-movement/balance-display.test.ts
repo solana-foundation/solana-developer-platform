@@ -1,4 +1,3 @@
-import { createClusterRpc } from "@sdp/rpc/factory";
 import { runInClusterScope } from "@sdp/rpc/scope";
 import { SOL_MINT, SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
 import { type Address, getAddressDecoder } from "@solana/kit";
@@ -53,6 +52,9 @@ const interestExtension: ExtensionArgs = {
   currentRate: 500,
 };
 
+/** A balance read with no deadline and no slot floor. */
+const NO_READ_BOUNDS = { abortSignal: undefined, minContextSlot: undefined } as const;
+
 describe("balance display", () => {
   const rpc = installClusterRpcResponder();
 
@@ -81,9 +83,8 @@ describe("balance display", () => {
   it("shows native SOL and classic mints as their token amount, with no read", async () => {
     const displayed = await inScope(() =>
       withDisplayAmount(
-        createClusterRpc(),
         [nativeSolHolding(1_500_000_000n), holding(CLASSIC_MINT, "2500000", "spl-token")],
-        undefined
+        NO_READ_BOUNDS
       )
     );
 
@@ -117,7 +118,6 @@ describe("balance display", () => {
 
     const displayed = await inScope(() =>
       withDisplayAmounts(
-        createClusterRpc(),
         new Map([
           ["wallet_a", [holding(SCALED_MINT, "1500000", "token-2022")]],
           [
@@ -128,7 +128,8 @@ describe("balance display", () => {
               holding(PLAIN_2022_MINT, "3000000", "token-2022"),
             ],
           ],
-        ])
+        ]),
+        NO_READ_BOUNDS
       )
     );
 
@@ -171,16 +172,29 @@ describe("balance display", () => {
 
     const displayed = await inScope(() =>
       withDisplayAmount(
-        createClusterRpc(),
         [
           holding(UNREADABLE_MINT, "1000000", "token-2022"),
           holding(SCALED_MINT, "1000000", "token-2022"),
         ],
-        undefined
+        NO_READ_BOUNDS
       )
     );
 
     expect(displayed.map(({ mint }) => mint)).toEqual([SCALED_MINT]);
+  });
+
+  it("reads the terms at or after the slot the holdings were read at", async () => {
+    answerMints();
+
+    await inScope(() =>
+      withDisplayAmount([holding(SCALED_MINT, "1000000", "token-2022")], {
+        abortSignal: undefined,
+        minContextSlot: 4_242n,
+      })
+    );
+
+    expect(termsReads()).toHaveLength(1);
+    expect(termsReads()[0]?.params[1]).toMatchObject({ minContextSlot: 4_242 });
   });
 
   it("fails when the terms read itself fails", async () => {
@@ -190,11 +204,7 @@ describe("balance display", () => {
 
     await expect(
       inScope(() =>
-        withDisplayAmount(
-          createClusterRpc(),
-          [holding(SCALED_MINT, "1000000", "token-2022")],
-          undefined
-        )
+        withDisplayAmount([holding(SCALED_MINT, "1000000", "token-2022")], NO_READ_BOUNDS)
       )
     ).rejects.toThrow();
   });

@@ -198,7 +198,10 @@ async function getBalancesByWalletId(
   const held = await readHeldBalancesByWalletId(c, rpc, walletPublicKeys);
   let displayed: Map<string, CustodyWalletTokenBalance[]>;
   try {
-    displayed = await withDisplayAmounts(rpc, held);
+    displayed = await withDisplayAmounts(held, {
+      abortSignal: undefined,
+      minContextSlot: undefined,
+    });
   } catch (error) {
     getLogger().error(
       {
@@ -212,7 +215,10 @@ async function getBalancesByWalletId(
         holdings.every((holding) => holding.program !== "token-2022")
       )
     );
-    displayed = await withDisplayAmounts(rpc, classicOnly);
+    displayed = await withDisplayAmounts(classicOnly, {
+      abortSignal: undefined,
+      minContextSlot: undefined,
+    });
   }
   const balancesMap = await attachTokenSymbolsToBalanceMap(displayed);
   return attachUsdValuesToBalanceMap(c.env, balancesMap);
@@ -577,18 +583,19 @@ export const getWalletAggregate = async (c: AppContext) => {
   });
   const aggregateStartedAt = performance.now();
   // The display of the summed base units, from one terms read.
-  const displayed = await withDisplayAmount(rpc, sumHoldings(walletHoldings), undefined).catch(
-    (cause: unknown) => {
-      getLogger().error(
-        {
-          requestId: c.get("requestId"),
-          error: cause instanceof Error ? cause.message : String(cause),
-        },
-        "getWalletAggregate: failed to read token terms for display"
-      );
-      throw serviceUnavailable("Wallet balances are temporarily unavailable. Try again.");
-    }
-  );
+  const displayed = await withDisplayAmount(sumHoldings(walletHoldings), {
+    abortSignal: undefined,
+    minContextSlot: undefined,
+  }).catch((cause: unknown) => {
+    getLogger().error(
+      {
+        requestId: c.get("requestId"),
+        error: cause instanceof Error ? cause.message : String(cause),
+      },
+      "getWalletAggregate: failed to read token terms for display"
+    );
+    throw serviceUnavailable("Wallet balances are temporarily unavailable. Try again.");
+  });
   const aggregatedBalances = await attachUsdValuesToBalances(
     c.env,
     await attachTokenSymbolsToBalances(displayed)
