@@ -145,9 +145,9 @@ async function checkEach(
   for (const [index, row] of rows.entries()) {
     const result = results[index];
     if (result?.status === "fulfilled") {
-      const { row: after, chainRead, blockedReason } = result.value;
-      stamps.push({ id: row.id, verified: chainRead, blockedReason });
-      if (blockedReason !== null) {
+      const { row: after, outcome } = result.value;
+      stamps.push({ id: row.id, outcome });
+      if (outcome.kind === "blocked") {
         blocked += 1;
       }
       if (after.status !== row.status) {
@@ -163,7 +163,7 @@ async function checkEach(
       }
       continue;
     }
-    stamps.push({ id: row.id, verified: false, blockedReason: null });
+    stamps.push({ id: row.id, outcome: { kind: "failed" } });
     failed += 1;
     logEvent("error", {
       event: "payment_requests.check_failed",

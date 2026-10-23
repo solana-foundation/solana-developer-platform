@@ -2,6 +2,7 @@ import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { PaymentRequestLifecycleEvent, PaymentRequestStatus } from "@sdp/types/payments";
 import { generateKeyPairSigner } from "@solana/kit";
 import { customAlphabet } from "nanoid";
+import { z } from "zod";
 
 // URL-safe, dash-only alphabet (nanoid's default also includes "_").
 // biome-ignore lint/security/noSecrets: token alphabet constant, not a secret.
@@ -65,11 +66,21 @@ export interface CreatePaymentRequestInput {
 export const SETTLEMENT_BLOCKED_REASONS = ["mint_not_admitted", "invalid_amount"] as const;
 export type SettlementBlockedReason = (typeof SETTLEMENT_BLOCKED_REASONS)[number];
 
-/** What one background check leaves on its row: verified moves last_verified_at and clears a block. */
+/**
+ * How one background check ended: it read the chain, skipped a row that needed no read, stopped on
+ * a blocked mint or amount, or failed. A read or a failure clears a recorded block; a skip keeps it.
+ */
+export const paymentRequestCheckOutcomeSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("read") }),
+  z.object({ kind: z.literal("skipped") }),
+  z.object({ kind: z.literal("blocked"), reason: z.enum(SETTLEMENT_BLOCKED_REASONS) }),
+  z.object({ kind: z.literal("failed") }),
+]);
+export type PaymentRequestCheckOutcome = z.infer<typeof paymentRequestCheckOutcomeSchema>;
+
 export interface PaymentRequestCheckStamp {
   id: string;
-  verified: boolean;
-  blockedReason: SettlementBlockedReason | null;
+  outcome: PaymentRequestCheckOutcome;
 }
 
 export interface MarkPaymentRequestInput {

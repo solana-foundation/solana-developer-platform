@@ -317,6 +317,28 @@ describe("reconcilePaymentRequests", () => {
     );
   });
 
+  it("reports a once-blocked request as backlog when its checks start failing", async () => {
+    const log = vi.spyOn(moneyPathEvents, "logEvent");
+    vi.spyOn(solanaRpc, "getSignaturesForAddress").mockRejectedValue(new Error("rpc down"));
+    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+    await updateRow(request.id, {
+      created_at: PAST,
+      last_checked_at: PAST,
+      settlement_blocked_reason: "mint_not_admitted",
+    });
+
+    await expect(onSandbox(() => reconcilePaymentRequests(env))).rejects.toThrow(/checks failed/);
+    log.mockClear();
+    await updateRow(request.id, { last_checked_at: PAST });
+    await expect(onSandbox(() => reconcilePaymentRequests(env))).rejects.toThrow(/checks failed/);
+
+    expect((await getRow(request.id)).settlement_blocked_reason).toBeNull();
+    expect(log).toHaveBeenCalledWith(
+      "warn",
+      expect.objectContaining({ event: "payment_requests.reconcile_backlog", stale: 1 })
+    );
+  });
+
   it("clears the block once the chain can be read again", async () => {
     vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);
     const request = await createRequest({ token: SOL_MINT, expiresAt: null });

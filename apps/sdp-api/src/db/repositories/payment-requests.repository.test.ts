@@ -815,7 +815,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
 
       const firstRun = await listDue();
       await systemRepo.markPaymentRequestsChecked(
-        firstRun.map((row) => ({ id: row.id, verified: false, blockedReason: null }))
+        firstRun.map((row) => ({ id: row.id, outcome: { kind: "skipped" } }))
       );
       const secondRun = await listDue();
 
@@ -996,8 +996,8 @@ describe("PaymentRequestsRepository (postgres)", () => {
       const systemRepo = createSystemPaymentRequestsRepository(env);
 
       await systemRepo.markPaymentRequestsChecked([
-        { id: a.id, verified: true, blockedReason: null },
-        { id: b.id, verified: false, blockedReason: null },
+        { id: a.id, outcome: { kind: "read" } },
+        { id: b.id, outcome: { kind: "skipped" } },
       ]);
 
       const rows = await Promise.all(
@@ -1011,6 +1011,49 @@ describe("PaymentRequestsRepository (postgres)", () => {
       );
       expect(rows.every((row) => row?.last_checked_at !== null)).toBe(true);
       expect(rows.map((row) => row?.last_verified_at === null)).toEqual([false, true]);
+    });
+
+    it("records a block, keeps it on a skip, and clears it on a read or a failure", async () => {
+      const systemRepo = createSystemPaymentRequestsRepository(env);
+      const created = await Promise.all(
+        ["blocked", "skipped", "read", "failed"].map(() =>
+          repo.createPaymentRequest(createInput({ token: SOL_MINT, expiresAt: null }))
+        )
+      );
+      const [blocked, skipped, read, failed] = created.map((row) => row.id);
+      if (!blocked || !skipped || !read || !failed) throw new Error("fixture rows missing");
+      for (const id of [skipped, read, failed]) {
+        await updateRow(id, { settlement_blocked_reason: "invalid_amount" });
+      }
+
+      await systemRepo.markPaymentRequestsChecked([
+        { id: blocked, outcome: { kind: "blocked", reason: "mint_not_admitted" } },
+        { id: skipped, outcome: { kind: "skipped" } },
+        { id: read, outcome: { kind: "read" } },
+        { id: failed, outcome: { kind: "failed" } },
+      ]);
+
+      const stored = await Promise.all(
+        [blocked, skipped, read, failed].map((requestId) =>
+          repo.getPaymentRequestById({
+            requestId,
+            organizationId: TEST_ORG.id,
+            projectId: TEST_PROJECT_ID,
+          })
+        )
+      );
+      expect(stored.map((row) => row?.settlement_blocked_reason)).toEqual([
+        "mint_not_admitted",
+        "invalid_amount",
+        null,
+        null,
+      ]);
+      expect(stored.map((row) => row?.last_verified_at === null)).toEqual([
+        true,
+        true,
+        false,
+        true,
+      ]);
     });
 
     describe("listExpiredPaymentRequestsForLateCheck", () => {
@@ -1092,6 +1135,12 @@ describe("PaymentRequestsRepository (postgres)", () => {
         expect(await countStale()).toBe(1);
       });
 
+      it("excludes a request blocked by its mint or amount", async () => {
+        await staleRequest(null, { settlement_blocked_reason: "mint_not_admitted" });
+
+        expect(await countStale()).toBe(0);
+      });
+
       it("excludes lapsed requests, which the expiry lane owns", async () => {
         await staleRequest("2020-01-01T00:00:00.000Z");
 
@@ -1140,6 +1189,8 @@ describe("PaymentRequestsRepository (postgres)", () => {
         await expiredRequest({ expires_at: ago(DAY), custody_wallet_id: null });
 
         expect(await countStaleLateWatch()).toBe(2);
+        await expiredRequest({ expires_at: ago(DAY), settlement_blocked_reason: "invalid_amount" });
+        expect(await countStaleLateWatch()).toBe(2);
         expect(await countStaleLateWatch("production")).toBe(0);
       });
     });
@@ -1172,6 +1223,12 @@ describe("PaymentRequestsRepository (postgres)", () => {
         await lapsedRequest(ago(MINUTE));
 
         expect(await countStaleLapsed()).toBe(2);
+      });
+
+      it("counts a blocked lapse, which needs no chain read to close", async () => {
+        await lapsedRequest(PAST, { settlement_blocked_reason: "mint_not_admitted" });
+
+        expect(await countStaleLapsed()).toBe(1);
       });
 
       it("counts a lapse attempted recently but not verified since the cutoff", async () => {

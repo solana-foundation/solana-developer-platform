@@ -416,20 +416,21 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
         .prepare(
           `UPDATE payment_requests AS pr
               SET last_checked_at = sdp_iso_now(),
-                  last_verified_at = CASE WHEN c.verified THEN sdp_iso_now() ELSE pr.last_verified_at END,
-                  settlement_blocked_reason = CASE
-                    WHEN c.verified THEN NULL
-                    ELSE COALESCE(c.blocked_reason, pr.settlement_blocked_reason)
+                  last_verified_at = CASE WHEN c.kind = 'read' THEN sdp_iso_now() ELSE pr.last_verified_at END,
+                  settlement_blocked_reason = CASE c.kind
+                    WHEN 'blocked' THEN c.reason
+                    WHEN 'skipped' THEN pr.settlement_blocked_reason
+                    ELSE NULL
                   END
-             FROM jsonb_to_recordset(?::jsonb) AS c(id text, verified boolean, blocked_reason text)
+             FROM jsonb_to_recordset(?::jsonb) AS c(id text, kind text, reason text)
             WHERE pr.id = c.id`
         )
         .bind(
           JSON.stringify(
             checks.map((check) => ({
               id: check.id,
-              verified: check.verified,
-              blocked_reason: check.blockedReason,
+              kind: check.outcome.kind,
+              reason: check.outcome.kind === "blocked" ? check.outcome.reason : null,
             }))
           )
         )
@@ -529,7 +530,6 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
               AND pr.custody_wallet_id IS NOT NULL
               AND pr.expires_at IS NOT NULL
               AND pr.expires_at <= sdp_iso_now()
-              AND pr.settlement_blocked_reason IS NULL
               AND COALESCE(pr.last_verified_at, pr.expires_at) < ?`
         )
         .bind(environment, checkedBefore)

@@ -8,6 +8,7 @@ import { ValidateTransferError } from "@solana/pay";
 import { z } from "zod";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import {
+  type PaymentRequestCheckOutcome,
   type PaymentRequestRow,
   type PaymentRequestsRepository,
   SETTLEMENT_BLOCKED_REASONS,
@@ -123,29 +124,25 @@ export async function reconcilePaymentRequest(
   return settlePaymentRequest(env, row, row.custody_wallet_id, result.found);
 }
 
-/**
- * A background check's outcome: the row after it, whether the chain was actually read, and why
- * the request cannot be settled when its mint or amount blocks the search.
- */
+/** A background check's outcome: the row after it and how the check ended. */
 export interface PaymentRequestCheck {
   row: PaymentRequestRow;
-  chainRead: boolean;
-  blockedReason: SettlementBlockedReason | null;
+  outcome: Exclude<PaymentRequestCheckOutcome, { kind: "failed" }>;
 }
 
 function skippedCheck(row: PaymentRequestRow): PaymentRequestCheck {
-  return { row, chainRead: false, blockedReason: null };
+  return { row, outcome: { kind: "skipped" } };
 }
 
 function readCheck(row: PaymentRequestRow): PaymentRequestCheck {
-  return { row, chainRead: true, blockedReason: null };
+  return { row, outcome: { kind: "read" } };
 }
 
 function blockedCheck(
   row: PaymentRequestRow,
   reason: SettlementBlockedReason
 ): PaymentRequestCheck {
-  return { row, chainRead: false, blockedReason: reason };
+  return { row, outcome: { kind: "blocked", reason } };
 }
 
 async function settleIfPaid(
