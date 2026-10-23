@@ -425,8 +425,8 @@ describe("the capability table", () => {
       "scaled UI amount",
       terms(TOKEN_2022, [scaled]),
       {
-        builder: [],
-        recurring: [],
+        builder: ["scaled_display"],
+        recurring: ["scaled_display"],
         issuance: [],
         issuance_seize: [],
         dvp: ["display_rule"],
@@ -438,8 +438,8 @@ describe("the capability table", () => {
       "interest-bearing",
       terms(TOKEN_2022, [interest]),
       {
-        builder: [],
-        recurring: [],
+        builder: ["scaled_display"],
+        recurring: ["scaled_display"],
         issuance: [],
         issuance_seize: [],
         dvp: ["display_rule"],
