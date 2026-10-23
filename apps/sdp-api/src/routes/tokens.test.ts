@@ -22,6 +22,7 @@ const CLASSIC_MINT = testAddress(11);
 const FEE_MINT = testAddress(12);
 const SCALED_MINT = testAddress(13);
 const PAUSED_MINT = testAddress(14);
+const FAR_SWITCH_MINT = testAddress(15);
 const READ_AT = new Date(Number(TEST_CLOCK.unixTimestamp) * 1000).toISOString();
 const chainTime = (seconds: bigint) => new Date(Number(seconds) * 1000).toISOString();
 
@@ -32,6 +33,12 @@ const pendingSwitch: ExtensionArgs = {
   multiplier: 1.5,
   newMultiplierEffectiveTimestamp: TEST_CLOCK.unixTimestamp + 30n,
   newMultiplier: 2,
+};
+
+/** A 1.5× scaled mint whose switch time is i64::MAX: Token-2022 stores any i64 there. */
+const farSwitch: ExtensionArgs = {
+  ...pendingSwitch,
+  newMultiplierEffectiveTimestamp: 2n ** 63n - 1n,
 };
 
 describe("token terms and quote routes", () => {
@@ -51,6 +58,7 @@ describe("token terms and quote routes", () => {
           }),
         ],
         [SCALED_MINT, mintRpcAccount("token-2022", { decimals: 6, extensions: [pendingSwitch] })],
+        [FAR_SWITCH_MINT, mintRpcAccount("token-2022", { decimals: 6, extensions: [farSwitch] })],
         [
           PAUSED_MINT,
           mintRpcAccount("token-2022", {
@@ -172,6 +180,26 @@ describe("token terms and quote routes", () => {
     const response = await getTerms(testAddress(99));
 
     expect(response.status).toBe(400);
+  });
+
+  // A switch time past the range of a date threw a RangeError, and the route answered 500.
+  it("refuses terms whose switch time no date can show, and still quotes the mint", async () => {
+    answerMints();
+
+    const response = await getTerms(FAR_SWITCH_MINT);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: {
+        message: "The mint's display terms name a time too far from now to show as a date",
+      },
+    });
+
+    // The switch is never within a quote's 60 seconds, so the quote expires as any other.
+    const quote = await quoteOf(await postQuote(FAR_SWITCH_MINT, { displayAmount: "150" }));
+    expect(quote).toMatchObject({
+      amount: "100",
+      expiresAt: chainTime(TEST_CLOCK.unixTimestamp + 60n),
+    });
   });
 
   it("quotes a debit on a fee mint as debit, fee and credit in token units", async () => {

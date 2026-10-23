@@ -82,6 +82,23 @@ function feeEntry(rate: TransferFeeRate, decimals: number): TokenTransferFeeEntr
   };
 }
 
+/** Unix seconds of 0000-01-01T00:00:00Z and 9999-12-31T23:59:59Z: the times ISO 8601's four-digit year shows. */
+const FIRST_ISO_SECOND = -62_167_219_200n;
+const LAST_ISO_SECOND = 253_402_300_799n;
+
+/**
+ * A time the mint's issuer set, as ISO 8601. Token-2022 stores any i64
+ * there, and a time outside the four-digit years has no ISO 8601 date.
+ *
+ * @throws AppError (400) when the time is outside those years.
+ */
+function issuerTimeIso(unixTimestamp: bigint): string {
+  if (unixTimestamp < FIRST_ISO_SECOND || unixTimestamp > LAST_ISO_SECOND) {
+    throw badRequest("The mint's display terms name a time too far from now to show as a date");
+  }
+  return chainTimeIso(unixTimestamp);
+}
+
 function displayTerms(rule: DisplayRule): TokenDisplayTerms {
   switch (rule.kind) {
     case "plain":
@@ -91,15 +108,15 @@ function displayTerms(rule: DisplayRule): TokenDisplayTerms {
         rule: "scaled",
         multiplier: rule.multiplier,
         newMultiplier: rule.newMultiplier,
-        newMultiplierEffectiveAt: chainTimeIso(rule.newMultiplierEffectiveAt),
+        newMultiplierEffectiveAt: issuerTimeIso(rule.newMultiplierEffectiveAt),
       };
     case "interest":
       return {
         rule: "interest",
         currentRate: rule.currentRate,
         preUpdateAverageRate: rule.preUpdateAverageRate,
-        initializedAt: chainTimeIso(rule.initializedAt),
-        lastUpdateAt: chainTimeIso(rule.lastUpdateAt),
+        initializedAt: issuerTimeIso(rule.initializedAt),
+        lastUpdateAt: issuerTimeIso(rule.lastUpdateAt),
       };
     default: {
       const exhaustive: never = rule;
