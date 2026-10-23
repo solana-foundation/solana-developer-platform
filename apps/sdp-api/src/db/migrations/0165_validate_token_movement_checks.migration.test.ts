@@ -7,6 +7,7 @@ const VALIDATED = [
   ["payment_requests", "payment_requests_expectation_shape"],
   ["payment_recurring_payments", "payment_recurring_payments_mandate_shape"],
   ["payment_subscription_plans", "payment_subscription_plans_mandate_shape"],
+  ["token_movement_legs", "token_movement_legs_verified_by_known"],
   ["token_movement_legs", "token_movement_legs_verification_reason_known"],
 ] as const;
 
