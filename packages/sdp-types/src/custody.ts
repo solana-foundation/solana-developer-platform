@@ -25,7 +25,10 @@ export const CUSTODY_MODES = ["managed", "byok"] as const;
 export type CustodyMode = (typeof CUSTODY_MODES)[number];
 
 /** Providers with a BYOK runtime: the only ones a custody connection can name. */
-export const BYOK_CUSTODY_PROVIDERS = ["privy"] as const satisfies readonly CustodyProvider[];
+export const BYOK_CUSTODY_PROVIDERS = [
+  "privy",
+  "fireblocks",
+] as const satisfies readonly CustodyProvider[];
 export type ByokCustodyProvider = (typeof BYOK_CUSTODY_PROVIDERS)[number];
 
 /**
@@ -34,7 +37,7 @@ export type ByokCustodyProvider = (typeof BYOK_CUSTODY_PROVIDERS)[number];
  * @param provider - The custody provider to classify.
  * @returns True when a custody connection may name `provider`.
  */
-export function isByokCustodyProvider(provider: CustodyProvider): provider is ByokCustodyProvider {
+export function isByokCustodyProvider(provider: string): provider is ByokCustodyProvider {
   return BYOK_CUSTODY_PROVIDERS.some((byokProvider) => byokProvider === provider);
 }
 
@@ -361,7 +364,39 @@ export const CUSTODY_PROVIDER_CATALOG_BY_ID = {
     visible: true,
     technicalCapabilities: CUSTODY_PROVIDER_CAPABILITIES.fireblocks,
     useCases: DEFAULT_CUSTODY_PROVIDER_USE_CASES,
-    storedCredentialSetup: { mode: "none" },
+    storedCredentialSetup: {
+      mode: "self_service",
+      fields: [
+        {
+          key: "credentialLabel",
+          labelKey: "DashboardCustody.providerCredentialLabel",
+          helpTextKey: "DashboardCustody.providerCredentialLabelDescription",
+          kind: "text",
+          required: true,
+          defaultValue: "Fireblocks credential",
+          valueHandling: "plain",
+        },
+        {
+          key: "apiKey",
+          labelKey: "DashboardCustody.providerFireblocksApiKey",
+          helpTextKey: "DashboardCustody.providerFireblocksApiKeyDescription",
+          kind: "text",
+          required: true,
+          valueHandling: "redacted_metadata",
+          redactionKind: "suffix",
+        },
+        {
+          key: "vaultAccountId",
+          // biome-ignore lint/security/noSecrets: translation key, not a credential.
+          labelKey: "DashboardCustody.providerFireblocksVaultAccountId",
+          // biome-ignore lint/security/noSecrets: translation key, not a credential.
+          helpTextKey: "DashboardCustody.providerFireblocksVaultAccountIdDescription",
+          kind: "text",
+          required: true,
+          valueHandling: "plain",
+        },
+      ],
+    },
   },
   coinbase_cdp: {
     id: "coinbase_cdp",

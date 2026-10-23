@@ -62,3 +62,30 @@ an older entry for later callers. Hydration runs each read under the stamp
 taken right after its position rows were read, and reconciliation close-out
 under a fresh stamp, so neither reuses a request sent before that point. A
 floor does not make an RPC node current; the minimum-slot scope does.
+
+## Bounded clients
+
+`createClusterRpc({ timeoutMs })` bounds each request end to end, failover hops
+and genesis probes included, for a client handed to a helper that sends without
+a signal. It takes behaviour only, never a cluster or URL: the client wraps the
+scope's memoized pool transport, so failover, cooldowns and genesis proofs stay
+shared, and it is memoized per deadline and pool. A caller that sends itself
+passes `abortSignal` to `.send()` instead.
+
+## Earn's URL helpers (transitional, HOO-1881)
+
+Earn reads the scope like every module, but its provider packages still build
+their own transports from a URL and pin one endpoint per operation, until they
+take clients (HOO-1881) and `withConsistentRpcReads` (HOO-2025). `factory.ts`
+therefore exports two Earn-only functions, fenced by Biome to
+`apps/sdp-api/src/services/earn/cluster-rpc.ts`:
+
+- `earnClusterEndpointUrls(cluster)`: the scope's pool URLs in failover order,
+  or none.
+- `proveEarnClusterEndpoint(cluster, url)`: the pool's own genesis probe and
+  proof cache for one of its URLs, so an endpoint the pool proved costs Earn no
+  second probe, and the other way round.
+
+Both take the cluster the provider asked for and refuse one that is not the
+scope's (`CLUSTER_SCOPE_CONFLICT`), outside a scope (`CLUSTER_SCOPE_MISSING`),
+or not in the pool. Delete them once the provider packages take clients.

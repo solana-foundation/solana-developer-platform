@@ -38,7 +38,7 @@ Public docs and AI artifacts should mirror the supported public surface only.
   - API playground: the committed catalog holds every channel's operations with their module; the dashboard filters it, and the hand-authored forms, by its own channel.
 - `earn` is held out of every public surface until launch (PRO-2038), independently of its release-channel stage: `EARN_PUBLIC_SURFACE_PUBLISHED` in `apps/sdp-api/src/openapi/spec.ts` drops the family from the public OpenAPI document, and the API reference, Postman collection, playground catalog and AI files regenerate from it. Flipping it back is a PRO-1872 security sign-off PR. The internal document and the runtime are unchanged, except `GET /v1/projects/{projectId}/provider-availability`, which omits Earn entries while the flag is false so the response matches the public document.
 - Hidden/internal families stay out of public AI resources unless product policy changes: `admin`, `onboarding`, `auth`, `organizations`, `members`, `api-keys`
-- Earn has two access tiers. Only strategy catalogue reads, deposit and withdrawal previews, withdrawal-route discovery, and unsigned instant deposit/direct-withdrawal builds may be keyless. Queued request and cancellation builds, submits, tenant reads, programs, custody routes, and the aggregate movement feed always require authentication. Keep this matrix aligned across the router, the internal OpenAPI document and the Embedded Yield guide, which is unpublished until PRO-2038 and lives at `apps/sdp-docs/content/unpublished/guides/embedded-yield.mdx`, outside the built `content/docs` tree.
+- Every Earn route requires an authenticated credential (an API key, or a dashboard session with a project) and runs in that project's environment. Keep the route list aligned across the router, the internal OpenAPI document and the Embedded Yield guide, which is unpublished until PRO-2038 and lives at `apps/sdp-docs/content/unpublished/guides/embedded-yield.mdx`, outside the built `content/docs` tree.
 - Promoting a route into the public OpenAPI document is a security-relevant scope change, not a docs edit: the PR needs a named security sign-off. For `earn` the pinned list in `apps/sdp-api/src/openapi/spec.test.ts` enforces this (see `apps/sdp-api/src/routes/earn/CLAUDE.md`, "Public OpenAPI promotion").
 
 ## Preferred checks
@@ -61,8 +61,6 @@ Public docs and AI artifacts should mirror the supported public surface only.
   `docs/testing/ramps-sandbox.md` shows how to run one end to end against the
   provider sandboxes locally.
 - Prefer reusing generated docs/OpenAPI metadata instead of duplicating route inventories by hand.
-- Implement each optional-auth Earn endpoint once. A valid credential enriches that request with tenant context and retains its previous permission requirement; an anonymous request must never acquire tenant identity or persist a build, advisory, movement, or position row.
-- Never downgrade a presented Earn credential to anonymous access. Invalid or expired API keys, plus Clerk tokens without organization context, return 401.
 - Keep public URLs coherent with the shared site constants in `@sdp/types/site`.
 - When changing docs URLs or discovery resources, update both the docs site and any product links that point at it.
 - Update `docs/architecture/module-map.md` with `pnpm generate:module-map`; do not edit it by hand.

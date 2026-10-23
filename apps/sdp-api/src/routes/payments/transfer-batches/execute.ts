@@ -13,6 +13,7 @@ import { internalError, transactionFailed } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { type AppContext, getPaymentsRepository } from "@/routes/payments/context";
 import { logEvent } from "@/runtime/money-path-events";
+import { signWithFreshBlockhash } from "@/services/payments/sign-with-fresh-blockhash";
 import { createTransferSignedSubmissionStore } from "@/services/payments/signed-submission";
 import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
 import {
@@ -120,7 +121,10 @@ export async function executeChunk(params: {
   preflight: boolean;
 }): Promise<void> {
   const { c, resolved, chunk } = params;
-  const partiallySigned = await partiallySignTransactionMessageWithSigners(chunk.message);
+  const partiallySigned = await signWithFreshBlockhash({
+    blockhash: chunk.message.lifetimeConstraint.blockhash,
+    sign: () => partiallySignTransactionMessageWithSigners(chunk.message),
+  });
   const serializedTx = getBase64EncodedWireTransaction(partiallySigned);
   const txBytes = new Uint8Array(getTransactionEncoder().encode(partiallySigned));
   const recipientRows = chunk.recipientIndexes.map((index) => {

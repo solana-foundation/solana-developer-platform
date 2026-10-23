@@ -403,7 +403,7 @@ describe("BYOK Privy outside the release channel", () => {
       operation: "rotate",
       path: `/internal/dashboard/custody/provider-credentials/${CREDENTIAL_ID}/rotate`,
       idempotencyKey: "byok-out-rotate",
-      body: { fields: { appId: APP_ID, appSecret: "rotated secret" } },
+      body: { provider: "privy", fields: { appId: APP_ID, appSecret: "rotated secret" } },
     },
     {
       operation: "complete-rotation",
@@ -447,7 +447,7 @@ describe("BYOK Privy outside the release channel", () => {
       seed: () => seedSuccessor({ status: "deactivated", deactivatedAt: SEEDED_AT }),
       path: `/internal/dashboard/custody/provider-credentials/${SUCCESSOR_CREDENTIAL_ID}/rotate`,
       idempotencyKey: "byok-out-rotate-deactivated",
-      body: { fields: { appId: APP_ID, appSecret: "rotated secret" } },
+      body: { provider: "privy", fields: { appId: APP_ID, appSecret: "rotated secret" } },
     },
     {
       operation: "complete-rotation",

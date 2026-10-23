@@ -1,6 +1,5 @@
 import { notImplemented } from "@sdp/earn/errors";
 import type { EarnRuntimeContext, EarnVaultTransactionPlan } from "@sdp/earn/types";
-import { resolveClusterRpcUrl } from "@sdp/rpc/config";
 import { compareDecimalAmounts } from "@sdp/solana/amount";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { getDb } from "@/db/client";
@@ -152,7 +151,6 @@ export async function withdrawFromVault(
   if (!client) throw notImplemented(input.provider, "vault withdrawals");
 
   const cluster = earnClusterFor(input.environment);
-  const rpcUrl = resolveClusterRpcUrl(env, cluster);
 
   // Same ordering rule as deposit: after the replay reads, before the build.
   //
@@ -232,11 +230,9 @@ export async function withdrawFromVault(
     walletId: input.wallet.id,
     walletPublicKey: input.wallet.publicKey,
     signerMismatchMessage: "Resolved signing wallet does not match the position's wallet",
-    cluster,
     deadline,
     expectedAssetIdentity,
     plan,
-    rpcUrl,
     fee,
     persist: (db, signed) =>
       createPostgresEarnMovementsRepository(db).createSignedVaultWithdrawalIntent({

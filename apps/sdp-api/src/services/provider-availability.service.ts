@@ -1558,22 +1558,6 @@ export async function assertProviderAvailable(
 }
 
 /**
- * The provider gate for an anonymous Earn money-in caller. With no project, the
- * project provider rule has no entitlement or credentials to decide from, so
- * only its offered check applies, answered with the same 403 an authenticated
- * caller gets from `assertProviderAvailable`. Exits and reads never call it
- * (ADR 0002).
- *
- * @param provider - The Earn provider a new position is being opened with.
- * @throws 403 `FORBIDDEN` with `details.reason: "provider_not_offered"` when SDP does not surface the provider.
- */
-export function assertAnonymousEarnProviderOffered(provider: EarnProviderId): void {
-  if (!isEarnRequestOffered({ family: "earn", provider })) {
-    throw providerNotOffered(getProviderLabel("earn", provider));
-  }
-}
-
-/**
  * Exit-safety gate for Earn withdrawals: money OUT must keep working when a
  * provider is commercially disabled for an organization (entitlement off), so
  * funds can never be trapped behind a sales/tier decision. Only the

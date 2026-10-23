@@ -20,9 +20,8 @@ import { DEFAULT_SDP_API_URL } from "@sdp/types/site";
  * Solana SDK referenced, and only by the optional sponsor signer.
  *
  * The docs guide (apps/sdp-docs/content/unpublished/guides/embedded-yield.mdx,
- * unpublished until PRO-2038)
- * documents this same authenticated flow plus the keyless catalogue and
- * unsigned-build tier. Keep the shared contract aligned in both.
+ * unpublished until PRO-2038) documents this same authenticated flow. Keep the
+ * shared contract aligned in both.
  */
 export interface EarnIntegrationSections {
   /** Shared client setup: base URL, auth headers, response envelope, signers. */
@@ -704,7 +703,7 @@ export async function waitForEarnQueuedWithdrawal(
   const terminal = new Set(["fulfilled", "cancelled", "failed"]);
   while (true) {
     signal?.throwIfAborted();
-    const request = await getEarnQueuedWithdrawalRequest(withdrawalRequestId);
+    const request = await getEarnWithdrawalRequest(withdrawalRequestId);
     if (terminal.has(request.status)) return request;
     await new Promise<void>((resolve, reject) => {
       const onAbort = () => {

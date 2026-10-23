@@ -142,16 +142,13 @@ nothing else; the program create still sends the body `requestId` form.
   partner `feePayer` (the implementor sponsoring its customers' fees) is
   documented in the docs guide
   (`apps/sdp-docs/content/unpublished/guides/embedded-yield.mdx`, unpublished
-  until PRO-2038). That guide
-  also owns the keyless quickstart; these dashboard snippets intentionally stay
-  keyed because they include submit and tenant read routes. Keep the shared
-  authenticated flow aligned across both. The guide is
-  entirely derived from the strategy catalogue: nothing is persisted, there is
-  no styling to save, and no public handoff token exists. (The UI builder that
-  used to hold those — styled previews, saved per-project configuration, the
-  public `/embedded-yield/integrate/:token` handoff page and its
-  `/v1/earn/button-configurations/*` API — was removed; migration 0074 dropped
-  its table. Do not reintroduce persisted presentation state here.)
+  until PRO-2038). Keep the shared authenticated flow aligned across both. The
+  guide is entirely derived from the strategy catalogue: nothing is persisted,
+  there is no styling to save, and no public handoff token exists. (The UI
+  builder that used to hold those was removed with its styled previews, saved
+  per-project configuration, the public `/embedded-yield/integrate/:token`
+  handoff page and its `/v1/earn/button-configurations/*` API; migration 0074
+  dropped its table. Do not reintroduce persisted presentation state here.)
 - Both routes are `dynamic = "force-dynamic"` and resolve
   `loadEarnProviderAccess()` server-side per request. Provider access is
   organization-scoped; caching it would hand one org's entitlement to another.
@@ -199,9 +196,7 @@ nothing else; the program create still sends the body `requestId` form.
   an info callout that links to the API keys page (a Developer key includes
   earn:read and earn:write), because the module they document carries a secret
   API key. The module needs only the strategy id and that key: no strategy
-  object, no `sourceTokenMint` on a direct deposit. Do not imply that catalogue,
-  preview, or unsigned build access always needs the key; the public guide
-  documents their keyless tier.
+  object, no `sourceTokenMint` on a direct deposit.
 - `earn-integration-snippets.ts` — the snippet source,
   `buildEarnIntegrationSections(strategy)` (+ `buildEarnServerIntegration`,
   the sections joined). Pure string building so the exact wire contract is

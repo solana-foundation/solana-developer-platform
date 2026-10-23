@@ -161,7 +161,10 @@ const SANDBOX_AVAILABILITY: ProjectProviderAvailability = {
       family: "custody",
       provider: "fireblocks",
       modes: [],
-      unavailableModes: SANDBOX_UNENTITLED_CUSTODY_MODES,
+      unavailableModes: [
+        { mode: "managed", reason: "provider_not_entitled" },
+        { mode: "byok", reason: "provider_not_entitled" },
+      ],
     },
     { family: "custody", provider: "privy", modes: ["managed", "byok"], unavailableModes: [] },
     {
@@ -226,7 +229,10 @@ const PRODUCTION_AVAILABILITY: ProjectProviderAvailability = {
       family: "custody",
       provider: "fireblocks",
       modes: [],
-      unavailableModes: PRODUCTION_UNOFFERED_CUSTODY_MODES,
+      unavailableModes: [
+        { mode: "managed", reason: "custody_mode_not_allowed" },
+        { mode: "byok", reason: "provider_not_entitled" },
+      ],
     },
     {
       family: "custody",
@@ -484,6 +490,28 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
     expect(availability.providers.filter((entry) => entry.family === "ramps")).toEqual([]);
     expect(availability.providers.filter((entry) => entry.family === "earn")).toEqual([]);
   });
+
+  it.each(["stable", "beta", "experimental"] as const)(
+    "advertises the actual Fireblocks BYOK stage to the dashboard in %s",
+    async (channel) => {
+      await setProviderOverrides({ custody: { fireblocks: true } });
+      const availability = await readAvailability(
+        "sandbox",
+        deploymentEnv({ SDP_RELEASE_CHANNEL: channel })
+      );
+      const fireblocks = availability.providers.find(
+        (entry) => entry.family === "custody" && entry.provider === "fireblocks"
+      );
+      expect(fireblocks).toMatchObject({
+        modes: channel === "stable" ? [] : ["byok"],
+        unavailableModes: expect.arrayContaining(
+          channel === "stable"
+            ? [{ mode: "byok", reason: "custody_provider_not_in_release_channel" }]
+            : []
+        ),
+      });
+    }
+  );
 
   it.for(EARN_FLAG_OFF_CASES)(
     "reports every Earn provider as outside the release channel while $flag is off",

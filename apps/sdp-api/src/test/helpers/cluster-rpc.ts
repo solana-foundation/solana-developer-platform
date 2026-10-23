@@ -190,6 +190,25 @@ const jsonRpcRequestWithParamsSchema = jsonRpcRequestSchema.extend({
   params: z.array(z.unknown()),
 });
 
+/**
+ * The id, method and params of one JSON-RPC request a suite's own `fetch` stub received, for
+ * suites that stub endpoints {@link installClusterRpcStub} cannot: several per cluster, or a fresh
+ * pool per test.
+ *
+ * @param init - The fetch options kit passed.
+ * @returns The parsed request.
+ * @throws Error when the fetch carried no string body.
+ * @throws ZodError when the body is not one JSON-RPC request.
+ */
+export function parseJsonRpcRequest(
+  init: Parameters<typeof fetch>[1]
+): z.infer<typeof jsonRpcRequestWithParamsSchema> {
+  if (init === undefined || typeof init.body !== "string") {
+    throw new Error("Expected a JSON-RPC body on the stubbed fetch");
+  }
+  return jsonRpcRequestWithParamsSchema.parse(JSON.parse(init.body));
+}
+
 const signatureStatusesParamsSchema = z.union([
   z.tuple([z.array(z.string())]),
   z.tuple([z.array(z.string()), z.object({ searchTransactionHistory: z.literal(true) })]),

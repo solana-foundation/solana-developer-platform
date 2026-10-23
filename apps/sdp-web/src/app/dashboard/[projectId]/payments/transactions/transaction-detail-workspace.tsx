@@ -41,6 +41,7 @@ import { RampOpenSale, useLiveRampTransfer } from "./ramp-open-sale";
 import type { PaymentTransferDetail } from "./transaction-detail.data";
 import { TRANSACTION_MODULE_HREFS, walletHref } from "./transaction-module-hrefs.redesign";
 import { isPaymentTransferStatus, useTransactionStatus } from "./transaction-status";
+import { usePendingPaymentRefresh } from "./use-pending-payment-refresh";
 
 type Translate = ReturnType<typeof useTranslations>;
 
@@ -89,6 +90,12 @@ function paymentWhy(
 ): string {
   switch (status) {
     case "processing":
+      if (transfer?.fireblocks)
+        return t(
+          transfer.fireblocks.transactionId
+            ? "DashboardPayments.onchainSend.fireblocksPending"
+            : "DashboardPayments.onchainSend.fireblocksUnknown"
+        );
       return t("DashboardPayments.transactionDetail.why.processing");
     case "settling":
       return t("DashboardPayments.transactionDetail.why.settling");
@@ -495,6 +502,7 @@ function TransactionRecord({
           signature: liveTransfer.signature,
         }
       : initialTransaction;
+  usePendingPaymentRefresh(transaction, transfer?.type);
   const summary = useTransactionSummary(
     transaction,
     transfer,
@@ -541,6 +549,24 @@ function TransactionRecord({
           direction={summary.direction}
           contact={summary.contact}
         />
+        {transfer?.fireblocks ? (
+          <RecordSection title={t("DashboardPayments.onchainSend.fireblocks")}>
+            <RecordList>
+              {transfer.fireblocks.transactionId ? (
+                <RecordRow
+                  label={t("DashboardPayments.onchainSend.fireblocksTransactionId")}
+                  copy={transfer.fireblocks.transactionId}
+                >
+                  {transfer.fireblocks.transactionId}
+                </RecordRow>
+              ) : null}
+              <RecordRow label={t("DashboardPayments.onchainSend.fireblocksStatus")}>
+                {transfer.fireblocks.status}
+                {transfer.fireblocks.subStatus ? ` · ${transfer.fireblocks.subStatus}` : ""}
+              </RecordRow>
+            </RecordList>
+          </RecordSection>
+        ) : null}
         {transfer?.provider ? (
           <ProviderSection provider={transfer.provider} reference={transfer.providerReference} />
         ) : null}

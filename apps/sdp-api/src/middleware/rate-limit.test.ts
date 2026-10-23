@@ -9,8 +9,6 @@ import * as organizationAccess from "@/lib/organization-access";
 import { apiKeyFloodGuardFallback, authMiddleware, optionalAuth } from "@/middleware/auth";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import {
-  ANONYMOUS_EARN_BUILD_MAX_REQUESTS,
-  ANONYMOUS_EARN_CATALOGUE_MAX_REQUESTS,
   API_KEY_PRE_READ_MAX_REQUESTS,
   apiKeyFloodGuardIdentifier,
   enforceRateLimit,
@@ -250,67 +248,6 @@ describe("Rate limiting", () => {
   });
 
   describe("anonymous IP limit", () => {
-    it("gives anonymous Earn catalogue traffic its own generous tier", async () => {
-      const identifier = `anonymous:earn:catalogue:ip:${CLIENT_IP}`;
-      await seedRateLimit(env, identifier, 20);
-
-      const res = await app.request(
-        "/v1/earn/strategies",
-        { headers: { "x-forwarded-for": CLIENT_IP } },
-        env
-      );
-
-      expect(res.status).not.toBe(429);
-      expect(res.headers.get("X-RateLimit-Limit")).toBe(
-        ANONYMOUS_EARN_CATALOGUE_MAX_REQUESTS.toString()
-      );
-    });
-
-    it("caps anonymous Earn builds in a separate per-IP tier", async () => {
-      const identifier = `anonymous:earn:build:ip:${CLIENT_IP}`;
-      await seedRateLimit(env, identifier, ANONYMOUS_EARN_BUILD_MAX_REQUESTS);
-
-      const res = await app.request(
-        "/v1/earn/external-wallet/deposit-transactions",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "x-forwarded-for": CLIENT_IP },
-          body: "{}",
-        },
-        env
-      );
-
-      expect(res.status).toBe(429);
-      expect(res.headers.get("X-RateLimit-Limit")).toBe(
-        ANONYMOUS_EARN_BUILD_MAX_REQUESTS.toString()
-      );
-    });
-
-    it("does not let an anonymous Earn rejection consume a keyed caller's tier", async () => {
-      await seedApiKeyRow(env, validKeyHash, TEST_SEEDED_API_KEY);
-      await seedRateLimit(
-        env,
-        `anonymous:earn:build:ip:${CLIENT_IP}`,
-        ANONYMOUS_EARN_BUILD_MAX_REQUESTS
-      );
-
-      const res = await app.request(
-        "/v1/earn/external-wallet/deposit-transactions",
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
-            "Content-Type": "application/json",
-            "x-forwarded-for": CLIENT_IP,
-          },
-          body: "{}",
-        },
-        env
-      );
-
-      expect(res.status).not.toBe(429);
-    });
-
     it("returns 429 for unauthenticated traffic over the anonymous limit", async () => {
       await seedRateLimit(env, CLIENT_IP, 20);
 
@@ -430,7 +367,7 @@ describe("Rate limiting", () => {
       expect(res.status).toBe(429);
     });
 
-    it("runs a keyless route under the presented key's tenant identity", async () => {
+    it("runs an optional-auth route under the presented key's tenant identity", async () => {
       await seedApiKeyRow(env, validKeyHash, TEST_SEEDED_API_KEY);
 
       const res = await optionalAuthApp().request(

@@ -43,7 +43,7 @@ import {
   type EarnPositionRow,
   type ExternalWalletMovementTotals,
 } from "@/db/repositories/earn-movements.repository";
-import { type ApiKeyContext, getAuth, getOptionalAuth, requireProjectId } from "@/lib/auth";
+import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, internalError, notFound } from "@/lib/errors";
 import { isEarnHastraDexExitConfigured } from "@/lib/feature-flags";
 import { encodeKeysetCursor } from "@/lib/keyset-cursor";
@@ -116,13 +116,11 @@ import {
  * value-moving conformance inventory to find.
  *
  * WHY THE BUILD IS THE GATE MOMENT: the money-in gates below run when SDP
- * builds. The vault exposure cap is the exception for a keyed build: its
- * submit repeats the decision under the ledger lock before recording or
- * broadcasting. An anonymous build has no SDP submit and no durable row, so
- * its cap decision can run only here. A signed transaction is valid only
- * within its blockhash window (about a minute), and a caller already holding
- * signed bytes can broadcast them without SDP; what SDP controls is what it is
- * willing to build and, for keyed flows, what it records and broadcasts.
+ * builds. The vault exposure cap is the exception: the submit repeats the
+ * decision under the ledger lock before recording or broadcasting. A signed
+ * transaction is valid only within its blockhash window (about a minute), and
+ * a caller already holding signed bytes can broadcast them without SDP; what
+ * SDP controls is what it is willing to build, record and broadcast.
  */
 
 type EarnExternalWalletDepositTransactionBody = z.output<
@@ -687,16 +685,13 @@ interface AuthenticatedEarnRequest {
   projectId: string;
 }
 
-function getAuthenticatedEarnRequest(c: AppContext): AuthenticatedEarnRequest | null {
-  const auth = getOptionalAuth(c);
-  if (!auth) return null;
-  return { auth, projectId: requireProjectId(c) };
+function getAuthenticatedEarnRequest(c: AppContext): AuthenticatedEarnRequest {
+  return { auth: getAuth(c), projectId: requireProjectId(c) };
 }
 
 function toExternalWalletBuildContext(
-  request: AuthenticatedEarnRequest | null
+  request: AuthenticatedEarnRequest
 ): ExternalWalletBuildContext {
-  if (!request) return {};
   return {
     organizationId: request.auth.organizationId,
     projectId: request.projectId,
@@ -705,14 +700,15 @@ function toExternalWalletBuildContext(
   };
 }
 
-export type ExternalWalletExitLocator =
-  | { positionId: string }
-  | { strategyId: string; ownerAddress: string };
+export interface ExternalWalletExitLocator {
+  positionId: string;
+}
 
-interface ResolvedExternalWalletExitBase {
+export interface ResolvedExternalWalletExit {
   buildContext: ExternalWalletBuildContext;
-  /** The tenant's environment, or the named strategy's for an anonymous exit. */
+  /** The tenant's environment. */
   environment: ReturnType<typeof resolveSdpEnvironment>;
+  positionId: string;
   provider: string;
   vaultAddress: string;
   tokenMint: string;
@@ -722,75 +718,36 @@ interface ResolvedExternalWalletExitBase {
   shareAtaRentFunder: string | null;
 }
 
-export type ResolvedExternalWalletExit = ResolvedExternalWalletExitBase &
-  ({ positionId: string; strategyId: null } | { positionId: null; strategyId: string });
-
 /**
- * Resolve one exit without ever crossing the tier boundary. Authenticated
- * requests resolve their tenant position exactly as before. Anonymous requests
- * resolve only global strategy metadata supplied in the public body. The
- * catalogue sync retains that immutable identity as a deprecated tombstone, so
- * delisting closes deposits without closing exits.
+ * Resolve one exit from the caller's tenant position: organization,
+ * environment, external-wallet shape and exact project, each a 404 when it
+ * does not match. The position carries the vault, owner and mints, so the exit
+ * needs no catalogue row and a delisted vault stays exitable.
  */
 export async function resolveExternalWalletExit(
   c: AppContext,
   locator: ExternalWalletExitLocator
 ): Promise<ResolvedExternalWalletExit> {
   const authenticated = getAuthenticatedEarnRequest(c);
-  if (authenticated) {
-    const environment = resolveSdpEnvironment(c);
-    if (!("positionId" in locator)) {
-      throw badRequest("positionId is required for an authenticated external-wallet exit");
-    }
-    const positionRow = await createPostgresEarnMovementsRepository(getDb(c.env)).getPositionById({
-      organizationId: authenticated.auth.organizationId,
-      environment,
-      positionId: locator.positionId,
-    });
-    const position = toExternalWalletHolding(positionRow, authenticated.projectId);
-    if (!position) throw notFound("Earn external-wallet position");
-    return {
-      buildContext: toExternalWalletBuildContext(authenticated),
-      environment,
-      provider: position.provider,
-      positionId: position.id,
-      strategyId: null,
-      vaultAddress: position.vaultAddress,
-      tokenMint: position.tokenMint,
-      shareMint: position.shareMint,
-      ownerAddress: position.ownerAddress,
-      label: position.label,
-      shareAtaRentFunder: position.shareAtaRentFunder,
-    };
-  }
-
-  if (!("strategyId" in locator)) {
-    throw badRequest(
-      "strategyId and ownerAddress are required for an anonymous external-wallet exit"
-    );
-  }
-  // The row names the shelf; an anonymous caller chose it (PRO-1998).
-  const { strategy, environment } = await requireEarnStrategyForCaller(c, locator.strategyId);
-  if (earnDepositStyle(strategy.provider) !== "vault_direct") {
-    throw badRequest(`${strategy.provider} does not support external-wallet exits.`);
-  }
-  const tokenMint = strategy.deposit_mints[0];
-  if (!tokenMint) throw internalError(`Earn strategy ${strategy.id} has no deposit mint`);
-  if (!strategy.share_mint) throw internalError(`Earn strategy ${strategy.id} has no share mint`);
-  return {
-    buildContext: {},
+  const environment = resolveSdpEnvironment(c);
+  const positionRow = await createPostgresEarnMovementsRepository(getDb(c.env)).getPositionById({
+    organizationId: authenticated.auth.organizationId,
     environment,
-    provider: strategy.provider,
-    positionId: null,
-    strategyId: strategy.id,
-    vaultAddress: strategy.provider_reference,
-    tokenMint,
-    shareMint: strategy.share_mint,
-    ownerAddress: locator.ownerAddress,
-    label: strategy.name,
-    // Anonymous deposits always make the owner pay account rent, so any rent
-    // refunded by this anonymous exit returns to that same owner.
-    shareAtaRentFunder: null,
+    positionId: locator.positionId,
+  });
+  const position = toExternalWalletHolding(positionRow, authenticated.projectId);
+  if (!position) throw notFound("Earn external-wallet position");
+  return {
+    buildContext: toExternalWalletBuildContext(authenticated),
+    environment,
+    provider: position.provider,
+    positionId: position.id,
+    vaultAddress: position.vaultAddress,
+    tokenMint: position.tokenMint,
+    shareMint: position.shareMint,
+    ownerAddress: position.ownerAddress,
+    label: position.label,
+    shareAtaRentFunder: position.shareAtaRentFunder,
   };
 }
 
@@ -800,8 +757,7 @@ export async function resolveExternalWalletExit(
  *
  * MONEY-IN GATES preserve the custody deposit order (routes/earn/CLAUDE.md,
  * "Gate asymmetry"): production slippage floor, environment capability,
- * surfacing, and catalogue admission apply to both tiers. Entitlement applies
- * only when a credential supplied an organization. Everything custody-shaped
+ * surfacing, entitlement and catalogue admission. Everything custody-shaped
  * stays absent: no wallet resolution, wallet scope, or policy extraction.
  * The owner is an address, not a wallet SDP can reach.
  */
@@ -810,8 +766,6 @@ export async function createEarnExternalWalletDepositTransaction(
 ) {
   const body: EarnExternalWalletDepositTransactionBody = c.req.valid("json");
   const authenticated = getAuthenticatedEarnRequest(c);
-  // The row names the shelf: a tenant caller must own it, an anonymous caller
-  // chose it (PRO-1998).
   const { strategy, environment } = await requireEarnStrategyForCaller(c, body.strategyId);
   const tokenMint = strategy.deposit_mints[0];
   if (!tokenMint) {
@@ -863,9 +817,6 @@ export async function createEarnExternalWalletDepositTransaction(
   // A fee payer equal to the owner IS the default: normalized away here so the
   // build, the compiled signer set, and the stored row all agree it is absent.
   const feePayer = body.feePayer === body.ownerAddress ? undefined : body.feePayer;
-  if (!authenticated && feePayer !== undefined) {
-    throw badRequest("feePayer requires an API key; anonymous builds are paid by the owner");
-  }
 
   const result = await buildExternalWalletDepositTransaction(c.env, {
     ...toExternalWalletBuildContext(authenticated),
@@ -874,7 +825,7 @@ export async function createEarnExternalWalletDepositTransaction(
     strategyId: strategy.id,
     providerReference: strategy.provider_reference,
     ownerAddress: body.ownerAddress,
-    ...(authenticated && feePayer !== undefined ? { feePayer } : {}),
+    feePayer,
     tokenMint,
     shareMint,
     label: strategy.name,
@@ -954,12 +905,11 @@ function toDepositSwapWire(sourceTokenMint: string, leg: JupiterSwapLeg): EarnDe
  *
  * ADR 0002 exit safety, the same strongest form as `POST /vault-withdrawals`:
  * no surfacing, entitlement, availability, or environment capability gate.
- * An authenticated caller names its position, which carries the vault, owner,
- * and mints. An anonymous caller names a global strategy plus owner address;
- * only that catalogue metadata is resolved. Capability (501, inside the
- * service) is the only provider-shaped refusal left.
+ * The caller names its position, which carries the vault, owner, and mints.
+ * Capability (501, inside the service) is the only provider-shaped refusal
+ * left.
  *
- * Authenticated scoping answers 404 across the board: organization and
+ * Scoping answers 404 across the board: organization and
  * environment in the position query, kind and owner shape, and exact project.
  * A sibling project must not learn whether the position exists. The custody
  * exit holds the same boundary: every custody wallet belongs to one project.
@@ -986,9 +936,6 @@ export async function createEarnExternalWalletWithdrawalTransaction(
 
   // Same owner-is-the-default normalization as the deposit build.
   const feePayer = body.feePayer === target.ownerAddress ? undefined : body.feePayer;
-  if (target.positionId === null && feePayer !== undefined) {
-    throw badRequest("feePayer requires an API key; anonymous builds are paid by the owner");
-  }
 
   const built = await buildExternalWalletWithdrawalTransaction(c.env, {
     ...target.buildContext,
@@ -999,7 +946,7 @@ export async function createEarnExternalWalletWithdrawalTransaction(
     tokenMint: target.tokenMint,
     shareMint: target.shareMint,
     ownerAddress: target.ownerAddress,
-    ...(target.positionId !== null && feePayer !== undefined ? { feePayer } : {}),
+    feePayer,
     label: target.label,
     shareAtaRentFunder: target.shareAtaRentFunder,
     shares: body.shares,
@@ -1009,9 +956,7 @@ export async function createEarnExternalWalletWithdrawalTransaction(
   const response: EarnExternalWalletWithdrawalTransactionResponse = {
     transaction: {
       ...toExternalWalletTransactionWire(built),
-      ...(target.positionId === null
-        ? { strategyId: target.strategyId }
-        : { positionId: target.positionId }),
+      positionId: target.positionId,
       shares: built.amount_requested,
       minAmountOut: built.min_shares_out,
     },
@@ -1056,9 +1001,7 @@ export async function createEarnExternalWalletWithdrawalPreview(
   }
 
   return success(c, {
-    ...(target.positionId === null
-      ? { strategyId: target.strategyId }
-      : { positionId: target.positionId }),
+    positionId: target.positionId,
     assetsOut: quote.assetsOut,
     assetDecimals: quote.assetDecimals,
     blockingIssues: quote.blockingIssues,

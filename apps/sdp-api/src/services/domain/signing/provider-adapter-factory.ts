@@ -262,3 +262,36 @@ export function createPrivyAdapterFromCredential(
       }),
   });
 }
+
+/** Resolve only this connection's credentials and its exact stored vault wallet. */
+export function createFireblocksAdapterFromCredential(
+  env: Env,
+  input: {
+    apiKey: string;
+    apiSecretPem: string;
+    assetId: "SOL" | "SOL_TEST";
+    walletId: string;
+    requestDelayMs?: number;
+  }
+): SigningPort {
+  assertCustodyProviderAvailable(env, "fireblocks", "byok");
+  if (
+    !input.apiKey ||
+    !input.apiSecretPem ||
+    !input.walletId ||
+    !["SOL", "SOL_TEST"].includes(input.assetId)
+  ) {
+    throw new SigningError(
+      "Fireblocks credential or wallet is unavailable",
+      "PROVIDER_NOT_CONFIGURED"
+    );
+  }
+  return new KeychainFireblocksAdapter({
+    apiKey: input.apiKey,
+    apiSecretPem: input.apiSecretPem,
+    vaultAccountId: input.walletId.startsWith("fb_") ? input.walletId.slice(3) : input.walletId,
+    assetId: input.assetId,
+    apiBaseUrl: env.FIREBLOCKS_API_BASE_URL,
+    requestDelayMs: input.requestDelayMs,
+  });
+}

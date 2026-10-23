@@ -1,5 +1,6 @@
 import type { EarnVaultPositionInput, EarnVaultPositionSnapshot } from "@sdp/earn/types";
 import { readFloor, withRpcReadContext } from "@sdp/rpc/read-context";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { createRpcFromTransport, getAccountInfo } from "@sdp/rpc/solana";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { Address, RpcTransport } from "@solana/kit";
@@ -12,9 +13,17 @@ import {
   type HydratableVaultPosition,
   type HydratedVaultPositionValue,
   hydratedHoldingTokenValue,
-  hydrateVaultPositions,
+  hydrateVaultPositions as hydrateUnscoped,
   markVaultPositionRowsRead,
 } from "./vault-position-hydration";
+
+/** One hydration in the cluster scope its request opens, from the environment it hydrates. */
+function hydrateVaultPositions(
+  ...args: Parameters<typeof hydrateUnscoped>
+): ReturnType<typeof hydrateUnscoped> {
+  const [, environment] = args;
+  return runInClusterScope({ projectId: null, environment }, () => hydrateUnscoped(...args));
+}
 
 const mocks = vi.hoisted(() => ({ readVaultPositions: vi.fn(), resolveClient: vi.fn() }));
 vi.mock("@/services/earn/execution-registry", () => ({
@@ -192,6 +201,19 @@ describe("hydrateVaultPositions shares identical provider reads in flight", () =
     shareMint: SHARE,
   });
 
+  /**
+   * Run `read` while the devnet managed pool names `endpointUrl`. The share key is
+   * taken synchronously, so the pool is restored before any other read starts.
+   */
+  function withDevnetPool<T>(endpointUrl: string, read: () => T): T {
+    vi.stubEnv("SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL", endpointUrl);
+    try {
+      return read();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  }
+
   /** Provider reads that settle only when told to, answering every reference asked for. */
   function heldReads() {
     const pending: Array<{
@@ -265,11 +287,8 @@ describe("hydrateVaultPositions shares identical provider reads in flight", () =
         [holding("p1", "vault-a")],
         options
       ),
-      hydrateVaultPositions(
-        context("sandbox", { SOLANA_DEVNET_RPC_URL: "https://devnet.rpc.invalid/?api-key=KEY" }),
-        "sandbox",
-        [holding("p1", "vault-a")],
-        options
+      withDevnetPool("https://devnet.rpc.invalid/?api-key=KEY", () =>
+        hydrateVaultPositions(context(), "sandbox", [holding("p1", "vault-a")], options)
       ),
       hydrateVaultPositions(context(), "sandbox", [holding("p1", "vault-a", OTHER_OWNER)], options),
       hydrateVaultPositions(

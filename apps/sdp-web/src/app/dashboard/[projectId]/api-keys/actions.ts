@@ -151,7 +151,7 @@ async function deactivateApiKeyRequest(input: {
     const cancelRecurringPayments = input.cancelRecurringPayments === true;
     const response = await client.fetch<{
       recurringPayments: { canceled: string[]; failed: string[] } | null;
-    }>(`/v1/api-keys/${keyId}`, {
+    }>(`/v1/api-keys/${encodeURIComponent(keyId)}`, {
       method: "DELETE",
       body: JSON.stringify({ confirmation, cancelRecurringPayments }),
     });
@@ -302,7 +302,7 @@ export async function rotateApiKeyAction(formData: FormData) {
         id: string;
         rotationDeadline: string;
       };
-    }>(`/v1/api-keys/${keyId}/rotate`, {
+    }>(`/v1/api-keys/${encodeURIComponent(keyId)}/rotate`, {
       method: "POST",
       body: JSON.stringify({ gracePeriodHours }),
     });

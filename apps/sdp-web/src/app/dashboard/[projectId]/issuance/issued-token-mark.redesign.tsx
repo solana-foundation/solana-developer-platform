@@ -2,6 +2,7 @@
 
 import { cn } from "@sdp/ui/cn";
 import { useState } from "react";
+import { isRenderableLogoUrl } from "@/lib/token-logo-url";
 
 const SIZES = {
   md: "size-8 text-body",
@@ -27,7 +28,7 @@ export function IssuedTokenMark({
 }) {
   const [failedLogoUrl, setFailedLogoUrl] = useState<string | null>(null);
   const letter = (symbol.trim() || name?.trim() || "?").slice(0, 1).toUpperCase();
-  const showLogo = Boolean(logoUrl && /^https:\/\//.test(logoUrl) && failedLogoUrl !== logoUrl);
+  const showLogo = Boolean(logoUrl && isRenderableLogoUrl(logoUrl) && failedLogoUrl !== logoUrl);
 
   return (
     <span

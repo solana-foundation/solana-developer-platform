@@ -32,10 +32,6 @@ export const listEarnStrategiesQuerySchema = z.object({
   // environment's own cluster — the shelf the caller can act on. Naming the
   // foreign cluster browses its mirrored sub-shelf; rows stay fundable: false.
   cluster: z.enum(SOLANA_CLUSTERS).optional(),
-  // The shelf an ANONYMOUS caller reads (PRO-1998). It has no project, so it
-  // picks: production, the real-money shelf, unless it asks for sandbox. A
-  // tenant caller's shelf is its project's; naming a different one is a 400.
-  environment: z.enum(["sandbox", "production"]).optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -546,9 +542,9 @@ export const earnVaultWithdrawalRequestsQuerySchema = z
   .strict();
 
 // ---------------------------------------------------------------------------
-// External-wallet (caller-signed) vault flows (PRO-1722, PRO-1943): SDP builds
-// unsigned transactions for a wallet it does not custody. Only keyed builds
-// can be submitted back for a durable movement and SDP broadcast.
+// External-wallet (caller-signed) vault flows (PRO-1722): SDP builds unsigned
+// transactions for a wallet it does not custody, and the caller submits them
+// back for a durable movement and SDP broadcast.
 // ---------------------------------------------------------------------------
 
 /** Same trim + isAddress convention as the payments destination schema. */
@@ -568,8 +564,8 @@ const solanaFeePayerAddressSchema = z.preprocess(
 );
 
 /**
- * The fee-payer field both external-wallet BUILD bodies share. Keyed builds
- * may name a partner wallet; anonymous builds require the owner. When present,
+ * The fee-payer field both external-wallet BUILD bodies share: an optional
+ * partner wallet. When present,
  * the partner pays the network fee and share-account rent, and the transaction
  * requires its signature alongside the owner's. Sending the owner's own
  * address is accepted and normalizes to the default.
@@ -608,61 +604,29 @@ export const earnExternalWalletDepositTransactionSchema = z.object({
   ...earnDepositSwapShape,
 });
 
-/** Fields shared by the keyed position form and anonymous strategy form. */
-const earnExternalWalletWithdrawalFields = {
+/**
+ * Exit an external-wallet position. The caller names its tenant-scoped
+ * `earn_positions` row, which carries the vault, owner and mints.
+ */
+export const earnExternalWalletWithdrawalTransactionSchema = z.object({
+  positionId: earnWithdrawalPositionIdSchema,
   /** Shares to redeem, decimal string in share units. */
   shares: earnWithdrawalSharesSchema,
   /** Same explicit output floor contract as the custody withdrawal builder. */
   minAmountOut: earnMinAmountOutSchema,
   ...earnExternalWalletFeePayerShape,
-} as const;
+});
 
-/**
- * Authenticated callers keep the tenant position contract. Anonymous callers
- * cannot safely resolve that identifier, so they name the global strategy and
- * the owner that will sign instead. The strategy supplies the trusted vault
- * and mint identity without reading tenant state.
- */
-export const earnExternalWalletWithdrawalTransactionSchema = z.union([
-  z.object({
-    /** The caller's tenant-scoped `earn_positions` row. */
-    positionId: earnWithdrawalPositionIdSchema,
-    ...earnExternalWalletWithdrawalFields,
-  }),
-  z.object({
-    /** Catalogue strategy id, resolved to a vault address server-side. */
-    strategyId: z.string().min(1),
-    /** The external wallet that owns the shares and will sign the exit. */
-    ownerAddress: solanaOwnerAddressSchema,
-    ...earnExternalWalletWithdrawalFields,
-  }),
-]);
+export const earnExternalWalletWithdrawalPreviewSchema = z.object({
+  /** The caller's tenant-scoped `earn_positions` row. */
+  positionId: earnWithdrawalPositionIdSchema,
+  shares: earnWithdrawalSharesSchema,
+});
 
-export const earnExternalWalletWithdrawalPreviewSchema = z.union([
-  z.object({
-    /** The caller's tenant-scoped `earn_positions` row. */
-    positionId: earnWithdrawalPositionIdSchema,
-    shares: earnWithdrawalSharesSchema,
-  }),
-  z.object({
-    /** Catalogue strategy id, resolved to a vault address server-side. */
-    strategyId: z.string().min(1),
-    /** The external wallet that owns the shares. */
-    ownerAddress: solanaOwnerAddressSchema,
-    shares: earnWithdrawalSharesSchema,
-  }),
-]);
-
-/** Optional-auth locator shared by queued exit options and previews. */
-export const earnExternalWalletWithdrawalOptionsSchema = z.union([
-  z.object({ positionId: earnWithdrawalPositionIdSchema }).strict(),
-  z
-    .object({
-      strategyId: z.string().min(1),
-      ownerAddress: solanaOwnerAddressSchema,
-    })
-    .strict(),
-]);
+/** The position whose queued exit routes are discovered. */
+export const earnExternalWalletWithdrawalOptionsSchema = z
+  .object({ positionId: earnWithdrawalPositionIdSchema })
+  .strict();
 
 export const earnExternalWalletQueuedWithdrawalPreviewSchema = z.union([
   z
@@ -673,34 +637,13 @@ export const earnExternalWalletQueuedWithdrawalPreviewSchema = z.union([
     .strict(),
   z
     .object({
-      strategyId: z.string().min(1),
-      ownerAddress: solanaOwnerAddressSchema,
-      ...earnVaultQueuedWithdrawalTermsShape,
-    })
-    .strict(),
-  z
-    .object({
       positionId: earnWithdrawalPositionIdSchema,
       ...earnVaultParRedemptionTermsShape,
     })
     .strict(),
   z
     .object({
-      strategyId: z.string().min(1),
-      ownerAddress: solanaOwnerAddressSchema,
-      ...earnVaultParRedemptionTermsShape,
-    })
-    .strict(),
-  z
-    .object({
       positionId: earnWithdrawalPositionIdSchema,
-      ...earnVaultParRedemptionIntermediateTermsShape,
-    })
-    .strict(),
-  z
-    .object({
-      strategyId: z.string().min(1),
-      ownerAddress: solanaOwnerAddressSchema,
       ...earnVaultParRedemptionIntermediateTermsShape,
     })
     .strict(),

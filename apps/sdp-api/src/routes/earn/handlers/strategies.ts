@@ -17,11 +17,11 @@ import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
 import { notFound } from "@/lib/errors";
 import { isEarnHastraDexExitConfigured, isEarnVaultSponsorshipEnabled } from "@/lib/feature-flags";
 import { success } from "@/lib/response";
+import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import {
   type AppContext,
   getEarnRepository,
   requireEarnStrategyForCaller,
-  resolveEarnCatalogueEnvironment,
 } from "@/routes/earn/context";
 import { earnStrategyIdParamsSchema, listEarnStrategiesQuerySchema } from "@/routes/earn/schemas";
 import type { Env } from "@/types/env";
@@ -128,8 +128,7 @@ export function mapToEarnStrategy(
 
 /**
  * Loads a strategy and applies the same environment and visibility policy as
- * the list route. The catalogue is platform-global: a tenant caller sees its
- * project's environment, an anonymous caller sees the shelf the id names.
+ * the list route: the caller sees its project's environment.
  */
 export async function requireEarnStrategy(
   c: AppContext,
@@ -146,9 +145,7 @@ export const listEarnStrategies = async (c: AppContext) => {
   const query = parseQuery(c, listEarnStrategiesQuerySchema);
 
   const repo = getEarnRepository(c);
-  // A tenant reads its project's shelf; an anonymous caller picks one with
-  // `?environment=` (production when omitted). See resolveEarnCatalogueEnvironment.
-  const environment = resolveEarnCatalogueEnvironment(c, query.environment);
+  const environment = resolveSdpEnvironment(c);
   // The shelf a caller can act on is the default; `?cluster=` is the explicit
   // opt-in that browses another cluster's sub-shelf — in practice a sandbox
   // reader reviewing the mirrored mainnet catalogue (PRO-1742). Opting in
