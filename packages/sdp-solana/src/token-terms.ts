@@ -593,6 +593,15 @@ function powTen(decimals: number): number {
   return accumulator;
 }
 
+/** `digits` without its trailing zeros; a loop, so its cost stays linear in the length. */
+function trimTrailingZeros(digits: string): string {
+  let end = digits.length;
+  while (end > 0 && digits[end - 1] === "0") {
+    end -= 1;
+  }
+  return digits.slice(0, end);
+}
+
 /** `quotient ÷ 10^decimals` as a decimal string, trimmed like `trim_ui_amount_string`. */
 function formatScaledInteger(quotient: bigint, decimals: number): string {
   const digits = quotient.toString().padStart(decimals + 1, "0");
@@ -600,7 +609,7 @@ function formatScaledInteger(quotient: bigint, decimals: number): string {
     return digits;
   }
   const whole = digits.slice(0, -decimals);
-  const fraction = digits.slice(-decimals).replace(/0+$/, "");
+  const fraction = trimTrailingZeros(digits.slice(-decimals));
   return fraction === "" ? whole : `${whole}.${fraction}`;
 }
 
