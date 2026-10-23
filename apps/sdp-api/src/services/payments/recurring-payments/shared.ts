@@ -2,6 +2,7 @@ import { createClusterRpc } from "@sdp/rpc/factory";
 import { confirmTransaction, getRecentBlockhash, type SolanaRpc } from "@sdp/rpc/solana";
 import { withTransientRpcRetry } from "@sdp/rpc/transient";
 import { assertValidAddress } from "@sdp/solana/address";
+import type { BaseUnits } from "@sdp/solana/token-amount";
 import type { ApiKeyWalletScope, SdpEnvironment } from "@sdp/types/api-keys";
 import type { MovementId } from "@sdp/types/movements";
 import type { PreparedPaymentSubscriptionTransaction } from "@sdp/types/payments";
@@ -35,6 +36,7 @@ import type {
   PaymentSubscriptionPlanRow,
   PaymentSubscriptionRow,
 } from "@/db/repositories/payment-subscriptions.repository";
+import type { RecurringMandate } from "@/db/repositories/recurring-mandate";
 import { createTokenRepository } from "@/db/repositories/repository-factory";
 import { createPostgresSubscriptionAuthorityRevocationsRepository } from "@/db/repositories/subscription-authority-revocations.repository";
 import type { ApiKeyLifecycleColumns } from "@/lib/api-key-rotation";
@@ -56,7 +58,6 @@ import {
   normalizePaymentToken,
   parseU64String,
 } from "@/services/payment-operation.service";
-import { loadPaymentMint, parseStaticPaymentAmount } from "@/services/payments/token-amount";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
   createSponsorshipFeePayment,
@@ -68,6 +69,12 @@ import {
 } from "@/services/sponsorship-submission";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
+import {
+  createRecurringMandate,
+  mandateProgramAccounts,
+  readRecurringTerms,
+  rowMandate,
+} from "./mandate";
 
 const RECURRING_PAYMENT_TOKEN_ERROR =
   "Recurring payments support USD stablecoins and tokens issued in this project; native SOL is not supported";
@@ -120,12 +127,17 @@ export async function assertRecurringPaymentTokenAdmitted(params: {
 
 /**
  * Admits a recurring payment's token and amount for new work: the token must be
- * admitted (`assertRecurringPaymentTokenAdmitted`), and the amount must convert to
- * a fixed raw amount at its mint's decimals.
+ * admitted (`assertRecurringPaymentTokenAdmitted`), and the row's mandate must
+ * hold (ADR 0012). A row with a mandate made it at create, so it reads nothing;
+ * a row written before mandates has one made now from its amount, so an amount
+ * the mint cannot hold or a mint the recurring path refuses is a 400.
+ *
+ * RPC budget: none, or one terms read for a row written before mandates.
  *
  * @param params - The terms and the tenant they belong to.
  * @param params.token - The requested token, a mint address or well-known symbol.
- * @param params.amount - The per-period UI amount.
+ * @param params.amount - The per-period amount in token units.
+ * @param params.mandate - The row's stored mandate; null for a row written before mandates.
  * @param params.organizationId - The schedule's organization.
  * @param params.projectId - The schedule's project, where issued tokens are looked up.
  * @param params.env - The API environment.
@@ -134,13 +146,16 @@ export async function assertRecurringPaymentTokenAdmitted(params: {
 export async function assertRecurringPaymentTerms(params: {
   token: string;
   amount: string;
+  mandate: RecurringMandate | null;
   organizationId: string;
   projectId: string;
   env: Env;
 }): Promise<Address> {
   const mint = resolveRecurringPaymentTokenMint(params.token);
   await assertRecurringPaymentTokenAdmitted({ ...params, mint });
-  await parseStaticPaymentAmount(params.amount, mint);
+  if (params.mandate === null) {
+    createRecurringMandate((await readRecurringTerms(mint, null, [])).terms, params.amount);
+  }
   return mint;
 }
 
@@ -162,18 +177,23 @@ export async function derivePlanAddresses(
   return { owner, planId, planPda };
 }
 
+/**
+ * What a plan's instructions are built with: its stored mandate, with no read
+ * (ADR 0012). A plan written before mandates has its amount parsed at the
+ * decimals one terms read shows.
+ *
+ * RPC budget (before → now): the mint's owner read and `getTokenSupply` →
+ * none, or one terms read for a plan written before mandates.
+ */
 export async function resolvePlanRuntime(
   plan: PaymentSubscriptionPlanRow
-): Promise<{ amountBaseUnits: bigint; mint: Address; tokenProgram: Address }> {
-  const mint = assertSubscriptionTokenMint(plan.token);
-  const { tokenProgram, toBaseUnits } = await loadPaymentMint(mint);
-  const amountBaseUnits = toBaseUnits(plan.amount);
-
-  if (amountBaseUnits <= 0n) {
-    throw badRequest("Subscription amount must be greater than zero");
-  }
-
-  return { amountBaseUnits, mint, tokenProgram };
+): Promise<{ amountBaseUnits: BaseUnits; mint: Address; tokenProgram: Address }> {
+  assertSubscriptionTokenMint(plan.token);
+  const mandate =
+    plan.mandate === null
+      ? rowMandate(plan, (await readRecurringTerms(plan.token, null, [])).terms)
+      : plan.mandate;
+  return { amountBaseUnits: mandate.debit, ...mandateProgramAccounts(mandate) };
 }
 
 export async function buildPreparedSubscriptionTransaction(

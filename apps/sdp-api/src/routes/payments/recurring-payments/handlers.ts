@@ -49,6 +49,7 @@ import {
   cancelRecurringPayment as cancelRecurringPaymentRecord,
   resumeRecurringPayment as resumeRecurringPaymentRecord,
 } from "@/services/payments/recurring-payments/lifecycle";
+import { mandateAmounts } from "@/services/payments/recurring-payments/mandate";
 import { updateRecurringPayment as updateRecurringPaymentRecord } from "@/services/payments/recurring-payments/update";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type {
@@ -92,6 +93,7 @@ function mapRecurringPayment(row: PaymentRecurringPaymentRow): PaymentRecurringP
     authorizationSignature: row.authorization_signature,
     status: row.status,
     metadataUri: row.metadata_uri,
+    ...(row.mandate === null ? {} : { amounts: mandateAmounts(row.mandate) }),
     createdBy: row.created_by,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

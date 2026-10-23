@@ -1,11 +1,9 @@
 import { createClusterRpc } from "@sdp/rpc/factory";
-import { getAccountInfo, type SolanaRpc } from "@sdp/rpc/solana";
+import type { SolanaRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import { type Address, address, type JsonParsedTokenAccount } from "@solana/kit";
-import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { badRequest } from "@/lib/errors";
-import type { PaymentMint } from "@/services/payments/token-amount";
 
 const SPL_TOKEN_PROGRAM_ID = address(SPL_TOKEN_PROGRAMS["spl-token"]);
 const SPL_TOKEN_2022_PROGRAM_ID = address(SPL_TOKEN_PROGRAMS["token-2022"]);
@@ -171,25 +169,6 @@ export async function resolveSourceTokenAccount(
   }
 
   return selected;
-}
-
-export async function resolveSourceTokenAccountOrAta(
-  owner: Address,
-  mint: Address,
-  paymentMint: PaymentMint
-): Promise<{ tokenAccount: Address; decimals: number; exists: boolean }> {
-  const [tokenAccount] = await findAssociatedTokenPda({
-    owner,
-    tokenProgram: paymentMint.tokenProgram,
-    mint,
-  });
-  const tokenAccountInfo = await getAccountInfo(createClusterRpc(), tokenAccount);
-
-  return {
-    tokenAccount,
-    decimals: paymentMint.decimals,
-    exists: tokenAccountInfo !== null,
-  };
 }
 
 async function findSourceTokenAccount(

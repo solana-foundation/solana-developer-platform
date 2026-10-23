@@ -464,11 +464,21 @@ export async function recurringCollectionTransactionForSignature(options: {
         mint: address(row.token),
       },
     });
+  // The destination receives the whole pull: a classic mint withholds no fee.
+  const destinationBalance = (amount: bigint) => ({
+    accountIndex: 1,
+    mint: row.token,
+    owner: row.destination_address,
+    amount: amount.toString(),
+    decimals: options.decimals,
+  });
   return {
     slot: 100n,
-    accountKeys: [row.subscription_authority_address],
+    accountKeys: [row.subscription_authority_address, destinationTokenAccount],
     executionResultKnown: true,
     err: null,
+    preTokenBalances: [destinationBalance(0n)],
+    postTokenBalances: [destinationBalance(amountBaseUnits)],
     instructions: [
       {
         programId: subscriptionsProgram.SUBSCRIPTIONS_PROGRAM_ADDRESS,

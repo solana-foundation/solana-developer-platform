@@ -4,6 +4,7 @@ import type {
   PaymentSubscriptionPlanStatus,
   PaymentSubscriptionStatus,
 } from "@sdp/types/payments";
+import type { RecurringMandate } from "./recurring-mandate";
 
 export interface PaymentSubscriptionPlanRow {
   id: string;
@@ -13,6 +14,8 @@ export interface PaymentSubscriptionPlanRow {
   owner_address: string;
   token: string;
   amount: string;
+  /** The plan's mandate in base units (migration 0163); null for a plan written before mandates. */
+  mandate: RecurringMandate | null;
   period_hours: number;
   program_plan_id: string;
   plan_pda: string | null;
@@ -72,7 +75,9 @@ export interface CreatePaymentSubscriptionPlanInput {
   ownerWalletId: string;
   ownerAddress: string;
   token: string;
+  /** The mandate's debit in token units. */
   amount: string;
+  mandate: RecurringMandate;
   periodHours: number;
   programPlanId: string;
   planPda: string | null;

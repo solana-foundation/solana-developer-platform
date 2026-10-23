@@ -664,6 +664,7 @@ async function runRecurringPaymentLifecycle(
       await assertRecurringPaymentTerms({
         token: plan.token,
         amount: claimed.amount,
+        mandate: claimed.mandate,
         organizationId: input.organizationId,
         projectId: input.projectId,
         env: input.env,
