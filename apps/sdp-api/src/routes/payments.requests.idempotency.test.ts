@@ -251,6 +251,12 @@ describe("Payments routes — payment request token cluster", () => {
 
 describe("Payments routes — subscription plan wallets before the key", () => {
   installPaymentsRouteTestHooks();
+  const rpc = installClusterRpcResponder();
+
+  beforeEach(() => {
+    // A plan's mandate is made from the mint's terms, read once at creation (ADR 0012).
+    answerUsdcTerms(rpc);
+  });
 
   function postPlan(body: Record<string, unknown>, idempotencyKey: string) {
     return app.request(

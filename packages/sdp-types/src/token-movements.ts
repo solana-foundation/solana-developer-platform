@@ -132,7 +132,8 @@ const BUILT_TRANSFER_LANDED = {
   reason: "sdp_built_transfer_landed",
 } as const satisfies AmountVerificationVerdict;
 
-const MOVEMENT_NOT_EXECUTED = {
+/** The verdict on a movement that failed, or was released, before it moved anything. */
+export const MOVEMENT_NOT_EXECUTED = {
   state: "not_required",
   reason: "movement_not_executed",
 } as const satisfies AmountVerificationVerdict;
@@ -183,6 +184,35 @@ export function builtOfframpDepositVerdict(
   const verdicts: Partial<Record<RampTransferTransitionId, AmountVerificationVerdict>> =
     BUILT_OFFRAMP_DEPOSIT_VERDICTS;
   return verdicts[transition] ?? null;
+}
+
+/**
+ * How a leg is verified: `construction` for a top-level transfer SDP built
+ * and signed, verified once it lands; `chain` for a movement a program makes
+ * (a CPI pull), verified from the landed transaction.
+ */
+export const LEG_VERIFIERS = ["construction", "chain"] as const;
+
+export type LegVerifier = (typeof LEG_VERIFIERS)[number];
+
+/** The verdict on a chain-verified leg whose landed transaction moved its quote. */
+export const CHAIN_DELTA_MATCHED = {
+  state: "verified",
+  reason: "chain_delta_matched",
+} as const satisfies AmountVerificationVerdict;
+
+/** The verdict on a chain-verified leg whose landed transaction shows other amounts or none. */
+export const CHAIN_DELTA_MISMATCH = {
+  state: "mismatch",
+  reason: "chain_delta_mismatch",
+} as const satisfies AmountVerificationVerdict;
+
+/**
+ * The verdict the chain gives a leg it verifies: matched when the landed
+ * transaction moved exactly the quote.
+ */
+export function chainDeltaVerdict(matched: boolean): AmountVerificationVerdict {
+  return matched ? CHAIN_DELTA_MATCHED : CHAIN_DELTA_MISMATCH;
 }
 
 /** The three amounts as a scaled or interest-bearing mint's wallets show them. */

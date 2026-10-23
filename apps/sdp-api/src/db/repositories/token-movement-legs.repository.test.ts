@@ -623,6 +623,36 @@ describe("token movement legs (postgres)", () => {
     expect((await legs().listLegsByTransfers([row.id])).get(row.id)).toHaveLength(1);
   });
 
+  it("never writes a chain verdict or a settlement on an archived leg", async () => {
+    const quote = tokenQuote(mintTerms([]), "25", "debit");
+    const transfer = required(
+      await payments().createTransfer({ ...transferInput("xfr_leg_archived_chain"), amount: "25" })
+    );
+    const leg = await legs().insertChainLeg({
+      owner: { kind: "transfer", transferId: transfer.id },
+      quote,
+    });
+    await db()
+      .prepare("UPDATE token_movement_legs SET status = 'archived' WHERE id = ?")
+      .bind(leg.id)
+      .run();
+
+    expect(
+      await legs().recordChainVerdict({
+        transferId: transfer.id,
+        observed: { debit: quote.debit, fee: quote.fee, credit: quote.credit },
+        updatedAt: new Date().toISOString(),
+      })
+    ).toBeNull();
+    expect(
+      await legs().settlePendingTransferLeg({
+        transferId: transfer.id,
+        verdict: { state: "not_required", reason: "movement_not_executed" },
+        updatedAt: new Date().toISOString(),
+      })
+    ).toBe(false);
+  });
+
   it("rolls the transfer back when its leg cannot be written", async () => {
     // A 1-base-unit debit at 50 bps pays its whole amount in fee, which the leg refuses.
     const nothingCredited = tokenQuote(

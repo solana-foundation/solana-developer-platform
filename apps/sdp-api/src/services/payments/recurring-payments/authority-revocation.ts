@@ -2,7 +2,8 @@ import { createClusterRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { assertValidAddress } from "@sdp/solana/address";
 import { RECURRING_PAYMENT_COLLECTION_CONFIG } from "@sdp/types/payments";
-import type { Address, MaybeAccount, Signature } from "@solana/kit";
+import { SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
+import { type Address, address, type MaybeAccount, type Signature } from "@solana/kit";
 import {
   fetchMaybeSubscriptionAuthority,
   findSubscriptionAuthorityPda,
@@ -19,13 +20,13 @@ import {
 import { badRequest, conflict } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
-import { normalizePaymentToken } from "@/services/payment-operation.service";
-import { loadPaymentMintFacts } from "@/services/payments/token-amount";
+import { normalizePaymentToken, resolvePaymentAsset } from "@/services/payment-operation.service";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
   isDefiniteSubmissionError,
   type SignedSubmissionStore,
 } from "@/services/sponsorship-submission";
+import { readMintMovementAccounts } from "@/services/token-movement/read-terms";
 import type { Env } from "@/types/env";
 import {
   confirmSubscriptionSignature,
@@ -317,6 +318,24 @@ async function finish(
   return status === "confirmed" ? "revoked" : "failed";
 }
 
+/**
+ * The program that owns a subscription's mint: the catalogue names it, and any
+ * other mint's terms read it (ADR 0012).
+ *
+ * RPC budget: none for a catalogue mint, else one terms read (was: one mint read).
+ */
+async function mintTokenProgram(mint: Address): Promise<Address> {
+  const asset = resolvePaymentAsset(mint);
+  if (asset.kind === "native") {
+    throw badRequest("Subscription authorities cover SPL token mints only");
+  }
+  const program =
+    asset.kind === "token"
+      ? asset.program
+      : (await readMintMovementAccounts(asset, [])).terms.asset.program;
+  return address(SPL_TOKEN_PROGRAMS[program]);
+}
+
 async function sendRevoke(
   env: Env,
   input: Parameters<SubscriptionAuthorityChain["sendRevoke"]>[0]
@@ -345,7 +364,7 @@ async function sendRevoke(
   const instruction = await getRevokeSubscriptionAuthorityOverlayInstructionAsync({
     user,
     tokenMint,
-    tokenProgram: (await loadPaymentMintFacts(tokenMint)).tokenProgram,
+    tokenProgram: await mintTokenProgram(tokenMint),
     // Valid whoever paid: the program requires the recorded payer when it is not the wallet.
     receiver: input.rentReceiver,
   });

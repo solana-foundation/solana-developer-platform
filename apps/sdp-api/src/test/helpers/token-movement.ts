@@ -1,6 +1,6 @@
 import type { AssetRef } from "@sdp/solana/asset-ref";
 import { type MovementQuote, quoteMovement } from "@sdp/solana/movement-quote";
-import { parseTokenAmount, toBaseUnits } from "@sdp/solana/token-amount";
+import { baseUnits, parseTokenAmount, toBaseUnits } from "@sdp/solana/token-amount";
 import { NATIVE_TOKEN_TERMS } from "@sdp/solana/token-terms";
 import type { TokenMovementBasis } from "@sdp/types/token-movements";
 import { SPL_TOKEN_PROGRAMS, type TokenProgramKind } from "@sdp/types/well-known-tokens";
@@ -26,7 +26,13 @@ import {
 } from "@solana-program/token-2022";
 import { z } from "zod";
 import type { PaymentRequestExpectation } from "@/db/repositories/payment-requests.repository";
-import type { ClusterRpcResponder, JsonRpcResult } from "@/test/helpers/cluster-rpc";
+import type { RecurringMandate } from "@/db/repositories/recurring-mandate";
+import type {
+  ClusterRpcReply,
+  ClusterRpcRequest,
+  ClusterRpcResponder,
+  JsonRpcResult,
+} from "@/test/helpers/cluster-rpc";
 
 /** The Clock a stubbed chain answers with: slot 4 200, epoch 900, 2027-01-15. */
 export const TEST_CLOCK = {
@@ -140,17 +146,29 @@ export function answerMovementAccounts(
   rpc: ClusterRpcResponder,
   accounts: ReadonlyMap<string, JsonRpcResult>
 ): void {
-  rpc.respond("getMultipleAccounts", (request) => {
-    const [addresses] = multipleAccountsParamsSchema.parse(request.params);
-    return {
-      result: {
-        context: { slot: Number(TEST_CLOCK.slot) },
-        value: addresses.map((requested) =>
-          requested === SYSVAR_CLOCK_ADDRESS ? CLOCK_RPC_ACCOUNT : (accounts.get(requested) ?? null)
-        ),
-      },
-    };
-  });
+  rpc.respond("getMultipleAccounts", (request) => movementAccountsReply(accounts, request));
+}
+
+/** The `getMultipleAccounts` answer {@link answerMovementAccounts} gives one request. */
+export function movementAccountsReply(
+  accounts: ReadonlyMap<string, JsonRpcResult>,
+  request: ClusterRpcRequest
+): ClusterRpcReply {
+  const [addresses] = multipleAccountsParamsSchema.parse(request.params);
+  return {
+    result: {
+      context: { slot: Number(TEST_CLOCK.slot) },
+      value: addresses.map((requested) =>
+        requested === SYSVAR_CLOCK_ADDRESS ? CLOCK_RPC_ACCOUNT : (accounts.get(requested) ?? null)
+      ),
+    },
+  };
+}
+
+/** Whether a recorded `getMultipleAccounts` request read `account`. */
+export function readsAccount(request: ClusterRpcRequest, account: string): boolean {
+  const [addresses] = multipleAccountsParamsSchema.parse(request.params);
+  return addresses.includes(account);
 }
 
 /** A debit or credit quote of `amount` under native SOL terms. */
@@ -174,6 +192,19 @@ export function sentInstructions(transactionBytes: Uint8Array) {
     accounts: (instruction.accounts ?? []).map((account) => account.address),
     data: instruction.data,
   }));
+}
+
+/**
+ * A classic mint's recurring mandate: `amount` token units of `mint` at
+ * `decimals`, under spl-token, with no fee tolerance (the mint has no fee).
+ */
+export function testMandate(mint: string, amount: string, decimals: number): RecurringMandate {
+  return {
+    asset: { kind: "token", mint: address(mint), program: "spl-token" },
+    decimals,
+    debit: toBaseUnits(parseTokenAmount(amount, decimals)),
+    maxFeePerPull: baseUnits(0n),
+  };
 }
 
 /** A payment request's expectation: `amount` token units of `asset` at `decimals`, as a credit. */

@@ -20,12 +20,16 @@ import { type AppContext, getPaymentSubscriptionsRepository } from "@/routes/pay
 import { resolveScope, resolveWallet } from "@/routes/payments/wallets";
 import { normalizePaymentToken, parseU64String } from "@/services/payment-operation.service";
 import {
+  createRecurringMandate,
+  mandateAmounts,
+  readRecurringTerms,
+} from "@/services/payments/recurring-payments/mandate";
+import {
   assertSubscriptionTokenMint,
   buildPreparedSubscriptionTransaction,
   derivePlanAddresses,
   resolvePlanRuntime,
 } from "@/services/payments/recurring-payments/shared";
-import { parseStaticPaymentAmount } from "@/services/payments/token-amount";
 import {
   resolveRequestSponsorshipScope,
   resolveSponsoredFeePayer,
@@ -55,6 +59,7 @@ function mapPlan(row: PaymentSubscriptionPlanRow): PaymentSubscriptionPlan {
     pullerAddress: row.puller_address,
     metadataUri: row.metadata_uri,
     status: row.status,
+    ...(row.mandate === null ? {} : { amounts: mandateAmounts(row.mandate) }),
     createdBy: row.created_by,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -110,8 +115,14 @@ export const createSubscriptionPlan = async (
   // The route's authorize step checked the credential's access to both wallets.
   const scope = await resolveScope(c);
   const ownerWallet = resolveWallet(scope.wallets, body.ownerWalletId);
-  const token = assertSubscriptionTokenMint(normalizePaymentToken(body.token));
-  await parseStaticPaymentAmount(body.amount, token);
+  // The plan's mandate, made once in base units under the terms read now (ADR 0012), before
+  // anything is stored. RPC budget: none before → one terms read.
+  const token = normalizePaymentToken(body.token);
+  assertSubscriptionTokenMint(token);
+  const mandate = createRecurringMandate(
+    (await readRecurringTerms(token, null, [])).terms,
+    body.amount
+  );
 
   const puller = await resolvePullerWalletAddress(c, body.pullerWalletId);
   const now = new Date().toISOString();
@@ -127,6 +138,7 @@ export const createSubscriptionPlan = async (
     ownerAddress: ownerWallet.publicKey,
     token,
     amount: body.amount,
+    mandate,
     periodHours: body.periodHours,
     programPlanId: body.programPlanId ?? generateProgramPlanId(),
     planPda: body.planPda ?? null,
