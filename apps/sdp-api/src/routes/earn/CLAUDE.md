@@ -1071,6 +1071,14 @@ the normal settlement path only when its execution result is known. Missing
 execution metadata or an unavailable history read leaves the row recoverable and
 fails the tick visibly; neither establishes success, failure, or signature absence.
 
+A null status counts as absence only from a node at least as current as the
+finalized height that proved expiry: the sweep reads height and slot together
+(`getChainHeight`) and re-reads every expired row's status with
+`minContextSlot` at that slot, as sponsorship budget reconciliation does. Per-
+request pool failover can answer the batch statuses from an endpoint behind the
+one that answered the height; a failed re-read leaves those rows unjudged and
+fails the tick.
+
 When neither status nor history observes the transaction past its window, a
 `requested` row moves conservatively to `submitted` through the guarded writer.
 The sweep records `unknown_signature_observed_at` on that submitted row. Only a

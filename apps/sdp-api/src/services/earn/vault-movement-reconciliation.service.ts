@@ -2,6 +2,7 @@ import { supportsVaultProviderOrderWithdraw } from "@sdp/earn/capabilities";
 import { type KaminoDepositReceipt, readKaminoDepositReceipt } from "@sdp/kamino/deposit-receipt";
 import { readStamp, withReadFloor } from "@sdp/rpc/read-context";
 import {
+  getChainHeight,
   getSignatureStatuses,
   getTransaction,
   type SignatureStatusInfo,
@@ -16,7 +17,7 @@ import {
   earnProviderDepositSettlement,
 } from "@sdp/types/provider-access";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
-import type { Signature } from "@solana/kit";
+import type { Signature, Slot } from "@solana/kit";
 import { getDb } from "@/db/client";
 import {
   createPostgresEarnMovementsRepository,
@@ -246,15 +247,12 @@ async function reconcileEnvironment(
 ): Promise<EarnVaultReconciliationStats> {
   const stats = emptyStats(rows.length);
   const cluster = earnClusterFor(environment);
+  const signatures = rows.map((row) => row.signature as Signature);
   let rpc: SolanaRpc;
   let statuses: Array<SignatureStatusInfo | null>;
   try {
     rpc = earnClusterRpc(cluster);
-    statuses = await getSignatureStatuses(
-      rpc,
-      rows.map((row) => row.signature as Signature),
-      { searchTransactionHistory: true }
-    );
+    statuses = await getSignatureStatuses(rpc, signatures, { searchTransactionHistory: true });
   } catch (error) {
     // The whole batch went unjudged: nothing settles this tick and the caller
     // must not report an ok tick (EARN-006). Structured so Loki can alert on
@@ -284,10 +282,10 @@ async function reconcileEnvironment(
   const needsBlockHeight = rows.some(
     (row, index) => (statuses[index] ?? null) === null && row.status !== "confirmed"
   );
-  let currentBlockHeight: bigint | null = null;
+  let finalized: FinalizedHeight | null = null;
   if (needsBlockHeight) {
     try {
-      currentBlockHeight = await rpc.getBlockHeight({ commitment: "finalized" }).send();
+      finalized = await getChainHeight(rpc, "finalized");
     } catch (error) {
       // Unknown signatures cannot be rebroadcast or expired without a height,
       // so those rows are left for the next tick; the tick still must not
@@ -301,17 +299,31 @@ async function reconcileEnvironment(
       stats.blockHeightReadFailures = 1;
     }
   }
+  const expiry =
+    finalized === null
+      ? { statuses, unproven: new Set<number>() }
+      : await reReadExpiredStatuses(rpc, environment, rows, signatures, statuses, finalized);
+  if (expiry.unproven.size > 0) stats.statusReadFailures = 1;
+  const currentBlockHeight = finalized?.blockHeight ?? null;
 
   // Sequential pacing protects the RPC endpoint and database pool from a
   // 256-way rebroadcast and write fanout.
   for (const [index, movement] of rows.entries()) {
     try {
       // react-doctor-disable-next-line react-doctor/async-await-in-loop -- reconciliation pacing is intentional.
-      const outcome = await reconcileMovement(env, ledger, movement, statuses[index] ?? null, {
-        cluster,
-        rpc,
-        currentBlockHeight,
-      });
+      const outcome = await reconcileMovement(
+        env,
+        ledger,
+        movement,
+        expiry.statuses[index] ?? null,
+        {
+          cluster,
+          rpc,
+          // An expired row whose absence could not be proven gets no height, so this tick
+          // neither rebroadcasts nor expires it.
+          currentBlockHeight: expiry.unproven.has(index) ? null : currentBlockHeight,
+        }
+      );
       if (outcome === "settled") stats.settled += 1;
       else if (outcome === "failed") stats.failed += 1;
       else if (outcome === "confirmed") stats.confirmed += 1;
@@ -327,6 +339,70 @@ async function reconcileEnvironment(
     }
   }
   return stats;
+}
+
+interface FinalizedHeight {
+  blockHeight: bigint;
+  absoluteSlot: Slot;
+}
+
+/**
+ * Re-read the status of every row whose blockhash the finalized height shows expired, from a node
+ * at least as current as that height read (`minContextSlot`), as sponsorship budget reconciliation
+ * does. The batch statuses can come from a pool endpoint behind the one that answered the height,
+ * and a null status from a lagging endpoint must never expire a transaction that landed.
+ *
+ * @param rpc - The cluster's pool client.
+ * @param environment - The environment the rows belong to, for the failure event.
+ * @param rows - The claimed rows.
+ * @param signatures - Each row's signature, by index.
+ * @param statuses - The batch statuses, by index.
+ * @param finalized - The finalized height read and the slot it was read at.
+ * @returns The statuses with every expired row's re-read applied, and the indexes of expired rows
+ * whose re-read failed, which stay unjudged this tick.
+ */
+async function reReadExpiredStatuses(
+  rpc: SolanaRpc,
+  environment: SdpEnvironment,
+  rows: readonly EarnMovementRow[],
+  signatures: readonly Signature[],
+  statuses: ReadonlyArray<SignatureStatusInfo | null>,
+  finalized: FinalizedHeight
+): Promise<{ statuses: Array<SignatureStatusInfo | null>; unproven: Set<number> }> {
+  const expired = rows.flatMap((row, index) => {
+    const signature = signatures[index];
+    const lastValidBlockHeight = row.last_valid_block_height;
+    return signature !== undefined &&
+      (statuses[index] ?? null) === null &&
+      row.status !== "confirmed" &&
+      lastValidBlockHeight !== null &&
+      finalized.blockHeight > BigInt(lastValidBlockHeight)
+      ? [{ index, signature }]
+      : [];
+  });
+  const reRead = [...statuses];
+  if (expired.length === 0) return { statuses: reRead, unproven: new Set() };
+  try {
+    const current = await getSignatureStatuses(
+      rpc,
+      expired.map(({ signature }) => signature),
+      { searchTransactionHistory: true, minContextSlot: finalized.absoluteSlot }
+    );
+    for (const [position, { index }] of expired.entries()) {
+      reRead[index] = current[position] ?? null;
+    }
+    return { statuses: reRead, unproven: new Set() };
+  } catch (error) {
+    logEvent("error", {
+      event: "sdp_api_earn_vault_reconciliation_status_read_failed",
+      environment,
+      rows: expired.length,
+      min_context_slot: finalized.absoluteSlot.toString(),
+      ...describeError(error),
+      error_message: errorMessage(error),
+    });
+    return { statuses: reRead, unproven: new Set(expired.map(({ index }) => index)) };
+  }
 }
 
 interface ChainObservation {

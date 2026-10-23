@@ -8,7 +8,8 @@ import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
 const getSignatureStatuses = vi.hoisted(() => vi.fn());
-const getBlockHeight = vi.hoisted(() => vi.fn());
+const finalizedHeight = vi.hoisted(() => vi.fn());
+const FINALIZED_SLOT = vi.hoisted(() => 5_000n);
 const getTransaction = vi.hoisted(() => vi.fn());
 const readKaminoDepositReceipt = vi.hoisted(() => vi.fn());
 const readVaultPositions = vi.hoisted(() => vi.fn());
@@ -29,7 +30,12 @@ vi.mock("@sdp/rpc/solana", async (importOriginal) => ({
 vi.mock("@/services/earn/cluster-rpc", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/earn/cluster-rpc")>()),
   earnClusterRpc: () => ({
-    getBlockHeight: (config: unknown) => ({ send: () => getBlockHeight(config) }),
+    getEpochInfo: (config: unknown) => ({
+      send: async () => ({
+        blockHeight: await finalizedHeight(config),
+        absoluteSlot: FINALIZED_SLOT,
+      }),
+    }),
   }),
 }));
 vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({
@@ -813,7 +819,7 @@ describe("reconcileEarnVaultMovementReadThrough", () => {
       [seeded.movement.signature],
       { retryDelaysMs: [], searchTransactionHistory: true }
     );
-    expect(getBlockHeight).not.toHaveBeenCalled();
+    expect(finalizedHeight).not.toHaveBeenCalled();
     expect(broadcastVaultTransaction).not.toHaveBeenCalled();
   });
 
@@ -837,7 +843,7 @@ describe("reconcileEarnVaultMovementReadThrough", () => {
     const movement = await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
 
     expect(movement.status).toBe("requested");
-    expect(getBlockHeight).not.toHaveBeenCalled();
+    expect(finalizedHeight).not.toHaveBeenCalled();
     expect(broadcastVaultTransaction).not.toHaveBeenCalled();
   });
 
@@ -1012,7 +1018,7 @@ describe("reconcileEarnVaultMovements", () => {
           toStatus: "submitted",
         });
       getSignatureStatuses.mockResolvedValue([null]);
-      getBlockHeight.mockResolvedValue(101n);
+      finalizedHeight.mockResolvedValue(101n);
       return seeded;
     }
 
@@ -1030,7 +1036,7 @@ describe("reconcileEarnVaultMovements", () => {
         seeded.movement.signature,
         "finalized"
       );
-      expect(getBlockHeight).toHaveBeenCalledWith({ commitment: "finalized" });
+      expect(finalizedHeight).toHaveBeenCalledWith({ commitment: "finalized" });
       expect(broadcastVaultTransaction).not.toHaveBeenCalled();
     });
 
@@ -1107,7 +1113,7 @@ describe("reconcileEarnVaultMovements", () => {
   it("expires an unknown intent only after finalized history and a later observation", async () => {
     const seeded = await seedMovement("100");
     getSignatureStatuses.mockResolvedValue([null]);
-    getBlockHeight.mockResolvedValue(101n);
+    finalizedHeight.mockResolvedValue(101n);
 
     await reconcileEarnVaultMovements(env);
     await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
@@ -1136,7 +1142,7 @@ describe("reconcileEarnVaultMovements", () => {
     it("parks the row on the first observation and expires it on the second", async () => {
       const seeded = await seedSubmitted("100");
       getSignatureStatuses.mockResolvedValue([null]);
-      getBlockHeight.mockResolvedValue(101n);
+      finalizedHeight.mockResolvedValue(101n);
 
       await reconcileEarnVaultMovements(env);
 
@@ -1159,7 +1165,7 @@ describe("reconcileEarnVaultMovements", () => {
     it("never fails a submitted movement whose signature was unknown once and then lands", async () => {
       const seeded = await seedSubmitted("100");
       getSignatureStatuses.mockResolvedValue([null]);
-      getBlockHeight.mockResolvedValue(101n);
+      finalizedHeight.mockResolvedValue(101n);
       await reconcileEarnVaultMovements(env);
       await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({ status: "submitted" });
 
@@ -1176,14 +1182,68 @@ describe("reconcileEarnVaultMovements", () => {
       });
     });
 
+    it("re-reads an expired row's status from a node at the finalized height's slot", async () => {
+      const seeded = await seedSubmitted("100");
+      getSignatureStatuses.mockResolvedValue([null]);
+      finalizedHeight.mockResolvedValue(101n);
+
+      await reconcileEarnVaultMovements(env);
+
+      expect(getSignatureStatuses).toHaveBeenLastCalledWith(
+        expect.anything(),
+        [seeded.movement.signature],
+        { searchTransactionHistory: true, minContextSlot: FINALIZED_SLOT }
+      );
+    });
+
+    it("settles a landed transaction a lagging batch read missed instead of expiring it", async () => {
+      const seeded = await seedSubmitted("100");
+      getSignatureStatuses.mockResolvedValue([null]);
+      finalizedHeight.mockResolvedValue(101n);
+      await reconcileEarnVaultMovements(env);
+
+      // The batch read comes from an endpoint behind the finalized height; the re-read, from a
+      // node at that height's slot, finds the transaction.
+      getSignatureStatuses
+        .mockResolvedValueOnce([null])
+        .mockResolvedValueOnce([
+          { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
+        ]);
+      await reconcileEarnVaultMovements(env);
+
+      await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+        status: "finalized",
+        failure_reason: null,
+        amount_settled: "1",
+      });
+    });
+
+    it("never expires a parked row when no node has reached the height's slot", async () => {
+      const seeded = await seedSubmitted("100");
+      getSignatureStatuses.mockResolvedValue([null]);
+      finalizedHeight.mockResolvedValue(101n);
+      await reconcileEarnVaultMovements(env);
+
+      getSignatureStatuses
+        .mockResolvedValueOnce([null])
+        .mockRejectedValueOnce(new Error("Solana RPC answered from a slot below minContextSlot"));
+      await expect(reconcileEarnVaultMovements(env)).rejects.toThrow();
+
+      await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+        status: "submitted",
+        failure_reason: null,
+      });
+      expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+    });
+
     it("leaves a parked row alone when the corroborating height read is unavailable", async () => {
       const seeded = await seedSubmitted("100");
       getSignatureStatuses.mockResolvedValue([null]);
-      getBlockHeight.mockResolvedValue(101n);
+      finalizedHeight.mockResolvedValue(101n);
       await reconcileEarnVaultMovements(env);
 
       // Exit safety (ADR 0002): an unavailable read is not a second observation.
-      getBlockHeight.mockRejectedValue(new Error("rpc down"));
+      finalizedHeight.mockRejectedValue(new Error("rpc down"));
       await expect(reconcileEarnVaultMovements(env)).rejects.toThrow();
 
       await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({ status: "submitted" });
@@ -1193,7 +1253,7 @@ describe("reconcileEarnVaultMovements", () => {
   it("rebroadcasts the exact recorded bytes while the blockhash is valid", async () => {
     const seeded = await seedMovement("100");
     getSignatureStatuses.mockResolvedValue([null]);
-    getBlockHeight.mockResolvedValue(99n);
+    finalizedHeight.mockResolvedValue(99n);
 
     await reconcileEarnVaultMovements(env);
 
@@ -1274,7 +1334,7 @@ describe("reconcileEarnVaultMovements", () => {
     expect(broadcastVaultTransaction).not.toHaveBeenCalled();
     // No stubbed height here on purpose: such a row can never consume one, so
     // a stub would mask the gate that keeps its failure off the tick.
-    expect(getBlockHeight).not.toHaveBeenCalled();
+    expect(finalizedHeight).not.toHaveBeenCalled();
   });
 
   it("fails a finalized-then-errored signature without regressing a settled row", async () => {
@@ -1420,7 +1480,7 @@ describe("reconcileEarnVaultMovements: sweep telemetry", () => {
     // signature, so it did none of its recovery duty this tick.
     await seedMovement();
     getSignatureStatuses.mockResolvedValue([null]);
-    getBlockHeight.mockRejectedValue(new Error("rpc unavailable"));
+    finalizedHeight.mockRejectedValue(new Error("rpc unavailable"));
 
     await expect(reconcileEarnVaultMovements(env)).rejects.toThrow(/1 block-height/);
 
@@ -1442,11 +1502,11 @@ describe("reconcileEarnVaultMovements: sweep telemetry", () => {
     logEvent.mockClear();
 
     getSignatureStatuses.mockResolvedValue([null]);
-    getBlockHeight.mockRejectedValue(new Error("rpc unavailable"));
+    finalizedHeight.mockRejectedValue(new Error("rpc unavailable"));
 
     await expect(reconcileEarnVaultMovements(env)).resolves.toBeUndefined();
 
-    expect(getBlockHeight).not.toHaveBeenCalled();
+    expect(finalizedHeight).not.toHaveBeenCalled();
     expect(tickLevel()).toBe("info");
     expect(tickPayload()).toMatchObject({
       block_height_read_failures: 0,
@@ -1474,11 +1534,11 @@ describe("reconcileEarnVaultMovements: sweep telemetry", () => {
     getSignatureStatuses.mockImplementation(async (_rpc: unknown, signatures: string[]) =>
       signatures.map(() => null)
     );
-    getBlockHeight.mockRejectedValue(new Error("rpc unavailable"));
+    finalizedHeight.mockRejectedValue(new Error("rpc unavailable"));
 
     await expect(reconcileEarnVaultMovements(env)).rejects.toThrow(/1 block-height/);
 
-    expect(getBlockHeight).toHaveBeenCalled();
+    expect(finalizedHeight).toHaveBeenCalled();
     expect(tickLevel()).toBe("error");
     expect(tickPayload()).toMatchObject({ block_height_read_failures: 1 });
     expect(broadcastVaultTransaction).not.toHaveBeenCalled();
@@ -1490,7 +1550,7 @@ describe("reconcileEarnVaultMovements: sweep telemetry", () => {
     // is the exact EARN-006 shape the job exists to close.
     await seedMovement();
     getSignatureStatuses.mockResolvedValue([null]);
-    getBlockHeight.mockResolvedValue(99n);
+    finalizedHeight.mockResolvedValue(99n);
     broadcastVaultTransaction.mockRejectedValue(new Error("node is behind"));
 
     await expect(reconcileEarnVaultMovements(env)).rejects.toThrow(/per-movement failures/);

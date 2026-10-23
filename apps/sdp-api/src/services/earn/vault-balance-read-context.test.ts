@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import type { Env } from "@/types/env";
+import { earnClusterRpc } from "./cluster-rpc";
 import {
   FINALIZED_SIGNATURE_STATUS_TTL_MS,
   resetFinalizedSignatureStatuses,
   resolveVaultBalanceReadContext,
 } from "./vault-balance-read-context";
 
-const mocks = vi.hoisted(() => ({ movement: vi.fn(), statuses: vi.fn(), rpc: vi.fn() }));
+const mocks = vi.hoisted(() => ({ movement: vi.fn(), statuses: vi.fn() }));
 vi.mock("@/db/client", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/db/client")>()),
   getDb: vi.fn(),
@@ -14,8 +16,10 @@ vi.mock("@/db/client", async (importOriginal) => ({
 vi.mock("@/db/repositories/earn-movements.repository", () => ({
   createPostgresEarnMovementsRepository: () => ({ getMovementById: mocks.movement }),
 }));
-vi.mock("@sdp/rpc/solana", () => ({ getSignatureStatuses: mocks.statuses }));
-vi.mock("./cluster-rpc", () => ({ earnClusterRpc: mocks.rpc }));
+vi.mock("@sdp/rpc/solana", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@sdp/rpc/solana")>()),
+  getSignatureStatuses: mocks.statuses,
+}));
 vi.mock("./execution-registry", () => ({
   earnClusterFor: (environment: string) =>
     environment === "production" ? "mainnet-beta" : "devnet",
@@ -37,12 +41,14 @@ const movement = {
 };
 const status = (slot: bigint) => ({ slot, confirmationStatus: "confirmed", err: null });
 
+// The status read gets a real pool client; each cluster's pool is the stub's test endpoint.
+installClusterRpcStub();
+
 beforeEach(() => {
   vi.clearAllMocks();
   resetFinalizedSignatureStatuses();
   mocks.movement.mockResolvedValue(movement);
   mocks.statuses.mockResolvedValue([status(100n), status(103n), status(102n)]);
-  mocks.rpc.mockReturnValue({});
 });
 
 describe("vault balance confirmation context", () => {
@@ -53,7 +59,8 @@ describe("vault balance confirmation context", () => {
       minimumSlotByPositionId: new Map([["position", 103]]),
     });
     expect(mocks.movement).toHaveBeenCalledWith({ movementId: "one", organizationId: "org" });
-    expect(mocks.rpc).toHaveBeenCalledWith("devnet", { timeoutMs: 3_000 });
+    // The bounded devnet client: the pool memoizes one per cluster and timeout.
+    expect(mocks.statuses.mock.calls[0]?.[0]).toBe(earnClusterRpc("devnet", { timeoutMs: 3_000 }));
   });
 
   it("keeps each position's bound separate while retaining the overall wallet bound", async () => {
@@ -79,7 +86,6 @@ describe("vault balance confirmation context", () => {
     await expect(resolveVaultBalanceReadContext({} as Env, input)).rejects.toMatchObject({
       statusCode: 404,
     });
-    expect(mocks.rpc).not.toHaveBeenCalled();
     expect(mocks.statuses).not.toHaveBeenCalled();
   });
 
@@ -146,9 +152,6 @@ describe("finalized signature statuses are read once", () => {
 
     expect(mocks.statuses).toHaveBeenCalledTimes(1);
     expect(mocks.statuses.mock.calls[0]?.[1]).toEqual(["sig-one", "sig-two", "sig-three"]);
-    // A poll answered entirely from finalized statuses builds no client, so it
-    // costs no request at all, not even the pool's genesis probe.
-    expect(mocks.rpc).toHaveBeenCalledTimes(1);
   });
 
   it("keeps reading a confirmed-only movement, and only that one", async () => {

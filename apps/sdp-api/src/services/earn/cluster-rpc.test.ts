@@ -2,6 +2,7 @@ import { createClusterRpc } from "@sdp/rpc/factory";
 import { runInClusterScope } from "@sdp/rpc/scope";
 import { GENESIS_HASH_BY_CLUSTER, type SolanaCluster } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { parseJsonRpcRequest } from "@/test/helpers/cluster-rpc";
 import { assertClusterEndpoint, earnClusterRpc, earnProviderEndpointUrls } from "./cluster-rpc";
 
 let poolSequence = 0;
@@ -35,7 +36,7 @@ beforeEach(() => {
         : GENESIS_HASH_BY_CLUSTER.devnet
     );
   vi.stubGlobal("fetch", async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
-    const { id, method } = JSON.parse(String(init?.body)) as { id: number; method: string };
+    const { id, method } = parseJsonRpcRequest(init);
     const url = String(input);
     requests.push({ url, method });
     const result = method === "getGenesisHash" ? await genesisFor(url) : 42;

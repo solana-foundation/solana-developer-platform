@@ -18,6 +18,7 @@ import {
 } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SponsorMessageMismatchError } from "@/services/sponsorship-integrity";
+import { parseJsonRpcRequest } from "@/test/helpers/cluster-rpc";
 import * as clusterRpc from "./cluster-rpc";
 import { createVaultDeadline } from "./vault-deadline";
 import {
@@ -131,7 +132,7 @@ function useRealDoorWithDevnetGenesis(genesis: string): string[] {
   );
   const methods: string[] = [];
   vi.stubGlobal("fetch", async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
-    const { id, method } = JSON.parse(String(init?.body)) as { id: number; method: string };
+    const { id, method } = parseJsonRpcRequest(init);
     methods.push(method);
     if (method !== "getGenesisHash") throw new Error(`${method} reached a mismatched endpoint`);
     return Response.json({ jsonrpc: "2.0", id, result: genesis });

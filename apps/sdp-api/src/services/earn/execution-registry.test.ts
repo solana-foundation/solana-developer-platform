@@ -7,6 +7,7 @@ import {
   resolveVaultParRedemptionClient,
   resolveVaultWithdrawClient,
 } from "@/services/earn/execution-registry";
+import { parseJsonRpcRequest } from "@/test/helpers/cluster-rpc";
 import type { Env } from "@/types/env";
 import { createVaultDeadline } from "./vault-deadline";
 
@@ -35,7 +36,7 @@ function stubDevnetPoolGenesis(genesis: string | "never") {
   const endpointUrl = `https://devnet-${poolSequence}.execution-registry.test`;
   vi.stubEnv("SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL", endpointUrl);
   const fetchSpy = vi.fn(async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
-    const { id, method } = JSON.parse(String(init?.body)) as { id: number; method: string };
+    const { id, method } = parseJsonRpcRequest(init);
     if (method !== "getGenesisHash") throw new Error(`Unexpected ${method} before the proof`);
     if (genesis === "never") return new Promise<Response>(() => undefined);
     return Response.json({ jsonrpc: "2.0", id, result: genesis });

@@ -1,5 +1,6 @@
 import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { parseJsonRpcRequest } from "@/test/helpers/cluster-rpc";
 import { assertClusterEndpoint } from "./cluster-rpc";
 import { createVaultDeadline } from "./vault-deadline";
 import { createVaultRpcFailover } from "./vault-rpc-failover";
@@ -27,7 +28,7 @@ beforeEach(() => {
   probedUrls.length = 0;
   genesisFor.mockReset().mockReturnValue(GENESIS_HASH_BY_CLUSTER.devnet);
   vi.stubGlobal("fetch", async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
-    const { id, method } = JSON.parse(String(init?.body)) as { id: number; method: string };
+    const { id, method } = parseJsonRpcRequest(init);
     if (method !== "getGenesisHash") throw new Error(`Unexpected ${method}`);
     const url = String(input);
     probedUrls.push(url);

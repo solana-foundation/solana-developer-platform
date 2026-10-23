@@ -122,23 +122,17 @@ function emptyStats(actions: number, requests: number): QueueReconciliationStats
 }
 
 /**
- * Reconcile both layers of a queued withdrawal:
+ * Delete each environment's expired, unconsumed external-wallet builds. A build expires against the
+ * confirmed height of its OWN environment's cluster, and with nothing to expire that cluster is not
+ * asked at all. A failed read defers only that environment's cleanup to the next tick.
  *
- * - owner-signed request/cancel transaction finality; and
- * - the long-lived queue PDA, including provider-solver fulfillment.
- *
- * A closed PDA is never guessed terminal. Its finalized address history must
- * contain a matching provider-authenticated lifecycle event before SDP records
- * fulfilled or cancelled; otherwise the durable state remains
- * `closed_or_unknown` and is retried on the next sweep.
+ * @param ledger - The two queue repository reads and writes the cleanup uses.
  */
-export async function reconcileEarnVaultQueuedWithdrawals(env: Env): Promise<void> {
-  const ledger = createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env));
-  await ledger.cleanupExpiredReservations();
+export async function cleanupAbandonedExternalBuilds(
+  ledger: Pick<QueueLedger, "hasUnconsumedExternalBuilds" | "cleanupExpiredExternalBuilds">
+): Promise<void> {
   for (const environment of ["sandbox", "production"] as const) {
     try {
-      // A build expires against the height of its OWN environment's cluster, and
-      // with nothing to expire the chain is not asked at all.
       // react-doctor-disable-next-line react-doctor/async-await-in-loop -- one existence read per environment gates its chain read.
       if (!(await ledger.hasUnconsumedExternalBuilds({ environment }))) continue;
       // react-doctor-disable-next-line react-doctor/async-await-in-loop -- each environment has an independent confirmed block-height lease.
@@ -157,6 +151,23 @@ export async function reconcileEarnVaultQueuedWithdrawals(env: Env): Promise<voi
       );
     }
   }
+}
+
+/**
+ * Reconcile both layers of a queued withdrawal:
+ *
+ * - owner-signed request/cancel transaction finality; and
+ * - the long-lived queue PDA, including provider-solver fulfillment.
+ *
+ * A closed PDA is never guessed terminal. Its finalized address history must
+ * contain a matching provider-authenticated lifecycle event before SDP records
+ * fulfilled or cancelled; otherwise the durable state remains
+ * `closed_or_unknown` and is retried on the next sweep.
+ */
+export async function reconcileEarnVaultQueuedWithdrawals(env: Env): Promise<void> {
+  const ledger = createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env));
+  await ledger.cleanupExpiredReservations();
+  await cleanupAbandonedExternalBuilds(ledger);
   const actions = await ledger.claimUnsettledActions(ACTION_BATCH_SIZE);
   const stats = emptyStats(actions.length, 0);
 

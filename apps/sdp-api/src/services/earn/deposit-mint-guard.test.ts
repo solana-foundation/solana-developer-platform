@@ -5,11 +5,16 @@ import {
   SPL_TOKEN_PROGRAMS,
 } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
+import { parseJsonRpcRequest } from "@/test/helpers/cluster-rpc";
 import type { Env } from "@/types/env";
 
 const mocks = vi.hoisted(() => ({
   logEvent: vi.fn(),
 }));
+
+/** `getMultipleAccounts` params: the mint addresses, then the read config. */
+const multipleAccountsParamsSchema = z.tuple([z.array(z.string()), z.unknown()]);
 
 vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/runtime/money-path-events")>()),
@@ -94,11 +99,7 @@ beforeEach(() => {
   vi.stubEnv("SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL", poolUrl("devnet"));
   vi.stubEnv("SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL", poolUrl("mainnet"));
   vi.stubGlobal("fetch", async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
-    const { id, method, params } = JSON.parse(String(init?.body)) as {
-      id: number;
-      method: string;
-      params: [string[], unknown];
-    };
+    const { id, method, params } = parseJsonRpcRequest(init);
     const url = String(input);
     requests.push({ url, method });
     if (method === "getGenesisHash") {
@@ -112,7 +113,10 @@ beforeEach(() => {
     return Response.json({
       jsonrpc: "2.0",
       id,
-      result: { context: { slot: 1 }, value: params[0].map((mint) => accountFor(mint)) },
+      result: {
+        context: { slot: 1 },
+        value: multipleAccountsParamsSchema.parse(params)[0].map((mint) => accountFor(mint)),
+      },
     });
   });
 });
