@@ -234,7 +234,11 @@ export interface PaymentsRepository {
     sourceAddress: string;
     destinationAddress: string;
     token: string;
-    amount: string;
+    /**
+     * The deposit's credit in token units: what the provider receives. The
+     * row's amount and the provider's `cryptoDeposit.amount` must equal it.
+     */
+    credit: string;
     initiatedByKeyId: string;
     /**
      * The funding request's record key and fingerprint (HOO-1918), recorded on
@@ -251,7 +255,9 @@ export interface PaymentsRepository {
   }): Promise<PaymentTransferRow | null>;
   /**
    * Updates a transfer's fields. An update carrying a `status` matches no ramp
-   * row: ramp statuses move only through `transitionRampTransfer`.
+   * row: ramp statuses move only through `transitionRampTransfer`. A chain
+   * verdict status settles the transfer's pending legs in the same statement
+   * (`BUILT_MOVEMENT_VERDICTS`).
    */
   updateTransfer(input: UpdatePaymentTransferInput): Promise<PaymentTransferRow | null>;
   persistSignedTransfer(input: {
@@ -274,7 +280,9 @@ export interface PaymentsRepository {
    * row must be a ramp transfer of one of the transition's types, in one of its
    * source statuses, scoped to org/project. Returns the updated row, or null
    * when no row matched (illegal source, lost race, missing, wrong owner, or
-   * not a ramp transfer of those types).
+   * not a ramp transfer of those types). A transition that ends an off-ramp
+   * deposit settles the deposit's pending leg in the same statement
+   * (`BUILT_OFFRAMP_DEPOSIT_VERDICTS`).
    */
   transitionRampTransfer(input: RampTransferTransitionInput): Promise<PaymentTransferRow | null>;
   /**

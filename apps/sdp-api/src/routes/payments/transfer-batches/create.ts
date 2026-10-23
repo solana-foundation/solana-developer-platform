@@ -163,8 +163,8 @@ export async function createTransferBatch(
   if (signer.address !== resolved.sourceWallet.publicKey) {
     throw badRequest("Resolved signing wallet does not match source wallet");
   }
-  const groups = await buildInstructionGroups({
-    tokenContext: resolved.tokenContext,
+  const groups = buildInstructionGroups({
+    plan: resolved.plan,
     recipients: resolved.recipients,
     sourceSigner: signer,
     feePayer,
@@ -194,9 +194,8 @@ export async function createTransferBatch(
         sourceCustodyWalletId: resolved.sourceWallet.id,
         sourceWalletId: resolved.sourceWallet.walletId,
         sourceAddress: resolved.sourceAddress,
-        token: resolved.tokenContext.token,
+        token: resolved.token,
         status: "processing",
-        totalAmount: resolved.totalAmount,
         recipientCount: resolved.recipients.length,
         transactionCount: chunks.length,
         options: body.options === undefined ? {} : body.options,
@@ -211,7 +210,7 @@ export async function createTransferBatch(
         counterpartyId: recipient.counterpartyId,
         counterpartyAccountId: recipient.counterpartyAccountId,
         destinationAddress: recipient.destinationAddress,
-        amount: recipient.amount,
+        quote: recipient.leg.quote,
         status: "pending",
         error: null,
       })),

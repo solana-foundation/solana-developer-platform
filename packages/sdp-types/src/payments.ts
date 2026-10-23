@@ -14,6 +14,11 @@ import {
   type PrivateChannelTransferStatus,
 } from "./private-channels";
 import type { PersistedRampProviderId, RampProviderId } from "./provider-access";
+import type {
+  AmountVerification,
+  TokenMovementAmounts,
+  TokenMovementBasis,
+} from "./token-movements";
 import type { PaymentTransactionKind } from "./unified-transactions";
 
 export const RECURRING_PAYMENT_COLLECTION_CONFIG = {
@@ -549,7 +554,11 @@ export interface PaymentTransferSummary {
   source?: string;
   destination?: string;
   token?: string;
+  /** Token units the row's own wallet moved; an off-ramp row keeps the provider's deposit amount. */
   amount?: string;
+  /** What the movement moves, for rows SDP built with a quote; a row written before quotes has none. */
+  amounts?: TokenMovementAmounts;
+  amountVerification?: AmountVerification;
   memo?: string;
   rampsMemo: Record<string, string>;
   /** A retired provider's transfers still read, as stored. */
@@ -586,6 +595,8 @@ export interface PaymentTransferRequest {
   destination: string;
   token: string;
   amount: string;
+  /** Which side of the transfer `amount` fixes; `debit` when omitted. */
+  amountBasis?: TokenMovementBasis;
   memo?: string;
 }
 
@@ -649,7 +660,10 @@ export interface PaymentTransferBatch {
   sourceAddress: string;
   token: string;
   status: PaymentTransferBatchStatus;
+  /** Sum of the recipients' debits, in token units. */
   totalAmount: string | null;
+  /** Sums of the recipients' amounts; absent for a batch written before quotes. */
+  amounts?: TokenMovementAmounts;
   recipientCount: number;
   transactionCount: number;
   createdAt: string;
@@ -665,6 +679,8 @@ export interface PaymentTransferRecipient {
   counterpartyAccountId: string;
   destination: string;
   amount: string;
+  amounts?: TokenMovementAmounts;
+  amountVerification?: AmountVerification;
   status: PaymentTransferBatchRecipientStatus;
   error: string | null;
   createdAt: string;
@@ -700,6 +716,8 @@ export interface ListProjectCounterpartyAccountsEnvelope {
 export interface PaymentTransferBatchEstimate {
   recipientCount: number;
   transactionCount: number;
+  /** The recipients' amounts summed under the mint's current terms. */
+  amounts: TokenMovementAmounts;
   estimatedFees: {
     networkFeeLamports: string;
     priorityFeeLamports: string;
