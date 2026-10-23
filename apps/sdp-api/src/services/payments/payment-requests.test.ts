@@ -7,6 +7,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { z } from "zod";
 import { getDb } from "@/db/client";
 import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
+import * as repositoryFactory from "@/db/repositories/repository-factory";
 import {
   createPaymentRequestsRepository,
   createPaymentsRepository,
@@ -493,6 +494,26 @@ describe("reconcilePaymentRequest (ADR 0012: settlement on the signatures SDP is
     expect(result).toBe(request);
     expect(errorSpy).toHaveBeenCalled();
     expect(await listInboundTransfers()).toHaveLength(0);
+  });
+
+  it("best-effort returns the stored row when the current-row read fails", async () => {
+    const errorSpy = vi.spyOn(rootLogger, "error").mockImplementation(() => {});
+    const request = await createRequest({ expiresAt: null });
+    const factory = repositoryFactory.createPaymentRequestsRepository;
+    vi.spyOn(repositoryFactory, "createPaymentRequestsRepository").mockImplementation(
+      (...args) => ({
+        ...factory(...args),
+        getPaymentRequestById: () => Promise.reject(new Error("connection lost")),
+      })
+    );
+
+    const result = await reconcileOnSandbox(request, { bestEffort: true });
+
+    expect(result).toBe(request);
+    expect(errorSpy).toHaveBeenCalled();
+    await expect(reconcileOnSandbox(request, { bestEffort: false })).rejects.toThrow(
+      "connection lost"
+    );
   });
 
   it("best-effort rethrows RPC_NOT_CONFIGURED instead of degrading to the stored row", async () => {

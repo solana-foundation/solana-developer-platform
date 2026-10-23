@@ -259,7 +259,11 @@ export async function reconcilePaymentRequest(
   if (open.length === 0) {
     // No window left to read: either none was issued, or a concurrent
     // reconcile settled the request and closed them. Answer the current row.
-    return currentPaymentRequest(env, row);
+    try {
+      return await currentPaymentRequest(env, row);
+    } catch (err) {
+      return degrade(err);
+    }
   }
   // Outside the best-effort net: a cluster with no endpoint is a configuration error.
   const rpc = createClusterRpc();
