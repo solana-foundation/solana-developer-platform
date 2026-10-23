@@ -292,10 +292,7 @@ function requestOwner(row: PaymentRequestRow): RequestOwner {
 }
 
 /** The request as stored now, read in its own tenant. */
-async function currentPaymentRequest(
-  env: Env,
-  row: PaymentRequestRow
-): Promise<PaymentRequestRow> {
+async function currentPaymentRequest(env: Env, row: PaymentRequestRow): Promise<PaymentRequestRow> {
   const owner = requestOwner(row);
   const current = await createPaymentRequestsRepository(
     env,
