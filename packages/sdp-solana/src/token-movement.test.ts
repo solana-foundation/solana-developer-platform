@@ -453,6 +453,18 @@ describe("decodeDestinationTokenAccount", () => {
     );
   });
 
+  it("reads lamports sent to the unopened address as a missing account", () => {
+    const prefunded = account(DESTINATION_ACCOUNT, SYSTEM_PROGRAM_ADDRESS, new Uint8Array());
+    assert.deepEqual(
+      decodeDestinationTokenAccount(FEE_ZERO, OWNER, DESTINATION_ACCOUNT, {
+        ...prefunded,
+        data: new Uint8Array(prefunded.data),
+        exists: true,
+      }),
+      { owner: OWNER, tokenAccount: DESTINATION_ACCOUNT, exists: false, requiresMemo: false }
+    );
+  });
+
   it("reads the MemoTransfer extension", () => {
     for (const requireIncomingTransferMemos of [true, false]) {
       const decoded = decodeDestinationTokenAccount(

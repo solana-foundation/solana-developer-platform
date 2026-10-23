@@ -11,6 +11,8 @@
  * - a stale fee fails on chain instead of settling short;
  * - paused, frozen-by-default, scaled, interest-bearing and unresolved-hook
  *   mints are refused first;
+ * - a destination address someone sent lamports to before it was opened
+ *   still opens;
  * - a memo-required destination gets its memo, which the program demands;
  * - native SOL moves lamports, and wrapped SOL moves as an SPL token;
  * - a Solana Pay reference rides the transfer.
@@ -243,6 +245,28 @@ describe("The token movement builder on a surfnet mint matrix", { skip: !ENABLED
       build(planned, unsigned()),
       refusal(TOKEN_MOVEMENT_REFUSALS.hookUnresolved)
     );
+  });
+
+  it("opens a destination whose address was sent lamports before it existed", async () => {
+    const mint = matrix.token2022Plain;
+    const source = await fundedSource(mint);
+    const recipient = (await generateKeyPairSigner()).address;
+    const tokenAccount = await destinationTokenAccountAddress(
+      await readMatrixTerms(chain, mint),
+      recipient
+    );
+    await sendInstructions(chain, [
+      getTransferSolInstruction({
+        source: chain.payer,
+        destination: tokenAccount,
+        amount: 10n ** 6n,
+      }),
+    ]);
+
+    const planned = await plan(mint, { source, recipient, amount: "1", basis: "debit" });
+    assert.equal(planned.destination.exists, false);
+    await sendInstructions(chain, await build(planned, unsigned()));
+    assert.equal((await holdings(chain, tokenAccount)).amount, planned.quote.credit);
   });
 
   it("names the fee, so a quote from before a fee change fails on chain", async () => {

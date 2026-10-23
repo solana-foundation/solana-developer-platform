@@ -34,7 +34,7 @@ import {
   type Rpc,
   type TransactionSigner,
 } from "@solana/kit";
-import { getTransferSolInstruction } from "@solana-program/system";
+import { getTransferSolInstruction, SYSTEM_PROGRAM_ADDRESS } from "@solana-program/system";
 import {
   decodeToken,
   deEscalateAccountMeta,
@@ -197,7 +197,8 @@ export function associatedTokenAccountSize(terms: MintTokenTerms): number {
 /**
  * Decodes the destination token account a movement read with the mint.
  *
- * @param account - The account at `tokenAccount`, missing or not.
+ * @param account - The account at `tokenAccount`, missing or not. An empty
+ * System account there (lamports sent before it was opened) reads as missing.
  * @throws {Error} When the account is not the owner's token account of the
  * mint under the mint's program: the caller read the wrong address.
  */
@@ -210,7 +211,13 @@ export function decodeDestinationTokenAccount(
   if (account.address !== tokenAccount) {
     throw new Error(`Expected the token account ${tokenAccount}, got ${account.address}`);
   }
-  if (!account.exists) {
+  // Lamports sent to the address before the account exists leave an empty
+  // System account there. Anyone can do that, and the idempotent create still
+  // opens the account over it, so it is missing, not a wrong read.
+  const unopened =
+    !account.exists ||
+    (account.programAddress === SYSTEM_PROGRAM_ADDRESS && account.data.length === 0);
+  if (unopened) {
     return { owner, tokenAccount, exists: false, requiresMemo: false };
   }
   if (account.programAddress !== SPL_TOKEN_PROGRAMS[terms.asset.program]) {
