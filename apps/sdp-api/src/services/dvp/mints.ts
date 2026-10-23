@@ -90,6 +90,7 @@ function refusedByProgram(refusal: TokenMovementRefusal): boolean {
     case "hook_unresolved":
     case "memo_required":
     case "nothing_credited":
+    case "scaled_display":
     case "destination_frozen":
     case "fee_above_tolerance":
       return false;
