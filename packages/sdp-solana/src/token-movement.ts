@@ -161,9 +161,9 @@ function builderSupport(terms: TokenTerms): TokenMovementSupport {
 
 /**
  * The recurring row: what the builder refuses, except a paused mint, which
- * holds the pull until it is unpaused. A transfer fee, a display rule and a
- * hook move (the mandate's fee tolerance is checked per pull, by
- * {@link recurringPullSupport}).
+ * holds the pull until it is unpaused. A transfer fee and a hook move (the
+ * mandate's fee tolerance is checked per pull, by {@link recurringPullSupport});
+ * a display rule is refused, as the builder refuses it until PR 5.
  */
 function recurringSupport(terms: TokenTerms): TokenMovementSupport {
   if (terms.paused) {
