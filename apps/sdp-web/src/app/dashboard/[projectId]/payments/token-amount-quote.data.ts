@@ -3,6 +3,7 @@ import {
   type TokenAmountQuote,
   type TokenMovementBasis,
   type TokenTermsSummary,
+  tokenDisplayTermsSchema,
 } from "@sdp/types/token-movements";
 import { z } from "zod";
 import type { MessageKey } from "@/i18n/messages";
@@ -33,22 +34,7 @@ const tokenTermsSchema = z.object({
   transferFee: z
     .object({ current: transferFeeEntrySchema, next: transferFeeEntrySchema })
     .nullable(),
-  display: z.discriminatedUnion("rule", [
-    z.object({ rule: z.literal("plain") }),
-    z.object({
-      rule: z.literal("scaled"),
-      multiplier: z.number(),
-      newMultiplier: z.number(),
-      newMultiplierEffectiveAt: z.string(),
-    }),
-    z.object({
-      rule: z.literal("interest"),
-      currentRate: z.number(),
-      preUpdateAverageRate: z.number(),
-      initializedAt: z.string(),
-      lastUpdateAt: z.string(),
-    }),
-  ]),
+  display: tokenDisplayTermsSchema,
 }) satisfies z.ZodType<Pick<TokenTermsSummary, "mint" | "decimals" | "transferFee" | "display">>;
 
 export type TokenAmountTerms = z.infer<typeof tokenTermsSchema>;

@@ -393,25 +393,37 @@ export interface TokenTransferFeeEntry {
   maximumFee: string;
 }
 
-/** A mint's display rule, as the terms route reports it. */
-export type TokenDisplayTerms =
-  | { rule: "plain" }
-  | {
-      rule: "scaled";
-      multiplier: number;
-      newMultiplier: number;
-      /** When `newMultiplier` replaces `multiplier` (ISO 8601). */
-      newMultiplierEffectiveAt: string;
-    }
-  | {
-      rule: "interest";
-      /** Rate in basis points from `lastUpdateAt` on; may be negative. */
-      currentRate: number;
-      /** Average rate in basis points from `initializedAt` to `lastUpdateAt`. */
-      preUpdateAverageRate: number;
-      initializedAt: string;
-      lastUpdateAt: string;
-    };
+/**
+ * A mint's display rule, as the terms route reports it: how its wallets show
+ * an amount. The API documents it and the dashboard parses it with this one
+ * schema. Base units never change with it.
+ */
+export const tokenDisplayTermsSchema = z.discriminatedUnion("rule", [
+  z.object({ rule: z.literal("plain") }),
+  z.object({
+    rule: z.literal("scaled"),
+    multiplier: z.number().describe("Wallets show base units × this."),
+    newMultiplier: z.number().describe("The multiplier from its switch time on."),
+    newMultiplierEffectiveAt: z.iso
+      .datetime()
+      .describe("When `newMultiplier` replaces `multiplier` (ISO 8601)."),
+  }),
+  z.object({
+    rule: z.literal("interest"),
+    currentRate: z
+      .number()
+      .int()
+      .describe("Rate in basis points a year from `lastUpdateAt` on; may be negative."),
+    preUpdateAverageRate: z
+      .number()
+      .int()
+      .describe("Average rate in basis points from `initializedAt` to `lastUpdateAt`."),
+    initializedAt: z.iso.datetime(),
+    lastUpdateAt: z.iso.datetime(),
+  }),
+]);
+
+export type TokenDisplayTerms = z.infer<typeof tokenDisplayTermsSchema>;
 
 /** One reason a movement path refuses, or holds, a mint. */
 export interface TokenMovementRefusalSummary {
