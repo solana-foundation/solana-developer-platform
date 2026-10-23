@@ -62,6 +62,7 @@ import {
 } from "./handlers/queued-withdrawals";
 import { getEarnStrategy, listEarnStrategies } from "./handlers/strategies";
 import {
+  admitEarnVaultDeposit,
   admitEarnVaultRuntimeExecution,
   assertEarnVaultWithdrawalFloor,
   createEarnVaultDeposit,
@@ -408,7 +409,12 @@ earn.post(
   requestGate({
     extract: extractEarnVaultDeposit,
     findIdempotentKeyReplay: findEarnVaultDepositIdempotentKeyReplay,
-    admit: admitEarnVaultRuntimeExecution,
+    // The money-in gates run AFTER the completed-replay exit so a recorded
+    // deposit stays replayable when its strategy pauses or a policy flips.
+    admit: async (c, extraction) => {
+      await admitEarnVaultDeposit(c, extraction);
+      await admitEarnVaultRuntimeExecution(c, extraction);
+    },
   }),
   createEarnVaultDeposit
 );

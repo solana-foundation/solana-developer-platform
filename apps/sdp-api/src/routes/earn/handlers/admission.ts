@@ -89,6 +89,17 @@ export function assertVaultDepositEnvironmentOpen(
 }
 
 /**
+ * The vault-deposit shape: a custodial provider reaching a vault route would
+ * silently skip its wallet-provisioning model. It depends on the provider
+ * alone, so the custody deposit checks it before its replay lookup.
+ */
+export function assertVaultDirectDepositStyle(provider: string): void {
+  if (earnDepositStyle(provider) !== "vault_direct") {
+    throw badRequest(`${provider} is a custodial provider; use POST /v1/earn/programs instead.`);
+  }
+}
+
+/**
  * The ONE vault money-in gate sequence for every handler that commits a
  * strategy to the vault-deposit path: `POST /vault-deposits` (custody),
  * `POST /external-wallet/deposit-transactions` (caller-signed), and
@@ -100,6 +111,10 @@ export function assertVaultDepositEnvironmentOpen(
  * and LAST, when the caller passes the deposit `amount`, the SDP-wide vault
  * exposure cap (ADR 0004 layer 1, `services/earn/vault-exposure.ts`). Keep it shared: a second copy
  * is a second thing that can drift toward permissive.
+ *
+ * The custody deposit runs it in its request gate's `admit`, after the replay
+ * lookup, so a same-key retry of a recorded deposit is answered from its row
+ * whatever these gates say now (ADR 0009).
  *
  * The cap runs last on purpose: it is the only step that reads the ledger,
  * and a caller refused by a cheaper gate should hear that reason, not "the
@@ -124,11 +139,7 @@ export async function assertVaultDepositAdmissible(
 ): Promise<EarnProviderId> {
   const environment = options.environment ?? resolveSdpEnvironment(c);
 
-  if (earnDepositStyle(strategy.provider) !== "vault_direct") {
-    throw badRequest(
-      `${strategy.provider} is a custodial provider; use POST /v1/earn/programs instead.`
-    );
-  }
+  assertVaultDirectDepositStyle(strategy.provider);
   if (!isEarnProviderId(strategy.provider)) {
     throw providerNotConfigured(
       `Earn provider ${strategy.provider} is not available in this deployment`

@@ -8,6 +8,8 @@ import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { required } from "@/test/helpers/required";
 
 const surfacing = vi.hoisted(() => ({ forceOn: false }));
+/** While set, replaces every deposit floor policy, as a policy change would. */
+const floorPolicy = vi.hoisted(() => ({ forced: null as { defaultToleranceBps: number } | null }));
 
 vi.mock("@sdp/types/provider-access", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@sdp/types/provider-access")>();
@@ -17,6 +19,8 @@ vi.mock("@sdp/types/provider-access", async (importOriginal) => {
       surfacing.forceOn || actual.isEarnProviderSurfaced(provider),
     isVaultDirectDepositEnabled: (environment: string, provider: string) =>
       surfacing.forceOn || actual.isVaultDirectDepositEnabled(environment, provider),
+    earnDepositSlippagePolicy: (...args: Parameters<typeof actual.earnDepositSlippagePolicy>) =>
+      floorPolicy.forced ?? actual.earnDepositSlippagePolicy(...args),
   };
 });
 
@@ -213,7 +217,11 @@ async function seedConnectionWallet(): Promise<void> {
   });
 }
 
-function recordConnectionDeposit(strategy: EarnStrategyRow, requestId: string) {
+function recordConnectionDeposit(
+  strategy: EarnStrategyRow,
+  requestId: string,
+  minSharesOut: string | null = "1"
+) {
   return createPostgresEarnMovementsRepository(getDb(env)).createSignedVaultDepositIntent({
     organizationId: TEST_ORG.id,
     projectId: TEST_PROJECT.id,
@@ -236,7 +244,7 @@ function recordConnectionDeposit(strategy: EarnStrategyRow, requestId: string) {
       providerReference: strategy.provider_reference,
       custodyWalletId: "cwlt_earn_vault_connection",
       amount: "10",
-      minSharesOut: "1",
+      minSharesOut,
     }),
     createdBy: TEST_USER.id,
   });
@@ -388,6 +396,7 @@ afterEach(() => {
   env.CUSTODY_ENCRYPTION_KEY = originalEncryptionKey;
   env.JUPITER_SWAP_API_KEY = originalJupiterSwapApiKey;
   surfacing.forceOn = false;
+  floorPolicy.forced = null;
   vaultDirectClientOverride.current = null;
   vi.restoreAllMocks();
 });
@@ -720,12 +729,13 @@ describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
 
   it("refuses a paused strategy", async () => {
     await seedAuth();
+    await seedConnectionWallet();
     const strategy = await seedStrategy({ status: "paused" });
 
     const res = await postVaultDeposit(
       {
         strategyId: strategy.id,
-        custodyWalletId: WALLET_ADDRESS,
+        custodyWalletId: "cwlt_earn_vault_connection",
         amount: "10",
         requestId: crypto.randomUUID(),
       },
@@ -740,12 +750,13 @@ describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
 
   it("refuses a deprecated strategy", async () => {
     await seedAuth();
+    await seedConnectionWallet();
     const strategy = await seedStrategy({ status: "deprecated" });
 
     const res = await postVaultDeposit(
       {
         strategyId: strategy.id,
-        custodyWalletId: WALLET_ADDRESS,
+        custodyWalletId: "cwlt_earn_vault_connection",
         amount: "10",
         requestId: crypto.randomUUID(),
       },
@@ -758,12 +769,13 @@ describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
 
   it("refuses a strategy whose host cluster is not fundable here", async () => {
     await seedAuth();
+    await seedConnectionWallet();
     const strategy = await seedStrategy({ hostCluster: "mainnet-beta" });
 
     const res = await postVaultDeposit(
       {
         strategyId: strategy.id,
-        custodyWalletId: WALLET_ADDRESS,
+        custodyWalletId: "cwlt_earn_vault_connection",
         amount: "10",
         requestId: crypto.randomUUID(),
       },
@@ -774,6 +786,76 @@ describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: { message: string } };
     expect(body.error.message).toContain("mainnet-beta");
+  });
+});
+
+interface DepositStateChange {
+  change: string;
+  /** The recorded deposit carried no floor, which the policy allowed at the time. */
+  floorless: boolean;
+  apply: (strategy: EarnStrategyRow) => unknown;
+  refusal: { status: number; error: Record<string, unknown> };
+}
+
+describe("POST /v1/earn/vault-deposits: replay before admission (ADR 0009)", () => {
+  // Each change refuses a NEW deposit. None may refuse the same-key retry of a
+  // deposit already recorded: that retry is answered from its movement row.
+  it.each<DepositStateChange>([
+    {
+      change: "its strategy is paused",
+      floorless: false,
+      apply: (strategy) =>
+        getDb(env)
+          .prepare("UPDATE earn_strategies SET status = 'paused' WHERE id = ?")
+          .bind(strategy.id)
+          .run(),
+      refusal: { status: 400, error: { details: { status: "paused" } } },
+    },
+    {
+      change: "the floor policy starts requiring minSharesOut",
+      floorless: true,
+      apply: () => {
+        floorPolicy.forced = { defaultToleranceBps: 10 };
+      },
+      refusal: {
+        status: 400,
+        error: { message: expect.stringContaining("minSharesOut is required") },
+      },
+    },
+    {
+      change: "the organization loses the provider entitlement",
+      floorless: false,
+      apply: () =>
+        getDb(env)
+          .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+          .bind(JSON.stringify({ providerOverrides: { earn: { kamino: false } } }), TEST_ORG.id)
+          .run(),
+      refusal: { status: 403, error: { details: { reason: "provider_not_entitled" } } },
+    },
+  ])("replays a recorded deposit after $change, refusing only new work", async (scenario) => {
+    await seedAuth();
+    await seedConnectionWallet();
+    const strategy = await seedStrategy({});
+    const minSharesOut = scenario.floorless ? null : "1";
+    const recorded = await recordConnectionDeposit(strategy, "recorded-deposit", minSharesOut);
+    await scenario.apply(strategy);
+    const body = {
+      strategyId: strategy.id,
+      custodyWalletId: "cwlt_earn_vault_connection",
+      amount: "10",
+      minSharesOut: minSharesOut ?? undefined,
+    };
+
+    const replay = await postVaultDeposit(body, "recorded-deposit", TEST_API_KEY.raw);
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toMatchObject({
+      data: { movementId: recorded.movement.id, replayed: true, signature: "sig_recorded_deposit" },
+    });
+
+    const fresh = await postVaultDeposit(body, "new-deposit", TEST_API_KEY.raw);
+    expect(fresh.status).toBe(scenario.refusal.status);
+    expect(await fresh.json()).toMatchObject({ error: scenario.refusal.error });
+    expect(depositIntoVault).not.toHaveBeenCalled();
   });
 });
 
@@ -1077,6 +1159,12 @@ describe("POST /v1/earn/vault-deposits — Veda", () => {
 
   it("refuses a deposit into a deployed but un-surfaced provider as provider_not_offered", async () => {
     await seedAuth();
+    await seedProductionConnectionWallet({
+      connectionId: "cconn_earn_vault_unsurfaced_hastra",
+      credentialId: "pcred_earn_vault_unsurfaced_hastra",
+      custodyWalletId: "cwlt_earn_vault_unsurfaced_hastra",
+      providerWalletId: "privy_earn_vault_unsurfaced_hastra",
+    });
     const strategy = await seedStrategy({
       provider: "hastra",
       name: "Hastra PRIME",

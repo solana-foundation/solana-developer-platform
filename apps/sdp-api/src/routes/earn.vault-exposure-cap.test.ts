@@ -4,10 +4,12 @@ import { getDb } from "@/db/client";
 import type { EarnStrategyRow, UpsertEarnStrategyInput } from "@/db/repositories/earn.repository";
 import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
 import {
+  createPostgresEarnMovementsRepository,
   generateEarnMovementId,
   generateEarnPositionId,
 } from "@/db/repositories/earn-movements.repository";
 import { app } from "@/index";
+import { buildEarnVaultDepositFingerprint } from "@/lib/idempotency";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { env } from "@/test/helpers/env";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
@@ -254,6 +256,36 @@ async function recordOtherOrgDeposit(
   ]);
 }
 
+/** The caller's own 10-unit custody deposit into `strategy`'s vault, recorded under `requestId`. */
+function recordOwnDeposit(strategy: EarnStrategyRow, requestId: string) {
+  return createPostgresEarnMovementsRepository(getDb(env)).createSignedVaultDepositIntent({
+    organizationId: TEST_ORG.id,
+    projectId: TEST_PROJECT.id,
+    environment: "sandbox",
+    provider: strategy.provider,
+    vaultAddress: strategy.provider_reference,
+    custodyWalletId: CUSTODY_WALLET_ID,
+    sourceAddress: WALLET_ADDRESS,
+    tokenMint: USDC_MINT,
+    shareMint: SHARE_MINT,
+    label: strategy.name,
+    requestedAmount: "10",
+    signature: "sig_own_deposit",
+    signedTransaction: "AQ==",
+    lastValidBlockHeight: "12345",
+    requestId,
+    idempotencyFingerprint: buildEarnVaultDepositFingerprint({
+      environment: "sandbox",
+      provider: strategy.provider,
+      providerReference: strategy.provider_reference,
+      custodyWalletId: CUSTODY_WALLET_ID,
+      amount: "10",
+      minSharesOut: "1",
+    }),
+    createdBy: TEST_USER.id,
+  });
+}
+
 function post(
   path: string,
   body: Record<string, unknown>,
@@ -479,6 +511,27 @@ describe("vault exposure cap (ADR 0004 layer 1): enforced", () => {
     });
   });
 
+  it("replays a recorded deposit at the cap instead of counting it twice", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy();
+    await recordOtherOrgDeposit(strategy.provider_reference, "4999990");
+    // Lands the vault exactly on its cap, so counting it again would refuse it.
+    const recorded = await recordOwnDeposit(strategy, "deposit-at-cap");
+    const body = { strategyId: strategy.id, custodyWalletId: CUSTODY_WALLET_ID, amount: "10" };
+
+    const replay = await post("vault-deposits", body, "deposit-at-cap");
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toMatchObject({
+      data: { movementId: recorded.movement.id, replayed: true },
+    });
+
+    await expectRedactedCapRefusal(
+      await post("vault-deposits", body, "deposit-past-cap"),
+      strategy.provider_reference
+    );
+    expect(depositIntoVault).not.toHaveBeenCalled();
+  });
+
   it("reports the cap as a blocking issue on the deposit preview, after the provider's own", async () => {
     await seedAuth();
     const strategy = await seedStrategy({ provider: "veda" });
@@ -644,4 +697,22 @@ describe("vault exposure cap (ADR 0004 layer 1): fail closed", () => {
       ]);
     }
   );
+
+  it("replays a recorded deposit without reading the exposure", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy();
+    const recorded = await recordOwnDeposit(strategy, "recorded-deposit");
+    exposureReadFailure.current = new Error("ledger unavailable");
+    const body = { strategyId: strategy.id, custodyWalletId: CUSTODY_WALLET_ID, amount: "10" };
+
+    const replay = await post("vault-deposits", body, "recorded-deposit");
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toMatchObject({
+      data: { movementId: recorded.movement.id, replayed: true },
+    });
+
+    const fresh = await post("vault-deposits", body, "new-deposit");
+    expect(fresh.status).toBe(503);
+    expect(depositIntoVault).not.toHaveBeenCalled();
+  });
 });
