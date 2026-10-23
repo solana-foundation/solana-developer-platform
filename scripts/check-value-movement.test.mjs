@@ -387,14 +387,26 @@ export const k = {} as Holder;
 export const l = {} as Deeper;
 export const m = {} as Minted;
 export const n = {} as Spender;
+declare function make(): Units;
+declare function take(amount: Units): void;
+export const o: Units = raw as never;
+export const p: { amount?: Units } = { amount: raw as any };
+take(raw as never);
+export const q = raw as ReturnType<typeof make>;
+export const r = raw as Parameters<typeof take>[0];
+export const s: bigint = raw as never;
+export const t = [raw] as never[];
 `,
   });
 
   assert.deepEqual(
     found.map((violation) => violation.split(": ")[0]),
-    [6, 7, 8, 9, 10, 11, 12, 13, 14, 20, 21, 22, 23].map((line) => `src/casts.ts:${line}`)
+    [6, 7, 8, 9, 10, 11, 12, 13, 14, 19, 20, 21, 22, 23, 27, 28, 29, 30, 31].map(
+      (line) => `src/casts.ts:${line}`
+    )
   );
   assert.match(found[0], /asserts Units \(Units\)/);
+  assert.match(found[9], /asserts Units \(never\)/);
 });
 
 test("allows the defining module, tests, `as const` and other types", () => {
