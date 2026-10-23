@@ -30,6 +30,7 @@ import {
   type MockInstance,
   vi,
 } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db/client";
 import type {
   PaymentRequestRow,
@@ -72,7 +73,12 @@ let signaturesSpy: MockInstance<typeof solanaRpc.getSignaturesForAddress>;
 let validateTransferSpy: MockInstance<typeof solanaPay.validateTransfer>;
 let verifyTransactionLandedSpy: MockInstance<typeof verifiedConfirmation.verifyTransactionLanded>;
 
-function verifiedOk(): Awaited<ReturnType<typeof verifiedConfirmation.verifyTransactionLanded>> {
+type VerifiedLanded = Extract<
+  Awaited<ReturnType<typeof verifiedConfirmation.verifyTransactionLanded>>,
+  { ok: true }
+>;
+
+function verifiedOk(): VerifiedLanded {
   return {
     ok: true,
     status: { slot: 1n, confirmations: null, confirmationStatus: "finalized", err: null },
@@ -80,27 +86,16 @@ function verifiedOk(): Awaited<ReturnType<typeof verifiedConfirmation.verifyTran
   };
 }
 
-function verifiedConfirmedOnly(): Awaited<
-  ReturnType<typeof verifiedConfirmation.verifyTransactionLanded>
-> {
+function verifiedConfirmedOnly(): VerifiedLanded {
   const verified = verifiedOk();
-  return verified.ok
-    ? { ...verified, status: { ...verified.status, confirmationStatus: "confirmed" } }
-    : verified;
+  return { ...verified, status: { ...verified.status, confirmationStatus: "confirmed" } };
 }
 
 function signatureInfo(
   sig: Signature,
-  overrides: Partial<solanaRpc.SignatureInfo> = {}
+  listed: Pick<solanaRpc.SignatureInfo, "blockTime" | "err">
 ): solanaRpc.SignatureInfo {
-  return {
-    signature: sig,
-    slot: 1n,
-    blockTime: null,
-    err: null,
-    confirmationStatus: "confirmed",
-    ...overrides,
-  };
+  return { signature: sig, slot: 1n, confirmationStatus: "confirmed", ...listed };
 }
 
 function mockSignatures(...newestFirst: solanaRpc.SignatureInfo[]) {
@@ -112,7 +107,7 @@ function mockNoSignatures() {
 }
 
 function validatedTransfer(
-  blockTime: UnixTimestamp | null = null
+  blockTime: UnixTimestamp | null
 ): Awaited<ReturnType<typeof solanaPay.validateTransfer>> {
   const transaction = compileTransaction(
     pipe(
@@ -146,10 +141,10 @@ function validatedTransfer(
   };
 }
 
-function mockSettlementSucceeds(blockTime: bigint | null = null) {
-  mockSignatures(signatureInfo(SIGNATURE, { blockTime }));
+function mockSettlementSucceeds(blockTime: bigint | null) {
+  mockSignatures(signatureInfo(SIGNATURE, { blockTime, err: null }));
   verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
-  validateTransferSpy.mockResolvedValue(validatedTransfer());
+  validateTransferSpy.mockResolvedValue(validatedTransfer(null));
 }
 
 async function createRequest(params: { token: string; expiresAt: string | null }) {
@@ -252,7 +247,7 @@ describe("reconcilePaymentRequest", () => {
   installSettlementHooks();
 
   it("settles an awaiting request and links an inbound transfer attributed to no counterparty", async () => {
-    mockSettlementSucceeds();
+    mockSettlementSucceeds(null);
     const request = await createRequest({ token: SOL_MINT, expiresAt: null });
     await seedProjectCryptoWalletCounterparty(getDb(env), {
       organizationId: TEST_ORG.id,
@@ -283,7 +278,7 @@ describe("reconcilePaymentRequest", () => {
   });
 
   it("settles an SPL request, exercising the splToken branch", async () => {
-    mockSettlementSucceeds();
+    mockSettlementSucceeds(null);
 
     const settled = await reconcileOnSandbox(
       await createRequest({ token: DEVNET_USDC_MINT, expiresAt: null })
@@ -295,7 +290,7 @@ describe("reconcilePaymentRequest", () => {
   });
 
   it("checks a SOL request as a native transfer with no SPL token", async () => {
-    mockSettlementSucceeds();
+    mockSettlementSucceeds(null);
 
     const settled = await reconcileOnSandbox(
       await createRequest({ token: SOL_MINT, expiresAt: null })
@@ -306,7 +301,7 @@ describe("reconcilePaymentRequest", () => {
   });
 
   it("converges concurrent reconciles of the same request to a single settlement", async () => {
-    mockSettlementSucceeds();
+    mockSettlementSucceeds(null);
     const request = await createRequest({ token: SOL_MINT, expiresAt: null });
 
     const [a, b] = await Promise.all([reconcileOnSandbox(request), reconcileOnSandbox(request)]);
@@ -352,7 +347,7 @@ describe("reconcilePaymentRequest", () => {
       .prepare("UPDATE payment_transfers SET custody_wallet_id = NULL WHERE id = ?")
       .bind(transfer.id)
       .run();
-    mockSettlementSucceeds();
+    mockSettlementSucceeds(null);
 
     await expect(reconcileOnSandbox(request)).rejects.toThrow("does not match payment request");
     expect(await listInboundTransfers()).toMatchObject([{ custody_wallet_id: null }]);
@@ -361,9 +356,9 @@ describe("reconcilePaymentRequest", () => {
   it.for(["not_confirmed", "not_indexed"] as const)(
     "asks the payer to retry instead of answering payable while a candidate is %s",
     async (reason) => {
-      mockSignatures(signatureInfo(SIGNATURE));
+      mockSignatures(signatureInfo(SIGNATURE, { blockTime: null, err: null }));
       verifyTransactionLandedSpy.mockResolvedValue({ ok: false, reason });
-      validateTransferSpy.mockResolvedValue(validatedTransfer());
+      validateTransferSpy.mockResolvedValue(validatedTransfer(null));
       const setRetryAfter = vi.fn();
       const request = await createRequest({ token: SOL_MINT, expiresAt: null });
 
@@ -381,9 +376,9 @@ describe("reconcilePaymentRequest", () => {
   );
 
   it("asks the payer to retry while the payment is confirmed but not finalized", async () => {
-    mockSignatures(signatureInfo(SIGNATURE));
+    mockSignatures(signatureInfo(SIGNATURE, { blockTime: null, err: null }));
     verifyTransactionLandedSpy.mockResolvedValue(verifiedConfirmedOnly());
-    validateTransferSpy.mockResolvedValue(validatedTransfer());
+    validateTransferSpy.mockResolvedValue(validatedTransfer(null));
     const request = await createRequest({ token: SOL_MINT, expiresAt: null });
 
     await expect(reconcileOnSandbox(request)).rejects.toMatchObject({ code: "RATE_LIMITED" });
@@ -394,7 +389,7 @@ describe("reconcilePaymentRequest", () => {
   });
 
   it("validates the transfer against the finalized transaction", async () => {
-    mockSettlementSucceeds();
+    mockSettlementSucceeds(null);
 
     await reconcileOnSandbox(await createRequest({ token: SOL_MINT, expiresAt: null }));
 
@@ -404,7 +399,10 @@ describe("reconcilePaymentRequest", () => {
   it("asks the payer to retry while the verify budget leaves candidates unchecked", async () => {
     mockSignatures(
       ...Array.from({ length: 30 }, (_, index) =>
-        signatureInfo(signature(getBase58Decoder().decode(new Uint8Array(64).fill(index + 10))))
+        signatureInfo(signature(getBase58Decoder().decode(new Uint8Array(64).fill(index + 10))), {
+          blockTime: null,
+          err: null,
+        })
       )
     );
     verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
@@ -416,7 +414,7 @@ describe("reconcilePaymentRequest", () => {
   });
 
   it("does not settle in a background check while a candidate is not indexed yet", async () => {
-    mockSignatures(signatureInfo(SIGNATURE));
+    mockSignatures(signatureInfo(SIGNATURE, { blockTime: null, err: null }));
     verifyTransactionLandedSpy.mockResolvedValue({ ok: false, reason: "not_indexed" });
 
     const result = await checkOnSandbox(await createRequest({ token: SOL_MINT, expiresAt: null }));
@@ -440,7 +438,7 @@ describe("reconcilePaymentRequest", () => {
   });
 
   it("leaves the request awaiting when the referenced transfer is invalid", async () => {
-    mockSignatures(signatureInfo(SIGNATURE));
+    mockSignatures(signatureInfo(SIGNATURE, { blockTime: null, err: null }));
     verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
     validateTransferSpy.mockRejectedValue(new ValidateTransferError("wrong amount"));
 
@@ -529,7 +527,7 @@ describe("closeLapsedPaymentRequest", () => {
   });
 
   it("keeps the request awaiting while the payment is confirmed but not finalized", async () => {
-    mockSignatures(signatureInfo(SIGNATURE, { blockTime: PAST_SECONDS - 10n }));
+    mockSignatures(signatureInfo(SIGNATURE, { blockTime: PAST_SECONDS - 10n, err: null }));
     verifyTransactionLandedSpy.mockResolvedValue(verifiedConfirmedOnly());
     const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
 
@@ -540,7 +538,7 @@ describe("closeLapsedPaymentRequest", () => {
   });
 
   it("judges lateness by the finalized transaction's block time", async () => {
-    mockSignatures(signatureInfo(SIGNATURE, { blockTime: PAST_SECONDS + 10n }));
+    mockSignatures(signatureInfo(SIGNATURE, { blockTime: PAST_SECONDS + 10n, err: null }));
     verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
     validateTransferSpy.mockResolvedValue(validatedTransfer(unixTimestamp(PAST_SECONDS - 10n)));
     const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
@@ -575,7 +573,7 @@ describe("closeLapsedPaymentRequest", () => {
   });
 
   it("leaves a request another writer already settled", async () => {
-    mockSettlementSucceeds();
+    mockSettlementSucceeds(null);
     const request = await createRequest({ token: SOL_MINT, expiresAt: null });
     await reconcileOnSandbox(request);
 
@@ -629,7 +627,7 @@ describe("checkAwaitingPaymentRequest", () => {
   installSettlementHooks();
 
   it("settles an unexpired awaiting request", async () => {
-    mockSettlementSucceeds();
+    mockSettlementSucceeds(null);
     const request = await createRequest({ token: SOL_MINT, expiresAt: null });
 
     const checked = await onSandbox(() => checkAwaitingPaymentRequest(env, request));
@@ -659,30 +657,36 @@ describe("checkAwaitingPaymentRequest", () => {
   });
 });
 
-async function listSettlementAudits(requestId: string) {
+const auditRowSchema = z.object({ organization_id: z.string(), metadata: z.string() });
+const auditMetadataSchema = z.record(z.string(), z.unknown());
+
+async function listPaymentRequestAudits(requestId: string, action: "settle" | "update") {
   const result = await getDb(env)
     .prepare(
-      "SELECT organization_id, metadata FROM audit_logs WHERE resource_type = 'payment_request' AND resource_id = ? AND action = 'settle'"
+      "SELECT organization_id, metadata FROM audit_logs WHERE resource_type = 'payment_request' AND resource_id = ? AND action = ?"
     )
-    .bind(requestId)
-    .all<{ organization_id: string; metadata: string | Record<string, unknown> }>();
-  return result.results.map((row) => ({
-    organizationId: row.organization_id,
-    metadata: typeof row.metadata === "string" ? JSON.parse(row.metadata) : row.metadata,
-  }));
+    .bind(requestId, action)
+    .all();
+  return result.results.map((raw) => {
+    const row = auditRowSchema.parse(raw);
+    return {
+      organizationId: row.organization_id,
+      metadata: auditMetadataSchema.parse(JSON.parse(row.metadata)),
+    };
+  });
 }
 
 describe("settlement audit", () => {
   installSettlementHooks();
 
   it("records one settle entry for the awaiting to paid transition", async () => {
-    mockSettlementSucceeds();
+    mockSettlementSucceeds(null);
     const request = await createRequest({ token: SOL_MINT, expiresAt: null });
 
     const settled = await reconcileOnSandbox(request);
     await onSandbox(() => checkAwaitingPaymentRequest(env, request));
 
-    expect(await listSettlementAudits(request.id)).toEqual([
+    expect(await listPaymentRequestAudits(request.id, "settle")).toEqual([
       {
         organizationId: TEST_ORG.id,
         metadata: expect.objectContaining({
@@ -703,7 +707,7 @@ describe("settlement audit", () => {
     mockSettlementSucceeds(PAST_SECONDS + 60n);
     await onSandbox(() => checkExpiredPaymentRequestForLatePayment(env, expired));
 
-    expect(await listSettlementAudits(request.id)).toEqual([
+    expect(await listPaymentRequestAudits(request.id, "settle")).toEqual([
       {
         organizationId: TEST_ORG.id,
         metadata: expect.objectContaining({ fromStatus: "expired", paidLate: true }),
@@ -722,34 +726,23 @@ describe("expiry audit", () => {
     await onSandbox(() => closeLapsedPaymentRequest(env, request));
     await onSandbox(() => closeLapsedPaymentRequest(env, request));
 
-    const result = await getDb(env)
-      .prepare(
-        "SELECT metadata FROM audit_logs WHERE resource_type = 'payment_request' AND resource_id = ? AND action = 'update'"
-      )
-      .bind(request.id)
-      .all<{ metadata: string | Record<string, unknown> }>();
-    expect(
-      result.results.map((row) =>
-        typeof row.metadata === "string" ? JSON.parse(row.metadata) : row.metadata
-      )
-    ).toEqual([expect.objectContaining({ fromStatus: "awaiting_payment", toStatus: "expired" })]);
+    expect(await listPaymentRequestAudits(request.id, "update")).toEqual([
+      {
+        organizationId: TEST_ORG.id,
+        metadata: expect.objectContaining({ fromStatus: "awaiting_payment", toStatus: "expired" }),
+      },
+    ]);
   });
 
   it("records nothing when the request was already settled", async () => {
-    mockSettlementSucceeds();
+    mockSettlementSucceeds(null);
     const request = await createRequest({ token: SOL_MINT, expiresAt: null });
     await reconcileOnSandbox(request);
     mockNoSignatures();
 
     await onSandbox(() => closeLapsedPaymentRequest(env, { ...request, expires_at: PAST }));
 
-    const result = await getDb(env)
-      .prepare(
-        "SELECT id FROM audit_logs WHERE resource_type = 'payment_request' AND resource_id = ? AND action = 'update'"
-      )
-      .bind(request.id)
-      .all<{ id: string }>();
-    expect(result.results).toHaveLength(0);
+    expect(await listPaymentRequestAudits(request.id, "update")).toHaveLength(0);
   });
 });
 
@@ -850,7 +843,7 @@ describe("settlement atomicity", () => {
               : Reflect.get(target, property, receiver),
         })
     );
-    mockSettlementSucceeds();
+    mockSettlementSucceeds(null);
     const request = await createRequest({ token: SOL_MINT, expiresAt: null });
 
     await expect(reconcileOnSandbox(request)).rejects.toThrow("transition failed");
@@ -906,7 +899,7 @@ describe("settlement convergence", () => {
               : Reflect.get(target, property, receiver),
         })
     );
-    mockSettlementSucceeds();
+    mockSettlementSucceeds(null);
 
     const settled = await reconcileOnSandbox(request);
 
@@ -932,9 +925,9 @@ describe("payment search", () => {
   });
 
   it("verifies candidates against the full signature history", async () => {
-    mockSignatures(signatureInfo(SIGNATURE));
+    mockSignatures(signatureInfo(SIGNATURE, { blockTime: null, err: null }));
     verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
-    validateTransferSpy.mockResolvedValue(validatedTransfer());
+    validateTransferSpy.mockResolvedValue(validatedTransfer(null));
 
     await reconcileOnSandbox(await createRequest({ token: SOL_MINT, expiresAt: null }));
 
@@ -944,9 +937,12 @@ describe("payment search", () => {
   });
 
   it("settles a valid payment that follows a failed transaction on the same reference", async () => {
-    mockSignatures(signatureInfo(LATER_SIGNATURE), signatureInfo(FAILED_SIGNATURE, { err: {} }));
+    mockSignatures(
+      signatureInfo(LATER_SIGNATURE, { blockTime: null, err: null }),
+      signatureInfo(FAILED_SIGNATURE, { blockTime: null, err: {} })
+    );
     verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
-    validateTransferSpy.mockResolvedValue(validatedTransfer());
+    validateTransferSpy.mockResolvedValue(validatedTransfer(null));
 
     const settled = await reconcileOnSandbox(
       await createRequest({ token: SOL_MINT, expiresAt: null })
@@ -962,11 +958,14 @@ describe("payment search", () => {
   });
 
   it("settles on a later signature when the oldest one does not validate", async () => {
-    mockSignatures(signatureInfo(LATER_SIGNATURE), signatureInfo(SIGNATURE));
+    mockSignatures(
+      signatureInfo(LATER_SIGNATURE, { blockTime: null, err: null }),
+      signatureInfo(SIGNATURE, { blockTime: null, err: null })
+    );
     verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
     validateTransferSpy.mockImplementation(async (_rpc, sig) => {
       if (sig === SIGNATURE) throw new ValidateTransferError("wrong amount");
-      return validatedTransfer();
+      return validatedTransfer(null);
     });
 
     const settled = await reconcileOnSandbox(
@@ -984,7 +983,10 @@ describe("payment search", () => {
   it("checks a bounded number of candidate signatures", async () => {
     mockSignatures(
       ...Array.from({ length: 30 }, (_, index) =>
-        signatureInfo(signature(getBase58Decoder().decode(new Uint8Array(64).fill(index + 10))))
+        signatureInfo(signature(getBase58Decoder().decode(new Uint8Array(64).fill(index + 10))), {
+          blockTime: null,
+          err: null,
+        })
       )
     );
     verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
@@ -1001,7 +1003,7 @@ describe("closeLapsedPaymentRequest while a payment is indexing", () => {
   installSettlementHooks();
 
   it("leaves the request awaiting when a candidate is confirmed but not yet indexed", async () => {
-    mockSignatures(signatureInfo(SIGNATURE));
+    mockSignatures(signatureInfo(SIGNATURE, { blockTime: null, err: null }));
     verifyTransactionLandedSpy.mockResolvedValue({ ok: false, reason: "not_indexed" });
     const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
 
@@ -1013,7 +1015,10 @@ describe("closeLapsedPaymentRequest while a payment is indexing", () => {
   });
 
   it("leaves the request awaiting when one candidate is indexing and another is invalid", async () => {
-    mockSignatures(signatureInfo(LATER_SIGNATURE), signatureInfo(SIGNATURE));
+    mockSignatures(
+      signatureInfo(LATER_SIGNATURE, { blockTime: null, err: null }),
+      signatureInfo(SIGNATURE, { blockTime: null, err: null })
+    );
     verifyTransactionLandedSpy.mockImplementation(async (_rpc, sig) =>
       sig === SIGNATURE ? { ok: false, reason: "not_indexed" } : verifiedOk()
     );
@@ -1027,11 +1032,14 @@ describe("closeLapsedPaymentRequest while a payment is indexing", () => {
   });
 
   it("settles a later valid candidate even while an earlier one is indexing", async () => {
-    mockSignatures(signatureInfo(LATER_SIGNATURE), signatureInfo(SIGNATURE));
+    mockSignatures(
+      signatureInfo(LATER_SIGNATURE, { blockTime: null, err: null }),
+      signatureInfo(SIGNATURE, { blockTime: null, err: null })
+    );
     verifyTransactionLandedSpy.mockImplementation(async (_rpc, sig) =>
       sig === SIGNATURE ? { ok: false, reason: "not_indexed" } : verifiedOk()
     );
-    validateTransferSpy.mockResolvedValue(validatedTransfer());
+    validateTransferSpy.mockResolvedValue(validatedTransfer(null));
     const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
 
     const result = await onSandbox(() => closeLapsedPaymentRequest(env, request));
@@ -1041,7 +1049,7 @@ describe("closeLapsedPaymentRequest while a payment is indexing", () => {
   });
 
   it("leaves the request awaiting when the only candidate is not confirmed by the status node yet", async () => {
-    mockSignatures(signatureInfo(SIGNATURE));
+    mockSignatures(signatureInfo(SIGNATURE, { blockTime: null, err: null }));
     verifyTransactionLandedSpy.mockResolvedValue({ ok: false, reason: "not_confirmed" });
     const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
 
@@ -1055,7 +1063,7 @@ describe("closeLapsedPaymentRequest while a payment is indexing", () => {
   });
 
   it("stores expired and advances the cursor when the only candidate failed on-chain", async () => {
-    mockSignatures(signatureInfo(SIGNATURE));
+    mockSignatures(signatureInfo(SIGNATURE, { blockTime: null, err: null }));
     verifyTransactionLandedSpy.mockResolvedValue({ ok: false, reason: "failed" });
     const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
 
@@ -1068,7 +1076,7 @@ describe("closeLapsedPaymentRequest while a payment is indexing", () => {
   it.for(["not found", "missing meta"])(
     "leaves the request awaiting when the transfer check answers '%s'",
     async (message) => {
-      mockSignatures(signatureInfo(SIGNATURE));
+      mockSignatures(signatureInfo(SIGNATURE, { blockTime: null, err: null }));
       verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
       validateTransferSpy.mockRejectedValue(new ValidateTransferError(message));
       const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
@@ -1085,10 +1093,10 @@ describe("closeLapsedPaymentRequest while a payment is indexing", () => {
   );
 
   it("settles a payment on a later check once the transfer check can read it", async () => {
-    mockSignatures(signatureInfo(SIGNATURE));
+    mockSignatures(signatureInfo(SIGNATURE, { blockTime: null, err: null }));
     verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
     validateTransferSpy.mockRejectedValueOnce(new ValidateTransferError("not found"));
-    validateTransferSpy.mockResolvedValueOnce(validatedTransfer());
+    validateTransferSpy.mockResolvedValueOnce(validatedTransfer(null));
     const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
 
     const first = await onSandbox(() => closeLapsedPaymentRequest(env, request));
@@ -1148,7 +1156,7 @@ describe("closeLapsedPaymentRequest while a payment is indexing", () => {
       async ({ setup }) => {
         const logSpy = vi.spyOn(moneyPathEvents, "logEvent");
         const listedHoursAgo = BigInt(Math.floor((Date.now() - 2 * HOUR_MS) / 1000));
-        mockSignatures(signatureInfo(SIGNATURE, { blockTime: listedHoursAgo }));
+        mockSignatures(signatureInfo(SIGNATURE, { blockTime: listedHoursAgo, err: null }));
         setup();
         const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
 
@@ -1161,7 +1169,7 @@ describe("closeLapsedPaymentRequest while a payment is indexing", () => {
         expectNoGiveUp(logSpy);
 
         verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
-        validateTransferSpy.mockResolvedValue(validatedTransfer());
+        validateTransferSpy.mockResolvedValue(validatedTransfer(null));
         const second = await onSandbox(() => closeLapsedPaymentRequest(env, stored));
 
         expect(second.status).toBe("paid");
@@ -1173,7 +1181,7 @@ describe("closeLapsedPaymentRequest while a payment is indexing", () => {
       "gives up on a signature that stayed $reason for over an hour and stores expired",
       async ({ reason, setup }) => {
         const logSpy = vi.spyOn(moneyPathEvents, "logEvent");
-        mockSignatures(signatureInfo(SIGNATURE));
+        mockSignatures(signatureInfo(SIGNATURE, { blockTime: null, err: null }));
         setup();
         const request = await storeScanPosition(
           await createRequest({ token: SOL_MINT, expiresAt: PAST }),
@@ -1201,7 +1209,7 @@ describe("closeLapsedPaymentRequest while a payment is indexing", () => {
 
     it("keeps waiting on a signature unreadable for less than an hour without restarting its clock", async () => {
       const logSpy = vi.spyOn(moneyPathEvents, "logEvent");
-      mockSignatures(signatureInfo(SIGNATURE));
+      mockSignatures(signatureInfo(SIGNATURE, { blockTime: null, err: null }));
       verifyTransactionLandedSpy.mockResolvedValue({ ok: false, reason: "not_indexed" });
       const stuckSince = isoAgo(50 * 60_000);
       const request = await storeScanPosition(
@@ -1222,7 +1230,7 @@ describe("closeLapsedPaymentRequest while a payment is indexing", () => {
 
     it("restarts the clock when a different signature becomes the first unreadable one", async () => {
       const logSpy = vi.spyOn(moneyPathEvents, "logEvent");
-      mockSignatures(signatureInfo(SIGNATURE));
+      mockSignatures(signatureInfo(SIGNATURE, { blockTime: null, err: null }));
       verifyTransactionLandedSpy.mockResolvedValue({ ok: false, reason: "not_indexed" });
       const request = await storeScanPosition(
         await createRequest({ token: SOL_MINT, expiresAt: PAST }),
@@ -1239,7 +1247,10 @@ describe("closeLapsedPaymentRequest while a payment is indexing", () => {
     });
 
     it("tracks only the oldest unreadable signature", async () => {
-      mockSignatures(signatureInfo(LATER_SIGNATURE), signatureInfo(SIGNATURE));
+      mockSignatures(
+        signatureInfo(LATER_SIGNATURE, { blockTime: null, err: null }),
+        signatureInfo(SIGNATURE, { blockTime: null, err: null })
+      );
       verifyTransactionLandedSpy.mockResolvedValue({ ok: false, reason: "not_indexed" });
       const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
 
@@ -1249,7 +1260,7 @@ describe("closeLapsedPaymentRequest while a payment is indexing", () => {
     });
 
     it("clears the stuck signature once it reads as definitive", async () => {
-      mockSignatures(signatureInfo(SIGNATURE));
+      mockSignatures(signatureInfo(SIGNATURE, { blockTime: null, err: null }));
       verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
       validateTransferSpy.mockRejectedValue(new ValidateTransferError("wrong amount"));
       const request = await storeScanPosition(
@@ -1268,7 +1279,10 @@ describe("closeLapsedPaymentRequest while a payment is indexing", () => {
     });
 
     it("starts the clock on the next unreadable signature after giving up on one", async () => {
-      mockSignatures(signatureInfo(LATER_SIGNATURE), signatureInfo(SIGNATURE));
+      mockSignatures(
+        signatureInfo(LATER_SIGNATURE, { blockTime: null, err: null }),
+        signatureInfo(SIGNATURE, { blockTime: null, err: null })
+      );
       verifyTransactionLandedSpy.mockResolvedValue({ ok: false, reason: "not_indexed" });
       const request = await storeScanPosition(
         await createRequest({ token: SOL_MINT, expiresAt: PAST }),
@@ -1284,11 +1298,14 @@ describe("closeLapsedPaymentRequest while a payment is indexing", () => {
     });
 
     it("settles a valid payment listed after an abandoned unreadable signature", async () => {
-      mockSignatures(signatureInfo(LATER_SIGNATURE), signatureInfo(SIGNATURE));
+      mockSignatures(
+        signatureInfo(LATER_SIGNATURE, { blockTime: null, err: null }),
+        signatureInfo(SIGNATURE, { blockTime: null, err: null })
+      );
       verifyTransactionLandedSpy.mockImplementation(async (_rpc, sig) =>
         sig === SIGNATURE ? { ok: false, reason: "not_indexed" } : verifiedOk()
       );
-      validateTransferSpy.mockResolvedValue(validatedTransfer());
+      validateTransferSpy.mockResolvedValue(validatedTransfer(null));
       const request = await storeScanPosition(
         await createRequest({ token: SOL_MINT, expiresAt: null }),
         { stuckSignature: SIGNATURE, stuckSince: isoAgo(2 * HOUR_MS) }
@@ -1306,7 +1323,7 @@ describe("closeLapsedPaymentRequest while a payment is indexing", () => {
   });
 
   it("stores expired and advances the cursor past a transfer that does not match the request", async () => {
-    mockSignatures(signatureInfo(SIGNATURE));
+    mockSignatures(signatureInfo(SIGNATURE, { blockTime: null, err: null }));
     verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
     validateTransferSpy.mockRejectedValue(new ValidateTransferError("amount not transferred"));
     const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
@@ -1339,7 +1356,7 @@ function mockChain(
     const page: solanaRpc.SignatureInfo[] = [];
     for (const sig of newestFirst.slice(start)) {
       if (sig === options?.until || page.length >= (options?.limit ?? 100)) break;
-      page.push(signatureInfo(sig, failed.has(sig) ? { err: {} } : {}));
+      page.push(signatureInfo(sig, { blockTime: null, err: failed.has(sig) ? {} : null }));
     }
     return page;
   });
@@ -1349,7 +1366,7 @@ function mockOnlyValid(paid: Signature) {
   verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
   validateTransferSpy.mockImplementation(async (_rpc, sig) => {
     if (sig !== paid) throw new ValidateTransferError("wrong amount");
-    return validatedTransfer();
+    return validatedTransfer(null);
   });
 }
 
@@ -1491,7 +1508,10 @@ describe("signature scan cursor", () => {
   it("advances the cursor over failed transactions without verifying them", async () => {
     const [failed, rejected] = chainOf(2);
     if (failed === undefined || rejected === undefined) throw new Error("chain too short");
-    signaturesSpy.mockResolvedValue([signatureInfo(rejected), signatureInfo(failed, { err: {} })]);
+    signaturesSpy.mockResolvedValue([
+      signatureInfo(rejected, { blockTime: null, err: null }),
+      signatureInfo(failed, { blockTime: null, err: {} }),
+    ]);
     verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
     validateTransferSpy.mockRejectedValue(new ValidateTransferError("wrong amount"));
     const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });

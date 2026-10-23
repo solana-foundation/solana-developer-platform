@@ -501,18 +501,18 @@ describe("decidePrincipal", () => {
   });
 
   it("admits a payment link only for its open request's sponsorship", () => {
-    const link = (status: string, expiresAt: string | null = null): MoneyPrincipalFacts => ({
+    const link = (status: string, expiresAt: string | null): MoneyPrincipalFacts => ({
       kind: "payment_request",
       request: { status, expiresAt },
     });
-    expect(decide(link("awaiting_payment"), NO_WALLET, "payments.pay_request")).toEqual({
+    expect(decide(link("awaiting_payment", null), NO_WALLET, "payments.pay_request")).toEqual({
       admitted: true,
     });
-    expect(decide(link("paid"), NO_WALLET, "payments.pay_request")).toEqual({
+    expect(decide(link("paid", null), NO_WALLET, "payments.pay_request")).toEqual({
       admitted: false,
       reason: "principal_not_live",
     });
-    expect(decide(link("awaiting_payment"), WALLET, "payments.pay_request")).toEqual({
+    expect(decide(link("awaiting_payment", null), WALLET, "payments.pay_request")).toEqual({
       admitted: false,
       reason: "wallet_out_of_scope",
     });

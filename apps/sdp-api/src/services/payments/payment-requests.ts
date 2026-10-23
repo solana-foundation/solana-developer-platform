@@ -1,5 +1,5 @@
 import { createClusterRpc } from "@sdp/rpc/factory";
-import { getSignaturesForAddress, type SignatureInfo, type SolanaRpc } from "@sdp/rpc/solana";
+import { getSignaturesForAddress, type SignatureInfo } from "@sdp/rpc/solana";
 import { verifyTransactionLanded } from "@sdp/rpc/verified-confirmation";
 import { assertValidAddress } from "@sdp/solana/address";
 import { toNumberAmount } from "@sdp/solana/amount";
@@ -100,7 +100,7 @@ export async function reconcilePaymentRequest(
   if (row.custody_wallet_id === null) {
     throw new AppError("CONFLICT", "Payment request wallet identity is unresolved");
   }
-  const result = await findValidPayment(env, createClusterRpc(), row);
+  const result = await findValidPayment(env, row);
   if (result.kind === "pending") {
     setRetryAfter(PAYMENT_SEARCH_RETRY_AFTER_SECONDS);
     throw rateLimited("A payment to this request may still be confirming; retry shortly");
@@ -122,7 +122,7 @@ export async function checkAwaitingPaymentRequest(
   ) {
     return row;
   }
-  const result = await findValidPayment(env, createClusterRpc(), row);
+  const result = await findValidPayment(env, row);
   if (result.kind !== "paid") {
     return row;
   }
@@ -137,7 +137,7 @@ export async function closeLapsedPaymentRequest(
     return row;
   }
   if (row.custody_wallet_id !== null) {
-    const result = await findValidPayment(env, createClusterRpc(), row);
+    const result = await findValidPayment(env, row);
     if (result.kind === "paid") {
       return settlePaymentRequest(env, row, row.custody_wallet_id, result.found);
     }
@@ -155,7 +155,7 @@ export async function checkExpiredPaymentRequestForLatePayment(
   if (row.status !== "expired" || row.custody_wallet_id === null) {
     return row;
   }
-  const result = await findValidPayment(env, createClusterRpc(), row);
+  const result = await findValidPayment(env, row);
   if (result.kind !== "paid") {
     return row;
   }
@@ -171,11 +171,7 @@ function isPaidLate(blockTime: bigint | null, expiresAt: string | null): boolean
     : isPaymentRequestExpired(expiresAt);
 }
 
-async function findValidPayment(
-  env: Env,
-  rpc: SolanaRpc,
-  row: PaymentRequestRow
-): Promise<PaymentSearchResult> {
+async function findValidPayment(env: Env, row: PaymentRequestRow): Promise<PaymentSearchResult> {
   const reference = assertValidAddress(row.reference, "reference");
   const from: SignatureScanPosition = {
     cursor: row.signature_scan_cursor,
@@ -183,7 +179,7 @@ async function findValidPayment(
     stuckSignature: row.signature_scan_stuck_signature,
     stuckSince: row.signature_scan_stuck_since,
   };
-  const fetched = await fetchUnscannedSignatures(rpc, reference, from);
+  const fetched = await fetchUnscannedSignatures(reference, from);
   const resumeBefore = fetched.newestFirst.at(-2);
   if (fetched.truncated && resumeBefore !== undefined) {
     logEvent("warn", {
@@ -197,7 +193,7 @@ async function findValidPayment(
     await advanceSignatureScan(env, row, from, { ...from, before: resumeBefore.signature });
     return { kind: "pending" };
   }
-  const scan = await evaluateOldestFirst(rpc, row, reference, [...fetched.newestFirst].reverse(), {
+  const scan = await evaluateOldestFirst(row, reference, [...fetched.newestFirst].reverse(), {
     signature: from.stuckSignature,
     since: from.stuckSince,
   });
@@ -214,7 +210,6 @@ async function findValidPayment(
 }
 
 async function fetchUnscannedSignatures(
-  rpc: SolanaRpc,
   reference: Address,
   from: SignatureScanPosition
 ): Promise<{ newestFirst: SignatureInfo[]; truncated: boolean }> {
@@ -222,7 +217,7 @@ async function fetchUnscannedSignatures(
   const newestFirst: SignatureInfo[] = [];
   let before = from.before === null ? undefined : signature(from.before);
   for (let pages = 0; pages < MAX_SIGNATURE_PAGES; pages++) {
-    const page = await getSignaturesForAddress(rpc, reference, {
+    const page = await getSignaturesForAddress(createClusterRpc(), reference, {
       commitment: "confirmed",
       limit: SIGNATURE_PAGE_SIZE,
       until,
@@ -239,7 +234,6 @@ async function fetchUnscannedSignatures(
 }
 
 async function evaluateOldestFirst(
-  rpc: SolanaRpc,
   row: PaymentRequestRow,
   reference: Address,
   oldestFirst: readonly SignatureInfo[],
@@ -256,7 +250,7 @@ async function evaluateOldestFirst(
         return { cursor, exhausted: false, found: null, stuck };
       }
       verified++;
-      verdict = await judgeCandidate(rpc, row, reference, candidate);
+      verdict = await judgeCandidate(row, reference, candidate);
     }
     if (verdict.kind === "retry" && contiguous) {
       const stuckSince =
@@ -299,11 +293,11 @@ async function evaluateOldestFirst(
 }
 
 async function judgeCandidate(
-  rpc: SolanaRpc,
   row: PaymentRequestRow,
   reference: Address,
   candidate: SignatureInfo
 ): Promise<CandidateVerdict> {
+  const rpc = createClusterRpc();
   const landed = await verifyTransactionLanded(rpc, candidate.signature, {
     searchTransactionHistory: true,
   });
