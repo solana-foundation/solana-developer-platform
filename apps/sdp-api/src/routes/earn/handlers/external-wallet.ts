@@ -8,6 +8,7 @@ import {
   subtractDecimalAmounts,
   sumDecimalAmounts,
 } from "@sdp/payments/decimal";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type {
   EarnDepositSwap,
@@ -754,14 +755,13 @@ export function anonymousExitNeedsStrategy(): AppError {
  *
  * @param c - The request context.
  * @param strategy - The strategy row the keyless exit names.
- * @param environment - The request's environment: its cluster scope's.
  * @throws AppError `BAD_REQUEST` when the vault lives on another cluster.
  */
 async function assertKeylessExitOnHostCluster(
   c: AppContext,
-  strategy: EarnStrategyRow,
-  environment: SdpEnvironment
+  strategy: EarnStrategyRow
 ): Promise<void> {
+  const { environment } = currentClusterScope();
   if (isClusterFundableInEnvironment(strategy.host_cluster, environment)) return;
   const hostEnvironment = SDP_ENVIRONMENT_BY_CLUSTER[strategy.host_cluster];
   const hostStrategy = await getEarnRepository(c).getStrategyByReference({
@@ -826,7 +826,7 @@ export async function resolveExternalWalletExit(
   if (!("strategyId" in locator)) throw anonymousExitNeedsStrategy();
   // The row names the shelf; an anonymous caller chose it (PRO-1998).
   const { strategy, environment } = await requireEarnStrategyForCaller(c, locator.strategyId);
-  await assertKeylessExitOnHostCluster(c, strategy, environment);
+  await assertKeylessExitOnHostCluster(c, strategy);
   if (earnDepositStyle(strategy.provider) !== "vault_direct") {
     throw badRequest(`${strategy.provider} does not support external-wallet exits.`);
   }

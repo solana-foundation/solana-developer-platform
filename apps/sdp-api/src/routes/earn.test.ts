@@ -4,6 +4,7 @@ import { JUPITER_LEND_USDT } from "@sdp/types/jupiter-lend-programs";
 import { ONDO_DEPLOYMENTS } from "@sdp/types/ondo-programs";
 import { type SolanaCluster, wellKnownMint } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { required } from "@/test/helpers/required";
@@ -366,6 +367,11 @@ describe("Earn routes — retired program surfaces (PRO-1670)", () => {
   });
 });
 
+const shelfPageSchema = z.object({
+  data: z.object({ strategies: z.array(z.object({ id: z.string(), fundable: z.boolean() })) }),
+});
+const errorBodySchema = z.object({ error: z.object({ code: z.string(), message: z.string() }) });
+
 describe("Earn routes — environment scoping", () => {
   it("hides production strategies from a sandbox API key", async () => {
     await seedAuth();
@@ -394,9 +400,7 @@ describe("Earn routes — environment scoping", () => {
 
     const sandboxShelf = await getEarnAnonymously("/v1/earn/strategies?environment=sandbox", {});
     expect(sandboxShelf.status).toBe(200);
-    const sandboxBody = (await sandboxShelf.json()) as {
-      data: { strategies: Array<{ id: string; fundable: boolean }> };
-    };
+    const sandboxBody = shelfPageSchema.parse(await sandboxShelf.json());
     expect(sandboxBody.data.strategies.map((s) => [s.id, s.fundable])).toEqual([
       [sandbox.id, true],
     ]);
@@ -406,9 +410,7 @@ describe("Earn routes — environment scoping", () => {
       {}
     );
     expect(productionShelf.status).toBe(200);
-    const productionBody = (await productionShelf.json()) as {
-      data: { strategies: Array<{ id: string; fundable: boolean }> };
-    };
+    const productionBody = shelfPageSchema.parse(await productionShelf.json());
     expect(productionBody.data.strategies.map((s) => [s.id, s.fundable])).toEqual([
       [production.id, true],
     ]);
@@ -423,7 +425,7 @@ describe("Earn routes — environment scoping", () => {
     for (const path of ["/v1/earn/strategies", "/v1/earn/strategies?environment=staging"]) {
       const res = await getEarnAnonymously(path, {});
       expect(res.status, path).toBe(400);
-      const body = (await res.json()) as { error: { code: string; message: string } };
+      const body = errorBodySchema.parse(await res.json());
       expect(body.error, path).toMatchObject({
         code: "BAD_REQUEST",
         message: "Invalid query parameters",
@@ -437,7 +439,7 @@ describe("Earn routes — environment scoping", () => {
     const res = await getEarnAnonymously("/v1/earn/strategies/strat_missing", {});
 
     expect(res.status).toBe(404);
-    const body = (await res.json()) as { error: { code: string } };
+    const body = errorBodySchema.parse(await res.json());
     expect(body.error.code).toBe("NOT_FOUND");
   });
 
@@ -448,7 +450,7 @@ describe("Earn routes — environment scoping", () => {
 
     const mismatch = await getEarn("/v1/earn/strategies?environment=production", {});
     expect(mismatch.status).toBe(409);
-    const mismatchBody = (await mismatch.json()) as { error: { code: string; message: string } };
+    const mismatchBody = errorBodySchema.parse(await mismatch.json());
     expect(mismatchBody.error.code).toBe("CONFLICT");
     expect(mismatchBody.error.message).toContain("follows the project");
 

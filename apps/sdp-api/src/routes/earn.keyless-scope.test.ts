@@ -1,12 +1,20 @@
+import type {
+  EarnVaultDepositQuoteProvider,
+  EarnVaultQueuedWithdrawProvider,
+  EarnVaultWithdrawQuoteProvider,
+} from "@sdp/earn/types";
 import { type ClusterScope, currentClusterScope } from "@sdp/rpc/scope";
 import { actionsInModule } from "@sdp/types/actions";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
-import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
+import { SOL_MINT, wellKnownMint } from "@sdp/types/well-known-tokens";
+import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db/client";
 import type { EarnStrategyRow, UpsertEarnStrategyInput } from "@/db/repositories/earn.repository";
 import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
 import { generateEarnPositionId } from "@/db/repositories/earn-movements.repository";
 import { app } from "@/index";
+import type { RouteHandler } from "@/middleware/authorize";
 import { earnRoutes } from "@/routes/earn";
 import { anonymousExitNeedsStrategy } from "@/routes/earn/handlers/external-wallet";
 import {
@@ -14,6 +22,12 @@ import {
   openKeylessStrategyBodyScope,
   openKeylessStrategyParamScope,
 } from "@/routes/earn/keyless-scope";
+import * as executionRegistry from "@/services/earn/execution-registry";
+import type {
+  ExternalWalletBuiltTransaction,
+  ExternalWalletDepositBuildResult,
+} from "@/services/earn/vault-external-wallet.service";
+import * as externalWalletService from "@/services/earn/vault-external-wallet.service";
 import {
   type EarnAuthzTenant,
   type EarnTestApiKey,
@@ -21,37 +35,9 @@ import {
   seedEarnAuthzTenant,
 } from "@/test/helpers/earn";
 import { env } from "@/test/helpers/env";
+import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
-
-const buildExternalWalletDepositTransaction = vi.hoisted(() => vi.fn());
-const buildExternalWalletWithdrawalTransaction = vi.hoisted(() => vi.fn());
-// One vault-direct client stands in for every provider capability these routes
-// reach, so each route's chain call can report the scope it ran in.
-const providerClient = vi.hoisted(() => ({
-  buildVaultDeposit: vi.fn(),
-  buildVaultWithdrawal: vi.fn(),
-  readVaultPositions: vi.fn(),
-  sponsoredPrograms: vi.fn(() => []),
-  quoteVaultDeposit: vi.fn(),
-  quoteVaultWithdrawal: vi.fn(),
-  getWithdrawalOptions: vi.fn(),
-  quoteQueuedWithdrawal: vi.fn(),
-}));
-
-vi.mock("@/services/earn/vault-external-wallet.service", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/services/earn/vault-external-wallet.service")>()),
-  buildExternalWalletDepositTransaction,
-  buildExternalWalletWithdrawalTransaction,
-}));
-
-vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/services/earn/execution-registry")>()),
-  resolveVaultDirectClient: () => providerClient,
-  resolveVaultWithdrawClient: () => providerClient,
-  resolveVaultQueuedWithdrawClient: () => providerClient,
-  resolveVaultParRedemptionClient: () => null,
-}));
 
 /**
  * Keyless Earn routes open the cluster scope (ADR 0007) from the shelf they
@@ -61,17 +47,48 @@ vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({
  * through `createClusterRpc()`.
  */
 
-const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
-const SHARE_MINT = "So11111111111111111111111111111111111111112";
+const USDC_MINT = required(wellKnownMint("USDC", "mainnet-beta"));
+const SHARE_MINT = SOL_MINT;
 const VAULT = "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx";
 const OWNER = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
 const QUEUE_TERMS = { shares: "10", discountBps: 50, deadlineSeconds: 3_600 } as const;
+
+// One vault-direct client with every capability these routes reach, so each
+// route's chain call can report the scope it ran in.
+const probeClient = {
+  provider: "kamino",
+  declaredSupport: { sourceKinds: ["defi"], depositTokens: ["USDC"] },
+  listStrategies: vi.fn(),
+  buildVaultDeposit: vi.fn(),
+  readVaultPositions: vi.fn(),
+  sponsoredPrograms: vi.fn(() => []),
+  buildVaultWithdrawal: vi.fn(),
+  quoteVaultDeposit: vi.fn(),
+  quoteVaultWithdrawal: vi.fn(),
+  getWithdrawalOptions: vi.fn(),
+  quoteQueuedWithdrawal: vi.fn(),
+  buildQueuedWithdrawalRequest: vi.fn(),
+  buildQueuedWithdrawalCancel: vi.fn(),
+  readQueuedWithdrawalRequests: vi.fn(),
+  readQueuedWithdrawalRequest: vi.fn(),
+  decodeQueuedWithdrawalLifecycleEvents: vi.fn(),
+} satisfies EarnVaultDepositQuoteProvider &
+  EarnVaultWithdrawQuoteProvider &
+  EarnVaultQueuedWithdrawProvider;
+
+const errorBodySchema = z.object({
+  error: z.object({
+    code: z.string(),
+    message: z.string(),
+    details: z.record(z.string(), z.unknown()).optional(),
+  }),
+});
 
 interface KeylessPostRoute {
   /** A body naming a catalogue strategy: what a keyless caller sends. */
   strategyBody: (strategyId: string) => Record<string, unknown>;
   /** The provider or service call the route makes once its gates pass. */
-  reached: () => Mock;
+  reached: () => MockInstance;
 }
 
 interface KeylessExitRoute extends KeylessPostRoute {
@@ -80,10 +97,10 @@ interface KeylessExitRoute extends KeylessPostRoute {
 }
 
 /** The money-in quote and build: a keyed caller names the strategy too. */
-const MONEY_IN_ROUTES: Record<string, KeylessPostRoute> = {
+const MONEY_IN_ROUTES = {
   "/vault-deposit-previews": {
     strategyBody: (strategyId) => ({ strategyId, amount: "10" }),
-    reached: () => providerClient.quoteVaultDeposit,
+    reached: () => probeClient.quoteVaultDeposit,
   },
   "/external-wallet/deposit-transactions": {
     strategyBody: (strategyId) => ({
@@ -92,37 +109,37 @@ const MONEY_IN_ROUTES: Record<string, KeylessPostRoute> = {
       amount: "25",
       minSharesOut: "1",
     }),
-    reached: () => buildExternalWalletDepositTransaction,
+    reached: () => vi.mocked(externalWalletService.buildExternalWalletDepositTransaction),
   },
-};
+} as const satisfies Record<string, KeylessPostRoute>;
 
-const EXIT_ROUTES: Record<string, KeylessExitRoute> = {
+const EXIT_ROUTES = {
   "/external-wallet/withdrawal-previews": {
     strategyBody: (strategyId) => ({ strategyId, ownerAddress: OWNER, shares: "10" }),
     positionBody: (positionId) => ({ positionId, shares: "10" }),
-    reached: () => providerClient.quoteVaultWithdrawal,
+    reached: () => probeClient.quoteVaultWithdrawal,
   },
   "/external-wallet/withdrawal-transactions": {
     strategyBody: (strategyId) => ({ strategyId, ownerAddress: OWNER, shares: "10" }),
     positionBody: (positionId) => ({ positionId, shares: "10" }),
-    reached: () => buildExternalWalletWithdrawalTransaction,
+    reached: () => vi.mocked(externalWalletService.buildExternalWalletWithdrawalTransaction),
   },
   "/external-wallet/withdrawal-options": {
     strategyBody: (strategyId) => ({ strategyId, ownerAddress: OWNER }),
     positionBody: (positionId) => ({ positionId }),
-    reached: () => providerClient.getWithdrawalOptions,
+    reached: () => probeClient.getWithdrawalOptions,
   },
   "/external-wallet/queued-withdrawal-previews": {
     strategyBody: (strategyId) => ({ strategyId, ownerAddress: OWNER, ...QUEUE_TERMS }),
     positionBody: (positionId) => ({ positionId, ...QUEUE_TERMS }),
-    reached: () => providerClient.quoteQueuedWithdrawal,
+    reached: () => probeClient.quoteQueuedWithdrawal,
   },
-};
+} as const satisfies Record<string, KeylessExitRoute>;
 
-const KEYLESS_POST_ROUTES: Record<string, KeylessPostRoute> = {
+const KEYLESS_POST_ROUTES = {
   ...MONEY_IN_ROUTES,
   ...EXIT_ROUTES,
-};
+} as const satisfies Record<string, KeylessPostRoute>;
 
 const SHELVES = [
   { environment: "sandbox", cluster: "devnet" },
@@ -197,12 +214,11 @@ async function seedExternalWalletPosition(project: {
   return id;
 }
 
-function builtRow(direction: "deposit" | "withdrawal") {
-  const now = new Date().toISOString();
+function builtTransaction(
+  direction: ExternalWalletBuiltTransaction["direction"]
+): ExternalWalletBuiltTransaction {
   return {
     id: `earn_external_wallet_transaction_${crypto.randomUUID()}`,
-    organization_id: null,
-    project_id: null,
     environment: "sandbox",
     provider: "kamino",
     direction,
@@ -220,12 +236,6 @@ function builtRow(direction: "deposit" | "withdrawal") {
     share_ata_rent_funder: null,
     unsigned_transaction: "AQ==",
     last_valid_block_height: "361",
-    movement_id: null,
-    consumed_at: null,
-    created_by: null,
-    initiated_by_key_id: null,
-    created_at: now,
-    updated_at: now,
   };
 }
 
@@ -259,17 +269,23 @@ beforeEach(async () => {
     .bind(JSON.stringify({ providerOverrides: { earn: { kamino: true } } }), tenant.org.id)
     .run();
 
-  buildExternalWalletDepositTransaction.mockImplementation(
-    inScope({ kind: "built", built: builtRow("deposit") })
+  vi.spyOn(externalWalletService, "buildExternalWalletDepositTransaction").mockImplementation(
+    inScope<ExternalWalletDepositBuildResult>({ kind: "built", built: builtTransaction("deposit") })
   );
-  buildExternalWalletWithdrawalTransaction.mockImplementation(inScope(builtRow("withdrawal")));
-  providerClient.quoteVaultDeposit.mockImplementation(
+  vi.spyOn(externalWalletService, "buildExternalWalletWithdrawalTransaction").mockImplementation(
+    inScope(builtTransaction("withdrawal"))
+  );
+  vi.spyOn(executionRegistry, "resolveVaultDirectClient").mockReturnValue(probeClient);
+  vi.spyOn(executionRegistry, "resolveVaultWithdrawClient").mockReturnValue(probeClient);
+  vi.spyOn(executionRegistry, "resolveVaultQueuedWithdrawClient").mockReturnValue(probeClient);
+  vi.spyOn(executionRegistry, "resolveVaultParRedemptionClient").mockReturnValue(null);
+  probeClient.quoteVaultDeposit.mockImplementation(
     inScope({ sharesOut: "9.99", shareDecimals: 6, blockingIssues: [] })
   );
-  providerClient.quoteVaultWithdrawal.mockImplementation(
+  probeClient.quoteVaultWithdrawal.mockImplementation(
     inScope({ assetsOut: "9.95", assetDecimals: 6, blockingIssues: [] })
   );
-  providerClient.getWithdrawalOptions.mockImplementation(
+  probeClient.getWithdrawalOptions.mockImplementation(
     inScope({
       instant: true,
       queued: true,
@@ -278,7 +294,7 @@ beforeEach(async () => {
       queueAsset: null,
     })
   );
-  providerClient.quoteQueuedWithdrawal.mockImplementation(
+  probeClient.quoteQueuedWithdrawal.mockImplementation(
     inScope({ mechanism: "solverQueue", assetsOut: "9.9", assetDecimals: 6 })
   );
 });
@@ -286,16 +302,17 @@ beforeEach(async () => {
 afterEach(() => {
   env.MARKETS_ENABLED = originalMarketsEnabled;
   env.EARN_ENABLED = originalEarnEnabled;
+  vi.restoreAllMocks();
 });
 
 describe("keyless Earn route wiring", () => {
   it("opens a scope on every keyless route, directly before its handler, and on no keyed route", () => {
-    const openers: ReadonlySet<unknown> = new Set([
+    const openers: ReadonlySet<RouteHandler> = new Set<RouteHandler>([
       openKeylessCatalogueScope,
       openKeylessStrategyParamScope,
       openKeylessStrategyBodyScope,
     ]);
-    const chains = new Map<string, unknown[]>();
+    const chains = new Map<string, RouteHandler[]>();
     for (const route of earnRoutes.routes) {
       if (route.method === "ALL") continue;
       const routeKey = `${route.method} ${route.path}`;
@@ -305,9 +322,7 @@ describe("keyless Earn route wiring", () => {
     const keyless: string[] = [];
     for (const [routeKey, steps] of chains) {
       const openerSteps = steps.filter((step) => openers.has(step));
-      const isKeyless = steps.some(
-        (step) => typeof step === "function" && step.name === "optionalEarnAuth"
-      );
+      const isKeyless = steps.some((step) => step.name === "optionalEarnAuth");
       if (!isKeyless) {
         expect(openerSteps, routeKey).toEqual([]);
         continue;
@@ -348,7 +363,7 @@ describe("keyless Earn routes run in the scope of the shelf they name", () => {
       const res = await postEarn(path, route.strategyBody("earn_strategy_missing"), null);
 
       expect(res.status).toBe(404);
-      const body = (await res.json()) as { error: { code: string } };
+      const body = errorBodySchema.parse(await res.json());
       expect(body.error.code).toBe("NOT_FOUND");
       expect(route.reached()).not.toHaveBeenCalled();
     }
@@ -428,7 +443,7 @@ describe("cross-environment requests", () => {
       const res = await postEarn(path, route.positionBody(positionId), null);
 
       expect(res.status).toBe(400);
-      const body = (await res.json()) as { error: { code: string; message: string } };
+      const body = errorBodySchema.parse(await res.json());
       expect(body.error).toMatchObject({
         code: "BAD_REQUEST",
         message: anonymousExitNeedsStrategy().message,
@@ -460,9 +475,7 @@ describe("mirrored strategies (PRO-1742)", () => {
       const res = await postEarn(path, route.strategyBody(mirror.id), null);
 
       expect(res.status).toBe(400);
-      const body = (await res.json()) as {
-        error: { code: string; message: string; details: Record<string, unknown> };
-      };
+      const body = errorBodySchema.parse(await res.json());
       expect(body.error.code).toBe("BAD_REQUEST");
       expect(body.error.message).toContain(`production strategy ${host.id}`);
       expect(body.error.details).toEqual({
@@ -485,12 +498,10 @@ describe("mirrored strategies (PRO-1742)", () => {
     );
 
     expect(res.status).toBe(400);
-    const body = (await res.json()) as {
-      error: { message: string; details: Record<string, unknown> };
-    };
+    const body = errorBodySchema.parse(await res.json());
     expect(body.error.message).toContain("exit through the production shelf");
     expect(body.error.details).toMatchObject({ hostStrategyId: null });
-    expect(providerClient.quoteVaultWithdrawal).not.toHaveBeenCalled();
+    expect(probeClient.quoteVaultWithdrawal).not.toHaveBeenCalled();
   });
 
   it.each(Object.entries(MONEY_IN_ROUTES))(
@@ -501,7 +512,7 @@ describe("mirrored strategies (PRO-1742)", () => {
       const res = await postEarn(path, route.strategyBody(mirror.id), null);
 
       expect(res.status).toBe(400);
-      const body = (await res.json()) as { error: { details: Record<string, unknown> } };
+      const body = errorBodySchema.parse(await res.json());
       expect(body.error.details).toMatchObject({ hostCluster: "mainnet-beta" });
       expect(route.reached()).not.toHaveBeenCalled();
     }
