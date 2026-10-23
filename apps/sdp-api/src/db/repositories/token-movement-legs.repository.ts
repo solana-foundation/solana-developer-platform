@@ -477,20 +477,34 @@ export function createPostgresTokenMovementLegsRepository(
         return byTransfer;
       }
       const placeholders = buildInClause(transferIds.length);
+      // Two indexed lookups: an OR across both sides of one join scans every leg.
       const rows = await db.queryMany(
-        `SELECT leg.*, COALESCE(leg.payment_transfer_id, recipient.transfer_id) AS movement_transfer_id
+        `SELECT leg.*, leg.payment_transfer_id AS movement_transfer_id
            FROM token_movement_legs leg
-           LEFT JOIN payment_transfer_recipients recipient
-             ON recipient.id = leg.payment_transfer_recipient_id
-            AND recipient.organization_id = leg.organization_id
-            AND recipient.project_id = leg.project_id
           WHERE leg.organization_id = ?
             AND leg.project_id = ?
             AND leg.status <> 'archived'
-            AND (leg.payment_transfer_id IN (${placeholders})
-                 OR recipient.transfer_id IN (${placeholders}))
-          ORDER BY leg.created_at, leg.id`,
-        [tenant.organizationId, projectId, ...transferIds, ...transferIds]
+            AND leg.payment_transfer_id IN (${placeholders})
+         UNION ALL
+         SELECT leg.*, recipient.transfer_id AS movement_transfer_id
+           FROM payment_transfer_recipients recipient
+           JOIN token_movement_legs leg
+             ON leg.payment_transfer_recipient_id = recipient.id
+            AND leg.organization_id = recipient.organization_id
+            AND leg.project_id = recipient.project_id
+          WHERE leg.organization_id = ?
+            AND leg.project_id = ?
+            AND leg.status <> 'archived'
+            AND recipient.transfer_id IN (${placeholders})
+          ORDER BY created_at, id`,
+        [
+          tenant.organizationId,
+          projectId,
+          ...transferIds,
+          tenant.organizationId,
+          projectId,
+          ...transferIds,
+        ]
       );
       for (const row of rows) {
         const movement = z.string().parse(row.movement_transfer_id);

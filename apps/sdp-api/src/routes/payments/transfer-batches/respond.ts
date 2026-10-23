@@ -93,7 +93,7 @@ function mapRecipientFields(row: PaymentTransferRecipientRow) {
 
 /**
  * Assembles the full batch response — batch, recipients, and chunk transfers
- * — using one batched transfer lookup and one legs read for each.
+ * — using one batched transfer lookup and one read of the recipients' legs.
  *
  * @param c - Request context.
  * @param batch - Batch row to respond with.
@@ -119,11 +119,11 @@ export async function buildTransferBatchResponse(
         .filter((transferId): transferId is string => Boolean(transferId))
     )
   );
-  const legsRepository = getTokenMovementLegsRepository(c);
-  const [transferRows, recipientLegs, transferLegs] = await Promise.all([
+  const [transferRows, recipientLegs] = await Promise.all([
     getPaymentsRepository(c).listTransfersByIds({ transferIds, organizationId, projectId }),
-    legsRepository.listLegsByRecipients(recipients.rows.map((recipient) => recipient.id)),
-    legsRepository.listLegsByTransfers(transferIds),
+    getTokenMovementLegsRepository(c).listLegsByRecipients(
+      recipients.rows.map((recipient) => recipient.id)
+    ),
   ]);
   if (
     transferRows.some((transfer) => transfer.custody_wallet_id !== batch.source_custody_wallet_id)
@@ -131,6 +131,16 @@ export async function buildTransferBatchResponse(
     throw new AppError("CONFLICT", "Transfer batch wallet identity is inconsistent");
   }
 
+  // A chunk transfer's legs are its recipients' legs, so they need no second read.
+  const transferLegs = new Map<string, TokenMovementLeg[]>();
+  for (const row of recipients.rows) {
+    const leg = recipientLegs.get(row.id);
+    if (row.transfer_id !== null && leg !== undefined) {
+      const chunkLegs = transferLegs.get(row.transfer_id) ?? [];
+      chunkLegs.push(leg);
+      transferLegs.set(row.transfer_id, chunkLegs);
+    }
+  }
   // A batch written before quotes has no legs (legacy = no leg).
   const legs = [...recipientLegs.values()];
   const [first, ...rest] = legs;
