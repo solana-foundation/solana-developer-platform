@@ -69,7 +69,7 @@ function sourceWalletName(wallet: PaymentsDashboardWallet | null): string {
     return "—";
   }
   if (wallet.label === null) {
-    return wallet.walletId;
+    return wallet.id;
   }
   return wallet.label;
 }

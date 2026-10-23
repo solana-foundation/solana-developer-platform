@@ -27,7 +27,6 @@ function sale(overrides: Partial<PaymentTransferDetail>): PaymentTransferDetail 
   return {
     id: "xfr_open_sale",
     custodyWalletId: "cwlt_treasury",
-    providerWalletId: "wallet_treasury",
     status: "awaiting_payment",
     signature: null,
     rampsMemo: {},

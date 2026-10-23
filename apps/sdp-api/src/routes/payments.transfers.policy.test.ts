@@ -280,8 +280,8 @@ describe("Payments routes — transfer wallet access", () => {
     const body = await readTransferResponse(response);
     expect(body.data.transfer).toMatchObject({
       custodyWalletId: TEST_CUSTODY_WALLET_ID,
-      providerWalletId: TEST_WALLET_ID,
     });
+    expect(body.data.transfer).not.toHaveProperty("providerWalletId");
     const row = await readTransferRow(body.data.transfer.id);
     expect(row).toMatchObject({
       custody_wallet_id: TEST_CUSTODY_WALLET_ID,

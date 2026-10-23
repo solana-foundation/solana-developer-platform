@@ -13,7 +13,6 @@ function transfer(overrides: Partial<PaymentTransferSummary>): PaymentTransferSu
   return {
     id: "xfr_phase",
     custodyWalletId: "cwlt_phase",
-    providerWalletId: "wallet_phase",
     status: "pending",
     signature: null,
     rampsMemo: {},

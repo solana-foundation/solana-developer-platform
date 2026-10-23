@@ -9,6 +9,7 @@ import { createApp } from "@/app";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { errorResponseSchema } from "@/openapi/schemas/base";
+import { onrampQuoteResponseSchema } from "@/openapi/schemas/payments";
 import * as tokenLabels from "@/routes/payments/token-labels";
 import * as jupiterPriceService from "@/services/jupiter-price.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
@@ -262,35 +263,69 @@ describe("Payments routes — ramps", () => {
     expect(body.error.message).toContain('Unrecognized key: "cryptoToken"');
   });
 
-  it("rejects the retired destinationWallet key on the onramp quote endpoint", async () => {
-    const counterpartyId = await seedCounterparty({
-      externalId: "retired_destination_wallet_key",
-    });
+  it.each([false, true])(
+    "rejects the retired destinationWallet key on the onramp quote endpoint (exact supplied: %s)",
+    async (includeExact) => {
+      const counterpartyId = await seedCounterparty({
+        externalId: "retired_destination_wallet_key",
+      });
 
-    const response = await app.request(
-      "/v1/payments/ramps/onramp/quote",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      const response = await app.request(
+        "/v1/payments/ramps/onramp/quote",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            provider: "moonpay",
+            counterpartyId,
+            destinationCustodyWalletId: includeExact ? TEST_CUSTODY_WALLET_ID : undefined,
+            destinationWallet: TEST_WALLET_ID,
+            assetRail: "sol.solana",
+            fiatCurrency: "USD",
+            fiatAmount: "120.50",
+          }),
         },
-        body: JSON.stringify({
-          provider: "moonpay",
-          counterpartyId,
-          destinationWallet: TEST_WALLET_ID,
-          assetRail: "sol.solana",
-          fiatCurrency: "USD",
-          fiatAmount: "120.50",
-        }),
-      },
-      env
-    );
+        env
+      );
 
-    expect(response.status).toBe(400);
-    const body = (await response.json()) as { error: { message: string } };
-    expect(body.error.message).toContain('Unrecognized key: "destinationWallet"');
-  });
+      expect(response.status).toBe(400);
+      const body = errorResponseSchema.parse(await response.json());
+      expect(body.error.message).toContain('Unrecognized key: "destinationWallet"');
+    }
+  );
+
+  it.each([false, true])(
+    "rejects the retired sourceWallet key on the offramp quote endpoint (exact supplied: %s)",
+    async (includeExact) => {
+      const response = await app.request(
+        "/v1/payments/ramps/offramp/quote",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            provider: "moonpay",
+            counterpartyId: "cpty_retired_source_wallet",
+            sourceCustodyWalletId: includeExact ? TEST_CUSTODY_WALLET_ID : undefined,
+            sourceWallet: TEST_WALLET_ID,
+            assetRail: "sol.solana",
+            fiatCurrency: "USD",
+            cryptoAmount: "10",
+          }),
+        },
+        env
+      );
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: { code: "BAD_REQUEST", message: expect.stringContaining("sourceWallet") },
+      });
+    }
+  );
   it("rejects a provider walletId value passed as destinationCustodyWalletId", async () => {
     const counterpartyId = await seedCounterparty({
       externalId: "provider_walletid_as_custody_id",
@@ -1029,7 +1064,7 @@ describe("Payments routes — ramps", () => {
           "Content-Type": "application/json",
           Authorization: `Bearer ${TEST_API_KEY.raw}`,
         },
-        body: JSON.stringify({ transferId: "xfr_cancel_pending" }),
+        body: JSON.stringify({ transferId: "xfr_cancel_pending", ignoredClientHint: true }),
       },
       env
     );
@@ -1037,6 +1072,7 @@ describe("Payments routes — ramps", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { data: { transfer: { id: string; status: string } } };
     expect(body.data.transfer.status).toBe("canceled");
+    expect(body.data.transfer).not.toHaveProperty("providerWalletId");
 
     const row = await getDb(env)
       .prepare("SELECT status FROM payment_transfers WHERE id = ?")
@@ -1351,6 +1387,10 @@ describe("Payments routes — ramps", () => {
   describe("ramp session and destination binding", () => {
     installStripeTestEnv();
 
+    const sessionResponseSchema = z.object({
+      data: onrampQuoteResponseSchema.pick({ transferId: true }),
+    });
+
     /** Answers a session create the way Stripe does, echoing the request's locked terms. */
     function stripeSessionResponse(sessionId: string) {
       return async (_input: string | URL | Request, init?: RequestInit): Promise<Response> => {
@@ -1412,15 +1452,105 @@ describe("Payments routes — ramps", () => {
 
       const created = await createStripeOnrampQuote(counterpartyId, "25");
       expect(created.status).toBe(200);
+      const initial = sessionResponseSchema.parse(await created.json());
+
+      await getDb(env)
+        .prepare(
+          "UPDATE payment_transfers SET wallet_id = 'retained_provider_reference' WHERE provider_reference = ?"
+        )
+        .bind("cos_bind_reuse_1")
+        .run();
 
       const replayed = await createStripeOnrampQuote(counterpartyId, "25");
       expect(replayed.status).toBe(200);
+      expect(await replayed.json()).toMatchObject({
+        data: { transferId: initial.data.transferId },
+      });
 
       const mutated = await createStripeOnrampQuote(counterpartyId, "26");
       expect(mutated.status).toBe(409);
       const body = (await mutated.json()) as { error: { message: string } };
       expect(body.error.message).toContain("already bound");
       fetchSpy.mockRestore();
+    });
+
+    it("replays the same exact session with retained direction metadata", async () => {
+      const counterpartyId = await seedCounterparty({ externalId: "stripe_retained_direction" });
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockImplementation(stripeSessionResponse("cos_retained_direction"));
+      try {
+        const created = await createStripeOnrampQuote(counterpartyId, "25");
+        expect(created.status).toBe(200);
+        const initial = sessionResponseSchema.parse(await created.json());
+        await getDb(env)
+          .prepare("UPDATE payment_transfers SET direction = 'outbound' WHERE id = ?")
+          .bind(initial.data.transferId)
+          .run();
+
+        const replayed = await createStripeOnrampQuote(counterpartyId, "25");
+        expect(replayed.status).toBe(200);
+        expect(await replayed.json()).toMatchObject({
+          data: { transferId: initial.data.transferId },
+        });
+        const detail = await app.request(
+          `/v1/payments/transfers/${initial.data.transferId}`,
+          { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+          env
+        );
+        expect(detail.status).toBe(200);
+        expect(await detail.json()).toMatchObject({
+          data: {
+            transfer: {
+              custodyWalletId: TEST_CUSTODY_WALLET_ID,
+              type: "onramp",
+              direction: "outbound",
+            },
+          },
+        });
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+
+    it.each([
+      ["custody_wallet_id", TEST_CONNECTION_CUSTODY_WALLET_ID],
+      ["custody_wallet_id", null],
+      ["destination_address", TEST_SOLANA_ADDRESSES.wallet2],
+      ["source_address", TEST_SOLANA_ADDRESSES.wallet1],
+      ["token", "SOL"],
+      ["amount", "25"],
+      ["fiat_amount", "26"],
+      ["fiat_currency", "MXN"],
+      ["type", "offramp"],
+    ] as const)("refuses session replay with changed %s evidence (%s)", async (field, value) => {
+      const counterpartyId = await seedCounterparty({ externalId: "stripe_exact_conflict" });
+      await seedActiveConnectionWallet({
+        walletId: TEST_WALLET_ID,
+        publicKey: TEST_SOLANA_ADDRESSES.wallet1,
+      });
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockImplementation(stripeSessionResponse("cos_exact_conflict"));
+      try {
+        const created = await createStripeOnrampQuote(counterpartyId, "25");
+        expect(created.status).toBe(200);
+        const initial = sessionResponseSchema.parse(await created.json());
+        await getDb(env)
+          .prepare(`UPDATE payment_transfers SET ${field} = ? WHERE id = ?`)
+          .bind(value, initial.data.transferId)
+          .run();
+        const replay = await createStripeOnrampQuote(counterpartyId, "25");
+        expect(replay.status).toBe(409);
+        expect(await replay.json()).toMatchObject({
+          error: {
+            message:
+              "Provider quote/session reference is already bound to a different ramp transfer.",
+          },
+        });
+      } finally {
+        fetchSpy.mockRestore();
+      }
     });
 
     it("fails closed when the provider reference is already bound to another tenant", async () => {

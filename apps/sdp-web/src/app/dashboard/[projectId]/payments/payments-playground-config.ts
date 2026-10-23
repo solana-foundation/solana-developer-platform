@@ -11,7 +11,6 @@ export interface PaymentsPlaygroundWalletView {
   id: string;
   label: string | null;
   publicKey: string;
-  walletId: string;
 }
 
 export interface PaymentsPlaygroundTransferView {

@@ -1,3 +1,7 @@
+import {
+  PAYMENT_TRANSFER_BATCH_RECIPIENT_STATUSES,
+  PAYMENT_TRANSFER_BATCH_STATUSES,
+} from "@sdp/types/payments";
 import { z } from "zod";
 import { paymentAmountSchema, paymentTokenSchema } from "@/routes/payments/schemas";
 
@@ -7,22 +11,9 @@ export const transferBatchIdParamsSchema = z.object({
   batchId: z.string().min(1),
 });
 
-export const transferBatchStatusSchema = z.enum([
-  "pending",
-  "processing",
-  "confirmed",
-  "failed",
-  "partially_failed",
-  "archived",
-]);
+export const transferBatchStatusSchema = z.enum(PAYMENT_TRANSFER_BATCH_STATUSES);
 
-export const transferBatchRecipientStatusSchema = z.enum([
-  "pending",
-  "processing",
-  "confirmed",
-  "failed",
-  "archived",
-]);
+export const transferBatchRecipientStatusSchema = z.enum(PAYMENT_TRANSFER_BATCH_RECIPIENT_STATUSES);
 
 export const transferBatchRecipientSchema = z.object({
   externalId: z.string().min(1).max(256).optional(),

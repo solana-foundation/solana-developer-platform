@@ -1,11 +1,17 @@
 import { OFFRAMP_SUPPORT, ONRAMP_SUPPORT } from "@sdp/types/generated/ramp.generated";
 import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
 import { beforeEach, describe, expect, it } from "vitest";
-import { buildWorld, DEMO_TOKENS, demoPathParts } from "./demo-fixtures";
+import { buildWorld, DEMO_TOKENS, demoAddress, demoPathParts, tokenBalance } from "./demo-fixtures";
 import { demoFlowRead, demoWrite } from "./demo-handlers";
 import type { DemoOp } from "./demo-ops";
 import { DEMO_RAMP_ASSETS, demoRampPairs, isDemoRampRail } from "./demo-ramp-assets";
-import { applyDemoOps, tokenKeyForRail, transferById } from "./demo-replay";
+import {
+  applyDemoOps,
+  DEMO_SETTLE_MS,
+  tokenKeyForRail,
+  transferById,
+  walletHolding,
+} from "./demo-replay";
 
 /*
  * The demo's write handlers on their own: each refuses what the SDP API would refuse, with the
@@ -23,6 +29,23 @@ let now = NOW;
 
 function world() {
   return applyDemoOps(buildWorld(now, RAMP_PROVIDERS), ops, now);
+}
+
+function collisionWorld() {
+  const collision = world();
+  const original = Object.values(collision.wallets)[0];
+  if (!original) throw new Error("Missing demo wallet fixture");
+  const source = {
+    ...original,
+    id: "demo_cwlt_collision_source",
+    walletId: "provider_b",
+    publicKey: demoAddress("collision_source"),
+    balances: [tokenBalance("USDC", "10")],
+  };
+  original.walletId = source.id;
+  original.balances = [tokenBalance("USDC", "1000")];
+  collision.wallets.collision = source;
+  return { collision, original, source };
 }
 
 function write(method: string, path: string, body: unknown = {}) {
@@ -49,6 +72,44 @@ function refusal(answer: ReturnType<typeof write>) {
 beforeEach(() => {
   ops = [];
   now = NOW;
+});
+
+describe("exact requirements selectors", () => {
+  it("refuses provider aliases when requirements name an exact destination", () => {
+    expect(
+      read(
+        "/v1/counterparties/demo_cpty_jane/requirements?provider=moonpay&destinationCustodyWalletId=demo_privy_treasury"
+      ).status
+    ).toBe(404);
+    expect(
+      refusal(
+        write("POST", "/v1/counterparties/demo_cpty_jane/requirements", {
+          provider: "moonpay",
+          direction: "onramp",
+          destinationCustodyWalletId: "demo_privy_treasury",
+        })
+      )
+    ).toEqual([404, "not_found"]);
+    expect(ops).toEqual([]);
+  });
+  it.each(["destination", "destinationWalletId"])(
+    "refuses %s on requirements reads and writes alongside an exact destination",
+    (field) => {
+      const readStatus = read(
+        `/v1/counterparties/demo_cpty_jane/requirements?provider=moonpay&destinationCustodyWalletId=${TREASURY}&${field}=demo_privy_treasury`
+      ).status;
+      const writeRefusal = refusal(
+        write("POST", "/v1/counterparties/demo_cpty_jane/requirements", {
+          provider: "moonpay",
+          direction: "onramp",
+          destinationCustodyWalletId: TREASURY,
+          [field]: "demo_privy_treasury",
+        })
+      );
+      expect([readStatus, ...writeRefusal]).toEqual([400, 400, "invalid_request"]);
+      expect(ops).toEqual([]);
+    }
+  );
 });
 
 describe("routing", () => {
@@ -344,6 +405,237 @@ describe("ramp pay-ins and cancels", () => {
 });
 
 describe("transfers and batches", () => {
+  const exactWalletWrites = [
+    {
+      path: "payments/transfers",
+      body: { destination: ADDRESS, token: USDC, amount: "1" },
+      selector: "sourceCustodyWalletId",
+      status: 201,
+      balance: "9",
+    },
+    ...["payments/transfer-batches/estimate", "payments/transfer-batches"].map((path) => ({
+      path,
+      body: {
+        token: USDC,
+        recipients: [
+          { counterpartyId: "demo_cpty_kai", counterpartyAccountId: "demo_cpa_kai", amount: "1" },
+        ],
+      },
+      selector: "sourceCustodyWalletId",
+      status: path.endsWith("estimate") ? 200 : 201,
+      balance: path.endsWith("estimate") ? "10" : "9",
+    })),
+    {
+      path: "payments/ramps/onramp/quote",
+      body: {
+        provider: "moonpay",
+        counterpartyId: "demo_cpty_jane",
+        assetRail: "usdc.solana",
+        fiatCurrency: "USD",
+        fiatAmount: "100",
+      },
+      selector: "destinationCustodyWalletId",
+      status: 201,
+      balance: "10",
+    },
+    {
+      path: "payments/ramps/offramp/quote",
+      body: {
+        provider: "moonpay",
+        counterpartyId: "demo_cpty_jane",
+        assetRail: "usdc.solana",
+        fiatCurrency: "USD",
+        cryptoAmount: "1",
+      },
+      selector: "sourceCustodyWalletId",
+      status: 201,
+      balance: "10",
+    },
+  ];
+
+  it.each(exactWalletWrites)("uses the exact wallet and its balance at $path", (input) => {
+    const { collision, original, source } = collisionWorld();
+    const existingIds = new Set(collision.transfers.map(({ transfer }) => transfer.id));
+    const legacySelector =
+      input.selector === "sourceCustodyWalletId" ? "sourceWalletId" : "destinationWalletId";
+    for (const includeExact of [false, true]) {
+      const legacy = demoWrite("POST", {
+        segments: input.path.split("/"),
+        body: {
+          ...input.body,
+          [input.selector]: includeExact ? source.id : undefined,
+          [legacySelector]: source.walletId,
+        },
+        world: collision,
+        ops: [],
+        now,
+      });
+      expect(legacy?.answer(collision)).toMatchObject({
+        status: 400,
+        body: { error: { code: "invalid_request" } },
+      });
+      expect(legacy?.ops).toEqual([]);
+    }
+    const refused = demoWrite("POST", {
+      segments: input.path.split("/"),
+      body: { ...input.body, [input.selector]: source.walletId },
+      world: collision,
+      ops: [],
+      now,
+    });
+    expect(refused?.answer(collision).status).toBe(404);
+    expect(refused?.ops).toEqual([]);
+    const result = demoWrite("POST", {
+      segments: input.path.split("/"),
+      body: { ...input.body, [input.selector]: source.id },
+      world: collision,
+      ops: [],
+      now,
+    });
+    expect(result?.ops).toHaveLength(input.path.endsWith("estimate") ? 0 : 1);
+    const before = structuredClone(collision);
+    const aliasOps = result?.ops.map((op) =>
+      op.k === "send" || op.k === "batch" || op.k === "ramp"
+        ? { ...op, wallet: source.walletId }
+        : op
+    );
+    applyDemoOps(collision, aliasOps ?? [], now);
+    expect(collision).toEqual(before);
+    applyDemoOps(collision, result?.ops ?? [], now);
+    expect(result?.answer(collision).status).toBe(input.status);
+    for (const { transfer } of collision.transfers.filter(
+      ({ transfer }) => !existingIds.has(transfer.id)
+    )) {
+      expect(transfer.custodyWalletId).toBe(source.id);
+      expect(transfer).not.toHaveProperty("providerWalletId");
+      expect(transfer.direction === "inbound" ? transfer.destination : transfer.source).toBe(
+        source.publicKey
+      );
+    }
+    const batch = collision.batches.find(({ batch }) => batch.sourceCustodyWalletId === source.id);
+    if (input.path === "payments/transfer-batches") {
+      expect(batch?.batch).toMatchObject({
+        sourceCustodyWalletId: source.id,
+        sourceAddress: source.publicKey,
+      });
+      expect(batch?.batch).not.toHaveProperty("sourceProviderWalletId");
+    }
+    expect(walletHolding(source, USDC)).toBe(input.balance);
+    expect(walletHolding(original, USDC)).toBe("1000");
+    if (input.selector === "sourceCustodyWalletId") {
+      source.balances = [];
+      const before = structuredClone(collision);
+      const insufficient = demoWrite("POST", {
+        segments: input.path.split("/"),
+        body: { ...input.body, [input.selector]: source.id },
+        world: collision,
+        ops: [],
+        now,
+      });
+      expect(insufficient?.answer(collision)).toMatchObject({
+        status: 400,
+        body: { error: { code: "insufficient_funds" } },
+      });
+      expect(insufficient?.ops).toEqual([]);
+      expect(collision).toEqual(before);
+    }
+  });
+
+  it("funds a saved off-ramp from its exact source without debiting an alias", () => {
+    const { collision, original, source } = collisionWorld();
+    const ramp = transferById(collision, "demo_xfr_offramp_orbit");
+    if (!ramp) throw new Error("Missing demo ramp fixture");
+    ramp.custodyWalletId = source.id;
+    ramp.status = "awaiting_payment";
+    ramp.token = USDC;
+    ramp.amount = "1";
+    const context = {
+      segments: ["payments", "transfers"],
+      body: {
+        transferId: ramp.id,
+        sourceCustodyWalletId: source.id,
+        destination: ADDRESS,
+        token: USDC,
+        amount: "1",
+      },
+      world: collision,
+      ops: [],
+      now,
+    };
+    source.balances = [];
+    const before = structuredClone(collision);
+    const insufficient = demoWrite("POST", context);
+    expect(insufficient?.answer(collision)).toMatchObject({
+      status: 400,
+      body: { error: { code: "insufficient_funds" } },
+    });
+    expect(insufficient?.ops).toEqual([]);
+    expect(collision).toEqual(before);
+    source.balances = [tokenBalance("USDC", "10")];
+    const result = demoWrite("POST", context);
+    expect(result?.answer(collision).status).toBe(201);
+    expect(result?.ops).toHaveLength(1);
+    applyDemoOps(collision, result?.ops ?? [], now);
+    expect(ramp.status).toBe("settling");
+    expect(ramp.custodyWalletId).toBe(source.id);
+    expect(ramp).not.toHaveProperty("providerWalletId");
+    expect(walletHolding(source, USDC)).toBe("9");
+    expect(walletHolding(original, USDC)).toBe("1000");
+  });
+
+  it("credits a settled on-ramp to its exact wallet without crediting an alias", () => {
+    const { collision, original, source } = collisionWorld();
+    const ramp = transferById(collision, "demo_xfr_onramp_moonpay");
+    if (!ramp) throw new Error("Missing demo ramp fixture");
+    ramp.custodyWalletId = source.id;
+    ramp.status = "awaiting_payment";
+    ramp.token = USDC;
+    ramp.amount = "3";
+    applyDemoOps(
+      collision,
+      [{ k: "ramp-paid", id: ramp.id, at: now.getTime() }],
+      new Date(now.getTime() + DEMO_SETTLE_MS)
+    );
+    expect(ramp.status).toBe("completed");
+    expect(walletHolding(source, USDC)).toBe("13");
+    expect(walletHolding(original, USDC)).toBe("1000");
+  });
+
+  it("does not fund or simulate a ramp whose pin is a provider alias", () => {
+    const { collision, source } = collisionWorld();
+    const ramp = transferById(collision, "demo_xfr_onramp_moonpay");
+    if (!ramp) throw new Error("Missing demo ramp fixture");
+    ramp.custodyWalletId = source.walletId;
+    ramp.status = "awaiting_payment";
+    const before = structuredClone(collision);
+    const result = demoWrite("POST", {
+      segments: ["payments", "ramps", "sandbox", "simulate"],
+      body: { transferId: ramp.id },
+      world: collision,
+      ops: [
+        {
+          k: "ramp",
+          id: ramp.id,
+          at: now.getTime(),
+          provider: "moonpay",
+          dir: "onramp",
+          cp: "demo_cpty_jane",
+          wallet: source.walletId,
+          rail: "usdc.solana",
+          fiat: "USD",
+          fiatAmount: "3",
+          crypto: "3",
+          quote: "demo_quote",
+        },
+      ],
+      now,
+    });
+    expect(result?.answer(collision).status).toBe(404);
+    expect(result?.ops).toEqual([]);
+    applyDemoOps(collision, [{ k: "ramp-paid", id: ramp.id, at: now.getTime() }], now);
+    expect(collision).toEqual(before);
+  });
+
   const send = (body: Record<string, unknown>) =>
     write("POST", "/v1/payments/transfers", {
       sourceCustodyWalletId: TREASURY,
@@ -371,6 +663,21 @@ describe("transfers and batches", () => {
     expect(ops).toHaveLength(1);
     const fresh = send({ transferId: "client_supplied" });
     expect(fresh?.body.data.transfer.id).toMatch(/^demo_new_xfr_/);
+  });
+
+  it("refuses to replay a saved transfer under another exact source", () => {
+    const first = send({ transferId: "demo_new_xfr_source" });
+
+    expect(
+      refusal(
+        send({
+          transferId: first?.body.data.transfer.id,
+          sourceCustodyWalletId: "demo_cwlt_payroll",
+        })
+      )
+    ).toEqual([409, "conflict"]);
+    expect(ops).toHaveLength(1);
+    expect(transferById(world(), "demo_new_xfr_source")?.custodyWalletId).toBe(TREASURY);
   });
 
   it("funds an off-ramp's payout once, from a wallet that can cover it", () => {

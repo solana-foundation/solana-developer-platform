@@ -47,7 +47,7 @@ export function CurrencyPairSelector() {
         const total = w.balances ? resolveTotalBalance(w.balances) : null;
         return {
           value: w.id,
-          label: w.label ?? w.walletId,
+          label: w.label ?? w.id,
           description: total !== null ? formatCurrencyAmount(total) : undefined,
         };
       }),

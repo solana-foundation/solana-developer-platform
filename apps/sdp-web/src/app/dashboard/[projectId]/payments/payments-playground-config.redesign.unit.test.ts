@@ -49,7 +49,7 @@ describe("buildPaymentsPlaygroundEndpointConfigs (NEW DESIGN)", () => {
     const configs = buildPaymentsPlaygroundEndpointConfigs(
       {
         transfers: [],
-        wallets: [{ id: "cwlt_1", walletId: "privy_1", publicKey: "address_1", label: "Treasury" }],
+        wallets: [{ id: "cwlt_1", publicKey: "address_1", label: "Treasury" }],
         rampProviders: [],
       },
       t

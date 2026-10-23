@@ -1,7 +1,7 @@
 \set ON_ERROR_STOP on
 
--- Idempotent HOO-1023 K3 catch-up. Run after old HTTP/cron executions and
--- leases have drained, then run audit-payments-execution-identity.sql.
+-- Idempotent catch-up, including ramp rows in payment_transfers. Retire incompatible
+-- writers and reconcile in-flight effects, then run audit-payments-execution-identity.sql.
 
 \echo '=== Payments exact identity before catch-up ==='
 SELECT

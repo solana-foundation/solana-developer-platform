@@ -1,8 +1,8 @@
 "use client";
 
-import type { PaymentTransferSummary } from "@sdp/types/payments";
 import { toast } from "sonner";
 import type {
+  CreatedTransfer,
   CreateTransferInput,
   Translate,
 } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
@@ -10,7 +10,7 @@ import type {
 /** Present the result of funding one existing off-ramp transfer. */
 export async function submitOfframpDeposit(
   submission: CreateTransferInput & { transferId: string },
-  send: (input: CreateTransferInput) => Promise<PaymentTransferSummary>,
+  send: (input: CreateTransferInput) => Promise<CreatedTransfer>,
   t: Translate
 ): Promise<void> {
   const toastId = toast.loading(t("DashboardPayments.ramps.submittingOnchainTransfer"), {

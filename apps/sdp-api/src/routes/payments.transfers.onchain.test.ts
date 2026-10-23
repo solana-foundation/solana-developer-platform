@@ -5,10 +5,12 @@ import {
   getTransactionDecoder,
 } from "@solana/kit";
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db/client";
 import { generatePaymentTransferId } from "@/db/repositories/payments.repository";
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
 import { createTenantScope } from "@/lib/tenant-scope";
+import { transferSchema } from "@/openapi/schemas/payments";
 import { AuditService } from "@/services/audit.service";
 import { moonpayWebhook } from "@/services/ramps/webhooks/moonpay";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
@@ -20,6 +22,7 @@ import {
   createOrgSignerForCustodyWalletMock,
   DEVNET_USDC_MINT,
   enableMainnetSponsorship,
+  getRecentBlockhashMock,
   installPaymentsRouteTestHooks,
   MAINNET_USDC_MINT,
   seedProductionPrivyWallet,
@@ -45,6 +48,10 @@ import {
 import { required } from "@/test/helpers/required";
 import { fullySignTestTransaction } from "@/test/helpers/sponsor-signing";
 
+const transferIdentityResponseSchema = z.object({
+  data: z.object({ transfer: transferSchema.pick({ custodyWalletId: true }).loose() }),
+});
+
 function testProjectPaymentsRepository() {
   return createPostgresPaymentsRepository(
     getDb(env),
@@ -53,13 +60,13 @@ function testProjectPaymentsRepository() {
 }
 
 /** An off-ramp awaiting its 1 SOL deposit to wallet2, as a MoonPay sell leaves it. */
-async function seedSolOfframpDeposit(transferId: string) {
+async function seedSolOfframpDeposit(transferId: string, walletId: string) {
   await testProjectPaymentsRepository().createTransfer({
     id: transferId,
     organizationId: TEST_ORG.id,
     projectId: TEST_PROJECT.id,
     custodyWalletId: TEST_CUSTODY_WALLET_ID,
-    walletId: TEST_WALLET_ID,
+    walletId,
     counterpartyId: null,
     sourceAddress: TEST_SOLANA_ADDRESSES.wallet1,
     destinationAddress: null,
@@ -101,6 +108,45 @@ function solOfframpDepositRequest(transferId: string) {
 
 describe("Payments routes — on-chain transfers", () => {
   installPaymentsRouteTestHooks();
+  it.each(["source", "sourceWalletId", "providerWalletId"])(
+    "rejects retired %s selectors with or without an exact transfer source",
+    async (selector) => {
+      for (const includeExact of [false, true]) {
+        const response = await postRawTransfer(
+          {
+            sourceCustodyWalletId: includeExact ? TEST_CUSTODY_WALLET_ID : undefined,
+            [selector]: TEST_WALLET_ID,
+            destination: TEST_SOLANA_ADDRESSES.wallet2,
+            token: "SOL",
+            amount: "1",
+          },
+          {}
+        );
+        expect(response.status).toBe(400);
+        expect(await readErrorResponse(response)).toMatchObject({
+          error: { code: "BAD_REQUEST" },
+        });
+      }
+      expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
+      expect(sendTransactionMock).not.toHaveBeenCalled();
+      expect(await countTransferRows()).toBe(0);
+    }
+  );
+
+  it("rejects a provider reference in the exact transfer selector without signing", async () => {
+    const response = await postTransfer(
+      {
+        sourceCustodyWalletId: TEST_WALLET_ID,
+        destination: TEST_SOLANA_ADDRESSES.wallet2,
+        token: "SOL",
+        amount: "1",
+      },
+      {}
+    );
+    expect(response.status).toBe(404);
+    expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
+    expect(sendTransactionMock).not.toHaveBeenCalled();
+  });
   const rpc = installClusterRpcStub();
 
   function answerSourceUsdcTokenAccount(mint: string) {
@@ -190,6 +236,11 @@ describe("Payments routes — on-chain transfers", () => {
     );
 
     expect(res.status).toBe(200);
+    const response = transferIdentityResponseSchema.parse(await res.clone().json());
+    expect(response.data.transfer).toMatchObject({
+      custodyWalletId: TEST_CUSTODY_WALLET_ID,
+    });
+    expect(response.data.transfer).not.toHaveProperty("providerWalletId");
     const body = await readTransferResponse(res);
     expect(body.data.transfer.status).toBe("finalized");
     expect(body.data.transfer.id).toMatch(/^xfr_/);
@@ -315,54 +366,59 @@ describe("Payments routes — on-chain transfers", () => {
     expect(JSON.parse(outcome?.metadata ?? "{}").auditPhase).toBe("outcome");
   });
 
-  it("uses the existing off-ramp row for its on-chain deposit", async () => {
-    const transferId = generatePaymentTransferId();
-    await seedSolOfframpDeposit(transferId);
+  it.each([TEST_WALLET_ID, "retained_provider_wallet_reference"])(
+    "funds the exact off-ramp row while preserving its provider reference (%s)",
+    async (walletId) => {
+      const transferId = generatePaymentTransferId();
+      await seedSolOfframpDeposit(transferId, walletId);
 
-    const requestBody = JSON.stringify(solOfframpDepositRequest(transferId));
-    const res = await postTransfer(JSON.parse(requestBody), {});
+      const requestBody = JSON.stringify(solOfframpDepositRequest(transferId));
+      const res = await postTransfer(JSON.parse(requestBody), {});
 
-    const responseText = await res.text();
-    expect(res.status, responseText).toBe(200);
-    const body = await readTransferResponse(new Response(responseText));
-    expect(body.data.transfer).toMatchObject({
-      id: transferId,
-      status: "settling",
-    });
-    expect(body.data.transfer.signature).toBeTruthy();
-    expect(confirmTransactionMock).toHaveBeenCalledWith(
-      expect.anything(),
-      body.data.transfer.signature,
-      { commitment: "confirmed" }
-    );
+      const responseText = await res.text();
+      expect(res.status, responseText).toBe(200);
+      const body = await readTransferResponse(new Response(responseText));
+      expect(body.data.transfer).toMatchObject({
+        id: transferId,
+        status: "settling",
+      });
+      expect(body.data.transfer.signature).toBeTruthy();
+      expect(confirmTransactionMock).toHaveBeenCalledWith(
+        expect.anything(),
+        body.data.transfer.signature,
+        { commitment: "confirmed" }
+      );
 
-    const rows = await listTransferRows();
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({
-      id: transferId,
-      custody_wallet_id: TEST_CUSTODY_WALLET_ID,
-      status: "settling",
-      destination_address: TEST_SOLANA_ADDRESSES.wallet2,
-    });
-    expect(rows[0]?.signature).toBeTruthy();
-    expect(rows[0]?.signed_transaction).toBeTruthy();
+      const rows = await listTransferRows();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        id: transferId,
+        custody_wallet_id: TEST_CUSTODY_WALLET_ID,
+        wallet_id: walletId,
+        status: "settling",
+        destination_address: TEST_SOLANA_ADDRESSES.wallet2,
+      });
+      expect(rows[0]?.signature).toBeTruthy();
+      expect(rows[0]?.signed_transaction).toBeTruthy();
+      expect(getRecentBlockhashMock).toHaveBeenCalledOnce();
+      expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledOnce();
+      expect(sendTransactionMock).toHaveBeenCalledOnce();
 
-    // A second request to fund the same deposit (a retry after a crash, or
-    // another key) is answered from the funded row and sends nothing again
-    // (HOO-1918), instead of a 409 the client could never get past.
-    const sendsBefore = sendTransactionMock.mock.calls.length;
-    const duplicate = await postTransfer(JSON.parse(requestBody), {});
-    expect(duplicate.status).toBe(200);
-    const duplicateBody = await readTransferResponse(duplicate);
-    expect(duplicateBody.data.transfer.id).toBe(body.data.transfer.id);
-    expect(duplicateBody.data.transfer.signature).toBe(body.data.transfer.signature);
-    expect(sendTransactionMock.mock.calls.length).toBe(sendsBefore);
-    expect(await countTransferRows()).toBe(1);
-  });
+      // A funded deposit is replayed from its retained row without sending again.
+      const sendsBefore = sendTransactionMock.mock.calls.length;
+      const duplicate = await postTransfer(JSON.parse(requestBody), {});
+      expect(duplicate.status).toBe(200);
+      const duplicateBody = await readTransferResponse(duplicate);
+      expect(duplicateBody.data.transfer.id).toBe(body.data.transfer.id);
+      expect(duplicateBody.data.transfer.signature).toBe(body.data.transfer.signature);
+      expect(sendTransactionMock.mock.calls.length).toBe(sendsBefore);
+      expect(await countTransferRows()).toBe(1);
+    }
+  );
 
   it("rejects a deposit after MoonPay fails the sale", async () => {
     const transferId = generatePaymentTransferId();
-    await seedSolOfframpDeposit(transferId);
+    await seedSolOfframpDeposit(transferId, TEST_WALLET_ID);
     expect(
       await moonpayWebhook.process(env, "sandbox", {
         provider: "moonpay",
@@ -379,7 +435,6 @@ describe("Payments routes — on-chain transfers", () => {
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT.id,
       custodyWalletId: TEST_CUSTODY_WALLET_ID,
-      walletId: TEST_WALLET_ID,
       sourceAddress: TEST_SOLANA_ADDRESSES.wallet1,
       destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
       token: SOL_MINT,
@@ -401,7 +456,7 @@ describe("Payments routes — on-chain transfers", () => {
 
   it("returns a claimed off-ramp deposit to awaiting it when audit-ledger admission is refused", async () => {
     const transferId = generatePaymentTransferId();
-    await seedSolOfframpDeposit(transferId);
+    await seedSolOfframpDeposit(transferId, TEST_WALLET_ID);
     const beginSpy = vi
       .spyOn(AuditService.prototype, "beginCritical")
       .mockRejectedValueOnce(new Error("audit ledger unavailable"));
@@ -421,7 +476,7 @@ describe("Payments routes — on-chain transfers", () => {
 
   it("keeps a deposit the provider completed mid-send at settling", async () => {
     const transferId = generatePaymentTransferId();
-    await seedSolOfframpDeposit(transferId);
+    await seedSolOfframpDeposit(transferId, TEST_WALLET_ID);
     sendTransactionMock.mockImplementationOnce(async (_rpc, transactionBytes) => {
       await testProjectPaymentsRepository().transitionRampTransfer({
         transferId,

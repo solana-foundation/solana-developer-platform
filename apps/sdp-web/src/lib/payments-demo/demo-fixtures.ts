@@ -872,7 +872,6 @@ function buildTransfer(spec: TransferSpec, world: WorldBase, clock: Clock): Demo
     organizationId: ORGANIZATION_ID,
     projectId: PROJECT_ID,
     custodyWalletId: spec.observed ? null : wallet.id,
-    providerWalletId: wallet.walletId,
     type: spec.type ?? "transfer",
     kind: spec.kind,
     direction: spec.direction,
@@ -952,7 +951,6 @@ function buildBatch(spec: BatchSpec, world: WorldBase, clock: Clock): DemoBatch 
       projectId: PROJECT_ID,
       externalId: spec.externalId,
       sourceCustodyWalletId: wallet.id,
-      sourceProviderWalletId: wallet.walletId,
       sourceAddress: wallet.publicKey,
       token: DEMO_TOKENS.USDC.mint,
       status: spec.status,
@@ -1264,6 +1262,13 @@ export function findWallet(
   return walletList(world).find((wallet) => wallet.id === id || wallet.walletId === id);
 }
 
+export function findWalletByCustodyWalletId(
+  world: DemoWorld,
+  id: string | null | undefined
+): DemoWallet | undefined {
+  return walletList(world).find((wallet) => wallet.id === id);
+}
+
 function walletsBody(world: DemoWorld, params: URLSearchParams) {
   const includeBalances = params.get("includeBalances") === "true";
   return {
@@ -1307,8 +1312,8 @@ function walletsRoute(rest: string[], params: URLSearchParams, world: DemoWorld)
   return undefined;
 }
 
-function walletBalancesBody(world: DemoWorld, walletId: string) {
-  const wallet = walletList(world).find((wallet) => wallet.id === walletId);
+function walletBalancesBody(world: DemoWorld, custodyWalletId: string) {
+  const wallet = findWalletByCustodyWalletId(world, custodyWalletId);
   if (!wallet) return undefined;
   return {
     data: {
@@ -1381,7 +1386,8 @@ function inTransferScope(
 
 function transfersBody(world: DemoWorld, params: URLSearchParams) {
   const custodyWalletId = params.get("custodyWalletId");
-  const wallet = custodyWalletId === null ? undefined : findWallet(world, custodyWalletId);
+  const wallet =
+    custodyWalletId === null ? undefined : findWalletByCustodyWalletId(world, custodyWalletId);
   const unknownWallet = custodyWalletId !== null && wallet?.id !== custodyWalletId;
   const includeObserved = params.get("includeObserved") === "true";
   const filters = transferFilters(params);
@@ -1413,7 +1419,7 @@ function toUnifiedTransaction(transfer: DemoTransfer, world: DemoWorld): Unified
     organizationId: transfer.organizationId,
     projectId: transfer.projectId,
     custodyWalletId: transfer.custodyWalletId,
-    custodyWalletLabel: findWallet(world, transfer.custodyWalletId)?.label ?? null,
+    custodyWalletLabel: findWalletByCustodyWalletId(world, transfer.custodyWalletId)?.label ?? null,
     token: transfer.token ?? null,
     amount: transfer.amount ?? null,
     counterpartyId: transfer.counterpartyId ?? null,
@@ -1474,8 +1480,14 @@ function transactionsBody(world: DemoWorld, params: URLSearchParams) {
 // ─── Batches, requests, schedules ────────────────────────────────────────────
 
 function batchesBody(world: DemoWorld, params: URLSearchParams) {
+  const sourceCustodyWalletId = params.get("sourceCustodyWalletId");
   const page = pageOf(
-    world.batches.map((entry) => entry.batch),
+    world.batches
+      .map((entry) => entry.batch)
+      .filter(
+        (batch) =>
+          sourceCustodyWalletId === null || batch.sourceCustodyWalletId === sourceCustodyWalletId
+      ),
     params
   );
   return { data: page.rows, meta: paginatedMeta(page) };

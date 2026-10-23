@@ -35,7 +35,6 @@ function sale(overrides: Partial<PaymentTransferSummary>): PaymentTransferSummar
   return {
     id: "xfr_sale",
     custodyWalletId: "cwlt_treasury",
-    providerWalletId: "wallet_treasury",
     status: "awaiting_payment",
     signature: null,
     rampsMemo: {},

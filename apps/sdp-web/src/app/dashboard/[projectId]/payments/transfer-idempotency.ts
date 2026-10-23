@@ -1,6 +1,5 @@
 "use client";
 
-import type { PaymentTransferSummary as TransferRecord } from "@sdp/types/payments";
 import { MOVEMENT_READ_PATHS, settleWhenMovementFinal } from "@/lib/dashboard-fetch";
 import { canonicalDecimalAmount, uncertainMoneyAnswerMessage } from "@/lib/idempotency";
 import {
@@ -9,6 +8,7 @@ import {
   settleMoneyIdempotencyKey,
 } from "@/lib/idempotency-key-store";
 import {
+  type CreatedTransfer,
   type CreateTransferInput,
   createTransfer,
   TransferRequestError,
@@ -26,7 +26,7 @@ import {
  */
 
 const store = createIdempotencyKeyStore("sdp:payments:transfer:idempotency:v1");
-type TransferSendResult = { transfer: TransferRecord; fingerprint: string };
+type TransferSendResult = { transfer: CreatedTransfer; fingerprint: string };
 const pendingSends = new Map<string, Promise<TransferSendResult>>();
 
 /** @internal Test-only: clear the module-scope tiers so specs are order-independent. */
@@ -88,7 +88,7 @@ async function performTransferUnderKey(
   providerSession: boolean
 ): Promise<TransferSendResult> {
   const { key, persisted } = store.claim(fingerprint);
-  let transfer: TransferRecord;
+  let transfer: CreatedTransfer;
   try {
     transfer = await createTransfer(submission, t, { value: key, persisted });
   } catch (error) {

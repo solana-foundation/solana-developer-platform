@@ -18,7 +18,6 @@ function renderStatus(status: PaymentTransferStatus, direction: RampDirection): 
         transfer={{
           id: "xfr_status",
           custodyWalletId: "cwlt_status",
-          providerWalletId: "wallet_status",
           status,
           signature: null,
           rampsMemo: {},
@@ -63,7 +62,6 @@ describe("RampStatusInline phases", () => {
           transfer={{
             id: "xfr_phase",
             custodyWalletId: "cwlt_phase",
-            providerWalletId: "wallet_phase",
             status: "pending",
             signature: null,
             rampsMemo: {},

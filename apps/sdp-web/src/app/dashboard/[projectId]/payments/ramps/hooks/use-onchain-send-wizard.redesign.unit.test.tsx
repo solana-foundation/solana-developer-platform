@@ -78,7 +78,6 @@ const wallets: PaymentsDashboardWallet[] = [
 const transfer: PaymentTransferSummary = {
   id: "transfer-test",
   custodyWalletId: "wallet-usdc",
-  providerWalletId: "provider-usdc",
   status: "pending",
   signature: null,
   rampsMemo: {},
