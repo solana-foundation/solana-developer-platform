@@ -55,12 +55,12 @@ beforeEach(() => {
   vi.spyOn(workspace, "useDashboardWorkspace").mockReturnValue(value);
   vi.spyOn(workspace, "useOptionalDashboardWorkspace").mockReturnValue(undefined);
   // Chrome with its own data reads, none of which lists a module.
-  vi.spyOn(workspaceSwitcher, "WorkspaceSwitcher").mockReturnValue(<></>);
-  vi.spyOn(sidebarUserMenu, "SidebarUserMenu").mockReturnValue(<></>);
-  vi.spyOn(quickStart, "DashboardQuickStart").mockReturnValue(<></>);
-  vi.spyOn(networkDebugPanel, "NetworkDebugPanel").mockReturnValue(<></>);
+  vi.spyOn(workspaceSwitcher, "WorkspaceSwitcher").mockReturnValue(<span />);
+  vi.spyOn(sidebarUserMenu, "SidebarUserMenu").mockReturnValue(<span />);
+  vi.spyOn(quickStart, "DashboardQuickStart").mockReturnValue(<span />);
+  vi.spyOn(networkDebugPanel, "NetworkDebugPanel").mockReturnValue(<span />);
   vi.spyOn(sentryUserContext, "SentryUserContext").mockReturnValue(null);
-  vi.spyOn(languagePicker, "LanguagePicker").mockReturnValue(<></>);
+  vi.spyOn(languagePicker, "LanguagePicker").mockReturnValue(<span />);
 });
 
 afterEach(() => {
