@@ -1,209 +1,55 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
-import * as verifiedConfirmation from "@sdp/rpc/verified-confirmation";
-import { formatDecimalAmount } from "@sdp/solana/amount";
-import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
-import {
-  AccountRole,
-  type Address,
-  address,
-  appendTransactionMessageInstructions,
-  blockhash,
-  compileTransaction,
-  compressTransactionMessageUsingAddressLookupTables,
-  createNoopSigner,
-  createTransactionMessage,
-  decodeTransactionFromRpcResponse,
-  getBase58Decoder,
-  getBase64EncodedWireTransaction,
-  getCompiledTransactionMessageDecoder,
-  lamports,
-  pipe,
-  setTransactionMessageFeePayer,
-  setTransactionMessageLifetimeUsingBlockhash,
-  signature,
-  stringifiedBigInt,
-  stringifiedNumber,
-} from "@solana/kit";
-import * as solanaPay from "@solana/pay";
-import { FindReferenceError, ValidateTransferError } from "@solana/pay";
-import { getTransferSolInstruction } from "@solana-program/system";
-import {
-  findAssociatedTokenPda,
-  getTransferCheckedInstruction,
-  TOKEN_PROGRAM_ADDRESS,
-} from "@solana-program/token";
-import {
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  type MockInstance,
-  vi,
-} from "vitest";
+import { NATIVE_ASSET } from "@sdp/solana/asset-ref";
+import { PAYMENT_REQUEST_TRANSACTION_OUTCOMES } from "@sdp/types/payments";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
+import { getBase58Decoder, type Signature, signature } from "@solana/kit";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db/client";
 import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
 import {
   createPaymentRequestsRepository,
   createPaymentsRepository,
+  createSystemPaymentRequestsRepository,
 } from "@/db/repositories/repository-factory";
-import { badRequest } from "@/lib/errors";
+import { recordedLegQuote } from "@/db/repositories/token-movement-legs.repository";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { rootLogger } from "@/runtime/logger";
-import * as paymentAmounts from "@/services/payments/token-amount";
 import { TEST_CUSTODY_PUBLIC_KEY } from "@/test/fixtures/custody";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
-import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
-import { seedProjectCryptoWalletCounterparty } from "@/test/helpers/counterparties";
+import {
+  installClusterRpcResponder,
+  type SignatureStatusesRead,
+  type StubSignatureStatus,
+  signatureStatusesRead,
+  signatureStatusesReplyAt,
+} from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import { BLANK_MANAGED_POOL_ENV } from "@/test/helpers/managed-pool-env";
-import { syntheticAddress } from "@/test/helpers/parsed-transactions";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { nativeQuote, testExpectation } from "@/test/helpers/token-movement";
 import { seedTestDatabase } from "@/test/mocks/db";
-import * as paymentRequestTransfer from "./payment-request-transfer";
 import { reconcilePaymentRequest } from "./payment-requests";
 
 const TEST_PROJECT_ID = "prj_preq_handler_test";
 const TEST_CONFIG_ID = "cust_cfg_preq_handler_test";
 const TEST_CUSTODY_WALLET_ID = "cwlt_preq_handler_test";
 const TEST_WALLET_ID = "wal_preq_handler_test";
-const SIGNATURE = signature(getBase58Decoder().decode(new Uint8Array(64).fill(5)));
-const DEVNET_USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
+const PAYER = TEST_SOLANA_ADDRESSES.wallet2;
 
-const validateExactTransfer = paymentRequestTransfer.validatePaymentRequestTransfer;
-
-let findReferenceSpy: MockInstance<typeof solanaPay.findReference>;
-let validateTransferSpy: MockInstance<typeof paymentRequestTransfer.validatePaymentRequestTransfer>;
-let verifyTransactionLandedSpy: MockInstance<typeof verifiedConfirmation.verifyTransactionLanded>;
-
-function verifiedOk(): Awaited<ReturnType<typeof verifiedConfirmation.verifyTransactionLanded>> {
-  return {
-    ok: true,
-    status: { slot: 1n, confirmations: 5n, confirmationStatus: "confirmed", err: null },
-    transaction: {
-      slot: 1n,
-      accountKeys: [TEST_CUSTODY_PUBLIC_KEY],
-      executionResultKnown: true,
-      err: null,
-      instructions: [],
-    },
-  };
+function testSignatureOf(seed: number): Signature {
+  return signature(getBase58Decoder().decode(new Uint8Array(64).fill(seed)));
 }
 
-function foundSignature(): Awaited<ReturnType<typeof solanaPay.findReference>> {
-  return {
-    signature: SIGNATURE,
-    slot: 1n,
-    err: null,
-    memo: null,
-    blockTime: null,
-    confirmationStatus: "confirmed",
-  };
-}
+const CONFIRMED: StubSignatureStatus = {
+  slot: 77,
+  confirmations: 5,
+  confirmationStatus: "confirmed",
+  err: null,
+};
 
-async function validatedTransfer(
-  token = SOL_MINT,
-  rawAmount = token === SOL_MINT ? 1_500_000_000n : 1_500_000n,
-  reference?: Address,
-  lookupTable?: Address
-): Promise<Awaited<ReturnType<typeof solanaPay.validateTransfer>>> {
-  const owner = address(TEST_CUSTODY_PUBLIC_KEY);
-  const source = createNoopSigner(syntheticAddress(332));
-  const destination =
-    token === SOL_MINT
-      ? owner
-      : (
-          await findAssociatedTokenPda({
-            owner,
-            mint: address(token),
-            tokenProgram: TOKEN_PROGRAM_ADDRESS,
-          })
-        )[0];
-  const instruction =
-    token === SOL_MINT
-      ? getTransferSolInstruction({ source, destination, amount: rawAmount })
-      : getTransferCheckedInstruction({
-          source: syntheticAddress(333),
-          mint: address(token),
-          destination,
-          authority: source,
-          amount: rawAmount,
-          decimals: 6,
-        });
-  const referenced =
-    reference === undefined
-      ? instruction
-      : {
-          ...instruction,
-          accounts: [...instruction.accounts, { address: reference, role: AccountRole.READONLY }],
-        };
-  const message = pipe(
-    createTransactionMessage({ version: 0 }),
-    (message) => setTransactionMessageFeePayer(source.address, message),
-    (message) =>
-      setTransactionMessageLifetimeUsingBlockhash(
-        {
-          blockhash: blockhash(getBase58Decoder().decode(new Uint8Array(32).fill(7))),
-          lastValidBlockHeight: 1n,
-        },
-        message
-      ),
-    (message) => appendTransactionMessageInstructions([referenced], message)
-  );
-  const transaction = compileTransaction(
-    lookupTable === undefined
-      ? message
-      : compressTransactionMessageUsingAddressLookupTables(message, {
-          [lookupTable]: [destination],
-        })
-  );
-  const compiled = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
-  const loadedWritable = lookupTable === undefined ? [] : [destination];
-  const accountKeys = [...compiled.staticAccounts, ...loadedWritable];
-  const accountIndex = accountKeys.indexOf(destination);
-  const tokenBalance = (amount: bigint) => ({
-    accountIndex,
-    mint: address(token),
-    owner,
-    programId: TOKEN_PROGRAM_ADDRESS,
-    uiTokenAmount: {
-      amount: stringifiedBigInt(amount.toString()),
-      decimals: 6,
-      uiAmount: null,
-      uiAmountString: stringifiedNumber(formatDecimalAmount(amount, 6)),
-    },
-  });
-  return {
-    slot: 1n,
-    blockTime: null,
-    version: 0,
-    meta: {
-      err: null,
-      fee: lamports(5_000n),
-      logMessages: [],
-      preBalances: accountKeys.map(() => lamports(0n)),
-      postBalances: accountKeys.map((account) =>
-        lamports(token === SOL_MINT && account === destination ? rawAmount : 0n)
-      ),
-      preTokenBalances: token === SOL_MINT ? [] : [tokenBalance(0n)],
-      postTokenBalances: token === SOL_MINT ? [] : [tokenBalance(rawAmount)],
-      rewards: [],
-      status: { Ok: null },
-      loadedAddresses: { readonly: [], writable: loadedWritable },
-    },
-    transaction: [getBase64EncodedWireTransaction(transaction), "base64"],
-  };
-}
-
-async function mockSettlementSucceeds(token = SOL_MINT) {
-  findReferenceSpy.mockResolvedValue(foundSignature());
-  verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
-  validateTransferSpy.mockResolvedValue(await validatedTransfer(token));
-}
-
-async function createRequest(params: { token: string; expiresAt: string | null; amount?: string }) {
+async function createRequest(params: { expiresAt: string | null }) {
   return createPaymentRequestsRepository(
     env,
     createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID })
@@ -213,11 +59,54 @@ async function createRequest(params: { token: string; expiresAt: string | null; 
     custodyWalletId: TEST_CUSTODY_WALLET_ID,
     walletId: TEST_WALLET_ID,
     destinationAddress: TEST_CUSTODY_PUBLIC_KEY,
-    token: params.token,
-    amount: params.amount ?? "1.5",
+    token: SOL_MINT,
+    amount: "1.5",
+    expectation: testExpectation(NATIVE_ASSET, "1.5", 9),
     expiresAt: params.expiresAt,
     createdBy: TEST_USER.id,
   });
+}
+
+/**
+ * Records a window /pay issued for the request, signed by the sponsor: the
+ * claim with its 1.5 SOL credit quote, then the saved signature.
+ */
+async function issueTransaction(
+  request: PaymentRequestRow,
+  seed: number,
+  options: { lastValidBlockHeight: bigint }
+): Promise<Signature> {
+  const repository = createSystemPaymentRequestsRepository(env);
+  const unsigned = `dW5zaWduZWQ${seed}`;
+  expect(
+    await repository.claimSponsoredTransactionWindow({
+      requestId: request.id,
+      account: PAYER,
+      unsignedTransaction: unsigned,
+      lastValidBlockHeight: options.lastValidBlockHeight,
+      currentBlockHeight: options.lastValidBlockHeight * 10n,
+      quote: recordedLegQuote(nativeQuote("1.5", "credit")),
+    })
+  ).toBe(true);
+  const issued = testSignatureOf(seed);
+  expect(
+    await repository.storeSponsoredTransactionSignature({
+      requestId: request.id,
+      account: PAYER,
+      unsignedTransaction: unsigned,
+      signedTransaction: `c2lnbmVk${seed}`,
+      signature: issued,
+    })
+  ).toBe(true);
+  return issued;
+}
+
+/** Moves a window's issue time into the past, so a check may lapse it. */
+async function ageTransaction(issued: Signature, issuedAt: string): Promise<void> {
+  await getDb(env)
+    .prepare("UPDATE payment_request_transactions SET created_at = ? WHERE signature = ?")
+    .bind(issuedAt, issued)
+    .run();
 }
 
 function reconcileOnSandbox(row: PaymentRequestRow, options: { bestEffort: boolean }) {
@@ -234,8 +123,53 @@ async function listInboundTransfers() {
   return result.results;
 }
 
-describe("reconcilePaymentRequest", () => {
-  const rpc = installClusterRpcStub();
+const issuedOutcomeSchema = z.object({
+  outcome: z.enum(PAYMENT_REQUEST_TRANSACTION_OUTCOMES),
+  landed_slot: z.string().nullable(),
+});
+
+async function issuedOutcome(issued: Signature) {
+  return issuedOutcomeSchema.parse(
+    await getDb(env)
+      .prepare("SELECT outcome, landed_slot FROM payment_request_transactions WHERE signature = ?")
+      .bind(issued)
+      .first()
+  );
+}
+
+describe("reconcilePaymentRequest (ADR 0012: settlement on the signatures SDP issued)", () => {
+  const rpc = installClusterRpcResponder();
+  let statusReads: SignatureStatusesRead[];
+
+  /** Answers each signature status read with `verdict`, from a node at `contextSlot`. */
+  function answerStatuses(
+    verdict: (issued: string) => StubSignatureStatus | null,
+    contextSlot = 1
+  ) {
+    rpc.respond("getSignatureStatuses", (request) => {
+      const read = signatureStatusesRead(request);
+      statusReads.push(read);
+      return signatureStatusesReplyAt(contextSlot, read.signatures.map(verdict));
+    });
+  }
+
+  function answerChainTip(tip: { blockHeight: number; absoluteSlot: number }) {
+    rpc.respond("getEpochInfo", () => ({
+      result: {
+        absoluteSlot: tip.absoluteSlot,
+        blockHeight: tip.blockHeight,
+        epoch: 1,
+        slotIndex: 1,
+        slotsInEpoch: 432_000,
+        transactionCount: null,
+      },
+    }));
+  }
+
+  /** The chain reads of the test, past the RPC factory's one-time cluster check. */
+  function chainMethods() {
+    return rpc.calls.map((call) => call.method).filter((method) => method !== "getGenesisHash");
+  }
 
   beforeAll(async () => {
     await seedTestDatabase(env);
@@ -246,10 +180,7 @@ describe("reconcilePaymentRequest", () => {
   });
 
   beforeEach(async () => {
-    findReferenceSpy = vi.spyOn(solanaPay, "findReference");
-    validateTransferSpy = vi.spyOn(paymentRequestTransfer, "validatePaymentRequestTransfer");
-    verifyTransactionLandedSpy = vi.spyOn(verifiedConfirmation, "verifyTransactionLanded");
-
+    statusReads = [];
     const db = getDb(env);
     await db.prepare("DELETE FROM payment_requests").run();
     await db.prepare("DELETE FROM payment_transfers").run();
@@ -292,220 +223,68 @@ describe("reconcilePaymentRequest", () => {
       .run();
   });
 
-  it("settles an awaiting request and links an inbound transfer attributed to no counterparty", async () => {
-    await mockSettlementSucceeds();
-    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
-    await seedProjectCryptoWalletCounterparty(getDb(env), {
-      organizationId: TEST_ORG.id,
-      projectId: TEST_PROJECT_ID,
-      createdBy: TEST_USER.id,
-      counterpartyId: "cp_preq_handler_legacy_payer",
-      counterpartyAccountId: "cpa_preq_handler_legacy_payer",
-      walletAddress: TEST_SOLANA_ADDRESSES.wallet1,
-    });
-    await getDb(env)
-      .prepare("UPDATE payment_requests SET counterparty_id = ? WHERE id = ?")
-      .bind("cp_preq_handler_legacy_payer", request.id)
-      .run();
+  it("settles a request when a transaction SDP issued lands, verified by construction", async () => {
+    const request = await createRequest({ expiresAt: null });
+    const issued = await issueTransaction(request, 1, { lastValidBlockHeight: 1_000n });
+    answerStatuses((candidate) => (candidate === issued ? CONFIRMED : null));
 
     const settled = await reconcileOnSandbox(request, { bestEffort: false });
 
     expect(settled.status).toBe("paid");
-    expect(settled.fulfilled_by_transfer_id).not.toBeNull();
-
     const transfers = await listInboundTransfers();
     expect(transfers).toHaveLength(1);
-    expect(transfers[0].id).toBe(settled.fulfilled_by_transfer_id);
-    expect(transfers[0].direction).toBe("inbound");
-    expect(transfers[0].status).toBe("confirmed");
-    expect(transfers[0].signature).toBe(SIGNATURE);
-    expect(transfers[0].custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
-    expect(transfers[0].counterparty_id).toBeNull();
-  });
-
-  it("settles an SPL request, exercising the splToken branch", async () => {
-    await mockSettlementSucceeds(DEVNET_USDC_MINT);
-
-    const settled = await reconcileOnSandbox(
-      await createRequest({ token: DEVNET_USDC_MINT, expiresAt: null }),
-      {
-        bestEffort: false,
-      }
-    );
-
-    expect(settled.status).toBe("paid");
-    const fields = validateTransferSpy.mock.calls[0][1];
-    expect(fields.splToken).toBe(DEVNET_USDC_MINT);
-  });
-
-  it.each([
-    {
-      label: "legacy excessive precision",
-      token: DEVNET_USDC_MINT,
-      amount: "1.0000001",
-      received: 1_000_000n,
-      status: "awaiting_payment",
-    },
-    {
-      label: "exact SPL above 2^53",
-      token: DEVNET_USDC_MINT,
-      amount: "9007199254.740993",
-      received: 9007199254740993n,
-      status: "paid",
-    },
-    {
-      label: "one raw unit short above 2^53",
-      token: DEVNET_USDC_MINT,
-      amount: "9007199254.740993",
-      received: 9007199254740992n,
-      status: "awaiting_payment",
-    },
-    {
-      label: "one lamport short",
-      token: SOL_MINT,
+    expect(transfers[0]).toMatchObject({
+      id: settled.fulfilled_by_transfer_id,
+      direction: "inbound",
+      status: "confirmed",
+      signature: issued,
+      slot: 77,
       amount: "1.5",
-      received: 1_499_999_999n,
-      status: "awaiting_payment",
-    },
-  ])("checks $label with real transfer validation", async ({ token, amount, received, status }) => {
-    const request = await createRequest({ token, amount, expiresAt: null });
-    findReferenceSpy.mockResolvedValue(foundSignature());
-    verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
-    validateTransferSpy.mockImplementation(validateExactTransfer);
-    const response = await validatedTransfer(token, received, address(request.reference));
-    // JSON-RPC token amounts are strings; all numeric fixture metadata is small.
-    rpc.answer(
-      "getTransaction",
-      JSON.parse(
-        JSON.stringify(response, (_, value) => (typeof value === "bigint" ? Number(value) : value))
-      )
-    );
-    const settled = await reconcileOnSandbox(request, { bestEffort: false });
-    expect(settled.status).toBe(status);
-    expect(await listInboundTransfers()).toHaveLength(status === "paid" ? 1 : 0);
-  });
-
-  it.each([
-    { received: 1_500_000n, status: "paid" },
-    { received: 1_499_999n, status: "awaiting_payment" },
-  ])(
-    "settles only sufficient payments into a fresh ATA: $received",
-    async ({ received, status }) => {
-      const request = await createRequest({ token: DEVNET_USDC_MINT, expiresAt: null });
-      findReferenceSpy.mockResolvedValue(foundSignature());
-      verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
-      validateTransferSpy.mockImplementation(validateExactTransfer);
-      const response = await validatedTransfer(
-        DEVNET_USDC_MINT,
-        received,
-        address(request.reference)
-      );
-      if (response.meta === null) throw new Error("Fixture requires metadata");
-      const fresh = { ...response, meta: { ...response.meta, preTokenBalances: [] } };
-      rpc.answer(
-        "getTransaction",
-        JSON.parse(
-          JSON.stringify(fresh, (_, value) => (typeof value === "bigint" ? Number(value) : value))
-        )
-      );
-      expect((await reconcileOnSandbox(request, { bestEffort: false })).status).toBe(status);
-      expect(await listInboundTransfers()).toHaveLength(status === "paid" ? 1 : 0);
-    }
-  );
-
-  it.each(["wrong program", "wrong mint", "wrong decimals", "failed transaction"])(
-    "rejects a fresh ATA payment with %s",
-    async (fault) => {
-      const request = await createRequest({ token: DEVNET_USDC_MINT, expiresAt: null });
-      findReferenceSpy.mockResolvedValue(foundSignature());
-      verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
-      validateTransferSpy.mockImplementation(validateExactTransfer);
-      const response = await validatedTransfer(
-        fault === "wrong program" ? SOL_MINT : DEVNET_USDC_MINT,
-        1_500_000n,
-        address(request.reference)
-      );
-      if (response.meta === null) throw new Error("Fixture requires metadata");
-      const postTokenBalances = response.meta.postTokenBalances?.map((balance) => ({
-        ...balance,
-        mint: fault === "wrong mint" ? syntheticAddress(502) : balance.mint,
-        uiTokenAmount: {
-          ...balance.uiTokenAmount,
-          decimals: fault === "wrong decimals" ? 5 : balance.uiTokenAmount.decimals,
-        },
-      }));
-      const invalid = {
-        ...response,
-        meta: {
-          ...response.meta,
-          preTokenBalances: [],
-          postTokenBalances,
-          err: fault === "failed transaction" ? { InstructionError: [0, "InvalidArgument"] } : null,
-        },
-      };
-      rpc.answer(
-        "getTransaction",
-        JSON.parse(
-          JSON.stringify(invalid, (_, value) => (typeof value === "bigint" ? Number(value) : value))
-        )
-      );
-      expect((await reconcileOnSandbox(request, { bestEffort: false })).status).toBe(
-        "awaiting_payment"
-      );
-      expect(await listInboundTransfers()).toHaveLength(0);
-    }
-  );
-
-  it("settles an SPL payment whose recipient ATA loads from an address lookup table", async () => {
-    const request = await createRequest({ token: DEVNET_USDC_MINT, expiresAt: null });
-    findReferenceSpy.mockResolvedValue(foundSignature());
-    verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
-    validateTransferSpy.mockImplementation(validateExactTransfer);
-    const response = await validatedTransfer(
-      DEVNET_USDC_MINT,
-      1_500_000n,
-      address(request.reference),
-      syntheticAddress(335)
-    );
-    const [recipientAta] = await findAssociatedTokenPda({
-      owner: address(TEST_CUSTODY_PUBLIC_KEY),
-      mint: address(DEVNET_USDC_MINT),
-      tokenProgram: TOKEN_PROGRAM_ADDRESS,
+      source_address: PAYER,
+      custody_wallet_id: TEST_CUSTODY_WALLET_ID,
+      counterparty_id: null,
     });
-    const { compiledMessage, loadedAddresses } = decodeTransactionFromRpcResponse(response);
-    expect(compiledMessage.staticAccounts).not.toContain(recipientAta);
-    expect(loadedAddresses).toEqual({ readonly: [], writable: [recipientAta] });
-    rpc.answer(
-      "getTransaction",
-      JSON.parse(
-        JSON.stringify(response, (_, value) => (typeof value === "bigint" ? Number(value) : value))
+    const leg = await getDb(env)
+      .prepare(
+        `SELECT basis, quoted_debit, quoted_fee, quoted_credit, verified_by,
+                verification_state, verification_reason
+           FROM token_movement_legs WHERE payment_transfer_id = ?`
       )
-    );
-    expect((await reconcileOnSandbox(request, { bestEffort: false })).status).toBe("paid");
-    expect(await listInboundTransfers()).toHaveLength(1);
+      .bind(settled.fulfilled_by_transfer_id)
+      .first();
+    expect(leg).toEqual({
+      basis: "credit",
+      quoted_debit: "1500000000",
+      quoted_fee: "0",
+      quoted_credit: "1500000000",
+      verified_by: "construction",
+      verification_state: "verified",
+      verification_reason: "sdp_built_transfer_landed",
+    });
+    expect(await issuedOutcome(issued)).toEqual({ outcome: "landed", landed_slot: "77" });
+    // One status read of the issued signatures, from history: no reference search and no
+    // `getTransaction`.
+    expect(chainMethods()).toEqual(["getSignatureStatuses"]);
+    expect(statusReads).toEqual([
+      { cluster: "devnet", signatures: [issued], searchTransactionHistory: true },
+    ]);
   });
 
-  it("still rejects a transfer whose reference does not match the request", async () => {
-    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
-    findReferenceSpy.mockResolvedValue(foundSignature());
-    verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
-    validateTransferSpy.mockImplementation(validateExactTransfer);
-    const response = await validatedTransfer(SOL_MINT, 1_500_000_000n, syntheticAddress(334));
-    rpc.answer(
-      "getTransaction",
-      JSON.parse(
-        JSON.stringify(response, (_, value) => (typeof value === "bigint" ? Number(value) : value))
-      )
-    );
-    expect((await reconcileOnSandbox(request, { bestEffort: false })).status).toBe(
-      "awaiting_payment"
-    );
+  it("reads nothing and settles nothing for a request SDP issued no transaction for (SOLA9-699)", async () => {
+    // A transfer anyone sends with the request's reference is not a transaction SDP issued.
+    const request = await createRequest({ expiresAt: null });
+
+    const result = await reconcileOnSandbox(request, { bestEffort: false });
+
+    expect(result.status).toBe("awaiting_payment");
+    expect(chainMethods()).toEqual([]);
     expect(await listInboundTransfers()).toHaveLength(0);
   });
 
   it("converges concurrent reconciles of the same request to a single settlement", async () => {
-    await mockSettlementSucceeds();
-    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+    const request = await createRequest({ expiresAt: null });
+    const issued = await issueTransaction(request, 1, { lastValidBlockHeight: 1_000n });
+    answerStatuses((candidate) => (candidate === issued ? CONFIRMED : null));
 
     const [a, b] = await Promise.all([
       reconcileOnSandbox(request, { bestEffort: false }),
@@ -518,7 +297,8 @@ describe("reconcilePaymentRequest", () => {
   });
 
   it("does not link a request to a conflicting transfer with the same signature", async () => {
-    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+    const request = await createRequest({ expiresAt: null });
+    const issued = await issueTransaction(request, 1, { lastValidBlockHeight: 1_000n });
     const transfer = await createPaymentsRepository(
       env,
       createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID })
@@ -544,7 +324,7 @@ describe("reconcilePaymentRequest", () => {
       fiatAmount: null,
       providerData: {},
       serializedTx: null,
-      signature: SIGNATURE,
+      signature: issued,
       slot: 1,
       initiatedByKeyId: null,
     });
@@ -553,7 +333,7 @@ describe("reconcilePaymentRequest", () => {
       .prepare("UPDATE payment_transfers SET custody_wallet_id = NULL WHERE id = ?")
       .bind(transfer.id)
       .run();
-    await mockSettlementSucceeds();
+    answerStatuses(() => CONFIRMED);
 
     await expect(reconcileOnSandbox(request, { bestEffort: false })).rejects.toThrow(
       "does not match payment request"
@@ -561,108 +341,118 @@ describe("reconcilePaymentRequest", () => {
     expect(await listInboundTransfers()).toMatchObject([{ custody_wallet_id: null }]);
   });
 
-  it("does not settle when the signature fails the independent confirmation check", async () => {
-    findReferenceSpy.mockResolvedValue(foundSignature());
-    verifyTransactionLandedSpy.mockResolvedValue({ ok: false, reason: "not_confirmed" });
-    validateTransferSpy.mockResolvedValue(await validatedTransfer());
+  it("does not settle while the issued transaction is processed only", async () => {
+    const request = await createRequest({ expiresAt: null });
+    const issued = await issueTransaction(request, 1, { lastValidBlockHeight: 1_000n });
+    answerStatuses(() => ({ ...CONFIRMED, confirmationStatus: "processed" }));
 
-    const result = await reconcileOnSandbox(
-      await createRequest({ token: SOL_MINT, expiresAt: null }),
-      {
-        bestEffort: false,
-      }
-    );
+    const result = await reconcileOnSandbox(request, { bestEffort: false });
 
     expect(result.status).toBe("awaiting_payment");
-    expect(validateTransferSpy).not.toHaveBeenCalled();
+    expect(await issuedOutcome(issued)).toEqual({ outcome: "open", landed_slot: null });
     expect(await listInboundTransfers()).toHaveLength(0);
   });
 
-  it("does not settle while the transaction is confirmed but not yet indexed", async () => {
-    findReferenceSpy.mockResolvedValue(foundSignature());
-    verifyTransactionLandedSpy.mockResolvedValue({ ok: false, reason: "not_indexed" });
+  it("closes a window whose transaction landed with an error, and settles nothing", async () => {
+    const request = await createRequest({ expiresAt: null });
+    const issued = await issueTransaction(request, 1, { lastValidBlockHeight: 1_000n });
+    answerStatuses(() => ({ ...CONFIRMED, err: { InstructionError: [0, "Custom"] } }));
 
-    const result = await reconcileOnSandbox(
-      await createRequest({ token: SOL_MINT, expiresAt: null }),
-      {
-        bestEffort: false,
-      }
-    );
+    const result = await reconcileOnSandbox(request, { bestEffort: false });
 
     expect(result.status).toBe("awaiting_payment");
-    expect(validateTransferSpy).not.toHaveBeenCalled();
+    expect(await issuedOutcome(issued)).toEqual({ outcome: "failed", landed_slot: "77" });
     expect(await listInboundTransfers()).toHaveLength(0);
+
+    await reconcileOnSandbox(result, { bestEffort: false });
+    expect(statusReads).toHaveLength(1);
   });
 
-  it("leaves the request awaiting when no transfer references it", async () => {
-    findReferenceSpy.mockRejectedValue(new FindReferenceError("not found"));
+  it("lapses an old window past its blockhash's expiry, and keeps it open while the status node lags", async () => {
+    const request = await createRequest({ expiresAt: null });
+    const issued = await issueTransaction(request, 1, { lastValidBlockHeight: 1_000n });
+    await ageTransaction(issued, new Date(Date.now() - 5 * 60_000).toISOString());
+    answerChainTip({ blockHeight: 1_001, absoluteSlot: 5_000 });
 
-    const result = await reconcileOnSandbox(
-      await createRequest({ token: SOL_MINT, expiresAt: null }),
-      { bestEffort: false }
-    );
+    answerStatuses(() => null, 4_999);
+    await reconcileOnSandbox(request, { bestEffort: false });
+    expect(await issuedOutcome(issued)).toEqual({ outcome: "open", landed_slot: null });
+    // The tip is read before the statuses, so nothing can land after the status read.
+    expect(chainMethods()).toEqual(["getEpochInfo", "getSignatureStatuses"]);
 
-    expect(result.status).toBe("awaiting_payment");
-    expect(result.fulfilled_by_transfer_id).toBeNull();
-    expect(validateTransferSpy).not.toHaveBeenCalled();
-    expect(await listInboundTransfers()).toHaveLength(0);
+    answerStatuses(() => null, 5_000);
+    await reconcileOnSandbox(request, { bestEffort: false });
+    expect(await issuedOutcome(issued)).toEqual({ outcome: "lapsed", landed_slot: null });
   });
 
-  it("leaves the request awaiting when the referenced transfer is invalid", async () => {
-    findReferenceSpy.mockResolvedValue(foundSignature());
-    verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
-    validateTransferSpy.mockRejectedValue(new ValidateTransferError("wrong amount"));
+  it("keeps a window open while its blockhash may still land", async () => {
+    const request = await createRequest({ expiresAt: null });
+    const issued = await issueTransaction(request, 1, { lastValidBlockHeight: 1_000n });
+    await ageTransaction(issued, new Date(Date.now() - 5 * 60_000).toISOString());
+    answerChainTip({ blockHeight: 1_000, absoluteSlot: 5_000 });
+    answerStatuses(() => null, 9_999);
 
-    const result = await reconcileOnSandbox(
-      await createRequest({ token: SOL_MINT, expiresAt: null }),
-      { bestEffort: false }
-    );
+    await reconcileOnSandbox(request, { bestEffort: false });
+
+    expect(await issuedOutcome(issued)).toEqual({ outcome: "open", landed_slot: null });
+  });
+
+  it("checks every open window, not only the request's current claim", async () => {
+    const request = await createRequest({ expiresAt: null });
+    const first = await issueTransaction(request, 1, { lastValidBlockHeight: 1_000n });
+    const second = await issueTransaction(request, 2, { lastValidBlockHeight: 2_000n });
+    answerStatuses((candidate) => (candidate === first ? CONFIRMED : null));
+
+    const settled = await reconcileOnSandbox(request, { bestEffort: false });
+
+    expect(settled.status).toBe("paid");
+    expect(statusReads[0]?.signatures).toEqual([first, second]);
+    expect((await listInboundTransfers())[0]).toMatchObject({ signature: first });
+  });
+
+  it("settles an expired request whose transaction was issued, and landed, before it expired", async () => {
+    const request = await createRequest({ expiresAt: null });
+    const issued = await issueTransaction(request, 1, { lastValidBlockHeight: 1_000n });
+    // Issued two minutes ago, the request expired one minute ago.
+    await ageTransaction(issued, new Date(Date.now() - 120_000).toISOString());
+    await getDb(env)
+      .prepare("UPDATE payment_requests SET expires_at = ? WHERE id = ?")
+      .bind(new Date(Date.now() - 60_000).toISOString(), request.id)
+      .run();
+    answerChainTip({ blockHeight: 2_000, absoluteSlot: 5_000 });
+    answerStatuses(() => CONFIRMED, 5_000);
+
+    const settled = await reconcileOnSandbox(request, { bestEffort: false });
+
+    expect(settled.status).toBe("paid");
+  });
+
+  it("reads nothing for an expired request with no open window", async () => {
+    const expired = await createRequest({ expiresAt: "2000-01-01T00:00:00.000Z" });
+
+    const result = await reconcileOnSandbox(expired, { bestEffort: false });
 
     expect(result.status).toBe("awaiting_payment");
-    expect(result.fulfilled_by_transfer_id).toBeNull();
-    expect(await listInboundTransfers()).toHaveLength(0);
+    expect(chainMethods()).toEqual([]);
   });
 
   it("rethrows unexpected errors instead of swallowing them", async () => {
-    findReferenceSpy.mockRejectedValue(new Error("rpc exploded"));
+    const request = await createRequest({ expiresAt: null });
+    await issueTransaction(request, 1, { lastValidBlockHeight: 1_000n });
+    rpc.respond("getSignatureStatuses", () => ({
+      error: { code: -32_603, message: "rpc exploded" },
+    }));
 
-    await expect(
-      reconcileOnSandbox(await createRequest({ token: SOL_MINT, expiresAt: null }), {
-        bestEffort: false,
-      })
-    ).rejects.toThrow("rpc exploded");
-  });
-
-  it.each([
-    "Token mint account does not exist",
-    "Unsupported token program for mint",
-    "Payments do not support the InterestBearingConfig mint extension",
-  ])("isolates legacy mint rejection from other list rows: %s", async (message) => {
-    const warn = vi.spyOn(rootLogger, "warn").mockImplementation(() => {});
-    const invalidMint = syntheticAddress(501);
-    const loadPaymentMint = paymentAmounts.loadPaymentMint;
-    vi.spyOn(paymentAmounts, "loadPaymentMint").mockImplementation((mint) =>
-      mint === invalidMint ? Promise.reject(badRequest(message)) : loadPaymentMint(mint)
-    );
-    const invalid = await createRequest({ token: invalidMint, expiresAt: null });
-    const healthy = await createRequest({ token: SOL_MINT, expiresAt: null });
-    await mockSettlementSucceeds();
-    const [unchanged, settled] = await Promise.all(
-      [invalid, healthy].map((row) => reconcileOnSandbox(row, { bestEffort: true }))
-    );
-    expect(unchanged).toEqual(invalid);
-    expect(settled.status).toBe("paid");
-    expect(warn).toHaveBeenCalledWith(
-      expect.objectContaining({ payment_request_id: invalid.id, reason: "mint_not_admitted" }),
-      expect.any(String)
-    );
-    expect(await listInboundTransfers()).toHaveLength(1);
+    await expect(reconcileOnSandbox(request, { bestEffort: false })).rejects.toThrow();
   });
 
   it("best-effort returns the stored row and logs when reconcile errors unexpectedly", async () => {
     const errorSpy = vi.spyOn(rootLogger, "error").mockImplementation(() => {});
-    findReferenceSpy.mockRejectedValue(new Error("rpc exploded"));
-    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+    const request = await createRequest({ expiresAt: null });
+    await issueTransaction(request, 1, { lastValidBlockHeight: 1_000n });
+    rpc.respond("getSignatureStatuses", () => ({
+      error: { code: -32_603, message: "rpc exploded" },
+    }));
 
     const result = await reconcileOnSandbox(request, { bestEffort: true });
 
@@ -673,10 +463,11 @@ describe("reconcilePaymentRequest", () => {
 
   it("best-effort rethrows RPC_NOT_CONFIGURED instead of degrading to the stored row", async () => {
     const errorSpy = vi.spyOn(rootLogger, "error").mockImplementation(() => {});
+    const request = await createRequest({ expiresAt: null });
+    await issueTransaction(request, 1, { lastValidBlockHeight: 1_000n });
     for (const [envKey, blankValue] of Object.entries(BLANK_MANAGED_POOL_ENV)) {
       vi.stubEnv(envKey, blankValue);
     }
-    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
 
     await expect(reconcileOnSandbox(request, { bestEffort: true })).rejects.toMatchObject({
       name: "SdpRpcError",
@@ -684,26 +475,25 @@ describe("reconcilePaymentRequest", () => {
       details: { cluster: "devnet" },
     });
     expect(errorSpy).not.toHaveBeenCalled();
-    expect(findReferenceSpy).not.toHaveBeenCalled();
     expect(await listInboundTransfers()).toHaveLength(0);
   });
 
   it("returns an unresolved legacy request on best-effort reads without touching the chain", async () => {
     const request: PaymentRequestRow = {
-      ...(await createRequest({ token: SOL_MINT, expiresAt: null })),
+      ...(await createRequest({ expiresAt: null })),
       custody_wallet_id: null,
     };
 
     const result = await reconcileOnSandbox(request, { bestEffort: true });
 
     expect(result).toBe(request);
-    expect(findReferenceSpy).not.toHaveBeenCalled();
+    expect(chainMethods()).toEqual([]);
     expect(await listInboundTransfers()).toHaveLength(0);
   });
 
   it("rejects an unresolved legacy request when current state is required", async () => {
     const request: PaymentRequestRow = {
-      ...(await createRequest({ token: SOL_MINT, expiresAt: null })),
+      ...(await createRequest({ expiresAt: null })),
       custody_wallet_id: null,
     };
 
@@ -711,28 +501,19 @@ describe("reconcilePaymentRequest", () => {
       code: "CONFLICT",
       statusCode: 409,
     });
-    expect(findReferenceSpy).not.toHaveBeenCalled();
+    expect(chainMethods()).toEqual([]);
     expect(await listInboundTransfers()).toHaveLength(0);
   });
 
   it("short-circuits non-awaiting requests without touching the chain", async () => {
     const canceled: PaymentRequestRow = {
-      ...(await createRequest({ token: SOL_MINT, expiresAt: null })),
+      ...(await createRequest({ expiresAt: null })),
       status: "canceled",
     };
 
     const result = await reconcileOnSandbox(canceled, { bestEffort: false });
 
     expect(result).toBe(canceled);
-    expect(findReferenceSpy).not.toHaveBeenCalled();
-  });
-
-  it("short-circuits expired requests without touching the chain", async () => {
-    const expired = await createRequest({ token: SOL_MINT, expiresAt: "2000-01-01T00:00:00.000Z" });
-
-    const result = await reconcileOnSandbox(expired, { bestEffort: false });
-
-    expect(result.status).toBe("awaiting_payment");
-    expect(findReferenceSpy).not.toHaveBeenCalled();
+    expect(chainMethods()).toEqual([]);
   });
 });

@@ -1,8 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
+import { generateKeyPairSigner } from "@solana/kit";
+import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
+import { installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import {
   DEVNET_USDC_MINT,
@@ -10,10 +13,10 @@ import {
   seedProductionPrivyWallet,
   TEST_API_KEY,
   TEST_PRODUCTION_PROJECT_ID,
-  TEST_PROJECT,
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
 import { required } from "@/test/helpers/required";
+import { answerMovementAccounts, mintRpcAccount } from "@/test/helpers/token-movement";
 
 function postPaymentRequest(body: Record<string, unknown>, idempotencyKey: string) {
   return app.request(
@@ -40,8 +43,21 @@ async function storedKeyCount(idempotencyKey: string): Promise<number> {
   return row.count;
 }
 
+/** Answers the terms read a request's creation makes: devnet USDC, a classic 6-decimal mint. */
+function answerUsdcTerms(rpc: ReturnType<typeof installClusterRpcResponder>) {
+  answerMovementAccounts(
+    rpc,
+    new Map([[DEVNET_USDC_MINT, mintRpcAccount("spl-token", { decimals: 6, extensions: null })]])
+  );
+}
+
 describe("Payments routes — payment request access before the key", () => {
   installPaymentsRouteTestHooks();
+  const rpc = installClusterRpcResponder();
+
+  beforeEach(() => {
+    answerUsdcTerms(rpc);
+  });
 
   it("refuses a wallet outside the caller's project with 404 and stores nothing under the key", async () => {
     const response = await postPaymentRequest(
@@ -82,6 +98,122 @@ describe("Payments routes — payment request access before the key", () => {
   });
 });
 
+describe("Payments routes — payment request expectations (ADR 0012)", () => {
+  installPaymentsRouteTestHooks();
+  const rpc = installClusterRpcResponder();
+
+  beforeEach(() => {
+    answerUsdcTerms(rpc);
+  });
+
+  async function storedRequestCount(): Promise<number> {
+    const row = await getDb(env)
+      .prepare("SELECT COUNT(*)::integer AS count FROM payment_requests")
+      .first<{ count: number }>();
+    return required(row).count;
+  }
+
+  it("stores what the wallet must receive in base units, and reports it as a credit", async () => {
+    const response = await postPaymentRequest(
+      { walletId: TEST_WALLET_ID, token: DEVNET_USDC_MINT, amount: "1.50" },
+      "payreq-expectation"
+    );
+
+    expect(response.status).toBe(201);
+    await expect(response.json()).resolves.toMatchObject({
+      data: {
+        amount: "1.5",
+        amounts: { basis: "credit", credit: "1.5", decimals: 6 },
+      },
+    });
+    const stored = await getDb(env)
+      .prepare(
+        "SELECT asset_kind, mint, token_program, decimals, expected_credit FROM payment_requests"
+      )
+      .first();
+    expect(stored).toEqual({
+      asset_kind: "token",
+      mint: DEVNET_USDC_MINT,
+      token_program: "spl-token",
+      decimals: 6,
+      expected_credit: "1500000",
+    });
+  });
+
+  it("records native SOL for the wrapped SOL mint, the token the dashboard sends for SOL", async () => {
+    // The request body takes a mint address only (main's contract), so SOL is named by its mint.
+    const response = await postPaymentRequest(
+      { walletId: TEST_WALLET_ID, token: SOL_MINT, amount: "0.25" },
+      "payreq-native-sol"
+    );
+
+    expect(response.status).toBe(201);
+    await expect(response.json()).resolves.toMatchObject({
+      data: { amounts: { basis: "credit", credit: "0.25", decimals: 9 } },
+    });
+    const stored = await getDb(env)
+      .prepare(
+        "SELECT token, asset_kind, mint, token_program, decimals, expected_credit FROM payment_requests"
+      )
+      .first();
+    // Payment requests always took the wrapped SOL mint as native SOL: /pay sends a system transfer.
+    expect(stored).toEqual({
+      token: SOL_MINT,
+      asset_kind: "native",
+      mint: null,
+      token_program: null,
+      decimals: 9,
+      expected_credit: "250000000",
+    });
+  });
+
+  it.each([
+    { amount: "1.0000001", message: "Amount has too many decimal places" },
+    { amount: "18446744073709.551616", message: "Amount is out of range" },
+  ])(
+    "refuses USDC amount $amount the mint cannot hold, and stores no request (SOLA9-803)",
+    async ({ amount, message }) => {
+      const response = await postPaymentRequest(
+        { walletId: TEST_WALLET_ID, token: DEVNET_USDC_MINT, amount },
+        "payreq-too-many-decimals"
+      );
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "BAD_REQUEST", message },
+      });
+      expect(await storedRequestCount()).toBe(0);
+    }
+  );
+
+  it("refuses a mint the builder cannot move, naming why, and stores no request", async () => {
+    const soulbound = (await generateKeyPairSigner()).address;
+    answerMovementAccounts(
+      rpc,
+      new Map([
+        [
+          soulbound,
+          mintRpcAccount("token-2022", {
+            decimals: 6,
+            extensions: [{ __kind: "NonTransferable" }],
+          }),
+        ],
+      ])
+    );
+
+    const response = await postPaymentRequest(
+      { walletId: TEST_WALLET_ID, token: soulbound, amount: "1" },
+      "payreq-non-transferable"
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "BAD_REQUEST", details: { reason: "non_transferable" } },
+    });
+    expect(await storedRequestCount()).toBe(0);
+  });
+});
+
 describe("Payments routes — payment request token cluster", () => {
   installPaymentsRouteTestHooks();
 
@@ -115,24 +247,6 @@ describe("Payments routes — payment request token cluster", () => {
       .first<{ count: number }>();
     expect(stored).toEqual({ count: 0 });
   });
-
-  it.each(["1.0000001", "18446744073709.551616"])(
-    "refuses invalid USDC amount %s and stores no request",
-    async (amount) => {
-      const response = await postPaymentRequest(
-        { walletId: TEST_WALLET_ID, token: DEVNET_USDC_MINT, amount },
-        "payreq-too-precise-amount"
-      );
-
-      expect(response.status).toBe(400);
-      await expect(response.json()).resolves.toMatchObject({ error: { code: "BAD_REQUEST" } });
-      const stored = await getDb(env)
-        .prepare("SELECT COUNT(*)::integer AS count FROM payment_requests WHERE project_id = ?")
-        .bind(TEST_PROJECT.id)
-        .first<{ count: number }>();
-      expect(stored).toEqual({ count: 0 });
-    }
-  );
 });
 
 describe("Payments routes — subscription plan wallets before the key", () => {
