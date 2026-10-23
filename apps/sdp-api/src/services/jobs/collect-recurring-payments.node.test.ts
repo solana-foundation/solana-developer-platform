@@ -121,6 +121,7 @@ function recurringRow(
     destination_token_account: null,
     token: "token_mint",
     amount: "10",
+    mandate: null,
     period_hours: 24,
     first_collection_at: null,
     next_collection_due_at: "2026-07-01T12:00:00.000Z",

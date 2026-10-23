@@ -16,7 +16,7 @@ import {
   preparePaymentSubscriptionPlanResponseSchema,
 } from "@/openapi/schemas/payments";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
-import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
+import { installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import {
   DEVNET_USDC_MINT,
@@ -31,7 +31,7 @@ import {
 } from "@/test/helpers/payments-routes";
 import { required } from "@/test/helpers/required";
 import { TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
-import { mintAccountInfoResult } from "@/test/helpers/token-mints";
+import { answerMovementAccounts, mintRpcAccount } from "@/test/helpers/token-movement";
 
 const SUBSCRIPTION_HEADERS = {
   Authorization: "Bearer sk_test_payments_policy",
@@ -79,10 +79,18 @@ function expectPreparedSubscriptionTransaction(
 
 describe("Payments routes — subscriptions", () => {
   installPaymentsRouteTestHooks();
-  const rpc = installClusterRpcStub();
+  const rpc = installClusterRpcResponder();
 
   beforeEach(() => {
-    rpc.answer("getAccountInfo", mintAccountInfoResult({ decimals: 6, extensions: null }));
+    // A plan's mandate is made from the mint's terms, read once at creation.
+    const usdc = mintRpcAccount("spl-token", { decimals: 6, extensions: null });
+    answerMovementAccounts(
+      rpc,
+      new Map([
+        [DEVNET_USDC_MINT, usdc],
+        [MAINNET_USDC_MINT, usdc],
+      ])
+    );
   });
 
   it("stores a Production plan's USDC as the mainnet mint", async () => {

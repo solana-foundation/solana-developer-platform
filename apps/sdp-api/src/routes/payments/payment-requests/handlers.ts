@@ -1,4 +1,4 @@
-import { assertValidAddress } from "@sdp/solana/address";
+import { toTokenAmount } from "@sdp/solana/token-amount";
 import type {
   CreatedPaymentRequest,
   ListPaymentRequestsResponse,
@@ -18,9 +18,10 @@ import { resolveScope, resolveWallet } from "@/routes/payments/wallets";
 import { normalizePaymentToken } from "@/services/payment-operation.service";
 import {
   isPaymentRequestExpired,
+  paymentRequestAmounts,
   reconcilePaymentRequest,
+  resolvePaymentRequestExpectation,
 } from "@/services/payments/payment-requests";
-import { parseStaticPaymentAmount } from "@/services/payments/token-amount";
 import {
   type createPaymentRequestSchema,
   listPaymentRequestsQuerySchema,
@@ -34,7 +35,7 @@ import {
  */
 function mapPaymentRequest(row: PaymentRequestRow): PaymentRequest {
   const expired = isPaymentRequestExpired(row.expires_at);
-  return {
+  const request: PaymentRequest = {
     id: row.id,
     organizationId: row.organization_id,
     projectId: row.project_id,
@@ -52,6 +53,10 @@ function mapPaymentRequest(row: PaymentRequestRow): PaymentRequest {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+  if (row.expectation !== null) {
+    request.amounts = paymentRequestAmounts(row.expectation);
+  }
+  return request;
 }
 
 export async function listPaymentRequests(c: AppContext) {
@@ -131,8 +136,8 @@ export async function createPaymentRequest(
   // wallet is operational is state, checked here.
   const scope = await resolveScope(c);
   const wallet = resolveWallet(scope.wallets, body.walletId);
-  const token = assertValidAddress(normalizePaymentToken(body.token), "token");
-  await parseStaticPaymentAmount(body.amount, token);
+  // The amount is a receipt: what the wallet must receive, at the decimals the mint has now.
+  const expectation = await resolvePaymentRequestExpectation(body.token, body.amount);
 
   const row = await createPaymentRequestsRepository(
     c.env,
@@ -143,8 +148,9 @@ export async function createPaymentRequest(
     custodyWalletId: wallet.id,
     walletId: wallet.walletId,
     destinationAddress: wallet.publicKey,
-    token,
-    amount: body.amount,
+    token: normalizePaymentToken(body.token),
+    amount: toTokenAmount(expectation.credit, expectation.decimals).value,
+    expectation,
     expiresAt: body.expiresAt,
     createdBy: await resolveCreatorUserId(c),
   });

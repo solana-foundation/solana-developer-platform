@@ -1,3 +1,6 @@
+import { parseTokenAmount, toBaseUnits } from "@sdp/solana/token-amount";
+import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
+import { address, getBase58Decoder, signature } from "@solana/kit";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
@@ -8,11 +11,21 @@ import {
   type SeededDefaultProjects,
   seedDefaultProjects,
 } from "@/test/helpers/projects";
+import { nativeQuote } from "@/test/helpers/token-movement";
 import { seedTestDatabase } from "@/test/mocks/db";
-import type { PaymentRequestsRepository } from "./payment-requests.repository";
+import type {
+  CreatePaymentRequestInput,
+  PaymentRequestsRepository,
+} from "./payment-requests.repository";
 import { createPostgresPaymentRequestsRepository } from "./payment-requests.repository.postgres";
+import { recordedLegQuote } from "./token-movement-legs.repository";
 
 const TEST_PROJECT_ID = "prj_preq_repo_test";
+const DEVNET_USDC_MINT = address(WELL_KNOWN_TOKENS.USDC.mints.devnet.address);
+/** The quote a claimed window's transaction moves: 1.5 SOL, a credit. */
+const WINDOW_QUOTE = recordedLegQuote(nativeQuote("1.5", "credit"));
+const signatureOf = (seed: number) =>
+  signature(getBase58Decoder().decode(new Uint8Array(64).fill(seed)));
 const TEST_CUSTODY_WALLET_ID = "cwlt_preq_repo_test";
 
 describe("PaymentRequestsRepository (postgres)", () => {
@@ -95,16 +108,21 @@ describe("PaymentRequestsRepository (postgres)", () => {
   }
 
   function createInput(
-    overrides: Partial<Parameters<PaymentRequestsRepository["createPaymentRequest"]>[0]> = {}
-  ) {
+    overrides: Partial<CreatePaymentRequestInput> = {}
+  ): CreatePaymentRequestInput {
     return {
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
       custodyWalletId: TEST_CUSTODY_WALLET_ID,
       walletId: "wlt_receiving",
       destinationAddress: "OurWallet",
-      token: "USDC",
+      token: DEVNET_USDC_MINT,
       amount: "25.00",
+      expectation: {
+        asset: { kind: "token", mint: DEVNET_USDC_MINT, program: "spl-token" },
+        decimals: 6,
+        credit: toBaseUnits(parseTokenAmount("25.00", 6)),
+      },
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
       createdBy: TEST_USER.id,
       ...overrides,
@@ -307,37 +325,14 @@ describe("PaymentRequestsRepository (postgres)", () => {
       );
     });
 
-    it("marks paid and links the settling transfer", async () => {
-      const created = await repo.createPaymentRequest(createInput());
-      await seedTransfer("xfr_settle");
-
-      const paid = await repo.markPaymentRequest({
-        requestId: created?.id ?? "",
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-        status: "paid",
-        fulfilledByTransferId: "xfr_settle",
-        canceledBy: null,
-      });
-
-      expect(paid?.status).toBe("paid");
-      expect(paid?.fulfilled_by_transfer_id).toBe("xfr_settle");
-      expect(paid?.canceled_by).toBeNull();
-      expect(paid?.lifecycle[1]).toMatchObject({ status: "paid" });
-    });
-
-    it("rejects a paid transition with no settling transfer (paid_requires_transfer)", async () => {
+    it("rejects a paid row with no settling transfer (paid_requires_transfer)", async () => {
       const created = await repo.createPaymentRequest(createInput());
 
       await expect(
-        repo.markPaymentRequest({
-          requestId: created.id,
-          organizationId: TEST_ORG.id,
-          projectId: TEST_PROJECT_ID,
-          status: "paid",
-          fulfilledByTransferId: null,
-          canceledBy: null,
-        })
+        getDb(env)
+          .prepare("UPDATE payment_requests SET status = 'paid' WHERE id = ?")
+          .bind(created.id)
+          .run()
       ).rejects.toThrow();
     });
 
@@ -385,7 +380,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
         requestId: created?.id ?? "",
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
-        status: "paid",
+        status: "expired",
         fulfilledByTransferId: null,
         canceledBy: null,
       });
@@ -413,6 +408,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
           unsignedTransaction: "dHhB",
           lastValidBlockHeight: 1_000n,
           currentBlockHeight: 900n,
+          quote: WINDOW_QUOTE,
         }),
         repo.claimSponsoredTransactionWindow({
           requestId: request.id,
@@ -420,6 +416,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
           unsignedTransaction: "dHhC",
           lastValidBlockHeight: 1_000n,
           currentBlockHeight: 900n,
+          quote: WINDOW_QUOTE,
         }),
       ]);
       expect(results.filter(Boolean)).toHaveLength(1);
@@ -440,6 +437,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
           unsignedTransaction: "dHhB",
           lastValidBlockHeight: 1_000n,
           currentBlockHeight: 900n,
+          quote: WINDOW_QUOTE,
         })
       ).toBe(true);
       expect(
@@ -449,6 +447,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
           unsignedTransaction: "dHhC",
           lastValidBlockHeight: 1_100n,
           currentBlockHeight: 950n,
+          quote: WINDOW_QUOTE,
         })
       ).toBe(false);
       expect(
@@ -458,6 +457,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
           unsignedTransaction: "dHhC",
           lastValidBlockHeight: 1_200n,
           currentBlockHeight: 1_001n,
+          quote: WINDOW_QUOTE,
         })
       ).toBe(true);
       const claim = await repo.getSponsoredTransactionClaim(request.id);
@@ -473,12 +473,14 @@ describe("PaymentRequestsRepository (postgres)", () => {
         unsignedTransaction: "dHhB",
         lastValidBlockHeight: 1_000n,
         currentBlockHeight: 900n,
+        quote: WINDOW_QUOTE,
       });
       await repo.storeSponsoredTransactionSignature({
         requestId: request.id,
         account: ACCOUNT_B,
         unsignedTransaction: "dHhB",
         signedTransaction: "c2lnQg==",
+        signature: signatureOf(11),
       });
       expect((await repo.getSponsoredTransactionClaim(request.id))?.signedTransaction).toBeNull();
 
@@ -487,6 +489,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
         account: ACCOUNT_A,
         unsignedTransaction: "dHhB",
         signedTransaction: "c2lnQQ==",
+        signature: signatureOf(12),
       });
       expect((await repo.getSponsoredTransactionClaim(request.id))?.signedTransaction).toBe(
         "c2lnQQ=="
@@ -501,6 +504,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
         unsignedTransaction: "dHhPbGQ=",
         lastValidBlockHeight: 1_000n,
         currentBlockHeight: 900n,
+        quote: WINDOW_QUOTE,
       });
       await repo.claimSponsoredTransactionWindow({
         requestId: request.id,
@@ -508,6 +512,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
         unsignedTransaction: "dHhOZXc=",
         lastValidBlockHeight: 1_200n,
         currentBlockHeight: 1_001n,
+        quote: WINDOW_QUOTE,
       });
 
       expect(
@@ -516,6 +521,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
           account: ACCOUNT_A,
           unsignedTransaction: "dHhPbGQ=",
           signedTransaction: "c2lnT2xk",
+          signature: signatureOf(13),
         })
       ).toBe(false);
       expect((await repo.getSponsoredTransactionClaim(request.id))?.signedTransaction).toBeNull();
@@ -526,6 +532,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
           account: ACCOUNT_A,
           unsignedTransaction: "dHhOZXc=",
           signedTransaction: "c2lnTmV3",
+          signature: signatureOf(14),
         })
       ).toBe(true);
       expect((await repo.getSponsoredTransactionClaim(request.id))?.signedTransaction).toBe(
@@ -550,8 +557,242 @@ describe("PaymentRequestsRepository (postgres)", () => {
           unsignedTransaction: "dHhB",
           lastValidBlockHeight: 1_000n,
           currentBlockHeight: 900n,
+          quote: WINDOW_QUOTE,
         })
       ).toBe(false);
+    });
+
+    describe("issued transactions and settlement (ADR 0012)", () => {
+      const OWNER = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID };
+      const PAYER = "9wVmMF2GpxZMsJLxCv2xXWjDWVv8HtqTmKqnZxNKkYTz";
+
+      async function claimAndSign(requestId: string, unsigned: string, seed: number) {
+        expect(
+          await repo.claimSponsoredTransactionWindow({
+            requestId,
+            account: PAYER,
+            unsignedTransaction: unsigned,
+            lastValidBlockHeight: 1_000n + BigInt(seed),
+            currentBlockHeight: 900n + BigInt(seed) * 1_000n,
+            quote: WINDOW_QUOTE,
+          })
+        ).toBe(true);
+        expect(
+          await repo.storeSponsoredTransactionSignature({
+            requestId,
+            account: PAYER,
+            unsignedTransaction: unsigned,
+            signedTransaction: `signed-${unsigned}`,
+            signature: signatureOf(seed),
+          })
+        ).toBe(true);
+      }
+
+      it("stores the expectation with the request", async () => {
+        const created = await repo.createPaymentRequest(createInput());
+
+        expect(created.expectation).toEqual({
+          asset: { kind: "token", mint: DEVNET_USDC_MINT, program: "spl-token" },
+          decimals: 6,
+          credit: 25_000_000n,
+        });
+      });
+
+      it("refuses an expectation whose credit is not the amount (payment_requests_expectation_shape)", async () => {
+        await expect(repo.createPaymentRequest(createInput({ amount: "26" }))).rejects.toThrow();
+      });
+
+      it("records each claim's issued transaction with its quote and saves its signature", async () => {
+        const request = await repo.createPaymentRequest(createInput());
+        await claimAndSign(request.id, "dHhB", 1);
+
+        const claim = await repo.getSponsoredTransactionClaim(request.id);
+        expect(claim?.issued).toMatchObject({
+          payer: PAYER,
+          lastValidBlockHeight: 1_001n,
+          signature: signatureOf(1),
+          quote: WINDOW_QUOTE,
+          outcome: "open",
+        });
+        expect(
+          await repo.listOpenPaymentRequestTransactions({ requestId: request.id, ...OWNER })
+        ).toEqual([expect.objectContaining({ signature: signatureOf(1) })]);
+      });
+
+      it("keeps every window's signature after a later claim replaces the request's claim", async () => {
+        const request = await repo.createPaymentRequest(createInput());
+        await claimAndSign(request.id, "dHhB", 1);
+        await claimAndSign(request.id, "dHhC", 2);
+
+        expect(
+          (await repo.listOpenPaymentRequestTransactions({ requestId: request.id, ...OWNER })).map(
+            (issued) => issued.signature
+          )
+        ).toEqual([signatureOf(1), signatureOf(2)]);
+
+        await repo.closePaymentRequestTransactions({
+          requestId: request.id,
+          ...OWNER,
+          outcomes: [{ signature: signatureOf(1), outcome: "lapsed", landedSlot: null }],
+        });
+        expect(
+          (await repo.listOpenPaymentRequestTransactions({ requestId: request.id, ...OWNER })).map(
+            (issued) => issued.signature
+          )
+        ).toEqual([signatureOf(2)]);
+      });
+
+      it("closes several windows in one statement and never reads or closes an archived one", async () => {
+        const request = await repo.createPaymentRequest(createInput());
+        await claimAndSign(request.id, "dHhB", 1);
+        await claimAndSign(request.id, "dHhC", 2);
+        await claimAndSign(request.id, "dHhD", 3);
+        await getDb(env)
+          .prepare(
+            "UPDATE payment_request_transactions SET status = 'archived' WHERE signature = ?"
+          )
+          .bind(signatureOf(3))
+          .run();
+
+        expect(
+          (await repo.listOpenPaymentRequestTransactions({ requestId: request.id, ...OWNER })).map(
+            (issued) => issued.signature
+          )
+        ).toEqual([signatureOf(1), signatureOf(2)]);
+
+        await repo.closePaymentRequestTransactions({
+          requestId: request.id,
+          ...OWNER,
+          outcomes: [
+            { signature: signatureOf(1), outcome: "failed", landedSlot: 77n },
+            { signature: signatureOf(2), outcome: "lapsed", landedSlot: null },
+            { signature: signatureOf(3), outcome: "lapsed", landedSlot: null },
+          ],
+        });
+        const outcomes = await getDb(env)
+          .prepare(
+            `SELECT signature, outcome, landed_slot FROM payment_request_transactions
+              WHERE payment_request_id = ? ORDER BY created_at, id`
+          )
+          .bind(request.id)
+          .all<{ signature: string; outcome: string; landed_slot: string | null }>();
+        expect(outcomes.results).toEqual([
+          { signature: signatureOf(1), outcome: "failed", landed_slot: "77" },
+          { signature: signatureOf(2), outcome: "lapsed", landed_slot: null },
+          { signature: signatureOf(3), outcome: "open", landed_slot: null },
+        ]);
+      });
+
+      it("closes only the named request's windows, never another request's", async () => {
+        const request = await repo.createPaymentRequest(createInput());
+        const other = await repo.createPaymentRequest(createInput());
+        await claimAndSign(request.id, "dHhB", 1);
+        await claimAndSign(other.id, "dHhC", 2);
+
+        await repo.closePaymentRequestTransactions({
+          requestId: request.id,
+          ...OWNER,
+          outcomes: [
+            { signature: signatureOf(1), outcome: "lapsed", landedSlot: null },
+            { signature: signatureOf(2), outcome: "lapsed", landedSlot: null },
+          ],
+        });
+
+        expect(
+          await repo.listOpenPaymentRequestTransactions({ requestId: request.id, ...OWNER })
+        ).toEqual([]);
+        expect(
+          (await repo.listOpenPaymentRequestTransactions({ requestId: other.id, ...OWNER })).map(
+            (issued) => issued.signature
+          )
+        ).toEqual([signatureOf(2)]);
+      });
+
+      it("never signs a claim with no issued record (the previous revision's)", async () => {
+        const request = await repo.createPaymentRequest(createInput());
+        await getDb(env)
+          .prepare(
+            `UPDATE payment_requests
+              SET sponsored_tx_account = ?, sponsored_tx_unsigned = 'bGVnYWN5',
+                  sponsored_tx_last_valid_block_height = 1000
+            WHERE id = ?`
+          )
+          .bind(PAYER, request.id)
+          .run();
+
+        expect((await repo.getSponsoredTransactionClaim(request.id))?.issued).toBeNull();
+        await expect(
+          repo.storeSponsoredTransactionSignature({
+            requestId: request.id,
+            account: PAYER,
+            unsignedTransaction: "bGVnYWN5",
+            signedTransaction: "c2lnbmVk",
+            signature: signatureOf(3),
+          })
+        ).rejects.toThrow("no issued record");
+        expect((await repo.getSponsoredTransactionClaim(request.id))?.signedTransaction).toBeNull();
+      });
+
+      it("refuses to claim a window for an expired request (SOLA9-761)", async () => {
+        const request = await repo.createPaymentRequest(
+          createInput({ expiresAt: new Date(Date.now() - 1_000).toISOString() })
+        );
+
+        expect(
+          await repo.claimSponsoredTransactionWindow({
+            requestId: request.id,
+            account: PAYER,
+            unsignedTransaction: "dHhB",
+            lastValidBlockHeight: 1_000n,
+            currentBlockHeight: 900n,
+            quote: WINDOW_QUOTE,
+          })
+        ).toBe(false);
+        expect(await repo.getSponsoredTransactionClaim(request.id)).toBeNull();
+      });
+
+      it("marks paid and links the settling transfer when the request was open at issue", async () => {
+        const created = await repo.createPaymentRequest(createInput());
+        await seedTransfer("xfr_settle");
+
+        const paid = await repo.markPaymentRequestPaid({
+          requestId: created.id,
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          fulfilledByTransferId: "xfr_settle",
+          issuedAt: new Date().toISOString(),
+        });
+
+        expect(paid?.status).toBe("paid");
+        expect(paid?.fulfilled_by_transfer_id).toBe("xfr_settle");
+        expect(paid?.canceled_by).toBeNull();
+        expect(paid?.lifecycle[1]).toMatchObject({ status: "paid" });
+      });
+
+      it("refuses to settle a request whose expiry came before the paying transaction was issued (SOLA9-757)", async () => {
+        const expiresAt = new Date(Date.now() + 60_000).toISOString();
+        const created = await repo.createPaymentRequest(createInput({ expiresAt }));
+        await seedTransfer("xfr_late");
+
+        expect(
+          await repo.markPaymentRequestPaid({
+            requestId: created.id,
+            organizationId: TEST_ORG.id,
+            projectId: TEST_PROJECT_ID,
+            fulfilledByTransferId: "xfr_late",
+            issuedAt: new Date(Date.now() + 120_000).toISOString(),
+          })
+        ).toBeNull();
+        expect(
+          (
+            await repo.getPaymentRequestById({
+              requestId: created.id,
+              organizationId: TEST_ORG.id,
+              projectId: TEST_PROJECT_ID,
+            })
+          )?.status
+        ).toBe("awaiting_payment");
+      });
     });
   });
 });

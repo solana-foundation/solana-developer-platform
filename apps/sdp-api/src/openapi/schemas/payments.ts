@@ -152,6 +152,33 @@ export const amountVerificationSchema = z
   })
   .openapi({ description: "Whether SDP has checked what the movement moved against `amounts`." });
 
+/** A recurring mandate's amounts, as recurring payments and subscription plans report them. */
+export const recurringMandateAmountsSchema = z
+  .object({
+    basis: z.literal("debit").openapi({
+      description:
+        "A mandate fixes the debit: what each pull takes from the source wallet. The subscriptions program's plan cap counts the debit.",
+      example: "debit",
+    }),
+    debit: z.string().openapi({
+      description: `What each pull debits from the source wallet, in ${TOKEN_UNITS_NOTE}`,
+      example: "25",
+    }),
+    decimals: z
+      .number()
+      .int()
+      .openapi({ description: "The mint's decimals when the mandate was made.", example: 6 }),
+    maxFeePerPull: z.string().openapi({
+      description:
+        "The fee tolerance, in token units: the largest transfer fee one pull may pay, the mint's fee for `debit` when the mandate was made. Before each pull SDP reads the mint again; when the fee is above this, the pull is held and the collection attempt reports `holdReason` `fee_above_tolerance`. The destination receives `debit` less the fee.",
+      example: "0",
+    }),
+  })
+  .openapi({
+    description:
+      "The mandate in token units, stored in base units when it was made (ADR 0012). Absent for a record made before mandates.",
+  });
+
 export const paymentWalletIdParamsSchema = walletIdParamsSchemaBase
   .extend({
     walletId: withOpenApi(walletIdParamsSchemaBase.shape.walletId, {
@@ -808,7 +835,7 @@ export const createRecurringPaymentRequestSchema = createRecurringPaymentSchemaB
       example: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     }),
     amount: withOpenApi(createRecurringPaymentSchemaBase.shape.amount, {
-      description: "Recurring payment amount in UI units.",
+      description: `What each pull debits from the source wallet, in ${TOKEN_UNITS_NOTE} It may have at most the mint's decimals. Recurring amounts are debits only: the destination receives the amount less any transfer fee.`,
       example: "25.00",
     }),
     periodHours: withOpenApi(createRecurringPaymentSchemaBase.shape.periodHours, {
@@ -858,7 +885,7 @@ export const updateRecurringPaymentRequestSchema = updateRecurringPaymentSchemaB
       example: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     }),
     amount: withOpenApi(updateRecurringPaymentSchemaBase.shape.amount, {
-      description: "Optional replacement amount in UI units.",
+      description: `Optional replacement debit per pull, in ${TOKEN_UNITS_NOTE}`,
       example: "25.00",
     }),
     periodHours: withOpenApi(updateRecurringPaymentSchemaBase.shape.periodHours, {
@@ -925,7 +952,10 @@ export const paymentRecurringPaymentSchema = z
       .nullable()
       .openapi({ description: "Derived counterparty token account used for collection." }),
     token: z.string().openapi({ description: "SPL token mint address." }),
-    amount: tokenAmountSchema,
+    amount: tokenUnitsAmountSchema.openapi({
+      description: `What each pull debits from the source wallet, in ${TOKEN_UNITS_NOTE}`,
+    }),
+    amounts: recurringMandateAmountsSchema.optional(),
     periodHours: z.number().int().positive().openapi({ example: 720 }),
     firstCollectionAt: isoDateTimeSchema
       .nullable()
@@ -997,7 +1027,7 @@ export const createSubscriptionPlanRequestSchema = createSubscriptionPlanSchemaB
       example: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     }),
     amount: withOpenApi(createSubscriptionPlanSchemaBase.shape.amount, {
-      description: "Recurring charge amount in UI units.",
+      description: `What each pull debits from the subscriber, in ${TOKEN_UNITS_NOTE} It may have at most the mint's decimals.`,
       example: "25.00",
     }),
     periodHours: withOpenApi(createSubscriptionPlanSchemaBase.shape.periodHours, {
@@ -1066,7 +1096,10 @@ export const paymentSubscriptionPlanSchema = z
     ownerWalletId: walletIdParamSchema,
     ownerAddress: solanaAddressSchema,
     token: z.string().openapi({ description: "Token mint or normalized token identifier." }),
-    amount: tokenAmountSchema,
+    amount: tokenUnitsAmountSchema.openapi({
+      description: `What each pull debits from the subscriber, in ${TOKEN_UNITS_NOTE}`,
+    }),
+    amounts: recurringMandateAmountsSchema.optional(),
     periodHours: z.number().int().positive().openapi({ example: 720 }),
     programPlanId: z.string().openapi({
       description: "Unsigned 64-bit decimal program plan identifier used in PDA derivation.",

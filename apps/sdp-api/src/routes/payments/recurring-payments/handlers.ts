@@ -49,6 +49,7 @@ import {
   cancelRecurringPayment as cancelRecurringPaymentRecord,
   resumeRecurringPayment as resumeRecurringPaymentRecord,
 } from "@/services/payments/recurring-payments/lifecycle";
+import { mandateAmounts } from "@/services/payments/recurring-payments/mandate";
 import { updateRecurringPayment as updateRecurringPaymentRecord } from "@/services/payments/recurring-payments/update";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type {
@@ -66,7 +67,7 @@ import {
 } from "./schemas";
 
 function mapRecurringPayment(row: PaymentRecurringPaymentRow): PaymentRecurringPayment {
-  return {
+  const recurringPayment: PaymentRecurringPayment = {
     id: row.id,
     organizationId: row.organization_id,
     projectId: row.project_id,
@@ -96,6 +97,10 @@ function mapRecurringPayment(row: PaymentRecurringPaymentRow): PaymentRecurringP
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+  if (row.mandate !== null) {
+    recurringPayment.amounts = mandateAmounts(row.mandate);
+  }
+  return recurringPayment;
 }
 
 /**

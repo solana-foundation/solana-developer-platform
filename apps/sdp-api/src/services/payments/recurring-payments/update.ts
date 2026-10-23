@@ -47,6 +47,7 @@ import type {
   PaymentSubscriptionsRepository,
 } from "@/db/repositories/payment-subscriptions.repository";
 import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories/payment-subscriptions.repository.postgres";
+import type { RecurringMandate } from "@/db/repositories/recurring-mandate";
 import {
   createPaymentRecurringPaymentsRepository,
   createPaymentSubscriptionsRepository,
@@ -62,20 +63,26 @@ import {
 } from "@/lib/errors";
 import { currentMandateActivator } from "@/lib/money-principal";
 import { createTenantScope } from "@/lib/tenant-scope";
-import { resolveSourceTokenAccountOrAta } from "@/routes/payments/token-accounts";
 import { getLogger } from "@/runtime/logger";
 import { createSigningService } from "@/services/domain/signing.service";
 import { parseU64String } from "@/services/payment-operation.service";
 import { resolveSolanaCounterpartyAccount } from "@/services/payments/counterparty-account-resolution";
-import { loadPaymentMint, parseStaticPaymentAmount } from "@/services/payments/token-amount";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
   createSponsorshipFeePayment,
   resolveProjectSponsorshipScope,
 } from "@/services/sponsorship.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
+import type { MintMovementAccounts } from "@/services/token-movement/read-terms";
 import type { Env } from "@/types/env";
 import { recoverOrBlockLifecycleCollection } from "./collection";
+import {
+  assertMandateActivatable,
+  createRecurringMandate,
+  mandateProgramAccounts,
+  readRecurringTerms,
+  rowMandate,
+} from "./mandate";
 import {
   assertRecurringPaymentSourceWallet,
   assertRecurringPaymentTokenAdmitted,
@@ -166,6 +173,11 @@ type ResolvedRecurringPaymentUpdate = {
   changedFields: Array<keyof RecurringPaymentUpdateSnapshot>;
   beforeValues: SavedUpdateValues;
   afterValues: SavedUpdateValues;
+  /**
+   * The new mandate when the token or the amount changes, made before any row
+   * is written, with the terms read it came from; null otherwise.
+   */
+  newMandate: { read: MintMovementAccounts; mandate: RecurringMandate } | null;
 };
 
 const REPLACEMENT_UPDATE_FIELDS = new Set<keyof RecurringPaymentUpdateSnapshot>([
@@ -372,7 +384,6 @@ async function resolveRecurringPaymentUpdate(input: {
           env: input.env,
         })
       : null,
-    parseStaticPaymentAmount(amount, token),
   ]);
   const periodHours =
     input.request.periodHours === undefined
@@ -404,6 +415,15 @@ async function resolveRecurringPaymentUpdate(input: {
     metadataUri,
   };
   const diff = buildUpdateDiff(before, after);
+  const newMandate =
+    diff.changedFields.includes("token") || diff.changedFields.includes("amount")
+      ? await makeUpdateMandate({
+          token,
+          amount,
+          destination: assertValidAddress(destination.destinationAddress, "destinationAddress"),
+          owner: assertValidAddress(finalSourceWallet.publicKey, "sourceAddress"),
+        })
+      : null;
 
   return {
     sourceWallet: finalSourceWallet,
@@ -417,7 +437,28 @@ async function resolveRecurringPaymentUpdate(input: {
     nextCollectionDueAt,
     metadataUri,
     ...diff,
+    newMandate,
   };
+}
+
+/**
+ * The mandate an update that changes the token or the amount makes, before
+ * any row is written, so an amount the mint cannot hold or a mint the
+ * recurring path refuses is a 400 that stores nothing (#2473). The read
+ * carries the destination's and the source's token accounts, which a
+ * replacement reuses.
+ *
+ * RPC budget: one `getMultipleAccounts`; the replacement then reads nothing
+ * more for it.
+ */
+async function makeUpdateMandate(input: {
+  token: Address;
+  amount: string;
+  destination: Address;
+  owner: Address;
+}): Promise<{ read: MintMovementAccounts; mandate: RecurringMandate }> {
+  const read = await readRecurringTerms(input.token, null, [input.destination, input.owner]);
+  return { read, mandate: createRecurringMandate(read.terms, input.amount) };
 }
 
 async function recordRecurringPaymentUpdateEvent(input: {
@@ -544,11 +585,16 @@ async function updatePendingRecurringPayment(input: {
   const changedDestinationOrToken =
     input.resolved.destinationAddress !== input.recurringPayment.destination_address ||
     input.resolved.token !== input.recurringPayment.token;
+  // A new token or amount is a new mandate, made in base units under the terms read when the
+  // request was resolved. RPC budget: none before → one terms read when the token or the
+  // amount changes.
+  const mandate = input.resolved.newMandate?.mandate;
   const updatedAt = new Date().toISOString();
   return getDb(input.env).transaction(async (tx) => {
     const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
     const updated = await updatePendingRecurringPaymentRow(recurringRepo, {
       ...input,
+      mandate,
       changedDestinationOrToken,
       updatedAt,
     });
@@ -609,6 +655,8 @@ async function updatePendingRecurringPaymentRow(
     projectId: string;
     recurringPayment: PaymentRecurringPaymentRow;
     resolved: ResolvedRecurringPaymentUpdate;
+    /** The new mandate, when the update changes the token or the amount. */
+    mandate: RecurringMandate | undefined;
     changedDestinationOrToken: boolean;
     updatedAt: string;
   }
@@ -626,7 +674,9 @@ async function updatePendingRecurringPaymentRow(
     destinationAddress: input.resolved.destinationAddress,
     ...(changedDestinationOrToken ? { destinationTokenAccount: null } : {}),
     token: input.resolved.token,
-    amount: input.resolved.amount,
+    // A new mandate replaces the amount with it; without one both stay as stored.
+    amount: input.mandate === undefined ? undefined : input.resolved.amount,
+    mandate: input.mandate,
     periodHours: input.resolved.periodHours,
     firstCollectionAt: input.resolved.firstCollectionAt,
     metadataUri: input.resolved.metadataUri,
@@ -1163,6 +1213,8 @@ async function prepareSubscriptionAuthorityForUpdate(input: {
 
 async function getOrCreateReplacementPlan(input: {
   subscriptionsRepo: PaymentSubscriptionsRepository;
+  /** The mandate a new replacement plan records. */
+  mandate: RecurringMandate;
   attempt: PaymentRecurringPaymentUpdateAttemptRow;
   organizationId: string;
   projectId: string;
@@ -1197,6 +1249,7 @@ async function getOrCreateReplacementPlan(input: {
     ownerAddress: input.sourceWallet.publicKey,
     token: input.resolved.token,
     amount: input.resolved.amount,
+    mandate: input.mandate,
     periodHours: input.resolved.periodHours,
     programPlanId: generateProgramPlanId(),
     planPda: null,
@@ -1274,6 +1327,8 @@ async function finalizeReplacementUpdate(input: {
   subscription: PaymentSubscriptionRow;
   attempt: PaymentRecurringPaymentUpdateAttemptRow;
   resolved: ResolvedRecurringPaymentUpdate;
+  /** The mandate the replacement plan was created with on chain. */
+  mandate: RecurringMandate;
   planPda: Address;
   planCreatedAt: string;
   /** Each signature is null when an earlier run's send landed before it was saved. */
@@ -1352,6 +1407,7 @@ async function finalizeReplacementUpdate(input: {
       destinationTokenAccount: null,
       token: input.resolved.token,
       amount: input.resolved.amount,
+      mandate: input.mandate,
       periodHours: input.resolved.periodHours,
       firstCollectionAt: null,
       nextCollectionDueAt: input.nextCollectionDueAt,
@@ -1505,16 +1561,28 @@ async function runReplacementUpdate(input: {
   }
   const owner = assertValidAddress(input.resolved.sourceWallet.publicKey, "sourceAddress");
   const destination = assertValidAddress(input.resolved.destinationAddress, "destinationAddress");
-  const mint = input.resolved.token;
-  const paymentMint = await loadPaymentMint(mint);
-  const { tokenProgram } = paymentMint;
-  const sourceTokenAccount = await resolveSourceTokenAccountOrAta(owner, mint, paymentMint);
-  const amountBaseUnits = paymentMint.toBaseUnits(input.resolved.amount);
-  if (amountBaseUnits <= 0n) {
-    throw badRequest("Subscription amount must be greater than zero");
+  // One terms read carries the destination's and the source's token accounts (ADR 0012): the
+  // one the request made with a new mandate, or one now. RPC budget: the mint's owner, the
+  // source token account and `getTokenSupply` → one `getMultipleAccounts`.
+  const { newMandate } = input.resolved;
+  const read =
+    newMandate === null
+      ? await readRecurringTerms(input.resolved.token, input.claimed.mandate, [destination, owner])
+      : newMandate.read;
+  const [destinationAccount, sourceAccount] = read.destinations;
+  if (destinationAccount === undefined || sourceAccount === undefined) {
+    throw internalError("The recurring terms read returned no token accounts");
   }
+  assertMandateActivatable(read.terms, destinationAccount);
+  const requestedMandate =
+    newMandate === null ? rowMandate(input.claimed, read.terms) : newMandate.mandate;
+  const sourceTokenAccount = {
+    tokenAccount: sourceAccount.tokenAccount,
+    exists: sourceAccount.exists,
+  };
 
   let plan = await getOrCreateReplacementPlan({
+    mandate: requestedMandate,
     subscriptionsRepo,
     attempt,
     organizationId: input.organizationId,
@@ -1523,6 +1591,11 @@ async function runReplacementUpdate(input: {
     resolved: input.resolved,
     createdBy: input.createdBy,
   });
+  // A plan an earlier run created keeps the mandate it was created with on chain; one written
+  // before mandates has none, so the request's applies.
+  const mandate = plan.mandate === null ? requestedMandate : plan.mandate;
+  const { mint, tokenProgram } = mandateProgramAccounts(mandate);
+  const amountBaseUnits = mandate.debit;
   if (attempt.new_plan_id !== plan.id) {
     attempt = requireUpdatedAttempt(
       await recurringRepo.updateUpdateAttempt({
@@ -1880,6 +1953,7 @@ async function runReplacementUpdate(input: {
     subscription,
     attempt,
     resolved: input.resolved,
+    mandate,
     planPda,
     planCreatedAt,
     planCreationSignature,
