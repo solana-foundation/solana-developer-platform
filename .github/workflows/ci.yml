@@ -1187,33 +1187,18 @@ jobs:
     needs: [unit_test_scope, browser_e2e]
     if: always() && needs.unit_test_scope.outputs.e2e == 'true'
     timeout-minutes: 5
-    permissions:
-      actions: read
     steps:
-      - name: Require all six issuance groups green
+      # The issuance groups share the browser_e2e matrix with the two Dashboard E2E
+      # jobs, so this reads the whole matrix's result. The jobs API is not a substitute:
+      # it reported finished shards' conclusions as null for minutes after they settled.
+      # The Dashboard E2E jobs are required checks themselves, so gating on them too
+      # blocks nothing that was mergeable.
+      - name: Require every browser E2E shard green
         env:
-          GH_TOKEN: ${{ github.token }}
+          SHARD_RESULT: ${{ needs.browser_e2e.result }}
         run: |
-          set -euo pipefail
-          # The jobs API can briefly report a finished job's conclusion as null, so a
-          # missing or null conclusion is re-read (up to a minute) before it counts. Only
-          # unread conclusions are waited on: any non-success fails on the read that shows it.
-          for attempt in 1 2 3 4 5 6; do
-            conclusions=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?per_page=100" \
-              --jq '[.jobs[] | select(.name | test("^Issuance E2E \\((basics|authority and supply|freeze controls|pause controls|allowlist|new design)\\)$")) | .conclusion]')
-            count=$(jq 'length' <<<"${conclusions}")
-            settled=$(jq '[.[] | select(. != null)] | length' <<<"${conclusions}")
-            # A shard that read anything but success decides the gate: stop waiting.
-            if jq -e 'any(.[]; . != null and . != "success")' <<<"${conclusions}" >/dev/null; then break; fi
-            if [ "${count}" -eq 6 ] && [ "${settled}" -eq 6 ]; then break; fi
-            if [ "${attempt}" -lt 6 ]; then
-              echo "Read ${settled}/6 settled issuance e2e jobs (${count} listed); re-reading in 10s." >&2
-              sleep 10
-            fi
-          done
-          green=$(jq '[.[] | select(. == "success")] | length' <<<"${conclusions}")
-          if [ "${count}" -ne 6 ] || [ "${green}" -ne 6 ]; then
-            echo "Expected 6 successful issuance e2e jobs, found ${green}/${count}: ${conclusions}" >&2
+          if [ "${SHARD_RESULT}" != "success" ]; then
+            echo "One or more browser E2E shards (issuance groups or Dashboard E2E) finished with ${SHARD_RESULT}." >&2
             exit 1
           fi
-          echo "All 6 issuance e2e groups passed."
+          echo "All issuance e2e groups and Dashboard E2E jobs passed."
