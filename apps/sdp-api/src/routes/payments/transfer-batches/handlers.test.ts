@@ -22,6 +22,7 @@ import {
   TRANSFER_CHECKED_DISCRIMINATOR,
 } from "@solana-program/token-2022";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db/client";
 import * as batchesRepositoryPostgres from "@/db/repositories/payment-transfer-batches.repository.postgres";
 import * as paymentsRepositoryPostgres from "@/db/repositories/payments.repository.postgres";
@@ -411,6 +412,44 @@ async function _seedBatchApproverClerk(): Promise<Record<string, string>> {
     "x-project-id": TEST_PROJECT.id,
   };
 }
+
+/** A movement's amounts and verification as the API answers them; other fields kept as sent. */
+const amountsSchema = z.looseObject({
+  basis: z.string(),
+  debit: z.string(),
+  fee: z.string(),
+  credit: z.string(),
+  decimals: z.number(),
+});
+const verificationSchema = z.looseObject({ state: z.string() });
+const estimateAmountsResponseSchema = z.object({
+  data: z.object({
+    estimate: z.looseObject({
+      amounts: amountsSchema,
+      estimatedFees: z.looseObject({ tokenAccountRentLamports: z.string() }),
+    }),
+  }),
+});
+const createdAmountsResponseSchema = z.object({
+  data: z.object({
+    batch: z.looseObject({ id: z.string(), totalAmount: z.string(), amounts: amountsSchema }),
+    recipients: z.array(
+      z.looseObject({
+        amount: z.string(),
+        amounts: amountsSchema,
+        amountVerification: verificationSchema,
+      })
+    ),
+  }),
+});
+const settledAmountsResponseSchema = z.object({
+  data: z.object({
+    recipients: z.array(z.looseObject({ amountVerification: verificationSchema })),
+    transfers: z.array(
+      z.looseObject({ amounts: amountsSchema, amountVerification: verificationSchema })
+    ),
+  }),
+});
 
 describe("payment transfer batches", () => {
   const rpc = installClusterRpcResponder();
@@ -2267,11 +2306,7 @@ describe("payment transfer batches", () => {
       );
 
       expect(res.status, await res.clone().text()).toBe(200);
-      const body = (await res.json()) as {
-        data: {
-          estimate: { amounts: unknown; estimatedFees: { tokenAccountRentLamports: string } };
-        };
-      };
+      const body = estimateAmountsResponseSchema.parse(await res.json());
       expect(body.data.estimate.amounts).toEqual({
         basis: "debit",
         debit: "10.5",
@@ -2322,12 +2357,7 @@ describe("payment transfer batches", () => {
       );
 
       expect(res.status, await res.clone().text()).toBe(200);
-      const created = (await res.json()) as {
-        data: {
-          batch: { id: string; totalAmount: string; amounts: unknown };
-          recipients: Array<{ amount: string; amounts: unknown; amountVerification: unknown }>;
-        };
-      };
+      const created = createdAmountsResponseSchema.parse(await res.json());
       expect(created.data.batch).toMatchObject({
         totalAmount: "10.5",
         amounts: { basis: "debit", debit: "10.5", fee: "0.0525", credit: "10.4475", decimals: 6 },
@@ -2354,12 +2384,7 @@ describe("payment transfer batches", () => {
         { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
         env
       );
-      const settled = (await read.json()) as {
-        data: {
-          recipients: Array<{ amountVerification: unknown }>;
-          transfers: Array<{ amounts: unknown; amountVerification: unknown }>;
-        };
-      };
+      const settled = settledAmountsResponseSchema.parse(await read.json());
       expect(settled.data.recipients.map((recipient) => recipient.amountVerification)).toEqual([
         { state: "verified", reason: "sdp_built_transfer_landed" },
         { state: "verified", reason: "sdp_built_transfer_landed" },
