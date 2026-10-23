@@ -218,6 +218,8 @@ export async function reconcileEarnVaultMovementBatch(
   if (rows.length === 0) return stats;
   const ledger = createPostgresEarnMovementsRepository(getDb(env));
   const { environment, cluster } = currentClusterScope();
+  // SAFETY: claims are vault_direct rows, whose signature `earn_movements_model_shape_check` (0062)
+  // makes NOT NULL: the base58 signature SDP recorded from the transaction it signed.
   const signatures = rows.map((row) => row.signature as Signature);
   let rpc: SolanaRpc;
   let statuses: Array<SignatureStatusInfo | null>;

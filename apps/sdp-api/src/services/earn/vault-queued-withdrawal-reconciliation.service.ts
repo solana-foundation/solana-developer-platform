@@ -163,7 +163,9 @@ async function proveExpiredActions(
 ): Promise<{ statuses: Array<SignatureStatusInfo | null>; unproven: Set<number> }> {
   const expired = rows.flatMap((row, index) =>
     awaitsChain(row, statuses[index]) && height.blockHeight > BigInt(row.last_valid_block_height)
-      ? [{ index, signature: row.signature as Signature }]
+      ? // SAFETY: an action row stores the base58 signature of the owner-signed transaction SDP
+        // verified at submit, the same value the batch status read sent.
+        [{ index, signature: row.signature as Signature }]
       : []
   );
   try {
@@ -332,6 +334,8 @@ async function reconcileActions(
     rpc = createClusterRpc();
     statuses = await getSignatureStatuses(
       rpc,
+      // SAFETY: an action row stores the base58 signature of the owner-signed transaction SDP
+      // verified at submit.
       actions.map((row) => row.signature as Signature),
       { searchTransactionHistory: true }
     );
