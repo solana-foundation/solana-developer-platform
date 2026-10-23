@@ -260,11 +260,17 @@ export function useOnchainSendWizard({
   const steps = getOnchainSendSteps(t);
   const [stepIndex, setStepIndex] = useState(0);
   const demo = usePaymentsDemo();
-  const { values: fields, setField } = useZodForm(onchainSendSchema, {
+  const {
+    values: fields,
+    setField,
+    setFields,
+  } = useZodForm(onchainSendSchema, {
     accountId: "",
     walletId: "",
     asset: "",
+    amountUnit: "token",
     amount: demo ? DEMO_PREFILL_AMOUNTS.send : "",
+    displayAmount: "",
     memo: "",
   });
   const [addAccountOpen, setAddAccountOpen] = useState(false);
@@ -322,9 +328,11 @@ export function useOnchainSendWizard({
   const amountEntry = useTokenAmountEntry({
     mint: selectedAssetBalance === null ? null : selectedAssetBalance.mint,
     basis: "debit",
-    tokenAmountInput: fields.amount,
+    fields,
+    setFields,
   });
-  const sendFields = { ...fields, amount: amountEntry.tokenAmount };
+  // As sent: the unit the input is in, and the amount in token units.
+  const sendFields = { ...fields, amountUnit: amountEntry.unit, amount: amountEntry.tokenAmount };
   const exceedsBalance = onchainAmountExceedsBalance(sendFields.amount, availableAmount);
 
   const selectWallet = (walletId: string) => {
