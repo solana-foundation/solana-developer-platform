@@ -1,4 +1,5 @@
 import { addDecimalAmounts, isDecimalString } from "@sdp/solana/amount";
+import { baseUnits, toTokenAmount } from "@sdp/solana/token-amount";
 import type { CustodyWalletAggregate, CustodyWalletTokenBalance } from "@sdp/types/custody";
 import {
   PAYMENT_TRANSFER_STATUS_TONE,
@@ -26,19 +27,6 @@ function parseIntegerAmount(value: string): bigint | null {
   } catch {
     return null;
   }
-}
-
-/** Exact token units of a base-unit count: `amount ÷ 10^decimals`. */
-function formatTokenAmountFromRaw(amount: bigint, decimals: number): string {
-  if (decimals <= 0) {
-    return amount.toString();
-  }
-
-  const scale = BigInt(10) ** BigInt(decimals);
-  const whole = amount / scale;
-  const fraction = (amount % scale).toString().padStart(decimals, "0").replace(/0+$/, "");
-
-  return fraction ? `${whole}.${fraction}` : whole.toString();
 }
 
 function resolveFallbackUsdValue(
@@ -143,7 +131,7 @@ export function formatTokenAmount(value: number | string, locale?: string): stri
 }
 
 export function formatLamportsAsSol(lamports: bigint, locale?: string): string {
-  return `${formatTokenAmount(formatTokenAmountFromRaw(lamports, SOL_DECIMALS), locale)} SOL`;
+  return `${formatTokenAmount(toTokenAmount(baseUnits(lamports), SOL_DECIMALS).value, locale)} SOL`;
 }
 
 /**
@@ -469,7 +457,7 @@ export function aggregateBalancesFromWallets(wallets: WalletRecord[]): CustodyWa
       token: entry.token,
       mint: entry.mint,
       amount: entry.amount.toString(),
-      tokenAmount: formatTokenAmountFromRaw(entry.amount, entry.decimals),
+      tokenAmount: toTokenAmount(baseUnits(entry.amount), entry.decimals).value,
       displayAmount: entry.displayAmount,
       displayAsOf: entry.displayAsOf,
       displayRule: entry.displayRule,
