@@ -6,7 +6,8 @@ on:
   pull_request:
     paths:
       - 'packages/sdp-types/src/well-known-tokens.ts'
-      - 'scripts/check-well-known-mints.mjs'
+      - 'packages/sdp-solana/scripts/check-well-known-mints.ts'
+      - 'packages/sdp-solana/src/token-terms.ts'
       - '.github/workflows/well-known-mints.yml'
 
 permissions:
