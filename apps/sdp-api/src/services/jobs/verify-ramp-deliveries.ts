@@ -15,7 +15,7 @@ import { feeFor, type TokenTerms } from "@sdp/solana/token-terms";
 import type { RampDeliveryMismatch, RampDeliveryMismatchReason } from "@sdp/types/payments";
 import { type AmountVerificationVerdict, MOVEMENT_NOT_EXECUTED } from "@sdp/types/token-movements";
 import { SOL_DECIMALS, SOL_MINT, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
-import { address, assertIsSignature, type Signature, unixTimestamp } from "@solana/kit";
+import { address, assertIsSignature, type Epoch, type Signature, unixTimestamp } from "@solana/kit";
 import { z } from "zod";
 import type { PaymentsRepository, PaymentTransferRow } from "@/db/repositories/payments.repository";
 import {
@@ -50,6 +50,48 @@ export interface RampChainReader {
   getSignatureStatuses(signatures: Signature[]): Promise<Array<SignatureStatusInfo | null>>;
   /** A mint's Token Terms, read live: only when a delivery's debit and credit differ. */
   readTokenTerms(asset: Extract<AssetRef, { kind: "token" }>): Promise<TokenTerms>;
+  /** The epoch `slot` is in, from the cluster's epoch schedule (read once per process). */
+  epochOfSlot(slot: bigint): Promise<Epoch>;
+}
+
+type EpochSchedule = Awaited<ReturnType<ReturnType<SolanaRpc["getEpochSchedule"]>["send"]>>;
+
+/** Each cluster's epoch schedule, a static fact; a failed read is never kept. */
+const epochSchedules = new Map<string, Promise<EpochSchedule>>();
+
+function clusterEpochSchedule(rpc: SolanaRpc): Promise<EpochSchedule> {
+  const { cluster } = currentClusterScope();
+  const cached = epochSchedules.get(cluster);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const read = rpc.getEpochSchedule().send();
+  epochSchedules.set(cluster, read);
+  read.catch(() => epochSchedules.delete(cluster));
+  return read;
+}
+
+/**
+ * The epoch `slot` is in, as `EpochSchedule::get_epoch` computes it: warmup
+ * epochs double from the minimum length until `firstNormalSlot`, then every
+ * epoch is `slotsPerEpoch` long.
+ */
+export function epochAt(
+  schedule: Pick<EpochSchedule, "firstNormalEpoch" | "firstNormalSlot" | "slotsPerEpoch">,
+  slot: bigint
+): Epoch {
+  if (slot >= schedule.firstNormalSlot) {
+    return schedule.firstNormalEpoch + (slot - schedule.firstNormalSlot) / schedule.slotsPerEpoch;
+  }
+  let epoch = 0n;
+  let length = MINIMUM_SLOTS_PER_EPOCH;
+  let start = 0n;
+  while (slot >= start + length) {
+    start += length;
+    length *= 2n;
+    epoch += 1n;
+  }
+  return epoch;
 }
 
 function createRampChainReader(rpc: SolanaRpc = createClusterRpc()): RampChainReader {
@@ -58,6 +100,7 @@ function createRampChainReader(rpc: SolanaRpc = createClusterRpc()): RampChainRe
     getSignatureStatuses: (signatures) =>
       getSignatureStatuses(rpc, signatures, { searchTransactionHistory: true }),
     readTokenTerms: (asset) => readTokenTerms(asset),
+    epochOfSlot: async (slot) => epochAt(await clusterEpochSchedule(rpc), slot),
   };
 }
 
@@ -103,6 +146,12 @@ function reportedFieldsMatch(transfer: PaymentTransferRow, settled: ProviderSett
   }
   return true;
 }
+
+/** Whether a mint's fee rule explains a delivery's debit and credit differing. */
+type FeeRuleVerdict = "explained" | "unexplained" | "unknown";
+
+/** `MINIMUM_SLOTS_PER_EPOCH`: the first warmup epoch's length. */
+const MINIMUM_SLOTS_PER_EPOCH = 32n;
 
 /** What one read of a finalized transaction proves about a provider-reported delivery. */
 type DeliveryVerdict =
@@ -153,6 +202,8 @@ interface ObservedDelivery {
   credit: bigint;
   /** What the transfers into the destination debited, by their instruction data. */
   debit: bigint;
+  /** Each transfer's own debit: a fee is charged, capped and rounded per transfer. */
+  debits: readonly bigint[];
   /** The fee the transfers stated (TransferCheckedWithFee); null when one stated none. */
   statedFee: bigint | null;
 }
@@ -200,7 +251,13 @@ function observedDelivery(
     const post = transaction.postBalances?.[index];
     if (pre === undefined || post === undefined) return null;
     // A native delivery carries no transfer fee.
-    return { decimals: SOL_DECIMALS, credit: post - pre, debit: post - pre, statedFee: 0n };
+    return {
+      decimals: SOL_DECIMALS,
+      credit: post - pre,
+      debit: post - pre,
+      debits: [post - pre],
+      statedFee: 0n,
+    };
   }
   if (transaction.preTokenBalances === undefined || transaction.postTokenBalances === undefined) {
     return null;
@@ -214,6 +271,7 @@ function observedDelivery(
       .map((balance) => transaction.accountKeys[balance.accountIndex])
   );
   let debit = 0n;
+  const debits: bigint[] = [];
   let statedFee: bigint | null = 0n;
   let moves = 0;
   for (const instruction of transaction.instructions) {
@@ -228,6 +286,7 @@ function observedDelivery(
     const amount = rawAmountOf(instruction.info, "tokenAmount");
     if (amount === null) return null;
     debit += amount;
+    debits.push(amount);
     moves += 1;
     const fee =
       instruction.parsedType === "transferCheckedWithFee"
@@ -238,39 +297,53 @@ function observedDelivery(
   // A delivery by an instruction this reader does not parse (a CPI it cannot
   // attribute) is judged by its credit alone.
   return moves === 0 || debit < delta.baseUnits
-    ? { decimals: delta.decimals, credit: delta.baseUnits, debit: delta.baseUnits, statedFee: 0n }
-    : { decimals: delta.decimals, credit: delta.baseUnits, debit, statedFee };
+    ? {
+        decimals: delta.decimals,
+        credit: delta.baseUnits,
+        debit: delta.baseUnits,
+        debits: [delta.baseUnits],
+        statedFee: 0n,
+      }
+    : { decimals: delta.decimals, credit: delta.baseUnits, debit, debits, statedFee };
 }
 
 /**
  * Whether the transfer fee rule explains a delivery's debit and credit
- * differing: the program checked a fee the transfers stated, or the mint's
- * fee schedule, read live, charges exactly that fee on the debit under either
- * of its entries (the transaction's epoch is one of them while the fee
- * changes). Reads the mint only when a fee is not stated.
+ * differing: the program checked a fee the transfers stated, or the mint's fee
+ * entry in force in the epoch the delivery landed, read live, charges exactly
+ * that fee, summed over the transfers (each is capped and rounded on its own).
+ * `unknown` when both fee entries the mint keeps came after the delivery: the
+ * fee it paid is no longer on chain, which is no contradiction. Reads the mint
+ * and the epoch only when a fee is not stated.
  */
 async function feeRuleExplains(
   asset: AssetRef,
   delivery: ObservedDelivery,
-  readTerms: (asset: Extract<AssetRef, { kind: "token" }>) => Promise<TokenTerms>
-): Promise<boolean> {
+  landedSlot: bigint,
+  chain: Pick<RampChainReader, "readTokenTerms" | "epochOfSlot">
+): Promise<FeeRuleVerdict> {
   const fee = delivery.debit - delivery.credit;
-  if (fee === 0n) return true;
-  if (asset.kind !== "token") return false;
-  if (delivery.statedFee !== null) return delivery.statedFee === fee;
-  const terms = await readTerms(asset);
-  if (terms.transferFee === null) return false;
-  const debit = baseUnits(delivery.debit);
-  return [terms.transferFee.older.epoch, terms.transferFee.newer.epoch].some(
-    (epoch) => feeFor(terms, debit, epoch) === fee
+  if (fee === 0n) return "explained";
+  if (asset.kind !== "token") return "unexplained";
+  if (delivery.statedFee !== null) {
+    return delivery.statedFee === fee ? "explained" : "unexplained";
+  }
+  const terms = await chain.readTokenTerms(asset);
+  if (terms.transferFee === null) return "unexplained";
+  const epoch = await chain.epochOfSlot(landedSlot);
+  if (epoch < terms.transferFee.older.epoch) return "unknown";
+  const charged = delivery.debits.reduce(
+    (total, debit) => total + feeFor(terms, baseUnits(debit), epoch),
+    0n
   );
+  return charged === fee ? "explained" : "unexplained";
 }
 
 async function judgeOnrampDelivery(
   transfer: PaymentTransferRow,
   settled: ProviderSettlement,
   transaction: ParsedTransaction,
-  readTerms: (asset: Extract<AssetRef, { kind: "token" }>) => Promise<TokenTerms>
+  chain: Pick<RampChainReader, "readTokenTerms" | "epochOfSlot">
 ): Promise<DeliveryVerdict> {
   const destination = transfer.destination_address;
   const asset = rampDeliveryAsset(transfer);
@@ -290,8 +363,11 @@ async function judgeOnrampDelivery(
   const observedAmount = formatDecimalAmount(delivery.credit, decimals);
   // A provider may report what it received (the credit) or what it sent (the
   // debit): the debit counts only when the fee rule explains the difference.
-  const debitCounts =
-    delivery.debit !== delivery.credit && (await feeRuleExplains(asset, delivery, readTerms));
+  const feeRule =
+    delivery.debit === delivery.credit
+      ? "explained"
+      : await feeRuleExplains(asset, delivery, transaction.slot, chain);
+  const debitCounts = delivery.debit !== delivery.credit && feeRule === "explained";
   try {
     const reported = [settled.receivedAmount, settled.onchain?.amount].filter(
       (amount): amount is string => amount !== undefined
@@ -304,7 +380,9 @@ async function judgeOnrampDelivery(
     const short =
       quoted !== null && delivery.credit < quoted && !(debitCounts && delivery.debit >= quoted);
     if (short || !reported.every(accounted)) {
-      return mismatch("amount_mismatch", observedAmount);
+      // The fee that applied is no longer on chain: read again later rather
+      // than record a contradiction the chain cannot support.
+      return feeRule === "unknown" ? PENDING : mismatch("amount_mismatch", observedAmount);
     }
   } catch {
     return mismatch("amount_mismatch", observedAmount);
@@ -417,7 +495,7 @@ async function verifyOnramp(
     }
     return false;
   }
-  const verdict = await judgeOnrampDelivery(transfer, settled, transaction, chain.readTokenTerms);
+  const verdict = await judgeOnrampDelivery(transfer, settled, transaction, chain);
   if (verdict.kind === "mismatch") {
     // An on-ramp is provider-built: it has no leg until its delivery verifies.
     await holdDelivery(repo, transfer, settled, verdict, null);
