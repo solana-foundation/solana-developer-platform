@@ -24,45 +24,55 @@ function isDefaultedOption(name: string): name is DefaultedOption {
 
 /**
  * The Idempotency-Key fingerprint form of a create-batch body (HOO-1918,
- * ADR 0012): the token as the asset it names on the project's cluster (the
- * mint, or "SOL" for native SOL), so "USDC" and its mint are one batch;
- * recipients with canonical amounts ("1.0" and "1" move the same), sorted by
- * their own canonical JSON, because the order they are listed in does not
- * change what moves (APE-667); and options at their default value dropped,
- * then empty `options`, because `{}`, no options and an explicit default mean
- * the same (APE-665). Anything that is not a recipients array is left as
- * sent; validation refuses it.
+ * ADR 0012): `token` becomes `asset`, the asset it names on the project's
+ * cluster ("native" for native SOL, else the mint), so "USDC" and its mint
+ * are one batch while native SOL and the wrapped SOL mint are two. No earlier
+ * form has an `asset` key, so this form never equals one of them for another
+ * request. Recipients have canonical amounts ("1.0" and "1" move the same) and
+ * are sorted by their own canonical JSON, because the order they are listed in
+ * does not change what moves (APE-667); options at their default value are
+ * dropped, then empty `options`, because `{}`, no options and an explicit
+ * default mean the same (APE-665). Anything that is not a recipients array is
+ * left as sent; validation refuses it.
  */
 export function canonicalizeTransferBatchBody(body: JsonValue): JsonValue {
-  return withCanonicalToken(canonicalBatchBody(body), (token) => {
-    const asset = resolvePaymentAsset(token);
-    return asset.kind === "native" ? "SOL" : asset.mint;
-  });
-}
-
-/**
- * {@link canonicalizeTransferBatchBody} as it was before ADR 0012, with the
- * token as the mint it executed as (native SOL and the wrapped SOL mint were
- * one asset then), so a key or batch row saved under it still matches its
- * retry (`previousCanonicalize`).
- */
-export function previousCanonicalTransferBatchBody(body: JsonValue): JsonValue {
-  return withCanonicalToken(canonicalBatchBody(body), normalizePaymentToken);
-}
-
-/** The batch body with its `token` spelled by `canonicalToken`; anything else as it is. */
-function withCanonicalToken(
-  canonical: JsonValue,
-  canonicalToken: (token: string) => string
-): JsonValue {
+  const canonical = canonicalBatchBody(body, withoutDefaultOptions);
   if (canonical === null || typeof canonical !== "object" || Array.isArray(canonical)) {
     return canonical;
   }
-  const { token } = canonical;
-  return typeof token === "string" ? { ...canonical, token: canonicalToken(token) } : canonical;
+  const { token, ...rest } = canonical;
+  if (typeof token !== "string") {
+    return canonical;
+  }
+  const asset = resolvePaymentAsset(token);
+  return { ...rest, asset: asset.kind === "native" ? "native" : asset.mint };
 }
 
-function canonicalBatchBody(body: JsonValue): JsonValue {
+/**
+ * The forms the route fingerprinted with before ADR 0012, newest first
+ * (`previousCanonicalForms`), so a key or batch row saved under either still
+ * matches its retry: default options dropped with the token as the mint it
+ * executed as (native SOL and the wrapped SOL mint were one asset then), and,
+ * before APE-665, options and token as sent.
+ */
+export const PREVIOUS_TRANSFER_BATCH_FORMS: readonly ((body: JsonValue) => JsonValue)[] = [
+  (body) => {
+    const canonical = canonicalBatchBody(body, withoutDefaultOptions);
+    if (canonical === null || typeof canonical !== "object" || Array.isArray(canonical)) {
+      return canonical;
+    }
+    const { token } = canonical;
+    return typeof token === "string"
+      ? { ...canonical, token: normalizePaymentToken(token) }
+      : canonical;
+  },
+  (body) => canonicalBatchBody(body, (options) => options),
+];
+
+function canonicalBatchBody(
+  body: JsonValue,
+  canonicalOptions: (options: JsonValue | undefined) => JsonValue | undefined
+): JsonValue {
   if (body === null || typeof body !== "object" || Array.isArray(body)) {
     return body;
   }
@@ -71,7 +81,7 @@ function canonicalBatchBody(body: JsonValue): JsonValue {
     return body;
   }
   const { options: sentOptions, ...rest } = body;
-  const options = withoutDefaultOptions(sentOptions);
+  const options = canonicalOptions(sentOptions);
   const emptyOptions =
     options !== null &&
     typeof options === "object" &&

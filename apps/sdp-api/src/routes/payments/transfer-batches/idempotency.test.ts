@@ -4,41 +4,41 @@ import { describe, expect, it } from "vitest";
 import type { JsonValue } from "@/lib/idempotency";
 import {
   canonicalizeTransferBatchBody as canonicalizeOnDevnet,
-  previousCanonicalTransferBatchBody as previousOnDevnet,
+  PREVIOUS_TRANSFER_BATCH_FORMS,
 } from "./idempotency";
 
-/** The canonical form a sandbox project's request takes: its tokens resolve on devnet. */
-function canonicalizeTransferBatchBody(body: JsonValue): JsonValue {
-  return runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
-    canonicalizeOnDevnet(body)
-  );
+/** Runs `form` as a sandbox project's request does: its tokens resolve on devnet. */
+function onDevnet(form: (body: JsonValue) => JsonValue): (body: JsonValue) => JsonValue {
+  return (body) => runInClusterScope({ projectId: null, environment: "sandbox" }, () => form(body));
 }
 
-/** The previous canonical form of a sandbox project's request. */
-function previousCanonicalTransferBatchBody(body: JsonValue): JsonValue {
-  return runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
-    previousOnDevnet(body)
-  );
-}
+const canonicalizeTransferBatchBody = onDevnet(canonicalizeOnDevnet);
+const [beforeAdr0012, beforeApe665] = PREVIOUS_TRANSFER_BATCH_FORMS.map(onDevnet);
+
+const USDC = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
+const BODY = {
+  sourceCustodyWalletId: "cwlt_1",
+  recipients: [{ counterpartyAccountId: "cpa_a", amount: "1" }],
+};
 
 describe("canonicalizeTransferBatchBody", () => {
-  it("makes recipient order irrelevant and keeps everything else as sent", () => {
+  it("makes recipient order irrelevant and spells the token as the asset", () => {
     const a = { counterpartyId: "cp_a", amount: "1" };
     const b = { counterpartyId: "cp_b", amount: "2" };
-    const body = { sourceCustodyWalletId: "cwlt_1", token: SOL_MINT, recipients: [b, a] };
+    const body = { sourceCustodyWalletId: "cwlt_1", token: USDC, recipients: [b, a] };
 
-    expect(canonicalizeTransferBatchBody(body)).toEqual({ ...body, recipients: [a, b] });
+    expect(canonicalizeTransferBatchBody(body)).toEqual({
+      sourceCustodyWalletId: "cwlt_1",
+      asset: USDC,
+      recipients: [a, b],
+    });
     expect(canonicalizeTransferBatchBody({ ...body, recipients: [a, b] })).toEqual(
       canonicalizeTransferBatchBody(body)
     );
   });
 
   it("spells recipient amounts canonically and drops empty options", () => {
-    const body = {
-      sourceCustodyWalletId: "cwlt_1",
-      token: SOL_MINT,
-      recipients: [{ counterpartyAccountId: "cpa_a", amount: "1" }],
-    };
+    const body = { ...BODY, token: USDC };
     const respelled = {
       ...body,
       options: {},
@@ -47,17 +47,14 @@ describe("canonicalizeTransferBatchBody", () => {
 
     expect(canonicalizeTransferBatchBody(respelled)).toEqual(canonicalizeTransferBatchBody(body));
     expect(canonicalizeTransferBatchBody({ ...body, options: { preflight: false } })).toEqual({
-      ...body,
+      ...BODY,
+      asset: USDC,
       options: { preflight: false },
     });
   });
 
   it("treats options sent at their default as omitted (APE-665)", () => {
-    const body = {
-      sourceCustodyWalletId: "cwlt_1",
-      token: SOL_MINT,
-      recipients: [{ counterpartyAccountId: "cpa_a", amount: "1" }],
-    };
+    const body = { ...BODY, token: USDC };
 
     expect(
       canonicalizeTransferBatchBody({
@@ -70,87 +67,66 @@ describe("canonicalizeTransferBatchBody", () => {
         ...body,
         options: { maxRecipientsPerTransaction: 20, preflight: false },
       })
-    ).toEqual({ ...body, options: { preflight: false } });
+    ).toEqual({ ...BODY, asset: USDC, options: { preflight: false } });
     expect(
       canonicalizeTransferBatchBody({ ...body, options: { maxRecipientsPerTransaction: 8 } })
-    ).toEqual({ ...body, options: { maxRecipientsPerTransaction: 8 } });
+    ).toEqual({ ...BODY, asset: USDC, options: { maxRecipientsPerTransaction: 8 } });
   });
 
   it("treats an omitted priority fee as none (APE SOLA9-765)", () => {
-    const body = {
-      sourceCustodyWalletId: "cwlt_1",
-      token: SOL_MINT,
-      recipients: [{ counterpartyAccountId: "cpa_a", amount: "1" }],
-    };
+    const body = { ...BODY, token: USDC };
 
     expect(canonicalizeTransferBatchBody({ ...body, options: { priorityFee: "none" } })).toEqual(
       canonicalizeTransferBatchBody(body)
     );
     expect(canonicalizeTransferBatchBody({ ...body, options: { priorityFee: "high" } })).toEqual({
-      ...body,
+      ...BODY,
+      asset: USDC,
       options: { priorityFee: "high" },
     });
   });
 
   it("fingerprints a symbol and its mint as one asset, and native SOL apart from wrapped SOL (APE SOLA9-695)", () => {
-    const usdc = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
-    const body = {
-      sourceCustodyWalletId: "cwlt_1",
-      recipients: [{ counterpartyAccountId: "cpa_a", amount: "1" }],
-    };
-
-    expect(canonicalizeTransferBatchBody({ ...body, token: "usdc" })).toEqual(
-      canonicalizeTransferBatchBody({ ...body, token: usdc })
+    expect(canonicalizeTransferBatchBody({ ...BODY, token: "usdc" })).toEqual(
+      canonicalizeTransferBatchBody({ ...BODY, token: USDC })
     );
     // ADR 0012: "SOL" moves native SOL, the wrapped SOL mint is an SPL token.
-    expect(canonicalizeTransferBatchBody({ ...body, token: "SOL" })).not.toEqual(
-      canonicalizeTransferBatchBody({ ...body, token: SOL_MINT })
-    );
-    // Before it both executed as the wrapped SOL mint, so a key saved then still matches either.
-    expect(previousCanonicalTransferBatchBody({ ...body, token: "SOL" })).toEqual(
-      previousCanonicalTransferBatchBody({ ...body, token: SOL_MINT })
-    );
+    expect(canonicalizeTransferBatchBody({ ...BODY, token: "sol" })).toEqual({
+      ...BODY,
+      asset: "native",
+    });
+    expect(canonicalizeTransferBatchBody({ ...BODY, token: SOL_MINT })).toEqual({
+      ...BODY,
+      asset: SOL_MINT,
+    });
   });
 
-  it("keeps the form before ADR 0012, defaults dropped and the token as the mint it executed as, for keys saved before it", () => {
+  it("keeps both earlier forms, so a key or row saved under either still matches", () => {
     const body = {
-      sourceCustodyWalletId: "cwlt_1",
+      ...BODY,
       token: "sol",
       recipients: [{ counterpartyAccountId: "cpa_a", amount: "1.0" }],
       options: { maxRecipientsPerTransaction: 20 },
     };
-    expect(previousCanonicalTransferBatchBody(body)).toEqual({
-      sourceCustodyWalletId: "cwlt_1",
-      token: SOL_MINT,
-      recipients: [{ counterpartyAccountId: "cpa_a", amount: "1" }],
+
+    // Before ADR 0012: defaults dropped, the token as the mint it executed as.
+    expect(beforeAdr0012(body)).toEqual({ ...BODY, token: SOL_MINT });
+    expect(beforeAdr0012({ ...body, token: SOL_MINT })).toEqual(beforeAdr0012(body));
+    // Before APE-665: options and token as sent.
+    expect(beforeApe665(body)).toEqual({
+      ...BODY,
+      token: "sol",
+      options: { maxRecipientsPerTransaction: 20 },
     });
-    expect(previousCanonicalTransferBatchBody(body)).not.toEqual(
-      canonicalizeTransferBatchBody(body)
-    );
   });
 
-  it("spells the token as the asset it names, and as the mint it executed as in the previous form", () => {
-    const body = {
-      sourceCustodyWalletId: "cwlt_1",
-      recipients: [{ counterpartyAccountId: "cpa_a", amount: "1" }],
-    };
-    const mint = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
-
-    expect(canonicalizeTransferBatchBody({ ...body, token: "usdc" })).toEqual({
-      ...body,
-      token: mint,
-    });
-    expect(canonicalizeTransferBatchBody({ ...body, token: mint })).toEqual(
-      canonicalizeTransferBatchBody({ ...body, token: "USDC" })
-    );
-    expect(canonicalizeTransferBatchBody({ ...body, token: "sol" })).toEqual({
-      ...body,
-      token: "SOL",
-    });
-    expect(previousCanonicalTransferBatchBody({ ...body, token: "usdc" })).toEqual({
-      ...body,
-      token: mint,
-    });
+  it("never gives a new request an earlier form's fingerprint of another asset", () => {
+    // A new wrapped SOL batch and a retry naming native SOL are two assets.
+    const wrapped = canonicalizeTransferBatchBody({ ...BODY, token: SOL_MINT });
+    for (const form of [beforeAdr0012, beforeApe665]) {
+      expect(form({ ...BODY, token: "SOL" })).not.toEqual(wrapped);
+      expect(form({ ...BODY, token: SOL_MINT })).not.toEqual(wrapped);
+    }
   });
 
   it("leaves a body without a recipients array untouched for validation to refuse", () => {

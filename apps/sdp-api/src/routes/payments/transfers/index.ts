@@ -32,7 +32,7 @@ transfers.post(
     // One intent is one request: "USDC" and its mint, "1.0" and "1", and an
     // omitted and an explicit default amountBasis.
     canonicalize: canonicalizeTransferBody,
-    previousCanonicalize: previousCanonicalTransferBody,
+    previousCanonicalForms: [previousCanonicalTransferBody],
   }),
   replayFromRecord(findTransferRecordReplay),
   admit(admitTransferExecution),
