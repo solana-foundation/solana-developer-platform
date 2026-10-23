@@ -160,6 +160,69 @@ describe("observed transfer amounts", () => {
     expect(observed?.movement.verification.state).toBe("verified");
   });
 
+  it("credits nothing when the whole debit is withheld, as a rounded-up fee on a tiny transfer can", async () => {
+    const [observed] = await observe(
+      tokenTransaction(token2022Transfer("transferChecked", "1", null), "0")
+    );
+
+    expect(observed?.row.amount).toBe("0");
+    expect(observed?.movement.amounts).toEqual({ debit: 1n, fee: 1n, credit: 0n });
+    expect(observed?.movement.verification.state).toBe("verified");
+  });
+
+  it("counts moves between accounts no tracked wallet owns before inferring a fee", async () => {
+    // The wallet sends 100 to an outside account, which forwards 90 in the same
+    // transaction: the outside account keeps 10 and no fee was withheld.
+    const outside = syntheticAddress(7);
+    const outsideAccount = syntheticAddress(8);
+    const onward = syntheticAddress(9);
+    const plainTransfer = (
+      source: string,
+      destination: string,
+      authority: string,
+      amount: string
+    ) => ({
+      program: "spl-token-2022",
+      programId: TOKEN_2022,
+      parsed: {
+        type: "transferChecked",
+        info: { source, destination, mint: FEE_MINT, authority, tokenAmount: scaledAmount(amount) },
+      },
+      stackHeight: 1,
+    });
+    const [observed, ...others] = await observe(
+      parsedTransactionResult({
+        signature: "1".repeat(64),
+        slot: 50,
+        blockTime: 1700000000,
+        accountKeys: [WALLET, WALLET_TOKEN_ACCOUNT, outsideAccount, onward],
+        instructions: [
+          plainTransfer(WALLET_TOKEN_ACCOUNT, outsideAccount, WALLET, "100"),
+          plainTransfer(outsideAccount, onward, outside, "90"),
+        ],
+        innerInstructions: [],
+        preTokenBalances: [
+          feeBalance(1, WALLET, "1000"),
+          feeBalance(2, outside, "0"),
+          feeBalance(3, outside, "0"),
+        ],
+        postTokenBalances: [
+          feeBalance(1, WALLET, "900"),
+          feeBalance(2, outside, "10"),
+          feeBalance(3, outside, "90"),
+        ],
+      })
+    );
+
+    expect(others).toEqual([]);
+    expect(observed?.row).toMatchObject({ direction: "outbound", amount: "0.0001" });
+    expect(observed?.movement.amounts).toEqual({ debit: 100n, fee: 0n, credit: 100n });
+    expect(observed?.movement.verification).toEqual({
+      state: "verified",
+      reason: "chain_delta_matched",
+    });
+  });
+
   it("flags a stated fee the balance change contradicts, and never reads the display string", async () => {
     const [observed] = await observe(
       tokenTransaction(token2022Transfer("transferCheckedWithFee", "1000000", "5000"), "900000")
