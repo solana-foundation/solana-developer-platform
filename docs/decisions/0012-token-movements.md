@@ -166,6 +166,35 @@ them in one place, not adding special cases to every flow.
   precision check `loadPaymentMint` made); token admission stays start admission, so cancel and
   recovery never ask it. Interest-bearing and scaled mints are still refused until PR 5: the
   recurring row takes the builder's refusals.
+- **One capability table (PR 4).** `support(terms, path)` answers from one table with a row per
+  path: `builder` and the adapters `recurring` (PR 3's row), `issuance` (mint, burn),
+  `issuance_seize`, `dvp`, `private_channels` and `earn`; `capabilityRefusals` lists every
+  refusal with its extension and disposition. Every refusal is a `refuse` except the recurring
+  row's paused mint, a `hold`; a row lists its refusals before its holds. DvP's create check and
+  form inspection, its reclaim's hook check and the Earn deposit-mint guard decide on their rows;
+  no module keeps its own extension set. A CI test (`kora-sponsor-policy.test.ts`) pins the
+  builder row to `infra/kora/kora.toml`.
+- **Token ACL thaw (PR 4).** A frozen-by-default mint whose freeze authority is its Token ACL
+  config moves through the builder: a destination the movement creates gets the config's
+  permissionless thaw right after its create (`resolveTokenAclThaws`), as Mosaic's transfer
+  does, and /pay gets the same thaw, signed by the payer. Other frozen-by-default mints move
+  only to an account their authority thawed; one with no freeze authority, and an existing
+  frozen destination, are refused. The recurring row still refuses every frozen-by-default mint
+  (the program's CPI cannot thaw), and a pull to a frozen destination is held
+  (`destination_frozen`). The Token ACL program is not on the offline surfnet, so the thaw is
+  covered by unit and route tests.
+- **Adapters (PR 4).** Issuance hands Mosaic a number only after reading the mint live, asking
+  its row and checking that Mosaic's own conversion gives back exactly the amount's base units
+  (`@sdp/solana/mosaic-amount`); a seize on a fee mint debits the amount and the destination
+  receives it less the withheld fee. DvP funding is built by the builder. Private Channels writes
+  read the mint with the allowlist entry and convert at its live decimals. Earn's guard reports
+  `earn_support` drift; its builders read no deposit mint, so it does not block a build.
+- **Chain verification (PR 4).** Observed transfers and on-ramp deliveries are judged from base
+  units: instruction data (`transferCheckedWithFee` included) against the raw balance change,
+  never `uiAmountString`. An on-ramp's reported amount may equal the observed credit, or the
+  observed debit when the fee rule explains the difference; a verified delivery records its leg,
+  `verified_by` the chain, in the statement that completes it. A built off-ramp deposit whose
+  confirmation timed out settles when the verifier sees it final.
 - **Mint watch.** `pnpm check:well-known-mints` decodes every catalogue mint with the same
   decoder, prints its extension state, and fails when a 1 000-token transfer would pay a fee
   under the current or the newer fee entry (bps alone is not the signal, since `maximumFee` is
@@ -215,7 +244,8 @@ Each PR ships alone.
 3. **Credit-basis recurring mandates**, after v1.
 4. **When the DvP, Private Channels and Earn refusals lift:** when those programs support
    `TransferCheckedWithFee` and hooks.
-5. **Token ACL gating:** PR 2 refuses mints that open accounts frozen; PR 4 adds the
-   permissionless thaw and lifts the refusal where the mint is gated.
+5. **Token ACL gating:** decided in PR 4 (see Consequences). Open: whether the builder should
+   also thaw an existing frozen account of a Token ACL mint, which would undo an issuer's freeze
+   the gate allows.
 6. **Issuer operations** (update a multiplier or fee, harvest withheld fees) are out of scope;
    Token Terms can support them later.
