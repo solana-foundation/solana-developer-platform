@@ -28,6 +28,7 @@ import {
 import { app } from "@/index";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
+import * as paymentRequests from "@/services/payments/payment-requests";
 import * as sponsorshipService from "@/services/sponsorship.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import {
@@ -444,6 +445,22 @@ describe("Public payment request routes", () => {
       expect(await response.json()).toMatchObject({ error: { code: "RATE_LIMITED" } });
       expect(verify).toHaveBeenCalledTimes(1);
       expect(sponsorship).not.toHaveBeenCalled();
+    });
+
+    it("does not replay the stored transaction once the request passes its deadline", async () => {
+      stubSponsorship();
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+      expect((await postTransaction(request.public_token)).status).toBe(200);
+
+      const expiry = vi
+        .spyOn(paymentRequests, "isPaymentRequestExpired")
+        .mockReturnValueOnce(false)
+        .mockReturnValue(true);
+      onTestFinished(() => expiry.mockRestore());
+
+      const replay = await postTransaction(request.public_token);
+      expect(replay.status).toBe(400);
+      expect(await replay.json()).not.toHaveProperty("transaction");
     });
 
     it("lets a new account claim after the window expires", async () => {

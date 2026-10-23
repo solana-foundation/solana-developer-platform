@@ -195,6 +195,7 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
                  updated_at = sdp_iso_now()
            WHERE id = ?
              AND status = 'awaiting_payment'
+             AND (expires_at IS NULL OR expires_at > sdp_iso_now())
              AND (
                sponsored_tx_last_valid_block_height IS NULL
                OR sponsored_tx_last_valid_block_height < ?

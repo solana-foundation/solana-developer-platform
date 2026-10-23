@@ -501,6 +501,22 @@ describe("PaymentRequestsRepository (postgres)", () => {
       expect(claim?.lastValidBlockHeight).toBe(1_000n);
     });
 
+    it("refuses a claim on a request past its deadline that is still awaiting payment", async () => {
+      const request = await repo.createPaymentRequest(
+        createInput({ expiresAt: new Date(Date.now() - 1_000).toISOString() })
+      );
+      expect(
+        await repo.claimSponsoredTransactionWindow({
+          requestId: request.id,
+          account: ACCOUNT_A,
+          unsignedTransaction: "dHhB",
+          lastValidBlockHeight: 1_000n,
+          currentBlockHeight: 900n,
+        })
+      ).toBe(false);
+      expect(await repo.getSponsoredTransactionClaim(request.id)).toBeNull();
+    });
+
     it("refuses a reclaim while the window is live and admits one after expiry", async () => {
       const request = await repo.createPaymentRequest(createInput());
       expect(

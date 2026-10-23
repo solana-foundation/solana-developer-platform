@@ -33,6 +33,7 @@ import { createSystemPaymentRequestsRepository } from "@/db/repositories/reposit
 import { badRequest, rateLimited } from "@/lib/errors";
 import { buildSplTransferInstructions } from "@/routes/payments/token-accounts";
 import { AuditService } from "@/services/audit.service";
+import { isPaymentRequestExpired } from "@/services/payments/payment-requests";
 import {
   createSponsorshipFeePayment,
   resolveProjectSponsorshipScope,
@@ -53,6 +54,12 @@ const sponsoredPaymentTransactionSchema = z.discriminatedUnion("kind", [
 ]);
 
 export type SponsoredPaymentTransaction = z.infer<typeof sponsoredPaymentTransactionSchema>;
+
+function assertNotExpired(request: PaymentRequestRow): void {
+  if (isPaymentRequestExpired(request.expires_at)) {
+    throw badRequest("Payment request is no longer payable");
+  }
+}
 
 /** Saved claims retain their original sponsor even after the configured signer rotates. */
 function assertSavedPayerIsNotSponsor(payer: Address, unsignedBase64: string): void {
@@ -101,6 +108,7 @@ export async function issuePaymentRequestTransaction(
     if (claim === null || claim.lastValidBlockHeight < currentBlockHeight) {
       return null;
     }
+    assertNotExpired(request);
     if (claim.account !== payer) {
       const retryAfterSeconds = Math.ceil(
         Number(claim.lastValidBlockHeight - currentBlockHeight) * 0.4
@@ -131,6 +139,7 @@ export async function issuePaymentRequestTransaction(
   };
 
   const signAndStore = async (unsignedBase64: string): Promise<SponsoredPaymentTransaction> => {
+    assertNotExpired(request);
     const feePayment = await getFeePayment();
     const unsignedBytes = new Uint8Array(getBase64Encoder().encode(unsignedBase64));
     const sponsored = await feePayment.signAsFeePayer(unsignedBytes);
@@ -167,6 +176,7 @@ export async function issuePaymentRequestTransaction(
         superseding.account === payer &&
         superseding.signedTransaction !== null
       ) {
+        assertNotExpired(request);
         assertSavedPayerIsNotSponsor(payer, superseding.unsignedTransaction);
         return { kind: "signed", transaction: superseding.signedTransaction };
       }
