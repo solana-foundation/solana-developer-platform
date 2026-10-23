@@ -35,6 +35,7 @@ import { registerOrganizationPaths } from "./paths/organizations";
 import { registerPaymentsPaths } from "./paths/payments";
 import { registerPrivateChannelsPaths } from "./paths/private-channels";
 import { registerProjectAdministrationPaths, registerProjectPaths } from "./paths/projects";
+import { registerTokenPaths } from "./paths/tokens";
 import { registerTransactionsPaths } from "./paths/transactions";
 import {
   isValuePublished,
@@ -231,6 +232,7 @@ function registerPublicPaths(registry: OpenAPIRegistry, publishEarn: boolean) {
   registerIssuancePaths(registry);
   registerPaymentsPaths(registry);
   registerTransactionsPaths(registry);
+  registerTokenPaths(registry);
   registerCompliancePaths(registry);
   registerCounterpartyPaths(registry);
   registerAssetProfilePaths(registry);
@@ -249,6 +251,7 @@ function registerAllPaths(registry: OpenAPIRegistry) {
   registerIssuancePaths(registry);
   registerPaymentsPaths(registry);
   registerTransactionsPaths(registry);
+  registerTokenPaths(registry);
   registerPrivateChannelsPaths(registry);
   registerCompliancePaths(registry);
   registerCounterpartyPaths(registry);

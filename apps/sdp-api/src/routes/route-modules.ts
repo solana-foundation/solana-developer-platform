@@ -22,7 +22,7 @@ export const ROUTE_OWNERS: readonly (readonly [RegExp, RouteOwner])[] = [
     /^\/v1\/payments\/(recurring-payments|subscription-plans|subscriptions)(\/|$)/,
     "recurring_payments",
   ],
-  [/^\/(v1\/payments|v1\/counterparties|v1\/transactions|pay)(\/|$)/, "payments"],
+  [/^\/(v1\/payments|v1\/counterparties|v1\/transactions|v1\/tokens|pay)(\/|$)/, "payments"],
   [/^\/(v1\/wallets|internal\/dashboard\/(custody|wallets))(\/|$)/, "custody"],
   [/^\/v1\/compliance(\/|$)/, "compliance"],
   [

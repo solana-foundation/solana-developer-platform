@@ -243,6 +243,8 @@ exports[`route actions > pins each route's action 1`] = `
   "transfers.execute POST /v1/payments/transfers",
   "transfers.read GET /v1/payments/transfers",
   "transfers.read GET /v1/payments/transfers/:transferId",
+  "transfers.read GET /v1/tokens/:mint/terms",
+  "transfers.read POST /v1/tokens/:mint/quote",
   "wallets.configure GET /internal/dashboard/custody/connections",
   "wallets.configure GET /internal/dashboard/custody/connections/:connectionId",
   "wallets.configure GET /internal/dashboard/custody/connections/:connectionId/provider-credential",
