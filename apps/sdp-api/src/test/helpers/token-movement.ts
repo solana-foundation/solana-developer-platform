@@ -92,13 +92,28 @@ export function mintRpcAccount(
 /** A transfer-fee config at one rate, as a fee mint carries it. */
 export function transferFeeExtension(basisPoints: number, maximumFee: bigint): ExtensionArgs {
   const rate = { epoch: 0n, maximumFee, transferFeeBasisPoints: basisPoints };
+  return transferFeeScheduleExtension(rate, rate);
+}
+
+/** One entry of a mint's transfer fee schedule: in force from `epoch`. */
+export type TransferFeeEntry = {
+  epoch: bigint;
+  maximumFee: bigint;
+  transferFeeBasisPoints: number;
+};
+
+/** A `TransferFeeConfig` with its two fee entries as given. */
+export function transferFeeScheduleExtension(
+  older: TransferFeeEntry,
+  newer: TransferFeeEntry
+): ExtensionArgs {
   return {
     __kind: "TransferFeeConfig",
     transferFeeConfigAuthority: MINT_AUTHORITY,
     withdrawWithheldAuthority: MINT_AUTHORITY,
     withheldAmount: 0n,
-    olderTransferFee: rate,
-    newerTransferFee: rate,
+    olderTransferFee: older,
+    newerTransferFee: newer,
   };
 }
 
