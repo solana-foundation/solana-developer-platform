@@ -366,17 +366,20 @@ describe("ramps and the release channel", () => {
     expect((await quote("moonpay")).status).toBe(201);
   });
 
-  it("walks no ramp on stable: no sample ramp transfer and every quote refused", async () => {
+  it("walks no ramp stable hides: no sample transfer of one and every quote refused", async () => {
     // The providers stable's capped flags leave on, from the stage table, not picked here.
     browser.rampProviders = rampProvidersInReleaseChannel("stable");
-    const transfers = await data<{ id: string; type: string }[]>(
+    const hidden = RAMP_PROVIDERS.filter((provider) => !browser.rampProviders.includes(provider));
+    const transfers = await data<{ id: string; provider?: string }[]>(
       "/v1/payments/transfers?pageSize=100"
     );
     expect(transfers.length).toBeGreaterThan(0);
-    expect(transfers.filter(({ type }) => type === "onramp" || type === "offramp")).toEqual([]);
-    for (const provider of RAMP_PROVIDERS.filter(
-      (offered) => !browser.rampProviders.includes(offered)
-    )) {
+    expect(
+      transfers.filter(({ provider }) =>
+        hidden.some((hiddenProvider) => hiddenProvider === provider)
+      )
+    ).toEqual([]);
+    for (const provider of hidden) {
       expect((await quote(provider)).status, provider).toBe(400);
     }
   });
