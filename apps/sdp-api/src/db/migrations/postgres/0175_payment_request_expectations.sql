@@ -13,9 +13,9 @@
 -- payment_request_transactions holds each sponsored transaction /pay issues,
 -- one row per claim window, with the quote it moves. The row is written with
 -- the claim; the sponsor is the fee payer and signs first, so its signature,
--- the transaction id, is saved when SDP signs. Settlement reads the status of
--- these signatures only. A transfer someone else sends with the request's
--- reference no longer settles it (SOLA9-699).
+-- the transaction id, is saved when SDP signs. When the reference scan finds
+-- one of these signatures, settlement takes the window's quote, and /pay
+-- issues no new window while a signed one can still land.
 --
 -- A window is `open` until its signature lands (`landed`), lands with an error
 -- (`failed`), or has no record once the chain is past the last valid block

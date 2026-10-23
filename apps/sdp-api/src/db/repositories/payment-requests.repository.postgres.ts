@@ -1,4 +1,11 @@
-import type { PaymentRequestLifecycleEvent, PaymentRequestStatus } from "@sdp/types/payments";
+import { parseBaseUnits } from "@sdp/solana/token-amount";
+import {
+  PAYMENT_REQUEST_TRANSACTION_OUTCOMES,
+  type PaymentRequestLifecycleEvent,
+  type PaymentRequestStatus,
+} from "@sdp/types/payments";
+import { TOKEN_PROGRAM_KINDS } from "@sdp/types/well-known-tokens";
+import { address, assertIsSignature } from "@solana/kit";
 import { z } from "zod";
 import type { DatabaseClient as AppDb } from "@/db/client";
 import { internalError } from "@/lib/errors";
@@ -10,8 +17,11 @@ import type {
   ListPaymentRequestsResult,
   MarkExpiredPaymentRequestPaidInput,
   MarkPaymentRequestInput,
+  PaymentRequestExpectation,
   PaymentRequestRow,
   PaymentRequestsRepository,
+  PaymentRequestTransaction,
+  SignedPaymentRequestTransaction,
 } from "./payment-requests.repository";
 import {
   generatePaymentRequestId,
@@ -19,6 +29,110 @@ import {
   generatePaymentRequestReference,
   SETTLEMENT_BLOCKED_REASONS,
 } from "./payment-requests.repository";
+import {
+  parseRecordedLegQuote,
+  RECORDED_QUOTE_COLUMNS,
+  RECORDED_QUOTE_VALUES,
+  recordedQuoteValues,
+} from "./token-movement-legs.repository";
+
+/**
+ * The expectation columns (migration 0175), one variant per asset: all null on
+ * a request written before expectations, native SOL at 9 decimals with no
+ * mint, or a token naming its mint and program.
+ */
+const expectationColumnsSchema = z.discriminatedUnion("asset_kind", [
+  z.object({
+    asset_kind: z.null(),
+    mint: z.null(),
+    token_program: z.null(),
+    decimals: z.null(),
+    expected_credit: z.null(),
+  }),
+  z.object({
+    asset_kind: z.literal("native"),
+    mint: z.null(),
+    token_program: z.null(),
+    decimals: z.literal(9),
+    expected_credit: z.string(),
+  }),
+  z.object({
+    asset_kind: z.literal("token"),
+    mint: z.string(),
+    token_program: z.enum(TOKEN_PROGRAM_KINDS),
+    decimals: z.number().int(),
+    expected_credit: z.string(),
+  }),
+]);
+
+function parseExpectation(row: Record<string, unknown>): PaymentRequestExpectation | null {
+  const columns = expectationColumnsSchema.parse(row);
+  switch (columns.asset_kind) {
+    case null:
+      return null;
+    case "native":
+      return {
+        asset: { kind: "native" },
+        decimals: columns.decimals,
+        credit: parseBaseUnits(columns.expected_credit),
+      };
+    case "token":
+      return {
+        asset: { kind: "token", mint: address(columns.mint), program: columns.token_program },
+        decimals: columns.decimals,
+        credit: parseBaseUnits(columns.expected_credit),
+      };
+    default: {
+      const exhaustive: never = columns;
+      throw new Error(`Unknown expectation columns: ${JSON.stringify(exhaustive)}`);
+    }
+  }
+}
+
+const issuedTransactionRowSchema = z.object({
+  id: z.string(),
+  payment_request_id: z.string(),
+  organization_id: z.string(),
+  project_id: z.string(),
+  payer: z.string(),
+  last_valid_block_height: z.string(),
+  signature: z.string().nullable(),
+  outcome: z.enum(PAYMENT_REQUEST_TRANSACTION_OUTCOMES),
+  created_at: z.string(),
+});
+
+function mapIssuedTransaction(raw: Record<string, unknown>): PaymentRequestTransaction {
+  const row = issuedTransactionRowSchema.parse(raw);
+  if (row.signature !== null) {
+    assertIsSignature(row.signature);
+  }
+  return {
+    id: row.id,
+    paymentRequestId: row.payment_request_id,
+    organizationId: row.organization_id,
+    projectId: row.project_id,
+    payer: row.payer,
+    lastValidBlockHeight: BigInt(row.last_valid_block_height),
+    signature: row.signature,
+    quote: parseRecordedLegQuote(raw),
+    outcome: row.outcome,
+    createdAt: row.created_at,
+  };
+}
+
+function signedIssuedTransaction(
+  transaction: PaymentRequestTransaction
+): SignedPaymentRequestTransaction {
+  const { signature } = transaction;
+  if (signature === null) {
+    throw internalError("payment_request_transactions row read as signed has no signature");
+  }
+  return { ...transaction, signature };
+}
+
+function generatePaymentRequestTransactionId(): string {
+  return `prtx_${crypto.randomUUID()}`;
+}
 
 const reconcilerColumnsSchema = z.object({
   project_id: z.string(),
@@ -48,6 +162,7 @@ function mapPaymentRequestRow(row: Record<string, unknown>): PaymentRequestRow {
     destination_address: row.destination_address as string,
     token: row.token as string,
     amount: row.amount as string,
+    expectation: parseExpectation(row),
     reference: row.reference as string,
     status: row.status as PaymentRequestStatus,
     expires_at: row.expires_at as string | null,
@@ -109,12 +224,17 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
              destination_address,
              token,
              amount,
+             asset_kind,
+             mint,
+             token_program,
+             decimals,
+             expected_credit,
              reference,
              expires_at,
              created_by,
              lifecycle
            ) VALUES (
-             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::numeric, ?, ?, ?,
              jsonb_build_array(jsonb_build_object('status', 'awaiting_payment', 'at', sdp_iso_now()))
            )
            RETURNING *`
@@ -129,6 +249,11 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
           input.destinationAddress,
           input.token,
           input.amount,
+          input.expectation.asset.kind,
+          input.expectation.asset.kind === "token" ? input.expectation.asset.mint : null,
+          input.expectation.asset.kind === "token" ? input.expectation.asset.program : null,
+          input.expectation.decimals,
+          input.expectation.credit.toString(),
           reference,
           input.expiresAt,
           input.createdBy
@@ -191,8 +316,8 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
     },
 
     async claimSponsoredTransactionWindow(params) {
-      const row = await db
-        .prepare(
+      return db.transaction(async (tx) => {
+        const claimed = await tx.queryOne<{ organization_id: string; project_id: string }>(
           `UPDATE payment_requests
              SET sponsored_tx_account = ?,
                  sponsored_tx_unsigned = ?,
@@ -206,17 +331,47 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
                sponsored_tx_last_valid_block_height IS NULL
                OR sponsored_tx_last_valid_block_height < ?
              )
-           RETURNING id`
-        )
-        .bind(
-          params.account,
-          params.unsignedTransaction,
-          params.lastValidBlockHeight.toString(),
-          params.requestId,
-          params.currentBlockHeight.toString()
-        )
-        .first<{ id: string }>();
-      return row !== null;
+             -- A signed window still open can still land, even in its last
+             -- blocks: a second window would let the payer pay twice. /pay
+             -- closes one once the chain proves it failed or lapsed, and
+             -- settlement closes the one that paid.
+             AND NOT EXISTS (
+               SELECT 1 FROM payment_request_transactions issued
+                WHERE issued.payment_request_id = payment_requests.id
+                  AND issued.outcome = 'open'
+                  AND issued.signature IS NOT NULL
+                  AND issued.status <> 'archived'
+             )
+           RETURNING organization_id, project_id`,
+          [
+            params.account,
+            params.unsignedTransaction,
+            params.lastValidBlockHeight.toString(),
+            params.requestId,
+            params.currentBlockHeight.toString(),
+          ]
+        );
+        if (claimed === null) {
+          return false;
+        }
+        await tx.execute(
+          `INSERT INTO payment_request_transactions (
+             id, payment_request_id, organization_id, project_id, payer, unsigned_transaction,
+             last_valid_block_height, ${RECORDED_QUOTE_COLUMNS}
+           ) VALUES (?, ?, ?, ?, ?, ?, ?::numeric, ${RECORDED_QUOTE_VALUES})`,
+          [
+            generatePaymentRequestTransactionId(),
+            params.requestId,
+            claimed.organization_id,
+            claimed.project_id,
+            params.account,
+            params.unsignedTransaction,
+            params.lastValidBlockHeight.toString(),
+            ...recordedQuoteValues(params.quote),
+          ]
+        );
+        return true;
+      });
     },
 
     async getSponsoredTransactionClaim(requestId) {
@@ -240,32 +395,97 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
       if (row.sponsored_tx_unsigned === null || row.sponsored_tx_last_valid_block_height === null) {
         throw internalError("payment_requests sponsored claim row is missing claim fields");
       }
+      const issued = await db.queryOne(
+        `SELECT * FROM payment_request_transactions
+          WHERE payment_request_id = ? AND unsigned_transaction = ? AND status <> 'archived'`,
+        [requestId, row.sponsored_tx_unsigned]
+      );
       return {
         account: row.sponsored_tx_account,
         unsignedTransaction: row.sponsored_tx_unsigned,
         signedTransaction: row.sponsored_tx_signed,
         lastValidBlockHeight: BigInt(row.sponsored_tx_last_valid_block_height),
+        issued: issued === null ? null : mapIssuedTransaction(issued),
       };
     },
 
     async storeSponsoredTransactionSignature(params) {
-      const changed = await db
-        .prepare(
+      return db.transaction(async (tx) => {
+        const changed = await tx.execute(
           `UPDATE payment_requests
              SET sponsored_tx_signed = ?, updated_at = sdp_iso_now()
            WHERE id = ?
              AND sponsored_tx_account = ?
              AND sponsored_tx_unsigned = ?
-             AND sponsored_tx_signed IS NULL`
-        )
-        .bind(
-          params.signedTransaction,
+             AND sponsored_tx_signed IS NULL`,
+          [params.signedTransaction, params.requestId, params.account, params.unsignedTransaction]
+        );
+        if (changed === 0) {
+          return false;
+        }
+        const signed = await tx.execute(
+          `UPDATE payment_request_transactions
+             SET signature = ?, updated_at = sdp_iso_now()
+           WHERE payment_request_id = ?
+             AND unsigned_transaction = ?
+             AND payer = ?
+             AND signature IS NULL
+             AND status <> 'archived'`,
+          [params.signature, params.requestId, params.unsignedTransaction, params.account]
+        );
+        if (signed !== 1) {
+          // A claim with no issued transaction (the previous revision's) is never signed here.
+          throw internalError("The claimed payment request transaction has no issued record");
+        }
+        return true;
+      });
+    },
+
+    async listOpenPaymentRequestTransactions(params) {
+      const rows = await db.queryMany(
+        `SELECT * FROM payment_request_transactions
+          WHERE payment_request_id = ?
+            AND organization_id = ?
+            AND project_id = ?
+            AND outcome = 'open'
+            AND signature IS NOT NULL
+            AND status <> 'archived'
+          ORDER BY created_at, id`,
+        [params.requestId, params.organizationId, params.projectId]
+      );
+      return rows.map((row) => signedIssuedTransaction(mapIssuedTransaction(row)));
+    },
+
+    async closePaymentRequestTransactions(params) {
+      if (params.outcomes.length === 0) {
+        return;
+      }
+      // One statement for every window, so a closing read settles all of them or none.
+      await db.execute(
+        `UPDATE payment_request_transactions issued
+            SET outcome = closing.outcome,
+                landed_slot = closing.landed_slot::numeric,
+                updated_at = sdp_iso_now()
+           FROM jsonb_to_recordset(?::jsonb) AS closing(signature text, outcome text, landed_slot text)
+          WHERE issued.signature = closing.signature
+            AND issued.payment_request_id = ?
+            AND issued.organization_id = ?
+            AND issued.project_id = ?
+            AND issued.outcome = 'open'
+            AND issued.status <> 'archived'`,
+        [
+          JSON.stringify(
+            params.outcomes.map((entry) => ({
+              signature: entry.signature,
+              outcome: entry.outcome,
+              landed_slot: entry.landedSlot === null ? null : entry.landedSlot.toString(),
+            }))
+          ),
           params.requestId,
-          params.account,
-          params.unsignedTransaction
-        )
-        .run();
-      return changed > 0;
+          params.organizationId,
+          params.projectId,
+        ]
+      );
     },
 
     async getPaymentRequestByPublicToken(publicToken) {

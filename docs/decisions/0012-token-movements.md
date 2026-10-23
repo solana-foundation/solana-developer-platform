@@ -139,14 +139,18 @@ them in one place, not adding special cases to every flow.
   reads and builds with `buildTokenMovement`; the Solana Pay reference is the transfer
   instruction's last account, after any hook accounts. Each claim window records its issued
   transaction and quote (`payment_request_transactions`); the sponsor signs first, so its
-  signature is the transaction id. Settlement reads only those signatures, every window still
-  `open`, and closes a window that landed, failed, or has no record past its blockhash's last
-  valid block height (the `readSavedSend` rule). A landed one is verified by construction. The
-  claim refuses an expired request, and a new window while a signed one is still open, which may
-  have landed in its last blocks; settlement refuses a request whose expiry came before the
-  paying transaction was issued. `findReference` and main's `validatePaymentRequestTransfer` are
-  gone (SOLA9-699). /pay leaves `loadPaymentMint`; a scaled or interest-bearing mint is still
-  refused, at creation and at /pay, since the builder refuses it until PR 5.
+  signature is the transaction id. Main's settlement stays (#2515): the reconcile crons scan the
+  reference from a persisted cursor and settle on a finalized transaction, `paid_late` by block
+  time. A scanned signature that is one of the request's open windows settles on that window's
+  quote when it delivers the expectation, with no `getTransaction`, and its leg is verified by
+  construction: `validatePaymentRequestTransfer` knows neither `TransferCheckedWithFee` nor hook
+  accounts before the reference. Every other signature goes through that validator, against the
+  stored expectation. Settlement closes the paying window `landed`. /pay issues no new window
+  while a signed one can still land: it closes the ones that failed at confirmed or above, or
+  have no record past their blockhash's last valid block height (the `readSavedSend` rule), and
+  answers 429 while any other stays open. /pay leaves `loadPaymentMint`; a scaled or
+  interest-bearing mint is still refused, at creation and at /pay, since the builder refuses it
+  until PR 5.
 - **Recurring mandates (PR 3).** A recurring payment and its plan store the mandate once: the
   debit in base units, the decimals and the fee tolerance (`maxFeePerPull`, the larger of the
   current and next epoch's fee for the debit; migration 0176). Each pull reads the terms once
@@ -187,7 +191,7 @@ Each PR ships alone.
 2. **Ledger and builder:** the `token_movement_legs` schema, the builder, transfers, batches and
    off-ramp funding on it, and the API amount shape (`amountBasis`, `amounts`,
    `amountVerification`).
-3. **Payment requests and recurring:** requests settle on the signatures SDP issued; recurring
+3. **Payment requests and recurring:** requests expect a credit and settle /pay windows on their quote; recurring
    moves to debit mandates with a fee tolerance and pre-pull holds.
 4. **Adapters:** issuance, the DvP, Private Channels and Earn refusal rows, the capability table
    with its Kora CI test, observed inbound transfers, on-ramp.

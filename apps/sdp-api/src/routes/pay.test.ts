@@ -1,6 +1,8 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
 import * as solanaRpc from "@sdp/rpc/solana";
+import { NATIVE_ASSET } from "@sdp/solana/asset-ref";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
-import { SOL_MINT } from "@sdp/types/well-known-tokens";
+import { SOL_MINT, SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import {
   address,
   appendTransactionMessageInstruction,
@@ -10,32 +12,45 @@ import {
   createTransactionMessage,
   getBase58Decoder,
   getBase64EncodedWireTransaction,
+  getBase64Encoder,
+  getSignatureFromTransaction,
+  getTransactionDecoder,
   partiallySignTransaction,
   pipe,
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
   signature,
 } from "@solana/kit";
-import { getTransferSolInstruction } from "@solana-program/system";
+import {
+  getTransferSolInstruction,
+  getTransferSolInstructionDataDecoder,
+  SYSTEM_PROGRAM_ADDRESS,
+} from "@solana-program/system";
+import { getTransferCheckedWithFeeInstructionDataDecoder } from "@solana-program/token-2022";
 
 import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
+import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
 import * as repositoryFactory from "@/db/repositories/repository-factory";
 import {
   createPaymentRequestsRepository,
   createSystemPaymentRequestsRepository,
 } from "@/db/repositories/repository-factory";
+import { recordedLegQuote } from "@/db/repositories/token-movement-legs.repository";
 import { app } from "@/index";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
+import * as paymentRequestTransfer from "@/services/payments/payment-request-transfer";
 import * as paymentRequests from "@/services/payments/payment-requests";
 import * as sponsorshipService from "@/services/sponsorship.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import {
   clusterOfRpcClient,
   ENVIRONMENT_CLUSTER_CASES,
+  epochInfoResult,
   installClusterRpcResponder,
+  tokenAccountsByOwnerResult,
 } from "@/test/helpers/cluster-rpc";
 import { seedUnreadPrivyWallet } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
@@ -52,12 +67,22 @@ import {
   TEST_USER,
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
+import { required } from "@/test/helpers/required";
 import {
   sponsorSignTestTransaction,
   TEST_MOCK_FEE_PAYER,
   TEST_MOCK_FEE_PAYER_KEY_PAIR,
 } from "@/test/helpers/sponsor-signing";
-import { respondMintAccounts, scaledUiAmountConfig } from "@/test/helpers/token-mints";
+import { scaledUiAmountConfig } from "@/test/helpers/token-mints";
+import {
+  answerMovementAccounts,
+  associatedTokenAccount,
+  mintRpcAccount,
+  nativeQuote,
+  sentInstructions,
+  testExpectation,
+  transferFeeExtension,
+} from "@/test/helpers/token-movement";
 
 interface RequestWallet {
   projectId: string;
@@ -94,7 +119,10 @@ const REQUEST_WALLET_BY_ENVIRONMENT = {
   production: seedProductionRequestWallet,
 } as const satisfies Record<SdpEnvironment, () => Promise<RequestWallet>>;
 
-const sponsoredTransactionResponseSchema = z.object({ transaction: z.string() });
+const sponsoredTransactionResponseSchema = z.object({
+  transaction: z.string(),
+  message: z.string(),
+});
 
 const sponsoredGrantAuditSchema = z.object({
   action: z.string(),
@@ -123,15 +151,11 @@ describe("Public payment request routes", () => {
   const rpc = installClusterRpcResponder();
 
   beforeEach(() => {
-    rpc.answer("getSignaturesForAddress", []);
     rpc.answer("getBlockHeight", 900);
+    rpc.respondSignatureStatuses(() => null);
   });
 
   function createAwaitingPaymentRequest(wallet: RequestWallet) {
-    return createAwaitingTokenPaymentRequest(wallet, SOL_MINT);
-  }
-
-  function createAwaitingTokenPaymentRequest(wallet: RequestWallet, token: string) {
     return createPaymentRequestsRepository(
       env,
       createTenantScope({ organizationId: TEST_ORG.id, projectId: wallet.projectId })
@@ -141,8 +165,9 @@ describe("Public payment request routes", () => {
       custodyWalletId: wallet.custodyWalletId,
       walletId: wallet.walletId,
       destinationAddress: wallet.publicKey,
-      token,
+      token: SOL_MINT,
       amount: "1.5",
+      expectation: testExpectation(NATIVE_ASSET, "1.5", 9),
       expiresAt: null,
       createdBy: TEST_USER.id,
     });
@@ -153,8 +178,14 @@ describe("Public payment request routes", () => {
     async (amount) => {
       const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
       if (request === null) throw new Error("Expected a payment request fixture");
+      // A legacy request: written before expectations, so /pay parses its amount itself.
       await getDb(env)
-        .prepare("UPDATE payment_requests SET amount = ? WHERE id = ?")
+        .prepare(
+          `UPDATE payment_requests
+              SET amount = ?, asset_kind = NULL, mint = NULL, token_program = NULL,
+                  decimals = NULL, expected_credit = NULL
+            WHERE id = ?`
+        )
         .bind(amount, request.id)
         .run();
       const response = await postTransaction(request.public_token);
@@ -167,15 +198,22 @@ describe("Public payment request routes", () => {
     return new Set(rpc.calls.map((call) => call.cluster));
   }
 
-  function postTransaction(publicToken: string) {
+  function postTransaction(publicToken: string, account: string = TEST_SOLANA_ADDRESSES.wallet2) {
     return app.request(
       `/pay/${publicToken}/tx`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ account: TEST_SOLANA_ADDRESSES.wallet2 }),
+        body: JSON.stringify({ account }),
       },
       env
+    );
+  }
+
+  /** The transaction id of a /pay answer: the sponsor's signature, which it signs first. */
+  function issuedSignature(transaction: string): string {
+    return getSignatureFromTransaction(
+      getTransactionDecoder().decode(getBase64Encoder().encode(transaction))
     );
   }
 
@@ -316,17 +354,21 @@ describe("Public payment request routes", () => {
             unsignedTransaction,
             lastValidBlockHeight: 1_000n,
             currentBlockHeight: 900n,
+            quote: recordedLegQuote(nativeQuote("1.5", "credit")),
           })
         ).toBe(true);
         if (state === "signed") {
+          const signed = await partiallySignTransaction(
+            [TEST_MOCK_FEE_PAYER_KEY_PAIR],
+            transaction
+          );
           expect(
             await repository.storeSponsoredTransactionSignature({
               requestId: request.id,
               account: TEST_MOCK_FEE_PAYER,
               unsignedTransaction,
-              signedTransaction: getBase64EncodedWireTransaction(
-                await partiallySignTransaction([TEST_MOCK_FEE_PAYER_KEY_PAIR], transaction)
-              ),
+              signedTransaction: getBase64EncodedWireTransaction(signed),
+              signature: getSignatureFromTransaction(signed),
             })
           ).toBe(true);
         }
@@ -526,24 +568,35 @@ describe("Public payment request routes", () => {
       expect(sponsorship).toHaveBeenCalledTimes(1);
     });
 
-    it("lets a new account claim after the window expires", async () => {
-      const sponsorship = stubSponsorship();
+    it("lets a new account claim once the expired window is proven lapsed, not before", async () => {
+      stubSponsorship();
       const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
-      expect((await postTransaction(request.public_token)).status).toBe(200);
+      const first = await postTransaction(request.public_token);
+      expect(first.status).toBe(200);
+      const { transaction } = z.object({ transaction: z.string() }).parse(await first.json());
 
+      // Past the window's last valid block height, but the window is too young
+      // for /pay to read the chain tip, so it may still land.
       rpc.answer("getBlockHeight", 2_000);
+      const held = await postTransaction(request.public_token, TEST_SOLANA_ADDRESSES.wallet3);
+      expect(held.status).toBe(429);
+      expect(Number(held.headers.get("Retry-After"))).toBeGreaterThan(0);
+      expect(await held.json()).toMatchObject({
+        error: { message: expect.stringContaining("can still land") },
+      });
 
-      const other = await app.request(
-        `/pay/${request.public_token}/tx`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ account: TEST_SOLANA_ADDRESSES.wallet3 }),
-        },
-        env
-      );
-      expect(other.status).toBe(200);
-      expect(sponsorship).toHaveBeenCalledTimes(2);
+      await getDb(env)
+        .prepare("UPDATE payment_request_transactions SET created_at = ? WHERE signature = ?")
+        .bind(new Date(Date.now() - 5 * 60_000).toISOString(), issuedSignature(transaction))
+        .run();
+      rpc.answer("getEpochInfo", epochInfoResult({ absoluteSlot: 1, blockHeight: 2_000 }));
+
+      expect(
+        (await postTransaction(request.public_token, TEST_SOLANA_ADDRESSES.wallet3)).status
+      ).toBe(200);
+      expect(
+        await createSystemPaymentRequestsRepository(env).getSponsoredTransactionClaim(request.id)
+      ).toMatchObject({ account: TEST_SOLANA_ADDRESSES.wallet3 });
     });
 
     it("keeps the claim when signing fails and signs the stored bytes on retry", async () => {
@@ -686,50 +739,285 @@ describe("Public payment request routes", () => {
       expect((await postTransaction(request.public_token)).status).toBe(200);
     });
 
-    it("refuses a request in a mint whose extension rescales amounts before claiming or signing", async () => {
-      const sign = vi.fn(sponsorSignTestTransaction);
-      stubSponsorship().mockImplementation(() => ({
-        providerId: "test",
-        getFeePayer: async () => TEST_MOCK_FEE_PAYER,
-        signAsFeePayer: sign,
-        getSponsorshipConfiguration: () => Promise.reject(new Error("not used")),
-        prepareOwnedSubmission: () => Promise.reject(new Error("not used")),
-      }));
+    it("refuses a payer paying into the request's own wallet, which would move nothing", async () => {
+      stubSponsorship();
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+
+      const response = await postTransaction(
+        request.public_token,
+        SANDBOX_REQUEST_WALLET.publicKey
+      );
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: {
+          message: "The destination is the source account: the transfer would move nothing",
+        },
+      });
+      const windows = await getDb(env)
+        .prepare(
+          "SELECT COUNT(*)::integer AS count FROM payment_request_transactions WHERE payment_request_id = ?"
+        )
+        .bind(request.id)
+        .first<{ count: number }>();
+      expect(windows).toEqual({ count: 0 });
+    });
+  });
+
+  describe("payment through the token movement builder (ADR 0012)", () => {
+    const pyusd = address(WELL_KNOWN_TOKENS.PYUSD.mints.devnet.address);
+
+    async function createPyusdRequest(options: { amount: string; decimals: number }) {
+      return createPaymentRequestsRepository(
+        env,
+        createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+      ).createPaymentRequest({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        custodyWalletId: TEST_CUSTODY_WALLET_ID,
+        walletId: TEST_WALLET_ID,
+        destinationAddress: SANDBOX_REQUEST_WALLET.publicKey,
+        token: pyusd,
+        amount: options.amount,
+        expectation: testExpectation(
+          { kind: "token", mint: pyusd, program: "token-2022" },
+          options.amount,
+          options.decimals
+        ),
+        expiresAt: null,
+        createdBy: TEST_USER.id,
+      });
+    }
+
+    /** PYUSD with a 50 bps fee capped at 1 PYUSD, and the payer's account of it. */
+    function answerPyusd(decimals: number) {
+      answerMovementAccounts(
+        rpc,
+        new Map([
+          [
+            pyusd,
+            mintRpcAccount("token-2022", {
+              decimals,
+              extensions: [transferFeeExtension(50, 1_000_000n)],
+            }),
+          ],
+        ])
+      );
+      rpc.answer(
+        "getTokenAccountsByOwner",
+        tokenAccountsByOwnerResult(1, [
+          {
+            pubkey: TEST_SOLANA_ADDRESSES.wallet3,
+            mint: pyusd,
+            amount: "1000000000",
+            decimals,
+            uiAmountString: "1000",
+            state: "initialized",
+          },
+        ])
+      );
+    }
+
+    function instructionsOf(transaction: string) {
+      return sentInstructions(new Uint8Array(getBase64Encoder().encode(transaction)));
+    }
+
+    async function settledTransfer(requestId: string) {
+      return getDb(env)
+        .prepare(
+          `SELECT pt.amount, pt.signature, leg.basis, leg.quoted_debit, leg.quoted_fee,
+                  leg.quoted_credit, leg.verification_state, leg.verification_reason
+             FROM payment_requests pr
+             JOIN payment_transfers pt ON pt.id = pr.fulfilled_by_transfer_id
+             JOIN token_movement_legs leg ON leg.payment_transfer_id = pt.id
+            WHERE pr.id = ?`
+        )
+        .bind(requestId)
+        .first();
+    }
+
+    /**
+     * The reconcile cron's check once the issued transaction is finalized: the
+     * reference scan finds its signature, and its window's quote settles it.
+     */
+    async function settleIssued(request: PaymentRequestRow, issued: string) {
+      getSignaturesForAddressMock.mockResolvedValue([
+        {
+          signature: signature(issued),
+          slot: 77n,
+          blockTime: null,
+          err: null,
+          confirmationStatus: "finalized",
+        },
+      ]);
+      const statuses = vi
+        .spyOn(solanaRpc, "getSignatureStatuses")
+        .mockResolvedValue([
+          { slot: 77n, confirmations: null, confirmationStatus: "finalized", err: null },
+        ]);
+      onTestFinished(() => statuses.mockRestore());
+      const validator = vi.spyOn(paymentRequestTransfer, "validatePaymentRequestTransfer");
+      onTestFinished(() => validator.mockRestore());
+
+      await runInClusterScope({ projectId: TEST_PROJECT.id, environment: "sandbox" }, () =>
+        paymentRequests.checkAwaitingPaymentRequest(env, request)
+      );
+
+      expect(validator).not.toHaveBeenCalled();
+      const read = await app.request(`/pay/${request.public_token}`, {}, env);
+      await expect(read.json()).resolves.toMatchObject({ status: "paid" });
+    }
+
+    it("pays a SOL request with a system transfer carrying the reference, and settles on its signature", async () => {
+      stubSponsorship();
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+
+      const response = await postTransaction(request.public_token);
+      expect(response.status).toBe(200);
+      const body = sponsoredTransactionResponseSchema.parse(await response.json());
+      expect(body.message).toBe("Pay 1.5 SOL to Solana Developer Platform");
+      const [transfer] = instructionsOf(body.transaction);
+      expect(transfer?.programAddress).toBe(SYSTEM_PROGRAM_ADDRESS);
+      expect(getTransferSolInstructionDataDecoder().decode(required(transfer?.data)).amount).toBe(
+        1_500_000_000n
+      );
+      expect(transfer?.accounts.at(-1)).toBe(request.reference);
+
+      const issued = issuedSignature(body.transaction);
+      await settleIssued(request, issued);
+
+      expect(await settledTransfer(request.id)).toEqual({
+        amount: "1.5",
+        signature: issued,
+        basis: "credit",
+        quoted_debit: "1500000000",
+        quoted_fee: "0",
+        quoted_credit: "1500000000",
+        verification_state: "verified",
+        verification_reason: "sdp_built_transfer_landed",
+      });
+    });
+
+    it("refuses a request in a scaled UI amount mint before claiming, until wallets show token units", async () => {
+      stubSponsorship();
+      // Balances show the scaled amount until PR 5, so a payer would read one amount and pay another.
       const mint = syntheticAddress(355);
-      const clockUnixTimestamp = 1_750_000_000n;
-      respondMintAccounts(rpc, {
-        mints: new Map([
+      answerMovementAccounts(
+        rpc,
+        new Map([
           [
             mint,
-            {
+            mintRpcAccount("token-2022", {
               decimals: 6,
               extensions: [
                 scaledUiAmountConfig({
                   multiplier: 2,
                   newMultiplier: 2,
-                  newMultiplierEffectiveTimestamp: clockUnixTimestamp,
+                  newMultiplierEffectiveTimestamp: 1_750_000_000n,
                 }),
               ],
-            },
+            }),
           ],
-        ]),
-        clockUnixTimestamp,
+        ])
+      );
+      rpc.answer(
+        "getTokenAccountsByOwner",
+        tokenAccountsByOwnerResult(1, [
+          {
+            pubkey: TEST_SOLANA_ADDRESSES.wallet3,
+            mint,
+            amount: "1000000000",
+            decimals: 6,
+            uiAmountString: "1000",
+            state: "initialized",
+          },
+        ])
+      );
+      const request = await createPaymentRequestsRepository(
+        env,
+        createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+      ).createPaymentRequest({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        custodyWalletId: TEST_CUSTODY_WALLET_ID,
+        walletId: TEST_WALLET_ID,
+        destinationAddress: SANDBOX_REQUEST_WALLET.publicKey,
+        token: mint,
+        amount: "1.5",
+        expectation: testExpectation({ kind: "token", mint, program: "token-2022" }, "1.5", 6),
+        expiresAt: null,
+        createdBy: TEST_USER.id,
       });
-      const request = await createAwaitingTokenPaymentRequest(SANDBOX_REQUEST_WALLET, mint);
 
       const response = await postTransaction(request.public_token);
 
       expect(response.status).toBe(400);
-      expect(await response.json()).toMatchObject({
-        error: {
-          code: "BAD_REQUEST",
-          message: "Payments do not support the ScaledUiAmountConfig mint extension",
-        },
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "BAD_REQUEST", details: { reason: "scaled_display" } },
       });
-      expect(sign).not.toHaveBeenCalled();
       expect(
         await createSystemPaymentRequestsRepository(env).getSponsoredTransactionClaim(request.id)
       ).toBeNull();
+    });
+
+    it("quotes a fee mint's request as a credit: the payer pays the fee, the message shows it", async () => {
+      stubSponsorship();
+      answerPyusd(6);
+      const request = await createPyusdRequest({ amount: "0.995", decimals: 6 });
+
+      const response = await postTransaction(request.public_token);
+      const text = await response.text();
+      expect(response.status, text).toBe(200);
+      const body = sponsoredTransactionResponseSchema.parse(JSON.parse(text));
+      expect(body.message).toBe(
+        "Pay 1 PYUSD to Solana Developer Platform, including a 0.005 PYUSD transfer fee; the recipient receives 0.995 PYUSD"
+      );
+      const instructions = instructionsOf(body.transaction);
+      const transfer = required(
+        instructions.find(
+          (instruction) => instruction.programAddress === SPL_TOKEN_PROGRAMS["token-2022"]
+        )
+      );
+      expect(
+        getTransferCheckedWithFeeInstructionDataDecoder().decode(required(transfer.data))
+      ).toMatchObject({ amount: 1_000_000n, decimals: 6, fee: 5_000n });
+      expect(transfer.accounts).toContain(
+        await associatedTokenAccount("token-2022", pyusd, SANDBOX_REQUEST_WALLET.publicKey)
+      );
+      // The Solana Pay reference rides the transfer, last.
+      expect(transfer.accounts.at(-1)).toBe(request.reference);
+
+      // Main's validator refuses `TransferCheckedWithFee`: only the window's quote settles it.
+      const issued = issuedSignature(body.transaction);
+      await settleIssued(request, issued);
+
+      expect(await settledTransfer(request.id)).toEqual({
+        amount: "0.995",
+        signature: issued,
+        basis: "credit",
+        quoted_debit: "1000000",
+        quoted_fee: "5000",
+        quoted_credit: "995000",
+        verification_state: "verified",
+        verification_reason: "sdp_built_transfer_landed",
+      });
+    });
+
+    it("refuses to pay a request whose mint changed its decimals since creation, before claiming", async () => {
+      const sponsorship = stubSponsorship();
+      answerPyusd(9);
+      const request = await createPyusdRequest({ amount: "0.995", decimals: 6 });
+
+      const response = await postTransaction(request.public_token);
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "BAD_REQUEST", message: expect.stringContaining("mint changed") },
+      });
+      expect(
+        await createSystemPaymentRequestsRepository(env).getSponsoredTransactionClaim(request.id)
+      ).toBeNull();
+      expect(sponsorship).toHaveBeenCalledTimes(1);
     });
   });
 });

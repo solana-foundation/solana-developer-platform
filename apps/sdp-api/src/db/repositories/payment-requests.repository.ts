@@ -1,8 +1,16 @@
+import type { AssetRef } from "@sdp/solana/asset-ref";
+import type { BaseUnits } from "@sdp/solana/token-amount";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
-import type { PaymentRequestLifecycleEvent, PaymentRequestStatus } from "@sdp/types/payments";
-import { generateKeyPairSigner } from "@solana/kit";
+import type {
+  FinalPaymentRequestTransactionOutcome,
+  PaymentRequestLifecycleEvent,
+  PaymentRequestStatus,
+  PaymentRequestTransactionOutcome,
+} from "@sdp/types/payments";
+import { generateKeyPairSigner, type Signature } from "@solana/kit";
 import { customAlphabet } from "nanoid";
 import { z } from "zod";
+import type { RecordedLegQuote } from "./token-movement-legs.repository";
 
 // URL-safe, dash-only alphabet (nanoid's default also includes "_").
 // biome-ignore lint/security/noSecrets: token alphabet constant, not a secret.
@@ -21,6 +29,16 @@ export async function generatePaymentRequestReference(): Promise<string> {
   return (await generateKeyPairSigner()).address;
 }
 
+/**
+ * What a request's payment must deliver (ADR 0012, migration 0175): the credit
+ * in base units, with the asset and the decimals its terms had at creation.
+ */
+export type PaymentRequestExpectation = Readonly<{
+  asset: AssetRef;
+  decimals: number;
+  credit: BaseUnits;
+}>;
+
 export interface PaymentRequestRow {
   id: string;
   public_token: string;
@@ -31,6 +49,8 @@ export interface PaymentRequestRow {
   destination_address: string;
   token: string;
   amount: string;
+  /** Null for a request recorded before expectations. */
+  expectation: PaymentRequestExpectation | null;
   reference: string;
   status: PaymentRequestStatus;
   expires_at: string | null;
@@ -57,7 +77,9 @@ export interface CreatePaymentRequestInput {
   walletId: string;
   destinationAddress: string;
   token: string;
+  /** The expectation's credit in token units. */
   amount: string;
+  expectation: PaymentRequestExpectation;
   expiresAt: string | null;
   createdBy: string | null;
 }
@@ -118,6 +140,28 @@ export interface AdvanceSignatureScanInput {
   to: SignatureScanPosition;
 }
 
+/**
+ * A sponsored transaction /pay issued for a request, in one claim window, with
+ * the quote it moves. Its signature is null until SDP signs it.
+ */
+export interface PaymentRequestTransaction {
+  id: string;
+  paymentRequestId: string;
+  organizationId: string;
+  projectId: string;
+  payer: string;
+  lastValidBlockHeight: bigint;
+  signature: Signature | null;
+  quote: RecordedLegQuote;
+  outcome: PaymentRequestTransactionOutcome;
+  createdAt: string;
+}
+
+/** An issued transaction whose signature is saved: one that can land. */
+export type SignedPaymentRequestTransaction = PaymentRequestTransaction & {
+  signature: Signature;
+};
+
 export interface ListPaymentRequestsInput {
   organizationId: string;
   projectId: string;
@@ -136,6 +180,11 @@ interface SponsoredTransactionClaim {
   unsignedTransaction: string;
   signedTransaction: string | null;
   lastValidBlockHeight: bigint;
+  /**
+   * The issued transaction the claim records, or null for a claim the
+   * previous revision made, which has none.
+   */
+  issued: PaymentRequestTransaction | null;
 }
 
 export interface PaymentRequestsRepository {
@@ -147,20 +196,52 @@ export interface PaymentRequestsRepository {
     projectId: string;
   }): Promise<PaymentRequestRow | null>;
   getPaymentRequestByPublicToken(publicToken: string): Promise<PaymentRequestRow | null>;
+  /**
+   * Claims the request's sponsored transaction window and records the
+   * transaction it issues, with its quote, in one transaction. The claim needs
+   * the request open (awaiting payment and unexpired), no live window, and
+   * no signed window still open: one that can still land is closed first.
+   */
   claimSponsoredTransactionWindow(params: {
     requestId: string;
     account: string;
     unsignedTransaction: string;
     lastValidBlockHeight: bigint;
     currentBlockHeight: bigint;
+    quote: RecordedLegQuote;
   }): Promise<boolean>;
   getSponsoredTransactionClaim(requestId: string): Promise<SponsoredTransactionClaim | null>;
+  /**
+   * Saves the sponsor-signed bytes on the claim and the signature on its
+   * issued transaction, in one transaction; false when the claim moved on.
+   */
   storeSponsoredTransactionSignature(params: {
     requestId: string;
     account: string;
     unsignedTransaction: string;
     signedTransaction: string;
+    signature: Signature;
   }): Promise<boolean>;
+  /** The request's issued transactions that are signed and still open, oldest first. */
+  listOpenPaymentRequestTransactions(params: {
+    requestId: string;
+    organizationId: string;
+    projectId: string;
+  }): Promise<SignedPaymentRequestTransaction[]>;
+  /**
+   * Writes final outcomes of one request's open issued transactions; an
+   * outcome already final is kept, and another request's window is untouched.
+   */
+  closePaymentRequestTransactions(params: {
+    requestId: string;
+    organizationId: string;
+    projectId: string;
+    outcomes: readonly {
+      signature: Signature;
+      outcome: FinalPaymentRequestTransactionOutcome;
+      landedSlot: bigint | null;
+    }[];
+  }): Promise<void>;
   listPaymentRequests(params: ListPaymentRequestsInput): Promise<ListPaymentRequestsResult>;
   /**
    * Whether `environment` holds any open request with a sponsored transaction window, the hot
