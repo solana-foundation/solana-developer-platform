@@ -16,17 +16,19 @@ const fireblocksSignerMock = vi.hoisted(() => ({
     request: (method: string, uri: string, body?: unknown) => Promise<unknown>;
   }>,
   init: vi.fn<() => Promise<void>>(),
-  request: vi.fn(async (): Promise<{ id: string; note: string }> => ({
-    id: "tx-1",
-    note: "response-secret-value",
-  })),
+  request: vi.fn(
+    async (): Promise<{ id: string; note: string }> => ({
+      id: "tx-1",
+      note: "response-secret-value",
+    })
+  ),
 }));
 
 vi.mock("@solana/keychain-fireblocks", () => ({
   FireblocksSigner: class FireblocksSigner {
     readonly address = "11111111111111111111111111111111";
 
-    request(method: string, uri: string, body?: unknown): Promise<unknown> {
+    request(_method: string, _uri: string, _body?: unknown): Promise<unknown> {
       return fireblocksSignerMock.request();
     }
 

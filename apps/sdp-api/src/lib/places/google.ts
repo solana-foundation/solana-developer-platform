@@ -186,7 +186,10 @@ async function readCappedResponseBytes(
   maxBytes: number
 ): Promise<Uint8Array<ArrayBuffer>> {
   if (response.body === null) {
-    return new Uint8Array();
+    // A map response without a body is a provider failure, not an empty
+    // image: serving a zero-byte PNG would turn a dropped payload into a
+    // silent 200 (code standards: no fallbacks).
+    throw new Error("provider response body is missing");
   }
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];

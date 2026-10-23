@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as rpcEgress from "@/services/rpc-egress";
 import type { Env } from "@/types/env";
 
 // --- Mocks (hoisted so the vi.mock factories can reference them) --------------
@@ -55,11 +56,6 @@ vi.mock("@sdp/rpc/solana", () => ({
   getTransaction,
 }));
 
-const { createCustomerRpcTransport } = vi.hoisted(() => ({
-  createCustomerRpcTransport: vi.fn((url: string) => ({ __guardedTransport: url })),
-}));
-vi.mock("@/services/rpc-egress", () => ({ createCustomerRpcTransport }));
-
 const { loadProjectRpcClient } = vi.hoisted(() => {
   const PROJECT_RPC = { __projectRpc: true };
   return {
@@ -85,10 +81,24 @@ vi.mock("@/services/private-channels/withdraw-events", () => ({ emitWithdrawalEv
 
 import { trackPendingWithdrawals } from "./track-pending-withdrawals";
 
+// Swapped with a spy on the service module's own export: `rpc-egress` is a
+// service dependency, not a single-valued ambient input, so it is not
+// module-mocked. The spied call keeps the real factory — the transport it
+// returns is only ever handed to the mocked `createRpcFromTransport`, never
+// dialed.
+const createCustomerRpcTransportSpy = vi.spyOn(rpcEgress, "createCustomerRpcTransport");
+
+// SAFETY: the reconciler reads only ENVIRONMENT (it picks the guarded
+// transport outside development) and hands the rest of Env opaquely to the
+// repository factories this file mocks.
+const DEV_ENV = { ENVIRONMENT: "development" } as Env;
+// SAFETY: only ENVIRONMENT matters — it must be outside development so the
+// persisted gateway URL is dialed through the guarded egress transport.
+const PROD_ENV = { ENVIRONMENT: "production" } as Env;
+
 // Development keeps the plain per-URL client — local gateway endpoints
 // legitimately resolve to loopback — so the existing reconciliation tests
 // assert against `createRpc` directly.
-const DEV_ENV = { ENVIRONMENT: "development" } as Env;
 
 // Valid base58 addresses (the reconciler runs `address()` on these fixtures).
 const MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
@@ -173,6 +183,7 @@ describe("trackPendingWithdrawals", () => {
     await trackPendingWithdrawals(DEV_ENV);
 
     expect(createRpc).toHaveBeenCalledWith(expect.anything(), { rpcUrl: "http://gw-live" });
+    expect(createCustomerRpcTransportSpy).not.toHaveBeenCalled();
     expect(withdrawalRepo.updateWithdrawal).toHaveBeenCalledWith(
       expect.objectContaining({ id: "w1", status: "confirmed", expectedStatus: "submitted" })
     );
@@ -185,13 +196,13 @@ describe("trackPendingWithdrawals", () => {
     instanceRepo.getById.mockResolvedValueOnce(instanceRow({ gateway_url: "https://gw-live" }));
     getSignatureStatuses.mockResolvedValueOnce([{ confirmationStatus: "confirmed" }]);
 
-    await trackPendingWithdrawals({ ENVIRONMENT: "production" } as Env);
+    await trackPendingWithdrawals(PROD_ENV);
 
     // A tenant-controlled gateway URL is DNS-checked at connect time and its
     // redirects re-guarded per hop — it never rides the plain transport the
     // development path keeps for loopback endpoints.
-    expect(createCustomerRpcTransport).toHaveBeenCalledWith("https://gw-live");
-    expect(createRpcFromTransport).toHaveBeenCalledWith({ __guardedTransport: "https://gw-live" });
+    expect(createCustomerRpcTransportSpy).toHaveBeenCalledWith("https://gw-live");
+    expect(createRpcFromTransport).toHaveBeenCalledWith(expect.anything());
     expect(createRpc).not.toHaveBeenCalled();
     expect(getSignatureStatuses).toHaveBeenCalledWith({ __guardedRpc: true }, ["burnsig"], {
       searchTransactionHistory: true,
