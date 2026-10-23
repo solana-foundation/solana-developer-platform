@@ -23,6 +23,14 @@ export const TOKEN_MOVEMENT_BASES = ["debit", "credit"] as const;
 
 export type TokenMovementBasis = (typeof TOKEN_MOVEMENT_BASES)[number];
 
+/**
+ * A leg's lifecycle (soft delete only): archived with the row that owns it,
+ * never deleted. Separate from its verification state.
+ */
+export const TOKEN_MOVEMENT_LEG_STATUSES = ["active", "archived"] as const;
+
+export type TokenMovementLegStatus = (typeof TOKEN_MOVEMENT_LEG_STATUSES)[number];
+
 /** The basis a request amount has when the request does not name one. */
 export const DEFAULT_TOKEN_MOVEMENT_BASIS = "debit" satisfies TokenMovementBasis;
 

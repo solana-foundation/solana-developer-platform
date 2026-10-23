@@ -24,6 +24,10 @@
 -- release). The repository's upsert refuses it in its predicate, and the
 -- trigger below refuses it for any writer.
 --
+-- Soft delete only: a leg is archived with the row that owns it (`status`),
+-- never deleted. An owner has one leg for life, archived or not, so the
+-- one-leg-per-owner keys cover archived legs too.
+--
 -- Legacy = no leg: rows written before quotes keep their entered amount and
 -- have no leg. There is no backfill (pre-launch).
 CREATE TABLE token_movement_legs (
@@ -51,6 +55,7 @@ CREATE TABLE token_movement_legs (
         CHECK (verification_state IN ('pending', 'verified', 'mismatch', 'not_required')),
     verification_reason TEXT
         CHECK (verification_reason IN ('sdp_built_transfer_landed', 'movement_not_executed')),
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived')),
     created_at TEXT NOT NULL DEFAULT sdp_iso_now(),
     updated_at TEXT NOT NULL DEFAULT sdp_iso_now(),
     FOREIGN KEY (payment_transfer_id, organization_id, project_id)

@@ -718,31 +718,36 @@ export function createPostgresPaymentTransferBatchesRepository(
         extraValues: input.recipientIds,
       });
 
+      // Recipients that fail before any chunk carried them moved nothing:
+      // their legs take that verdict in the same statement, so the two writes
+      // commit or roll back together.
+      const legs =
+        input.status === BUILT_MOVEMENT_FAILED_STATUS && input.transferId === null
+          ? legVerdictStatement({
+              source: "updated_recipients",
+              ownerColumn: "payment_transfer_recipient_id",
+              verdict: BUILT_MOVEMENT_VERDICTS.failed,
+              updatedAt: new Date().toISOString(),
+            })
+          : null;
+      const legValues = legs === null ? [] : legs.values;
       const result = await db
         .prepare(
-          `UPDATE payment_transfer_recipients
-             SET transfer_id = ?,
-                 status = ?,
-                 error = ?,
-                 updated_at = sdp_iso_now()
-           WHERE ${scope.where}
-           RETURNING *`
+          `WITH updated_recipients AS (
+             UPDATE payment_transfer_recipients
+                SET transfer_id = ?,
+                    status = ?,
+                    error = ?,
+                    updated_at = sdp_iso_now()
+              WHERE ${scope.where}
+              RETURNING *
+           )${legs === null ? "" : `, ${legs.cte}`}
+           SELECT * FROM updated_recipients`
         )
-        .bind(input.transferId, input.status, input.error, ...scope.values)
+        .bind(input.transferId, input.status, input.error, ...scope.values, ...legValues)
         .all<Record<string, unknown>>();
 
-      const updated = result.results.map(mapPaymentTransferRecipientRow);
-      if (input.status === BUILT_MOVEMENT_FAILED_STATUS && input.transferId === null) {
-        // Failed before any chunk carried them: their legs moved nothing.
-        await settleRecipientLegs(db, {
-          organizationId: input.organizationId,
-          projectId: input.projectId,
-          recipientIds: updated.map((recipient) => recipient.id),
-          verdict: BUILT_MOVEMENT_VERDICTS.failed,
-          updatedAt: new Date().toISOString(),
-        });
-      }
-      return updated;
+      return result.results.map(mapPaymentTransferRecipientRow);
     },
 
     async deleteTransferRecipient(input: DeletePaymentTransferRecipientInput) {
@@ -753,13 +758,24 @@ export function createPostgresPaymentTransferBatchesRepository(
         extraValues: [input.recipientId],
       });
 
+      // The recipient's leg is archived with it, in the same statement.
       const row = await db
         .prepare(
-          `UPDATE payment_transfer_recipients
-              SET status = 'archived',
-                  updated_at = sdp_iso_now()
-            WHERE ${scope.where}
-            RETURNING *`
+          `WITH archived_recipient AS (
+             UPDATE payment_transfer_recipients
+                SET status = 'archived',
+                    updated_at = sdp_iso_now()
+              WHERE ${scope.where}
+              RETURNING *
+           ), archived_legs AS (
+             UPDATE token_movement_legs leg
+                SET status = 'archived', updated_at = sdp_iso_now()
+               FROM archived_recipient owner_row
+              WHERE leg.payment_transfer_recipient_id = owner_row.id
+                AND leg.organization_id = owner_row.organization_id
+                AND leg.status <> 'archived'
+           )
+           SELECT * FROM archived_recipient`
         )
         .bind(...scope.values)
         .first<Record<string, unknown>>();
