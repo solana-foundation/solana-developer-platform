@@ -372,17 +372,21 @@ async function judgeOnrampDelivery(
     const reported = [settled.receivedAmount, settled.onchain?.amount].filter(
       (amount): amount is string => amount !== undefined
     );
-    const accounted = (amount: string) => {
-      const units = parseDecimalAmount(amount, decimals);
-      return units === delivery.credit || (debitCounts && units === delivery.debit);
-    };
     const quoted = transfer.amount === null ? null : parseDecimalAmount(transfer.amount, decimals);
-    const short =
-      quoted !== null && delivery.credit < quoted && !(debitCounts && delivery.debit >= quoted);
-    if (short || !reported.every(accounted)) {
-      // The fee that applied is no longer on chain: read again later rather
-      // than record a contradiction the chain cannot support.
-      return feeRule === "unknown" ? PENDING : mismatch("amount_mismatch", observedAmount);
+    /** Whether the reports and the quote hold, counting the debit or not. */
+    const holds = (countDebit: boolean) =>
+      reported.every((amount) => {
+        const units = parseDecimalAmount(amount, decimals);
+        return units === delivery.credit || (countDebit && units === delivery.debit);
+      }) &&
+      !(quoted !== null && delivery.credit < quoted && !(countDebit && delivery.debit >= quoted));
+    if (!holds(debitCounts)) {
+      // The fee that applied is no longer on chain: when counting the debit
+      // would settle it, read again later rather than record a contradiction
+      // the chain cannot support. Anything else no fee could explain.
+      return feeRule === "unknown" && holds(true)
+        ? PENDING
+        : mismatch("amount_mismatch", observedAmount);
     }
   } catch {
     return mismatch("amount_mismatch", observedAmount);
