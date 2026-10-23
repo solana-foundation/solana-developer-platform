@@ -1,9 +1,11 @@
+import { createHmac } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
 import * as repositoryFactory from "@/db/repositories/repository-factory";
 import { RedisKVStore } from "@/runtime/kv-redis";
 import * as events from "@/runtime/money-path-events";
+import type { ManagedRampKeysEnv } from "@/services/ramps/runtime";
 import { moonpayWebhook } from "@/services/ramps/webhooks/moonpay";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -869,14 +871,42 @@ describe("moonpayWebhook.process", () => {
 });
 
 describe("moonpayWebhook.verify", () => {
-  it("refuses the production endpoint, which has no managed key", async () => {
+  const SANDBOX_SECRET = "wk_test_moonpay_sandbox";
+  const PRODUCTION_SECRET = "wk_live_moonpay_production";
+
+  /** Verifies a body signed with `secret` at the production endpoint. */
+  function verifyAtProduction(env: ManagedRampKeysEnv, secret: string) {
+    const rawBody = "{}";
+    const timestamp = Math.floor(Date.now() / 1000);
+    const s = createHmac("sha256", secret).update(`${timestamp}.${rawBody}`).digest("hex");
+    return moonpayWebhook.verify({
+      env,
+      environment: "production",
+      headers: new Headers({ "moonpay-signature-v2": `t=${timestamp},s=${s}` }),
+      rawBody,
+    });
+  }
+
+  it("refuses the production endpoint while no production secret is mounted", async () => {
     await expect(
-      moonpayWebhook.verify({
-        env: { MOONPAY_SANDBOX_WEBHOOK_KEY: "moonpay_sandbox_webhook_key" },
-        environment: "production",
-        headers: new Headers({ "moonpay-signature-v2": "t=1,s=deadbeef" }),
-        rawBody: "{}",
-      })
+      verifyAtProduction({ MOONPAY_SANDBOX_WEBHOOK_SECRET: SANDBOX_SECRET }, SANDBOX_SECRET)
     ).rejects.toMatchObject({ code: "PROVIDER_NOT_CONFIGURED" });
+  });
+
+  it("refuses a test-mode key mounted as the production secret", async () => {
+    await expect(
+      verifyAtProduction({ MOONPAY_PRODUCTION_WEBHOOK_SECRET: SANDBOX_SECRET }, SANDBOX_SECRET)
+    ).rejects.toMatchObject({ code: "PROVIDER_NOT_CONFIGURED" });
+  });
+
+  it("verifies the production endpoint with the production secret, never the sandbox one", async () => {
+    const env = {
+      MOONPAY_SANDBOX_WEBHOOK_SECRET: SANDBOX_SECRET,
+      MOONPAY_PRODUCTION_WEBHOOK_SECRET: PRODUCTION_SECRET,
+    } satisfies ManagedRampKeysEnv;
+    await expect(verifyAtProduction(env, SANDBOX_SECRET)).rejects.toMatchObject({
+      code: "UNAUTHORIZED",
+    });
+    await expect(verifyAtProduction(env, PRODUCTION_SECRET)).resolves.toBe("{}");
   });
 });

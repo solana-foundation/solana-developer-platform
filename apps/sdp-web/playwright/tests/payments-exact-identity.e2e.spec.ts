@@ -255,7 +255,7 @@ test.describe
       expect(response.status()).toBe(200);
       const submitted = z.object({ data: transferResultSchema }).parse(await response.json()).data;
       transferIds.add(submitted.transfer.id);
-      expect(submitted.transfer).toMatchObject({ custodyWalletId: wallet.id, status: "confirmed" });
+      expect(submitted.transfer).toMatchObject({ custodyWalletId: wallet.id, status: "finalized" });
       expect(submitted.transfer).not.toHaveProperty("providerWalletId");
       await expect(
         page.getByRole("heading", { name: "Transfer submitted", exact: true })

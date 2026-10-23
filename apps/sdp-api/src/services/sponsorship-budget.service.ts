@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { sponsoredNetworkFee } from "@sdp/fee-payment/chain-reads";
+import { priceSponsoredTransaction } from "@sdp/fee-payment/chain-reads";
 import {
   FeePaymentError,
   type FeePaymentPort,
@@ -81,7 +81,7 @@ type BudgetRedis = Pick<SponsorshipBudgetRedis, "reserve" | "cancel" | "settle" 
 export interface BudgetedFeePaymentDependencies {
   repository?: BudgetRepository;
   budgetRedis?: BudgetRedis;
-  getNetworkFee?: (transaction: Uint8Array) => Promise<bigint>;
+  priceTransaction?: typeof priceSponsoredTransaction;
   now?: () => Date;
 }
 
@@ -108,6 +108,7 @@ type AdmissionContext = {
   feePayer: string;
   providerConfigFingerprint: string;
   recentBlockhash: string;
+  lastValidBlockHeight: bigint;
   hourBucket: string;
   dayBucket: string;
 };
@@ -159,6 +160,17 @@ function canonicalJson(value: unknown): string {
   throw new Error("Unsupported sponsorship provider configuration value");
 }
 
+/**
+ * The message digest a sponsorship reservation is keyed by, so a caller can bind an audit record
+ * to the reservation `signAsFeePayer` will admit before it signs.
+ *
+ * @param messageBytes - The compiled message of the transaction to sponsor.
+ * @returns The hex SHA-256 digest of the message bytes.
+ */
+export function sponsoredMessageDigest(messageBytes: Transaction["messageBytes"]): string {
+  return createHash("sha256").update(new Uint8Array(messageBytes)).digest("hex");
+}
+
 /** Stable digest of every provider setting that can increase fee-payer outflow. */
 export function sponsorshipProviderConfigFingerprint(
   configuration: SponsorshipProviderConfiguration
@@ -167,6 +179,8 @@ export function sponsorshipProviderConfigFingerprint(
     .update(
       canonicalJson({
         maxAllowedLamports: configuration.maxAllowedLamports,
+        // No longer sizes the ceiling, but it stays an input: every open reservation pins a
+        // fingerprint that includes it, and the reconciler trips on any mismatch.
         feePayerMayTransferLamports: configuration.feePayerMayTransferLamports,
         feePayerPolicy: configuration.feePayerPolicy,
       })
@@ -181,7 +195,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
   private readonly network: SponsorshipNetwork;
   private readonly repository: BudgetRepository;
   private readonly budgetRedis: BudgetRedis;
-  private readonly getNetworkFee: (transaction: Uint8Array) => Promise<bigint>;
+  private readonly priceTransaction: typeof priceSponsoredTransaction;
   private readonly now: () => Date;
 
   constructor(
@@ -196,7 +210,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     this.network = sponsorshipNetworkForCluster(cluster);
     this.repository = dependencies.repository ?? new SponsorshipBudgetRepository(getDb(env));
     this.budgetRedis = dependencies.budgetRedis ?? new SponsorshipBudgetRedis(env);
-    this.getNetworkFee = dependencies.getNetworkFee ?? sponsoredNetworkFee;
+    this.priceTransaction = dependencies.priceTransaction ?? priceSponsoredTransaction;
     this.now = dependencies.now ?? (() => new Date());
   }
 
@@ -471,11 +485,11 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
   private async prepareAdmission(transaction: Uint8Array): Promise<AdmissionContext> {
     const network = this.network;
     let providerConfig: Awaited<ReturnType<FeePaymentPort["getSponsorshipConfiguration"]>>;
-    let networkFee: bigint;
+    let price: Awaited<ReturnType<typeof priceSponsoredTransaction>>;
     try {
-      [providerConfig, networkFee] = await Promise.all([
+      [providerConfig, price] = await Promise.all([
         this.provider.getSponsorshipConfiguration(),
-        this.getNetworkFee(transaction),
+        this.priceTransaction(transaction),
       ]);
     } catch (error) {
       throw new FeePaymentError(
@@ -484,10 +498,10 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
         error instanceof Error ? error : undefined
       );
     }
-    const providerOutflow = providerConfig.feePayerMayTransferLamports
-      ? providerConfig.maxAllowedLamports
-      : 0n;
-    const ceiling = networkFee + providerOutflow;
+    // The policy read is not bound to the signature Kora returns, so the
+    // reservation assumes the worst outflow Kora allows; reconciliation settles
+    // the actual lamports from the chain.
+    const ceiling = price.networkFee + providerConfig.maxAllowedLamports;
     if (ceiling < 0n || ceiling > MAX_SAFE_LAMPORTS) {
       throw new FeePaymentError(
         "Sponsored transaction cost cannot be represented safely",
@@ -498,9 +512,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     const providerConfigFingerprint = sponsorshipProviderConfigFingerprint(providerConfig);
     const decodedTransaction = getTransactionDecoder().decode(transaction);
     const recentBlockhash = getRecentBlockhash(transaction);
-    const transactionDigest = createHash("sha256")
-      .update(new Uint8Array(decodedTransaction.messageBytes))
-      .digest("hex");
+    const transactionDigest = sponsoredMessageDigest(decodedTransaction.messageBytes);
     const id = `sbr_${createHash("sha256")
       .update(
         JSON.stringify({
@@ -524,6 +536,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
       feePayer: providerConfig.signerAddress,
       providerConfigFingerprint,
       recentBlockhash,
+      lastValidBlockHeight: price.lastValidBlockHeight,
       hourBucket: buckets.hour,
       dayBucket: buckets.day,
     };
@@ -703,6 +716,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
       feePayer: context.feePayer,
       providerConfigFingerprint: context.providerConfigFingerprint,
       recentBlockhash: context.recentBlockhash,
+      lastValidBlockHeight: context.lastValidBlockHeight,
       reservedLamports: context.amount,
       hourBucket: context.hourBucket,
       dayBucket: context.dayBucket,

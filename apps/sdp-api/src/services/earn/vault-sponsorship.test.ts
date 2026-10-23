@@ -110,7 +110,9 @@ describe("resolveVaultSponsorship", () => {
     const fee = await resolveVaultSponsorship(env, { ...input, cluster: "mainnet-beta" });
 
     expect(fee).toMatchObject({ kind: "sponsored", sponsor: SPONSOR });
-    expect(createSponsorshipFeePayment).toHaveBeenCalledWith(env, productionScope, "earn.deposit");
+    expect(createSponsorshipFeePayment).toHaveBeenCalledWith(env, productionScope, "earn.deposit", {
+      custodyWalletId: "cwlt_1",
+    });
   });
 
   it("goes through the shared sponsorship boundary, scoped to the custody wallet", async () => {
@@ -126,7 +128,9 @@ describe("resolveVaultSponsorship", () => {
       projectId: "prj_1",
       actor: { type: "wallet", id: "cwlt_1" },
     });
-    expect(createSponsorshipFeePayment).toHaveBeenCalledWith(env, WALLET_SCOPE, "earn.deposit");
+    expect(createSponsorshipFeePayment).toHaveBeenCalledWith(env, WALLET_SCOPE, "earn.deposit", {
+      custodyWalletId: "cwlt_1",
+    });
   });
 
   it("bounds sponsor resolution with the caller's deadline", async () => {

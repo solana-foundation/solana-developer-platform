@@ -1,5 +1,7 @@
+import { canonicalJson } from "@sdp/types/idempotency";
 import type { z } from "zod";
-import { canonicalizeDecimalFields, canonicalJson, type JsonValue } from "@/lib/idempotency";
+import { canonicalizeDecimalFields, type JsonValue } from "@/lib/idempotency";
+import { normalizePaymentToken } from "@/services/payment-operation.service";
 import type { transferBatchOptionsSchema } from "./schemas";
 import { DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION } from "./transaction";
 
@@ -9,6 +11,8 @@ import { DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION } from "./transaction";
  */
 const OPTION_DEFAULTS = {
   maxRecipientsPerTransaction: DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION,
+  // Not read by execution yet, so omitted and "none" send the same batch (APE SOLA9-765).
+  priorityFee: "none",
   preflight: true,
 } as const satisfies Partial<Record<keyof z.infer<typeof transferBatchOptionsSchema>, JsonValue>>;
 
@@ -24,11 +28,19 @@ function isDefaultedOption(name: string): name is DefaultedOption {
  * their own canonical JSON, because the order they are listed in does not
  * change what moves (APE-667), and options at their default value dropped,
  * then empty `options`, because `{}`, no options and an explicit default mean
- * the same (APE-665). Anything that is not a recipients array is left as
- * sent; validation refuses it.
+ * the same (APE-665), and the token as the mint it executes as. Anything that
+ * is not a recipients array is left as sent; validation refuses it.
  */
 export function canonicalizeTransferBatchBody(body: JsonValue): JsonValue {
-  return canonicalBatchBody(body, withoutDefaultOptions);
+  const canonical = canonicalBatchBody(body, withoutDefaultOptions);
+  if (canonical === null || typeof canonical !== "object" || Array.isArray(canonical)) {
+    return canonical;
+  }
+  // The mint the batch executes as: a symbol and its mint move the same asset (APE SOLA9-695).
+  const { token } = canonical;
+  return typeof token === "string"
+    ? { ...canonical, token: normalizePaymentToken(token) }
+    : canonical;
 }
 
 /**

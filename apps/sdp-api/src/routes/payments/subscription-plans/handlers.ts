@@ -20,10 +20,12 @@ import { type AppContext, getPaymentSubscriptionsRepository } from "@/routes/pay
 import { resolveScope, resolveWallet } from "@/routes/payments/wallets";
 import { normalizePaymentToken, parseU64String } from "@/services/payment-operation.service";
 import {
+  assertSubscriptionTokenMint,
   buildPreparedSubscriptionTransaction,
   derivePlanAddresses,
   resolvePlanRuntime,
 } from "@/services/payments/recurring-payments/shared";
+import { parseStaticPaymentAmount } from "@/services/payments/token-amount";
 import {
   resolveRequestSponsorshipScope,
   resolveSponsoredFeePayer,
@@ -108,6 +110,8 @@ export const createSubscriptionPlan = async (
   // The route's authorize step checked the credential's access to both wallets.
   const scope = await resolveScope(c);
   const ownerWallet = resolveWallet(scope.wallets, body.ownerWalletId);
+  const token = assertSubscriptionTokenMint(normalizePaymentToken(body.token));
+  await parseStaticPaymentAmount(body.amount, token);
 
   const puller = await resolvePullerWalletAddress(c, body.pullerWalletId);
   const now = new Date().toISOString();
@@ -121,7 +125,7 @@ export const createSubscriptionPlan = async (
     projectId,
     ownerWalletId: ownerWallet.walletId,
     ownerAddress: ownerWallet.publicKey,
-    token: normalizePaymentToken(body.token),
+    token,
     amount: body.amount,
     periodHours: body.periodHours,
     programPlanId: body.programPlanId ?? generateProgramPlanId(),

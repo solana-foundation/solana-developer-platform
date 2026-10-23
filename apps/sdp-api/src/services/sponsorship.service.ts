@@ -7,6 +7,7 @@ import type { Context } from "hono";
 import { getDb } from "@/db/client";
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest, internalError } from "@/lib/errors";
+import type { MoneyAdmissionSubject } from "@/lib/money-admission";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
 import { instrumentVendorPort } from "@/runtime/vendor-calls";
 import type { Env } from "@/types/env";
@@ -32,10 +33,14 @@ export interface SponsorshipScope {
 }
 
 /**
- * A scope bound to the movement it serves, built only inside `createSponsorshipFeePayment`. The
- * sponsor refuses to sign a start the organization may not make right now (HOO-1955).
+ * A scope bound to the movement it serves and the custody wallet it pays for, built only inside
+ * `createSponsorshipFeePayment`. The sponsor refuses to sign a start the organization may not make
+ * right now (HOO-1955), or any movement the principal may not make with that wallet (HOO-2099).
  */
-export type SponsorshipMovementScope = SponsorshipScope & { movement: MovementId };
+export type SponsorshipMovementScope = SponsorshipScope & {
+  movement: MovementId;
+  custodyWalletId: string | null;
+};
 
 export interface OwnedSignedSubmission {
   signedTransaction: Uint8Array;
@@ -154,14 +159,22 @@ function instrumentedAdapter(env: Env, userId: string): FeePaymentPort {
  * @param env - API environment for provider, database and Redis access.
  * @param scope - Who is sponsored.
  * @param movement - The movement the sponsored transaction serves.
+ * @param subject - The custody wallet that signs the sponsored transaction, decided against the
+ *   principal's wallet scope on every sponsor signature; null only when no custody wallet signs it
+ *   (`/pay`).
  * @returns The sponsor.
  */
 export function createSponsorshipFeePayment(
   env: Env,
   scope: SponsorshipScope,
-  movement: MovementId
+  movement: MovementId,
+  subject: MoneyAdmissionSubject
 ): SponsorshipFeePayment {
-  const admitted: SponsorshipMovementScope = { ...scope, movement };
+  const admitted: SponsorshipMovementScope = {
+    ...scope,
+    movement,
+    custodyWalletId: subject.custodyWalletId,
+  };
   const provider = instrumentedAdapter(env, buildKoraUserId(admitted));
   return isSelfHostedDeployment(env)
     ? withOwnedSubmissionLifecycle(provider, { env, scope: admitted })

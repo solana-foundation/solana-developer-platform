@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import { SdpPaymentsError } from "#/errors";
 import { rampClientFor } from "#/ramps/index";
+import { checkRampCredentials } from "#/ramps/shared";
 import { rampTestRuntime, replayExchanges } from "#/ramps/test-kit";
 import type { RampOnrampQuoteInput } from "#/ramps/types";
 import { STRIPE_SESSION_TERMS, STRIPE_TEST_KIT, stripeSessionExchange } from "./test-kit";
@@ -137,14 +138,16 @@ describe("StripeRampClient session request", () => {
 describe("StripeRampClient credentials", () => {
   it("accepts a restricted secret key in either mode", () => {
     assert.equal(
-      stripe.checkCredentials(
+      checkRampCredentials(
+        stripe,
         { ...STRIPE_TEST_KIT.credentials, secretKey: "rk_test_restricted" },
         "sandbox"
       ),
       null
     );
     assert.equal(
-      stripe.checkCredentials(
+      checkRampCredentials(
+        stripe,
         { ...STRIPE_TEST_KIT.liveCredentials, secretKey: "rk_live_restricted" },
         "production"
       ),

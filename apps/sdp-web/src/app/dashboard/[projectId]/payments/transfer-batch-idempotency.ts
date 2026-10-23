@@ -2,7 +2,7 @@
 
 import type { PaymentTransferBatchRequest } from "@sdp/types/payments";
 import { MOVEMENT_READ_PATHS, settleWhenMovementFinal } from "@/lib/dashboard-fetch";
-import { uncertainMoneyAnswerMessage } from "@/lib/idempotency";
+import { canonicalDecimalAmount, uncertainMoneyAnswerMessage } from "@/lib/idempotency";
 import {
   createIdempotencyKeyStore,
   resetIdempotencyKeyStoresForTests,
@@ -47,21 +47,24 @@ export function resetTransferBatchIdempotencyStateForTests(): void {
  * byte-identical and the API replays the recorded batch instead of conflicting.
  * Recipient order carries no meaning to a batch — the same accounts receive
  * the same amounts either way.
+ *
+ * Each amount is spelled canonically too, as the API fingerprints it: a retry
+ * that re-enters `1` for `1.0` is the same batch under the same key.
  */
 export function canonicalTransferBatchRequest(
   request: PaymentTransferBatchRequest
 ): PaymentTransferBatchRequest {
   return {
     ...request,
-    recipients: [...request.recipients].sort((a, b) =>
-      a.counterpartyAccountId.localeCompare(b.counterpartyAccountId)
-    ),
+    recipients: request.recipients
+      .map((recipient) => ({ ...recipient, amount: canonicalDecimalAmount(recipient.amount) }))
+      .sort((a, b) => a.counterpartyAccountId.localeCompare(b.counterpartyAccountId)),
   };
 }
 
 /**
  * What makes two submissions the SAME batch: the source wallet, the token,
- * every recipient with its amount, and the external reference. Change any one
+ * every recipient with its amount (in canonical spelling), and the external reference. Change any one
  * and it is a different batch, not a retry. Recipients are read in canonical
  * order, which is also the order they are SENT in, so this key and the API's
  * own order-sensitive fingerprint agree on what one intent is.
@@ -115,11 +118,13 @@ export async function sendTransferBatchUnderKey(
   request: PaymentTransferBatchRequest,
   t: Translate
 ): Promise<CreateTransferBatchResult> {
-  const fingerprint = transferBatchRequestFingerprint(request);
+  // Sent in the form it is keyed by, whatever form the caller passed.
+  const canonical = canonicalTransferBatchRequest(request);
+  const fingerprint = transferBatchRequestFingerprint(canonical);
   const { key, persisted } = store.claim(fingerprint);
   let result: CreateTransferBatchResult;
   try {
-    result = await createTransferBatch(request, t, { value: key, persisted });
+    result = await createTransferBatch(canonical, t, { value: key, persisted });
   } catch (error) {
     if (error instanceof TransferBatchRequestError) {
       const answer = { status: error.status, replayed: error.replayed, code: error.code };

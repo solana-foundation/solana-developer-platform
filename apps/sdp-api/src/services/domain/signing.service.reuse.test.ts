@@ -166,7 +166,7 @@ describe("signing.service custody provider enablement", () => {
       );
 
     await expect(
-      service.createWallet(orgId, PROJECT_ID, { provider: "privy" })
+      service.createWallet(orgId, PROJECT_ID, { provider: "privy", purpose: "transfer" })
     ).rejects.toMatchObject({
       name: "SigningError",
       code: "INVALID_REQUEST",

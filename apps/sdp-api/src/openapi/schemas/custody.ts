@@ -68,7 +68,8 @@ const walletCreationFieldsOpenApi = {
     example: "Mint authority wallet",
   }),
   purpose: withOpenApi(createManagedWalletSchemaBase.shape.purpose, {
-    description: "Optional semantic purpose for the wallet.",
+    description:
+      "What the wallet is for. Defaults to `transfer`, the only purpose a payment, transfer batch or recurring payment can send from.",
     example: "mint_authority",
   }),
 };

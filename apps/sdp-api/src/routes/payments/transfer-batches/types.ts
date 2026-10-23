@@ -2,6 +2,7 @@ import type { getRecentBlockhash, SolanaRpc } from "@sdp/rpc/solana";
 import type { Address } from "@solana/kit";
 import type { z } from "zod";
 import type { ResolvedScope } from "@/routes/payments/wallets";
+import type { PaymentAmountConverter } from "@/services/payments/token-amount";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { createTransferBatchSchema } from "./schemas";
 
@@ -16,6 +17,7 @@ export type TokenContext =
       /** Canonical native token value: the wrapped SOL mint. */
       token: string;
       decimals: 9;
+      toBaseUnits: PaymentAmountConverter;
     }
   | {
       kind: "spl";
@@ -24,6 +26,8 @@ export type TokenContext =
       mintAddress: Address;
       tokenProgram: Address;
       sourceTokenAccount: Address;
+      /** Loaded once per batch; every recipient amount converts through it. */
+      toBaseUnits: PaymentAmountConverter;
     };
 
 export interface ResolvedRecipient {

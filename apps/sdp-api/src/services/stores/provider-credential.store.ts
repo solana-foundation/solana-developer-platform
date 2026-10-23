@@ -854,8 +854,8 @@ export class ProviderCredentialStore {
     await this.db.execute(
       `INSERT INTO custody_wallets (
          id, custody_config_id, custody_connection_id, wallet_id,
-         public_key, label, status, updated_at
-       ) VALUES (?, NULL, ?, ?, ?, ?, 'active', sdp_iso_now())`,
+         public_key, label, purpose, status, updated_at
+       ) VALUES (?, NULL, ?, ?, ?, ?, 'transfer', 'active', sdp_iso_now())`,
       [
         custodyWalletId,
         params.connectionId,

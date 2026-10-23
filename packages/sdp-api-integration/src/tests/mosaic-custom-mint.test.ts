@@ -58,6 +58,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic custom min
             actor: { type: "project", id: TEST_PROJECT.id },
           },
           movement: "issuance.authority",
+          custodyWalletId: custodyWallet.id,
         });
         return asOrganizationAdmin(() =>
           mosaic.createToken({
