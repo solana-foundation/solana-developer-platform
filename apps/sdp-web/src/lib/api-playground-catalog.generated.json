@@ -3896,7 +3896,7 @@
         "expectedResponse": {
           "data": {
             "terms": {
-              "mint": "So11111111111111111111111111111111111111112",
+              "mint": "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo",
               "program": "token-2022",
               "decimals": 6,
               "readAt": {
@@ -3919,11 +3919,11 @@
               "display": {
                 "rule": "plain"
               },
-              "transferHookProgram": "So11111111111111111111111111111111111111112",
+              "transferHookProgram": null,
               "paused": false,
               "nonTransferable": false,
               "defaultAccountState": "initialized",
-              "permanentDelegate": "So11111111111111111111111111111111111111112",
+              "permanentDelegate": null,
               "confidentialTransfers": false,
               "support": [
                 {
