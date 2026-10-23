@@ -194,7 +194,7 @@
   "POST /v1/earn/vault-withdrawal-options": "earn.read",
   "POST /v1/earn/vault-withdrawal-previews": "earn.read",
   "POST /v1/earn/vault-withdrawal-requests": "earn.execute",
-  "POST /v1/earn/vault-withdrawal-requests/:_/cancel": "earn.execute",
+  "POST /v1/earn/vault-withdrawal-requests/:_/cancel": "earn.manage",
   "POST /v1/earn/vault-withdrawals": "earn.execute",
   "POST /v1/helius-rings/operations": "helius_rings.execute",
   "POST /v1/helius-rings/operations/:_/execute": "helius_rings.execute",

@@ -7,8 +7,8 @@ import { GENESIS_HASH_BY_CLUSTER, type SolanaCluster } from "@sdp/types/well-kno
 
 /**
  * Earn's endpoint URLs for its provider packages. Every other Earn read and send goes through
- * `createClusterRpc()` in the open cluster scope: the project's for a keyed request, the named
- * strategy's for a keyless one, the registration's for a cron, the lane's for the catalogue sync.
+ * `createClusterRpc()` in the open cluster scope: the project's for a request, the registration's
+ * for a cron, the lane's for the catalogue sync.
  * Provider packages still build their own transports from a URL and name the cluster their plan
  * targets (HOO-1881), so these helpers hand them the scope's pool URLs and refuse a provider that
  * asks for the other cluster (`CLUSTER_SCOPE_CONFLICT`). Nothing resolves an endpoint from

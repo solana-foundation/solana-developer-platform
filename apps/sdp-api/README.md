@@ -17,11 +17,7 @@ The SDP API provides a unified interface for blockchain operations on Solana, in
 ## Public API Routes
 
 The API exposes these public REST endpoints. Most require an API key or Clerk session
-token. Earn strategy reads, deposit/direct-withdrawal previews and unsigned
-instant builds, withdrawal-route discovery, and queued-withdrawal previews also
-accept anonymous requests. Submits, queued request/cancellation actions,
-positions, movements, earnings, and the rest of the tenant control plane remain
-authenticated.
+token; every Earn route does.
 
 | Family | Path | Use Case |
 |---|---|---|
@@ -156,16 +152,9 @@ it reads, `KORA_<CLUSTER>_RPC_URL`, instead: both or neither, since the API refu
 start when a cluster sets only one of them. For managed custody, choose a supported `SIGNING_PROVIDER` and add
 that provider's credentials as shown below and in `.env.local.example`.
 
-Keyless Earn requests map `ENVIRONMENT=development` to sandbox and
-`ENVIRONMENT=production` to production. Anonymous quote and build traffic has
-a separate paid-upstream budget configured with
-`EARN_ANONYMOUS_RPC_MAX_REQUESTS` and
-`EARN_ANONYMOUS_RPC_WINDOW_SECONDS`. API-key requests continue to use their
-project environment and authenticated quota. At startup, the API validates and
-logs the resolved anonymous Earn environment from `ENVIRONMENT`; verify that
-event before exposing a non-production deployment. Outside Cloud Run, forwarded
-client addresses are ignored unless `TRUST_PROXY_HEADERS=true`; enable it only
-behind an ingress that replaces caller-supplied `X-Forwarded-For` values.
+Outside Cloud Run, forwarded client addresses are ignored unless
+`TRUST_PROXY_HEADERS=true`; enable it only behind an ingress that replaces
+caller-supplied `X-Forwarded-For` values.
 
 ### Release Channel (which modules run)
 

@@ -39,8 +39,7 @@ import { earnClusterFor } from "./execution-registry";
  * customers can always leave (EARN-015). The config is curation-as-code beside
  * `CURATED_VAULTS` (`handlers/curation.ts`).
  *
- * The cap is decided TWICE per ledgered deposit, on purpose. Anonymous builds
- * persist nothing and have no SDP submit, so they receive only step 1:
+ * The cap is decided TWICE per ledgered deposit, on purpose:
  *
  * 1. **Admission** (`assertVaultExposureWithinCap`), the LAST step of the single
  *    money-in predicate (`assertVaultDepositAdmissible`), before anything is
@@ -70,12 +69,11 @@ import { earnClusterFor } from "./execution-registry";
  *   throws refuses the deposit with a 503, shadow mode included. Same posture
  *   as a database outage today.
  * - **Figures stay internal.** The aggregate is EVERY tenant's holdings, read
- *   under the system identity, and the preview and external-wallet build
- *   routes are keyless. So the 409's `details` carry only `vaultAddress` and
- *   the preview's blocking issue is a fixed sentence: `exposure`, `projected`
- *   and `limit` go to the evaluated event and nowhere else (SOLA9-9). A
- *   response that named them handed any anonymous caller SDP's total position
- *   in the vault.
+ *   under the system identity. So the 409's `details` carry only
+ *   `vaultAddress` and the preview's blocking issue is a fixed sentence:
+ *   `exposure`, `projected` and `limit` go to the evaluated event and nowhere
+ *   else (SOLA9-9). A response that named them handed one tenant SDP's total
+ *   position in the vault.
  *
  * Units: the vault's DEPOSIT-TOKEN units throughout (no price oracle; every V1
  * vault is a dollar stablecoin). The catalogue TVL is USD, so the share bound
@@ -434,7 +432,7 @@ function admitOrRefuse(verdict: VaultExposureVerdict, amount: string): VaultExpo
   if (verdict.evaluation.wouldBlock && verdict.enforced) {
     // Only the vault the caller already named. The figures behind the verdict
     // are the cross-tenant aggregate; they are on the evaluated event, not in
-    // a body an anonymous caller can read (SOLA9-9).
+    // a body one tenant can read (SOLA9-9).
     throw vaultExposureCapExceeded(VAULT_EXPOSURE_CAP_MESSAGE, {
       vaultAddress: verdict.key.vaultAddress,
     });

@@ -22,6 +22,7 @@ import {
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { isRenderableLogoUrl } from "@/lib/token-logo-url";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { IssuanceFilterPopover } from "./issuance-filter-popover";
 import { IssuanceLegacyOverview } from "./issuance-legacy-overview";
@@ -194,7 +195,7 @@ function IssuanceTokenGridCard({
       <div className="flex items-center justify-between gap-4">
         <div className="flex min-w-0 items-center gap-3">
           <div className="h-12 w-12 shrink-0 overflow-hidden rounded-2xl border border-border-subtle bg-fill-subtle">
-            {token.imageUrl ? (
+            {token.imageUrl && isRenderableLogoUrl(token.imageUrl) ? (
               // biome-ignore lint/performance/noImgElement: user-supplied external logo URL; next/image can't be configured for arbitrary hosts here.
               <img
                 src={token.imageUrl}

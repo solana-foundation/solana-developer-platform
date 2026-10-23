@@ -58,7 +58,7 @@ layers in SDP, none redundant:
    in one authenticated Connect context, the wallet registry must report the
    sender Approved AND the products shelf must contain the requested registry
    fund with `can_trade === true` before USDC leaves. A valid negative result
-   always gets the same generic refusal: the optional-auth build route must not
+   always gets the same generic refusal: the build route must not
    reveal whether a wallet is registered, its KYC state, or the organization's
    product entitlements. Malformed/upstream responses fail closed.
 2. **Hook account resolution** (`transfer-hook.ts`): the standard SPL

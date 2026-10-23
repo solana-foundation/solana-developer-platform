@@ -25,6 +25,10 @@ import {
 import { forbidden } from "@/lib/errors";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { logVendorCallFailure } from "@/runtime/vendor-calls";
+import {
+  createPrivateChannelAuthFetch,
+  createPrivateChannelGatewayTransport,
+} from "@/services/private-channels/egress";
 import type { Env } from "@/types/env";
 import { getSpcSession } from "./spc-session";
 
@@ -114,7 +118,10 @@ export async function resolveGatewayAuth(
     throw forbidden("This project has no active Private Channels principal.");
   }
 
-  const client = createAuthClient(instance.authUrl, { timeoutMs: SPC_AUTH_TIMEOUT_MS });
+  const client = createAuthClient(instance.authUrl, {
+    timeoutMs: SPC_AUTH_TIMEOUT_MS,
+    fetchImpl: createPrivateChannelAuthFetch(env),
+  });
   return openSpcAuthContext(env, organizationId, instance.id, pcUser, client);
 }
 
@@ -129,8 +136,8 @@ function isUnauthorizedAuthError(error: unknown): boolean {
 
 /**
  * Run a gateway RPC op with a context's token, retrying ONCE on a gateway 401 with a
- * re-minted token and a rebuilt client (the token is baked into headers at
- * construction, so a rebuild is required).
+ * re-minted token and a rebuilt client (the token is baked into the guarded
+ * transport's headers at construction, so a rebuild is required).
  *
  * `run` must be the token-authenticated gateway sequence ONLY, never surrounding
  * business logic — on the withdrawal write path this re-runs a burn broadcast. That
@@ -148,7 +155,16 @@ export async function withGatewayRpc<T>(
   run: (rpc: SolanaRpc) => Promise<T>
 ): Promise<T> {
   const attempt = (token: string) =>
-    run(createChannelGatewayRpc(env, gatewayUrl, gatewayAuthOptions(token)));
+    run(
+      createChannelGatewayRpc(env, gatewayUrl, {
+        ...gatewayAuthOptions(token),
+        // Egress-guarded transport: the factory receives the bearer-token headers
+        // above, so the guarded transport dials with the same credentials kit
+        // would have sent.
+        transportFactory: (headers) =>
+          createPrivateChannelGatewayTransport(env, gatewayUrl, headers),
+      })
+    );
   const startedAt = Date.now();
   try {
     return await attempt(context.current);
@@ -262,7 +278,10 @@ export async function resolveMemberGatewayAuth(
   }
 
   try {
-    const client = createAuthClient(instance.auth_url, { timeoutMs: SPC_AUTH_TIMEOUT_MS });
+    const client = createAuthClient(instance.auth_url, {
+      timeoutMs: SPC_AUTH_TIMEOUT_MS,
+      fetchImpl: createPrivateChannelAuthFetch(env),
+    });
     return {
       kind: "token",
       context: await openSpcAuthContext(env, organizationId, instanceId, pcUser, client),

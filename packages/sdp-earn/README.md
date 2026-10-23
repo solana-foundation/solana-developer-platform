@@ -17,7 +17,7 @@ integration touches:
 | `/v1/earn/programs` | the whole flow | **501** by capability detection |
 | Upstream readiness | `<PROVIDER>_API_KEY` / `<PROVIDER>_SANDBOX_API_KEY` | Kamino, Veda, and Jupiter Lend are credential-free; Ondo needs the platform Jupiter key; WisdomTree needs Connect credentials |
 | Clusters | catalogued per environment's own cluster | provider deployment registries: Kamino on devnet/mainnet, Veda on devnet, Jupiter Lend and Ondo on mainnet; WisdomTree remains deposit-disabled |
-| Dashboard | treasury program flow | treasury vault flow plus an authenticated integration guide; public docs also cover the optional-auth instant-build and queued-preview tier |
+| Dashboard | treasury program flow | treasury vault flow plus an authenticated integration guide |
 
 A vault-direct provider is a complete integration without a portfolio wallet:
 `supportsPortfolioWallets` returning false is the answer, not a TODO. Its
@@ -91,45 +91,39 @@ which routes serve the flow:
 | | Treasury (SDP signs) | B2B2C external wallet (the customer signs) |
 | -- | -- | -- |
 | Who holds the funds | an org custody wallet | the end user's own wallet; SDP holds no key |
-| Deposit | `POST /v1/earn/vault-deposits` | `POST /v1/earn/external-wallet/deposit-transactions` (keyless or keyed build); a keyed caller may then submit to `/external-wallet/deposits` |
-| Direct exit | `POST /v1/earn/vault-withdrawals` | `POST /v1/earn/external-wallet/withdrawal-previews` and `/withdrawal-transactions` (keyless or keyed); a keyed caller may then submit to `/external-wallet/withdrawals` |
-| Queued exit | options, preview, create/list/detail, and post-deadline cancel routes on the custody surface | options and preview are keyless or keyed; request/cancellation builds, submits, and history require a key |
+| Deposit | `POST /v1/earn/vault-deposits` | `POST /v1/earn/external-wallet/deposit-transactions` builds; the caller then submits to `/external-wallet/deposits` |
+| Direct exit | `POST /v1/earn/vault-withdrawals` | `POST /v1/earn/external-wallet/withdrawal-previews` and `/withdrawal-transactions`; the caller then submits to `/external-wallet/withdrawals` |
+| Queued exit | options, preview, create/list/detail, and post-deadline cancel routes on the custody surface | options, preview, request/cancellation builds, submits, and history |
 | Movement reads | `GET /v1/earn/vault-deposits`, `/vault-withdrawals`, `/movements` | `GET /v1/earn/external-wallet/movements[?ownerAddress=]` + `/:movementId` (PRO-1772) |
 | Holdings + earnings | `GET /v1/earn/vault-positions` | `GET /v1/earn/external-wallet/positions?ownerAddress=…`, `/positions/summary`, `/earnings?ownerAddress=…` |
 | Authorization | wallet policy, then `createOrgSignerForCustodyWallet` | the owner's own ed25519 signature |
 | Ledger identity | `earn_movements.custody_wallet_id` | `earn_movements.owner_address` |
 
-Both are the SAME execution model (`vault_direct`). Treasury and keyed
+Both are the SAME execution model (`vault_direct`). Treasury and
 external-wallet submits record a signed transaction durably before SDP
 broadcasts it, then drive it terminal through the same reconciliation sweep.
-A keyless external-wallet build is deliberately ephemeral: SDP returns unsigned
-bytes, writes no tenant row, and leaves signing, broadcast, and tracking to the
-caller. Exactly one of the two identity columns is set on every recorded row
+Exactly one of the two identity columns is set on every recorded row
 (migration 0070), and every treasury read scopes by custody wallet, so recorded
 external-wallet rows are structurally invisible to those surfaces.
 
 The external-wallet flow in one pass (PRO-1722):
 
-1. **Build.** The partner calls the same build route with or without an API
-   key. SDP runs the environment, catalogue, and safety gates, asks the provider
-   for the plan, simulates it, and compiles ONE unsigned transaction. A keyed
-   build also applies the tenant entitlement and persists
-   `earn_external_wallet_transactions`; a keyless build uses the owner as fee
-   payer and writes nothing. Both return `{transactionId, transaction,
-   sponsored}`. Nothing has moved, and the build expires with its blockhash.
+1. **Build.** The partner's backend calls the build route with its API key.
+   SDP runs the environment, entitlement, catalogue, and safety gates, asks the
+   provider for the plan, simulates it, compiles ONE unsigned transaction, and
+   persists `earn_external_wallet_transactions`. It returns `{transactionId,
+   transaction, sponsored}`. Nothing has moved, and the build expires with its
+   blockhash.
 2. **Sign.** The customer's wallet signs those exact bytes in the partner's
    UI. By default the owner is the fee payer and only required signer. To
-   sponsor fees and share-account rent on a keyed build, pass the partner
-   wallet's `feePayer` and co-sign the same bytes with both wallets.
-3. **Broadcast.** A keyless caller broadcasts and tracks the signed transaction
-   directly. It cannot use SDP's submit or tenant read routes because no server
-   build row exists.
-4. **Submit, keyed only.** The backend returns `{transactionId,
-   signedTransaction}` with a required `Idempotency-Key`. SDP proves the message
-   is byte-for-byte the one it built, verifies every required signature,
+   sponsor fees and share-account rent, pass the partner wallet's `feePayer`
+   and co-sign the same bytes with both wallets.
+3. **Submit.** The backend returns `{transactionId, signedTransaction}` with a
+   required `Idempotency-Key`. SDP proves the message is byte-for-byte the one
+   it built, verifies every required signature,
    records the movement, THEN broadcasts. A retry with the same key replays the
    original movement (`replayed: true`); each durable build is consumable once.
-5. **Settle.** SDP drives a submitted movement to `finalized` or `failed`. The
+4. **Settle.** SDP drives a submitted movement to `finalized` or `failed`. The
    exit mirrors the deposit and retains its money-out safety rules.
 
 A queued exit is deliberately separate. Its first signed transaction escrows
@@ -138,10 +132,9 @@ and cancellation actions before broadcast, reconciles provider state and lifecyc
 events, and projects a withdrawal movement only after verified fulfilment.
 
 The Embedded Yield guide (`apps/sdp-docs/content/unpublished/guides/embedded-yield.mdx`,
-unpublished until PRO-2038) documents both access tiers. The dashboard's
-configuration snippets intentionally emit the authenticated end-to-end flow
-because they include submit and tenant read routes. The treasury dashboard
-flows use the SDP-signed routes.
+unpublished until PRO-2038) and the dashboard's configuration snippets document
+the same end-to-end flow. The treasury dashboard flows use the SDP-signed
+routes.
 Deeper docs: gates and scoping in
 `apps/sdp-api/src/routes/earn/CLAUDE.md`; instruction building in
 `packages/sdp-kamino/CLAUDE.md`; the decision record in ADR 0002
@@ -361,8 +354,8 @@ refresh is update-only.
 - **Delist convergence:** after a successful non-empty provider response, active
   rows absent from that provider's live catalogue become deprecated metadata
   tombstones, scoped to the cluster sub-shelf the responding lane is the truth
-  for. They disappear from browse and deposit admission while preserving the
-  stable vault and mint identity an anonymous holder needs to exit. A provider
+  for. They disappear from browse and deposit admission while the stable
+  strategy id keeps resolving to its vault and mint identity. A provider
   relist reactivates only a sync-owned tombstone; operator-paused or deprecated
   rows remain sticky. The mirror lane additionally converges to EMPTY on a
   reliable "nothing is listed" answer (an empty accepted mainnet shelf, or a

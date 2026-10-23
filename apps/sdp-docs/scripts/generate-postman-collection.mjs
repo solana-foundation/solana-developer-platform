@@ -293,7 +293,7 @@ function idempotencyKeyEvents() {
   ];
 }
 
-function getRequestBody(spec, operation, preferredExampleName) {
+function getRequestBody(spec, operation) {
   const jsonBody = operation.requestBody?.content?.["application/json"];
   if (!jsonBody) {
     return undefined;
@@ -301,7 +301,7 @@ function getRequestBody(spec, operation, preferredExampleName) {
 
   const example =
     jsonBody.example ??
-    getNamedExampleValue(jsonBody.examples, preferredExampleName) ??
+    getNamedExampleValue(jsonBody.examples) ??
     buildExampleFromSchema(spec, jsonBody.schema);
 
   return {
@@ -319,21 +319,7 @@ function buildRequestUrl(baseUrl, routePath) {
   return `${baseUrl}${routePath.replace(/\{([^}]+)\}/g, "{{$1}}")}`;
 }
 
-function allowsAnonymousAccess(security) {
-  return (
-    Array.isArray(security) &&
-    security.some(
-      (requirement) =>
-        requirement &&
-        typeof requirement === "object" &&
-        !Array.isArray(requirement) &&
-        Object.keys(requirement).length === 0
-    )
-  );
-}
-
 function createRequestItem(spec, baseUrl, routePath, method, operation) {
-  const allowsAnonymous = allowsAnonymousAccess(operation.security);
   const request = {
     method: method.toUpperCase(),
     header: getRequestHeaders(operation, routePath, method),
@@ -341,14 +327,7 @@ function createRequestItem(spec, baseUrl, routePath, method, operation) {
     description: operation.description || operation.summary || "",
   };
 
-  // Collection auth is inherited by default. Optional-auth operations must
-  // override it so the placeholder API key does not turn a valid anonymous
-  // request into an INVALID_API_KEY response.
-  if (allowsAnonymous) {
-    request.auth = { type: "noauth" };
-  }
-
-  const body = getRequestBody(spec, operation, allowsAnonymous ? "anonymous" : undefined);
+  const body = getRequestBody(spec, operation);
   if (body) {
     request.body = body;
   }

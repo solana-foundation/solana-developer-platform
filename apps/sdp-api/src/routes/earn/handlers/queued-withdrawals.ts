@@ -16,7 +16,7 @@ import {
   type EarnVaultWithdrawalRequestStatus,
 } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
 import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
-import { badRequest, conflict, internalError, notFound } from "@/lib/errors";
+import { badRequest, conflict, notFound } from "@/lib/errors";
 import {
   buildEarnVaultParRedemptionFingerprint,
   buildEarnVaultQueuedWithdrawalFingerprint,
@@ -641,7 +641,7 @@ function externalActor(c: AppContext, environment: SdpEnvironment): QueuedWithdr
 
 function externalPosition(target: Awaited<ReturnType<typeof resolveExternalWalletExit>>) {
   return {
-    id: target.positionId ?? "",
+    id: target.positionId,
     provider: target.provider,
     vaultAddress: target.vaultAddress,
     tokenMint: target.tokenMint,
@@ -656,10 +656,7 @@ export async function getEarnExternalWalletWithdrawalOptions(
   const body = c.req.valid("json");
   const target = await resolveExternalWalletExit(c, body);
   const options = await readOptions(c, target.environment, externalPosition(target));
-  return success(c, {
-    ...(target.positionId ? { positionId: target.positionId } : { strategyId: target.strategyId }),
-    ...options,
-  });
+  return success(c, { positionId: target.positionId, ...options });
 }
 
 export async function createEarnExternalWalletQueuedWithdrawalPreview(
@@ -673,10 +670,7 @@ export async function createEarnExternalWalletQueuedWithdrawalPreview(
     externalPosition(target),
     queuedTerms(body)
   );
-  return success(c, {
-    ...(target.positionId ? { positionId: target.positionId } : { strategyId: target.strategyId }),
-    ...quote,
-  });
+  return success(c, { positionId: target.positionId, ...quote });
 }
 
 export async function createEarnExternalWalletWithdrawalRequestTransaction(
@@ -684,9 +678,6 @@ export async function createEarnExternalWalletWithdrawalRequestTransaction(
 ) {
   const body: ExternalRequestBuildBody = c.req.valid("json");
   const target = await resolveExternalWalletExit(c, body);
-  if (!target.positionId) {
-    throw internalError("Authenticated queued-withdrawal build resolved without a position");
-  }
   const built = await buildExternalQueuedWithdrawalRequest(c.env, {
     actor: externalActor(c, target.environment),
     position: externalPosition(target),
@@ -717,9 +708,6 @@ export async function createEarnExternalWalletWithdrawalRequestCancelTransaction
     throw notFound("Earn external-wallet withdrawal request");
   }
   const target = await resolveExternalWalletExit(c, { positionId: request.position_id });
-  if (!target.positionId) {
-    throw internalError("Authenticated queued-withdrawal cancellation resolved without a position");
-  }
   if (target.ownerAddress !== request.owner_address) {
     throw notFound("Earn external-wallet withdrawal request");
   }

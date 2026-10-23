@@ -126,7 +126,7 @@ export interface UpdateEarnStrategyMetricsInput {
  * Delist pass input: everything the provider still lists for (provider,
  * environment). Any other active row is stale, either a vault the provider
  * delisted or one a tightened catalogue gate now refuses, and becomes a
- * deprecated metadata tombstone so existing anonymous positions remain exitable.
+ * deprecated metadata tombstone, so its stable id keeps resolving.
  *
  * `listedProviderReferences` is the KEEP set, never the delist set, so the
  * caller cannot enumerate stale rows it does not know about: the provider's
@@ -328,10 +328,9 @@ export interface EarnRepository {
    * what left the live catalogue. Idempotent: a second pass over the same keep
    * set matches nothing.
    *
-   * The retained row is exit metadata, not a browsable or depositable strategy.
-   * Anonymous builds write no tenant position, so its stable id and immutable
-   * provider/vault/mint identity are the only server-side facts that let a
-   * holder exit after delisting. `catalogue_delisted_at` distinguishes this
+   * The retained row is metadata, not a browsable or depositable strategy: its
+   * stable id and immutable provider/vault/mint identity keep resolving after
+   * delisting. `catalogue_delisted_at` distinguishes this
    * sync-owned deprecation from a sticky operator status and lets a later
    * provider relist reactivate the same id safely.
    */

@@ -69,7 +69,11 @@ import { checkVaultExposure, vaultExposureBlockingIssue } from "@/services/earn/
 import { reconcileEarnVaultMovementReadThrough } from "@/services/earn/vault-movement-reconciliation.service";
 import { rethrowVaultProviderFailure } from "@/services/earn/vault-refusals";
 import { withdrawFromVault } from "@/services/earn/vault-withdraw.service";
-import { assertDepositFloorPresent, assertVaultDepositAdmissible } from "./admission";
+import {
+  assertDepositFloorPresent,
+  assertVaultDepositAdmissible,
+  assertVaultDirectDepositStyle,
+} from "./admission";
 import {
   beginEarnDepositAudit,
   completeEarnDepositAudit,
@@ -103,18 +107,15 @@ import {
  *
  * A READ that takes the deposit's own money-in gates through
  * `assertVaultDepositAdmissible`, the function both deposit builds call: the
- * quote exists only to open a NEW position, so surfacing, admission, and
- * environment capability always apply, and an authenticated caller takes the
- * project provider rule (an anonymous caller has no project for it to decide
- * from). There is no wallet, persistence, or idempotency
+ * quote exists only to open a NEW position, so surfacing, admission,
+ * environment capability and the project provider rule always apply. There is
+ * no wallet, persistence, or idempotency
  * key because the preview moves and holds nothing.
  */
 export async function createEarnVaultDepositPreview(
   c: ValidatedBodyContext<typeof earnVaultDepositPreviewSchema>
 ) {
   const body = c.req.valid("json");
-  // The row names the shelf: a tenant caller must own it, an anonymous caller
-  // chose it (PRO-1998).
   const { strategy, environment } = await requireEarnStrategyForCaller(c, body.strategyId);
   // No amount: the preview reports the cap below as a blocking issue instead
   // of throwing it.
@@ -287,10 +288,13 @@ interface EarnVaultDepositResolved {
 /**
  * Parse and resolve a vault deposit for the request gate.
  *
- * Everything the handler needs is resolved HERE, before the handler runs, so
- * the wallet, the strategy admission and the swap normalization are all
- * decided BEFORE `createOrgSignerForCustodyWallet` is reached; the signer then
- * decides whether this caller may sign with the wallet (HOO-2099).
+ * Identity only, which is everything the replay lookup and its fingerprint
+ * need: the strategy and its shape, the swap normalization, the wallet and the
+ * key's scope over it. The money-in state gates wait for
+ * `admitEarnVaultDeposit`, after the replay lookup (ADR 0009). Both run before
+ * the handler, so all of it is decided BEFORE `createOrgSignerForCustodyWallet`
+ * is reached; the signer then decides whether this caller may sign with the
+ * wallet (HOO-2099).
  */
 export async function extractEarnVaultDeposit(
   c: ValidatedBodyContext<typeof earnVaultDepositSchema>
@@ -323,19 +327,8 @@ export async function extractEarnVaultDeposit(
       `Earn provider ${strategy.provider} is not available in this deployment`
     );
   }
-
-  // The share floor the catalogue promised (`depositSlippage`) is the one the
-  // build enforces: every production deposit carries one, derived by the
-  // dashboard from a live quote and rejected when stale (PRO-1691); the
-  // provider builder enforces the exact value on-chain. A next-NAV provider
-  // order publishes null because no on-chain instruction can bound its later
-  // settlement.
-  assertDepositFloorPresent(
-    strategy.provider,
-    environment,
-    body.minSharesOut,
-    strategy.host_cluster
-  );
+  const provider = strategy.provider;
+  assertVaultDirectDepositStyle(provider);
 
   const tokenMint = strategy.deposit_mints[0];
   if (!tokenMint) {
@@ -345,38 +338,6 @@ export async function extractEarnVaultDeposit(
   if (!shareMint) {
     throw internalError(`Earn strategy ${strategy.id} has no share mint`);
   }
-
-  // MONEY-IN GATES, in the same order and with the same meaning as
-  // `POST /programs` (see routes/earn/CLAUDE.md → "Gate asymmetry"). Opening a
-  // vault position is a new commitment, so it takes all of:
-  //
-  //   shape       — a custodial provider reaching this route would silently
-  //                 skip its wallet-provisioning model.
-  //   environment — capability, inside `assertVaultDepositAdmissible`: this
-  //                 project must reach the provider's deployed cluster.
-  //   surfacing   — "SDP does not offer this provider", which no per-org
-  //                 override can lift, and which reads differently from
-  //                 entitlement. Checked first so a caller is never pointed at
-  //                 an activation door that does not exist.
-  //   entitlement — the org's own override plus the environment's credentials.
-  //   admission   — the catalogue row is `active` and its cluster is fundable
-  //                 here. Shared with `POST /programs` rather than re-derived:
-  //                 this path used to check neither, so a `paused` strategy —
-  //                 an operator's deliberate stop during an exploit or depeg —
-  //                 stayed fundable by id.
-  //
-  //   exposure:     SDP-wide holdings in this vault stay under its cap (ADR
-  //                 0004 layer 1); a typed 409 when enforced, an event only in
-  //                 shadow mode. Last, because it is the one step that reads
-  //                 the ledger. The amount is the body's, which for a
-  //                 swap-funded deposit is the SOURCE stablecoin's units (a
-  //                 dollar-for-dollar approximation the cap accepts by design).
-  //
-  // The sequence lives in handlers/admission.ts so the external-wallet build
-  // shares it instead of re-deriving it. Money-OUT must never inherit any of
-  // these (ADR 0002): un-offering a provider closes the door in, never the
-  // door out.
-  const provider = await assertVaultDepositAdmissible(c, strategy, body.amount);
 
   // Swap funding, normalized before the handler runs. A source equal to the vault's own token is a
   // no-op (null), and an unsupported mint is refused here, before any
@@ -422,6 +383,67 @@ export async function extractEarnVaultDeposit(
   };
 
   return { body, resolved };
+}
+
+/**
+ * The vault deposit's money-in gates, run as the request gate's `admit` hook,
+ * AFTER the replay lookup: a same-key retry of a recorded deposit is not new
+ * work, so it gets its recorded answer whatever happened since to the strategy's
+ * status, the floor policy, entitlement or the vault's exposure (ADR 0009).
+ */
+export async function admitEarnVaultDeposit(
+  c: AppContext,
+  extraction: RequestGateExtraction
+): Promise<void> {
+  // SAFETY: wired only beside extractEarnVaultDeposit in index.ts.
+  const { strategy } = extraction.resolved as EarnVaultDepositResolved;
+  const body = extraction.body as EarnVaultDepositBody;
+
+  // The share floor the catalogue promised (`depositSlippage`) is the one the
+  // build enforces: every production deposit carries one, derived by the
+  // dashboard from a live quote and rejected when stale (PRO-1691); the
+  // provider builder enforces the exact value on-chain. A next-NAV provider
+  // order publishes null because no on-chain instruction can bound its later
+  // settlement.
+  assertDepositFloorPresent(
+    strategy.provider,
+    resolveSdpEnvironment(c),
+    body.minSharesOut,
+    strategy.host_cluster
+  );
+
+  // MONEY-IN GATES, in the same order and with the same meaning as
+  // `POST /programs` (see routes/earn/CLAUDE.md → "Gate asymmetry"). Opening a
+  // vault position is a new commitment, so it takes all of:
+  //
+  //   shape:        a custodial provider reaching this route would silently
+  //                 skip its wallet-provisioning model (the extractor already
+  //                 refused one; repeating it here is harmless).
+  //   environment:  capability, inside `assertVaultDepositAdmissible`: this
+  //                 project must reach the provider's deployed cluster.
+  //   surfacing:    "SDP does not offer this provider", which no per-org
+  //                 override can lift, and which reads differently from
+  //                 entitlement. Checked first so a caller is never pointed at
+  //                 an activation door that does not exist.
+  //   entitlement:  the org's own override plus the environment's credentials.
+  //   admission:    the catalogue row is `active` and its cluster is fundable
+  //                 here. Shared with `POST /programs` rather than re-derived:
+  //                 this path used to check neither, so a `paused` strategy
+  //                 (an operator's deliberate stop during an exploit or depeg)
+  //                 stayed fundable by id.
+  //
+  //   exposure:     SDP-wide holdings in this vault stay under its cap (ADR
+  //                 0004 layer 1); a typed 409 when enforced, an event only in
+  //                 shadow mode. Last, because it is the one step that reads
+  //                 the ledger. The amount is the body's, which for a
+  //                 swap-funded deposit is the SOURCE stablecoin's units (a
+  //                 dollar-for-dollar approximation the cap accepts by design).
+  //
+  // The sequence lives in handlers/admission.ts so the external-wallet build
+  // shares it instead of re-deriving it. Money-OUT must never inherit any of
+  // these (ADR 0002): un-offering a provider closes the door in, never the
+  // door out.
+  await assertVaultDepositAdmissible(c, strategy, body.amount);
 }
 
 /** Check custody execution separately from Earn strategy availability. */

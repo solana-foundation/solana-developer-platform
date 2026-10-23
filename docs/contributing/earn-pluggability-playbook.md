@@ -216,9 +216,8 @@ holds the money and who signs:
   removed; see ADR 0002's 2026-09 addendum): a live `listStrategies` plus the
   portfolio-wallet capability (§4b) and a credential key pair. Copy this when
   SDP provisions a wallet and moves funds through the provider.
-- **Kamino: executing vault-direct, with a credential-free upstream and keyless
-  hosted builds.** `kamino` id,
-  `KaminoEarnClient` (catalogue, no credential), the live-metrics capability
+- **Kamino: executing vault-direct, with a credential-free upstream.** `kamino`
+  id, `KaminoEarnClient` (catalogue, no credential), the live-metrics capability
   (§4c), and *none* of the portfolio-wallet surface: the vaults are
   non-custodial, so `supportsPortfolioWallets` returning false is the finished
   answer rather than a TODO, and every program route answers 501 by capability
@@ -315,13 +314,9 @@ A provider whose data API takes no credential does steps 1–4 unchanged, then:
   any provider that declares no credential keys unless it is named in that
   set, so making an upstream credential-free stays a deliberate decision.
 
-Provider configuration and caller entitlement are separate gates. An
-authenticated request retains the organization's provider entitlement. The
-optional-auth catalogue, preview, withdrawal-route discovery, and instant-build
-subset has no organization whose entitlement can be evaluated, so it relies on
-global provider surfacing, environment capability, and strategy admission
-instead. Queued request and cancellation builds stay authenticated because the
-durable lifecycle is part of their recovery contract.
+Provider configuration and caller entitlement are separate gates: a money-in
+request checks the organization's provider entitlement after global provider
+surfacing and before strategy admission.
 
 ### If the provider is not deployed on every cluster
 

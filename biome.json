@@ -273,7 +273,7 @@
                 "paths": {
                   "@sdp/rpc/scope": {
                     "allowImportNames": ["currentClusterScope", "ClusterScope"],
-                    "message": "Only cluster-scope entry points (project middleware, job runner, webhook handlers, anonymous Earn) may open a scope with runInClusterScope. Read the open scope with currentClusterScope() or createClusterRpc(). See docs/decisions/0007-cluster-scope-ambient.md."
+                    "message": "Only cluster-scope entry points (project middleware, job runner, webhook handlers, /pay context) may open a scope with runInClusterScope. Read the open scope with currentClusterScope() or createClusterRpc(). See docs/decisions/0007-cluster-scope-ambient.md."
                   },
                   "@sdp/rpc/factory": {
                     "importNames": [
@@ -307,8 +307,7 @@
         "**/packages/**/test/**/*.ts",
         "**/apps/sdp-api/src/middleware/project-context.ts",
         "**/apps/sdp-api/src/runtime/cluster-scope-runs.ts",
-        "**/apps/sdp-api/src/routes/pay/context.ts",
-        "**/apps/sdp-api/src/routes/earn/keyless-scope.ts"
+        "**/apps/sdp-api/src/routes/pay/context.ts"
       ],
       "linter": {
         "rules": {
@@ -323,7 +322,7 @@
                       "ClusterScope",
                       "runInClusterScope"
                     ],
-                    "message": "Only cluster-scope entry points (project middleware, job runner, webhook handlers, anonymous Earn) may open a scope with runInClusterScope. Read the open scope with currentClusterScope() or createClusterRpc(). See docs/decisions/0007-cluster-scope-ambient.md."
+                    "message": "Only cluster-scope entry points (project middleware, job runner, webhook handlers, /pay context) may open a scope with runInClusterScope. Read the open scope with currentClusterScope() or createClusterRpc(). See docs/decisions/0007-cluster-scope-ambient.md."
                   },
                   "@sdp/rpc/factory": {
                     "importNames": [
