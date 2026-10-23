@@ -33,7 +33,7 @@ import type {
   RampTransferTransitionInput,
   UpdatePaymentTransferInput,
 } from "./payments.repository";
-import { legVerdictStatement } from "./token-movement-legs.repository";
+import { type LegBinding, legVerdictStatement } from "./token-movement-legs.repository";
 
 /** SQL a repository method adds to a guarded status change, each list bound in order. */
 interface StatusChangeSql {
@@ -101,7 +101,7 @@ function appendRampTransitionGuards(
 function settledLegs(
   verdict: AmountVerificationVerdict | null,
   updatedAt: string
-): { cte: string; values: unknown[] } {
+): { cte: string; values: LegBinding[] } {
   if (verdict === null) {
     return { cte: "", values: [] };
   }
