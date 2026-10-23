@@ -35,6 +35,8 @@
 import { SANDBOX_DEFAULTS } from "@sdp/private-channels/constants";
 import type { ProbeRequest, ProbeResponse, ProbeTransport } from "@sdp/private-channels/transport";
 import { isBlockedAddress } from "@sdp/rpc/blocked-address";
+import { RpcHttpStatusError } from "@sdp/rpc/errors";
+import type { RpcTransport } from "@solana/kit";
 import { badRequest } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { guardedFetch } from "@/services/guarded-egress";
@@ -137,7 +139,9 @@ function parseAllowlistSetting(value: string | undefined): string[] {
 // same list share one map and a test that changes the env is not stale.
 const allowlistCache = new Map<string, PrivateChannelEgressAllowlist>();
 
-export function resolvePrivateChannelEgressAllowlist(env: Env): PrivateChannelEgressAllowlist {
+export function resolvePrivateChannelEgressAllowlist(
+  env: Pick<Env, "PRIVATE_CHANNEL_EGRESS_ALLOWLIST">
+): PrivateChannelEgressAllowlist {
   const setting = env.PRIVATE_CHANNEL_EGRESS_ALLOWLIST ?? "";
   const cached = allowlistCache.get(setting);
   if (cached) return cached;
@@ -234,5 +238,127 @@ export function createPrivateChannelProbeTransport(env: Env): ProbeTransport {
     });
 
     return { status: response.status, ok: response.ok, text: await response.text() };
+  };
+}
+
+/**
+ * How long a runtime leg (gateway JSON-RPC or auth REST) gets to answer. Joins
+ * the caller's own signal below.
+ */
+const MAX_SPC_RUNTIME_TIMEOUT_MS = 30_000;
+
+/**
+ * Upper bound on what is buffered back from a gateway JSON-RPC answer. Sized
+ * for the largest ordinary answers (`getSignaturesForAddress`, `getTransaction`)
+ * with room to spare; a hostile gateway cannot stream unbounded bytes.
+ */
+const MAX_GATEWAY_RESPONSE_BYTES = 4 * 1024 * 1024;
+
+/**
+ * Upper bound on an auth REST answer (a challenge, a JWT, a verified-wallet
+ * echo) — far smaller than a gateway answer needs.
+ */
+const MAX_AUTH_RESPONSE_BYTES = 64 * 1024;
+
+/** A runtime leg follows a few guarded hops, exactly like a customer RPC endpoint. */
+const MAX_SPC_RUNTIME_REDIRECTS = 3;
+
+/**
+ * The time bound joins the caller's signal rather than yielding to it: the Kit
+ * transport always supplies one, and a caller's cancellation must not disable
+ * the ceiling.
+ */
+function boundedRuntimeSignal(signal: AbortSignal | undefined): AbortSignal {
+  const timeout = AbortSignal.timeout(MAX_SPC_RUNTIME_TIMEOUT_MS);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+}
+
+/**
+ * A Solana Kit transport for one instance's gateway URL — the JSON-RPC legs the
+ * probes do not cover (`withGatewayRpc`: blockhash, broadcast, balances, tx
+ * lookups). The connect-time allowlist check that gated the probes applies
+ * here on every dial too, because a stored row's URL is re-read at runtime
+ * long after connect: routing the runtime legs through the same guard keeps a
+ * rebinding DNS name or a tampered row from pointing SDP's process at an
+ * internal address while it carries bearer tokens and channel instructions.
+ */
+export function createPrivateChannelGatewayTransport(
+  env: Env,
+  gatewayUrl: string,
+  headers: Record<string, string> = {}
+): RpcTransport {
+  const allowlist = resolvePrivateChannelEgressAllowlist(env);
+
+  return async function gatewayTransport<TResponse>({
+    payload,
+    signal,
+  }: Parameters<RpcTransport>[0]): Promise<TResponse> {
+    const checked = checkPrivateChannelDestination(gatewayUrl, allowlist, "Gateway URL");
+    if (!checked.ok) throw new Error(checked.error);
+
+    const upstream = await guardedFetch(checked.url.toString(), {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json; charset=utf-8",
+        ...headers,
+      },
+      body: JSON.stringify(payload),
+      signal: boundedRuntimeSignal(signal),
+      maxRedirects: MAX_SPC_RUNTIME_REDIRECTS,
+      maxResponseBytes: MAX_GATEWAY_RESPONSE_BYTES,
+      rejectOversizeResponse: true,
+      approvedInsecureDestination: checked.approved.insecure,
+      approvedPlaintextDestination: checked.approved.plaintext,
+    });
+
+    if (!upstream.ok) {
+      throw new RpcHttpStatusError(
+        upstream.status,
+        `RPC request failed with HTTP ${upstream.status}`
+      );
+    }
+
+    return (await upstream.json()) as TResponse;
+  };
+}
+
+/**
+ * A WHATWG `fetch` for the SPC auth REST legs (`createAuthClient`'s
+ * `fetchImpl`), guarded the same way as the probe transport: every call is
+ * re-checked against the deployment allowlist and resolved through the egress
+ * guard, so an allowlisted name that starts answering from a private address
+ * is dropped while connecting. Auth answers are small; anything past the cap
+ * is refused as corruption.
+ */
+export function createPrivateChannelAuthFetch(
+  env: Pick<Env, "PRIVATE_CHANNEL_EGRESS_ALLOWLIST">
+): typeof fetch {
+  const allowlist = resolvePrivateChannelEgressAllowlist(env);
+
+  return async (input, init) => {
+    if (typeof input !== "string" && !(input instanceof URL)) {
+      throw new TypeError("guarded auth fetch takes a URL, not a Request");
+    }
+
+    const checked = checkPrivateChannelDestination(input.toString(), allowlist, "Auth URL");
+    if (!checked.ok) throw new Error(checked.error);
+
+    const headers: Record<string, string> = {};
+    new Headers(init?.headers).forEach((value, key) => {
+      headers[key] = value;
+    });
+
+    return guardedFetch(checked.url.toString(), {
+      method: init?.method ?? "GET",
+      headers,
+      body: typeof init?.body === "string" ? init.body : "",
+      ...(init?.signal ? { signal: init.signal } : {}),
+      maxRedirects: MAX_SPC_RUNTIME_REDIRECTS,
+      maxResponseBytes: MAX_AUTH_RESPONSE_BYTES,
+      rejectOversizeResponse: true,
+      approvedInsecureDestination: checked.approved.insecure,
+      approvedPlaintextDestination: checked.approved.plaintext,
+    });
   };
 }

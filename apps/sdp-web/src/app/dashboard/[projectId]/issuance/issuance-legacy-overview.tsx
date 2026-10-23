@@ -6,6 +6,7 @@ import { Search } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { isRenderableLogoUrl } from "@/lib/token-logo-url";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import {
   deploymentStatusBadge,
@@ -89,7 +90,7 @@ export function IssuanceLegacyOverview({
             >
               <div className="mb-4 flex items-start justify-between gap-3">
                 <div className="h-14 w-14 overflow-hidden rounded-full border border-border-default bg-fill-subtle">
-                  {token.imageUrl ? (
+                  {token.imageUrl && isRenderableLogoUrl(token.imageUrl) ? (
                     // biome-ignore lint/performance/noImgElement: user-supplied external logo URL; next/image can't be configured for arbitrary hosts here.
                     <img
                       src={token.imageUrl}
