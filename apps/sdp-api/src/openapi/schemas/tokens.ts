@@ -4,6 +4,7 @@ import {
   TOKEN_MOVEMENT_DISPOSITIONS,
   TOKEN_MOVEMENT_PATHS,
   TOKEN_MOVEMENT_REFUSAL_REASONS,
+  tokenDisplayTermsSchema,
 } from "@sdp/types/token-movements";
 import { TOKEN_PROGRAM_KINDS, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { z } from "zod";
@@ -35,33 +36,11 @@ const transferFeeEntrySchema = z
   })
   .openapi({ description: "One entry of the mint's transfer-fee schedule." });
 
-const displayTermsSchema = z
-  .discriminatedUnion("rule", [
-    z.object({ rule: z.literal("plain") }),
-    z.object({
-      rule: z.literal("scaled"),
-      multiplier: z.number().openapi({ description: "Wallets show base units × this." }),
-      newMultiplier: z.number().openapi({ description: "The multiplier from its switch time on." }),
-      newMultiplierEffectiveAt: isoDateTimeSchema.openapi({
-        description: "When `newMultiplier` replaces `multiplier`.",
-      }),
-    }),
-    z.object({
-      rule: z.literal("interest"),
-      currentRate: z.number().int().openapi({
-        description: "Rate in basis points a year from `lastUpdateAt` on; may be negative.",
-      }),
-      preUpdateAverageRate: z.number().int().openapi({
-        description: "Average rate in basis points from `initializedAt` to `lastUpdateAt`.",
-      }),
-      initializedAt: isoDateTimeSchema,
-      lastUpdateAt: isoDateTimeSchema,
-    }),
-  ])
-  .openapi({
-    description:
-      "How the mint's wallets show an amount: `plain` (token units), `scaled` (Token-2022 scaled UI amount) or `interest` (Token-2022 interest-bearing). Base units never change with it.",
-  });
+// The shared schema (@sdp/types) is built on that package's zod, which has no
+// `.openapi()`; `.describe()` carries the description into the document.
+const displayTermsSchema = tokenDisplayTermsSchema.describe(
+  "How the mint's wallets show an amount: `plain` (token units), `scaled` (Token-2022 scaled UI amount) or `interest` (Token-2022 interest-bearing). Base units never change with it."
+);
 
 const pathSupportSchema = z
   .object({
