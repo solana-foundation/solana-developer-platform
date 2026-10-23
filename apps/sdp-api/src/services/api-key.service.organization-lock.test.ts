@@ -27,6 +27,7 @@ const INPUT: CreateApiKeyInput = {
   name: "Racing key",
   grants: ["transfers.read"],
   walletScope: { scope: "all" },
+  pepper: env.API_KEY_PEPPER,
 };
 
 function createKey(): Promise<unknown> {
@@ -182,7 +183,7 @@ describe("ApiKeyService.createApiKey and organization deletion (APE-358)", () =>
           new ApiKeyService(
             asTransactionalClient(tx),
             createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
-          ).rotateApiKey(created.id, TEST_ORG.id, TEST_PROJECT.id, 24, "admin")
+          ).rotateApiKey(created.id, TEST_ORG.id, TEST_PROJECT.id, 24, "admin", env.API_KEY_PEPPER)
         )
       ).then(
         (result) => result,

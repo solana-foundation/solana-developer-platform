@@ -132,8 +132,22 @@ function FirstWalletPrompt({ canCreateWallet }: { canCreateWallet: boolean }) {
 }
 
 /**
+ * A census entry: its figure at 18px before its 14px word, linked to where it is counted. The
+ * word is keyed by the figure, so a figure that lands or changes width replaces the word instead
+ * of sliding it along: a slide counts as a layout shift, a replacement does not.
+ */
+function CensusLink({ href, figure, label }: { href: string; figure: string; label: string }) {
+  return (
+    <Link href={href} className="transition-colors hover:text-primary">
+      <span className="text-subheading font-medium text-primary tabular-nums">{figure}</span>
+      <Fragment key={figure}> {label}</Fragment>
+    </Link>
+  );
+}
+
+/**
  * The populated left column, the same grammar as the Payments overview: the total at 40px, the
- * top holdings on 52px rows, and a one-line census of wallets, tokens and today's volume.
+ * top holdings on 52px rows, and a census of wallets and tokens over today's volume.
  */
 function BalanceSummary({
   totalBalance,
@@ -166,7 +180,7 @@ function BalanceSummary({
     BALANCE_ROW_COUNT
   );
   const heldTokenCount = countHeldTokens(balances);
-  const census = [
+  const holdings = [
     {
       key: "wallets",
       href: DASHBOARD_SIDE_NAV_HREFS.wallets,
@@ -187,14 +201,9 @@ function BalanceSummary({
           : "Shared.homeWorkspace.summary.tokens.other"
       ),
     },
-    {
-      key: "volume",
-      href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.transactions,
-      // Still loading or failed reads as a dash, never as a measured $0.00.
-      figure: todaysVolumeUnavailable ? "—" : formatCurrencyAmount(todaysVolume, locale),
-      label: t("Shared.homeWorkspace.summary.volume"),
-    },
   ];
+  // Still loading or failed reads as a dash, never as a measured $0.00.
+  const volumeFigure = todaysVolumeUnavailable ? "—" : formatCurrencyAmount(todaysVolume, locale);
 
   return (
     <section className="min-w-0" data-overview-section="balance">
@@ -273,23 +282,30 @@ function BalanceSummary({
         </ul>
       ) : null}
       <div className="mt-9 border-t border-border-default pt-6">
-        {/* The counts read at 18px over their 14px words, on one baseline. */}
-        <p className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-body text-secondary">
-          {census.map((item, index) => (
-            <Fragment key={item.key}>
-              {index > 0 ? (
-                <span aria-hidden="true" className="text-tertiary">
-                  ·
-                </span>
-              ) : null}
-              <Link href={href(item.href)} className="transition-colors hover:text-primary">
-                <span className="text-subheading font-medium text-primary tabular-nums">
-                  {item.figure}
-                </span>{" "}
-                {item.label}
-              </Link>
-            </Fragment>
-          ))}
+        {/*
+          Wallets and tokens over today's volume at every width. No column holds all three on one
+          line once the figures grow, and a line that wrapped only when the volume read landed
+          would push every section below it down.
+        */}
+        <p className="flex flex-col items-start gap-1 text-body text-secondary">
+          {/* The counts read at 18px over their 14px words, on one baseline. */}
+          <span className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            {holdings.map((item, index) => (
+              <Fragment key={item.key}>
+                {index > 0 ? (
+                  <span aria-hidden="true" className="text-tertiary">
+                    ·
+                  </span>
+                ) : null}
+                <CensusLink href={href(item.href)} figure={item.figure} label={item.label} />
+              </Fragment>
+            ))}
+          </span>
+          <CensusLink
+            href={href(DASHBOARD_PAYMENTS_SUBNAV_HREFS.transactions)}
+            figure={volumeFigure}
+            label={t("Shared.homeWorkspace.summary.volume")}
+          />
         </p>
       </div>
     </section>
