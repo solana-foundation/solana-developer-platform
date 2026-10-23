@@ -688,29 +688,56 @@ function repoPath(rootDir, fileName) {
  * The branded type a type node names, directly or through a local type alias,
  * a type argument, a union or an object member; or undefined.
  */
-function brandedTypeIn(checker, typeNode, targets) {
-  const seenAliases = new Set();
-  const resolve = (symbol) =>
-    symbol && symbol.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(symbol) : symbol;
-  const visit = (node) => {
-    let symbol;
-    if (ts.isTypeReferenceNode(node)) {
-      symbol = resolve(
-        checker.getSymbolAtLocation(
-          ts.isQualifiedName(node.typeName) ? node.typeName.right : node.typeName
-        )
-      );
-    } else if (ts.isImportTypeNode(node) || ts.isTypeQueryNode(node)) {
-      symbol = checker.getTypeFromTypeNode(node).aliasSymbol;
+/** The type symbol a type node names, through import aliases; undefined for anything else. */
+function namedTypeSymbol(checker, node) {
+  let named;
+  if (ts.isTypeReferenceNode(node)) {
+    named = ts.isQualifiedName(node.typeName) ? node.typeName.right : node.typeName;
+  } else if (ts.isExpressionWithTypeArguments(node)) {
+    // An `extends` or `implements` clause names its type as an expression.
+    named = ts.isPropertyAccessExpression(node.expression) ? node.expression.name : node.expression;
+  } else if (ts.isImportTypeNode(node) || ts.isTypeQueryNode(node)) {
+    return checker.getTypeFromTypeNode(node).aliasSymbol;
+  } else {
+    return undefined;
+  }
+  const symbol = checker.getSymbolAtLocation(named);
+  return symbol && symbol.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(symbol) : symbol;
+}
+
+/**
+ * The nodes a named type is made of: an alias's type, an interface's heritage
+ * and members, and a class's heritage and member types (not its code).
+ * Declaration files cannot name a brand they do not import, so they are skipped.
+ */
+function typeDeclarationParts(symbol) {
+  const parts = [];
+  for (const declaration of symbol.declarations ?? []) {
+    const inSource = !declaration.getSourceFile().isDeclarationFile;
+    if (ts.isTypeAliasDeclaration(declaration)) {
+      parts.push(declaration.type);
+    } else if (inSource && ts.isInterfaceDeclaration(declaration)) {
+      parts.push(declaration);
+    } else if (inSource && ts.isClassDeclaration(declaration)) {
+      parts.push(...(declaration.heritageClauses ?? []));
+      for (const member of declaration.members) {
+        if (member.type) parts.push(member.type);
+      }
     }
+  }
+  return parts;
+}
+
+function brandedTypeIn(checker, typeNode, targets) {
+  const seen = new Set();
+  const visit = (node) => {
+    const symbol = namedTypeSymbol(checker, node);
     if (symbol && targets.has(symbol)) return targets.get(symbol);
-    if (symbol && symbol.flags & ts.SymbolFlags.TypeAlias && !seenAliases.has(symbol)) {
-      seenAliases.add(symbol);
-      for (const declaration of symbol.declarations ?? []) {
-        if (ts.isTypeAliasDeclaration(declaration)) {
-          const found = visit(declaration.type);
-          if (found) return found;
-        }
+    if (symbol && !seen.has(symbol)) {
+      seen.add(symbol);
+      for (const part of typeDeclarationParts(symbol)) {
+        const found = ts.isTypeNode(part) ? visit(part) : ts.forEachChild(part, visit);
+        if (found) return found;
       }
     }
     return ts.forEachChild(node, visit);

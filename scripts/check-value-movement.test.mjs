@@ -377,12 +377,22 @@ export const f = [] as Units[];
 export const g = {} as { amount: Units };
 export const h = {} as Intent;
 export const i = raw as typeof sample;
+interface Forged extends Intent {}
+interface Holder { amount: Units }
+interface Deeper extends Holder {}
+class Minted implements Intent { readonly amount = 1n; }
+class Spender { spend(): bigint { const local: Units = 1n as never; return local; } }
+export const j = {} as Forged;
+export const k = {} as Holder;
+export const l = {} as Deeper;
+export const m = {} as Minted;
+export const n = {} as Spender;
 `,
   });
 
   assert.deepEqual(
     found.map((violation) => violation.split(": ")[0]),
-    [6, 7, 8, 9, 10, 11, 12, 13, 14].map((line) => `src/casts.ts:${line}`)
+    [6, 7, 8, 9, 10, 11, 12, 13, 14, 20, 21, 22, 23].map((line) => `src/casts.ts:${line}`)
   );
   assert.match(found[0], /asserts Units \(Units\)/);
 });
