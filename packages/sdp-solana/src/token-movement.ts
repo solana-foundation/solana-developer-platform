@@ -71,6 +71,7 @@ export const TOKEN_MOVEMENT_REFUSALS = {
   hookUnresolved: "hook_unresolved",
   memoRequired: "memo_required",
   nothingCredited: "nothing_credited",
+  scaledDisplay: "scaled_display",
 } as const satisfies Record<string, string>;
 
 export type TokenMovementRefusal =
@@ -99,10 +100,13 @@ function refused(refusal: TokenMovementRefusal, message: string): TokenMovementS
 }
 
 /**
- * The builder's row: a transfer fee, a display rule, a permanent delegate and
- * confidential transfers all move through it; a hook moves once its accounts
- * resolve (checked when they are). A mint the program refuses to transfer,
- * and one whose new accounts start frozen (no Token ACL thaw yet), are refused.
+ * The builder's row: a transfer fee, a permanent delegate and confidential
+ * transfers all move through it; a hook moves once its accounts resolve
+ * (checked when they are). A mint the program refuses to transfer, one whose
+ * new accounts start frozen (no Token ACL thaw yet), and one whose wallets
+ * show a scaled or interest-bearing amount are refused. The last waits for
+ * PR 5: until balances and the dashboard show token units, a user would type
+ * the displayed amount and move another.
  */
 function builderSupport(terms: TokenTerms): TokenMovementSupport {
   if (terms.nonTransferable) {
@@ -121,6 +125,12 @@ function builderSupport(terms: TokenTerms): TokenMovementSupport {
     return refused(
       TOKEN_MOVEMENT_REFUSALS.defaultFrozen,
       "This token opens new token accounts frozen, and SDP cannot thaw them"
+    );
+  }
+  if (terms.display.kind !== "plain") {
+    return refused(
+      TOKEN_MOVEMENT_REFUSALS.scaledDisplay,
+      "Payments does not move tokens whose wallets show a scaled or interest-bearing amount yet"
     );
   }
   return SUPPORTED;

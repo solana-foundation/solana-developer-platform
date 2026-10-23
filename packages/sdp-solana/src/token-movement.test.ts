@@ -188,11 +188,36 @@ describe("support", () => {
     }
   });
 
-  it("refuses a non-transferable, paused or frozen-by-default mint", () => {
+  it("refuses a non-transferable, paused, frozen-by-default, scaled or interest-bearing mint", () => {
     const cases: [ExtensionArgs[], string][] = [
       [[{ __kind: "NonTransferable" }], TOKEN_MOVEMENT_REFUSALS.nonTransferable],
       [[{ __kind: "PausableConfig", authority: AUTHORITY, paused: true }], "paused"],
       [[{ __kind: "DefaultAccountState", state: AccountState.Frozen }], "default_frozen"],
+      [
+        [
+          {
+            __kind: "ScaledUiAmountConfig",
+            authority: AUTHORITY,
+            multiplier: 2,
+            newMultiplierEffectiveTimestamp: 1_900_000_000n,
+            newMultiplier: 4,
+          },
+        ],
+        "scaled_display",
+      ],
+      [
+        [
+          {
+            __kind: "InterestBearingConfig",
+            rateAuthority: AUTHORITY,
+            initializationTimestamp: 1_700_000_000n,
+            preUpdateAverageRate: 500,
+            lastUpdateTimestamp: 1_750_000_000n,
+            currentRate: 500,
+          },
+        ],
+        "scaled_display",
+      ],
     ];
     for (const [extensions, reason] of cases) {
       const decision = support(terms(TOKEN_2022, extensions), "builder");

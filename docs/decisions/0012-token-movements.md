@@ -127,12 +127,14 @@ them in one place, not adding special cases to every flow.
   its legs' verdict: `verified` when it confirms, `not_required` when it fails or is released.
   No extra `getTransaction`. Transfer status values do not change.
 - **Builder refusals (PR 2).** Paused, non-transferable and frozen-by-default mints (until the Token
-  ACL thaw, PR 4), an unresolved hook, a memo-required destination with no memo, and a fee that
-  leaves nothing to credit are refused with `400` before the movement is recorded.
+  ACL thaw, PR 4), interest-bearing and scaled mints (until PR 5), an unresolved hook, a
+  memo-required destination with no memo, and a fee that leaves nothing to credit are refused
+  with `400` before the movement is recorded.
 - **Payments' stopgap, transfers (PR 2).** Single transfers, batches and off-ramp funding leave
   `loadPaymentMint`: the quote parses exactly in u64 against the live decimals, and `support`
-  refuses a non-transferable mint. Interest-bearing and scaled mints move there in token units.
-  /pay keeps the stopgap until PR 3, recurring until PR 3.
+  refuses a non-transferable mint. `support` still refuses interest-bearing and scaled mints:
+  balances and the dashboard show their display amount until PR 5, so a user would type one
+  amount and move another. /pay keeps the stopgap until PR 3, recurring until PR 3.
 - **Mint watch.** `pnpm check:well-known-mints` decodes every catalogue mint with the same
   decoder, prints its extension state, and fails when a 1 000-token transfer would pay a fee
   under the current or the newer fee entry (bps alone is not the signal, since `maximumFee` is
@@ -168,8 +170,8 @@ Each PR ships alone.
 4. **Adapters:** issuance, the DvP, Private Channels and Earn refusal rows, the capability table
    with its Kora CI test, observed inbound transfers, on-ramp.
 5. **Display and finish:** balances, the terms and quote routes, `uiAmount` stripped at the RPC
-   boundary, the generic amount helper split from token conversion, the check-script pins, and
-   validated constraints.
+   boundary, the builder's refusal of interest-bearing and scaled mints lifted, the generic amount
+   helper split from token conversion, the check-script pins, and validated constraints.
 
 ## Open decisions
 
