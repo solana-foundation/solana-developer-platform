@@ -9,7 +9,8 @@
  *
  * - every movable profile debits, withholds and credits exactly the quote;
  * - a stale fee fails on chain instead of settling short;
- * - paused, frozen-by-default and unresolved-hook mints are refused first;
+ * - paused, frozen-by-default, scaled, interest-bearing and unresolved-hook
+ *   mints are refused first;
  * - a memo-required destination gets its memo, which the program demands;
  * - native SOL moves lamports, and wrapped SOL moves as an SPL token;
  * - a Solana Pay reference rides the transfer.
@@ -192,10 +193,6 @@ describe("The token movement builder on a surfnet mint matrix", { skip: !ENABLED
       ["feeCapped", "0.995", "credit"],
       ["feeCapped", "250", "credit"],
       ["feeCapped", "1000", "debit"],
-      ["scaled", "3", "debit"],
-      ["scaledSwitch", "3", "credit"],
-      ["interestPositive", "1.25", "debit"],
-      ["interestNegative", "1.25", "credit"],
     ];
     const sources = new Map<MintProfile, Address>();
     for (const [profile, amount, basis] of cases) {
@@ -223,11 +220,15 @@ describe("The token movement builder on a surfnet mint matrix", { skip: !ENABLED
     }
   });
 
-  it("refuses paused, frozen-by-default and unresolved-hook mints before building", async () => {
+  it("refuses paused, frozen-by-default, scaled, interest-bearing and unresolved-hook mints before building", async () => {
     await pauseMint(chain, matrix.paused);
     for (const [profile, reason] of [
       ["paused", TOKEN_MOVEMENT_REFUSALS.paused],
       ["defaultFrozen", TOKEN_MOVEMENT_REFUSALS.defaultFrozen],
+      ["scaled", TOKEN_MOVEMENT_REFUSALS.scaledDisplay],
+      ["scaledSwitch", TOKEN_MOVEMENT_REFUSALS.scaledDisplay],
+      ["interestPositive", TOKEN_MOVEMENT_REFUSALS.scaledDisplay],
+      ["interestNegative", TOKEN_MOVEMENT_REFUSALS.scaledDisplay],
     ] as const) {
       const decision = support(await readMatrixTerms(chain, matrix[profile]), "builder");
       assert.deepEqual(decision.supported === false && decision.refusal, reason, profile);
