@@ -1,6 +1,7 @@
 "use client";
 
 import type { CreatedPaymentRequest, PaymentsDashboardWallet } from "@sdp/types/payments";
+import type { TokenAmountQuote } from "@sdp/types/token-movements";
 import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
 import { Button } from "@sdp/ui/button";
 import { cn } from "@sdp/ui/cn";
@@ -37,7 +38,7 @@ import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
-import { fetchResultAnswer } from "@/lib/idempotency";
+import { answerRetiresKey, fetchResultAnswer } from "@/lib/idempotency";
 import { DEMO_PREFILL_AMOUNTS } from "@/lib/payments-demo/demo-prefill";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { PAYMENT_REQUESTS_HREF, paymentRequestHref } from "@/lib/payments-routes";
@@ -386,7 +387,29 @@ function PaymentRequestCreateForm({ wallets, walletsError }: PaymentRequestCreat
     fields,
     setFields,
   });
-  const requestAmount = amountEntry.tokenAmount.trim();
+  // A display amount's credit is priced again each time its quote expires (ADR 0012). After
+  // an attempt whose answer left its key kept, the API may have created the request; a retry
+  // at a later quote's credit would be a new body under a new key. So while that key is kept,
+  // the same typed entry is shown and sent at the credit it went out with, as the send
+  // wizard's `pinnedSendEntry` does.
+  const [unresolved, setUnresolved] = useState<{
+    typedEntry: string;
+    amount: string;
+    quote: TokenAmountQuote | null;
+  } | null>(null);
+  const typedEntry = JSON.stringify([
+    wallet === null ? null : wallet.walletId,
+    token === null ? null : token.mintAddress,
+    amountEntry.unit,
+    amountEntry.unit === "display" ? fields.displayAmount.trim() : fields.amount.trim(),
+    expiry,
+  ]);
+  const pinned = unresolved !== null && unresolved.typedEntry === typedEntry ? unresolved : null;
+  const shownEntry: TokenAmountEntry =
+    pinned === null
+      ? amountEntry
+      : { ...amountEntry, tokenAmount: pinned.amount, quote: pinned.quote, quoteError: null };
+  const requestAmount = shownEntry.tokenAmount.trim();
 
   const canCreate =
     isValidAmount(requestAmount) &&
@@ -399,8 +422,9 @@ function PaymentRequestCreateForm({ wallets, walletsError }: PaymentRequestCreat
     if (!canCreate || token === null || wallet === null) {
       return;
     }
-    // A display amount's credit holds only until its quote expires.
-    if (!amountEntry.canSubmitAt(Date.now())) {
+    // A display amount's credit holds only until its quote expires. A retry of an
+    // unresolved attempt resends that attempt's credit, so it needs no quote.
+    if (pinned === null && !amountEntry.canSubmitAt(Date.now())) {
       amountEntry.refreshQuote();
       toast.error(t("DashboardPayments.tokenAmount.quoteExpired"));
       return;
@@ -431,6 +455,11 @@ function PaymentRequestCreateForm({ wallets, walletsError }: PaymentRequestCreat
         }
       );
       settleExpiresAt(input, expiresAt, res);
+      setUnresolved(
+        answerRetiresKey(fetchResultAnswer(res))
+          ? null
+          : { typedEntry, amount: requestAmount, quote: shownEntry.quote }
+      );
       if (!res.ok) {
         // The earlier attempt may have created it: show the list to check.
         if (notice(fetchResultAnswer(res))) {
@@ -489,7 +518,7 @@ function PaymentRequestCreateForm({ wallets, walletsError }: PaymentRequestCreat
           <AmountField
             fields={fields}
             setField={setField}
-            entry={amountEntry}
+            entry={shownEntry}
             symbol={token === null ? "" : token.symbol}
             busy={busy}
           />

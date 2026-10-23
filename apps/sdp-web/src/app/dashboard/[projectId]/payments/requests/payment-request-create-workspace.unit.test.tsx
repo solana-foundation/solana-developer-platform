@@ -319,10 +319,14 @@ describe("New request page", () => {
 
   /**
    * Answers USDC as a scaled mint (two shown per token unit) and its credit
-   * quote: 25 shown is 12.5 token units. Records each quote body, and hands
-   * each create to `answerCreate`.
+   * quotes, the next of `credits` each time, the last one holding: 25 shown is
+   * 12.5 token units. Records each quote body, and hands each create to
+   * `answerCreate`.
    */
-  function stubScaledUsdc(answerCreate: (body: unknown) => Promise<Response>) {
+  function stubScaledUsdc(
+    credits: readonly [string, ...string[]],
+    answerCreate: (body: unknown) => Promise<Response>
+  ) {
     const usdc = deriveTokenOptions("devnet").find((token) => token.symbol === "USDC");
     const quoteBodies: unknown[] = [];
     vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -345,17 +349,18 @@ describe("New request page", () => {
         });
       }
       if (url.endsWith("/quote")) {
+        const credit = credits[Math.min(quoteBodies.length, credits.length - 1)];
         quoteBodies.push(JSON.parse(String(init?.body)));
         return Response.json({
           data: {
             quote: {
               mint: usdc?.mintAddress,
-              amount: "12.5",
+              amount: credit,
               amounts: {
                 basis: "credit",
-                debit: "12.5",
+                debit: credit,
                 fee: "0",
-                credit: "12.5",
+                credit,
                 decimals: 6,
                 display: {
                   debit: "25",
@@ -389,7 +394,7 @@ describe("New request page", () => {
   // converts it, and the quote's credit is what the request asks for.
   it("asks for the credit a display amount converts to, never the display amount", async () => {
     const creates: unknown[] = [];
-    const { usdc, quoteBodies } = stubScaledUsdc(async (body) => {
+    const { usdc, quoteBodies } = stubScaledUsdc(["12.5"], async (body) => {
       creates.push(body);
       return Response.json({ data: { id: "preq_1", publicToken: "tok_1" } });
     });
@@ -410,10 +415,54 @@ describe("New request page", () => {
     ]);
   });
 
+  // A display amount's credit is priced again by each quote. A retry after a lost answer at a
+  // later quote's credit was a new body under a new key, and could create a second request.
+  it("resends a display amount's first credit and key after a lost answer and a new quote", async () => {
+    let attempts = 0;
+    stubScaledUsdc(["12.5", "13", "12.4"], async () => {
+      attempts += 1;
+      if (attempts === 1) throw new TypeError("Failed to fetch");
+      return Response.json({ data: { id: "preq_1", publicToken: "tok_1" } });
+    });
+    // The stub sees bodies only; the spy also sees each create's Idempotency-Key.
+    const sent = vi.spyOn(globalThis, "fetch");
+    const user = userEvent.setup();
+    const create = () => screen.getByRole("button", { name: "Create and copy link" });
+    const amount = () => screen.getByRole("textbox", { name: "Amount as wallets show it" });
+    await fillDisplayRequest(user);
+    await waitFor(() => expect(create().hasAttribute("disabled")).toBe(false));
+    await user.click(create());
+    await waitFor(() => expect(attempts).toBe(1));
+    await waitFor(() => expect(create().hasAttribute("disabled")).toBe(false));
+
+    // An edit and back prices 25 again, at 12.4 now.
+    await user.clear(amount());
+    await user.type(amount(), "26");
+    await waitFor(() => expect(readsAs()).toContain("13.00 USDC"));
+    await user.clear(amount());
+    await user.type(amount(), "25");
+    await waitFor(() => expect(create().hasAttribute("disabled")).toBe(false));
+    // The unresolved attempt is shown as it went out.
+    expect(readsAs()).toBe("Anyone with the link can pay 12.50 USDC into Treasury.");
+    await user.click(create());
+    await waitFor(() => expect(dashboardRouter.push).toHaveBeenCalledTimes(1));
+
+    const createCalls = sent.mock.calls.filter(([input]) =>
+      String(input).endsWith("/payments/requests")
+    );
+    const bodies = createCalls.map(([, init]) => JSON.parse(String(init?.body)));
+    const keys = createCalls.map(([, init]) => new Headers(init?.headers).get("Idempotency-Key"));
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0]).toMatchObject({ amount: "12.5" });
+    expect(bodies[1]).toEqual(bodies[0]);
+    expect(keys[1]).toBe(keys[0]);
+  });
+
   // The unit decides what the request asks for, so it cannot change while the create is sent.
   it("locks the amount unit while the request is being created", async () => {
     let answer: (response: Response) => void = () => undefined;
     stubScaledUsdc(
+      ["12.5"],
       () =>
         new Promise<Response>((resolve) => {
           answer = resolve;
