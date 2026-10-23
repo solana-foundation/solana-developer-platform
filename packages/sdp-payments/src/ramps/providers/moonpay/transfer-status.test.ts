@@ -5,14 +5,11 @@ import { SdpPaymentsError, type SdpPaymentsErrorCode } from "#/errors";
 import { RAMP_PROVIDER_CLIENTS } from "#/ramps/index";
 import {
   CONTRACT_DELIVERY_SIGNATURE,
+  CONTRACT_WALLET,
   type RecordedExchange,
   rampTestRuntime,
   replayExchanges,
 } from "#/ramps/test-kit";
-import {
-  moonpaySellTransactionSchema,
-  moonpaySellTransactionSettlementEvent,
-} from "./event-status-mapping";
 import {
   MOONPAY_COMPLETED_BUY,
   MOONPAY_SALE_AWAITING_DEPOSIT,
@@ -96,12 +93,28 @@ describe("MoonpayRampClient.fetchTransferStatus", () => {
   it("maps a completed sale as the webhook path does, with the crypto it sold", async () => {
     const events = await lookUpEvents("offramp", [COMPLETED_SALE]);
 
+    // Pinned literally rather than read back from the mapper: the webhook
+    // contract this must match is exactly what event-status-mapping.test.ts
+    // pins, and a sale's `baseCurrency.code` is the crypto sold, so "sol"
+    // must settle on the SOL rail.
     assert.deepEqual(events, [
       {
-        ...moonpaySellTransactionSettlementEvent(
-          moonpaySellTransactionSchema.parse(COMPLETED_SALE)
-        ),
+        provider: "moonpay",
+        kind: "settled",
+        reference: "8c52cc05-0cb0-4614-8baa-16bdfaa18b8e",
+        transferId: TRANSFER_ID,
+        rampType: "offramp",
+        providerObservedAt: "2026-09-04T08:27:27.552Z",
+        providerCustomerId: "55ee219b-1a3f-4770-8b85-5ce022c1c0d1",
+        receivedAmount: "148.2",
+        receivedCurrency: "USD",
+        refundAddress: CONTRACT_WALLET,
         deliveredAssetRail: "sol.solana",
+        onchain: {
+          signature: CONTRACT_DELIVERY_SIGNATURE,
+          destinationAddress: "NEQhyijWMWBYq1khA2YaeG6FyxMBVMbnFsasxa9DZvU",
+          amount: "1",
+        },
       },
     ]);
   });

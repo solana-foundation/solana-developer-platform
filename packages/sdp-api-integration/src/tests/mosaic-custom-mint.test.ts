@@ -77,9 +77,10 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic custom min
       }
     );
 
-    expect(result.mint).toBeTruthy();
-    expect(result.signature).toBeTruthy();
+    expect(result.mint).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
+    expect(result.signature).toMatch(/^[1-9A-HJ-NP-Za-km-z]{64,88}$/);
     expect(result.slot).toBeGreaterThan(0n);
+    expect(result.listAddress).toBeUndefined();
 
     console.log(`Mosaic custom mint: ${result.mint}`);
     console.log(`Signature: ${result.signature}`);
