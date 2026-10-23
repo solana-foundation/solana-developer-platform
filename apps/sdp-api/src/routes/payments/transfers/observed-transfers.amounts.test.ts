@@ -1,6 +1,7 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
 import type { SignatureInfo } from "@sdp/rpc/solana";
 import { SOL_MINT, SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
+import { SYSTEM_PROGRAM_ADDRESS } from "@solana-program/system";
 import { beforeEach, describe, expect, it } from "vitest";
 import { installClusterRpcResponder, type JsonRpcResult } from "@/test/helpers/cluster-rpc";
 import {
@@ -245,9 +246,75 @@ describe("observed transfer amounts", () => {
       verification: { state: "verified" },
     });
 
+    // Wrapping SOL: the wallet creates its wrapped SOL account and moves 1.5 SOL
+    // into it, so the account also gains the rent its create funded, which no
+    // System transfer states. The System program moves exactly what it states,
+    // so that is no contradiction.
     clearObservedTransferCaches();
-    const [short] = await observe(solTransaction(1_500_000_000, 1_000_000_000));
-    expect(short?.movement.verification.state).toBe("mismatch");
+    const wrappedAccount = syntheticAddress(7);
+    const rent = 2_039_280;
+    const [wrap] = await observe({
+      slot: 50,
+      blockTime: 1700000000,
+      version: 0,
+      meta: {
+        err: null,
+        fee: 5000,
+        preBalances: [2_000_000_000, 0],
+        postBalances: [2_000_000_000 - 1_500_000_000 - rent - 5000, 1_500_000_000 + rent],
+        innerInstructions: [],
+        preTokenBalances: [],
+        postTokenBalances: [
+          parsedTokenBalance({
+            accountIndex: 1,
+            mint: SOL_MINT,
+            owner: WALLET,
+            tokenAmount: { amount: "1500000000", decimals: 9, uiAmountString: "1.5" },
+          }),
+        ],
+      },
+      transaction: {
+        signatures: ["1".repeat(64)],
+        message: {
+          accountKeys: [WALLET, wrappedAccount].map((pubkey, index) => ({
+            pubkey,
+            signer: index === 0,
+            source: "transaction",
+            writable: true,
+          })),
+          instructions: [
+            {
+              program: "system",
+              programId: SYSTEM_PROGRAM_ADDRESS,
+              parsed: {
+                type: "createAccount",
+                info: {
+                  source: WALLET,
+                  newAccount: wrappedAccount,
+                  lamports: rent,
+                  space: 165,
+                  owner: SPL_TOKEN_PROGRAMS["spl-token"],
+                },
+              },
+              stackHeight: 1,
+            },
+            parsedSystemTransfer({
+              source: WALLET,
+              destination: wrappedAccount,
+              lamports: 1_500_000_000,
+            }),
+            {
+              program: "spl-token",
+              programId: SPL_TOKEN_PROGRAMS["spl-token"],
+              parsed: { type: "syncNative", info: { account: wrappedAccount } },
+              stackHeight: 1,
+            },
+          ],
+        },
+      },
+    });
+    expect(wrap?.row).toMatchObject({ token: SOL_MINT, amount: "1.5", direction: "outbound" });
+    expect(wrap?.movement.verification).toEqual({ state: "pending", reason: null });
   });
 
   it("moves the wrapped SOL mint as an SPL token, not as native SOL", async () => {
