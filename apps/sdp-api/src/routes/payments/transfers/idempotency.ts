@@ -12,19 +12,21 @@ const intentFieldsSchema = z.looseObject({
   amountBasis: z.enum(TOKEN_MOVEMENT_BASES).optional(),
 });
 
-/** "SOL" for native SOL, the mint for a token: one spelling per asset. */
+/** "native" for native SOL, the mint for a token: one spelling per asset. */
 function canonicalAsset(token: string): string {
   const asset = resolvePaymentAsset(token);
-  return asset.kind === "native" ? "SOL" : asset.mint;
+  return asset.kind === "native" ? "native" : asset.mint;
 }
 
 /**
  * The Idempotency-Key fingerprint form of a create-transfer body (ADR 0009,
- * ADR 0012): the canonical intent. The token is the asset it names on the
- * project's cluster, so "USDC" and its mint are one request; the amount is
- * canonical, so "1.0" and "1" are one; and the basis has its default
- * applied, so an omitted and an explicit default `amountBasis` are one. A body
- * that is not a create-transfer body is left as sent; validation refuses it.
+ * ADR 0012): the canonical intent. `token` becomes `asset`, the asset it
+ * names on the project's cluster, so "USDC" and its mint are one request and
+ * native SOL and the wrapped SOL mint are two; the amount is canonical, so
+ * "1.0" and "1" are one; and the basis has its default applied, so an omitted
+ * and an explicit default `amountBasis` are one. No earlier form has an
+ * `asset` key, so this form never equals one of them for another request. A
+ * body that is not a create-transfer body is left as sent; validation refuses it.
  */
 export function canonicalizeTransferBody(body: JsonValue): JsonValue {
   const fields = intentFieldsSchema.safeParse(body);
@@ -37,9 +39,10 @@ export function canonicalizeTransferBody(body: JsonValue): JsonValue {
   ) {
     return canonical;
   }
+  const { token: _token, ...rest } = canonical;
   return {
-    ...canonical,
-    token: canonicalAsset(fields.data.token),
+    ...rest,
+    asset: canonicalAsset(fields.data.token),
     amountBasis:
       fields.data.amountBasis === undefined
         ? defaultTransferBasis(fields.data)
@@ -48,7 +51,7 @@ export function canonicalizeTransferBody(body: JsonValue): JsonValue {
 }
 
 /**
- * The fingerprint form before ADR 0012 (`previousCanonicalize`): the token as
+ * The fingerprint form before ADR 0012 (`previousCanonicalForms`): the token as
  * the mint it executed as and the amount canonical (`canonicalizePaymentBody`),
  * so a key or row saved under it still answers its retry. No body had a basis
  * then: a default basis is dropped, so a retry that now names it still
