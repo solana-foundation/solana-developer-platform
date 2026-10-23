@@ -138,6 +138,8 @@ interface VerifiedRecurringPaymentCollection {
    * transaction shows no delta SDP can read.
    */
   observed: LegAmounts | null;
+  /** The mandate's fee tolerance, which the observed fee is held to. */
+  maxFeePerPull: BaseUnits;
 }
 
 interface RecurringPaymentCollectionResult {
@@ -685,6 +687,7 @@ async function verifyRecurringPaymentCollection(input: {
       mint,
       destinationOwner: input.recurringPayment.destination_address,
     }),
+    maxFeePerPull: input.mandate.maxFeePerPull,
   };
 }
 
@@ -1278,6 +1281,7 @@ async function finalizeRecurringPaymentCollection(input: {
     const leg = await createPostgresTokenMovementLegsRepository(tx, tenant).recordChainVerdict({
       transferId: input.transfer.id,
       observed: input.proof.observed,
+      maxFee: input.proof.maxFeePerPull,
       updatedAt: finalizedAt,
     });
     if (leg !== null && leg.verification.state === "mismatch") {

@@ -78,11 +78,15 @@ export const AMOUNT_VERIFICATION_REASONS = [
   "movement_not_executed",
   /**
    * A movement SDP did not build itself (a program's CPI pull) landed, and the
-   * chain shows it moved exactly the quote: the instruction's debit, and the
-   * destination's raw token-balance delta as the credit.
+   * chain shows it moved the quote's debit (the instruction's amount) with a
+   * fee within the mandate's tolerance (the debit less the destination's raw
+   * token-balance delta).
    */
   "chain_delta_matched",
-  /** The chain shows the movement moved other amounts than the quote, or none SDP can read. */
+  /**
+   * The chain shows the movement moved another debit, paid a fee above the
+   * tolerance, or moved nothing SDP can read.
+   */
   "chain_delta_mismatch",
 ] as const;
 
@@ -196,7 +200,10 @@ export const LEG_VERIFIERS = ["construction", "chain"] as const;
 
 export type LegVerifier = (typeof LEG_VERIFIERS)[number];
 
-/** The verdict on a chain-verified leg whose landed transaction moved its quote. */
+/**
+ * The verdict on a chain-verified leg whose landed transaction moved its
+ * quote's debit, its fee within the tolerance.
+ */
 export const CHAIN_DELTA_MATCHED = {
   state: "verified",
   reason: "chain_delta_matched",
@@ -210,7 +217,7 @@ export const CHAIN_DELTA_MISMATCH = {
 
 /**
  * The verdict the chain gives a leg it verifies: matched when the landed
- * transaction moved exactly the quote.
+ * transaction moved the quote's debit with a fee within the tolerance.
  */
 export function chainDeltaVerdict(matched: boolean): AmountVerificationVerdict {
   return matched ? CHAIN_DELTA_MATCHED : CHAIN_DELTA_MISMATCH;
