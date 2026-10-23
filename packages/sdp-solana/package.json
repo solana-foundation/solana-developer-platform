@@ -45,10 +45,14 @@
       "default": "./src/token-terms.ts"
     }
   },
+  "imports": {
+    "#/*": "./src/*.ts"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test \"src/**/*.test.ts\"",
-    "lint": "biome check src/"
+    "lint": "biome check src/ scripts/",
+    "check:well-known-mints": "tsx scripts/check-well-known-mints.ts"
   },
   "dependencies": {
     "@sdp/rpc": "workspace:*",
