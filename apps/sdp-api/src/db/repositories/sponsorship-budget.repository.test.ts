@@ -38,6 +38,7 @@ function reservationInput(id: string): CreateSponsorshipReservationInput {
     feePayer: "fee_payer_1",
     providerConfigFingerprint: "config_1",
     recentBlockhash: "blockhash_1",
+    lastValidBlockHeight: 1_000n,
     reservedLamports: 5,
     hourBucket: "2026-08-03T10:00:00.000Z",
     dayBucket: "2026-08-03T00:00:00.000Z",
@@ -437,6 +438,34 @@ describe("SponsorshipBudgetRepository", () => {
     await expect(
       repository.markSigned(second.id, 1, "signed_transaction", "shared_signature")
     ).resolves.toBe("duplicate_signature");
+  });
+
+  it("stores the last valid block height bound and reads a pre-height row back as null", async () => {
+    const repository = new SponsorshipBudgetRepository(getDb(env));
+    await repository.createReservation({
+      ...reservationInput("reservation_bounded"),
+      lastValidBlockHeight: 9_007_199_254_740_993n,
+    });
+    await repository.createReservation({
+      ...reservationInput("reservation_pre_height"),
+      transactionDigest: "digest_2",
+    });
+    await getDb(env).execute(
+      "UPDATE sponsorship_budget_reservations SET last_valid_block_height = NULL WHERE id = ?",
+      ["reservation_pre_height"]
+    );
+
+    const candidates = await repository.listReconciliationCandidates(
+      "devnet",
+      "2100-01-01T00:00:00.000Z",
+      250
+    );
+
+    expect(
+      Object.fromEntries(
+        candidates.map((candidate) => [candidate.id, candidate.lastValidBlockHeight])
+      )
+    ).toEqual({ reservation_bounded: 9_007_199_254_740_993n, reservation_pre_height: null });
   });
 
   it("retains an ambiguous submitted attempt as charged unknown", async () => {

@@ -56,7 +56,7 @@ Manual-instruction and multi-step onboarding providers were removed; one that re
 
 - **Do not default required credentials or required upstream fields.** Explicit product defaults and optional-field fallbacks are acceptable only when their semantics are deliberate and tested; never swallow an upstream failure.
 - **HTTP in the provider; DB in the route handler.** Providers get their keys in `ctx.credentials`, never the process env, and never touch the database.
-- **SDP's managed keys are sandbox env vars**, resolved once in `apps/sdp-api/src/services/ramps/runtime.ts`; production projects bring their own account. Missing keys, or keys from the other mode, answer `PROVIDER_NOT_CONFIGURED` → HTTP 503. Never commit credentials.
+- **SDP's managed keys are `<PROVIDER>_<MODE>_<ROLE>` env vars**, resolved once in `apps/sdp-api/src/services/ramps/runtime.ts`; live keys exist only in `prd`. Missing keys, or keys from the other mode, answer `PROVIDER_NOT_CONFIGURED` → HTTP 503. Never commit credentials.
 - **Webhooks are fully typed** — parse the raw body as `unknown` only at the signature boundary, then narrow.
 - **One status mapping per provider, in the package** — the provider's transaction object becomes a `RampSettlementEvent` in `providers/<id>/*-status-mapping.ts`; the webhook parser and `fetchTransferStatus` both call it, so a pulled observation and a delivered one cannot diverge.
 - **Strong typing** — no `any`, no `enum`, finite sets are `as const satisfies Record<…>`.

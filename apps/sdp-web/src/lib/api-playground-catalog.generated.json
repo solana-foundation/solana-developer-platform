@@ -8146,6 +8146,9 @@
     "ramps": {
       "module": "ramps"
     },
+    "ramp": {
+      "module": "ramps"
+    },
     "moonpay": {
       "rampProvider": "moonpay"
     },

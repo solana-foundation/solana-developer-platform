@@ -2,20 +2,25 @@
 // Run: `pnpm check:well-known-mints`
 //
 // For each token, and each cluster it declares a mint on, this fetches the mint
-// account and asserts three things:
+// account and asserts four things:
 //
 //   1. the account parses as a mint at all (not a token account, not a wallet)
 //   2. its on-chain `decimals` matches the declared value
 //   3. its owning program matches the declared `tokenProgram`
+//   4. it carries none of the three Token-2022 extensions payments refuse
+//      (interest, scale or non-transferability): payment amount
+//      conversion takes a catalogue mint's decimals without reading the chain,
+//      which is exact only for a mint whose UI amount is its raw amount scaled
+//      by decimals. Extensions are fixed at mint initialization, so this holds.
 //
 // Those are exactly the properties that are unsafe to take on trust. A spoofed
 // token shares the real asset's name and symbol, and only the mint address
 // distinguishes them; a wrong `decimals` silently misscales every amount shown
 // for that token.
 //
-// Deliberately not wired into CI: it needs public RPC, and a rate-limited
-// endpoint would make the pipeline flaky for no safety gain. Run it by hand
-// whenever you add or change a catalogue entry.
+// CI runs it only on pull requests that touch the catalogue or this script
+// (`.github/workflows/well-known-mints.yml`): it needs public RPC, and a
+// rate-limited endpoint would make every pipeline flaky for no safety gain.
 //
 // Run it through the root script, not with bare `node`. It imports the
 // catalogue straight from TypeScript source, and `engines.node` here is
@@ -27,6 +32,13 @@ import {
   SPL_TOKEN_PROGRAMS,
   WELL_KNOWN_TOKENS,
 } from "../packages/sdp-types/src/well-known-tokens.ts";
+
+const UNSUPPORTED_PAYMENT_EXTENSIONS = [
+  "interestBearingConfig",
+  "nonTransferable",
+  // biome-ignore lint/security/noSecrets: Token-2022 extension name, not a secret.
+  "scaledUiAmountConfig",
+];
 
 const RPC_URLS = {
   devnet: "https://api.devnet.solana.com",
@@ -75,6 +87,13 @@ function findProblems(account, mint, tokenProgram) {
   const expectedOwner = SPL_TOKEN_PROGRAMS[tokenProgram];
   if (account.owner !== expectedOwner) {
     problems.push(`declared ${tokenProgram}, chain says owner ${account.owner}`);
+  }
+
+  const extensions = account.data?.parsed?.info?.extensions ?? [];
+  for (const { extension } of extensions) {
+    if (UNSUPPORTED_PAYMENT_EXTENSIONS.includes(extension)) {
+      problems.push(`carries ${extension}, which payments do not support`);
+    }
   }
 
   return problems;

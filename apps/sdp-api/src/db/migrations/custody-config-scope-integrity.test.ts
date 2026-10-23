@@ -193,7 +193,7 @@ describe("custody Config scoped upsert concurrency", () => {
         walletId: "wallet_atomic",
         publicKey: "public_atomic",
         label: "Atomic",
-        purpose: "root",
+        purpose: "transfer",
       },
     });
 
@@ -227,6 +227,7 @@ describe("custody Config scoped upsert concurrency", () => {
         wallet: {
           walletId: "wallet_rollback",
           publicKey: "public_rollback_dup",
+          purpose: "transfer",
         },
       })
     ).rejects.toThrow();

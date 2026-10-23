@@ -117,6 +117,20 @@ export type RampCredentialsResolution =
   | { ok: true; credentials: RampProviderCredentials }
   | { ok: false; reason: string };
 
+/** The format each of a provider's keys has in one mode. */
+export interface RampKeyFormat {
+  readonly publicKey: RegExp;
+  readonly secretKey: RegExp;
+  /** Absent for a provider that only polls and takes no webhooks. */
+  readonly webhookSecret?: RegExp;
+}
+
+/**
+ * A provider's key formats in each mode. Both modes declare the same keys, and
+ * a key's format names the mode it runs in wherever the provider's keys do.
+ */
+export type RampKeyFormats = Readonly<Record<SdpEnvironment, RampKeyFormat>>;
+
 export interface RampDiscoveryContext {
   /** SDP's sandbox keys for the provider, or why it has none. */
   credentials: RampCredentialsResolution;
@@ -371,11 +385,11 @@ export interface RampProvider<Event extends RampSettlementEvent = RampSettlement
   readonly label: string;
   readonly declaredRailSupport: ProviderDeclaredRailSupport;
   /**
-   * Why `credentials` can't serve `mode`, or null when they can. A key's
-   * format names the mode it runs in, so a live key never reaches a sandbox
-   * call. Pure: makes no request.
+   * The format of every key the provider's account has, by mode. The keys a
+   * provider declares here are the managed keys SDP holds for it, and a key
+   * that doesn't fit its mode never makes a request.
    */
-  checkCredentials: (credentials: RampProviderCredentials, mode: SdpEnvironment) => string | null;
+  readonly keyFormats: RampKeyFormats;
   /** Optional webhook contract. Ingress verifies signed bytes before persisting;
    * parsing is pure and runs from the durable inbox after acknowledgement. */
   webhook?: RampProviderWebhook;

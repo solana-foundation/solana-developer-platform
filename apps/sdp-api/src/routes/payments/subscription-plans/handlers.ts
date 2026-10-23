@@ -19,10 +19,12 @@ import type { ValidatedBodyContext } from "@/middleware/validate";
 import { type AppContext, getPaymentSubscriptionsRepository } from "@/routes/payments/context";
 import { normalizePaymentToken, parseU64String } from "@/services/payment-operation.service";
 import {
+  assertSubscriptionTokenMint,
   buildPreparedSubscriptionTransaction,
   derivePlanAddresses,
   resolvePlanRuntime,
 } from "@/services/payments/recurring-payments/shared";
+import { parseStaticPaymentAmount } from "@/services/payments/token-amount";
 import {
   resolveRequestSponsorshipScope,
   resolveSponsoredFeePayer,
@@ -118,6 +120,8 @@ export const createSubscriptionPlan = async (
 
   const auth = getAuth(c);
   const ownerWallet = await resolveSubscriptionPlanWalletSelector(c, body.ownerCustodyWalletId);
+  const token = assertSubscriptionTokenMint(normalizePaymentToken(body.token));
+  await parseStaticPaymentAmount(body.amount, token);
 
   const puller = await resolvePullerWalletAddress(c, body.pullerCustodyWalletId);
   const now = new Date().toISOString();
@@ -132,7 +136,7 @@ export const createSubscriptionPlan = async (
     ownerWalletId: ownerWallet.walletId,
     ownerCustodyWalletId: ownerWallet.id,
     ownerAddress: ownerWallet.publicKey,
-    token: normalizePaymentToken(body.token),
+    token,
     amount: body.amount,
     periodHours: body.periodHours,
     programPlanId: body.programPlanId ?? generateProgramPlanId(),

@@ -72,7 +72,7 @@ const TOTAL_BITS = 256;
  * decimals configuration is invalid, the string exceeds the target scale, or
  * the scaled value overflows the 256-bit raw range.
  */
-const parseDecimalFixedPoint = (value: string, decimals: number) => {
+const parseDecimalFixedPoint = (value: string, decimals: number, totalBits: number) => {
   const normalized = value.trim();
 
   if (!isDecimalString(normalized)) {
@@ -88,7 +88,7 @@ const parseDecimalFixedPoint = (value: string, decimals: number) => {
   }
 
   try {
-    return decimalFixedPoint("unsigned", TOTAL_BITS, decimals)(normalized);
+    return decimalFixedPoint("unsigned", totalBits, decimals)(normalized, "strict");
   } catch {
     throw new AmountError("Amount is out of range");
   }
@@ -105,7 +105,11 @@ const parseDecimalFixedPoint = (value: string, decimals: number) => {
  * the scaled value overflows the 256-bit raw range.
  */
 export const parseDecimalAmount = (value: string, decimals: number): bigint =>
-  parseDecimalFixedPoint(value, decimals).raw;
+  parseDecimalFixedPoint(value, decimals, TOTAL_BITS).raw;
+
+/** Parses an exact token or lamport amount, rejecting precision loss and u64 overflow. */
+export const parseTokenAmount = (value: string, decimals: number): bigint =>
+  parseDecimalFixedPoint(value, decimals, 64).raw;
 
 /**
  * Compares two decimal amount strings at their maximum shared scale.
@@ -118,8 +122,8 @@ export const parseDecimalAmount = (value: string, decimals: number): bigint =>
  */
 export const compareDecimalAmounts = (left: string, right: string): number => {
   const decimals = Math.max(decimalScale(left), decimalScale(right));
-  const leftAmount = parseDecimalFixedPoint(left, decimals);
-  const rightAmount = parseDecimalFixedPoint(right, decimals);
+  const leftAmount = parseDecimalFixedPoint(left, decimals, TOTAL_BITS);
+  const rightAmount = parseDecimalFixedPoint(right, decimals, TOTAL_BITS);
   return cmpDecimalFixedPoint(leftAmount, rightAmount);
 };
 

@@ -49,8 +49,15 @@ const PRIVY_CREDENTIALS = {
 const MOONPAY_SANDBOX_CREDENTIALS = {
   MOONPAY_SANDBOX_API_KEY: "pk_test_project_provider_rule",
   MOONPAY_SANDBOX_SECRET_KEY: "sk_test_project_provider_rule",
+  MOONPAY_SANDBOX_WEBHOOK_SECRET: "wk_test_project_provider_rule",
+} as const satisfies Partial<Env>;
+const MOONPAY_PRODUCTION_CREDENTIALS = {
+  MOONPAY_PRODUCTION_API_KEY: "pk_live_project_provider_rule",
+  MOONPAY_PRODUCTION_SECRET_KEY: "sk_live_project_provider_rule",
+  MOONPAY_PRODUCTION_WEBHOOK_SECRET: "wk_live_project_provider_rule",
 } as const satisfies Partial<Env>;
 const MOONPAY_LIVE_KEYS_UNDER_SANDBOX_NAMES = {
+  ...MOONPAY_SANDBOX_CREDENTIALS,
   MOONPAY_SANDBOX_API_KEY: "pk_live_project_provider_rule",
   MOONPAY_SANDBOX_SECRET_KEY: "sk_live_project_provider_rule",
 } as const satisfies Partial<Env>;
@@ -147,12 +154,15 @@ describe("assertProjectProviderAdmitted", () => {
       refusal("MoonPay requires manual activation for this organization.", "provider_not_entitled")
     );
     await setProviderOverrides({});
-    // SDP holds MoonPay sandbox keys only, so a Production project stops at credentials.
+    // Sandbox keys never serve a Production project, which needs MoonPay's production keys.
     await expect(
       admit(projects.production, deploymentEnv(MOONPAY_SANDBOX_CREDENTIALS), MOONPAY)
     ).rejects.toMatchObject(
       notConfigured("MoonPay is not configured for production projects in this deployment.")
     );
+    await expect(
+      admit(projects.production, deploymentEnv(MOONPAY_PRODUCTION_CREDENTIALS), MOONPAY)
+    ).resolves.toBeUndefined();
   });
 
   it("requires a ramp provider's test-mode sandbox credentials in a Sandbox project", async () => {

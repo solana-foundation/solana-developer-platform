@@ -46,6 +46,7 @@ export const createIssuanceMosaicService = (
           mode: "sponsored",
           scope: resolveRequestSponsorshipScope(c),
           movement: authority.movement,
+          custodyWalletId: authority.custodyWalletId,
         }
       : { mode: "wallet" }
   );
@@ -55,4 +56,5 @@ export const createIssuanceToken2022Service = (c: AppContext, authority: Issuanc
   createToken2022Service(c.env, authority.signer, {
     scope: resolveRequestSponsorshipScope(c),
     movement: authority.movement,
+    custodyWalletId: authority.custodyWalletId,
   });

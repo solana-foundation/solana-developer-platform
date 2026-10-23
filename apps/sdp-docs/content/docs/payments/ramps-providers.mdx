@@ -8,7 +8,7 @@ SDP integrates the ramp providers in the matrix below. They are configured at th
 
 ## Sandbox vs production selection
 
-The project's environment picks the mode for every request: a Sandbox project uses a provider's sandbox credentials, a Production project its production ones. When SDP holds only a provider's sandbox credentials, that provider answers `PROVIDER_NOT_CONFIGURED` for Production projects. Each provider's page lists the credentials it reads.
+The project's environment picks the mode for every request: a Sandbox project uses a provider's sandbox credentials, a Production project its production ones. Each key is named `<PROVIDER>_<MODE>_<ROLE>`, with `MODE` either `SANDBOX` or `PRODUCTION`. A provider whose keys for a mode are missing, or are the other mode's, answers `PROVIDER_NOT_CONFIGURED` in that mode. Each provider's page lists the credentials it reads.
 
 ## Capability matrix
 

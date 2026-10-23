@@ -57,9 +57,12 @@ export const getSplTokenAccountAddressesMock = vi.spyOn(
 
 export const createKoraAdapterMock = vi.spyOn(feePaymentAdapters, "createKoraAdapter");
 
-export const sponsoredNetworkFeeMock = vi.spyOn(feePaymentChainReads, "sponsoredNetworkFee");
+export const priceSponsoredTransactionMock = vi.spyOn(
+  feePaymentChainReads,
+  "priceSponsoredTransaction"
+);
 
-export const TEST_SPONSORED_NETWORK_FEE_LAMPORTS = 5000n;
+export const TEST_SPONSORED_PRICE = { networkFee: 5000n, lastValidBlockHeight: 1000n };
 
 export function testKoraAdapter(
   methods: Pick<KoraAdapter, "getFeePayer" | "getSponsorshipConfiguration" | "signAsFeePayer">
@@ -145,6 +148,8 @@ export const TEST_MOONPAY_API_KEY = "pk_test_moonpay";
 
 export const TEST_MOONPAY_SECRET_KEY = "sk_test_moonpay";
 
+export const TEST_MOONPAY_WEBHOOK_SECRET = "wk_test_moonpay";
+
 export const TEST_MOONPAY_ONRAMP_URL = "https://buy-sandbox.moonpay.com";
 
 export const TEST_MOONPAY_OFFRAMP_URL = "https://sell-sandbox.moonpay.com";
@@ -156,6 +161,8 @@ export const MAINNET_USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"].ad
 let originalMoonPaySandboxApiKey: string | undefined;
 
 let originalMoonPaySandboxSecretKey: string | undefined;
+
+let originalMoonPaySandboxWebhookSecret: string | undefined;
 
 async function seedAuthAndWallet(): Promise<void> {
   const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
@@ -497,7 +504,7 @@ export function installPaymentsRouteTestHooks(): void {
         send: async () => ({ value: { decimals: 6 } }),
       }),
     } as unknown as ReturnType<typeof solanaRpc.createRpc>);
-    sponsoredNetworkFeeMock.mockResolvedValue(TEST_SPONSORED_NETWORK_FEE_LAMPORTS);
+    priceSponsoredTransactionMock.mockResolvedValue(TEST_SPONSORED_PRICE);
     getAccountInfoMock.mockResolvedValue({
       lamports: 4200000000n,
       owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
@@ -571,9 +578,11 @@ export function installPaymentsRouteTestHooks(): void {
 
     originalMoonPaySandboxApiKey = env.MOONPAY_SANDBOX_API_KEY;
     originalMoonPaySandboxSecretKey = env.MOONPAY_SANDBOX_SECRET_KEY;
+    originalMoonPaySandboxWebhookSecret = env.MOONPAY_SANDBOX_WEBHOOK_SECRET;
 
     env.MOONPAY_SANDBOX_API_KEY = TEST_MOONPAY_API_KEY;
     env.MOONPAY_SANDBOX_SECRET_KEY = TEST_MOONPAY_SECRET_KEY;
+    env.MOONPAY_SANDBOX_WEBHOOK_SECRET = TEST_MOONPAY_WEBHOOK_SECRET;
 
     await seedTestDatabase(env);
     await seedAuthAndWallet();
@@ -582,6 +591,7 @@ export function installPaymentsRouteTestHooks(): void {
   afterEach(async () => {
     env.MOONPAY_SANDBOX_API_KEY = originalMoonPaySandboxApiKey;
     env.MOONPAY_SANDBOX_SECRET_KEY = originalMoonPaySandboxSecretKey;
+    env.MOONPAY_SANDBOX_WEBHOOK_SECRET = originalMoonPaySandboxWebhookSecret;
 
     await clearKVStores(env);
   });

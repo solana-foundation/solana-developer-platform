@@ -85,7 +85,15 @@ export const paymentAmountSchema = z
     message: "Amount must be greater than zero",
   });
 
-export const recurringTimestampSchema = z.string().datetime({ offset: true });
+/**
+ * A recurring-payment instant, accepted with any offset and kept as UTC ISO
+ * (`toISOString()`): the columns are TEXT and compared lexically, so every
+ * stored or compared value must share one spelling.
+ */
+export const recurringTimestampSchema = z
+  .string()
+  .datetime({ offset: true })
+  .transform((value) => new Date(value).toISOString());
 export const u64StringSchema = z
   .string()
   .regex(/^\d+$/, { message: "Value must be an unsigned integer string" })
