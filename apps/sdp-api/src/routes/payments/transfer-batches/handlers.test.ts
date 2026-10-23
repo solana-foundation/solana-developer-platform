@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
+import { AMOUNT_VERIFICATION_STATES, TOKEN_MOVEMENT_BASES } from "@sdp/types/token-movements";
 import {
   SPL_TOKEN_PROGRAMS,
   type TokenProgramKind,
@@ -415,13 +416,13 @@ async function _seedBatchApproverClerk(): Promise<Record<string, string>> {
 
 /** A movement's amounts and verification as the API answers them; other fields kept as sent. */
 const amountsSchema = z.looseObject({
-  basis: z.string(),
+  basis: z.enum(TOKEN_MOVEMENT_BASES),
   debit: z.string(),
   fee: z.string(),
   credit: z.string(),
   decimals: z.number(),
 });
-const verificationSchema = z.looseObject({ state: z.string() });
+const verificationSchema = z.looseObject({ state: z.enum(AMOUNT_VERIFICATION_STATES) });
 const estimateAmountsResponseSchema = z.object({
   data: z.object({
     estimate: z.looseObject({
