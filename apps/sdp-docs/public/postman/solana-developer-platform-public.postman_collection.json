@@ -1562,7 +1562,7 @@
             "description": "Prices an amount under the mint's live terms: what leaves the sender (`debit`), the transfer fee withheld in the destination (`fee`) and what the recipient receives (`credit`), in token units, with the display values of a scaled or interest-bearing mint. Send `amount` in token units, or `displayAmount` as wallets show it to get the token amount to send. It moves and stores nothing, takes no Idempotency-Key, and the movement is priced again when it is built. Requires `transfers.read`. The endpoint reads the chain once and is metered (60/min per credential, 240/min per organization); exceeding the quota returns 429, and 503 indicates the quota backend was unavailable.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"amount\": \"100\",\n  \"displayAmount\": \"150\",\n  \"basis\": \"debit\"\n}",
+              "raw": "{\n  \"amount\": \"100\",\n  \"basis\": \"debit\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

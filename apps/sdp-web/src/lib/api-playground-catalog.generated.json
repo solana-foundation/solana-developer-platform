@@ -3971,14 +3971,14 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"amount\": \"100\",\n  \"displayAmount\": \"150\",\n  \"basis\": \"debit\"\n}",
+            "defaultValue": "{\n  \"amount\": \"100\",\n  \"basis\": \"debit\"\n}",
             "required": true
           }
         ],
         "expectedResponse": {
           "data": {
             "quote": {
-              "mint": "So11111111111111111111111111111111111111112",
+              "mint": "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo",
               "amount": "100",
               "amounts": {
                 "basis": "debit",
