@@ -76,8 +76,8 @@ const CRC32_TABLE = (() => {
 export function crc32(input: string): number {
   let crc = 0xffffffff;
   for (const byte of new TextEncoder().encode(input)) {
-    // The index is masked to 0-255, inside the 256-entry table.
-    crc = (CRC32_TABLE[(crc ^ byte) & 0xff] ?? 0) ^ (crc >>> 8);
+    // SAFETY: The masked index is 0-255, and all 256 table entries are initialized.
+    crc = (CRC32_TABLE[(crc ^ byte) & 0xff] as number) ^ (crc >>> 8);
   }
   return (crc ^ 0xffffffff) >>> 0;
 }
