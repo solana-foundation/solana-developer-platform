@@ -1,10 +1,12 @@
 import { type Action, apiKeyMayPerform, organizationRoleMayPerform } from "@sdp/types/actions";
 import { API_KEY_WALLET_SCOPES, type ApiKeyWalletScope } from "@sdp/types/api-keys";
+import type { CustodyWalletPurpose } from "@sdp/types/custody";
 import {
   MANDATE_MOVEMENT_STATUSES,
   MOVEMENTS,
   type MovementId,
   movementActions,
+  movementAllowsWalletPurpose,
   PAYMENT_REQUEST_MOVEMENT_STATUSES,
 } from "@sdp/types/movements";
 import {
@@ -49,8 +51,9 @@ import type { Env } from "@/types/env";
  *
  * Then the principal (see `lib/money-principal.ts`): a start with none is
  * refused; an API key must be live, hold one of the movement's actions and
- * have the signing wallet in its wallet scope; a member must be active and
- * hold one of the actions through their role; a mandate (recurring payment)
+ * have the signing wallet in its wallet scope; a member must be active, still
+ * a member of the project (the `project_members` row the dashboard's project
+ * scope is admitted by) and hold one of the actions through their role; a mandate (recurring payment)
  * must be in a status that admits the movement and sign only with its source
  * wallet; a `/pay` link signs only its open payment request.
  *
@@ -69,7 +72,8 @@ export type MoneyAdmissionRefusal =
   | "principal_missing"
   | "principal_not_live"
   | "action_not_held"
-  | "wallet_out_of_scope";
+  | "wallet_out_of_scope"
+  | "wallet_purpose";
 
 export interface MoneyAdmissionScope {
   organizationId: string;
@@ -90,12 +94,20 @@ export type MoneyPrincipalFacts =
           })
         | null;
     }
-  | { kind: "member"; member: { status: string; role: string } | null }
+  | {
+      kind: "member";
+      member: {
+        status: string;
+        role: string;
+        /** Whether the user still has a `project_members` row for the project. */
+        inProject: boolean;
+      } | null;
+    }
   | {
       kind: "mandate";
       mandate: { status: string; sourceCustodyWalletId: string | null } | null;
     }
-  | { kind: "payment_request"; request: { status: string } | null };
+  | { kind: "payment_request"; request: { status: string; expiresAt: string | null } | null };
 
 export interface MoneyAdmissionFacts {
   /** The raw `organizations.status` column. */
@@ -125,8 +137,10 @@ export type MoneyAdmissionRefused =
 export type MoneyAdmissionDecision = { admitted: true } | MoneyAdmissionRefused;
 
 /**
- * What a start signs with. The custody signer names its wallet; a sponsor and
- * a provider-API start that has no custody wallet pass null, and then no
+ * What a start signs with. The custody signer names its wallet, and a sponsor
+ * names the custody wallet whose transaction it pays for, so a key's wallet
+ * scope decides both signatures. A sponsor with no custody wallet in the
+ * transaction (`/pay`) and a provider-API start pass null, and then no
  * wallet-scope check applies.
  */
 export interface MoneyAdmissionSubject {
@@ -149,6 +163,7 @@ const REFUSAL_MESSAGES: Record<Exclude<MoneyAdmissionRefusal, "action_not_held">
   principal_missing: "No authenticated principal may move money here",
   principal_not_live: "The credential moving money is no longer active",
   wallet_out_of_scope: "The credential may not sign with this wallet",
+  wallet_purpose: "Payments can only be sent from a transfer wallet",
 };
 
 type RefusalArguments =
@@ -198,30 +213,81 @@ export function assertCallerWalletInScope(
   custodyWalletId: string
 ): void {
   if (walletAccessAllows(caller.walletAccess, custodyWalletId)) return;
-  logMoneyRefusedEarly(caller, custodyWalletId);
+  logMoneyRefusedEarly(caller, custodyWalletId, "wallet_out_of_scope", null);
   throw new MoneyMovementRefusedError("wallet_out_of_scope");
 }
 
 /**
+ * Refuses, before any work, a request whose source wallet may not sign the
+ * movement: outside the caller's wallet scope ({@link assertCallerWalletInScope}),
+ * then a purpose the movement does not allow ({@link assertWalletPurposeAdmitted}).
+ * For flows that sign in the request (transfers, batches, ramp quotes); a
+ * route asks here before its Idempotency-Key is claimed, so a refusal stores
+ * nothing.
+ *
+ * @param caller - The authenticated caller, as read at authentication.
+ * @param wallet - The custody wallet the movement would sign with.
+ * @param wallet.id - Its custody wallet row id.
+ * @param wallet.purpose - Its purpose; null for a wallet created before purposes.
+ * @param movement - The movement the wallet would sign.
+ */
+export function assertCallerMaySignWith(
+  caller: Pick<ApiKeyContext, "walletAccess" | "organizationId" | "projectId">,
+  wallet: { id: string; purpose: CustodyWalletPurpose | null },
+  movement: MovementId
+): void {
+  assertCallerWalletInScope(caller, wallet.id);
+  assertWalletPurposeAdmitted(caller, wallet, movement);
+}
+
+/**
+ * Refuses, before any work, a wallet whose purpose the movement does not
+ * allow (APE-371), without requiring the caller's wallet scope: recurring
+ * writes that sign nothing succeed on any project wallet (HOO-2099). A
+ * refused wallet outside the scope is refused as out of scope instead, so a
+ * key never learns the purpose of a wallet it cannot see. The custody signer
+ * makes the same purpose refusal ({@link decideWalletPurpose}) on every path,
+ * cron included.
+ *
+ * @param caller - The authenticated caller, as read at authentication.
+ * @param wallet - The custody wallet the movement would sign with.
+ * @param wallet.id - Its custody wallet row id.
+ * @param wallet.purpose - Its purpose; null for a wallet created before purposes.
+ * @param movement - The movement the wallet would sign.
+ */
+export function assertWalletPurposeAdmitted(
+  caller: Pick<ApiKeyContext, "walletAccess" | "organizationId" | "projectId">,
+  wallet: { id: string; purpose: CustodyWalletPurpose | null },
+  movement: MovementId
+): void {
+  if (movementAllowsWalletPurpose(movement, wallet.purpose)) return;
+  assertCallerWalletInScope(caller, wallet.id);
+  logMoneyRefusedEarly(caller, wallet.id, "wallet_purpose", movement);
+  throw new MoneyMovementRefusedError("wallet_purpose");
+}
+
+/**
  * The waist's `sdp_money_refused` event for a refusal made before any
- * movement starts, so it names no movement (surface `early`).
+ * movement starts (surface `early`). A scope refusal names no movement.
  */
 function logMoneyRefusedEarly(
   caller: Pick<ApiKeyContext, "organizationId" | "projectId">,
-  custodyWalletId: string
+  custodyWalletId: string,
+  reason: Extract<MoneyAdmissionRefusal, "wallet_out_of_scope" | "wallet_purpose">,
+  movement: MovementId | null
 ): void {
   const principal = currentMoneyPrincipal();
   logEvent("warn", {
     event: "sdp_money_refused",
     surface: "early",
-    movement: null,
-    module: null,
+    movement,
+    module: movement === null ? null : MOVEMENTS[movement].module,
     subject_id: custodyWalletId,
     organization_id: caller.organizationId,
     project_id: caller.projectId,
     principal_kind: principal ? principal.kind : null,
     principal: principal ? describeMoneyPrincipal(principal) : null,
-    reason: "wallet_out_of_scope",
+    reason,
   });
 }
 
@@ -304,7 +370,10 @@ export function decidePrincipal(
       const request = principal.request;
       if (
         !request ||
-        !mayActInStatus(PAYMENT_REQUEST_MOVEMENT_STATUSES, movement, actions, request.status)
+        !mayActInStatus(PAYMENT_REQUEST_MOVEMENT_STATUSES, movement, actions, request.status) ||
+        (actions !== null &&
+          request.expiresAt !== null &&
+          Date.parse(request.expiresAt) <= facts.readAt)
       ) {
         return refuse("principal_not_live");
       }
@@ -333,7 +402,8 @@ function decideApiKey(
     return refuseActionNotHeld(actions);
   }
   // A selected key signs only with a listed wallet; with none listed it signs
-  // nothing. A sponsor signs for no custody wallet, so has none to scope.
+  // nothing. A sponsor names the custody wallet it pays for; one that pays for
+  // none (null) has none to scope.
   if (subject.custodyWalletId !== null && key.walletScope === "selected" && !key.walletListed) {
     return refuse("wallet_out_of_scope");
   }
@@ -341,7 +411,7 @@ function decideApiKey(
 }
 
 function decideMember(
-  member: { status: string; role: string } | null,
+  member: Extract<MoneyPrincipalFacts, { kind: "member" }>["member"],
   actions: readonly [Action, ...Action[]] | null
 ): MoneyAdmissionDecision {
   if (!member || !memberStatusMayMoveMoney(member.status)) {
@@ -349,6 +419,12 @@ function decideMember(
   }
   if (actions === null) {
     return ADMITTED;
+  }
+  // A start needs the project membership the request's project scope was
+  // admitted by (`findMemberProject`): removed from the project since, the
+  // member starts nothing there. No role bypasses it, as at ingress.
+  if (!member.inProject) {
+    return refuse("principal_not_live");
   }
   const role = normalizeOrganizationRole(member.role);
   return actions.some((action) => organizationRoleMayPerform(role, action))
@@ -387,6 +463,23 @@ export function decideMovement(
     return organization;
   }
   return decidePrincipal(movement, facts, subject);
+}
+
+/**
+ * Pure. Whether a custody wallet of this purpose may sign the movement
+ * (APE-371): the signer's half of {@link assertCallerMaySignWith}.
+ *
+ * @param movement - The movement asking to sign.
+ * @param purpose - The signing wallet's purpose; null for a wallet created before purposes.
+ * @returns Admitted, or refused with `wallet_purpose`.
+ */
+export function decideWalletPurpose(
+  movement: MovementId,
+  purpose: CustodyWalletPurpose | null
+): MoneyAdmissionDecision {
+  return movementAllowsWalletPurpose(movement, purpose)
+    ? ADMITTED
+    : { admitted: false, reason: "wallet_purpose" };
 }
 
 /** Where a movement was refused, for the `sdp_money_refused` event. */
@@ -447,9 +540,11 @@ interface MoneyAdmissionRow {
   key_wallet_listed: boolean | null;
   member_status: string | null;
   member_role: string | null;
+  member_in_project: boolean;
   mandate_status: string | null;
   mandate_wallet_id: string | null;
   request_status: string | null;
+  request_expires_at: string | null;
 }
 
 function principalIdOf(principal: MoneyPrincipal | null, kind: MoneyPrincipalKind): string | null {
@@ -501,7 +596,11 @@ function principalFacts(
         member:
           row.member_status === null || row.member_role === null
             ? null
-            : { status: row.member_status, role: row.member_role },
+            : {
+                status: row.member_status,
+                role: row.member_role,
+                inProject: row.member_in_project,
+              },
       };
     case "mandate":
       return {
@@ -514,7 +613,10 @@ function principalFacts(
     case "payment_request":
       return {
         kind: "payment_request",
-        request: row.request_status === null ? null : { status: row.request_status },
+        request:
+          row.request_status === null
+            ? null
+            : { status: row.request_status, expiresAt: row.request_expires_at },
       };
     default: {
       const exhaustive: never = principal;
@@ -556,7 +658,8 @@ export async function readMoneyAdmissionFacts(
  * One statement, by primary keys, scoped by both ids: the project and its
  * organization, and the ambient principal's row (its key, membership,
  * recurring payment or payment request) in the same project. For a key it
- * also answers whether the subject's custody wallet is in its signing list.
+ * also answers whether the subject's custody wallet is in its signing list;
+ * for a member, whether they still belong to the project.
  * The joins the principal does not use match nothing, so the cost is the
  * same one round trip the organization read always made.
  */
@@ -580,14 +683,17 @@ export async function readMoneyAdmissionFactsWith(
                    )
               END AS key_wallet_listed,
               om.status AS member_status, om.role AS member_role,
+              pm.id IS NOT NULL AS member_in_project,
               rp.status AS mandate_status, rp.source_custody_wallet_id AS mandate_wallet_id,
-              pr.status AS request_status
+              pr.status AS request_status, pr.expires_at AS request_expires_at
          FROM projects p
          JOIN organizations o ON o.id = p.organization_id
          LEFT JOIN api_keys ak
            ON ak.id = ?::text AND ak.organization_id = p.organization_id AND ak.project_id = p.id
          LEFT JOIN organization_members om
            ON om.user_id = ?::text AND om.organization_id = p.organization_id
+         LEFT JOIN project_members pm
+           ON pm.user_id = om.user_id AND pm.project_id = p.id
          LEFT JOIN payment_recurring_payments rp
            ON rp.id = ?::text AND rp.organization_id = p.organization_id AND rp.project_id = p.id
          LEFT JOIN payment_requests pr

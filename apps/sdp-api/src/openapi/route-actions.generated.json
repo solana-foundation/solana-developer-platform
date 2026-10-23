@@ -163,7 +163,7 @@
   "POST /v1/api-keys/:_/rotate": "api_keys.manage",
   "POST /v1/compliance/address-screenings": "compliance.execute",
   "POST /v1/counterparties": "counterparties.manage",
-  "POST /v1/counterparties/:_/accounts": "counterparties.manage",
+  "POST /v1/counterparties/:_/accounts": "counterparties.execute",
   "POST /v1/counterparties/:_/requirements": "counterparties.execute",
   "POST /v1/dvp/trades": "dvp.manage",
   "POST /v1/dvp/trades/:_/cancel": "dvp.manage",

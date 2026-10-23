@@ -1,5 +1,6 @@
 import type { SponsoredSubmitter } from "@sdp/solana/token-2022";
 import type { MovementId } from "@sdp/types/movements";
+import type { MoneyAdmissionSubject } from "@/lib/money-admission";
 import { createSponsorshipFeePayment, type SponsorshipScope } from "@/services/sponsorship.service";
 import {
   type SignedSubmissionStore,
@@ -26,14 +27,16 @@ const UNRECORDED_SUBMISSION: SignedSubmissionStore = {
  * @param env - API environment for provider, database and Redis access.
  * @param scope - Who is sponsored.
  * @param movement - The movement the sponsored transactions serve.
+ * @param subject - The custody wallet that signs the sponsored transactions.
  * @returns The sponsor Mosaic and the token-2022 service send through.
  */
 export function createIssuanceSponsor(
   env: Env,
   scope: SponsorshipScope,
-  movement: MovementId
+  movement: MovementId,
+  subject: MoneyAdmissionSubject
 ): SponsoredSubmitter {
-  const feePayment = createSponsorshipFeePayment(env, scope, movement);
+  const feePayment = createSponsorshipFeePayment(env, scope, movement, subject);
   return {
     getFeePayer: () => feePayment.getFeePayer(),
     submitSponsored: ({ transaction, lastValidBlockHeight, rpc }) =>

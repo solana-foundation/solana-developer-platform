@@ -63,6 +63,8 @@ export interface RampProviderTestKit {
   credentials: RampProviderCredentials;
   /** Live-mode keys: production accepts them, and sandbox refuses them before any request. */
   liveCredentials: RampProviderCredentials;
+  /** Webhook signing secrets by mode; absent for a provider that takes no webhooks. */
+  webhookSecrets?: Readonly<Record<SdpEnvironment, string>>;
   onramp?: {
     estimate: RampKitCase<RampEstimateOnrampInput>;
     quote: RampKitCase<RampOnrampQuoteInput>;

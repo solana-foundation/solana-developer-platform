@@ -1,13 +1,14 @@
+import { FeePaymentError } from "@sdp/fee-payment/port";
 import { hashString } from "@sdp/payments/hash";
 import { createClusterRpc } from "@sdp/rpc/factory";
-import { getRecentBlockhash, type SolanaRpc } from "@sdp/rpc/solana";
+import { getRecentBlockhash } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import { parseDecimalAmount } from "@sdp/solana/amount";
-import { SOL_DECIMALS, SOL_MINT } from "@sdp/types/well-known-tokens";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import {
   type AccountMeta,
   AccountRole,
   type Address,
+  address,
   appendTransactionMessageInstructions,
   type Blockhash,
   compileTransaction,
@@ -33,11 +34,14 @@ import { createSystemPaymentRequestsRepository } from "@/db/repositories/reposit
 import { badRequest, rateLimited } from "@/lib/errors";
 import { buildSplTransferInstructions } from "@/routes/payments/token-accounts";
 import { AuditService } from "@/services/audit.service";
+import { isPaymentRequestExpired } from "@/services/payments/payment-requests";
+import { loadPaymentMint } from "@/services/payments/token-amount";
 import {
   createSponsorshipFeePayment,
   resolveProjectSponsorshipScope,
   type SponsorshipFeePayment,
 } from "@/services/sponsorship.service";
+import { sponsoredMessageDigest } from "@/services/sponsorship-budget.service";
 import type { Env } from "@/types/env";
 
 /** A payment request whose Project is known: the only kind `/pay` sponsors. */
@@ -53,6 +57,12 @@ const sponsoredPaymentTransactionSchema = z.discriminatedUnion("kind", [
 ]);
 
 export type SponsoredPaymentTransaction = z.infer<typeof sponsoredPaymentTransactionSchema>;
+
+function assertNotExpired(request: PaymentRequestRow): void {
+  if (isPaymentRequestExpired(request.expires_at)) {
+    throw badRequest("Payment request is no longer payable");
+  }
+}
 
 /** Saved claims retain their original sponsor even after the configured signer rotates. */
 function assertSavedPayerIsNotSponsor(payer: Address, unsignedBase64: string): void {
@@ -101,6 +111,7 @@ export async function issuePaymentRequestTransaction(
     if (claim === null || claim.lastValidBlockHeight < currentBlockHeight) {
       return null;
     }
+    assertNotExpired(request);
     if (claim.account !== payer) {
       const retryAfterSeconds = Math.ceil(
         Number(claim.lastValidBlockHeight - currentBlockHeight) * 0.4
@@ -125,33 +136,59 @@ export async function issuePaymentRequestTransaction(
         projectId: request.project_id,
         actor: { type: "wallet", id: request.wallet_id },
       }),
-      "payments.pay_request"
+      "payments.pay_request",
+      // No custody wallet signs a `/pay` transaction: the payer signs it.
+      { custodyWalletId: null }
     );
     return feePaymentInstance;
   };
 
   const signAndStore = async (unsignedBase64: string): Promise<SponsoredPaymentTransaction> => {
+    assertNotExpired(request);
     const feePayment = await getFeePayment();
     const unsignedBytes = new Uint8Array(getBase64Encoder().encode(unsignedBase64));
-    const sponsored = await feePayment.signAsFeePayer(unsignedBytes);
-    // /pay bytes are partially signed by design: the payer signs client-side.
-    const signature = getSignatureFromTransaction(getTransactionDecoder().decode(sponsored));
-    const signedBase64 = getBase64Decoder().decode(sponsored);
-    await new AuditService(getDb(c.env)).log(c, {
+    // The intent is durable before signAsFeePayer reserves budget and Kora
+    // signs, so no reservation can exist without its audit record.
+    const auditService = new AuditService(getDb(c.env));
+    const auditIntent = await auditService.beginCritical(c, {
       organizationId: request.organization_id,
       action: "sign",
       resourceType: "payment_request",
       resourceId: request.id,
       metadata: {
+        organizationId: request.organization_id,
+        projectId: request.project_id,
         sponsoredAccount: payer,
         amount: request.amount,
-        token: request.token,
+        // Named tokenMint: a bare "token" key is scrubbed as a credential by
+        // the audit redaction policy, and a mint address is not a secret.
+        tokenMint: request.token,
         destination: request.destination_address,
         walletId: request.wallet_id,
-        signature,
+        transactionDigest: sponsoredMessageDigest(
+          getTransactionDecoder().decode(unsignedBytes).messageBytes
+        ),
         claimHash: await hashString(unsignedBase64),
       },
     });
+    let sponsored: Uint8Array;
+    try {
+      sponsored = await feePayment.signAsFeePayer(unsignedBytes);
+    } catch (error) {
+      await auditService.completeCritical(c, auditIntent, {
+        status: "failure",
+        // A code, never the message: Kora and RPC error text can carry provider context the
+        // audit scrubber does not decode.
+        metadata: {
+          errorCode: error instanceof FeePaymentError ? error.code : "UNCLASSIFIED_ERROR",
+        },
+      });
+      throw error;
+    }
+    // /pay bytes are partially signed by design: the payer signs client-side.
+    const signature = getSignatureFromTransaction(getTransactionDecoder().decode(sponsored));
+    const signedBase64 = getBase64Decoder().decode(sponsored);
+    await auditService.completeCritical(c, auditIntent, { metadata: { signature } });
     const stored = await repository.storeSponsoredTransactionSignature({
       requestId: request.id,
       account: payer,
@@ -167,6 +204,7 @@ export async function issuePaymentRequestTransaction(
         superseding.account === payer &&
         superseding.signedTransaction !== null
       ) {
+        assertNotExpired(request);
         assertSavedPayerIsNotSponsor(payer, superseding.unsignedTransaction);
         return { kind: "signed", transaction: superseding.signedTransaction };
       }
@@ -186,7 +224,7 @@ export async function issuePaymentRequestTransaction(
     throw badRequest("Payment payer cannot be the fee sponsor");
   }
   const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
-  const unsignedBase64 = await buildPaymentTransaction(rpc, {
+  const unsignedBase64 = await buildPaymentTransaction({
     ...params,
     feePayer,
     blockhash,
@@ -201,6 +239,7 @@ export async function issuePaymentRequestTransaction(
     currentBlockHeight,
   });
   if (!claimed) {
+    assertNotExpired(request);
     const winner = await serveLiveClaim();
     if (winner) {
       return winner;
@@ -227,18 +266,15 @@ export async function issuePaymentRequestTransaction(
  * @returns The compiled, unsigned transaction as base64.
  * @throws AppError `BAD_REQUEST` when a SOL request's amount is not positive.
  */
-async function buildPaymentTransaction(
-  rpc: SolanaRpc,
-  params: {
-    request: PaymentRequestRow;
-    payer: Address;
-    recipient: Address;
-    reference: Address;
-    feePayer: Address;
-    blockhash: Blockhash;
-    lastValidBlockHeight: bigint;
-  }
-): Promise<string> {
+async function buildPaymentTransaction(params: {
+  request: PaymentRequestRow;
+  payer: Address;
+  recipient: Address;
+  reference: Address;
+  feePayer: Address;
+  blockhash: Blockhash;
+  lastValidBlockHeight: bigint;
+}): Promise<string> {
   const { request, recipient, reference, feePayer, blockhash, lastValidBlockHeight } = params;
   const withReference = (instruction: Instruction & { accounts: readonly AccountMeta[] }) => ({
     ...instruction,
@@ -248,7 +284,7 @@ async function buildPaymentTransaction(
 
   let instructions: Instruction[];
   if (request.token === SOL_MINT) {
-    const lamports = parseDecimalAmount(request.amount, SOL_DECIMALS);
+    const lamports = (await loadPaymentMint(address(SOL_MINT))).toBaseUnits(request.amount);
     if (lamports <= 0n) {
       throw badRequest("Transfer amount must be greater than zero");
     }
@@ -260,7 +296,7 @@ async function buildPaymentTransaction(
     instructions = [withReference(transferInstruction)];
   } else {
     const { createDestinationAtaInstruction, transferInstruction } =
-      await buildSplTransferInstructions(rpc, {
+      await buildSplTransferInstructions({
         authority: payerSigner,
         destination: recipient,
         mint: assertValidAddress(request.token, "token"),

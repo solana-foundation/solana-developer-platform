@@ -1,3 +1,4 @@
+import * as solanaRpc from "@sdp/rpc/solana";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import {
@@ -13,12 +14,14 @@ import {
   pipe,
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
+  signature,
 } from "@solana/kit";
 import { getTransferSolInstruction } from "@solana-program/system";
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
+import * as repositoryFactory from "@/db/repositories/repository-factory";
 import {
   createPaymentRequestsRepository,
   createSystemPaymentRequestsRepository,
@@ -26,18 +29,21 @@ import {
 import { app } from "@/index";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
+import * as paymentRequests from "@/services/payments/payment-requests";
 import * as sponsorshipService from "@/services/sponsorship.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import {
   clusterOfRpcClient,
   ENVIRONMENT_CLUSTER_CASES,
-  installClusterRpcStub,
+  installClusterRpcResponder,
 } from "@/test/helpers/cluster-rpc";
 import { seedUnreadPrivyWallet } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
+import { syntheticAddress } from "@/test/helpers/parsed-transactions";
 import {
   createKoraAdapterMock,
   getRecentBlockhashMock,
+  getSignaturesForAddressMock,
   installPaymentsRouteTestHooks,
   TEST_CUSTODY_WALLET_ID,
   TEST_ORG,
@@ -51,6 +57,7 @@ import {
   TEST_MOCK_FEE_PAYER,
   TEST_MOCK_FEE_PAYER_KEY_PAIR,
 } from "@/test/helpers/sponsor-signing";
+import { respondMintAccounts, scaledUiAmountConfig } from "@/test/helpers/token-mints";
 
 interface RequestWallet {
   projectId: string;
@@ -100,9 +107,20 @@ const sponsoredGrantMetadataSchema = z.object({
   signature: z.string().min(1),
 });
 
+const sponsoredOutcomeAuditSchema = z.object({ status: z.string(), metadata: z.string() });
+
+const sponsoredIntentMetadataSchema = z.object({
+  auditPhase: z.literal("intent"),
+  target: z.object({
+    action: z.string(),
+    resourceType: z.string(),
+    metadata: z.record(z.string(), z.unknown()),
+  }),
+});
+
 describe("Public payment request routes", () => {
   installPaymentsRouteTestHooks();
-  const rpc = installClusterRpcStub();
+  const rpc = installClusterRpcResponder();
 
   beforeEach(() => {
     rpc.answer("getSignaturesForAddress", []);
@@ -110,6 +128,10 @@ describe("Public payment request routes", () => {
   });
 
   function createAwaitingPaymentRequest(wallet: RequestWallet) {
+    return createAwaitingTokenPaymentRequest(wallet, SOL_MINT);
+  }
+
+  function createAwaitingTokenPaymentRequest(wallet: RequestWallet, token: string) {
     return createPaymentRequestsRepository(
       env,
       createTenantScope({ organizationId: TEST_ORG.id, projectId: wallet.projectId })
@@ -119,12 +141,27 @@ describe("Public payment request routes", () => {
       custodyWalletId: wallet.custodyWalletId,
       walletId: wallet.walletId,
       destinationAddress: wallet.publicKey,
-      token: SOL_MINT,
+      token,
       amount: "1.5",
       expiresAt: null,
       createdBy: TEST_USER.id,
     });
   }
+
+  it.each(["1.0000000001", "18446744073.709551616"])(
+    "returns 400 for a legacy invalid SOL pay-link amount %s",
+    async (amount) => {
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+      if (request === null) throw new Error("Expected a payment request fixture");
+      await getDb(env)
+        .prepare("UPDATE payment_requests SET amount = ? WHERE id = ?")
+        .bind(amount, request.id)
+        .run();
+      const response = await postTransaction(request.public_token);
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ error: { code: "BAD_REQUEST" } });
+    }
+  );
 
   function calledClusters() {
     return new Set(rpc.calls.map((call) => call.cluster));
@@ -153,7 +190,7 @@ describe("Public payment request routes", () => {
   }
 
   it.for(ENVIRONMENT_CLUSTER_CASES)(
-    "reports and reads a $environment request on $cluster only",
+    "reports a $environment request on $cluster from stored state without reading the chain",
     async ({ environment, cluster }) => {
       const request = await createAwaitingPaymentRequest(
         await REQUEST_WALLET_BY_ENVIRONMENT[environment]()
@@ -166,8 +203,7 @@ describe("Public payment request routes", () => {
         status: "awaiting_payment",
         network: cluster,
       });
-      expect(rpc.calls).toContainEqual({ cluster, method: "getSignaturesForAddress" });
-      expect(calledClusters()).toEqual(new Set([cluster]));
+      expect(rpc.calls).toEqual([]);
     }
   );
 
@@ -324,9 +360,14 @@ describe("Public payment request routes", () => {
         expect(sponsorship).toHaveBeenCalledWith(
           env,
           expect.objectContaining({ projectId: wallet.projectId }),
-          "payments.pay_request"
+          "payments.pay_request",
+          { custodyWalletId: null }
         );
-        expect(rpc.calls).toContainEqual({ cluster, method: "getSignaturesForAddress" });
+        expect(
+          new Set(
+            getSignaturesForAddressMock.mock.calls.map(([client]) => clusterOfRpcClient(client))
+          )
+        ).toEqual(new Set([cluster]));
         expect(rpc.calls).toContainEqual({ cluster, method: "getBlockHeight" });
         expect(calledClusters()).toEqual(new Set([cluster]));
         expect(
@@ -414,6 +455,77 @@ describe("Public payment request routes", () => {
       expect(Number(other.headers.get("Retry-After"))).toBeGreaterThan(0);
     });
 
+    it("answers 429 with Retry-After instead of a new transaction while a payment is still confirming", async () => {
+      const sponsorship = stubSponsorship();
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+      getSignaturesForAddressMock.mockResolvedValueOnce([
+        {
+          signature: signature(getBase58Decoder().decode(new Uint8Array(64).fill(5))),
+          slot: 1n,
+          blockTime: null,
+          err: null,
+          confirmationStatus: "confirmed",
+        },
+      ]);
+      const verify = vi
+        .spyOn(solanaRpc, "getSignatureStatuses")
+        .mockResolvedValue([
+          { slot: 1n, confirmations: null, confirmationStatus: "confirmed", err: null },
+        ]);
+      onTestFinished(() => verify.mockRestore());
+
+      const response = await postTransaction(request.public_token);
+
+      expect(response.status).toBe(429);
+      expect(Number(response.headers.get("Retry-After"))).toBeGreaterThan(0);
+      expect(await response.json()).toMatchObject({ error: { code: "RATE_LIMITED" } });
+      expect(verify).toHaveBeenCalledTimes(1);
+      expect(sponsorship).not.toHaveBeenCalled();
+    });
+
+    it("does not replay the stored transaction once the request passes its deadline", async () => {
+      stubSponsorship();
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+      expect((await postTransaction(request.public_token)).status).toBe(200);
+
+      const expiry = vi
+        .spyOn(paymentRequests, "isPaymentRequestExpired")
+        .mockReturnValueOnce(false)
+        .mockReturnValue(true);
+      onTestFinished(() => expiry.mockRestore());
+
+      const replay = await postTransaction(request.public_token);
+      expect(replay.status).toBe(400);
+      expect(await replay.json()).not.toHaveProperty("transaction");
+    });
+
+    it("answers no longer payable when the claim is lost to the deadline", async () => {
+      const sponsorship = stubSponsorship();
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+      const systemRepository = repositoryFactory.createSystemPaymentRequestsRepository;
+      const factory = vi
+        .spyOn(repositoryFactory, "createSystemPaymentRequestsRepository")
+        .mockImplementation((bindings) => {
+          const repository = systemRepository(bindings);
+          vi.spyOn(repository, "claimSponsoredTransactionWindow").mockResolvedValue(false);
+          return repository;
+        });
+      onTestFinished(() => factory.mockRestore());
+      const expiry = vi
+        .spyOn(paymentRequests, "isPaymentRequestExpired")
+        .mockReturnValueOnce(false)
+        .mockReturnValue(true);
+      onTestFinished(() => expiry.mockRestore());
+
+      const response = await postTransaction(request.public_token);
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: { message: "Payment request is no longer payable" },
+      });
+      expect(sponsorship).toHaveBeenCalledTimes(1);
+    });
+
     it("lets a new account claim after the window expires", async () => {
       const sponsorship = stubSponsorship();
       const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
@@ -472,6 +584,61 @@ describe("Public payment request routes", () => {
       });
     });
 
+    it("files a fresh grant's audit intent under its tenant with the message digest and mint", async () => {
+      stubSponsorship();
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+
+      expect((await postTransaction(request.public_token)).status).toBe(200);
+
+      const rows = await getDb(env)
+        .prepare(
+          "SELECT action, organization_id, metadata FROM audit_logs WHERE resource_type = 'audit_ledger' AND metadata::jsonb -> 'target' ->> 'resourceId' = ?"
+        )
+        .bind(request.id)
+        .all();
+      expect(rows.results).toHaveLength(1);
+      const intent = sponsoredGrantAuditSchema.parse(rows.results[0]);
+      expect(intent.organization_id).toBe(TEST_ORG.id);
+      const metadata = sponsoredIntentMetadataSchema.parse(JSON.parse(intent.metadata));
+      expect(metadata.target).toMatchObject({ action: "sign", resourceType: "payment_request" });
+      expect(metadata.target.metadata).toMatchObject({
+        organizationId: TEST_ORG.id,
+        projectId: SANDBOX_REQUEST_WALLET.projectId,
+        tokenMint: SOL_MINT,
+        transactionDigest: expect.stringMatching(/^[0-9a-f]{64}$/),
+      });
+      expect(metadata.target.metadata).not.toHaveProperty("token");
+    });
+
+    it("records a failed sponsor sign as a failure outcome and errors the route", async () => {
+      const sponsorship = stubSponsorship();
+      sponsorship.mockImplementationOnce(() => ({
+        providerId: "test",
+        getFeePayer: async () => TEST_MOCK_FEE_PAYER,
+        signAsFeePayer: () => Promise.reject(new Error("kora refused")),
+        getSponsorshipConfiguration: () => Promise.reject(new Error("not used")),
+        prepareOwnedSubmission: () => Promise.reject(new Error("not used")),
+      }));
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+
+      expect((await postTransaction(request.public_token)).status).toBe(500);
+
+      const rows = await getDb(env)
+        .prepare(
+          "SELECT status, metadata FROM audit_logs WHERE resource_type = 'payment_request' AND resource_id = ?"
+        )
+        .bind(request.id)
+        .all();
+      expect(rows.results).toHaveLength(1);
+      const outcome = sponsoredOutcomeAuditSchema.parse(rows.results[0]);
+      expect(outcome.status).toBe("failure");
+      expect(JSON.parse(outcome.metadata)).toMatchObject({
+        auditPhase: "outcome",
+        errorCode: "UNCLASSIFIED_ERROR",
+      });
+      expect(outcome.metadata).not.toContain("kora refused");
+    });
+
     it("refuses and does not store the grant when its audit entry cannot be persisted", async () => {
       stubSponsorship();
       const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
@@ -517,6 +684,52 @@ describe("Public payment request routes", () => {
       expect(sponsorship).not.toHaveBeenCalled();
 
       expect((await postTransaction(request.public_token)).status).toBe(200);
+    });
+
+    it("refuses a request in a mint whose extension rescales amounts before claiming or signing", async () => {
+      const sign = vi.fn(sponsorSignTestTransaction);
+      stubSponsorship().mockImplementation(() => ({
+        providerId: "test",
+        getFeePayer: async () => TEST_MOCK_FEE_PAYER,
+        signAsFeePayer: sign,
+        getSponsorshipConfiguration: () => Promise.reject(new Error("not used")),
+        prepareOwnedSubmission: () => Promise.reject(new Error("not used")),
+      }));
+      const mint = syntheticAddress(355);
+      const clockUnixTimestamp = 1_750_000_000n;
+      respondMintAccounts(rpc, {
+        mints: new Map([
+          [
+            mint,
+            {
+              decimals: 6,
+              extensions: [
+                scaledUiAmountConfig({
+                  multiplier: 2,
+                  newMultiplier: 2,
+                  newMultiplierEffectiveTimestamp: clockUnixTimestamp,
+                }),
+              ],
+            },
+          ],
+        ]),
+        clockUnixTimestamp,
+      });
+      const request = await createAwaitingTokenPaymentRequest(SANDBOX_REQUEST_WALLET, mint);
+
+      const response = await postTransaction(request.public_token);
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: {
+          code: "BAD_REQUEST",
+          message: "Payments do not support the ScaledUiAmountConfig mint extension",
+        },
+      });
+      expect(sign).not.toHaveBeenCalled();
+      expect(
+        await createSystemPaymentRequestsRepository(env).getSponsoredTransactionClaim(request.id)
+      ).toBeNull();
     });
   });
 });

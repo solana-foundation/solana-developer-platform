@@ -20,7 +20,6 @@ import { TokenMark } from "@/components/token-mark";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { readApiErrorMessage } from "@/lib/api-error";
-import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { explorerAddressUrl, explorerTxUrl } from "@/lib/explorer";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
@@ -34,7 +33,7 @@ import {
 } from "./home-page.data";
 import { seriesColorForMint } from "./home-series-color";
 import { buildTokenSymbolsByMint } from "./home-token-symbols";
-import { fetchHomeActivity, fetchHomeVolume } from "./home-workspace.data";
+import { useHomeActivitySnapshot } from "./home-workspace.data";
 import {
   formatCurrencyAmount,
   formatDisplayAmount,
@@ -55,10 +54,6 @@ interface HomeWorkspaceProps {
   walletCount: number;
   issuedTokens: PaymentsIssuedTokenSymbol[];
 }
-
-const HOME_ACTIVITY_KEY = "dashboard-home-activity";
-const HOME_ACTIVITY_CACHE_TTL_MS = 60_000;
-const HOME_VOLUME_KEY = "dashboard-home-volume";
 
 /** Table text that ellipsizes, with a full-value tooltip only while it actually overflows. */
 function TruncatedTableText({ value, className }: { value: string; className?: string }) {
@@ -706,50 +701,16 @@ function HomeActivityCard({
 }
 
 /**
- * Today's volume, read apart from the activity list: it waits on every wallet so
- * the total is never a sum over some of them, and the list does not wait on it.
+ * Recent activity and today's volume, from the one read that builds both. This
+ * design shows both before the first wallet too, so it always reads.
  */
-function useHomeVolume() {
-  const t = useTranslations();
-  const { data: volumeSnapshot, error: volumeRequestError } = usePersistedDashboardSWR(
-    HOME_VOLUME_KEY,
-    () => fetchHomeVolume(),
-    {
-      revalidateOnFocus: true,
-      refreshInterval: 20_000,
-    },
-    {
-      key: "home-volume",
-      ttlMs: HOME_ACTIVITY_CACHE_TTL_MS,
-    }
-  );
-  return {
-    todaysVolume: volumeSnapshot?.todaysVolume ?? null,
-    todaysVolumeError: volumeRequestError
-      ? readApiErrorMessage(volumeRequestError) || t("Shared.homeWorkspace.activityUnavailable")
-      : (volumeSnapshot?.todaysVolumeError ?? null),
-    todaysVolumeLoading: volumeSnapshot === undefined && !volumeRequestError,
-  };
-}
-
 function useHomeActivity(
   balances: CustodyWalletTokenBalance[],
   issuanceEnabled: boolean,
   isWalletEmptyState: boolean
 ) {
   const t = useTranslations();
-  const { data: activitySnapshot, error: activityRequestError } = usePersistedDashboardSWR(
-    HOME_ACTIVITY_KEY,
-    () => fetchHomeActivity(),
-    {
-      revalidateOnFocus: true,
-      refreshInterval: 20_000,
-    },
-    {
-      key: "home-activity",
-      ttlMs: HOME_ACTIVITY_CACHE_TTL_MS,
-    }
-  );
+  const { data: activitySnapshot, error: activityRequestError } = useHomeActivitySnapshot(true);
   const activityRows = filterHomeActivityRowsByFlags(activitySnapshot?.activityRows ?? [], {
     issuance: issuanceEnabled,
   });
@@ -770,6 +731,11 @@ function useHomeActivity(
     activityError,
     activityNotice,
     emptyActivityMessage,
+    todaysVolume: activitySnapshot?.todaysVolume ?? null,
+    todaysVolumeError: activityRequestError
+      ? readApiErrorMessage(activityRequestError) || t("Shared.homeWorkspace.activityUnavailable")
+      : (activitySnapshot?.todaysVolumeError ?? null),
+    todaysVolumeLoading: activitySnapshot === undefined && !activityRequestError,
   };
 }
 
@@ -807,9 +773,16 @@ export function HomeWorkspace({
   const issuedTokensByMint = Object.fromEntries(
     issuedTokens.map((token) => [token.mintAddress, token])
   );
-  const { todaysVolume, todaysVolumeError, todaysVolumeLoading } = useHomeVolume();
-  const { activityRows, symbolsByMint, activityError, activityNotice, emptyActivityMessage } =
-    useHomeActivity(balances, issuanceEnabled, isWalletEmptyState);
+  const {
+    activityRows,
+    symbolsByMint,
+    activityError,
+    activityNotice,
+    emptyActivityMessage,
+    todaysVolume,
+    todaysVolumeError,
+    todaysVolumeLoading,
+  } = useHomeActivity(balances, issuanceEnabled, isWalletEmptyState);
 
   return (
     <div className="w-full space-y-8 py-2">

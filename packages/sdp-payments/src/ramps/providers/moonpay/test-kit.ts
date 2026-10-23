@@ -203,6 +203,7 @@ function signedWithSandboxKeys(hostedUrl: string): boolean {
 export const MOONPAY_TEST_KIT: RampProviderTestKit = {
   credentials: { publicKey: API_KEY, secretKey: SECRET_KEY },
   liveCredentials: { publicKey: "pk_live_contract", secretKey: "sk_live_contract" },
+  webhookSecrets: { sandbox: "wk_test_contract", production: "wk_live_contract" },
   onramp: {
     estimate: {
       input: { assetRail: "sol.solana", fiatCurrency: "USD", fiatAmount: "50" },

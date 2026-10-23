@@ -273,17 +273,20 @@ export interface Env extends ManagedRpcEnv {
   // data.solana.com, the API behind solana.com/data (the Overview's Solana network figures)
   DATA_API_KEY?: string;
 
-  // MoonPay ramps configuration
-  // MoonPay sandbox only: production projects bring their own MoonPay account.
+  // Managed ramp provider keys, <PROVIDER>_<MODE>_<ROLE> (services/ramps/runtime.ts).
+  // Live (PRODUCTION) keys exist only in prd; a mode without its keys fails closed.
   MOONPAY_SANDBOX_API_KEY?: string;
   MOONPAY_SANDBOX_SECRET_KEY?: string;
-  MOONPAY_SANDBOX_WEBHOOK_KEY?: string;
-
-
-  // Stripe sandbox only: production projects bring their own Stripe account.
-  STRIPE_SANDBOX_SECRET_KEY?: string;
+  MOONPAY_SANDBOX_WEBHOOK_SECRET?: string;
+  MOONPAY_PRODUCTION_API_KEY?: string;
+  MOONPAY_PRODUCTION_SECRET_KEY?: string;
+  MOONPAY_PRODUCTION_WEBHOOK_SECRET?: string;
   STRIPE_SANDBOX_PUBLISHABLE_KEY?: string;
+  STRIPE_SANDBOX_SECRET_KEY?: string;
   STRIPE_SANDBOX_WEBHOOK_SECRET?: string;
+  STRIPE_PRODUCTION_PUBLISHABLE_KEY?: string;
+  STRIPE_PRODUCTION_SECRET_KEY?: string;
+  STRIPE_PRODUCTION_WEBHOOK_SECRET?: string;
 
   // Markets module gate. Clearing it dark-launches every Markets API surface.
   MARKETS_ENABLED?: string;

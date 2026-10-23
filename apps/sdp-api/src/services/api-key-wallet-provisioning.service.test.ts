@@ -235,6 +235,7 @@ describe("provisionApiKeyWallet", () => {
           organizationId: ORGANIZATION_ID,
           projectId: PROJECT_ID,
           owner: { connectionId },
+          purpose: "transfer",
         })
       ).rejects.toThrow();
 
@@ -258,6 +259,7 @@ describe("provisionApiKeyWallet", () => {
         organizationId: ORGANIZATION_ID,
         projectId: PROJECT_ID,
         owner: { connectionId: CONNECTION_ID },
+        purpose: "transfer",
       })
     ).rejects.toThrow();
     expect(provisionPrivyWalletMock).not.toHaveBeenCalled();

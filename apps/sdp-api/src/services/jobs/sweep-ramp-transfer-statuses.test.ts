@@ -2,6 +2,7 @@ import type { PaymentTransferStatus } from "@sdp/types/payments";
 import { SOL_MINT, wellKnownMint } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
+import type { ManagedRampKeysEnv } from "@/services/ramps/runtime";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { installStripeTestEnv } from "@/test/helpers/stripe-env";
@@ -18,7 +19,11 @@ const PROJECTS = { sandbox: "prj_ramp_status_sandbox", production: "prj_ramp_sta
 const MOONPAY_TEST_ENV = {
   MOONPAY_SANDBOX_API_KEY: "pk_test_status_sweep",
   MOONPAY_SANDBOX_SECRET_KEY: "sk_test_status_sweep",
-};
+} satisfies ManagedRampKeysEnv;
+const MOONPAY_PRODUCTION_ENV = {
+  MOONPAY_PRODUCTION_API_KEY: "pk_live_status_sweep",
+  MOONPAY_PRODUCTION_SECRET_KEY: "sk_live_status_sweep",
+} satisfies ManagedRampKeysEnv;
 const SIG =
   "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy";
 const WALLET = "8mSiNWTeu59yy1pxsoNCyy7KNMnKvfgGu8Ej975LsufM";
@@ -157,12 +162,14 @@ function sweep() {
 describe("sweepRampTransferStatuses", () => {
   installStripeTestEnv();
 
-  let savedMoonpay: Partial<typeof MOONPAY_TEST_ENV>;
+  let savedMoonpay: ManagedRampKeysEnv;
 
   beforeEach(async () => {
     savedMoonpay = {
       MOONPAY_SANDBOX_API_KEY: env.MOONPAY_SANDBOX_API_KEY,
       MOONPAY_SANDBOX_SECRET_KEY: env.MOONPAY_SANDBOX_SECRET_KEY,
+      MOONPAY_PRODUCTION_API_KEY: env.MOONPAY_PRODUCTION_API_KEY,
+      MOONPAY_PRODUCTION_SECRET_KEY: env.MOONPAY_PRODUCTION_SECRET_KEY,
     };
     Object.assign(env, MOONPAY_TEST_ENV);
     answers = new Map();
@@ -393,7 +400,7 @@ describe("sweepRampTransferStatuses", () => {
     expect((await row("xfr_raced")).status).toBe("pending");
   });
 
-  it("skips production rows, which have no SDP-held keys", async () => {
+  it("skips production rows while SDP holds no production keys", async () => {
     await seedTransfer({ id: "xfr_production", provider: "moonpay", project: PROJECTS.production });
 
     await sweep();
@@ -402,6 +409,18 @@ describe("sweepRampTransferStatuses", () => {
     const production = await row("xfr_production");
     expect(production.status).toBe("pending");
     expect(production.provider_status_last_polled_at).toBeNull();
+  });
+
+  it("pulls production rows once the production keys are mounted, needing no webhook secret", async () => {
+    Object.assign(env, MOONPAY_PRODUCTION_ENV);
+    await seedTransfer({ id: "xfr_production", provider: "moonpay", project: PROJECTS.production });
+    answer("/v1/transactions/ext/xfr_production", 200, [buy("xfr_production", {})]);
+
+    const results = await sweep();
+
+    expect(requestsTo("api.moonpay.com")).toBe(1);
+    expect(resultFor(results, "moonpay")).toMatchObject({ polled: 1, failed: 0 });
+    expect((await row("xfr_production")).provider_status_last_polled_at).not.toBeNull();
   });
 
   it("drains open transfers before expired ones", async () => {

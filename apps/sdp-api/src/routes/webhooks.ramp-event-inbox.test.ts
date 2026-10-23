@@ -32,7 +32,7 @@ describe("Ramp webhook event inbox", () => {
   const USER_ID = "usr_ramp_inbox";
   const TRANSFER_ID = "xfr_ramp_inbox";
   const MOONPAY_TRANSACTION_ID = "e3a1f7cb-42c1-4a08-9d5f-0d51e94eb1af";
-  const MOONPAY_WEBHOOK_KEY = "moonpay_test_webhook_key";
+  const MOONPAY_WEBHOOK_KEY = "wk_test_moonpay_webhook";
   const STRIPE_WEBHOOK_SECRET = "whsec_ramp_inbox_test";
   function solMint(): string {
     const mint = wellKnownMint("SOL", "devnet");
@@ -187,13 +187,13 @@ describe("Ramp webhook event inbox", () => {
 
   beforeEach(async () => {
     await seedTestDatabase(env);
-    env.MOONPAY_SANDBOX_WEBHOOK_KEY = MOONPAY_WEBHOOK_KEY;
+    env.MOONPAY_SANDBOX_WEBHOOK_SECRET = MOONPAY_WEBHOOK_KEY;
     env.STRIPE_SANDBOX_WEBHOOK_SECRET = STRIPE_WEBHOOK_SECRET;
     await seedMoonpayOnrampTransfer();
   });
 
   afterEach(async () => {
-    env.MOONPAY_SANDBOX_WEBHOOK_KEY = undefined;
+    env.MOONPAY_SANDBOX_WEBHOOK_SECRET = undefined;
     env.STRIPE_SANDBOX_WEBHOOK_SECRET = undefined;
   });
 

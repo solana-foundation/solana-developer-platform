@@ -125,6 +125,7 @@ export function stripeSessionLookupExchange(
 export const STRIPE_TEST_KIT: RampProviderTestKit = {
   credentials: { publicKey: "pk_test_contract", secretKey: SECRET_KEY },
   liveCredentials: { publicKey: "pk_live_contract", secretKey: "sk_live_contract" },
+  webhookSecrets: { sandbox: "whsec_test_contract", production: "whsec_live_contract" },
   onramp: {
     estimate: {
       input: { assetRail: "usdc.solana", fiatCurrency: "USD", fiatAmount: FIAT_AMOUNT },

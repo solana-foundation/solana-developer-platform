@@ -41,7 +41,7 @@ import type { Env } from "@/types/env";
 import { recoverOrBlockLifecycleCollection } from "./collection";
 import {
   assertRecurringPaymentSourceWallet,
-  assertRecurringPaymentTokenMint,
+  assertRecurringPaymentTerms,
   confirmSubscriptionSignature,
   createSubscriptionStepStore,
   isSubscriptionDelegationCanceled,
@@ -594,15 +594,7 @@ async function runRecurringPaymentLifecycle(
     if (!plan) {
       throw notFound("Subscription plan");
     }
-    const tokenMint = assertValidAddress(
-      await assertRecurringPaymentTokenMint(
-        plan.token,
-        input.organizationId,
-        input.projectId,
-        input.env
-      ),
-      "tokenMint"
-    );
+    const tokenMint = assertValidAddress(plan.token, "tokenMint");
 
     const expectedSubscriptionStatus = input.operation === "cancel" ? "active" : "canceled";
     const finalSubscriptionStatus = input.operation === "cancel" ? "canceled" : "active";
@@ -666,8 +658,19 @@ async function runRecurringPaymentLifecycle(
     // chain shows landed has already returned, so a refusal never strands an
     // operation that is on chain. A refused resume goes back to `canceled`
     // through the failure reset, which matches the subscription on chain.
-    if (recoveringStaleLifecycle && input.operation === "resume") {
-      await input.admitStart();
+    // Token terms are asked at the same point for every resume; cancel is an
+    // exit and never asks them.
+    if (input.operation === "resume") {
+      await assertRecurringPaymentTerms({
+        token: plan.token,
+        amount: claimed.amount,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        env: input.env,
+      });
+      if (recoveringStaleLifecycle) {
+        await input.admitStart();
+      }
     }
     const sourceSigner = await createOrgSignerForCustodyWallet(
       input.env,

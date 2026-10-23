@@ -358,11 +358,11 @@ export const updateRecurringPayment = async (
     request: body,
     createdBy: await resolveCreatorUserId(c),
     idempotency: requiredIdempotency(c),
-    admitStart: (custodyWalletId) =>
+    admitStart: (custodyWalletId, movement) =>
       assertMoneyStartAdmitted(
         c.env,
         { organizationId: auth.organizationId, projectId },
-        { surface: "http", movement: "recurring.update", subjectId: recurringPayment.id },
+        { surface: "http", movement, subjectId: recurringPayment.id },
         { custodyWalletId }
       ),
   });

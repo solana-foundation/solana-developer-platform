@@ -27,8 +27,7 @@ const REQUEST_ICON = `${getSdpDocsOrigin()}/icon.svg`;
  * @returns The request's amount, token, recipient, status, and Solana Pay URL.
  */
 export async function getPaymentRequest(c: Context<{ Bindings: Env }, "/:token">) {
-  const existing = await findPaymentRequest(c.env, c.req.param("token"));
-  const request = await reconcilePaymentRequest(c.env, existing, { bestEffort: true });
+  const request = await findPaymentRequest(c.env, c.req.param("token"));
 
   const expired = isPaymentRequestExpired(request.expires_at);
   const status = expired && request.status === "awaiting_payment" ? "expired" : request.status;
@@ -77,7 +76,9 @@ export async function createSponsoredTransaction(
 ) {
   const { token } = c.req.param();
   const existing = await findPaymentRequest(c.env, token);
-  const request = await reconcilePaymentRequest(c.env, existing, { bestEffort: false });
+  const request = await reconcilePaymentRequest(c.env, existing, (seconds) =>
+    c.header("Retry-After", String(seconds))
+  );
   if (request.status !== "awaiting_payment" || isPaymentRequestExpired(request.expires_at)) {
     throw badRequest("Payment request is no longer payable");
   }

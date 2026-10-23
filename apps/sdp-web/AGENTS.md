@@ -17,7 +17,11 @@ is verified; never turn a provider webhook alone into completed UI state.
 Poll with SWR by passing `refreshInterval` as an inline function each render,
 `(data) => interval(data)`. SWR clears a pending poll only when the option
 changes, so with a stable function, data that turns terminal through a
-`mutate` or another hook on the same key still gets one more request.
+`mutate` or another hook on the same key still gets one more request. The
+function sees only data SWR fetched, never `fallbackData`: a poll seeded by
+the server reads that seed itself while it gets `undefined`. A poll that never
+stops keeps a plain number, since an inline function restarts the timer on
+every render.
 
 Dashboard pages live under `app/dashboard/[projectId]/`, and the Project comes from the URL alone:
 

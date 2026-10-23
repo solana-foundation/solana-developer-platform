@@ -23,7 +23,6 @@ interface BuildWalletsPlaygroundConfigOptions {
 
 function buildPurposeOptions(t: ReturnType<typeof useTranslations>): ApiPlaygroundFieldOption[] {
   return [
-    { label: t("DashboardCustody.rootWallet"), value: "root" },
     { label: t("DashboardCustody.mintAuthority"), value: "mint_authority" },
     { label: t("DashboardCustody.freezeAuthority"), value: "freeze_authority" },
     { label: t("DashboardCustody.feePayer"), value: "fee_payer" },
@@ -216,7 +215,7 @@ export function buildWalletsPlaygroundEndpointConfigs({
           placeholder: t("DashboardCustody.selectWalletPurpose"),
           kind: "select",
           options: buildPurposeOptions(t),
-          defaultValue: "root",
+          defaultValue: "transfer",
         },
       ],
       expectedResponse: {

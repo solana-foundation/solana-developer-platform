@@ -30,14 +30,12 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => workspace,
   useOptionalDashboardWorkspace: () => workspace,
 }));
-const swr = vi.hoisted(() => ({
-  activity: { activityRows: [] } as Record<string, unknown>,
-  volume: { todaysVolume: 0, todaysVolumeError: null } as Record<string, unknown> | undefined,
+const SETTLED_ACTIVITY = { activityRows: [], todaysVolume: 0, todaysVolumeError: null };
+const swr = vi.hoisted((): { activity: Record<string, unknown> | undefined } => ({
+  activity: undefined,
 }));
 vi.mock("@/lib/dashboard-swr", () => ({
-  usePersistedDashboardSWR: (key: string) => ({
-    data: key === "dashboard-home-volume" ? swr.volume : swr.activity,
-  }),
+  usePersistedDashboardSWR: () => ({ data: swr.activity }),
 }));
 vi.mock("./wallets/section-entry", () => ({
   SectionEntry: ({ children }: { children: ReactNode }) => children,
@@ -49,6 +47,7 @@ beforeEach(() => {
   workspace.initialQuickStartStep = "api-key";
   workspace.dashboardCacheScope.orgId = `home_org_${++orgSequence}`;
   progressKey = quickStartKey(workspace.dashboardCacheScope);
+  swr.activity = { ...SETTLED_ACTIVITY };
 });
 function ui(totalBalanceError: string | null = null) {
   return (
@@ -68,8 +67,6 @@ afterEach(() => {
   cleanup();
   resetDashboardNavigation();
   workspace.sdpEnvironment = "sandbox";
-  swr.activity = { activityRows: [] };
-  swr.volume = { todaysVolume: 0, todaysVolumeError: null };
 });
 
 describe("home after quick start", () => {
@@ -150,7 +147,8 @@ describe("home after quick start", () => {
 
   it("says why today's volume is missing on the page, not only on hover", () => {
     setQuickStart(progressKey, "done");
-    swr.volume = {
+    swr.activity = {
+      ...SETTLED_ACTIVITY,
       todaysVolume: null,
       todaysVolumeError: "Payments activity is unavailable right now.",
     };
@@ -161,7 +159,7 @@ describe("home after quick start", () => {
   });
   it("shows a dash, not $0.00, while today's volume is still loading", () => {
     setQuickStart(progressKey, "done");
-    swr.volume = undefined;
+    swr.activity = undefined;
     const view = render(ui());
     const label = view.getByText("Today's Volume");
     expect(label.nextElementSibling?.textContent).toBe("—");

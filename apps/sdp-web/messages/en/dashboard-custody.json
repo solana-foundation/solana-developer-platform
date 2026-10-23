@@ -2,7 +2,7 @@
   "DashboardCustody": {
     "walletStateActive": "Active",
     "walletStateActiveBody": "Payments, ramps and issuance can sign with this wallet.",
-    "walletPurposeInfo": "What this wallet is for. Payments sends from a root wallet and pays the network fee from a fee payer; Issuance signs with a mint or freeze authority. It restricts nothing on its own, a policy does that.",
+    "walletPurposeInfo": "What this wallet is for. Payments, transfer batches and recurring payments only send from a transfer wallet; Issuance signs with a mint or freeze authority.",
     "walletIdInfo": "SDP's own identifier for this wallet, which is what the API takes. The address is what the chain knows.",
     "walletTokens": "Tokens",
     "walletToken": "Token",
@@ -606,7 +606,7 @@
     "walletSetupDetailsStep": "Details",
     "walletLabelHint": "How the wallet is named in the dashboard and in API responses. You can rename it later.",
     "walletPurposeHint": "What the wallet is for, shown with it across the dashboard and the API.",
-    "walletPurposeFirstWalletHint": "A provider's first wallet is its root wallet. Choose a purpose for the wallets you add after it.",
+    "walletPurposeFirstWalletHint": "A provider's first wallet is a transfer wallet. Choose a purpose for the wallets you add after it.",
     "walletSetupCreatedWith": "Created with",
     "walletSetupProvider": "Provider",
     "walletSetupChangeProvider": "Change",

@@ -20,6 +20,7 @@ import type { Env } from "@/types/env";
  * @param sponsorship - Who is sponsored and the movement the sponsor serves.
  * @param sponsorship.scope - Who is sponsored.
  * @param sponsorship.movement - The movement the sponsor serves.
+ * @param sponsorship.custodyWalletId - The custody wallet that signs, scoping the sponsor too.
  * @returns The Token-2022 service.
  *
  * When a Kora is configured for the scope's cluster (`KORA_<CLUSTER>_URL`),
@@ -29,10 +30,12 @@ import type { Env } from "@/types/env";
 export function createToken2022Service(
   env: Env,
   signer: TransactionSigner,
-  sponsorship: { scope: SponsorshipScope; movement: MovementId }
+  sponsorship: { scope: SponsorshipScope; movement: MovementId; custodyWalletId: string }
 ): Token2022Service {
   const feePayment = isKoraSponsorshipConfigured(env)
-    ? createIssuanceSponsor(env, sponsorship.scope, sponsorship.movement)
+    ? createIssuanceSponsor(env, sponsorship.scope, sponsorship.movement, {
+        custodyWalletId: sponsorship.custodyWalletId,
+      })
     : undefined;
 
   return new Token2022Service(env, signer, feePayment);

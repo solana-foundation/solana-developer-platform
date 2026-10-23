@@ -38,6 +38,7 @@ function solTransferReply(requestedSignature: string): ClusterRpcReply {
       instructions: [
         parsedSystemTransfer({ source: PAYER, destination: WALLET_ADDRESS, lamports: 1000 }),
       ],
+      innerInstructions: [],
       preTokenBalances: [],
       postTokenBalances: [],
     }),

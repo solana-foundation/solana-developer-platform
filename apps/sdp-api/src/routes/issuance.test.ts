@@ -8658,6 +8658,7 @@ describe("Issuance Routes", () => {
         const accountExistsSpy = vi.spyOn(SolanaRpc, "accountExists").mockResolvedValueOnce(true);
         const getTransactionSpy = vi.spyOn(SolanaRpc, "getTransaction").mockResolvedValueOnce({
           slot: 100n,
+          accountKeys: [TEST_SOLANA_ADDRESSES.wallet2],
           executionResultKnown: true,
           err: null,
           instructions: [
@@ -8767,6 +8768,7 @@ describe("Issuance Routes", () => {
         const accountExistsSpy = vi.spyOn(SolanaRpc, "accountExists").mockResolvedValueOnce(true);
         const getTransactionSpy = vi.spyOn(SolanaRpc, "getTransaction").mockResolvedValueOnce({
           slot: 100n,
+          accountKeys: [TEST_SOLANA_ADDRESSES.wallet2],
           executionResultKnown: true,
           err: null,
           instructions: [
@@ -8844,6 +8846,7 @@ describe("Issuance Routes", () => {
         const accountExistsSpy = vi.spyOn(SolanaRpc, "accountExists").mockResolvedValueOnce(true);
         const getTransactionSpy = vi.spyOn(SolanaRpc, "getTransaction").mockResolvedValueOnce({
           slot: 100n,
+          accountKeys: [TEST_SOLANA_ADDRESSES.wallet2],
           executionResultKnown: true,
           err: null,
           instructions: [
@@ -8919,6 +8922,7 @@ describe("Issuance Routes", () => {
         const accountExistsSpy = vi.spyOn(SolanaRpc, "accountExists").mockResolvedValueOnce(true);
         const getTransactionSpy = vi.spyOn(SolanaRpc, "getTransaction").mockResolvedValueOnce({
           slot: 100n,
+          accountKeys: [TEST_SOLANA_ADDRESSES.wallet2],
           executionResultKnown: true,
           err: null,
           instructions: [
@@ -9059,6 +9063,7 @@ describe("Issuance Routes", () => {
         const accountExistsSpy = vi.spyOn(SolanaRpc, "accountExists").mockResolvedValueOnce(true);
         const getTransactionSpy = vi.spyOn(SolanaRpc, "getTransaction").mockResolvedValueOnce({
           slot: 100n,
+          accountKeys: [TEST_SOLANA_ADDRESSES.wallet2],
           executionResultKnown: true,
           err: null,
           instructions: [
@@ -9160,6 +9165,7 @@ describe("Issuance Routes", () => {
         const accountExistsSpy = vi.spyOn(SolanaRpc, "accountExists").mockResolvedValueOnce(true);
         const getTransactionSpy = vi.spyOn(SolanaRpc, "getTransaction").mockResolvedValueOnce({
           slot: 100n,
+          accountKeys: [TEST_SOLANA_ADDRESSES.wallet2],
           executionResultKnown: true,
           err: null,
           instructions: [
@@ -9436,6 +9442,7 @@ describe("Issuance Routes", () => {
         const accountExistsSpy = vi.spyOn(SolanaRpc, "accountExists").mockResolvedValueOnce(true);
         const getTransactionSpy = vi.spyOn(SolanaRpc, "getTransaction").mockResolvedValueOnce({
           slot: 100n,
+          accountKeys: [TEST_SOLANA_ADDRESSES.wallet2],
           executionResultKnown: true,
           err: null,
           instructions: [

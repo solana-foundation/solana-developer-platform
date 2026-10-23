@@ -154,10 +154,21 @@ beforeEach(() => {
     canManageApiKeys: true,
   };
   mocks.swr = {
-    "dashboard-home-activity": { data: { activityRows: [] } },
-    "dashboard-home-volume": { data: { todaysVolume: 1234.5, todaysVolumeError: null } },
+    "dashboard-home-activity": {
+      data: { activityRows: [], todaysVolume: 1234.5, todaysVolumeError: null },
+    },
   };
 });
+
+/** The keys Home's activity read was asked for under, across every render. */
+function activityReadKeys(): Set<unknown> {
+  return new Set(
+    vi
+      .mocked(dashboardSwr.usePersistedDashboardSWR)
+      .mock.calls.filter(([, , , persisted]) => persisted?.key === "home-activity")
+      .map(([key]) => key)
+  );
+}
 
 afterEach(() => {
   cleanup();
@@ -174,11 +185,14 @@ describe("Overview (HomeWorkspace redesign)", () => {
     // The total and the USDC row it is made of.
     expect(scoped.getAllByText("$250.00")).toHaveLength(2);
     expect(scoped.getByText("SDP-Minted")).toBeTruthy();
-    expect(scoped.getByRole("link", { name: "2 wallets" }).getAttribute("href")).toBe(
-      "/dashboard/prj_test_sandbox/wallets"
-    );
-    expect(scoped.getByRole("link", { name: "2 tokens held" })).toBeTruthy();
-    expect(scoped.getByRole("link", { name: "$1,234.50 today’s volume" })).toBeTruthy();
+    const wallets = scoped.getByRole("link", { name: "2 wallets" });
+    expect(wallets.getAttribute("href")).toBe("/dashboard/prj_test_sandbox/wallets");
+    const tokens = scoped.getByRole("link", { name: "2 tokens held" });
+    const volume = scoped.getByRole("link", { name: "$1,234.50 today’s volume" });
+    // Wallets and tokens share a line and today's volume holds its own, so the volume figure
+    // landing after the counts never rewraps them.
+    expect(tokens.parentElement).toBe(wallets.parentElement);
+    expect(wallets.parentElement?.contains(volume)).toBe(false);
 
     const actions = within(requireSection("actions"));
     expect(actions.getByText("Create a wallet")).toBeTruthy();
@@ -189,10 +203,18 @@ describe("Overview (HomeWorkspace redesign)", () => {
     expect(section("quick-start")).toBeTruthy();
     expect(screen.getByRole("link", { name: "See all payments" })).toBeTruthy();
     expect(screen.getByText("No recent activity found yet.")).toBeTruthy();
+    expect(activityReadKeys()).toEqual(new Set(["dashboard-home-activity"]));
   });
 
   it("reads one wallet and one token in the singular and a dash while volume is unknown", () => {
-    mocks.swr["dashboard-home-volume"] = { error: new Error("volume down") };
+    // A wallet missed its read: the list can say so, but a total over the rest would understate.
+    mocks.swr["dashboard-home-activity"] = {
+      data: {
+        activityRows: [],
+        todaysVolume: null,
+        todaysVolumeError: "Payments activity is unavailable right now.",
+      },
+    };
     renderOverview({ walletCount: 1, balances: [at(BALANCES, 0)] });
     const balance = within(requireSection("balance"));
     expect(balance.getByText("wallet")).toBeTruthy();
@@ -219,6 +241,8 @@ describe("Overview (HomeWorkspace redesign)", () => {
       "/dashboard/prj_test_sandbox/wallets/setup"
     );
     expect(section("activity")).toBeNull();
+    // Neither the list nor the volume is on screen, so their read is never made.
+    expect(activityReadKeys()).toEqual(new Set([null]));
     const actions = within(requireSection("actions"));
     expect(actions.queryByText("Create a wallet")).toBeNull();
     expect(actions.queryByText("Send a payment")).toBeNull();

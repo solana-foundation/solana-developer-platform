@@ -1,3 +1,4 @@
+import { validate } from "node-cron";
 import { describe, expect, it } from "vitest";
 import { env } from "@/test/helpers/env";
 import { CRON_DEFINITIONS } from "./runner";
@@ -32,5 +33,21 @@ describe("CRON_DEFINITIONS", () => {
     ).map((definition) => definition.name);
 
     expect(disabledExits).toEqual(["track-pending-withdrawals"]);
+  });
+
+  it("runs the payment request hot lane every 30 seconds and its sweep and expiry every minute", () => {
+    const byName = new Map(CRON_DEFINITIONS.map((definition) => [definition.name, definition]));
+
+    expect(byName.get("reconcile-payment-requests-hot")?.schedule).toBe("*/30 * * * * *");
+    expect(byName.get("reconcile-payment-requests")?.schedule).toBe("* * * * *");
+    expect(byName.get("expire-payment-requests")?.schedule).toBe("* * * * *");
+  });
+
+  it("gives every definition a schedule node-cron accepts", () => {
+    const invalid = CRON_DEFINITIONS.filter((definition) => !validate(definition.schedule)).map(
+      (definition) => definition.name
+    );
+
+    expect(invalid).toEqual([]);
   });
 });
