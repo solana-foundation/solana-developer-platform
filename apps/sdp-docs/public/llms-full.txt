@@ -2273,7 +2273,7 @@ You provision custody wallets up front (see [Set Up Wallets](/docs/guides/setup-
 
 ## Tokens and token accounts
 
-Payments transfer **SPL tokens** — stablecoins, tokenized assets, or any mint your project supports. The `token` field on `POST /v1/payments/transfers` requires the on-chain **mint address** for SPL tokens; the literal string `SOL` is accepted as the native-SOL shorthand. Symbols like `USDC` are not resolved at request time. The `token` filter on `GET /v1/payments/transfers` does an **exact match** against the `Transfer.token` value as stored — API-created transfers store the mint you supplied (or `SOL`), while indexed/observed transfers run mint-to-symbol resolution and may store a resolved symbol (e.g. `USDC`). Filter using the same label you see on the response, or query without `token` and filter client-side. **Balance responses always attempt symbol resolution** and return the symbol whenever the mint is known — so a wallet holding USDC reports `USDC` rather than the mint string.
+Payments transfer **SPL tokens** — stablecoins, tokenized assets, or any mint your project supports. The `token` field on `POST /v1/payments/transfers` requires the on-chain **mint address** for SPL tokens; the literal string `SOL` is accepted as the native-SOL shorthand, and the only way to name native SOL: the wrapped SOL mint is refused with `400`. Symbols like `USDC` are not resolved at request time. The `token` filter on `GET /v1/payments/transfers` does an **exact match** against the `Transfer.token` value as stored — API-created transfers store the mint you supplied (or `SOL`), while indexed/observed transfers run mint-to-symbol resolution and may store a resolved symbol (e.g. `USDC`). Filter using the same label you see on the response, or query without `token` and filter client-side. **Balance responses always attempt symbol resolution** and return the symbol whenever the mint is known — so a wallet holding USDC reports `USDC` rather than the mint string.
 
 **Amounts on the wire are UI-unit decimal strings** — `"100.00"` means 100 tokens, regardless of the mint's decimal count. This applies to every amount SDP accepts. SDP handles the smallest-unit conversion when it builds the on-chain transaction. The one exception is wallet-balance responses, which return both a raw `amount` (smallest unit) **and** a `uiAmount` (decimal string) so balance consumers can pick whichever fits.
 
@@ -2527,7 +2527,7 @@ SDP reads the mint's fee for each transfer and names it in the transaction, so a
 "amountVerification": { "state": "verified", "reason": "sdp_built_transfer_landed" }
 ```
 
-`fee` is the token's transfer fee, not the network fee (`fee` on the transfer record, in lamports). `amountVerification` becomes `verified` when the transaction SDP signed lands. SDP refuses a transfer of a token whose mint is paused or non-transferable, or that opens new accounts frozen, with `400` before it records anything. Records created before these fields existed have no `amounts`.
+`fee` is the token's transfer fee, not the network fee (`fee` on the transfer record, in lamports). `amountVerification` becomes `verified` when the transaction SDP signed lands. SDP refuses a transfer of a token whose mint is paused or non-transferable, that opens new accounts frozen, or whose wallets show a scaled or interest-bearing amount, with `400` before it records anything. Records created before these fields existed have no `amounts`.
 
 ## Deduplication
 
