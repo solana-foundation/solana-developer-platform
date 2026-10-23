@@ -36,6 +36,16 @@ function makePendingRpc(signature: Signature): {
 }
 
 /**
+ * A fake RPC that answers `getSignatureStatuses` from `send` and nothing else,
+ * enough for `confirmTransaction`.
+ */
+function statusesRpc(send: ReturnType<typeof vi.fn>): SolanaRpc {
+  // SAFETY: confirmTransaction calls only getSignatureStatuses(...).send(), which this
+  // object provides; the rest of the SolanaRpc surface is never reached.
+  return { getSignatureStatuses: vi.fn().mockReturnValue({ send }) } as unknown as SolanaRpc;
+}
+
+/**
  * Await a promise that is expected to reject and hand back the rejection value.
  */
 async function captureRejection(promise: Promise<unknown>): Promise<unknown> {
@@ -61,6 +71,43 @@ describe("confirmTransaction", () => {
     expect(appError.statusCode).toBe(502);
     expect(appError.message).toBe(`Transaction ${TEST_SIGNATURE} confirmation timed out after 1ms`);
     expect(getSignatureStatuses).toHaveBeenCalledWith([TEST_SIGNATURE]);
+  });
+
+  it("keeps waiting past an error seen only at processed (APE SOLA9-708)", async () => {
+    const failure = { InstructionError: [0, { Custom: 1 }] };
+    const send = vi
+      .fn()
+      .mockResolvedValueOnce({
+        value: [{ confirmationStatus: "processed", slot: 41n, err: failure }],
+      })
+      .mockResolvedValueOnce({
+        value: [{ confirmationStatus: "confirmed", slot: 42n, err: null }],
+      });
+    const rpc = statusesRpc(send);
+
+    const confirmation = await confirmTransaction(rpc, TEST_SIGNATURE, {
+      pollIntervalMs: 1,
+      timeoutMs: 10_000,
+    });
+
+    expect(confirmation).toMatchObject({ confirmationStatus: "confirmed", slot: 42n, err: null });
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns an error once it reaches the commitment", async () => {
+    const failure = { InstructionError: [0, { Custom: 1 }] };
+    const send = vi
+      .fn()
+      .mockResolvedValue({ value: [{ confirmationStatus: "confirmed", slot: 42n, err: failure }] });
+    const rpc = statusesRpc(send);
+
+    const confirmation = await confirmTransaction(rpc, TEST_SIGNATURE, {
+      pollIntervalMs: 1,
+      timeoutMs: 10_000,
+    });
+
+    expect(confirmation.err).toEqual(failure);
+    expect(send).toHaveBeenCalledTimes(1);
   });
 });
 

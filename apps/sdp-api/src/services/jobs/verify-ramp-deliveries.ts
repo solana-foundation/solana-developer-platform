@@ -127,7 +127,6 @@ function deliveredBaseUnits(
   transaction: ParsedTransaction
 ): bigint | "absent" | null {
   if (transfer.token === SOL_MINT) {
-    if (transaction.accountKeys === undefined) return null;
     const index = transaction.accountKeys.indexOf(destination);
     if (index < 0) return "absent";
     const pre = transaction.preBalances?.[index];

@@ -7,6 +7,7 @@ import {
   authorizeSubscriptionPlanCreate,
   authorizeSubscriptionPlanUpdate,
 } from "@/routes/payments/access";
+import { canonicalizePaymentBody } from "@/routes/payments/fingerprint";
 import type { Env } from "@/types/env";
 import {
   createSubscriptionPlan,
@@ -29,7 +30,7 @@ subscriptionPlans.post(
   requireAction("recurring.manage"),
   validateBody(createSubscriptionPlanSchema),
   authorize(authorizeSubscriptionPlanCreate),
-  idempotent({ key: "accepted", serverErrors: "store" }),
+  idempotent({ key: "accepted", serverErrors: "store", canonicalize: canonicalizePaymentBody }),
   createSubscriptionPlan
 );
 subscriptionPlans.get("/", requireAction("recurring.read"), listSubscriptionPlans);
@@ -46,6 +47,6 @@ subscriptionPlans.patch(
   validateParams(subscriptionPlanIdParamsSchema),
   validateBody(updateSubscriptionPlanSchema),
   authorize(authorizeSubscriptionPlanUpdate),
-  idempotent({ key: "accepted", serverErrors: "store" }),
+  idempotent({ key: "accepted", serverErrors: "store", canonicalize: canonicalizePaymentBody }),
   updateSubscriptionPlan
 );

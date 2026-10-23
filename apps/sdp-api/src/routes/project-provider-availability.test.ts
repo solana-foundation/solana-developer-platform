@@ -1,13 +1,15 @@
 import type { Action } from "@sdp/types/actions";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
-import type {
-  OrganizationProviderOverrides,
-  ProjectProviderAvailability,
-  ProjectProviderAvailabilityEntry,
+import {
+  type OrganizationProviderOverrides,
+  type ProjectProviderAvailability,
+  type ProjectProviderAvailabilityEntry,
+  RAMP_PROVIDERS,
 } from "@sdp/types/provider-access";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
+import { managedRampKeyName } from "@/services/ramps/runtime";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { seedProjectApiKey, type TestApiKeyMaterial } from "@/test/helpers/api-keys";
 import { clerkHeadersWithoutProject } from "@/test/helpers/clerk";
@@ -107,6 +109,7 @@ const DEPLOYMENT_CREDENTIALS = {
   RANGE_API_KEY: "range_project_provider_availability_key",
   MOONPAY_SANDBOX_API_KEY: "pk_test_project_provider_availability",
   MOONPAY_SANDBOX_SECRET_KEY: "sk_test_project_provider_availability",
+  MOONPAY_SANDBOX_WEBHOOK_SECRET: "wk_test_project_provider_availability",
   STRIPE_SANDBOX_SECRET_KEY: "sk_test_project_provider_availability",
   STRIPE_SANDBOX_PUBLISHABLE_KEY: "pk_test_project_provider_availability",
   STRIPE_SANDBOX_WEBHOOK_SECRET: "whsec_project_provider_availability",
@@ -605,11 +608,19 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
     });
   });
 
-  it("reports MoonPay unavailable in a Production project, since SDP holds sandbox keys only", async () => {
+  it("reports MoonPay in a Production project only once its production keys are mounted", async () => {
     const deployment = deploymentEnv({});
 
     const production = await readAvailability("production", deployment);
     const sandbox = await readAvailability("sandbox", deployment);
+    const withProductionKeys = await readAvailability(
+      "production",
+      deploymentEnv({
+        MOONPAY_PRODUCTION_API_KEY: "pk_live_project_provider_availability",
+        MOONPAY_PRODUCTION_SECRET_KEY: "sk_live_project_provider_availability",
+        MOONPAY_PRODUCTION_WEBHOOK_SECRET: "wk_live_project_provider_availability",
+      })
+    );
 
     expect(production.providers).toContainEqual({
       family: "ramps",
@@ -622,7 +633,29 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
       provider: "moonpay",
       available: true,
     });
+    expect(withProductionKeys.providers).toContainEqual({
+      family: "ramps",
+      provider: "moonpay",
+      available: true,
+    });
   });
+
+  it.each(RAMP_PROVIDERS)(
+    "reports %s unavailable while its sandbox webhook secret is missing",
+    async (provider) => {
+      const withoutSecret = deploymentEnv({
+        [managedRampKeyName(provider, "sandbox", "webhookSecret")]: undefined,
+      });
+      const sandbox = await readAvailability("sandbox", withoutSecret);
+
+      expect(sandbox.providers).toContainEqual({
+        family: "ramps",
+        provider,
+        available: false,
+        reason: "provider_not_configured",
+      });
+    }
+  );
 
   it("reports MoonPay unavailable when a live key sits under the sandbox names", async () => {
     const liveKey = deploymentEnv({ MOONPAY_SANDBOX_SECRET_KEY: "sk_live_mounted_by_mistake" });

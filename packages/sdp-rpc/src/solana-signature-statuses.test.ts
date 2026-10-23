@@ -73,3 +73,31 @@ test("returns an instruction error's index as a number JSON can serialize", asyn
   assert.deepEqual(status.err, { InstructionError: [0, { Custom: 1 }] });
   assert.equal(JSON.stringify(status.err), '{"InstructionError":[0,{"Custom":1}]}');
 });
+
+test("forwards minContextSlot with a history search", async () => {
+  const payloads: unknown[] = [];
+  const rpc = createSolanaRpcFromTransport(async ({ payload }) => {
+    payloads.push(payload);
+    return JSON.parse('{"jsonrpc":"2.0","id":1,"result":{"context":{"slot":123},"value":[null]}}');
+  });
+  const statuses = await getSignatureStatuses(rpc, [SIG], {
+    searchTransactionHistory: true,
+    minContextSlot: 123n,
+  });
+  assert.deepEqual(statuses, [null]);
+  assert.equal(payloads.length, 1);
+  assert.partialDeepStrictEqual(payloads[0], {
+    method: "getSignatureStatuses",
+    params: [[SIG], { searchTransactionHistory: true, minContextSlot: 123n }],
+  });
+});
+
+test("refuses a history search answered from below minContextSlot", async () => {
+  const rpc = createSolanaRpcFromTransport(async () =>
+    JSON.parse('{"jsonrpc":"2.0","id":1,"result":{"context":{"slot":122},"value":[null]}}')
+  );
+  await assert.rejects(
+    getSignatureStatuses(rpc, [SIG], { searchTransactionHistory: true, minContextSlot: 123n }),
+    { name: "SdpRpcError", code: "SOLANA_RPC_ERROR" }
+  );
+});

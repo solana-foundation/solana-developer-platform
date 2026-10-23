@@ -196,6 +196,18 @@ describe("readRecurringPaymentStep", () => {
       status: null,
     },
     {
+      state: "its saved send failed only at processed (APE SOLA9-708)",
+      effect: "none",
+      blockHeight: 1001,
+      statusSlot: CHAIN_TIP_SLOT,
+      status: {
+        slot: 100,
+        confirmations: 0,
+        confirmationStatus: "processed",
+        err: { InstructionError: [0, { Custom: 1 }] },
+      },
+    },
+    {
       state: "its saved send has no record past expiry from a node behind the tip",
       effect: "none",
       blockHeight: 1001,

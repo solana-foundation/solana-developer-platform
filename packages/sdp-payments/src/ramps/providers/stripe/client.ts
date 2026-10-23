@@ -1,5 +1,4 @@
 import { isDecimalString } from "@sdp/solana/amount";
-import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { Counterparty } from "@sdp/types/counterparties";
 import type { PaymentRampEstimate, PaymentRampQuote } from "@sdp/types/payments";
 import { checkRampDestination } from "@sdp/types/ramp-destinations";
@@ -17,8 +16,6 @@ import { providerFetchJson } from "#/ramps/fetch";
 import { readyCounterparty } from "#/ramps/requirements";
 import {
   basicAuthHeader,
-  checkRampKeyFormats,
-  type RampKeyFormats,
   rampCredentials,
   UNREPORTED_COUNTRY_SUPPORT,
   unreportedCurrencyLimit,
@@ -29,9 +26,9 @@ import type {
   RampCustomerDetails,
   RampDiscoveryContext,
   RampEstimateOnrampInput,
+  RampKeyFormats,
   RampOnrampQuoteInput,
   RampProvider,
-  RampProviderCredentials,
   RampRuntimeContext,
   RampSettlementEvent,
   RampTransferLookup,
@@ -57,10 +54,13 @@ export const STRIPE_DECLARED_RAIL_SUPPORT = {
   },
 } as const satisfies ProviderDeclaredRailSupport;
 
-/** A secret key may be standard (`sk_`) or restricted (`rk_`). */
+/**
+ * A secret key may be standard (`sk_`) or restricted (`rk_`). A webhook
+ * signing secret doesn't name its mode; Stripe issues one per endpoint.
+ */
 const STRIPE_KEY_FORMATS = {
-  sandbox: { publicKey: /^pk_test_/, secretKey: /^(sk|rk)_test_/ },
-  production: { publicKey: /^pk_live_/, secretKey: /^(sk|rk)_live_/ },
+  sandbox: { publicKey: /^pk_test_/, secretKey: /^(sk|rk)_test_/, webhookSecret: /^whsec_/ },
+  production: { publicKey: /^pk_live_/, secretKey: /^(sk|rk)_live_/, webhookSecret: /^whsec_/ },
 } as const satisfies RampKeyFormats;
 
 type StripeFormValue =
@@ -289,10 +289,7 @@ export class StripeRampClient implements RampProvider {
   readonly id = "stripe";
   readonly label = "Stripe";
   readonly declaredRailSupport = STRIPE_DECLARED_RAIL_SUPPORT;
-
-  checkCredentials(credentials: RampProviderCredentials, mode: SdpEnvironment): string | null {
-    return checkRampKeyFormats(this.label, STRIPE_KEY_FORMATS, credentials, mode);
-  }
+  readonly keyFormats = STRIPE_KEY_FORMATS;
 
   validateCounterparty(
     _counterparty: Counterparty,

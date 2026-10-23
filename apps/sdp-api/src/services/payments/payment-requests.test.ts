@@ -1,25 +1,40 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
 import * as solanaRpc from "@sdp/rpc/solana";
 import * as verifiedConfirmation from "@sdp/rpc/verified-confirmation";
+import { formatDecimalAmount } from "@sdp/solana/amount";
 import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import {
+  AccountRole,
+  type Address,
   address,
+  appendTransactionMessageInstructions,
   blockhash,
   compileTransaction,
+  compressTransactionMessageUsingAddressLookupTables,
+  createNoopSigner,
   createTransactionMessage,
+  decodeTransactionFromRpcResponse,
   getBase58Decoder,
   getBase64EncodedWireTransaction,
+  getCompiledTransactionMessageDecoder,
   lamports,
   pipe,
   type Signature,
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
   signature,
+  stringifiedBigInt,
+  stringifiedNumber,
   type UnixTimestamp,
   unixTimestamp,
 } from "@solana/kit";
-import * as solanaPay from "@solana/pay";
 import { ValidateTransferError } from "@solana/pay";
+import { getTransferSolInstruction } from "@solana-program/system";
+import {
+  findAssociatedTokenPda,
+  getTransferCheckedInstruction,
+  TOKEN_PROGRAM_ADDRESS,
+} from "@solana-program/token";
 import {
   afterEach,
   beforeAll,
@@ -41,16 +56,21 @@ import {
   createPaymentRequestsRepository,
   createPaymentsRepository,
 } from "@/db/repositories/repository-factory";
+import { badRequest } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
+import { rootLogger } from "@/runtime/logger";
 import * as moneyPathEvents from "@/runtime/money-path-events";
+import * as paymentAmounts from "@/services/payments/token-amount";
 import { TEST_CUSTODY_PUBLIC_KEY } from "@/test/fixtures/custody";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
-import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
+import { installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
 import { seedProjectCryptoWalletCounterparty } from "@/test/helpers/counterparties";
 import { env } from "@/test/helpers/env";
+import { syntheticAddress } from "@/test/helpers/parsed-transactions";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
+import * as paymentRequestTransfer from "./payment-request-transfer";
 import {
   checkAwaitingPaymentRequest,
   checkExpiredPaymentRequestForLatePayment,
@@ -70,7 +90,9 @@ const PAST = "2020-01-01T00:00:00.000Z";
 const PAST_SECONDS = BigInt(Date.parse(PAST) / 1000);
 
 let signaturesSpy: MockInstance<typeof solanaRpc.getSignaturesForAddress>;
-let validateTransferSpy: MockInstance<typeof solanaPay.validateTransfer>;
+let validateTransferSpy: MockInstance<typeof paymentRequestTransfer.validatePaymentRequestTransfer>;
+
+const validateExactTransfer = paymentRequestTransfer.validatePaymentRequestTransfer;
 let verifyTransactionLandedSpy: MockInstance<typeof verifiedConfirmation.verifyTransactionLanded>;
 
 type VerifiedLanded = Extract<
@@ -82,7 +104,13 @@ function verifiedOk(): VerifiedLanded {
   return {
     ok: true,
     status: { slot: 1n, confirmations: null, confirmationStatus: "finalized", err: null },
-    transaction: { slot: 1n, executionResultKnown: true, err: null, instructions: [] },
+    transaction: {
+      slot: 1n,
+      accountKeys: [TEST_CUSTODY_PUBLIC_KEY],
+      executionResultKnown: true,
+      err: null,
+      instructions: [],
+    },
   };
 }
 
@@ -108,7 +136,7 @@ function mockNoSignatures() {
 
 function validatedTransfer(
   blockTime: UnixTimestamp | null
-): Awaited<ReturnType<typeof solanaPay.validateTransfer>> {
+): Awaited<ReturnType<typeof paymentRequestTransfer.validatePaymentRequestTransfer>> {
   const transaction = compileTransaction(
     pipe(
       createTransactionMessage({ version: 0 }),
@@ -147,7 +175,15 @@ function mockSettlementSucceeds(blockTime: bigint | null) {
   validateTransferSpy.mockResolvedValue(validatedTransfer(null));
 }
 
-async function createRequest(params: { token: string; expiresAt: string | null }) {
+function createRequest(params: { token: string; expiresAt: string | null }) {
+  return createRequestFor({ ...params, amount: "1.5" });
+}
+
+async function createRequestFor(params: {
+  token: string;
+  amount: string;
+  expiresAt: string | null;
+}) {
   return createPaymentRequestsRepository(
     env,
     createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID })
@@ -158,7 +194,7 @@ async function createRequest(params: { token: string; expiresAt: string | null }
     walletId: TEST_WALLET_ID,
     destinationAddress: TEST_CUSTODY_PUBLIC_KEY,
     token: params.token,
-    amount: "1.5",
+    amount: params.amount,
     expiresAt: params.expiresAt,
     createdBy: TEST_USER.id,
   });
@@ -185,7 +221,7 @@ async function listInboundTransfers() {
 }
 
 function installSettlementHooks() {
-  installClusterRpcStub();
+  const rpc = installClusterRpcResponder();
 
   beforeAll(async () => {
     await seedTestDatabase(env);
@@ -197,7 +233,7 @@ function installSettlementHooks() {
 
   beforeEach(async () => {
     signaturesSpy = vi.spyOn(solanaRpc, "getSignaturesForAddress");
-    validateTransferSpy = vi.spyOn(solanaPay, "validateTransfer");
+    validateTransferSpy = vi.spyOn(paymentRequestTransfer, "validatePaymentRequestTransfer");
     verifyTransactionLandedSpy = vi.spyOn(verifiedConfirmation, "verifyTransactionLanded");
 
     const db = getDb(env);
@@ -241,6 +277,7 @@ function installSettlementHooks() {
       .bind(TEST_CUSTODY_WALLET_ID, TEST_CONFIG_ID, TEST_WALLET_ID, TEST_CUSTODY_PUBLIC_KEY)
       .run();
   });
+  return rpc;
 }
 
 describe("reconcilePaymentRequest", () => {
@@ -285,7 +322,7 @@ describe("reconcilePaymentRequest", () => {
     );
 
     expect(settled.status).toBe("paid");
-    const fields = validateTransferSpy.mock.calls[0][2];
+    const fields = validateTransferSpy.mock.calls[0][1];
     expect(fields.splToken).toBe(DEVNET_USDC_MINT);
   });
 
@@ -297,7 +334,7 @@ describe("reconcilePaymentRequest", () => {
     );
 
     expect(settled.status).toBe("paid");
-    expect(validateTransferSpy.mock.calls[0][2].splToken).toBeUndefined();
+    expect(validateTransferSpy.mock.calls[0][1].splToken).toBeUndefined();
   });
 
   it("converges concurrent reconciles of the same request to a single settlement", async () => {
@@ -386,14 +423,6 @@ describe("reconcilePaymentRequest", () => {
     expect(validateTransferSpy).not.toHaveBeenCalled();
     expect(await listInboundTransfers()).toHaveLength(0);
     expect(await readStored(request.id)).toMatchObject({ status: "awaiting_payment" });
-  });
-
-  it("validates the transfer against the finalized transaction", async () => {
-    mockSettlementSucceeds(null);
-
-    await reconcileOnSandbox(await createRequest({ token: SOL_MINT, expiresAt: null }));
-
-    expect(validateTransferSpy.mock.calls[0]?.[3]).toEqual({ commitment: "finalized" });
   });
 
   it("asks the payer to retry while the verify budget leaves candidates unchecked", async () => {
@@ -746,6 +775,322 @@ describe("expiry audit", () => {
   });
 });
 
+async function exactTransferResponse(params: {
+  token: string;
+  rawAmount: bigint;
+  reference: Address;
+  lookupTable: Address | null;
+}): Promise<Awaited<ReturnType<typeof paymentRequestTransfer.validatePaymentRequestTransfer>>> {
+  const { token, rawAmount, reference, lookupTable } = params;
+  const owner = address(TEST_CUSTODY_PUBLIC_KEY);
+  const source = createNoopSigner(syntheticAddress(332));
+  const destination =
+    token === SOL_MINT
+      ? owner
+      : (
+          await findAssociatedTokenPda({
+            owner,
+            mint: address(token),
+            tokenProgram: TOKEN_PROGRAM_ADDRESS,
+          })
+        )[0];
+  const instruction =
+    token === SOL_MINT
+      ? getTransferSolInstruction({ source, destination, amount: rawAmount })
+      : getTransferCheckedInstruction({
+          source: syntheticAddress(333),
+          mint: address(token),
+          destination,
+          authority: source,
+          amount: rawAmount,
+          decimals: 6,
+        });
+  const referenced = {
+    ...instruction,
+    accounts: [...instruction.accounts, { address: reference, role: AccountRole.READONLY }],
+  };
+  const message = pipe(
+    createTransactionMessage({ version: 0 }),
+    (message) => setTransactionMessageFeePayer(source.address, message),
+    (message) =>
+      setTransactionMessageLifetimeUsingBlockhash(
+        {
+          blockhash: blockhash(getBase58Decoder().decode(new Uint8Array(32).fill(7))),
+          lastValidBlockHeight: 1n,
+        },
+        message
+      ),
+    (message) => appendTransactionMessageInstructions([referenced], message)
+  );
+  const transaction = compileTransaction(
+    lookupTable === null
+      ? message
+      : compressTransactionMessageUsingAddressLookupTables(message, {
+          [lookupTable]: [destination],
+        })
+  );
+  const compiled = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
+  const loadedWritable = lookupTable === null ? [] : [destination];
+  const accountKeys = [...compiled.staticAccounts, ...loadedWritable];
+  const accountIndex = accountKeys.indexOf(destination);
+  const tokenBalance = (amount: bigint) => ({
+    accountIndex,
+    mint: address(token),
+    owner,
+    programId: TOKEN_PROGRAM_ADDRESS,
+    uiTokenAmount: {
+      amount: stringifiedBigInt(amount.toString()),
+      decimals: 6,
+      uiAmount: null,
+      uiAmountString: stringifiedNumber(formatDecimalAmount(amount, 6)),
+    },
+  });
+  return {
+    slot: 1n,
+    blockTime: null,
+    version: 0,
+    meta: {
+      err: null,
+      fee: lamports(5_000n),
+      logMessages: [],
+      preBalances: accountKeys.map(() => lamports(0n)),
+      postBalances: accountKeys.map((account) =>
+        lamports(token === SOL_MINT && account === destination ? rawAmount : 0n)
+      ),
+      preTokenBalances: token === SOL_MINT ? [] : [tokenBalance(0n)],
+      postTokenBalances: token === SOL_MINT ? [] : [tokenBalance(rawAmount)],
+      rewards: [],
+      status: { Ok: null },
+      loadedAddresses: { readonly: [], writable: loadedWritable },
+    },
+    transaction: [getBase64EncodedWireTransaction(transaction), "base64"],
+  };
+}
+
+// JSON-RPC token amounts are strings; all numeric fixture metadata is small.
+function asRpcJson<T>(response: T) {
+  return JSON.parse(
+    JSON.stringify(response, (_, value) => (typeof value === "bigint" ? Number(value) : value))
+  );
+}
+
+describe("exact transfer validation", () => {
+  const rpc = installSettlementHooks();
+
+  function mockExactCandidate() {
+    mockSignatures(signatureInfo(SIGNATURE, { blockTime: null, err: null }));
+    verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
+    validateTransferSpy.mockImplementation(validateExactTransfer);
+  }
+
+  it.each([
+    {
+      label: "legacy excessive precision",
+      token: DEVNET_USDC_MINT,
+      amount: "1.0000001",
+      received: 1_000_000n,
+      status: "awaiting_payment",
+    },
+    {
+      label: "exact SPL above 2^53",
+      token: DEVNET_USDC_MINT,
+      amount: "9007199254.740993",
+      received: 9007199254740993n,
+      status: "paid",
+    },
+    {
+      label: "one raw unit short above 2^53",
+      token: DEVNET_USDC_MINT,
+      amount: "9007199254.740993",
+      received: 9007199254740992n,
+      status: "awaiting_payment",
+    },
+    {
+      label: "one lamport short",
+      token: SOL_MINT,
+      amount: "1.5",
+      received: 1_499_999_999n,
+      status: "awaiting_payment",
+    },
+  ])("checks $label with real transfer validation", async ({ token, amount, received, status }) => {
+    const request = await createRequestFor({ token, amount, expiresAt: null });
+    mockExactCandidate();
+    rpc.answer(
+      "getTransaction",
+      asRpcJson(
+        await exactTransferResponse({
+          token,
+          rawAmount: received,
+          reference: address(request.reference),
+          lookupTable: null,
+        })
+      )
+    );
+
+    const settled = await onSandbox(() => checkAwaitingPaymentRequest(env, request));
+
+    expect(settled.status).toBe(status);
+    expect(await listInboundTransfers()).toHaveLength(status === "paid" ? 1 : 0);
+  });
+
+  it("reads the transfer at finalized commitment", async () => {
+    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+    mockExactCandidate();
+    rpc.answer(
+      "getTransaction",
+      asRpcJson(
+        await exactTransferResponse({
+          token: SOL_MINT,
+          rawAmount: 1_500_000_000n,
+          reference: address(request.reference),
+          lookupTable: null,
+        })
+      )
+    );
+
+    await onSandbox(() => checkAwaitingPaymentRequest(env, request));
+
+    // Kit omits the commitment from the request when it is the RPC default, finalized.
+    expect(rpc.requests.find((request) => request.method === "getTransaction")?.params).toEqual([
+      SIGNATURE,
+      { encoding: "base64", maxSupportedTransactionVersion: 0 },
+    ]);
+  });
+
+  it.each([
+    { received: 1_500_000n, status: "paid" },
+    { received: 1_499_999n, status: "awaiting_payment" },
+  ])(
+    "settles only sufficient payments into a fresh ATA: $received",
+    async ({ received, status }) => {
+      const request = await createRequest({ token: DEVNET_USDC_MINT, expiresAt: null });
+      mockExactCandidate();
+      const response = await exactTransferResponse({
+        token: DEVNET_USDC_MINT,
+        rawAmount: received,
+        reference: address(request.reference),
+        lookupTable: null,
+      });
+      if (response.meta === null) throw new Error("Fixture requires metadata");
+      rpc.answer(
+        "getTransaction",
+        asRpcJson({ ...response, meta: { ...response.meta, preTokenBalances: [] } })
+      );
+
+      expect((await onSandbox(() => checkAwaitingPaymentRequest(env, request))).status).toBe(
+        status
+      );
+      expect(await listInboundTransfers()).toHaveLength(status === "paid" ? 1 : 0);
+    }
+  );
+
+  it.each(["wrong program", "wrong mint", "wrong decimals", "failed transaction"])(
+    "rejects a fresh ATA payment with %s",
+    async (fault) => {
+      const request = await createRequest({ token: DEVNET_USDC_MINT, expiresAt: null });
+      mockExactCandidate();
+      const response = await exactTransferResponse({
+        token: fault === "wrong program" ? SOL_MINT : DEVNET_USDC_MINT,
+        rawAmount: 1_500_000n,
+        reference: address(request.reference),
+        lookupTable: null,
+      });
+      if (response.meta === null) throw new Error("Fixture requires metadata");
+      const postTokenBalances = response.meta.postTokenBalances?.map((balance) => ({
+        ...balance,
+        mint: fault === "wrong mint" ? syntheticAddress(502) : balance.mint,
+        uiTokenAmount: {
+          ...balance.uiTokenAmount,
+          decimals: fault === "wrong decimals" ? 5 : balance.uiTokenAmount.decimals,
+        },
+      }));
+      rpc.answer(
+        "getTransaction",
+        asRpcJson({
+          ...response,
+          meta: {
+            ...response.meta,
+            preTokenBalances: [],
+            postTokenBalances,
+            err:
+              fault === "failed transaction" ? { InstructionError: [0, "InvalidArgument"] } : null,
+          },
+        })
+      );
+
+      expect((await onSandbox(() => checkAwaitingPaymentRequest(env, request))).status).toBe(
+        "awaiting_payment"
+      );
+      expect(await listInboundTransfers()).toHaveLength(0);
+    }
+  );
+
+  it("settles an SPL payment whose recipient ATA loads from an address lookup table", async () => {
+    const request = await createRequest({ token: DEVNET_USDC_MINT, expiresAt: null });
+    mockExactCandidate();
+    const response = await exactTransferResponse({
+      token: DEVNET_USDC_MINT,
+      rawAmount: 1_500_000n,
+      reference: address(request.reference),
+      lookupTable: syntheticAddress(335),
+    });
+    const [recipientAta] = await findAssociatedTokenPda({
+      owner: address(TEST_CUSTODY_PUBLIC_KEY),
+      mint: address(DEVNET_USDC_MINT),
+      tokenProgram: TOKEN_PROGRAM_ADDRESS,
+    });
+    const { compiledMessage, loadedAddresses } = decodeTransactionFromRpcResponse(response);
+    expect(compiledMessage.staticAccounts).not.toContain(recipientAta);
+    expect(loadedAddresses).toEqual({ readonly: [], writable: [recipientAta] });
+    rpc.answer("getTransaction", asRpcJson(response));
+
+    expect((await onSandbox(() => checkAwaitingPaymentRequest(env, request))).status).toBe("paid");
+    expect(await listInboundTransfers()).toHaveLength(1);
+  });
+
+  it("still rejects a transfer whose reference does not match the request", async () => {
+    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+    mockExactCandidate();
+    rpc.answer(
+      "getTransaction",
+      asRpcJson(
+        await exactTransferResponse({
+          token: SOL_MINT,
+          rawAmount: 1_500_000_000n,
+          reference: syntheticAddress(334),
+          lookupTable: null,
+        })
+      )
+    );
+
+    expect((await onSandbox(() => checkAwaitingPaymentRequest(env, request))).status).toBe(
+      "awaiting_payment"
+    );
+    expect(await listInboundTransfers()).toHaveLength(0);
+  });
+
+  it.each([
+    "Token mint account does not exist",
+    "Unsupported token program for mint",
+    "Payments do not support the InterestBearingConfig mint extension",
+  ])("skips a request whose legacy mint is no longer admitted: %s", async (message) => {
+    const warn = vi.spyOn(rootLogger, "warn").mockImplementation(() => {});
+    const invalidMint = syntheticAddress(501);
+    vi.spyOn(paymentAmounts, "loadPaymentMint").mockRejectedValue(badRequest(message));
+    const request = await createRequest({ token: invalidMint, expiresAt: null });
+    mockSettlementSucceeds(null);
+
+    const unchanged = await onSandbox(() => checkAwaitingPaymentRequest(env, request));
+
+    expect(unchanged).toEqual(request);
+    expect(signaturesSpy).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ payment_request_id: request.id, reason: "mint_not_admitted" }),
+      expect.any(String)
+    );
+  });
+});
+
 async function storeExpired(requestId: string) {
   await getDb(env)
     .prepare("UPDATE payment_requests SET status = 'expired' WHERE id = ?")
@@ -963,7 +1308,7 @@ describe("payment search", () => {
       signatureInfo(SIGNATURE, { blockTime: null, err: null })
     );
     verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
-    validateTransferSpy.mockImplementation(async (_rpc, sig) => {
+    validateTransferSpy.mockImplementation(async (sig) => {
       if (sig === SIGNATURE) throw new ValidateTransferError("wrong amount");
       return validatedTransfer(null);
     });
@@ -973,7 +1318,7 @@ describe("payment search", () => {
     );
 
     expect(settled.status).toBe("paid");
-    expect(validateTransferSpy.mock.calls.map((call) => call[1])).toEqual([
+    expect(validateTransferSpy.mock.calls.map((call) => call[0])).toEqual([
       SIGNATURE,
       LATER_SIGNATURE,
     ]);
@@ -1073,7 +1418,7 @@ describe("closeLapsedPaymentRequest while a payment is indexing", () => {
     expect(await readStored(request.id)).toMatchObject({ signature_scan_cursor: SIGNATURE });
   });
 
-  it.for(["not found", "missing meta"])(
+  it.for(["Transaction not found", "Transaction meta missing"])(
     "leaves the request awaiting when the transfer check answers '%s'",
     async (message) => {
       mockSignatures(signatureInfo(SIGNATURE, { blockTime: null, err: null }));
@@ -1095,7 +1440,7 @@ describe("closeLapsedPaymentRequest while a payment is indexing", () => {
   it("settles a payment on a later check once the transfer check can read it", async () => {
     mockSignatures(signatureInfo(SIGNATURE, { blockTime: null, err: null }));
     verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
-    validateTransferSpy.mockRejectedValueOnce(new ValidateTransferError("not found"));
+    validateTransferSpy.mockRejectedValueOnce(new ValidateTransferError("Transaction not found"));
     validateTransferSpy.mockResolvedValueOnce(validatedTransfer(null));
     const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
 
@@ -1124,17 +1469,19 @@ describe("closeLapsedPaymentRequest while a payment is indexing", () => {
           verifyTransactionLandedSpy.mockResolvedValue({ ok: false, reason: "not_confirmed" }),
       },
       {
-        reason: "not found",
+        reason: "Transaction not found",
         setup: () => {
           verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
-          validateTransferSpy.mockRejectedValue(new ValidateTransferError("not found"));
+          validateTransferSpy.mockRejectedValue(new ValidateTransferError("Transaction not found"));
         },
       },
       {
-        reason: "missing meta",
+        reason: "Transaction meta missing",
         setup: () => {
           verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
-          validateTransferSpy.mockRejectedValue(new ValidateTransferError("missing meta"));
+          validateTransferSpy.mockRejectedValue(
+            new ValidateTransferError("Transaction meta missing")
+          );
         },
       },
     ];
@@ -1364,14 +1711,14 @@ function mockChain(
 
 function mockOnlyValid(paid: Signature) {
   verifyTransactionLandedSpy.mockResolvedValue(verifiedOk());
-  validateTransferSpy.mockImplementation(async (_rpc, sig) => {
+  validateTransferSpy.mockImplementation(async (sig) => {
     if (sig !== paid) throw new ValidateTransferError("wrong amount");
     return validatedTransfer(null);
   });
 }
 
 function validatedSignatures() {
-  return validateTransferSpy.mock.calls.map((call) => call[1]);
+  return validateTransferSpy.mock.calls.map((call) => call[0]);
 }
 
 async function checkUntilSettled(request: PaymentRequestRow, maxChecks: number) {

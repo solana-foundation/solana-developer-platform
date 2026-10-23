@@ -23,6 +23,7 @@
  */
 
 import type { Action } from "./actions";
+import type { CustodyWalletPurpose } from "./custody";
 import type { HeliusRingsOperationType } from "./helius-rings";
 import type { PaymentRecurringPaymentStatus, PaymentRequestStatus } from "./payments";
 import type { SdpModule } from "./release-channels";
@@ -35,19 +36,39 @@ export type MovementKind = "start" | "exit";
  * movement several routes sign (each declaring its own action) lists each of
  * them, so the waist never refuses what the route admitted. An exit names
  * none: the route's own action admits it.
+ *
+ * A start may also name the wallet purposes allowed to sign it (APE-371); one
+ * that names none leaves the purpose to its module.
  */
 export type MovementDefinition =
-  | { module: SdpModule; kind: "start"; actions: readonly [Action, ...Action[]] }
+  | {
+      module: SdpModule;
+      kind: "start";
+      actions: readonly [Action, ...Action[]];
+      walletPurposes?: readonly CustodyWalletPurpose[];
+    }
   | { module: SdpModule; kind: "exit" };
+
+/**
+ * A payment's source is always a `transfer` wallet (APE-371): a privileged one,
+ * such as the DvP settlement authority, never funds a payment.
+ */
+const PAYMENT_SOURCE_WALLET_PURPOSES = ["transfer"] as const;
 
 export const MOVEMENTS = {
   "custody.signer_check": { module: "custody", kind: "start", actions: ["wallets.execute"] },
 
-  "payments.transfer": { module: "payments", kind: "start", actions: ["transfers.execute"] },
+  "payments.transfer": {
+    module: "payments",
+    kind: "start",
+    actions: ["transfers.execute"],
+    walletPurposes: PAYMENT_SOURCE_WALLET_PURPOSES,
+  },
   "payments.transfer_batch": {
     module: "payments",
     kind: "start",
     actions: ["transfer_batches.execute"],
+    walletPurposes: PAYMENT_SOURCE_WALLET_PURPOSES,
   },
   /** `/pay`: SDP sponsors the payer's transaction for the organization's request. */
   "payments.pay_request": {
@@ -65,11 +86,13 @@ export const MOVEMENTS = {
     module: "recurring_payments",
     kind: "start",
     actions: ["recurring.execute"],
+    walletPurposes: PAYMENT_SOURCE_WALLET_PURPOSES,
   },
   "recurring.update": {
     module: "recurring_payments",
     kind: "start",
     actions: ["recurring.execute"],
+    walletPurposes: PAYMENT_SOURCE_WALLET_PURPOSES,
   },
   /** Cancels the old subscription after an update created its replacement. */
   "recurring.update_cancel_old": { module: "recurring_payments", kind: "exit" },
@@ -77,11 +100,13 @@ export const MOVEMENTS = {
     module: "recurring_payments",
     kind: "start",
     actions: ["recurring.execute"],
+    walletPurposes: PAYMENT_SOURCE_WALLET_PURPOSES,
   },
   "recurring.resume": {
     module: "recurring_payments",
     kind: "start",
     actions: ["recurring.execute"],
+    walletPurposes: PAYMENT_SOURCE_WALLET_PURPOSES,
   },
   "recurring.cancel": { module: "recurring_payments", kind: "exit" },
   /**
@@ -210,6 +235,18 @@ export type StartMovementId = {
 export function movementActions(movement: MovementId): readonly [Action, ...Action[]] | null {
   const definition: MovementDefinition = MOVEMENTS[movement];
   return definition.kind === "start" ? definition.actions : null;
+}
+
+/** Whether a custody wallet of this purpose may sign the movement (APE-371). */
+export function movementAllowsWalletPurpose(
+  movement: MovementId,
+  purpose: CustodyWalletPurpose | null
+): boolean {
+  const definition: MovementDefinition = MOVEMENTS[movement];
+  if (definition.kind === "exit" || definition.walletPurposes === undefined) {
+    return true;
+  }
+  return purpose !== null && definition.walletPurposes.includes(purpose);
 }
 
 /**

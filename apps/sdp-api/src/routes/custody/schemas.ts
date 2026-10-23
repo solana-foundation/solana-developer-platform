@@ -120,8 +120,8 @@ export const custodyWalletOwnerSchema = z.union(
 const walletCreationFields = {
   label: z.string().max(100).optional(),
   purpose: z
-    .enum(["root", "mint_authority", "freeze_authority", "fee_payer", "transfer"])
-    .optional(),
+    .enum(["transfer", "mint_authority", "freeze_authority", "fee_payer"])
+    .default("transfer"),
 };
 
 export const createManagedWalletSchema = managedWalletOwnerSchema.extend(walletCreationFields);

@@ -27,9 +27,11 @@ import {
 export const counterpartyAccounts = new Hono<{ Bindings: Env }>();
 
 counterpartyAccounts.get("/", requireAction("counterparties.read"), listCounterpartyAccounts);
+// Creating an account sets a payout destination, so it is `execute` like editing one
+// (APE SOLA9-771): `manage` alone could otherwise point a transfer batch anywhere.
 counterpartyAccounts.post(
   "/",
-  requireAction("counterparties.manage"),
+  requireAction("counterparties.execute"),
   validateParams(counterpartyAccountListParamsSchema),
   validateBody(createCounterpartyAccountSchema),
   authorize(authorizeCounterparty),

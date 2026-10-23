@@ -16,8 +16,9 @@ import { AppError } from "@/lib/errors";
  *
  * - `api_key`: live when active, unexpired and within any rotation deadline;
  *   holds its grants; signs with its wallet scope.
- * - `member`: live while the organization membership is active; holds its
- *   organization role's actions; signs with every wallet in the project.
+ * - `member`: live while the organization membership is active; starts money
+ *   only while still a member of the project; holds its organization role's
+ *   actions; signs with every wallet in the project.
  * - `mandate`: a recurring payment (APE-343), admitted by its own row (status,
  *   source wallet), never by whoever created or activated it.
  * - `payment_request`: a `/pay` link, admitted by its own open request.

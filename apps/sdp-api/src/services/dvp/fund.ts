@@ -377,7 +377,8 @@ export async function executeDvpFunding(
       projectId: plan.signer.projectId,
       actor: { type: "wallet", id: plan.signer.custodyWalletId },
     }),
-    "dvp.fund"
+    "dvp.fund",
+    { custodyWalletId: plan.signer.custodyWalletId }
   );
   const sponsor = await feePayment.getFeePayer();
   const instruction = getTransferCheckedInstruction(

@@ -108,6 +108,7 @@ function landedToken(amount: string, owner = "quoted-destination", mint = MINT):
   return {
     slot: 42n,
     blockTime: LANDED_AFTER_TRANSFER,
+    accountKeys: ["fee-payer"],
     executionResultKnown: true,
     err: null,
     preTokenBalances: [],

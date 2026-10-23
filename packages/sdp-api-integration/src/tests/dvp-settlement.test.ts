@@ -174,6 +174,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("DvP creation and 
               actor: { type: "project", id: TEST_PROJECT.id },
             },
             movement: "issuance.authority",
+            custodyWalletId: custodyWallet.id,
           });
           return asOrganizationAdmin(async () => {
             // Distinct mints prove each direction funds the correct escrow.

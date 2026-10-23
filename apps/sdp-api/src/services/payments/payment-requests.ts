@@ -2,10 +2,10 @@ import { createClusterRpc } from "@sdp/rpc/factory";
 import { getSignaturesForAddress, type SignatureInfo } from "@sdp/rpc/solana";
 import { verifyTransactionLanded } from "@sdp/rpc/verified-confirmation";
 import { assertValidAddress } from "@sdp/solana/address";
-import { toNumberAmount } from "@sdp/solana/amount";
+import { AmountError, parseTokenAmount } from "@sdp/solana/amount";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { type Address, type Signature, signature } from "@solana/kit";
-import { ValidateTransferError, validateTransfer } from "@solana/pay";
+import { ValidateTransferError } from "@solana/pay";
 import { z } from "zod";
 import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
@@ -27,16 +27,25 @@ import {
 import { AppError, internalError, rateLimited } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { createAuditLedgerCheckpointStore } from "@/runtime/kv-redis";
+import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
 import { AuditService, type SystemAuditLogEntry } from "@/services/audit.service";
 import { AUDIT_LEDGER_REDIS_TIMEOUT_MS } from "@/services/audit-ledger-timeout";
+import {
+  type PaymentRequestTransferFields,
+  validatePaymentRequestTransfer,
+} from "@/services/payments/payment-request-transfer";
+import { loadPaymentMint, type PaymentMint } from "@/services/payments/token-amount";
 import type { Env } from "@/types/env";
 
 const SIGNATURE_PAGE_SIZE = 1000;
 const MAX_SIGNATURE_PAGES = 5;
 const VERIFY_BUDGET = 25;
 const PAYMENT_SEARCH_RETRY_AFTER_SECONDS = 5;
-const RETRYABLE_TRANSFER_CHECK_ERRORS: ReadonlySet<string> = new Set(["not found", "missing meta"]);
+const RETRYABLE_TRANSFER_CHECK_ERRORS: ReadonlySet<string> = new Set([
+  "Transaction not found",
+  "Transaction meta missing",
+]);
 const UNREADABLE_SIGNATURE_GIVE_UP_MS = 60 * 60 * 1000;
 
 export function isPaymentRequestExpired(expiresAt: string | null): boolean {
@@ -173,6 +182,10 @@ function isPaidLate(blockTime: bigint | null, expiresAt: string | null): boolean
 
 async function findValidPayment(env: Env, row: PaymentRequestRow): Promise<PaymentSearchResult> {
   const reference = assertValidAddress(row.reference, "reference");
+  const expected = await expectedTransfer(row, reference);
+  if (expected === null) {
+    return { kind: "none" };
+  }
   const from: SignatureScanPosition = {
     cursor: row.signature_scan_cursor,
     before: row.signature_scan_before,
@@ -193,7 +206,7 @@ async function findValidPayment(env: Env, row: PaymentRequestRow): Promise<Payme
     await advanceSignatureScan(env, row, from, { ...from, before: resumeBefore.signature });
     return { kind: "pending" };
   }
-  const scan = await evaluateOldestFirst(row, reference, [...fetched.newestFirst].reverse(), {
+  const scan = await evaluateOldestFirst(row, expected, [...fetched.newestFirst].reverse(), {
     signature: from.stuckSignature,
     since: from.stuckSince,
   });
@@ -235,7 +248,7 @@ async function fetchUnscannedSignatures(
 
 async function evaluateOldestFirst(
   row: PaymentRequestRow,
-  reference: Address,
+  expected: PaymentRequestTransferFields,
   oldestFirst: readonly SignatureInfo[],
   stuckFrom: StuckSignature
 ): Promise<SignatureScanOutcome> {
@@ -250,7 +263,7 @@ async function evaluateOldestFirst(
         return { cursor, exhausted: false, found: null, stuck };
       }
       verified++;
-      verdict = await judgeCandidate(row, reference, candidate);
+      verdict = await judgeCandidate(expected, candidate);
     }
     if (verdict.kind === "retry" && contiguous) {
       const stuckSince =
@@ -293,12 +306,10 @@ async function evaluateOldestFirst(
 }
 
 async function judgeCandidate(
-  row: PaymentRequestRow,
-  reference: Address,
+  expected: PaymentRequestTransferFields,
   candidate: SignatureInfo
 ): Promise<CandidateVerdict> {
-  const rpc = createClusterRpc();
-  const landed = await verifyTransactionLanded(rpc, candidate.signature, {
+  const landed = await verifyTransactionLanded(createClusterRpc(), candidate.signature, {
     searchTransactionHistory: true,
   });
   if (!landed.ok) {
@@ -309,19 +320,9 @@ async function judgeCandidate(
   if (landed.status.confirmationStatus !== "finalized") {
     return { kind: "retry", reason: "not_finalized" };
   }
-  let validated: Awaited<ReturnType<typeof validateTransfer>>;
+  let validated: Awaited<ReturnType<typeof validatePaymentRequestTransfer>>;
   try {
-    validated = await validateTransfer(
-      rpc,
-      candidate.signature,
-      {
-        recipient: assertValidAddress(row.destination_address, "destinationAddress"),
-        amount: toNumberAmount(row.amount),
-        reference,
-        splToken: row.token === SOL_MINT ? undefined : assertValidAddress(row.token, "token"),
-      },
-      { commitment: "finalized" }
-    );
+    validated = await validatePaymentRequestTransfer(candidate.signature, expected);
   } catch (err) {
     if (!(err instanceof ValidateTransferError)) {
       throw err;
@@ -337,6 +338,44 @@ async function judgeCandidate(
       slot: candidate.slot,
       blockTime: validated.blockTime ?? candidate.blockTime ?? landed.transaction.blockTime ?? null,
     },
+  };
+}
+
+async function expectedTransfer(
+  row: PaymentRequestRow,
+  reference: Address
+): Promise<PaymentRequestTransferFields | null> {
+  let mint: PaymentMint;
+  try {
+    mint = await loadPaymentMint(assertValidAddress(row.token, "token"));
+  } catch (error) {
+    if (!(error instanceof AppError) || error.code !== "BAD_REQUEST") throw error;
+    getLogger().warn(
+      { payment_request_id: row.id, reason: "mint_not_admitted", error: error.message },
+      "Payment request settlement skipped"
+    );
+    return null;
+  }
+  let amount: bigint;
+  try {
+    amount = parseTokenAmount(row.amount, mint.decimals);
+  } catch (error) {
+    // Legacy requests may predate create-time precision checks. They must
+    // never settle against a rounded or out-of-range amount.
+    if (!(error instanceof AmountError)) throw error;
+    getLogger().warn(
+      { payment_request_id: row.id, reason: "invalid_amount", error: error.message },
+      "Payment request settlement skipped"
+    );
+    return null;
+  }
+  return {
+    recipient: assertValidAddress(row.destination_address, "destinationAddress"),
+    amount,
+    decimals: mint.decimals,
+    tokenProgram: mint.tokenProgram,
+    reference,
+    ...(row.token === SOL_MINT ? {} : { splToken: assertValidAddress(row.token, "token") }),
   };
 }
 

@@ -194,7 +194,8 @@ export async function closeDvpTrade(
   const feePayment = createSponsorshipFeePayment(
     c.env,
     resolveRequestSponsorshipScope(c),
-    movement
+    movement,
+    { custodyWalletId: settlement.custodyWalletId }
   );
   const sponsor = await feePayment.getFeePayer();
 

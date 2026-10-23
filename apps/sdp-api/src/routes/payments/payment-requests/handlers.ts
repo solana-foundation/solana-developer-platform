@@ -1,3 +1,4 @@
+import { assertValidAddress } from "@sdp/solana/address";
 import type {
   CreatedPaymentRequest,
   ListPaymentRequestsResponse,
@@ -16,6 +17,7 @@ import type { AppContext } from "@/routes/payments/context";
 import { resolveScope, resolveWallet } from "@/routes/payments/wallets";
 import { normalizePaymentToken } from "@/services/payment-operation.service";
 import { isPaymentRequestExpired } from "@/services/payments/payment-requests";
+import { parseStaticPaymentAmount } from "@/services/payments/token-amount";
 import {
   type createPaymentRequestSchema,
   listPaymentRequestsQuerySchema,
@@ -122,6 +124,8 @@ export async function createPaymentRequest(
   // wallet is operational is state, checked here.
   const scope = await resolveScope(c);
   const wallet = resolveWallet(scope.wallets, body.walletId);
+  const token = assertValidAddress(normalizePaymentToken(body.token), "token");
+  await parseStaticPaymentAmount(body.amount, token);
 
   const row = await createPaymentRequestsRepository(
     c.env,
@@ -132,7 +136,7 @@ export async function createPaymentRequest(
     custodyWalletId: wallet.id,
     walletId: wallet.walletId,
     destinationAddress: wallet.publicKey,
-    token: normalizePaymentToken(body.token),
+    token,
     amount: body.amount,
     expiresAt: body.expiresAt,
     createdBy: await resolveCreatorUserId(c),

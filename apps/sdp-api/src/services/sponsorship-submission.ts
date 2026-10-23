@@ -31,15 +31,28 @@ export interface SignedSubmissionStore {
 }
 
 /**
+ * The store's start marker could not be written, so the send that follows it never ran and the
+ * signed bytes were never broadcast, even when the write committed and only its reply was lost.
+ */
+export class SubmissionNotStartedError extends AppError {
+  constructor(cause: unknown) {
+    super("SERVICE_UNAVAILABLE", "The transaction could not be submitted; nothing was broadcast");
+    this.name = "SubmissionNotStartedError";
+    this.cause = cause;
+  }
+}
+
+/**
  * Identifies a submission error that proves the transaction was not broadcast.
  *
  * @param error - The error returned by the sponsored submission path.
- * @returns Whether the error is a definitive preflight rejection.
+ * @returns Whether the error is a definitive preflight rejection or a submission that never started.
  */
 export function isDefiniteSubmissionError(error: unknown): boolean {
   return (
-    error instanceof AppError &&
-    (error.code === "TRANSACTION_FAILED" || error.code === "ACCOUNT_FROZEN")
+    error instanceof SubmissionNotStartedError ||
+    (error instanceof AppError &&
+      (error.code === "TRANSACTION_FAILED" || error.code === "ACCOUNT_FROZEN"))
   );
 }
 
@@ -93,8 +106,13 @@ export async function submitSponsoredTransaction(input: {
         signedTransaction: getBase64Decoder().decode(signedTransaction),
         lastValidBlockHeight: input.lastValidBlockHeight.toString(),
       }),
-    markStarted: input.store.markStarted,
-    hasStarted: input.store.hasStarted,
+    markStarted: async () => {
+      try {
+        await input.store.markStarted();
+      } catch (error) {
+        throw new SubmissionNotStartedError(error);
+      }
+    },
   });
 
   let sawTransientFailure = false;

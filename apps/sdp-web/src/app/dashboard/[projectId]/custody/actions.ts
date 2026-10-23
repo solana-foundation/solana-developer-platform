@@ -130,7 +130,6 @@ async function revalidateWalletPaths() {
 
 /** The purposes the create endpoint accepts; anything else is left for the API to default. */
 const CREATABLE_WALLET_PURPOSES = new Set<string>([
-  "root",
   "transfer",
   "mint_authority",
   "freeze_authority",

@@ -57,7 +57,7 @@ export interface CreateWalletParams {
   walletId: string;
   publicKey: string;
   label?: string;
-  purpose?: WalletPurpose;
+  purpose: WalletPurpose;
   idempotency?: CustodyWalletIdempotency | null;
 }
 
@@ -228,7 +228,7 @@ export class CustodyConfigStore implements SigningConfigStore {
             params.wallet.walletId,
             params.wallet.publicKey,
             params.wallet.label ?? null,
-            params.wallet.purpose ?? null
+            params.wallet.purpose
           )
           .run();
       }
@@ -316,7 +316,7 @@ export class CustodyConfigStore implements SigningConfigStore {
           params.walletId,
           params.publicKey,
           params.label ?? null,
-          params.purpose ?? null,
+          params.purpose,
           params.idempotency?.requestId ?? null,
           params.idempotency?.fingerprint ?? null
         ),

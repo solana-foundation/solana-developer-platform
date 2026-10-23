@@ -1,10 +1,10 @@
 import { Hono } from "hono";
-import { canonicalizeDecimalFields } from "@/lib/idempotency";
 import { authorize } from "@/middleware/authorize";
 import { idempotent } from "@/middleware/idempotency";
 import { admit, replayFromRecord } from "@/middleware/movement-steps";
 import { requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
+import { canonicalizePaymentBody } from "@/routes/payments/fingerprint";
 import type { Env } from "@/types/env";
 import {
   admitTransferExecution,
@@ -29,8 +29,7 @@ transfers.post(
     key: "required",
     serverErrors: "rerun",
     recovery: "record",
-    // "1.0" and "1" move the same amount, so they are one request.
-    canonicalize: (body) => canonicalizeDecimalFields(body, ["amount"]),
+    canonicalize: canonicalizePaymentBody,
   }),
   replayFromRecord(findTransferRecordReplay),
   admit(admitTransferExecution),

@@ -1,17 +1,15 @@
 import { sumDecimalAmounts } from "@sdp/payments/decimal";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { assertValidAddress } from "@sdp/solana/address";
-import { AmountError, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
+import { formatDecimalAmount } from "@sdp/solana/amount";
 import { SOL_DECIMALS, SOL_MINT } from "@sdp/types/well-known-tokens";
-import type { Address } from "@solana/kit";
+import { type Address, address } from "@solana/kit";
 import type { CounterpartyAccountRow } from "@/db/repositories/counterparty-account.repository";
 import { requireProjectId } from "@/lib/auth";
 import { badRequest, notFound } from "@/lib/errors";
+import { assertCallerMaySignWith } from "@/lib/money-admission";
 import { type AppContext, getCounterpartyAccountsRepository } from "@/routes/payments/context";
-import {
-  resolveMintTokenProgram,
-  resolveSourceTokenAccount,
-} from "@/routes/payments/token-accounts";
+import { resolveSourceTokenAccount } from "@/routes/payments/token-accounts";
 import {
   type ResolvedScope,
   resolveScope,
@@ -23,57 +21,54 @@ import {
   isNativePaymentToken,
   normalizePaymentToken,
 } from "@/services/payment-operation.service";
+import { loadPaymentMint, type PaymentAmountConverter } from "@/services/payments/token-amount";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type {
   CreateTransferBatchInput,
   ResolvedBatchRequest,
   ResolvedRecipient,
-  Rpc,
   TokenContext,
   TransferBatchRecipientInput,
 } from "./types";
 
 /**
  * Parses a recipient amount into token base units, mapping amount-format
- * violations to a 400 response.
+ * violations to a 400 response. Every recipient must move positive base units.
  *
  * @param amount - Decimal amount string from the request body.
- * @param decimals - Decimal places of the batch token.
+ * @param toBaseUnits - The batch token's converter from UI amounts to base units.
  * @returns The amount in token base units.
  */
-function parseRecipientAmount(amount: string, decimals: number): bigint {
-  try {
-    return parseDecimalAmount(assertPositivePaymentAmount(amount), decimals);
-  } catch (error) {
-    if (error instanceof AmountError) {
-      throw badRequest(error.message);
-    }
-    throw error;
+function parseRecipientAmount(amount: string, toBaseUnits: PaymentAmountConverter): bigint {
+  const amountBaseUnits = toBaseUnits(assertPositivePaymentAmount(amount));
+  if (amountBaseUnits <= 0n) {
+    throw badRequest("Recipient amount must be greater than zero");
   }
+  return amountBaseUnits;
 }
 
 /**
  * Resolves the batch token into transfer parameters: native SOL, or an SPL
  * mint with its token program and the source wallet's token account.
  *
- * @param rpc - Solana RPC client.
  * @param token - "SOL" or an SPL mint address.
  * @param sourceAddress - Source wallet address holding the token.
  * @returns The token context used to build transfer instructions.
  */
-async function resolveTokenContext(
-  rpc: Rpc,
-  token: string,
-  sourceAddress: Address
-): Promise<TokenContext> {
+async function resolveTokenContext(token: string, sourceAddress: Address): Promise<TokenContext> {
   if (isNativePaymentToken(token)) {
-    return { kind: "sol", token: SOL_MINT, decimals: SOL_DECIMALS };
+    const { toBaseUnits } = await loadPaymentMint(address(SOL_MINT));
+    return {
+      kind: "sol",
+      token: SOL_MINT,
+      decimals: SOL_DECIMALS,
+      toBaseUnits,
+    };
   }
 
   const mintAddress = assertValidAddress(token, "token");
-  const tokenProgram = await resolveMintTokenProgram(rpc, mintAddress);
+  const { tokenProgram, decimals, toBaseUnits } = await loadPaymentMint(mintAddress);
   const sourceTokenAccount = await resolveSourceTokenAccount(
-    rpc,
     sourceAddress,
     mintAddress,
     tokenProgram
@@ -82,10 +77,11 @@ async function resolveTokenContext(
   return {
     kind: "spl",
     token,
-    decimals: sourceTokenAccount.decimals,
+    decimals,
     mintAddress,
     tokenProgram,
     sourceTokenAccount: sourceTokenAccount.tokenAccount,
+    toBaseUnits,
   };
 }
 
@@ -120,28 +116,29 @@ function readCryptoWalletAddress(account: CounterpartyAccountRow, index: number)
  *
  * @param params.recipients - Recipient inputs from the request body.
  * @param params.accounts - The named accounts, by id, as authorize loaded them.
- * @param params.decimals - Decimal places of the batch token.
+ * @param params.tokenContext - The batch token: its decimals and UI-amount converter.
  * @returns Recipients with resolved destination addresses and base-unit amounts.
  */
 function resolveRecipients(params: {
   recipients: TransferBatchRecipientInput[];
   accounts: ReadonlyMap<string, CounterpartyAccountRow>;
-  decimals: number;
+  tokenContext: TokenContext;
 }): ResolvedRecipient[] {
+  const { decimals, toBaseUnits } = params.tokenContext;
   return params.recipients.map((recipient, index) => {
     const account = params.accounts.get(recipient.counterpartyAccountId);
     if (account?.status !== "active") {
       throw notFound(`Counterparty account ${recipient.counterpartyAccountId}`);
     }
 
-    const amountBaseUnits = parseRecipientAmount(recipient.amount, params.decimals);
+    const amountBaseUnits = parseRecipientAmount(recipient.amount, toBaseUnits);
     return {
       index,
       externalId: recipient.externalId ?? null,
       counterpartyId: account.counterparty_id,
       counterpartyAccountId: recipient.counterpartyAccountId,
       destinationAddress: readCryptoWalletAddress(account, index),
-      amount: formatDecimalAmount(amountBaseUnits, params.decimals),
+      amount: formatDecimalAmount(amountBaseUnits, decimals),
       amountBaseUnits,
     };
   });
@@ -158,11 +155,13 @@ export interface AuthorizedBatchRequest {
 }
 
 /**
- * The access check for a batch (HOO-1918): project scope and every named
- * counterparty account in the project and under the counterparty the
- * recipient names. Whether the caller may sign with the source wallet is the
- * custody signer's decision (HOO-2099). Status is state and
- * is checked later, so a request that already ran is still answered.
+ * The access check for a batch (HOO-1918), for create and `/estimate`:
+ * project scope, a source wallet the caller may sign with (in its scope, of a
+ * purpose that may send), and every named counterparty account in the project
+ * and under the counterparty the recipient names. Create runs it before the
+ * Idempotency-Key is claimed, so a refused batch writes no failed recipients.
+ * Status is state and is checked later, so a request that already ran is
+ * still answered.
  *
  * @param retainedCustodyWalletId - Resolve this wallet even when inactive, so a replay of a request that ran is answered.
  */
@@ -176,6 +175,7 @@ export async function authorizeBatchRequest(
   assertPaymentProjectScope(input.projectId, projectId);
 
   const sourceWallet = resolveWalletByCustodyWalletId(scope.wallets, input.sourceCustodyWalletId);
+  assertCallerMaySignWith(scope.auth, sourceWallet, "payments.transfer_batch");
 
   const sourceAddress = assertValidAddress(sourceWallet.publicKey, "source");
 
@@ -209,11 +209,11 @@ export async function resolveBatchMovement(
 ): Promise<ResolvedBatchRequest> {
   const token = normalizePaymentToken(input.token);
   const rpc = createClusterRpc();
-  const tokenContext = await resolveTokenContext(rpc, token, authorized.sourceAddress);
+  const tokenContext = await resolveTokenContext(token, authorized.sourceAddress);
   const recipients = resolveRecipients({
     recipients: input.recipients,
     accounts: authorized.accounts,
-    decimals: tokenContext.decimals,
+    tokenContext,
   });
   return {
     scope: authorized.scope,

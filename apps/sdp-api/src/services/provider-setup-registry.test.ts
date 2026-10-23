@@ -120,11 +120,16 @@ describe("provider setup registry", () => {
     const env = {
       MOONPAY_SANDBOX_API_KEY: "pk_test_sandbox",
       MOONPAY_SANDBOX_SECRET_KEY: "sk_test_sandbox",
+      MOONPAY_SANDBOX_WEBHOOK_SECRET: "wk_test_sandbox",
     } as Env;
+    const withoutWebhookSecret = { ...env, MOONPAY_SANDBOX_WEBHOOK_SECRET: undefined };
 
     expect(moonpay.setupMode).toBe("platform_managed");
     expect(moonpay.checkConnection({ env, testMode: true }).status).toBe("configured");
     expect(moonpay.checkConnection({ env, testMode: false }).status).toBe("not_configured");
+    expect(moonpay.checkConnection({ env: withoutWebhookSecret, testMode: true }).status).toBe(
+      "not_configured"
+    );
     expect("storeCredentials" in moonpay).toBe(false);
   });
 });

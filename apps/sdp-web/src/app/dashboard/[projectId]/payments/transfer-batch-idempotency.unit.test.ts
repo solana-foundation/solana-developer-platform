@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import type { PaymentTransferBatchRequest } from "@sdp/types/payments";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { MOVEMENT_POLL_INTERVAL_MS, resetMovementWatchesForTests } from "@/lib/dashboard-fetch";
 import type { Translate } from "./payments-workspace.data";
 import {
@@ -51,7 +52,19 @@ describe("canonicalTransferBatchRequest", () => {
     ).toEqual(["acct_1", "acct_2"]);
   });
 
-  it("leaves everything except recipient order alone", () => {
+  it("spells every amount canonically, as the API fingerprints it", () => {
+    const canonical = canonicalTransferBatchRequest(
+      batchRequest({
+        recipients: [
+          { counterpartyId: "cp_2", counterpartyAccountId: "acct_2", amount: "2.00" },
+          { counterpartyId: "cp_1", counterpartyAccountId: "acct_1", amount: "01.50" },
+        ],
+      })
+    );
+    expect(canonical.recipients.map((r) => r.amount)).toEqual(["1.5", "2"]);
+  });
+
+  it("leaves everything except recipient order and amount spelling alone", () => {
     const request = batchRequest({ externalId: "ext_1" });
     const canonical = canonicalTransferBatchRequest(request);
     expect(canonical.sourceCustodyWalletId).toBe(request.sourceCustodyWalletId);
@@ -68,6 +81,23 @@ describe("transferBatchRequestFingerprint", () => {
     expect(transferBatchRequestFingerprint(forward)).toBe(
       transferBatchRequestFingerprint(reversed)
     );
+  });
+
+  // SOLA9-811: a recipient's `1.0` and `1` are one amount to the API, so they
+  // are one batch to the browser's key too.
+  it("is one batch however an amount is spelled", () => {
+    const withFirstAmount = (amount: string) =>
+      transferBatchRequestFingerprint(
+        batchRequest({
+          recipients: [
+            { counterpartyId: "cp_1", counterpartyAccountId: "acct_1", amount },
+            { counterpartyId: "cp_2", counterpartyAccountId: "acct_2", amount: "2" },
+          ],
+        })
+      );
+    expect(withFirstAmount("1.0")).toBe(withFirstAmount("1"));
+    expect(withFirstAmount("1.50")).toBe(withFirstAmount("1.5"));
+    expect(withFirstAmount("1.01")).not.toBe(withFirstAmount("1"));
   });
 
   it("differs when any part of the intent changes", () => {
@@ -211,6 +241,35 @@ describe("sendTransferBatchUnderKey", () => {
 
     const [unknown, next] = sentKeys(fetchMock);
     expect(next).toBe(unknown);
+  });
+
+  it("resends a lost batch with a re-spelled amount under the same key, as keyed", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>(async () => recorded())
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    vi.stubGlobal("fetch", fetchMock);
+    const withFirstAmount = (amount: string) =>
+      batchRequest({
+        recipients: [
+          { counterpartyId: "cp_1", counterpartyAccountId: "acct_1", amount },
+          { counterpartyId: "cp_2", counterpartyAccountId: "acct_2", amount: "2" },
+        ],
+      });
+
+    await expect(sendTransferBatchUnderKey(withFirstAmount("1.0"), t)).rejects.toThrow(
+      "Failed to fetch"
+    );
+    await sendTransferBatchUnderKey(withFirstAmount("1"), t);
+
+    const [lost, retry] = sentKeys(fetchMock);
+    expect(retry).toBe(lost);
+    const sentAmounts = fetchMock.mock.calls.map(
+      ([, init]) =>
+        z
+          .object({ recipients: z.array(z.object({ amount: z.string() })) })
+          .parse(JSON.parse(String(init?.body))).recipients[0]?.amount
+    );
+    expect(sentAmounts).toEqual(["1", "1"]);
   });
 
   // Browser test (HOO-1918): the API recorded the batch but the answer was lost;
