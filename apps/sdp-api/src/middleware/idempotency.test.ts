@@ -878,11 +878,42 @@ describe("idempotent()", () => {
       return preflight === true ? rest : body;
     };
     const after = buildApp(
-      { key: "required", canonicalize: dropDefault, previousCanonicalize: (body) => body },
+      { key: "required", canonicalize: dropDefault, previousCanonicalForms: [(body) => body] },
       created
     );
     const retried = await post(after.app, "/v1/other", { amount: "1", preflight: true }, KEY);
     expect(retried.headers.get(IDEMPOTENT_REPLAYED_HEADER)).toBe("true");
     expect(after.create).not.toHaveBeenCalled();
+  });
+
+  it("replays a key saved under any of the route's previous canonical forms", async () => {
+    // Two changes ago: the body as sent.
+    const oldest = buildApp({ key: "required" }, created);
+    await post(oldest.app, "/v1/other", { amount: "1.0", preflight: true }, KEY);
+
+    // SAFETY: the test always sends an object body.
+    const fields = (body: JsonValue) => body as { amount: string; preflight?: boolean };
+    const dropDefault = (body: JsonValue): JsonValue => {
+      const { preflight, ...rest } = fields(body);
+      return preflight === true ? rest : body;
+    };
+    const canonicalAmount = (body: JsonValue): JsonValue => ({
+      ...fields(dropDefault(body)),
+      amount: String(Number(fields(body).amount)),
+    });
+    const current = buildApp(
+      {
+        key: "required",
+        canonicalize: canonicalAmount,
+        previousCanonicalForms: [dropDefault, (body) => body],
+      },
+      created
+    );
+    const retried = await post(current.app, "/v1/other", { amount: "1.0", preflight: true }, KEY);
+    expect(retried.headers.get(IDEMPOTENT_REPLAYED_HEADER)).toBe("true");
+    expect(current.create).not.toHaveBeenCalled();
+
+    const changed = await post(current.app, "/v1/other", { amount: "2", preflight: true }, KEY);
+    expect(changed.status).toBe(422);
   });
 });

@@ -1,9 +1,16 @@
-import { SOL_MINT } from "@sdp/types/well-known-tokens";
+import { MEMO_PROGRAM_ADDRESS } from "@sdp/types/well-known-programs";
+import { SOL_MINT, SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import {
+  address,
   generateKeyPairSigner,
   getSignatureFromTransaction,
   getTransactionDecoder,
 } from "@solana/kit";
+import {
+  type ExtensionArgs,
+  findAssociatedTokenPda,
+  getTransferCheckedWithFeeInstructionDataDecoder,
+} from "@solana-program/token-2022";
 import { describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { generatePaymentTransferId } from "@/db/repositories/payments.repository";
@@ -12,7 +19,11 @@ import { createTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
 import { moonpayWebhook } from "@/services/ramps/webhooks/moonpay";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
-import { installClusterRpcStub, tokenAccountsByOwnerResult } from "@/test/helpers/cluster-rpc";
+import {
+  installClusterRpcResponder,
+  type JsonRpcResult,
+  tokenAccountsByOwnerResult,
+} from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import {
   confirmTransactionMock,
@@ -44,6 +55,14 @@ import {
 } from "@/test/helpers/payments-transfers";
 import { required } from "@/test/helpers/required";
 import { fullySignTestTransaction } from "@/test/helpers/sponsor-signing";
+import {
+  answerMovementAccounts,
+  associatedTokenAccount,
+  mintRpcAccount,
+  sentInstructions,
+  tokenRpcAccount,
+  transferFeeExtension,
+} from "@/test/helpers/token-movement";
 
 function testProjectPaymentsRepository() {
   return createPostgresPaymentsRepository(
@@ -101,9 +120,13 @@ function solOfframpDepositRequest(transferId: string) {
 
 describe("Payments routes — on-chain transfers", () => {
   installPaymentsRouteTestHooks();
-  const rpc = installClusterRpcStub();
+  const rpc = installClusterRpcResponder();
 
   function answerSourceUsdcTokenAccount(mint: string) {
+    answerMovementAccounts(
+      rpc,
+      new Map([[mint, mintRpcAccount("spl-token", { decimals: 6, extensions: null })]])
+    );
     rpc.answer(
       "getTokenAccountsByOwner",
       tokenAccountsByOwnerResult(1, [
@@ -160,6 +183,8 @@ describe("Payments routes — on-chain transfers", () => {
   });
 
   it("refuses a USDC amount finer than its decimals before creating a transfer record", async () => {
+    // The mint's live terms say how many decimals an amount may carry (ADR 0012).
+    answerSourceUsdcTokenAccount(DEVNET_USDC_MINT);
     const res = await postTransfer(
       {
         sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
@@ -383,7 +408,7 @@ describe("Payments routes — on-chain transfers", () => {
       sourceAddress: TEST_SOLANA_ADDRESSES.wallet1,
       destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
       token: SOL_MINT,
-      amount: "1",
+      credit: "1",
       initiatedByKeyId: TEST_API_KEY.id,
       idempotency: null,
       updatedAt: new Date().toISOString(),
@@ -727,6 +752,284 @@ describe("Payments routes — on-chain transfers", () => {
     expect(transfers).toHaveLength(1);
     expect(transfers[0]?.status).toBe("failed");
     expect(transfers[0]?.error).toBeTruthy();
+  });
+
+  describe("token movements (ADR 0012)", () => {
+    const pyusd = WELL_KNOWN_TOKENS.PYUSD.mints.devnet.address;
+    const usdc = DEVNET_USDC_MINT;
+
+    function answerPyusd(options: {
+      extensions: ExtensionArgs[];
+      destination?: { extensions: ExtensionArgs[] };
+    }) {
+      return associatedTokenAccount("token-2022", pyusd, TEST_SOLANA_ADDRESSES.wallet2).then(
+        (destinationAccount) => {
+          const accounts = new Map<string, JsonRpcResult>([
+            [pyusd, mintRpcAccount("token-2022", { decimals: 6, extensions: options.extensions })],
+          ]);
+          if (options.destination !== undefined) {
+            accounts.set(
+              destinationAccount,
+              tokenRpcAccount("token-2022", {
+                mint: pyusd,
+                owner: TEST_SOLANA_ADDRESSES.wallet2,
+                amount: 0n,
+                extensions: options.destination.extensions,
+              })
+            );
+          }
+          answerMovementAccounts(rpc, accounts);
+          rpc.answer(
+            "getTokenAccountsByOwner",
+            tokenAccountsByOwnerResult(1, [
+              {
+                pubkey: TEST_SOLANA_ADDRESSES.wallet3,
+                mint: pyusd,
+                amount: "1000000000",
+                decimals: 6,
+                uiAmountString: "1000",
+                state: "initialized",
+              },
+            ])
+          );
+          return destinationAccount;
+        }
+      );
+    }
+
+    const lastSentInstructions = () => {
+      const [, transactionBytes] = required(sendTransactionMock.mock.calls.at(-1));
+      return sentInstructions(transactionBytes);
+    };
+
+    it("answers a SOL transfer with its amounts, verified once it lands", async () => {
+      const res = await postTransfer(
+        {
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          destination: TEST_SOLANA_ADDRESSES.wallet2,
+          token: "SOL",
+          amount: "1.5",
+        },
+        {}
+      );
+
+      expect(res.status).toBe(200);
+      expect((await readTransferResponse(res)).data.transfer).toMatchObject({
+        status: "finalized",
+        amount: "1.5",
+        amounts: { basis: "debit", debit: "1.5", fee: "0", credit: "1.5", decimals: 9 },
+        amountVerification: { state: "verified", reason: "sdp_built_transfer_landed" },
+      });
+      expect(rpc.calls.filter((call) => call.method === "getMultipleAccounts")).toEqual([]);
+    });
+
+    it("moves a fee mint with TransferCheckedWithFee, grossing up a credit, in two reads", async () => {
+      await answerPyusd({ extensions: [transferFeeExtension(50, 1_000_000n)] });
+
+      const res = await postTransfer(
+        {
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          destination: TEST_SOLANA_ADDRESSES.wallet2,
+          token: "PYUSD",
+          amount: "0.995",
+          amountBasis: "credit",
+        },
+        {}
+      );
+
+      const text = await res.text();
+      expect(res.status, text).toBe(200);
+      expect((await readTransferResponse(new Response(text))).data.transfer).toMatchObject({
+        token: pyusd,
+        amount: "1",
+        amounts: { basis: "credit", debit: "1", fee: "0.005", credit: "0.995", decimals: 6 },
+        amountVerification: { state: "verified" },
+      });
+      const transfer = required(
+        lastSentInstructions().find(
+          (instruction) => instruction.programAddress === SPL_TOKEN_PROGRAMS["token-2022"]
+        )
+      );
+      expect(
+        getTransferCheckedWithFeeInstructionDataDecoder().decode(required(transfer.data))
+      ).toMatchObject({ amount: 1_000_000n, decimals: 6, fee: 5_000n });
+      expect(
+        rpc.calls
+          .map((call) => call.method)
+          .filter(
+            (method) => method === "getMultipleAccounts" || method === "getTokenAccountsByOwner"
+          )
+          .sort()
+      ).toEqual(["getMultipleAccounts", "getTokenAccountsByOwner"]);
+    });
+
+    it("refuses an amount the mint cannot hold before writing a row, so the key is not spent", async () => {
+      answerSourceUsdcTokenAccount(usdc);
+      const idempotencyKey = crypto.randomUUID();
+      const request = {
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        destination: TEST_SOLANA_ADDRESSES.wallet2,
+        token: "USDC",
+        amount: "1.0000001",
+      };
+
+      const refused = await postTransfer(request, { idempotencyKey });
+
+      expect(refused.status).toBe(400);
+      expect(await countTransferRows()).toBe(0);
+      expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
+      const retried = await postTransfer({ ...request, amount: "1" }, { idempotencyKey });
+      expect(retried.status).toBe(200);
+    });
+
+    it("refuses a paused mint before writing a row", async () => {
+      await answerPyusd({
+        extensions: [
+          {
+            __kind: "PausableConfig",
+            authority: address(TEST_SOLANA_ADDRESSES.wallet1),
+            paused: true,
+          },
+        ],
+      });
+
+      const refused = await postTransfer(
+        {
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          destination: TEST_SOLANA_ADDRESSES.wallet2,
+          token: "PYUSD",
+          amount: "1",
+        },
+        {}
+      );
+
+      expect(refused.status).toBe(400);
+      expect((await readErrorResponse(refused)).error).toMatchObject({
+        code: "BAD_REQUEST",
+        details: { reason: "paused" },
+      });
+      expect(await countTransferRows()).toBe(0);
+    });
+
+    it("sends the memo a memo-required destination needs, and refuses the transfer without one", async () => {
+      const destinationAccount = await answerPyusd({
+        extensions: [],
+        destination: {
+          extensions: [
+            { __kind: "ImmutableOwner" },
+            { __kind: "MemoTransfer", requireIncomingTransferMemos: true },
+          ],
+        },
+      });
+      const request = {
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        destination: TEST_SOLANA_ADDRESSES.wallet2,
+        token: "PYUSD",
+        amount: "1",
+      };
+
+      const refused = await postTransfer(request, {});
+      expect(refused.status).toBe(400);
+      expect((await readErrorResponse(refused)).error.details).toEqual({ reason: "memo_required" });
+      expect(await countTransferRows()).toBe(0);
+
+      const sent = await postTransfer({ ...request, memo: "invoice 42" }, {});
+      expect(sent.status).toBe(200);
+      const instructions = lastSentInstructions();
+      const transferIndex = instructions.findIndex(
+        (instruction) =>
+          instruction.programAddress === SPL_TOKEN_PROGRAMS["token-2022"] &&
+          instruction.accounts.includes(destinationAccount)
+      );
+      expect(instructions[transferIndex - 1]).toMatchObject({
+        programAddress: MEMO_PROGRAM_ADDRESS,
+        data: new TextEncoder().encode("invoice 42"),
+      });
+    });
+
+    it("refuses the wrapped SOL mint with a 400 before reading the chain", async () => {
+      const wrapped = await postTransfer(
+        {
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          destination: TEST_SOLANA_ADDRESSES.wallet2,
+          token: SOL_MINT,
+          amount: "1",
+        },
+        {}
+      );
+
+      // Rows and balances store native SOL under the wrapped SOL mint, so a wrapped SOL move
+      // would read back as native SOL: the caller names native SOL as "SOL".
+      expect(wrapped.status).toBe(400);
+      expect((await readErrorResponse(wrapped)).error.message).toBe(
+        'Payments does not move wrapped SOL: send token "SOL" to move native SOL'
+      );
+      expect(sendTransactionMock).not.toHaveBeenCalled();
+      expect(rpc.calls).toEqual([]);
+      expect(await countTransferRows()).toBe(0);
+    });
+
+    it("refuses a transfer into the source's own token account, which would move nothing", async () => {
+      const [ownAccount] = await findAssociatedTokenPda({
+        owner: address(TEST_SOLANA_ADDRESSES.wallet1),
+        mint: address(DEVNET_USDC_MINT),
+        tokenProgram: address(SPL_TOKEN_PROGRAMS["spl-token"]),
+      });
+      answerMovementAccounts(
+        rpc,
+        new Map([
+          [DEVNET_USDC_MINT, mintRpcAccount("spl-token", { decimals: 6, extensions: null })],
+        ])
+      );
+      rpc.answer(
+        "getTokenAccountsByOwner",
+        tokenAccountsByOwnerResult(1, [
+          {
+            pubkey: ownAccount,
+            mint: DEVNET_USDC_MINT,
+            amount: "1000000000",
+            decimals: 6,
+            uiAmountString: "1000",
+            state: "initialized",
+          },
+        ])
+      );
+
+      const res = await postTransfer(
+        {
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          destination: TEST_SOLANA_ADDRESSES.wallet1,
+          token: DEVNET_USDC_MINT,
+          amount: "1",
+        },
+        {}
+      );
+
+      expect(res.status).toBe(400);
+      expect((await readErrorResponse(res)).error.message).toBe(
+        "The destination is the source account: the transfer would move nothing"
+      );
+      expect(sendTransactionMock).not.toHaveBeenCalled();
+      expect(await countTransferRows()).toBe(0);
+    });
+
+    it("refuses native SOL sent to the source wallet itself", async () => {
+      const res = await postTransfer(
+        {
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          destination: TEST_SOLANA_ADDRESSES.wallet1,
+          token: "SOL",
+          amount: "1",
+        },
+        {}
+      );
+
+      expect(res.status).toBe(400);
+      expect((await readErrorResponse(res)).error.message).toBe(
+        "The destination is the source account: the transfer would move nothing"
+      );
+      expect(await countTransferRows()).toBe(0);
+    });
   });
 
   it("returns 400 ACCOUNT_FROZEN when the source SPL token account is frozen", async () => {

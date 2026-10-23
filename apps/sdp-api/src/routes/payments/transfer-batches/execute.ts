@@ -149,7 +149,7 @@ export async function executeChunk(params: {
       counterpartyId: recipientRows.length === 1 ? firstRecipient.counterparty_id : null,
       sourceAddress: resolved.sourceAddress,
       destinationAddress: recipientRows.length === 1 ? firstRecipient.destination_address : null,
-      token: resolved.tokenContext.token,
+      token: resolved.token,
       amount: chunk.amount,
       memo: null,
       type: "transfer_batch",

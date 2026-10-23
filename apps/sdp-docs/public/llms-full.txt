@@ -2273,7 +2273,7 @@ You provision custody wallets up front (see [Set Up Wallets](/docs/guides/setup-
 
 ## Tokens and token accounts
 
-Payments transfer **SPL tokens** — stablecoins, tokenized assets, or any mint your project supports. The `token` field on `POST /v1/payments/transfers` requires the on-chain **mint address** for SPL tokens; the literal string `SOL` is accepted as the native-SOL shorthand. Symbols like `USDC` are not resolved at request time. The `token` filter on `GET /v1/payments/transfers` does an **exact match** against the `Transfer.token` value as stored — API-created transfers store the mint you supplied (or `SOL`), while indexed/observed transfers run mint-to-symbol resolution and may store a resolved symbol (e.g. `USDC`). Filter using the same label you see on the response, or query without `token` and filter client-side. **Balance responses always attempt symbol resolution** and return the symbol whenever the mint is known — so a wallet holding USDC reports `USDC` rather than the mint string.
+Payments transfer **SPL tokens** — stablecoins, tokenized assets, or any mint your project supports. The `token` field on `POST /v1/payments/transfers` requires the on-chain **mint address** for SPL tokens; the literal string `SOL` is accepted as the native-SOL shorthand, and the only way to name native SOL: the wrapped SOL mint is refused with `400`. Symbols like `USDC` are not resolved at request time. The `token` filter on `GET /v1/payments/transfers` does an **exact match** against the `Transfer.token` value as stored — API-created transfers store the mint you supplied (or `SOL`), while indexed/observed transfers run mint-to-symbol resolution and may store a resolved symbol (e.g. `USDC`). Filter using the same label you see on the response, or query without `token` and filter client-side. **Balance responses always attempt symbol resolution** and return the symbol whenever the mint is known — so a wallet holding USDC reports `USDC` rather than the mint string.
 
 **Amounts on the wire are UI-unit decimal strings** — `"100.00"` means 100 tokens, regardless of the mint's decimal count. This applies to every amount SDP accepts. SDP handles the smallest-unit conversion when it builds the on-chain transaction. The one exception is wallet-balance responses, which return both a raw `amount` (smallest unit) **and** a `uiAmount` (decimal string) so balance consumers can pick whichever fits.
 
@@ -2363,7 +2363,7 @@ On the **Enter transfer details** form, select a source wallet from the dropdown
 Fill in:
 
 - **Source** — a wallet you control in SDP
-- **Amount** — human-readable units (e.g., `0.5`)
+- **Amount** — token units (e.g., `0.5`)
 - **Asset** — select from your deployed tokens
 - **Destination address** — any valid Solana wallet address
 - **Memo** — optional note recorded onchain
@@ -2380,12 +2380,14 @@ const body = {
   sourceCustodyWalletId: "cwlt_123",    // `id` from GET /v1/wallets
   destination: "7xKXz...9fGh",         // recipient wallet (owner) address
   token: "9aBCd...4eEf",               // onchain mint address
-  amount: "100.00",                    // human-readable units
+  amount: "100.00",                    // token units
   memo: "Payment for invoice #1234",
 };
 ```
 
 `token` is the token's on-chain mint address, not an SDP token ID. `destination` is the wallet pubkey — SDP derives the associated token account from it.
+
+`amount` is in token units: base units ÷ 10^decimals. It is never the display value a scaled or interest-bearing mint shows in wallets.
 
 </Tab>
 </Tabs>
@@ -2511,6 +2513,22 @@ curl https://api.solana.com/v1/payments/transfers/txn_abc123 \
 
 </HowItWorks>
 
+## Amounts and transfer fees
+
+A Token-2022 mint can charge a transfer fee, which the program withholds from what the destination receives. `amountBasis` says which side of the transfer `amount` fixes:
+
+- `debit` (the default): the source wallet sends `amount`; the destination receives `amount` less the fee.
+- `credit`: the destination receives `amount`; the source wallet sends `amount` plus the fee.
+
+SDP reads the mint's fee for each transfer and names it in the transaction, so a fee change before the transaction lands makes it fail instead of delivering less. The transfer record shows what moved:
+
+```json title="Transfer amounts"
+"amounts": { "basis": "credit", "debit": "100.502513", "fee": "0.502513", "credit": "100", "decimals": 6 },
+"amountVerification": { "state": "verified", "reason": "sdp_built_transfer_landed" }
+```
+
+`fee` is the token's transfer fee, not the network fee (`fee` on the transfer record, in lamports). `amountVerification` becomes `verified` when the transaction SDP signed lands. SDP refuses a transfer of a token whose mint is paused or non-transferable, that opens new accounts frozen, or whose wallets show a scaled or interest-bearing amount, with `400` before it records anything. Records created before these fields existed have no `amounts`.
+
 ## Deduplication
 
 `POST /v1/payments/transfers` requires an `Idempotency-Key`: a request without one returns `400 IDEMPOTENCY_KEY_REQUIRED`. Send one stable key per logical payment and reuse it for every retry. A retry with the same key and request returns the original transfer instead of sending a second one; reusing the key with a different payload, wallet or credential returns `422 IDEMPOTENCY_KEY_REUSED`, and a retry while the original is still running returns `409 IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`. A transfer that fails after it was recorded (such as `400 TRANSACTION_FAILED`) answers every same-key retry with the same error; send a new key to try again. A replay is a snapshot, so read the transfer with `GET` to see whether it has finalized. See [Idempotency](/docs/developing-with-sdp/idempotency) for the full contract.
@@ -2542,7 +2560,7 @@ Use a memo when you need a free-form correlation token that your backend already
 - **Customer references** — internal customer or account identifiers for support and reconciliation.
 - **Run identifiers** — a payout-batch ID shared across many outbound transfers in the same disbursement.
 
-Memos are stored by SDP. They are **not** automatically attached as a Solana memo-program instruction; if you need an on-chain memo that block explorers display, that has to be handled at the transaction level (see the trade-offs section below).
+Memos are stored by SDP. SDP sends a memo onchain, as a memo-program instruction directly before the transfer, only when the destination token account requires memos on incoming transfers (its `MemoTransfer` extension). A transfer to such an account without a `memo` is refused with `400` and `details.reason: "memo_required"`. In every other case the memo is not onchain; if you need an onchain memo that block explorers display, that has to be handled at the transaction level (see the trade-offs section below).
 
 ## API usage
 

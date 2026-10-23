@@ -1,15 +1,19 @@
 import { FeePaymentError } from "@sdp/fee-payment/port";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import type { getRecentBlockhash } from "@sdp/rpc/solana";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
+import { requestFingerprint } from "@/middleware/idempotency";
+import { canonicalizePaymentBody } from "@/routes/payments/fingerprint";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
-import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
+import { installClusterRpcResponder, tokenAccountsByOwnerResult } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import {
   createKoraAdapterMock,
+  DEVNET_USDC_MINT,
   getRecentBlockhashMock,
   installPaymentsRouteTestHooks,
   seedCachedKey,
@@ -29,10 +33,107 @@ import {
   readTransferRow,
 } from "@/test/helpers/payments-transfers";
 import { TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
+import { answerMovementAccounts, mintRpcAccount } from "@/test/helpers/token-movement";
 
 describe("Payments routes — transfer idempotency", () => {
   installPaymentsRouteTestHooks();
-  installClusterRpcStub();
+  const rpc = installClusterRpcResponder();
+
+  function answerUsdc() {
+    answerMovementAccounts(
+      rpc,
+      new Map([[DEVNET_USDC_MINT, mintRpcAccount("spl-token", { decimals: 6, extensions: null })]])
+    );
+    rpc.answer(
+      "getTokenAccountsByOwner",
+      tokenAccountsByOwnerResult(1, [
+        {
+          pubkey: TEST_SOLANA_ADDRESSES.wallet3,
+          mint: DEVNET_USDC_MINT,
+          amount: "1000000000",
+          decimals: 6,
+          uiAmountString: "1000",
+          state: "initialized",
+        },
+      ])
+    );
+  }
+
+  it("replays one intent under a symbol or its mint, a respelled amount and the default basis spelled out", async () => {
+    answerUsdc();
+    const idempotencyKey = crypto.randomUUID();
+    const request = {
+      sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+      destination: TEST_SOLANA_ADDRESSES.wallet2,
+      token: "USDC",
+      amount: "1",
+    };
+
+    const first = await postTransfer(request, { idempotencyKey });
+    expect(first.status).toBe(200);
+    const respelled = await postTransfer(
+      { ...request, token: DEVNET_USDC_MINT, amount: "1.000000", amountBasis: "debit" },
+      { idempotencyKey }
+    );
+
+    expect(respelled.status).toBe(200);
+    expect(respelled.headers.get("Idempotent-Replayed")).toBe("true");
+    expect((await readTransferResponse(respelled)).data.transfer.id).toBe(
+      (await readTransferResponse(first)).data.transfer.id
+    );
+    expect(sendTransactionMock).toHaveBeenCalledOnce();
+
+    const otherBasis = await postTransfer(
+      { ...request, amountBasis: "credit" },
+      { idempotencyKey }
+    );
+    expect(otherBasis.status).toBe(422);
+  });
+
+  it("still replays a key and a row stored under the fingerprint before ADR 0012", async () => {
+    answerUsdc();
+    const idempotencyKey = crypto.randomUUID();
+    const request = {
+      sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+      destination: TEST_SOLANA_ADDRESSES.wallet2,
+      token: "USDC",
+      amount: "1.0",
+    };
+    const first = await postTransfer(request, { idempotencyKey });
+    expect(first.status).toBe(200);
+    const transferId = (await readTransferResponse(first)).data.transfer.id;
+    // What the route stored before: the token as the mint it executed as, the amount canonical.
+    const before = requestFingerprint({
+      operation: "POST /v1/payments/transfers",
+      params: {},
+      query: {},
+      body: runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+        canonicalizePaymentBody(request)
+      ),
+    });
+    await getDb(env).execute(
+      "UPDATE idempotency_keys SET fingerprint = ? WHERE idempotency_key = ?",
+      [before, idempotencyKey]
+    );
+    await getDb(env).execute(
+      "UPDATE payment_transfers SET idempotency_fingerprint = ? WHERE id = ?",
+      [before, transferId]
+    );
+
+    const fromKey = await postTransfer(request, { idempotencyKey });
+    expect(fromKey.status).toBe(200);
+    expect(fromKey.headers.get("Idempotent-Replayed")).toBe("true");
+
+    await getDb(env).execute(
+      "UPDATE idempotency_keys SET expires_at = now() - interval '1 second' WHERE idempotency_key = ?",
+      [idempotencyKey]
+    );
+    const fromRow = await postTransfer(request, { idempotencyKey });
+    expect(fromRow.status).toBe(200);
+    expect((await readTransferResponse(fromRow)).data.transfer.id).toBe(transferId);
+    expect(sendTransactionMock).toHaveBeenCalledOnce();
+  });
+
   it("replays a transfer when the same Idempotency-Key + body is retried", async () => {
     const headers = {
       Authorization: `Bearer ${TEST_API_KEY.raw}`,
@@ -221,7 +322,7 @@ describe("Payments routes — transfer idempotency", () => {
     expect(await countTransferRows()).toBe(1);
   });
 
-  it("fingerprints the token as the mint it sends, so SOL and its mint are one transfer (APE SOLA9-695)", async () => {
+  it("fingerprints native SOL's spellings as one transfer, and refuses a new wrapped SOL request (APE SOLA9-695, ADR 0012)", async () => {
     const body = {
       sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
       destination: TEST_SOLANA_ADDRESSES.wallet2,
@@ -230,13 +331,46 @@ describe("Payments routes — transfer idempotency", () => {
 
     const first = await postTransfer({ ...body, token: "SOL" }, { idempotencyKey: "xfer-alias" });
     expect(first.status).toBe(200);
-    const aliased = await postTransfer(
-      { ...body, token: SOL_MINT },
-      { idempotencyKey: "xfer-alias" }
-    );
+    const aliased = await postTransfer({ ...body, token: "sol" }, { idempotencyKey: "xfer-alias" });
 
     expect(aliased.status).toBe(200);
     expect(aliased.headers.get("Idempotent-Replayed")).toBe("true");
+    // "SOL" moves native SOL; a new request for the wrapped SOL mint is refused before it moves.
+    const wrapped = await postTransfer(
+      { ...body, token: SOL_MINT },
+      { idempotencyKey: "xfer-wrapped" }
+    );
+    expect(wrapped.status).toBe(400);
+    expect(await countTransferRows()).toBe(1);
+  });
+
+  it("replays a native SOL transfer saved under the wrapped SOL mint before ADR 0012", async () => {
+    const idempotencyKey = crypto.randomUUID();
+    const body = {
+      sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+      destination: TEST_SOLANA_ADDRESSES.wallet2,
+      amount: "1",
+    };
+    const first = await postTransfer({ ...body, token: "SOL" }, { idempotencyKey });
+    expect(first.status).toBe(200);
+    // Before ADR 0012 the wrapped SOL mint named native SOL, and the fingerprint kept it.
+    const before = requestFingerprint({
+      operation: "POST /v1/payments/transfers",
+      params: {},
+      query: {},
+      body: runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+        canonicalizePaymentBody({ ...body, token: SOL_MINT })
+      ),
+    });
+    await getDb(env).execute(
+      "UPDATE idempotency_keys SET fingerprint = ? WHERE idempotency_key = ?",
+      [before, idempotencyKey]
+    );
+
+    const retry = await postTransfer({ ...body, token: SOL_MINT }, { idempotencyKey });
+
+    expect(retry.status).toBe(200);
+    expect(retry.headers.get("Idempotent-Replayed")).toBe("true");
     expect(await countTransferRows()).toBe(1);
   });
 

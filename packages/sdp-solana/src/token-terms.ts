@@ -651,9 +651,12 @@ function interestExp(rate: number, timespan: bigint): number {
 }
 
 /** The display string, or null where the program's f64 overflows. */
-function displayString(terms: TokenTerms, units: bigint, at: UnixTimestamp): string | null {
-  const { decimals } = terms;
-  const rule = terms.display;
+function displayString(
+  rule: DisplayRule,
+  decimals: number,
+  units: bigint,
+  at: UnixTimestamp
+): string | null {
   switch (rule.kind) {
     case "plain":
       return formatScaledInteger(units, decimals);
@@ -714,13 +717,28 @@ function compareDisplayValues(left: string, right: string): number {
  * @throws {AmountError} When the program's f64 math overflows for this amount.
  */
 export function toDisplay(terms: TokenTerms, units: BaseUnits, at: UnixTimestamp): DisplayAmount {
-  const value = displayString(terms, units, at);
+  return displayUnder(terms.display, terms.decimals, units, at);
+}
+
+/**
+ * {@link toDisplay} for a display rule recorded with a movement, such as a
+ * movement leg's, where the rest of the terms are not at hand.
+ *
+ * @throws {AmountError} When the program's f64 math overflows for this amount.
+ */
+export function displayUnder(
+  rule: DisplayRule,
+  decimals: number,
+  units: BaseUnits,
+  at: UnixTimestamp
+): DisplayAmount {
+  const value = displayString(rule, decimals, units, at);
   if (value === null) {
     throw new AmountError("Display amount is out of range");
   }
   // SAFETY: the value comes from the mint's own display rule at `at`, which
   // is what the brand promises.
-  return { value, rule: terms.display, asOf: at } as DisplayAmount;
+  return { value, rule, asOf: at } as DisplayAmount;
 }
 
 /**
@@ -745,7 +763,7 @@ export function fromDisplay(
   }
   /** -1, 0 or 1 as the display of `units` is below, at or above the target; overflow is above. */
   const compareShown = (units: bigint) => {
-    const shown = displayString(terms, units, at);
+    const shown = displayString(terms.display, terms.decimals, units, at);
     return shown === null ? 1 : compareDisplayValues(shown, target);
   };
 

@@ -1,6 +1,11 @@
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { assertValidAddress } from "@sdp/solana/address";
 import { isDecimalString } from "@sdp/solana/amount";
+import {
+  type AssetRequest,
+  AssetResolutionError,
+  resolveAssetRequest,
+} from "@sdp/solana/asset-ref";
 import { type CryptoRailId, getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import {
   isWellKnownTokenSymbol,
@@ -16,7 +21,10 @@ export interface OutboundPaymentOperation {
   sourceWallet: CustodyWallet;
   sourceAddress: Address;
   destinationAddress: Address;
+  /** The token as transfer rows store it: a mint, with native SOL as the wrapped SOL mint. */
   token: string;
+  /** What the movement moves: "SOL" is native SOL; the wrapped SOL mint is refused. */
+  asset: AssetRequest;
   amount: string;
 }
 
@@ -96,9 +104,10 @@ export function isNativePaymentToken(token: string): boolean {
  * the open scope's cluster mint. A well-known mint address must be deployed on
  * that cluster; any other mint passes through byte-exact, since base58 is
  * case-sensitive. Native SOL canonicalizes to the
- * wrapped SOL mint so `token` values compare uniformly — dispatch between
- * native and SPL paths goes through {@link isNativePaymentToken}, never string
- * equality against the mint.
+ * wrapped SOL mint so stored `token` values compare uniformly. It names what a
+ * row stores, never what moves: transfers and batches move the asset
+ * {@link resolvePaymentAsset} resolves, which refuses the wrapped SOL mint;
+ * recurring payments still dispatch through {@link isNativePaymentToken}.
  *
  * @param token - A native SOL alias, a well-known token symbol, or a mint address.
  * @returns The canonical mint address for `token` on the scope's cluster.
@@ -125,6 +134,52 @@ export function normalizePaymentToken(token: string): string {
     throw badRequest(`${symbol} is not available on ${cluster}`);
   }
   return mint;
+}
+
+/**
+ * The asset a Payments request's token names on the open scope's cluster
+ * (ADR 0012): "SOL" is native SOL, a catalogue symbol is the cluster's mint,
+ * and the wrapped SOL mint is wrapped SOL. Authorization and fingerprints read
+ * it this way, so a retry of a request saved before the wrapped SOL refusal
+ * still replays; what moves goes through {@link refuseWrappedSol}.
+ *
+ * @param token - A symbol or a mint address.
+ * @returns The asset; an uncatalogued mint stays unread until its terms are read.
+ * @throws AppError (400) when the token names no asset on the cluster.
+ */
+export function paymentAssetOf(token: string): AssetRequest {
+  try {
+    return resolveAssetRequest(token, currentClusterScope().cluster);
+  } catch (error) {
+    if (error instanceof AssetResolutionError) {
+      throw badRequest(error.message);
+    }
+    throw error;
+  }
+}
+
+/**
+ * Refuses the wrapped SOL mint: rows and balances store native SOL under that
+ * mint, so a wrapped SOL move would read back as native.
+ *
+ * @throws AppError (400) for the wrapped SOL mint.
+ */
+export function refuseWrappedSol(asset: AssetRequest): void {
+  if (asset.kind !== "native" && asset.mint === SOL_MINT) {
+    throw badRequest('Payments does not move wrapped SOL: send token "SOL" to move native SOL');
+  }
+}
+
+/**
+ * {@link paymentAssetOf} for a request that moves it, refusing wrapped SOL.
+ *
+ * @throws AppError (400) when the token names no asset on the cluster, or is
+ * the wrapped SOL mint.
+ */
+export function resolvePaymentAsset(token: string): AssetRequest {
+  const asset = paymentAssetOf(token);
+  refuseWrappedSol(asset);
+  return asset;
 }
 
 /**
@@ -176,6 +231,8 @@ export function resolveOutboundPaymentOperation(input: {
     sourceAddress: assertValidAddress(sourceWallet.publicKey, "source"),
     destinationAddress: assertValidAddress(input.destination, "destination"),
     token: normalizePaymentToken(input.token),
+    // Resolved, not refused: authorization runs before a replay (planTokenMovement refuses).
+    asset: paymentAssetOf(input.token),
     amount,
   };
 }

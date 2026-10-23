@@ -1,5 +1,12 @@
+import { formatDecimalAmount } from "@sdp/solana/amount";
+import {
+  type AmountVerificationVerdict,
+  BUILT_MOVEMENT_VERDICTS,
+} from "@sdp/types/token-movements";
+
 import type { DatabaseClient as AppDb, DatabaseExecutor } from "@/db/client";
 import { internalError } from "@/lib/errors";
+import { createTenantScope } from "@/lib/tenant-scope";
 import { parseNullableCustodyWalletId } from "./payment-execution-identity";
 import {
   type CreatePaymentTransferBatchInput,
@@ -27,6 +34,14 @@ import {
   type UpsertPaymentTransferBatchInput,
   type UpsertPaymentTransferRecipientInput,
 } from "./payment-transfer-batches.repository";
+import {
+  createPostgresTokenMovementLegsRepository,
+  legVerdictStatement,
+  ownWalletAmount,
+} from "./token-movement-legs.repository";
+
+/** The recipient status of a recipient whose movement failed. */
+const BUILT_MOVEMENT_FAILED_STATUS = "failed" satisfies PaymentTransferRecipientRow["status"];
 
 function mapPaymentTransferBatchRow(row: Record<string, unknown>): PaymentTransferBatchRow {
   return {
@@ -193,7 +208,7 @@ async function insertTransferBatch(
 
 async function insertTransferRecipients(
   db: DatabaseExecutor,
-  inputs: CreatePaymentTransferRecipientInput[]
+  inputs: (CreatePaymentTransferRecipientInput & { id: string })[]
 ): Promise<PaymentTransferRecipientRow[]> {
   if (inputs.length === 0) {
     return [];
@@ -201,7 +216,7 @@ async function insertTransferRecipients(
 
   const rowPlaceholder = `(${Array(12).fill("?").join(", ")})`;
   const values = inputs.flatMap((input) => [
-    generatePaymentTransferRecipientId(),
+    input.id,
     input.batchId,
     input.organizationId,
     input.projectId,
@@ -239,7 +254,49 @@ async function insertTransferRecipients(
   if (result.results.length !== inputs.length) {
     throw internalError("payment_transfer_recipients bulk INSERT returned an unexpected count");
   }
-  return result.results.map(mapPaymentTransferRecipientRow);
+  const byId = new Map(
+    result.results.map((row) => {
+      const recipient = mapPaymentTransferRecipientRow(row);
+      return [recipient.id, recipient];
+    })
+  );
+  return inputs.map((input) => {
+    const recipient = byId.get(input.id);
+    if (recipient === undefined) {
+      throw internalError(`payment_transfer_recipients INSERT did not return ${input.id}`);
+    }
+    return recipient;
+  });
+}
+
+/** Marks the pending legs of `recipientIds` with a verdict, in the caller's transaction. */
+async function settleRecipientLegs(
+  db: DatabaseExecutor,
+  input: {
+    organizationId: string;
+    projectId: string;
+    recipientIds: readonly string[];
+    verdict: AmountVerificationVerdict;
+    updatedAt: string;
+  }
+): Promise<void> {
+  if (input.recipientIds.length === 0) {
+    return;
+  }
+  const statement = legVerdictStatement({
+    source: "settled_recipients",
+    ownerColumn: "payment_transfer_recipient_id",
+    verdict: input.verdict,
+    updatedAt: input.updatedAt,
+  });
+  await db.execute(
+    `WITH settled_recipients AS (
+       SELECT id, organization_id FROM payment_transfer_recipients
+        WHERE organization_id = ? AND project_id = ? AND id = ANY(?::text[])
+     ), ${statement.cte}
+     SELECT 1`,
+    [input.organizationId, input.projectId, [...input.recipientIds], ...statement.values]
+  );
 }
 
 export function createPostgresPaymentTransferBatchesRepository(
@@ -247,11 +304,34 @@ export function createPostgresPaymentTransferBatchesRepository(
 ): PaymentTransferBatchesRepository {
   return {
     async createTransferBatchWithRecipients(input: CreatePaymentTransferBatchWithRecipientsInput) {
+      const [first] = input.recipients;
+      const totalDebit = input.recipients.reduce(
+        (total, recipient) => total + recipient.quote.debit,
+        0n
+      );
       return db.transaction(async (tx) => {
-        const batch = await insertTransferBatch(tx, input.batch);
-        const recipients = await insertTransferRecipients(
+        const batch = await insertTransferBatch(tx, {
+          ...input.batch,
+          // A batch with no recipient has no total; the API refuses one.
+          totalAmount:
+            first === undefined ? null : formatDecimalAmount(totalDebit, first.quote.decimals),
+        });
+        const quoted = input.recipients.map(({ quote, ...recipient }) => ({
+          ...recipient,
+          id: generatePaymentTransferRecipientId(),
+          batchId: batch.id,
+          amount: ownWalletAmount(quote),
+          quote,
+        }));
+        const recipients = await insertTransferRecipients(tx, quoted);
+        await createPostgresTokenMovementLegsRepository(
           tx,
-          input.recipients.map((recipient) => ({ ...recipient, batchId: batch.id }))
+          createTenantScope({ organizationId: batch.organization_id, projectId: batch.project_id })
+        ).insertLegs(
+          quoted.map((recipient) => ({
+            owner: { kind: "batch_recipient", recipientId: recipient.id },
+            quote: recipient.quote,
+          }))
         );
         return { batch, recipients };
       });
@@ -638,17 +718,33 @@ export function createPostgresPaymentTransferBatchesRepository(
         extraValues: input.recipientIds,
       });
 
+      // Recipients that fail before any chunk carried them moved nothing:
+      // their legs take that verdict in the same statement, so the two writes
+      // commit or roll back together.
+      const legs =
+        input.status === BUILT_MOVEMENT_FAILED_STATUS && input.transferId === null
+          ? legVerdictStatement({
+              source: "updated_recipients",
+              ownerColumn: "payment_transfer_recipient_id",
+              verdict: BUILT_MOVEMENT_VERDICTS.failed,
+              updatedAt: new Date().toISOString(),
+            })
+          : null;
+      const legValues = legs === null ? [] : legs.values;
       const result = await db
         .prepare(
-          `UPDATE payment_transfer_recipients
-             SET transfer_id = ?,
-                 status = ?,
-                 error = ?,
-                 updated_at = sdp_iso_now()
-           WHERE ${scope.where}
-           RETURNING *`
+          `WITH updated_recipients AS (
+             UPDATE payment_transfer_recipients
+                SET transfer_id = ?,
+                    status = ?,
+                    error = ?,
+                    updated_at = sdp_iso_now()
+              WHERE ${scope.where}
+              RETURNING *
+           )${legs === null ? "" : `, ${legs.cte}`}
+           SELECT * FROM updated_recipients`
         )
-        .bind(input.transferId, input.status, input.error, ...scope.values)
+        .bind(input.transferId, input.status, input.error, ...scope.values, ...legValues)
         .all<Record<string, unknown>>();
 
       return result.results.map(mapPaymentTransferRecipientRow);
@@ -662,13 +758,24 @@ export function createPostgresPaymentTransferBatchesRepository(
         extraValues: [input.recipientId],
       });
 
+      // The recipient's leg is archived with it, in the same statement.
       const row = await db
         .prepare(
-          `UPDATE payment_transfer_recipients
-              SET status = 'archived',
-                  updated_at = sdp_iso_now()
-            WHERE ${scope.where}
-            RETURNING *`
+          `WITH archived_recipient AS (
+             UPDATE payment_transfer_recipients
+                SET status = 'archived',
+                    updated_at = sdp_iso_now()
+              WHERE ${scope.where}
+              RETURNING *
+           ), archived_legs AS (
+             UPDATE token_movement_legs leg
+                SET status = 'archived', updated_at = sdp_iso_now()
+               FROM archived_recipient owner_row
+              WHERE leg.payment_transfer_recipient_id = owner_row.id
+                AND leg.organization_id = owner_row.organization_id
+                AND leg.status <> 'archived'
+           )
+           SELECT * FROM archived_recipient`
         )
         .bind(...scope.values)
         .first<Record<string, unknown>>();
@@ -793,11 +900,18 @@ export function createPostgresPaymentTransferBatchesRepository(
             input.projectId,
             input.transferId
           )
-          .all<{ batch_id: string }>();
+          .all<{ id: string; batch_id: string }>();
 
         if (recipients.results.length === 0) {
           throw internalError("Transfer batch recipients not found for settlement");
         }
+        await settleRecipientLegs(tx, {
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          recipientIds: recipients.results.map((recipient) => recipient.id),
+          verdict: BUILT_MOVEMENT_VERDICTS[input.transferStatus],
+          updatedAt: input.updatedAt,
+        });
 
         await recomputeBatchStatusInTransaction(tx, {
           batchId: recipients.results[0].batch_id,
@@ -847,7 +961,7 @@ export function createPostgresPaymentTransferBatchesRepository(
           )
           .bind(input.batchId, input.organizationId, input.projectId)
           .first<{ id: string }>();
-        await tx
+        const failed = await tx
           .prepare(
             `UPDATE payment_transfer_recipients
                 SET status = 'failed', error = ?, updated_at = sdp_iso_now()
@@ -855,10 +969,18 @@ export function createPostgresPaymentTransferBatchesRepository(
                 AND organization_id = ?
                 AND project_id = ?
                 AND status = 'pending'
-                AND transfer_id IS NULL`
+                AND transfer_id IS NULL
+              RETURNING id`
           )
           .bind(input.error, input.batchId, input.organizationId, input.projectId)
-          .run();
+          .all<{ id: string }>();
+        await settleRecipientLegs(tx, {
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          recipientIds: failed.results.map((recipient) => recipient.id),
+          verdict: BUILT_MOVEMENT_VERDICTS.failed,
+          updatedAt: new Date().toISOString(),
+        });
         return recomputeBatchStatusInTransaction(tx, input);
       });
     },

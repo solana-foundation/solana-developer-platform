@@ -1,3 +1,4 @@
+import type { MovementQuote } from "@sdp/solana/movement-quote";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import {
   ONCHAIN_TRANSFER_IN_FLIGHT_STATUSES,
@@ -167,9 +168,19 @@ export interface UpsertPaymentTransferRecipientInput extends CreatePaymentTransf
   recipientId?: string;
 }
 
+/** A recipient SDP quoted: its `amount` and its leg are written from the quote. */
+export interface QuotedTransferRecipientInput
+  extends Omit<CreatePaymentTransferRecipientInput, "batchId" | "amount"> {
+  quote: MovementQuote;
+}
+
+/**
+ * A batch, its recipients and their legs, written in one transaction. The
+ * batch's `total_amount` is the sum of the recipients' debits.
+ */
 export interface CreatePaymentTransferBatchWithRecipientsInput {
-  batch: CreatePaymentTransferBatchInput;
-  recipients: Omit<CreatePaymentTransferRecipientInput, "batchId">[];
+  batch: Omit<CreatePaymentTransferBatchInput, "totalAmount">;
+  recipients: QuotedTransferRecipientInput[];
 }
 
 export interface CreatePaymentTransferBatchWithRecipientsResult {
@@ -224,6 +235,10 @@ export interface UpdatePaymentTransferRecipientsStatusInput {
   error: string | null;
 }
 
+/**
+ * Settles a chunk transfer, its recipients and their legs together: a landed
+ * chunk verifies its recipients' legs, a failed one marks them not executed.
+ */
 export interface SettlePaymentTransferBatchInput {
   transferId: string;
   /** Timeout CAS: leave a signed or started chunk and its recipients unchanged. */
