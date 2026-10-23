@@ -34,7 +34,6 @@ import {
 import { app } from "@/index";
 import { AppError } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
-import { errorResponseSchema } from "@/openapi/schemas/base";
 import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
 import { rootLogger } from "@/runtime/logger";
 import { SigningService } from "@/services/domain/signing.service";
@@ -2058,7 +2057,21 @@ describe("payment transfer batches", () => {
     }
   );
 
-  it("moves exact base units on a Token-2022 mint", async () => {
+  it.each([
+    { kind: "plain", extensions: null },
+    {
+      // ADR 0012: an amount is in token units, so the multiplier changes only what a wallet
+      // displays, never what moves (main refused these mints rather than convert lossily).
+      kind: "scaled UI amount",
+      extensions: [
+        scaledUiAmountConfig({
+          multiplier: 2,
+          newMultiplier: 4,
+          newMultiplierEffectiveTimestamp: 1_800_000_000n,
+        }),
+      ],
+    },
+  ])("moves exact base units on a $kind Token-2022 mint", async ({ extensions }) => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerForCustodyWalletMock.mockResolvedValueOnce(sourceSigner);
@@ -2066,7 +2079,7 @@ describe("payment transfer batches", () => {
     answerSourceTokenAccount(mint, "token-2022");
     answerMovementAccounts(
       rpc,
-      new Map([[mint, mintRpcAccount("token-2022", { decimals: 6, extensions: null })]])
+      new Map([[mint, mintRpcAccount("token-2022", { decimals: 6, extensions })]])
     );
     const signingOutcomeMock = vi
       .fn<(transactionBytes: Uint8Array) => Promise<string>>()
@@ -2124,63 +2137,6 @@ describe("payment transfer batches", () => {
       { destination_address: TEST_SOLANA_ADDRESSES.wallet2, amount: "10", total_amount: "12.5" },
       { destination_address: TEST_SOLANA_ADDRESSES.wallet3, amount: "2.5", total_amount: "12.5" },
     ]);
-  });
-
-  it("refuses a scaled UI amount mint with a 400 before recording the batch", async () => {
-    const mint = syntheticAddress(21);
-    answerSourceTokenAccount(mint, "token-2022");
-    answerMovementAccounts(
-      rpc,
-      new Map([
-        [
-          mint,
-          mintRpcAccount("token-2022", {
-            decimals: 6,
-            extensions: [
-              scaledUiAmountConfig({
-                multiplier: 2,
-                newMultiplier: 4,
-                newMultiplierEffectiveTimestamp: 1_800_000_000n,
-              }),
-            ],
-          }),
-        ],
-      ])
-    );
-    const counterpartyId = await seedCounterparty("batch_scaled_counterparty");
-    const [counterpartyAccountId] = await seedCryptoWalletCounterpartyAccounts(counterpartyId, [
-      TEST_SOLANA_ADDRESSES.wallet2,
-    ]);
-
-    const res = await app.request(
-      "/v1/payments/transfer-batches",
-      {
-        method: "POST",
-        headers: {
-          "Idempotency-Key": crypto.randomUUID(),
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-        },
-        body: JSON.stringify({
-          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-          token: mint,
-          recipients: [{ counterpartyId, counterpartyAccountId, amount: "10" }],
-          options: { preflight: false },
-        }),
-      },
-      env
-    );
-
-    expect(res.status).toBe(400);
-    expect(errorResponseSchema.parse(await res.json()).error).toMatchObject({
-      message:
-        "Payments does not move tokens whose wallets show a scaled or interest-bearing amount yet",
-      details: { reason: "scaled_display" },
-    });
-    const count = await getDb(env)
-      .prepare("SELECT COUNT(*)::int AS count FROM payment_transfer_batches")
-      .first<{ count: number }>();
-    expect(count).toEqual({ count: 0 });
   });
 
   it("builds a Production project's USDC batch on mainnet-beta with the mainnet mint", async () => {

@@ -253,6 +253,9 @@ them in one place, not adding special cases to every flow.
   payment request form let a scaled or interest-bearing mint's amount be typed in display units,
   quote it, show the token amount, fee and credit, and submit token units; a fee mint shows its
   fee and credit preview.
+- **Display mints move (PR 5).** With balances and entry in token and display units, the
+  builder's `scaled_display` refusal (PR 2) is lifted: transfers, batches, off-ramp funding,
+  /pay and recurring mandates move interest-bearing and scaled mints in token units.
 - **Unified view (PR 5).** A Payments row's amount comes from its legs when it has them (outbound:
   the quoted debit; inbound and off-ramp: the credit; a batch chunk: its recipients' debits);
   a row without a leg keeps its stored text. A verified on-ramp delivery's transfer `amount` is

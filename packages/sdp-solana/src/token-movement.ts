@@ -84,7 +84,6 @@ export const TOKEN_MOVEMENT_REFUSALS = {
   hookUnresolved: "hook_unresolved",
   memoRequired: "memo_required",
   nothingCredited: "nothing_credited",
-  scaledDisplay: "scaled_display",
   feeAboveTolerance: "fee_above_tolerance",
   /** An existing destination token account is frozen. */
   destinationFrozen: "destination_frozen",
@@ -268,22 +267,6 @@ function displayRule(engine: string): CapabilityRule {
   };
 }
 
-/**
- * A scaled or interest-bearing mint, which Payments refuses until PR 5:
- * balances and the dashboard show its display amount until then, so a user
- * would type the displayed amount and move another.
- */
-const scaledDisplay: CapabilityRule = (terms) => {
-  const shown = displayRule("Payments")(terms);
-  return shown === null
-    ? null
-    : notice(
-        TOKEN_MOVEMENT_REFUSALS.scaledDisplay,
-        shown.extension,
-        "Payments does not move tokens whose wallets show a scaled or interest-bearing amount yet"
-      );
-};
-
 /** A hook program that runs on every transfer, for an engine that cannot pass its accounts. */
 function hookSet(engine: string): CapabilityRule {
   return (terms) =>
@@ -320,7 +303,7 @@ function hookSettable(engine: string): CapabilityRule {
  * | State | builder | recurring | issuance | issuance_seize | dvp | private_channels | earn |
  * |---|---|---|---|---|---|---|---|
  * | Transfer fee | yes (`TransferCheckedWithFee`) | yes, within the mandate's tolerance (`recurringPullSupport`) | n/a | yes: the seized amount is the debit, the fee is withheld in the destination | program refuses | refused (SPC cannot encode `WithFee`) | refused once a fee is charged; a 0-bps config moves |
- * | Scaled / interest | refused until PR 5 (`scaled_display`) | refused until PR 5 | yes | yes | program refuses | yes | yes |
+ * | Scaled / interest | yes (display only) | yes | yes | yes | program refuses | yes | yes |
  * | Hook | yes once its accounts resolve | yes | n/a | refused when a program is set | refused when it runs or can be set | refused when it runs or can be set | refused when a program is set |
  * | Paused | refused | held until unpaused | refused | refused | refused | refused | refused |
  * | Non-transferable | refused | refused | yes | refused | program refuses | refused | refused |
@@ -335,8 +318,8 @@ function hookSettable(engine: string): CapabilityRule {
  * `validate_mint_extensions` plus what SDP cannot settle, cancel or reclaim.
  */
 const CAPABILITY_ROWS = {
-  builder: [nonTransferable, paused, unthawable, scaledDisplay],
-  recurring: [nonTransferable, frozenByDefault("a recurring pull"), scaledDisplay, pausedHolds],
+  builder: [nonTransferable, paused, unthawable],
+  recurring: [nonTransferable, frozenByDefault("a recurring pull"), pausedHolds],
   issuance: [paused],
   issuance_seize: [nonTransferable, paused, hookSet("Mosaic's force transfer")],
   dvp: [

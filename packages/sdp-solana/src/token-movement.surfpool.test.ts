@@ -9,10 +9,9 @@
  *
  * - every movable profile debits, withholds and credits exactly the quote;
  * - a stale fee fails on chain instead of settling short;
- * - paused, scaled, interest-bearing and unresolved-hook mints are refused
- *   first, and so is a new account of a frozen-by-default mint whose freeze
- *   authority is no Token ACL config; an existing account its freeze
- *   authority thawed moves;
+ * - paused and unresolved-hook mints are refused first, and so is a new
+ *   account of a frozen-by-default mint whose freeze authority is no Token
+ *   ACL config; an existing account its freeze authority thawed moves;
  * - a destination address someone sent lamports to before it was opened
  *   still opens;
  * - a memo-required destination gets its memo, which the program demands;
@@ -206,7 +205,6 @@ describe("The token movement builder on a surfnet mint matrix", { skip: !ENABLED
       ["feeCapped", "0.995", "credit"],
       ["feeCapped", "250", "credit"],
       ["feeCapped", "1000", "debit"],
-      // Payments refuses these (support() below) until PR 5; the builder still moves them exactly.
       ["scaled", "3", "debit"],
       ["scaledSwitch", "3", "credit"],
       ["interestPositive", "1.25", "debit"],
@@ -238,23 +236,10 @@ describe("The token movement builder on a surfnet mint matrix", { skip: !ENABLED
     }
   });
 
-  it("refuses paused, scaled, interest-bearing and unresolved-hook mints, and an unthawable new frozen account, before building", async () => {
+  it("refuses paused and unresolved-hook mints, and an unthawable new frozen account, before building", async () => {
     await pauseMint(chain, matrix.paused);
     const paused = support(await readMatrixTerms(chain, matrix.paused), "builder");
     assert.equal(paused.supported === false && paused.refusal, TOKEN_MOVEMENT_REFUSALS.paused);
-    for (const profile of [
-      "scaled",
-      "scaledSwitch",
-      "interestPositive",
-      "interestNegative",
-    ] as const) {
-      const decision = support(await readMatrixTerms(chain, matrix[profile]), "builder");
-      assert.equal(
-        decision.supported === false && decision.refusal,
-        TOKEN_MOVEMENT_REFUSALS.scaledDisplay,
-        profile
-      );
-    }
 
     // The matrix's frozen-by-default mint has a plain freeze authority, so a
     // new account cannot get a Token ACL thaw; an account it thawed moves.

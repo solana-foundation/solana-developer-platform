@@ -23,7 +23,10 @@ import {
   getTransferSolInstructionDataDecoder,
   SYSTEM_PROGRAM_ADDRESS,
 } from "@solana-program/system";
-import { getTransferCheckedWithFeeInstructionDataDecoder } from "@solana-program/token-2022";
+import {
+  getTransferCheckedInstructionDataDecoder,
+  getTransferCheckedWithFeeInstructionDataDecoder,
+} from "@solana-program/token-2022";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -789,9 +792,9 @@ describe("Public payment request routes", () => {
       });
     });
 
-    it("refuses a request in a scaled UI amount mint before claiming, until wallets show token units", async () => {
+    it("pays a request in a scaled UI amount mint in token units: the multiplier changes only the display", async () => {
       stubSponsorship();
-      // Balances show the scaled amount until PR 5, so a payer would read one amount and pay another.
+      // Main refused these mints at /pay rather than convert lossily; an amount is token units now.
       const mint = syntheticAddress(355);
       answerMovementAccounts(
         rpc,
@@ -841,14 +844,17 @@ describe("Public payment request routes", () => {
       });
 
       const response = await postTransaction(request.public_token);
-
-      expect(response.status).toBe(400);
-      await expect(response.json()).resolves.toMatchObject({
-        error: { code: "BAD_REQUEST", details: { reason: "scaled_display" } },
-      });
+      const text = await response.text();
+      expect(response.status, text).toBe(200);
+      const body = sponsoredTransactionResponseSchema.parse(JSON.parse(text));
+      const transfer = required(
+        instructionsOf(body.transaction).find(
+          (instruction) => instruction.programAddress === SPL_TOKEN_PROGRAMS["token-2022"]
+        )
+      );
       expect(
-        await createSystemPaymentRequestsRepository(env).getSponsoredTransactionClaim(request.id)
-      ).toBeNull();
+        getTransferCheckedInstructionDataDecoder().decode(required(transfer.data))
+      ).toMatchObject({ amount: 1_500_000n, decimals: 6 });
     });
 
     it("quotes a fee mint's request as a credit: the payer pays the fee, the message shows it", async () => {

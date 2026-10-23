@@ -48,8 +48,6 @@ export const TOKEN_MOVEMENT_REFUSAL_REASONS = [
   "hook_unresolved",
   "memo_required",
   "nothing_credited",
-  /** Wallets show a scaled or interest-bearing amount: Payments refuses the mint until PR 5. */
-  "scaled_display",
   /** A recurring pull's transfer fee is above the fee tolerance its mandate recorded. */
   "fee_above_tolerance",
   /** An existing destination token account is frozen. */
