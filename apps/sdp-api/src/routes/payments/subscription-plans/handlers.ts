@@ -43,7 +43,7 @@ import {
 } from "./schemas";
 
 function mapPlan(row: PaymentSubscriptionPlanRow): PaymentSubscriptionPlan {
-  return {
+  const plan: PaymentSubscriptionPlan = {
     id: row.id,
     organizationId: row.organization_id,
     projectId: row.project_id,
@@ -59,11 +59,14 @@ function mapPlan(row: PaymentSubscriptionPlanRow): PaymentSubscriptionPlan {
     pullerAddress: row.puller_address,
     metadataUri: row.metadata_uri,
     status: row.status,
-    ...(row.mandate === null ? {} : { amounts: mandateAmounts(row.mandate) }),
     createdBy: row.created_by,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+  if (row.mandate !== null) {
+    plan.amounts = mandateAmounts(row.mandate);
+  }
+  return plan;
 }
 
 async function persistPlanPda(

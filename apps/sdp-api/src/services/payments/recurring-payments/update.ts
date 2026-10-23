@@ -674,9 +674,9 @@ async function updatePendingRecurringPaymentRow(
     destinationAddress: input.resolved.destinationAddress,
     ...(changedDestinationOrToken ? { destinationTokenAccount: null } : {}),
     token: input.resolved.token,
-    ...(input.mandate === undefined
-      ? {}
-      : { amount: input.resolved.amount, mandate: input.mandate }),
+    // A new mandate replaces the amount with it; without one both stay as stored.
+    amount: input.mandate === undefined ? undefined : input.resolved.amount,
+    mandate: input.mandate,
     periodHours: input.resolved.periodHours,
     firstCollectionAt: input.resolved.firstCollectionAt,
     metadataUri: input.resolved.metadataUri,

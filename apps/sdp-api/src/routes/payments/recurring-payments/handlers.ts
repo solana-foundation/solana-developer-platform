@@ -67,7 +67,7 @@ import {
 } from "./schemas";
 
 function mapRecurringPayment(row: PaymentRecurringPaymentRow): PaymentRecurringPayment {
-  return {
+  const recurringPayment: PaymentRecurringPayment = {
     id: row.id,
     organizationId: row.organization_id,
     projectId: row.project_id,
@@ -93,11 +93,14 @@ function mapRecurringPayment(row: PaymentRecurringPaymentRow): PaymentRecurringP
     authorizationSignature: row.authorization_signature,
     status: row.status,
     metadataUri: row.metadata_uri,
-    ...(row.mandate === null ? {} : { amounts: mandateAmounts(row.mandate) }),
     createdBy: row.created_by,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+  if (row.mandate !== null) {
+    recurringPayment.amounts = mandateAmounts(row.mandate);
+  }
+  return recurringPayment;
 }
 
 /**
