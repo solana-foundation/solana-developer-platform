@@ -285,6 +285,16 @@ describe("scrubTelemetryString — prefixed keys in a serialized body", () => {
     assert.ok(publicSeeds.includes('"seeds":["owner","aux"]'));
   });
 
+  it("keeps seed exact-only in serialized fields and assignments", () => {
+    const body =
+      '{"pda_seed":"public-derivation","pda-seed":"public-derivation","seeds":["owner","aux"]}';
+    const assignment = "pda_seed=public-derivation; pda-seed=public-derivation";
+
+    assert.equal(scrubTelemetryString(body), body);
+    assert.equal(scrubTelemetryString(assignment), assignment);
+    assert.equal(scrubTelemetryString('{"seed":"recovery phrase"}'), '{"seed":"[REDACTED]"}');
+  });
+
   it("keeps a key that merely contains a denied name as a prefix", () => {
     // `tokenName` ends in `name`, which is deliberately never denied, and the
     // prefix group must not reach across the `:` into the next field either.

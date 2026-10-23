@@ -24,15 +24,18 @@ import { isCredentialKey, REDACTED } from "./policy";
 // `quotedValueEnd` finds where the value closes. A quote token may carry
 // backslashes (a body serialized more than once), and the lookbehind starts a
 // token only where its backslash run starts, so a long run is scanned once.
+// Bare `seed` sits outside the suffix group: public PDA keys such as
+// `pda_seed` are not credentials under the object-key policy.
 const SENSITIVE_JSON_FIELD_START =
-  /(?<!\\)(\\*["'])((?:[A-Za-z0-9]+[-_ ])*(?:app[-_ ]?secret|api[-_ ]?secret|api[-_ ]?key|client[-_ ]?secret|wallet[-_ ]?secret|signing[-_ ]?secret|private[-_ ]?key|secret[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|id[-_ ]?token|authorization|cookies?|passphrase|password|pem|seed|credential|secret|token|set[-_ ]?cookie|wallet[-_ ]?passphrase|seed[-_ ]?phrase))\1\s*:\s*(\\*)(["'])/gi;
+  /(?<!\\)(\\*["'])((?:[A-Za-z0-9]+[-_ ])*(?:app[-_ ]?secret|api[-_ ]?secret|api[-_ ]?key|client[-_ ]?secret|wallet[-_ ]?secret|signing[-_ ]?secret|private[-_ ]?key|secret[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|id[-_ ]?token|authorization|cookies?|passphrase|password|pem|credential|secret|token|set[-_ ]?cookie|wallet[-_ ]?passphrase|seed[-_ ]?phrase)|seed)\1\s*:\s*(\\*)(["'])/gi;
 // A cookie header is a credential container, not one credential: every
 // `name=value` pair after `Cookie:` is a session, and they are separated by
 // spaces — exactly where the generic assignment pattern's value stops. Consume
 // the whole header value to the end of the line instead.
 const COOKIE_ASSIGNMENT_PATTERN = /\b(cookies?)\b(\s*[:=]\s*)[^\n\r]*/gi;
+// Do not start the exact-only seed alternative after an identifier separator.
 const SENSITIVE_ASSIGNMENT_PATTERN =
-  /\b(app[-_ ]?secret|api[-_ ]?secret|api[-_ ]?key|client[-_ ]?secret|wallet[-_ ]?secret|signing[-_ ]?secret|private[-_ ]?key|secret[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|id[-_ ]?token|authorization|passphrase|password|pem|seed|credential|secret|token|wallet[-_ ]?passphrase|seed[-_ ]?phrase)\b(\s*[:=]\s*)[^,\s}]+/gi;
+  /\b(app[-_ ]?secret|api[-_ ]?secret|api[-_ ]?key|client[-_ ]?secret|wallet[-_ ]?secret|signing[-_ ]?secret|private[-_ ]?key|secret[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|id[-_ ]?token|authorization|passphrase|password|pem|(?<![A-Za-z0-9_-])seed|credential|secret|token|wallet[-_ ]?passphrase|seed[-_ ]?phrase)\b(\s*[:=]\s*)[^,\s}]+/gi;
 // Quantified parts all exclude "-" so the pattern cannot backtrack across the
 // PEM delimiters (keeps the regex linear; PEM bodies are base64 + whitespace).
 const PRIVATE_KEY_PATTERN =

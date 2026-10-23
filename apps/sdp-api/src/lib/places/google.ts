@@ -160,6 +160,11 @@ export async function fetchStaticMap(
   // rather than hold a Cloud Run slot or fill memory.
   const response = await fetch(url.toString(), {
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  }).catch((cause: unknown) => {
+    throw providerUnavailable("Google Static Maps did not answer", {
+      provider: "google",
+      reason: cause instanceof Error ? cause.name : "unknown",
+    });
   });
   if (!response.ok) {
     throw providerUnavailable(`Google Static Maps request failed with status ${response.status}`, {
