@@ -23,6 +23,7 @@ import {
 const reconcilerColumnsSchema = z.object({
   project_id: z.string(),
   last_checked_at: z.string().nullable(),
+  last_verified_at: z.string().nullable(),
   paid_late: z.boolean(),
   signature_scan_cursor: z.string().nullable(),
   signature_scan_before: z.string().nullable(),
@@ -56,6 +57,7 @@ function mapPaymentRequestRow(row: Record<string, unknown>): PaymentRequestRow {
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
     last_checked_at: reconciler.last_checked_at,
+    last_verified_at: reconciler.last_verified_at,
     paid_late: reconciler.paid_late,
     signature_scan_cursor: reconciler.signature_scan_cursor,
     signature_scan_before: reconciler.signature_scan_before,
@@ -402,16 +404,21 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
       return result.results.map(mapPaymentRequestRow);
     },
 
-    async markPaymentRequestsChecked(requestIds) {
-      if (requestIds.length === 0) {
+    async markPaymentRequestsChecked({ checked, verified }) {
+      if (checked.length === 0) {
         return;
       }
+      const verifiedAt =
+        verified.length === 0
+          ? "last_verified_at"
+          : `CASE WHEN id IN (${buildInClause(verified.length)}) THEN sdp_iso_now() ELSE last_verified_at END`;
       await db
         .prepare(
-          `UPDATE payment_requests SET last_checked_at = sdp_iso_now()
-            WHERE id IN (${buildInClause(requestIds.length)})`
+          `UPDATE payment_requests
+              SET last_checked_at = sdp_iso_now(), last_verified_at = ${verifiedAt}
+            WHERE id IN (${buildInClause(checked.length)})`
         )
-        .bind(...requestIds)
+        .bind(...verified, ...checked)
         .run();
     },
 

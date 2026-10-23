@@ -143,9 +143,11 @@ async function checkEach(
   );
   let failed = 0;
   let settled = 0;
+  const verified: string[] = [];
   for (const [index, row] of rows.entries()) {
     const result = results[index];
     if (result?.status === "fulfilled") {
+      verified.push(row.id);
       if (result.value.status !== row.status) {
         settled += 1;
         logEvent("info", {
@@ -168,9 +170,10 @@ async function checkEach(
     });
   }
   if (rows.length > 0) {
-    await createSystemPaymentRequestsRepository(env).markPaymentRequestsChecked(
-      rows.map((row) => row.id)
-    );
+    await createSystemPaymentRequestsRepository(env).markPaymentRequestsChecked({
+      checked: rows.map((row) => row.id),
+      verified,
+    });
   }
   logEvent(failed > 0 ? "warn" : "info", {
     event: "payment_requests.lane_run",

@@ -184,6 +184,20 @@ describe("payment request public tokens", () => {
     expect(body.data).toMatchObject({ paidLate: false, lastCheckedAt: null });
   });
 
+  it("reports lastCheckedAt from the last verified check, not the last attempt", async () => {
+    const db = getDb(env);
+    await db
+      .prepare("UPDATE payment_requests SET last_checked_at = ?, last_verified_at = ? WHERE id = ?")
+      .bind("2026-10-23T10:05:00.000Z", "2026-10-23T10:00:00.000Z", requestId)
+      .run();
+
+    const res = await get(`/v1/payments/requests/${requestId}`, MANAGE_KEY);
+
+    expect(res.status).toBe(200);
+    const body = z.object({ data: z.record(z.string(), z.unknown()) }).parse(await res.json());
+    expect(body.data).toMatchObject({ lastCheckedAt: "2026-10-23T10:00:00.000Z" });
+  });
+
   it("returns paidLate true for a request settled late", async () => {
     const db = getDb(env);
     const transferId = "xfr_payment_request_token_late";

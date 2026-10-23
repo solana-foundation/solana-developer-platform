@@ -804,7 +804,10 @@ describe("PaymentRequestsRepository (postgres)", () => {
         });
 
       const firstRun = await listDue();
-      await systemRepo.markPaymentRequestsChecked(firstRun.map((row) => row.id));
+      await systemRepo.markPaymentRequestsChecked({
+        checked: firstRun.map((row) => row.id),
+        verified: [],
+      });
       const secondRun = await listDue();
 
       expect(firstRun.map((row) => row.id)).toEqual([first, second]);
@@ -974,12 +977,12 @@ describe("PaymentRequestsRepository (postgres)", () => {
       expect(paid).toMatchObject({ status: "paid", paid_late: false });
     });
 
-    it("stamps last_checked_at on every listed id", async () => {
+    it("stamps last_checked_at on every listed id and last_verified_at only on verified ones", async () => {
       const a = await repo.createPaymentRequest(createInput({ token: SOL_MINT, expiresAt: null }));
       const b = await repo.createPaymentRequest(createInput({ token: SOL_MINT, expiresAt: null }));
       const systemRepo = createSystemPaymentRequestsRepository(env);
 
-      await systemRepo.markPaymentRequestsChecked([a.id, b.id]);
+      await systemRepo.markPaymentRequestsChecked({ checked: [a.id, b.id], verified: [a.id] });
 
       const rows = await Promise.all(
         [a, b].map((row) =>
@@ -991,6 +994,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
         )
       );
       expect(rows.every((row) => row?.last_checked_at !== null)).toBe(true);
+      expect(rows.map((row) => row?.last_verified_at === null)).toEqual([false, true]);
     });
 
     describe("listExpiredPaymentRequestsForLateCheck", () => {
@@ -1304,7 +1308,9 @@ describe("PaymentRequestsRepository (postgres)", () => {
         env,
         createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID })
       );
-      expect(() => tenant.markPaymentRequestsChecked([])).toThrow(/system-only/);
+      expect(() => tenant.markPaymentRequestsChecked({ checked: [], verified: [] })).toThrow(
+        /system-only/
+      );
       expect(() =>
         tenant.countStaleLapsedPaymentRequests({ environment: "sandbox", checkedBefore: PAST })
       ).toThrow(/system-only/);

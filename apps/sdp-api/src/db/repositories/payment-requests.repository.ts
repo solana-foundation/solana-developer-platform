@@ -40,6 +40,7 @@ export interface PaymentRequestRow {
   created_at: string;
   updated_at: string;
   last_checked_at: string | null;
+  last_verified_at: string | null;
   paid_late: boolean;
   signature_scan_cursor: string | null;
   signature_scan_before: string | null;
@@ -160,7 +161,10 @@ export interface PaymentRequestsRepository {
     checkedBefore: string;
     limit: number;
   }): Promise<PaymentRequestRow[]>;
-  markPaymentRequestsChecked(requestIds: readonly string[]): Promise<void>;
+  markPaymentRequestsChecked(params: {
+    checked: readonly string[];
+    verified: readonly string[];
+  }): Promise<void>;
   markExpiredPaymentRequestPaid(
     input: MarkExpiredPaymentRequestPaidInput
   ): Promise<PaymentRequestRow | null>;

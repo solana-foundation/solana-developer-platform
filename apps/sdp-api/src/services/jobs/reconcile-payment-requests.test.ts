@@ -136,7 +136,7 @@ function installJobHooks() {
 describe("reconcilePaymentRequests", () => {
   installJobHooks();
 
-  it("stamps last_checked_at on every row it read, paid or not", async () => {
+  it("stamps last_checked_at and last_verified_at on every row it read, paid or not", async () => {
     vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);
     const request = await createRequest({ token: SOL_MINT, expiresAt: null });
 
@@ -145,6 +145,7 @@ describe("reconcilePaymentRequests", () => {
     const row = await getRow(request.id);
     expect(row.status).toBe("awaiting_payment");
     expect(row.last_checked_at).not.toBeNull();
+    expect(row.last_verified_at).not.toBeNull();
   });
 
   it("keeps going after one row throws, and still stamps it", async () => {
@@ -159,8 +160,9 @@ describe("reconcilePaymentRequests", () => {
     await onSandbox(() => reconcilePaymentRequests(env));
 
     expect(findReference).toHaveBeenCalledTimes(2);
-    expect((await getRow(first.id)).last_checked_at).not.toBeNull();
-    expect((await getRow(second.id)).last_checked_at).not.toBeNull();
+    const rows = [await getRow(first.id), await getRow(second.id)];
+    expect(rows.map((row) => row.last_checked_at)).not.toContain(null);
+    expect(rows.filter((row) => row.last_verified_at === null)).toHaveLength(1);
     expect(log).toHaveBeenCalledWith(
       "error",
       expect.objectContaining({ event: "payment_requests.check_failed", lane: "sweep" })
@@ -199,6 +201,8 @@ describe("reconcilePaymentRequests", () => {
 
     expect((await getRow(first.id)).last_checked_at).not.toBeNull();
     expect((await getRow(second.id)).last_checked_at).not.toBeNull();
+    expect((await getRow(first.id)).last_verified_at).toBeNull();
+    expect((await getRow(second.id)).last_verified_at).toBeNull();
     expect(log).toHaveBeenCalledWith("warn", {
       event: "payment_requests.lane_run",
       environment: "sandbox",

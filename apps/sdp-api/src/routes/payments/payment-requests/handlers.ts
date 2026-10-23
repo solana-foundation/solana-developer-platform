@@ -44,7 +44,7 @@ function mapPaymentRequest(row: PaymentRequestRow): PaymentRequest {
     expiresAt: row.expires_at,
     fulfilledByTransferId: row.fulfilled_by_transfer_id,
     paidLate: row.paid_late,
-    lastCheckedAt: row.last_checked_at,
+    lastCheckedAt: row.last_verified_at,
     canceledBy: row.canceled_by,
     lifecycle: row.lifecycle,
     createdBy: row.created_by,
