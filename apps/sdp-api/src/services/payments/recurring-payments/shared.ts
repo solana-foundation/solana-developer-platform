@@ -298,7 +298,8 @@ export async function sendSubscriptionInstructions(input: {
       projectId: input.projectId,
       actor: { type: "wallet", id: input.sourceWallet.walletId },
     }),
-    input.movement
+    input.movement,
+    { custodyWalletId: input.sourceWallet.id }
   );
   const feePayer = input.feePayer ?? (await feePayment.getFeePayer());
   const message = pipe(
@@ -603,6 +604,12 @@ export async function readSavedSend(
   );
   const [status] = statuses.value;
   if (status) {
+    // Seen only at "processed", the verdict may be on a fork the cluster drops: a failure
+    // there does not stop the same send landing, so resending it could collect twice
+    // (APE SOLA9-708).
+    if (status.confirmationStatus === null || status.confirmationStatus === "processed") {
+      return "pending";
+    }
     return status.err === null ? "succeeded" : "failed";
   }
   if (savedSend.lastValidBlockHeight === null) {
@@ -670,7 +677,8 @@ export function recurringPaymentErrorMessage(error: Error): string {
  * claim roll back, and a claim that commits first is what revocation lists.
  * The job later signs as the mandate without the key, so this is the last
  * point the key's authority is read. A member activator is decided the same
- * way from their membership row, which removal and role changes write; no
+ * way from their organization and project membership rows, which removal
+ * and role changes write; no
  * activator (the job itself) reads nothing.
  *
  * @throws MoneyMovementRefusedError with the waist's refusal (403).
@@ -696,11 +704,19 @@ export async function lockLiveActivatingKey(
   } as const;
   const userId = input.activator?.userId;
   if (userId) {
-    const member = await tx.queryOne<{ status: string; role: string }>(
-      `SELECT status, role FROM organization_members
-        WHERE user_id = ? AND organization_id = ?
-        FOR SHARE`,
-      [userId, input.organizationId]
+    // The project membership is share-locked too, so a removal from the
+    // project either commits first (and refuses) or waits for the claim.
+    const member = await tx.queryOne<{ status: string; role: string; inProject: boolean }>(
+      `SELECT om.status, om.role,
+              EXISTS (
+                SELECT 1 FROM project_members pm
+                 WHERE pm.user_id = om.user_id AND pm.project_id = ?
+                 FOR SHARE
+              ) AS "inProject"
+         FROM organization_members om
+        WHERE om.user_id = ? AND om.organization_id = ?
+        FOR SHARE OF om`,
+      [input.projectId, userId, input.organizationId]
     );
     assertMovementAdmitted(
       decidePrincipal(

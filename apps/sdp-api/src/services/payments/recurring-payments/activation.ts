@@ -1021,7 +1021,8 @@ export async function activateRecurringPayment(input: {
           projectId: input.projectId,
           actor: { type: "wallet", id: input.sourceWallet.walletId },
         }),
-        "recurring.activate"
+        "recurring.activate",
+        { custodyWalletId: input.sourceWallet.id }
       );
       const feePayer = await feePayment.getFeePayer();
       const payer = createNoopSigner(feePayer);

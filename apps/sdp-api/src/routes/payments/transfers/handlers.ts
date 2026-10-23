@@ -78,7 +78,11 @@ import {
 import { enforceMeteredQuota } from "@/middleware/metered-quota";
 import type { MovementStepInput, RecordAnswer } from "@/middleware/movement-steps";
 import { callerMayPerform } from "@/middleware/require-action";
-import { assertTransferRampProviderInChannel } from "@/middleware/require-module";
+import {
+  assertModuleInChannel,
+  assertTransferRampProviderInChannel,
+  isModuleInChannel,
+} from "@/middleware/require-module";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { type AppContext, getPaymentsRepository } from "@/routes/payments/context";
 import { mapTransferRow } from "@/routes/payments/mappers";
@@ -717,7 +721,8 @@ async function executeSponsoredTransfer(
   const feePayment = createSponsorshipFeePayment(
     c.env,
     resolveRequestSponsorshipScope(c),
-    "payments.transfer"
+    "payments.transfer",
+    { custodyWalletId: params.sourceWallet.id }
   );
   const feePayer = await feePayment.getFeePayer();
   const instructions = await params.buildInstructions({ signer, feePayer, rpc });
@@ -1125,15 +1130,26 @@ const TRANSFER_TYPE_READ_ACTIONS = {
 } as const satisfies Record<TransferType, Action>;
 
 /**
+ * Whether this deployment discloses transfers of `type`: a ramp transfer only
+ * while the release channel runs Ramps (APE SOLA9-698).
+ */
+function isTransferTypeInChannel(c: AppContext, type: TransferType): boolean {
+  return !isRampTransferType(type) || isModuleInChannel(c, "ramps");
+}
+
+/**
  * The transfer types this caller may list: an explicitly requested type it
- * cannot read is refused, naming the read; a category or the default set is
- * narrowed to what it can read.
+ * cannot read, or whose module the release channel leaves out, is refused; a
+ * category or the default set is narrowed to what it can read.
  */
 function readableTransferTypes(
   c: AppContext,
   requested: readonly TransferType[] | undefined,
   candidates: readonly TransferType[]
 ): TransferType[] {
+  if ((requested ?? []).some((type) => !isTransferTypeInChannel(c, type))) {
+    assertModuleInChannel(c, "ramps");
+  }
   const unreadable = (requested ?? []).find(
     (type) => !callerMayPerform(c, TRANSFER_TYPE_READ_ACTIONS[type])
   );
@@ -1141,7 +1157,10 @@ function readableTransferTypes(
     const action = TRANSFER_TYPE_READ_ACTIONS[unreadable];
     throw missingAction(action);
   }
-  return candidates.filter((type) => callerMayPerform(c, TRANSFER_TYPE_READ_ACTIONS[type]));
+  return candidates.filter(
+    (type) =>
+      isTransferTypeInChannel(c, type) && callerMayPerform(c, TRANSFER_TYPE_READ_ACTIONS[type])
+  );
 }
 
 export async function listTransfers(c: AppContext) {
@@ -1181,6 +1200,9 @@ export async function listTransfers(c: AppContext) {
     requestedTypes.some((type) => !categoryTypes.includes(type as never))
   ) {
     throw badRequest("type must match the requested transfer category");
+  }
+  if (category === "ramp") {
+    assertModuleInChannel(c, "ramps");
   }
   const transferTypes = readableTransferTypes(
     c,
@@ -1421,8 +1443,12 @@ export async function getTransfer(c: AppContext) {
     projectId: requireProjectId(c),
   });
 
-  // A row of a module the caller cannot read is not disclosed.
-  if (!row || !callerMayPerform(c, TRANSFER_TYPE_READ_ACTIONS[row.type])) {
+  // A row of a module the caller cannot read, or the release channel leaves out, is not disclosed.
+  if (
+    !row ||
+    !isTransferTypeInChannel(c, row.type) ||
+    !callerMayPerform(c, TRANSFER_TYPE_READ_ACTIONS[row.type])
+  ) {
     throw notFound("Transfer");
   }
 

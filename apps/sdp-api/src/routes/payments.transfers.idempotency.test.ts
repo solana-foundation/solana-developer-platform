@@ -1,5 +1,6 @@
 import { FeePaymentError } from "@sdp/fee-payment/port";
 import type { getRecentBlockhash } from "@sdp/rpc/solana";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
@@ -217,6 +218,25 @@ describe("Payments routes — transfer idempotency", () => {
     expect((await readTransferResponse(respelled)).data.transfer.id).toBe(
       (await readTransferResponse(first)).data.transfer.id
     );
+    expect(await countTransferRows()).toBe(1);
+  });
+
+  it("fingerprints the token as the mint it sends, so SOL and its mint are one transfer (APE SOLA9-695)", async () => {
+    const body = {
+      sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+      destination: TEST_SOLANA_ADDRESSES.wallet2,
+      amount: "1",
+    };
+
+    const first = await postTransfer({ ...body, token: "SOL" }, { idempotencyKey: "xfer-alias" });
+    expect(first.status).toBe(200);
+    const aliased = await postTransfer(
+      { ...body, token: SOL_MINT },
+      { idempotencyKey: "xfer-alias" }
+    );
+
+    expect(aliased.status).toBe(200);
+    expect(aliased.headers.get("Idempotent-Replayed")).toBe("true");
     expect(await countTransferRows()).toBe(1);
   });
 

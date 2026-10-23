@@ -302,22 +302,42 @@ describe("CustodyRuntimeTargets", () => {
       await expect(exit.signTransactions([])).resolves.toEqual([]);
     });
 
-    it("signs a start for an active organization, as a live member", async () => {
+    it("signs a start for an active organization, as a live member of the project", async () => {
       const config = await seedConfig({ provider: "privy", projectId: PROJECT_ID });
-      await getDb(env)
-        .prepare(
-          `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-           VALUES ('om_runtime_targets', ?, ?, 'admin', 'active')`
-        )
-        .bind(ORGANIZATION_ID, USER_ID)
-        .run();
+      const db = getDb(env);
+      await db.batch([
+        db
+          .prepare(
+            `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+             VALUES ('om_runtime_targets', ?, ?, 'admin', 'active')`
+          )
+          .bind(ORGANIZATION_ID, USER_ID),
+        db
+          .prepare(
+            `INSERT INTO project_members (id, project_id, user_id, role)
+             VALUES ('pm_runtime_targets', ?, ?, 'admin') ON CONFLICT DO NOTHING`
+          )
+          .bind(PROJECT_ID, USER_ID),
+      ]);
 
       const start = await signerFor(`cwlt_${config.id}`, "payments.transfer");
+      const asMember = <T>(fn: () => Promise<T>) =>
+        runAsMoneyPrincipal({ kind: "member", userId: USER_ID }, fn);
 
       // A start signs only for an authenticated principal (HOO-2099).
-      await expect(
-        runAsMoneyPrincipal({ kind: "member", userId: USER_ID }, () => start.signTransactions([]))
-      ).resolves.toEqual([]);
+      await expect(asMember(() => start.signTransactions([]))).resolves.toEqual([]);
+
+      // SOLA9-790: removed from the project after ingress, the member's
+      // in-flight start gets no custody signature; an exit still signs.
+      await db
+        .prepare("DELETE FROM project_members WHERE project_id = ? AND user_id = ?")
+        .bind(PROJECT_ID, USER_ID)
+        .run();
+      await expect(asMember(() => start.signTransactions([]))).rejects.toMatchObject({
+        reason: "principal_not_live",
+      });
+      const exit = await signerFor(`cwlt_${config.id}`, "recurring.cancel");
+      await expect(asMember(() => exit.signTransactions([]))).resolves.toEqual([]);
     });
   });
 

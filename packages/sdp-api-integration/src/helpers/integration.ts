@@ -295,14 +295,28 @@ export function requestWithApiKey(apiKey: string = TEST_PROJECT_API_KEY.raw) {
   };
 }
 
+/**
+ * The test organization's admin, a member of the test project: the project
+ * membership is what a signed-in request's project scope is admitted by, and
+ * the signing waists re-read it for every start (SOLA9-790).
+ */
 async function seedOrganizationAdminMembership(): Promise<void> {
-  await getDb(env)
+  const db = getDb(env);
+  await db
     .prepare(
       `INSERT INTO organization_members (id, organization_id, user_id, role, status)
        VALUES (?, ?, ?, 'admin', 'active')
        ON CONFLICT (organization_id, user_id) DO UPDATE SET role = 'admin', status = 'active'`
     )
     .bind(`mem_integration_${TEST_USER.id}`, TEST_ORG.id, TEST_USER.id)
+    .run();
+  await db
+    .prepare(
+      `INSERT INTO project_members (id, project_id, user_id, role)
+       VALUES (?, ?, ?, 'admin')
+       ON CONFLICT (project_id, user_id) DO NOTHING`
+    )
+    .bind(`pm_integration_${TEST_USER.id}`, TEST_PROJECT.id, TEST_USER.id)
     .run();
 }
 
@@ -329,14 +343,6 @@ export async function requestAsOrganizationAdmin() {
   const clerkUserId = `clerk_${TEST_USER.id}`;
   const clerkOrgId = `clerk_${TEST_ORG.id}`;
   await seedOrganizationAdminMembership();
-  await db
-    .prepare(
-      `INSERT INTO project_members (id, project_id, user_id, role)
-       VALUES (?, ?, ?, 'admin')
-       ON CONFLICT (project_id, user_id) DO NOTHING`
-    )
-    .bind(`pm_integration_${TEST_USER.id}`, TEST_PROJECT.id, TEST_USER.id)
-    .run();
   await db
     .prepare(
       `INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)

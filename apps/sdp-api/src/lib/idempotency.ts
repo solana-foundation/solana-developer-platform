@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { normalizeDecimalString } from "@sdp/types/idempotency";
 import { z } from "zod";
 import { conflict } from "@/lib/errors";
 
@@ -105,27 +106,6 @@ export function canonicalizeDecimalFields(body: JsonValue, fields: readonly stri
   return canonical;
 }
 
-/**
- * Serializes a JSON value with object keys sorted by UTF-16 code unit, so equal
- * values always produce equal text (RFC 8785's ordering; numbers use
- * ECMAScript's canonical form). Unlike `normalizeForFingerprint`, the order
- * does not depend on the runtime's locale.
- */
-export function canonicalJson(value: JsonValue): string {
-  if (value === null || typeof value !== "object") {
-    return JSON.stringify(value);
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map(canonicalJson).join(",")}]`;
-  }
-  const members = Object.keys(value)
-    // With no comparator, sort orders strings by UTF-16 code unit: RFC 8785's order.
-    .sort()
-    // SAFETY: every key comes from Object.keys(value), so the member is present.
-    .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key] as JsonValue)}`);
-  return `{${members.join(",")}}`;
-}
-
 export const normalizeForFingerprint = (value: unknown): unknown => {
   if (value === null || value === undefined) {
     return value;
@@ -171,16 +151,6 @@ export interface EarnVaultDepositFingerprintInput {
    */
   swapSourceTokenMint?: string;
   swapSlippageBps?: number;
-}
-
-/** Canonicalize decimal spelling without rounding or passing through a float. */
-export function normalizeDecimalString(value: string): string {
-  const [integer = "0", fraction = ""] = value.split(".");
-  const normalizedInteger = integer.replace(/^0+(?=\d)/, "") || "0";
-  const normalizedFraction = fraction.replace(/0+$/, "");
-  return normalizedFraction === ""
-    ? normalizedInteger
-    : `${normalizedInteger}.${normalizedFraction}`;
 }
 
 /**

@@ -432,11 +432,13 @@ export async function confirmTransaction(
     const result = await getSignatureStatusOrNull(rpc, signature);
 
     if (result) {
+      // An error short of the commitment is not terminal: it may be from a fork
+      // the cluster drops, and the same transaction can still land (APE SOLA9-708).
       const isConfirmed =
         result.confirmationStatus !== null &&
         commitmentComparator(result.confirmationStatus, commitment) >= 0;
 
-      if (isConfirmed || result.err) {
+      if (isConfirmed) {
         return {
           signature,
           slot: result.slot,

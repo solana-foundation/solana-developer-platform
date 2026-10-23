@@ -249,7 +249,11 @@ describe("issuance authority resolution across an organization's projects", () =
         auth: clerkAuth(ORGANIZATION_ID, REQUESTER_PROJECT_ID),
         walletId: REQUESTER_WALLET.providerWalletId,
       })
-    ).resolves.toEqual({ signer, movement: "issuance.authority" });
+    ).resolves.toEqual({
+      signer,
+      movement: "issuance.authority",
+      custodyWalletId: REQUESTER_WALLET.custodyWalletId,
+    });
     expect(exactSigner).toHaveBeenCalledExactlyOnceWith(
       env,
       ORGANIZATION_ID,

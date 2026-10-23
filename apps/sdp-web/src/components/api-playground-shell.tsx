@@ -1,5 +1,6 @@
 "use client";
 
+import { canonicalJson } from "@sdp/types/idempotency";
 import { IDEMPOTENCY_REQUIRED_ROUTES } from "@sdp/types/idempotency-required-routes";
 import { Button } from "@sdp/ui/button";
 import { cn } from "@sdp/ui/cn";
@@ -27,7 +28,9 @@ import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 import {
   answerRetiresKey,
   apiErrorCode,
+  canonicalizeAmounts,
   IDEMPOTENCY_KEY_HEADER,
+  parseJsonValue,
   storageFingerprint,
 } from "@/lib/idempotency";
 import { createIdempotencyKeyStore } from "@/lib/idempotency-key-store";
@@ -553,7 +556,24 @@ async function executePlaygroundRequest({
   // The request runs as the signed-in member against the tab's Project, so the
   // Project is part of what makes two Sends the same request.
   const { projectId } = parseDashboardPathname(window.location.pathname);
-  const sendRequest = JSON.stringify([projectId, activeEndpoint.method, resolvedPath, requestBody]);
+  // The body exactly as it goes out, read back in canonical form (keys sorted,
+  // arrays in order), so a Send that only reorders an object's keys is the same
+  // request to its key as it is to the API's fingerprint.
+  const sentBody =
+    hasRequestBody(activeEndpoint.method) && requestBody !== null
+      ? JSON.stringify(requestBody)
+      : undefined;
+  // On a money route the amounts are keyed canonically too ("100.00" and "100"
+  // move the same), as the API fingerprints them; the body still goes out as typed.
+  const keyedBody = sentBody === undefined ? null : parseJsonValue(sentBody);
+  const sendRequest = canonicalJson([
+    projectId,
+    activeEndpoint.method,
+    resolvedPath,
+    keyedBody !== null && isMoneyRouteRequest(activeEndpoint.method, resolvedPath)
+      ? canonicalizeAmounts(keyedBody)
+      : keyedBody,
+  ]);
   const claimed = hasRequestBody(activeEndpoint.method) ? keyForSend(sendRequest) : undefined;
   if (
     claimed !== undefined &&
@@ -571,10 +591,6 @@ async function executePlaygroundRequest({
   try {
     // The dashboard proxies the call itself: same method, path, query and
     // body, run as the session. The key is the one header it forwards.
-    const sentBody =
-      hasRequestBody(activeEndpoint.method) && requestBody !== null
-        ? JSON.stringify(requestBody)
-        : undefined;
     const headers = new Headers();
     if (sentBody !== undefined) {
       headers.set("Content-Type", "application/json");

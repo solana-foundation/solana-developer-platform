@@ -356,7 +356,8 @@ describe("Public payment request routes", () => {
         expect(sponsorship).toHaveBeenCalledWith(
           env,
           expect.objectContaining({ projectId: wallet.projectId }),
-          "payments.pay_request"
+          "payments.pay_request",
+          { custodyWalletId: null }
         );
         expect(rpc.calls).toContainEqual({ cluster, method: "getSignaturesForAddress" });
         expect(rpc.calls).toContainEqual({ cluster, method: "getBlockHeight" });

@@ -158,6 +158,16 @@ async function applyOnChainVerdict(
       return true;
     }
 
+    // An error seen only at "processed" may be on a fork the cluster drops, and
+    // the same signed transaction can still land; failing the row here would
+    // let a retry pay twice (APE SOLA9-708).
+    const committed =
+      status.confirmationStatus !== null &&
+      commitmentComparator(status.confirmationStatus, "confirmed") >= 0;
+    if (!committed) {
+      return false;
+    }
+
     if (status.err) {
       await updateTerminalTransfer(env, repo, transfer, {
         transferId: transfer.id,
@@ -180,20 +190,14 @@ async function applyOnChainVerdict(
         updatedAt: nowIso,
       });
       return true;
-    } else if (
-      status.confirmationStatus !== null &&
-      commitmentComparator(status.confirmationStatus, "confirmed") >= 0
-    ) {
-      await updateTerminalTransfer(env, repo, transfer, {
-        transferId: transfer.id,
-        status: "confirmed",
-        slot: Number(status.slot),
-        updatedAt: nowIso,
-      });
-      return true;
     }
-    // "processed" confirmation is too weak to record as confirmed — skip.
-    return false;
+    await updateTerminalTransfer(env, repo, transfer, {
+      transferId: transfer.id,
+      status: "confirmed",
+      slot: Number(status.slot),
+      updatedAt: nowIso,
+    });
+    return true;
   } catch (err) {
     getLogger().error(
       {
@@ -649,8 +653,7 @@ async function reconcileSignedSubmissionCacheMisses(
 function unresolvedReasonForStatus(
   status: SignatureStatusInfo
 ): "processed_only" | "verdict_write_failed" {
-  return !status.err &&
-    status.confirmationStatus !== null &&
+  return status.confirmationStatus !== null &&
     commitmentComparator(status.confirmationStatus, "confirmed") < 0
     ? "processed_only"
     : "verdict_write_failed";
