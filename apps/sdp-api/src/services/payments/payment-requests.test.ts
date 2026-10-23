@@ -509,21 +509,19 @@ describe("reconcilePaymentRequest (ADR 0012: settlement on the signatures SDP is
     expect(await listInboundTransfers()).toHaveLength(0);
   });
 
-  it("best-effort returns the stored row when the current-row read fails", async () => {
-    const errorSpy = vi.spyOn(rootLogger, "error").mockImplementation(() => {});
+  it("answers a best-effort read with no window from the row it read, reading it no second time", async () => {
     const request = await createRequest({ expiresAt: null });
     const factory = repositoryFactory.createPaymentRequestsRepository;
+    const reread = vi.fn(() => Promise.reject(new Error("connection lost")));
     vi.spyOn(repositoryFactory, "createPaymentRequestsRepository").mockImplementation(
-      (...args) => ({
-        ...factory(...args),
-        getPaymentRequestById: () => Promise.reject(new Error("connection lost")),
-      })
+      (...args) => ({ ...factory(...args), getPaymentRequestById: reread })
     );
 
     const result = await reconcileOnSandbox(request, { bestEffort: true });
 
     expect(result).toBe(request);
-    expect(errorSpy).toHaveBeenCalled();
+    expect(reread).not.toHaveBeenCalled();
+    // A path that acts on the status reads the current row, and fails with it.
     await expect(reconcileOnSandbox(request, { bestEffort: false })).rejects.toThrow(
       "connection lost"
     );

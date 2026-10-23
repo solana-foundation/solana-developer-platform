@@ -258,12 +258,11 @@ export async function reconcilePaymentRequest(
   }
   if (open.length === 0) {
     // No window left to read: either none was issued, or a concurrent
-    // reconcile settled the request and closed them. Answer the current row.
-    try {
-      return await currentPaymentRequest(env, row);
-    } catch (err) {
-      return degrade(err);
-    }
+    // reconcile settled the request and closed them. A best-effort read (a
+    // list, the pay page) answers the row it read, as a read a moment earlier
+    // would, with no second read per row; a path that acts on the status
+    // reads the current row.
+    return options.bestEffort ? row : currentPaymentRequest(env, row);
   }
   // Outside the best-effort net: a cluster with no endpoint is a configuration error.
   const rpc = createClusterRpc();
