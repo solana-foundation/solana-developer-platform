@@ -8,7 +8,11 @@ import {
   generateEarnSplitSwapAdvisoryId,
 } from "@/db/repositories/earn-split-swap-advisories.repository";
 import { runInEnvironmentClusterScope } from "@/runtime/cluster-scope-runs";
-import { ENVIRONMENT_CLUSTER_CASES, installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
+import {
+  ENVIRONMENT_CLUSTER_CASES,
+  epochInfoResult,
+  installClusterRpcResponder,
+} from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -42,6 +46,8 @@ const FLOOR = 24_800_000n;
 const BASELINE = 500_000n;
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
+/** The slot of the bank that reports each cluster's confirmed height: the balance read's floor. */
+const HEIGHT_SLOT = 777n;
 
 beforeEach(async () => {
   await seedTestDatabase(env);
@@ -203,7 +209,10 @@ describe("detectOrphanedEarnSplitSwaps", () => {
 
   beforeEach(() => {
     // The swap's blockhash is long expired by default; judgement is on.
-    clusterRpc.answer("getBlockHeight", 10_000);
+    clusterRpc.answer(
+      "getEpochInfo",
+      epochInfoResult({ absoluteSlot: Number(HEIGHT_SLOT), blockHeight: 10_000 })
+    );
   });
 
   it("flags an owner whose balance rose by the swap floor with no follow-up deposit", async () => {
@@ -227,6 +236,10 @@ describe("detectOrphanedEarnSplitSwaps", () => {
     });
     expect(tick().level).toBe("info");
     expect(tick().payload).toMatchObject({ checked: 1, orphaned: 1, open_backlog: 1 });
+    // The balance read must come from a node at least as current as the height read.
+    expect(readOwnerMintBalance).toHaveBeenCalledWith(OWNER, USDC, {
+      minContextSlot: HEIGHT_SLOT,
+    });
     // Stays open, stamped, and reported again on the next visit.
     const row = await advisoryRow(id);
     expect(row?.resolved_at).toBeNull();
@@ -432,24 +445,34 @@ describe("detectOrphanedEarnSplitSwaps", () => {
     expect(tick().payload).toMatchObject({ pending: 2, orphaned: 0 });
   });
 
-  it("fails the tick loudly when the balance read is unavailable", async () => {
-    const id = await seedAdvisory(2 * HOUR);
-    readOwnerMintBalance.mockRejectedValue(new Error("rpc unavailable"));
+  it.each([
+    ["is unavailable", "rpc unavailable"],
+    // A node behind the height read's slot could predate a landed swap.
+    [
+      "comes from a node behind the height's slot",
+      "Mint-filtered token-account RPC answered at slot 776, below its floor 777",
+    ],
+  ])(
+    "fails the tick loudly and judges nothing when the balance read %s",
+    async (_label, message) => {
+      const id = await seedAdvisory(2 * HOUR);
+      readOwnerMintBalance.mockRejectedValue(new Error(message));
 
-    await expect(detectIn("sandbox")).rejects.toThrow(/1 balance failures/);
+      await expect(detectIn("sandbox")).rejects.toThrow(/1 balance failures/);
 
-    expect(tick().level).toBe("error");
-    expect(tick().payload).toMatchObject({ balance_read_failures: 1 });
-    expect(logEvent).toHaveBeenCalledWith(
-      "error",
-      expect.objectContaining({
-        event: "sdp_api_earn_split_swap_balance_read_failed",
-        advisory_id: id,
-        error_message: "rpc unavailable",
-      })
-    );
-    expect((await advisoryRow(id))?.resolved_at).toBeNull();
-  });
+      expect(tick().level).toBe("error");
+      expect(tick().payload).toMatchObject({ balance_read_failures: 1 });
+      expect(logEvent).toHaveBeenCalledWith(
+        "error",
+        expect.objectContaining({
+          event: "sdp_api_earn_split_swap_balance_read_failed",
+          advisory_id: id,
+          error_message: message,
+        })
+      );
+      expect((await advisoryRow(id))?.resolved_at).toBeNull();
+    }
+  );
 
   it("refuses to judge atoms of a different scale", async () => {
     await seedAdvisory(2 * HOUR);
@@ -466,7 +489,7 @@ describe("detectOrphanedEarnSplitSwaps", () => {
 
   it("fails the tick when the block height cannot be read, leaving every advisory open", async () => {
     const id = await seedAdvisory(2 * HOUR);
-    clusterRpc.respond("getBlockHeight", () => ({
+    clusterRpc.respond("getEpochInfo", () => ({
       error: { code: -32000, message: "rpc unavailable" },
     }));
 
@@ -531,7 +554,7 @@ describe("detectOrphanedEarnSplitSwaps", () => {
       expect(tick().payload).toMatchObject({ environment, checked: 1, orphaned: 1 });
       expect(
         clusterRpc.requests
-          .filter((request) => request.method === "getBlockHeight")
+          .filter((request) => request.method === "getEpochInfo")
           .map((request) => request.cluster)
       ).toEqual([cluster]);
     }

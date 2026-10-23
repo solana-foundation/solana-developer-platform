@@ -1283,7 +1283,11 @@ guarantee durable status and recovery (`handlers/external-wallet.ts`,
   signal stays reserved for what the detector can prove. Once the rise
   is gone a covering deposit resolves it (one movement discharges at most one
   advisory, UNIQUE `resolving_movement_id`; a `failed` one never does), no rise
-  is `unfunded`, and a partial rise stays open. It ALERTS and never acts: the funds are
+  is `unfunded`, and a partial rise stays open. The balance is read with
+  `minContextSlot` at the confirmed height's slot (`getChainHeight`): a pool
+  endpoint behind that height could predate a landed swap and make an orphan a
+  permanent `unfunded`, so a node behind the floor fails the read and the
+  advisory waits for the next sweep. It ALERTS and never acts: the funds are
   the owner's, and only the partner can move them. Detection writes nothing
   but back to the advisory table. Every amount it compares is atoms to atoms;
   the decimal `swap_min_out_amount` exists for display only.
