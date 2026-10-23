@@ -3,14 +3,25 @@ import { createClusterHistoryRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import type { getSignaturesForAddress, SolanaRpc } from "@sdp/rpc/solana";
 import { formatDecimalAmount } from "@sdp/solana/amount";
+import { type AssetRef, NATIVE_ASSET } from "@sdp/solana/asset-ref";
+import { type BaseUnits, baseUnits, U64_MAX } from "@sdp/solana/token-amount";
 import type { PaymentTransferStatus as TransferStatus } from "@sdp/types/payments";
-import { SOL_MINT } from "@sdp/types/well-known-tokens";
-import type { Address, Signature } from "@solana/kit";
+import {
+  type AmountVerificationReason,
+  type AmountVerificationState,
+  CHAIN_DELTA_MATCHED,
+  CHAIN_DELTA_MISMATCH,
+  MOVEMENT_NOT_EXECUTED,
+  type TokenMovementBasis,
+} from "@sdp/types/token-movements";
+import { SOL_DECIMALS, SOL_MINT, type TokenProgramKind } from "@sdp/types/well-known-tokens";
+import { type Address, address, type Signature } from "@solana/kit";
 import { observedTransferKind } from "@/db/repositories/payments.kind";
 import type {
   PaymentTransferDirection as TransferDirection,
   PaymentTransferRow as TransferRow,
 } from "@/db/repositories/payments.repository";
+import type { LegAmounts } from "@/db/repositories/token-movement-legs.repository";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import type { AppContext } from "@/routes/payments/context";
 import { getSplTokenAccountAddresses } from "@/routes/payments/token-accounts";
@@ -49,10 +60,10 @@ interface ParsedAccountKey {
   pubkey?: string;
 }
 
+/** A raw token amount; the RPC's display fields (`uiAmount`, `uiAmountString`) are never read. */
 interface RpcTokenBalanceAmount {
   amount?: string;
   decimals?: number | bigint;
-  uiAmountString?: string | null;
 }
 
 interface RpcTokenBalanceRecord {
@@ -71,6 +82,8 @@ interface ParsedTransactionResponse {
     meta?: {
       err?: unknown;
       fee?: bigint;
+      preBalances?: readonly (bigint | number)[] | null;
+      postBalances?: readonly (bigint | number)[] | null;
       innerInstructions?: readonly ParsedInstructionGroup[] | null;
       postTokenBalances?: readonly RpcTokenBalanceRecord[] | null;
       preTokenBalances?: readonly RpcTokenBalanceRecord[] | null;
@@ -92,6 +105,61 @@ interface ObservedTransferContext {
 }
 
 type SignatureHistoryEntry = Awaited<ReturnType<typeof getSignaturesForAddress>>[number];
+
+/**
+ * What an observed transfer moved, as the chain shows it (ADR 0012): the
+ * shape of a movement leg, built at read time and never persisted. Inbound
+ * rows take the credit basis, outbound rows the debit.
+ */
+export interface ObservedMovement {
+  /** Native SOL and the wrapped SOL mint are different assets, though rows store both under the mint. */
+  asset: AssetRef;
+  basis: TokenMovementBasis;
+  decimals: number;
+  amounts: LegAmounts;
+  verification: Readonly<{
+    state: AmountVerificationState;
+    reason: AmountVerificationReason | null;
+  }>;
+}
+
+/** A synthesized observed transfer row and what it moved. */
+export interface ObservedTransfer {
+  row: TransferRow;
+  movement: ObservedMovement;
+}
+
+/** One move an instruction makes that touches a wallet SDP knows. */
+interface ObservedMove {
+  /** The instruction's position, from flattenParsedInstructions. */
+  position: string;
+  /**
+   * The tracked wallet the move belongs to; null for a move between accounts
+   * no tracked wallet owns, read only to check balance changes.
+   */
+  walletId: string | null;
+  direction: TransferDirection;
+  asset: AssetRef;
+  /** The row's `token`: the mint, or the wrapped SOL mint for native SOL. */
+  token: string;
+  decimals: number;
+  /** What the instruction moves out of its source, in base units. */
+  debit: BaseUnits;
+  /** The transfer fee the instruction states; null for a transfer that states none. */
+  statedFee: BaseUnits | null;
+  /** The account debited (a token account, or the paying wallet); null for a mint. */
+  sourceAccount: string | null;
+  /** The account credited (a token account, or the receiving wallet). */
+  destinationAccount: string;
+  sourceAddress: string;
+  destinationAddress: string;
+}
+
+interface TokenAccountMetadata {
+  decimals: number | null;
+  mint: string | null;
+  owner: string | null;
+}
 
 function resolveWalletIdForTokenAccount(
   context: ObservedTransferContext,
@@ -226,11 +294,37 @@ function readInstructionInfoInteger(
   return null;
 }
 
+/** A non-negative integer the RPC serves as a bigint or a safe number; null otherwise. */
+function integerOrNull(value: bigint | number | null | undefined): bigint | null {
+  if (typeof value === "bigint") {
+    return value >= 0n ? value : null;
+  }
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) {
+    return BigInt(value);
+  }
+  return null;
+}
+
+/** Base units in the u64 range; null for anything a token amount cannot be. */
+function u64OrNull(value: bigint | null): BaseUnits | null {
+  return value === null || value > U64_MAX ? null : baseUnits(value);
+}
+
+/**
+ * A parsed instruction's raw token amount and decimals: `info[key]`
+ * (`tokenAmount` or `feeAmount`), or for `tokenAmount` the flat `amount` and
+ * `decimals` some instructions carry. Base units only: the display string is
+ * never read.
+ */
 function readTokenAmountInfo(
-  info: Record<string, unknown> | undefined
-): { amount: bigint; decimals: number; uiAmount: string | null } | null {
-  const rawTokenAmount = info?.tokenAmount;
+  info: Record<string, unknown> | undefined,
+  key: "tokenAmount" | "feeAmount"
+): { amount: bigint; decimals: number } | null {
+  const rawTokenAmount = info?.[key];
   if (!rawTokenAmount || typeof rawTokenAmount !== "object" || Array.isArray(rawTokenAmount)) {
+    if (key === "feeAmount") {
+      return null;
+    }
     const rawAmount = readInstructionInfoInteger(info, "amount");
     const rawDecimals = info?.decimals;
     const decimalsValue = typeof rawDecimals === "bigint" ? Number(rawDecimals) : rawDecimals;
@@ -242,16 +336,11 @@ function readTokenAmountInfo(
     ) {
       return null;
     }
-
-    return {
-      amount: rawAmount,
-      decimals: decimalsValue,
-      uiAmount: formatDecimalAmount(rawAmount, decimalsValue),
-    };
+    return { amount: rawAmount, decimals: decimalsValue };
   }
 
+  // SAFETY: checked above to be a non-array object; each field is read and checked below.
   const tokenAmountRecord = rawTokenAmount as RpcTokenBalanceAmount;
-
   const amountValue =
     typeof tokenAmountRecord.amount === "string" && /^\d+$/.test(tokenAmountRecord.amount)
       ? BigInt(tokenAmountRecord.amount)
@@ -268,16 +357,50 @@ function readTokenAmountInfo(
   if (amountValue === null || decimalsValue === null) {
     return null;
   }
+  return { amount: amountValue, decimals: decimalsValue };
+}
 
-  return {
-    amount: amountValue,
-    decimals: decimalsValue,
-    uiAmount:
-      typeof tokenAmountRecord.uiAmountString === "string" &&
-      tokenAmountRecord.uiAmountString.trim()
-        ? tokenAmountRecord.uiAmountString
-        : formatDecimalAmount(amountValue, decimalsValue),
-  };
+/** The token program a parsed instruction's `program` names; null for any other program. */
+function tokenProgramOf(program: string | undefined): TokenProgramKind | null {
+  switch (program) {
+    case "spl-token":
+      return "spl-token";
+    case "spl-token-2022":
+      return "token-2022";
+    default:
+      return null;
+  }
+}
+
+/** Each token account's owner, mint and decimals, from the transaction's token balances. */
+function tokenAccountMetadata(
+  parsedTransaction: ParsedTransaction,
+  accountKeys: readonly string[]
+): Map<string, TokenAccountMetadata> {
+  const metadata = new Map<string, TokenAccountMetadata>();
+  const preTokenBalances = parsedTransaction.meta?.preTokenBalances ?? [];
+  const postTokenBalances = parsedTransaction.meta?.postTokenBalances ?? [];
+  for (const balance of [...preTokenBalances, ...postTokenBalances]) {
+    if (typeof balance.accountIndex !== "number") {
+      continue;
+    }
+    const accountAddress = accountKeys[balance.accountIndex];
+    if (!accountAddress) {
+      continue;
+    }
+    const current = metadata.get(accountAddress) ?? { owner: null, mint: null, decimals: null };
+    const decimals = balance.uiTokenAmount?.decimals;
+    metadata.set(accountAddress, {
+      owner:
+        typeof balance.owner === "string" && balance.owner.trim() ? balance.owner : current.owner,
+      mint: typeof balance.mint === "string" && balance.mint.trim() ? balance.mint : current.mint,
+      decimals:
+        typeof decimals === "number" && Number.isFinite(decimals) && Number.isInteger(decimals)
+          ? decimals
+          : current.decimals,
+    });
+  }
+  return metadata;
 }
 
 function compareSignatureHistoryDesc(
@@ -474,12 +597,307 @@ function observedFee(parsedTransaction: ParsedTransaction): number | null {
   return parsedTransaction.meta?.fee === undefined ? null : Number(parsedTransaction.meta.fee);
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Parsed transaction synthesis intentionally handles both SOL and SPL transfers in one pass.
-function buildObservedTransferRows(
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: one pass over the instructions reads SOL, mints and the three token transfer forms.
+function readObservedMoves(
+  parsedTransaction: ParsedTransaction,
+  context: ObservedTransferContext,
+  tokenAccounts: ReadonlyMap<string, TokenAccountMetadata>
+): ObservedMove[] {
+  const moves: ObservedMove[] = [];
+  for (const { instruction, position } of flattenParsedInstructions(parsedTransaction)) {
+    const parsedType = instruction.parsed?.type;
+    const info = instruction.parsed?.info;
+
+    if (!parsedType || !info) {
+      continue;
+    }
+
+    if ((instruction.program ?? "").startsWith("system") && parsedType === "transfer") {
+      const sourceAddress = readInstructionInfoString(info, "source");
+      const destinationAddress = readInstructionInfoString(info, "destination");
+      const lamports = u64OrNull(readInstructionInfoInteger(info, "lamports"));
+
+      if (!sourceAddress || !destinationAddress || lamports === null) {
+        continue;
+      }
+
+      const sourceWalletId = context.walletIdsByAddress.get(sourceAddress) ?? null;
+      const destinationWalletId = context.walletIdsByAddress.get(destinationAddress) ?? null;
+      const walletId = sourceWalletId ?? destinationWalletId;
+      moves.push({
+        position,
+        walletId,
+        direction: destinationWalletId && !sourceWalletId ? "inbound" : "outbound",
+        asset: NATIVE_ASSET,
+        // Rows store native SOL under the wrapped SOL mint (`normalizePaymentToken`); the
+        // movement's asset is what tells the two apart.
+        token: SOL_MINT,
+        decimals: SOL_DECIMALS,
+        debit: lamports,
+        statedFee: baseUnits(0n),
+        sourceAccount: sourceAddress,
+        destinationAccount: destinationAddress,
+        sourceAddress,
+        destinationAddress,
+      });
+      continue;
+    }
+
+    const program = tokenProgramOf(instruction.program);
+    if (program === null) {
+      continue;
+    }
+
+    if (parsedType === "mintTo" || parsedType === "mintToChecked") {
+      const destinationTokenAccount = readInstructionInfoString(info, "account");
+      if (!destinationTokenAccount) {
+        continue;
+      }
+      const destinationTokenMetadata = tokenAccounts.get(destinationTokenAccount);
+      const destinationOwner = destinationTokenMetadata?.owner ?? null;
+      const destinationWalletId = resolveWalletIdForTokenAccount(
+        context,
+        destinationTokenAccount,
+        destinationOwner
+      );
+      const tokenAmount = readTokenAmountInfo(info, "tokenAmount");
+      const decimals = tokenAmount?.decimals ?? destinationTokenMetadata?.decimals ?? null;
+      const rawAmount = u64OrNull(
+        tokenAmount?.amount ?? readInstructionInfoInteger(info, "amount")
+      );
+      const mint = readInstructionInfoString(info, "mint") ?? destinationTokenMetadata?.mint;
+      if (decimals === null || rawAmount === null || !mint) {
+        continue;
+      }
+      moves.push({
+        position,
+        walletId: destinationWalletId,
+        direction: "inbound",
+        asset: { kind: "token", mint: address(mint), program },
+        token: mint,
+        decimals,
+        debit: rawAmount,
+        // A mint charges no transfer fee.
+        statedFee: baseUnits(0n),
+        sourceAccount: null,
+        destinationAccount: destinationTokenAccount,
+        sourceAddress: readInstructionInfoString(info, "mintAuthority") ?? mint,
+        destinationAddress: destinationOwner ?? destinationTokenAccount,
+      });
+      continue;
+    }
+
+    if (
+      parsedType !== "transfer" &&
+      parsedType !== "transferChecked" &&
+      parsedType !== "transferCheckedWithFee"
+    ) {
+      continue;
+    }
+
+    const sourceTokenAccount = readInstructionInfoString(info, "source");
+    const destinationTokenAccount = readInstructionInfoString(info, "destination");
+    if (!sourceTokenAccount || !destinationTokenAccount) {
+      continue;
+    }
+
+    const sourceTokenMetadata = tokenAccounts.get(sourceTokenAccount);
+    const destinationTokenMetadata = tokenAccounts.get(destinationTokenAccount);
+    const sourceOwner = sourceTokenMetadata?.owner ?? null;
+    const destinationOwner = destinationTokenMetadata?.owner ?? null;
+    const sourceWalletId = resolveWalletIdForTokenAccount(context, sourceTokenAccount, sourceOwner);
+    const destinationWalletId = resolveWalletIdForTokenAccount(
+      context,
+      destinationTokenAccount,
+      destinationOwner
+    );
+    const walletId = sourceWalletId ?? destinationWalletId;
+
+    const tokenAmount = readTokenAmountInfo(info, "tokenAmount");
+    const decimals =
+      tokenAmount?.decimals ??
+      sourceTokenMetadata?.decimals ??
+      destinationTokenMetadata?.decimals ??
+      null;
+    const rawAmount = u64OrNull(tokenAmount?.amount ?? readInstructionInfoInteger(info, "amount"));
+    const mint =
+      readInstructionInfoString(info, "mint") ??
+      sourceTokenMetadata?.mint ??
+      destinationTokenMetadata?.mint;
+    // TransferCheckedWithFee states the fee it was built for; the program
+    // refuses it unless that is the fee it withholds.
+    const feeAmount =
+      parsedType === "transferCheckedWithFee" ? readTokenAmountInfo(info, "feeAmount") : null;
+    const statedFee =
+      parsedType === "transferCheckedWithFee" ? u64OrNull(feeAmount?.amount ?? null) : null;
+    if (
+      decimals === null ||
+      rawAmount === null ||
+      !mint ||
+      (parsedType === "transferCheckedWithFee" && (statedFee === null || statedFee > rawAmount))
+    ) {
+      continue;
+    }
+
+    moves.push({
+      position,
+      walletId,
+      direction: destinationWalletId && !sourceWalletId ? "inbound" : "outbound",
+      asset: { kind: "token", mint: address(mint), program },
+      token: mint,
+      decimals,
+      debit: rawAmount,
+      statedFee,
+      sourceAccount: sourceTokenAccount,
+      destinationAccount: destinationTokenAccount,
+      sourceAddress: sourceOwner ?? sourceTokenAccount,
+      destinationAddress: destinationOwner ?? destinationTokenAccount,
+    });
+  }
+  return moves;
+}
+
+/**
+ * Each account's balance change in base units, as the transaction's metadata
+ * reports it: lamports from `pre/postBalances` by account index, a token
+ * account's raw amount from `pre/postTokenBalances[].uiTokenAmount.amount`
+ * (never `uiAmountString`, a display value). An account the metadata does
+ * not list is absent.
+ */
+function balanceDeltas(
+  parsedTransaction: ParsedTransaction,
+  accountKeys: readonly string[]
+): { lamports: Map<string, bigint>; tokens: Map<string, bigint> } {
+  const lamports = new Map<string, bigint>();
+  const pre = parsedTransaction.meta?.preBalances ?? [];
+  const post = parsedTransaction.meta?.postBalances ?? [];
+  for (const [index, key] of accountKeys.entries()) {
+    const before = integerOrNull(pre[index]);
+    const after = integerOrNull(post[index]);
+    if (before !== null && after !== null) {
+      lamports.set(key, after - before);
+    }
+  }
+
+  const tokens = new Map<string, bigint>();
+  const read = (
+    balances: readonly RpcTokenBalanceRecord[] | null | undefined,
+    sign: 1n | -1n
+  ): boolean => {
+    for (const balance of balances ?? []) {
+      const key =
+        typeof balance.accountIndex === "number" ? accountKeys[balance.accountIndex] : undefined;
+      const amount = balance.uiTokenAmount?.amount;
+      if (key === undefined || typeof amount !== "string" || !/^\d+$/.test(amount)) {
+        return false;
+      }
+      tokens.set(key, (tokens.get(key) ?? 0n) + sign * BigInt(amount));
+    }
+    return true;
+  };
+  // A token account the transaction creates has no pre balance: it starts at 0.
+  const readable =
+    read(parsedTransaction.meta?.postTokenBalances, 1n) &&
+    read(parsedTransaction.meta?.preTokenBalances, -1n);
+  return { lamports, tokens: readable ? tokens : new Map() };
+}
+
+/**
+ * What each move moved, checked against the chain (ADR 0012, verification
+ * where the program does not already guarantee it): the credits instruction
+ * data implies into each destination account, less what the transaction
+ * moved out of it (and, for lamports, the network fee its fee payer paid),
+ * must equal that account's balance change.
+ *
+ * A plain `TransferChecked` (or `Transfer`) on a fee mint does not state its
+ * fee: when it is the only move into an account that received less than it
+ * debited, the program withheld the difference, so that is the fee and the
+ * change is the credit. A failed transaction moved nothing.
+ */
+function observedMovements(
+  parsedTransaction: ParsedTransaction,
+  accountKeys: readonly string[],
+  moves: readonly ObservedMove[]
+): ObservedMovement[] {
+  const executed = !parsedTransaction.meta?.err;
+  const deltas = balanceDeltas(parsedTransaction, accountKeys);
+  const feePayer = accountKeys[0];
+  // The fee the fee payer paid; when the transaction does not state it, no
+  // move into the fee payer's lamports can be checked.
+  const networkFee = integerOrNull(parsedTransaction.meta?.fee);
+
+  return moves.map((move): ObservedMovement => {
+    const basis = move.direction === "inbound" ? "credit" : "debit";
+    // A plain transfer states no fee: until the chain shows one, its debit is all credit.
+    const stated = (fee: BaseUnits | null): BaseUnits => (fee === null ? baseUnits(0n) : fee);
+    const split = (fee: BaseUnits): LegAmounts => ({
+      debit: move.debit,
+      fee,
+      credit: baseUnits(move.debit - fee),
+    });
+    const movement = (
+      amounts: LegAmounts,
+      verification: ObservedMovement["verification"]
+    ): ObservedMovement => ({
+      asset: move.asset,
+      basis,
+      decimals: move.decimals,
+      amounts,
+      verification,
+    });
+    if (!executed) {
+      return movement(split(stated(move.statedFee)), MOVEMENT_NOT_EXECUTED);
+    }
+
+    const native = move.asset.kind === "native";
+    const sameFamily = (other: ObservedMove) => (other.asset.kind === "native") === native;
+    const into = moves.filter(
+      (other) => sameFamily(other) && other.destinationAccount === move.destinationAccount
+    );
+    const outOf = moves.filter(
+      (other) => sameFamily(other) && other.sourceAccount === move.destinationAccount
+    );
+    const delta = (native ? deltas.lamports : deltas.tokens).get(move.destinationAccount);
+    if (delta === undefined) {
+      return movement(split(stated(move.statedFee)), { state: "pending", reason: null });
+    }
+    const intoFeePayer = native && move.destinationAccount === feePayer;
+    if (intoFeePayer && networkFee === null) {
+      return movement(split(stated(move.statedFee)), { state: "pending", reason: null });
+    }
+    const paidFee = intoFeePayer && networkFee !== null ? networkFee : 0n;
+    const expected =
+      into.reduce((total, other) => total + other.debit - stated(other.statedFee), 0n) -
+      outOf.reduce((total, other) => total + other.debit, 0n) -
+      paidFee;
+    if (delta === expected) {
+      return movement(split(stated(move.statedFee)), CHAIN_DELTA_MATCHED);
+    }
+    // Only a Token-2022 mint can withhold a fee, and every move into and out
+    // of the account is counted (tracked wallet or not), so the shortfall is it.
+    // The whole debit can be withheld: fees round up, so a tiny transfer can
+    // credit nothing.
+    if (
+      move.asset.kind === "token" &&
+      move.asset.program === "token-2022" &&
+      into.length === 1 &&
+      outOf.length === 0 &&
+      paidFee === 0n &&
+      move.statedFee === null &&
+      delta >= 0n &&
+      delta < move.debit
+    ) {
+      return movement(split(baseUnits(move.debit - delta)), CHAIN_DELTA_MATCHED);
+    }
+    return movement(split(stated(move.statedFee)), CHAIN_DELTA_MISMATCH);
+  });
+}
+
+function buildObservedTransfers(
   parsedTransaction: ParsedTransactionResponse["result"],
   signatureInfo: SignatureHistoryEntry,
   context: ObservedTransferContext
-): TransferRow[] {
+): ObservedTransfer[] {
   if (!parsedTransaction) {
     return [];
   }
@@ -498,280 +916,42 @@ function buildObservedTransferRows(
   const accountKeys = (parsedTransaction.transaction?.message?.accountKeys ?? [])
     .map((accountKey) => resolveParsedAccountKey(accountKey))
     .filter((accountKey): accountKey is string => Boolean(accountKey));
-  const tokenAccountMetadata = new Map<
-    string,
-    { decimals: number | null; mint: string | null; owner: string | null }
-  >();
-  const observedRows: TransferRow[] = [];
-  const preTokenBalances = parsedTransaction.meta?.preTokenBalances ?? [];
-  const postTokenBalances = parsedTransaction.meta?.postTokenBalances ?? [];
+  const moves = readObservedMoves(
+    parsedTransaction,
+    context,
+    tokenAccountMetadata(parsedTransaction, accountKeys)
+  );
+  // Every move checks the balances; only a tracked wallet's move is a row.
+  const movements = observedMovements(parsedTransaction, accountKeys, moves);
 
-  for (const balance of [...preTokenBalances, ...postTokenBalances]) {
-    if (typeof balance.accountIndex !== "number") {
-      continue;
+  return moves.flatMap((move, index) => {
+    const { walletId } = move;
+    if (walletId === null) {
+      return [];
     }
-
-    const accountAddress = accountKeys[balance.accountIndex];
-    if (!accountAddress) {
-      continue;
-    }
-
-    const current = tokenAccountMetadata.get(accountAddress) ?? {
-      owner: null,
-      mint: null,
-      decimals: null,
-    };
-
-    tokenAccountMetadata.set(accountAddress, {
-      owner:
-        typeof balance.owner === "string" && balance.owner.trim() ? balance.owner : current.owner,
-      mint: typeof balance.mint === "string" && balance.mint.trim() ? balance.mint : current.mint,
-      decimals:
-        typeof balance.uiTokenAmount?.decimals === "number" &&
-        Number.isFinite(balance.uiTokenAmount.decimals) &&
-        Number.isInteger(balance.uiTokenAmount.decimals)
-          ? balance.uiTokenAmount.decimals
-          : current.decimals,
-    });
-  }
-
-  for (const { instruction, position } of flattenParsedInstructions(parsedTransaction)) {
-    const parsedType = instruction.parsed?.type;
-    const info = instruction.parsed?.info;
-
-    if (!parsedType || !info) {
-      continue;
-    }
-
-    if ((instruction.program ?? "").startsWith("system") && parsedType === "transfer") {
-      const sourceAddress = readInstructionInfoString(info, "source");
-      const destinationAddress = readInstructionInfoString(info, "destination");
-      const lamports = readInstructionInfoInteger(info, "lamports");
-
-      if (!sourceAddress || !destinationAddress || lamports === null) {
-        continue;
-      }
-
-      const sourceWalletId = context.walletIdsByAddress.get(sourceAddress) ?? null;
-      const destinationWalletId = context.walletIdsByAddress.get(destinationAddress) ?? null;
-      const walletId = sourceWalletId ?? destinationWalletId;
-
-      if (!walletId) {
-        continue;
-      }
-
-      const direction: TransferDirection =
-        destinationWalletId && !sourceWalletId ? "inbound" : "outbound";
-
-      observedRows.push({
-        id: observedTransferRowId({
-          walletId,
-          signature,
-          position,
-          direction,
-        }),
-        organization_id: context.organizationId,
-        project_id: context.projectId,
-        wallet_id: walletId,
-        custody_wallet_id: null,
-        counterparty_id: null,
-        source_address: sourceAddress,
-        destination_address: destinationAddress,
-        token: SOL_MINT,
-        amount: formatDecimalAmount(lamports, 9),
-        memo: null,
-        type: "transfer",
-        kind: observedTransferKind(direction),
-        direction,
-        status,
-        provider: null,
-        provider_reference: null,
-        provider_observed_at: null,
-        delivery_mode: null,
-        fiat_currency: null,
-        fiat_amount: null,
-        ramps_memo: {},
-        provider_data: {},
-        signature,
-        serialized_tx: null,
-        signed_transaction: null,
-        last_valid_block_height: null,
-        submission_started_at: null,
-        slot,
-        block_time: timestamp,
-        fee: observedFee(parsedTransaction),
-        error: null,
-        initiated_by_key_id: null,
-        idempotency_key: null,
-        idempotency_fingerprint: null,
-        confirmed_at: null,
-        finalization_last_polled_at: null,
-        created_at: timestamp,
-        updated_at: timestamp,
-      });
-      continue;
-    }
-
-    const normalizedProgram = (instruction.program ?? "").toLowerCase();
-    if (!normalizedProgram.includes("token")) {
-      continue;
-    }
-
-    if (parsedType === "mintTo" || parsedType === "mintToChecked") {
-      const destinationTokenAccount = readInstructionInfoString(info, "account");
-      if (!destinationTokenAccount) {
-        continue;
-      }
-
-      const destinationTokenMetadata = tokenAccountMetadata.get(destinationTokenAccount);
-      const destinationOwner = destinationTokenMetadata?.owner ?? null;
-      const destinationWalletId = resolveWalletIdForTokenAccount(
-        context,
-        destinationTokenAccount,
-        destinationOwner
-      );
-
-      if (!destinationWalletId) {
-        continue;
-      }
-
-      const tokenAmount = readTokenAmountInfo(info);
-      const decimals = tokenAmount?.decimals ?? destinationTokenMetadata?.decimals;
-      const rawAmount = tokenAmount?.amount ?? readInstructionInfoInteger(info, "amount");
-      const mint = readInstructionInfoString(info, "mint") ?? destinationTokenMetadata?.mint;
-      const resolvedDecimals =
-        typeof decimals === "number" && Number.isFinite(decimals) && Number.isInteger(decimals)
-          ? decimals
-          : null;
-
-      if (resolvedDecimals === null || rawAmount === null || !mint) {
-        continue;
-      }
-
-      const resolvedUiAmount =
-        tokenAmount?.uiAmount ?? formatDecimalAmount(rawAmount, resolvedDecimals);
-      const direction = "inbound";
-      const sourceAddress = readInstructionInfoString(info, "mintAuthority") ?? mint;
-      const destinationAddress = destinationOwner ?? destinationTokenAccount;
-      observedRows.push({
-        id: observedTransferRowId({
-          walletId: destinationWalletId,
-          signature,
-          position,
-          direction,
-        }),
-        organization_id: context.organizationId,
-        project_id: context.projectId,
-        wallet_id: destinationWalletId,
-        custody_wallet_id: null,
-        counterparty_id: null,
-        source_address: sourceAddress,
-        destination_address: destinationAddress,
-        token: mint,
-        amount: resolvedUiAmount,
-        memo: null,
-        type: "transfer",
-        kind: observedTransferKind(direction),
-        direction,
-        status,
-        provider: null,
-        provider_reference: null,
-        provider_observed_at: null,
-        delivery_mode: null,
-        fiat_currency: null,
-        fiat_amount: null,
-        ramps_memo: {},
-        provider_data: {},
-        signature,
-        serialized_tx: null,
-        signed_transaction: null,
-        last_valid_block_height: null,
-        submission_started_at: null,
-        slot,
-        block_time: timestamp,
-        fee: observedFee(parsedTransaction),
-        error: null,
-        initiated_by_key_id: null,
-        idempotency_key: null,
-        idempotency_fingerprint: null,
-        confirmed_at: null,
-        finalization_last_polled_at: null,
-        created_at: timestamp,
-        updated_at: timestamp,
-      });
-      continue;
-    }
-
-    if (parsedType !== "transfer" && parsedType !== "transferChecked") {
-      continue;
-    }
-
-    const sourceTokenAccount = readInstructionInfoString(info, "source");
-    const destinationTokenAccount = readInstructionInfoString(info, "destination");
-    if (!sourceTokenAccount || !destinationTokenAccount) {
-      continue;
-    }
-
-    const sourceTokenMetadata = tokenAccountMetadata.get(sourceTokenAccount);
-    const destinationTokenMetadata = tokenAccountMetadata.get(destinationTokenAccount);
-    const sourceOwner = sourceTokenMetadata?.owner ?? null;
-    const destinationOwner = destinationTokenMetadata?.owner ?? null;
-    const sourceWalletId = resolveWalletIdForTokenAccount(context, sourceTokenAccount, sourceOwner);
-    const destinationWalletId = resolveWalletIdForTokenAccount(
-      context,
-      destinationTokenAccount,
-      destinationOwner
-    );
-    const walletId = sourceWalletId ?? destinationWalletId;
-
-    if (!walletId) {
-      continue;
-    }
-
-    const tokenAmount = readTokenAmountInfo(info);
-    const decimals =
-      tokenAmount?.decimals ?? sourceTokenMetadata?.decimals ?? destinationTokenMetadata?.decimals;
-    const rawAmount = tokenAmount?.amount ?? readInstructionInfoInteger(info, "amount");
-    const mint =
-      readInstructionInfoString(info, "mint") ??
-      sourceTokenMetadata?.mint ??
-      destinationTokenMetadata?.mint;
-    const resolvedDecimals =
-      typeof decimals === "number" && Number.isFinite(decimals) && Number.isInteger(decimals)
-        ? decimals
-        : null;
-
-    if (resolvedDecimals === null || rawAmount === null || !mint) {
-      continue;
-    }
-
-    const direction: TransferDirection =
-      destinationWalletId && !sourceWalletId ? "inbound" : "outbound";
-    const resolvedUiAmount =
-      tokenAmount?.uiAmount ?? formatDecimalAmount(rawAmount, resolvedDecimals);
-    const sourceAddress = sourceOwner ?? sourceTokenAccount;
-    const destinationAddress = destinationOwner ?? destinationTokenAccount;
-
-    observedRows.push({
+    const movement = movements[index];
+    // The row's amount is its own wallet's effect: what it received, or what it sent.
+    const ownEffect = move.direction === "inbound" ? movement.amounts.credit : move.debit;
+    const row: TransferRow = {
       id: observedTransferRowId({
         walletId,
         signature,
-        position,
-        direction,
+        position: move.position,
+        direction: move.direction,
       }),
       organization_id: context.organizationId,
       project_id: context.projectId,
       wallet_id: walletId,
       custody_wallet_id: null,
       counterparty_id: null,
-      source_address: sourceAddress,
-      destination_address: destinationAddress,
-      token: mint,
-      amount: resolvedUiAmount,
+      source_address: move.sourceAddress,
+      destination_address: move.destinationAddress,
+      token: move.token,
+      amount: formatDecimalAmount(ownEffect, move.decimals),
       memo: null,
       type: "transfer",
-      kind: observedTransferKind(direction),
-      direction,
+      kind: observedTransferKind(move.direction),
+      direction: move.direction,
       status,
       provider: null,
       provider_reference: null,
@@ -797,16 +977,15 @@ function buildObservedTransferRows(
       finalization_last_polled_at: null,
       created_at: timestamp,
       updated_at: timestamp,
-    });
-  }
-
-  return observedRows;
+    };
+    return [{ row, movement }];
+  });
 }
 
 export async function buildObservedTransfersForSignatures(
   signatures: Array<Awaited<ReturnType<typeof getSignaturesForAddress>>[number]>,
   context: ObservedTransferContext
-): Promise<TransferRow[]> {
+): Promise<ObservedTransfer[]> {
   if (signatures.length === 0 || context.walletIdsByAddress.size === 0) {
     return [];
   }
@@ -822,7 +1001,7 @@ export async function buildObservedTransfersForSignatures(
       // confirmationStatus is the current finality signal for the body gate.
       const isFinalized = signatureInfo.confirmationStatus === "finalized";
       const parsedTransaction = await fetchParsedTransaction(signatureInfo.signature, isFinalized);
-      return buildObservedTransferRows(parsedTransaction, signatureInfo, context);
+      return buildObservedTransfers(parsedTransaction, signatureInfo, context);
     }
   );
 

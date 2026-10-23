@@ -36,9 +36,9 @@ export type TokenMovementLegStatus = (typeof TOKEN_MOVEMENT_LEG_STATUSES)[number
 export const DEFAULT_TOKEN_MOVEMENT_BASIS = "debit" satisfies TokenMovementBasis;
 
 /**
- * Why SDP will not make a movement now (`@sdp/solana/token-movement`). A
- * builder path refuses it with a 400; a recurring pull is held with it, and
- * the collection attempt reports it.
+ * Why SDP will not make a movement now (`@sdp/solana/token-movement`). The
+ * builder and each adapter refuse it with a 400; a recurring pull is held
+ * with it, and the collection attempt reports it.
  */
 export const TOKEN_MOVEMENT_REFUSAL_REASONS = [
   "non_transferable",
@@ -49,6 +49,15 @@ export const TOKEN_MOVEMENT_REFUSAL_REASONS = [
   "nothing_credited",
   /** A recurring pull's transfer fee is above the fee tolerance its mandate recorded. */
   "fee_above_tolerance",
+  /** An existing destination token account is frozen. */
+  "destination_frozen",
+  // An adapter's row (issuance, DvP, Private Channels, Earn) refuses these.
+  /** The path cannot state a transfer fee, or cannot carry one. */
+  "transfer_fee",
+  /** The path's program refuses a scaled or interest-bearing mint. */
+  "display_rule",
+  /** The path cannot pass a transfer hook's extra accounts. */
+  "transfer_hook",
 ] as const;
 
 export type TokenMovementRefusalReason = (typeof TOKEN_MOVEMENT_REFUSAL_REASONS)[number];
@@ -75,12 +84,13 @@ export const AMOUNT_VERIFICATION_REASONS = [
   /** The movement failed, or was released, before it moved anything. */
   "movement_not_executed",
   /**
-   * A movement SDP did not build itself (a program's CPI pull) landed, and the
-   * chain shows it moved exactly the quote: the instruction's debit, and the
-   * destination's raw token-balance delta as the credit.
+   * SDP did not build the movement itself (a program's CPI pull, an observed
+   * transfer, a provider's delivery), and the chain shows it moved what it
+   * says: the raw balance changes, in base units, agree with the quote, or
+   * with its instruction data and the transfer fee rule.
    */
   "chain_delta_matched",
-  /** The chain shows the movement moved other amounts than the quote, or none SDP can read. */
+  /** The chain shows other amounts than the movement says it moved, or none SDP can read. */
   "chain_delta_mismatch",
 ] as const;
 
@@ -163,6 +173,12 @@ export function builtMovementVerdict(
 /** The same for the ramp transitions that end an off-ramp deposit SDP built. */
 export const BUILT_OFFRAMP_DEPOSIT_VERDICTS = {
   offramp_deposit_confirmed: BUILT_TRANSFER_LANDED,
+  /**
+   * The chain verifier saw a deposit's signature finalize without error. A
+   * deposit whose own confirmation timed out stayed pending until then: it
+   * landed as SDP built it. An on-ramp has no built leg, so this writes none.
+   */
+  delivery_verified: BUILT_TRANSFER_LANDED,
   offramp_deposit_failed: MOVEMENT_NOT_EXECUTED,
   offramp_deposit_released: MOVEMENT_NOT_EXECUTED,
 } as const satisfies Partial<Record<RampTransferTransitionId, AmountVerificationVerdict>>;

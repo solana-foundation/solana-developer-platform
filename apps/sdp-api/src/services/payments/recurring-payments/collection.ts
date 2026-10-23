@@ -1870,8 +1870,8 @@ interface RecurringPull {
 /**
  * Decides a due pull before anything is claimed (ADR 0012): one terms read,
  * with the destination's token account, then the recurring capability rule.
- * A paused mint, a fee above the mandate's tolerance or a destination that
- * requires memos holds the pull: a `failed` attempt with its hold reason and
+ * A paused mint, a fee above the mandate's tolerance, or a destination that
+ * is frozen or requires memos holds the pull: a `failed` attempt with its hold reason and
  * retry time, no transfer, and the period still due. A cron run during a
  * failure's retry window reads nothing.
  *

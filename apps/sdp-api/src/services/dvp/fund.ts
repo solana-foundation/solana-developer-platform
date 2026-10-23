@@ -9,13 +9,19 @@ import {
 } from "@sdp/dvp";
 import { createRpc, getRecentBlockhash } from "@sdp/rpc/solana";
 import { formatDecimalAmount } from "@sdp/solana/amount";
+import { quoteMovement } from "@sdp/solana/movement-quote";
+import { baseUnits, toTokenAmount } from "@sdp/solana/token-amount";
+import { buildTokenMovement, support, TokenMovementError } from "@sdp/solana/token-movement";
+import type { MintTokenTerms } from "@sdp/solana/token-terms";
 import { DVP_LEG_REFUSAL, type DvpTradeSide, type DvpTradeStatus } from "@sdp/types/dvp";
 import {
   type Address,
   appendTransactionMessageInstructions,
+  createNoopSigner,
   createTransactionMessage,
   getBase58Decoder,
   getTransactionEncoder,
+  type Instruction,
   pipe,
   type Signature,
   setTransactionMessageFeePayer,
@@ -23,11 +29,7 @@ import {
   signature,
 } from "@solana/kit";
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
-import {
-  fetchMaybeToken,
-  findAssociatedTokenPda,
-  getTransferCheckedInstruction,
-} from "@solana-program/token-2022";
+import { decodeToken, findAssociatedTokenPda } from "@solana-program/token-2022";
 import type { Context } from "hono";
 import { getDb } from "@/db/client";
 import { createPostgresDvpLegFundingClaimRepository } from "@/db/repositories/dvp-leg-funding-claim.repository";
@@ -46,7 +48,7 @@ import {
 import type { Env } from "@/types/env";
 import { assertTradeNotClosing } from "./close-exclusion";
 import type { RecordDvpLegActionAttempt } from "./leg-action-idempotency";
-import { readMintDecimals } from "./mints";
+import { readDvpFundingAccounts } from "./mints";
 import { readDvpAccounts, readEscrowState } from "./read-chain";
 
 /** Statuses from which a leg can still be funded. */
@@ -141,6 +143,60 @@ export function fundingPlan(
     hasClaim: (signature) => claims.hasClaim(trade.id, side, signature),
     recordFundingTx: (signature) => claims.recordFundingTx(trade.id, side, signature),
   };
+}
+
+/**
+ * The leg's mint terms, read live with the funding wallet's token account,
+ * once the `dvp` row moves the mint and the wallet holds the shortfall.
+ *
+ * @throws AppError (400) when the mint cannot be read, the `dvp` row refuses
+ * it, or the wallet holds no token account or less than the shortfall.
+ */
+async function readFundableMint(
+  rpc: ReturnType<typeof createRpc>,
+  trade: DvpTradeRow,
+  leg: DvpSdpLeg,
+  funding: { source: Address; wallet: Address; outstanding: bigint }
+): Promise<MintTokenTerms> {
+  const { mint } = leg;
+  const { source, wallet, outstanding } = funding;
+  // One read: the leg's mint, live (its terms decide the `dvp` row and give
+  // the transfer its decimals, so a decimals mismatch cannot move the wrong
+  // quantity), and the funding wallet's token account.
+  const accounts = await readDvpFundingAccounts(rpc, leg, source);
+  if (accounts.mint.kind !== "read") {
+    throw badRequest(`DvP trade ${trade.id}: mint ${mint} could not be read`, {
+      reason: DVP_LEG_REFUSAL.mintUnreadable,
+    });
+  }
+  const terms = accounts.mint.terms;
+  const decimals = terms.decimals;
+  // A trade created before its mint changed (a fee turned on, a hook set, a
+  // pause) cannot be funded under the program's or SDP's rules any more.
+  const decision = support(terms, "dvp");
+  if (!decision.supported) {
+    throw badRequest(`DvP trade ${trade.id}: ${decision.message}; nothing was sent`, {
+      reason: DVP_LEG_REFUSAL.mintUnsupported,
+    });
+  }
+
+  if (!accounts.source.exists) {
+    throw badRequest(
+      `DvP trade ${trade.id}: wallet ${wallet} holds no ${mint} token account, so it cannot fund this leg; nothing was sent`,
+      { reason: DVP_LEG_REFUSAL.walletHoldsNoToken }
+    );
+  }
+  const sourceBalance = decodeToken(accounts.source).data.amount;
+  if (sourceBalance < outstanding) {
+    const sourceAmount = formatDecimalAmount(sourceBalance, decimals);
+    const outstandingAmount = formatDecimalAmount(outstanding, decimals);
+    throw badRequest(
+      `DvP trade ${trade.id}: wallet ${wallet} holds ${sourceAmount} of the ${outstandingAmount} ${mint} this leg still needs; nothing was sent`,
+      { reason: DVP_LEG_REFUSAL.walletBalanceShort }
+    );
+  }
+
+  return terms;
 }
 
 /**
@@ -311,32 +367,11 @@ export async function executeDvpFunding(
     tokenProgram,
   });
 
-  // TransferChecked, never `transfer`: the latter is deprecated under
-  // Token-2022 and fails outright on a mint carrying extensions. It needs the
-  // mint and its decimals, which is also the check that stops a decimals
-  // mismatch moving the wrong quantity.
-  const decimals = await readMintDecimals(rpc, mint);
-  if (decimals === null) {
-    throw badRequest(`DvP trade ${trade.id}: mint ${mint} could not be read`, {
-      reason: DVP_LEG_REFUSAL.mintUnreadable,
-    });
-  }
-
-  const sourceAccount = await fetchMaybeToken(rpc, source);
-  if (!sourceAccount.exists) {
-    throw badRequest(
-      `DvP trade ${trade.id}: wallet ${signer.address} holds no ${mint} token account, so it cannot fund this leg; nothing was sent`,
-      { reason: DVP_LEG_REFUSAL.walletHoldsNoToken }
-    );
-  }
-  if (sourceAccount.data.amount < outstanding) {
-    const sourceAmount = formatDecimalAmount(sourceAccount.data.amount, decimals);
-    const outstandingAmount = formatDecimalAmount(outstanding, decimals);
-    throw badRequest(
-      `DvP trade ${trade.id}: wallet ${signer.address} holds ${sourceAmount} of the ${outstandingAmount} ${mint} this leg still needs; nothing was sent`,
-      { reason: DVP_LEG_REFUSAL.walletBalanceShort }
-    );
-  }
+  const terms = await readFundableMint(rpc, trade, plan.leg, {
+    source,
+    wallet: signer.address,
+    outstanding,
+  });
 
   // Last look before anything is committed to. Everything between the first
   // balance read and here — resolving a signer at the custody provider above
@@ -381,16 +416,53 @@ export async function executeDvpFunding(
     { custodyWalletId: plan.signer.custodyWalletId }
   );
   const sponsor = await feePayment.getFeePayer();
-  const instruction = getTransferCheckedInstruction(
-    { source, mint, destination: escrow, authority: signer, amount: outstanding, decimals },
-    { programAddress: tokenProgram }
-  );
+  // The escrow must receive exactly the shortfall. The `dvp` row refuses fee
+  // mints, so the debit is the credit; the builder states the decimals with
+  // TransferChecked, never the unchecked `transfer` (deprecated under
+  // Token-2022 and refused on a mint carrying extensions).
+  const quote = quoteMovement(terms, {
+    asset: terms.asset,
+    amount: toTokenAmount(baseUnits(outstanding), terms.decimals),
+    basis: "credit",
+  });
+  let instructions: Instruction[];
+  try {
+    instructions = buildTokenMovement(terms, quote, {
+      authority: signer,
+      rentPayer: createNoopSigner(sponsor),
+      accounts: {
+        kind: "token",
+        source,
+        // Read above: it exists and is not frozen. The DvP program opens its
+        // escrows itself, without MemoTransfer, and only the escrow's PDA
+        // owner could enable it.
+        destination: {
+          owner: trade.swapDvp,
+          tokenAccount: escrow,
+          exists: true,
+          requiresMemo: false,
+          frozen: false,
+        },
+        hookAccounts: [],
+        thaw: null,
+      },
+      memo: null,
+      reference: null,
+    });
+  } catch (error) {
+    if (error instanceof TokenMovementError) {
+      throw badRequest(`DvP trade ${trade.id}: ${error.message}; nothing was sent`, {
+        reason: DVP_LEG_REFUSAL.mintUnsupported,
+      });
+    }
+    throw error;
+  }
   const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
   const message = pipe(
     createTransactionMessage({ version: 0 }),
     (m) => setTransactionMessageFeePayer(sponsor, m),
     (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
-    (m) => appendTransactionMessageInstructions([instruction], m)
+    (m) => appendTransactionMessageInstructions(instructions, m)
   );
   const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
   const walletSignatureBytes = partiallySigned.signatures[signer.address];

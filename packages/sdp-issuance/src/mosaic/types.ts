@@ -5,6 +5,7 @@
  * These map SDP's domain types to Mosaic SDK concepts.
  */
 
+import type { TokenAmount } from "@sdp/solana/token-amount";
 import type { TokenExtensionsConfig, TokenTemplate } from "@sdp/types/tokens";
 import type { Address, TransactionSigner } from "@solana/kit";
 
@@ -137,15 +138,14 @@ export interface CreateTokenOptions {
 }
 
 /**
- * Options for minting tokens
- * Note: amount is a number (decimal amount), not bigint.
- * The Mosaic SDK handles conversion to raw amount using mint decimals.
+ * Options for minting tokens. The amount is exact token units at the scale
+ * SDP recorded for the mint; the service checks that scale against the mint
+ * read live before Mosaic converts it.
  */
 export interface MintToOptions {
   mint: Address;
   destination: Address;
-  /** Decimal amount (e.g., 100 for 100 tokens) - SDK handles conversion */
-  amount: number;
+  amount: TokenAmount;
   mintAuthority: Address;
   feePayer: Address;
 }

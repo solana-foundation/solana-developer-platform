@@ -15,6 +15,7 @@ import {
   assertTokenAllowsOperation,
   assertTokenIsDeployed,
   parsePositiveTokenAmount,
+  withLiveIssuanceTerms,
 } from "@/services/token-operation.service";
 import {
   admitIssuanceRuntimeExecution,
@@ -51,7 +52,7 @@ export const prepareForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
   assertTokenAllowsOperation(token, "force_burn");
   assertTokenIsDeployed(token);
 
-  const { mosaicAmount } = parsePositiveTokenAmount(body.forceBurn.amount, token.decimals);
+  const { amount } = parsePositiveTokenAmount(body.forceBurn.amount, token.decimals);
 
   const permanentDelegateRaw = await resolvePermanentDelegateAuthority(c.env, tokenService, token);
   if (!permanentDelegateRaw) {
@@ -78,13 +79,15 @@ export const prepareForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
   const permanentDelegate = assertValidAddress(permanentDelegateRaw, "delegateAuthority");
 
   const mosaic = createIssuanceMosaicService(c, authority, "sponsored");
-  const prepared = await mosaic.prepareForceBurn({
-    mint: mintAddress,
-    source,
-    amount: mosaicAmount,
-    permanentDelegate,
-    feePayer: signer.address,
-  });
+  const prepared = await withLiveIssuanceTerms(() =>
+    mosaic.prepareForceBurn({
+      mint: mintAddress,
+      source,
+      amount,
+      permanentDelegate,
+      feePayer: signer.address,
+    })
+  );
 
   let simulation: unknown;
   if (body.options?.simulate) {
@@ -186,7 +189,7 @@ export const executeForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
   assertTokenAllowsOperation(token, "force_burn");
   assertTokenIsDeployed(token);
 
-  const { mosaicAmount } = parsePositiveTokenAmount(body.forceBurn.amount, token.decimals);
+  const { amount } = parsePositiveTokenAmount(body.forceBurn.amount, token.decimals);
 
   const permanentDelegateRaw = await resolvePermanentDelegateAuthority(c.env, tokenService, token);
   if (!permanentDelegateRaw) {
@@ -277,13 +280,15 @@ export const executeForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
   let onChainEffectCompleted = false;
 
   try {
-    const result = await mosaic.forceBurn({
-      mint: mintAddress,
-      source,
-      amount: mosaicAmount,
-      permanentDelegate: signer,
-      feePayer: signer,
-    });
+    const result = await withLiveIssuanceTerms(() =>
+      mosaic.forceBurn({
+        mint: mintAddress,
+        source,
+        amount,
+        permanentDelegate: signer,
+        feePayer: signer,
+      })
+    );
     onChainEffectCompleted = true;
 
     const updatedTx = await persistSettledTransactionThenOutcome({

@@ -84,7 +84,7 @@ import {
   getPaymentsRepository,
   getTokenMovementLegsRepository,
 } from "@/routes/payments/context";
-import { mapTransferWithLegs } from "@/routes/payments/mappers";
+import { mapObservedTransfer, mapTransferWithLegs } from "@/routes/payments/mappers";
 import { transferIdParamsSchema } from "@/routes/payments/schemas";
 import { resolveTokenLabel } from "@/routes/payments/token-accounts";
 import {
@@ -125,6 +125,7 @@ import {
   buildObservedTransfersForSignatures,
   dedupeSignatureHistory,
   MAX_TOKEN_ACCOUNT_SIGNATURE_LOOKUPS,
+  type ObservedMovement,
   resolveWalletTokenAccountAddresses,
   SIGNATURE_HISTORY_LOOKUP_CONCURRENCY,
 } from "./observed-transfers";
@@ -1225,6 +1226,8 @@ export async function listTransfers(c: AppContext) {
 
   let transferRows: TransferRow[];
   let total: number;
+  /** What each observed row moved, by row id; persisted rows have legs instead. */
+  let observedMovements: ReadonlyMap<string, ObservedMovement> = new Map();
 
   // On-chain history is opt-in and always anchored to one exact wallet row.
   const observedTarget =
@@ -1353,11 +1356,15 @@ export async function listTransfers(c: AppContext) {
     const missingObservedSignatures = onChainSigs.filter(
       (signatureInfo) => !persistedSignatures.has(String(signatureInfo.signature))
     );
-    const observedRows = await buildObservedTransfersForSignatures(missingObservedSignatures, {
+    const observedTransfers = await buildObservedTransfersForSignatures(missingObservedSignatures, {
       organizationId: auth.organizationId,
       projectId: requireProjectId(c),
       walletIdsByAddress,
     });
+    observedMovements = new Map(
+      observedTransfers.map((observed) => [observed.row.id, observed.movement])
+    );
+    const observedRows = observedTransfers.map((observed) => observed.row);
 
     // 4. Filter only synthetic observations; the repository already applied
     // the same filters to the authoritative exact ledger.
@@ -1411,12 +1418,29 @@ export async function listTransfers(c: AppContext) {
     transferRows = result.rows;
   }
 
+  const transfers = await mapListedTransfers(c, transferRows, observedMovements);
+  return paginated(c, transfers, { total, page, pageSize });
+}
+
+/**
+ * A listed page's transfers with their amounts: a persisted row's legs (a row
+ * written before quotes has none: legacy = no leg), or what the chain shows an
+ * observed row moved.
+ */
+async function mapListedTransfers(
+  c: AppContext,
+  transferRows: readonly TransferRow[],
+  observedMovements: ReadonlyMap<string, ObservedMovement>
+) {
   const legs = await getTokenMovementLegsRepository(c).listLegsByTransfers(
     transferRows.map((row) => row.id)
   );
-  // A row written before quotes, or observed on chain, has no leg (legacy = no leg).
-  const transfers = transferRows.map((row) => mapTransferWithLegs(row, legs.get(row.id) ?? []));
-  return paginated(c, transfers, { total, page, pageSize });
+  return transferRows.map((row) => {
+    const observed = observedMovements.get(row.id);
+    return observed === undefined
+      ? mapTransferWithLegs(row, legs.get(row.id) ?? [])
+      : mapObservedTransfer(row, observed);
+  });
 }
 
 export async function getTransfer(c: AppContext) {

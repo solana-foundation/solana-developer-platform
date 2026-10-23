@@ -17,6 +17,7 @@ import {
   assertTokenAllowsOperation,
   assertTokenIsDeployed,
   parsePositiveTokenAmount,
+  withLiveIssuanceTerms,
 } from "@/services/token-operation.service";
 import type { Env } from "@/types/env";
 import {
@@ -166,10 +167,7 @@ export const prepareBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
   const signer = authority.signer;
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const source = assertValidAddress(body.burn.source, "source");
-  const { amountBaseUnits, mosaicAmount } = parsePositiveTokenAmount(
-    body.burn.amount,
-    token.decimals
-  );
+  const { amountBaseUnits, amount } = parsePositiveTokenAmount(body.burn.amount, token.decimals);
   const normalizedSource = await resolveValidatedBurnSource(
     c.env,
     signer.address,
@@ -183,14 +181,16 @@ export const prepareBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
   const token2022 = createIssuanceToken2022Service(c, authority);
   const prepared = await (async () => {
     try {
-      return await token2022.prepareBurn(
-        {
-          mint: mintAddress,
-          source: normalizedSource,
-          amount: mosaicAmount,
-          authority: signer.address,
-        },
-        body.options?.simulate ?? false
+      return await withLiveIssuanceTerms(() =>
+        token2022.prepareBurn(
+          {
+            mint: mintAddress,
+            source: normalizedSource,
+            amount,
+            authority: signer.address,
+          },
+          body.options?.simulate ?? false
+        )
       );
     } catch (error) {
       const appError = toBurnOperationAppError(error);
@@ -300,10 +300,7 @@ export const executeBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
   });
   const mintAddress = assertValidAddress(token.mintAddress, "mintAddress");
   const source = assertValidAddress(body.burn.source, "source");
-  const { amountBaseUnits, mosaicAmount } = parsePositiveTokenAmount(
-    body.burn.amount,
-    token.decimals
-  );
+  const { amountBaseUnits, amount } = parsePositiveTokenAmount(body.burn.amount, token.decimals);
 
   const idempotencyMetadata = idempotencyForWallet(wallet.custodyWalletId);
 
@@ -378,12 +375,14 @@ export const executeBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
     // Execute burn on Solana
     const token2022 = createIssuanceToken2022Service(c, authority);
 
-    const result = await token2022.burn({
-      mint: mintAddress,
-      source: normalizedSource,
-      amount: mosaicAmount,
-      authority: signer,
-    });
+    const result = await withLiveIssuanceTerms(() =>
+      token2022.burn({
+        mint: mintAddress,
+        source: normalizedSource,
+        amount,
+        authority: signer,
+      })
+    );
     onChainEffectCompleted = true;
 
     const evidence = { signature: result.signature, slot: Number(result.slot) };

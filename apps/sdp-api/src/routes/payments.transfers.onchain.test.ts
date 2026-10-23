@@ -7,10 +7,21 @@ import {
   getTransactionDecoder,
 } from "@solana/kit";
 import {
+  findMintConfigPda,
+  findThawExtraMetasAccountPda,
+  getMintConfigEncoder,
+  TOKEN_ACL_PROGRAM_ADDRESS,
+} from "@solana/token-acl-sdk";
+import {
+  AccountState,
+  ASSOCIATED_TOKEN_PROGRAM_ADDRESS,
   type ExtensionArgs,
+  getExtraAccountMetasEncoder,
+  getMintEncoder,
   getTransferCheckedWithFeeInstructionDataDecoder,
 } from "@solana-program/token-2022";
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db/client";
 import { generatePaymentTransferId } from "@/db/repositories/payments.repository";
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
@@ -57,6 +68,7 @@ import { fullySignTestTransaction } from "@/test/helpers/sponsor-signing";
 import {
   answerMovementAccounts,
   associatedTokenAccount,
+  encodedRpcAccount,
   mintRpcAccount,
   sentInstructions,
   tokenRpcAccount,
@@ -906,6 +918,103 @@ describe("Payments routes — on-chain transfers", () => {
       expect((await readErrorResponse(refused)).error).toMatchObject({
         code: "BAD_REQUEST",
         details: { reason: "paused" },
+      });
+      expect(await countTransferRows()).toBe(0);
+    });
+
+    it("thaws a new destination of a Token ACL mint right after creating it", async () => {
+      const mint = address(pyusd);
+      const gate = (await generateKeyPairSigner()).address;
+      const [mintConfig] = await findMintConfigPda(
+        { mint },
+        { programAddress: TOKEN_ACL_PROGRAM_ADDRESS }
+      );
+      const [thawList] = await findThawExtraMetasAccountPda({ mint }, { programAddress: gate });
+      await answerPyusd({ extensions: [] });
+      answerMovementAccounts(
+        rpc,
+        new Map([
+          [
+            pyusd,
+            encodedRpcAccount(
+              SPL_TOKEN_PROGRAMS["token-2022"],
+              getMintEncoder().encode({
+                mintAuthority: mintConfig,
+                supply: 1_000_000_000_000n,
+                decimals: 6,
+                isInitialized: true,
+                freezeAuthority: mintConfig,
+                extensions: [{ __kind: "DefaultAccountState", state: AccountState.Frozen }],
+              })
+            ),
+          ],
+        ])
+      );
+      const aclAccounts = new Map<string, JsonRpcResult>([
+        [
+          mintConfig,
+          encodedRpcAccount(
+            TOKEN_ACL_PROGRAM_ADDRESS,
+            getMintConfigEncoder().encode({
+              bump: 255,
+              enablePermissionlessThaw: true,
+              enablePermissionlessFreeze: false,
+              mint,
+              freezeAuthority: address(TEST_SOLANA_ADDRESSES.wallet1),
+              gatingProgram: gate,
+            })
+          ),
+        ],
+        [thawList, encodedRpcAccount(gate, getExtraAccountMetasEncoder().encode([]))],
+      ]);
+      rpc.respond("getAccountInfo", (request) => ({
+        result: {
+          context: { slot: 1 },
+          value: aclAccounts.get(z.string().parse(request.params[0])) ?? null,
+        },
+      }));
+
+      const res = await postTransfer(
+        {
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          destination: TEST_SOLANA_ADDRESSES.wallet2,
+          token: "PYUSD",
+          amount: "1",
+        },
+        {}
+      );
+
+      expect(res.status, await res.clone().text()).toBe(200);
+      expect(lastSentInstructions().map((instruction) => instruction.programAddress)).toEqual([
+        ASSOCIATED_TOKEN_PROGRAM_ADDRESS,
+        TOKEN_ACL_PROGRAM_ADDRESS,
+        SPL_TOKEN_PROGRAMS["token-2022"],
+      ]);
+      expect(
+        rpc.requests
+          .filter((request) => request.method === "getAccountInfo")
+          .map((request) => request.params[0])
+      ).toEqual([mintConfig, thawList]);
+    });
+
+    it("refuses a frozen-by-default mint with no freeze authority before writing a row", async () => {
+      await answerPyusd({
+        extensions: [{ __kind: "DefaultAccountState", state: AccountState.Frozen }],
+      });
+
+      const refused = await postTransfer(
+        {
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          destination: TEST_SOLANA_ADDRESSES.wallet2,
+          token: "PYUSD",
+          amount: "1",
+        },
+        {}
+      );
+
+      expect(refused.status).toBe(400);
+      expect((await readErrorResponse(refused)).error.details).toEqual({
+        reason: "default_frozen",
       });
       expect(await countTransferRows()).toBe(0);
     });

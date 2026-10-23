@@ -40,7 +40,7 @@ import {
 } from "./base";
 
 export const ISSUANCE_TOKEN_AMOUNT_DESCRIPTION =
-  'Token amount in UI units (decimal string). Human-readable value such as "1" or "1.5". SDP converts to on-chain base units using the token\'s decimals field.';
+  'Token amount in token units (decimal string): base units ÷ 10^decimals, such as "1" or "1.5", never a scaled or interest-bearing display value. SDP checks the token\'s decimals against the mint read live and converts the amount to on-chain base units exactly.';
 
 export const tokenExtensionsConfigSchema = z
   .object({
@@ -1060,7 +1060,7 @@ const seizeOperationSchema = seizeSchemaBase.shape.seize
       example: "So11111111111111111111111111111111111111112",
     }),
     amount: withOpenApi(seizeSchemaBase.shape.seize.shape.amount, {
-      description: ISSUANCE_TOKEN_AMOUNT_DESCRIPTION,
+      description: `${ISSUANCE_TOKEN_AMOUNT_DESCRIPTION} On a mint with a transfer fee, this is what leaves the source; the token program withholds the fee in the destination.`,
       example: "250",
     }),
     delegateAuthority: withOpenApi(seizeSchemaBase.shape.seize.shape.delegateAuthority, {

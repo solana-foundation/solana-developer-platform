@@ -22,7 +22,6 @@
  */
 
 import { getRecentBlockhash, sendTransaction } from "@sdp/rpc/solana";
-import { parseDecimalAmount } from "@sdp/solana/amount";
 import {
   getDepositInstructionAsync,
   PRIVATE_CHANNEL_ESCROW_PROGRAM_ADDRESS,
@@ -58,7 +57,7 @@ import type { Env } from "@/types/env";
 import type { SpcAuthContext } from "./auth/gateway-auth";
 import { confirmAndPersistDeposit } from "./deposit-confirm";
 import { emitDepositEvent } from "./deposit-events";
-import { resolveChannelToken } from "./mint";
+import { channelAmountBaseUnits, resolveChannelToken } from "./mint";
 import type { PrivateChannelProjectRpcClient } from "./project-rpc";
 import { describeTxError, isAmbiguousSubmissionOutcome } from "./tx-error";
 
@@ -253,18 +252,12 @@ export async function createChannelDeposit(
     );
   }
 
-  const { mint, decimals, tokenProgram } = await resolveChannelToken(
-    input.instance,
-    input.projectRpc,
-    input.mint
-  );
+  const { token, terms } = await resolveChannelToken(input.instance, input.projectRpc, input.mint);
+  const { mint, tokenProgram } = token;
   const depositor = wallet.publicKey;
   const recipient = input.recipient;
 
-  const amountBaseUnits = parseDecimalAmount(input.amount, decimals);
-  if (amountBaseUnits <= 0n) {
-    throw badRequest("amount must be greater than zero");
-  }
+  const amountBaseUnits = channelAmountBaseUnits(input.amount, terms);
 
   const repo = createPrivateChannelDepositRepository(env);
   // The route has admitted and prepared its exact signer. Only the request that

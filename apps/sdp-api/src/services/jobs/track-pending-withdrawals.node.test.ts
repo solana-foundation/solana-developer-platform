@@ -1,3 +1,4 @@
+import * as readTokenTerms from "@sdp/solana/read-token-terms";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "@/types/env";
 
@@ -72,6 +73,7 @@ vi.mock("@solana-program/token", () => ({
 const { emitWithdrawalEvent } = vi.hoisted(() => ({ emitWithdrawalEvent: vi.fn() }));
 vi.mock("@/services/private-channels/withdraw-events", () => ({ emitWithdrawalEvent }));
 
+import { mintTermsAt } from "@/test/helpers/token-movement";
 import { trackPendingWithdrawals } from "./track-pending-withdrawals";
 
 // Valid base58 addresses (the reconciler runs `address()` on these fixtures).
@@ -126,6 +128,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.useFakeTimers();
   vi.setSystemTime(new Date(NOW_ISO));
+  // The mint's live terms: a classic six-decimal mint, as devnet USDC is.
+  vi.spyOn(readTokenTerms, "fetchTokenTerms").mockResolvedValue(
+    mintTermsAt(MINT, "spl-token", { decimals: 6, extensions: null })
+  );
   withdrawalRepo.updateWithdrawal.mockImplementation(async (input: Record<string, unknown>) => ({
     ...withdrawalRow({}),
     ...input,

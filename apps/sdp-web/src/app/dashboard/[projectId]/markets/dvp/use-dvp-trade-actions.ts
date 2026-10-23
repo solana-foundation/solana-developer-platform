@@ -107,6 +107,7 @@ const LEG_REFUSAL_MESSAGE: Record<
   [DVP_LEG_REFUSAL.escrowMissing]: sameCopy("DashboardMarkets.dvp.fundRefusedUnverified"),
   [DVP_LEG_REFUSAL.escrowMismatch]: sameCopy("DashboardMarkets.dvp.fundRefusedUnverified"),
   [DVP_LEG_REFUSAL.mintUnreadable]: sameCopy("DashboardMarkets.dvp.fundRefusedUnverified"),
+  [DVP_LEG_REFUSAL.mintUnsupported]: sameCopy("DashboardMarkets.dvp.fundRefusedMintUnsupported"),
   [DVP_LEG_REFUSAL.tradeNotReclaimable]: sameCopy("DashboardMarkets.dvp.reclaimRefusedClosed"),
   [DVP_LEG_REFUSAL.nothingToReclaim]: sameCopy("DashboardMarkets.dvp.reclaimRefusedEmpty"),
   [DVP_LEG_REFUSAL.transferHookUnsupported]: sameCopy(

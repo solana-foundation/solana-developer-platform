@@ -22,6 +22,7 @@ import {
   type TokenMovementLeg,
 } from "@/db/repositories/token-movement-legs.repository";
 import { AppError } from "@/lib/errors";
+import type { ObservedMovement } from "@/routes/payments/transfers/observed-transfers";
 import {
   currentProviderSettlement,
   readDeliveryMismatch,
@@ -225,6 +226,29 @@ export function movementVerification(
 export interface MovementFields {
   amounts?: TokenMovementAmounts;
   amountVerification?: AmountVerification;
+}
+
+/**
+ * An observed transfer row with what the chain shows it moved (ADR 0012):
+ * leg-shaped amounts in token units (the credit basis for an inbound row) and
+ * the verdict of comparing its instruction data with the balance changes.
+ */
+export function mapObservedTransfer(row: TransferRow, movement: ObservedMovement) {
+  const transfer: ReturnType<typeof mapTransferRow> & MovementFields = mapTransferRow(row);
+  const { amounts, decimals } = movement;
+  transfer.amounts = {
+    basis: movement.basis,
+    debit: formatDecimalAmount(amounts.debit, decimals),
+    fee: formatDecimalAmount(amounts.fee, decimals),
+    credit: formatDecimalAmount(amounts.credit, decimals),
+    decimals,
+  };
+  const verification: AmountVerification = { state: movement.verification.state };
+  if (movement.verification.reason !== null) {
+    verification.reason = movement.verification.reason;
+  }
+  transfer.amountVerification = verification;
+  return transfer;
 }
 
 /** A transfer row with its legs' amounts and verification. */

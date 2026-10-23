@@ -1,7 +1,8 @@
 /**
  * The token movement builder (ADR 0012): the one place SDP builds the
  * instructions that move a token or native SOL, and the capability decision
- * every movement path asks first.
+ * every movement path asks first (`support`, one row per path: the builder's
+ * and each registered adapter's).
  *
  * - Native SOL is a system transfer of the quoted debit, in lamports.
  * - A token movement opens the destination's associated token account under
@@ -35,8 +36,18 @@ import {
   type Rpc,
   type TransactionSigner,
 } from "@solana/kit";
+import {
+  findFlagAccountPda,
+  findMintConfigPda,
+  findThawExtraMetasAccountPda,
+  getMintConfigDecoder,
+  getThawPermissionlessIdempotentInstruction,
+  getThawPermissionlessIdempotentInstructionDataEncoder,
+  TOKEN_ACL_PROGRAM_ADDRESS,
+} from "@solana/token-acl-sdk";
 import { getTransferSolInstruction } from "@solana-program/system";
 import {
+  AccountState,
   decodeToken,
   deEscalateAccountMeta,
   findAssociatedTokenPda,
@@ -52,21 +63,43 @@ import {
 import { isSameAsset } from "./asset-ref";
 import type { MovementQuote } from "./movement-quote";
 import { type BaseUnits, toTokenAmount } from "./token-amount";
-import { feeFor, type MintTokenTerms, type TokenTerms } from "./token-terms";
+import {
+  epochFee,
+  feeFor,
+  type MintTokenTerms,
+  type TokenTerms,
+  type TransferFeeRate,
+} from "./token-terms";
 
 /**
- * The paths a movement takes, each with its own capability row. PR 4 adds
- * the other registered adapters (issuance, DvP, Private Channels, Earn).
+ * The paths a movement takes, each with its own capability row (ADR 0012,
+ * "one capability decision"). `builder` is the instructions built here; the
+ * others are registered adapters: each moves tokens through its own engine
+ * (an SDK or an on-chain program), so its row holds that engine's rules.
  */
 export const TOKEN_MOVEMENT_PATHS = [
-  /** Instructions built here: Payments transfers, batches, off-ramp funding and /pay. */
+  /** Instructions built here: Payments transfers, batches, off-ramp funding, /pay and DvP funding. */
   "builder",
+  // ── Registered adapters ────────────────────────────────────────────────
   /**
    * A recurring pull: the subscriptions program moves the mandate's debit with
    * a plain `TransferChecked` through CPI, so no fee guard is on chain and the
    * destination cannot get a memo first.
    */
   "recurring",
+  /** Issuance mint and burn through Mosaic. Neither is a transfer, so no fee or hook applies. */
+  "issuance",
+  /** Issuance seize: the permanent delegate's `TransferChecked`, which Mosaic builds. */
+  "issuance_seize",
+  /** DvP trades: the DvP program settles, cancels and reclaims each escrow. */
+  "dvp",
+  /** Private Channels deposits, transfers and withdrawals, through SPC's escrow and encoding. */
+  "private_channels",
+  /**
+   * Earn deposit mints, moved by each provider's own builder or program. Exits
+   * never inherit a money-in gate; the deposit-mint guard reports this row.
+   */
+  "earn",
 ] as const;
 
 export type TokenMovementPath = (typeof TOKEN_MOVEMENT_PATHS)[number];
@@ -79,6 +112,15 @@ export const TOKEN_MOVEMENT_REFUSALS = {
   memoRequired: "memo_required",
   nothingCredited: "nothing_credited",
   feeAboveTolerance: "fee_above_tolerance",
+  /** An existing destination token account is frozen. */
+  destinationFrozen: "destination_frozen",
+  // ── The adapters' rows ─────────────────────────────────────────────────
+  /** The path cannot state a transfer fee, or cannot carry one. */
+  transferFee: "transfer_fee",
+  /** The path's program refuses a scaled or interest-bearing mint. */
+  displayRule: "display_rule",
+  /** The path cannot pass a transfer hook's extra accounts. */
+  transferHook: "transfer_hook",
 } as const satisfies Record<string, TokenMovementRefusalReason>;
 
 export type TokenMovementRefusal =
@@ -96,89 +138,282 @@ export class TokenMovementError extends Error {
 }
 
 /**
- * Whether a path can move a token under its terms, and why not. A `hold`
- * may pass later without anything SDP stores changing (a paused mint can be
- * unpaused), so a path that can wait, a recurring pull, waits instead of
- * failing; a `refuse` cannot.
+ * What a path does with a movement it will not make now. A `hold` may pass
+ * later without anything SDP stores changing (a paused mint can be unpaused),
+ * so a path that can wait, a recurring pull, waits instead of failing; a
+ * `refuse` cannot.
  */
+export type TokenMovementDisposition = "refuse" | "hold";
+
+/** Whether a path can move a token under its terms, and why not. */
 export type TokenMovementSupport =
   | Readonly<{ supported: true }>
   | Readonly<{
       supported: false;
       refusal: TokenMovementRefusal;
       message: string;
-      disposition: "refuse" | "hold";
+      disposition: TokenMovementDisposition;
     }>;
 
-const SUPPORTED: TokenMovementSupport = { supported: true };
+/** The Token-2022 mint extension, as the client names it, whose state a row refuses. */
+export type CapabilityExtension =
+  | "NonTransferable"
+  | "PausableConfig"
+  | "DefaultAccountState"
+  | "TransferFeeConfig"
+  | "ScaledUiAmountConfig"
+  | "InterestBearingConfig"
+  | "TransferHook";
 
-function refused(refusal: TokenMovementRefusal, message: string): TokenMovementSupport {
-  return { supported: false, refusal, message, disposition: "refuse" };
-}
+/** One reason a path refuses, or holds, a mint. */
+export type TokenMovementRefusalNotice = Readonly<{
+  refusal: TokenMovementRefusal;
+  extension: CapabilityExtension;
+  message: string;
+  disposition: TokenMovementDisposition;
+}>;
+
+/** One cell of a capability row: a mint state the path cannot move, or null. */
+type CapabilityRule = (terms: TokenTerms) => TokenMovementRefusalNotice | null;
+
+const SUPPORTED: TokenMovementSupport = { supported: true };
 
 function held(refusal: TokenMovementRefusal, message: string): TokenMovementSupport {
   return { supported: false, refusal, message, disposition: "hold" };
 }
 
+function notice(
+  refusal: TokenMovementRefusal,
+  extension: CapabilityExtension,
+  message: string
+): TokenMovementRefusalNotice {
+  return { refusal, extension, message, disposition: "refuse" };
+}
+
+const nonTransferable: CapabilityRule = (terms) =>
+  terms.nonTransferable
+    ? notice(
+        TOKEN_MOVEMENT_REFUSALS.nonTransferable,
+        "NonTransferable",
+        "This token cannot be transferred: its mint is non-transferable"
+      )
+    : null;
+
+/** Token-2022 refuses every transfer, mint and burn of a paused mint. */
+const paused: CapabilityRule = (terms) =>
+  terms.paused
+    ? notice(
+        TOKEN_MOVEMENT_REFUSALS.paused,
+        "PausableConfig",
+        "This token is paused: its mint refuses every transfer, mint and burn"
+      )
+    : null;
+
+/** The same, for a path that can wait: it holds the movement until the mint is unpaused. */
+const pausedHolds: CapabilityRule = (terms) =>
+  terms.paused
+    ? {
+        refusal: TOKEN_MOVEMENT_REFUSALS.paused,
+        extension: "PausableConfig",
+        message: "This token is paused: its mint refuses every transfer until it is unpaused",
+        disposition: "hold",
+      }
+    : null;
+
 /**
- * The builder's row: a transfer fee, a display rule, a permanent delegate and
- * confidential transfers all move through it; a hook moves once its accounts
- * resolve (checked when they are). A mint the program refuses to transfer,
- * and one whose new accounts start frozen (no Token ACL thaw yet), are refused.
+ * New accounts start frozen and no freeze authority can ever thaw them. A mint
+ * with one moves: a new account gets a Token ACL thaw (`resolveTokenAclThaws`,
+ * which refuses a freeze authority that is not the mint's Token ACL config),
+ * and an existing account moves once its freeze authority has thawed it.
  */
-function builderSupport(terms: TokenTerms): TokenMovementSupport {
-  if (terms.nonTransferable) {
-    return refused(
-      TOKEN_MOVEMENT_REFUSALS.nonTransferable,
-      "This token cannot be transferred: its mint is non-transferable"
-    );
-  }
-  if (terms.paused) {
-    return refused(
-      TOKEN_MOVEMENT_REFUSALS.paused,
-      "This token is paused: its mint refuses every transfer"
-    );
-  }
-  if (terms.defaultAccountState === "frozen") {
-    return refused(
-      TOKEN_MOVEMENT_REFUSALS.defaultFrozen,
-      "This token opens new token accounts frozen, and SDP cannot thaw them"
-    );
-  }
-  return SUPPORTED;
+const unthawable: CapabilityRule = (terms) =>
+  terms.defaultAccountState === "frozen" && terms.freezeAuthority === null
+    ? notice(
+        TOKEN_MOVEMENT_REFUSALS.defaultFrozen,
+        "DefaultAccountState",
+        "This token opens new token accounts frozen and has no freeze authority to thaw them"
+      )
+    : null;
+
+/** Any frozen-by-default mint, for an engine that cannot thaw the accounts it opens. */
+function frozenByDefault(engine: string): CapabilityRule {
+  return (terms) =>
+    terms.defaultAccountState === "frozen"
+      ? notice(
+          TOKEN_MOVEMENT_REFUSALS.defaultFrozen,
+          "DefaultAccountState",
+          `This token opens new token accounts frozen, and ${engine} cannot thaw them`
+        )
+      : null;
+}
+
+/** A fee config, even at 0 bps, for an engine that cannot state the fee it would pay. */
+function feeConfig(engine: string): CapabilityRule {
+  return (terms) =>
+    terms.transferFee === null
+      ? null
+      : notice(
+          TOKEN_MOVEMENT_REFUSALS.transferFee,
+          "TransferFeeConfig",
+          `This token has a transfer fee config, which ${engine} cannot carry`
+        );
+}
+
+function charges(rate: TransferFeeRate): boolean {
+  return rate.basisPoints > 0 && rate.maximumFee > 0n;
 }
 
 /**
- * The recurring row: what the builder refuses, except a paused mint, which
- * holds the pull until it is unpaused. A transfer fee, a display rule and a
- * hook move (the mandate's fee tolerance is checked per pull, by
- * {@link recurringPullSupport}).
+ * A fee that is charged now or is set to be: the entry in force at the read,
+ * or the newer one. A zero fee config (PYUSD, USDG) passes; a plain
+ * `TransferChecked` under it credits the whole debit.
  */
-function recurringSupport(terms: TokenTerms): TokenMovementSupport {
-  if (terms.paused) {
-    return held(
-      TOKEN_MOVEMENT_REFUSALS.paused,
-      "This token is paused: its mint refuses every transfer until it is unpaused"
-    );
-  }
-  return builderSupport(terms);
+function chargedFee(engine: string): CapabilityRule {
+  return (terms) => {
+    if (terms.transferFee === null || terms.readAt === null) {
+      return null;
+    }
+    const current = epochFee(terms, terms.readAt.epoch);
+    const charged = (current !== null && charges(current)) || charges(terms.transferFee.newer);
+    return charged
+      ? notice(
+          TOKEN_MOVEMENT_REFUSALS.transferFee,
+          "TransferFeeConfig",
+          `This token charges a transfer fee, which ${engine} cannot carry`
+        )
+      : null;
+  };
+}
+
+/** A scaled or interest-bearing mint, for a program that refuses both. */
+function displayRule(engine: string): CapabilityRule {
+  return (terms) => {
+    switch (terms.display.kind) {
+      case "plain":
+        return null;
+      case "scaled":
+        return notice(
+          TOKEN_MOVEMENT_REFUSALS.displayRule,
+          // biome-ignore lint/security/noSecrets: an extension name, not a secret.
+          "ScaledUiAmountConfig",
+          `This token has a scaled UI amount, which ${engine} refuses`
+        );
+      case "interest":
+        return notice(
+          TOKEN_MOVEMENT_REFUSALS.displayRule,
+          "InterestBearingConfig",
+          `This token bears interest, which ${engine} refuses`
+        );
+      default: {
+        const exhaustive: never = terms.display;
+        throw new Error(`Unknown display rule: ${JSON.stringify(exhaustive)}`);
+      }
+    }
+  };
+}
+
+/** A hook program that runs on every transfer, for an engine that cannot pass its accounts. */
+function hookSet(engine: string): CapabilityRule {
+  return (terms) =>
+    terms.transferHookProgram === null
+      ? null
+      : notice(
+          TOKEN_MOVEMENT_REFUSALS.transferHook,
+          "TransferHook",
+          `This token runs a transfer hook, which ${engine} cannot pass accounts to`
+        );
 }
 
 /**
- * The capability decision for moving a token under `terms` on `path`. Every
- * path asks it before it reads or builds anything else.
+ * A hook program that runs, or that its authority can set later: an engine
+ * that holds funds across transfers (an escrow) is stranded if one appears.
+ * An immutable hook with no program can never run.
+ */
+function hookSettable(engine: string): CapabilityRule {
+  return (terms) =>
+    terms.transferHookProgram === null && terms.transferHookAuthority === null
+      ? null
+      : notice(
+          TOKEN_MOVEMENT_REFUSALS.transferHook,
+          "TransferHook",
+          `This token has a transfer hook that runs or can be set, which ${engine} cannot pass accounts to`
+        );
+}
+
+/**
+ * The capability table: per path, the mint states it refuses, in the order
+ * they are reported. A state no rule names moves on that path. Rows come from
+ * SDP's own rules and from each path's engine:
+ *
+ * | State | builder | recurring | issuance | issuance_seize | dvp | private_channels | earn |
+ * |---|---|---|---|---|---|---|---|
+ * | Transfer fee | yes (`TransferCheckedWithFee`) | yes, within the mandate's tolerance (`recurringPullSupport`) | n/a | yes: the seized amount is the debit, the fee is withheld in the destination | program refuses | refused (SPC cannot encode `WithFee`) | refused once a fee is charged; a 0-bps config moves |
+ * | Scaled / interest | yes (display only) | yes | yes | yes | program refuses | yes | yes |
+ * | Hook | yes once its accounts resolve | yes | n/a | refused when a program is set | refused when it runs or can be set | refused when it runs or can be set | refused when a program is set |
+ * | Paused | refused | held until unpaused | refused | refused | refused | refused | refused |
+ * | Non-transferable | refused | refused | yes | refused | program refuses | refused | refused |
+ * | Frozen by default | yes: a new account gets a Token ACL thaw, an existing one must be thawed; refused with no freeze authority | refused (the program's CPI cannot thaw) | yes (Mosaic thaws Token ACL accounts) | yes (same) | yes (funding refuses a frozen escrow) | refused | refused |
+ * | Permanent delegate, confidential | yes | yes | yes | yes | yes | yes | yes |
+ *
+ * Every refusal is a `refuse` except the recurring row's paused mint, a
+ * `hold`: a recurring pull can wait for the mint to be unpaused. A row lists
+ * its refusals before its holds, so a mint that can never move is refused.
+ * `builder` agrees with the Kora sponsor policy (`infra/kora/kora.toml`,
+ * pinned by `kora-sponsor-policy.test.ts`); `dvp` is the DvP program's
+ * `validate_mint_extensions` plus what SDP cannot settle, cancel or reclaim.
+ */
+const CAPABILITY_ROWS = {
+  builder: [nonTransferable, paused, unthawable],
+  recurring: [nonTransferable, frozenByDefault("a recurring pull"), pausedHolds],
+  issuance: [paused],
+  issuance_seize: [nonTransferable, paused, hookSet("Mosaic's force transfer")],
+  dvp: [
+    feeConfig("the DvP program"),
+    displayRule("the DvP program"),
+    nonTransferable,
+    hookSettable("DvP settlement"),
+    paused,
+  ],
+  private_channels: [
+    nonTransferable,
+    paused,
+    frozenByDefault("Private Channels"),
+    feeConfig("Private Channels"),
+    hookSettable("Private Channels"),
+  ],
+  earn: [nonTransferable, paused, frozenByDefault("Earn"), chargedFee("Earn"), hookSet("Earn")],
+} as const satisfies Record<TokenMovementPath, readonly CapabilityRule[]>;
+
+/**
+ * Every reason `path` refuses to move a token under `terms`, in its row's
+ * order; empty when it moves. For a caller that reports them all at once.
+ */
+export function capabilityRefusals(
+  terms: TokenTerms,
+  path: TokenMovementPath
+): readonly TokenMovementRefusalNotice[] {
+  const rules: readonly CapabilityRule[] = CAPABILITY_ROWS[path];
+  return rules.flatMap((rule) => {
+    const refusal = rule(terms);
+    return refusal === null ? [] : [refusal];
+  });
+}
+
+/**
+ * The capability decision for moving a token under `terms` on `path`: its
+ * first refusal, or supported. Every path asks it before it reads or builds
+ * anything else.
  */
 export function support(terms: TokenTerms, path: TokenMovementPath): TokenMovementSupport {
-  switch (path) {
-    case "builder":
-      return builderSupport(terms);
-    case "recurring":
-      return recurringSupport(terms);
-    default: {
-      const exhaustive: never = path;
-      throw new Error(`Unknown token movement path: ${String(exhaustive)}`);
-    }
-  }
+  const [first] = capabilityRefusals(terms, path);
+  return first === undefined
+    ? SUPPORTED
+    : {
+        supported: false,
+        refusal: first.refusal,
+        message: first.message,
+        disposition: first.disposition,
+      };
 }
 
 /** A destination token account, as the movement's account read saw it. */
@@ -191,6 +426,8 @@ export type DestinationTokenAccount = Readonly<{
   exists: boolean;
   /** Its `MemoTransfer` extension requires a memo on every incoming transfer. */
   requiresMemo: boolean;
+  /** An existing account is frozen: nothing can credit it until its freeze authority thaws it. */
+  frozen: boolean;
 }>;
 
 /** The owner's associated token account for the mint, under the mint's program. */
@@ -241,7 +478,7 @@ export function decodeDestinationTokenAccount(
     throw new Error(`Expected the token account ${tokenAccount}, got ${account.address}`);
   }
   if (!account.exists) {
-    return { owner, tokenAccount, exists: false, requiresMemo: false };
+    return { owner, tokenAccount, exists: false, requiresMemo: false, frozen: false };
   }
   if (account.programAddress !== SPL_TOKEN_PROGRAMS[terms.asset.program]) {
     throw new Error(`Token account ${tokenAccount} is not owned by ${terms.asset.program}`);
@@ -254,7 +491,13 @@ export function decodeDestinationTokenAccount(
   const requiresMemo = extensions.some(
     (extension) => isExtension("MemoTransfer", extension) && extension.requireIncomingTransferMemos
   );
-  return { owner, tokenAccount, exists: true, requiresMemo };
+  return {
+    owner,
+    tokenAccount,
+    exists: true,
+    requiresMemo,
+    frozen: data.state === AccountState.Frozen,
+  };
 }
 
 /** What one recurring pull moves under its mandate, in base units. */
@@ -284,6 +527,8 @@ export function recurringPullFee(terms: MintTokenTerms, debit: BaseUnits): BaseU
  * the destination and the fee. Every outcome but a non-transferable or
  * frozen-by-default mint is a hold, which can pass on a later read.
  *
+ * - A frozen destination holds the pull until its freeze authority thaws it:
+ *   the program's `TransferChecked` would fail on chain.
  * - A destination that requires memos holds the pull: a CPI cannot put a memo
  *   first.
  * - A fee ({@link recurringPullFee}) above the mandate's tolerance holds it.
@@ -299,6 +544,12 @@ export function recurringPullSupport(
   const decision = support(terms, "recurring");
   if (!decision.supported) {
     return decision;
+  }
+  if (destination.exists && destination.frozen) {
+    return held(
+      TOKEN_MOVEMENT_REFUSALS.destinationFrozen,
+      `The destination token account ${destination.tokenAccount} is frozen; its freeze authority must thaw it first`
+    );
   }
   if (destination.requiresMemo) {
     return held(
@@ -433,6 +684,187 @@ export async function resolveTransferHookAccounts(
   );
 }
 
+/**
+ * A Token ACL (sRFC-37) permissionless thaw of a destination account the
+ * movement creates, for a mint whose new accounts open frozen and whose freeze
+ * authority is its Token ACL config. The config's gating program decides on
+ * chain whether the owner may hold the token, so a refused owner fails the
+ * whole transaction before anything moves. SDP issues such mints through
+ * Mosaic, whose own transfer adds the same thaw.
+ */
+export type TokenAclThaw = Readonly<{
+  /** Signs the thaw: the movement's authority, which signs the transfer too. */
+  authority: Address;
+  /** The mint's Token ACL config, its freeze authority. */
+  mintConfig: Address;
+  gatingProgram: Address;
+  /** The Token ACL flag account the gating program checks. */
+  flagAccount: Address;
+  /** The gating program's thaw account list, then each extra account it names, resolved. */
+  extraAccounts: readonly AccountMeta<Address>[];
+}>;
+
+function aclRefusal(message: string): TokenMovementError {
+  return new TokenMovementError(TOKEN_MOVEMENT_REFUSALS.defaultFrozen, message);
+}
+
+/**
+ * The Token ACL thaw each destination needs: one for every destination the
+ * movement creates under a frozen-by-default mint, null for every other. This
+ * is `createThawPermissionlessIdempotentInstructionWithExtraMetas` from
+ * `@solana/token-acl-sdk` (which Mosaic calls), resolved before the signer
+ * exists and with the config and account list read once for all of a batch's
+ * destinations.
+ *
+ * RPC budget: none when no destination needs a thaw; otherwise one
+ * `getAccountInfo` for the mint's Token ACL config, one for its gating
+ * program's thaw account list, and one per extra account whose address comes
+ * from another account's data. An extra account that reads the new token
+ * account's data (it does not exist yet) is refused.
+ *
+ * @param authority - The wallet that signs the movement.
+ * @returns One entry per destination, in order.
+ * @throws {TokenMovementError} (`default_frozen`) When the mint's freeze
+ * authority is not its Token ACL config, the config does not allow a
+ * permissionless thaw, the gating program publishes no thaw account list, or
+ * an extra account cannot be resolved or must sign.
+ */
+export async function resolveTokenAclThaws(
+  rpc: Rpc<GetAccountInfoApi>,
+  terms: MintTokenTerms,
+  destinations: readonly DestinationTokenAccount[],
+  authority: Address
+): Promise<(TokenAclThaw | null)[]> {
+  const opensFrozen = (destination: DestinationTokenAccount) =>
+    !destination.exists && terms.defaultAccountState === "frozen";
+  if (!destinations.some(opensFrozen)) {
+    return destinations.map(() => null);
+  }
+  const mint = terms.asset.mint;
+  const [mintConfig] = await findMintConfigPda(
+    { mint },
+    { programAddress: TOKEN_ACL_PROGRAM_ADDRESS }
+  );
+  if (terms.freezeAuthority !== mintConfig) {
+    throw aclRefusal(
+      "This token opens new token accounts frozen, and its freeze authority is not a Token ACL config SDP can thaw through"
+    );
+  }
+  const configAccount = await fetchEncodedAccount(rpc, mintConfig, { commitment: "confirmed" });
+  if (!configAccount.exists || configAccount.programAddress !== TOKEN_ACL_PROGRAM_ADDRESS) {
+    throw aclRefusal(`This token's Token ACL config ${mintConfig} does not exist`);
+  }
+  const config = getMintConfigDecoder().decode(configAccount.data);
+  if (config.mint !== mint) {
+    throw new Error(`Token ACL config ${mintConfig} is not the config of ${mint}`);
+  }
+  if (!config.enablePermissionlessThaw) {
+    throw aclRefusal(
+      "This token opens new token accounts frozen, and its Token ACL config does not allow a permissionless thaw"
+    );
+  }
+  const gatingProgram = config.gatingProgram;
+  const [thawList] = await findThawExtraMetasAccountPda(
+    { mint },
+    { programAddress: gatingProgram }
+  );
+  const thawListAccount = await fetchEncodedAccount(rpc, thawList, { commitment: "confirmed" });
+  if (!thawListAccount.exists) {
+    throw aclRefusal(
+      `This token's Token ACL gating program ${gatingProgram} publishes no thaw account list`
+    );
+  }
+  const extraMetas = getExtraAccountMetasDecoder().decode(thawListAccount.data);
+  const instructionData = getThawPermissionlessIdempotentInstructionDataEncoder().encode({});
+
+  return Promise.all(
+    destinations.map(async (destination): Promise<TokenAclThaw | null> => {
+      if (!opensFrozen(destination)) {
+        return null;
+      }
+      const [flagAccount] = await findFlagAccountPda(
+        { tokenAccount: destination.tokenAccount },
+        { programAddress: TOKEN_ACL_PROGRAM_ADDRESS }
+      );
+      // The accounts the gating program's `can thaw` sees, in its order.
+      const previousAddresses: Address[] = [
+        authority,
+        destination.tokenAccount,
+        mint,
+        destination.owner,
+        flagAccount,
+        thawList,
+      ];
+      const resolved: AccountMeta<Address>[] = [];
+      for (const extraMeta of extraMetas) {
+        let meta: Awaited<ReturnType<typeof resolveExtraAccountMeta>>;
+        try {
+          meta = await resolveExtraAccountMeta(
+            extraMeta,
+            previousAddresses,
+            instructionData,
+            gatingProgram,
+            rpc
+          );
+        } catch (cause) {
+          throw aclRefusal(
+            `This token's Token ACL thaw accounts cannot be resolved: ${
+              cause instanceof Error ? cause.message : String(cause)
+            }`
+          );
+        }
+        if (meta.isSigner && meta.address !== authority) {
+          throw aclRefusal(
+            `This token's Token ACL gate needs ${meta.address} to sign, which SDP cannot do`
+          );
+        }
+        resolved.push({ address: meta.address, role: accountRole(meta.isSigner, meta.isWritable) });
+        previousAddresses.push(meta.address);
+      }
+      return {
+        authority,
+        mintConfig,
+        gatingProgram,
+        flagAccount,
+        extraAccounts: [{ address: thawList, role: AccountRole.READONLY }, ...resolved],
+      };
+    })
+  );
+}
+
+/**
+ * The thaw instruction of a destination the movement creates, signed by the
+ * movement's authority.
+ *
+ * @throws {Error} When the thaw was resolved for another authority.
+ */
+function thawInstruction(
+  terms: MintTokenTerms,
+  destination: DestinationTokenAccount,
+  thaw: TokenAclThaw,
+  authority: TransactionSigner
+): Instruction {
+  if (authority.address !== thaw.authority) {
+    throw new Error("The Token ACL thaw was resolved for another authority");
+  }
+  return withTrailingAccounts(
+    getThawPermissionlessIdempotentInstruction(
+      {
+        authority,
+        mint: terms.asset.mint,
+        tokenAccount: destination.tokenAccount,
+        flagAccount: thaw.flagAccount,
+        tokenAccountOwner: destination.owner,
+        mintConfig: thaw.mintConfig,
+        tokenProgram: address(SPL_TOKEN_PROGRAMS[terms.asset.program]),
+        gatingProgram: thaw.gatingProgram,
+      },
+      { programAddress: TOKEN_ACL_PROGRAM_ADDRESS }
+    ),
+    thaw.extraAccounts
+  );
+}
+
 /** The accounts a movement moves between. */
 export type TokenMovementAccounts =
   | Readonly<{ kind: "native"; destination: Address }>
@@ -443,6 +875,11 @@ export type TokenMovementAccounts =
       destination: DestinationTokenAccount;
       /** From `resolveTransferHookAccounts`; empty for a mint without a hook program. */
       hookAccounts: readonly AccountMeta<Address>[];
+      /**
+       * From `resolveTokenAclThaws`: the thaw of a destination the movement
+       * creates for a frozen-by-default mint; null for every other destination.
+       */
+      thaw: TokenAclThaw | null;
     }>;
 
 /** What a movement is built with, besides its terms and quote. */
@@ -487,8 +924,10 @@ function pairMovement(terms: TokenTerms, accounts: TokenMovementAccounts): Paire
 
 /**
  * Refuses a movement the builder will not build, before anything is signed:
- * the path's capability row, an unresolved hook, a destination that requires
- * a memo the movement does not carry, and a fee that leaves nothing to credit.
+ * the path's capability row, an unresolved hook, a frozen destination (an
+ * existing one, or a new one of a frozen-by-default mint without its Token ACL
+ * thaw), a destination that requires a memo the movement does not carry, and
+ * a fee that leaves nothing to credit.
  * `buildTokenMovement` asks it first; a caller asks it before it records the
  * movement, so a refusal costs nothing.
  *
@@ -517,7 +956,7 @@ export function assertMovementBuildable(
   if (paired.kind === "native") {
     return;
   }
-  const { hookAccounts, destination } = paired.accounts;
+  const { hookAccounts, destination, thaw } = paired.accounts;
   if (paired.terms.transferHookProgram === null && hookAccounts.length > 0) {
     throw new Error("Hook accounts were resolved for a mint without a hook program");
   }
@@ -526,6 +965,22 @@ export function assertMovementBuildable(
       TOKEN_MOVEMENT_REFUSALS.hookUnresolved,
       "This token's transfer hook accounts were not resolved"
     );
+  }
+  if (destination.exists && destination.frozen) {
+    throw new TokenMovementError(
+      TOKEN_MOVEMENT_REFUSALS.destinationFrozen,
+      `The destination token account ${destination.tokenAccount} is frozen; its freeze authority must thaw it first`
+    );
+  }
+  const startsFrozen = !destination.exists && paired.terms.defaultAccountState === "frozen";
+  if (startsFrozen && thaw === null) {
+    throw new TokenMovementError(
+      TOKEN_MOVEMENT_REFUSALS.defaultFrozen,
+      `The destination token account ${destination.tokenAccount} would open frozen, and its Token ACL thaw was not resolved`
+    );
+  }
+  if (!startsFrozen && thaw !== null) {
+    throw new Error("A Token ACL thaw was resolved for an account that does not open frozen");
   }
   if (destination.requiresMemo && movement.memo === null) {
     throw new TokenMovementError(
@@ -559,7 +1014,8 @@ function memoInstruction(memo: string): Instruction {
  * @param quote - Its debit is what the transfer moves; its fee is what a
  * `TransferCheckedWithFee` names.
  * @returns The instructions in order: the destination token account's
- * idempotent create, a memo when the destination requires one, the transfer.
+ * idempotent create, its Token ACL thaw when it opens frozen, a memo when the
+ * destination requires one, the transfer.
  * Native SOL is the system transfer alone.
  * @throws {TokenMovementError} When {@link assertMovementBuildable} refuses it.
  */
@@ -606,6 +1062,10 @@ export function buildTokenMovement(
           { programAddress }
         );
   const memo = destination.requiresMemo && ctx.memo !== null ? [memoInstruction(ctx.memo)] : [];
+  const thaw =
+    accounts.thaw === null
+      ? []
+      : [thawInstruction(mintTerms, destination, accounts.thaw, ctx.authority)];
 
   return [
     getCreateAssociatedTokenIdempotentInstruction({
@@ -615,6 +1075,7 @@ export function buildTokenMovement(
       mint,
       tokenProgram: programAddress,
     }),
+    ...thaw,
     ...memo,
     withTrailingAccounts(transfer, [...accounts.hookAccounts, ...reference]),
   ];
