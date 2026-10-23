@@ -1,4 +1,4 @@
-import type { Signature } from "@solana/kit";
+import { getBase58Decoder, type Signature, signature } from "@solana/kit";
 import { describe, expect, it } from "vitest";
 import {
   installClusterRpcResponder,
@@ -7,6 +7,15 @@ import {
 } from "@/test/helpers/cluster-rpc";
 import { earnClusterRpc } from "./cluster-rpc";
 import { reReadExpiredStatuses } from "./expired-status-proof";
+
+/** A well-formed signature whose 64 bytes are all `fill`. */
+function signatureOf(fill: number): Signature {
+  return signature(getBase58Decoder().decode(new Uint8Array(64).fill(fill)));
+}
+
+const LANDED = signatureOf(1);
+const ABSENT = signatureOf(2);
+const UNKNOWN = signatureOf(3);
 
 const FINALIZED: StubSignatureStatus = {
   slot: 7,
@@ -36,8 +45,8 @@ describe("reReadExpiredStatuses", () => {
       earnClusterRpc("devnet"),
       [null, null, null],
       [
-        { index: 1, signature: "sig-landed" as Signature },
-        { index: 2, signature: "sig-absent" as Signature },
+        { index: 1, signature: LANDED },
+        { index: 2, signature: ABSENT },
       ],
       100n
     );
@@ -46,7 +55,7 @@ describe("reReadExpiredStatuses", () => {
     expect(statuses[1]).toMatchObject({ confirmationStatus: "finalized" });
     expect(statuses[2]).toBeNull();
     expect(statusReads().map(({ params }) => params)).toEqual([
-      [["sig-landed", "sig-absent"], { searchTransactionHistory: true, minContextSlot: 100 }],
+      [[LANDED, ABSENT], { searchTransactionHistory: true, minContextSlot: 100 }],
     ]);
   });
 
@@ -57,7 +66,7 @@ describe("reReadExpiredStatuses", () => {
       reReadExpiredStatuses(
         earnClusterRpc("devnet"),
         [null],
-        [{ index: 0, signature: "sig-unknown" as Signature }],
+        [{ index: 0, signature: UNKNOWN }],
         100n
       )
     ).rejects.toThrow("minContextSlot");
