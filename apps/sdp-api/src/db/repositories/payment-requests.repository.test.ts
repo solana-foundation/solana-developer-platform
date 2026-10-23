@@ -932,6 +932,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
         canceledBy: null,
         paidLate: false,
       });
+      await updateRow(request.id, { last_verified_at: null });
       const paid = await systemRepo.markExpiredPaymentRequestPaid({
         ...scoped,
         fulfilledByTransferId: transferId,
@@ -943,6 +944,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
         paid_late: true,
         fulfilled_by_transfer_id: transferId,
       });
+      expect(paid?.last_verified_at).not.toBeNull();
       expect(paid?.lifecycle.map((event) => event.status)).toEqual([
         "awaiting_payment",
         "expired",
