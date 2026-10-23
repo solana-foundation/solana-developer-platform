@@ -941,10 +941,11 @@ describe("verifyRampDeliveries", () => {
       });
     });
 
-    it("leaves a debit report pending when both of the mint's fee entries came after the delivery", async () => {
+    it("holds a debit report for a person when both of the mint's fee entries came after the delivery", async () => {
       await settleOnramp("xfr_leg_old_fee", PYUSD_MINT, "1");
       getTransactionMock.mockResolvedValue(landedFeeMint("995000", "transferChecked", null));
-      // The delivery landed in epoch 900; the mint now keeps entries from 950 and 960.
+      // The delivery landed in epoch 900; the mint now keeps entries from 950 and
+      // 960. Entries only get newer, so no later read can price that fee.
       const later = { epoch: 950n, maximumFee: 0n, transferFeeBasisPoints: 0 };
       readTokenTermsMock.mockResolvedValue(
         mintTermsAt(PYUSD_MINT, "token-2022", {
@@ -954,10 +955,19 @@ describe("verifyRampDeliveries", () => {
       );
 
       await sweep();
+      await sweep();
 
-      const pending = await row("xfr_leg_old_fee");
-      expect(pending?.status).toBe("settling");
-      expect(pending?.provider_data).toMatchObject({ deliveryMismatch: null });
+      expect(getTransactionMock).toHaveBeenCalledTimes(1);
+      expect(await row("xfr_leg_old_fee")).toMatchObject({
+        status: "settling",
+        provider_data: {
+          deliveryMismatch: {
+            reason: "amount_mismatch",
+            reportedAmount: "1",
+            observedAmount: "0.995",
+          },
+        },
+      });
       expect(await legOf("xfr_leg_old_fee")).toBeNull();
     });
 

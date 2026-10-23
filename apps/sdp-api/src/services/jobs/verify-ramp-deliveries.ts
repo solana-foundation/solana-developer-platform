@@ -152,9 +152,6 @@ function reportedFieldsMatch(transfer: PaymentTransferRow, settled: ProviderSett
   return true;
 }
 
-/** Whether a mint's fee rule explains a delivery's debit and credit differing. */
-type FeeRuleVerdict = "explained" | "unexplained" | "unknown";
-
 /** `MINIMUM_SLOTS_PER_EPOCH`: the first warmup epoch's length. */
 const MINIMUM_SLOTS_PER_EPOCH = 32n;
 
@@ -322,31 +319,32 @@ function observedDelivery(
  * differing: the program checked a fee the transfers stated, or the mint's fee
  * entry in force in the epoch the delivery landed, read live, charges exactly
  * that fee, summed over the transfers (each is capped and rounded on its own).
- * `unknown` when both fee entries the mint keeps came after the delivery: the
- * fee it paid is no longer on chain, which is no contradiction. Reads the mint
- * and the epoch only when a fee is not stated.
+ * Unexplained when both fee entries the mint keeps came after the delivery:
+ * the fee it paid is no longer on chain, and the entries only get newer, so no
+ * later read could explain it either; a person decides. Reads the mint and the
+ * epoch only when a fee is not stated.
  */
 async function feeRuleExplains(
   asset: AssetRef,
   delivery: ObservedDelivery,
   landedSlot: bigint,
   chain: Pick<RampChainReader, "readTokenTerms" | "epochOfSlot">
-): Promise<FeeRuleVerdict> {
+): Promise<boolean> {
   const fee = delivery.debit - delivery.credit;
-  if (fee === 0n) return "explained";
-  if (asset.kind !== "token") return "unexplained";
+  if (fee === 0n) return true;
+  if (asset.kind !== "token") return false;
   if (delivery.statedFee !== null) {
-    return delivery.statedFee === fee ? "explained" : "unexplained";
+    return delivery.statedFee === fee;
   }
   const terms = await chain.readTokenTerms(asset);
-  if (terms.transferFee === null) return "unexplained";
+  if (terms.transferFee === null) return false;
   const epoch = await chain.epochOfSlot(landedSlot);
-  if (epoch < terms.transferFee.older.epoch) return "unknown";
+  if (epoch < terms.transferFee.older.epoch) return false;
   const charged = delivery.debits.reduce(
     (total, debit) => total + feeFor(terms, baseUnits(debit), epoch),
     0n
   );
-  return charged === fee ? "explained" : "unexplained";
+  return charged === fee;
 }
 
 async function judgeOnrampDelivery(
@@ -373,30 +371,22 @@ async function judgeOnrampDelivery(
   const observedAmount = formatDecimalAmount(delivery.credit, decimals);
   // A provider may report what it received (the credit) or what it sent (the
   // debit): the debit counts only when the fee rule explains the difference.
-  const feeRule =
-    delivery.debit === delivery.credit
-      ? "explained"
-      : await feeRuleExplains(asset, delivery, transaction.slot, chain);
-  const debitCounts = delivery.debit !== delivery.credit && feeRule === "explained";
+  const debitCounts =
+    delivery.debit !== delivery.credit &&
+    (await feeRuleExplains(asset, delivery, transaction.slot, chain));
   try {
     const reported = [settled.receivedAmount, settled.onchain?.amount].filter(
       (amount): amount is string => amount !== undefined
     );
     const quoted = transfer.amount === null ? null : parseDecimalAmount(transfer.amount, decimals);
-    /** Whether the reports and the quote hold, counting the debit or not. */
-    const holds = (countDebit: boolean) =>
-      reported.every((amount) => {
-        const units = parseDecimalAmount(amount, decimals);
-        return units === delivery.credit || (countDebit && units === delivery.debit);
-      }) &&
-      !(quoted !== null && delivery.credit < quoted && !(countDebit && delivery.debit >= quoted));
-    if (!holds(debitCounts)) {
-      // The fee that applied is no longer on chain: when counting the debit
-      // would settle it, read again later rather than record a contradiction
-      // the chain cannot support. Anything else no fee could explain.
-      return feeRule === "unknown" && holds(true)
-        ? PENDING
-        : mismatch("amount_mismatch", observedAmount);
+    const reportsHold = reported.every((amount) => {
+      const units = parseDecimalAmount(amount, decimals);
+      return units === delivery.credit || (debitCounts && units === delivery.debit);
+    });
+    const quoteHolds =
+      quoted === null || delivery.credit >= quoted || (debitCounts && delivery.debit >= quoted);
+    if (!reportsHold || !quoteHolds) {
+      return mismatch("amount_mismatch", observedAmount);
     }
   } catch {
     return mismatch("amount_mismatch", observedAmount);
