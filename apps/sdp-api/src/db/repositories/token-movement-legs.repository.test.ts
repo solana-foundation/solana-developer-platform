@@ -1,7 +1,7 @@
 import { quoteMovement } from "@sdp/solana/movement-quote";
 import { parseTokenAmount } from "@sdp/solana/token-amount";
 import { decodeTokenTerms, type MintTokenTerms } from "@sdp/solana/token-terms";
-import { SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
+import { SOL_MINT, SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
 import {
   address,
   getAddressDecoder,
@@ -399,7 +399,7 @@ describe("token movement legs (postgres)", () => {
         sourceCustodyWalletId: CUSTODY_WALLET_ID,
         sourceWalletId: WALLET_ID,
         sourceAddress: "Source111",
-        token: "So11111111111111111111111111111111111111112",
+        token: SOL_MINT,
         status: "processing",
         recipientCount: 2,
         transactionCount: 1,
@@ -474,7 +474,7 @@ describe("token movement legs (postgres)", () => {
         sourceCustodyWalletId: CUSTODY_WALLET_ID,
         sourceWalletId: WALLET_ID,
         sourceAddress: "Source111",
-        token: "So11111111111111111111111111111111111111112",
+        token: SOL_MINT,
         status: "processing",
         recipientCount: 2,
         transactionCount: 1,
