@@ -7,6 +7,7 @@ import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-mo
 import { generateEarnVaultWithdrawalRequestId } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
 import { app } from "@/index";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
+import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
@@ -18,13 +19,9 @@ vi.mock("@/routes/payments/token-accounts", async (importOriginal) => ({
   getSplTokenBalances,
 }));
 
-// Balances come from the mocked read above, so the client the handler builds is
-// never asked anything and no RPC request is issued by these tests.
-const earnClusterRpc = vi.hoisted(() => vi.fn(() => ({})));
-vi.mock("@/services/earn/cluster-rpc", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/services/earn/cluster-rpc")>()),
-  earnClusterRpc,
-}));
+// Balances come from the mocked read above, so the scope's pool client the handler builds is
+// never asked anything; the stub gives each cluster a pool and keeps the network out.
+installClusterRpcStub();
 
 // Lets one test shrink the pass budget to prove the deadline posture; null
 // keeps the handler's real default.

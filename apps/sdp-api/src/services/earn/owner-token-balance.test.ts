@@ -1,4 +1,5 @@
 import { createServer, type Server } from "node:http";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types/well-known-tokens";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -84,10 +85,15 @@ describe("readOwnerMintBalance", () => {
   });
 });
 
-/** Each test's server is a fresh devnet pool endpoint, so no proof carries over. */
+/**
+ * One read in a Sandbox scope. Each test's server is a fresh devnet pool endpoint, so no proof
+ * carries over.
+ */
 function readBalance(rpcUrl: string) {
   vi.stubEnv("SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL", rpcUrl);
-  return readOwnerMintBalance("sandbox", OWNER, USDC);
+  return runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+    readOwnerMintBalance(OWNER, USDC)
+  );
 }
 
 function tokenAccount(

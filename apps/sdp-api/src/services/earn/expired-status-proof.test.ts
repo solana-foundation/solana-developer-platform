@@ -1,3 +1,5 @@
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { getBase58Decoder, type Signature, signature } from "@solana/kit";
 import { describe, expect, it } from "vitest";
 import {
@@ -5,7 +7,6 @@ import {
   type StubSignatureStatus,
   signatureStatusesReplyAt,
 } from "@/test/helpers/cluster-rpc";
-import { earnClusterRpc } from "./cluster-rpc";
 import { reReadExpiredStatuses } from "./expired-status-proof";
 
 /** A well-formed signature whose 64 bytes are all `fill`. */
@@ -16,6 +17,11 @@ function signatureOf(fill: number): Signature {
 const LANDED = signatureOf(1);
 const ABSENT = signatureOf(2);
 const UNKNOWN = signatureOf(3);
+
+/** The devnet pool client a Sandbox sweep reads through. */
+function devnetRpc() {
+  return runInClusterScope({ projectId: null, environment: "sandbox" }, () => createClusterRpc());
+}
 
 const FINALIZED: StubSignatureStatus = {
   slot: 7,
@@ -32,9 +38,7 @@ describe("reReadExpiredStatuses", () => {
   }
 
   it("asks no node anything when no row expired unseen", async () => {
-    await expect(
-      reReadExpiredStatuses(earnClusterRpc("devnet"), [null], [], 100n)
-    ).resolves.toEqual([null]);
+    await expect(reReadExpiredStatuses(devnetRpc(), [null], [], 100n)).resolves.toEqual([null]);
     expect(rpc.requests).toEqual([]);
   });
 
@@ -42,7 +46,7 @@ describe("reReadExpiredStatuses", () => {
     rpc.respond("getSignatureStatuses", () => signatureStatusesReplyAt(100, [FINALIZED, null]));
 
     const statuses = await reReadExpiredStatuses(
-      earnClusterRpc("devnet"),
+      devnetRpc(),
       [null, null, null],
       [
         { index: 1, signature: LANDED },
@@ -63,12 +67,7 @@ describe("reReadExpiredStatuses", () => {
     rpc.respond("getSignatureStatuses", () => signatureStatusesReplyAt(99, [null]));
 
     await expect(
-      reReadExpiredStatuses(
-        earnClusterRpc("devnet"),
-        [null],
-        [{ index: 0, signature: UNKNOWN }],
-        100n
-      )
+      reReadExpiredStatuses(devnetRpc(), [null], [{ index: 0, signature: UNKNOWN }], 100n)
     ).rejects.toThrow("minContextSlot");
   });
 });

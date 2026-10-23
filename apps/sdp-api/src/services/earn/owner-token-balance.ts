@@ -1,11 +1,9 @@
-import type { SdpEnvironment } from "@sdp/types/api-keys";
+import { createClusterRpc } from "@sdp/rpc/factory";
 import { address } from "@solana/kit";
 import { z } from "zod";
-import { earnClusterRpc } from "@/services/earn/cluster-rpc";
-import { earnClusterFor } from "@/services/earn/execution-registry";
 
 /**
- * One owner's balance of ONE mint, in base units, on the environment's own
+ * One owner's balance of ONE mint, in base units, on the open cluster scope's
  * cluster (PRO-1864).
  *
  * Written for the orphaned split-swap detector and its build-time baseline,
@@ -19,8 +17,8 @@ import { earnClusterFor } from "@/services/earn/execution-registry";
  * Filtering by `mint` rather than `programId` is one call, not two: a mint
  * belongs to exactly one token program, and the RPC resolves it.
  *
- * The read goes to the environment's own cluster pool, whose genesis guard is
- * not optional: without it a mis-pointed sandbox would judge devnet advisories
+ * The read goes to the scope's cluster pool, whose genesis guard is not
+ * optional: without it a mis-pointed sandbox would judge devnet advisories
  * against mainnet balances and never notice.
  */
 export interface OwnerMintBalance {
@@ -53,11 +51,10 @@ const mintFilteredTokenAccountsResponseSchema = z.object({
 });
 
 export async function readOwnerMintBalance(
-  environment: SdpEnvironment,
   ownerAddress: string,
   mint: string
 ): Promise<OwnerMintBalance> {
-  const response = await earnClusterRpc(earnClusterFor(environment))
+  const response = await createClusterRpc()
     .getTokenAccountsByOwner(
       address(ownerAddress),
       { mint: address(mint) },

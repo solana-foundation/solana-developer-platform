@@ -1,3 +1,5 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { SdpVedaError } from "@sdp/veda/errors";
 import type { Blockhash } from "@solana/kit";
 import {
@@ -8,6 +10,7 @@ import {
   getTransactionDecoder,
   getTransactionEncoder,
   partiallySignTransaction,
+  SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
   SOLANA_ERROR__TRANSACTION_ERROR__BLOCKHASH_NOT_FOUND,
   SolanaError,
@@ -15,6 +18,7 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { generateEarnPositionId } from "@/db/repositories/earn-movements.repository";
+import { installClusterRpcResponder, signatureStatusesReplyAt } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import {
   expectProjectScoped,
@@ -22,6 +26,7 @@ import {
   seedDefaultProjects,
 } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
+import type { Env } from "@/types/env";
 import type {
   ExternalWalletBuiltTransaction,
   ExternalWalletDepositBuildInput,
@@ -36,18 +41,16 @@ const simulateVaultPlan = vi.hoisted(() => vi.fn());
 const broadcastVaultTransaction = vi.hoisted(() => vi.fn());
 const fetchJupiterSwapLeg = vi.hoisted(() => vi.fn());
 const readOwnerMintBalance = vi.hoisted(() => vi.fn());
-const getBlockHeight = vi.hoisted(() => vi.fn());
-const getSignatureStatuses = vi.hoisted(() => vi.fn());
 
 // RPC boundary for the expiry gate and the audit's independently finalized
-// transaction. Transaction construction, signatures and persistence stay real.
-vi.mock("./cluster-rpc", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./cluster-rpc")>()),
-  earnClusterRpc: () => ({
-    getBlockHeight: () => ({ send: getBlockHeight }),
-    getSignatureStatuses: () => ({ send: getSignatureStatuses }),
-  }),
-}));
+// transaction: each cluster's pool, reached through the real factory.
+// Transaction construction, signatures and persistence stay real.
+const clusterRpc = installClusterRpcResponder();
+
+/** A pool that cannot answer the read. */
+const RPC_UNREACHABLE = {
+  error: { code: SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR, message: "rpc unreachable" },
+} as const;
 
 // `prependSwapLegToVaultPlan` stays REAL — instruction ordering is part of
 // what the swap-funded cases prove. Only the Jupiter HTTP boundary is stubbed.
@@ -74,12 +77,26 @@ vi.mock("./vault-execution.service", async (importOriginal) => ({
   broadcastVaultTransaction,
 }));
 
-const {
-  buildExternalWalletDepositTransaction,
-  buildExternalWalletWithdrawalTransaction,
-  submitExternalWalletDeposit,
-  submitExternalWalletWithdrawal,
-} = await import("./vault-external-wallet.service");
+const service = await import("./vault-external-wallet.service");
+
+/** Each call in the cluster scope its request opens, from the environment it names. */
+function inRequestScope<TInput extends { environment: SdpEnvironment }, TResult>(
+  operation: (env: Env, input: TInput) => Promise<TResult>
+): (env: Env, input: TInput) => Promise<TResult> {
+  return (scopedEnv, input) =>
+    runInClusterScope({ projectId: null, environment: input.environment }, () =>
+      operation(scopedEnv, input)
+    );
+}
+
+const buildExternalWalletDepositTransaction = inRequestScope(
+  service.buildExternalWalletDepositTransaction
+);
+const buildExternalWalletWithdrawalTransaction = inRequestScope(
+  service.buildExternalWalletWithdrawalTransaction
+);
+const submitExternalWalletDeposit = inRequestScope(service.submitExternalWalletDeposit);
+const submitExternalWalletWithdrawal = inRequestScope(service.submitExternalWalletWithdrawal);
 const { VaultTransactionTooLargeError } = await import("./vault-execution.service");
 
 /**
@@ -345,8 +362,8 @@ beforeEach(async () => {
   }));
   broadcastVaultTransaction.mockResolvedValue(undefined);
   // Well inside the stubbed build window (lastValidBlockHeight 361).
-  getBlockHeight.mockResolvedValue(100n);
-  getSignatureStatuses.mockResolvedValue({ context: { slot: 100n }, value: [null] });
+  clusterRpc.answer("getBlockHeight", 100);
+  clusterRpc.respond("getSignatureStatuses", () => signatureStatusesReplyAt(100, [null]));
 });
 
 describe("buildExternalWalletDepositTransaction", () => {
@@ -649,7 +666,7 @@ describe("buildExternalWalletDepositTransaction (swap-funded)", () => {
     expect(String(advisory?.swap_last_valid_block_height)).toBe(
       result.swapTransaction.lastValidBlockHeight
     );
-    expect(readOwnerMintBalance).toHaveBeenCalledWith("sandbox", ownerAddress, TOKEN_MINT);
+    expect(readOwnerMintBalance).toHaveBeenCalledWith(ownerAddress, TOKEN_MINT);
   });
 
   it("splits when the composed probe is oversized before RPC simulation", async () => {
@@ -999,7 +1016,7 @@ describe("submitExternalWalletDeposit", () => {
   it("records an expired signed build and leaves broadcast refusal reconcilable", async () => {
     const built = await buildDepositRow(depositInput());
     const signed = await signBuiltTransaction(built);
-    getBlockHeight.mockResolvedValue(362n);
+    clusterRpc.answer("getBlockHeight", 362);
     broadcastVaultTransaction.mockRejectedValue(preflightBlockhashNotFound());
 
     const result = await submitDeposit(built, signed, crypto.randomUUID());
@@ -1025,13 +1042,13 @@ describe("submitExternalWalletDeposit", () => {
     const requestId = crypto.randomUUID();
     const first = await submitDeposit(built, signed, requestId);
 
-    getBlockHeight.mockResolvedValue(10_000n);
+    clusterRpc.answer("getBlockHeight", 10_000);
     const replay = await submitDeposit(built, signed, requestId);
 
     expect(replay.replayed).toBe(true);
     expect(replay.movement.id).toBe(first.movement.id);
     // A replay is a durable read; no chain call decides it.
-    expect(getBlockHeight).not.toHaveBeenCalled();
+    expect(clusterRpc.calls).toEqual([]);
   });
 
   it("audit: retains a signed deposit that finalized before its first expired-build submit", async () => {
@@ -1040,13 +1057,14 @@ describe("submitExternalWalletDeposit", () => {
     const signature = getSignatureFromTransaction(
       getTransactionDecoder().decode(Uint8Array.from(Buffer.from(signed, "base64")))
     );
-    getBlockHeight.mockResolvedValue(362n);
+    clusterRpc.answer("getBlockHeight", 362);
     // The owner broadcast these bytes independently while the build was valid.
     // This RPC boundary represents that transaction's later finalized receipt.
-    getSignatureStatuses.mockResolvedValue({
-      context: { slot: 400n },
-      value: [{ slot: 350n, confirmations: null, err: null, confirmationStatus: "finalized" }],
-    });
+    clusterRpc.respond("getSignatureStatuses", () =>
+      signatureStatusesReplyAt(400, [
+        { slot: 350, confirmations: null, err: null, confirmationStatus: "finalized" },
+      ])
+    );
 
     await submitDeposit(built, signed, crypto.randomUUID()).catch(() => undefined);
 
@@ -1060,7 +1078,7 @@ describe("submitExternalWalletDeposit", () => {
   });
 
   it("does not refuse when the block height cannot be read", async () => {
-    getBlockHeight.mockRejectedValue(new Error("rpc unreachable"));
+    clusterRpc.respond("getBlockHeight", () => RPC_UNREACHABLE);
     const built = await buildDepositRow(depositInput());
     const result = await submitDeposit(
       built,
@@ -1072,7 +1090,7 @@ describe("submitExternalWalletDeposit", () => {
 
   it("leaves an expired-blockhash refusal reconcilable after an external broadcast", async () => {
     broadcastVaultTransaction.mockRejectedValue(preflightBlockhashNotFound());
-    getBlockHeight.mockResolvedValueOnce(361n);
+    clusterRpc.answer("getBlockHeight", 361);
     const built = await buildDepositRow(depositInput());
     const result = await submitDeposit(
       built,
@@ -1416,7 +1434,7 @@ describe("external-wallet withdrawals", () => {
   it("retains an expired signed exit when broadcast cannot establish execution", async () => {
     const positionId = await seedExternalWalletPosition();
     const built = await buildExternalWalletWithdrawalTransaction(env, withdrawalInput(positionId));
-    getBlockHeight.mockResolvedValue(362n);
+    clusterRpc.answer("getBlockHeight", 362);
 
     broadcastVaultTransaction.mockRejectedValue(preflightBlockhashNotFound());
     const result = await submitExternalWalletWithdrawal(env, {

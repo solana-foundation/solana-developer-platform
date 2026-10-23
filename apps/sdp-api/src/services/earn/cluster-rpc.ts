@@ -1,52 +1,31 @@
 import { providerNotConfigured, type SdpEarnError } from "@sdp/earn/errors";
 import { SdpRpcError } from "@sdp/rpc/errors";
-// biome-ignore-start lint/style/noRestrictedImports: Earn's door names its cluster until Earn reads the cluster scope (HOO-1881)
-import {
-  createEarnClusterRpc,
-  type EarnClusterRpcOptions,
-  earnClusterEndpointUrls,
-  proveEarnClusterEndpoint,
-} from "@sdp/rpc/factory";
-// biome-ignore-end lint/style/noRestrictedImports: the door's one importer ends here
-import type { SolanaRpc } from "@sdp/rpc/solana";
+// biome-ignore-start lint/style/noRestrictedImports: Earn's provider packages take endpoint URLs until they take clients (HOO-1881)
+import { earnClusterEndpointUrls, proveEarnClusterEndpoint } from "@sdp/rpc/factory";
+// biome-ignore-end lint/style/noRestrictedImports: the URL helpers' one importer ends here
 import { GENESIS_HASH_BY_CLUSTER, type SolanaCluster } from "@sdp/types/well-known-tokens";
 
 /**
- * Earn's only way to Solana. Every Earn read and send goes to the named cluster's managed pool,
- * the pool `createClusterRpc()` serves, and nothing resolves an endpoint from `SOLANA_RPC_URL`,
- * `SOLANA_<CLUSTER>_RPC_URL` or `SOLANA_NETWORK`: a deployment that serves both clusters by project
- * reaches mainnet for a production project, and a cluster without a pool fails closed instead of
- * reading the other one.
- *
- * Earn names the cluster (`earnClusterFor` of the project, strategy or row environment) because
- * anonymous Earn opens no cluster scope yet and the services the Earn crons share with request
- * paths still take one (HOO-1881). The crons themselves run once per environment inside its scope
- * and make their own reads through `createClusterRpc()` (HOO-2148). Inside a scope, naming the
- * other cluster throws `CLUSTER_SCOPE_CONFLICT`.
+ * Earn's endpoint URLs for its provider packages. Every other Earn read and send goes through
+ * `createClusterRpc()` in the open cluster scope: the project's for a keyed request, the named
+ * strategy's for a keyless one, the registration's for a cron, the lane's for the catalogue sync.
+ * Provider packages still build their own transports from a URL and name the cluster their plan
+ * targets (HOO-1881), so these helpers hand them the scope's pool URLs and refuse a provider that
+ * asks for the other cluster (`CLUSTER_SCOPE_CONFLICT`). Nothing resolves an endpoint from
+ * `SOLANA_RPC_URL`, `SOLANA_<CLUSTER>_RPC_URL` or `SOLANA_NETWORK`, and a cluster without a pool
+ * fails closed.
  */
-
-/**
- * The managed pool client for `cluster`, for one-shot reads and every send: block heights,
- * signature statuses, history, blockhashes, lookup tables, simulation and broadcast. Per-request
- * failover and the pool's genesis guard apply; a send never fails over once it left SDP.
- *
- * @param cluster - The cluster the work runs on.
- * @param options - Pass `timeoutMs` to bound each request end to end.
- * @returns The memoized client for `cluster`.
- * @throws SdpRpcError `RPC_NOT_CONFIGURED` when `cluster` has no managed endpoint.
- */
-export function earnClusterRpc(cluster: SolanaCluster, options?: EarnClusterRpcOptions): SolanaRpc {
-  return createEarnClusterRpc(cluster, options);
-}
 
 /**
  * The managed endpoints a provider operation pins, one per attempt, in failover order. Provider
  * packages build their own transports from these URLs, so each must pass `assertClusterEndpoint`
- * first. Empty when `cluster` has no managed pool (raise `earnPoolNotConfigured`); never another
- * cluster's endpoints.
+ * first. Empty when the scope's cluster has no managed pool (raise `earnPoolNotConfigured`); never
+ * another cluster's endpoints.
  *
- * @param cluster - The cluster the operation runs on.
+ * @param cluster - The cluster the provider asked for; it must be the scope's.
  * @returns The pool's endpoint URLs, possibly none.
+ * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope, `CLUSTER_SCOPE_CONFLICT` when
+ *   the scope serves the other cluster.
  */
 export function earnProviderEndpointUrls(cluster: SolanaCluster): readonly string[] {
   return earnClusterEndpointUrls(cluster);

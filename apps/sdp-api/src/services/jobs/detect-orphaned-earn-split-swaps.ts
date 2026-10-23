@@ -246,11 +246,7 @@ async function judgeAdvisory(
   // 4. The balance is the ground truth: judge it against the build-time baseline.
   let balance: Awaited<ReturnType<typeof readOwnerMintBalance>>;
   try {
-    balance = await readOwnerMintBalance(
-      advisory.environment,
-      advisory.owner_address,
-      advisory.deposit_token_mint
-    );
+    balance = await readOwnerMintBalance(advisory.owner_address, advisory.deposit_token_mint);
   } catch (error) {
     stats.balanceReadFailures += 1;
     logEvent("error", {

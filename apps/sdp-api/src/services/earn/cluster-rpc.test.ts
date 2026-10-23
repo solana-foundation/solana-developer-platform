@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseJsonRpcRequest } from "@/test/helpers/cluster-rpc";
 import {
   assertClusterEndpoint,
-  earnClusterRpc,
   earnPoolNotConfigured,
   earnProviderEndpointUrls,
 } from "./cluster-rpc";
@@ -55,72 +54,54 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("earnClusterRpc on a devnet-default process", () => {
-  it("reads mainnet from the mainnet pool, never the process default", async () => {
-    stubDevnetDefaultProcess();
-    vi.stubEnv("SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL", endpoint("devnet-pool"));
-    vi.stubEnv("SOLANA_RPC_TRITON_MAINNET_API_KEY_URL", endpoint("mainnet-pool"));
+const SANDBOX = { projectId: null, environment: "sandbox" } as const;
+const PRODUCTION = { projectId: "prj_earn_cluster_rpc", environment: "production" } as const;
 
-    await expect(earnClusterRpc("mainnet-beta").getSlot().send()).resolves.toBe(42n);
-    await expect(earnClusterRpc("devnet").getSlot().send()).resolves.toBe(42n);
+/** Provider work in the scope a sandbox request or cron opens. */
+function inSandbox<T>(work: () => T): T {
+  return runInClusterScope(SANDBOX, work);
+}
 
-    expect(requests).toEqual([
-      { url: endpoint("mainnet-pool"), method: "getGenesisHash" },
-      { url: endpoint("mainnet-pool"), method: "getSlot" },
-      { url: endpoint("devnet-pool"), method: "getGenesisHash" },
-      { url: endpoint("devnet-pool"), method: "getSlot" },
-    ]);
-  });
-
-  it("refuses a cluster with no pool instead of reading the other one", () => {
-    stubDevnetDefaultProcess();
-    vi.stubEnv("SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL", endpoint("devnet-pool"));
-
-    expect(() => earnClusterRpc("mainnet-beta")).toThrow(
-      expect.objectContaining({ code: "RPC_NOT_CONFIGURED", details: { cluster: "mainnet-beta" } })
-    );
-    expect(earnProviderEndpointUrls("mainnet-beta")).toEqual([]);
-    expect(requests).toEqual([]);
-  });
-
-  it("lists only the requested cluster's endpoints, in pool order", () => {
+describe("earnProviderEndpointUrls on a devnet-default process", () => {
+  it("lists the scope's own pool, never the process default", () => {
     stubDevnetDefaultProcess();
     vi.stubEnv("SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL", endpoint("devnet-helius"));
     vi.stubEnv("SOLANA_RPC_TRITON_DEVNET_API_KEY_URL", endpoint("devnet-triton"));
     vi.stubEnv("SOLANA_RPC_TRITON_MAINNET_API_KEY_URL", endpoint("mainnet-triton"));
 
-    expect(earnProviderEndpointUrls("devnet")).toEqual([
+    expect(inSandbox(() => earnProviderEndpointUrls("devnet"))).toEqual([
       endpoint("devnet-triton"),
       endpoint("devnet-helius"),
     ]);
-    expect(earnProviderEndpointUrls("mainnet-beta")).toEqual([endpoint("mainnet-triton")]);
+    expect(runInClusterScope(PRODUCTION, () => earnProviderEndpointUrls("mainnet-beta"))).toEqual([
+      endpoint("mainnet-triton"),
+    ]);
+    expect(requests).toEqual([]);
   });
 
-  it("is the scope's own client in that cluster's scope, and refuses the other cluster there", () => {
+  it("lists none when the scope's cluster has no pool, instead of the other cluster's", () => {
+    stubDevnetDefaultProcess();
+    vi.stubEnv("SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL", endpoint("devnet-pool"));
+
+    expect(runInClusterScope(PRODUCTION, () => earnProviderEndpointUrls("mainnet-beta"))).toEqual(
+      []
+    );
+    expect(requests).toEqual([]);
+  });
+
+  it("refuses a provider asking for the other cluster, and work outside a scope", () => {
     vi.stubEnv("SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL", endpoint("devnet-pool"));
     vi.stubEnv("SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL", endpoint("mainnet-pool"));
-    const production = { projectId: "prj_earn_cluster_rpc", environment: "production" } as const;
 
-    expect(runInClusterScope(production, () => earnClusterRpc("mainnet-beta"))).toBe(
-      runInClusterScope(production, createClusterRpc)
+    expect(() => runInClusterScope(PRODUCTION, () => earnProviderEndpointUrls("devnet"))).toThrow(
+      expect.objectContaining({
+        code: "CLUSTER_SCOPE_CONFLICT",
+        details: { openCluster: "mainnet-beta", requestedCluster: "devnet" },
+      })
     );
-    expect(() => runInClusterScope(production, () => earnClusterRpc("devnet"))).toThrow(
-      expect.objectContaining({ code: "CLUSTER_SCOPE_CONFLICT" })
+    expect(() => earnProviderEndpointUrls("devnet")).toThrow(
+      expect.objectContaining({ code: "CLUSTER_SCOPE_MISSING" })
     );
-    expect(() => runInClusterScope(production, () => earnProviderEndpointUrls("devnet"))).toThrow(
-      expect.objectContaining({ code: "CLUSTER_SCOPE_CONFLICT" })
-    );
-  });
-
-  it("bounds a request end to end when asked", async () => {
-    vi.useFakeTimers();
-    vi.stubEnv("SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL", endpoint("devnet-pool"));
-    genesisFor.mockReturnValue(new Promise<string>(() => undefined));
-
-    const read = earnClusterRpc("devnet", { timeoutMs: 50 }).getSlot().send();
-    const rejection = expect(read).rejects.toThrow("RPC request timed out after 50ms");
-    await vi.advanceTimersByTimeAsync(50);
-    await rejection;
   });
 });
 
@@ -128,7 +109,7 @@ describe("assertClusterEndpoint", () => {
   const cluster: SolanaCluster = "devnet";
 
   it("names the managed pool keys when the cluster has no endpoint", () => {
-    expect(earnProviderEndpointUrls(cluster)).toEqual([]);
+    expect(inSandbox(() => earnProviderEndpointUrls(cluster))).toEqual([]);
     expect(earnPoolNotConfigured(cluster)).toMatchObject({
       code: "PROVIDER_NOT_CONFIGURED",
       message: expect.stringContaining("SOLANA_RPC_<PROVIDER>_DEVNET_API_KEY_URL"),
@@ -139,7 +120,9 @@ describe("assertClusterEndpoint", () => {
   it("refuses a URL outside the cluster's pool without probing it", async () => {
     vi.stubEnv("SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL", endpoint("devnet-pool"));
 
-    await expect(assertClusterEndpoint(cluster, endpoint("stranger"))).rejects.toMatchObject({
+    await expect(
+      inSandbox(() => assertClusterEndpoint(cluster, endpoint("stranger")))
+    ).rejects.toMatchObject({
       code: "PROVIDER_NOT_CONFIGURED",
       message: expect.stringContaining("not in the devnet managed pool"),
     });
@@ -151,7 +134,9 @@ describe("assertClusterEndpoint", () => {
     genesisFor.mockReturnValue(GENESIS_HASH_BY_CLUSTER["mainnet-beta"]);
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      await expect(assertClusterEndpoint(cluster, endpoint("devnet-pool"))).rejects.toMatchObject({
+      await expect(
+        inSandbox(() => assertClusterEndpoint(cluster, endpoint("devnet-pool")))
+      ).rejects.toMatchObject({
         code: "PROVIDER_NOT_CONFIGURED",
         message: expect.stringContaining(
           `reports genesis ${GENESIS_HASH_BY_CLUSTER["mainnet-beta"]}, not ${GENESIS_HASH_BY_CLUSTER.devnet}`
@@ -165,11 +150,15 @@ describe("assertClusterEndpoint", () => {
     vi.stubEnv("SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL", endpoint("devnet-pool"));
     genesisFor.mockImplementationOnce(() => Promise.reject(new TypeError("fetch failed")));
 
-    await expect(assertClusterEndpoint(cluster, endpoint("devnet-pool"))).rejects.toThrow(
-      /Could not verify/
-    );
-    await expect(assertClusterEndpoint(cluster, endpoint("devnet-pool"))).resolves.toBeUndefined();
-    await expect(assertClusterEndpoint(cluster, endpoint("devnet-pool"))).resolves.toBeUndefined();
+    await expect(
+      inSandbox(() => assertClusterEndpoint(cluster, endpoint("devnet-pool")))
+    ).rejects.toThrow(/Could not verify/);
+    await expect(
+      inSandbox(() => assertClusterEndpoint(cluster, endpoint("devnet-pool")))
+    ).resolves.toBeUndefined();
+    await expect(
+      inSandbox(() => assertClusterEndpoint(cluster, endpoint("devnet-pool")))
+    ).resolves.toBeUndefined();
     expect(requests).toHaveLength(2);
   });
 
@@ -178,8 +167,8 @@ describe("assertClusterEndpoint", () => {
 
     await expect(
       Promise.all([
-        assertClusterEndpoint(cluster, endpoint("devnet-pool")),
-        assertClusterEndpoint(cluster, endpoint("devnet-pool")),
+        inSandbox(() => assertClusterEndpoint(cluster, endpoint("devnet-pool"))),
+        inSandbox(() => assertClusterEndpoint(cluster, endpoint("devnet-pool"))),
       ])
     ).resolves.toEqual([undefined, undefined]);
     expect(requests).toEqual([{ url: endpoint("devnet-pool"), method: "getGenesisHash" }]);
@@ -190,13 +179,13 @@ describe("assertClusterEndpoint", () => {
     vi.setSystemTime(new Date("2026-10-23T00:00:00.000Z"));
     vi.stubEnv("SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL", endpoint("devnet-pool"));
 
-    await earnClusterRpc(cluster).getSlot().send();
-    await assertClusterEndpoint(cluster, endpoint("devnet-pool"));
+    await inSandbox(() => createClusterRpc().getSlot().send());
+    await inSandbox(() => assertClusterEndpoint(cluster, endpoint("devnet-pool")));
     expect(requests.map(({ method }) => method)).toEqual(["getGenesisHash", "getSlot"]);
 
     vi.setSystemTime(new Date("2026-10-23T00:00:30.000Z"));
-    await assertClusterEndpoint(cluster, endpoint("devnet-pool"));
-    await earnClusterRpc(cluster).getSlot().send();
+    await inSandbox(() => assertClusterEndpoint(cluster, endpoint("devnet-pool")));
+    await inSandbox(() => createClusterRpc().getSlot().send());
     expect(requests.map(({ method }) => method)).toEqual([
       "getGenesisHash",
       "getSlot",

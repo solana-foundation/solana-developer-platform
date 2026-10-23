@@ -4,12 +4,11 @@ import { describe, expect, it } from "vitest";
 
 /**
  * Structural tests over Earn's source: every Earn read and send reaches Solana
- * through a cluster's managed pool, either `createClusterRpc()` under a cluster
- * scope (the Earn crons, HOO-2148) or the Earn door in
- * `services/earn/cluster-rpc.ts` for the named cluster, and nothing in Earn
- * picks an endpoint from a URL in env. A source grep is the honest
- * tool: a stray `createRpc(env, { rpcUrl })` type-checks and runs, and on a
- * deployment whose process default serves devnet it reads devnet for mainnet work.
+ * through the open cluster scope's managed pool (`createClusterRpc()`), provider
+ * packages get that pool's URLs only from `services/earn/cluster-rpc.ts`, and
+ * nothing in Earn picks an endpoint from a URL in env. A source grep is the
+ * honest tool: a stray `createRpc(env, { rpcUrl })` type-checks and runs, and on
+ * a deployment whose process default serves devnet it reads devnet for mainnet work.
  */
 
 const API_SRC = join(import.meta.dirname, "../..");
@@ -104,7 +103,7 @@ describe("Earn's cluster RPC boundary", () => {
     expect(offenders(EARN_API_FILES, (body) => importsModule(body, "@sdp/rpc/config"))).toEqual([]);
   });
 
-  it("reaches the Earn door only through services/earn/cluster-rpc.ts", () => {
+  it("imports the URL helpers only in services/earn/cluster-rpc.ts", () => {
     expect(
       offenders(
         EARN_API_FILES.filter((file) => file !== DOOR),

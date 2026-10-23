@@ -24,6 +24,11 @@
  * provider-by-provider: one provider failing (or still being a NOT_IMPLEMENTED
  * stub) must never sink the others' pass. Adding a provider is a registry
  * change only (`EARN_PROVIDER_CLIENTS`); the sync never names providers.
+ *
+ * The job stays `global`: the mirror lane writes production's snapshot into a
+ * non-production environment, so one pass spans both environments. Each lane's
+ * provider fetch runs in its own environment's cluster scope, so a lane reads
+ * only its own cluster's pool; the writes are DB-only.
  */
 
 import { randomUUID } from "node:crypto";
@@ -40,6 +45,7 @@ import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types/well-
 import type { EarnRepository } from "@/db/repositories/earn.repository";
 import { createEarnRepository } from "@/db/repositories/repository-factory";
 import { isEarnEnabled } from "@/lib/feature-flags";
+import { runInEnvironmentClusterScope } from "@/runtime/cluster-scope-runs";
 import type { KVStore } from "@/runtime/kv";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
@@ -98,7 +104,7 @@ const SKIPPABLE_SYNC_ERROR_CODES: ReadonlySet<string> = new Set([
 
 /**
  * The runtime a catalogue read runs under. An on-chain shelf is read from the
- * preferred endpoint of the requested cluster's managed pool, never a process
+ * preferred endpoint of the lane's cluster scope's managed pool, never a process
  * default, so the pass reaches each cluster on every deployment and a cluster
  * with no pool skips as `PROVIDER_NOT_CONFIGURED`.
  */
@@ -339,7 +345,9 @@ async function fetchAcceptedSnapshots(
   let snapshots: ProviderStrategySnapshot[];
   const startedAt = Date.now();
   try {
-    snapshots = await client.listStrategies(ctx);
+    snapshots = await runInEnvironmentClusterScope(ctx.environment, () =>
+      client.listStrategies(ctx)
+    );
   } catch (err) {
     if (err instanceof SdpEarnError && SKIPPABLE_SYNC_ERROR_CODES.has(err.code)) {
       getLogger().info(

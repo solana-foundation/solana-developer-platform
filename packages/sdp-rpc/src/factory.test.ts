@@ -23,7 +23,6 @@ import {
 import {
   createClusterHistoryRpc,
   createClusterRpc,
-  createEarnClusterRpc,
   createKoraUpstreamRpc,
   earnClusterEndpointUrls,
   proveEarnClusterEndpoint,
@@ -787,7 +786,76 @@ describe("createClusterRpc", () => {
   });
 });
 
-describe("createEarnClusterRpc", () => {
+describe("createClusterRpc with a deadline", () => {
+  beforeEach(isolateRpcEnv);
+
+  afterEach(restoreRpcEnv);
+
+  it("is memoized per deadline and pool, apart from the plain client", () => {
+    configurePool({
+      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: "https://devnet-bounded-memo.example.test",
+      SOLANA_RPC_TRITON_MAINNET_API_KEY_URL: "https://mainnet-bounded-memo.example.test",
+    });
+
+    runInClusterScope(SANDBOX, () => {
+      assert.equal(createClusterRpc({ timeoutMs: 2_000 }), createClusterRpc({ timeoutMs: 2_000 }));
+      assert.notEqual(createClusterRpc({ timeoutMs: 2_000 }), createClusterRpc());
+      assert.notEqual(
+        createClusterRpc({ timeoutMs: 2_000 }),
+        createClusterRpc({ timeoutMs: 3_000 })
+      );
+    });
+    assert.notEqual(
+      runInClusterScope(SANDBOX, () => createClusterRpc({ timeoutMs: 2_000 })),
+      runInClusterScope(PRODUCTION, () => createClusterRpc({ timeoutMs: 2_000 }))
+    );
+  });
+
+  it("shares the pool's cooldowns with the plain client", async () => {
+    const down = "https://devnet-bounded-down.example.test";
+    const healthy = "https://devnet-bounded-healthy.example.test";
+    configurePool({
+      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: down,
+      SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: healthy,
+    });
+    const calls = stubEndpoints({ [down]: DEVNET_FETCH_FAILS, [healthy]: SERVES_DEVNET });
+
+    await runInClusterScope(SANDBOX, async () => {
+      assert.equal(await createClusterRpc().getSlot().send(), BigInt(SLOT));
+      assert.equal(await createClusterRpc({ timeoutMs: 2_000 }).getSlot().send(), BigInt(SLOT));
+    });
+
+    assert.deepEqual(calls, [
+      genesisProbe(down),
+      slotRead(down),
+      genesisProbe(healthy),
+      slotRead(healthy),
+      slotRead(healthy),
+    ]);
+  });
+
+  it("bounds each request end to end, failover included", async () => {
+    mock.timers.enable({ apis: ["setTimeout"] });
+    const stalled = "https://devnet-bounded-stalled.example.test";
+    const healthy = "https://devnet-bounded-unreached.example.test";
+    configurePool({
+      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: stalled,
+      SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: healthy,
+    });
+    const stall = stubStalledDevnetRead(stalled);
+
+    const slot = runInClusterScope(SANDBOX, () =>
+      createClusterRpc({ timeoutMs: 2_000 }).getSlot().send()
+    );
+    await stall.readStalled;
+    mock.timers.tick(2_000);
+
+    await assert.rejects(slot, { name: "RpcTimeoutError" });
+    assert.deepEqual(stall.calls, [genesisProbe(stalled), slotRead(stalled)]);
+  });
+});
+
+describe("Earn's URL helpers", () => {
   const processDefault = { SOLANA_NETWORK: undefined, SOLANA_RPC_URL: undefined } as Record<
     string,
     string | undefined
@@ -807,154 +875,92 @@ describe("createEarnClusterRpc", () => {
     }
   });
 
-  /** How stage and prod run: a devnet process default and no mainnet override. */
-  function configureDevnetDefaultProcess(defaultUrl: string): void {
-    process.env.SOLANA_NETWORK = "devnet";
-    process.env.SOLANA_RPC_URL = defaultUrl;
-  }
-
-  it("serves mainnet from the mainnet pool on a devnet-default process", async () => {
+  it("list the scope's own pool on a devnet-default process, or none", () => {
     const processUrl = "https://devnet-earn-process-default.example.test";
     const mainnet = "https://mainnet-earn-pool.example.test";
-    configureDevnetDefaultProcess(processUrl);
+    process.env.SOLANA_NETWORK = "devnet";
+    process.env.SOLANA_RPC_URL = processUrl;
+    configurePool({ SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: processUrl });
+
+    assert.deepEqual(
+      runInClusterScope(PRODUCTION, () => earnClusterEndpointUrls("mainnet-beta")),
+      []
+    );
+
     configurePool({
       SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: processUrl,
       SOLANA_RPC_TRITON_MAINNET_API_KEY_URL: mainnet,
     });
-    const calls = stubEndpoints({ [processUrl]: SERVES_DEVNET, [mainnet]: SERVES_MAINNET });
-
-    assert.equal(await createEarnClusterRpc("mainnet-beta").getSlot().send(), BigInt(SLOT));
-
-    assert.deepEqual(calls, [genesisProbe(mainnet), slotRead(mainnet)]);
-    assert.deepEqual(earnClusterEndpointUrls("mainnet-beta"), [mainnet]);
+    assert.deepEqual(
+      runInClusterScope(PRODUCTION, () => earnClusterEndpointUrls("mainnet-beta")),
+      [mainnet]
+    );
   });
 
-  it("refuses a cluster with no pool instead of answering with another cluster's", () => {
-    const processUrl = "https://devnet-earn-only.example.test";
-    configureDevnetDefaultProcess(processUrl);
-    configurePool({ SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: processUrl });
-
-    assert.throws(() => createEarnClusterRpc("mainnet-beta"), {
-      name: "SdpRpcError",
-      code: "RPC_NOT_CONFIGURED",
-      details: { cluster: "mainnet-beta" },
-    });
-    assert.deepEqual(earnClusterEndpointUrls("mainnet-beta"), []);
-  });
-
-  it("is the client createClusterRpc() returns in that cluster's scope", () => {
+  it("refuse a provider asking for the other cluster, and work outside a scope", async () => {
+    const devnet = "https://devnet-earn-scope.example.test";
     configurePool({
-      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: "https://devnet-earn-memo.example.test",
-      SOLANA_RPC_TRITON_MAINNET_API_KEY_URL: "https://mainnet-earn-memo.example.test",
-    });
-
-    assert.equal(
-      createEarnClusterRpc("mainnet-beta"),
-      runInClusterScope(PRODUCTION, createClusterRpc)
-    );
-    assert.equal(createEarnClusterRpc("devnet"), runInClusterScope(SANDBOX, createClusterRpc));
-    assert.equal(
-      createEarnClusterRpc("devnet", { timeoutMs: 2_000 }),
-      createEarnClusterRpc("devnet", { timeoutMs: 2_000 })
-    );
-    assert.notEqual(
-      createEarnClusterRpc("devnet", { timeoutMs: 2_000 }),
-      createEarnClusterRpc("devnet")
-    );
-  });
-
-  it("refuses the other cluster inside a scope, and names the scope's own cluster freely", () => {
-    configurePool({
-      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: "https://devnet-earn-scope.example.test",
+      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: devnet,
       SOLANA_RPC_TRITON_MAINNET_API_KEY_URL: "https://mainnet-earn-scope.example.test",
     });
+    const calls = stubEndpoints({ [devnet]: SERVES_DEVNET });
 
-    const conflictingCalls: Array<() => unknown> = [
-      () => createEarnClusterRpc("mainnet-beta"),
-      () => earnClusterEndpointUrls("mainnet-beta"),
-    ];
-    for (const conflicting of conflictingCalls) {
-      assert.throws(() => runInClusterScope(SANDBOX, conflicting), {
-        name: "SdpRpcError",
-        code: "CLUSTER_SCOPE_CONFLICT",
-        details: { openCluster: "devnet", requestedCluster: "mainnet-beta" },
-      });
-    }
-    assert.doesNotThrow(() => runInClusterScope(SANDBOX, () => createEarnClusterRpc("devnet")));
-  });
-
-  it("shares the pool's cooldowns between its bounded and plain clients", async () => {
-    const down = "https://devnet-earn-down.example.test";
-    const healthy = "https://devnet-earn-healthy.example.test";
-    configurePool({
-      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: down,
-      SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: healthy,
+    assert.throws(() => runInClusterScope(SANDBOX, () => earnClusterEndpointUrls("mainnet-beta")), {
+      name: "SdpRpcError",
+      code: "CLUSTER_SCOPE_CONFLICT",
+      details: { openCluster: "devnet", requestedCluster: "mainnet-beta" },
     });
-    const calls = stubEndpoints({ [down]: DEVNET_FETCH_FAILS, [healthy]: SERVES_DEVNET });
-
-    assert.equal(await createEarnClusterRpc("devnet").getSlot().send(), BigInt(SLOT));
-    assert.equal(
-      await createEarnClusterRpc("devnet", { timeoutMs: 2_000 }).getSlot().send(),
-      BigInt(SLOT)
+    await assert.rejects(
+      runInClusterScope(PRODUCTION, () => proveEarnClusterEndpoint("devnet", devnet)),
+      { name: "SdpRpcError", code: "CLUSTER_SCOPE_CONFLICT" }
     );
-
-    assert.deepEqual(calls, [
-      genesisProbe(down),
-      slotRead(down),
-      genesisProbe(healthy),
-      slotRead(healthy),
-      slotRead(healthy),
-    ]);
-  });
-
-  it("bounds a bounded client's request end to end, failover included", async () => {
-    mock.timers.enable({ apis: ["setTimeout"] });
-    const stalled = "https://devnet-earn-stalled.example.test";
-    const healthy = "https://devnet-earn-unreached.example.test";
-    configurePool({
-      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: stalled,
-      SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: healthy,
+    assert.throws(() => earnClusterEndpointUrls("devnet"), {
+      name: "SdpRpcError",
+      code: "CLUSTER_SCOPE_MISSING",
     });
-    const stall = stubStalledDevnetRead(stalled);
-
-    const slot = createEarnClusterRpc("devnet", { timeoutMs: 2_000 }).getSlot().send();
-    await stall.readStalled;
-    mock.timers.tick(2_000);
-
-    await assert.rejects(slot, { name: "RpcTimeoutError" });
-    assert.deepEqual(stall.calls, [genesisProbe(stalled), slotRead(stalled)]);
+    await assert.rejects(proveEarnClusterEndpoint("devnet", devnet), {
+      name: "SdpRpcError",
+      code: "CLUSTER_SCOPE_MISSING",
+    });
+    assert.deepEqual(calls, []);
   });
 
-  it("proves a pool endpoint with the pool's own genesis proof, both ways", async () => {
+  it("prove a pool endpoint with the pool's own genesis proof, both ways", async () => {
     const provedFirst = "https://devnet-earn-proved-first.example.test";
     const readFirst = "https://devnet-earn-read-first.example.test";
     configurePool({ SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: provedFirst });
     const calls = stubEndpoints({ [provedFirst]: SERVES_DEVNET, [readFirst]: SERVES_DEVNET });
 
-    await proveEarnClusterEndpoint("devnet", provedFirst);
-    assert.equal(await createEarnClusterRpc("devnet").getSlot().send(), BigInt(SLOT));
+    await runInClusterScope(SANDBOX, async () => {
+      await proveEarnClusterEndpoint("devnet", provedFirst);
+      assert.equal(await createClusterRpc().getSlot().send(), BigInt(SLOT));
+    });
     assert.deepEqual(calls, [genesisProbe(provedFirst), slotRead(provedFirst)]);
 
     configurePool({ SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: readFirst });
     calls.length = 0;
-    assert.equal(await createEarnClusterRpc("devnet").getSlot().send(), BigInt(SLOT));
-    await proveEarnClusterEndpoint("devnet", readFirst);
+    await runInClusterScope(SANDBOX, async () => {
+      assert.equal(await createClusterRpc().getSlot().send(), BigInt(SLOT));
+      await proveEarnClusterEndpoint("devnet", readFirst);
+    });
     assert.deepEqual(calls, [genesisProbe(readFirst), slotRead(readFirst)]);
   });
 
-  it("refuses to prove a URL outside the cluster's pool, or one serving another cluster", async () => {
+  it("refuse to prove a URL outside the scope's pool, or one serving another cluster", async () => {
     const pooled = "https://devnet-earn-mismatch.example.test";
     configurePool({ SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: pooled });
     const calls = stubEndpoints({ [pooled]: SERVES_MAINNET });
 
-    await assert.rejects(
-      proveEarnClusterEndpoint("devnet", "https://devnet-earn-stranger.example.test"),
-      { name: "SdpRpcError", code: "RPC_NOT_CONFIGURED" }
-    );
-    assert.deepEqual(calls, []);
-    await assert.rejects(proveEarnClusterEndpoint("devnet", pooled), {
-      name: "SdpRpcError",
-      code: "RPC_CLUSTER_MISMATCH",
+    await runInClusterScope(SANDBOX, async () => {
+      await assert.rejects(
+        proveEarnClusterEndpoint("devnet", "https://devnet-earn-stranger.example.test"),
+        { name: "SdpRpcError", code: "RPC_NOT_CONFIGURED" }
+      );
+      assert.deepEqual(calls, []);
+      await assert.rejects(proveEarnClusterEndpoint("devnet", pooled), {
+        name: "SdpRpcError",
+        code: "RPC_CLUSTER_MISMATCH",
+      });
     });
     assert.deepEqual(calls, [genesisProbe(pooled)]);
   });

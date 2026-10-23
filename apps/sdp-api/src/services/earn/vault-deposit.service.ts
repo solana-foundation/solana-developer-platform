@@ -297,7 +297,6 @@ export async function depositIntoVault(
     // asks the same question signing will.
     if (swapLeg) {
       const probe = await simulateVaultPlan({
-        cluster,
         deadline,
         expectedAssetIdentity,
         plan: withComputeUnitLimit(plan, MAX_COMPUTE_UNIT_LIMIT),
@@ -325,7 +324,6 @@ export async function depositIntoVault(
       walletId: input.wallet.id,
       walletPublicKey: input.wallet.publicKey,
       signerMismatchMessage: "Resolved signing wallet does not match the deposit wallet",
-      cluster,
       deadline,
       expectedAssetIdentity,
       plan,

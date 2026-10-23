@@ -1,3 +1,5 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseJsonRpcRequest } from "@/test/helpers/cluster-rpc";
@@ -6,6 +8,16 @@ import { createVaultDeadline } from "./vault-deadline";
 import { createVaultRpcFailover } from "./vault-rpc-failover";
 
 const runtime = { env: {}, environment: "sandbox" } as const;
+
+/** The runner a request or cron for `environment` uses: every operation runs in its scope. */
+function failoverIn(environment: SdpEnvironment): ReturnType<typeof createVaultRpcFailover> {
+  const rpc = createVaultRpcFailover(createVaultDeadline(), assertClusterEndpoint);
+  return {
+    resolve: rpc.resolve,
+    run: (label, operation) =>
+      runInClusterScope({ projectId: null, environment }, () => rpc.run(label, operation)),
+  };
+}
 
 let poolSequence = 0;
 let primary = "";
@@ -54,7 +66,7 @@ function fanOutFailure(...causes: Error[]): Error {
 
 describe("Earn RPC fallback", () => {
   it("retries a nested provider transport failure on a separately proven endpoint", async () => {
-    const rpc = createVaultRpcFailover(createVaultDeadline(), assertClusterEndpoint);
+    const rpc = failoverIn("sandbox");
     const visited: string[] = [];
     const result = await rpc.run("Read vault", async () => {
       const url = await rpc.resolve(runtime, "devnet");
@@ -71,7 +83,7 @@ describe("Earn RPC fallback", () => {
   it("draws only the requested cluster's pool, never the process default", async () => {
     vi.stubEnv("SOLANA_NETWORK", "devnet");
     vi.stubEnv("SOLANA_RPC_URL", "https://process-default.failover.test");
-    const rpc = createVaultRpcFailover(createVaultDeadline(), assertClusterEndpoint);
+    const rpc = failoverIn("production");
 
     await expect(
       rpc.run("Read vault", () =>
@@ -85,7 +97,7 @@ describe("Earn RPC fallback", () => {
   });
 
   it("retries a per-vault fan-out whose every failure is transient", async () => {
-    const rpc = createVaultRpcFailover(createVaultDeadline(), assertClusterEndpoint);
+    const rpc = failoverIn("sandbox");
     const visited: string[] = [];
     const result = await rpc.run("Read vault positions", async () => {
       const url = await rpc.resolve(runtime, "devnet");
@@ -114,7 +126,7 @@ describe("Earn RPC fallback", () => {
     ],
     ["a cyclic cause chain", cyclic],
   ])("does not retry %s", async (_label, failure) => {
-    const rpc = createVaultRpcFailover(createVaultDeadline(), assertClusterEndpoint);
+    const rpc = failoverIn("sandbox");
     const read = vi.fn(async () => {
       await rpc.resolve(runtime, "devnet");
       throw failure;
@@ -127,7 +139,7 @@ describe("Earn RPC fallback", () => {
     genesisFor.mockImplementation(
       (url) => GENESIS_HASH_BY_CLUSTER[url === primary ? "devnet" : "mainnet-beta"]
     );
-    const rpc = createVaultRpcFailover(createVaultDeadline(), assertClusterEndpoint);
+    const rpc = failoverIn("sandbox");
     const read = vi.fn(async () => {
       await rpc.resolve(runtime, "devnet");
       throw new Error("503 service unavailable");
@@ -138,7 +150,7 @@ describe("Earn RPC fallback", () => {
   });
 
   it("does not retain the fallback for later historical reads or reinterpret absent evidence", async () => {
-    const rpc = createVaultRpcFailover(createVaultDeadline(), assertClusterEndpoint);
+    const rpc = failoverIn("sandbox");
     await rpc.run("Build", async () => {
       if ((await rpc.resolve(runtime, "devnet")) === primary) throw new Error("fetch failed");
     });
@@ -153,7 +165,7 @@ describe("Earn RPC fallback", () => {
 
   it("does not retry a deterministic refusal or past a one-endpoint pool", async () => {
     vi.stubEnv("SOLANA_RPC_ALCHEMY_DEVNET_API_KEY_URL", "");
-    const single = createVaultRpcFailover(createVaultDeadline(), assertClusterEndpoint);
+    const single = failoverIn("sandbox");
     const read = vi.fn(async () => {
       await single.resolve(runtime, "devnet");
       throw new Error("fetch failed");
@@ -162,7 +174,7 @@ describe("Earn RPC fallback", () => {
     expect(read).toHaveBeenCalledTimes(1);
 
     vi.stubEnv("SOLANA_RPC_ALCHEMY_DEVNET_API_KEY_URL", fallback);
-    const pooled = createVaultRpcFailover(createVaultDeadline(), assertClusterEndpoint);
+    const pooled = failoverIn("sandbox");
     const refused = vi.fn(async () => {
       await pooled.resolve(runtime, "devnet");
       throw new Error("Insufficient funds");

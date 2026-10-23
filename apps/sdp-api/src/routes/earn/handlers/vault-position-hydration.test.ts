@@ -1,5 +1,6 @@
 import type { EarnVaultPositionInput, EarnVaultPositionSnapshot } from "@sdp/earn/types";
 import { readFloor, withRpcReadContext } from "@sdp/rpc/read-context";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { createRpcFromTransport, getAccountInfo } from "@sdp/rpc/solana";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { Address, RpcTransport } from "@solana/kit";
@@ -12,9 +13,17 @@ import {
   type HydratableVaultPosition,
   type HydratedVaultPositionValue,
   hydratedHoldingTokenValue,
-  hydrateVaultPositions,
+  hydrateVaultPositions as hydrateUnscoped,
   markVaultPositionRowsRead,
 } from "./vault-position-hydration";
+
+/** One hydration in the cluster scope its request opens, from the environment it hydrates. */
+function hydrateVaultPositions(
+  ...args: Parameters<typeof hydrateUnscoped>
+): ReturnType<typeof hydrateUnscoped> {
+  const [, environment] = args;
+  return runInClusterScope({ projectId: null, environment }, () => hydrateUnscoped(...args));
+}
 
 const mocks = vi.hoisted(() => ({ readVaultPositions: vi.fn(), resolveClient: vi.fn() }));
 vi.mock("@/services/earn/execution-registry", () => ({

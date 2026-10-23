@@ -230,7 +230,6 @@ export async function withdrawFromVault(
     walletId: input.wallet.id,
     walletPublicKey: input.wallet.publicKey,
     signerMismatchMessage: "Resolved signing wallet does not match the position's wallet",
-    cluster,
     deadline,
     expectedAssetIdentity,
     plan,

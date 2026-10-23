@@ -46,11 +46,13 @@ import {
   vedaDeployment,
 } from "@sdp/types/veda-programs";
 import {
+  SDP_ENVIRONMENT_BY_CLUSTER,
   SOLANA_CLUSTERS,
   type SolanaCluster,
   WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types/well-known-tokens";
 import { z } from "zod";
+import { runInEnvironmentClusterScope } from "@/runtime/cluster-scope-runs";
 import { earnProviderEndpointUrls } from "@/services/earn/cluster-rpc";
 
 const INVENTORY_ROOT = path.resolve(process.cwd(), ".earn-catalogue");
@@ -314,7 +316,12 @@ ${inventory.clusters.map(renderCluster).join("\n")}`;
 async function runFetch(): Promise<void> {
   const clusters: ClusterInventory[] = [];
   for (const cluster of SOLANA_CLUSTERS) {
-    clusters.push(await inventoryCluster(cluster));
+    // Each cluster is read in its environment's cluster scope, as the catalogue sync reads it.
+    clusters.push(
+      await runInEnvironmentClusterScope(SDP_ENVIRONMENT_BY_CLUSTER[cluster], () =>
+        inventoryCluster(cluster)
+      )
+    );
   }
 
   const inventory: Inventory = {

@@ -63,26 +63,29 @@ taken right after its position rows were read, and reconciliation close-out
 under a fresh stamp, so neither reuses a request sent before that point. A
 floor does not make an RPC node current; the minimum-slot scope does.
 
-## Earn's door (transitional, HOO-1881)
+## Bounded clients
 
-`createClusterRpc()` reads the cluster scope, but Earn still names its cluster:
-anonymous Earn opens no scope yet, and the services the Earn crons share with
-request paths still take a cluster (HOO-1881). The crons themselves run per
-environment in their scope since HOO-2148 and read through `createClusterRpc()`.
-`factory.ts` therefore exports three Earn-only functions, fenced by
-Biome to `apps/sdp-api/src/services/earn/cluster-rpc.ts`:
+`createClusterRpc({ timeoutMs })` bounds each request end to end, failover hops
+and genesis probes included, for a client handed to a helper that sends without
+a signal. It takes behaviour only, never a cluster or URL: the client wraps the
+scope's memoized pool transport, so failover, cooldowns and genesis proofs stay
+shared, and it is memoized per deadline and pool. A caller that sends itself
+passes `abortSignal` to `.send()` instead.
 
-- `createEarnClusterRpc(cluster, { timeoutMs? })`: the named cluster's managed
-  pool. Without `timeoutMs` it is the very client `createClusterRpc()` returns
-  in that cluster's scope; with one, a bounded client over the same pool
-  transport, so failover, cooldowns and genesis proofs stay shared.
-- `earnClusterEndpointUrls(cluster)`: the pool's URLs in failover order, or
-  none. Earn's provider packages still build their own transports from a URL
-  and pin one endpoint per operation, until `withConsistentRpcReads` (HOO-2025).
+## Earn's URL helpers (transitional, HOO-1881)
+
+Earn reads the scope like every module, but its provider packages still build
+their own transports from a URL and pin one endpoint per operation, until they
+take clients (HOO-1881) and `withConsistentRpcReads` (HOO-2025). `factory.ts`
+therefore exports two Earn-only functions, fenced by Biome to
+`apps/sdp-api/src/services/earn/cluster-rpc.ts`:
+
+- `earnClusterEndpointUrls(cluster)`: the scope's pool URLs in failover order,
+  or none.
 - `proveEarnClusterEndpoint(cluster, url)`: the pool's own genesis probe and
   proof cache for one of its URLs, so an endpoint the pool proved costs Earn no
   second probe, and the other way round.
 
-All three answer the named cluster's pool or nothing, never another cluster's
-and never `SOLANA_RPC_URL`, and throw `CLUSTER_SCOPE_CONFLICT` inside a scope for
-the other cluster. Delete them once Earn reads the scope.
+Both take the cluster the provider asked for and refuse one that is not the
+scope's (`CLUSTER_SCOPE_CONFLICT`), outside a scope (`CLUSTER_SCOPE_MISSING`),
+or not in the pool. Delete them once the provider packages take clients.

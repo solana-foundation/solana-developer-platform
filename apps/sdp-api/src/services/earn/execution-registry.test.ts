@@ -1,3 +1,4 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { EARN_PROVIDERS } from "@sdp/types/provider-access";
 import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types/well-known-tokens";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -43,6 +44,11 @@ function stubDevnetPoolGenesis(genesis: string | "never") {
   });
   vi.stubGlobal("fetch", fetchSpy);
   return fetchSpy;
+}
+
+/** Provider work in the cluster scope a Sandbox request opens. */
+function inSandbox<T>(work: () => Promise<T>): Promise<T> {
+  return runInClusterScope({ projectId: null, environment: "sandbox" }, work);
 }
 
 /** A fetch spy that fails the test on any request: resolution must stay I/O-free. */
@@ -139,14 +145,16 @@ describe("resolveVaultDirectClient", () => {
     expect(client).not.toBeNull();
     if (!client) throw new Error("expected Kamino vault-direct client");
 
-    await expect(client.buildVaultDeposit(runtime, depositInput)).rejects.toThrow(
+    await expect(inSandbox(() => client.buildVaultDeposit(runtime, depositInput))).rejects.toThrow(
       /reports genesis/
     );
     await expect(
-      client.readVaultPositions(runtime, {
-        owner: depositInput.owner,
-        providerReferences: [depositInput.providerReference],
-      })
+      inSandbox(() =>
+        client.readVaultPositions(runtime, {
+          owner: depositInput.owner,
+          providerReferences: [depositInput.providerReference],
+        })
+      )
     ).rejects.toThrow(/reports genesis/);
     // Only genesis probes went out: no SDK read reached the mismatched endpoint.
     expect(fetchSpy).toHaveBeenCalledTimes(2);
@@ -157,7 +165,9 @@ describe("resolveVaultDirectClient", () => {
     const client = resolveVaultDirectClient(executionEnv, "kamino", createVaultDeadline());
     if (!client) throw new Error("expected Kamino vault-direct client");
 
-    await expect(client.buildVaultDeposit(runtime, depositInput)).rejects.toMatchObject({
+    await expect(
+      inSandbox(() => client.buildVaultDeposit(runtime, depositInput))
+    ).rejects.toMatchObject({
       code: "PROVIDER_NOT_CONFIGURED",
       message: expect.stringContaining("SOLANA_RPC_<PROVIDER>_DEVNET_API_KEY_URL"),
     });
@@ -270,7 +280,7 @@ describe("resolveVaultDirectClient", () => {
     expect(client).not.toBeNull();
     if (!client) throw new Error("expected Kamino vault-direct client");
 
-    const result = client.buildVaultDeposit(runtime, depositInput);
+    const result = inSandbox(() => client.buildVaultDeposit(runtime, depositInput));
     const rejection = expect(result).rejects.toThrow(
       "Building the vault deposit timed out after 25ms"
     );

@@ -1,5 +1,5 @@
 import { readFloor, readStamp } from "@sdp/rpc/read-context";
-import { runInClusterScope } from "@sdp/rpc/scope";
+import { currentClusterScope, runInClusterScope } from "@sdp/rpc/scope";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -64,6 +64,14 @@ function sweep(environment: SdpEnvironment): Promise<void> {
 /** Sweep work outside the job itself, in the scope the Worker opens for Sandbox. */
 function inSandbox<T>(work: () => Promise<T>): Promise<T> {
   return runInClusterScope({ projectId: null, environment: "sandbox" }, work);
+}
+
+/** A detail read's read-through, in the scope the project middleware opens for the row's project. */
+function readThrough(movement: Parameters<typeof reconcileEarnVaultMovementReadThrough>[1]) {
+  return runInClusterScope(
+    { projectId: movement.project_id, environment: movement.environment },
+    () => reconcileEarnVaultMovementReadThrough(env, movement)
+  );
 }
 
 /** Each cluster's managed pool, which the sweep and the read-through reach through the factory. */
@@ -369,7 +377,7 @@ describe("Kamino deposit receipts", () => {
     getSignatureStatuses.mockResolvedValue([
       { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
     ]);
-    const movement = await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+    const movement = await readThrough(seeded.movement);
     expect(movement).toMatchObject({
       status: "finalized",
       amount_requested: "1",
@@ -396,7 +404,7 @@ describe("Kamino deposit receipts", () => {
     getSignatureStatuses.mockResolvedValue([
       { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
     ]);
-    expect(await reconcileEarnVaultMovementReadThrough(env, seeded.movement)).toMatchObject({
+    expect(await readThrough(seeded.movement)).toMatchObject({
       status: "finalized",
       amount_settled: null,
       token_amount_settled: null,
@@ -433,7 +441,7 @@ describe("settlement observations (0103): withdrawal payout and empty-holding cl
     getTransaction.mockResolvedValue(landedPayout(EXTERNAL_OWNER, "1004500"));
     readVaultPositions.mockResolvedValue(liveSnapshot(seeded.position, EXTERNAL_OWNER, "0"));
 
-    const movement = await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+    const movement = await readThrough(seeded.movement);
 
     // Shares stay shares; the token column carries what the wallet received,
     // formatted at the mint's decimals.
@@ -465,7 +473,7 @@ describe("settlement observations (0103): withdrawal payout and empty-holding cl
     });
     const before = readStamp();
 
-    await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+    await readThrough(seeded.movement);
 
     expect(floors).toEqual([expect.any(Number)]);
     expect(floors[0]).toBeGreaterThan(before);
@@ -479,7 +487,7 @@ describe("settlement observations (0103): withdrawal payout and empty-holding cl
     getTransaction.mockResolvedValue(landedPayout(EXTERNAL_OWNER, "1000000"));
     readVaultPositions.mockResolvedValue(liveSnapshot(seeded.position, EXTERNAL_OWNER, "0.5"));
 
-    await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+    await readThrough(seeded.movement);
 
     await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
       status: "finalized",
@@ -496,7 +504,7 @@ describe("settlement observations (0103): withdrawal payout and empty-holding cl
     getTransaction.mockRejectedValue(new Error("rpc unavailable"));
     readVaultPositions.mockRejectedValue(new Error("provider unavailable"));
 
-    const movement = await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+    const movement = await readThrough(seeded.movement);
 
     // Finalization itself is never blocked by either observation.
     expect(movement).toMatchObject({
@@ -514,7 +522,7 @@ describe("settlement observations (0103): withdrawal payout and empty-holding cl
     ]);
     getTransaction.mockRejectedValue(new Error("rpc unavailable"));
     readVaultPositions.mockRejectedValue(new Error("provider unavailable"));
-    await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+    await readThrough(seeded.movement);
     await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
       status: "finalized",
       token_amount_settled: null,
@@ -545,7 +553,7 @@ describe("settlement observations (0103): withdrawal payout and empty-holding cl
     ]);
     getTransaction.mockRejectedValue(new Error("rpc unavailable"));
     readVaultPositions.mockRejectedValue(new Error("provider unavailable"));
-    await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+    await readThrough(seeded.movement);
 
     await expect(inSandbox(() => repairUnvaluedWithdrawalPayouts(env))).resolves.toEqual({
       claimed: 1,
@@ -597,7 +605,7 @@ describe("settlement observations (0103): withdrawal payout and empty-holding cl
       liveSnapshot({ vault_address: "some_other_vault" }, EXTERNAL_OWNER, "0")
     );
 
-    await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+    await readThrough(seeded.movement);
 
     await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
       status: "finalized",
@@ -745,7 +753,7 @@ describe("provider-order settlement boundary", () => {
       liveSnapshot(seeded.position, seeded.position.owner_address ?? "", "0")
     );
 
-    const movement = await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+    const movement = await readThrough(seeded.movement);
 
     expect(movement).toMatchObject({
       status: "confirmed",
@@ -780,7 +788,7 @@ describe("provider-order settlement boundary", () => {
     expect(readVaultPositions).not.toHaveBeenCalled();
 
     // Read-through sees the durable marker and does not spend another RPC call.
-    await reconcileEarnVaultMovementReadThrough(env, movement);
+    await readThrough(movement);
     expect(getSignatureStatuses).toHaveBeenCalledTimes(1);
   });
 
@@ -791,8 +799,8 @@ describe("provider-order settlement boundary", () => {
       { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
     ]);
 
-    await reconcileEarnVaultMovementReadThrough(env, deposit.movement);
-    await reconcileEarnVaultMovementReadThrough(env, withdrawal.movement);
+    await readThrough(deposit.movement);
+    await readThrough(withdrawal.movement);
 
     await expect(ledgerRow(deposit.movement.id)).resolves.toMatchObject({
       status: "confirmed",
@@ -818,7 +826,7 @@ describe("provider-order settlement boundary", () => {
     getTransaction.mockResolvedValue(landedPayout(receiver, "1000000"));
     readVaultPositions.mockResolvedValue(liveSnapshot(seeded.position, receiver, "0"));
 
-    const movement = await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+    const movement = await readThrough(seeded.movement);
 
     expect(movement).toMatchObject({
       status: "finalized",
@@ -841,7 +849,7 @@ describe("provider-order settlement boundary", () => {
     getTransaction.mockResolvedValue(landedPayout(receiver, "1000000"));
     readVaultPositions.mockResolvedValue(liveSnapshot(seeded.position, receiver, "0"));
 
-    const movement = await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+    const movement = await readThrough(seeded.movement);
 
     expect(movement).toMatchObject({
       status: "finalized",
@@ -861,7 +869,7 @@ describe("reconcileEarnVaultMovementReadThrough", () => {
       { slot: 1n, confirmations: 1n, err: null, confirmationStatus: "confirmed" },
     ]);
 
-    const movement = await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+    const movement = await readThrough(seeded.movement);
 
     expect(movement).toMatchObject({ status: "confirmed", settled_at: null });
     expect(movement.confirmed_at).not.toBeNull();
@@ -880,7 +888,7 @@ describe("reconcileEarnVaultMovementReadThrough", () => {
       { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
     ]);
 
-    const movement = await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+    const movement = await readThrough(seeded.movement);
 
     expect(movement).toMatchObject({ status: "finalized", amount_settled: "1" });
     expect(movement.confirmed_at).not.toBeNull();
@@ -891,7 +899,7 @@ describe("reconcileEarnVaultMovementReadThrough", () => {
     const seeded = await seedWithdrawal();
     getSignatureStatuses.mockResolvedValue([null]);
 
-    const movement = await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+    const movement = await readThrough(seeded.movement);
 
     expect(movement.status).toBe("requested");
     expect(heightReads()).toEqual([]);
@@ -902,9 +910,10 @@ describe("reconcileEarnVaultMovementReadThrough", () => {
     const seeded = await seedWithdrawal();
     getSignatureStatuses.mockRejectedValue(new Error("rpc unavailable"));
 
-    await expect(
-      reconcileEarnVaultMovementReadThrough(env, seeded.movement)
-    ).resolves.toMatchObject({ id: seeded.movement.id, status: "requested" });
+    await expect(readThrough(seeded.movement)).resolves.toMatchObject({
+      id: seeded.movement.id,
+      status: "requested",
+    });
     await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({ status: "requested" });
   });
 
@@ -918,8 +927,8 @@ describe("reconcileEarnVaultMovementReadThrough", () => {
         })
     );
 
-    const first = reconcileEarnVaultMovementReadThrough(env, seeded.movement);
-    const second = reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+    const first = readThrough(seeded.movement);
+    const second = readThrough(seeded.movement);
     await vi.waitFor(() => expect(getSignatureStatuses).toHaveBeenCalledTimes(1));
     resolveStatuses?.([
       { slot: 1n, confirmations: 1n, err: null, confirmationStatus: "confirmed" },
@@ -935,7 +944,7 @@ describe("reconcileEarnVaultMovementReadThrough", () => {
     vi.useFakeTimers();
     try {
       getSignatureStatuses.mockImplementation(() => new Promise(() => {}));
-      const response = reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+      const response = readThrough(seeded.movement);
 
       await vi.advanceTimersByTimeAsync(2_000);
 
@@ -957,7 +966,7 @@ describe("reconcileEarnVaultMovementReadThrough", () => {
       { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
     ]);
 
-    const movement = await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+    const movement = await readThrough(seeded.movement);
 
     expect(movement).toMatchObject({
       status: "finalized",
@@ -979,10 +988,23 @@ describe("reconcileEarnVaultMovementReadThrough", () => {
     const terminal = await ledgerRow(seeded.movement.id);
     if (!terminal) throw new Error("terminal movement did not persist");
 
-    const movement = await reconcileEarnVaultMovementReadThrough(env, terminal);
+    const movement = await readThrough(terminal);
 
     expect(movement.status).toBe("failed");
     expect(getSignatureStatuses).not.toHaveBeenCalled();
+  });
+
+  it("answers a movement from another environment's scope with its durable row, unread", async () => {
+    const seeded = await seedExternalWalletMovement("sandbox");
+
+    const movement = await runInClusterScope(
+      { projectId: `${PROJECT}_production`, environment: "production" },
+      () => reconcileEarnVaultMovementReadThrough(env, seeded.movement)
+    );
+
+    expect(movement).toEqual(seeded.movement);
+    expect(getSignatureStatuses).not.toHaveBeenCalled();
+    expect(clusterRpc.calls).toEqual([]);
   });
 });
 
@@ -1017,11 +1039,11 @@ describe("reconcileEarnVaultMovements", () => {
           confirmationStatus,
         },
       ]);
-      const observed = await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+      const observed = await readThrough(seeded.movement);
       getSignatureStatuses.mockResolvedValue([
         { slot: 2n, confirmations: null, err: null, confirmationStatus: "finalized" },
       ]);
-      const recovered = await reconcileEarnVaultMovementReadThrough(env, observed);
+      const recovered = await readThrough(observed);
       expect(recovered.status).toBe("finalized");
     }
   );
@@ -1306,12 +1328,17 @@ describe("reconcileEarnVaultMovements", () => {
     const seeded = await seedMovement("100");
     getSignatureStatuses.mockResolvedValue([null]);
     finalizedHeightIs(99);
+    let broadcastCluster: string | undefined;
+    broadcastVaultTransaction.mockImplementationOnce(async () => {
+      broadcastCluster = currentClusterScope().cluster;
+    });
 
     await sweep("sandbox");
 
     expect(broadcastVaultTransaction).toHaveBeenCalledWith(
-      expect.objectContaining({ cluster: "devnet", bytes: new Uint8Array([1, 2, 3]) })
+      expect.objectContaining({ bytes: new Uint8Array([1, 2, 3]) })
     );
+    expect(broadcastCluster).toBe("devnet");
     await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({ status: "submitted" });
   });
 

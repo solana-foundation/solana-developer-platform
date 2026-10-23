@@ -1031,11 +1031,11 @@ chain reads the sweeps make themselves go through `createClusterRpc()`:
 statuses, heights and history, the payout and receipt repairs, the
 queued-withdrawal build cleanup (its height read only when
 `hasUnconsumedExternalBuilds` says something could expire), the split-swap
-height and the deposit-mint guard. Shared services they call with the scope's
-cluster (rebroadcast, provider position and queue reads) and every request
-path still name their cluster through the Earn door (`earnClusterRpc`) until
-the packages take door clients and the services read the scope (HOO-1881).
-The catalogue sync stays `global`: its sandbox mirror lane reads mainnet.
+height and the deposit-mint guard, and so do the shared services they call
+(rebroadcast, provider position and queue reads). The catalogue sync stays
+`global`, because its sandbox mirror lane writes production's snapshot, and
+runs each lane's provider fetch in that lane's environment's scope
+(`runInEnvironmentClusterScope`); its writes are DB-only.
 
 **The sweep must fail LOUDLY, and that is a correctness property** (PRO-1863,
 threat model EARN-006). A chain read failure used to `return` cleanly, so the
@@ -1495,21 +1495,22 @@ retired path-addressed shapes (`positions/:ownerAddress`,
 `EARN_PROVIDER_DEPLOYED_CLUSTERS` scopes new deposits to the clusters
 each provider is deployed on; withdrawals remain open independently.
 
-**Per-cluster RPC.** Every Earn read and send goes to the named cluster's
-managed pool (`SOLANA_RPC_<PROVIDER>_<CLUSTER>_API_KEY_URL`, the pool
-`createClusterRpc()` serves) through `services/earn/cluster-rpc.ts`, the one
-module allowed to import Earn's door from `@sdp/rpc/factory`. Nothing in Earn
-reads `SOLANA_RPC_URL`, `SOLANA_<CLUSTER>_RPC_URL` or `SOLANA_NETWORK`: a
-cluster with no pool fails closed (`RPC_NOT_CONFIGURED` on the pooled client,
-`PROVIDER_NOT_CONFIGURED` on a provider operation) and never reads the other
-cluster. Earn names the cluster (`earnClusterFor` of the project, strategy or
-row environment) because anonymous Earn opens no cluster scope yet and the
-services the Earn crons share with request paths still take one (HOO-1881).
-The crons themselves run once per environment inside its scope and make their
-own reads through `createClusterRpc()` (HOO-2148). Inside a scope, naming the
-other cluster throws `CLUSTER_SCOPE_CONFLICT`. One-shot reads, simulation and
-broadcast use `earnClusterRpc(cluster)`: per-request failover and the pool's
-genesis guard, a send never failing over once it left SDP. Executing provider
+**Per-cluster RPC.** Every Earn read and send runs in a cluster scope and
+goes to that scope's managed pool (`SOLANA_RPC_<PROVIDER>_<CLUSTER>_API_KEY_URL`):
+a keyed request in its project's scope, a keyless one in the scope of the
+strategy it names (`keyless-scope.ts`), a cron in its registration's, the
+catalogue sync in each lane's. Nothing in Earn takes a cluster to pick an RPC,
+and nothing reads `SOLANA_RPC_URL`, `SOLANA_<CLUSTER>_RPC_URL` or
+`SOLANA_NETWORK`: a cluster with no pool fails closed (`RPC_NOT_CONFIGURED` on
+the pooled client, `PROVIDER_NOT_CONFIGURED` on a provider operation) and never
+reads the other cluster. One-shot reads, simulation and broadcast use
+`createClusterRpc()`, or `createClusterRpc({ timeoutMs })` for a client handed
+to a helper that sends without a signal: per-request failover and the pool's
+genesis guard, a send never failing over once it left SDP. Provider packages
+still build transports from a URL (HOO-1881), so `services/earn/cluster-rpc.ts`,
+the one module allowed to import the URL helpers from `@sdp/rpc/factory`, hands
+them the scope's pool URLs and refuses a provider that asks for the other
+cluster (`CLUSTER_SCOPE_CONFLICT`). Executing provider
 read/build operations instead pin one pool endpoint per attempt
 (`vault-rpc-failover.ts`, until `withConsistentRpcReads` replaces it under
 HOO-2025), so a plan never mixes endpoints; each candidate must prove its

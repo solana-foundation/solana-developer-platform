@@ -1,4 +1,4 @@
-import { runInClusterScope } from "@sdp/rpc/scope";
+import { currentClusterScope, runInClusterScope } from "@sdp/rpc/scope";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   EarnVaultWithdrawalRequestActionRow,
@@ -402,6 +402,10 @@ describe("queued withdrawal reconciliation", () => {
     "rebroadcasts the same submitted %s while its blockhash is valid",
     async (kind) => {
       const ledger = fakeLedger(request());
+      let broadcastCluster: string | undefined;
+      broadcast.mockImplementationOnce(async () => {
+        broadcastCluster = currentClusterScope().cluster;
+      });
       await expect(
         inSandboxScope(() =>
           reconcileAction(
@@ -413,9 +417,8 @@ describe("queued withdrawal reconciliation", () => {
           )
         )
       ).resolves.toBe("rebroadcast");
-      expect(broadcast).toHaveBeenCalledWith(
-        expect.objectContaining({ cluster: "devnet", bytes: Uint8Array.of(1) })
-      );
+      expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ bytes: Uint8Array.of(1) }));
+      expect(broadcastCluster).toBe("devnet");
       expect(ledger.failActionAndRecoverRequest).not.toHaveBeenCalled();
     }
   );

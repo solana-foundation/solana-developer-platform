@@ -18,7 +18,6 @@ import {
   EARN_PROVIDER_DEPOSIT_SETTLEMENT,
   earnProviderDepositSettlement,
 } from "@sdp/types/provider-access";
-import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import type { Signature, Slot } from "@solana/kit";
 import { getDb } from "@/db/client";
 import {
@@ -28,7 +27,6 @@ import {
 } from "@/db/repositories/earn-movements.repository";
 import { getLogger } from "@/runtime/logger";
 import { describeError, logEvent } from "@/runtime/money-path-events";
-import { earnClusterRpc } from "@/services/earn/cluster-rpc";
 import {
   earnClusterFor,
   resolveRecordedVaultWithdrawClient,
@@ -130,9 +128,16 @@ async function observeEarnVaultMovement(
     throw new Error(`Earn vault movement ${movement.id} is missing its transaction signature`);
   }
 
+  // Rows are scoped to the caller before this read; one from another environment would be read on
+  // the wrong cluster, so it falls back to the durable row instead.
+  const { environment } = currentClusterScope();
+  if (movement.environment !== environment) {
+    throw new Error(
+      `Earn vault movement ${movement.id} belongs to ${movement.environment}, not the ${environment} scope`
+    );
+  }
   const ledger = createPostgresEarnMovementsRepository(getDb(env));
-  const cluster = earnClusterFor(movement.environment);
-  const rpc = earnClusterRpc(cluster, { timeoutMs: INTERACTIVE_RPC_TIMEOUT_MS });
+  const rpc = createClusterRpc({ timeoutMs: INTERACTIVE_RPC_TIMEOUT_MS });
   const [status] = await getSignatureStatuses(rpc, [movement.signature as Signature], {
     searchTransactionHistory: true,
     retryDelaysMs: [],
@@ -142,7 +147,6 @@ async function observeEarnVaultMovement(
   // into a rebroadcast or expiry decision. Passing no block height makes the
   // shared transition function leave an unknown signature for the durable job.
   await reconcileMovement(env, ledger, movement, status ?? null, {
-    cluster,
     rpc,
     currentBlockHeight: null,
   });
@@ -217,7 +221,7 @@ export async function reconcileEarnVaultMovementBatch(
   const stats = emptyStats(rows.length);
   if (rows.length === 0) return stats;
   const ledger = createPostgresEarnMovementsRepository(getDb(env));
-  const { environment, cluster } = currentClusterScope();
+  const { environment } = currentClusterScope();
   // SAFETY: claims are vault_direct rows, whose signature `earn_movements_model_shape_check` (0062)
   // makes NOT NULL: the base58 signature SDP recorded from the transaction it signed.
   const signatures = rows.map((row) => row.signature as Signature);
@@ -290,7 +294,6 @@ export async function reconcileEarnVaultMovementBatch(
         movement,
         expiry.statuses[index] ?? null,
         {
-          cluster,
           rpc,
           // An expired row whose absence could not be proven gets no height, so this tick
           // neither rebroadcasts nor expires it.
@@ -371,7 +374,6 @@ async function proveExpiredAbsence(
 }
 
 interface ChainObservation {
-  cluster: SolanaCluster;
   rpc: SolanaRpc;
   currentBlockHeight: bigint | null;
 }
@@ -464,7 +466,6 @@ async function reconcileMovement(
   if (chain.currentBlockHeight === null) return "unchanged";
 
   await broadcastVaultTransaction({
-    cluster: chain.cluster,
     deadline: createVaultDeadline(),
     bytes: Uint8Array.from(Buffer.from(signedTransaction, "base64")),
   });
@@ -626,7 +627,7 @@ async function settleMovement(
       : null;
   const depositReceipt =
     position && movement.direction === "deposit" && movement.provider === "kamino"
-      ? await observeKaminoDepositReceipt(chain, movement, position)
+      ? await observeKaminoDepositReceipt(chain.rpc, movement, position)
       : null;
 
   const observedAt = new Date().toISOString();
@@ -645,7 +646,7 @@ async function settleMovement(
 }
 
 async function observeKaminoDepositReceipt(
-  chain: Pick<ChainObservation, "cluster" | "rpc">,
+  rpc: SolanaRpc,
   movement: EarnMovementRow,
   position: EarnPositionRow
 ): Promise<KaminoDepositReceipt | null> {
@@ -662,7 +663,7 @@ async function observeKaminoDepositReceipt(
     return null;
   try {
     return await readKaminoDepositReceipt(
-      { cluster: chain.cluster, rpc: chain.rpc },
+      { cluster: currentClusterScope().cluster, rpc },
       {
         signature: movement.signature,
         owner,
@@ -690,7 +691,7 @@ export async function repairUnvaluedKaminoDeposits(
   { limit = 25, now = Date.now() }: { limit?: number; now?: number } = {}
 ): Promise<WithdrawalPayoutRepairStats> {
   const ledger = createPostgresEarnMovementsRepository(getDb(env));
-  const { environment, cluster } = currentClusterScope();
+  const { environment } = currentClusterScope();
   const movements = await ledger.claimUnvaluedKaminoDeposits({
     environment,
     limit,
@@ -713,9 +714,7 @@ export async function repairUnvaluedKaminoDeposits(
         environment: movement.environment,
         positionId: movement.position_id,
       });
-      const receipt = position
-        ? await observeKaminoDepositReceipt({ cluster, rpc }, movement, position)
-        : null;
+      const receipt = position ? await observeKaminoDepositReceipt(rpc, movement, position) : null;
       if (!receipt) {
         stats.unobserved += 1;
         continue;

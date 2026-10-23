@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
 import type { EarnVaultAssetIdentity, EarnVaultTransactionPlan } from "@sdp/earn/types";
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import { getRecentBlockhash, sendTransaction } from "@sdp/rpc/solana";
 import { withTransientRpcRetry } from "@sdp/rpc/transient";
 import { MEMO_PROGRAM_ADDRESS } from "@sdp/types/well-known-programs";
-import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import {
   type Address,
   type AddressesByLookupTableAddress,
@@ -31,7 +32,6 @@ import {
   partiallySignTransactionMessageWithSigners,
   signTransactionMessageWithSigners,
 } from "@solana/signers";
-import { earnClusterRpc } from "./cluster-rpc";
 import type { VaultDeadline } from "./vault-deadline";
 import { describeVaultSimulationError } from "./vault-simulation-error";
 import type { VaultFeeMode } from "./vault-sponsorship";
@@ -113,8 +113,6 @@ export function appendVaultRequestMemo(
 }
 
 export interface VaultExecutionScope {
-  /** Cluster derived from the authenticated SDP project environment. */
-  cluster: SolanaCluster;
   /** One absolute budget shared by every stage in this vault workflow. */
   deadline: VaultDeadline;
 }
@@ -155,13 +153,11 @@ export interface SignedVaultTransaction {
 
 function assertExpectedPlan(
   plan: EarnVaultTransactionPlan,
-  expectedCluster: SolanaCluster,
   expectedAssetIdentity: EarnVaultAssetIdentity
 ): void {
-  if (plan.cluster !== expectedCluster) {
-    throw new Error(
-      `Vault plan targets ${plan.cluster}, not the expected ${expectedCluster} cluster`
-    );
+  const { cluster } = currentClusterScope();
+  if (plan.cluster !== cluster) {
+    throw new Error(`Vault plan targets ${plan.cluster}, not the expected ${cluster} cluster`);
   }
   if (plan.assetIdentity.depositTokenMint !== expectedAssetIdentity.depositTokenMint) {
     throw new Error(
@@ -191,7 +187,7 @@ async function resolveLookupTables(
   input: VaultExecutionScope & { plan: EarnVaultTransactionPlan }
 ): Promise<AddressesByLookupTableAddress> {
   if (input.plan.lookupTables.length === 0) return {};
-  const rpc = earnClusterRpc(input.cluster);
+  const rpc = createClusterRpc();
   return input.deadline.run("Fetching the vault lookup tables", () =>
     withTransientRpcRetry(() =>
       fetchAddressesForLookupTables(
@@ -273,14 +269,14 @@ function assertVaultTransactionFits(
 
 /** Sign exactly one complete vault transaction without broadcasting it. */
 export async function signVaultPlan(input: SignVaultPlanInput): Promise<SignedVaultTransaction> {
-  assertExpectedPlan(input.plan, input.cluster, input.expectedAssetIdentity);
+  assertExpectedPlan(input.plan, input.expectedAssetIdentity);
   const instructions = planInstructions(input.plan).map(toKitInstruction);
   let prepared = input.prepared;
   if (prepared && prepared.plan !== input.plan) {
     throw new Error("Vault execution preparation belongs to a different plan");
   }
   if (!prepared) {
-    const rpc = earnClusterRpc(input.cluster);
+    const rpc = createClusterRpc();
     const [lookupTables, { blockhash, lastValidBlockHeight }] = await Promise.all([
       resolveLookupTables(input),
       input.deadline.run("Fetching the vault transaction blockhash", () =>
@@ -401,7 +397,7 @@ export interface UnsignedVaultTransaction {
 export function compileUnsignedVaultTransaction(
   input: CompileUnsignedVaultTransactionInput
 ): UnsignedVaultTransaction {
-  assertExpectedPlan(input.plan, input.cluster, input.expectedAssetIdentity);
+  assertExpectedPlan(input.plan, input.expectedAssetIdentity);
   if (input.prepared.plan !== input.plan) {
     throw new Error("Vault execution preparation belongs to a different plan");
   }
@@ -451,7 +447,7 @@ export function compileUnsignedVaultTransaction(
 export async function broadcastVaultTransaction(
   input: VaultExecutionScope & { bytes: Uint8Array }
 ): Promise<void> {
-  const rpc = earnClusterRpc(input.cluster);
+  const rpc = createClusterRpc();
   await input.deadline.run("Broadcasting the vault transaction", () =>
     sendTransaction(rpc, input.bytes)
   );
@@ -509,7 +505,7 @@ export async function simulateVaultPlan(
       logs: readonly string[];
     }
 > {
-  assertExpectedPlan(input.plan, input.cluster, input.expectedAssetIdentity);
+  assertExpectedPlan(input.plan, input.expectedAssetIdentity);
   let instructions: EarnVaultTransactionPlan["instructions"];
   try {
     instructions = planInstructions(input.plan);
@@ -522,7 +518,7 @@ export async function simulateVaultPlan(
     };
   }
 
-  const rpc = earnClusterRpc(input.cluster);
+  const rpc = createClusterRpc();
   // Lookup-table transport failures are infrastructure failures, not a
   // program simulation verdict. Let them reject so callers preserve their
   // idempotency key and return a retryable 5xx instead of a caller-fault 400.

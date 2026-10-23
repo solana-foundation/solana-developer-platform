@@ -22,15 +22,6 @@ const simulateVaultPlan = vi.hoisted(() => vi.fn());
 const createOrgSignerForCustodyWallet = vi.hoisted(() => vi.fn());
 const resolveVaultDirectClient = vi.hoisted(() => vi.fn());
 const resolveVaultSponsorship = vi.hoisted(() => vi.fn());
-const getBlockHeight = vi.hoisted(() => vi.fn());
-
-// The confirmed block height the broadcast tail reads before it may call a
-// preflight blockhash refusal definitive.
-vi.mock("./cluster-rpc", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./cluster-rpc")>()),
-  earnClusterRpc: () => ({ getBlockHeight: () => ({ send: getBlockHeight }) }),
-}));
-
 // `prependSwapLegToVaultPlan` stays real; only the Jupiter HTTP boundary is stubbed.
 vi.mock("./jupiter-swap.service", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./jupiter-swap.service")>()),
@@ -189,7 +180,6 @@ beforeEach(async () => {
   });
   broadcastVaultTransaction.mockResolvedValue(undefined);
   // Inside the stubbed signature's window (lastValidBlockHeight 12345).
-  getBlockHeight.mockResolvedValue(12_000n);
 });
 
 afterEach(() => {
@@ -538,18 +528,15 @@ describe("depositIntoVault — signed persistence boundary", () => {
     const deadline = resolveVaultDirectClient.mock.calls[0]?.[2];
     expect(deadline).toBeDefined();
     expect(simulateVaultPlan.mock.calls[0]?.[0]).toMatchObject({
-      cluster: "devnet",
       deadline,
       expectedAssetIdentity: { depositTokenMint: TOKEN_MINT, shareMint: SHARE_MINT },
     });
     expect(signVaultPlan.mock.calls[0]?.[0]).toMatchObject({
-      cluster: "devnet",
       deadline,
       expectedAssetIdentity: { depositTokenMint: TOKEN_MINT, shareMint: SHARE_MINT },
       fee: { kind: "wallet-pays" },
     });
     expect(broadcastVaultTransaction.mock.calls[0]?.[0]).toMatchObject({
-      cluster: "devnet",
       deadline,
     });
     expect(movementAtBroadcast).toMatchObject({
@@ -682,7 +669,6 @@ describe("depositIntoVault — signed persistence boundary", () => {
 
   it("leaves an expired-blockhash refusal for signature reconciliation", async () => {
     broadcastVaultTransaction.mockRejectedValue(preflightBlockhashNotFound());
-    getBlockHeight.mockResolvedValue(12_346n);
 
     const result = await depositIntoVault(env, depositInput());
 
@@ -702,7 +688,6 @@ describe("depositIntoVault — signed persistence boundary", () => {
     // A too-NEW blockhash draws the same preflight answer from a lagging
     // node; the reconciler's rebroadcast is what lands it.
     broadcastVaultTransaction.mockRejectedValue(preflightBlockhashNotFound());
-    getBlockHeight.mockResolvedValue(12_345n);
 
     const result = await depositIntoVault(env, depositInput());
 
@@ -711,7 +696,6 @@ describe("depositIntoVault — signed persistence boundary", () => {
 
   it("leaves a preflight blockhash refusal reconcilable when the height is unreadable", async () => {
     broadcastVaultTransaction.mockRejectedValue(preflightBlockhashNotFound());
-    getBlockHeight.mockRejectedValue(new Error("rpc unreachable"));
 
     const result = await depositIntoVault(env, depositInput());
 

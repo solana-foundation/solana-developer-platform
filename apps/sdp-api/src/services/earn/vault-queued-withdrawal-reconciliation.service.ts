@@ -478,7 +478,6 @@ export async function reconcileAction(
   if (chain.currentHeight === null) return "unchanged";
 
   await broadcastVaultTransaction({
-    cluster: currentClusterScope().cluster,
     deadline: createVaultDeadline(),
     bytes: Uint8Array.from(Buffer.from(actionRow.signed_transaction, "base64")),
   });
