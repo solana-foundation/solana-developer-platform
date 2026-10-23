@@ -8,6 +8,7 @@ import {
 } from "@solana/kit";
 import {
   type ExtensionArgs,
+  findAssociatedTokenPda,
   getTransferCheckedWithFeeInstructionDataDecoder,
 } from "@solana-program/token-2022";
 import { describe, expect, it, vi } from "vitest";
@@ -965,6 +966,68 @@ describe("Payments routes — on-chain transfers", () => {
       );
       expect(sendTransactionMock).not.toHaveBeenCalled();
       expect(rpc.calls).toEqual([]);
+      expect(await countTransferRows()).toBe(0);
+    });
+
+    it("refuses a transfer into the source's own token account, which would move nothing", async () => {
+      const [ownAccount] = await findAssociatedTokenPda({
+        owner: address(TEST_SOLANA_ADDRESSES.wallet1),
+        mint: address(DEVNET_USDC_MINT),
+        tokenProgram: address(SPL_TOKEN_PROGRAMS["spl-token"]),
+      });
+      answerMovementAccounts(
+        rpc,
+        new Map([
+          [DEVNET_USDC_MINT, mintRpcAccount("spl-token", { decimals: 6, extensions: null })],
+        ])
+      );
+      rpc.answer(
+        "getTokenAccountsByOwner",
+        tokenAccountsByOwnerResult(1, [
+          {
+            pubkey: ownAccount,
+            mint: DEVNET_USDC_MINT,
+            amount: "1000000000",
+            decimals: 6,
+            uiAmountString: "1000",
+            state: "initialized",
+          },
+        ])
+      );
+
+      const res = await postTransfer(
+        {
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          destination: TEST_SOLANA_ADDRESSES.wallet1,
+          token: DEVNET_USDC_MINT,
+          amount: "1",
+        },
+        {}
+      );
+
+      expect(res.status).toBe(400);
+      expect((await readErrorResponse(res)).error.message).toBe(
+        "The destination is the source account: the transfer would move nothing"
+      );
+      expect(sendTransactionMock).not.toHaveBeenCalled();
+      expect(await countTransferRows()).toBe(0);
+    });
+
+    it("refuses native SOL sent to the source wallet itself", async () => {
+      const res = await postTransfer(
+        {
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          destination: TEST_SOLANA_ADDRESSES.wallet1,
+          token: "SOL",
+          amount: "1",
+        },
+        {}
+      );
+
+      expect(res.status).toBe(400);
+      expect((await readErrorResponse(res)).error.message).toBe(
+        "The destination is the source account: the transfer would move nothing"
+      );
       expect(await countTransferRows()).toBe(0);
     });
   });

@@ -11,7 +11,7 @@ import {
   TOKEN_MOVEMENT_BASES,
   type TokenMovementBasis,
 } from "@sdp/types/token-movements";
-import { TOKEN_PROGRAM_KINDS, type TokenProgramKind } from "@sdp/types/well-known-tokens";
+import { TOKEN_PROGRAM_KINDS } from "@sdp/types/well-known-tokens";
 import { address, type Epoch, type Slot, type UnixTimestamp, unixTimestamp } from "@solana/kit";
 import { z } from "zod";
 import type { DatabaseExecutor } from "@/db/client";
@@ -133,7 +133,7 @@ const legRowSchema = z.object({
   payment_transfer_recipient_id: z.string().nullable(),
   asset_kind: z.enum(["native", "token"]),
   mint: z.string().nullable(),
-  token_program: z.string().nullable(),
+  token_program: z.enum(TOKEN_PROGRAM_KINDS).nullable(),
   decimals: z.number().int(),
   basis: z.enum(TOKEN_MOVEMENT_BASES),
   quoted_debit: z.string(),
@@ -168,14 +168,6 @@ const batchTotalsRowSchema = z.object({
   credit: wholeNumberSchema,
 });
 
-function tokenProgramKind(value: string): TokenProgramKind {
-  const kind = TOKEN_PROGRAM_KINDS.find((candidate) => candidate === value);
-  if (kind === undefined) {
-    throw new Error(`Unknown token program on a movement leg: ${value}`);
-  }
-  return kind;
-}
-
 function legAsset(row: LegRow): AssetRef {
   if (row.asset_kind === "native") {
     return { kind: "native" };
@@ -183,7 +175,7 @@ function legAsset(row: LegRow): AssetRef {
   if (row.mint === null || row.token_program === null) {
     throw new Error(`Token movement leg ${row.id} names no mint`);
   }
-  return { kind: "token", mint: address(row.mint), program: tokenProgramKind(row.token_program) };
+  return { kind: "token", mint: address(row.mint), program: row.token_program };
 }
 
 function legOwner(row: LegRow): TokenMovementLegOwner {

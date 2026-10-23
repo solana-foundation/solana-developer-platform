@@ -33,12 +33,10 @@ describe("canonicalizeTransferBody", () => {
     expect(canonical({ ...body, amountBasis: "credit" })).not.toEqual(canonical(body));
   });
 
-  it("spells native SOL as native and refuses the wrapped SOL mint", () => {
+  it("spells native SOL as native and the wrapped SOL mint as its own asset", () => {
     expect(canonical({ ...body, token: "SOL" })).toMatchObject({ asset: "native" });
-    // Rows store native SOL under the wrapped SOL mint, so a wrapped SOL move would read as native.
-    expect(() => canonical({ ...body, token: SOL_MINT })).toThrow(
-      'Payments does not move wrapped SOL: send token "SOL" to move native SOL'
-    );
+    // A wrapped SOL request is refused when it runs, after the replay step.
+    expect(canonical({ ...body, token: SOL_MINT })).toMatchObject({ asset: SOL_MINT });
   });
 
   it("defaults an off-ramp deposit's basis to credit", () => {

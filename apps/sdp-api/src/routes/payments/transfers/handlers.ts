@@ -100,6 +100,7 @@ import {
   assertPaymentProjectScope,
   normalizePaymentToken,
   type OutboundPaymentOperation,
+  refuseWrappedSol,
   resolveOutboundPaymentOperation,
 } from "@/services/payment-operation.service";
 import { createTransferSignedSubmissionStore } from "@/services/payments/signed-submission";
@@ -920,6 +921,8 @@ function compareTransferRows(
 export async function createTransfer(c: ValidatedBodyContext<typeof createTransferSchema>) {
   const body = c.req.valid("json");
   const { scope, operation, basis, rampTransfer } = getAuthorized<TransferResolved>(c);
+  // Here, after the replay step, so a retry saved before the refusal still replays.
+  refuseWrappedSol(operation.asset);
   // The credential-bound record key (ADR 0009), never the raw client key.
   const recordKey = getIdempotencyRecordKey(c);
   const fingerprint = getIdempotencyFingerprint(c);
