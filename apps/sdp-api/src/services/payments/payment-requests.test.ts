@@ -712,6 +712,47 @@ describe("settlement audit", () => {
   });
 });
 
+describe("expiry audit", () => {
+  installSettlementHooks();
+
+  it("records one update entry when the expiry lane stores expired", async () => {
+    mockNoSignatures();
+    const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
+
+    await onSandbox(() => closeLapsedPaymentRequest(env, request));
+    await onSandbox(() => closeLapsedPaymentRequest(env, request));
+
+    const result = await getDb(env)
+      .prepare(
+        "SELECT metadata FROM audit_logs WHERE resource_type = 'payment_request' AND resource_id = ? AND action = 'update'"
+      )
+      .bind(request.id)
+      .all<{ metadata: string | Record<string, unknown> }>();
+    expect(
+      result.results.map((row) =>
+        typeof row.metadata === "string" ? JSON.parse(row.metadata) : row.metadata
+      )
+    ).toEqual([expect.objectContaining({ fromStatus: "awaiting_payment", toStatus: "expired" })]);
+  });
+
+  it("records nothing when the request was already settled", async () => {
+    mockSettlementSucceeds();
+    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+    await reconcileOnSandbox(request);
+    mockNoSignatures();
+
+    await onSandbox(() => closeLapsedPaymentRequest(env, { ...request, expires_at: PAST }));
+
+    const result = await getDb(env)
+      .prepare(
+        "SELECT id FROM audit_logs WHERE resource_type = 'payment_request' AND resource_id = ? AND action = 'update'"
+      )
+      .bind(request.id)
+      .all<{ id: string }>();
+    expect(result.results).toHaveLength(0);
+  });
+});
+
 async function storeExpired(requestId: string) {
   await getDb(env)
     .prepare("UPDATE payment_requests SET status = 'expired' WHERE id = ?")

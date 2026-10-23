@@ -376,10 +376,7 @@ async function settlePaymentRequest(
   const key = paymentRequestKey(row);
   const scope = createTenantScope({ organizationId: key.organizationId, projectId: key.projectId });
   const paidLate = isPaidLate(found.blockTime, row.expires_at);
-  const audit = new AuditService(
-    getDb(env),
-    createAuditLedgerCheckpointStore(env, AUDIT_LEDGER_REDIS_TIMEOUT_MS)
-  );
+  const audit = systemAuditService(env);
   const settle = () =>
     audit.logSystemWithin(async (db) => {
       const transfer = await recordInboundTransfer(
@@ -467,18 +464,47 @@ function settlementAuditEntry(
 
 async function markExpired(env: Env, row: PaymentRequestRow): Promise<PaymentRequestRow> {
   const key = paymentRequestKey(row);
-  const requestsRepo = createPaymentRequestsRepository(
-    env,
-    createTenantScope({ organizationId: key.organizationId, projectId: key.projectId })
-  );
-  const expired = await requestsRepo.markPaymentRequest({
-    ...key,
-    status: "expired",
-    fulfilledByTransferId: null,
-    canceledBy: null,
-    paidLate: false,
+  const scope = createTenantScope({ organizationId: key.organizationId, projectId: key.projectId });
+  return systemAuditService(env).logSystemWithin(async (db) => {
+    const requestsRepo = createTransactionalPaymentRequestsRepository(db, scope);
+    const expired = await requestsRepo.markPaymentRequest({
+      ...key,
+      status: "expired",
+      fulfilledByTransferId: null,
+      canceledBy: null,
+      paidLate: false,
+    });
+    return {
+      entry: expired === null ? null : expiryAuditEntry(expired),
+      result: expired ?? (await reread(requestsRepo, key)),
+    };
   });
-  return expired ?? (await reread(requestsRepo, key));
+}
+
+function expiryAuditEntry(expired: PaymentRequestRow): SystemAuditLogEntry {
+  return {
+    organizationId: expired.organization_id,
+    action: "update",
+    resourceType: "payment_request",
+    resourceId: expired.id,
+    metadata: {
+      projectId: expired.project_id,
+      fromStatus: "awaiting_payment",
+      toStatus: "expired",
+      expiresAt: expired.expires_at,
+      amount: expired.amount,
+      tokenMint: expired.token,
+      destination: expired.destination_address,
+      walletId: expired.wallet_id,
+    },
+  };
+}
+
+function systemAuditService(env: Env): AuditService {
+  return new AuditService(
+    getDb(env),
+    createAuditLedgerCheckpointStore(env, AUDIT_LEDGER_REDIS_TIMEOUT_MS)
+  );
 }
 
 async function reread(
