@@ -1,23 +1,17 @@
-import { resolveClusterRpcUrl } from "@sdp/rpc/config";
-import * as solanaRpc from "@sdp/rpc/solana";
 import { EARN_PROVIDERS } from "@sdp/types/provider-access";
 import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types/well-known-tokens";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  assertClusterEndpoint,
-  CLUSTER_ENDPOINT_PROOF_TTL_MS,
-  resetClusterEndpointProofs,
   resolveRecordedVaultWithdrawClient,
   resolveVaultDirectClient,
   resolveVaultParRedemptionClient,
   resolveVaultWithdrawClient,
 } from "@/services/earn/execution-registry";
+import { parseJsonRpcRequest } from "@/test/helpers/cluster-rpc";
 import type { Env } from "@/types/env";
 import { createVaultDeadline } from "./vault-deadline";
 
-const env = {} as Env;
-const rpcUrl = "https://rpc.example.invalid";
-const executionEnv = { SOLANA_DEVNET_RPC_URL: rpcUrl } as Env;
+const executionEnv = {} as Env;
 const hastraDexExecutionEnv = {
   ...executionEnv,
   EARN_HASTRA_DEX_EXIT_ENABLED: "true",
@@ -30,131 +24,46 @@ const depositInput = {
   amount: "1",
 };
 
-function mockGenesisSend() {
-  const send = vi.fn();
-  vi.spyOn(solanaRpc, "createRpc").mockReturnValue({
-    getGenesisHash: () => ({ send }),
-  } as never);
-  return send;
+let poolSequence = 0;
+
+/**
+ * Point the devnet managed pool at a URL no earlier test proved (the pool's
+ * genesis proofs outlive a test) and answer its genesis probe with `genesis`,
+ * or never.
+ */
+function stubDevnetPoolGenesis(genesis: string | "never") {
+  poolSequence += 1;
+  const endpointUrl = `https://devnet-${poolSequence}.execution-registry.test`;
+  vi.stubEnv("SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL", endpointUrl);
+  const fetchSpy = vi.fn(async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    const { id, method } = parseJsonRpcRequest(init);
+    if (method !== "getGenesisHash") throw new Error(`Unexpected ${method} before the proof`);
+    if (genesis === "never") return new Promise<Response>(() => undefined);
+    return Response.json({ jsonrpc: "2.0", id, result: genesis });
+  });
+  vi.stubGlobal("fetch", fetchSpy);
+  return fetchSpy;
 }
 
-beforeEach(() => {
-  resetClusterEndpointProofs();
-});
+/** A fetch spy that fails the test on any request: resolution must stay I/O-free. */
+function forbidFetch() {
+  const fetchSpy = vi.fn(async () => {
+    throw new Error("client resolution must not touch the network");
+  });
+  vi.stubGlobal("fetch", fetchSpy);
+  return fetchSpy;
+}
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
-});
-
-describe("assertClusterEndpoint", () => {
-  it("evicts a transient probe rejection so the endpoint can recover", async () => {
-    const send = mockGenesisSend()
-      .mockRejectedValueOnce(new Error("RPC request timed out after 30000ms"))
-      .mockResolvedValue(GENESIS_HASH_BY_CLUSTER.devnet);
-
-    await expect(assertClusterEndpoint(env, "devnet", rpcUrl)).rejects.toThrow(/Could not verify/);
-    await expect(assertClusterEndpoint(env, "devnet", rpcUrl)).resolves.toBeUndefined();
-    // The successful observation is cached only for the short trust window.
-    await expect(assertClusterEndpoint(env, "devnet", rpcUrl)).resolves.toBeUndefined();
-
-    expect(send).toHaveBeenCalledTimes(2);
-  });
-
-  it("caches an observed mismatch only within the short trust window", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-08-16T00:00:00.000Z"));
-    const send = mockGenesisSend().mockResolvedValue(GENESIS_HASH_BY_CLUSTER["mainnet-beta"]);
-
-    await expect(assertClusterEndpoint(env, "devnet", rpcUrl)).rejects.toThrow(/reports genesis/);
-    await expect(assertClusterEndpoint(env, "devnet", rpcUrl)).rejects.toThrow(/reports genesis/);
-    expect(send).toHaveBeenCalledOnce();
-
-    vi.advanceTimersByTime(CLUSTER_ENDPOINT_PROOF_TTL_MS);
-    await expect(assertClusterEndpoint(env, "devnet", rpcUrl)).rejects.toThrow(/reports genesis/);
-    expect(send).toHaveBeenCalledTimes(2);
-  });
-
-  it("coalesces concurrent probes and caches the successful observation", async () => {
-    let resolveGenesis!: (hash: string) => void;
-    const send = mockGenesisSend().mockReturnValue(
-      new Promise<string>((resolve) => {
-        resolveGenesis = resolve;
-      })
-    );
-
-    const first = assertClusterEndpoint(env, "devnet", rpcUrl);
-    const second = assertClusterEndpoint(env, "devnet", rpcUrl);
-    expect(send).toHaveBeenCalledOnce();
-
-    resolveGenesis(GENESIS_HASH_BY_CLUSTER.devnet);
-    await expect(Promise.all([first, second])).resolves.toEqual([undefined, undefined]);
-    await expect(assertClusterEndpoint(env, "devnet", rpcUrl)).resolves.toBeUndefined();
-
-    expect(send).toHaveBeenCalledOnce();
-  });
-
-  it("re-proves a successful URL after its trust window expires", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-08-16T00:00:00.000Z"));
-    const send = mockGenesisSend().mockResolvedValue(GENESIS_HASH_BY_CLUSTER.devnet);
-
-    await expect(assertClusterEndpoint(env, "devnet", rpcUrl)).resolves.toBeUndefined();
-    vi.advanceTimersByTime(CLUSTER_ENDPOINT_PROOF_TTL_MS - 1);
-    await expect(assertClusterEndpoint(env, "devnet", rpcUrl)).resolves.toBeUndefined();
-    expect(send).toHaveBeenCalledOnce();
-
-    vi.advanceTimersByTime(1);
-    await expect(assertClusterEndpoint(env, "devnet", rpcUrl)).resolves.toBeUndefined();
-    expect(send).toHaveBeenCalledTimes(2);
-  });
-});
-
-describe("resolveClusterRpcUrl", () => {
-  it("prefers an explicit per-cluster endpoint", () => {
-    expect(
-      resolveClusterRpcUrl(
-        {
-          SOLANA_NETWORK: "devnet",
-          SOLANA_RPC_URL: "https://public.example.invalid",
-          SOLANA_DEVNET_RPC_URL: " https://earn-devnet.example.invalid ",
-        } as Env,
-        "devnet"
-      )
-    ).toBe("https://earn-devnet.example.invalid");
-  });
-
-  it("preserves the canonical managed-provider selection and API-key expansion", () => {
-    expect(
-      resolveClusterRpcUrl(
-        {
-          SOLANA_NETWORK: "devnet",
-          SOLANA_RPC_URL: "https://public.example.invalid",
-          SOLANA_RPC_DEFAULT_PROVIDER: "helius",
-          SOLANA_RPC_HELIUS_URL: "https://helius.example.invalid/?api-key={API_KEY}",
-          SOLANA_RPC_HELIUS_API_KEY: "secret key",
-        } as Env,
-        "devnet"
-      )
-    ).toBe("https://helius.example.invalid/?api-key=secret%20key");
-  });
-
-  it("does not reuse a canonical default for the other cluster", () => {
-    expect(
-      resolveClusterRpcUrl(
-        {
-          SOLANA_NETWORK: "devnet",
-          SOLANA_RPC_URL: "https://devnet.example.invalid",
-        } as Env,
-        "mainnet-beta"
-      )
-    ).toBe("");
-  });
 });
 
 describe("resolveVaultDirectClient", () => {
   it("keeps resolution I/O-free and preserves inherited provider capabilities", () => {
-    const createRpc = vi.spyOn(solanaRpc, "createRpc");
+    const fetchSpy = forbidFetch();
 
     const client = resolveVaultDirectClient(executionEnv, "kamino", createVaultDeadline());
 
@@ -162,11 +71,11 @@ describe("resolveVaultDirectClient", () => {
     expect(typeof (client as unknown as Record<string, unknown>).listStrategyMetrics).toBe(
       "function"
     );
-    expect(createRpc).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("resolves an executing client for every provider that can move money", () => {
-    const createRpc = vi.spyOn(solanaRpc, "createRpc");
+    const fetchSpy = forbidFetch();
     const catalogueOnly = new Set(["upshift", "perena"]);
 
     for (const provider of EARN_PROVIDERS) {
@@ -180,7 +89,7 @@ describe("resolveVaultDirectClient", () => {
       // The superset, not a replacement: the executing client still catalogues.
       expect(typeof client?.listStrategies, provider).toBe("function");
     }
-    expect(createRpc).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   /**
@@ -207,7 +116,7 @@ describe("resolveVaultDirectClient", () => {
    * node being reachable.
    */
   it("refuses Veda work on the missing mainnet deployment, before any RPC", async () => {
-    const createRpc = vi.spyOn(solanaRpc, "createRpc");
+    const fetchSpy = forbidFetch();
     const productionRuntime = { env: {}, environment: "production" } as const;
     const client = resolveVaultDirectClient(executionEnv, "veda", createVaultDeadline());
     if (!client) throw new Error("expected a Veda vault-direct client");
@@ -221,11 +130,11 @@ describe("resolveVaultDirectClient", () => {
         providerReferences: [depositInput.providerReference],
       })
     ).rejects.toMatchObject({ code: "DEPLOYMENT_NOT_CONFIGURED" });
-    expect(createRpc).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("refuses build and position work before the SDK when genesis is wrong", async () => {
-    mockGenesisSend().mockResolvedValue(GENESIS_HASH_BY_CLUSTER["mainnet-beta"]);
+    const fetchSpy = stubDevnetPoolGenesis(GENESIS_HASH_BY_CLUSTER["mainnet-beta"]);
     const client = resolveVaultDirectClient(executionEnv, "kamino", createVaultDeadline());
     expect(client).not.toBeNull();
     if (!client) throw new Error("expected Kamino vault-direct client");
@@ -239,10 +148,24 @@ describe("resolveVaultDirectClient", () => {
         providerReferences: [depositInput.providerReference],
       })
     ).rejects.toThrow(/reports genesis/);
+    // Only genesis probes went out: no SDK read reached the mismatched endpoint.
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("refuses provider work when the cluster has no managed pool", async () => {
+    const fetchSpy = forbidFetch();
+    const client = resolveVaultDirectClient(executionEnv, "kamino", createVaultDeadline());
+    if (!client) throw new Error("expected Kamino vault-direct client");
+
+    await expect(client.buildVaultDeposit(runtime, depositInput)).rejects.toMatchObject({
+      code: "PROVIDER_NOT_CONFIGURED",
+      message: expect.stringContaining("SOLANA_RPC_<PROVIDER>_DEVNET_API_KEY_URL"),
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("resolves WisdomTree as vault-direct with eligibility and withdraw, I/O-free", async () => {
-    const createRpc = vi.spyOn(solanaRpc, "createRpc");
+    const fetchSpy = forbidFetch();
     const {
       supportsDepositEligibility,
       supportsVaultDirect,
@@ -258,11 +181,11 @@ describe("resolveVaultDirectClient", () => {
     expect(supportsVaultWithdraw(client)).toBe(true);
     expect(supportsVaultProviderOrderWithdraw(client)).toBe(true);
     expect(supportsDepositEligibility(client)).toBe(true);
-    expect(createRpc).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("defaults Hastra to par-only and admits the DEX capability only when configured", async () => {
-    const createRpc = vi.spyOn(solanaRpc, "createRpc");
+    const fetchSpy = forbidFetch();
     const { supportsVaultParRedemption, supportsVaultWithdraw } = await import(
       "@sdp/earn/capabilities"
     );
@@ -296,7 +219,7 @@ describe("resolveVaultDirectClient", () => {
     expect(flagWithoutKey).toBeNull();
     expect(enabledDex?.provider).toBe("hastra");
     expect(historicalDex?.provider).toBe("hastra");
-    expect(createRpc).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("keeps the client capability and the withdrawal settlement table in agreement", async () => {
@@ -304,7 +227,6 @@ describe("resolveVaultDirectClient", () => {
     // and the dashboard decide by the settlement TABLE. If the two disagree,
     // the API parks rows the list calls settled and detail reads never stop —
     // so one loop over the registry pins the invariant for every provider.
-    mockGenesisSend().mockResolvedValue(GENESIS_HASH_BY_CLUSTER.devnet);
     const { supportsVaultProviderOrderWithdraw } = await import("@sdp/earn/capabilities");
     const { EARN_PROVIDERS, EARN_PROVIDER_WITHDRAWAL_SETTLEMENT } = await import(
       "@sdp/types/provider-access"
@@ -343,7 +265,7 @@ describe("resolveVaultDirectClient", () => {
 
   it("does not start provider work after endpoint proof exhausts the shared deadline", async () => {
     vi.useFakeTimers();
-    mockGenesisSend().mockReturnValue(new Promise<never>(() => undefined));
+    const fetchSpy = stubDevnetPoolGenesis("never");
     const client = resolveVaultDirectClient(executionEnv, "kamino", createVaultDeadline(25));
     expect(client).not.toBeNull();
     if (!client) throw new Error("expected Kamino vault-direct client");
@@ -354,5 +276,6 @@ describe("resolveVaultDirectClient", () => {
     );
     await vi.advanceTimersByTimeAsync(25);
     await rejection;
+    expect(fetchSpy).toHaveBeenCalledOnce();
   });
 });

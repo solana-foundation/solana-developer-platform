@@ -54,6 +54,19 @@ export async function fetchTransactionDetail(
     );
     const envelope = response.ok ? ((await response.json()) as PaymentTransferEnvelope) : null;
     const transfer = (envelope?.data?.transfer as PaymentTransferDetail | undefined) ?? null;
+    // The provider read can advance the payment after the ledger query above.
+    if (transfer?.fireblocks)
+      transaction = {
+        ...transaction,
+        moduleStatus: transfer.status,
+        signature: transfer.signature,
+        status:
+          transfer.status === "failed"
+            ? "failed"
+            : ["confirmed", "finalized"].includes(transfer.status)
+              ? "succeeded"
+              : "pending",
+      };
     return { status: "found", transaction, transfer };
   } catch {
     return { status: "found", transaction, transfer: null };

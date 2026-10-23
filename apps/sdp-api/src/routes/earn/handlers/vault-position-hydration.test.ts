@@ -192,6 +192,19 @@ describe("hydrateVaultPositions shares identical provider reads in flight", () =
     shareMint: SHARE,
   });
 
+  /**
+   * Run `read` while the devnet managed pool names `endpointUrl`. The share key is
+   * taken synchronously, so the pool is restored before any other read starts.
+   */
+  function withDevnetPool<T>(endpointUrl: string, read: () => T): T {
+    vi.stubEnv("SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL", endpointUrl);
+    try {
+      return read();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  }
+
   /** Provider reads that settle only when told to, answering every reference asked for. */
   function heldReads() {
     const pending: Array<{
@@ -265,11 +278,8 @@ describe("hydrateVaultPositions shares identical provider reads in flight", () =
         [holding("p1", "vault-a")],
         options
       ),
-      hydrateVaultPositions(
-        context("sandbox", { SOLANA_DEVNET_RPC_URL: "https://devnet.rpc.invalid/?api-key=KEY" }),
-        "sandbox",
-        [holding("p1", "vault-a")],
-        options
+      withDevnetPool("https://devnet.rpc.invalid/?api-key=KEY", () =>
+        hydrateVaultPositions(context(), "sandbox", [holding("p1", "vault-a")], options)
       ),
       hydrateVaultPositions(context(), "sandbox", [holding("p1", "vault-a", OTHER_OWNER)], options),
       hydrateVaultPositions(

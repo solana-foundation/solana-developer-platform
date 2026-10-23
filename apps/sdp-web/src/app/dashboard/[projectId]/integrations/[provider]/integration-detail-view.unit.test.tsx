@@ -29,7 +29,8 @@ const AVAILABILITY = projectProviderAvailability({
   custody: [
     { provider: "privy", modes: ["managed", "byok"] },
     { provider: "para", modes: ["managed"] },
-    { provider: "fireblocks", modes: ["managed"] },
+    { provider: "fireblocks", modes: ["managed", "byok"] },
+    { provider: "anchorage", modes: ["managed"] },
   ],
   compliance: ["range"],
   ramps: ["moonpay"],
@@ -76,9 +77,9 @@ describe("IntegrationDetailView", () => {
   });
 
   it("routes an available manual provider into setup and says it is by arrangement", async () => {
-    const markup = await render("fireblocks");
+    const markup = await render("anchorage");
     expect(markup).toContain("Ready to connect");
-    expect(markup).toContain(`${PROJECT_PATH}/wallets/setup?provider=fireblocks`);
+    expect(markup).toContain(`${PROJECT_PATH}/wallets/setup?provider=anchorage`);
     expect(markup).toContain("Available by arrangement");
   });
 

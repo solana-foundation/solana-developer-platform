@@ -1,23 +1,26 @@
 import { createServer, type Server } from "node:http";
 import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types/well-known-tokens";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { resetClusterEndpointProofs } from "./execution-registry";
 import { readOwnerMintBalance } from "./owner-token-balance";
 
 const OWNER = "3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF";
 const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
 const servers: Server[] = [];
+/** The params of every token-account request the test servers received. */
+const tokenAccountParams: unknown[][] = [];
 const rpcRequestSchema = z.object({
   id: z.union([z.string(), z.number()]),
   method: z.string(),
+  params: z.array(z.unknown()),
 });
 
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
 afterEach(async () => {
-  resetClusterEndpointProofs();
+  vi.unstubAllEnvs();
+  tokenAccountParams.length = 0;
   await Promise.all(servers.splice(0).map((server) => closeServer(server)));
 });
 
@@ -83,20 +86,36 @@ describe("readOwnerMintBalance", () => {
 
     await expect(readBalance(rpcUrl)).rejects.toThrow(/out of scope/i);
   });
+
+  it("asks for its floor as minContextSlot and accepts an answer at it", async () => {
+    const rpcUrl = await serveRpcResponse({ context: { slot: 100 }, value: [tokenAccount("5")] });
+
+    await expect(readBalance(rpcUrl, { minContextSlot: 100n })).resolves.toEqual({
+      atoms: 5n,
+      decimals: 6,
+    });
+    expect(tokenAccountParams).toEqual([
+      [
+        OWNER,
+        { mint: USDC },
+        { encoding: "jsonParsed", commitment: "confirmed", minContextSlot: 100 },
+      ],
+    ]);
+  });
+
+  it("refuses an answer from a node behind its floor", async () => {
+    const rpcUrl = await serveRpcResponse({ context: { slot: 99 }, value: [tokenAccount("5")] });
+
+    await expect(readBalance(rpcUrl, { minContextSlot: 100n })).rejects.toThrow(
+      /below its floor 100/
+    );
+  });
 });
 
-function readBalance(rpcUrl: string) {
-  return readOwnerMintBalance(
-    {
-      ENVIRONMENT: "development",
-      API_VERSION: "v1",
-      SOLANA_NETWORK: "devnet",
-      SOLANA_DEVNET_RPC_URL: rpcUrl,
-    },
-    "sandbox",
-    OWNER,
-    USDC
-  );
+/** Each test's server is a fresh devnet pool endpoint, so no proof carries over. */
+function readBalance(rpcUrl: string, options?: { minContextSlot: bigint }) {
+  vi.stubEnv("SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL", rpcUrl);
+  return readOwnerMintBalance("sandbox", OWNER, USDC, options);
 }
 
 function tokenAccount(
@@ -125,6 +144,7 @@ async function serveRpcResponse(tokenAccountsResult: JsonValue): Promise<string>
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
     const body = rpcRequestSchema.parse(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+    if (body.method === "getTokenAccountsByOwner") tokenAccountParams.push(body.params);
     const result =
       body.method === "getGenesisHash" ? GENESIS_HASH_BY_CLUSTER.devnet : tokenAccountsResult;
     response.setHeader("content-type", "application/json");

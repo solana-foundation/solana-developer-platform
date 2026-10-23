@@ -14,6 +14,8 @@ import { idempotencyKeyMiddleware } from "@/middleware/idempotency-key";
 import { enforceMeteredQuota } from "@/middleware/metered-quota";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { requireAction } from "@/middleware/require-action";
+import { fireblocksCustody } from "@/routes/internal-custody/fireblocks";
+import { byokRegistrationSchema } from "@/services/custody/byok-credential";
 import { getCustodySetupStatus } from "@/services/custody-setup-status.service";
 import { isCustodyConnectionRuntimeAvailable } from "@/services/domain/signing/custody-runtime-target";
 import {
@@ -21,6 +23,8 @@ import {
   isCustodyProviderEntitled,
 } from "@/services/provider-availability.service";
 import {
+  cancelProviderCredentialInstallation,
+  completeProviderCredentialInstallation,
   deactivateCustodyConnection,
   getProviderCredentialInstallation,
 } from "@/services/provider-credential-installation.service";
@@ -31,7 +35,10 @@ import {
   rollbackProviderCredential,
   rotateProviderCredential,
 } from "@/services/provider-credential-lifecycle.service";
-import { getProviderSetupDefinition } from "@/services/provider-setup-registry";
+import {
+  storeCustodyCredentials,
+  validateCustodySetupPayload,
+} from "@/services/provider-setup-registry";
 import {
   getPendingWalletLabel,
   ProviderCredentialStore,
@@ -40,17 +47,6 @@ import type { Env } from "@/types/env";
 
 const connectionParamsSchema = z.object({ connectionId: z.string().trim().min(1) }).strict();
 const credentialParamsSchema = z.object({ credentialId: z.string().trim().min(1) }).strict();
-const rotationBodySchema = z
-  .object({
-    fields: z
-      .object({
-        appId: z.string().trim().min(1).max(4096),
-        appSecret: z.string().min(1).max(4096),
-      })
-      .strict(),
-  })
-  .strict();
-const privySetup = getProviderSetupDefinition("custody", "privy");
 const rotationQuota = { name: "credential-rotation", actorMax: 5, orgMax: 20 };
 // Rotation retries must not consume the budget for rollback or candidate cancellation.
 const recoveryQuota = { name: "credential-recovery", actorMax: 5, orgMax: 20 };
@@ -60,6 +56,8 @@ export const internalCustody = new Hono<{ Bindings: Env }>();
 internalCustody.use("*", credentialAdminAuthMiddleware());
 internalCustody.use("*", projectContextMiddleware());
 internalCustody.use("*", idempotencyKeyMiddleware());
+
+internalCustody.route("/fireblocks", fireblocksCustody);
 
 // Reload-safe view of setup: which connections exist for this project, where
 // each sits in its lifecycle, and the safe credential columns. This is what
@@ -138,7 +136,7 @@ internalCustody.get("/providers", requireAction("wallets.configure"), async (c) 
 
 internalCustody.post("/provider-credentials", requireAction("wallets.configure"), async (c) => {
   const body = await c.req.json().catch(() => null);
-  const parsed = privySetup.validateSetupPayload(body);
+  const parsed = validateCustodySetupPayload(body);
   if (!parsed.success) {
     throw badRequest("Invalid request body", {
       errors: z.flattenError(parsed.error).fieldErrors,
@@ -150,7 +148,7 @@ internalCustody.post("/provider-credentials", requireAction("wallets.configure")
     throw badRequest("Idempotency-Key is required");
   }
 
-  const result = await privySetup.storeCredentials({
+  const result = await storeCustodyCredentials({
     context: c,
     payload: parsed.data,
     idempotencyKey,
@@ -168,7 +166,7 @@ internalCustody.post(
     }
 
     const body = await c.req.json().catch(() => null);
-    const parsed = privySetup.validateSetupPayload(body);
+    const parsed = validateCustodySetupPayload(body);
     if (!parsed.success) {
       throw badRequest("Invalid request body", {
         errors: z.flattenError(parsed.error).fieldErrors,
@@ -182,7 +180,7 @@ internalCustody.post(
 
     return created(
       c,
-      await privySetup.storeCredentials({
+      await storeCustodyCredentials({
         context: c,
         connectionId: params.data.connectionId,
         payload: parsed.data,
@@ -233,7 +231,7 @@ internalCustody.post(
     if (!params.success) {
       throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
     }
-    const body = rotationBodySchema.safeParse(await c.req.json().catch(() => null));
+    const body = byokRegistrationSchema.safeParse(await c.req.json().catch(() => null));
     if (!body.success) {
       throw badRequest("Invalid request body", {
         errors: z.flattenError(body.error).fieldErrors,
@@ -244,7 +242,7 @@ internalCustody.post(
     await enforceMeteredQuota(c, rotationQuota);
     return success(
       c,
-      await rotateProviderCredential(c, params.data.credentialId, body.data.fields, idempotencyKey)
+      await rotateProviderCredential(c, params.data.credentialId, body.data, idempotencyKey)
     );
   }
 );
@@ -296,10 +294,7 @@ internalCustody.post(
     if (!params.success) {
       throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
     }
-    return success(
-      c,
-      await privySetup.activate({ context: c, connectionId: params.data.connectionId })
-    );
+    return success(c, await completeProviderCredentialInstallation(c, params.data.connectionId));
   }
 );
 
@@ -311,9 +306,6 @@ internalCustody.post(
     if (!params.success) {
       throw badRequestParams({ errors: z.flattenError(params.error).fieldErrors });
     }
-    return success(
-      c,
-      await privySetup.deactivate({ context: c, connectionId: params.data.connectionId })
-    );
+    return success(c, await cancelProviderCredentialInstallation(c, params.data.connectionId));
   }
 );

@@ -1,31 +1,46 @@
-import * as solanaRpc from "@sdp/rpc/solana";
 import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Env } from "@/types/env";
-import { assertClusterEndpoint, resetClusterEndpointProofs } from "./execution-registry";
+import { parseJsonRpcRequest } from "@/test/helpers/cluster-rpc";
+import { assertClusterEndpoint } from "./cluster-rpc";
 import { createVaultDeadline } from "./vault-deadline";
 import { createVaultRpcFailover } from "./vault-rpc-failover";
 
-const primary = "https://primary.example.invalid";
-const fallback = "https://fallback.example.invalid";
-const env = {
-  SOLANA_NETWORK: "devnet",
-  SOLANA_RPC_HELIUS_URL: primary,
-  SOLANA_RPC_ALCHEMY_URL: fallback,
-} as Env;
 const runtime = { env: {}, environment: "sandbox" } as const;
-const genesis = vi.fn<(url: string) => Promise<string>>();
+
+let poolSequence = 0;
+let primary = "";
+let fallback = "";
+/** Every genesis probe of the current test, by endpoint, in arrival order. */
+const probedUrls: string[] = [];
+const genesisFor = vi.fn<(url: string) => string>();
+
+/**
+ * Point the devnet managed pool at two endpoints no earlier test proved (the
+ * pool's genesis proofs outlive a test) and answer each probe with
+ * `genesisFor(url)`.
+ */
 beforeEach(() => {
-  resetClusterEndpointProofs();
-  genesis.mockReset().mockResolvedValue(GENESIS_HASH_BY_CLUSTER.devnet);
-  vi.spyOn(solanaRpc, "createRpc").mockImplementation(
-    (_env, options) =>
-      ({
-        getGenesisHash: () => ({ send: () => genesis(options?.rpcUrl ?? "missing-endpoint") }),
-      }) as never
-  );
+  poolSequence += 1;
+  primary = `https://primary-${poolSequence}.failover.test`;
+  fallback = `https://fallback-${poolSequence}.failover.test`;
+  vi.stubEnv("SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL", primary);
+  vi.stubEnv("SOLANA_RPC_ALCHEMY_DEVNET_API_KEY_URL", fallback);
+  probedUrls.length = 0;
+  genesisFor.mockReset().mockReturnValue(GENESIS_HASH_BY_CLUSTER.devnet);
+  vi.stubGlobal("fetch", async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    const { id, method } = parseJsonRpcRequest(init);
+    if (method !== "getGenesisHash") throw new Error(`Unexpected ${method}`);
+    const url = String(input);
+    probedUrls.push(url);
+    return Response.json({ jsonrpc: "2.0", id, result: genesisFor(url) });
+  });
 });
-afterEach(() => vi.restoreAllMocks());
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 /** The shape Veda and Kamino position reads throw: failures sit in `.errors`. */
 function fanOutFailure(...causes: Error[]): Error {
@@ -39,7 +54,7 @@ function fanOutFailure(...causes: Error[]): Error {
 
 describe("Earn RPC fallback", () => {
   it("retries a nested provider transport failure on a separately proven endpoint", async () => {
-    const rpc = createVaultRpcFailover(env, createVaultDeadline(), assertClusterEndpoint);
+    const rpc = createVaultRpcFailover(createVaultDeadline(), assertClusterEndpoint);
     const visited: string[] = [];
     const result = await rpc.run("Read vault", async () => {
       const url = await rpc.resolve(runtime, "devnet");
@@ -50,11 +65,58 @@ describe("Earn RPC fallback", () => {
     });
     expect(result).toBe("verified vault state");
     expect(visited).toEqual([primary, fallback]);
-    expect(genesis.mock.calls.map(([url]) => url)).toEqual([primary, fallback]);
+    expect(probedUrls).toEqual([primary, fallback]);
+  });
+
+  it("fails over past a primary whose genesis probe answers node-unhealthy", async () => {
+    // A code-classified failure: its message matches no transient text, so only the probe
+    // error kept as the cause tells the failover that the next endpoint could succeed.
+    vi.stubGlobal("fetch", async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const { id, method } = parseJsonRpcRequest(init);
+      if (method !== "getGenesisHash") throw new Error(`Unexpected ${method}`);
+      const url = String(input);
+      probedUrls.push(url);
+      if (url === primary) {
+        return Response.json({
+          jsonrpc: "2.0",
+          id,
+          error: { code: -32005, message: "Node is unhealthy", data: { numSlotsBehind: 900 } },
+        });
+      }
+      return Response.json({ jsonrpc: "2.0", id, result: genesisFor(url) });
+    });
+    const rpc = createVaultRpcFailover(createVaultDeadline(), assertClusterEndpoint);
+    const visited: string[] = [];
+
+    const result = await rpc.run("Read vault", async () => {
+      const url = await rpc.resolve(runtime, "devnet");
+      visited.push(url);
+      return "verified vault state";
+    });
+
+    expect(result).toBe("verified vault state");
+    expect(visited).toEqual([fallback]);
+    expect(probedUrls).toEqual([primary, fallback]);
+  });
+
+  it("draws only the requested cluster's pool, never the process default", async () => {
+    vi.stubEnv("SOLANA_NETWORK", "devnet");
+    vi.stubEnv("SOLANA_RPC_URL", "https://process-default.failover.test");
+    const rpc = createVaultRpcFailover(createVaultDeadline(), assertClusterEndpoint);
+
+    await expect(
+      rpc.run("Read vault", () =>
+        rpc.resolve({ ...runtime, environment: "production" }, "mainnet-beta")
+      )
+    ).rejects.toMatchObject({
+      code: "PROVIDER_NOT_CONFIGURED",
+      message: expect.stringContaining("SOLANA_RPC_<PROVIDER>_MAINNET_API_KEY_URL"),
+    });
+    expect(probedUrls).toEqual([]);
   });
 
   it("retries a per-vault fan-out whose every failure is transient", async () => {
-    const rpc = createVaultRpcFailover(env, createVaultDeadline(), assertClusterEndpoint);
+    const rpc = createVaultRpcFailover(createVaultDeadline(), assertClusterEndpoint);
     const visited: string[] = [];
     const result = await rpc.run("Read vault positions", async () => {
       const url = await rpc.resolve(runtime, "devnet");
@@ -83,7 +145,7 @@ describe("Earn RPC fallback", () => {
     ],
     ["a cyclic cause chain", cyclic],
   ])("does not retry %s", async (_label, failure) => {
-    const rpc = createVaultRpcFailover(env, createVaultDeadline(), assertClusterEndpoint);
+    const rpc = createVaultRpcFailover(createVaultDeadline(), assertClusterEndpoint);
     const read = vi.fn(async () => {
       await rpc.resolve(runtime, "devnet");
       throw failure;
@@ -93,21 +155,21 @@ describe("Earn RPC fallback", () => {
   });
 
   it("never reads/builds on a fallback that reports the wrong cluster", async () => {
-    genesis.mockImplementation(
-      async (url) => GENESIS_HASH_BY_CLUSTER[url === primary ? "devnet" : "mainnet-beta"]
+    genesisFor.mockImplementation(
+      (url) => GENESIS_HASH_BY_CLUSTER[url === primary ? "devnet" : "mainnet-beta"]
     );
-    const rpc = createVaultRpcFailover(env, createVaultDeadline(), assertClusterEndpoint);
+    const rpc = createVaultRpcFailover(createVaultDeadline(), assertClusterEndpoint);
     const read = vi.fn(async () => {
       await rpc.resolve(runtime, "devnet");
       throw new Error("503 service unavailable");
     });
     await expect(rpc.run("Read vault", read)).rejects.toThrow(/reports genesis/);
     expect(read).toHaveBeenCalledTimes(2);
-    expect(genesis).toHaveBeenCalledWith(fallback);
+    expect(probedUrls).toEqual([primary, fallback]);
   });
 
   it("does not retain the fallback for later historical reads or reinterpret absent evidence", async () => {
-    const rpc = createVaultRpcFailover(env, createVaultDeadline(), assertClusterEndpoint);
+    const rpc = createVaultRpcFailover(createVaultDeadline(), assertClusterEndpoint);
     await rpc.run("Build", async () => {
       if ((await rpc.resolve(runtime, "devnet")) === primary) throw new Error("fetch failed");
     });
@@ -120,24 +182,23 @@ describe("Earn RPC fallback", () => {
     expect(visited).toEqual([primary]);
   });
 
-  it("does not retry a deterministic refusal or override an explicit cluster pin", async () => {
-    const rpc = createVaultRpcFailover(
-      { ...env, SOLANA_DEVNET_RPC_URL: primary },
-      createVaultDeadline(),
-      assertClusterEndpoint
-    );
+  it("does not retry a deterministic refusal or past a one-endpoint pool", async () => {
+    vi.stubEnv("SOLANA_RPC_ALCHEMY_DEVNET_API_KEY_URL", "");
+    const single = createVaultRpcFailover(createVaultDeadline(), assertClusterEndpoint);
     const read = vi.fn(async () => {
-      await rpc.resolve(runtime, "devnet");
+      await single.resolve(runtime, "devnet");
       throw new Error("fetch failed");
     });
-    await expect(rpc.run("Read vault", read)).rejects.toThrow("fetch failed");
+    await expect(single.run("Read vault", read)).rejects.toThrow("fetch failed");
     expect(read).toHaveBeenCalledTimes(1);
-    const unpinned = createVaultRpcFailover(env, createVaultDeadline(), assertClusterEndpoint);
+
+    vi.stubEnv("SOLANA_RPC_ALCHEMY_DEVNET_API_KEY_URL", fallback);
+    const pooled = createVaultRpcFailover(createVaultDeadline(), assertClusterEndpoint);
     const refused = vi.fn(async () => {
-      await unpinned.resolve(runtime, "devnet");
+      await pooled.resolve(runtime, "devnet");
       throw new Error("Insufficient funds");
     });
-    await expect(unpinned.run("Build", refused)).rejects.toThrow("Insufficient funds");
+    await expect(pooled.run("Build", refused)).rejects.toThrow("Insufficient funds");
     expect(refused).toHaveBeenCalledTimes(1);
   });
 });

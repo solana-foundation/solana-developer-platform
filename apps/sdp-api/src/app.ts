@@ -46,6 +46,7 @@ import { earnRoutes as earn } from "@/routes/earn";
 import { health } from "@/routes/health";
 import { heliusRings } from "@/routes/helius-rings";
 import { internalCustody } from "@/routes/internal-custody";
+import { internalFireblocks } from "@/routes/internal-fireblocks";
 import { internalHeliusRings } from "@/routes/internal-helius-rings";
 import { internalNetwork } from "@/routes/internal-network";
 import { issuance } from "@/routes/issuance";
@@ -392,6 +393,8 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   app.route("/internal/dashboard/custody", internalCustody);
   app.use("/internal/dashboard/wallets/*", requireModule("custody"));
   app.route("/internal/dashboard/wallets", internalWallets);
+  app.use("/internal/dashboard/fireblocks/*", requireModule("custody"));
+  app.route("/internal/dashboard/fireblocks", internalFireblocks);
   app.route("/internal/dashboard/helius-rings", internalHeliusRings);
   app.route("/internal/dashboard/network", internalNetwork);
 

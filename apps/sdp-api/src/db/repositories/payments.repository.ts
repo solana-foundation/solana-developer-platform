@@ -110,6 +110,8 @@ export interface UpdatePaymentTransferInput {
   /** Timeout CAS: only an unsigned row with no submission start may match. */
   requireUnsigned?: true;
   expectedStatus?: PaymentTransferStatus;
+  /** Guard a missing-provider verdict against a concurrent acknowledgement. */
+  expectedProviderReference?: string | null;
   status?: PaymentTransferStatus;
   signature?: string | null;
   serializedTx?: string | null;
@@ -186,6 +188,7 @@ export interface ListTransfersByStatusInput {
   /** Only transfers whose project is in this environment, so one job run reads one cluster. */
   environment: SdpEnvironment;
   statuses: PaymentTransferStatus[];
+  fireblocks?: boolean;
   types?: readonly PaymentTransferType[];
   hasSignature?: boolean;
   createdBefore?: string;
@@ -218,6 +221,21 @@ export interface PaymentsRepositoryContext {
 }
 
 export interface PaymentsRepository {
+  /** Exactly one provider submission attempt per durable Fireblocks intent. */
+  claimFireblocksTransferSubmission(input: {
+    transferId: string;
+    organizationId: string;
+    projectId: string;
+    now: string;
+  }): Promise<PaymentTransferRow | null>;
+  /** Throttle and serialize provider reads across dashboard requests and cron workers. */
+  claimFireblocksTransferPoll(input: {
+    transferId: string;
+    organizationId: string;
+    projectId: string | null;
+    polledBefore: string;
+    now: string;
+  }): Promise<PaymentTransferRow | null>;
   createTransfer(input: CreatePaymentTransferInput): Promise<PaymentTransferRow | null>;
   /**
    * Claims an awaiting off-ramp row for its crypto deposit transaction through

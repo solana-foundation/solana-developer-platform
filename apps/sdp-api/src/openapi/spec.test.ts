@@ -1,5 +1,8 @@
 import { readFileSync } from "node:fs";
-import { IDEMPOTENCY_REQUIRED_ROUTES } from "@sdp/types/idempotency-required-routes";
+import {
+  IDEMPOTENCY_REQUIRED_ROUTES,
+  INTERNAL_IDEMPOTENCY_REQUIRED_ROUTES,
+} from "@sdp/types/idempotency-required-routes";
 import { SDP_RELEASE_CHANNEL_NAMES, SDP_RELEASE_CHANNELS } from "@sdp/types/release-channels";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -985,7 +988,11 @@ function operationFor(document: ReturnType<typeof createOpenApiDocument>, route:
 
 describe("OpenAPI Idempotency-Key headers", () => {
   // Declared routes with no public operation yet; adding one is deliberate.
-  const UNDOCUMENTED: readonly string[] = ["POST /v1/payments/requests"];
+  const UNDOCUMENTED: readonly string[] = [
+    "POST /v1/payments/requests",
+    // Dashboard-only CSR registration must not be promoted to a public API.
+    ...INTERNAL_IDEMPOTENCY_REQUIRED_ROUTES,
+  ];
 
   function declaredModes() {
     const modes = new Map<string, ReturnType<typeof declaredIdempotency>>();
@@ -1070,6 +1077,13 @@ describe("OpenAPI Idempotency-Key headers", () => {
  * to the list fails here until each surface says so.
  */
 describe("Idempotency-Key required routes on public surfaces", () => {
+  it("keeps internal key-generation routes out of public API surfaces", () => {
+    const publicDocument = createPublicOpenApiDocument(EXPERIMENTAL);
+    for (const route of INTERNAL_IDEMPOTENCY_REQUIRED_ROUTES) {
+      expect(operationFor(publicDocument, route)).toBeUndefined();
+    }
+  });
+
   const postmanItemSchema = z.object({
     get item() {
       return z.array(postmanItemSchema).optional();

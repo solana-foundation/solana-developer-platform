@@ -1,6 +1,5 @@
 import { notImplemented } from "@sdp/earn/errors";
 import type { EarnRuntimeContext, EarnVaultTransactionPlan } from "@sdp/earn/types";
-import { resolveClusterRpcUrl } from "@sdp/rpc/config";
 import { compareDecimalAmounts } from "@sdp/solana/amount";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { EarnProviderId } from "@sdp/types/provider-access";
@@ -194,7 +193,6 @@ export async function depositIntoVault(
     throw notImplemented(input.provider, "direct vault deposits");
   }
   const cluster = earnClusterFor(input.environment);
-  const rpcUrl = resolveClusterRpcUrl(env, cluster);
   const runtime: EarnRuntimeContext = {
     env,
     environment: input.environment,
@@ -298,13 +296,12 @@ export async function depositIntoVault(
     // plan before signing. Wallet-pays is already forced above, so the probe
     // asks the same question signing will.
     if (swapLeg) {
-      const probe = await simulateVaultPlan(env, {
+      const probe = await simulateVaultPlan({
         cluster,
         deadline,
         expectedAssetIdentity,
         plan: withComputeUnitLimit(plan, MAX_COMPUTE_UNIT_LIMIT),
         owner: address(input.wallet.publicKey),
-        rpcUrl,
         fee,
       });
       if (!probe.ok) {
@@ -332,7 +329,6 @@ export async function depositIntoVault(
       deadline,
       expectedAssetIdentity,
       plan,
-      rpcUrl,
       fee,
       persist: (db, signed) =>
         createPostgresEarnMovementsRepository(db).createSignedVaultDepositIntent({

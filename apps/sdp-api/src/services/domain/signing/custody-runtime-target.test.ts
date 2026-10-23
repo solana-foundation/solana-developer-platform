@@ -97,6 +97,22 @@ describe("CustodyRuntimeTargets", () => {
     requestDelayMs: env.PRIVY_REQUEST_DELAY_MS,
   };
 
+  it("leaves managed Fireblocks wallets on the existing signing path", async () => {
+    const wallet = await seedConfig({ provider: "fireblocks", projectId: PROJECT_ID });
+    const read = mockStoredCredentialRead();
+    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+    await expect(
+      targets.getFireblocksTransferAccess({
+        organizationId: ORGANIZATION_ID,
+        projectId: PROJECT_ID,
+        custodyWalletId: `cwlt_${wallet.id}`,
+        forSubmission: true,
+      })
+    ).resolves.toBeNull();
+    expect(read).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   beforeEach(async () => {
     await seedTestDatabase(env);
     custodyReleaseChannel.outOfChannelMode = null;

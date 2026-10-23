@@ -86,6 +86,7 @@ export const SDP_MANAGED_CUSTODY_PROVIDER_STAGES = {
 
 export const SDP_BYOK_CUSTODY_PROVIDER_STAGES = {
   privy: "stable",
+  fireblocks: "beta",
 } as const satisfies Record<ByokCustodyProvider, SdpReleaseChannel>;
 
 export type SdpRampProviderStages = Record<RampProviderId, SdpReleaseChannel>;

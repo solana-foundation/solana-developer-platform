@@ -50,6 +50,7 @@ import {
   reportShelfDisappearance,
   type StoredStrategyFigures,
 } from "@/services/earn/catalogue-anomaly";
+import { earnProviderEndpointUrls } from "@/services/earn/cluster-rpc";
 import type { Env } from "@/types/env";
 import { defineCron } from "./define-cron";
 
@@ -95,6 +96,20 @@ const SKIPPABLE_SYNC_ERROR_CODES: ReadonlySet<string> = new Set([
   "PROVIDER_NOT_CONFIGURED",
 ]);
 
+/**
+ * The runtime a catalogue read runs under. An on-chain shelf is read from the
+ * preferred endpoint of the requested cluster's managed pool, never a process
+ * default, so the pass reaches each cluster on every deployment and a cluster
+ * with no pool skips as `PROVIDER_NOT_CONFIGURED`.
+ */
+function catalogueRuntime(env: Env, environment: SdpEnvironment): EarnRuntimeContext {
+  return {
+    env,
+    environment,
+    catalogueRpcUrl: (cluster) => earnProviderEndpointUrls(cluster)[0] ?? null,
+  };
+}
+
 export async function syncEarnCatalogue(env: Env): Promise<void> {
   const repo = createEarnRepository(env);
   // Providers read their own credentials from the raw env keyed by
@@ -118,7 +133,7 @@ async function syncProviderCatalogue(
   client: EarnVaultProvider,
   env: Env
 ): Promise<void> {
-  const production = await fetchAcceptedSnapshots(client, { env, environment: "production" });
+  const production = await fetchAcceptedSnapshots(client, catalogueRuntime(env, "production"));
   if (production.ok) {
     // The provider's own fetch is the total truth for production, so its
     // delist stays environment-wide and stray wrong-cluster rows converge away
@@ -182,7 +197,7 @@ async function syncNonProductionEnvironment(
 ): Promise<void> {
   const logContext = { provider: client.provider, environment };
 
-  const own = await fetchAcceptedSnapshots(client, { env, environment });
+  const own = await fetchAcceptedSnapshots(client, catalogueRuntime(env, environment));
   if (!own.ok && !own.steadyState) {
     // No reliable read of the environment's own shelf: write nothing here. The
     // mirror lane needs the own reference set too (collision rule below), so it

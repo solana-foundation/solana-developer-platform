@@ -1,4 +1,7 @@
-import { IDEMPOTENCY_REQUIRED_ROUTES } from "@sdp/types/idempotency-required-routes";
+import {
+  IDEMPOTENCY_REQUIRED_ROUTES,
+  INTERNAL_IDEMPOTENCY_REQUIRED_ROUTES,
+} from "@sdp/types/idempotency-required-routes";
 import { describe, expect, it } from "vitest";
 import { declaredAuthorization } from "@/middleware/authorize";
 import { declaredIdempotency, declaredIdempotencyRecovery } from "@/middleware/idempotency";
@@ -34,6 +37,8 @@ const CONNECTION =
   "dashboard-internal custody connection lifecycle; not part of the public API contract yet";
 
 const EXEMPT = {
+  "POST /internal/dashboard/custody/fireblocks/vaults":
+    "read-only vault discovery; uses POST to keep credential references out of URLs and never stores a response",
   "POST /internal/dashboard/custody/provider-credentials": CREDENTIALS,
   "POST /internal/dashboard/custody/connections/:connectionId/provider-credentials": CREDENTIALS,
   "POST /internal/dashboard/custody/provider-credentials/:credentialId/rotate": CREDENTIALS,
@@ -131,12 +136,14 @@ describe("idempotency route inventory", () => {
     expect(undeclared).toEqual([]);
   });
 
-  it("requires the key on exactly the shared list of routes that move money", () => {
+  it("requires the key on exactly the public money routes and internal key-generation routes", () => {
     const required = idempotent
       .filter(([, steps]) => steps.idempotency === "required")
       .map(([route]) => route)
       .sort();
-    expect(required).toEqual([...IDEMPOTENCY_REQUIRED_ROUTES].sort());
+    expect(required).toEqual(
+      [...IDEMPOTENCY_REQUIRED_ROUTES, ...INTERNAL_IDEMPOTENCY_REQUIRED_ROUTES].sort()
+    );
   });
 
   it("runs an access check before the idempotency step on every idempotent route", () => {

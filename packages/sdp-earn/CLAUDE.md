@@ -207,7 +207,7 @@ ADR 0002's 2026-08-14 addendum.
 | A Veda deposit answers 403 "is not currently offered" | stale build — `EARN_PROVIDER_SURFACING.veda` flipped `true` on 2026-08-31 (Kamino, Veda, Jupiter Lend and Ondo are offered). The gate still exists and still answers this for upshift/perena, and no org override lifts it (§5b) |
 | No Ondo rows in the sandbox catalogue's own lane; USDY only appears under the mainnet-mirror toggle | correct — Ondo has no devnet deployment anywhere (even its staging runs on mainnet), so sandbox carries USDY only as the PRO-1742 browse-only mirror row. See the Ondo section below |
 | The Ondo pass fails with `Ondo assets API listed no usdy entry` or `Ondo USDY apy is not a non-negative number` | `ondo.finance/api/v1/assets` changed shape (the `usdy` entry or its numeric `apy` percent). Check the live body; the row keeps its last figures until fixed |
-| No Ondo row in the sandbox MIRROR either, on a deployment with no mainnet RPC | the production pass needs a mainnet RPC: `resolveCatalogueRpcUrl` reads `SOLANA_MAINNET_RPC_URL` and falls back to `SOLANA_RPC_URL`, which fails the genesis proof when it serves devnet (steady-state skip, mirror converges to empty). Set the override; smoky needs it in sdp-infra dev `app_secret_keys` + Doppler |
+| No Ondo row in the sandbox MIRROR either, on a deployment with no mainnet RPC | the production pass needs a mainnet RPC: the catalogue sync hands every on-chain read the preferred endpoint of the requested cluster's managed pool (`ctx.catalogueRpcUrl`, read by `resolveCatalogueRpcUrl`), with no process-default fallback. With no `SOLANA_RPC_<PROVIDER>_MAINNET_API_KEY_URL` the pass is a steady-state skip and the mirror converges to empty. Managed deployments refuse to boot without both pools; a local or self-hosted stack sets one |
 
 ## Ondo — a TOKEN-HOLDING strategy, no vault program at all
 
@@ -493,6 +493,13 @@ the five-minute pass would re-pay the whole catalogue cost for the rate alone.
   + type guard in capabilities.ts — never `instanceof` or provider-id checks.
 - All USD/amount values in contract types are **decimal strings**; convert to
   wire numbers only at the provider HTTP boundary.
+- **An on-chain catalogue read takes its endpoint from `ctx.catalogueRpcUrl`**
+  (`resolveCatalogueRpcUrl`, src/solana-rpc.ts), never from `ctx.env`. The
+  catalogue sync answers it with the preferred endpoint of the requested
+  cluster's managed pool; null means no endpoint, which `resolveCatalogueRpcUrl`
+  refuses with `PROVIDER_NOT_CONFIGURED` before any read. `EarnRuntimeEnvironment`
+  carries credentials only: `SOLANA_RPC_URL` and the `SOLANA_<CLUSTER>_RPC_URL`
+  pins are gone from it, so a provider cannot fall back to the process default.
 - Registry: `EARN_PROVIDER_CLIENTS` (src/index.ts) + fail-closed
   `resolveEarnProviderClient` — DB provider ids are open strings and MUST be
   resolved through this, never direct-indexed.

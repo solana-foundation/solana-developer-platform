@@ -233,6 +233,11 @@
       "types": "./src/wisdomtree-programs.ts",
       "import": "./src/wisdomtree-programs.ts",
       "default": "./src/wisdomtree-programs.ts"
+    },
+    "./fireblocks": {
+      "types": "./src/fireblocks.ts",
+      "import": "./src/fireblocks.ts",
+      "default": "./src/fireblocks.ts"
     }
   },
   "scripts": {

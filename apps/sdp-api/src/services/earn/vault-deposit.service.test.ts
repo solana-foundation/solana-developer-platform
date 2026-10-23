@@ -26,9 +26,9 @@ const getBlockHeight = vi.hoisted(() => vi.fn());
 
 // The confirmed block height the broadcast tail reads before it may call a
 // preflight blockhash refusal definitive.
-vi.mock("@sdp/rpc/solana", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@sdp/rpc/solana")>()),
-  createRpc: () => ({ getBlockHeight: () => ({ send: getBlockHeight }) }),
+vi.mock("./cluster-rpc", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./cluster-rpc")>()),
+  earnClusterRpc: () => ({ getBlockHeight: () => ({ send: getBlockHeight }) }),
 }));
 
 // `prependSwapLegToVaultPlan` stays real; only the Jupiter HTTP boundary is stubbed.
@@ -37,10 +37,6 @@ vi.mock("./jupiter-swap.service", async (importOriginal) => ({
   fetchJupiterSwapLeg,
 }));
 
-vi.mock("@sdp/rpc/config", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@sdp/rpc/config")>()),
-  resolveClusterRpcUrl: () => "https://rpc.example.invalid",
-}));
 vi.mock("./execution-registry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./execution-registry")>()),
   resolveVaultDirectClient,
@@ -203,7 +199,7 @@ afterEach(() => {
 describe("depositIntoVault — idempotency", () => {
   it("records three back-to-back same-amount deposits as separate intents", async () => {
     const memos: string[] = [];
-    signVaultPlan.mockImplementation(async (_env, execution) => {
+    signVaultPlan.mockImplementation(async (execution) => {
       memos.push(
         Buffer.from(execution.plan.instructions.at(-1)?.data ?? "", "base64").toString("utf8")
       );
@@ -344,7 +340,7 @@ describe("depositIntoVault — idempotency", () => {
 
   it("binds independent request keys into distinct on-chain memo instructions", async () => {
     const memoPayloads: string[] = [];
-    signVaultPlan.mockImplementation(async (_env, input) => {
+    signVaultPlan.mockImplementation(async (input) => {
       const encoded = input.plan.instructions.at(-1)?.data;
       if (!encoded) throw new Error("missing request memo");
       memoPayloads.push(Buffer.from(encoded, "base64").toString("utf8"));
@@ -541,18 +537,18 @@ describe("depositIntoVault — signed persistence boundary", () => {
     expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
     const deadline = resolveVaultDirectClient.mock.calls[0]?.[2];
     expect(deadline).toBeDefined();
-    expect(simulateVaultPlan.mock.calls[0]?.[1]).toMatchObject({
+    expect(simulateVaultPlan.mock.calls[0]?.[0]).toMatchObject({
       cluster: "devnet",
       deadline,
       expectedAssetIdentity: { depositTokenMint: TOKEN_MINT, shareMint: SHARE_MINT },
     });
-    expect(signVaultPlan.mock.calls[0]?.[1]).toMatchObject({
+    expect(signVaultPlan.mock.calls[0]?.[0]).toMatchObject({
       cluster: "devnet",
       deadline,
       expectedAssetIdentity: { depositTokenMint: TOKEN_MINT, shareMint: SHARE_MINT },
       fee: { kind: "wallet-pays" },
     });
-    expect(broadcastVaultTransaction.mock.calls[0]?.[1]).toMatchObject({
+    expect(broadcastVaultTransaction.mock.calls[0]?.[0]).toMatchObject({
       cluster: "devnet",
       deadline,
     });
@@ -1184,13 +1180,11 @@ describe("earn vault project attribution", () => {
         return plan({ createsShareAccount: true });
       });
       const sponsorBySignature = new Map<string, string>();
-      signVaultPlan.mockImplementation(
-        async (_env: unknown, input: { fee: { sponsor: string } }) => {
-          const signature = `sig_fee_mode_${sponsorBySignature.size + 1}`;
-          sponsorBySignature.set(signature, input.fee.sponsor);
-          return { bytes: new Uint8Array([1]), signature, lastValidBlockHeight: "12345" };
-        }
-      );
+      signVaultPlan.mockImplementation(async (input: { fee: { sponsor: string } }) => {
+        const signature = `sig_fee_mode_${sponsorBySignature.size + 1}`;
+        sponsorBySignature.set(signature, input.fee.sponsor);
+        return { bytes: new Uint8Array([1]), signature, lastValidBlockHeight: "12345" };
+      });
 
       const results = await Promise.all([
         depositIntoVault(env, depositInput()),
@@ -1266,7 +1260,7 @@ describe("depositIntoVault — swap-funded (Jupiter)", () => {
     // consumption was unreported by the mocked simulation, so the maximum),
     // then swap → provider deposit → request memo, with the swap's lookup
     // tables carried along.
-    const signedPlan = signVaultPlan.mock.calls[0]?.[1]?.plan;
+    const signedPlan = signVaultPlan.mock.calls[0]?.[0]?.plan;
     expect(signedPlan.instructions[0].programAddress).toBe(
       "ComputeBudget111111111111111111111111111111"
     );

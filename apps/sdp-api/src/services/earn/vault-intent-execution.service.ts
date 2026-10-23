@@ -1,5 +1,4 @@
 import type { EarnVaultAssetIdentity, EarnVaultTransactionPlan } from "@sdp/earn/types";
-import { createRpc } from "@sdp/rpc/solana";
 import type { MovementId } from "@sdp/types/movements";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { address } from "@solana/kit";
@@ -12,6 +11,7 @@ import { badRequest, internalError } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import type { Env } from "@/types/env";
+import { earnClusterRpc } from "./cluster-rpc";
 import type { VaultDeadline } from "./vault-deadline";
 import {
   broadcastVaultTransaction,
@@ -59,9 +59,10 @@ const BLOCK_HEIGHT_READ_TIMEOUT_MS = 2_000;
  * The cluster's confirmed block height, the same commitment the build's
  * `lastValidBlockHeight` was quoted at and the reconciler compares against.
  */
-export async function readConfirmedBlockHeight(env: Env, rpcUrl: string): Promise<bigint> {
-  const rpc = createRpc(env, { rpcUrl, requestTimeoutMs: BLOCK_HEIGHT_READ_TIMEOUT_MS });
-  return rpc.getBlockHeight({ commitment: "confirmed" }).send();
+export async function readConfirmedBlockHeight(cluster: SolanaCluster): Promise<bigint> {
+  return earnClusterRpc(cluster, { timeoutMs: BLOCK_HEIGHT_READ_TIMEOUT_MS })
+    .getBlockHeight({ commitment: "confirmed" })
+    .send();
 }
 
 interface SignedVaultIntentResult {
@@ -81,7 +82,6 @@ export interface ExecuteSignedVaultIntentInput<TResult extends SignedVaultIntent
   deadline: VaultDeadline;
   expectedAssetIdentity: EarnVaultAssetIdentity;
   plan: EarnVaultTransactionPlan;
-  rpcUrl: string;
   /**
    * Who pays, resolved by the caller BEFORE it built the plan, because a
    * sponsor also has to be named inside the instructions as the rent payer.
@@ -106,13 +106,12 @@ export async function executeSignedVaultIntent<TResult extends SignedVaultIntent
 
   let prepared: PreparedVaultPlanExecution;
   try {
-    const simulation = await simulateVaultPlan(env, {
+    const simulation = await simulateVaultPlan({
       cluster: input.cluster,
       deadline: input.deadline,
       expectedAssetIdentity: input.expectedAssetIdentity,
       plan: input.plan,
       owner: address(input.walletPublicKey),
-      rpcUrl: input.rpcUrl,
       fee: input.fee,
     });
     if (!simulation.ok) {
@@ -188,13 +187,12 @@ export async function executeSignedVaultIntent<TResult extends SignedVaultIntent
     if (signer.address !== input.walletPublicKey) {
       throw badRequest(input.signerMismatchMessage);
     }
-    signed = await signVaultPlan(env, {
+    signed = await signVaultPlan({
       cluster: input.cluster,
       deadline: input.deadline,
       expectedAssetIdentity: input.expectedAssetIdentity,
       plan: input.plan,
       owner: signer,
-      rpcUrl: input.rpcUrl,
       fee: input.fee,
       prepared,
     });
@@ -211,7 +209,6 @@ export async function executeSignedVaultIntent<TResult extends SignedVaultIntent
     organizationId: input.organizationId,
     cluster: input.cluster,
     deadline: input.deadline,
-    rpcUrl: input.rpcUrl,
     bytes: signed.bytes,
     signature: signed.signature,
     movement: result.movement,
@@ -239,18 +236,16 @@ export async function broadcastRecordedVaultMovement(
     organizationId: string;
     cluster: SolanaCluster;
     deadline: VaultDeadline;
-    rpcUrl: string;
     bytes: Uint8Array;
     signature: string;
     movement: EarnMovementRow;
   }
 ): Promise<EarnMovementRow> {
   try {
-    await broadcastVaultTransaction(env, {
+    await broadcastVaultTransaction({
       cluster: input.cluster,
       deadline: input.deadline,
       bytes: input.bytes,
-      rpcUrl: input.rpcUrl,
     });
   } catch (error) {
     getLogger().error(

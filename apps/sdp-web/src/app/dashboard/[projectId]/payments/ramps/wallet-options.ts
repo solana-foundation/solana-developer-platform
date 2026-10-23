@@ -1,5 +1,7 @@
 import { compareDecimalAmounts, isDecimalString } from "@sdp/solana/amount";
+import { isFireblocksPaymentMint } from "@sdp/types/fireblocks";
 import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import type { ComboboxOption } from "@sdp/ui/combobox";
 import {
   formatCurrencyAmount,
@@ -109,6 +111,19 @@ export function walletPickerLabel(
   wallet: Pick<PaymentsDashboardWallet, "label" | "publicKey">
 ): string {
   return wallet.label ?? wallet.publicKey;
+}
+
+/** Native Fireblocks BYOK payments have narrower asset support than wallet balances. */
+export function onchainPaymentAssetOptions(
+  wallet: PaymentsDashboardWallet | null,
+  issuedTokenSymbolsByMint: IssuedTokenSymbolsByMint,
+  t: Translate,
+  cluster: SolanaCluster
+): ComboboxOption[] {
+  const options = walletBalanceAssetOptions(wallet, issuedTokenSymbolsByMint, t);
+  return wallet?.provider === "fireblocks" && wallet.custodyConnectionId
+    ? options.filter((option) => isFireblocksPaymentMint(option.value, cluster))
+    : options;
 }
 
 export function walletComboboxOptions(

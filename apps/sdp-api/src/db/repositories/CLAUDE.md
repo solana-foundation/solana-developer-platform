@@ -91,7 +91,16 @@ Things that will bite:
   count equals the claimed id SET, not a literal, so the two fail together;
   it lives in `../../services/jobs/reconcile-earn-vault-movements.test.ts`
   ("reports exactly the rows the next claim would take"). Change one predicate
-  and you must change both.
+  and you must change both. Both take the sweep's `environment` (HOO-2148), so
+  pass the same one to both.
+- **Earn's sweep queries select one environment** (HOO-2148). The vault
+  movement, queued withdrawal and split-swap crons run once per environment,
+  so every claim, repair, backlog count and cleanup they call takes
+  `environment` and filters Earn's own `environment` column (joining
+  `projects` waits on `project_id NOT NULL`, HOO-2177). A row in the other
+  environment is neither returned, counted nor touched; each query has a
+  cross-environment test ("environment scope" describes). A new sweep query
+  takes `environment` too.
 - **A vault row's signer is a column pair, not a new model** (PRO-1722,
   migration 0070): exactly one of `custody_wallet_id` (SDP signs) and
   `owner_address` (an external wallet SDP holds no key for signs) is set, on

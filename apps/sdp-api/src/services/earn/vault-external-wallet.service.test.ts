@@ -41,9 +41,9 @@ const getSignatureStatuses = vi.hoisted(() => vi.fn());
 
 // RPC boundary for the expiry gate and the audit's independently finalized
 // transaction. Transaction construction, signatures and persistence stay real.
-vi.mock("@sdp/rpc/solana", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@sdp/rpc/solana")>()),
-  createRpc: () => ({
+vi.mock("./cluster-rpc", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./cluster-rpc")>()),
+  earnClusterRpc: () => ({
     getBlockHeight: () => ({ send: getBlockHeight }),
     getSignatureStatuses: () => ({ send: getSignatureStatuses }),
   }),
@@ -58,10 +58,6 @@ vi.mock("./jupiter-swap.service", async (importOriginal) => ({
   fetchJupiterSwapLeg,
 }));
 
-vi.mock("@sdp/rpc/config", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@sdp/rpc/config")>()),
-  resolveClusterRpcUrl: () => "https://rpc.example.invalid",
-}));
 vi.mock("./execution-registry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./execution-registry")>()),
   resolveVaultDirectClient,
@@ -338,7 +334,7 @@ beforeEach(async () => {
   resolveVaultWithdrawClient.mockReturnValue({ buildVaultWithdrawal });
   buildVaultDeposit.mockResolvedValue(depositPlan());
   buildVaultWithdrawal.mockResolvedValue(withdrawalPlan());
-  simulateVaultPlan.mockImplementation(async (_env, input) => ({
+  simulateVaultPlan.mockImplementation(async (input) => ({
     ok: true,
     prepared: {
       plan: input.plan,
@@ -379,7 +375,6 @@ describe("buildExternalWalletDepositTransaction", () => {
 
     // Simulated with the owner paying its own fee — the shape it will sign.
     expect(simulateVaultPlan).toHaveBeenCalledWith(
-      env,
       expect.objectContaining({ owner: ownerAddress, fee: { kind: "wallet-pays" } })
     );
     // The provider build was NOT asked to name a separate rent payer.
@@ -393,7 +388,6 @@ describe("buildExternalWalletDepositTransaction", () => {
     expect(result.built.owner_address).toBe(ownerAddress);
     expect(result.built.fee_payer).toBeNull();
     expect(simulateVaultPlan).toHaveBeenCalledWith(
-      env,
       expect.objectContaining({ owner: ownerAddress, fee: { kind: "wallet-pays" } })
     );
     const row = await getDb(env)
@@ -498,7 +492,7 @@ describe("buildExternalWalletDepositTransaction (swap-funded)", () => {
   it("prepends the swap, sizes the deposit to the floor, and pins a probed CU limit", async () => {
     fetchJupiterSwapLeg.mockResolvedValue(swapLeg());
     buildVaultDeposit.mockResolvedValue(depositPlan({ accepted: { amount: "24.8" } }));
-    simulateVaultPlan.mockImplementation(async (_env, input) => ({
+    simulateVaultPlan.mockImplementation(async (input) => ({
       ok: true,
       prepared: {
         plan: input.plan,
@@ -539,7 +533,7 @@ describe("buildExternalWalletDepositTransaction (swap-funded)", () => {
     // final plan under the buffered consumption — Jupiter's /build carries no
     // CU limit, so it is derived locally (see jupiter-swap.service.ts).
     expect(simulateVaultPlan).toHaveBeenCalledTimes(2);
-    const probe = simulateVaultPlan.mock.calls[0]?.[1]?.plan;
+    const probe = simulateVaultPlan.mock.calls[0]?.[0]?.plan;
     const probeCu = Buffer.from(probe.instructions[0].data, "base64");
     expect(probe.instructions[0].programAddress).toBe(
       "ComputeBudget111111111111111111111111111111"
@@ -548,7 +542,7 @@ describe("buildExternalWalletDepositTransaction (swap-funded)", () => {
 
     // Final (compiled) plan order: locally built CU limit — buffered 15% over
     // the probe's consumption — then swap leg, provider deposit, memo last.
-    const simulated = simulateVaultPlan.mock.calls[1]?.[1]?.plan;
+    const simulated = simulateVaultPlan.mock.calls[1]?.[0]?.plan;
     const finalCu = Buffer.from(simulated.instructions[0].data, "base64");
     expect(finalCu.readUInt8(0)).toBe(2);
     expect(finalCu.readUInt32LE(1)).toBe(460_001);
@@ -615,7 +609,7 @@ describe("buildExternalWalletDepositTransaction (swap-funded)", () => {
     // One re-route for compactness before giving up on atomicity.
     expect(fetchJupiterSwapLeg).toHaveBeenCalledTimes(2);
     expect(fetchJupiterSwapLeg.mock.calls[1]?.[2]).toMatchObject({ maxAccounts: 24 });
-    const usedCompactMemo = simulateVaultPlan.mock.calls.some(([, input]) =>
+    const usedCompactMemo = simulateVaultPlan.mock.calls.some(([input]) =>
       input.plan.instructions.some((instruction: { data: string }) =>
         /^sdp:e:ed:[A-Za-z0-9_-]{22}$/.test(
           Buffer.from(instruction.data, "base64").toString("utf8")
@@ -655,7 +649,7 @@ describe("buildExternalWalletDepositTransaction (swap-funded)", () => {
     expect(String(advisory?.swap_last_valid_block_height)).toBe(
       result.swapTransaction.lastValidBlockHeight
     );
-    expect(readOwnerMintBalance).toHaveBeenCalledWith(env, "sandbox", ownerAddress, TOKEN_MINT);
+    expect(readOwnerMintBalance).toHaveBeenCalledWith("sandbox", ownerAddress, TOKEN_MINT);
   });
 
   it("splits when the composed probe is oversized before RPC simulation", async () => {
@@ -671,7 +665,7 @@ describe("buildExternalWalletDepositTransaction (swap-funded)", () => {
       })
     );
     buildVaultDeposit.mockResolvedValue(depositPlan({ accepted: { amount: "24.8" } }));
-    simulateVaultPlan.mockImplementation(async (_env, input) => {
+    simulateVaultPlan.mockImplementation(async (input) => {
       const hasProviderDeposit = input.plan.instructions.some(
         (instruction: { data: string }) =>
           Buffer.from(instruction.data, "base64").toString("utf8") === "provider-instruction"
@@ -809,7 +803,7 @@ describe("submitExternalWalletDeposit", () => {
 
     // The signed bytes that were broadcast are the recorded outbox bytes.
     expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
-    expect(Buffer.from(broadcastVaultTransaction.mock.calls[0][1].bytes).toString("base64")).toBe(
+    expect(Buffer.from(broadcastVaultTransaction.mock.calls[0][0].bytes).toString("base64")).toBe(
       result.movement.signed_transaction
     );
 
@@ -1166,7 +1160,6 @@ describe("partner fee payer (caller-provided)", () => {
     // The funds check ran against the partner wallet, and the provider was
     // asked to charge account rent to the same identity.
     expect(simulateVaultPlan).toHaveBeenCalledWith(
-      env,
       expect.objectContaining({
         fee: { kind: "caller-provided", feePayer: partnerAddress },
       })
@@ -1178,7 +1171,7 @@ describe("partner fee payer (caller-provided)", () => {
   });
 
   it("retries an oversized partner-paid plan with a compact request binding", async () => {
-    simulateVaultPlan.mockImplementation(async (_env, input) => {
+    simulateVaultPlan.mockImplementation(async (input) => {
       const memo = Buffer.from(input.plan.instructions.at(-1)?.data ?? "", "base64").toString(
         "utf8"
       );
@@ -1225,7 +1218,6 @@ describe("partner fee payer (caller-provided)", () => {
     );
     expect(Object.keys(decoded.signatures)).toEqual([ownerAddress]);
     expect(simulateVaultPlan).toHaveBeenCalledWith(
-      env,
       expect.objectContaining({ fee: { kind: "wallet-pays" } })
     );
   });
@@ -1323,7 +1315,6 @@ describe("external-wallet withdrawals", () => {
     expect(built.position_id).toBeNull();
     expect(built.fee_payer).toBeNull();
     expect(simulateVaultPlan).toHaveBeenCalledWith(
-      env,
       expect.objectContaining({ owner: ownerAddress, fee: { kind: "wallet-pays" } })
     );
     const row = await getDb(env)

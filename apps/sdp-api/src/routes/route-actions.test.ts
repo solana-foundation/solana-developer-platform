@@ -216,7 +216,8 @@ const REFUSED_BEFORE_THE_ACTION =
   /^(\/v1\/(api-keys|members|organizations)|\/v1\/projects\/:projectId\/(api-keys|members)|\/internal\/(playground|dashboard\/custody|dashboard\/helius-rings|dashboard\/wallets))(\/|$)/;
 
 /** The mounts above that refuse a key on every route, whatever its action. */
-const KEYLESS_MOUNTS = /^\/internal\/(playground|dashboard\/(custody|helius-rings|wallets))(\/|$)/;
+const KEYLESS_MOUNTS =
+  /^\/internal\/(playground|dashboard\/(custody|fireblocks|helius-rings|wallets))(\/|$)/;
 
 describe("actions no API key may hold", () => {
   const forbiddenRoutes = routes.filter((route) => {

@@ -250,7 +250,7 @@ holds the money and who signs:
   provider's product is a yield-bearing TOKEN rather than a vault — and note
   its mainnet-only registry (`@sdp/types/ondo-programs`) leaves the sandbox
   shelf to the PRO-1742 mirror, which in a devnet deployment only fills when
-  the catalogue can reach mainnet (`SOLANA_MAINNET_RPC_URL`, below).
+  the catalogue can reach mainnet (its mainnet managed RPC pool, below).
 - **Hastra: two native programs plus two independent exit contracts.** `hastra`
   fronts exactly one pinned PRIME strategy. Deposit composes USDC -> wYLDS ->
   PRIME atomically. Its default exit is an operator-completed at-par redemption,
@@ -353,18 +353,18 @@ references must be cluster-distinct (address-keyed). A slug shared by both of
 your catalogues collides with the environment's own shelf and stays own-lane
 only (ADR 0002, PRO-1742 addendum).
 
-**And the mirror needs a mainnet RPC in every deployment that is not one.** The
-sync walks both environments in one process, and `SOLANA_RPC_URL` serves only
-the cluster that process is configured for. A provider whose catalogue is an
-HTTP API (Kamino, Jupiter Lend) does not care; one that reads the chain does.
-Ondo's production pass in a devnet deployment fails its genesis proof, the sync
-treats that as a steady-state skip, and the mirror converges to EMPTY — so the
-row never appears on smoky, even surfaced. Resolve the endpoint per cluster with
+**And the mirror needs a mainnet RPC in every deployment.** The sync walks
+both environments in one process, so a provider whose catalogue reads the chain
+needs each cluster's own endpoint; one whose catalogue is an HTTP API (Kamino,
+Jupiter Lend) does not care. Without a mainnet endpoint, Ondo's production pass
+is a steady-state skip and the mirror converges to EMPTY, so the row never
+appears in sandbox, even surfaced. Resolve the endpoint per cluster with
 `resolveCatalogueRpcUrl` (`packages/sdp-earn/src/solana-rpc.ts`), which reads
-`SOLANA_MAINNET_RPC_URL` / `SOLANA_DEVNET_RPC_URL` — the same overrides the
-execution path uses — and falls back to the process endpoint. Provision the
-override in sdp-infra's dev `app_secret_keys` (+ Doppler) for the mirror to
-fill; every URL is still genesis-checked before anything is read from it.
+`ctx.catalogueRpcUrl`: the catalogue sync answers it with the preferred
+endpoint of the requested cluster's managed pool, the same pool the execution
+path uses, and never with a process default. Managed deployments boot only
+with both pools, so the mirror fills everywhere; every URL is still
+genesis-checked before anything is read from it.
 
 ### A new catalogue column is EXPAND-ONLY in the release that adds it
 

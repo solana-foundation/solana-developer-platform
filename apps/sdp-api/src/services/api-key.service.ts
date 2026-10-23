@@ -5,12 +5,12 @@
  */
 
 // biome-ignore-all lint/security/noSecrets: service operation identifiers are not credentials
-import { hashString } from "@sdp/payments/hash";
 import { type Action, expandStoredGrants, normalizeGrants } from "@sdp/types/actions";
 import type { ApiKeyEnvironment, ApiKeyStatus, ApiKeyWalletScope } from "@sdp/types/api-keys";
 import type { OrganizationRole } from "@sdp/types/roles";
 import { z } from "zod";
 import { parseOptionalPostgresJson } from "@/db/postgres-utils";
+import { hashApiKey } from "@/lib/api-key-hash";
 import { apiKeyRowRefusal } from "@/lib/api-key-rotation";
 import { AppError, badRequest, conflict, notFound } from "@/lib/errors";
 import { assertTenantClaim, type TenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
@@ -289,7 +289,7 @@ export class ApiKeyService {
 
     const keyId = `key_${crypto.randomUUID()}`;
     const { key, prefix } = createApiKeyMaterial(project.environment);
-    const keyHash = await hashString(key, input.pepper);
+    const keyHash = await hashApiKey(key, input.pepper);
 
     const createdBy = input.createdByUserId;
     const actor = await this.db
@@ -534,7 +534,7 @@ export class ApiKeyService {
 
     const newKeyId = `key_${crypto.randomUUID()}`;
     const { key: newKey, prefix: newPrefix } = createApiKeyMaterial(target.environment);
-    const newKeyHash = await hashString(newKey, pepper);
+    const newKeyHash = await hashApiKey(newKey, pepper);
 
     const requestedDeadline = new Date(now + gracePeriodHours * 60 * 60 * 1000).toISOString();
     // Never extend a deadline: a second rotation inside a grace period keeps

@@ -48,8 +48,10 @@ at these boundaries can duplicate transfers, strand tracking, or misstate balanc
   command keys only for observed payouts and normalizes previous writers with a
   trigger. It preserves initiated-movement indexes and historical economic data.
 - Executing provider read/build calls can retry transient failures against the
-  configured default-cluster pool. Every endpoint must independently prove its
-  genesis hash. Explicit cluster pins stay isolated. Cursors are per operation,
+  named cluster's managed pool, never another cluster's (2026-10-23: the pool
+  `createClusterRpc()` serves, replacing the `SOLANA_NETWORK` default and the
+  `SOLANA_<CLUSTER>_RPC_URL` pins). Every endpoint must independently prove its
+  genesis hash. Cursors are per operation,
   never sticky across later historical reads, and all attempts share one deadline.
   Signing/broadcast and reconciliation retain their existing durable recovery
   rules; this runner does not retry those effects.

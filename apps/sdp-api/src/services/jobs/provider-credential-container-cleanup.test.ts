@@ -46,12 +46,17 @@ function fakeGcp() {
   return { versions, listVersions, destroyVersion, secrets };
 }
 
-async function reserve(id: string, version: number, predecessor: string | null = null) {
+async function reserve(
+  id: string,
+  version: number,
+  predecessor: string | null = null,
+  provider: "privy" | "fireblocks" = "privy"
+) {
   const row = await new ProviderCredentialStore(getDb(env)).insertCredential({
     id,
     organizationId: ORG,
     projectId: PROJECT,
-    provider: "privy",
+    provider,
     label: "Prototype",
     scope: "project",
     source: "stored",
@@ -103,38 +108,41 @@ describe("shared-container orphan cleanup", () => {
     });
   });
 
-  it("destroys an unreferenced version while preserving active and retained rollback versions", async () => {
-    const log = vi.spyOn(rootLogger, "info").mockImplementation(() => rootLogger);
-    const gcp = fakeGcp();
-    await reserve("pcred_proto_previous", 1);
-    await finalize("pcred_proto_previous", 1);
-    await getDb(env).execute(
-      "UPDATE provider_credentials SET status = 'retired', secret_retention_expires_at = '2099-01-01T00:00:00.000Z' WHERE id = ?",
-      ["pcred_proto_previous"]
-    );
-    await reserve("pcred_proto_current", 2, "pcred_proto_previous");
-    await finalize("pcred_proto_current", 2);
-    await getDb(env).execute("UPDATE provider_credentials SET status = 'active' WHERE id = ?", [
-      "pcred_proto_current",
-    ]);
-    for (const version of [1, 2, 3]) gcp.versions.set(ref(version), "ENABLED");
+  it.each(["privy", "fireblocks"] as const)(
+    "cleans %s orphans while preserving active and retained rollback versions",
+    async (provider) => {
+      const log = vi.spyOn(rootLogger, "info").mockImplementation(() => rootLogger);
+      const gcp = fakeGcp();
+      await reserve("pcred_proto_previous", 1, null, provider);
+      await finalize("pcred_proto_previous", 1);
+      await getDb(env).execute(
+        "UPDATE provider_credentials SET status = 'retired', secret_retention_expires_at = '2099-01-01T00:00:00.000Z' WHERE id = ?",
+        ["pcred_proto_previous"]
+      );
+      await reserve("pcred_proto_current", 2, "pcred_proto_previous", provider);
+      await finalize("pcred_proto_current", 2);
+      await getDb(env).execute("UPDATE provider_credentials SET status = 'active' WHERE id = ?", [
+        "pcred_proto_current",
+      ]);
+      for (const version of [1, 2, 3]) gcp.versions.set(ref(version), "ENABLED");
 
-    await scanGcpCredentialContainers(env, () => gcp.secrets);
+      await scanGcpCredentialContainers(env, () => gcp.secrets);
 
-    expect([...gcp.versions.values()]).toEqual(["ENABLED", "ENABLED", "DESTROYED"]);
-    expect(log).toHaveBeenCalledWith(
-      {
-        organizationId: ORG,
-        containerOwnerCredentialId: "pcred_proto_previous",
-        providerCredentialId: undefined,
-        secretRef: PARENT,
-        secretVersionRef: ref(3),
-        outcome: "confirmed_destroyed",
-        kind: "unreferenced_version",
-      },
-      "provider_credential_secret_destroyed"
-    );
-  });
+      expect([...gcp.versions.values()]).toEqual(["ENABLED", "ENABLED", "DESTROYED"]);
+      expect(log).toHaveBeenCalledWith(
+        {
+          organizationId: ORG,
+          containerOwnerCredentialId: "pcred_proto_previous",
+          providerCredentialId: undefined,
+          secretRef: PARENT,
+          secretVersionRef: ref(3),
+          outcome: "confirmed_destroyed",
+          kind: "unreferenced_version",
+        },
+        "provider_credential_secret_destroyed"
+      );
+    }
+  );
 
   it("preserves an active project-ID version when GCP inventory uses the project number", async () => {
     const gcp = fakeGcp();

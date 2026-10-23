@@ -1,9 +1,8 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { EarnRuntimeContext } from "@sdp/earn/types";
-import { resolveClusterRpcUrls } from "@sdp/rpc/config";
 import { isTransientRpcError } from "@sdp/rpc/transient";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
-import type { Env } from "@/types/env";
+import { earnPoolNotConfigured, earnProviderEndpointUrls } from "./cluster-rpc";
 import type { VaultDeadline } from "./vault-deadline";
 
 /**
@@ -42,28 +41,30 @@ function transientCause(error: unknown): boolean {
 
 /**
  * Provider operations build unsigned plans or read chain state. They never sign
- * or broadcast. Retry that whole read/build on a proven alternative, with one
- * workflow deadline and no process-wide sticky endpoint. Each concurrent call
- * owns its endpoint cursor; a later receipt read starts at the primary again.
- * A successful unknown/missing-history response is not an error or settlement.
+ * or broadcast. Retry that whole read/build on a proven alternative from the
+ * cluster's managed pool, with one workflow deadline and no process-wide sticky
+ * endpoint: every read of one attempt goes to one endpoint, so a plan never mixes
+ * provider views at different slots (ADR 0007). Each concurrent call owns its
+ * endpoint cursor; a later receipt read starts at the primary again. A
+ * successful unknown/missing-history response is not an error or settlement.
  */
 export function createVaultRpcFailover(
-  env: Env,
   deadline: VaultDeadline,
-  prove: (env: Env, cluster: SolanaCluster, url: string) => Promise<void>
+  prove: (cluster: SolanaCluster, url: string) => Promise<void>
 ) {
-  const attempts = new AsyncLocalStorage<{ index: number; urls: string[] }>();
+  const attempts = new AsyncLocalStorage<{ index: number; urls: readonly string[] }>();
   return {
     async resolve(_ctx: EarnRuntimeContext, cluster: SolanaCluster): Promise<string> {
       const attempt = attempts.getStore();
-      const urls = resolveClusterRpcUrls(env, cluster);
+      const urls = earnProviderEndpointUrls(cluster);
       if (attempt) attempt.urls = urls;
-      const url = urls[attempt?.index ?? 0] ?? "";
-      await prove(env, cluster, url);
+      const url = urls[attempt?.index ?? 0];
+      if (url === undefined) throw earnPoolNotConfigured(cluster);
+      await prove(cluster, url);
       return url;
     },
     run<T>(label: string, operation: (assertActive: () => void) => Promise<T>): Promise<T> {
-      const attempt: { index: number; urls: string[] } = { index: 0, urls: [] };
+      const attempt: { index: number; urls: readonly string[] } = { index: 0, urls: [] };
       return deadline.run(label, () =>
         attempts.run(attempt, async () => {
           for (;;) {

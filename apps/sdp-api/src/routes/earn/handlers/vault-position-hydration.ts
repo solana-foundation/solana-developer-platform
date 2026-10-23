@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import type { EarnVaultPositionSnapshot } from "@sdp/earn/types";
 import { addDecimalAmounts } from "@sdp/payments/decimal";
-import { resolveClusterRpcUrls } from "@sdp/rpc/config";
 import { readStamp, withMinimumRpcSlot, withReadFloor } from "@sdp/rpc/read-context";
 import { isDecimalString } from "@sdp/solana/amount";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
@@ -12,6 +11,7 @@ import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import type { AppContext } from "@/routes/earn/context";
 import { earnRuntime } from "@/routes/earn/context";
 import { getLogger } from "@/runtime/logger";
+import { earnProviderEndpointUrls } from "@/services/earn/cluster-rpc";
 import { earnClusterFor, resolveVaultDirectClient } from "@/services/earn/execution-registry";
 import { createVaultDeadline, type VaultDeadline } from "@/services/earn/vault-deadline";
 
@@ -70,13 +70,13 @@ function sharedVaultPositionRead(
 }
 
 /**
- * The RPC endpoints a read for `cluster` would use, in failover order, as a
+ * The managed endpoints a read for `cluster` would use, in failover order, as a
  * hash: reads through different endpoints never share, and the key never
  * holds a URL (providers carry API keys in them).
  */
-function rpcEndpointIdentity(env: AppContext["env"], cluster: SolanaCluster): string {
+function rpcEndpointIdentity(cluster: SolanaCluster): string {
   return createHash("sha256")
-    .update(JSON.stringify(resolveClusterRpcUrls(env, cluster)))
+    .update(JSON.stringify(earnProviderEndpointUrls(cluster)))
     .digest("hex")
     .slice(0, 16);
 }
@@ -193,7 +193,7 @@ export async function hydrateVaultPositions(
           const snapshots = await sharedVaultPositionRead(
             JSON.stringify([
               runtime.environment,
-              rpcEndpointIdentity(c.env, earnClusterFor(runtime.environment)),
+              rpcEndpointIdentity(earnClusterFor(runtime.environment)),
               provider,
               owner,
               [...providerReferences].sort(),

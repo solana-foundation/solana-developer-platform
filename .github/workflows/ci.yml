@@ -676,6 +676,7 @@ jobs:
     env:
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_c21va2UubG9jYWwuY2xlcmsuZGV2JA
       CLERK_SECRET_KEY: sk_test_dummy_smoke_for_ci_only
+      API_KEY_PEPPER: ci-compose-smoke-pepper-not-a-secret
       COMPOSE_FILE: docker-compose.yml:docker-compose.ci.yml
     steps:
       - name: Checkout
@@ -1026,7 +1027,10 @@ jobs:
       CI_HAS_DOPPLER_TOKEN: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
       DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp
       REDIS_URL: redis://127.0.0.1:6379
-      DOPPLER_PRESERVE_ENV: DATABASE_URL,REDIS_URL,SOLANA_NETWORK,NEXT_PUBLIC_SENTRY_DSN,SDP_API_BASE_URL,NEXT_PUBLIC_SDP_API_BASE_URL,PLAYWRIGHT_API_URL,PLAYWRIGHT_API_PORT,PLAYWRIGHT_BASE_URL,PLAYWRIGHT_NEXT_DIST_DIR,PLAYWRIGHT_USE_NEXT_START,ISSUANCE_ENABLED,SDP_FLAG_NEW_DESIGN_ISSUANCE
+      DOPPLER_PRESERVE_ENV: DATABASE_URL,REDIS_URL,SOLANA_NETWORK,NEXT_PUBLIC_SENTRY_DSN,SDP_API_BASE_URL,NEXT_PUBLIC_SDP_API_BASE_URL,PLAYWRIGHT_API_URL,PLAYWRIGHT_API_PORT,PLAYWRIGHT_BASE_URL,PLAYWRIGHT_NEXT_DIST_DIR,PLAYWRIGHT_USE_NEXT_START,ISSUANCE_ENABLED,SDP_FLAG_NEW_DESIGN_ISSUANCE,API_KEY_PEPPER
+      # The API refuses to start without a pepper (HOO-2219). A fixed CI value is
+      # enough: each run starts from an empty database and mints its own keys.
+      API_KEY_PEPPER: ci-e2e-pepper-not-a-secret
       ISSUANCE_ENABLED: "true"
       # issuance.e2e.spec.ts drives the previous Issuance design, which production still serves
       # (NEW DESIGN is off there). A matrix entry sets new_design_issuance to run the new one.

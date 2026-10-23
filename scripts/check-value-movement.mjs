@@ -78,6 +78,18 @@ const KEYCHAIN_SDKS = [
 /** @type {Capability[]} */
 export const CAPABILITIES = [
   {
+    id: "fireblocks-native-transfer",
+    why: "Creates a provider-signed payment; only the admitted Fireblocks submission service may.",
+    symbols: [
+      {
+        file: "packages/sdp-custody/src/provisioning/fireblocks-transfers.ts",
+        name: "createFireblocksTransfer",
+      },
+    ],
+    owners: [CUSTODY_PACKAGE],
+    allow: [`${API}/services/payments/fireblocks-transfer.ts`],
+  },
+  {
     id: "config-signing-adapter",
     why: "Builds a signing adapter from an encrypted custody config; only the custody signer waist may.",
     symbols: [
@@ -97,6 +109,10 @@ export const CAPABILITIES = [
       {
         file: `${API}/services/domain/signing/provider-adapter-factory.ts`,
         name: "createPrivyAdapterFromCredential",
+      },
+      {
+        file: `${API}/services/domain/signing/provider-adapter-factory.ts`,
+        name: "createFireblocksAdapterFromCredential",
       },
     ],
     owners: [`${API}/services/domain/signing/provider-adapter-factory.ts`],

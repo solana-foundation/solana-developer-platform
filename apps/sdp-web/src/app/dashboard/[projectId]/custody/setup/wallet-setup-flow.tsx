@@ -26,7 +26,7 @@ import {
   type CustodyProviderAvailability,
   resolveCustodyProviderAvailability,
 } from "@/app/dashboard/[projectId]/custody/provider-display-status";
-import { PrivyCredentialForm } from "@/app/dashboard/[projectId]/custody/setup/privy-credential-form";
+import { ByokCredentialForm } from "@/app/dashboard/[projectId]/custody/setup/privy-credential-form";
 import { useWalletInventoryRefresh } from "@/app/dashboard/[projectId]/custody/use-wallet-inventory-refresh";
 import { WalletProviderChoices } from "@/app/dashboard/[projectId]/custody/wallet-provider-choices";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
@@ -297,33 +297,6 @@ function CustodyModeField({
  * @param props.onRecoveryLockChange - Called with whether leaving the form would strand a stored credential or key.
  * @returns The provider's credential form.
  */
-function ByokCredentialForm({
-  provider,
-  formId,
-  onPendingChange,
-  onRecoveryLockChange,
-}: {
-  provider: ByokCustodyProvider;
-  formId: string;
-  onPendingChange: (pending: boolean) => void;
-  onRecoveryLockChange: (locked: boolean) => void;
-}) {
-  switch (provider) {
-    case "privy":
-      return (
-        <PrivyCredentialForm
-          formId={formId}
-          onPendingChange={onPendingChange}
-          onRecoveryLockChange={onRecoveryLockChange}
-        />
-      );
-    default: {
-      const unhandledProvider: never = provider;
-      throw new Error(`Unhandled BYOK custody provider: ${String(unhandledProvider)}`);
-    }
-  }
-}
-
 interface SetupOptions {
   /** The BYOK provider whose credential form step 2 shows, or `null` when it shows none. */
   byokSetupProvider: ByokCustodyProvider | null;

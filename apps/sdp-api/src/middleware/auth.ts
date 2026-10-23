@@ -10,13 +10,13 @@
  * 6. Set auth context for downstream handlers
  */
 
-import { hashString } from "@sdp/payments/hash";
 import type { Action } from "@sdp/types/actions";
 import type { ApiKeyEnvironment } from "@sdp/types/api-keys";
 import type { Context, Next } from "hono";
 import { getDb } from "@/db/client";
 import { runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db/identity";
 import { extractApiKey, looksLikeApiKey } from "@/lib/api-key-format";
+import { hashApiKey } from "@/lib/api-key-hash";
 import {
   assertNoCachedTerminalRefusal,
   assertNotThrottled,
@@ -225,8 +225,7 @@ async function authenticateApiKeyRequest(c: Context<{ Bindings: Env }>): Promise
   }
 
   // Hash the key
-  const pepper = c.env.API_KEY_PEPPER;
-  const keyHash = await hashString(apiKey, pepper);
+  const keyHash = await hashApiKey(apiKey, c.env.API_KEY_PEPPER);
 
   // A hash this instance recently refused for good (unknown, revoked,
   // expired) is refused again from memory, with no Redis call or DB read.

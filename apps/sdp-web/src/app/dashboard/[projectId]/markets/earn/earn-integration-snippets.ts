@@ -704,7 +704,7 @@ export async function waitForEarnQueuedWithdrawal(
   const terminal = new Set(["fulfilled", "cancelled", "failed"]);
   while (true) {
     signal?.throwIfAborted();
-    const request = await getEarnQueuedWithdrawalRequest(withdrawalRequestId);
+    const request = await getEarnWithdrawalRequest(withdrawalRequestId);
     if (terminal.has(request.status)) return request;
     await new Promise<void>((resolve, reject) => {
       const onAbort = () => {
