@@ -7,7 +7,7 @@ import {
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { prerender } from "react-dom/static";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveIntegrationDetail } from "@/app/dashboard/[projectId]/integrations/integration-detail";
 import { IntegrationDetailSkeleton } from "@/app/dashboard/[projectId]/integrations/integrations-skeleton";
 import {
@@ -63,7 +63,9 @@ async function render(
 ): Promise<string> {
   const detail = resolveIntegrationDetail({ provider, ...INPUTS });
   if (!detail) throw new Error(`unknown provider ${provider}`);
-  return markupOf(<IntegrationDetailView detail={detail} releaseChannel={releaseChannel} />);
+  // The Capabilities read the deployment's release channel themselves.
+  vi.stubEnv("SDP_RELEASE_CHANNEL", releaseChannel);
+  return markupOf(<IntegrationDetailView detail={detail} />);
 }
 
 /** The Capabilities section's chips, by visible label. */
@@ -72,6 +74,10 @@ function capabilityChips(markup: string): string[] {
     ([, label]) => label
   );
 }
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 beforeEach(() => {
   resetRequestProject();
@@ -133,9 +139,7 @@ describe("IntegrationDetailView", () => {
     for (const provider of ["privy", "moonpay", "range"]) {
       const detail = resolveIntegrationDetail({ provider, ...INPUTS });
       if (!detail) throw new Error(provider);
-      const markup = await markupOf(
-        <IntegrationDetailView detail={detail} releaseChannel="experimental" />
-      );
+      const markup = await markupOf(<IntegrationDetailView detail={detail} />);
       const blocks =
         (markup.match(/<section/g) ?? []).length + (markup.match(/<header/g) ?? []).length;
       expect(Math.abs(blocks - skeleton)).toBeLessThanOrEqual(1);

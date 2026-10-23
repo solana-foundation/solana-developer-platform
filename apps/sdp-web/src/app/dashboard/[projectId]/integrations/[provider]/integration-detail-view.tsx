@@ -1,5 +1,4 @@
 import type { CustodyWalletSummary } from "@sdp/types/custody";
-import type { SdpReleaseChannel } from "@sdp/types/release-channels";
 import { Button } from "@sdp/ui/button";
 import { VenetianMaskIcon } from "lucide-react";
 import Image from "next/image";
@@ -16,7 +15,7 @@ import {
   CustodyConnectionsSection,
 } from "@/app/dashboard/[projectId]/integrations/custody-connections-section";
 import type { IntegrationDetail } from "@/app/dashboard/[projectId]/integrations/integration-detail";
-import { custodyUseCasesInReleaseChannel } from "@/app/dashboard/[projectId]/integrations/integration-feature-gates";
+import { custodyUseCasesInDeploymentReleaseChannel } from "@/app/dashboard/[projectId]/integrations/integration-feature-gates";
 import { docsHref } from "@/components/dashboard-nav";
 import { getTranslations } from "@/i18n/server";
 import { COMPLIANCE_PROVIDER_LOGOS } from "@/lib/compliance";
@@ -250,17 +249,15 @@ function CustodyConnectionsBlock({
 
 function CapabilitiesSection({
   entry,
-  releaseChannel,
   t,
 }: {
   entry: NonNullable<IntegrationDetail["custodyEntry"]>;
-  releaseChannel: SdpReleaseChannel;
   t: Translate;
 }) {
   return (
     <Section title={t("Shared.integrations.detailCapabilities")}>
       <ul className="flex flex-wrap gap-2">
-        {custodyUseCasesInReleaseChannel(entry.useCases, releaseChannel).map((useCase) => (
+        {custodyUseCasesInDeploymentReleaseChannel(entry.useCases).map((useCase) => (
           <li
             key={useCase}
             className="rounded-full bg-fill-subtle px-3 py-1 text-sm text-secondary"
@@ -340,19 +337,16 @@ function HowItConnectsBody({ detail, t }: { detail: IntegrationDetail; t: Transl
  * @param props.detail - The resolved provider detail.
  * @param props.custodyConnections - The project's custody connections, or why there are none.
  * @param props.canManageCustody - Whether the viewer may manage custody connections.
- * @param props.releaseChannel - The deployment's release channel, which trims the Capabilities.
  * @returns The rendered detail page.
  */
 export async function IntegrationDetailView({
   detail,
   custodyConnections = null,
   canManageCustody = false,
-  releaseChannel,
 }: {
   detail: IntegrationDetail;
   custodyConnections?: CustodyConnectionsContext;
   canManageCustody?: boolean;
-  releaseChannel: SdpReleaseChannel;
 }) {
   const t = await getTranslations();
   const entry = detail.custodyEntry;
@@ -380,7 +374,7 @@ export async function IntegrationDetailView({
         </Section>
       ) : null}
 
-      {entry ? <CapabilitiesSection entry={entry} releaseChannel={releaseChannel} t={t} /> : null}
+      {entry ? <CapabilitiesSection entry={entry} t={t} /> : null}
 
       <Section title={t("Shared.integrations.detailHowItConnects")}>
         <HowItConnectsBody detail={detail} t={t} />

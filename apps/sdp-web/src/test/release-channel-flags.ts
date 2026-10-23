@@ -6,6 +6,7 @@ import {
 } from "@sdp/types/release-channels";
 import type { DashboardFlags } from "@/flags/dashboard";
 import { rampProvidersInReleaseChannel } from "@/flags/release-channel";
+import type { DesignModule } from "@/lib/design-modules";
 
 export type DashboardDesign = "legacy" | "redesign";
 
@@ -42,11 +43,13 @@ export function dashboardFlagsAt(
     markets: inChannel(releaseChannel, "markets"),
     newDesign,
     newDesignModules: {
+      overview: newDesign,
       wallets: newDesign,
+      issuance: newDesign,
       contacts: newDesign,
       payDeposit: newDesign,
       activity: newDesign,
-    },
+    } satisfies Record<DesignModule, boolean>,
     payments,
     paymentsDemoMode: false,
     privateChannels: inChannel(releaseChannel, "private_channels"),

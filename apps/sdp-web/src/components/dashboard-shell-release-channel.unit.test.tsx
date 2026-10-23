@@ -5,17 +5,28 @@ import {
   SDP_RAMP_PROVIDER_STAGES,
   SDP_RELEASE_CHANNEL_NAMES,
   type SdpModule,
+  type SdpReleaseChannel,
 } from "@sdp/types/release-channels";
 import { UNIFIED_TRANSACTION_MODULES } from "@sdp/types/unified-transactions";
 import { act, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { enabledTransactionModules } from "@/app/dashboard/[projectId]/payments/transactions/transaction-modules";
+import * as quickStart from "@/components/dashboard-quick-start";
+import { DashboardShell } from "@/components/dashboard-shell";
+import * as languagePicker from "@/components/language-picker";
+import * as networkDebugPanel from "@/components/network-debug-panel";
+import * as sentryUserContext from "@/components/sentry-user-context";
+import * as sidebarUserMenu from "@/components/sidebar-user-menu";
+import * as workspaceSwitcher from "@/components/workspace-switcher";
+import * as workspace from "@/contexts/dashboard-workspace-context";
+import type { DashboardFlags } from "@/flags/dashboard";
+import { getMessages } from "@/i18n/messages";
+import { I18nProvider } from "@/i18n/provider";
 import { setDashboardUrl } from "@/test/dashboard-navigation";
 import { SANDBOX_PROJECT } from "@/test/projects";
 import { DASHBOARD_DESIGNS, dashboardFlagsAt } from "@/test/release-channel-flags";
-import { DashboardShell } from "./dashboard-shell";
 
 vi.mock("@clerk/nextjs", () => ({
   useAuth: () => ({ isLoaded: true, isSignedIn: true, orgId: "org-release-channel" }),
@@ -25,50 +36,78 @@ vi.mock("@clerk/nextjs", () => ({
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
-vi.mock("@/i18n/provider", () => ({
-  useTranslations: () => (key: string) => key,
-  useLocale: () => "en",
-}));
-
-vi.mock("@/contexts/dashboard-workspace-context", () => ({
-  useOptionalDashboardWorkspace: () => undefined,
-  useDashboardWorkspace: () => ({
-    dashboardAccess: {
-      capabilities: { canReadApprovals: true, canManageOrgSettings: true },
-    },
-    dashboardCacheScope: { orgId: "org-release-channel", userId: "user-release-channel" },
-    selectedProjectId: SANDBOX_PROJECT.id,
-    isSidebarOpen: true,
-    setSidebarOpen: () => undefined,
-    isProjectSwitching: false,
-  }),
-}));
-
-vi.mock("@/components/workspace-switcher", () => ({ WorkspaceSwitcher: () => null }));
-vi.mock("@/components/sidebar-user-menu", () => ({ SidebarUserMenu: () => null }));
-vi.mock("@/components/dashboard-quick-start", () => ({ DashboardQuickStart: () => null }));
-vi.mock("@/components/network-debug-panel", () => ({ NetworkDebugPanel: () => null }));
-vi.mock("@/components/sentry-user-context", () => ({ SentryUserContext: () => null }));
-vi.mock("@/components/language-picker", () => ({ LanguagePicker: () => null }));
-
 const PROJECT = `/dashboard/${SANDBOX_PROJECT.id}`;
+const MESSAGES = getMessages("en");
+
+/** The shell's workspace: a signed-in admin on the sandbox Project with the sidebar open. */
+const WORKSPACE = {
+  dashboardAccess: { capabilities: { canReadApprovals: true, canManageOrgSettings: true } },
+  dashboardCacheScope: { orgId: "org-release-channel", userId: "user-release-channel" },
+  selectedProjectId: SANDBOX_PROJECT.id,
+  isSidebarOpen: true,
+  setSidebarOpen: () => undefined,
+  isProjectSwitching: false,
+};
+
+beforeEach(() => {
+  // SAFETY: the shell reads only the fields above from its workspace.
+  const value = WORKSPACE as unknown as ReturnType<typeof workspace.useDashboardWorkspace>;
+  vi.spyOn(workspace, "useDashboardWorkspace").mockReturnValue(value);
+  vi.spyOn(workspace, "useOptionalDashboardWorkspace").mockReturnValue(undefined);
+  // Chrome with its own data reads, none of which lists a module.
+  vi.spyOn(workspaceSwitcher, "WorkspaceSwitcher").mockReturnValue(<></>);
+  vi.spyOn(sidebarUserMenu, "SidebarUserMenu").mockReturnValue(<></>);
+  vi.spyOn(quickStart, "DashboardQuickStart").mockReturnValue(<></>);
+  vi.spyOn(networkDebugPanel, "NetworkDebugPanel").mockReturnValue(<></>);
+  vi.spyOn(sentryUserContext, "SentryUserContext").mockReturnValue(null);
+  vi.spyOn(languagePicker, "LanguagePicker").mockReturnValue(<></>);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+
+function shell(flags: DashboardFlags) {
+  return (
+    <I18nProvider locale="en" messages={MESSAGES}>
+      <DashboardShell flags={flags}>
+        <div />
+      </DashboardShell>
+    </I18nProvider>
+  );
+}
+
+function required<T>(value: T | null, what: string): T {
+  if (value === null) throw new Error(`The shell rendered no ${what}`);
+  return value;
+}
+
+function hrefs(anchors: Iterable<Element>): string[] {
+  return [...anchors].map((anchor) => required(anchor.getAttribute("href"), "link href"));
+}
+
+function runs(releaseChannel: SdpReleaseChannel, module: SdpModule): boolean {
+  return isModuleInReleaseChannel(releaseChannel, module, SDP_RAMP_PROVIDER_STAGES);
+}
 
 /**
- * The navigation link each module owns. A module is listed iff its release channel runs it,
+ * The navigation links each module owns. A module is listed iff its release channel runs it,
  * checked in both directions so a selector that stopped matching cannot pass as "absent".
  */
-const MODULE_LINKS = {
-  custody: [`${PROJECT}/wallets`, `${PROJECT}/integrations?tab=custody`],
-  payments: [`${PROJECT}/payments`],
-  compliance: [`${PROJECT}/integrations?tab=compliance`],
-  ramps: [`${PROJECT}/integrations?tab=ramps`],
-  issuance: [`${PROJECT}/issuance`],
-  markets: [`${PROJECT}/markets`],
-  earn: [`${PROJECT}/markets/embedded-yield`],
-  dvp: [`${PROJECT}/markets/dvp`],
-  private_channels: [`${PROJECT}/integrations?tab=privacy`],
-  helius_rings: [`${PROJECT}/helius-rings`],
-} as const satisfies Partial<Record<SdpModule, readonly string[]>>;
+const MODULE_LINKS: readonly (readonly [SdpModule, string])[] = [
+  ["custody", `${PROJECT}/wallets`],
+  ["custody", `${PROJECT}/integrations?tab=custody`],
+  ["payments", `${PROJECT}/payments`],
+  ["compliance", `${PROJECT}/integrations?tab=compliance`],
+  ["ramps", `${PROJECT}/integrations?tab=ramps`],
+  ["issuance", `${PROJECT}/issuance`],
+  ["markets", `${PROJECT}/markets`],
+  ["earn", `${PROJECT}/markets/embedded-yield`],
+  ["dvp", `${PROJECT}/markets/dvp`],
+  ["private_channels", `${PROJECT}/integrations?tab=privacy`],
+  ["helius_rings", `${PROJECT}/helius-rings`],
+];
 
 // Each opens its own subnav, so the sidebar lists that section's children.
 const PATHS = [`${PROJECT}/integrations`, `${PROJECT}/markets/treasury-solutions`];
@@ -77,26 +116,17 @@ const CASES = SDP_RELEASE_CHANNEL_NAMES.flatMap((releaseChannel) =>
   DASHBOARD_DESIGNS.map((design) => ({ releaseChannel, design }))
 );
 
-function sidebarLinks(flags: ReturnType<typeof dashboardFlagsAt>): Set<string> {
+function sidebarLinks(flags: DashboardFlags): Set<string> {
   const links = new Set<string>();
   for (const path of PATHS) {
     setDashboardUrl(path, {});
     const root = document.createElement("div");
-    root.innerHTML = renderToStaticMarkup(
-      <DashboardShell flags={flags}>
-        <div />
-      </DashboardShell>
-    );
-    for (const anchor of root.querySelectorAll("aside a[href]")) {
-      links.add(anchor.getAttribute("href") ?? "");
-    }
+    root.innerHTML = renderToStaticMarkup(shell(flags));
+    const sidebar = required(root.querySelector("aside"), "sidebar");
+    for (const href of hrefs(sidebar.querySelectorAll("a[href]"))) links.add(href);
   }
   return links;
 }
-
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
 
 describe("dashboard navigation on each release channel", () => {
   it.each(CASES)(
@@ -104,75 +134,60 @@ describe("dashboard navigation on each release channel", () => {
     ({ releaseChannel, design }) => {
       const links = sidebarLinks(dashboardFlagsAt(releaseChannel, design));
 
-      for (const [module, hrefs] of Object.entries(MODULE_LINKS)) {
-        const listed = isModuleInReleaseChannel(
-          releaseChannel,
-          module as SdpModule,
-          SDP_RAMP_PROVIDER_STAGES
-        );
-        for (const href of hrefs) {
-          expect(links.has(href), `${module} ${href}`).toBe(listed);
-        }
+      for (const [module, href] of MODULE_LINKS) {
+        expect(links.has(href), `${module} ${href}`).toBe(runs(releaseChannel, module));
       }
     }
   );
 
   // The previous design's phone swaps the sidebar for a bottom bar and a More sheet, each
   // wired to the flags by hand.
-  const PHONE_LINKS = {
-    custody: `${PROJECT}/wallets`,
-    payments: `${PROJECT}/payments`,
-    issuance: `${PROJECT}/issuance`,
-    markets: `${PROJECT}/markets`,
-    helius_rings: `${PROJECT}/helius-rings`,
-  } as const satisfies Partial<Record<SdpModule, string>>;
+  const PHONE_LINKS: readonly (readonly [SdpModule, string])[] = [
+    ["custody", `${PROJECT}/wallets`],
+    ["payments", `${PROJECT}/payments`],
+    ["issuance", `${PROJECT}/issuance`],
+    ["markets", `${PROJECT}/markets`],
+    ["helius_rings", `${PROJECT}/helius-rings`],
+  ];
 
   it.each(SDP_RELEASE_CHANNEL_NAMES)(
     "lists only %s's modules on the previous design's phone",
     async (releaseChannel) => {
       vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-      // jsdom lays nothing out; the header's tab strip scrolls its active tab into view.
-      Element.prototype.scrollIntoView = () => undefined;
       vi.stubGlobal("matchMedia", (query: string) => ({
         matches: false,
         media: query,
         addEventListener: () => undefined,
         removeEventListener: () => undefined,
       }));
+      // jsdom has no layout, so no `scrollIntoView`; the header's tab strip calls it.
+      Element.prototype.scrollIntoView = () => undefined;
       setDashboardUrl(`${PROJECT}/payments`, {});
       const container = document.createElement("div");
       document.body.append(container);
       const root = createRoot(container);
       try {
-        await act(async () =>
-          root.render(
-            <DashboardShell flags={dashboardFlagsAt(releaseChannel, "legacy")}>
-              <div />
-            </DashboardShell>
-          )
+        await act(async () => root.render(shell(dashboardFlagsAt(releaseChannel, "legacy"))));
+        const bottomNav = required(
+          container.querySelector("[data-dashboard-bottom-nav]"),
+          "bottom bar"
         );
-        const bottomNav = container.querySelector("[data-dashboard-bottom-nav]");
-        const links = new Set(
-          [...(bottomNav?.querySelectorAll("a[href]") ?? [])].map((a) => a.getAttribute("href"))
+        const links = new Set(hrefs(bottomNav.querySelectorAll("a[href]")));
+        const more = required(bottomNav.querySelector<HTMLButtonElement>("button"), "More button");
+        await act(async () => more.click());
+        const sheet = required(
+          container.querySelector("[data-dashboard-more-sheet]"),
+          "More sheet"
         );
-        await act(async () => bottomNav?.querySelector<HTMLButtonElement>("button")?.click());
-        const sheet = container.querySelector("[data-dashboard-more-sheet]");
-        expect(sheet).not.toBeNull();
-        for (const anchor of sheet?.querySelectorAll("a[href]") ?? []) {
-          links.add(anchor.getAttribute("href"));
-        }
+        for (const href of hrefs(sheet.querySelectorAll("a[href]"))) links.add(href);
 
-        for (const [module, href] of Object.entries(PHONE_LINKS)) {
-          const listed = isModuleInReleaseChannel(
-            releaseChannel,
-            module as SdpModule,
-            SDP_RAMP_PROVIDER_STAGES
-          );
-          expect(links.has(href), module).toBe(listed);
+        for (const [module, href] of PHONE_LINKS) {
+          expect(links.has(href), module).toBe(runs(releaseChannel, module));
         }
       } finally {
         await act(async () => root.unmount());
         container.remove();
+        Reflect.deleteProperty(Element.prototype, "scrollIntoView");
       }
     }
   );
@@ -183,16 +198,14 @@ describe("dashboard navigation on each release channel", () => {
       // The redesign has no module tabs; its Type filter is covered beside the page.
       const flags = dashboardFlagsAt(releaseChannel, "legacy");
       setDashboardUrl(`${PROJECT}/payments/transactions`, {});
-      const text = renderToStaticMarkup(
-        <DashboardShell flags={flags}>
-          <div />
-        </DashboardShell>
-      );
+      const root = document.createElement("div");
+      root.innerHTML = renderToStaticMarkup(shell(flags));
+      const tabs = [...root.querySelectorAll('[role="tab"]')].map((tab) => tab.textContent);
       const shown = enabledTransactionModules(flags);
+      expect(tabs.length).toBeGreaterThan(shown.length);
       for (const module of UNIFIED_TRANSACTION_MODULES) {
-        expect(text.includes(`DashboardPayments.transactions.modules.${module}`), module).toBe(
-          shown.includes(module)
-        );
+        const label = MESSAGES.DashboardPayments.transactions.modules[module];
+        expect(tabs.includes(label), module).toBe(shown.includes(module));
       }
     }
   );

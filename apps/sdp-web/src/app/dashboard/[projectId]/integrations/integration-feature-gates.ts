@@ -1,14 +1,12 @@
 import type { CustodyProviderUseCase } from "@sdp/types/custody";
 import { COMPLIANCE_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
-import {
-  isModuleInReleaseChannel,
-  SDP_RAMP_PROVIDER_STAGES,
-  type SdpModule,
-  type SdpReleaseChannel,
-} from "@sdp/types/release-channels";
+import type { SdpModule } from "@sdp/types/release-channels";
 import { isKnownCustodyProvider } from "@/app/dashboard/[projectId]/custody/provider-catalog";
 import type { DashboardFlags } from "@/flags/dashboard";
-import { rampProvidersInReleaseChannel } from "@/flags/release-channel";
+import {
+  isModuleInDeploymentReleaseChannel,
+  rampProvidersInReleaseChannel,
+} from "@/flags/release-channel";
 import { INTEGRATION_FAMILIES, type IntegrationFamily } from "./integrations-filter";
 
 export type IntegrationFeatureFlags = {
@@ -73,23 +71,17 @@ const CUSTODY_USE_CASE_MODULES = {
 } as const satisfies Record<CustodyProviderUseCase, SdpModule>;
 
 /**
- * A custody provider's use cases the release channel runs, so its Capabilities never
- * advertise a module the deployment refuses (Issuance on `stable`).
+ * A custody provider's use cases the deployment's release channel runs, so its Capabilities
+ * never advertise a module the deployment refuses (Issuance on `stable`).
  *
  * @param useCases - The provider's use cases.
- * @param releaseChannel - The deployment's release channel.
  * @returns The use cases whose module the channel runs, in their given order.
  */
-export function custodyUseCasesInReleaseChannel(
-  useCases: readonly CustodyProviderUseCase[],
-  releaseChannel: SdpReleaseChannel
+export function custodyUseCasesInDeploymentReleaseChannel(
+  useCases: readonly CustodyProviderUseCase[]
 ): CustodyProviderUseCase[] {
   return useCases.filter((useCase) =>
-    isModuleInReleaseChannel(
-      releaseChannel,
-      CUSTODY_USE_CASE_MODULES[useCase],
-      SDP_RAMP_PROVIDER_STAGES
-    )
+    isModuleInDeploymentReleaseChannel(CUSTODY_USE_CASE_MODULES[useCase])
   );
 }
 

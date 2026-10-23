@@ -5,76 +5,76 @@ import {
   SDP_RELEASE_CHANNEL_NAMES,
   type SdpReleaseChannel,
 } from "@sdp/types/release-channels";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import IntegrationDetailPage from "@/app/dashboard/[projectId]/integrations/[provider]/page";
+import { integrationsSkeletonLayout } from "@/app/dashboard/[projectId]/integrations/integration-feature-gates";
+import IntegrationsPage from "@/app/dashboard/[projectId]/integrations/page";
+import * as flags from "@/flags";
+import * as ramps from "@/flags/ramps";
 import { rampProvidersInReleaseChannel } from "@/flags/release-channel";
+import * as sdpApi from "@/lib/sdp-api";
 import { SANDBOX_PROJECT } from "@/test/projects";
 import { projectProviderAvailability } from "@/test/provider-availability";
 import { dashboardFlagsAt } from "@/test/release-channel-flags";
-import { integrationsSkeletonLayout } from "./integration-feature-gates";
-
-const channel = vi.hoisted(() => ({ current: "stable" as SdpReleaseChannel }));
-const mocks = vi.hoisted(() => ({
-  fetchProjectProviderAvailability: vi.fn(),
-  organizationFetch: vi.fn(),
-  projectRequest: vi.fn(),
-  projectFetch: vi.fn(),
-}));
+import { resetRequestProject, setPageRequest } from "@/test/request-project";
 
 vi.mock("@clerk/nextjs/server", () => ({
   auth: async () => ({ userId: "user_test", orgId: "org_test", orgRole: "org:admin" }),
 }));
 vi.mock("server-only", () => ({}));
-// Each flag read as the shell's snapshot would serve it with Vercel serving every flag on.
-vi.mock("@/flags", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/flags")>()),
-  privateChannels: async () => dashboardFlagsAt(channel.current).privateChannels,
-}));
-vi.mock("@/flags/ramps", () => ({
-  getOfferedRampProviders: async () =>
-    dashboardFlagsAt(channel.current).ramps ? rampProvidersInReleaseChannel(channel.current) : [],
-}));
-vi.mock("@/i18n/server", () => ({ getTranslations: async () => (key: string) => key }));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
-vi.mock("@/lib/auth-entry", () => ({ getAuthEntryPath: async () => "/sign-in" }));
-vi.mock("@/lib/provider-availability.server", () => ({
-  fetchProjectProviderAvailability: mocks.fetchProjectProviderAvailability,
-}));
-vi.mock("@/lib/sdp-api", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/sdp-api")>()),
-  createRequestScopedSdpApiClients: async () => ({
-    organizationClient: { request: vi.fn(), fetch: mocks.organizationFetch },
-    projectClient: { request: mocks.projectRequest, fetch: mocks.projectFetch },
-  }),
-}));
+vi.mock("next/headers", () => import("@/test/next-headers"));
 
-import IntegrationDetailPage from "./[provider]/page";
-import IntegrationsPage from "./page";
+// The Project may use every provider, so the release channel is the only gate left.
+const AVAILABILITY = projectProviderAvailability({
+  project: SANDBOX_PROJECT,
+  custody: [{ provider: "privy", modes: ["managed"] }],
+  compliance: [...COMPLIANCE_PROVIDERS],
+  ramps: [...RAMP_PROVIDERS],
+  earn: [],
+});
+
+/** Answers the reads both pages make, and fails on any other so a new read is noticed. */
+function apiClient(answers: Record<string, unknown>): sdpApi.SdpApiClient {
+  const answer = (path: string) => {
+    if (!(path in answers)) throw new Error(`Unexpected request: ${path}`);
+    return answers[path];
+  };
+  return {
+    request: async (path: string) => Response.json(answer(path)),
+    // SAFETY: each answer is the body the API returns for that path.
+    fetch: async <T>(path: string): Promise<T> => answer(path) as T,
+  };
+}
 
 function useChannel(releaseChannel: SdpReleaseChannel) {
-  channel.current = releaseChannel;
-  // The compliance gate reads the deployment's channel itself.
+  // The page reads the channel itself; the flags it reads are capped at it.
   vi.stubEnv("SDP_RELEASE_CHANNEL", releaseChannel);
+  const snapshot = dashboardFlagsAt(releaseChannel);
+  vi.spyOn(flags, "privateChannels").mockResolvedValue(snapshot.privateChannels);
+  vi.spyOn(ramps, "getOfferedRampProviders").mockResolvedValue(
+    snapshot.ramps ? rampProvidersInReleaseChannel(releaseChannel) : []
+  );
 }
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  resetRequestProject();
+  setPageRequest(`/dashboard/${SANDBOX_PROJECT.id}/integrations`);
+  vi.spyOn(sdpApi, "createRequestScopedSdpApiClients").mockImplementation(async () => ({
+    organizationClient: apiClient({
+      "/v1/onboarding/status": { linked: true, organization: { id: "org_test" } },
+    }),
+    projectClient: apiClient({
+      [`/v1/projects/${SANDBOX_PROJECT.id}/provider-availability`]: AVAILABILITY,
+      "/v1/wallets/configs": { data: { configs: [] } },
+      "/v1/private-channels/instance": { instance: { isActive: true } },
+    }),
+  }));
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllEnvs();
-  mocks.organizationFetch.mockResolvedValue({ linked: true, organization: { id: "org_test" } });
-  mocks.projectRequest.mockImplementation(async (path: string) => {
-    if (path === "/v1/wallets/configs") return Response.json({ data: { configs: [] } });
-    throw new Error(`Unexpected request: ${path}`);
-  });
-  mocks.projectFetch.mockResolvedValue({ instance: { isActive: true } });
-  // The Project may use every provider, so the release channel is the only gate left.
-  mocks.fetchProjectProviderAvailability.mockResolvedValue(
-    projectProviderAvailability({
-      project: SANDBOX_PROJECT,
-      custody: [{ provider: "privy", modes: ["managed"] }],
-      compliance: [...COMPLIANCE_PROVIDERS],
-      ramps: [...RAMP_PROVIDERS],
-      earn: [],
-    })
-  );
 });
 
 describe("integrations catalog on each release channel", () => {
@@ -96,7 +96,7 @@ describe("integrations catalog on each release channel", () => {
 
 describe("integration detail deep links on each release channel", () => {
   it.each(SDP_RELEASE_CHANNEL_NAMES)(
-    "opens a ramp or compliance provider's page only where %s runs it",
+    "opens a provider's page only where %s runs it",
     async (releaseChannel) => {
       useChannel(releaseChannel);
       const offered = rampProvidersInReleaseChannel(releaseChannel);
@@ -106,9 +106,10 @@ describe("integration detail deep links on each release channel", () => {
         SDP_RAMP_PROVIDER_STAGES
       );
       const expectations = [
+        ["privy", isModuleInReleaseChannel(releaseChannel, "custody", SDP_RAMP_PROVIDER_STAGES)],
         ...RAMP_PROVIDERS.map((provider) => [provider, offered.includes(provider)] as const),
         ...COMPLIANCE_PROVIDERS.map((provider) => [provider, compliance] as const),
-      ];
+      ] as const;
 
       for (const [provider, opens] of expectations) {
         const page = IntegrationDetailPage({ params: Promise.resolve({ provider }) });
@@ -120,11 +121,4 @@ describe("integration detail deep links on each release channel", () => {
       }
     }
   );
-
-  it("opens a custody provider on stable, its Capabilities trimmed to stable", async () => {
-    useChannel("stable");
-    const page = await IntegrationDetailPage({ params: Promise.resolve({ provider: "privy" }) });
-    // The view drops each Capability whose module the channel leaves out.
-    expect(page.props.releaseChannel).toBe("stable");
-  });
 });

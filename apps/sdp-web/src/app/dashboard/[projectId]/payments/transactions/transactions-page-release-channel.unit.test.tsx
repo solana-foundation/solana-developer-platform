@@ -1,59 +1,76 @@
-import { SDP_RELEASE_CHANNEL_NAMES } from "@sdp/types/release-channels";
-import { UNIFIED_TRANSACTION_MODULES } from "@sdp/types/unified-transactions";
+import { SDP_RELEASE_CHANNEL_NAMES, type SdpReleaseChannel } from "@sdp/types/release-channels";
+import {
+  UNIFIED_TRANSACTION_MODULES,
+  type UnifiedTransactionModule,
+} from "@sdp/types/unified-transactions";
 import type { ReactElement } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import LegacyOrRedesignTransactionsPage from "@/app/dashboard/[projectId]/payments/transactions/page";
+import { TransactionsPage as RedesignTransactionsPage } from "@/app/dashboard/[projectId]/payments/transactions/page.redesign";
+import { enabledTransactionModules } from "@/app/dashboard/[projectId]/payments/transactions/transaction-modules";
+import * as flags from "@/flags";
+import * as dashboardFlags from "@/flags/dashboard";
+import * as sdpApi from "@/lib/sdp-api";
 import { type DashboardDesign, dashboardFlagsAt } from "@/test/release-channel-flags";
-import TransactionsPage from "./page";
-import { enabledTransactionModules } from "./transaction-modules";
-
-const state = vi.hoisted(() => ({ design: "legacy" as DashboardDesign, flags: {} as unknown }));
-const fetchLegacyPage = vi.hoisted(() => vi.fn());
-const fetchRedesignPage = vi.hoisted(() => vi.fn());
 
 vi.mock("@clerk/nextjs/server", () => ({
   auth: async () => ({ userId: "user_test", orgId: "org_test" }),
 }));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
-vi.mock("@/flags/dashboard", () => ({ getDashboardFlags: async () => state.flags }));
-vi.mock("@/flags/new-design", () => ({
-  withLegacyDesign:
-    <P extends object>(Current: (props: P) => unknown, Legacy: (props: P) => unknown) =>
-    (props: P) =>
-      state.design === "redesign" ? Current(props) : Legacy(props),
-}));
-vi.mock("@/lib/sdp-api", () => ({
-  createSdpApiClient: async () => ({ request: vi.fn() }),
-  requestProjectHref: async (path: string) => path,
-}));
-vi.mock("../payments-page.data", () => ({
-  fetchIssuedTokensByMint: async () => ({}),
-  fetchPaymentsWallets: async () => ({ data: [] }),
-}));
-vi.mock("../counterparty/counterparty-page.data", () => ({
-  fetchCounterparties: async () => ({ data: [] }),
-}));
-vi.mock("./transactions-page.data", () => ({ fetchTransactionsPage: fetchLegacyPage }));
-vi.mock("./transactions-page.data.redesign", () => ({ fetchTransactionsPage: fetchRedesignPage }));
 
-type WorkspaceProps = { modules: string[]; initialFilters: { module?: string } };
+/** What both designs' pages hand their workspace that the release channel decides. */
+type WorkspaceProps = {
+  modules: UnifiedTransactionModule[];
+  initialFilters: { module?: UnifiedTransactionModule };
+};
+
+/** The API paths the page read, so a test can see which module it asked for. */
+const requestedPaths: string[] = [];
+
+/** Answers every read the page makes with an empty page, recording each path. */
+function emptyApiClient(): sdpApi.SdpApiClient {
+  const body = (path: string) =>
+    path.startsWith("/v1/transactions")
+      ? { transactions: [], nextCursor: null }
+      : { data: [], pagination: { page: 1, pageSize: 100, total: 0, totalPages: 0 } };
+  return {
+    request: async (path: string) => {
+      requestedPaths.push(path);
+      return Response.json(body(path));
+    },
+    fetch: async <T,>(path: string): Promise<T> => {
+      requestedPaths.push(path);
+      // SAFETY: each empty body matches the response type its reader declares for that path.
+      return body(path) as T;
+    },
+  };
+}
 
 async function renderPage(
-  releaseChannel: (typeof SDP_RELEASE_CHANNEL_NAMES)[number],
+  releaseChannel: SdpReleaseChannel,
   design: DashboardDesign,
   searchParams: Record<string, string>
 ): Promise<WorkspaceProps> {
-  state.design = design;
-  state.flags = dashboardFlagsAt(releaseChannel, design);
-  const element = (await TransactionsPage({
+  vi.spyOn(dashboardFlags, "getDashboardFlags").mockResolvedValue(
+    dashboardFlagsAt(releaseChannel, design)
+  );
+  // The legacy route picks its design by NEW DESIGN; the redesign is rendered directly.
+  vi.spyOn(flags, "newDesign").mockResolvedValue(false);
+  const page = design === "redesign" ? RedesignTransactionsPage : LegacyOrRedesignTransactionsPage;
+  // SAFETY: both pages return their workspace element, whose props include `WorkspaceProps`.
+  const element = (await page({
     searchParams: Promise.resolve(searchParams),
   })) as ReactElement<WorkspaceProps>;
   return element.props;
 }
 
 beforeEach(() => {
-  const page = { transactions: [], nextCursor: null };
-  fetchLegacyPage.mockReset().mockResolvedValue(page);
-  fetchRedesignPage.mockReset().mockResolvedValue(page);
+  requestedPaths.length = 0;
+  vi.spyOn(sdpApi, "createSdpApiClient").mockImplementation(async () => emptyApiClient());
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 // Legacy carries the module in `?tab=` (its header tabs), the redesign in `?module=`.
@@ -75,19 +92,20 @@ describe("transactions page on each release channel", () => {
   it.each(["legacy", "redesign"] as const)(
     "opens All on stable for a deep link to a module stable hides (%s)",
     async (design) => {
-      const fetchPage = design === "legacy" ? fetchLegacyPage : fetchRedesignPage;
       const shown = enabledTransactionModules(dashboardFlagsAt("stable"));
       const hidden = UNIFIED_TRANSACTION_MODULES.filter((module) => !shown.includes(module));
       expect(hidden).not.toEqual([]);
       for (const module of hidden) {
+        requestedPaths.length = 0;
         const { initialFilters } = await renderPage("stable", design, {
           [MODULE_PARAM[design]]: module,
         });
         expect(initialFilters.module, module).toBeUndefined();
-        expect(fetchPage).toHaveBeenLastCalledWith(
-          expect.anything(),
-          expect.not.objectContaining({ module })
+        const transactionsRead = requestedPaths.filter((path) =>
+          path.startsWith("/v1/transactions")
         );
+        expect(transactionsRead, module).toHaveLength(1);
+        expect(transactionsRead[0], module).not.toContain(`module=${module}`);
       }
     }
   );
