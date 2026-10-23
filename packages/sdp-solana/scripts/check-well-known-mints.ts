@@ -28,11 +28,12 @@
 // 10 000), maximumFee)`, not as bps alone, because `maximumFee` is 0 today.
 // Each mint's other extension state is printed for the record.
 //
-// CI runs it only on pull requests that touch the catalogue, the decoder or
-// this script (`.github/workflows/well-known-mints.yml`): it needs public RPC,
-// and a rate-limited endpoint would make every pipeline flaky for no safety
-// gain. A scheduled run, which catches a fee or hook set after the entry
-// merged, is a follow-up in ADR 0012.
+// CI runs it on pull requests that touch the catalogue, the decoder or this
+// script (`.github/workflows/well-known-mints.yml`), and daily
+// (`.github/workflows/well-known-mints-watch.yml`), which alerts on any failure
+// here: a fee or a hook set after an entry merged. No other pull request runs
+// it: it needs public RPC, and a rate-limited endpoint would make every
+// pipeline flaky for no safety gain.
 
 import {
   SOLANA_CLUSTERS,
