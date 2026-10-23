@@ -32,6 +32,7 @@
 
 import {
   createRpc,
+  createRpcFromTransport,
   getSignatureStatuses,
   getSignaturesForAddress,
   getTransaction,
@@ -63,6 +64,7 @@ import {
 } from "@/services/private-channels/project-rpc";
 import { describeTransactionErr } from "@/services/private-channels/tx-error";
 import { emitWithdrawalEvent } from "@/services/private-channels/withdraw-events";
+import { createCustomerRpcTransport } from "@/services/rpc-egress";
 import type { Env } from "@/types/env";
 
 const STUCK_AFTER_MS = 5 * 60 * 1000;
@@ -116,7 +118,15 @@ export async function trackPendingWithdrawals(env: Env): Promise<void> {
   const gatewayRpcFor = (instance: PrivateChannelInstanceRow): SolanaRpc => {
     let rpc = gatewayRpcs.get(instance.gateway_url);
     if (!rpc) {
-      rpc = createRpc(env, { rpcUrl: instance.gateway_url });
+      // A persisted gateway URL is tenant-controlled, so outside development
+      // it is dialed through the guarded transport — DNS-checked at connect
+      // time, redirects re-guarded per hop — the same egress every other
+      // tenant-URL dial uses. Development keeps the plain client: local
+      // gateway endpoints legitimately resolve to loopback.
+      rpc =
+        env.ENVIRONMENT === "development"
+          ? createRpc(env, { rpcUrl: instance.gateway_url })
+          : createRpcFromTransport(createCustomerRpcTransport(instance.gateway_url));
       gatewayRpcs.set(instance.gateway_url, rpc);
     }
     return rpc;

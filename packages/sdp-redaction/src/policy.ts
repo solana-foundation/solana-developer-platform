@@ -38,8 +38,10 @@ const CREDENTIAL_KEYS = new Set([
   "cookies",
   "credential",
   "credentials",
+  "passphrase",
   "password",
   "pem",
+  "seed",
   "secret",
   "setcookie",
   // `signingKey` names key material far more often than metadata, so the bare
@@ -52,15 +54,19 @@ const CREDENTIAL_KEYS = new Set([
 // `apikey` is a suffix rule, not just an exact one: normalization strips the
 // separators from the `x-api-key` header to `xapikey`, which an exact match
 // would miss — and that header is exactly what lands in a Sentry
-// `request.headers` payload.
-const CREDENTIAL_KEY_SUFFIXES = ["secret", "password", "token", "pem", "apikey"];
+// `request.headers` payload. `passphrase` rides here rather than the exact set
+// alone so `walletPassphrase` is covered too.
+const CREDENTIAL_KEY_SUFFIXES = ["secret", "password", "passphrase", "token", "pem", "apikey"];
 
 // Key-material names that no suffix or exact rule above catches. `secretKey`
 // is the literal field a Solana keypair JSON file uses for the full 64-byte
 // secret — the single most damaging object a blockchain telemetry payload can
 // carry — and `mnemonic`/`seedPhrase` are the two standard spellings of the
 // wallet recovery secret. Fragments, so `payerSecretKey` and `seedMnemonic`
-// are covered too; nothing in NEVER_REDACTED_KEYS contains any of them.
+// are covered too; nothing in NEVER_REDACTED_KEYS contains any of them. The
+// bare `seed` is exact-only (in CREDENTIAL_KEYS above), not a fragment: a PDA
+// derivation logs public `seeds` arrays, and a fragment rule would redact
+// those too.
 const CREDENTIAL_KEY_FRAGMENTS = [
   "privatekey",
   "secretpayload",
