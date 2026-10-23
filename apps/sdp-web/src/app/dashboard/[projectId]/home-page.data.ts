@@ -1,9 +1,10 @@
-import type { PaymentTransferStatus, PaymentTransferSummary } from "@sdp/types/payments";
-import type {
-  TokenTransaction,
-  TokenTransactionListItem,
-  TokenTransactionStatus,
+import { PAYMENT_TRANSFER_STATUSES, type PaymentTransferSummary } from "@sdp/types/payments";
+import {
+  TOKEN_TRANSACTION_STATUSES,
+  type TokenTransaction,
+  type TokenTransactionListItem,
 } from "@sdp/types/tokens";
+import { z } from "zod";
 import type { MessageKey } from "@/i18n/messages";
 import type { TranslationValues } from "@/i18n/translate";
 import { parseErrorMessage } from "@/lib/api-error";
@@ -14,29 +15,31 @@ import type { FetchResult } from "./payments/payments-page.data";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
-export interface HomeActivityExplorerRef {
-  kind: "tx" | "address";
-  value: string;
-}
+const homeActivityExplorerRefSchema = z.object({
+  kind: z.enum(["tx", "address"]),
+  value: z.string(),
+});
 
-export interface HomeActivityRow {
-  id: string;
-  createdAt: string;
-  type: string;
-  token: string;
-  /**
-   * Raw mint behind `token`, when there is one. `token` is already resolved here,
-   * but this builder only sees issued-token symbols — a holding the organization
-   * did not issue degrades to a shortened mint. Carrying the mint lets the client,
-   * which has the symbols that came back with the balances, name it properly.
-   */
-  tokenMint: string | null;
-  amount: string;
-  status: PaymentTransferStatus | TokenTransactionStatus;
-  address: string;
-  explorer: HomeActivityExplorerRef | null;
-  sourceKind: "payments" | "issuance";
-}
+/** One recent-activity row: what the activity route builds and the browser parses back. */
+export const homeActivityRowSchema = z.object({
+  id: z.string(),
+  createdAt: z.string(),
+  type: z.string(),
+  token: z.string(),
+  // Raw mint behind `token`, when there is one. `token` is already resolved here,
+  // but this builder only sees issued-token symbols, so a holding the organization
+  // did not issue degrades to a shortened mint. Carrying the mint lets the client,
+  // which has the symbols that came back with the balances, name it properly.
+  tokenMint: z.string().nullable(),
+  amount: z.string(),
+  status: z.union([z.enum(PAYMENT_TRANSFER_STATUSES), z.enum(TOKEN_TRANSACTION_STATUSES)]),
+  address: z.string(),
+  explorer: homeActivityExplorerRefSchema.nullable(),
+  sourceKind: z.enum(["payments", "issuance"]),
+});
+
+export type HomeActivityExplorerRef = z.infer<typeof homeActivityExplorerRefSchema>;
+export type HomeActivityRow = z.infer<typeof homeActivityRowSchema>;
 
 /**
  * Filters cached Home activity through the current module flags. The API route

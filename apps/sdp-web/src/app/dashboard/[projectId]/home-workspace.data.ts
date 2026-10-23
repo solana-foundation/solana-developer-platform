@@ -3,15 +3,12 @@
 import { z } from "zod";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
-import type { HomeActivityRow } from "./home-page.data";
+import { homeActivityRowSchema } from "./home-page.data";
 import { homeQueryKeys } from "./home-query-key";
 
 const homeActivityResponseSchema = z.object({
   data: z.object({
-    // The route builds each row as a HomeActivityRow; only that the list arrived is checked here.
-    activityRows: z.array(
-      z.custom<HomeActivityRow>((row) => typeof row === "object" && row !== null)
-    ),
+    activityRows: z.array(homeActivityRowSchema),
     activityError: z.string().nullable(),
     activityNotice: z.string().nullable(),
     todaysVolume: z.number().nullable(),

@@ -1,21 +1,15 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { TokenTransactionListItem } from "@sdp/types/tokens";
+import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
+import * as homePageData from "@/app/dashboard/[projectId]/home-page.data";
 
 const mocks = vi.hoisted(() => ({
   issuance: vi.fn(),
-  buildHomeActivityRows: vi.fn((): unknown[] => []),
-  computeTodaysVolume: vi.fn((): number | null => 0),
-  fetchOrgIssuanceActivity: vi.fn(),
   fetchDashboardPaymentTransfers: vi.fn(),
   fetchPaymentsIssuedTokenSymbols: vi.fn(),
   createSdpApiClient: vi.fn(),
 }));
 
 vi.mock("@/flags", () => ({ issuance: mocks.issuance }));
-vi.mock("@/app/dashboard/[projectId]/home-page.data", () => ({
-  buildHomeActivityRows: mocks.buildHomeActivityRows,
-  computeTodaysVolume: mocks.computeTodaysVolume,
-  fetchOrgIssuanceActivity: mocks.fetchOrgIssuanceActivity,
-}));
 vi.mock("@/app/dashboard/[projectId]/payments/payments-page.data", () => ({
   fetchDashboardPaymentTransfers: mocks.fetchDashboardPaymentTransfers,
   fetchPaymentsIssuedTokenSymbols: mocks.fetchPaymentsIssuedTokenSymbols,
@@ -36,9 +30,24 @@ vi.mock("@/lib/sdp-api", () => ({ createSdpApiClient: mocks.createSdpApiClient }
 
 import { GET } from "./route";
 
+const TODAY = "2026-10-23T09:00:00.000Z";
+const YESTERDAY = "2026-10-22T09:00:00.000Z";
+
+/** A transfer with the fields the row builder and the volume read. */
+function transfer(id: string, createdAt: string, amount: string) {
+  return { id, createdAt, amount, status: "completed", direction: "outbound", destination: "D" };
+}
+
 describe("GET /api/dashboard/home/activity", () => {
+  let buildHomeActivityRows: MockInstance<typeof homePageData.buildHomeActivityRows>;
+  let fetchOrgIssuanceActivity: MockInstance<typeof homePageData.fetchOrgIssuanceActivity>;
+
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-23T12:00:00.000Z"));
+    buildHomeActivityRows = vi.spyOn(homePageData, "buildHomeActivityRows");
+    fetchOrgIssuanceActivity = vi.spyOn(homePageData, "fetchOrgIssuanceActivity");
     mocks.issuance.mockResolvedValue(false);
     mocks.createSdpApiClient.mockResolvedValue({ request: vi.fn() });
     mocks.fetchDashboardPaymentTransfers.mockResolvedValue({
@@ -48,46 +57,50 @@ describe("GET /api/dashboard/home/activity", () => {
     });
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
   it("does not request or return issuance data while Issuance is disabled", async () => {
     const response = await GET(new Request("http://localhost/api/dashboard/home/activity"));
 
     expect(response.status).toBe(200);
-    expect(mocks.fetchOrgIssuanceActivity).not.toHaveBeenCalled();
+    expect(fetchOrgIssuanceActivity).not.toHaveBeenCalled();
     expect(mocks.fetchPaymentsIssuedTokenSymbols).not.toHaveBeenCalled();
-    expect(mocks.buildHomeActivityRows).toHaveBeenCalledWith([], [], expect.any(Function), {});
+    expect(buildHomeActivityRows).toHaveBeenCalledWith([], [], expect.any(Function), {});
   });
 
   it("includes issuance activity and token metadata while Issuance is enabled", async () => {
+    // SAFETY: the builder skips a listed transaction without a createdAt; only its passage counts.
+    const listed = [{ transaction: {} }] as unknown as TokenTransactionListItem[];
     mocks.issuance.mockResolvedValue(true);
-    mocks.fetchOrgIssuanceActivity.mockResolvedValue({ ok: true, data: [{ transaction: {} }] });
+    fetchOrgIssuanceActivity.mockResolvedValue({ ok: true, data: listed });
     mocks.fetchPaymentsIssuedTokenSymbols.mockResolvedValue({
       ok: true,
       data: [{ mintAddress: "mint_1", symbol: "ACME" }],
     });
-    mocks.buildHomeActivityRows.mockReturnValueOnce([{ id: "issuance_1", sourceKind: "issuance" }]);
 
     const response = await GET(new Request("http://localhost/api/dashboard/home/activity"));
 
     expect(response.status).toBe(200);
-    expect(mocks.fetchOrgIssuanceActivity).toHaveBeenCalledOnce();
+    expect(fetchOrgIssuanceActivity).toHaveBeenCalledOnce();
     expect(mocks.fetchPaymentsIssuedTokenSymbols).toHaveBeenCalledOnce();
-    expect(mocks.buildHomeActivityRows).toHaveBeenCalledWith(
-      [],
-      [{ transaction: {} }],
-      expect.any(Function),
-      { mint_1: "ACME" }
-    );
+    expect(buildHomeActivityRows).toHaveBeenCalledWith([], listed, expect.any(Function), {
+      mint_1: "ACME",
+    });
   });
 
   it("reports unavailable activity sources without fabricating rows", async () => {
     mocks.issuance.mockResolvedValue(true);
     mocks.fetchDashboardPaymentTransfers.mockResolvedValue({ ok: false, data: null });
-    mocks.fetchOrgIssuanceActivity.mockResolvedValue({ ok: false, data: null });
+    fetchOrgIssuanceActivity.mockResolvedValue({ ok: false, error: "issuance down" });
     mocks.fetchPaymentsIssuedTokenSymbols.mockResolvedValue({ ok: false, data: null });
 
     const response = await GET(new Request("http://localhost/api/dashboard/home/activity"));
     const body = await response.json();
 
+    expect(body.data.activityRows).toEqual([]);
     expect(body.data.activityError).toBe("Shared.homeWorkspace.paymentsActivityUnavailable");
     expect(body.data.activityNotice).toContain("Shared.homeWorkspace.issuanceActivityUnavailable");
   });
@@ -95,14 +108,14 @@ describe("GET /api/dashboard/home/activity", () => {
   it("says the list is partial when some wallets did not load, without an error", async () => {
     mocks.fetchDashboardPaymentTransfers.mockResolvedValue({
       ok: true,
-      data: [{ id: "transfer_1" }],
+      data: [transfer("transfer_1", TODAY, "12.5")],
       walletsNotLoaded: 1,
     });
-    mocks.buildHomeActivityRows.mockReturnValueOnce([{ id: "transfer_1", sourceKind: "payment" }]);
 
     const response = await GET(new Request("http://localhost/api/dashboard/home/activity"));
     const body = await response.json();
 
+    expect(body.data.activityRows).toHaveLength(1);
     expect(body.data.activityError).toBeNull();
     expect(body.data.activityNotice).toBe("Shared.homeWorkspace.somePaymentsActivityUnavailable");
     // Home is the caller that can say the list is partial, so it is the one that sets a deadline.
@@ -114,16 +127,15 @@ describe("GET /api/dashboard/home/activity", () => {
   it("totals today's volume from the list's own read once every wallet loaded", async () => {
     mocks.fetchDashboardPaymentTransfers.mockResolvedValue({
       ok: true,
-      data: [{ id: "transfer_1" }],
+      data: [transfer("transfer_1", TODAY, "125"), transfer("transfer_2", YESTERDAY, "50")],
       walletsNotLoaded: 0,
     });
-    mocks.computeTodaysVolume.mockReturnValueOnce(125);
 
     const response = await GET(new Request("http://localhost/api/dashboard/home/activity"));
     const body = await response.json();
 
     expect(mocks.fetchDashboardPaymentTransfers).toHaveBeenCalledOnce();
-    expect(mocks.computeTodaysVolume).toHaveBeenCalledWith([{ id: "transfer_1" }]);
+    expect(body.data.activityRows).toHaveLength(2);
     expect(body.data).toMatchObject({ todaysVolume: 125, todaysVolumeError: null });
   });
 
@@ -131,9 +143,12 @@ describe("GET /api/dashboard/home/activity", () => {
   it.each([
     [
       "a wallet failed or missed its deadline",
-      { ok: true, data: [{ id: "transfer_1" }], walletsNotLoaded: 1 },
+      { ok: true, data: [transfer("transfer_1", TODAY, "125")], walletsNotLoaded: 1 },
     ],
-    ["the wallet list failed", { ok: true, data: [{ id: "transfer_1" }], walletsNotLoaded: null }],
+    [
+      "the wallet list failed",
+      { ok: true, data: [transfer("transfer_1", TODAY, "125")], walletsNotLoaded: null },
+    ],
     ["the transfers read failed", { ok: false, data: null, walletsNotLoaded: 0 }],
   ])("reports the volume unavailable, not understated, when %s", async (_label, result) => {
     mocks.fetchDashboardPaymentTransfers.mockResolvedValue(result);
@@ -145,7 +160,6 @@ describe("GET /api/dashboard/home/activity", () => {
       todaysVolume: null,
       todaysVolumeError: "Shared.homeWorkspace.paymentsActivityUnavailable",
     });
-    expect(mocks.computeTodaysVolume).not.toHaveBeenCalled();
   });
 
   it("reports activity unavailable, not empty, when no wallet loaded and nothing else did", async () => {
@@ -167,10 +181,9 @@ describe("GET /api/dashboard/home/activity", () => {
   it("says the list is partial when the wallet list failed", async () => {
     mocks.fetchDashboardPaymentTransfers.mockResolvedValue({
       ok: true,
-      data: [{ id: "transfer_1" }],
+      data: [transfer("transfer_1", TODAY, "12.5")],
       walletsNotLoaded: null,
     });
-    mocks.buildHomeActivityRows.mockReturnValueOnce([{ id: "transfer_1", sourceKind: "payment" }]);
 
     const response = await GET(new Request("http://localhost/api/dashboard/home/activity"));
     const body = await response.json();

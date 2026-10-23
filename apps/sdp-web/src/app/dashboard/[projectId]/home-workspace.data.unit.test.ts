@@ -17,8 +17,22 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
 }));
 
 const ACTIVITY_PATH = "/api/dashboard/home/activity";
+const ADDRESS = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
 const SNAPSHOT = {
-  activityRows: [],
+  activityRows: [
+    {
+      id: "payment-xfr_1",
+      createdAt: "2026-10-23T12:00:00.000Z",
+      type: "Send",
+      token: "USDC",
+      tokenMint: null,
+      amount: "12.5",
+      status: "completed",
+      address: ADDRESS,
+      explorer: { kind: "address", value: ADDRESS },
+      sourceKind: "payments",
+    },
+  ],
   activityError: null,
   activityNotice: null,
   todaysVolume: 125,
@@ -54,6 +68,12 @@ describe("fetchHomeActivity", () => {
 
   it("rejects an answer without the volume instead of reading it as a $0.00 day", async () => {
     respond(200, { data: { activityRows: [], activityError: null, activityNotice: null } });
+
+    await expect(fetchHomeActivity()).rejects.toThrow();
+  });
+
+  it("rejects a row the route could not have built", async () => {
+    respond(200, { data: { ...SNAPSHOT, activityRows: [{ id: "payment-xfr_1" }] } });
 
     await expect(fetchHomeActivity()).rejects.toThrow();
   });
