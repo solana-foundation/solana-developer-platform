@@ -35,6 +35,7 @@ import {
 } from "@sdp/types/payments";
 // biome-ignore lint/style/noRestrictedImports: validates the provider ids an estimate response names; which providers to ask comes from getEnabledRampProviders()
 import { RAMP_PROVIDERS } from "@sdp/types/provider-access";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import type { Address } from "@solana/kit";
 import { z } from "zod";
 import type { MessageKey } from "@/i18n/messages";
@@ -537,6 +538,16 @@ export async function fetchWalletBalances(
   return snapshot;
 }
 
+/**
+ * The token a dashboard payment names: "SOL" for native SOL, else the mint.
+ * Wallet balances list native SOL under the wrapped SOL mint, and the API
+ * reads that mint as wrapped SOL, an SPL token (ADR 0012). The dashboard
+ * sends native SOL only, so it names it by symbol.
+ */
+export function dashboardPaymentToken(mint: string): string {
+  return mint === SOL_MINT ? "SOL" : mint;
+}
+
 export interface CreateTransferInput {
   transferId?: string;
   sourceCustodyWalletId: string;
@@ -618,7 +629,7 @@ export async function createTransfer(
       ...(input.transferId ? { transferId: input.transferId } : {}),
       sourceCustodyWalletId: input.sourceCustodyWalletId,
       destination: input.destination,
-      token: input.token,
+      token: dashboardPaymentToken(input.token),
       amount: input.amount,
       ...(input.memo ? { memo: input.memo } : {}),
     }),
@@ -702,7 +713,7 @@ export async function estimateTransferBatch(
   const response = await dashboardRequest("/api/dashboard/payments/transfers/batch/estimate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
+    body: JSON.stringify({ ...input, token: dashboardPaymentToken(input.token) }),
   });
   const body = (await response.json().catch(() => ({}))) as PaymentTransferBatchEstimateEnvelope;
   if (!response.ok) {
@@ -762,7 +773,7 @@ export async function createTransferBatch(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(input),
+      body: JSON.stringify({ ...input, token: dashboardPaymentToken(input.token) }),
     },
     idempotencyKey
   );

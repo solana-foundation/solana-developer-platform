@@ -1,4 +1,5 @@
 import type { Counterparty } from "@sdp/types/counterparties";
+import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { address } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setWindowPathname } from "@/test/window-location";
@@ -27,7 +28,7 @@ describe("Payments write requests", () => {
   const transferInput = {
     sourceCustodyWalletId: "cwlt_1",
     destination: "destination",
-    token: address("So11111111111111111111111111111111111111112"),
+    token: address(SOL_MINT),
     amount: "1",
   };
 
@@ -46,7 +47,12 @@ describe("Payments write requests", () => {
     await createTransfer(transferInput, t, null);
 
     const init = fetch.mock.calls[0]?.[1] as RequestInit;
-    expect(JSON.parse(String(init.body))).toEqual({ ...transferInput, transferId: "xfr_1" });
+    // Native SOL is named by symbol: the API reads the wrapped SOL mint as an SPL token.
+    expect(JSON.parse(String(init.body))).toEqual({
+      ...transferInput,
+      token: "SOL",
+      transferId: "xfr_1",
+    });
 
     const [keyed, unkeyed] = fetch.mock.calls.map(([, init]) => (init as RequestInit).headers);
     expect(keyed).toEqual(
@@ -60,6 +66,32 @@ describe("Payments write requests", () => {
     const unkeyedHeaders = new Headers(unkeyed);
     expect(unkeyedHeaders.get("x-project-id")).toBe("prj_test_sandbox");
     expect(unkeyedHeaders.get("Idempotency-Key")).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("names a token by its mint and native SOL by symbol, for a transfer and a batch", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ data: { transfer: { id: "trf_1", status: "pending", signature: null } } })
+      )
+      .mockResolvedValueOnce(jsonResponse({ data: { estimate: { transactionCount: 1 } } }));
+    vi.stubGlobal("fetch", fetch);
+    const usdc = address(WELL_KNOWN_TOKENS.USDC.mints.devnet.address);
+
+    await createTransfer({ ...transferInput, token: usdc }, t, null);
+    await estimateTransferBatch(
+      {
+        sourceCustodyWalletId: "cwlt_1",
+        token: SOL_MINT,
+        recipients: [{ counterpartyId: "cp_1", counterpartyAccountId: "acct_1", amount: "1" }],
+      },
+      t
+    );
+
+    const tokens = fetch.mock.calls.map(
+      ([, init]) => JSON.parse(String((init as RequestInit).body)).token
+    );
+    expect(tokens).toEqual([usdc, "SOL"]);
   });
 
   it("treats a 202 SIGNING_PENDING body like any other unexpected response", async () => {
