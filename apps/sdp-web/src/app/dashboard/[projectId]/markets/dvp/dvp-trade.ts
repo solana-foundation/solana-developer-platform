@@ -233,6 +233,22 @@ export function frozenLegs(trade: DvpTrade): DvpTradeLeg[] {
   return [trade.legs.a, trade.legs.b].filter((leg) => leg.funding?.frozen === true);
 }
 
+/** The funding warnings a trade raises, named so both surfaces agree on them. */
+export type DvpLegWarningKind = "frozen" | "surplus";
+
+/**
+ * Which funding warnings apply to a trade, in the order every surface shows
+ * them: a frozen escrow before a surplus. Shared by the trades list (whose
+ * row badge names the FIRST warning) and the detail page (whose callouts name
+ * each) so the two cannot disagree about which warning wins.
+ */
+export function dvpLegWarnings(trade: DvpTrade): ReadonlyArray<DvpLegWarningKind> {
+  const warnings: DvpLegWarningKind[] = [];
+  if (frozenLegs(trade).length > 0) warnings.push("frozen");
+  if (overFundedLegs(trade).length > 0) warnings.push("surplus");
+  return warnings;
+}
+
 /**
  * Funding progress as a 0..1 fraction, or null when nothing has been observed.
  *

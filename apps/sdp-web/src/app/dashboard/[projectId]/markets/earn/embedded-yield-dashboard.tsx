@@ -13,7 +13,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@sdp/
 import { cn } from "@sdp/ui/cn";
 import { ListEmptyState } from "@sdp/ui/list-empty-state";
 import { TableCell } from "@sdp/ui/table";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@sdp/ui/tooltip";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import {
   AlertTriangleIcon,
@@ -27,6 +26,7 @@ import {
 import { domAnimation, LazyMotion, m, useReducedMotion } from "motion/react";
 import Link from "next/link";
 import { Fragment, useMemo, useState } from "react";
+import { InfoTip } from "@/app/dashboard/[projectId]/markets/info-tip";
 import { EmbeddedYieldPortfolioSkeleton } from "@/app/dashboard/[projectId]/markets/markets-route-skeletons";
 import { truncateMiddle } from "@/app/dashboard/[projectId]/markets/truncate-middle";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
@@ -48,20 +48,13 @@ import { earnVaultHoldingValue } from "./earn-vault-holding";
 
 function PortfolioInfoTip({ label }: { label: string }) {
   return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            aria-label={label}
-            className="inline-flex items-center justify-center rounded-full text-tertiary transition-colors hover:text-primary"
-            type="button"
-          >
-            <InfoIcon aria-hidden="true" className="size-5" />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent className="max-w-72 text-xs leading-5">{label}</TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <InfoTip
+      contentClassName="max-w-72 text-xs leading-5"
+      label={label}
+      triggerClassName="inline-flex items-center justify-center rounded-full text-tertiary transition-colors hover:text-primary"
+    >
+      <InfoIcon aria-hidden="true" className="size-5" />
+    </InfoTip>
   );
 }
 

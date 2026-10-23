@@ -88,6 +88,7 @@ import {
   earnVaultWithdrawalUiState,
 } from "@/app/dashboard/[projectId]/markets/earn/earn-vault-ui-state";
 import { EarnVaultWithdrawalRequestsCard } from "@/app/dashboard/[projectId]/markets/earn/earn-vault-withdrawal-requests-card";
+import { InfoTip } from "@/app/dashboard/[projectId]/markets/info-tip";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { TokenMark } from "@/components/token-mark";
 import {
@@ -385,22 +386,27 @@ function displayedVaultPositions(
   return displayed;
 }
 
+/** `count` identical skeleton blocks, for a loading grid the loaded card fills. */
+function SkeletonRows({ className, count }: { className: string; count: number }) {
+  return (
+    <>
+      {Array.from({ length: count }, (_, index) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: static skeleton placeholders
+        <SkeletonBlock className={className} key={index} />
+      ))}
+    </>
+  );
+}
+
 function TreasuryInfoTip({ label }: { label: string }) {
   return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            aria-label={label}
-            className="inline-flex size-4 items-center justify-center rounded-full text-tertiary transition-colors hover:text-primary"
-            type="button"
-          >
-            <InfoIcon aria-hidden="true" className="size-3.5" />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent className="max-w-64 text-xs leading-5">{label}</TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <InfoTip
+      contentClassName="max-w-64 text-xs leading-5"
+      label={label}
+      triggerClassName="inline-flex size-4 items-center justify-center rounded-full text-tertiary transition-colors hover:text-primary"
+    >
+      <InfoIcon aria-hidden="true" className="size-3.5" />
+    </InfoTip>
   );
 }
 
@@ -419,20 +425,14 @@ function TreasuryPositionStatusBadge({ activity }: { activity?: TrackedVaultActi
       : t("DashboardMarkets.treasury.positionStatusActiveDescription");
 
   return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            aria-label={`${display.label}: ${description}`}
-            className="inline-flex cursor-help border-0 bg-transparent p-0"
-            type="button"
-          >
-            <Badge variant={display.variant}>{display.label}</Badge>
-          </button>
-        </TooltipTrigger>
-        <TooltipContent className="max-w-64 text-xs leading-5">{description}</TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <InfoTip
+      ariaLabel={`${display.label}: ${description}`}
+      contentClassName="max-w-64 text-xs leading-5"
+      label={description}
+      triggerClassName="inline-flex cursor-help border-0 bg-transparent p-0"
+    >
+      <Badge variant={display.variant}>{display.label}</Badge>
+    </InfoTip>
   );
 }
 
@@ -499,9 +499,7 @@ function TreasuryAllocationCard({
   if (isLoading) {
     return (
       <div className="grid gap-3 sm:grid-cols-3">
-        <SkeletonBlock className="h-[168px] rounded-2xl" />
-        <SkeletonBlock className="h-[168px] rounded-2xl" />
-        <SkeletonBlock className="h-[168px] rounded-2xl" />
+        <SkeletonRows className="h-[168px] rounded-2xl" count={3} />
       </div>
     );
   }
@@ -586,9 +584,7 @@ function TreasuryWalletsCard({
       </div>
       {isLoading ? (
         <div className="grid gap-3 md:grid-cols-3">
-          <SkeletonBlock className="h-[175px] rounded-2xl" />
-          <SkeletonBlock className="h-[175px] rounded-2xl" />
-          <SkeletonBlock className="h-[175px] rounded-2xl" />
+          <SkeletonRows className="h-[175px] rounded-2xl" count={3} />
         </div>
       ) : error ? (
         <p className="text-sm text-secondary">{t("DashboardMarkets.treasury.walletsError")}</p>
@@ -1126,8 +1122,7 @@ function ActiveVaultPositionsCard({
       <Card className="overflow-hidden rounded-2xl py-0">
         {isLoading ? (
           <div className="grid gap-3 px-6 py-5">
-            <SkeletonBlock className="h-14 rounded-xl" />
-            <SkeletonBlock className="h-14 rounded-xl" />
+            <SkeletonRows className="h-14 rounded-xl" count={2} />
           </div>
         ) : error && activePositions.length === 0 ? (
           <ListEmptyState
@@ -1540,9 +1535,7 @@ function TreasuryStrategiesCardBody({
   if (isLoading) {
     return (
       <div className="grid gap-3 px-6 py-5">
-        <SkeletonBlock className="h-14 rounded-xl" />
-        <SkeletonBlock className="h-14 rounded-xl" />
-        <SkeletonBlock className="h-14 rounded-xl" />
+        <SkeletonRows className="h-14 rounded-xl" count={3} />
       </div>
     );
   }

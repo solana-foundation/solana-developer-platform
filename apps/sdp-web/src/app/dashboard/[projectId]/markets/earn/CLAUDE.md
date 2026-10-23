@@ -340,6 +340,16 @@ nothing else; the program create still sends the body `requestId` form.
   strike and provider settlement. A held par intermediate opens straight into
   the par route over it (`parSource: "intermediate"`, Treasury's "Redeem
   wYLDS"), since no other exit can redeem it.
+- `earn-vault-async-withdrawal-flow.tsx` — the queued-request lifecycle the
+  queued-withdraw and par-redemption modals share: the stepper steps, the live
+  preview hook, the submission hook (fingerprint built by the caller — the two
+  modals sign different request shapes), the post-deadline cancel hook and the
+  blocking-issues list. One copy on purpose, same reasoning as the slippage
+  machinery: two copies of an escrow-and-recovery flow is how one drifts.
+- `earn-vault-result-screen.tsx` — the finished-step markup (mark, headline
+  with status badge, body, summary `<dl>`, note, Done) shared by the deposit
+  and withdrawal modals' result screens. Callers keep their own copy state
+  machines and rows; only the identical shell lives here.
 - `earn-vault-withdrawal-requests-card.tsx` — durable queued-request recovery.
   Its discovery read asks the server for `settled=false`, then polls request
   detail through terminal state. An expired request exposes an idempotent cancel

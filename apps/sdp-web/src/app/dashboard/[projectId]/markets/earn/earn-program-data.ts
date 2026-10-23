@@ -743,6 +743,41 @@ const earnVaultDepositOutcomeSchema = z
 export type EarnVaultDepositOutcome = z.infer<typeof earnVaultDepositOutcomeSchema>;
 
 /**
+ * The shared tail of every value-moving POST: one `dashboardFetch` carrying the
+ * idempotency-key header, the success envelope parsed through the route's own
+ * zod schema, and an unparseable success answer returned as a structured
+ * failure that still carries the raw body. Callers rebuild their request
+ * bodies field-by-field (the smuggling rule) and own their route's extra
+ * validation.
+ */
+async function postEarnOutcome<Schema extends z.ZodType>(input: {
+  path: string;
+  body: unknown;
+  idempotencyKey: string;
+  schema: Schema;
+  invalidMessage: string;
+  signal?: AbortSignal;
+}): Promise<DashboardFetchResult<z.output<Schema>>> {
+  const result = await dashboardFetch<unknown>(input.path, {
+    method: "POST",
+    headers: { [IDEMPOTENCY_KEY_HEADER]: input.idempotencyKey },
+    body: input.body,
+    signal: input.signal,
+  });
+  if (!result.ok) return result;
+  const parsed = input.schema.safeParse(result.data);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: input.invalidMessage,
+      status: result.status,
+      body: result.data,
+    } as const;
+  }
+  return { ok: true, status: result.status, data: parsed.data };
+}
+
+/**
  * Deposits from an SDP custody wallet into a non-custodial vault. The caller's
  * idempotency key is transport metadata and is never copied into the JSON body.
  */
@@ -762,26 +797,14 @@ export async function createEarnVaultDeposit(
     ...(input.sourceTokenMint === undefined ? {} : { sourceTokenMint: input.sourceTokenMint }),
     ...(input.swapSlippageBps === undefined ? {} : { swapSlippageBps: input.swapSlippageBps }),
   };
-  const result = await dashboardFetch<unknown>("/api/dashboard/markets/earn/vault-deposits", {
-    method: "POST",
-    headers: { [IDEMPOTENCY_KEY_HEADER]: idempotencyKey },
+  return postEarnOutcome({
+    path: "/api/dashboard/markets/earn/vault-deposits",
     body,
+    idempotencyKey,
+    schema: earnVaultDepositOutcomeSchema,
+    invalidMessage: "Invalid vault deposit response",
     signal,
   });
-
-  if (!result.ok) return result;
-
-  const invalid = {
-    ok: false,
-    error: "Invalid vault deposit response",
-    status: result.status,
-    body: result.data,
-  } as const;
-
-  const parsed = earnVaultDepositOutcomeSchema.safeParse(result.data);
-  if (!parsed.success) return invalid;
-
-  return { ok: true, status: result.status, data: parsed.data };
 }
 
 /**
@@ -1193,26 +1216,14 @@ export async function createEarnVaultWithdrawal(
     shares: input.shares,
     ...(input.minAmountOut === undefined ? {} : { minAmountOut: input.minAmountOut }),
   };
-  const result = await dashboardFetch<unknown>("/api/dashboard/markets/earn/vault-withdrawals", {
-    method: "POST",
-    headers: { [IDEMPOTENCY_KEY_HEADER]: idempotencyKey },
+  return postEarnOutcome({
+    path: "/api/dashboard/markets/earn/vault-withdrawals",
     body,
+    idempotencyKey,
+    schema: earnVaultWithdrawalOutcomeSchema,
+    invalidMessage: "Invalid vault withdrawal response",
     signal,
   });
-
-  if (!result.ok) return result;
-
-  const invalid = {
-    ok: false,
-    error: "Invalid vault withdrawal response",
-    status: result.status,
-    body: result.data,
-  } as const;
-
-  const parsed = earnVaultWithdrawalOutcomeSchema.safeParse(result.data);
-  if (!parsed.success) return invalid;
-
-  return { ok: true, status: result.status, data: parsed.data };
 }
 
 const earnVaultWithdrawalResponseSchema = z.object({
@@ -1453,44 +1464,63 @@ const earnVaultWithdrawalRequestRecordSchema: z.ZodType<EarnVaultWithdrawalReque
 
 type QueuedReadResult<T> = { kind: "ready"; value: T } | { kind: "unavailable" };
 
+/**
+ * The shared tail of the keyed POST reads (route discovery, the two live
+ * previews): an unusable answer of any shape degrades to `unavailable`, and a
+ * usable one is the parsed `data` envelope. No client-side provider list
+ * chooses a route.
+ */
+async function postEarnQueuedRead<T>(input: {
+  path: string;
+  body: unknown;
+  schema: z.ZodType<T>;
+  signal?: AbortSignal;
+}): Promise<QueuedReadResult<T>> {
+  const result = await dashboardFetch<unknown>(input.path, {
+    method: "POST",
+    body: input.body,
+    signal: input.signal,
+  });
+  if (!result.ok) return { kind: "unavailable" };
+  const parsed = z.object({ data: input.schema }).safeParse(result.data);
+  return parsed.success ? { kind: "ready", value: parsed.data.data } : { kind: "unavailable" };
+}
+
 /** Read settlement routes independently. No client-side provider list chooses one. */
 export async function fetchEarnVaultWithdrawalOptions(
   positionId: string,
   signal?: AbortSignal
 ): Promise<QueuedReadResult<EarnVaultWithdrawalOptions>> {
-  const result = await dashboardFetch<unknown>(
-    "/api/dashboard/markets/earn/vault-withdrawal-options",
-    { method: "POST", body: { positionId }, signal }
-  );
-  if (!result.ok) return { kind: "unavailable" };
-  const parsed = z.object({ data: earnVaultWithdrawalOptionsSchema }).safeParse(result.data);
-  return parsed.success ? { kind: "ready", value: parsed.data.data } : { kind: "unavailable" };
+  return postEarnQueuedRead({
+    path: "/api/dashboard/markets/earn/vault-withdrawal-options",
+    body: { positionId },
+    schema: earnVaultWithdrawalOptionsSchema,
+    signal,
+  });
 }
 
 export async function fetchEarnVaultQueuedWithdrawalPreview(
   input: EarnVaultQueuedWithdrawalTermsRequest,
   signal?: AbortSignal
 ): Promise<QueuedReadResult<EarnVaultQueuedWithdrawalPreview>> {
-  const result = await dashboardFetch<unknown>(
-    "/api/dashboard/markets/earn/vault-queued-withdrawal-previews",
-    { method: "POST", body: input, signal }
-  );
-  if (!result.ok) return { kind: "unavailable" };
-  const parsed = z.object({ data: earnVaultQueuedWithdrawalPreviewSchema }).safeParse(result.data);
-  return parsed.success ? { kind: "ready", value: parsed.data.data } : { kind: "unavailable" };
+  return postEarnQueuedRead({
+    path: "/api/dashboard/markets/earn/vault-queued-withdrawal-previews",
+    body: input,
+    schema: earnVaultQueuedWithdrawalPreviewSchema,
+    signal,
+  });
 }
 
 export async function fetchEarnVaultParRedemptionPreview(
   input: EarnVaultParRedemptionTermsRequest,
   signal?: AbortSignal
 ): Promise<QueuedReadResult<EarnVaultParRedemptionPreview>> {
-  const result = await dashboardFetch<unknown>(
-    "/api/dashboard/markets/earn/vault-queued-withdrawal-previews",
-    { method: "POST", body: input, signal }
-  );
-  if (!result.ok) return { kind: "unavailable" };
-  const parsed = z.object({ data: earnVaultParRedemptionPreviewSchema }).safeParse(result.data);
-  return parsed.success ? { kind: "ready", value: parsed.data.data } : { kind: "unavailable" };
+  return postEarnQueuedRead({
+    path: "/api/dashboard/markets/earn/vault-queued-withdrawal-previews",
+    body: input,
+    schema: earnVaultParRedemptionPreviewSchema,
+    signal,
+  });
 }
 
 const queuedMutationEnvelopeSchema = z.object({
@@ -1528,63 +1558,34 @@ export async function createEarnVaultWithdrawalRequest(
           deadlineSeconds: input.deadlineSeconds,
           ...(input.mechanism ? { mechanism: input.mechanism } : {}),
         };
-  const result = await dashboardFetch<unknown>(
-    "/api/dashboard/markets/earn/vault-withdrawal-requests",
-    {
-      method: "POST",
-      headers: { [IDEMPOTENCY_KEY_HEADER]: idempotencyKey },
-      body,
-    }
+  // The answer must name the mechanism the request asked for: a queue answer
+  // to an operator redemption (or the reverse) would misstate where the
+  // escrowed shares went.
+  const schema = earnVaultQueuedWithdrawalOutcomeSchema.refine(
+    (outcome) =>
+      (outcome.withdrawalRequest.mechanism === "operatorRedemption") ===
+      (input.mechanism === "operatorRedemption")
   );
-  if (!result.ok) return result;
-  const parsed = earnVaultQueuedWithdrawalOutcomeSchema.safeParse(result.data);
-  if (!parsed.success) {
-    return {
-      ok: false,
-      error: "Invalid queued withdrawal response",
-      status: result.status,
-      body: result.data,
-    };
-  }
-  if (
-    (input.mechanism === "operatorRedemption" &&
-      parsed.data.withdrawalRequest.mechanism !== "operatorRedemption") ||
-    (input.mechanism !== "operatorRedemption" &&
-      parsed.data.withdrawalRequest.mechanism === "operatorRedemption")
-  ) {
-    return {
-      ok: false,
-      error: "Invalid queued withdrawal response",
-      status: result.status,
-      body: result.data,
-    };
-  }
-  return { ok: true, status: result.status, data: parsed.data };
+  return postEarnOutcome({
+    path: "/api/dashboard/markets/earn/vault-withdrawal-requests",
+    body,
+    idempotencyKey,
+    schema,
+    invalidMessage: "Invalid queued withdrawal response",
+  });
 }
 
 export async function cancelEarnVaultWithdrawalRequest(
   withdrawalRequestId: string,
   idempotencyKey: string
 ): Promise<DashboardFetchResult<EarnVaultWithdrawalRequestRecord>> {
-  const result = await dashboardFetch<unknown>(
-    `/api/dashboard/markets/earn/vault-withdrawal-requests/${encodeURIComponent(withdrawalRequestId)}/cancel`,
-    {
-      method: "POST",
-      headers: { [IDEMPOTENCY_KEY_HEADER]: idempotencyKey },
-      body: {},
-    }
-  );
-  if (!result.ok) return result;
-  const parsed = queuedMutationEnvelopeSchema.safeParse(result.data);
-  if (!parsed.success) {
-    return {
-      ok: false,
-      error: "Invalid queued withdrawal cancellation response",
-      status: result.status,
-      body: result.data,
-    };
-  }
-  return { ok: true, status: result.status, data: parsed.data.data.withdrawalRequest };
+  return postEarnOutcome({
+    path: `/api/dashboard/markets/earn/vault-withdrawal-requests/${encodeURIComponent(withdrawalRequestId)}/cancel`,
+    body: {},
+    idempotencyKey,
+    schema: queuedMutationEnvelopeSchema.transform(({ data }) => data.withdrawalRequest),
+    invalidMessage: "Invalid queued withdrawal cancellation response",
+  });
 }
 
 export async function fetchEarnVaultWithdrawalRequest(

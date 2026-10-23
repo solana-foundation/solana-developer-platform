@@ -11,7 +11,7 @@ import {
 } from "@sdp/types/earn";
 import { earnProviderDepositSettlement } from "@sdp/types/provider-access";
 import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
-import { Badge, type BadgeVariant } from "@sdp/ui/badge";
+import type { BadgeVariant } from "@sdp/ui/badge";
 import { Button } from "@sdp/ui/button";
 import { cn } from "@sdp/ui/cn";
 import { Input } from "@sdp/ui/input";
@@ -22,7 +22,6 @@ import Link from "next/link";
 import { type ChangeEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { EarnFlowStepper } from "@/app/dashboard/[projectId]/markets/earn/earn-flow-stepper";
 import { EarnFlowTransition } from "@/app/dashboard/[projectId]/markets/earn/earn-flow-transition";
-import { EarnOutcomeMark } from "@/app/dashboard/[projectId]/markets/earn/earn-outcome-mark";
 import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { fetchResultAnswer } from "@/lib/idempotency";
@@ -68,6 +67,7 @@ import {
   vaultMovementProgressStep,
   vaultMovementProgressSteps,
 } from "./earn-vault-movement";
+import { VaultResultScreen } from "./earn-vault-result-screen";
 import {
   atomsToDecimalString,
   derivedMinOut,
@@ -82,11 +82,7 @@ import {
   type VaultQuoteState,
 } from "./earn-vault-slippage";
 import { VaultQuoteNotices, VaultSlippageSection } from "./earn-vault-slippage-section";
-import {
-  earnVaultDepositUiState,
-  earnVaultPositionStatusLabels,
-  vaultOutcomeTone,
-} from "./earn-vault-ui-state";
+import { earnVaultDepositUiState, earnVaultPositionStatusLabels } from "./earn-vault-ui-state";
 
 export type VaultDepositAmountValidation =
   | { kind: "valid"; canonicalAmount: string }
@@ -542,47 +538,40 @@ function DepositResult({
   const processing = deposit.status === "pending" || deposit.status === "submitted";
 
   return (
-    <>
-      {processing ? null : <EarnOutcomeMark tone={vaultOutcomeTone(statusVariant)} />}
-      <div className="flex items-center gap-2 pr-8">
-        <h2
-          className="text-base font-medium text-primary outline-none"
-          data-modal-focus-target
-          tabIndex={-1}
-        >
-          {copy.title}
-        </h2>
-        <Badge variant={statusVariant}>{status}</Badge>
-      </div>
-      <p className="mt-2 text-sm leading-5 text-secondary">{copy.body}</p>
-
-      <dl className="mt-5 grid gap-3 rounded-xl bg-fill-subtle px-4 py-3 text-sm">
-        <div className="flex items-baseline justify-between gap-5">
-          <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultStrategy")}</dt>
-          <dd className="max-w-64 text-right text-primary">{deposit.strategy.name}</dd>
-        </div>
-        <div className="flex items-baseline justify-between gap-5">
-          <dt className="text-tertiary">{t("DashboardEarn.withdraw.amountLabel")}</dt>
-          <dd className="text-right tabular-nums text-primary">
-            {formatTokenValue(outcome.amount, fundingMint, locale)}
-          </dd>
-        </div>
-        <div className="flex items-baseline justify-between gap-5">
-          <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultFrom")}</dt>
-          <dd className="max-w-64 text-right text-primary">{outcome.walletName}</dd>
-        </div>
-        <div className="flex items-baseline justify-between gap-5">
-          <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultTransaction")}</dt>
-          <dd className="text-right">
-            <TransactionLink cluster={deposit.strategy.hostCluster} signature={deposit.signature} />
-          </dd>
-        </div>
-      </dl>
-      <p className="mt-4 text-xs leading-5 text-tertiary">{copy.note}</p>
-      <div className="mt-5 flex justify-end">
-        <Button onClick={onClose}>{t("DashboardEarn.withdraw.done")}</Button>
-      </div>
-    </>
+    <VaultResultScreen
+      copy={copy}
+      status={status}
+      statusVariant={statusVariant}
+      processing={processing}
+      onClose={onClose}
+      rows={
+        <>
+          <div className="flex items-baseline justify-between gap-5">
+            <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultStrategy")}</dt>
+            <dd className="max-w-64 text-right text-primary">{deposit.strategy.name}</dd>
+          </div>
+          <div className="flex items-baseline justify-between gap-5">
+            <dt className="text-tertiary">{t("DashboardEarn.withdraw.amountLabel")}</dt>
+            <dd className="text-right tabular-nums text-primary">
+              {formatTokenValue(outcome.amount, fundingMint, locale)}
+            </dd>
+          </div>
+          <div className="flex items-baseline justify-between gap-5">
+            <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultFrom")}</dt>
+            <dd className="max-w-64 text-right text-primary">{outcome.walletName}</dd>
+          </div>
+          <div className="flex items-baseline justify-between gap-5">
+            <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultTransaction")}</dt>
+            <dd className="text-right">
+              <TransactionLink
+                cluster={deposit.strategy.hostCluster}
+                signature={deposit.signature}
+              />
+            </dd>
+          </div>
+        </>
+      }
+    />
   );
 }
 

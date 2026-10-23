@@ -53,11 +53,10 @@ import { DvpStatusBadge } from "./dvp-status";
 import {
   type DvpTrade,
   type DvpTradeLeg,
+  dvpLegWarnings,
   formatLegAmount,
-  frozenLegs,
   isDvpTradeClosed,
   matchesAddressQuery,
-  overFundedLegs,
 } from "./dvp-trade";
 import { DVP_TRADES_PAGE_SIZE, type DvpInboundTrade } from "./dvp-trades.data";
 import { resolveTradesListState } from "./dvp-trades-list-state";
@@ -223,11 +222,13 @@ function OwnTradeRow({ trade }: { trade: DvpTrade }) {
   // The two conditions need different words. Labelling a frozen escrow "holds
   // more than the trade needs" is not a vague warning, it is a false one, and it
   // is the only thing a screen reader gets from this icon.
-  const attention = frozenLegs(trade).length
-    ? t("DashboardMarkets.dvp.frozenTitle")
-    : overFundedLegs(trade).length
-      ? t("DashboardMarkets.dvp.surplusTitle")
-      : null;
+  const [firstWarning] = dvpLegWarnings(trade);
+  const attention =
+    firstWarning === "frozen"
+      ? t("DashboardMarkets.dvp.frozenTitle")
+      : firstWarning === "surplus"
+        ? t("DashboardMarkets.dvp.surplusTitle")
+        : null;
   const closed = isDvpTradeClosed(trade);
 
   return (

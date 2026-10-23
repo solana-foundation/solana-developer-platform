@@ -4,7 +4,7 @@ import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { EarnVaultPosition, EarnVaultWithdrawal } from "@sdp/types/earn";
 import { earnWithdrawSlippageFloor } from "@sdp/types/provider-access";
 import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
-import { Badge, type BadgeVariant } from "@sdp/ui/badge";
+import type { BadgeVariant } from "@sdp/ui/badge";
 import { Button } from "@sdp/ui/button";
 import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
@@ -13,7 +13,6 @@ import { Loader2Icon } from "lucide-react";
 import { type ChangeEvent, useEffect, useRef, useState } from "react";
 import { EarnFlowStepper } from "@/app/dashboard/[projectId]/markets/earn/earn-flow-stepper";
 import { EarnFlowTransition } from "@/app/dashboard/[projectId]/markets/earn/earn-flow-transition";
-import { EarnOutcomeMark } from "@/app/dashboard/[projectId]/markets/earn/earn-outcome-mark";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { fetchResultAnswer } from "@/lib/idempotency";
 import { settleMoneyIdempotencyKey } from "@/lib/idempotency-key-store";
@@ -39,6 +38,7 @@ import {
   vaultMovementProgressStep,
   vaultMovementProgressSteps,
 } from "./earn-vault-movement";
+import { VaultResultScreen } from "./earn-vault-result-screen";
 import {
   derivedMinOut,
   floorToReplay,
@@ -50,11 +50,7 @@ import {
   type VaultQuoteState,
 } from "./earn-vault-slippage";
 import { VaultQuoteNotices, VaultSlippageSection } from "./earn-vault-slippage-section";
-import {
-  earnVaultPositionStatusLabels,
-  earnVaultWithdrawalUiState,
-  vaultOutcomeTone,
-} from "./earn-vault-ui-state";
+import { earnVaultPositionStatusLabels, earnVaultWithdrawalUiState } from "./earn-vault-ui-state";
 import {
   VAULT_WITHDRAWAL_AMOUNT_DECIMALS,
   VAULT_WITHDRAWAL_SHARE_DECIMALS,
@@ -336,62 +332,52 @@ function WithdrawalResult({
   const processing = withdrawal.status === "requested" || withdrawal.status === "submitted";
 
   return (
-    <>
-      {processing ? null : <EarnOutcomeMark tone={vaultOutcomeTone(statusVariant)} />}
-      <div className="flex items-center gap-2 pr-8">
-        <h2
-          className="text-base font-medium text-primary outline-none"
-          data-modal-focus-target
-          tabIndex={-1}
-        >
-          {copy.title}
-        </h2>
-        <Badge variant={statusVariant}>{status}</Badge>
-      </div>
-      <p className="mt-2 text-sm leading-5 text-secondary">{copy.body}</p>
-
-      <dl className="mt-5 grid gap-3 rounded-xl bg-fill-subtle px-4 py-3 text-sm">
-        <div className="flex items-baseline justify-between gap-5">
-          <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultStrategy")}</dt>
-          <dd className="max-w-64 text-right text-primary">{positionName}</dd>
-        </div>
-        <div className="flex items-baseline justify-between gap-5">
-          <dt className="text-tertiary">
-            {t(
-              settlement === "provider_order"
-                ? "DashboardEarn.vaultWithdraw.sharesLabel"
-                : "DashboardEarn.vaultWithdraw.amountLabel"
-            )}
-          </dt>
-          <dd className="text-right tabular-nums text-primary">
-            {settlement === "provider_order"
-              ? requestedAmount
-              : formatTokenValue(requestedAmount, asset.mint, locale)}
-          </dd>
-        </div>
-        {settlement === "provider_order" ? null : (
+    <VaultResultScreen
+      copy={copy}
+      status={status}
+      statusVariant={statusVariant}
+      processing={processing}
+      onClose={onClose}
+      rows={
+        <>
           <div className="flex items-baseline justify-between gap-5">
-            <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.receiveAs")}</dt>
-            <dd className="text-right text-primary">{asset.symbol}</dd>
+            <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultStrategy")}</dt>
+            <dd className="max-w-64 text-right text-primary">{positionName}</dd>
           </div>
-        )}
-        {withdrawal.status === "requested" ? null : (
           <div className="flex items-baseline justify-between gap-5">
-            <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.transaction")}</dt>
-            <dd className="text-right">
-              <TransactionLink
-                cluster={CLUSTER_BY_SDP_ENVIRONMENT[environment]}
-                signature={withdrawal.signature}
-              />
+            <dt className="text-tertiary">
+              {t(
+                settlement === "provider_order"
+                  ? "DashboardEarn.vaultWithdraw.sharesLabel"
+                  : "DashboardEarn.vaultWithdraw.amountLabel"
+              )}
+            </dt>
+            <dd className="text-right tabular-nums text-primary">
+              {settlement === "provider_order"
+                ? requestedAmount
+                : formatTokenValue(requestedAmount, asset.mint, locale)}
             </dd>
           </div>
-        )}
-      </dl>
-      <p className="mt-4 text-xs leading-5 text-tertiary">{copy.note}</p>
-      <div className="mt-5 flex justify-end">
-        <Button onClick={onClose}>{t("DashboardEarn.withdraw.done")}</Button>
-      </div>
-    </>
+          {settlement === "provider_order" ? null : (
+            <div className="flex items-baseline justify-between gap-5">
+              <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.receiveAs")}</dt>
+              <dd className="text-right text-primary">{asset.symbol}</dd>
+            </div>
+          )}
+          {withdrawal.status === "requested" ? null : (
+            <div className="flex items-baseline justify-between gap-5">
+              <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.transaction")}</dt>
+              <dd className="text-right">
+                <TransactionLink
+                  cluster={CLUSTER_BY_SDP_ENVIRONMENT[environment]}
+                  signature={withdrawal.signature}
+                />
+              </dd>
+            </div>
+          )}
+        </>
+      }
+    />
   );
 }
 

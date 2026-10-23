@@ -45,16 +45,15 @@ import {
   type DvpTrade,
   type DvpTradeKind,
   type DvpTradeLeg,
+  dvpLegWarnings,
   dvpTimestampToIso,
   formatLegAmount,
   formatLegAmountWithSymbol,
-  frozenLegs,
   isDvpPartyView,
   isDvpTradeClosed,
   isDvpTradeOpen,
   legFundingRatio,
   legTransfers,
-  overFundedLegs,
 } from "./dvp-trade";
 import { useDvpTradeActions } from "./use-dvp-trade-actions";
 
@@ -870,8 +869,7 @@ function WarningTitle({ Icon, label }: { Icon: LucideIcon; label: string }) {
  */
 function TradeWarnings({ trade }: { trade: DvpTrade }) {
   const t = useTranslations();
-  const frozen = frozenLegs(trade);
-  const overFunded = overFundedLegs(trade);
+  const warnings = dvpLegWarnings(trade);
   // A leg paying out somewhere other than the address that funds it.
   // Legitimate and ordinary for an execution desk, and simultaneously the
   // exact shape of a forged trade: create is permissionless and the economic
@@ -907,7 +905,7 @@ function TradeWarnings({ trade }: { trade: DvpTrade }) {
         </Callout>
       ) : null}
 
-      {frozen.length > 0 ? (
+      {warnings.includes("frozen") ? (
         <Callout
           title={
             <WarningTitle Icon={SnowflakeIcon} label={t("DashboardMarkets.dvp.frozenTitle")} />
@@ -918,7 +916,7 @@ function TradeWarnings({ trade }: { trade: DvpTrade }) {
         </Callout>
       ) : null}
 
-      {overFunded.length > 0 ? (
+      {warnings.includes("surplus") ? (
         <Callout
           title={
             <WarningTitle Icon={TriangleAlertIcon} label={t("DashboardMarkets.dvp.surplusTitle")} />
