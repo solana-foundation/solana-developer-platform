@@ -170,8 +170,13 @@ async function prepareReview(result: ReturnType<typeof renderWizard>["result"], 
   await act(async () => result.current.handlePrimary());
 }
 
-/** A scaled mint's terms and a debit quote for SECOND_MINT: 1 shown is 0.5 token units. */
-function stubScaledMint(expiresAt: string) {
+/**
+ * A scaled mint's terms and its debit quotes for SECOND_MINT. Each quote prices
+ * 1 shown at the next of `tokenAmounts`, and the last one holds, as a mint whose
+ * multiplier moves between two reads.
+ */
+function stubScaledMint(expiresAt: string, tokenAmounts: readonly [string, ...string[]]) {
+  let quotes = 0;
   const base = fetchMock.getMockImplementation();
   fetchMock.mockImplementation((input, init) => {
     const url = String(input);
@@ -195,13 +200,15 @@ function stubScaledMint(expiresAt: string) {
       );
     }
     if (url === `/api/dashboard/tokens/${SECOND_MINT}/quote`) {
+      const amount = tokenAmounts[Math.min(quotes, tokenAmounts.length - 1)];
+      quotes += 1;
       return Promise.resolve(
         Response.json({
           data: {
             quote: {
               mint: SECOND_MINT,
-              amount: "0.5",
-              amounts: { basis: "debit", debit: "0.5", fee: "0", credit: "0.5", decimals: 6 },
+              amount,
+              amounts: { basis: "debit", debit: amount, fee: "0", credit: amount, decimals: 6 },
               feeEpoch: null,
               asOf: "2026-10-22T12:00:00.000Z",
               expiresAt,
@@ -228,6 +235,43 @@ function transferPosts() {
 
 function sentIdempotencyKeys() {
   return transferPosts().map(([, init]) => new Headers(init?.headers).get("Idempotency-Key"));
+}
+
+/** Types 1 as wallets show it, waits for its first quote (0.5), and goes on to Review. */
+async function reviewDisplayAmount(result: ReturnType<typeof renderWizard>["result"]) {
+  await resolveAccounts();
+  act(() => result.current.setField("accountId", cryptoAccount.id));
+  act(() => result.current.selectWallet("wallet-usdc"));
+  await waitFor(() => expect(result.current.amountEntry.displayEntryAvailable).toBe(true));
+  act(() => {
+    result.current.amountEntry.setUnit("display");
+    result.current.setField("displayAmount", "1");
+  });
+  await waitFor(() => expect(result.current.sendAmount).toBe("0.5"));
+  await act(async () => result.current.handlePrimary());
+  expect(result.current.currentStepId).toBe("REVIEW");
+}
+
+/** Prices the display amount again and waits until the new quote is read. */
+async function reprice(result: ReturnType<typeof renderWizard>["result"]) {
+  const priced = quotePosts().length;
+  act(() => result.current.amountEntry.refreshQuote());
+  await waitFor(() => expect(quotePosts()).toHaveLength(priced + 1));
+  await waitFor(() => expect(result.current.quoteInFlight).toBe(false));
+}
+
+function sentTransferBodies(): unknown[] {
+  return transferPosts().map(([, init]) => JSON.parse(String(init?.body)));
+}
+
+/** The transfer body for `amount` token units from the USDC wallet. */
+function transferBody(amount: string) {
+  return {
+    sourceCustodyWalletId: "wallet-usdc",
+    destination: DESTINATION,
+    token: SECOND_MINT,
+    amount,
+  };
 }
 
 beforeEach(() => {
@@ -391,7 +435,7 @@ describe("useOnchainSendWizard", () => {
     expect(result.current.addAccountOpen).toBe(false);
   });
   it("sends the token amount a display amount is priced at, never the display amount", async () => {
-    stubScaledMint("2099-01-01T00:00:00.000Z");
+    stubScaledMint("2099-01-01T00:00:00.000Z", ["0.5"]);
     const { result } = renderWizard();
     await resolveAccounts();
     act(() => result.current.setField("accountId", cryptoAccount.id));
@@ -423,7 +467,7 @@ describe("useOnchainSendWizard", () => {
   });
 
   it("refuses to send a display amount whose quote has expired", async () => {
-    stubScaledMint("2000-01-01T00:00:00.000Z");
+    stubScaledMint("2000-01-01T00:00:00.000Z", ["0.5"]);
     const { result } = renderWizard();
     await resolveAccounts();
     act(() => result.current.setField("accountId", cryptoAccount.id));
@@ -443,5 +487,46 @@ describe("useOnchainSendWizard", () => {
       "The price of this amount expired, so it was priced again. Check the amount and try again.",
       expect.anything()
     );
+  });
+
+  // A lost answer may mean the payment went out. A quote priced after it must not
+  // turn the retry into a new request under a new key, which could pay twice.
+  it("resends an unresolved attempt's token amount and key after the amount is priced again", async () => {
+    stubScaledMint("2099-01-01T00:00:00.000Z", ["0.5", "0.49"]);
+    transferStatus = 503;
+    const { result } = renderWizard();
+    await reviewDisplayAmount(result);
+    await act(async () => result.current.handlePrimary());
+
+    await reprice(result);
+    // Review still shows, and sends, what the first attempt sent.
+    expect(result.current.sendAmount).toBe("0.5");
+    expect(result.current.amountEntry.quote?.amount).toBe("0.5");
+    expect(result.current.readySubmission?.amount).toBe("0.5");
+    transferStatus = 200;
+    await act(async () => result.current.handlePrimary());
+
+    expect(sentTransferBodies()).toEqual([transferBody("0.5"), transferBody("0.5")]);
+    const [firstKey, retryKey] = sentIdempotencyKeys();
+    expect(retryKey).toBe(firstKey);
+    expect(result.current.transferResult).toEqual(transfer);
+  });
+
+  // A refusal retires the key: nothing was sent, so the next press is priced afresh.
+  it("prices the amount again once a refusal resolves the attempt", async () => {
+    stubScaledMint("2099-01-01T00:00:00.000Z", ["0.5", "0.49"]);
+    transferStatus = 422;
+    const { result } = renderWizard();
+    await reviewDisplayAmount(result);
+    await act(async () => result.current.handlePrimary());
+
+    await reprice(result);
+    expect(result.current.sendAmount).toBe("0.49");
+    transferStatus = 200;
+    await act(async () => result.current.handlePrimary());
+
+    expect(sentTransferBodies()).toEqual([transferBody("0.5"), transferBody("0.49")]);
+    const [refusedKey, nextKey] = sentIdempotencyKeys();
+    expect(nextKey).not.toBe(refusedKey);
   });
 });

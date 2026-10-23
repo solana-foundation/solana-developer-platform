@@ -65,6 +65,14 @@ export function claimTransferIdempotencyKey(fingerprint: string): string {
   return store.claim(fingerprint).key;
 }
 
+/**
+ * Whether this payment's key is kept: an attempt left it unretired, so the
+ * API may have run it, and the next send must be that request under that key.
+ */
+export function isTransferKeyKept(submission: CreateTransferInput): boolean {
+  return store.has(transferRequestFingerprint(submission));
+}
+
 /** Retire the key once an answer retires it (`answerRetiresKey`). */
 export function releaseTransferIdempotencyKey(fingerprint: string, key: string): void {
   store.release(fingerprint, key);
