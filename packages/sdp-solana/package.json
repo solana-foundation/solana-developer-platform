@@ -50,7 +50,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "test": "node --import tsx --test \"src/**/*.test.ts\" \"scripts/**/*.test.ts\"",
     "lint": "biome check src/ scripts/",
     "check:well-known-mints": "tsx scripts/check-well-known-mints.ts"
   },
