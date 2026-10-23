@@ -2,17 +2,11 @@ import { FeePaymentError } from "@sdp/fee-payment/port";
 import { hashString } from "@sdp/payments/hash";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { getRecentBlockhash } from "@sdp/rpc/solana";
-import { assertValidAddress } from "@sdp/solana/address";
-import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import {
-  type AccountMeta,
-  AccountRole,
   type Address,
-  address,
   appendTransactionMessageInstructions,
   type Blockhash,
   compileTransaction,
-  createNoopSigner,
   createTransactionMessage,
   getBase64Decoder,
   getBase64Encoder,
@@ -20,48 +14,48 @@ import {
   getSignatureFromTransaction,
   getTransactionDecoder,
   getTransactionEncoder,
-  type Instruction,
   pipe,
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
-  type TransactionSigner,
 } from "@solana/kit";
-import { getTransferSolInstruction } from "@solana-program/system";
-import {
-  findAssociatedTokenPda,
-  getCreateAssociatedTokenIdempotentInstruction,
-  getTransferCheckedInstruction,
-} from "@solana-program/token-2022";
 import type { Context } from "hono";
-import { z } from "zod";
 import { getDb } from "@/db/client";
 import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
 import { createSystemPaymentRequestsRepository } from "@/db/repositories/repository-factory";
+import {
+  type RecordedLegQuote,
+  recordedLegQuote,
+} from "@/db/repositories/token-movement-legs.repository";
 import { badRequest, rateLimited } from "@/lib/errors";
-import { resolveSourceTokenAccount } from "@/routes/payments/token-accounts";
 import { AuditService } from "@/services/audit.service";
-import { loadPaymentMint } from "@/services/payments/token-amount";
+import {
+  assertPlanMeetsExpectation,
+  paymentRequestPayment,
+} from "@/services/payments/payment-requests";
 import {
   createSponsorshipFeePayment,
   resolveProjectSponsorshipScope,
   type SponsorshipFeePayment,
 } from "@/services/sponsorship.service";
 import { sponsoredMessageDigest } from "@/services/sponsorship-budget.service";
+import {
+  buildPlannedPaymentRequestLeg,
+  type PlannedLeg,
+  type PlannedTokenMovement,
+  planTokenMovement,
+} from "@/services/token-movement/build";
 import type { Env } from "@/types/env";
 
 /** A payment request whose Project is known: the only kind `/pay` sponsors. */
 export type PayablePaymentRequest = PaymentRequestRow & { project_id: string };
 
 /**
- * What a payer scanning a payment request gets: the sponsored transaction to sign, or how long
- * another payer's live claim on the request still holds.
+ * What a payer scanning a payment request gets: the sponsored transaction to sign with the quote
+ * it moves, or how long another payer's live claim on the request still holds.
  */
-const sponsoredPaymentTransactionSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("signed"), transaction: z.string() }),
-  z.object({ kind: z.literal("held"), retryAfterSeconds: z.number().int().positive() }),
-]);
-
-export type SponsoredPaymentTransaction = z.infer<typeof sponsoredPaymentTransactionSchema>;
+export type SponsoredPaymentTransaction =
+  | { kind: "signed"; transaction: string; quote: RecordedLegQuote }
+  | { kind: "held"; retryAfterSeconds: number };
 
 /** Saved claims retain their original sponsor even after the configured signer rotates. */
 function assertSavedPayerIsNotSponsor(payer: Address, unsignedBase64: string): void {
@@ -86,10 +80,13 @@ function assertSavedPayerIsNotSponsor(payer: Address, unsignedBase64: string): v
  * @param params.payer - The account that pays and signs client-side.
  * @param params.recipient - The request's destination address.
  * @param params.reference - The request's Solana Pay reference account.
- * @returns The partially signed transaction, or the hold another payer's live claim places.
+ * @returns The partially signed transaction and its quote, or the hold another payer's live claim
+ *   places. A live claim the previous revision made has no issued record to settle by, so it is
+ *   held until it expires.
  * @throws AppError `RATE_LIMITED` when the claim is lost with no live claim to serve, or a
  *   concurrent claim superseded this one.
- * @throws AppError `BAD_REQUEST` when the payer is the sponsor or a SOL amount is not positive.
+ * @throws AppError `BAD_REQUEST` when the payer is the sponsor, or the token movement is refused
+ *   (an unsupported mint, a missing payer token account, a mint changed since creation).
  */
 export async function issuePaymentRequestTransaction(
   c: Context<{ Bindings: Env }>,
@@ -110,7 +107,7 @@ export async function issuePaymentRequestTransaction(
     if (claim === null || claim.lastValidBlockHeight < currentBlockHeight) {
       return null;
     }
-    if (claim.account !== payer) {
+    if (claim.account !== payer || claim.issued === null) {
       const retryAfterSeconds = Math.ceil(
         Number(claim.lastValidBlockHeight - currentBlockHeight) * 0.4
       );
@@ -120,9 +117,9 @@ export async function issuePaymentRequestTransaction(
     // signing an old claim or replaying bytes signed before this admission rule.
     assertSavedPayerIsNotSponsor(payer, claim.unsignedTransaction);
     if (claim.signedTransaction !== null) {
-      return { kind: "signed", transaction: claim.signedTransaction };
+      return { kind: "signed", transaction: claim.signedTransaction, quote: claim.issued.quote };
     }
-    return signAndStore(claim.unsignedTransaction);
+    return signAndStore(claim.unsignedTransaction, claim.issued.quote);
   };
 
   let feePaymentInstance: SponsorshipFeePayment | null = null;
@@ -141,7 +138,10 @@ export async function issuePaymentRequestTransaction(
     return feePaymentInstance;
   };
 
-  const signAndStore = async (unsignedBase64: string): Promise<SponsoredPaymentTransaction> => {
+  const signAndStore = async (
+    unsignedBase64: string,
+    quote: RecordedLegQuote
+  ): Promise<SponsoredPaymentTransaction> => {
     const feePayment = await getFeePayment();
     const unsignedBytes = new Uint8Array(getBase64Encoder().encode(unsignedBase64));
     // The intent is durable before signAsFeePayer reserves budget and Kora
@@ -157,6 +157,8 @@ export async function issuePaymentRequestTransaction(
         projectId: request.project_id,
         sponsoredAccount: payer,
         amount: request.amount,
+        debit: quote.quoted.debit.toString(),
+        transferFee: quote.quoted.fee.toString(),
         // Named tokenMint: a bare "token" key is scrubbed as a credential by
         // the audit redaction policy, and a mint address is not a secret.
         tokenMint: request.token,
@@ -182,7 +184,8 @@ export async function issuePaymentRequestTransaction(
       });
       throw error;
     }
-    // /pay bytes are partially signed by design: the payer signs client-side.
+    // /pay bytes are partially signed by design: the payer signs client-side. The sponsor, the
+    // fee payer, signs first, so its signature is the transaction id settlement reads.
     const signature = getSignatureFromTransaction(getTransactionDecoder().decode(sponsored));
     const signedBase64 = getBase64Decoder().decode(sponsored);
     await auditService.completeCritical(c, auditIntent, { metadata: { signature } });
@@ -191,6 +194,7 @@ export async function issuePaymentRequestTransaction(
       account: payer,
       unsignedTransaction: unsignedBase64,
       signedTransaction: signedBase64,
+      signature,
     });
     if (!stored) {
       const superseding = await repository.getSponsoredTransactionClaim(request.id);
@@ -199,14 +203,19 @@ export async function issuePaymentRequestTransaction(
         superseding !== null &&
         superseding.lastValidBlockHeight >= heightNow &&
         superseding.account === payer &&
-        superseding.signedTransaction !== null
+        superseding.signedTransaction !== null &&
+        superseding.issued !== null
       ) {
         assertSavedPayerIsNotSponsor(payer, superseding.unsignedTransaction);
-        return { kind: "signed", transaction: superseding.signedTransaction };
+        return {
+          kind: "signed",
+          transaction: superseding.signedTransaction,
+          quote: superseding.issued.quote,
+        };
       }
       throw rateLimited("This payment request's sponsored transaction was superseded; retry");
     }
-    return { kind: "signed", transaction: signedBase64 };
+    return { kind: "signed", transaction: signedBase64, quote };
   };
 
   const served = await serveLiveClaim();
@@ -219,13 +228,18 @@ export async function issuePaymentRequestTransaction(
   if (payer === feePayer) {
     throw badRequest("Payment payer cannot be the fee sponsor");
   }
+  const { plan, leg } = await planPaymentRequestTransfer(request, payer, params.recipient);
   const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
-  const unsignedBase64 = await buildPaymentTransaction({
-    ...params,
+  const unsignedBase64 = compilePaymentTransaction({
+    plan,
+    leg,
+    payer,
+    reference: params.reference,
     feePayer,
     blockhash,
     lastValidBlockHeight,
   });
+  const quote = recordedLegQuote(leg.quote);
 
   const claimed = await repository.claimSponsoredTransactionWindow({
     requestId: request.id,
@@ -233,6 +247,7 @@ export async function issuePaymentRequestTransaction(
     unsignedTransaction: unsignedBase64,
     lastValidBlockHeight,
     currentBlockHeight,
+    quote,
   });
   if (!claimed) {
     const winner = await serveLiveClaim();
@@ -242,124 +257,64 @@ export async function issuePaymentRequestTransaction(
     throw rateLimited("Another payer holds this payment request's sponsored transaction");
   }
 
-  return signAndStore(unsignedBase64);
+  return signAndStore(unsignedBase64, quote);
 }
 
 /**
- * The SPL transfer a payer signs for a payment request: an idempotent create
- * of the recipient's token account (rent from the sponsor) and a
- * `TransferChecked` from the payer's largest token account, the request's
- * amount as the debit.
+ * Plans the transfer a payer signs for a payment request (ADR 0012): the request's credit,
+ * quoted as a credit under the terms read now, so the payer pays the current transfer fee and
+ * the destination gets exactly the credit; from the payer's largest token account of the mint.
+ * Native SOL is a system transfer.
  *
- * Payment requests still settle through `validatePaymentRequestTransfer`,
- * which accepts only a final transfer instruction carrying the reference. So
- * /pay keeps this shape, and `loadPaymentMint`'s refusal of mints that rescale
- * or cannot move, until it settles on the signatures SDP issued (ADR 0012,
- * PR 3), and then builds with `buildTokenMovement`, whose
- * `TransferCheckedWithFee` and hook accounts that validation would refuse.
+ * RPC budget (before → now): a token mint's owner read and the payer's token accounts → the
+ * mint, the Clock and the destination token account in one `getMultipleAccounts`, beside the
+ * payer's token accounts (at once for a catalogue mint); a hook mint adds its validation account
+ * and any extra account read from data. Native SOL: none → none.
  *
- * RPC budget: the mint (none for a catalogue mint) and the payer's token
- * accounts, as before.
+ * @throws AppError (400) when the movement is refused, or no longer meets the expectation.
  */
-async function buildPaymentRequestSplTransfer(input: {
-  payer: TransactionSigner;
-  destination: Address;
-  mint: Address;
-  amount: string;
-  ataRentPayer: Address;
-}) {
-  const { tokenProgram, decimals, toBaseUnits } = await loadPaymentMint(input.mint);
-  const sourceTokenAccount = await resolveSourceTokenAccount(
-    input.payer.address,
-    input.mint,
-    tokenProgram
-  );
-  const transferAmount = toBaseUnits(input.amount);
-  if (transferAmount <= 0n) {
-    throw badRequest("Transfer amount must be greater than zero");
-  }
-  const [destinationTokenAccount] = await findAssociatedTokenPda({
-    owner: input.destination,
-    tokenProgram,
-    mint: input.mint,
+async function planPaymentRequestTransfer(
+  request: PaymentRequestRow,
+  payer: Address,
+  recipient: Address
+): Promise<{ plan: PlannedTokenMovement; leg: PlannedLeg }> {
+  const payment = paymentRequestPayment(request);
+  const plan = await planTokenMovement({
+    asset: payment.asset,
+    basis: "credit",
+    source: payer,
+    destinations: [{ owner: recipient, amount: payment.amount }],
+    memo: null,
   });
-  return {
-    createDestinationAtaInstruction: getCreateAssociatedTokenIdempotentInstruction({
-      payer: createNoopSigner(input.ataRentPayer),
-      ata: destinationTokenAccount,
-      owner: input.destination,
-      mint: input.mint,
-      tokenProgram,
-    }),
-    transferInstruction: getTransferCheckedInstruction(
-      {
-        source: sourceTokenAccount.tokenAccount,
-        mint: input.mint,
-        destination: destinationTokenAccount,
-        authority: input.payer,
-        amount: transferAmount,
-        decimals,
-      },
-      { programAddress: tokenProgram }
-    ),
-  };
+  assertPlanMeetsExpectation(plan, payment.expectation);
+  const [leg] = plan.legs;
+  if (leg === undefined) {
+    throw badRequest("Payment request transfer has no destination");
+  }
+  return { plan, leg };
 }
 
 /**
- * Compile the unsigned transfer a payment request asks for, with the request's reference account
- * on the transfer instruction so the payment can be found on chain.
+ * Compiles the unsigned transfer a payment request asks for, built by `buildTokenMovement` with
+ * the request's Solana Pay reference on the transfer instruction.
  *
- * @param params - The transfer and its lifetime.
- * @param params.request - The payment request: token and amount.
- * @param params.payer - The account that pays and signs client-side.
- * @param params.recipient - The request's destination address.
- * @param params.reference - The request's Solana Pay reference account.
- * @param params.feePayer - The sponsor, which also pays a missing destination token account's rent.
- * @param params.blockhash - The lifetime blockhash.
- * @param params.lastValidBlockHeight - The block height the blockhash expires after.
  * @returns The compiled, unsigned transaction as base64.
- * @throws AppError `BAD_REQUEST` when a SOL request's amount is not positive.
  */
-async function buildPaymentTransaction(params: {
-  request: PaymentRequestRow;
+function compilePaymentTransaction(params: {
+  plan: PlannedTokenMovement;
+  leg: PlannedLeg;
   payer: Address;
-  recipient: Address;
   reference: Address;
   feePayer: Address;
   blockhash: Blockhash;
   lastValidBlockHeight: bigint;
-}): Promise<string> {
-  const { request, recipient, reference, feePayer, blockhash, lastValidBlockHeight } = params;
-  const withReference = (instruction: Instruction & { accounts: readonly AccountMeta[] }) => ({
-    ...instruction,
-    accounts: [...instruction.accounts, { address: reference, role: AccountRole.READONLY }],
+}): string {
+  const { feePayer, blockhash, lastValidBlockHeight } = params;
+  const instructions = buildPlannedPaymentRequestLeg(params.plan, params.leg, {
+    payer: params.payer,
+    feePayer,
+    reference: params.reference,
   });
-  const payerSigner = createNoopSigner(params.payer);
-
-  let instructions: Instruction[];
-  if (request.token === SOL_MINT) {
-    const lamports = (await loadPaymentMint(address(SOL_MINT))).toBaseUnits(request.amount);
-    if (lamports <= 0n) {
-      throw badRequest("Transfer amount must be greater than zero");
-    }
-    const transferInstruction = getTransferSolInstruction({
-      source: payerSigner,
-      destination: recipient,
-      amount: lamports,
-    });
-    instructions = [withReference(transferInstruction)];
-  } else {
-    const { createDestinationAtaInstruction, transferInstruction } =
-      await buildPaymentRequestSplTransfer({
-        payer: payerSigner,
-        destination: recipient,
-        mint: assertValidAddress(request.token, "token"),
-        amount: request.amount,
-        ataRentPayer: feePayer,
-      });
-    instructions = [createDestinationAtaInstruction, withReference(transferInstruction)];
-  }
-
   const message = pipe(
     createTransactionMessage({ version: 0 }),
     (m) => setTransactionMessageFeePayer(feePayer, m),

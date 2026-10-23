@@ -104,6 +104,16 @@ export interface NewTokenMovementLeg {
   quote: MovementQuote;
 }
 
+/**
+ * A quote as the ledger stores it, without an owner: what a leg records. A
+ * table that keeps a quote for a leg written later (a payment request's
+ * issued transaction) stores these columns under the same names.
+ */
+export type RecordedLegQuote = Pick<
+  TokenMovementLeg,
+  "asset" | "decimals" | "basis" | "quoted" | "feeEpoch" | "asOf" | "displayRule"
+>;
+
 const LEG_PENDING_STATE = "pending" satisfies AmountVerificationState;
 
 /** `display_rule` as stored: the rule, with its timestamps as decimal strings. */
@@ -154,6 +164,24 @@ const legRowSchema = z.object({
 
 type LegRow = z.infer<typeof legRowSchema>;
 
+/** The recorded-quote columns of a row, under the leg's column names. */
+const recordedQuoteRowSchema = legRowSchema.pick({
+  asset_kind: true,
+  mint: true,
+  token_program: true,
+  decimals: true,
+  basis: true,
+  quoted_debit: true,
+  quoted_fee: true,
+  quoted_credit: true,
+  fee_epoch: true,
+  as_of_slot: true,
+  as_of_unix_timestamp: true,
+  display_rule: true,
+});
+
+type RecordedQuoteRow = z.infer<typeof recordedQuoteRowSchema>;
+
 /** A sum of non-negative whole numbers, as `sum(...)::text` returns it. */
 const wholeNumberSchema = z.string().regex(/^(0|[1-9][0-9]*)$/);
 
@@ -168,12 +196,12 @@ const batchTotalsRowSchema = z.object({
   credit: wholeNumberSchema,
 });
 
-function legAsset(row: LegRow): AssetRef {
+function recordedAsset(row: RecordedQuoteRow): AssetRef {
   if (row.asset_kind === "native") {
     return { kind: "native" };
   }
   if (row.mint === null || row.token_program === null) {
-    throw new Error(`Token movement leg ${row.id} names no mint`);
+    throw new Error("A recorded token movement quote names no mint");
   }
   return { kind: "token", mint: address(row.mint), program: row.token_program };
 }
@@ -256,15 +284,9 @@ function storedDisplayRule(rule: DisplayRule): StoredDisplayRule | null {
   }
 }
 
-/** Parses a `token_movement_legs` row: the database is a trust boundary too. */
-export function parseTokenMovementLegRow(raw: Record<string, unknown>): TokenMovementLeg {
-  const row = legRowSchema.parse(raw);
+function recordedQuoteOf(row: RecordedQuoteRow): RecordedLegQuote {
   return {
-    id: row.id,
-    organizationId: row.organization_id,
-    projectId: row.project_id,
-    owner: legOwner(row),
-    asset: legAsset(row),
+    asset: recordedAsset(row),
     decimals: row.decimals,
     basis: row.basis,
     quoted: amounts(row.quoted_debit, row.quoted_fee, row.quoted_credit),
@@ -277,6 +299,26 @@ export function parseTokenMovementLegRow(raw: Record<string, unknown>): TokenMov
             unixTimestamp: unixTimestamp(BigInt(row.as_of_unix_timestamp)),
           },
     displayRule: row.display_rule === null ? null : displayRuleOf(row.display_rule),
+  };
+}
+
+/**
+ * Parses the recorded-quote columns of a row that stores them under the leg's
+ * column names (`RECORDED_QUOTE_COLUMNS`).
+ */
+export function parseRecordedLegQuote(raw: Record<string, unknown>): RecordedLegQuote {
+  return recordedQuoteOf(recordedQuoteRowSchema.parse(raw));
+}
+
+/** Parses a `token_movement_legs` row: the database is a trust boundary too. */
+export function parseTokenMovementLegRow(raw: Record<string, unknown>): TokenMovementLeg {
+  const row = legRowSchema.parse(raw);
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    projectId: row.project_id,
+    owner: legOwner(row),
+    ...recordedQuoteOf(row),
     observed: observedAmounts(row),
     verification: { state: row.verification_state, reason: row.verification_reason },
     createdAt: row.created_at,
@@ -298,44 +340,78 @@ function quoteDisplayRule(quote: MovementQuote): DisplayRule {
   return quote.display === null ? { kind: "plain" } : quote.display.debit.rule;
 }
 
-const LEG_COLUMNS = `id, organization_id, project_id, payment_transfer_id,
-  payment_transfer_recipient_id, asset_kind, mint, token_program, decimals, basis,
+/** A quote as a leg records it. */
+export function recordedLegQuote(quote: MovementQuote): RecordedLegQuote {
+  const rule = quoteDisplayRule(quote);
+  return {
+    asset: quote.intent.asset,
+    decimals: quote.decimals,
+    basis: quote.intent.basis,
+    quoted: { debit: quote.debit, fee: quote.fee, credit: quote.credit },
+    feeEpoch: quote.feeEpoch,
+    asOf:
+      quote.asOf === null
+        ? null
+        : { slot: quote.asOf.slot, unixTimestamp: quote.asOf.unixTimestamp },
+    displayRule: rule.kind === "plain" ? null : rule,
+  };
+}
+
+/** The recorded-quote columns, in the order `recordedQuoteValues` binds them. */
+export const RECORDED_QUOTE_COLUMNS = `asset_kind, mint, token_program, decimals, basis,
   quoted_debit, quoted_fee, quoted_credit, fee_epoch, as_of_slot, as_of_unix_timestamp,
   display_rule`;
 
-const LEG_VALUES =
-  "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::numeric, ?::numeric, ?::numeric, ?::numeric, ?::numeric, ?, ?::jsonb)";
+/** Placeholders for `RECORDED_QUOTE_COLUMNS`. */
+export const RECORDED_QUOTE_VALUES =
+  "?, ?, ?, ?, ?, ?::numeric, ?::numeric, ?::numeric, ?::numeric, ?::numeric, ?, ?::jsonb";
+
+/** A value a leg statement binds: text (base units travel as decimal text), a number or NULL. */
+export type LegBinding = string | number | null;
+
+/** A recorded quote's values, in `RECORDED_QUOTE_COLUMNS` order. */
+export function recordedQuoteValues(quote: RecordedLegQuote): LegBinding[] {
+  const { asset } = quote;
+  const displayRule = quote.displayRule === null ? null : storedDisplayRule(quote.displayRule);
+  return [
+    asset.kind,
+    asset.kind === "token" ? asset.mint : null,
+    asset.kind === "token" ? asset.program : null,
+    quote.decimals,
+    quote.basis,
+    quote.quoted.debit.toString(),
+    quote.quoted.fee.toString(),
+    quote.quoted.credit.toString(),
+    quote.feeEpoch === null ? null : quote.feeEpoch.toString(),
+    quote.asOf === null ? null : quote.asOf.slot.toString(),
+    quote.asOf === null ? null : Number(quote.asOf.unixTimestamp),
+    displayRule === null ? null : JSON.stringify(displayRule),
+  ];
+}
+
+const LEG_COLUMNS = `id, organization_id, project_id, payment_transfer_id,
+  payment_transfer_recipient_id, ${RECORDED_QUOTE_COLUMNS}`;
+
+const LEG_VALUES = `(?, ?, ?, ?, ?, ${RECORDED_QUOTE_VALUES})`;
 
 function generateTokenMovementLegId(): string {
   return `tml_${crypto.randomUUID()}`;
 }
 
-/** A value a leg statement binds: text (base units travel as decimal text), a number or NULL. */
-export type LegBinding = string | number | null;
-
 /** One leg's values, in `LEG_COLUMNS` order. */
-function legValues(tenant: TenantScope, id: string, leg: NewTokenMovementLeg): LegBinding[] {
-  const { quote, owner } = leg;
-  const asset = quote.intent.asset;
-  const displayRule = storedDisplayRule(quoteDisplayRule(quote));
+function legValues(
+  tenant: TenantScope,
+  id: string,
+  owner: TokenMovementLegOwner,
+  quote: RecordedLegQuote
+): LegBinding[] {
   return [
     id,
     tenant.organizationId,
     tenant.projectId,
     owner.kind === "transfer" ? owner.transferId : null,
     owner.kind === "batch_recipient" ? owner.recipientId : null,
-    asset.kind,
-    asset.kind === "token" ? asset.mint : null,
-    asset.kind === "token" ? asset.program : null,
-    quote.decimals,
-    quote.intent.basis,
-    quote.debit.toString(),
-    quote.fee.toString(),
-    quote.credit.toString(),
-    quote.feeEpoch === null ? null : quote.feeEpoch.toString(),
-    quote.asOf === null ? null : quote.asOf.slot.toString(),
-    quote.asOf === null ? null : Number(quote.asOf.unixTimestamp),
-    displayRule === null ? null : JSON.stringify(displayRule),
+    ...recordedQuoteValues(quote),
   ];
 }
 
@@ -394,7 +470,9 @@ export function createPostgresTokenMovementLegsRepository(
         return [];
       }
       const ids = legs.map(() => generateTokenMovementLegId());
-      const values = legs.flatMap((leg, index) => legValues(tenant, ids[index], leg));
+      const values = legs.flatMap((leg, index) =>
+        legValues(tenant, ids[index], leg.owner, recordedLegQuote(leg.quote))
+      );
       const rows = await db.queryMany(
         `INSERT INTO token_movement_legs (${LEG_COLUMNS})
          VALUES ${legs.map(() => LEG_VALUES).join(", ")}
@@ -412,6 +490,40 @@ export function createPostgresTokenMovementLegsRepository(
         }
         return assertOwnRow(leg);
       });
+    },
+
+    /**
+     * Records the leg of a transfer that has already settled, with its
+     * verdict: a payment request's payment, built and signed by SDP, is
+     * recorded once its signature lands, from the quote its issued
+     * transaction kept.
+     *
+     * @returns The leg.
+     */
+    async insertSettledTransferLeg(input: {
+      transferId: string;
+      quote: RecordedLegQuote;
+      verdict: AmountVerificationVerdict;
+    }): Promise<TokenMovementLeg> {
+      const row = await db.queryOne(
+        `INSERT INTO token_movement_legs (${LEG_COLUMNS}, verification_state, verification_reason)
+         VALUES (?, ?, ?, ?, ?, ${RECORDED_QUOTE_VALUES}, ?, ?)
+         RETURNING *`,
+        [
+          ...legValues(
+            tenant,
+            generateTokenMovementLegId(),
+            { kind: "transfer", transferId: input.transferId },
+            input.quote
+          ),
+          input.verdict.state,
+          input.verdict.reason,
+        ]
+      );
+      if (row === null) {
+        throw new Error("token_movement_legs INSERT returned no row");
+      }
+      return assertOwnRow(parseTokenMovementLegRow(row));
     },
 
     /**
@@ -450,7 +562,15 @@ export function createPostgresTokenMovementLegsRepository(
                  AND movement.signature IS NOT NULL
             )
          RETURNING *`,
-        [...legValues(tenant, generateTokenMovementLegId(), leg), LEG_PENDING_STATE]
+        [
+          ...legValues(
+            tenant,
+            generateTokenMovementLegId(),
+            leg.owner,
+            recordedLegQuote(leg.quote)
+          ),
+          LEG_PENDING_STATE,
+        ]
       );
       return row === null ? null : assertOwnRow(parseTokenMovementLegRow(row));
     },

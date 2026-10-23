@@ -1,8 +1,10 @@
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { assertValidAddress } from "@sdp/solana/address";
+import { type BaseUnits, toTokenAmount } from "@sdp/solana/token-amount";
 import { getSdpDocsOrigin } from "@sdp/types/site";
 import { encodeURL } from "@solana/pay";
 import type { Context } from "hono";
+import type { RecordedLegQuote } from "@/db/repositories/token-movement-legs.repository";
 import { badRequest, rateLimited } from "@/lib/errors";
 import { assertMoneyStartAdmitted } from "@/lib/money-admission";
 import type { ValidatedBodyContext } from "@/middleware/validate";
@@ -18,6 +20,20 @@ import type { transactionRequestBodySchema } from "./schemas";
 
 const REQUEST_LABEL = "Solana Developer Platform";
 const REQUEST_ICON = `${getSdpDocsOrigin()}/icon.svg`;
+
+/**
+ * The message a wallet shows for the sponsored transfer: what the payer is debited, and, when the
+ * mint charges a transfer fee, the fee and what the recipient receives.
+ */
+function paymentMessage(quote: RecordedLegQuote, tokenLabel: string): string {
+  const { debit, fee, credit } = quote.quoted;
+  const units = (amount: BaseUnits) =>
+    `${toTokenAmount(amount, quote.decimals).value} ${tokenLabel}`;
+  const pay = `Pay ${units(debit)} to ${REQUEST_LABEL}`;
+  return fee === 0n
+    ? pay
+    : `${pay}, including a ${units(fee)} transfer fee; the recipient receives ${units(credit)}`;
+}
 
 /**
  * The public view of a payment request, with the Solana Pay transaction-request link while it
@@ -107,6 +123,6 @@ export async function createSponsoredTransaction(
   }
   return c.json({
     transaction: sponsored.transaction,
-    message: `Pay ${request.amount} ${resolveTokenLabel(request.token)} to ${REQUEST_LABEL}`,
+    message: paymentMessage(sponsored.quote, resolveTokenLabel(request.token)),
   });
 }

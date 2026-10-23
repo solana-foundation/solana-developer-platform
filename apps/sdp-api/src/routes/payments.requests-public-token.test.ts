@@ -1,5 +1,6 @@
 import type { Action } from "@sdp/types/actions";
 import { wellKnownMint } from "@sdp/types/well-known-tokens";
+import { address } from "@solana/kit";
 import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
@@ -10,6 +11,7 @@ import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { testExpectation } from "@/test/helpers/token-movement";
 import { seedTestDatabase } from "@/test/mocks/db";
 
 /**
@@ -105,6 +107,11 @@ describe("payment request public tokens", () => {
       destinationAddress: WALLET_ADDRESS,
       token: DEVNET_USDC,
       amount: "25.00",
+      expectation: testExpectation(
+        { kind: "token", mint: address(DEVNET_USDC), program: "spl-token" },
+        "25.00",
+        6
+      ),
       expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
       createdBy: USER_ID,
     });
