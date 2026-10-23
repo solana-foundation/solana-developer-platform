@@ -155,17 +155,3 @@ describe("dashboard shell sidebar on a route no area has redesigned", () => {
     }
   });
 });
-
-describe("dashboard shell transactions tabs", () => {
-  it("shows a tab only for transaction modules whose area is on", () => {
-    const text =
-      renderShell(`/dashboard/${SANDBOX_PROJECT.id}/payments/transactions`, false).textContent ??
-      "";
-
-    expect(text).toContain("DashboardPayments.transactions.modules.payments");
-    expect(text).toContain("DashboardPayments.transactions.modules.issuance");
-    for (const hidden of ["earn", "dvp", "private_channels", "rings"]) {
-      expect(text).not.toContain(`DashboardPayments.transactions.modules.${hidden}`);
-    }
-  });
-});

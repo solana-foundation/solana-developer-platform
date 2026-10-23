@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { CUSTODY_PROVIDER_CATALOG } from "@/app/dashboard/[projectId]/custody/provider-catalog";
 import { resolvePageLoadingComponent } from "@/components/dashboard-page-loading";
 import type { DashboardFlags } from "@/flags/dashboard";
+import { dashboardFlagsAt } from "@/test/release-channel-flags";
 import IntegrationDetailLoading from "./[provider]/loading";
 import { integrationsSkeletonLayout } from "./integration-feature-gates";
 import { INTEGRATION_FAMILIES } from "./integrations-filter";
@@ -120,20 +121,7 @@ describe("integration detail skeleton", () => {
 
   describe("client loading path", () => {
     // The shell's flag snapshot on `stable`: every non-stable module capped off.
-    const STABLE_FLAGS: DashboardFlags = {
-      assetProfiles: false,
-      compliance: false,
-      custody: true,
-      dvp: false,
-      earn: false,
-      heliusRings: false,
-      issuance: false,
-      markets: false,
-      payments: true,
-      privateChannels: false,
-      ramps: false,
-      releaseChannel: "stable",
-    };
+    const STABLE_FLAGS = dashboardFlagsAt("stable");
 
     function renderClientPath(flags: DashboardFlags): string {
       const PageLoading = resolvePageLoadingComponent("integrations");
@@ -147,8 +135,12 @@ describe("integration detail skeleton", () => {
     });
 
     it("drops a family its flag hides inside the release channel", () => {
-      const markup = renderClientPath({ ...STABLE_FLAGS, compliance: false });
-      expect(markup.match(SECTION)).toHaveLength(1);
+      // Private Channels' flag can turn it off on a channel that runs it.
+      const markup = renderClientPath({
+        ...dashboardFlagsAt("experimental"),
+        privateChannels: false,
+      });
+      expect(markup.match(SECTION)).toHaveLength(INTEGRATION_FAMILIES.length - 1);
     });
   });
 });
