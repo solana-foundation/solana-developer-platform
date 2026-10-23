@@ -34,6 +34,11 @@
       "import": "./src/token-2022.utils.ts",
       "default": "./src/token-2022.utils.ts"
     },
+    "./token-movement": {
+      "types": "./src/token-movement.ts",
+      "import": "./src/token-movement.ts",
+      "default": "./src/token-movement.ts"
+    },
     "./token-amount": {
       "types": "./src/token-amount.ts",
       "import": "./src/token-amount.ts",
@@ -57,6 +62,7 @@
   "dependencies": {
     "@sdp/rpc": "workspace:*",
     "@sdp/types": "workspace:*",
+    "@solana-program/system": "catalog:",
     "@solana-program/token-2022": "catalog:",
     "@solana/addresses": "catalog:",
     "@solana/fixed-points": "7.1.1",
@@ -66,7 +72,6 @@
     "@solana/sysvars": "catalog:"
   },
   "devDependencies": {
-    "@solana-program/system": "catalog:",
     "@solana/surfpool": "1.5.0",
     "tsx": "4.23.15"
   }
