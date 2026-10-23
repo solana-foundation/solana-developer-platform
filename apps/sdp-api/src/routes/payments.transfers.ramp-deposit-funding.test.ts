@@ -1,5 +1,6 @@
 import { formatDecimalAmount } from "@sdp/solana/amount";
-import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
+import { MEMO_PROGRAM_ADDRESS } from "@sdp/types/well-known-programs";
+import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { runWithSystemDatabaseIdentity } from "@/db/identity";
@@ -11,6 +12,7 @@ import { moonpayWebhook } from "@/services/ramps/webhooks/moonpay";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import {
   installClusterRpcResponder,
+  type JsonRpcResult,
   type StubTokenAccount,
   tokenAccountsByOwnerResult,
 } from "@/test/helpers/cluster-rpc";
@@ -32,9 +34,13 @@ import {
   readTransferResponse,
   readTransferRow,
 } from "@/test/helpers/payments-transfers";
+import { required } from "@/test/helpers/required";
 import {
   answerMovementAccounts,
+  associatedTokenAccount,
   mintRpcAccount,
+  sentInstructions,
+  tokenRpcAccount,
   transferFeeExtension,
 } from "@/test/helpers/token-movement";
 
@@ -350,6 +356,64 @@ describe("Payments routes — funding an off-ramp token deposit", () => {
         decimals: 6,
       },
       amountVerification: { state: "verified", reason: "sdp_built_transfer_landed" },
+    });
+  });
+
+  it("sends the request's memo to a provider destination that requires memos", async () => {
+    const transferId = generatePaymentTransferId();
+    await seedOfframpDeposit(transferId, DEVNET_PYUSD_MINT);
+    const destinationAccount = await associatedTokenAccount(
+      "token-2022",
+      DEVNET_PYUSD_MINT,
+      TEST_SOLANA_ADDRESSES.wallet2
+    );
+    answerMovementAccounts(
+      rpc,
+      new Map<string, JsonRpcResult>([
+        [DEVNET_PYUSD_MINT, mintRpcAccount("token-2022", { decimals: 6, extensions: [] })],
+        [
+          destinationAccount,
+          tokenRpcAccount("token-2022", {
+            mint: DEVNET_PYUSD_MINT,
+            owner: TEST_SOLANA_ADDRESSES.wallet2,
+            amount: 0n,
+            extensions: [
+              { __kind: "ImmutableOwner" },
+              { __kind: "MemoTransfer", requireIncomingTransferMemos: true },
+            ],
+          }),
+        ],
+      ])
+    );
+    rpc.answer(
+      "getTokenAccountsByOwner",
+      tokenAccountsByOwnerResult(1, [
+        {
+          pubkey: TEST_SOLANA_ADDRESSES.wallet3,
+          mint: DEVNET_PYUSD_MINT,
+          amount: "30000000",
+          decimals: 6,
+          uiAmountString: "30",
+          state: "initialized",
+        },
+      ])
+    );
+    const request = { ...usdcDepositRequest(transferId), token: "PYUSD", memo: "moonpay 42" };
+
+    const funded = await postTransfer(request, {});
+
+    const fundedText = await funded.text();
+    expect(funded.status, fundedText).toBe(200);
+    const [, transactionBytes] = required(sendTransactionMock.mock.calls.at(-1));
+    const instructions = sentInstructions(transactionBytes);
+    const transferIndex = instructions.findIndex(
+      (instruction) =>
+        instruction.programAddress === SPL_TOKEN_PROGRAMS["token-2022"] &&
+        instruction.accounts.includes(destinationAccount)
+    );
+    expect(instructions[transferIndex - 1]).toMatchObject({
+      programAddress: MEMO_PROGRAM_ADDRESS,
+      data: new TextEncoder().encode("moonpay 42"),
     });
   });
 
