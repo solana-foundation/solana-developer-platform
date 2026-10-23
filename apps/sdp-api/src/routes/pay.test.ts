@@ -44,6 +44,7 @@ import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import {
   clusterOfRpcClient,
   ENVIRONMENT_CLUSTER_CASES,
+  epochInfoResult,
   installClusterRpcResponder,
   tokenAccountsByOwnerResult,
 } from "@/test/helpers/cluster-rpc";
@@ -490,24 +491,32 @@ describe("Public payment request routes", () => {
       expect(Number(other.headers.get("Retry-After"))).toBeGreaterThan(0);
     });
 
-    it("lets a new account claim after the window expires", async () => {
-      const sponsorship = stubSponsorship();
+    it("lets a new account claim once the expired window is proven lapsed, not before", async () => {
+      stubSponsorship();
       const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
-      expect((await postTransaction(request.public_token)).status).toBe(200);
+      const first = await postTransaction(request.public_token);
+      expect(first.status).toBe(200);
+      const { transaction } = z.object({ transaction: z.string() }).parse(await first.json());
 
+      // Past the window's last valid block height, but the window is too young
+      // for settlement to read the chain tip, so it may still have landed.
       rpc.answer("getBlockHeight", 2_000);
+      expect(
+        (await postTransaction(request.public_token, TEST_SOLANA_ADDRESSES.wallet3)).status
+      ).toBe(429);
 
-      const other = await app.request(
-        `/pay/${request.public_token}/tx`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ account: TEST_SOLANA_ADDRESSES.wallet3 }),
-        },
-        env
-      );
-      expect(other.status).toBe(200);
-      expect(sponsorship).toHaveBeenCalledTimes(2);
+      await getDb(env)
+        .prepare("UPDATE payment_request_transactions SET created_at = ? WHERE signature = ?")
+        .bind(new Date(Date.now() - 5 * 60_000).toISOString(), issuedSignature(transaction))
+        .run();
+      rpc.answer("getEpochInfo", epochInfoResult({ absoluteSlot: 1, blockHeight: 2_000 }));
+
+      expect(
+        (await postTransaction(request.public_token, TEST_SOLANA_ADDRESSES.wallet3)).status
+      ).toBe(200);
+      expect(
+        await createSystemPaymentRequestsRepository(env).getSponsoredTransactionClaim(request.id)
+      ).toMatchObject({ account: TEST_SOLANA_ADDRESSES.wallet3 });
     });
 
     it("keeps the claim when signing fails and signs the stored bytes on retry", async () => {

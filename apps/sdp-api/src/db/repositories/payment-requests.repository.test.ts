@@ -588,6 +588,29 @@ describe("PaymentRequestsRepository (postgres)", () => {
         ).toBe(true);
       }
 
+      /**
+       * Claims and signs one window per unsigned transaction, seeded 1, 2, …,
+       * each once the one before it lapsed, then opens them all again. Two
+       * signed windows are open at once only when a claim raced the signature
+       * store of a window whose blockhash had already expired.
+       */
+      async function signOpenWindows(requestId: string, unsigned: readonly string[]) {
+        for (const [index, transaction] of unsigned.entries()) {
+          await claimAndSign(requestId, transaction, index + 1);
+          await repo.closePaymentRequestTransactions({
+            requestId,
+            ...OWNER,
+            outcomes: [{ signature: signatureOf(index + 1), outcome: "lapsed", landedSlot: null }],
+          });
+        }
+        await getDb(env)
+          .prepare(
+            "UPDATE payment_request_transactions SET outcome = 'open' WHERE payment_request_id = ?"
+          )
+          .bind(requestId)
+          .run();
+      }
+
       it("stores the expectation with the request", async () => {
         const created = await repo.createPaymentRequest(createInput());
 
@@ -619,22 +642,50 @@ describe("PaymentRequestsRepository (postgres)", () => {
         ).toEqual([expect.objectContaining({ signature: signatureOf(1) })]);
       });
 
-      it("keeps every window's signature after a later claim replaces the request's claim", async () => {
+      it("refuses a new window while a signed one is still open, and admits one once it is closed", async () => {
         const request = await repo.createPaymentRequest(createInput());
         await claimAndSign(request.id, "dHhB", 1);
-        await claimAndSign(request.id, "dHhC", 2);
+        const next = {
+          requestId: request.id,
+          account: PAYER,
+          unsignedTransaction: "dHhC",
+          lastValidBlockHeight: 3_000n,
+          // Past the first window's last valid block height (1_001).
+          currentBlockHeight: 2_000n,
+          quote: WINDOW_QUOTE,
+        };
 
-        expect(
-          (await repo.listOpenPaymentRequestTransactions({ requestId: request.id, ...OWNER })).map(
-            (issued) => issued.signature
-          )
-        ).toEqual([signatureOf(1), signatureOf(2)]);
+        expect(await repo.claimSponsoredTransactionWindow(next)).toBe(false);
 
         await repo.closePaymentRequestTransactions({
           requestId: request.id,
           ...OWNER,
           outcomes: [{ signature: signatureOf(1), outcome: "lapsed", landedSlot: null }],
         });
+        expect(await repo.claimSponsoredTransactionWindow(next)).toBe(true);
+      });
+
+      it("keeps every window's signature after a later claim replaces the request's claim", async () => {
+        const request = await repo.createPaymentRequest(createInput());
+        await claimAndSign(request.id, "dHhB", 1);
+        await repo.closePaymentRequestTransactions({
+          requestId: request.id,
+          ...OWNER,
+          outcomes: [{ signature: signatureOf(1), outcome: "lapsed", landedSlot: null }],
+        });
+        await claimAndSign(request.id, "dHhC", 2);
+
+        const windows = await getDb(env)
+          .prepare(
+            `SELECT signature FROM payment_request_transactions
+              WHERE payment_request_id = ? ORDER BY created_at, id`
+          )
+          .bind(request.id)
+          .all<{ signature: string }>();
+        expect(windows.results.map((issued) => issued.signature)).toEqual([
+          signatureOf(1),
+          signatureOf(2),
+        ]);
         expect(
           (await repo.listOpenPaymentRequestTransactions({ requestId: request.id, ...OWNER })).map(
             (issued) => issued.signature
@@ -644,9 +695,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
 
       it("closes several windows in one statement and never reads or closes an archived one", async () => {
         const request = await repo.createPaymentRequest(createInput());
-        await claimAndSign(request.id, "dHhB", 1);
-        await claimAndSign(request.id, "dHhC", 2);
-        await claimAndSign(request.id, "dHhD", 3);
+        await signOpenWindows(request.id, ["dHhB", "dHhC", "dHhD"]);
         await getDb(env)
           .prepare(
             "UPDATE payment_request_transactions SET status = 'archived' WHERE signature = ?"

@@ -1,6 +1,9 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
 import { NATIVE_ASSET } from "@sdp/solana/asset-ref";
-import { PAYMENT_REQUEST_TRANSACTION_OUTCOMES } from "@sdp/types/payments";
+import {
+  PAYMENT_REQUEST_TRANSACTION_OUTCOMES,
+  type PaymentRequestTransactionOutcome,
+} from "@sdp/types/payments";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { getBase58Decoder, type Signature, signature } from "@solana/kit";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -435,7 +438,17 @@ describe("reconcilePaymentRequest (ADR 0012: settlement on the signatures SDP is
   it("checks every open window, not only the request's current claim", async () => {
     const request = await createRequest({ expiresAt: null });
     const first = await issueTransaction(request, 1, { lastValidBlockHeight: 1_000n });
+    // Two signed windows are open at once only when a claim raced the
+    // signature store of a window whose blockhash had already expired: the
+    // first is closed for the second claim, then opened again.
+    const setOutcome = (outcome: PaymentRequestTransactionOutcome) =>
+      getDb(env)
+        .prepare("UPDATE payment_request_transactions SET outcome = ? WHERE signature = ?")
+        .bind(outcome, first)
+        .run();
+    await setOutcome("lapsed");
     const second = await issueTransaction(request, 2, { lastValidBlockHeight: 2_000n });
+    await setOutcome("open");
     answerStatuses((candidate) => (candidate === first ? CONFIRMED : null));
 
     const settled = await reconcileOnSandbox(request, { bestEffort: false });

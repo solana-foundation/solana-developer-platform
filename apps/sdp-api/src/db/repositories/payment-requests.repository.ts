@@ -146,7 +146,8 @@ export interface PaymentRequestsRepository {
   /**
    * Claims the request's sponsored transaction window and records the
    * transaction it issues, with its quote, in one transaction. The claim needs
-   * the request open (awaiting payment and unexpired) and no live window.
+   * the request open (awaiting payment and unexpired), no live window, and
+   * no signed window still open: one that may have landed is settled first.
    */
   claimSponsoredTransactionWindow(params: {
     requestId: string;

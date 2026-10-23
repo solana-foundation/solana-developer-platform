@@ -302,6 +302,17 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
                sponsored_tx_last_valid_block_height IS NULL
                OR sponsored_tx_last_valid_block_height < ?
              )
+             -- A signed window still open may have landed in its last blocks
+             -- before settlement could read it: a second window would let the
+             -- payer pay twice. Reconcile closes it once the chain proves it
+             -- landed, failed or lapsed.
+             AND NOT EXISTS (
+               SELECT 1 FROM payment_request_transactions issued
+                WHERE issued.payment_request_id = payment_requests.id
+                  AND issued.outcome = 'open'
+                  AND issued.signature IS NOT NULL
+                  AND issued.status <> 'archived'
+             )
            RETURNING organization_id, project_id`,
           [
             params.account,
