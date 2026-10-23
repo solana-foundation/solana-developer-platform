@@ -1,3 +1,4 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
 import type { ParsedTransaction } from "@sdp/rpc/solana";
 import {
   AMOUNT_VERIFICATION_REASONS,
@@ -14,6 +15,7 @@ import { z } from "zod";
 import { getDb } from "@/db/client";
 import { app as baseApp } from "@/index";
 import { errorResponseSchema } from "@/openapi/schemas/base";
+import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { epochInfoResult, type JsonRpcResult } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
@@ -333,6 +335,50 @@ describe("Payments routes — recurring mandates in base units (ADR 0012)", () =
       )
     );
     expect(after.data.recurringPayment.nextCollectionDueAt).toBe(dueAt);
+  });
+
+  it("skips a period still held when it ends, as the subscriptions program forfeits it", async () => {
+    await answerPyusd({ extensions: [transferFeeExtension(0, 0n)], destinationExtensions: [] });
+    const activated = await activateRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      token: PYUSD,
+    });
+    const periodMs = DEFAULT_RECURRING_FIXTURE.periodHours * 60 * 60 * 1000;
+    // Due a period and a minute ago: the period has ended.
+    const dueAt = new Date(Date.now() - periodMs - 60 * 1000).toISOString();
+    await setRecurringCollectionDue({
+      recurringPaymentId: activated.id,
+      subscriptionId: activated.subscriptionId,
+      dueAt,
+    });
+    await answerPyusd({
+      extensions: [transferFeeExtension(50, 1_000_000n)],
+      destinationExtensions: [],
+    });
+    const sendsBefore = sendTransactionMock.mock.calls.length;
+
+    const result = await runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+      collectDueRecurringPayments(env, new Date())
+    );
+
+    expect(result).toMatchObject({ collected: 0, failed: 0, skipped: 1 });
+    expect(sendTransactionMock.mock.calls.length).toBe(sendsBefore);
+    const attempts = await getDb(env)
+      .prepare("SELECT status, transfer_id, error FROM payment_subscription_collection_attempts")
+      .all();
+    expect(attempts.results).toEqual([
+      { status: "skipped", transfer_id: null, error: expect.stringContaining("transfer fee") },
+    ]);
+    const after = await parseRecurringResponse(
+      await app.request(
+        `/v1/payments/recurring-payments/${activated.id}`,
+        { headers: RECURRING_HEADERS },
+        env
+      )
+    );
+    expect(after.data.recurringPayment.nextCollectionDueAt).toBe(
+      new Date(Date.parse(dueAt) + 2 * periodMs).toISOString()
+    );
   });
 
   it("recovers a landed pull of a payment written before mandates from its plan's mandate, reading no terms", async () => {

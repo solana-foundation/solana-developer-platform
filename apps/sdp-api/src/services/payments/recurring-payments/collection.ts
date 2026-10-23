@@ -101,7 +101,6 @@ import {
   solanaRpcError,
   transactionFailed,
 } from "@/lib/errors";
-import type { MoneyMovementRefusedError } from "@/lib/money-admission";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
@@ -935,10 +934,12 @@ async function claimCollectionUnderRecurringLock(input: {
 /**
  * Skips a due collection period that money admission refused (HOO-1955): the
  * organization is deleted or suspended, or its production project lost the
- * entitlement. In one transaction, under the lock collectors take before they
- * sign, it records a `skipped` attempt (shown in the collection history with
- * the reason) and moves the due date to the first boundary after `now`. The
- * job stops selecting the row, and nothing is caught up after re-entitlement.
+ * entitlement; or a pull still held when its period ended (ADR 0012), whose
+ * allowance the subscriptions program forfeits. In one transaction, under the
+ * lock collectors take before they sign, it records a `skipped` attempt (shown
+ * in the collection history with the reason) and moves the due date to the
+ * first boundary after `now`. The job stops selecting the row, and nothing is
+ * caught up after re-entitlement.
  *
  * Returns false and changes nothing when the cycle moved on or an attempt
  * already holds it; an in-flight collection finishes through recovery.
@@ -948,7 +949,8 @@ export async function skipRefusedRecurringCollectionPeriod(input: {
   organizationId: string;
   projectId: string;
   recurringPayment: RecurringPaymentCollectionCycleRow;
-  refusal: MoneyMovementRefusedError;
+  /** Why the period is skipped: the admission refusal, or the pull's hold. */
+  refusal: { message: string };
   now: Date;
 }): Promise<boolean> {
   const { recurringPayment } = input;
@@ -1047,8 +1049,9 @@ export async function journalAutomatedCollectionFailure(input: {
  * Records a pull held before it was signed (ADR 0012): a `failed` attempt
  * with its hold reason and retry time, under the lock collectors take, and no
  * transfer. The period stays due, and the next run past the retry time reads
- * the token's terms again. The cron honours the retry time as a cooldown; a
- * manual collect may ask again at once.
+ * the token's terms again, until the period ends and the cron skips it. The
+ * cron honours the retry time as a cooldown; a manual collect may ask again at
+ * once.
  */
 async function journalHeldCollection(input: {
   env: Env;
@@ -1876,8 +1879,10 @@ interface RecurringPull {
  * with the destination's token account, then the recurring capability rule.
  * A paused mint, a fee above the mandate's tolerance or a destination that
  * requires memos holds the pull: a `failed` attempt with its hold reason and
- * retry time, no transfer, and the period still due. A cron run during a
- * failure's retry window reads nothing.
+ * retry time, no transfer, and the period still due. A cron run that finds the
+ * pull still held once its period has ended skips the period instead, as the
+ * subscriptions program forfeits its allowance. A cron run during a failure's
+ * retry window reads nothing.
  *
  * RPC budget: one `getMultipleAccounts`.
  *
@@ -1935,15 +1940,33 @@ async function decideRecurringPull(input: {
   }
   const decision = recurringPullSupport(terms, mandate, destination);
   if (!decision.supported) {
-    await journalHeldCollection({
-      env: input.env,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      recurringPayment,
-      source: input.source,
-      initiatedByKeyId: input.initiatedByKeyId,
-      hold: { refusal: decision.refusal, message: decision.message },
-    });
+    const periodEndsAt = nextRecurringPaymentCollectionDueAt(
+      recurringPayment.next_collection_due_at,
+      recurringPayment.period_hours
+    );
+    if (
+      input.source === "automated" &&
+      new Date(input.attemptedAt).getTime() >= new Date(periodEndsAt).getTime()
+    ) {
+      await skipRefusedRecurringCollectionPeriod({
+        env: input.env,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        recurringPayment,
+        refusal: decision,
+        now: new Date(input.attemptedAt),
+      });
+    } else {
+      await journalHeldCollection({
+        env: input.env,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        recurringPayment,
+        source: input.source,
+        initiatedByKeyId: input.initiatedByKeyId,
+        hold: { refusal: decision.refusal, message: decision.message },
+      });
+    }
     logEvent("warn", {
       event: "sdp_api_recurring_payment_collection_held",
       reason: decision.refusal,
