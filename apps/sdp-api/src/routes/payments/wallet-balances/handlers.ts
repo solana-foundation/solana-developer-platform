@@ -82,18 +82,20 @@ export async function getWalletBalances(c: AppContext) {
   const holdings = [nativeSolHolding(lamports), ...splBalancesResult.value];
   // Display from the summed base units under each mint's terms; one read for
   // every Token-2022 mint held, none when all are classic.
-  const displayed = await withDisplayAmount(rpc, holdings, abortSignal).catch((cause: unknown) => {
-    getLogger().error(
-      {
-        requestId: c.get("requestId"),
-        walletId: wallet.walletId,
-        publicKey: wallet.publicKey,
-        error: cause instanceof Error ? cause.message : String(cause),
-      },
-      "getWalletBalances: failed to read token terms for display"
-    );
-    throw providerUnavailable("Wallet balances are temporarily unavailable. Try again.");
-  });
+  const displayed = await withDisplayAmount(holdings, { abortSignal, minContextSlot }).catch(
+    (cause: unknown) => {
+      getLogger().error(
+        {
+          requestId: c.get("requestId"),
+          walletId: wallet.walletId,
+          publicKey: wallet.publicKey,
+          error: cause instanceof Error ? cause.message : String(cause),
+        },
+        "getWalletBalances: failed to read token terms for display"
+      );
+      throw providerUnavailable("Wallet balances are temporarily unavailable. Try again.");
+    }
+  );
   const labeledBalances = await attachTokenSymbolsToBalances(displayed);
   const balances = await attachUsdValuesToBalances(c.env, labeledBalances);
 

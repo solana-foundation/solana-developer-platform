@@ -64,13 +64,14 @@ const MINTS_PER_READ = 99;
  * hide the others.
  *
  * @param assets - Distinct mints, each with the token program its accounts are under.
- * @param options - The caller's deadline for the read.
+ * @param options - The caller's deadline for the read, and the slot it must
+ * see at least (the slot the holdings it displays were read at).
  * @returns One entry per asset, in order: its terms, or why they could not be read.
  */
 export async function fetchTokenTermsOfMints(
   rpc: Rpc<GetMultipleAccountsApi>,
   assets: readonly TokenAsset[],
-  options: { abortSignal: AbortSignal | undefined }
+  options: { abortSignal: AbortSignal | undefined; minContextSlot: bigint | undefined }
 ): Promise<(MintTokenTerms | TokenTermsError)[]> {
   const pages: TokenAsset[][] = [];
   for (let start = 0; start < assets.length; start += MINTS_PER_READ) {
@@ -81,7 +82,11 @@ export async function fetchTokenTermsOfMints(
       const [clock, ...mints] = await fetchEncodedAccounts(
         rpc,
         [SYSVAR_CLOCK_ADDRESS, ...page.map((asset) => asset.mint)],
-        { commitment: "confirmed", abortSignal: options.abortSignal }
+        {
+          commitment: "confirmed",
+          abortSignal: options.abortSignal,
+          minContextSlot: options.minContextSlot,
+        }
       );
       // The Clock sysvar always exists; a node answering otherwise fails the read.
       assertAccountExists(clock);
