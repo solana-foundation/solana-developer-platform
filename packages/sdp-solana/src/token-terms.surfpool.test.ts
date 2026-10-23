@@ -16,37 +16,34 @@
 
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
+import type { TokenMovementBasis } from "@sdp/types/token-movements";
 import { SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
 import {
   type Address,
   address,
-  assertAccountExists,
   createKeyPairSignerFromBytes,
   createSolanaRpc,
   generateKeyPairSigner,
   isSolanaError,
-  parseBase64RpcAccount,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
   type UnixTimestamp,
   unixTimestamp,
-  unwrapOption,
 } from "@solana/kit";
 import type { Surfnet } from "@solana/surfpool";
 import type { createSurfnetCheatcodesRpc } from "@solana/surfpool/kit";
-import { fetchSysvarClock, SYSVAR_CLOCK_ADDRESS } from "@solana/sysvars";
+import { fetchSysvarClock } from "@solana/sysvars";
 import {
   AccountState,
-  fetchToken,
   getSetTransferFeeInstruction,
   getTokenSize,
   getTransferCheckedInstruction,
   getTransferCheckedWithFeeInstruction,
-  isExtension,
 } from "@solana-program/token-2022";
-import { type MovementBasis, type MovementQuote, quoteMovement } from "./movement-quote";
+import { type MovementQuote, quoteMovement } from "./movement-quote";
 import {
   CAPPED_FEE,
   createMintMatrix,
+  holdings,
   INTEREST_RATE_BPS,
   MATRIX_DECIMALS,
   type MatrixChain,
@@ -57,12 +54,13 @@ import {
   openTokenAccount,
   pauseMint,
   programDisplay,
+  readMatrixTerms,
   SCALED_MULTIPLIER,
   SWITCHED_MULTIPLIER,
   sendInstructions,
 } from "./test/mint-matrix";
 import { baseUnits, parseTokenAmount } from "./token-amount";
-import { decodeTokenTerms, type MintTokenTerms, toDisplay } from "./token-terms";
+import { type MintTokenTerms, toDisplay } from "./token-terms";
 
 const ENABLED = process.env.TOKEN_MOVEMENT_SURFPOOL_E2E === "true";
 
@@ -101,31 +99,6 @@ const RPC_DISPLAYS_LATER: ReadonlySet<MintProfile> = new Set([
   "token2022Plain",
   "scaled",
 ]);
-
-/** The mint's terms, from the one request and the decoder `readTokenTerms` uses. */
-async function termsOf(chain: MatrixChain, mint: MatrixMint): Promise<MintTokenTerms> {
-  const response = await chain.rpc
-    .getMultipleAccounts([mint.mint, SYSVAR_CLOCK_ADDRESS], { encoding: "base64" })
-    .send();
-  const [mintAccount, clock] = [
-    parseBase64RpcAccount(mint.mint, response.value[0]),
-    parseBase64RpcAccount(SYSVAR_CLOCK_ADDRESS, response.value[1]),
-  ];
-  assertAccountExists(mintAccount);
-  assertAccountExists(clock);
-  return decodeTokenTerms(
-    { kind: "token", mint: mint.mint, program: mint.program },
-    { mint: mintAccount, clock }
-  );
-}
-
-/** A token account's balance and the fee withheld in it, in base units. */
-async function holdings(chain: MatrixChain, tokenAccount: Address) {
-  const { data } = await fetchToken(chain.rpc, tokenAccount);
-  const extensions = unwrapOption(data.extensions);
-  const withheld = extensions?.find((extension) => isExtension("TransferFeeAmount", extension));
-  return { amount: data.amount, withheld: withheld ? withheld.withheldAmount : 0n, data };
-}
 
 /** The transfer instruction a quote asks for: `TransferCheckedWithFee` whenever a fee config exists. */
 function transferInstruction(
@@ -190,7 +163,10 @@ describe("Token Terms on a surfnet mint matrix", { skip: !ENABLED }, () => {
   it("decodes every profile as the program wrote it", async () => {
     const terms = Object.fromEntries(
       await Promise.all(
-        Object.values(matrix).map(async (mint) => [mint.profile, await termsOf(chain, mint)])
+        Object.values(matrix).map(async (mint) => [
+          mint.profile,
+          await readMatrixTerms(chain, mint),
+        ])
       )
     );
     for (const mint of Object.values(matrix)) {
@@ -240,7 +216,7 @@ describe("Token Terms on a surfnet mint matrix", { skip: !ENABLED }, () => {
 
   it("sizes a new token account as the program does", async () => {
     for (const mint of Object.values(matrix)) {
-      const terms = await termsOf(chain, mint);
+      const terms = await readMatrixTerms(chain, mint);
       const owner = (await generateKeyPairSigner()).address;
       const tokenAccount = await openTokenAccount(chain, mint, owner);
       const { value } = await chain.rpc
@@ -259,7 +235,7 @@ describe("Token Terms on a surfnet mint matrix", { skip: !ENABLED }, () => {
   });
 
   it("moves exactly the quoted debit, fee and credit", async () => {
-    const cases: readonly [MintProfile, string, MovementBasis][] = [
+    const cases: readonly [MintProfile, string, TokenMovementBasis][] = [
       ["classic", "1.5", "debit"],
       ["classic", "2", "credit"],
       ["token2022Plain", "1.5", "debit"],
@@ -286,7 +262,7 @@ describe("Token Terms on a surfnet mint matrix", { skip: !ENABLED }, () => {
         await mintTokens(chain, mint, pair.source, 10n ** 12n);
         accounts.set(profile, pair);
       }
-      const terms = await termsOf(chain, mint);
+      const terms = await readMatrixTerms(chain, mint);
       const quote = quoteMovement(terms, {
         asset: terms.asset,
         amount: parseTokenAmount(amount, MATRIX_DECIMALS),
@@ -327,7 +303,7 @@ describe("Token Terms on a surfnet mint matrix", { skip: !ENABLED }, () => {
 
     const compareAll = async (moment: string, rpcDisplays: ReadonlySet<MintProfile>) => {
       for (const { mint, owner, amount } of held) {
-        const terms = await termsOf(chain, mint);
+        const terms = await readMatrixTerms(chain, mint);
         const shown = toDisplay(terms, baseUnits(amount), terms.readAt.unixTimestamp).value;
         const label = `${moment} ${mint.profile} ${amount}`;
         assert.equal(shown, await programDisplay(chain, mint, amount), label);
@@ -345,9 +321,9 @@ describe("Token Terms on a surfnet mint matrix", { skip: !ENABLED }, () => {
     // timestamp, which interest-bearing display depends on to the second.
     await cheatcodes.pauseClock().send();
     await compareAll("now", RPC_DISPLAYS_NOW);
-    const now = (await termsOf(chain, matrix.scaled)).readAt.unixTimestamp;
+    const now = (await readMatrixTerms(chain, matrix.scaled)).readAt.unixTimestamp;
     surfnet.timeTravelToTimestamp(Number((now + ONE_YEAR_SECONDS) * 1_000n));
-    const later = await termsOf(chain, matrix.scaledSwitch);
+    const later = await readMatrixTerms(chain, matrix.scaledSwitch);
     assert.ok(later.readAt.unixTimestamp >= newMultiplierAt);
     await compareAll("a year later", RPC_DISPLAYS_LATER);
     await cheatcodes.resumeClock().send();
@@ -369,7 +345,7 @@ describe("Token Terms on a surfnet mint matrix", { skip: !ENABLED }, () => {
 
     for (const [profile, pair] of pairs) {
       const mint = matrix[profile];
-      const terms = await termsOf(chain, mint);
+      const terms = await readMatrixTerms(chain, mint);
       assert.equal(terms.paused, profile === "paused");
       const quote = quoteMovement(terms, {
         asset: terms.asset,
@@ -401,7 +377,7 @@ describe("Token Terms on a surfnet mint matrix", { skip: !ENABLED }, () => {
         maximumFee: 20_000n,
       }),
     ]);
-    const pending = await termsOf(chain, mint);
+    const pending = await readMatrixTerms(chain, mint);
     const effectiveEpoch = pending.readAt.epoch + 2n;
     assert.equal(pending.transferFee?.newer.epoch, effectiveEpoch);
     const intent = {
@@ -413,7 +389,7 @@ describe("Token Terms on a surfnet mint matrix", { skip: !ENABLED }, () => {
     assert.equal(staleQuote.fee, 5_000n);
 
     surfnet.timeTravelToEpoch(Number(effectiveEpoch));
-    const effective = await termsOf(chain, mint);
+    const effective = await readMatrixTerms(chain, mint);
     const quote = quoteMovement(effective, intent);
     assert.equal(quote.feeEpoch, effectiveEpoch);
     assert.equal(quote.fee, 10_000n);

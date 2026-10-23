@@ -11,6 +11,7 @@
  * Client-safe: no RPC and no Node-only import.
  */
 
+import type { TokenMovementBasis } from "@sdp/types/token-movements";
 import type { Epoch } from "@solana/kit";
 import { AmountError } from "./amount";
 import { type AssetRef, isSameAsset } from "./asset-ref";
@@ -27,16 +28,11 @@ import {
 
 declare const movementQuoteBrand: unique symbol;
 
-/** Which side of the transfer an intent's amount fixes. */
-export const MOVEMENT_BASES = ["debit", "credit"] as const;
-
-export type MovementBasis = (typeof MOVEMENT_BASES)[number];
-
 /** What a caller asked to move. The amount is exact token units, never a display value. */
 export type MovementIntent = Readonly<{
   asset: AssetRef;
   amount: TokenAmount;
-  basis: MovementBasis;
+  basis: TokenMovementBasis;
 }>;
 
 /** The three base-unit amounts of one movement. */
@@ -58,7 +54,7 @@ export type MovementQuote = MovementSplit &
 function splitAtEpoch(
   terms: MintTokenTerms,
   amount: BaseUnits,
-  basis: MovementBasis,
+  basis: TokenMovementBasis,
   epoch: Epoch
 ): MovementSplit {
   switch (basis) {
