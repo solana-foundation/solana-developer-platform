@@ -127,7 +127,7 @@ invariants are in ADR 0002 (`docs/decisions/0002-earn-provider-pluggability.md`)
 
 ## Token movement legs (ADR 0012)
 
-`token_movement_legs` (migration 0161) records what each movement SDP builds
+`token_movement_legs` (migration 0174) records what each movement SDP builds
 moves, in base units. `token-movement-legs.repository.ts` is its only writer.
 
 - **A leg is written with its owner, in one transaction**
