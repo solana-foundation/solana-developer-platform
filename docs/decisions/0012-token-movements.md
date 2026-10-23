@@ -10,12 +10,11 @@ call site. PRs 2–5 move every path onto them (Rollout).
 
 1. **No model of what an amount means.** Every path converts a decimal string by itself, as
    `value × 10^decimals`, with decimals from a different source each time: the source token
-   account, `getTokenSupply`, the catalogue, or a constant (`sdp-ondo`). Each path also picks its
+   account, the catalogue, a live mint read, or a constant (`sdp-ondo`). Each path also picks its
    own instruction: Payments uses `transferChecked`, Private Channels uses unchecked `Transfer`,
    Mosaic and the subscriptions program build `TransferChecked` inside their SDKs.
 2. **SDP records what it intended, not what happened.** Rows store the entered string. A transfer
-   is "confirmed" on signature status alone. Payment requests settle through `@solana/pay`
-   `validateTransfer` with a JS number. Recurring checks instruction data, never what the
+   is "confirmed" on signature status alone. Recurring checks instruction data, never what the
    recipient got.
 3. **Units are mixed, and no type tells them apart.** Balances return the RPC's `uiAmount` (the
    display value, multiplier included) next to raw amounts. The dashboard checks typed amounts
@@ -23,6 +22,12 @@ call site. PRs 2–5 move every path onto them (Rollout).
    "UI units", which on Solana means the display value.
 4. **No single asset identity.** "SOL" and the wrapped SOL mint both become native SOL. The
    security scan found this bug class twice (SOLA9-758, SOLA9-838).
+
+Payments already closed the precision part of gap 1 (#2453, #2473): amounts parse exactly into
+u64 base units, a too-precise amount is a 400 before any row is stored, payment requests settle
+on an exact recipient balance increase, and new payments refuse interest-bearing, scaled and
+non-transferable mints at admission. That refusal is a stopgap: it keeps display-changing mints
+out instead of supporting them, and it does nothing for transfer fees, hooks or the other paths.
 
 This is in production scope today. PYUSD and USDG are catalogue tokens, ramp assets and allowed
 recurring tokens. On mainnet both carry `TransferFeeConfig` (0 bps, `maximumFee` 0),
@@ -107,11 +112,13 @@ them in one place, not adding special cases to every flow.
   nothing uses the types yet. The pins on transfer builders and conversion helpers land in PR 5,
   with no allowlist of offenders: each PR moves its paths first.
 - **Target RPC budget.** A classic-mint transfer keeps its two reads; the mint read now brings the Clock
-  with it. Recurring's separate `getTokenSupply` goes. The reader is one request, native none.
+  with it. The reader is one request, native none.
 - **Mint watch.** `pnpm check:well-known-mints` decodes every catalogue mint with the same
   decoder, prints its extension state, and fails when a 1 000-token transfer would pay a fee
   under the current or the newer fee entry (bps alone is not the signal, since `maximumFee` is
-  0), or when a hook program is set. It stays manual because it uses public RPC.
+  0), or when a hook program is set. While Payments still refuses display-changing mints, it
+  also fails on an interest-bearing, scaled or non-transferable catalogue mint. CI runs it only on
+  pull requests that touch the catalogue or the script, because it uses public RPC.
 - **Mint matrix.** `packages/sdp-solana/src/test/mint-matrix.ts` creates one mint per profile
   on an embedded offline surfnet: classic, Token-2022 plain, fee 0 bps, fee 50 bps with a cap,
   scaled 1.5×, a scaled multiplier switch, interest ±5%, a hook program set, paused, and frozen
