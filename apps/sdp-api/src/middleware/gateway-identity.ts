@@ -14,13 +14,15 @@ import { InProcessRateLimiter } from "./rate-limit";
 /** Failed `X-SF-Identity` verifications one client IP may cause per window. */
 const INVALID_IDENTITY_MAX_FAILURES = 20;
 const INVALID_IDENTITY_WINDOW_MS = 60_000;
+/** Where failures without a verified client address count, together. */
+const UNVERIFIED_CLIENT_BUCKET = "unverified-client";
 
 /**
  * Bounds signature checks on forged identities, which reach verification
  * before any request limit. It counts failures only, per the proxy-reported
  * client IP (never the token's own `client_ip`): the gateway's traffic shares
- * a few egress IPs, so a limit on every identity would throttle it. With no
- * trusted client IP (TRUST_PROXY_HEADERS unset) nothing is counted. Per
+ * a few egress IPs, so a limit on every identity would throttle it. Gateway
+ * mode requires TRUST_PROXY_HEADERS, so the address is known. Per
  * instance, in memory, so it needs no counter store before verification.
  */
 export const invalidGatewayIdentityLimiter = new InProcessRateLimiter(
@@ -46,18 +48,18 @@ export function gatewayIdentityMiddleware() {
       return;
     }
 
-    // Without a trusted client IP there is no bucket to count in: one shared
-    // bucket would let any caller's forgeries refuse every gateway request.
-    // Such a deployment relies on its edge's per-IP limit alone.
-    const failureBucket = resolveClientIp({ get: (name) => c.req.header(name) ?? null }, c.env);
-    if (failureBucket !== null) {
-      invalidGatewayIdentityLimiter.assertNotExhausted(
-        c,
-        failureBucket,
-        INVALID_IDENTITY_MAX_FAILURES,
-        INVALID_IDENTITY_WINDOW_MS
-      );
-    }
+    // A request without a verified client address (one that bypassed the
+    // trusted proxy) counts in one shared bucket, which can only refuse other
+    // such requests: the gateway's own traffic always carries a verified one.
+    const failureBucket =
+      resolveClientIp({ get: (name) => c.req.header(name) ?? null }, c.env) ??
+      UNVERIFIED_CLIENT_BUCKET;
+    invalidGatewayIdentityLimiter.assertNotExhausted(
+      c,
+      failureBucket,
+      INVALID_IDENTITY_MAX_FAILURES,
+      INVALID_IDENTITY_WINDOW_MS
+    );
 
     try {
       c.set("gatewayIdentity", await verifyGatewayIdentity(token, config));
@@ -67,14 +69,12 @@ export function gatewayIdentityMiddleware() {
         throw new AppError("SERVICE_UNAVAILABLE", "Gateway identity cannot be verified right now");
       }
       // Counts the failure; the one that reaches the limit is refused as such.
-      if (failureBucket !== null) {
-        invalidGatewayIdentityLimiter.enforce(
-          c,
-          failureBucket,
-          INVALID_IDENTITY_MAX_FAILURES,
-          INVALID_IDENTITY_WINDOW_MS
-        );
-      }
+      invalidGatewayIdentityLimiter.enforce(
+        c,
+        failureBucket,
+        INVALID_IDENTITY_MAX_FAILURES,
+        INVALID_IDENTITY_WINDOW_MS
+      );
       throw new AppError("UNAUTHORIZED", "Invalid gateway identity");
     }
     await next();

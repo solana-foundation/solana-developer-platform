@@ -62,18 +62,34 @@ export interface GatewayIdentityConfig {
   jwksUrl: string;
 }
 
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
 const configSchema = z.object({
   issuer: z.string().min(1),
-  jwksUrl: z.url({ protocol: /^https?$/ }),
+  // The JWKS decides who can mint an identity for any key, so it is fetched
+  // over TLS only: plain HTTP lets an on-path attacker swap the signing key.
+  // Loopback HTTP is for a local gateway in development.
+  jwksUrl: z.url({ protocol: /^https?$/ }).refine((value) => {
+    // Refinements run after a failed URL check too; that value is refused there.
+    if (!URL.canParse(value)) {
+      return false;
+    }
+    const url = new URL(value);
+    return url.protocol === "https:" || LOOPBACK_HOSTS.has(url.hostname);
+  }),
 });
 
 /**
  * The configured gateway, or null when no gateway fronts this deployment.
  * Parsed at boot (`assertRequiredEnv`), so a malformed value fails startup
  * rather than every signed request.
+ *
+ * Gateway mode needs a trusted client IP (`TRUST_PROXY_HEADERS`): identities
+ * are verified before any request limit, and only a trusted address can bound
+ * the verifications a caller forces.
  */
 export function resolveGatewayIdentityConfig(
-  env: Pick<Env, "SF_GATEWAY_ISSUER" | "SF_GATEWAY_JWKS_URL">
+  env: Pick<Env, "SF_GATEWAY_ISSUER" | "SF_GATEWAY_JWKS_URL" | "TRUST_PROXY_HEADERS">
 ): GatewayIdentityConfig | null {
   const issuer = env.SF_GATEWAY_ISSUER?.trim();
   const jwksUrl = env.SF_GATEWAY_JWKS_URL?.trim();
@@ -85,7 +101,10 @@ export function resolveGatewayIdentityConfig(
   }
   const parsed = configSchema.safeParse({ issuer, jwksUrl });
   if (!parsed.success) {
-    throw new Error("SF_GATEWAY_JWKS_URL must be an http(s) URL");
+    throw new Error("SF_GATEWAY_JWKS_URL must be an https URL (http only on loopback)");
+  }
+  if (env.TRUST_PROXY_HEADERS !== "gclb" && env.TRUST_PROXY_HEADERS !== "true") {
+    throw new Error("SF_GATEWAY_* requires TRUST_PROXY_HEADERS (gclb or true)");
   }
   return parsed.data;
 }

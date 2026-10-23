@@ -231,23 +231,24 @@ describe("gateway identity (X-SF-Identity)", () => {
     expect((await from("198.51.100.8", valid)).status).toBe(200);
   });
 
-  it("never lets forgeries without a trusted client IP block valid identities", async () => {
+  it("counts forgeries without a verified client together, never against verified clients", async () => {
     await seedSfKey();
-    const bindings = { ...gatewayEnv(), TRUST_PROXY_HEADERS: undefined };
+    // gclb: one forwarded entry means the request bypassed the load balancer.
+    const bindings = { ...gatewayEnv(), TRUST_PROXY_HEADERS: "gclb" };
     const forged = await identityToken(
       { key_id: sfKey.keyId },
       { key: (await generateKeyPair("ES256")).privateKey }
     );
+    const valid = await identityToken({ key_id: sfKey.keyId });
+    const send = (forwardedFor: string, token: string) =>
+      request({ [GATEWAY_IDENTITY_HEADER]: token, "X-Forwarded-For": forwardedFor }, bindings);
 
-    for (let i = 0; i < 25; i++) {
-      expect((await request({ [GATEWAY_IDENTITY_HEADER]: forged }, bindings)).status).toBe(401);
+    for (let i = 0; i < 20; i++) {
+      expect((await send("198.51.100.7", forged)).status).toBe(401);
     }
-    const res = await request(
-      { [GATEWAY_IDENTITY_HEADER]: await identityToken({ key_id: sfKey.keyId }) },
-      bindings
-    );
 
-    expect(res.status).toBe(200);
+    expect((await send("198.51.100.8", valid)).status).toBe(429);
+    expect((await send("203.0.113.5, 35.191.0.1", valid)).status).toBe(200);
   });
 
   it("answers 503, not 401, when the gateway's signing keys cannot be fetched", async () => {
@@ -352,6 +353,32 @@ describe("resolveGatewayIdentityConfig", () => {
         SF_GATEWAY_ISSUER: "https://gw.test",
         SF_GATEWAY_JWKS_URL: "not a url",
       })
-    ).toThrow("SF_GATEWAY_JWKS_URL must be an http(s) URL");
+    ).toThrow("SF_GATEWAY_JWKS_URL must be an https URL (http only on loopback)");
+  });
+
+  it("refuses plain HTTP to a non-loopback JWKS, and allows it on loopback", () => {
+    const config = (jwksUrl: string) =>
+      resolveGatewayIdentityConfig({
+        SF_GATEWAY_ISSUER: "https://gw.test",
+        SF_GATEWAY_JWKS_URL: jwksUrl,
+        TRUST_PROXY_HEADERS: "gclb",
+      });
+
+    expect(() => config("http://gateway.solana.com/.well-known/jwks.json")).toThrow(
+      "SF_GATEWAY_JWKS_URL must be an https URL (http only on loopback)"
+    );
+    expect(config("http://127.0.0.1:8080/jwks.json")?.jwksUrl).toBe(
+      "http://127.0.0.1:8080/jwks.json"
+    );
+    expect(config("https://gateway.solana.com/.well-known/jwks.json")).not.toBeNull();
+  });
+
+  it("refuses gateway mode without a trusted client IP", () => {
+    expect(() =>
+      resolveGatewayIdentityConfig({
+        SF_GATEWAY_ISSUER: "https://gw.test",
+        SF_GATEWAY_JWKS_URL: "https://gw.test/jwks.json",
+      })
+    ).toThrow("SF_GATEWAY_* requires TRUST_PROXY_HEADERS (gclb or true)");
   });
 });
