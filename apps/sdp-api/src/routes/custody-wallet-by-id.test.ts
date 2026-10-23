@@ -1,18 +1,34 @@
 import { hashString } from "@sdp/payments/hash";
+import { SOL_MINT, SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR } from "@solana/kit";
+import { SYSVAR_CLOCK_ADDRESS } from "@solana/sysvars";
+import { SYSTEM_PROGRAM_ADDRESS } from "@solana-program/system";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
+import { clearWalletCaches } from "@/routes/custody/handlers/wallets";
 import * as heliusDasService from "@/services/helius-das.service";
 import { custodyProviderNotInReleaseChannel } from "@/services/provider-availability.service";
+import { clearBalanceTermsCacheForTests } from "@/services/token-movement/balance-display";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
-import { installClusterRpcResponder, systemAccountInfoResult } from "@/test/helpers/cluster-rpc";
+import {
+  installClusterRpcResponder,
+  type StubTokenAccount,
+  systemAccountInfoResult,
+  tokenAccountsByOwnerResult,
+} from "@/test/helpers/cluster-rpc";
 import { insertTestCustodyWalletRow, seedTestCustodyRows } from "@/test/helpers/custody";
 import { seedTestPrivyConnection } from "@/test/helpers/custody-connections";
 import { custodyReleaseChannel } from "@/test/helpers/custody-release-channel";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import {
+  encodedRpcAccount,
+  movementAccountsReply,
+  readsAccount,
+} from "@/test/helpers/token-movement";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 
@@ -588,6 +604,103 @@ describe("Custody wallet by ID route", () => {
       },
     });
     expect(clusterRpc.calls).toContainEqual({ cluster: "devnet", method: "getAccountInfo" });
+  });
+});
+
+describe("Custody wallet list balances", () => {
+  const clusterRpc = installClusterRpcResponder();
+  const USDC = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
+  const PYUSD = WELL_KNOWN_TOKENS.PYUSD.mints.devnet.address;
+
+  beforeEach(async () => {
+    custodyReleaseChannel.outOfChannelMode = null;
+    clearWalletCaches();
+    clearBalanceTermsCacheForTests();
+    await seedTestDatabase(env);
+    await seedAuthAndConfigs();
+  });
+
+  afterEach(async () => {
+    await clearKVStores(env);
+  });
+
+  // The terms read is the one Token-2022 wallets need; it must not hide the others' balances.
+  it("keeps a classic wallet's balances and leaves out a Token-2022 holder when the terms read fails", async () => {
+    const systemAccount = encodedRpcAccount(SYSTEM_PROGRAM_ADDRESS, new Uint8Array());
+    const solAccounts = new Map([
+      [TEST_SOLANA_ADDRESSES.wallet1, systemAccount],
+      [TEST_SOLANA_ADDRESSES.wallet2, systemAccount],
+    ]);
+    clusterRpc.respond("getMultipleAccounts", (request) =>
+      readsAccount(request, SYSVAR_CLOCK_ADDRESS)
+        ? { error: { code: -32_005, message: "Node is unhealthy" } }
+        : movementAccountsReply(solAccounts, request)
+    );
+    // The classic wallet holds USDC, the other PYUSD (Token-2022).
+    const holdings = new Map([
+      [`${TEST_SOLANA_ADDRESSES.wallet1} ${SPL_TOKEN_PROGRAMS["spl-token"]}`, USDC],
+      [`${TEST_SOLANA_ADDRESSES.wallet2} ${SPL_TOKEN_PROGRAMS["token-2022"]}`, PYUSD],
+    ]);
+    const tokenAccountsParams = z
+      .tuple([z.string(), z.object({ programId: z.string() })])
+      .rest(z.unknown());
+    clusterRpc.respond("getTokenAccountsByOwner", (request) => {
+      const [owner, { programId }] = tokenAccountsParams.parse(request.params);
+      const mint = holdings.get(`${owner} ${programId}`);
+      const accounts: StubTokenAccount[] =
+        mint === undefined
+          ? []
+          : [
+              {
+                pubkey: TEST_SOLANA_ADDRESSES.wallet3,
+                mint,
+                amount: "2500000",
+                decimals: 6,
+                uiAmountString: "2.5",
+                state: "initialized",
+              },
+            ];
+      return { result: tokenAccountsByOwnerResult(1, accounts) };
+    });
+
+    const res = await app.request(
+      "/v1/wallets?includeBalances=true",
+      { method: "GET", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const listed = z
+      .object({
+        data: z.object({
+          wallets: z.array(
+            z.object({
+              walletId: z.string(),
+              balances: z.array(z.object({ mint: z.string(), tokenAmount: z.string() })).optional(),
+            })
+          ),
+        }),
+      })
+      .parse(await res.json());
+    expect(listed.data.wallets).toEqual(
+      expect.arrayContaining([
+        {
+          walletId: "privy_wallet_a",
+          balances: [
+            { mint: SOL_MINT, tokenAmount: "0.00203928" },
+            { mint: USDC, tokenAmount: "2.5" },
+          ],
+        },
+        { walletId: "para_wallet_a" },
+      ])
+    );
+    // RPC budget: the classic-only retry needs no terms, so the failed read is the only one.
+    expect(
+      clusterRpc.requests.filter(
+        (request) =>
+          request.method === "getMultipleAccounts" && readsAccount(request, SYSVAR_CLOCK_ADDRESS)
+      )
+    ).toHaveLength(1);
   });
 });
 
