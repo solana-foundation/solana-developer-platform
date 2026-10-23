@@ -910,6 +910,38 @@ describe("verifyRampDeliveries", () => {
       expect(await legOf("xfr_leg_old_fee")).toBeNull();
     });
 
+    it("still holds a short delivery whose fee entries came after it, which no fee could explain", async () => {
+      // The quote is 2 PYUSD; the transfer debited 1 and credited 0.995.
+      await seedTransfer({
+        id: "xfr_leg_old_fee_short",
+        reference: "moonpay_xfr_leg_old_fee_short",
+        token: PYUSD_MINT,
+        amount: "2",
+      });
+      await applyRampSettlementEvent(env, "sandbox", {
+        provider: "moonpay",
+        kind: "settled",
+        reference: "moonpay_xfr_leg_old_fee_short",
+        onchain: { signature: SIG_1, destinationAddress: "quoted-destination", amount: "1" },
+        receivedAmount: "1",
+      });
+      getTransactionMock.mockResolvedValue(landedFeeMint("995000", "transferChecked", null));
+      const later = { epoch: 950n, maximumFee: 0n, transferFeeBasisPoints: 0 };
+      readTokenTermsMock.mockResolvedValue(
+        mintTermsAt(PYUSD_MINT, "token-2022", {
+          decimals: 6,
+          extensions: [transferFeeScheduleExtension(later, { ...later, epoch: 960n })],
+        })
+      );
+
+      await sweep();
+
+      expect(await row("xfr_leg_old_fee_short")).toMatchObject({
+        status: "settling",
+        provider_data: { deliveryMismatch: { reason: "amount_mismatch" } },
+      });
+    });
+
     it("holds amount_mismatch when no fee rule explains a debit report, and records no leg", async () => {
       await settleOnramp("xfr_leg_unexplained", PYUSD_MINT, "1");
       getTransactionMock.mockResolvedValue(landedFeeMint("995000", "transferChecked", null));
