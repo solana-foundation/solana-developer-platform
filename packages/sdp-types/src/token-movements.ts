@@ -59,6 +59,34 @@ export const AMOUNT_VERIFICATION_REASONS = [
 
 export type AmountVerificationReason = (typeof AMOUNT_VERIFICATION_REASONS)[number];
 
+/**
+ * The order a movement of several legs reports their states in: the first any
+ * leg is in. One mismatch outranks everything, an unchecked leg outranks the
+ * checked ones, and `not_required` reports only when no leg needed a check.
+ */
+export const AMOUNT_VERIFICATION_SUMMARY_ORDER = [
+  "mismatch",
+  "pending",
+  "verified",
+  "not_required",
+] as const satisfies readonly AmountVerificationState[];
+
+/**
+ * The state a movement of several legs reports: the first in
+ * {@link AMOUNT_VERIFICATION_SUMMARY_ORDER} any leg is in.
+ *
+ * @throws Error when `states` is empty, which no movement is.
+ */
+export function summarizeAmountVerificationStates(
+  states: readonly AmountVerificationState[]
+): AmountVerificationState {
+  const state = AMOUNT_VERIFICATION_SUMMARY_ORDER.find((candidate) => states.includes(candidate));
+  if (state === undefined) {
+    throw new Error("A movement has at least one leg to summarize");
+  }
+  return state;
+}
+
 /** A movement's verification, as the API reports it. */
 export interface AmountVerification {
   state: AmountVerificationState;
