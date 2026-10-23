@@ -588,24 +588,31 @@ export function createPostgresTokenMovementLegsRepository(
     /**
      * Writes what the landed transaction shows a chain-verified transfer
      * moved, and the verdict that follows from it: `verified` when the
-     * observed debit, fee and credit are the quote's, `mismatch` otherwise or
-     * when the transaction shows none SDP can read. The chain is the authority
-     * for such a leg, so this replaces any earlier verdict.
+     * observed debit is the quote's and the observed fee is at most `maxFee`,
+     * `mismatch` otherwise or when the transaction shows none SDP can read.
+     * The fee is held to the tolerance, not the quote's fee: a pull that lands
+     * in the next epoch pays that epoch's fee, which the tolerance allows. The
+     * chain is the authority for such a leg, so this replaces any earlier
+     * verdict.
      *
      * @param input.observed - The amounts the transaction shows; null when it
      * shows none SDP can read.
+     * @param input.maxFee - The largest fee the movement may pay: the
+     * recurring mandate's tolerance, the rule a pull is held by.
      * @returns The leg, or null when the transfer has no chain-verified leg
      * (a pull recorded before legs).
      */
     async recordChainVerdict(input: {
       transferId: string;
       observed: LegAmounts | null;
+      maxFee: BaseUnits;
       updatedAt: string;
     }): Promise<TokenMovementLeg | null> {
       const { observed } = input;
       const debit = observed === null ? null : observed.debit.toString();
       const fee = observed === null ? null : observed.fee.toString();
       const credit = observed === null ? null : observed.credit.toString();
+      const feeWithinTolerance = observed !== null && observed.fee <= input.maxFee;
       const row = await db.queryOne(
         `UPDATE token_movement_legs
             SET observed_debit = ?::numeric,
@@ -616,12 +623,7 @@ export function createPostgresTokenMovementLegsRepository(
                 updated_at = ?
            FROM (
              SELECT leg.id,
-                    COALESCE(
-                      leg.quoted_debit = ?::numeric
-                        AND leg.quoted_fee = ?::numeric
-                        AND leg.quoted_credit = ?::numeric,
-                      false
-                    ) AS quote
+                    COALESCE(leg.quoted_debit = ?::numeric AND ?::boolean, false) AS quote
                FROM token_movement_legs leg
               WHERE leg.organization_id = ?
                 AND leg.project_id = ?
@@ -641,8 +643,7 @@ export function createPostgresTokenMovementLegsRepository(
           CHAIN_DELTA_MISMATCH.reason,
           input.updatedAt,
           debit,
-          fee,
-          credit,
+          feeWithinTolerance,
           tenant.organizationId,
           projectId,
           input.transferId,

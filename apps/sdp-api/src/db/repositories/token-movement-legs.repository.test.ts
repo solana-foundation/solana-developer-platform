@@ -1,5 +1,5 @@
 import { quoteMovement } from "@sdp/solana/movement-quote";
-import { parseTokenAmount } from "@sdp/solana/token-amount";
+import { baseUnits, parseTokenAmount } from "@sdp/solana/token-amount";
 import { decodeTokenTerms, type MintTokenTerms } from "@sdp/solana/token-terms";
 import { SOL_MINT, SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
 import {
@@ -641,6 +641,7 @@ describe("token movement legs (postgres)", () => {
       await legs().recordChainVerdict({
         transferId: transfer.id,
         observed: { debit: quote.debit, fee: quote.fee, credit: quote.credit },
+        maxFee: quote.fee,
         updatedAt: new Date().toISOString(),
       })
     ).toBeNull();
@@ -651,6 +652,41 @@ describe("token movement legs (postgres)", () => {
         updatedAt: new Date().toISOString(),
       })
     ).toBe(false);
+  });
+
+  it("verifies a pull that paid the next epoch's fee within the tolerance, keeping what it moved", async () => {
+    // 25 at 50 bps, capped at 0.05 in the epoch the quote read; the pull lands
+    // in the next epoch, whose cap of 0.1 the mandate's tolerance allows.
+    const quote = tokenQuote(mintTerms([transferFeeExtension(50, 50_000n)]), "25", "debit");
+    const landed = {
+      debit: quote.debit,
+      fee: baseUnits(100_000n),
+      credit: baseUnits(quote.debit - 100_000n),
+    };
+    const verdict = async (transferId: string, maxFee: bigint) => {
+      const transfer = required(
+        await payments().createTransfer({ ...transferInput(transferId), amount: "25" })
+      );
+      await legs().insertChainLeg({ owner: { kind: "transfer", transferId: transfer.id }, quote });
+      return required(
+        await legs().recordChainVerdict({
+          transferId: transfer.id,
+          observed: landed,
+          maxFee: baseUnits(maxFee),
+          updatedAt: new Date().toISOString(),
+        })
+      );
+    };
+
+    expect(await verdict("xfr_leg_chain_within", 100_000n)).toMatchObject({
+      quoted: { fee: 50_000n },
+      observed: landed,
+      verification: { state: "verified", reason: "chain_delta_matched" },
+    });
+    expect(await verdict("xfr_leg_chain_above", 99_999n)).toMatchObject({
+      observed: landed,
+      verification: { state: "mismatch", reason: "chain_delta_mismatch" },
+    });
   });
 
   it("rolls the transfer back when its leg cannot be written", async () => {
