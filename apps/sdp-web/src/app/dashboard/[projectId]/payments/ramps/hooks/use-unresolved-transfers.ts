@@ -4,6 +4,7 @@ import type { TokenAmountQuote } from "@sdp/types/token-movements";
 import { useState } from "react";
 import type { CreateTransferInput } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import { isTransferKeyKept } from "@/app/dashboard/[projectId]/payments/transfer-idempotency";
+import type { TokenAmountEntry } from "@/app/dashboard/[projectId]/payments/use-token-amount-entry";
 
 /** An attempt whose answer left its key kept: what it sent, and the quote that priced it. */
 export interface UnresolvedTransfer {
@@ -43,6 +44,53 @@ export function useUnresolvedTransfers() {
         else next.delete(entry);
         return next;
       });
+    },
+  };
+}
+
+/** What a send wizard has typed, as `pinnedSendEntry` reads it. */
+interface TypedSend {
+  walletId: string;
+  destinationAddress: string | null;
+  mint: string | null;
+  amount: string;
+  displayAmount: string;
+  memo: string;
+}
+
+/**
+ * The amount entry a send wizard shows and sends: the live entry, or, while
+ * the typed payment's last attempt is unresolved, that attempt's token amount
+ * and quote, never one a later quote priced.
+ *
+ * @returns The typed entry's identity, its unresolved attempt (null when
+ *   none), and the entry to show and send.
+ */
+export function pinnedSendEntry(
+  typed: TypedSend,
+  amountEntry: TokenAmountEntry,
+  unresolvedFor: (entry: string) => UnresolvedTransfer | null
+): { typedEntry: string; unresolved: UnresolvedTransfer | null; shownEntry: TokenAmountEntry } {
+  const typedEntry = JSON.stringify([
+    typed.walletId,
+    typed.destinationAddress,
+    typed.mint,
+    amountEntry.unit,
+    amountEntry.unit === "display" ? typed.displayAmount.trim() : typed.amount.trim(),
+    typed.memo.trim(),
+  ]);
+  const unresolved = unresolvedFor(typedEntry);
+  if (unresolved === null) {
+    return { typedEntry, unresolved, shownEntry: amountEntry };
+  }
+  return {
+    typedEntry,
+    unresolved,
+    shownEntry: {
+      ...amountEntry,
+      tokenAmount: unresolved.submission.amount,
+      quote: unresolved.quote,
+      quoteError: null,
     },
   };
 }
