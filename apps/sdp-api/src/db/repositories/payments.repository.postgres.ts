@@ -95,18 +95,20 @@ function appendRampTransitionGuards(
 }
 
 /**
- * The legs CTE a statement that settles `pt` adds, and its values, bound after
- * the statement's own; none when the write is no verdict on a built movement.
+ * The legs CTE a statement that settles `source` (`pt` or rows of it) adds,
+ * and its values, bound after the statement's own; none when the write is no
+ * verdict on a built movement.
  */
 function settledLegs(
   verdict: AmountVerificationVerdict | null,
-  updatedAt: string
+  updatedAt: string,
+  source: string
 ): { cte: string; values: LegBinding[] } {
   if (verdict === null) {
     return { cte: "", values: [] };
   }
   const statement = legVerdictStatement({
-    source: "pt",
+    source,
     ownerColumn: "payment_transfer_id",
     verdict,
     updatedAt,
@@ -437,7 +439,12 @@ export function createPostgresPaymentsRepository(
       assignments.push("provider_observed_at = ?");
       assignmentValues.push(input.providerObservation.observedAt);
     }
-    const legs = settledLegs(builtOfframpDepositVerdict(input.transition), input.updatedAt);
+    // delivery_verified completes on-ramps too; only an off-ramp's leg is a deposit SDP built.
+    const legs = settledLegs(
+      builtOfframpDepositVerdict(input.transition),
+      input.updatedAt,
+      "(SELECT * FROM pt WHERE pt.type = 'offramp')"
+    );
     const row = await db
       .prepare(
         `WITH pt AS (
@@ -575,7 +582,8 @@ export function createPostgresPaymentsRepository(
       const { clauses, values } = buildUpdateTransferWhere(input);
       const legs = settledLegs(
         input.status === undefined ? null : builtMovementVerdict(input.status),
-        input.updatedAt
+        input.updatedAt,
+        "pt"
       );
 
       const row = await db

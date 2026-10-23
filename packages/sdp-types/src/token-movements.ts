@@ -132,11 +132,17 @@ export function builtMovementVerdict(
   return verdicts[status] ?? null;
 }
 
-/** The same for the ramp transitions that end an off-ramp deposit SDP built. */
+/**
+ * The same for the ramp transitions that end an off-ramp deposit SDP built,
+ * written on off-ramp rows only. `delivery_verified` is there because a
+ * provider settlement can move the row out of `processing` before
+ * `offramp_deposit_confirmed` matches it; on-ramps take it too, and get no verdict.
+ */
 export const BUILT_OFFRAMP_DEPOSIT_VERDICTS = {
   offramp_deposit_confirmed: BUILT_TRANSFER_LANDED,
   offramp_deposit_failed: MOVEMENT_NOT_EXECUTED,
   offramp_deposit_released: MOVEMENT_NOT_EXECUTED,
+  delivery_verified: BUILT_TRANSFER_LANDED,
 } as const satisfies Partial<Record<RampTransferTransitionId, AmountVerificationVerdict>>;
 
 /**
