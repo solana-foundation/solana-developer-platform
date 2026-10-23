@@ -9,7 +9,12 @@
  * Client-safe: no RPC and no Node-only import. The dashboard imports it.
  */
 
-import { AmountError, formatDecimalAmount, parseDecimalAmount } from "./amount";
+import {
+  AmountError,
+  formatDecimalAmount,
+  parseDecimalAmount,
+  parseTokenAmount as parseU64BaseUnits,
+} from "./amount";
 
 declare const baseUnitsBrand: unique symbol;
 declare const tokenAmountBrand: unique symbol;
@@ -85,11 +90,7 @@ export function parseBaseUnits(value: string): BaseUnits {
  */
 export function parseTokenAmount(value: string, decimals: number): TokenAmount {
   assertMintDecimals(decimals);
-  const units = parseDecimalAmount(value, decimals);
-  if (units > U64_MAX) {
-    throw new AmountError("Amount is out of range");
-  }
-  return toTokenAmount(baseUnits(units), decimals);
+  return toTokenAmount(baseUnits(parseU64BaseUnits(value, decimals)), decimals);
 }
 
 /**
