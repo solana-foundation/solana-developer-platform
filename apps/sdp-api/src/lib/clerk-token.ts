@@ -208,13 +208,15 @@ export async function verifyClerkJwtForRequest(
 
   const payload = await verifyClerkJwt(token, c.env);
   // A session presented alongside a gateway identity must be the session the
-  // gateway authenticated (HOO-2256).
+  // gateway authenticated (HOO-2256): its user and, when the identity names
+  // one, its active organization. The organization only selects which SDP
+  // membership applies; the role still comes from SDP's own row.
   const gatewayIdentity = c.get("gatewayIdentity");
   if (
     gatewayIdentity &&
     (gatewayIdentity.clerkUserId !== payload.sub ||
       (gatewayIdentity.orgId !== null &&
-        gatewayIdentity.orgId !== (payload.o?.id ?? payload.org_id ?? null)))
+        gatewayIdentity.orgId !== resolveClerkOrganizationClaims(payload).organizationId))
   ) {
     throw new Error("Clerk session does not match the gateway identity");
   }
