@@ -14,7 +14,12 @@ import { baseUnits } from "@sdp/solana/token-amount";
 import { feeFor, type TokenTerms } from "@sdp/solana/token-terms";
 import type { RampDeliveryMismatch, RampDeliveryMismatchReason } from "@sdp/types/payments";
 import { type AmountVerificationVerdict, MOVEMENT_NOT_EXECUTED } from "@sdp/types/token-movements";
-import { SOL_DECIMALS, SOL_MINT, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
+import {
+  SOL_DECIMALS,
+  SOL_MINT,
+  SPL_TOKEN_PROGRAMS,
+  WELL_KNOWN_TOKEN_BY_MINT,
+} from "@sdp/types/well-known-tokens";
 import { address, assertIsSignature, type Epoch, type Signature, unixTimestamp } from "@solana/kit";
 import { z } from "zod";
 import type { PaymentsRepository, PaymentTransferRow } from "@/db/repositories/payments.repository";
@@ -274,8 +279,13 @@ function observedDelivery(
   const debits: bigint[] = [];
   let statedFee: bigint | null = 0n;
   let moves = 0;
+  const tokenProgram = SPL_TOKEN_PROGRAMS[asset.program];
   for (const instruction of transaction.instructions) {
+    // The System program's "transfer" moves lamports, as when the ATA program
+    // tops up rent for an account that already held some: only the mint's own
+    // token program moves its tokens.
     if (
+      instruction.programId !== tokenProgram ||
       instruction.parsedType === null ||
       !TOKEN_TRANSFER_TYPES.has(instruction.parsedType) ||
       instruction.info === null ||
