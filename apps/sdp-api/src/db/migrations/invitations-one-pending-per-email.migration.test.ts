@@ -11,7 +11,7 @@ import { seedOrgProject, UNIQUE_VIOLATION } from "@/test/helpers/migration-db";
 const revokeDuplicatesSql = readFileSync(
   path.join(
     path.dirname(fileURLToPath(import.meta.url)),
-    "postgres/0160_invitations_revoke_duplicate_pending.sql"
+    "postgres/0163_invitations_revoke_duplicate_pending.sql"
   ),
   "utf8"
 );
@@ -57,18 +57,18 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await client.query("BEGIN");
-  const tenant = await seedOrgProject(client, "0160");
+  const tenant = await seedOrgProject(client, "0163");
   org = tenant.organizationId;
   inviterId = tenant.userId;
-  otherOrg = (await seedOrgProject(client, "0160_other")).organizationId;
+  otherOrg = (await seedOrgProject(client, "0163_other")).organizationId;
 });
 
 afterEach(async () => {
   await client.query("ROLLBACK");
 });
 
-describe("0160/0161 one pending invitation per address per organization", () => {
-  it("0160 keeps only the newest pending invitation per organization and address", async () => {
+describe("0163/0164 one pending invitation per address per organization", () => {
+  it("0163 keeps only the newest pending invitation per organization and address", async () => {
     await client.query("DROP INDEX idx_invitations_one_pending_per_email");
     await insertInvitation("inv_oldest", org, "A@x.test", "pending", "2026-01-01T01:00Z");
     await insertInvitation("inv_newest", org, "a@X.test", "pending", "2026-01-01T03:00Z");
@@ -89,7 +89,7 @@ describe("0160/0161 one pending invitation per address per organization", () => 
     });
   });
 
-  it("0161 rejects a second pending invitation for the same address in any case", async () => {
+  it("0164 rejects a second pending invitation for the same address in any case", async () => {
     await insertInvitation("inv_first", org, "a@x.test", "pending", "2026-01-01T01:00Z");
 
     await expect(
@@ -100,7 +100,7 @@ describe("0160/0161 one pending invitation per address per organization", () => 
     });
   });
 
-  it("0161 frees the address once the first is not pending, and in another organization", async () => {
+  it("0164 frees the address once the first is not pending, and in another organization", async () => {
     await insertInvitation("inv_first", org, "a@x.test", "pending", "2026-01-01T01:00Z");
     await client.query("UPDATE invitations SET status = 'revoked' WHERE id = 'inv_first'");
 
