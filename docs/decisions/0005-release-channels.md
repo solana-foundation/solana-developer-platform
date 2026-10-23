@@ -33,17 +33,23 @@ deployment can run.
 
 | Release channel | Modules                                           | Target deployment                            |
 | --------------- | ------------------------------------------------- | -------------------------------------------- |
-| `stable`        | Custody, Payments, Recurring payments, Compliance | Production                                   |
-| `beta`          | `stable` plus modules in final validation         | Stage                                        |
+| `stable`        | Custody, Payments, Recurring payments, Compliance | Production, stage                            |
+| `beta`          | `stable` plus modules in final validation         | None yet                                     |
 | `experimental`  | All modules                                       | Development, previews, self-hosted           |
 
 Every deployment starts on `experimental`, which matches the behavior before
 release channels. Stage and production move to `beta` and `stable` in a later
 infrastructure change.
 
+**Amended 2026-10-23:** stage runs `stable` too. It is the gate every prod
+promotion passes, so it runs what prod runs; on `beta` it checked a superset of
+production's configuration. No deployment runs `beta` until a dedicated beta
+environment exists (HOO-2264); dev's `experimental` covers modules in
+validation meanwhile.
+
 A module or ramp provider is promoted by changing its maturity: `experimental` to
-`beta` to validate it on stage, then `beta` to `stable` to ship it to
-production. Maturity levels live on `main` and every deployment runs the same code, so
+`beta` while it is validated (on dev until a beta deployment exists), then
+`beta` to `stable` to ship it to stage and production. Maturity levels live on `main` and every deployment runs the same code, so
 the release channel is what keeps a module under validation on stage out of
 production.
 
