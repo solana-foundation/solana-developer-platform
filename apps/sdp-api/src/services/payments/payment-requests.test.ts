@@ -659,6 +659,59 @@ describe("checkAwaitingPaymentRequest", () => {
   });
 });
 
+async function listSettlementAudits(requestId: string) {
+  const result = await getDb(env)
+    .prepare(
+      "SELECT organization_id, metadata FROM audit_logs WHERE resource_type = 'payment_request' AND resource_id = ? AND action = 'settle'"
+    )
+    .bind(requestId)
+    .all<{ organization_id: string; metadata: string | Record<string, unknown> }>();
+  return result.results.map((row) => ({
+    organizationId: row.organization_id,
+    metadata: typeof row.metadata === "string" ? JSON.parse(row.metadata) : row.metadata,
+  }));
+}
+
+describe("settlement audit", () => {
+  installSettlementHooks();
+
+  it("records one settle entry for the awaiting to paid transition", async () => {
+    mockSettlementSucceeds();
+    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+
+    const settled = await reconcileOnSandbox(request);
+    await onSandbox(() => checkAwaitingPaymentRequest(env, request));
+
+    expect(await listSettlementAudits(request.id)).toEqual([
+      {
+        organizationId: TEST_ORG.id,
+        metadata: expect.objectContaining({
+          fromStatus: "awaiting_payment",
+          paidLate: false,
+          transferId: settled.fulfilled_by_transfer_id,
+          signature: SIGNATURE,
+        }),
+      },
+    ]);
+  });
+
+  it("records the expired to paid conversion as late", async () => {
+    mockNoSignatures();
+    const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
+    const expired = await onSandbox(() => closeLapsedPaymentRequest(env, request));
+
+    mockSettlementSucceeds(PAST_SECONDS + 60n);
+    await onSandbox(() => checkExpiredPaymentRequestForLatePayment(env, expired));
+
+    expect(await listSettlementAudits(request.id)).toEqual([
+      {
+        organizationId: TEST_ORG.id,
+        metadata: expect.objectContaining({ fromStatus: "expired", paidLate: true }),
+      },
+    ]);
+  });
+});
+
 async function storeExpired(requestId: string) {
   await getDb(env)
     .prepare("UPDATE payment_requests SET status = 'expired' WHERE id = ?")

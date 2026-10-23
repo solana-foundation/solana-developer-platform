@@ -7,7 +7,7 @@ import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { type Address, type Signature, signature } from "@solana/kit";
 import { ValidateTransferError, validateTransfer } from "@solana/pay";
 import { z } from "zod";
-import { asTransactionalClient, getDb } from "@/db/client";
+import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import type {
   PaymentRequestRow,
@@ -26,7 +26,10 @@ import {
 } from "@/db/repositories/repository-factory";
 import { AppError, internalError, rateLimited } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
+import { createAuditLedgerCheckpointStore } from "@/runtime/kv-redis";
 import { logEvent } from "@/runtime/money-path-events";
+import { AuditService, type SystemAuditLogEntry } from "@/services/audit.service";
+import { AUDIT_LEDGER_REDIS_TIMEOUT_MS } from "@/services/audit-ledger-timeout";
 import type { Env } from "@/types/env";
 
 const SIGNATURE_PAGE_SIZE = 1000;
@@ -73,6 +76,11 @@ interface SignatureScanOutcome {
   exhausted: boolean;
   found: FoundPayment | null;
   stuck: StuckSignature;
+}
+
+interface PaidTransition {
+  row: PaymentRequestRow;
+  from: "awaiting_payment" | "expired" | null;
 }
 
 interface PaymentRequestKey {
@@ -368,9 +376,12 @@ async function settlePaymentRequest(
   const key = paymentRequestKey(row);
   const scope = createTenantScope({ organizationId: key.organizationId, projectId: key.projectId });
   const paidLate = isPaidLate(found.blockTime, row.expires_at);
+  const audit = new AuditService(
+    getDb(env),
+    createAuditLedgerCheckpointStore(env, AUDIT_LEDGER_REDIS_TIMEOUT_MS)
+  );
   const settle = () =>
-    getDb(env).transaction(async (tx) => {
-      const db = asTransactionalClient(tx);
+    audit.logSystemWithin(async (db) => {
       const transfer = await recordInboundTransfer(
         createTransactionalPaymentsRepository(db, scope),
         row,
@@ -378,13 +389,17 @@ async function settlePaymentRequest(
         custodyWalletId,
         found
       );
-      return transitionToPaid(
+      const transition = await transitionToPaid(
         createTransactionalPaymentRequestsRepository(db, scope),
         row,
         key,
         transfer.id,
         paidLate
       );
+      return {
+        entry: transition.from === null ? null : settlementAuditEntry(transition, transfer, found),
+        result: transition.row,
+      };
     });
   try {
     return await settle();
@@ -402,7 +417,7 @@ async function transitionToPaid(
   key: PaymentRequestKey,
   transferId: string,
   paidLate: boolean
-): Promise<PaymentRequestRow> {
+): Promise<PaidTransition> {
   const paid = { ...key, fulfilledByTransferId: transferId, paidLate };
   if (row.status === "awaiting_payment") {
     const settled = await requestsRepo.markPaymentRequest({
@@ -411,16 +426,43 @@ async function transitionToPaid(
       canceledBy: null,
     });
     if (settled) {
-      return settled;
+      return { row: settled, from: "awaiting_payment" };
     }
   }
   const current = await reread(requestsRepo, key);
   if (current.status !== "expired") {
-    return current;
+    return { row: current, from: null };
   }
-  return (
-    (await requestsRepo.markExpiredPaymentRequestPaid(paid)) ?? (await reread(requestsRepo, key))
-  );
+  const converted = await requestsRepo.markExpiredPaymentRequestPaid(paid);
+  return converted
+    ? { row: converted, from: "expired" }
+    : { row: await reread(requestsRepo, key), from: null };
+}
+
+function settlementAuditEntry(
+  transition: PaidTransition,
+  transfer: PaymentTransferRow,
+  found: FoundPayment
+): SystemAuditLogEntry {
+  return {
+    organizationId: transition.row.organization_id,
+    action: "settle",
+    resourceType: "payment_request",
+    resourceId: transition.row.id,
+    metadata: {
+      projectId: transition.row.project_id,
+      fromStatus: transition.from,
+      paidLate: transition.row.paid_late,
+      transferId: transfer.id,
+      signature: found.signature,
+      slot: found.slot.toString(),
+      blockTime: found.blockTime?.toString() ?? null,
+      amount: transition.row.amount,
+      tokenMint: transition.row.token,
+      destination: transition.row.destination_address,
+      walletId: transition.row.wallet_id,
+    },
+  };
 }
 
 async function markExpired(env: Env, row: PaymentRequestRow): Promise<PaymentRequestRow> {
