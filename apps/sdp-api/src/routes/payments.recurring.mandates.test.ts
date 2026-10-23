@@ -26,6 +26,8 @@ import {
   installPaymentsRouteTestHooks,
   recurringCollectionTransactionForSignature,
   sendTransactionMock,
+  TEST_ORG,
+  TEST_PROJECT,
 } from "@/test/helpers/payments-routes";
 import {
   activateRecurringPaymentFixture,
@@ -299,6 +301,89 @@ describe("Payments routes — recurring mandates in base units (ADR 0012)", () =
       verification_state: "mismatch",
       verification_reason: "chain_delta_mismatch",
     });
+  });
+
+  it("finishes a stale amount update from its saved replacement plan after the fee grew to take the debit", async () => {
+    await answerPyusd({ extensions: [transferFeeExtension(0, 0n)], destinationExtensions: [] });
+    const activated = await activateRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      token: PYUSD,
+    });
+    const staleAt = new Date(Date.now() - 16 * 60 * 1000).toISOString();
+    // The crashed run made the replacement plan for 30 under a 0 fee, then stopped.
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_subscription_plans
+         SELECT (jsonb_populate_record(NULL::payment_subscription_plans, to_jsonb(plan) || jsonb_build_object(
+                  'id', 'psp_saved_replacement', 'amount', '30', 'mandate_debit', '30000000',
+                  'program_plan_id', '987654321', 'plan_pda', NULL, 'status', 'draft'))).*
+           FROM payment_subscription_plans plan WHERE plan.id = ?`
+      )
+      .bind(activated.planId)
+      .run();
+    const before = {
+      sourceCustodyWalletId: activated.sourceCustodyWalletId,
+      counterpartyId: activated.counterpartyId,
+      counterpartyAccountId: activated.counterpartyAccountId,
+      token: activated.token,
+      amount: activated.amount,
+      periodHours: activated.periodHours,
+      firstCollectionAt: activated.firstCollectionAt,
+      nextCollectionDueAt: activated.nextCollectionDueAt,
+      metadataUri: activated.metadataUri,
+    };
+    await getDb(env)
+      .prepare(
+        "UPDATE payment_recurring_payments SET status = 'updating', updated_at = ? WHERE id = ?"
+      )
+      .bind(staleAt, activated.id)
+      .run();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_recurring_payment_update_attempts (
+           id, organization_id, project_id, recurring_payment_id, mode, status, stage,
+           old_plan_id, old_subscription_id, new_plan_id, changed_fields, before_values,
+           after_values, created_at, updated_at
+         ) VALUES (
+           'prpu_stale_saved_plan', ?, ?, ?, 'replacement', 'processing', 'claim', ?, ?,
+           'psp_saved_replacement', ARRAY['amount']::text[], ?::jsonb, ?::jsonb, ?, ?
+         )`
+      )
+      .bind(
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        activated.id,
+        activated.planId,
+        activated.subscriptionId,
+        JSON.stringify(before),
+        JSON.stringify({ ...before, amount: "30" }),
+        staleAt,
+        staleAt
+      )
+      .run();
+    // Since then the fee grew to take every pull whole: a mandate made now would be refused.
+    await answerPyusd({
+      extensions: [transferFeeExtension(10_000, 1_000_000_000n)],
+      destinationExtensions: [],
+    });
+
+    const response = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}`,
+      { method: "PATCH", headers: RECURRING_HEADERS, body: JSON.stringify({ amount: "30" }) },
+      env
+    );
+
+    expect(response.status).toBe(200);
+    expect((await parseRecurringResponse(response)).data.recurringPayment).toMatchObject({
+      status: "active",
+      planId: "psp_saved_replacement",
+    });
+    const plan = mandateColumnsSchema.parse(
+      await getDb(env)
+        .prepare("SELECT * FROM payment_subscription_plans WHERE id = 'psp_saved_replacement'")
+        .first()
+    );
+    expect(plan.mandate_debit).toBe("30000000");
   });
 
   it("refuses an amount with more decimals than the mint when a new mandate is made", async () => {
