@@ -176,14 +176,16 @@ describe("Clerk webhooks", () => {
     }
   );
   it.each([
-    { totalCount: 1, status: "active", auditActions: [] },
-    { totalCount: 0, status: "removed", auditActions: ["delete"] },
+    { totalCount: 1, clerkReads: 1, status: "active", auditActions: [] },
+    { totalCount: 0, clerkReads: 2, status: "removed", auditActions: ["delete"] },
   ])(
     "organizationMembership.deleted leaves the membership $status when Clerk lists $totalCount",
-    async ({ totalCount, status, auditActions }) => {
+    async ({ totalCount, clerkReads, status, auditActions }) => {
       await seedKnownOrganization();
       const clerk = stubClerkBackend(env);
-      clerk.answer({ status: 200, body: { data: [], total_count: totalCount } });
+      for (let read = 0; read < clerkReads; read += 1) {
+        clerk.answer({ status: 200, body: { data: [], total_count: totalCount } });
+      }
       const clerkUserId = `clerk_user_${KNOWN_ADMIN.userId}`;
 
       const response = await simulateClerkWebhook({
@@ -197,13 +199,13 @@ describe("Clerk webhooks", () => {
       });
 
       expect(response.status).toBe(200);
-      expect(clerk.requests).toEqual([
-        {
+      expect(clerk.requests).toEqual(
+        Array.from({ length: clerkReads }, () => ({
           method: "GET",
           path: `/organizations/${KNOWN_CLERK_ORG_ID}/memberships?user_id=${clerkUserId}`,
           body: null,
-        },
-      ]);
+        }))
+      );
       expect(await knownOrganizationMemberships()).toEqual([
         { user_id: KNOWN_ADMIN.userId, role: "admin", status },
       ]);
