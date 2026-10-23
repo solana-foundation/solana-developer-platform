@@ -12,6 +12,7 @@ import {
   type SeededDefaultProjects,
   seedDefaultProjects,
 } from "@/test/helpers/projects";
+import { nativeQuote } from "@/test/helpers/token-movement";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { PaymentTransferBatchesRepository } from "./payment-transfer-batches.repository";
 import { createPostgresPaymentTransferBatchesRepository } from "./payment-transfer-batches.repository.postgres";
@@ -171,7 +172,7 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
             counterpartyId: "cpty_does_not_exist",
             counterpartyAccountId: "cpacct_does_not_exist",
             destinationAddress: "Dest111",
-            amount: "1",
+            quote: nativeQuote("1", "debit"),
             status: "pending",
             error: null,
           },
@@ -311,7 +312,6 @@ describe("PaymentTransferBatchesRepository.listStrandedTransferBatches (postgres
           sourceAddress: "Source111",
           token: "SOL",
           status: "processing",
-          totalAmount: "1",
           recipientCount: 1,
           transactionCount: 1,
           options: {},
@@ -327,7 +327,7 @@ describe("PaymentTransferBatchesRepository.listStrandedTransferBatches (postgres
             counterpartyId: `cpty_stranded_${environment}`,
             counterpartyAccountId: `cpacct_stranded_${environment}`,
             destinationAddress: "Dest111",
-            amount: "1",
+            quote: nativeQuote("1", "debit"),
             status: "pending",
             error: null,
           },

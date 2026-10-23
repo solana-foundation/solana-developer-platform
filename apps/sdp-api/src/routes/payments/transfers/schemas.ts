@@ -1,4 +1,9 @@
 import { PAYMENT_TRANSFER_STATUSES, PAYMENT_TRANSFER_TYPES } from "@sdp/types/payments";
+import {
+  DEFAULT_TOKEN_MOVEMENT_BASIS,
+  TOKEN_MOVEMENT_BASES,
+  type TokenMovementBasis,
+} from "@sdp/types/token-movements";
 import { z } from "zod";
 import { rampProviderSchema } from "@/routes/payments/ramps/schemas";
 import {
@@ -14,8 +19,26 @@ export const createTransferSchema = z.strictObject({
   destination: solanaAddressSchema("destination"),
   token: paymentTokenSchema,
   amount: paymentAmountSchema,
+  amountBasis: z.enum(TOKEN_MOVEMENT_BASES).optional(),
   memo: z.string().max(256).optional(),
 });
+
+/**
+ * The basis a create-transfer request's amount has when it names none. A
+ * request that funds an off-ramp deposit (`transferId`) names the provider's
+ * deposit amount, a receipt, so its basis is `credit`; any other is `debit`.
+ */
+export function defaultTransferBasis(body: { transferId?: string }): TokenMovementBasis {
+  return body.transferId === undefined ? DEFAULT_TOKEN_MOVEMENT_BASIS : "credit";
+}
+
+/** The basis a create-transfer request's amount has: the one it names, or its default. */
+export function requestedTransferBasis(body: {
+  transferId?: string;
+  amountBasis?: TokenMovementBasis;
+}): TokenMovementBasis {
+  return body.amountBasis === undefined ? defaultTransferBasis(body) : body.amountBasis;
+}
 
 export const transferDirectionSchema = z.enum(["inbound", "outbound"]);
 

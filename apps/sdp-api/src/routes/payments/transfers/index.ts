@@ -4,7 +4,6 @@ import { idempotent } from "@/middleware/idempotency";
 import { admit, replayFromRecord } from "@/middleware/movement-steps";
 import { requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
-import { canonicalizePaymentBody } from "@/routes/payments/fingerprint";
 import type { Env } from "@/types/env";
 import {
   admitTransferExecution,
@@ -14,6 +13,7 @@ import {
   getTransfer,
   listTransfers,
 } from "./handlers";
+import { canonicalizeTransferBody, previousCanonicalTransferBody } from "./idempotency";
 import { createTransferSchema } from "./schemas";
 
 export const transfers = new Hono<{ Bindings: Env }>();
@@ -29,7 +29,10 @@ transfers.post(
     key: "required",
     serverErrors: "rerun",
     recovery: "record",
-    canonicalize: canonicalizePaymentBody,
+    // One intent is one request: "USDC" and its mint, "1.0" and "1", and an
+    // omitted and an explicit default amountBasis.
+    canonicalize: canonicalizeTransferBody,
+    previousCanonicalForms: [previousCanonicalTransferBody],
   }),
   replayFromRecord(findTransferRecordReplay),
   admit(admitTransferExecution),

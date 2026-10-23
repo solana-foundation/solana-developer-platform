@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
-import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
+import { AMOUNT_VERIFICATION_STATES, TOKEN_MOVEMENT_BASES } from "@sdp/types/token-movements";
+import {
+  SPL_TOKEN_PROGRAMS,
+  type TokenProgramKind,
+  WELL_KNOWN_TOKENS,
+} from "@sdp/types/well-known-tokens";
 import {
   address,
   createNoopSigner,
@@ -12,11 +17,13 @@ import {
   type Signature,
 } from "@solana/kit";
 import {
+  getTokenSize,
   getTransferCheckedInstructionDataDecoder,
-  TOKEN_2022_PROGRAM_ADDRESS,
+  getTransferCheckedWithFeeInstructionDataDecoder,
   TRANSFER_CHECKED_DISCRIMINATOR,
 } from "@solana-program/token-2022";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db/client";
 import * as batchesRepositoryPostgres from "@/db/repositories/payment-transfer-batches.repository.postgres";
 import * as paymentsRepositoryPostgres from "@/db/repositories/payments.repository.postgres";
@@ -35,7 +42,11 @@ import * as solanaSigner from "@/services/solana/signer";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
-import { installClusterRpcResponder, tokenAccountsByOwnerResult } from "@/test/helpers/cluster-rpc";
+import {
+  installClusterRpcResponder,
+  type JsonRpcResult,
+  tokenAccountsByOwnerResult,
+} from "@/test/helpers/cluster-rpc";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import { syntheticAddress } from "@/test/helpers/parsed-transactions";
@@ -54,7 +65,18 @@ import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { sendTransactionPreflightError } from "@/test/helpers/rpc-errors";
 import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
-import { respondMintAccounts, scaledUiAmountConfig } from "@/test/helpers/token-mints";
+import { scaledUiAmountConfig } from "@/test/helpers/token-mints";
+import {
+  answerMovementAccounts,
+  associatedTokenAccount,
+  mintRpcAccount,
+  sentInstructions,
+  tokenRpcAccount,
+  transferFeeExtension,
+} from "@/test/helpers/token-movement";
+
+const TOKEN_2022_PROGRAM = SPL_TOKEN_PROGRAMS["token-2022"];
+
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 
@@ -105,6 +127,8 @@ const FIRST_SIGNATURE =
 const SECOND_SIGNATURE =
   "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV";
 const TEST_TOKEN_ACCOUNT = TEST_SOLANA_ADDRESSES.wallet3;
+/** A Token-2022 mint the catalogue does not name, so its program comes from the read. */
+const UNCATALOGUED_TOKEN_2022_MINT = "Bm3Ue2xDWJ1V26ecNqz1Uy7rRbC4f7CdMUrfrPGgKT6W";
 
 const labeledSignatures = new Map<string, string>();
 
@@ -390,10 +414,53 @@ async function _seedBatchApproverClerk(): Promise<Record<string, string>> {
   };
 }
 
+/** A movement's amounts and verification as the API answers them; other fields kept as sent. */
+const amountsSchema = z.looseObject({
+  basis: z.enum(TOKEN_MOVEMENT_BASES),
+  debit: z.string(),
+  fee: z.string(),
+  credit: z.string(),
+  decimals: z.number(),
+});
+const verificationSchema = z.looseObject({ state: z.enum(AMOUNT_VERIFICATION_STATES) });
+const estimateAmountsResponseSchema = z.object({
+  data: z.object({
+    estimate: z.looseObject({
+      amounts: amountsSchema,
+      estimatedFees: z.looseObject({ tokenAccountRentLamports: z.string() }),
+    }),
+  }),
+});
+const createdAmountsResponseSchema = z.object({
+  data: z.object({
+    batch: z.looseObject({ id: z.string(), totalAmount: z.string(), amounts: amountsSchema }),
+    recipients: z.array(
+      z.looseObject({
+        amount: z.string(),
+        amounts: amountsSchema,
+        amountVerification: verificationSchema,
+      })
+    ),
+  }),
+});
+const settledAmountsResponseSchema = z.object({
+  data: z.object({
+    recipients: z.array(z.looseObject({ amountVerification: verificationSchema })),
+    transfers: z.array(
+      z.looseObject({ amounts: amountsSchema, amountVerification: verificationSchema })
+    ),
+  }),
+});
+
 describe("payment transfer batches", () => {
   const rpc = installClusterRpcResponder();
 
-  function answerSourceTokenAccount(mint: string) {
+  /** Answers the batch's mint read and its source token account read for `mint`. */
+  function answerSourceTokenAccount(mint: string, program: TokenProgramKind) {
+    answerMovementAccounts(
+      rpc,
+      new Map([[mint, mintRpcAccount(program, { decimals: 6, extensions: null })]])
+    );
     rpc.answer(
       "getTokenAccountsByOwner",
       tokenAccountsByOwnerResult(1, [
@@ -1882,33 +1949,29 @@ describe("payment transfer batches", () => {
   it.each([
     {
       label: "legacy SPL Token",
-      tokenProgram: SPL_TOKEN_PROGRAMS["spl-token"],
+      tokenProgram: "spl-token",
       requestToken: WELL_KNOWN_TOKENS.USDC.mints.devnet.address,
       expectedMint: WELL_KNOWN_TOKENS.USDC.mints.devnet.address,
     },
     {
       label: "Token-2022",
-      tokenProgram: SPL_TOKEN_PROGRAMS["token-2022"],
-      requestToken: WELL_KNOWN_TOKENS.USDC.mints.devnet.address,
-      expectedMint: WELL_KNOWN_TOKENS.USDC.mints.devnet.address,
+      tokenProgram: "token-2022",
+      requestToken: UNCATALOGUED_TOKEN_2022_MINT,
+      expectedMint: UNCATALOGUED_TOKEN_2022_MINT,
     },
     {
       label: "well-known symbol USDC",
-      tokenProgram: SPL_TOKEN_PROGRAMS["spl-token"],
+      tokenProgram: "spl-token",
       requestToken: "USDC",
       expectedMint: WELL_KNOWN_TOKENS.USDC.mints.devnet.address,
     },
-  ])(
+  ] as const)(
     "creates a $label transfer batch",
     async ({ label, tokenProgram, requestToken, expectedMint }) => {
       const sourceSigner = await generateKeyPairSigner();
       await updateSeededWalletPublicKey(sourceSigner.address);
       createOrgSignerForCustodyWalletMock.mockResolvedValueOnce(sourceSigner);
-      getAccountInfoMock.mockResolvedValueOnce({
-        lamports: 4200000000n,
-        owner: tokenProgram,
-      } as Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>);
-      answerSourceTokenAccount(expectedMint);
+      answerSourceTokenAccount(expectedMint, tokenProgram);
 
       const signingOutcomeMock = vi.fn().mockResolvedValueOnce(FIRST_SIGNATURE);
       createKoraAdapterMock.mockReturnValueOnce(ownedSubmissionAdapter(signingOutcomeMock));
@@ -1994,111 +2057,35 @@ describe("payment transfer batches", () => {
     }
   );
 
-  it("refuses a scaled UI mint before storing or signing a batch", async () => {
-    const mint = syntheticAddress(22);
-    getAccountInfoMock.mockImplementationOnce(
-      async (client, account) =>
-        (
-          await client
-            .getAccountInfo(account, { encoding: "base64", commitment: "confirmed" })
-            .send()
-        ).value
-    );
-    answerSourceTokenAccount(mint);
-    respondMintAccounts(rpc, {
-      mints: new Map([
-        [
-          mint,
-          {
-            decimals: 6,
-            extensions: [
-              scaledUiAmountConfig({
-                multiplier: 2,
-                newMultiplier: 4,
-                newMultiplierEffectiveTimestamp: 1_800_000_000n,
-              }),
-            ],
-          },
-        ],
-      ]),
-      clockUnixTimestamp: 1_750_000_000n,
-    });
-    const counterpartyId = await seedCounterparty("batch_scaled_zero_counterparty");
-    const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
-      counterpartyId,
-      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
-    });
-
-    const res = await app.request(
-      "/v1/payments/transfer-batches",
-      {
-        method: "POST",
-        headers: {
-          "Idempotency-Key": crypto.randomUUID(),
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-        },
-        body: JSON.stringify({
-          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-          token: mint,
-          recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.000001" }],
-          options: { preflight: false },
+  it.each([
+    { kind: "plain", extensions: null },
+    {
+      // ADR 0012: an amount is in token units, so the multiplier changes only what a wallet
+      // displays, never what moves (main refused these mints rather than convert lossily).
+      kind: "scaled UI amount",
+      extensions: [
+        scaledUiAmountConfig({
+          multiplier: 2,
+          newMultiplier: 4,
+          newMultiplierEffectiveTimestamp: 1_800_000_000n,
         }),
-      },
-      env
-    );
-
-    expect(res.status).toBe(400);
-    expect(await res.json()).toMatchObject({
-      error: {
-        code: "BAD_REQUEST",
-        message: "Payments do not support the ScaledUiAmountConfig mint extension",
-      },
-    });
-    expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
-    expect(sendTransactionMock).not.toHaveBeenCalled();
-    const count = await getDb(env)
-      .prepare(
-        `SELECT COUNT(*)::int AS count
-           FROM payment_transfer_batches
-          WHERE organization_id = ? AND project_id = ?`
-      )
-      .bind(TEST_ORG.id, TEST_PROJECT.id)
-      .first<{ count: number }>();
-    expect(count).toEqual({ count: 0 });
-  });
-
-  it("moves exact base units on a plain Token-2022 mint", async () => {
+      ],
+    },
+  ])("moves exact base units on a $kind Token-2022 mint", async ({ extensions }) => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerForCustodyWalletMock.mockResolvedValueOnce(sourceSigner);
     const mint = syntheticAddress(21);
-    getAccountInfoMock.mockImplementationOnce(
-      async (client, account) =>
-        (
-          await client
-            .getAccountInfo(account, { encoding: "base64", commitment: "confirmed" })
-            .send()
-        ).value
+    answerSourceTokenAccount(mint, "token-2022");
+    answerMovementAccounts(
+      rpc,
+      new Map([[mint, mintRpcAccount("token-2022", { decimals: 6, extensions })]])
     );
-    answerSourceTokenAccount(mint);
-    respondMintAccounts(rpc, {
-      mints: new Map([
-        [
-          mint,
-          {
-            decimals: 6,
-            extensions: null,
-          },
-        ],
-      ]),
-      clockUnixTimestamp: 1_750_000_000n,
-    });
     const signingOutcomeMock = vi
       .fn<(transactionBytes: Uint8Array) => Promise<string>>()
       .mockResolvedValueOnce(FIRST_SIGNATURE);
     createKoraAdapterMock.mockReturnValueOnce(ownedSubmissionAdapter(signingOutcomeMock));
-    const counterpartyId = await seedCounterparty("batch_scaled_ui_amount_counterparty");
+    const counterpartyId = await seedCounterparty("batch_token_2022_counterparty");
     const counterpartyAccountIds = await seedCryptoWalletCounterpartyAccounts(counterpartyId, [
       TEST_SOLANA_ADDRESSES.wallet2,
       TEST_SOLANA_ADDRESSES.wallet3,
@@ -2126,14 +2113,10 @@ describe("payment transfer batches", () => {
       env
     );
 
-    expect(res.status).toBe(200);
+    expect(res.status, await res.clone().text()).toBe(200);
     const [transactionBytes] = required(signingOutcomeMock.mock.calls.at(0));
-    const message = getCompiledTransactionMessageDecoder().decode(
-      getTransactionDecoder().decode(transactionBytes).messageBytes
-    );
-    assert(message.version === 0);
-    const transferCheckedAmounts = message.instructions.flatMap((instruction) =>
-      message.staticAccounts[instruction.programAddressIndex] === TOKEN_2022_PROGRAM_ADDRESS &&
+    const transferCheckedAmounts = sentInstructions(transactionBytes).flatMap((instruction) =>
+      instruction.programAddress === TOKEN_2022_PROGRAM &&
       instruction.data !== undefined &&
       instruction.data[0] === TRANSFER_CHECKED_DISCRIMINATOR
         ? [getTransferCheckedInstructionDataDecoder().decode(instruction.data).amount]
@@ -2177,7 +2160,7 @@ describe("payment transfer batches", () => {
       environment: "production",
     });
     await enableMainnetSponsorship();
-    answerSourceTokenAccount(MAINNET_USDC_MINT);
+    answerSourceTokenAccount(MAINNET_USDC_MINT, "spl-token");
     const counterpartyId = await seedProjectCounterparty(
       productionProjectId,
       "batch_production_counterparty"
@@ -2234,6 +2217,245 @@ describe("payment transfer batches", () => {
         transfer_token: MAINNET_USDC_MINT,
       },
     ]);
+  });
+
+  describe("token movements (ADR 0012)", () => {
+    const pyusd = WELL_KNOWN_TOKENS.PYUSD.mints.devnet.address;
+
+    /** PYUSD at 50 bps, its source account, and wallet3's existing PYUSD account. */
+    async function answerFeeMint() {
+      const existing = await associatedTokenAccount(
+        "token-2022",
+        pyusd,
+        TEST_SOLANA_ADDRESSES.wallet3
+      );
+      answerMovementAccounts(
+        rpc,
+        new Map<string, JsonRpcResult>([
+          [
+            pyusd,
+            mintRpcAccount("token-2022", {
+              decimals: 6,
+              extensions: [transferFeeExtension(50, 1_000_000n)],
+            }),
+          ],
+          [
+            existing,
+            tokenRpcAccount("token-2022", {
+              mint: pyusd,
+              owner: TEST_SOLANA_ADDRESSES.wallet3,
+              amount: 0n,
+              extensions: [
+                { __kind: "ImmutableOwner" },
+                { __kind: "TransferFeeAmount", withheldAmount: 0n },
+              ],
+            }),
+          ],
+        ])
+      );
+      rpc.answer(
+        "getTokenAccountsByOwner",
+        tokenAccountsByOwnerResult(1, [
+          {
+            pubkey: TEST_TOKEN_ACCOUNT,
+            mint: pyusd,
+            amount: "1000000000",
+            decimals: 6,
+            uiAmountString: "1000",
+            state: "initialized",
+          },
+        ])
+      );
+    }
+
+    async function feeMintRecipients() {
+      const counterpartyId = await seedCounterparty(
+        `batch_fee_counterparty_${crypto.randomUUID()}`
+      );
+      const [toNew, toExisting] = await seedCryptoWalletCounterpartyAccounts(counterpartyId, [
+        TEST_SOLANA_ADDRESSES.wallet2,
+        TEST_SOLANA_ADDRESSES.wallet3,
+      ]);
+      return [
+        { counterpartyId, counterpartyAccountId: toNew, amount: "10" },
+        { counterpartyId, counterpartyAccountId: toExisting, amount: "0.5" },
+      ];
+    }
+
+    it("estimates a fee mint batch: fee totals, rent sized by its extensions, no read per destination", async () => {
+      await answerFeeMint();
+      rpc.answer("getFeeForMessage", { context: { slot: 1 }, value: 5000 });
+      rpc.respond("getMinimumBalanceForRentExemption", (request) => ({
+        result: Number(request.params[0]) * 10,
+      }));
+
+      const res = await app.request(
+        "/v1/payments/transfer-batches/estimate",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            token: "PYUSD",
+            recipients: await feeMintRecipients(),
+          }),
+        },
+        env
+      );
+
+      expect(res.status, await res.clone().text()).toBe(200);
+      const body = estimateAmountsResponseSchema.parse(await res.json());
+      expect(body.data.estimate.amounts).toEqual({
+        basis: "debit",
+        debit: "10.5",
+        fee: "0.0525",
+        credit: "10.4475",
+        decimals: 6,
+      });
+      // Only wallet2 needs an account, sized with ImmutableOwner and TransferFeeAmount.
+      const accountSize = getTokenSize([
+        { __kind: "ImmutableOwner" },
+        { __kind: "TransferFeeAmount", withheldAmount: 0n },
+      ]);
+      expect(body.data.estimate.estimatedFees.tokenAccountRentLamports).toBe(
+        String(accountSize * 10)
+      );
+      const methods = rpc.calls.map((call) => call.method);
+      expect(methods.filter((method) => method === "getMultipleAccounts")).toHaveLength(1);
+      expect(methods).not.toContain("getAccountInfo");
+      expect(getAccountInfoMock).not.toHaveBeenCalled();
+    });
+
+    it("records a leg per recipient with its fee, verified when the chunk lands", async () => {
+      await answerFeeMint();
+      const sourceSigner = await generateKeyPairSigner();
+      await updateSeededWalletPublicKey(sourceSigner.address);
+      createOrgSignerForCustodyWalletMock.mockResolvedValueOnce(sourceSigner);
+      createKoraAdapterMock.mockReturnValueOnce(
+        ownedSubmissionAdapter(vi.fn().mockResolvedValueOnce(FIRST_SIGNATURE))
+      );
+
+      const res = await app.request(
+        "/v1/payments/transfer-batches",
+        {
+          method: "POST",
+          headers: {
+            "Idempotency-Key": crypto.randomUUID(),
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            token: "PYUSD",
+            recipients: await feeMintRecipients(),
+            options: { preflight: false },
+          }),
+        },
+        env
+      );
+
+      expect(res.status, await res.clone().text()).toBe(200);
+      const created = createdAmountsResponseSchema.parse(await res.json());
+      expect(created.data.batch).toMatchObject({
+        totalAmount: "10.5",
+        amounts: { basis: "debit", debit: "10.5", fee: "0.0525", credit: "10.4475", decimals: 6 },
+      });
+      // Recipients written in one statement share a timestamp, so they list in no fixed order.
+      expect(created.data.recipients.map((recipient) => recipient.amounts)).toHaveLength(2);
+      expect(created.data.recipients.map((recipient) => recipient.amounts)).toEqual(
+        expect.arrayContaining([
+          { basis: "debit", debit: "10", fee: "0.05", credit: "9.95", decimals: 6 },
+          { basis: "debit", debit: "0.5", fee: "0.0025", credit: "0.4975", decimals: 6 },
+        ])
+      );
+      expect(created.data.recipients.map((recipient) => recipient.amountVerification)).toEqual([
+        { state: "pending" },
+        { state: "pending" },
+      ]);
+
+      getSignatureStatusesMock.mockResolvedValueOnce([
+        { slot: 103n, confirmations: 1n, confirmationStatus: "confirmed", err: null },
+      ]);
+      await runInEachClusterScope(() => trackPendingTransfers(env));
+      const read = await app.request(
+        `/v1/payments/transfer-batches/${created.data.batch.id}`,
+        { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
+      const settled = settledAmountsResponseSchema.parse(await read.json());
+      expect(settled.data.recipients.map((recipient) => recipient.amountVerification)).toEqual([
+        { state: "verified", reason: "sdp_built_transfer_landed" },
+        { state: "verified", reason: "sdp_built_transfer_landed" },
+      ]);
+      expect(settled.data.transfers).toMatchObject([
+        {
+          amounts: { basis: "debit", debit: "10.5", fee: "0.0525", credit: "10.4475" },
+          amountVerification: { state: "verified" },
+        },
+      ]);
+
+      const [, transactionBytes] = required(sendTransactionMock.mock.calls.at(-1));
+      const withFee = sentInstructions(transactionBytes).filter(
+        (instruction) =>
+          instruction.programAddress === TOKEN_2022_PROGRAM &&
+          instruction.data !== undefined &&
+          instruction.data[0] === 26 &&
+          instruction.data[1] === 1
+      );
+      expect(
+        withFee.map((instruction) =>
+          getTransferCheckedWithFeeInstructionDataDecoder().decode(required(instruction.data))
+        )
+      ).toMatchObject([
+        { amount: 10_000_000n, fee: 50_000n },
+        { amount: 500_000n, fee: 2_500n },
+      ]);
+    });
+
+    it("replays a batch keyed under its mint when the retry names its symbol", async () => {
+      await answerFeeMint();
+      const sourceSigner = await generateKeyPairSigner();
+      await updateSeededWalletPublicKey(sourceSigner.address);
+      createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
+      createKoraAdapterMock.mockReturnValueOnce(
+        ownedSubmissionAdapter(vi.fn().mockResolvedValueOnce(FIRST_SIGNATURE))
+      );
+      const recipients = await feeMintRecipients();
+      const idempotencyKey = crypto.randomUUID();
+      const post = (token: string) =>
+        app.request(
+          "/v1/payments/transfer-batches",
+          {
+            method: "POST",
+            headers: {
+              "Idempotency-Key": idempotencyKey,
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            },
+            body: JSON.stringify({
+              sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+              token,
+              recipients,
+              options: { preflight: false },
+            }),
+          },
+          env
+        );
+
+      const first = await post(pyusd);
+      expect(first.status).toBe(200);
+      const replay = await post("pyusd");
+
+      expect(replay.status).toBe(200);
+      expect(replay.headers.get("Idempotent-Replayed")).toBe("true");
+      const count = await getDb(env)
+        .prepare("SELECT COUNT(*)::int AS count FROM payment_transfer_batches")
+        .first<{ count: number }>();
+      expect(count).toEqual({ count: 1 });
+    });
   });
 
   it("returns a submitted chunk as processing without confirming in-request", async () => {

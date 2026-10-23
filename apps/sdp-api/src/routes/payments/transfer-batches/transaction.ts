@@ -1,11 +1,10 @@
-import { sumDecimalAmounts } from "@sdp/payments/decimal";
+import { formatDecimalAmount } from "@sdp/solana/amount";
 import { MEMO_PROGRAM_ADDRESS } from "@sdp/types/well-known-programs";
 import type { Address, Instruction, TransactionSigner } from "@solana/kit";
 import {
   addSignersToTransactionMessage,
   appendTransactionMessageInstructions,
   compileTransaction,
-  createNoopSigner,
   createTransactionMessage,
   getTransactionSize,
   getTransactionSizeLimit,
@@ -14,94 +13,49 @@ import {
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
-import { getTransferSolInstruction } from "@solana-program/system";
-import {
-  findAssociatedTokenPda,
-  getCreateAssociatedTokenIdempotentInstruction,
-  getTransferCheckedInstruction,
-} from "@solana-program/token-2022";
 import { badRequest } from "@/lib/errors";
-import type { RecentBlockhash, ResolvedRecipient, TokenContext } from "./types";
+import { buildPlannedLeg, type PlannedTokenMovement } from "@/services/token-movement/build";
+import type { RecentBlockhash, ResolvedRecipient } from "./types";
 
 export const DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION = 20;
 
 export interface RecipientInstructionGroup extends ResolvedRecipient {
   instructions: Instruction[];
-  destinationTokenAccount?: Address;
 }
 
 export interface TransactionChunk {
   recipientIndexes: number[];
   instructions: Instruction[];
   message: ReturnType<typeof buildBatchTransactionMessage>;
+  /** The sum of the chunk's recipients' debits, in token units. */
   amount: string;
 }
 
 /**
- * Builds the per-recipient instruction groups for the batch: a single system
- * transfer for SOL, or an idempotent create-ATA plus checked transfer for SPL
- * tokens.
+ * Builds the per-recipient instruction groups for the batch, each through the
+ * token movement builder from the batch's plan: a system transfer for native
+ * SOL; for a token, the destination's idempotent create and a checked
+ * transfer (with its fee whenever the mint has a fee config).
  *
- * @param params.tokenContext - Resolved token parameters for the batch.
- * @param params.recipients - Resolved recipients with base-unit amounts.
+ * @param params.plan - The batch's plan; its legs are the recipients'.
+ * @param params.recipients - Resolved recipients with their legs.
  * @param params.sourceSigner - Signer for the source wallet.
  * @param params.feePayer - Fee payer address sponsoring the transactions.
  * @returns One instruction group per recipient, in request order.
  */
-export async function buildInstructionGroups(params: {
-  tokenContext: TokenContext;
+export function buildInstructionGroups(params: {
+  plan: PlannedTokenMovement;
   recipients: ResolvedRecipient[];
   sourceSigner: TransactionSigner;
   feePayer: Address;
-}): Promise<RecipientInstructionGroup[]> {
-  if (params.tokenContext.kind === "sol") {
-    return params.recipients.map((recipient) => ({
-      ...recipient,
-      instructions: [
-        getTransferSolInstruction({
-          source: params.sourceSigner,
-          destination: recipient.destinationAddress,
-          amount: recipient.amountBaseUnits,
-        }),
-      ],
-    }));
-  }
-
-  const tokenContext = params.tokenContext;
-  const feePayerSigner = createNoopSigner(params.feePayer);
-  return Promise.all(
-    params.recipients.map(async (recipient) => {
-      const [destinationTokenAccount] = await findAssociatedTokenPda({
-        owner: recipient.destinationAddress,
-        tokenProgram: tokenContext.tokenProgram,
-        mint: tokenContext.mintAddress,
-      });
-      const createDestinationAtaInstruction = getCreateAssociatedTokenIdempotentInstruction({
-        payer: feePayerSigner,
-        ata: destinationTokenAccount,
-        owner: recipient.destinationAddress,
-        mint: tokenContext.mintAddress,
-        tokenProgram: tokenContext.tokenProgram,
-      });
-      const transferInstruction = getTransferCheckedInstruction(
-        {
-          source: tokenContext.sourceTokenAccount,
-          mint: tokenContext.mintAddress,
-          destination: destinationTokenAccount,
-          authority: params.sourceSigner,
-          amount: recipient.amountBaseUnits,
-          decimals: tokenContext.decimals,
-        },
-        { programAddress: tokenContext.tokenProgram }
-      );
-
-      return {
-        ...recipient,
-        destinationTokenAccount,
-        instructions: [createDestinationAtaInstruction, transferInstruction],
-      };
-    })
-  );
+}): RecipientInstructionGroup[] {
+  return params.recipients.map((recipient) => ({
+    ...recipient,
+    instructions: buildPlannedLeg(params.plan, recipient.leg, {
+      authority: params.sourceSigner,
+      feePayer: params.feePayer,
+    }),
+  }));
 }
 
 /**
@@ -170,8 +124,20 @@ function buildCandidateChunk(
       feePayer: params.feePayer,
       lifetime: params.lifetime,
     }),
-    amount: sumDecimalAmounts(groups.map((group) => group.amount)),
+    amount: chunkDebit(groups),
   };
+}
+
+/** The sum of a chunk's recipients' debits, in token units. */
+function chunkDebit(groups: readonly RecipientInstructionGroup[]): string {
+  const [first] = groups;
+  if (first === undefined) {
+    throw new Error("A transaction chunk has at least one recipient");
+  }
+  return formatDecimalAmount(
+    groups.reduce((total, group) => total + group.leg.quote.debit, 0n),
+    first.leg.quote.decimals
+  );
 }
 
 /**

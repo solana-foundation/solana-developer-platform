@@ -10,6 +10,11 @@ import {
   WALLET_TRANSFER_TYPES,
 } from "@sdp/types/payments";
 import { PERSISTED_RAMP_PROVIDERS } from "@sdp/types/provider-access";
+import {
+  type AmountVerificationVerdict,
+  builtMovementVerdict,
+  builtOfframpDepositVerdict,
+} from "@sdp/types/token-movements";
 import type { PaymentTransactionKind } from "@sdp/types/unified-transactions";
 import { tokenFilterAliases } from "@sdp/types/well-known-tokens";
 import { z } from "zod";
@@ -28,6 +33,7 @@ import type {
   RampTransferTransitionInput,
   UpdatePaymentTransferInput,
 } from "./payments.repository";
+import { type LegBinding, legVerdictStatement } from "./token-movement-legs.repository";
 
 /** SQL a repository method adds to a guarded status change, each list bound in order. */
 interface StatusChangeSql {
@@ -86,6 +92,26 @@ function appendRampTransitionGuards(
     clauses.push("updated_at = ?");
     values.push(input.expectedUpdatedAt);
   }
+}
+
+/**
+ * The legs CTE a statement that settles `pt` adds, and its values, bound after
+ * the statement's own; none when the write is no verdict on a built movement.
+ */
+function settledLegs(
+  verdict: AmountVerificationVerdict | null,
+  updatedAt: string
+): { cte: string; values: LegBinding[] } {
+  if (verdict === null) {
+    return { cte: "", values: [] };
+  }
+  const statement = legVerdictStatement({
+    source: "pt",
+    ownerColumn: "payment_transfer_id",
+    verdict,
+    updatedAt,
+  });
+  return { cte: `, ${statement.cte}`, values: statement.values };
 }
 
 function paymentTransferSearchExpression(alias: string): string {
@@ -407,6 +433,7 @@ export function createPostgresPaymentsRepository(
       assignments.push("provider_observed_at = ?");
       assignmentValues.push(input.providerObservation.observedAt);
     }
+    const legs = settledLegs(builtOfframpDepositVerdict(input.transition), input.updatedAt);
     const row = await db
       .prepare(
         `WITH pt AS (
@@ -414,10 +441,10 @@ export function createPostgresPaymentsRepository(
          SET ${assignments.join(", ")}
          WHERE ${scope.where}
          RETURNING *
-         )
+         )${legs.cte}
          SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind FROM pt`
       )
-      .bind(...assignmentValues, ...scope.values)
+      .bind(...assignmentValues, ...scope.values, ...legs.values)
       .first<PaymentTransferProjectionRow>();
 
     return row ? mapTransferRow(row) : null;
@@ -542,6 +569,10 @@ export function createPostgresPaymentsRepository(
         };
       }
       const { clauses, values } = buildUpdateTransferWhere(input);
+      const legs = settledLegs(
+        input.status === undefined ? null : builtMovementVerdict(input.status),
+        input.updatedAt
+      );
 
       const row = await db
         .prepare(
@@ -563,7 +594,7 @@ export function createPostgresPaymentsRepository(
                updated_at = ?
            WHERE ${clauses.join(" AND ")}
            RETURNING *
-           )
+           )${legs.cte}
            SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind FROM pt`
         )
         .bind(
@@ -593,7 +624,8 @@ export function createPostgresPaymentsRepository(
           input.status === "confirmed" || input.status === "finalized",
           input.updatedAt,
           input.updatedAt,
-          ...values
+          ...values,
+          ...legs.values
         )
         .first<PaymentTransferProjectionRow>();
 
@@ -659,6 +691,7 @@ export function createPostgresPaymentsRepository(
             "wallet_id = ?",
             "source_address = ?",
             "token = ?",
+            // The deposit is a receipt: the row and the provider name its credit.
             "amount::numeric = ?::numeric",
             "provider_data #>> '{cryptoDeposit,destinationAddress}' = ?",
             "(provider_data #>> '{cryptoDeposit,amount}')::numeric = ?::numeric",
@@ -677,9 +710,9 @@ export function createPostgresPaymentsRepository(
             input.walletId,
             input.sourceAddress,
             input.token,
-            input.amount,
+            input.credit,
             input.destinationAddress,
-            input.amount,
+            input.credit,
           ],
           assignments: [
             "initiated_by_key_id = ?",

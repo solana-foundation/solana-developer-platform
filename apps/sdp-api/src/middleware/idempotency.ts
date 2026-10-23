@@ -80,11 +80,13 @@ export interface IdempotencyOptions {
    */
   canonicalize?: (body: JsonValue) => JsonValue;
   /**
-   * The canonical form the route fingerprinted with before its current
-   * `canonicalize`. A key record or domain row saved under it still matches,
-   * so a retry across the change replays instead of answering 422. Must be pure.
+   * The canonical forms the route fingerprinted with before its current
+   * `canonicalize`, newest first. A key record or domain row saved under any of
+   * them still matches, so a retry across a change replays instead of answering
+   * 422. Each must be pure, and no form may give two different requests one
+   * fingerprint: a new form must never equal an old form of another request.
    */
-  previousCanonicalize?: (body: JsonValue) => JsonValue;
+  previousCanonicalForms?: readonly ((body: JsonValue) => JsonValue)[];
 }
 
 export const DEFAULT_IDEMPOTENCY_LEASE_SECONDS = 60;
@@ -363,9 +365,11 @@ export async function runIdempotency(
       body: canonicalize ? canonicalize(body) : body,
     });
   let fingerprint = fingerprintOf(options.canonicalize);
-  const previousFingerprint = options.previousCanonicalize
-    ? fingerprintOf(options.previousCanonicalize)
-    : fingerprint;
+  const previousForms =
+    options.previousCanonicalForms === undefined ? [] : options.previousCanonicalForms;
+  const previousFingerprints = [
+    ...new Set(previousForms.map((form) => fingerprintOf(form))),
+  ].filter((previous) => previous !== fingerprint);
   const id = `idk_${crypto.randomUUID()}`;
   const claimToken = crypto.randomUUID();
   const repository = createPostgresIdempotencyKeyRepository(getDb(c.env));
@@ -386,16 +390,17 @@ export async function runIdempotency(
     retentionSeconds: IDEMPOTENCY_KEY_RETENTION_SECONDS,
   };
   let claim = await repository.claim(claimInput);
-  if (claim.kind === "mismatch" && previousFingerprint !== fingerprint) {
+  for (const previousFingerprint of previousFingerprints) {
+    if (claim.kind !== "mismatch") break;
     // A key saved before the route's canonical form changed (a mismatch
-    // writes nothing, so claiming again under the old form is safe).
+    // writes nothing, so claiming again under an old form is safe).
     const previous = await repository.claim({ ...claimInput, fingerprint: previousFingerprint });
     if (previous.kind !== "mismatch") {
       claim = previous;
       fingerprint = previousFingerprint;
     }
   }
-  c.set("idempotencyPreviousFingerprint", previousFingerprint);
+  c.set("idempotencyPreviousFingerprints", previousFingerprints);
 
   switch (claim.kind) {
     case "completed":
@@ -644,14 +649,16 @@ export function getIdempotencyFingerprint(c: Context<{ Bindings: Env }>): string
 
 /**
  * Whether a fingerprint stored on a domain row is this request's: its current
- * fingerprint, or the one under the route's `previousCanonicalize`, so a row
+ * fingerprint, or one under the route's `previousCanonicalForms`, so a row
  * saved before the canonical form changed still answers its retry.
  */
 export function idempotencyFingerprintMatches(
   c: Context<{ Bindings: Env }>,
   stored: string
 ): boolean {
-  return (
-    stored === c.get("idempotencyFingerprint") || stored === c.get("idempotencyPreviousFingerprint")
-  );
+  if (stored === c.get("idempotencyFingerprint")) {
+    return true;
+  }
+  // Unset on a request that sent no key, which has no previous forms either.
+  return c.get("idempotencyPreviousFingerprints")?.includes(stored) === true;
 }

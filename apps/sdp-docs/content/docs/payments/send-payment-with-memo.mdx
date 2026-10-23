@@ -13,7 +13,7 @@ Use a memo when you need a free-form correlation token that your backend already
 - **Customer references** — internal customer or account identifiers for support and reconciliation.
 - **Run identifiers** — a payout-batch ID shared across many outbound transfers in the same disbursement.
 
-Memos are stored by SDP. They are **not** automatically attached as a Solana memo-program instruction; if you need an on-chain memo that block explorers display, that has to be handled at the transaction level (see the trade-offs section below).
+Memos are stored by SDP. SDP sends a memo onchain, as a memo-program instruction directly before the transfer, only when the destination token account requires memos on incoming transfers (its `MemoTransfer` extension). A transfer to such an account without a `memo` is refused with `400` and `details.reason: "memo_required"`. In every other case the memo is not onchain; if you need an onchain memo that block explorers display, that has to be handled at the transaction level (see the trade-offs section below).
 
 ## API usage
 

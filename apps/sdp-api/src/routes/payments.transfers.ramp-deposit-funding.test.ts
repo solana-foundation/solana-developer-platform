@@ -1,4 +1,6 @@
 import { formatDecimalAmount } from "@sdp/solana/amount";
+import { MEMO_PROGRAM_ADDRESS } from "@sdp/types/well-known-programs";
+import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { runWithSystemDatabaseIdentity } from "@/db/identity";
@@ -9,7 +11,8 @@ import { createTenantScope } from "@/lib/tenant-scope";
 import { moonpayWebhook } from "@/services/ramps/webhooks/moonpay";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import {
-  installClusterRpcStub,
+  installClusterRpcResponder,
+  type JsonRpcResult,
   type StubTokenAccount,
   tokenAccountsByOwnerResult,
 } from "@/test/helpers/cluster-rpc";
@@ -17,7 +20,6 @@ import { env } from "@/test/helpers/env";
 import {
   createOrgSignerForCustodyWalletMock,
   DEVNET_USDC_MINT,
-  getAccountInfoMock,
   installPaymentsRouteTestHooks,
   sendTransactionMock,
   TEST_API_KEY,
@@ -32,9 +34,20 @@ import {
   readTransferResponse,
   readTransferRow,
 } from "@/test/helpers/payments-transfers";
+import { required } from "@/test/helpers/required";
+import {
+  answerMovementAccounts,
+  associatedTokenAccount,
+  mintRpcAccount,
+  sentInstructions,
+  tokenRpcAccount,
+  transferFeeExtension,
+} from "@/test/helpers/token-movement";
 
-/** An off-ramp awaiting its 25 USDC deposit to wallet2, as a MoonPay sell leaves it. */
-async function seedUsdcOfframpDeposit(transferId: string) {
+const DEVNET_PYUSD_MINT = WELL_KNOWN_TOKENS.PYUSD.mints.devnet.address;
+
+/** An off-ramp awaiting its 25 USDC (or `mint`) deposit to wallet2, as a MoonPay sell leaves it. */
+async function seedOfframpDeposit(transferId: string, mint: string) {
   await createPostgresPaymentsRepository(
     getDb(env),
     createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
@@ -47,14 +60,14 @@ async function seedUsdcOfframpDeposit(transferId: string) {
     counterpartyId: null,
     sourceAddress: TEST_SOLANA_ADDRESSES.wallet1,
     destinationAddress: null,
-    token: DEVNET_USDC_MINT,
+    token: mint,
     amount: "25",
     memo: null,
     type: "offramp",
     direction: "outbound",
     status: "awaiting_payment",
     provider: "moonpay",
-    providerReference: "moonpay-usdc-deposit",
+    providerReference: `moonpay-deposit-${transferId}`,
     deliveryMode: "hosted",
     fiatCurrency: "USD",
     fiatAmount: "25",
@@ -80,6 +93,10 @@ function usdcDepositRequest(transferId: string, amount = "25") {
   };
 }
 
+async function seedUsdcOfframpDeposit(transferId: string) {
+  await seedOfframpDeposit(transferId, DEVNET_USDC_MINT);
+}
+
 async function countAuditRows(transferId: string): Promise<number> {
   const row = await getDb(env)
     .prepare(
@@ -94,9 +111,13 @@ async function countAuditRows(transferId: string): Promise<number> {
 
 describe("Payments routes — funding an off-ramp token deposit", () => {
   installPaymentsRouteTestHooks();
-  const rpc = installClusterRpcStub();
+  const rpc = installClusterRpcResponder();
 
   function answerSourceUsdc(baseUnits: string, state: StubTokenAccount["state"]) {
+    answerMovementAccounts(
+      rpc,
+      new Map([[DEVNET_USDC_MINT, mintRpcAccount("spl-token", { decimals: 6, extensions: null })]])
+    );
     rpc.answer(
       "getTokenAccountsByOwner",
       tokenAccountsByOwnerResult(1, [
@@ -114,6 +135,10 @@ describe("Payments routes — funding an off-ramp token deposit", () => {
 
   function tokenAccountReads(): number {
     return rpc.calls.filter((call) => call.method === "getTokenAccountsByOwner").length;
+  }
+
+  function mintReads(): number {
+    return rpc.calls.filter((call) => call.method === "getMultipleAccounts").length;
   }
 
   it("refuses a deposit the wallet cannot cover, leaving the sale open for the same key", async () => {
@@ -138,7 +163,7 @@ describe("Payments routes — funding an off-ramp token deposit", () => {
     // The refusal stored nothing under the key, so the same key funds the sale.
     answerSourceUsdc("25000000", "initialized");
     const tokenAccountReadsBefore = tokenAccountReads();
-    const mintReadsBefore = getAccountInfoMock.mock.calls.length;
+    const mintReadsBefore = mintReads();
     const funded = await postTransfer(usdcDepositRequest(transferId), { idempotencyKey });
 
     const fundedText = await funded.text();
@@ -148,9 +173,9 @@ describe("Payments routes — funding an off-ramp token deposit", () => {
       status: "settling",
     });
     expect(sendTransactionMock).toHaveBeenCalledTimes(1);
-    // The send reuses the source read; the catalogue mint needs no RPC read, as before the check.
+    // The send reuses the source and the terms the check read: one read of each.
     expect(tokenAccountReads() - tokenAccountReadsBefore).toBe(1);
-    expect(getAccountInfoMock.mock.calls.length - mintReadsBefore).toBe(0);
+    expect(mintReads() - mintReadsBefore).toBe(1);
   });
 
   it("refuses a deposit from a frozen token account before claiming it", async () => {
@@ -174,6 +199,7 @@ describe("Payments routes — funding an off-ramp token deposit", () => {
     const transferId = generatePaymentTransferId();
     await seedUsdcOfframpDeposit(transferId);
     const quoted = await readTransferRow(transferId);
+    answerSourceUsdc("0", "initialized");
     rpc.answer("getTokenAccountsByOwner", tokenAccountsByOwnerResult(1, []));
 
     const refused = await postTransfer(usdcDepositRequest(transferId), {});
@@ -232,7 +258,7 @@ describe("Payments routes — funding an off-ramp token deposit", () => {
             provider: "moonpay",
             kind: "failed",
             rampType: "offramp",
-            reference: "moonpay-usdc-deposit",
+            reference: `moonpay-deposit-${transferId}`,
             transferId,
             providerObservedAt: "2026-10-20T12:00:00.000Z",
             error: "deposit_timeout",
@@ -254,7 +280,7 @@ describe("Payments routes — funding an off-ramp token deposit", () => {
     expect(row.status).toBe("failed");
     expect(row.provider_data).toMatchObject({
       cryptoDeposit: null,
-      providerFailure: { reference: "moonpay-usdc-deposit", error: "deposit_timeout" },
+      providerFailure: { reference: `moonpay-deposit-${transferId}`, error: "deposit_timeout" },
     });
   });
 
@@ -270,6 +296,140 @@ describe("Payments routes — funding an off-ramp token deposit", () => {
       "Transfer does not match the off-ramp deposit instruction"
     );
     expect(tokenAccountReads()).toBe(0);
-    expect(getAccountInfoMock).not.toHaveBeenCalled();
+    expect(mintReads()).toBe(0);
+  });
+
+  it("delivers a fee mint's deposit in full: the debit is grossed up, the claim compares the credit", async () => {
+    const transferId = generatePaymentTransferId();
+    await seedOfframpDeposit(transferId, DEVNET_PYUSD_MINT);
+    answerMovementAccounts(
+      rpc,
+      new Map([
+        [
+          DEVNET_PYUSD_MINT,
+          mintRpcAccount("token-2022", {
+            decimals: 6,
+            extensions: [transferFeeExtension(50, 1_000_000n)],
+          }),
+        ],
+      ])
+    );
+    const answerSourcePyusd = (baseUnits: string) =>
+      rpc.answer(
+        "getTokenAccountsByOwner",
+        tokenAccountsByOwnerResult(1, [
+          {
+            pubkey: TEST_SOLANA_ADDRESSES.wallet3,
+            mint: DEVNET_PYUSD_MINT,
+            amount: baseUnits,
+            decimals: 6,
+            uiAmountString: formatDecimalAmount(BigInt(baseUnits), 6),
+            state: "initialized",
+          },
+        ])
+      );
+    const request = { ...usdcDepositRequest(transferId), token: "PYUSD" };
+    // 25 PYUSD reaching the provider at 50 bps costs the wallet 25.125628.
+    answerSourcePyusd("25000000");
+
+    const refused = await postTransfer(request, {});
+
+    expect(refused.status).toBe(400);
+    expect((await readErrorResponse(refused)).error.message).toBe(
+      "Source wallet holds 25 PYUSD; this deposit needs 25.125629 PYUSD"
+    );
+
+    answerSourcePyusd("30000000");
+    const funded = await postTransfer(request, {});
+    const fundedText = await funded.text();
+    expect(funded.status, fundedText).toBe(200);
+    const { transfer } = (await readTransferResponse(new Response(fundedText))).data;
+    expect(transfer).toMatchObject({
+      id: transferId,
+      status: "settling",
+      amount: "25",
+      amounts: {
+        basis: "credit",
+        debit: "25.125629",
+        fee: "0.125629",
+        credit: "25",
+        decimals: 6,
+      },
+      amountVerification: { state: "verified", reason: "sdp_built_transfer_landed" },
+    });
+  });
+
+  it("sends the request's memo to a provider destination that requires memos", async () => {
+    const transferId = generatePaymentTransferId();
+    await seedOfframpDeposit(transferId, DEVNET_PYUSD_MINT);
+    const destinationAccount = await associatedTokenAccount(
+      "token-2022",
+      DEVNET_PYUSD_MINT,
+      TEST_SOLANA_ADDRESSES.wallet2
+    );
+    answerMovementAccounts(
+      rpc,
+      new Map<string, JsonRpcResult>([
+        [DEVNET_PYUSD_MINT, mintRpcAccount("token-2022", { decimals: 6, extensions: [] })],
+        [
+          destinationAccount,
+          tokenRpcAccount("token-2022", {
+            mint: DEVNET_PYUSD_MINT,
+            owner: TEST_SOLANA_ADDRESSES.wallet2,
+            amount: 0n,
+            extensions: [
+              { __kind: "ImmutableOwner" },
+              { __kind: "MemoTransfer", requireIncomingTransferMemos: true },
+            ],
+          }),
+        ],
+      ])
+    );
+    rpc.answer(
+      "getTokenAccountsByOwner",
+      tokenAccountsByOwnerResult(1, [
+        {
+          pubkey: TEST_SOLANA_ADDRESSES.wallet3,
+          mint: DEVNET_PYUSD_MINT,
+          amount: "30000000",
+          decimals: 6,
+          uiAmountString: "30",
+          state: "initialized",
+        },
+      ])
+    );
+    const request = { ...usdcDepositRequest(transferId), token: "PYUSD", memo: "moonpay 42" };
+
+    const funded = await postTransfer(request, {});
+
+    const fundedText = await funded.text();
+    expect(funded.status, fundedText).toBe(200);
+    const [, transactionBytes] = required(sendTransactionMock.mock.calls.at(-1));
+    const instructions = sentInstructions(transactionBytes);
+    const transferIndex = instructions.findIndex(
+      (instruction) =>
+        instruction.programAddress === SPL_TOKEN_PROGRAMS["token-2022"] &&
+        instruction.accounts.includes(destinationAccount)
+    );
+    expect(instructions[transferIndex - 1]).toMatchObject({
+      programAddress: MEMO_PROGRAM_ADDRESS,
+      data: new TextEncoder().encode("moonpay 42"),
+    });
+  });
+
+  it("refuses a debit basis on an off-ramp deposit, whose amount is a receipt", async () => {
+    const transferId = generatePaymentTransferId();
+    await seedUsdcOfframpDeposit(transferId);
+
+    const refused = await postTransfer(
+      { ...usdcDepositRequest(transferId), amountBasis: "debit" },
+      {}
+    );
+
+    expect(refused.status).toBe(400);
+    expect((await readErrorResponse(refused)).error.message).toContain(
+      "amountBasis must be credit"
+    );
+    expect(mintReads()).toBe(0);
   });
 });
