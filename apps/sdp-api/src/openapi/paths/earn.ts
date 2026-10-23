@@ -141,11 +141,11 @@ function registerEarnStrategyPaths(
       "Returns the strategy catalogue visible to the caller, ranked by deposit size (TVL " +
       "descending). By default the list answers the environment's own cluster, the shelf the " +
       "caller can act on; pass `?cluster=` to browse the other cluster's mirrored shelf " +
-      "(those rows stay `fundable: false`). Without an API key you pick the shelf with " +
-      "`?environment=`: production (mainnet) unless you ask for sandbox (devnet); a key's shelf " +
-      "is its project's, and naming another answers 400. Catalogued is not the same as " +
-      "fundable: branch on `fundable` and `status` rather than assuming a listed strategy takes " +
-      "deposits.",
+      "(those rows stay `fundable: false`). Without an API key `?environment=` is required and " +
+      "picks the shelf: `sandbox` (devnet) or `production` (mainnet); omitting it answers 400. " +
+      "A key's shelf is its project's, and naming another answers 409. Catalogued is not the " +
+      "same as fundable: branch on `fundable` and `status` rather than assuming a listed " +
+      "strategy takes deposits.",
     security,
     request: {
       headers: projectScopeHeaders,
@@ -156,7 +156,7 @@ function registerEarnStrategyPaths(
         description: "One page of the strategy catalogue",
         content: jsonContent(earnStrategiesResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 429, 500, 503]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 409, 429, 500, 503]),
     },
   });
 

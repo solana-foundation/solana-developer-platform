@@ -75,9 +75,11 @@ DATABASE_URL=postgresql://sdp:sdp@127.0.0.1:5433/sdp pnpm db:seed:local
   by **both** apps (same unprefixed names). Under the Doppler wrapper, plain
   shell exports are ignored unless named in `DOPPLER_PRESERVE_ENV`.
 - **Keyless environment** is caller-selected on strategy lists with
-  `?environment=sandbox|production` and defaults to production. Quotes and
-  builds inherit the named strategy's environment. Authenticated calls continue
-  to derive environment from the selected project.
+  `?environment=sandbox|production`, which is required (400 when omitted).
+  Strategy detail, quotes and builds follow the named strategy row's
+  environment, and that choice opens the request's cluster scope.
+  Authenticated calls derive environment from the selected project; a list
+  naming another environment answers 409.
 - **Sponsored vault movements** (`EARN_VAULT_FEE_SPONSORSHIP_ENABLED=true`, API
   only) additionally need a Kora to sign against: `pnpm kora:local:up`, which
   hands the API `KORA_DEVNET_URL` via `.secrets/kora-local/api.env`. `infra/kora/kora.toml` already carries the Kamino program

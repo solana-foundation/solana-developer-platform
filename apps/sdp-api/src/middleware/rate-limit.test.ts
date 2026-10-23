@@ -255,7 +255,7 @@ describe("Rate limiting", () => {
       await seedRateLimit(env, identifier, 20);
 
       const res = await app.request(
-        "/v1/earn/strategies",
+        "/v1/earn/strategies?environment=sandbox",
         { headers: { "x-forwarded-for": CLIENT_IP } },
         env
       );

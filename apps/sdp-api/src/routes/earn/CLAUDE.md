@@ -1155,11 +1155,18 @@ fork a keyed and anonymous route with duplicate behavior.
 - **Keyed control plane:** submits, queued request/cancellation builds,
   movements, positions, earnings, custody vault routes, programs, and the
   aggregate feed. These retain the existing permission and project boundaries.
-- **Environment:** an authenticated project is authoritative. A keyless call
-  has no project, so the caller picks the shelf: `?environment=` on the list
-  (production when omitted) and the named strategy's own `environment` on
-  quotes and builds (`requireEarnStrategyForCaller`, context.ts). The
-  deployment's `ENVIRONMENT` never selects a cluster (PRO-1998).
+- **Environment:** an authenticated project is authoritative; a keyed list
+  naming another `?environment=` is a 409. A keyless call has no project, so
+  the caller picks the shelf: a required `?environment=` on the list (400 when
+  omitted) and the named strategy row's own `environment` on detail, quotes
+  and builds. `keyless-scope.ts` opens the cluster scope (ADR 0007) from that
+  choice directly before each keyless handler; keyed calls pass through in the
+  project middleware's scope, so no request opens two. The file is the one
+  Earn entry in the Biome `runInClusterScope` override, and
+  `earn.keyless-scope.test.ts` fails a keyless route that does not mount an
+  opener. `resolveEarnCatalogueEnvironment` and `requireEarnStrategyForCaller`
+  (context.ts) read the open scope for both tiers. The deployment's
+  `ENVIRONMENT` never selects a cluster (PRO-1998).
 - **Anonymous accounting:** catalogue reads use a generous per-IP tier. Quotes
   and builds use a tighter per-IP tier plus an independently configurable RPC
   budget. Structured logs carry the tier, normalized route, and decision.
@@ -1615,9 +1622,10 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
   callers use the membership-verified `x-project-id` project's environment; a
   request with neither fails closed (500), never defaults to sandbox. The
   keyless-capable Earn handlers are the single exception: with no tenant
-  authenticated, the caller's `?environment=` or the named strategy's row
-  decides (PRO-1998), never the deployment's `ENVIRONMENT`. A
-  production-project dashboard session therefore drives provider production.
+  authenticated, the caller's required `?environment=` or the named strategy's
+  row decides (PRO-1998) and opens the cluster scope, never the deployment's
+  `ENVIRONMENT`. A production-project dashboard session therefore drives
+  provider production.
 - `EARN_ENABLED` gates the whole family (index.ts), and Earn is a sub-module of
   Markets — `isEarnEnabled` also requires the parent `MARKETS_ENABLED`, so
   clearing that one flag darkens every Markets API surface. Both default off.

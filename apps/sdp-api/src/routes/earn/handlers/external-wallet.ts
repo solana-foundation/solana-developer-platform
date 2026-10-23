@@ -44,7 +44,7 @@ import {
   type ExternalWalletMovementTotals,
 } from "@/db/repositories/earn-movements.repository";
 import { type ApiKeyContext, getAuth, getOptionalAuth, requireProjectId } from "@/lib/auth";
-import { badRequest, internalError, notFound } from "@/lib/errors";
+import { type AppError, badRequest, internalError, notFound } from "@/lib/errors";
 import { isEarnHastraDexExitConfigured } from "@/lib/feature-flags";
 import { encodeKeysetCursor } from "@/lib/keyset-cursor";
 import { success } from "@/lib/response";
@@ -726,6 +726,19 @@ export type ResolvedExternalWalletExit = ResolvedExternalWalletExitBase &
   ({ positionId: string; strategyId: null } | { positionId: null; strategyId: string });
 
 /**
+ * The refusal for a keyless exit body that names only a `positionId`: a position is a tenant row
+ * a keyless caller cannot address, so it names the catalogue strategy and owner instead. The
+ * keyless scope opener (keyless-scope.ts) refuses with it before any scope opens.
+ *
+ * @returns The `BAD_REQUEST` error to throw.
+ */
+export function anonymousExitNeedsStrategy(): AppError {
+  return badRequest(
+    "strategyId and ownerAddress are required for an anonymous external-wallet exit"
+  );
+}
+
+/**
  * Resolve one exit without ever crossing the tier boundary. Authenticated
  * requests resolve their tenant position exactly as before. Anonymous requests
  * resolve only global strategy metadata supplied in the public body. The
@@ -764,11 +777,7 @@ export async function resolveExternalWalletExit(
     };
   }
 
-  if (!("strategyId" in locator)) {
-    throw badRequest(
-      "strategyId and ownerAddress are required for an anonymous external-wallet exit"
-    );
-  }
+  if (!("strategyId" in locator)) throw anonymousExitNeedsStrategy();
   // The row names the shelf; an anonymous caller chose it (PRO-1998).
   const { strategy, environment } = await requireEarnStrategyForCaller(c, locator.strategyId);
   if (earnDepositStyle(strategy.provider) !== "vault_direct") {

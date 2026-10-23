@@ -146,9 +146,9 @@ export const listEarnStrategies = async (c: AppContext) => {
   const query = parseQuery(c, listEarnStrategiesQuerySchema);
 
   const repo = getEarnRepository(c);
-  // A tenant reads its project's shelf; an anonymous caller picks one with
-  // `?environment=` (production when omitted). See resolveEarnCatalogueEnvironment.
-  const environment = resolveEarnCatalogueEnvironment(c, query.environment);
+  // A tenant reads its project's shelf; an anonymous caller must name one with
+  // `?environment=`. See resolveEarnCatalogueEnvironment.
+  const environment = resolveEarnCatalogueEnvironment(query.environment);
   // The shelf a caller can act on is the default; `?cluster=` is the explicit
   // opt-in that browses another cluster's sub-shelf — in practice a sandbox
   // reader reviewing the mirrored mainnet catalogue (PRO-1742). Opting in
