@@ -106,26 +106,26 @@ export function nativeSolBalance(lamports: bigint): CustodyWalletBalance {
 }
 
 /**
- * The holdings of several wallets summed per asset, in base units, before
+ * The holdings of several wallets summed per mint, in base units, before
  * display: an aggregate shows the display of the sum, never a sum of
  * displays, so one token never shows two numbers. Native SOL and wrapped SOL
- * share a mint address but stay apart, as each wallet lists them. An asset
+ * share a mint address and are one entry, as the dashboard keys and sums the
+ * aggregate by mint; neither is Token-2022, so the sum needs no terms. A mint
  * keeps the first wallet's label. Sorted by label, descending, as the
  * aggregate lists them.
  */
 export function sumHoldings(sets: readonly (readonly HeldTokenBalance[])[]): HeldTokenBalance[] {
-  const byAsset = new Map<string, HeldTokenBalance & { units: bigint }>();
+  const byMint = new Map<string, HeldTokenBalance & { units: bigint }>();
   for (const holding of sets.flat()) {
-    const key = `${holding.program === null ? "native" : holding.program}:${holding.mint}`;
     const units = parseBaseUnits(holding.amount);
-    const current = byAsset.get(key);
+    const current = byMint.get(holding.mint);
     if (current === undefined) {
-      byAsset.set(key, { ...holding, units });
+      byMint.set(holding.mint, { ...holding, units });
     } else {
       current.units += units;
     }
   }
-  return [...byAsset.values()]
+  return [...byMint.values()]
     .map(({ units, ...holding }) => ({ ...holding, amount: units.toString() }))
     .sort((left, right) => right.token.localeCompare(left.token));
 }

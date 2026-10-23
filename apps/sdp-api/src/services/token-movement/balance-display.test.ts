@@ -211,7 +211,9 @@ describe("balance display", () => {
 });
 
 describe("sumHoldings", () => {
-  it("sums each asset's base units across wallets and keeps native SOL apart from wrapped SOL", () => {
+  // Kept apart, native and wrapped SOL were two aggregate entries with one mint, which the
+  // dashboard keys and sums by mint.
+  it("sums each mint's base units across wallets, native SOL and wrapped SOL as one", () => {
     const wrappedSol = { ...holding(SOL_MINT, "5", "spl-token"), token: "wSOL", decimals: 9 };
 
     expect(
@@ -220,8 +222,7 @@ describe("sumHoldings", () => {
         [nativeSolHolding(2n), wrappedSol, holding(SCALED_MINT, "1", "token-2022")],
       ])
     ).toEqual([
-      { ...wrappedSol, amount: "5" },
-      { token: "SOL", mint: SOL_MINT, amount: "1000000002", decimals: 9, program: null },
+      { token: "SOL", mint: SOL_MINT, amount: "1000000007", decimals: 9, program: null },
       holding(SCALED_MINT, "18446744073709552", "token-2022"),
     ]);
   });

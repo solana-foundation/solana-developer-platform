@@ -229,9 +229,10 @@ them in one place, not adding special cases to every flow.
   read in one `getMultipleAccounts` with the Clock (99 mints per request, pages in parallel); none
   is cached, because interest accrues every second. A Token-2022 holding whose mint does not
   decode, or whose display overflows the program's f64 math, is left out and logged: anyone can
-  send a wallet such a token. An aggregate sums base units per asset, native SOL and wrapped SOL
-  apart, and shows the display of the sum. `usdValue` prices `displayAmount`. The old `uiAmount`
-  field is removed, not kept beside the new ones, which is acceptable only before launch.
+  send a wallet such a token. An aggregate sums base units per mint (native SOL and wrapped SOL as
+  one, as the dashboard keys it) and shows the display of the sum. `usdValue` prices
+  `displayAmount`. The old `uiAmount` field is removed, not kept beside the new ones, which is
+  acceptable only before launch.
   Private Channels balances report `tokenAmount` (SPC accounts are classic); Earn's share
   reconciliation compares base units and makes no terms read.
 - **Terms and quote routes (PR 5).** `GET /v1/tokens/{mint}/terms` reports decimals, program, the
