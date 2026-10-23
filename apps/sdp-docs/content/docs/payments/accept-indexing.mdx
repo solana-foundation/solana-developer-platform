@@ -13,7 +13,7 @@ The minimal inbound-only request:
 <Tab value="curl">
 ```bash title="Terminal"
 curl "https://api.solana.com/v1/payments/transfers?direction=inbound&pageSize=50" \
-  -H "Authorization: Bearer sk_test_..."
+  -H "Authorization: Bearer sf_..."
 ```
 </Tab>
 <Tab value="TypeScript">
@@ -23,7 +23,7 @@ url.searchParams.set("direction", "inbound");
 url.searchParams.set("pageSize", "50");
 
 const res = await fetch(url, {
-  headers: { Authorization: "Bearer sk_test_..." },
+  headers: { Authorization: "Bearer sf_..." },
 });
 const { data, meta } = await res.json();
 // data: Transfer[]

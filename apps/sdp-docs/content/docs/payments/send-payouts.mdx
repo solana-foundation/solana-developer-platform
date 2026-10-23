@@ -11,7 +11,7 @@ One request creates a durable batch, chunks its recipients into Solana transacti
 
 ```bash
 curl -X POST https://api.solana.com/v1/payments/transfer-batches \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: payroll-2026-05-14" \
   -d '{
@@ -60,7 +60,7 @@ Using a fresh idempotency key creates a new transfer intent, even if the payload
 <Tab value="curl">
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/transfers \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: payout-row-4837" \
   -d '{
@@ -82,7 +82,7 @@ async function payoutRecipient(row: PayoutRow): Promise<string> {
     {
       method: "POST",
       headers: {
-        "Authorization": "Bearer sk_test_...",
+        "Authorization": "Bearer sf_...",
         "Content-Type": "application/json",
         "Idempotency-Key": row.idempotencyKey,
       },
@@ -107,7 +107,7 @@ async function payoutRecipient(row: PayoutRow): Promise<string> {
 ```java title="PayoutRecipient.java"
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/payments/transfers"))
-    .header("Authorization", "Bearer sk_test_...")
+    .header("Authorization", "Bearer sf_...")
     .header("Content-Type", "application/json")
     .header("Idempotency-Key", idempotencyKey)
     .POST(HttpRequest.BodyPublishers.ofString("""
@@ -131,7 +131,7 @@ After the loop finishes, list all outbound transfers in the run's time window an
 <Tab value="curl">
 ```bash title="Terminal"
 curl "https://api.solana.com/v1/payments/transfers?direction=outbound&from=2026-05-14T00:00:00Z&to=2026-05-14T23:59:59Z&pageSize=100" \
-  -H "Authorization: Bearer sk_test_..."
+  -H "Authorization: Bearer sf_..."
 ```
 </Tab>
 <Tab value="TypeScript">
@@ -147,7 +147,7 @@ async function* listOutboundTransfers(from: string, to: string) {
     url.searchParams.set("pageSize", "100");
 
     const res = await fetch(url, {
-      headers: { Authorization: "Bearer sk_test_..." },
+      headers: { Authorization: "Bearer sf_..." },
     });
     const { data, meta } = await res.json();
     yield* data;

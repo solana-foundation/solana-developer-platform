@@ -199,7 +199,7 @@ function registerApiKeyAuth(registry: OpenAPIRegistry) {
     scheme: "bearer",
     bearerFormat: "API Key",
     description:
-      "Use Authorization: Bearer sk_test_... or sk_live_... with a base64url-encoded suffix.",
+      "Use Authorization: Bearer sf_<key id>_<secret><checksum>. Keys issued before this format (sk_test_..., sk_live_...) are still accepted.",
   });
 }
 

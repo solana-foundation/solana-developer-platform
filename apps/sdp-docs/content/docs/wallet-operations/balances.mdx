@@ -11,14 +11,14 @@ description: Per-wallet token balances with optional USD valuation via SDP.
 <Tab value="curl">
 ```bash title="Terminal"
 curl https://api.solana.com/v1/payments/wallets/wal_abc123/balances \
-  -H "Authorization: Bearer sk_test_..."
+  -H "Authorization: Bearer sf_..."
 ```
 </Tab>
 <Tab value="TypeScript">
 ```typescript title="get-wallet-balances.ts"
 const response = await fetch(
   "https://api.solana.com/v1/payments/wallets/wal_abc123/balances",
-  { headers: { Authorization: "Bearer sk_test_..." } }
+  { headers: { Authorization: "Bearer sf_..." } }
 );
 const { data } = await response.json();
 // data.walletBalances.balances: TokenBalance[]
@@ -28,7 +28,7 @@ const { data } = await response.json();
 ```java title="GetWalletBalances.java"
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/payments/wallets/wal_abc123/balances"))
-    .header("Authorization", "Bearer sk_test_...")
+    .header("Authorization", "Bearer sf_...")
     .GET()
     .build();
 ```

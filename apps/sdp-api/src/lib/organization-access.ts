@@ -152,7 +152,14 @@ export interface ApiKeyAuthorization {
  */
 export async function authorizeApiKey(
   c: Context<{ Bindings: Env }>,
-  keyHash: string
+  {
+    keyHash,
+    publicId,
+  }: {
+    keyHash: string;
+    /** An `sf_` key's key ID; null for a legacy `sk_` key, which has none. */
+    publicId: string | null;
+  }
 ): Promise<ApiKeyAuthorization> {
   const row = await getDb(c.env)
     .prepare(
@@ -170,9 +177,11 @@ export async function authorizeApiKey(
          FROM api_keys ak
          JOIN organizations o ON o.id = ak.organization_id
          JOIN projects p ON p.id = ak.project_id AND p.organization_id = ak.organization_id
-        WHERE ak.key_hash = ?`
+        WHERE ak.key_hash = ? AND ak.public_id IS NOT DISTINCT FROM ?`
     )
-    .bind(keyHash)
+    // The key ID must match the row the secret belongs to: an `sf_` secret
+    // under another key's ID is no key at all.
+    .bind(keyHash, publicId)
     .first<ApiKeyAuthorizationRow>();
 
   if (!row) {

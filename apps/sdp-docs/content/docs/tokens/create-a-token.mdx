@@ -52,12 +52,12 @@ List available templates to see what fields each one pre-configures:
 
 ```bash title="Terminal"
 curl https://api.solana.com/v1/issuance/templates \
-  -H "Authorization: Bearer sk_test_..."
+  -H "Authorization: Bearer sf_..."
 ```
 
 ```typescript title="list-templates.ts"
 const res = await fetch("https://api.solana.com/v1/issuance/templates", {
-  headers: { Authorization: "Bearer sk_test_..." },
+  headers: { Authorization: "Bearer sf_..." },
 });
 const { data } = await res.json();
 // data[].id — use as the "template" value when creating
@@ -95,7 +95,7 @@ Pass identity fields in the `POST /v1/issuance/tokens` body:
 
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Acme Dollar",
@@ -138,7 +138,7 @@ Add operational fields to the same body. `signingCustodyWalletId` is the exact S
 const res = await fetch("https://api.solana.com/v1/issuance/tokens", {
   method: "POST",
   headers: {
-    Authorization: "Bearer sk_test_...",
+    Authorization: "Bearer sf_...",
     "Content-Type": "application/json",
   },
   body: JSON.stringify({

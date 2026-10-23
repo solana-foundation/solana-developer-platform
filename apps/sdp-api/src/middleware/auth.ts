@@ -3,7 +3,7 @@
  *
  * Flow:
  * 1. Extract API key from Authorization header
- * 2. Hash the key
+ * 2. Check its format (an `sf_` key's checksum) and hash it
  * 3. Flood guard per key hash at the highest rate-limit tier
  * 4. Read and judge the key's live rows in one Postgres statement
  * 5. Enforce the key's own tier per key id
@@ -15,7 +15,7 @@ import type { ApiKeyEnvironment } from "@sdp/types/api-keys";
 import type { Context, Next } from "hono";
 import { getDb } from "@/db/client";
 import { runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db/identity";
-import { extractApiKey, looksLikeApiKey } from "@/lib/api-key-format";
+import { extractApiKey, looksLikeApiKey, parsePresentedApiKey } from "@/lib/api-key-format";
 import { hashApiKey } from "@/lib/api-key-hash";
 import {
   assertNoCachedTerminalRefusal,
@@ -219,13 +219,19 @@ async function authenticateApiKeyRequest(c: Context<{ Bindings: Env }>): Promise
     throw new AppError("UNAUTHORIZED", "API key required");
   }
 
-  // Validate key format
-  if (!apiKey.startsWith("sk_test_") && !apiKey.startsWith("sk_live_")) {
+  // Validate key format. An `sf_` key's checksum rejects a typo here, before
+  // any hash, Redis call or DB read.
+  const presented = parsePresentedApiKey(apiKey);
+  if (!presented) {
     throw new AppError("INVALID_API_KEY", "Invalid API key format");
   }
 
-  // Hash the key
-  const keyHash = await hashApiKey(apiKey, c.env.API_KEY_PEPPER);
+  // Hash the key: an `sf_` key's secret alone, as the gateway will; a legacy
+  // `sk_` key whole, as it was issued.
+  const keyHash = await hashApiKey(
+    presented.format === "sf" ? presented.secret : presented.key,
+    c.env.API_KEY_PEPPER
+  );
 
   // A hash this instance recently refused for good (unknown, revoked,
   // expired) is refused again from memory, with no Redis call or DB read.
@@ -252,7 +258,10 @@ async function authenticateApiKeyRequest(c: Context<{ Bindings: Env }>): Promise
   // The authoritative read: every authorization field from the key's live
   // rows, in one statement, so a change to any of them applies on this
   // request. It refuses an unknown, revoked, expired or out-of-scope key.
-  const key = await authorizeApiKey(c, keyHash);
+  const key = await authorizeApiKey(c, {
+    keyHash,
+    publicId: presented.format === "sf" ? presented.keyId : null,
+  });
 
   // The key's own tier, per key id. Only admitted requests count, so a client
   // above its tier still gets its tier's worth through.

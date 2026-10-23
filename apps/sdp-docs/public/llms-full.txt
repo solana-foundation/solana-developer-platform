@@ -47,7 +47,7 @@ SDP puts one stable API in front of the Solana ecosystem's providers, so you int
 const response = await fetch("https://api.solana.com/v1/wallets", {
   method: "POST",
   headers: {
-    Authorization: "Bearer sk_test_...",
+    Authorization: "Bearer sf_...",
     "Content-Type": "application/json",
   },
   body: JSON.stringify({
@@ -63,7 +63,7 @@ const wallet = await response.json();
 
 response = requests.post(
     "https://api.solana.com/v1/wallets",
-    headers={"Authorization": "Bearer sk_test_..."},
+    headers={"Authorization": "Bearer sf_..."},
     json={"provider": "privy", "label": "Treasury wallet"},
 )
 wallet = response.json()
@@ -72,7 +72,7 @@ wallet = response.json()
 <Tab value="curl">
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/wallets \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -d '{ "provider": "privy", "label": "Treasury wallet" }'
 ```
@@ -105,7 +105,7 @@ SDP exposes unified endpoints for onchain transfers, built on official Solana pr
 <Tab value="Recurring Payments">
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/recurring-payments \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Idempotency-Key: recurring-subscriber-42" \
   -H "Content-Type: application/json" \
   -d '{
@@ -121,7 +121,7 @@ curl -X POST https://api.solana.com/v1/payments/recurring-payments \
 <Tab value="Payment Requests">
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/requests \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -d '{
     "walletId": "privy_wallet_123",
@@ -134,7 +134,7 @@ curl -X POST https://api.solana.com/v1/payments/requests \
 <Tab value="Batch Transfers">
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/transfer-batches \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Idempotency-Key: payroll-2026-06-30" \
   -H "Content-Type: application/json" \
   -d '{
@@ -191,10 +191,12 @@ Everything the dashboard does is available through the API. Build against the AP
 
 Authenticated environments are a property of the **project**, not of individual requests. Every tenant resource and API key belongs to a project and inherits that project's environment.
 
-| Environment  | Network      | API key prefix |
-| ------------ | ------------ | -------------- |
-| `sandbox`    | devnet       | `sk_test_`     |
-| `production` | mainnet-beta | `sk_live_`     |
+| Environment  | Network      |
+| ------------ | ------------ |
+| `sandbox`    | devnet       |
+| `production` | mainnet-beta |
+
+A key's format does not name its environment: the project it belongs to does.
 
 Both environments expose the same route shapes. Develop and test authenticated integrations against a sandbox project, then switch to production by swapping your API key.
 
@@ -234,7 +236,7 @@ Clients time out, connections drop and workers die mid-run. Send an `Idempotency
 
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/transfers \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Idempotency-Key: 0192f8a4-6c1e-7d4b-8f3a-b7e52c8d9f0a" \
   -H "Content-Type: application/json" \
   -d '{ ... }'
@@ -284,7 +286,7 @@ async function sendTransfer(payout: Payout): Promise<Response> {
       response = await fetch("https://api.solana.com/v1/payments/transfers", {
         method: "POST",
         headers: {
-          Authorization: "Bearer sk_test_...",
+          Authorization: "Bearer sf_...",
           "Content-Type": "application/json",
           "Idempotency-Key": payout.idempotencyKey,
         },
@@ -383,14 +385,14 @@ Authenticated API requests carry an API key in the `Authorization` header:
 
 ```bash title="Terminal"
 curl https://api.solana.com/v1/wallets \
-  -H "Authorization: Bearer sk_test_..."
+  -H "Authorization: Bearer sf_..."
 ```
 
 The `Bearer` prefix is optional — a raw key in the `Authorization` header is also accepted.
 
 ## Key scope
 
-Keys are issued per **project** and inherit that project's environment: `sk_test_` keys belong to sandbox projects (devnet), `sk_live_` keys to production projects (mainnet-beta). A key can only reach the wallets, tokens, and payments of the project it was issued for; there is no cross-project or organization-wide key.
+Keys are issued per **project** and inherit that project's environment: a key from a sandbox project reaches devnet, one from a production project mainnet-beta. The key itself does not name its environment; the dashboard shows it next to each key. A key can only reach the wallets, tokens, and payments of the project it was issued for; there is no cross-project or organization-wide key.
 
 ## Authorization layers
 
@@ -449,14 +451,19 @@ Create, rotate, and revoke the API keys that authenticate SDP API requests. Each
 
 Keys are credentials, not administrators: they are created, changed, rotated, and revoked only by a signed-in member of your organization in the dashboard. An API key cannot manage keys, the organization, its members, or project members, whatever it is granted; it is refused with `403 FORBIDDEN` and `error.details.reason` set to `human_session_required`.
 
-The full secret is returned exactly once — at creation and at rotation. SDP stores only a salted hash and a display prefix; a lost key cannot be recovered, only rotated or replaced. Every key tracks `lastUsedAt` so you can identify stale credentials before revoking them.
+The full secret is returned exactly once — at creation and at rotation. SDP stores only a keyed hash of the secret and the key ID; a lost key cannot be recovered, only rotated or replaced. Every key tracks `lastUsedAt` so you can identify stale credentials before revoking them.
 
 ## Key format
 
-| Environment | Prefix | Solana network |
-| --- | --- | --- |
-| Sandbox | `sk_test_` | devnet |
-| Production | `sk_live_` | mainnet-beta |
+Keys use the shared Solana Foundation format, `sf_<key id>_<secret><checksum>`:
+
+| Part | What it is |
+| --- | --- |
+| `<key id>` | 16 hex characters. Not secret: safe to log, and shown in the dashboard to tell keys apart |
+| `<secret>` | 43 base62 characters (256 random bits) |
+| `<checksum>` | 6 base62 characters, so a mistyped key is refused at once and secret scanners can match a leaked one |
+
+The format does not name an environment: a key reaches the network of the project it was created in (sandbox: devnet, production: mainnet-beta). Keys created before this format, prefixed `sk_test_` or `sk_live_`, keep working until they are revoked.
 
 ## Grants by module
 
@@ -672,7 +679,7 @@ Production projects use BYOK only. `POST /v1/wallets/initialize` sets up Managed
 
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/wallets \
-  -H "Authorization: Bearer sk_live_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -d '{
     "connectionId": "cconn_123",
@@ -688,7 +695,7 @@ Every wallet names the provider account it lives under: `provider` for the provi
 <Tab value="curl">
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/wallets \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -d '{
     "provider": "privy",
@@ -702,7 +709,7 @@ curl -X POST https://api.solana.com/v1/wallets \
 const response = await fetch("https://api.solana.com/v1/wallets", {
   method: "POST",
   headers: {
-    "Authorization": "Bearer sk_test_...",
+    "Authorization": "Bearer sf_...",
     "Content-Type": "application/json",
   },
   body: JSON.stringify({
@@ -717,7 +724,7 @@ const response = await fetch("https://api.solana.com/v1/wallets", {
 ```java title="CreateWallet.java"
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/wallets"))
-    .header("Authorization", "Bearer sk_test_...")
+    .header("Authorization", "Bearer sf_...")
     .header("Content-Type", "application/json")
     .POST(HttpRequest.BodyPublishers.ofString("""
         {
@@ -738,13 +745,13 @@ The `purpose` field is optional metadata in the API. The current dashboard creat
 <Tab value="curl">
 ```bash title="Terminal"
 curl "https://api.solana.com/v1/wallets?view=summary" \
-  -H "Authorization: Bearer sk_test_..."
+  -H "Authorization: Bearer sf_..."
 ```
 </Tab>
 <Tab value="TypeScript">
 ```typescript title="list-wallets.ts"
 const response = await fetch("https://api.solana.com/v1/wallets?view=summary", {
-  headers: { "Authorization": "Bearer sk_test_..." },
+  headers: { "Authorization": "Bearer sf_..." },
 });
 const { data } = await response.json();
 // data.wallets includes id, walletId, publicKey, provider, label, purpose, and status
@@ -754,7 +761,7 @@ const { data } = await response.json();
 ```java title="ListWallets.java"
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/wallets?view=summary"))
-    .header("Authorization", "Bearer sk_test_...")
+    .header("Authorization", "Bearer sf_...")
     .GET()
     .build();
 ```
@@ -813,7 +820,7 @@ const response = await fetch(
   {
     method: "POST",
     headers: {
-      Authorization: "Bearer sk_test_...",
+      Authorization: "Bearer sf_...",
       "Content-Type": "application/json",
     },
     body: JSON.stringify(operationParams),
@@ -827,7 +834,7 @@ const result = await response.json();
 
 response = requests.post(
     "https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze",
-    headers={"Authorization": "Bearer sk_test_..."},
+    headers={"Authorization": "Bearer sf_..."},
     json=operation_params,
 )
 result = response.json()
@@ -836,7 +843,7 @@ result = response.json()
 <Tab value="curl">
 ```bash title="Terminal" rotate-token-ops
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -d "$OPERATION_PARAMS"
 ```
@@ -954,12 +961,12 @@ List available templates to see what fields each one pre-configures:
 
 ```bash title="Terminal"
 curl https://api.solana.com/v1/issuance/templates \
-  -H "Authorization: Bearer sk_test_..."
+  -H "Authorization: Bearer sf_..."
 ```
 
 ```typescript title="list-templates.ts"
 const res = await fetch("https://api.solana.com/v1/issuance/templates", {
-  headers: { Authorization: "Bearer sk_test_..." },
+  headers: { Authorization: "Bearer sf_..." },
 });
 const { data } = await res.json();
 // data[].id — use as the "template" value when creating
@@ -997,7 +1004,7 @@ Pass identity fields in the `POST /v1/issuance/tokens` body:
 
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Acme Dollar",
@@ -1040,7 +1047,7 @@ Add operational fields to the same body. `signingCustodyWalletId` is the exact S
 const res = await fetch("https://api.solana.com/v1/issuance/tokens", {
   method: "POST",
   headers: {
-    Authorization: "Bearer sk_test_...",
+    Authorization: "Bearer sf_...",
     "Content-Type": "application/json",
   },
   body: JSON.stringify({
@@ -1160,14 +1167,14 @@ You need the `tokenId` returned when you created the token. If you don't have it
 
 ```bash title="Terminal"
 curl https://api.solana.com/v1/issuance/tokens \
-  -H "Authorization: Bearer sk_test_..."
+  -H "Authorization: Bearer sf_..."
 ```
 
 Note the token `id` (e.g., `tok_abc123`) — required for all deploy and post-deploy calls. Also list your wallets and use the wallet record's `id`, not its provider-specific `walletId` or public key:
 
 ```bash title="Terminal"
 curl https://api.solana.com/v1/wallets \
-  -H "Authorization: Bearer sk_test_..."
+  -H "Authorization: Bearer sf_..."
 ```
 
 </Tab>
@@ -1199,7 +1206,7 @@ SDP submits the transaction to Solana and polls for confirmation. The page updat
 
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: deploy-acme-001" \
   -d '{"signingCustodyWalletId":"cwlt_abc123"}'
@@ -1211,7 +1218,7 @@ const res = await fetch(
   {
     method: "POST",
     headers: {
-      Authorization: "Bearer sk_test_...",
+      Authorization: "Bearer sf_...",
       "Content-Type": "application/json",
       "Idempotency-Key": "deploy-acme-001",
     },
@@ -1259,7 +1266,7 @@ Fetch the token at any time to verify:
 
 ```bash title="Terminal"
 curl https://api.solana.com/v1/issuance/tokens/tok_abc123 \
-  -H "Authorization: Bearer sk_test_..."
+  -H "Authorization: Bearer sf_..."
 ```
 
 </Tab>
@@ -1357,7 +1364,7 @@ Once confirmed, the mint appears in the Transactions table with a `confirmed` st
 
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/mint \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: mint-001" \
   -d '{
@@ -1376,7 +1383,7 @@ const res = await fetch(
   {
     method: "POST",
     headers: {
-      Authorization: "Bearer sk_test_...",
+      Authorization: "Bearer sf_...",
       "Content-Type": "application/json",
       "Idempotency-Key": "mint-001",
     },
@@ -1439,7 +1446,7 @@ For **Force burn** (requires `tokens:admin`), use the Compliance tab instead of 
 await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/burn", {
   method: "POST",
   headers: {
-    Authorization: "Bearer sk_test_...",
+    Authorization: "Bearer sf_...",
     "Content-Type": "application/json",
     "Idempotency-Key": "burn-001",
   },
@@ -1456,7 +1463,7 @@ await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/burn", {
 await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/force-burn", {
   method: "POST",
   headers: {
-    Authorization: "Bearer sk_test_...",
+    Authorization: "Bearer sf_...",
     "Content-Type": "application/json",
     "Idempotency-Key": "force-burn-001",
   },
@@ -1492,7 +1499,7 @@ Reload the token detail page if the displayed supply value appears stale.
 
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/supply/refresh \
-  -H "Authorization: Bearer sk_test_..."
+  -H "Authorization: Bearer sf_..."
 ```
 
 Safe to include in automated post-mint workflows.
@@ -1591,7 +1598,7 @@ After adding, the entry appears below the form with a **Remove entry** button.
 
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -d '{
     "address": "7xKXz...9fGh",
@@ -1605,7 +1612,7 @@ const res = await fetch(
   {
     method: "POST",
     headers: {
-      Authorization: "Bearer sk_test_...",
+      Authorization: "Bearer sf_...",
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ address: "7xKXz...9fGh", label: "Treasury wallet" }),
@@ -1639,7 +1646,7 @@ Use the search field to find a specific address by label or public key.
 
 ```bash title="Terminal"
 curl "https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist?search=So1&label=Treasury" \
-  -H "Authorization: Bearer sk_test_..."
+  -H "Authorization: Bearer sf_..."
 ```
 
 ```typescript title="list-allowlist.ts"
@@ -1660,7 +1667,7 @@ includes `total`, the unfiltered entry count, for a summary display):
 
 ```bash
 curl https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist/labels \
-  -H "Authorization: Bearer sk_test_..."
+  -H "Authorization: Bearer sf_..."
 ```
 
 ```typescript
@@ -1690,7 +1697,7 @@ In **Operations → Approved recipients**, click **Remove entry** next to the ad
 ```bash title="Terminal"
 curl -X DELETE \
   https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist/alw_abc123 \
-  -H "Authorization: Bearer sk_test_..."
+  -H "Authorization: Bearer sf_..."
 ```
 
 Use the `entry.id` returned when the address was added.
@@ -1749,7 +1756,7 @@ Enter the wallet address and select the intent (e.g., transfer destination or To
 
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/compliance/address-screenings \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -d '{
     "address": "8dHEsGLp...hQWRGZ",
@@ -1811,7 +1818,7 @@ The "Unfreeze transaction finalized." toast appears and the Frozen Accounts coun
 
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -d '{
     "accountAddress": "3xYZa...2aBc",
@@ -1826,7 +1833,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze \
 ```typescript title="unfreeze-account.ts"
 await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/unfreeze", {
   method: "POST",
-  headers: { Authorization: "Bearer sk_test_...", "Content-Type": "application/json" },
+  headers: { Authorization: "Bearer sf_...", "Content-Type": "application/json" },
   body: JSON.stringify({ accountAddress: "3xYZa...2aBc" }),
 });
 ```
@@ -1835,7 +1842,7 @@ await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/unfreeze", {
 
 ```bash title="Terminal"
 curl https://api.solana.com/v1/issuance/tokens/tok_abc123/frozen \
-  -H "Authorization: Bearer sk_test_..."
+  -H "Authorization: Bearer sf_..."
 ```
 
 </Tab>
@@ -1876,13 +1883,13 @@ To resume, click **Unpause token** and confirm.
 ```bash title="Terminal"
 # Pause
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/pause \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -d '{"signingCustodyWalletId":"cwlt_example"}'
 
 # Unpause
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/unpause \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -d '{"signingCustodyWalletId":"cwlt_example"}'
 ```
@@ -1912,7 +1919,7 @@ In the **Compliance** tab, click **Seize tokens**. Provide the source, destinati
 
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/seize \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: seize-001" \
   -d '{
@@ -1989,7 +1996,7 @@ Fetch the current token state:
 
 ```bash title="Terminal"
 curl https://api.solana.com/v1/issuance/tokens/tok_abc123 \
-  -H "Authorization: Bearer sk_test_..."
+  -H "Authorization: Bearer sf_..."
 ```
 
 ```typescript title="get-token-settings.ts"
@@ -2026,7 +2033,7 @@ SDP signs the authority rotation:
 
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/authority \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: rotate-001" \
   -d '{
@@ -2119,14 +2126,14 @@ Source: https://platform.solana.com/docs/wallet-operations/balances
 <Tab value="curl">
 ```bash title="Terminal"
 curl https://api.solana.com/v1/payments/wallets/wal_abc123/balances \
-  -H "Authorization: Bearer sk_test_..."
+  -H "Authorization: Bearer sf_..."
 ```
 </Tab>
 <Tab value="TypeScript">
 ```typescript title="get-wallet-balances.ts"
 const response = await fetch(
   "https://api.solana.com/v1/payments/wallets/wal_abc123/balances",
-  { headers: { Authorization: "Bearer sk_test_..." } }
+  { headers: { Authorization: "Bearer sf_..." } }
 );
 const { data } = await response.json();
 // data.walletBalances.balances: TokenBalance[]
@@ -2136,7 +2143,7 @@ const { data } = await response.json();
 ```java title="GetWalletBalances.java"
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/payments/wallets/wal_abc123/balances"))
-    .header("Authorization", "Bearer sk_test_...")
+    .header("Authorization", "Bearer sf_...")
     .GET()
     .build();
 ```
@@ -2412,7 +2419,7 @@ The transfer status updates to `Confirmed` once the transaction is finalized.
 <Tab value="curl">
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/transfers \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: payment-invoice-1234" \
   -d '{
@@ -2431,7 +2438,7 @@ const response = await fetch(
   {
     method: "POST",
     headers: {
-      "Authorization": "Bearer sk_test_...",
+      "Authorization": "Bearer sf_...",
       "Content-Type": "application/json",
       "Idempotency-Key": "payment-invoice-1234",
     },
@@ -2452,7 +2459,7 @@ const { data } = await response.json();
 ```java title="ExecuteTransfer.java"
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/payments/transfers"))
-    .header("Authorization", "Bearer sk_test_...")
+    .header("Authorization", "Bearer sf_...")
     .header("Content-Type", "application/json")
     .header("Idempotency-Key", "payment-invoice-1234")
     .POST(HttpRequest.BodyPublishers.ofString("""
@@ -2500,7 +2507,7 @@ Poll status for async confirmations:
 
 ```bash title="Terminal"
 curl https://api.solana.com/v1/payments/transfers/txn_abc123 \
-  -H "Authorization: Bearer sk_test_..."
+  -H "Authorization: Bearer sf_..."
 ```
 
 </Tab>
@@ -2550,7 +2557,7 @@ Memos are stored by SDP. They are **not** automatically attached as a Solana mem
 <Tab value="curl">
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/transfers \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Idempotency-Key: order-2026-05-14-4837" \
   -H "Content-Type: application/json" \
   -d '{
@@ -2569,7 +2576,7 @@ const response = await fetch(
   {
     method: "POST",
     headers: {
-      "Authorization": "Bearer sk_test_...",
+      "Authorization": "Bearer sf_...",
       "Idempotency-Key": "order-2026-05-14-4837",
       "Content-Type": "application/json",
     },
@@ -2589,7 +2596,7 @@ const { data } = await response.json();
 ```java title="SendPaymentWithMemo.java"
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/payments/transfers"))
-    .header("Authorization", "Bearer sk_test_...")
+    .header("Authorization", "Bearer sf_...")
     .header("Idempotency-Key", "order-2026-05-14-4837")
     .header("Content-Type", "application/json")
     .POST(HttpRequest.BodyPublishers.ofString("""
@@ -2652,7 +2659,7 @@ One request creates a durable batch, chunks its recipients into Solana transacti
 
 ```bash
 curl -X POST https://api.solana.com/v1/payments/transfer-batches \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: payroll-2026-05-14" \
   -d '{
@@ -2701,7 +2708,7 @@ Using a fresh idempotency key creates a new transfer intent, even if the payload
 <Tab value="curl">
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/transfers \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: payout-row-4837" \
   -d '{
@@ -2723,7 +2730,7 @@ async function payoutRecipient(row: PayoutRow): Promise<string> {
     {
       method: "POST",
       headers: {
-        "Authorization": "Bearer sk_test_...",
+        "Authorization": "Bearer sf_...",
         "Content-Type": "application/json",
         "Idempotency-Key": row.idempotencyKey,
       },
@@ -2748,7 +2755,7 @@ async function payoutRecipient(row: PayoutRow): Promise<string> {
 ```java title="PayoutRecipient.java"
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/payments/transfers"))
-    .header("Authorization", "Bearer sk_test_...")
+    .header("Authorization", "Bearer sf_...")
     .header("Content-Type", "application/json")
     .header("Idempotency-Key", idempotencyKey)
     .POST(HttpRequest.BodyPublishers.ofString("""
@@ -2772,7 +2779,7 @@ After the loop finishes, list all outbound transfers in the run's time window an
 <Tab value="curl">
 ```bash title="Terminal"
 curl "https://api.solana.com/v1/payments/transfers?direction=outbound&from=2026-05-14T00:00:00Z&to=2026-05-14T23:59:59Z&pageSize=100" \
-  -H "Authorization: Bearer sk_test_..."
+  -H "Authorization: Bearer sf_..."
 ```
 </Tab>
 <Tab value="TypeScript">
@@ -2788,7 +2795,7 @@ async function* listOutboundTransfers(from: string, to: string) {
     url.searchParams.set("pageSize", "100");
 
     const res = await fetch(url, {
-      headers: { Authorization: "Bearer sk_test_..." },
+      headers: { Authorization: "Bearer sf_..." },
     });
     const { data, meta } = await res.json();
     yield* data;
@@ -2970,7 +2977,7 @@ The minimal inbound-only request:
 <Tab value="curl">
 ```bash title="Terminal"
 curl "https://api.solana.com/v1/payments/transfers?direction=inbound&pageSize=50" \
-  -H "Authorization: Bearer sk_test_..."
+  -H "Authorization: Bearer sf_..."
 ```
 </Tab>
 <Tab value="TypeScript">
@@ -2980,7 +2987,7 @@ url.searchParams.set("direction", "inbound");
 url.searchParams.set("pageSize", "50");
 
 const res = await fetch(url, {
-  headers: { Authorization: "Bearer sk_test_..." },
+  headers: { Authorization: "Bearer sf_..." },
 });
 const { data, meta } = await res.json();
 // data: Transfer[]
@@ -3119,7 +3126,7 @@ const response = await fetch(
   {
     method: "POST",
     headers: {
-      Authorization: "Bearer sk_test_...",
+      Authorization: "Bearer sf_...",
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -3140,7 +3147,7 @@ const quote = await response.json();
 
 response = requests.post(
     "https://api.solana.com/v1/payments/ramps/onramp/quote",
-    headers={"Authorization": "Bearer sk_test_..."},
+    headers={"Authorization": "Bearer sf_..."},
     json={
         "provider": "moonpay",
         "counterpartyId": "cp_...",
@@ -3156,7 +3163,7 @@ quote = response.json()
 <Tab value="curl">
 ```bash title="Terminal" rotate-providers
 curl -X POST https://api.solana.com/v1/payments/ramps/onramp/quote \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -d '{
     "provider": "moonpay",
@@ -3188,7 +3195,7 @@ Ramp quote endpoints use the same public shape for every provider: `destinationC
 <Tab value="curl">
 ```bash title="Terminal"
 curl "https://api.solana.com/v1/payments/ramps/onramp/currency?source=USD&dest=usdc.solana" \
-  -H "Authorization: Bearer sk_test_..."
+  -H "Authorization: Bearer sf_..."
 ```
 </Tab>
 </Tabs>
@@ -3209,7 +3216,7 @@ The response's `pairs` list which providers cover each source/dest combination; 
 <Tab value="curl">
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/ramps/onramp/estimate \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -d '{
     "assetRail": "usdc.solana",
@@ -3225,7 +3232,7 @@ const response = await fetch(
   {
     method: "POST",
     headers: {
-      "Authorization": "Bearer sk_test_...",
+      "Authorization": "Bearer sf_...",
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -3251,7 +3258,7 @@ Each entry under `estimates` carries `fiatAmount`, `cryptoAmount`, `exchangeRate
 <Tab value="curl">
 ```bash title="Terminal" rotate-providers
 curl -X POST https://api.solana.com/v1/payments/ramps/onramp/quote \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -d '{
     "provider": "moonpay",
@@ -3270,7 +3277,7 @@ const response = await fetch(
   {
     method: "POST",
     headers: {
-      "Authorization": "Bearer sk_test_...",
+      "Authorization": "Bearer sf_...",
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -3291,7 +3298,7 @@ const { data } = await response.json();
 ```java title="OnrampQuote.java" rotate-providers
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/payments/ramps/onramp/quote"))
-    .header("Authorization", "Bearer sk_test_...")
+    .header("Authorization", "Bearer sf_...")
     .header("Content-Type", "application/json")
     .POST(HttpRequest.BodyPublishers.ofString("""
         {
@@ -3341,7 +3348,7 @@ There is no further SDP endpoint to call after this. The provider handles execut
 
 ```bash title="Terminal" rotate-providers
 curl -X POST https://api.solana.com/v1/payments/ramps/transfers/cancel \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -d '{
     "provider": "moonpay",
@@ -4174,17 +4181,17 @@ await sdpAdmin.post(`/v1/issuance/tokens/${tokenId}/unfreeze`, {
 });
 ```
 
-With the freeze cleared, the destination can receive transfers again. Section 8 covers the production transition: what changes between `sk_test_` and `sk_live_`, and which checks your compliance officer signs against before this same code runs on mainnet.
+With the freeze cleared, the destination can receive transfers again. Section 8 covers the production transition: what changes between sandbox and production keys, and which checks your compliance officer signs against before this same code runs on mainnet.
 
 ## 8. Production transition checklist
 
-The work between `sk_test_` and `sk_live_` is not a flag flip. It is the moment your compliance officer signs against the runbook your engineering team has been building since Section 2. Going to production means three things change mechanically and a longer list of things your institution attests to.
+The move from sandbox to production keys is not a flag flip. It is the moment your compliance officer signs against the runbook your engineering team has been building since Section 2. Going to production means three things change mechanically and a longer list of things your institution attests to.
 
 ### 1. What changes mechanically
 
 Your sandbox setup is built around six artifacts that all swap for production equivalents:
 
-- **API keys**. Replace your project-scoped Developer and Admin keys with `sk_live_` keys created in the dashboard in your production project, as in Section 2.
+- **API keys**. Replace your project-scoped Developer and Admin keys with keys created in the dashboard in your production project, as in Section 2.
 - **Custody provider**. Production reads `provider` as your federally chartered custodian (Anchorage Digital Bank for most US institutional issuers), bound to your organization through the Anchorage onboarding flow. The Privy sandbox wallets do not carry over.
 - **Solana network**. Mainnet-beta replaces devnet. The custody address gets funded by your custody bank as part of standard operational support, not by a faucet.
 - **API base URL**. `https://api.solana.com` is the canonical production base.
@@ -4193,7 +4200,7 @@ Your sandbox setup is built around six artifacts that all swap for production eq
 
 ### 2. What your compliance officer signs off on
 
-Before any `sk_live_` key sees real traffic, the compliance officer needs evidence that the institutional posture from Section 1 is operational, not aspirational. The minimum sign-off list:
+Before any production key sees real traffic, the compliance officer needs evidence that the institutional posture from Section 1 is operational, not aspirational. The minimum sign-off list:
 
 - **GENIUS Section 4(a)(5) capabilities demonstrated**. Screening, freeze, seize, and force-burn each exercised on sandbox with a captured response in the audit trail.
 - **BSA/AML program documented**. Written risk-based policy with internal controls, ongoing customer due diligence, independent testing, and a US-located AML/CFT compliance officer named (proposed 31 CFR § 1033.210 under the FinCEN/OFAC implementing rules).
@@ -4546,7 +4553,7 @@ Save the full key when the dashboard shows it. SDP only displays it once.
 Use the new key against your self-hosted API:
 
 ```bash title="Terminal"
-export SDP_API_KEY="sk_test_..."
+export SDP_API_KEY="sf_..."
 
 curl "http://localhost:8787/v1/wallets?view=summary" \
   -H "Authorization: Bearer $SDP_API_KEY"

@@ -50,7 +50,7 @@ Fetch the current token state:
 
 ```bash title="Terminal"
 curl https://api.solana.com/v1/issuance/tokens/tok_abc123 \
-  -H "Authorization: Bearer sk_test_..."
+  -H "Authorization: Bearer sf_..."
 ```
 
 ```typescript title="get-token-settings.ts"
@@ -87,7 +87,7 @@ SDP signs the authority rotation:
 
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/authority \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: rotate-001" \
   -d '{

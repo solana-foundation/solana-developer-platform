@@ -21,7 +21,7 @@ const response = await fetch(
   {
     method: "POST",
     headers: {
-      Authorization: "Bearer sk_test_...",
+      Authorization: "Bearer sf_...",
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -43,7 +43,7 @@ import requests
 
 response = requests.post(
     "https://api.solana.com/v1/payments/ramps/onramp/quote",
-    headers={"Authorization": "Bearer sk_test_..."},
+    headers={"Authorization": "Bearer sf_..."},
     json={
         "provider": "moonpay",
         "counterpartyId": "cp_...",
@@ -59,7 +59,7 @@ quote = response.json()
 <Tab value="curl">
 ```bash title="Terminal" rotate-providers
 curl -X POST https://api.solana.com/v1/payments/ramps/onramp/quote \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -d '{
     "provider": "moonpay",
@@ -91,7 +91,7 @@ Ramp quote endpoints use the same public shape for every provider: `destinationC
 <Tab value="curl">
 ```bash title="Terminal"
 curl "https://api.solana.com/v1/payments/ramps/onramp/currency?source=USD&dest=usdc.solana" \
-  -H "Authorization: Bearer sk_test_..."
+  -H "Authorization: Bearer sf_..."
 ```
 </Tab>
 </Tabs>
@@ -112,7 +112,7 @@ The response's `pairs` list which providers cover each source/dest combination; 
 <Tab value="curl">
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/ramps/onramp/estimate \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -d '{
     "assetRail": "usdc.solana",
@@ -128,7 +128,7 @@ const response = await fetch(
   {
     method: "POST",
     headers: {
-      "Authorization": "Bearer sk_test_...",
+      "Authorization": "Bearer sf_...",
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -154,7 +154,7 @@ Each entry under `estimates` carries `fiatAmount`, `cryptoAmount`, `exchangeRate
 <Tab value="curl">
 ```bash title="Terminal" rotate-providers
 curl -X POST https://api.solana.com/v1/payments/ramps/onramp/quote \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -d '{
     "provider": "moonpay",
@@ -173,7 +173,7 @@ const response = await fetch(
   {
     method: "POST",
     headers: {
-      "Authorization": "Bearer sk_test_...",
+      "Authorization": "Bearer sf_...",
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -194,7 +194,7 @@ const { data } = await response.json();
 ```java title="OnrampQuote.java" rotate-providers
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/payments/ramps/onramp/quote"))
-    .header("Authorization", "Bearer sk_test_...")
+    .header("Authorization", "Bearer sf_...")
     .header("Content-Type", "application/json")
     .POST(HttpRequest.BodyPublishers.ofString("""
         {
@@ -244,7 +244,7 @@ There is no further SDP endpoint to call after this. The provider handles execut
 
 ```bash title="Terminal" rotate-providers
 curl -X POST https://api.solana.com/v1/payments/ramps/transfers/cancel \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -d '{
     "provider": "moonpay",

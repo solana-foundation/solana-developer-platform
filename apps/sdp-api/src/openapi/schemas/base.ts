@@ -117,8 +117,8 @@ export const tokenAllowlistEntryIdSchema = idSchema(
 export const frozenAccountIdSchema = idSchema("Frozen account identifier.", "frz_example");
 
 export const apiKeyPrefixSchema = z.string().openapi({
-  description: "API key prefix for display.",
-  example: "sk_test_abc",
+  description: "API key prefix for display: `sf_` and the key ID.",
+  example: "sf_0018a3cae6a0a034",
 });
 
 export const pageQuerySchema = z.number().int().positive().openapi({

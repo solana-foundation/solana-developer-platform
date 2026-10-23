@@ -33,7 +33,7 @@ const response = await fetch(
   {
     method: "POST",
     headers: {
-      Authorization: "Bearer sk_test_...",
+      Authorization: "Bearer sf_...",
       "Content-Type": "application/json",
     },
     body: JSON.stringify(operationParams),
@@ -48,7 +48,7 @@ import requests
 
 response = requests.post(
     "https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze",
-    headers={"Authorization": "Bearer sk_test_..."},
+    headers={"Authorization": "Bearer sf_..."},
     json=operation_params,
 )
 result = response.json()
@@ -57,7 +57,7 @@ result = response.json()
 <Tab value="curl">
 ```bash title="Terminal" rotate-token-ops
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -d "$OPERATION_PARAMS"
 ```

@@ -7,14 +7,19 @@ Create, rotate, and revoke the API keys that authenticate SDP API requests. Each
 
 Keys are credentials, not administrators: they are created, changed, rotated, and revoked only by a signed-in member of your organization in the dashboard. An API key cannot manage keys, the organization, its members, or project members, whatever it is granted; it is refused with `403 FORBIDDEN` and `error.details.reason` set to `human_session_required`.
 
-The full secret is returned exactly once — at creation and at rotation. SDP stores only a salted hash and a display prefix; a lost key cannot be recovered, only rotated or replaced. Every key tracks `lastUsedAt` so you can identify stale credentials before revoking them.
+The full secret is returned exactly once — at creation and at rotation. SDP stores only a keyed hash of the secret and the key ID; a lost key cannot be recovered, only rotated or replaced. Every key tracks `lastUsedAt` so you can identify stale credentials before revoking them.
 
 ## Key format
 
-| Environment | Prefix | Solana network |
-| --- | --- | --- |
-| Sandbox | `sk_test_` | devnet |
-| Production | `sk_live_` | mainnet-beta |
+Keys use the shared Solana Foundation format, `sf_<key id>_<secret><checksum>`:
+
+| Part | What it is |
+| --- | --- |
+| `<key id>` | 16 hex characters. Not secret: safe to log, and shown in the dashboard to tell keys apart |
+| `<secret>` | 43 base62 characters (256 random bits) |
+| `<checksum>` | 6 base62 characters, so a mistyped key is refused at once and secret scanners can match a leaked one |
+
+The format does not name an environment: a key reaches the network of the project it was created in (sandbox: devnet, production: mainnet-beta). Keys created before this format, prefixed `sk_test_` or `sk_live_`, keep working until they are revoked.
 
 ## Grants by module
 

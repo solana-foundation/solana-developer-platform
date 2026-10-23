@@ -95,7 +95,7 @@ The transfer status updates to `Confirmed` once the transaction is finalized.
 <Tab value="curl">
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/transfers \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: payment-invoice-1234" \
   -d '{
@@ -114,7 +114,7 @@ const response = await fetch(
   {
     method: "POST",
     headers: {
-      "Authorization": "Bearer sk_test_...",
+      "Authorization": "Bearer sf_...",
       "Content-Type": "application/json",
       "Idempotency-Key": "payment-invoice-1234",
     },
@@ -135,7 +135,7 @@ const { data } = await response.json();
 ```java title="ExecuteTransfer.java"
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/payments/transfers"))
-    .header("Authorization", "Bearer sk_test_...")
+    .header("Authorization", "Bearer sf_...")
     .header("Content-Type", "application/json")
     .header("Idempotency-Key", "payment-invoice-1234")
     .POST(HttpRequest.BodyPublishers.ofString("""
@@ -183,7 +183,7 @@ Poll status for async confirmations:
 
 ```bash title="Terminal"
 curl https://api.solana.com/v1/payments/transfers/txn_abc123 \
-  -H "Authorization: Bearer sk_test_..."
+  -H "Authorization: Bearer sf_..."
 ```
 
 </Tab>

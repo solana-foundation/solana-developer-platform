@@ -136,7 +136,7 @@ export const apiKeyResponseSchema = z
         name: z.string().openapi({ description: "API key name.", example: "Primary Key" }),
         key: z.string().openapi({
           description: "Full API key. Only returned once.",
-          example: "sk_test_example",
+          example: "sf_0018a3cae6a0a034_sc7Mv6ineTCew5AEgraQLmN8OgapWiFzDF9DUPEXDUI3NoYh3",
         }),
         keyPrefix: apiKeyPrefixSchema,
         grants: apiKeyGrantsSchema,
@@ -162,7 +162,7 @@ export const rotateApiKeyResponseSchema = z
         name: z.string().openapi({ description: "API key name.", example: "Primary Key" }),
         key: z.string().openapi({
           description: "Full API key. Only returned once.",
-          example: "sk_test_example",
+          example: "sf_0018a3cae6a0a034_sc7Mv6ineTCew5AEgraQLmN8OgapWiFzDF9DUPEXDUI3NoYh3",
         }),
         keyPrefix: apiKeyPrefixSchema,
         grants: apiKeyGrantsSchema,

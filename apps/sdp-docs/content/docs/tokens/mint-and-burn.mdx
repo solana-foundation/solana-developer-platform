@@ -89,7 +89,7 @@ Once confirmed, the mint appears in the Transactions table with a `confirmed` st
 
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/mint \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: mint-001" \
   -d '{
@@ -108,7 +108,7 @@ const res = await fetch(
   {
     method: "POST",
     headers: {
-      Authorization: "Bearer sk_test_...",
+      Authorization: "Bearer sf_...",
       "Content-Type": "application/json",
       "Idempotency-Key": "mint-001",
     },
@@ -171,7 +171,7 @@ For **Force burn** (requires `tokens:admin`), use the Compliance tab instead of 
 await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/burn", {
   method: "POST",
   headers: {
-    Authorization: "Bearer sk_test_...",
+    Authorization: "Bearer sf_...",
     "Content-Type": "application/json",
     "Idempotency-Key": "burn-001",
   },
@@ -188,7 +188,7 @@ await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/burn", {
 await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/force-burn", {
   method: "POST",
   headers: {
-    Authorization: "Bearer sk_test_...",
+    Authorization: "Bearer sf_...",
     "Content-Type": "application/json",
     "Idempotency-Key": "force-burn-001",
   },
@@ -224,7 +224,7 @@ Reload the token detail page if the displayed supply value appears stale.
 
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/supply/refresh \
-  -H "Authorization: Bearer sk_test_..."
+  -H "Authorization: Bearer sf_..."
 ```
 
 Safe to include in automated post-mint workflows.
