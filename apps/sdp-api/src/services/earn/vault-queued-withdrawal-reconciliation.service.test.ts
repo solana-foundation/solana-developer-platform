@@ -5,6 +5,7 @@ import type {
   EarnVaultWithdrawalRequestRow,
   EarnVaultWithdrawalRequestsRepository,
 } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
+import { installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import {
   assertClosingIdentity,
@@ -19,17 +20,12 @@ import {
 
 const provider = vi.hoisted(() => ({ client: null as Record<string, unknown> | null }));
 const parProvider = vi.hoisted(() => ({ client: null as Record<string, unknown> | null }));
-const sweepRpc = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
 const broadcast = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 
 vi.mock("@/services/earn/vault-execution.service", () => ({
   broadcastVaultTransaction: broadcast,
 }));
 
-vi.mock("@sdp/rpc/factory", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@sdp/rpc/factory")>()),
-  createClusterRpc: () => sweepRpc.current,
-}));
 vi.mock("@/services/earn/execution-registry", () => ({
   resolveVaultQueuedWithdrawClient: () => provider.client,
   resolveVaultParRedemptionClient: () => parProvider.client,
@@ -159,11 +155,12 @@ function inSandboxScope<T>(work: () => Promise<T>): Promise<T> {
 }
 
 describe("queued withdrawal reconciliation", () => {
+  const clusterRpc = installClusterRpcResponder();
+
   beforeEach(() => {
     vi.clearAllMocks();
     provider.client = null;
     parProvider.client = null;
-    sweepRpc.current = null;
   });
 
   it("backs pending provider reads off without adding delay past maturity", () => {
@@ -717,6 +714,7 @@ describe("queued withdrawal reconciliation", () => {
     // claim lease is dropped and the same request is re-claimed immediately.
     expect(Date.parse(nextCheckAt as string)).toBeGreaterThanOrEqual(before + 59_000);
     expect(Date.parse(nextCheckAt as string)).toBeLessThanOrEqual(Date.now() + 61_000);
+    expect(clusterRpc.calls).toEqual([]);
   });
 
   it("backs off a closed par request whose history has no closing event yet", async () => {
@@ -728,11 +726,7 @@ describe("queued withdrawal reconciliation", () => {
         request: null,
       }),
     };
-    sweepRpc.current = {
-      getSignaturesForAddress: vi.fn().mockReturnValue({
-        send: vi.fn().mockResolvedValue([]),
-      }),
-    };
+    clusterRpc.answer("getSignaturesForAddress", []);
 
     await expect(
       inSandboxScope(() =>
@@ -746,6 +740,15 @@ describe("queued withdrawal reconciliation", () => {
         nextCheckAt: expect.any(String),
       })
     );
+    expect(
+      clusterRpc.requests.filter(({ method }) => method === "getSignaturesForAddress")
+    ).toEqual([
+      {
+        cluster: "devnet",
+        method: "getSignaturesForAddress",
+        params: [PAR_REQUEST_ADDRESS, expect.objectContaining({ until: "request-signature" })],
+      },
+    ]);
   });
 
   it("refuses terminal lifecycle events whose nonce or settled shares disagree", () => {
