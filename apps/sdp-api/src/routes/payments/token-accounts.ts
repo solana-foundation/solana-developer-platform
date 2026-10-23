@@ -2,24 +2,10 @@ import { createClusterRpc } from "@sdp/rpc/factory";
 import { getAccountInfo, type SolanaRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
-import {
-  type Address,
-  address,
-  createNoopSigner,
-  type JsonParsedTokenAccount,
-  type TransactionSigner,
-} from "@solana/kit";
-import {
-  findAssociatedTokenPda,
-  getCreateAssociatedTokenIdempotentInstruction,
-  getTransferCheckedInstruction,
-} from "@solana-program/token-2022";
+import { type Address, address, type JsonParsedTokenAccount } from "@solana/kit";
+import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { badRequest } from "@/lib/errors";
-import {
-  loadPaymentMint,
-  type PaymentAmountConverter,
-  type PaymentMint,
-} from "@/services/payments/token-amount";
+import type { PaymentMint } from "@/services/payments/token-amount";
 
 const SPL_TOKEN_PROGRAM_ID = address(SPL_TOKEN_PROGRAMS["spl-token"]);
 const SPL_TOKEN_2022_PROGRAM_ID = address(SPL_TOKEN_PROGRAMS["token-2022"]);
@@ -41,13 +27,6 @@ export interface SourceTokenAccount {
   /** Base units it held when read. */
   amount: bigint;
   frozen: boolean;
-}
-
-/** A source token account with its mint's token program, read once for a send to reuse. */
-export interface SplTransferSource extends SourceTokenAccount {
-  tokenProgram: Address;
-  /** The funding check's converter; the build reuses it so both see one raw amount. */
-  toBaseUnits: PaymentAmountConverter;
 }
 
 function issuedTokenLabel(mint: string, tokenLabelsByMint?: TokenLabelsByMint): string | null {
@@ -210,65 +189,6 @@ export async function resolveSourceTokenAccountOrAta(
     tokenAccount,
     decimals: paymentMint.decimals,
     exists: tokenAccountInfo !== null,
-  };
-}
-
-/**
- * Build the standard SPL transfer instruction pair: an idempotent ATA
- * creation for the destination (rent paid by `ataRentPayer`) followed by a
- * transferChecked from the authority's largest token account.
- */
-export async function buildSplTransferInstructions(input: {
-  authority: TransactionSigner;
-  destination: Address;
-  mint: Address;
-  amount: string;
-  ataRentPayer: Address;
-  /** The source this request already read, so the build reads nothing again. */
-  source?: SplTransferSource;
-}) {
-  let source = input.source;
-  if (source === undefined) {
-    const mint = await loadPaymentMint(input.mint);
-    const account = await resolveSourceTokenAccount(
-      input.authority.address,
-      input.mint,
-      mint.tokenProgram
-    );
-    source = { ...account, ...mint };
-  }
-  const { tokenProgram } = source;
-  const sourceTokenAccount = source;
-  const transferAmount = source.toBaseUnits(input.amount);
-  if (transferAmount <= 0n) {
-    throw badRequest("Transfer amount must be greater than zero");
-  }
-
-  const [destinationTokenAccount] = await findAssociatedTokenPda({
-    owner: input.destination,
-    tokenProgram,
-    mint: input.mint,
-  });
-
-  return {
-    createDestinationAtaInstruction: getCreateAssociatedTokenIdempotentInstruction({
-      payer: createNoopSigner(input.ataRentPayer),
-      ata: destinationTokenAccount,
-      owner: input.destination,
-      mint: input.mint,
-      tokenProgram,
-    }),
-    transferInstruction: getTransferCheckedInstruction(
-      {
-        source: sourceTokenAccount.tokenAccount,
-        mint: input.mint,
-        destination: destinationTokenAccount,
-        authority: input.authority,
-        amount: transferAmount,
-        decimals: sourceTokenAccount.decimals,
-      },
-      { programAddress: tokenProgram }
-    ),
   };
 }
 

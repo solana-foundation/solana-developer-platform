@@ -1,7 +1,25 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
-import { SOL_MINT, wellKnownMint } from "@sdp/types/well-known-tokens";
+import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { describe, expect, it } from "vitest";
-import { canonicalizeTransferBatchBody, previousCanonicalTransferBatchBody } from "./idempotency";
+import type { JsonValue } from "@/lib/idempotency";
+import {
+  canonicalizeTransferBatchBody as canonicalizeOnDevnet,
+  previousCanonicalTransferBatchBody as previousOnDevnet,
+} from "./idempotency";
+
+/** The canonical form a sandbox project's request takes: its tokens resolve on devnet. */
+function canonicalizeTransferBatchBody(body: JsonValue): JsonValue {
+  return runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+    canonicalizeOnDevnet(body)
+  );
+}
+
+/** The previous canonical form of a sandbox project's request. */
+function previousCanonicalTransferBatchBody(body: JsonValue): JsonValue {
+  return runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+    previousOnDevnet(body)
+  );
+}
 
 describe("canonicalizeTransferBatchBody", () => {
   it("makes recipient order irrelevant and keeps everything else as sent", () => {
@@ -74,37 +92,65 @@ describe("canonicalizeTransferBatchBody", () => {
     });
   });
 
-  it("fingerprints the token as the mint the batch executes as (APE SOLA9-695)", () => {
-    const usdc = wellKnownMint("USDC", "devnet");
+  it("fingerprints a symbol and its mint as one asset, and native SOL apart from wrapped SOL (APE SOLA9-695)", () => {
+    const usdc = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
     const body = {
       sourceCustodyWalletId: "cwlt_1",
       recipients: [{ counterpartyAccountId: "cpa_a", amount: "1" }],
     };
 
-    runInClusterScope({ projectId: null, environment: "sandbox" }, () => {
-      expect(canonicalizeTransferBatchBody({ ...body, token: "usdc" })).toEqual(
-        canonicalizeTransferBatchBody({ ...body, token: usdc ?? "" })
-      );
-      expect(canonicalizeTransferBatchBody({ ...body, token: "SOL" })).toEqual(
-        canonicalizeTransferBatchBody({ ...body, token: SOL_MINT })
-      );
-    });
+    expect(canonicalizeTransferBatchBody({ ...body, token: "usdc" })).toEqual(
+      canonicalizeTransferBatchBody({ ...body, token: usdc })
+    );
+    // ADR 0012: "SOL" moves native SOL, the wrapped SOL mint is an SPL token.
+    expect(canonicalizeTransferBatchBody({ ...body, token: "SOL" })).not.toEqual(
+      canonicalizeTransferBatchBody({ ...body, token: SOL_MINT })
+    );
+    // Before it both executed as the wrapped SOL mint, so a key saved then still matches either.
+    expect(previousCanonicalTransferBatchBody({ ...body, token: "SOL" })).toEqual(
+      previousCanonicalTransferBatchBody({ ...body, token: SOL_MINT })
+    );
   });
 
-  it("keeps the pre-APE-665 form, options as sent, for keys saved before it", () => {
+  it("keeps the form before ADR 0012, defaults dropped and the token as the mint it executed as, for keys saved before it", () => {
     const body = {
       sourceCustodyWalletId: "cwlt_1",
-      token: "SOL",
+      token: "sol",
       recipients: [{ counterpartyAccountId: "cpa_a", amount: "1.0" }],
       options: { maxRecipientsPerTransaction: 20 },
     };
     expect(previousCanonicalTransferBatchBody(body)).toEqual({
-      ...body,
+      sourceCustodyWalletId: "cwlt_1",
+      token: SOL_MINT,
       recipients: [{ counterpartyAccountId: "cpa_a", amount: "1" }],
     });
     expect(previousCanonicalTransferBatchBody(body)).not.toEqual(
       canonicalizeTransferBatchBody(body)
     );
+  });
+
+  it("spells the token as the asset it names, and as the mint it executed as in the previous form", () => {
+    const body = {
+      sourceCustodyWalletId: "cwlt_1",
+      recipients: [{ counterpartyAccountId: "cpa_a", amount: "1" }],
+    };
+    const mint = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
+
+    expect(canonicalizeTransferBatchBody({ ...body, token: "usdc" })).toEqual({
+      ...body,
+      token: mint,
+    });
+    expect(canonicalizeTransferBatchBody({ ...body, token: mint })).toEqual(
+      canonicalizeTransferBatchBody({ ...body, token: "USDC" })
+    );
+    expect(canonicalizeTransferBatchBody({ ...body, token: "sol" })).toEqual({
+      ...body,
+      token: "SOL",
+    });
+    expect(previousCanonicalTransferBatchBody({ ...body, token: "usdc" })).toEqual({
+      ...body,
+      token: mint,
+    });
   });
 
   it("leaves a body without a recipients array untouched for validation to refuse", () => {

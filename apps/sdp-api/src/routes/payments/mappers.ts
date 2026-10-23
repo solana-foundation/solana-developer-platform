@@ -1,3 +1,6 @@
+import { formatDecimalAmount } from "@sdp/solana/amount";
+import type { MovementQuote } from "@sdp/solana/movement-quote";
+import { displayUnder } from "@sdp/solana/token-terms";
 import {
   isRampTransferType,
   type PaymentSubscriptionCollectionAttempt,
@@ -6,8 +9,18 @@ import {
   type RampTransferSettlement,
 } from "@sdp/types/payments";
 import { isRetiredRampProviderId, type PersistedRampProviderId } from "@sdp/types/provider-access";
+import type {
+  AmountVerification,
+  AmountVerificationState,
+  TokenMovementAmounts,
+} from "@sdp/types/token-movements";
 import type { PaymentSubscriptionCollectionAttemptRow } from "@/db/repositories/payment-subscriptions.repository";
 import type { PaymentTransferRow as TransferRow } from "@/db/repositories/payments.repository";
+import {
+  type LegTotals,
+  legTotals,
+  type TokenMovementLeg,
+} from "@/db/repositories/token-movement-legs.repository";
 import { AppError } from "@/lib/errors";
 import {
   currentProviderSettlement,
@@ -138,6 +151,114 @@ export function mapTransferRow(row: TransferRow) {
     fiatPayout: rampFiatPayout(row),
     deliveryMismatch: readDeliveryMismatch(row.provider_data),
   };
+}
+
+/** Which leg state a summary of several legs reports: the first in this order any leg is in. */
+const VERIFICATION_SUMMARY_ORDER = [
+  "mismatch",
+  "pending",
+  "verified",
+  "not_required",
+] as const satisfies readonly AmountVerificationState[];
+
+/** Summed amounts in token units, with no display: a sum shows no single wallet's view. */
+export function totalsAmounts(totals: LegTotals): TokenMovementAmounts {
+  return {
+    basis: totals.basis,
+    debit: formatDecimalAmount(totals.debit, totals.decimals),
+    fee: formatDecimalAmount(totals.fee, totals.decimals),
+    credit: formatDecimalAmount(totals.credit, totals.decimals),
+    decimals: totals.decimals,
+  };
+}
+
+/**
+ * The summed amounts of quotes of one movement, such as a batch estimate's.
+ *
+ * @throws AppError (500) when the quotes disagree on basis or decimals.
+ */
+export function quotedAmounts(quotes: readonly MovementQuote[]): TokenMovementAmounts {
+  const [first] = quotes;
+  if (first === undefined) {
+    throw new AppError("INTERNAL_ERROR", "A movement has at least one quote");
+  }
+  if (
+    quotes.some(
+      (quote) => quote.intent.basis !== first.intent.basis || quote.decimals !== first.decimals
+    )
+  ) {
+    throw new AppError("INTERNAL_ERROR", "Movement quotes disagree on basis or decimals");
+  }
+  const sum = (part: "debit" | "fee" | "credit") =>
+    quotes.reduce((total, quote) => total + quote[part], 0n);
+  return totalsAmounts({
+    basis: first.intent.basis,
+    decimals: first.decimals,
+    debit: sum("debit"),
+    fee: sum("fee"),
+    credit: sum("credit"),
+  });
+}
+
+/**
+ * What a movement moves, in token units, summed over its legs: one leg for a
+ * transfer, a chunk's recipients otherwise. Display values are shown for one
+ * leg of a scaled or interest-bearing mint only.
+ *
+ * @throws Error when the legs disagree on basis or decimals: they are not one movement.
+ */
+export function movementAmounts(
+  legs: readonly [TokenMovementLeg, ...TokenMovementLeg[]]
+): TokenMovementAmounts {
+  const amounts = totalsAmounts(legTotals(legs));
+  const [first, ...rest] = legs;
+  if (rest.length === 0 && first.displayRule !== null && first.asOf !== null) {
+    const { displayRule, asOf, quoted } = first;
+    const shown = (part: "debit" | "fee" | "credit") =>
+      displayUnder(displayRule, first.decimals, quoted[part], asOf.unixTimestamp).value;
+    amounts.display = {
+      debit: shown("debit"),
+      fee: shown("fee"),
+      credit: shown("credit"),
+      asOf: new Date(Number(asOf.unixTimestamp) * 1000).toISOString(),
+    };
+  }
+  return amounts;
+}
+
+/** Whether SDP has checked what the legs moved, summarized over the legs. */
+export function movementVerification(
+  legs: readonly [TokenMovementLeg, ...TokenMovementLeg[]]
+): AmountVerification {
+  const state = VERIFICATION_SUMMARY_ORDER.find((candidate) =>
+    legs.some((leg) => leg.verification.state === candidate)
+  );
+  const reporting = legs.find((leg) => leg.verification.state === state);
+  if (state === undefined || reporting === undefined) {
+    throw new AppError("INTERNAL_ERROR", "Movement leg has an unknown verification state");
+  }
+  const verification: AmountVerification = { state };
+  if (reporting.verification.reason !== null) {
+    verification.reason = reporting.verification.reason;
+  }
+  return verification;
+}
+
+/** The movement fields a row's legs add; a row with no leg (legacy) adds none. */
+export interface MovementFields {
+  amounts?: TokenMovementAmounts;
+  amountVerification?: AmountVerification;
+}
+
+/** A transfer row with its legs' amounts and verification. */
+export function mapTransferWithLegs(row: TransferRow, legs: readonly TokenMovementLeg[]) {
+  const transfer: ReturnType<typeof mapTransferRow> & MovementFields = mapTransferRow(row);
+  const [first, ...rest] = legs;
+  if (first !== undefined) {
+    transfer.amounts = movementAmounts([first, ...rest]);
+    transfer.amountVerification = movementVerification([first, ...rest]);
+  }
+  return transfer;
 }
 
 export function mapCollectionAttemptRow(

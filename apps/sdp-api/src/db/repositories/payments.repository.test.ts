@@ -13,6 +13,7 @@ import {
   type SeededDefaultProjects,
   seedDefaultProjects,
 } from "@/test/helpers/projects";
+import { nativeQuote } from "@/test/helpers/token-movement";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { createPostgresPaymentTransferBatchesRepository } from "./payment-transfer-batches.repository.postgres";
 import type { PaymentsRepository } from "./payments.repository";
@@ -172,7 +173,7 @@ describe("PaymentsRepository transfer writes (postgres)", () => {
               counterpartyId: "cpty_timeout",
               counterpartyAccountId: "cpacct_timeout",
               destinationAddress: input.destinationAddress,
-              amount: "1",
+              quote: nativeQuote("1", "debit"),
               status: "processing",
             },
           ],
@@ -360,7 +361,7 @@ describe("PaymentsRepository transfer writes (postgres)", () => {
         sourceAddress: "Sourceramp-onchain",
         destinationAddress: depositAddress,
         token: "SOL",
-        amount: "1",
+        credit: "1",
         initiatedByKeyId: "key_ramp_onchain",
         idempotency: null,
         updatedAt: "2026-08-31T10:00:00.000Z",
@@ -376,7 +377,7 @@ describe("PaymentsRepository transfer writes (postgres)", () => {
       sourceAddress: "Sourceramp-onchain",
       destinationAddress: depositAddress,
       token: "SOL",
-      amount: "1",
+      credit: "1",
       initiatedByKeyId: "key_ramp_onchain",
       idempotency: null,
       updatedAt: "2026-08-31T10:00:00.000Z",
@@ -415,7 +416,7 @@ describe("PaymentsRepository transfer writes (postgres)", () => {
         sourceAddress: "Sourceramp-occupied",
         destinationAddress: depositAddress,
         token: "SOL",
-        amount: "1",
+        credit: "1",
         initiatedByKeyId: "key_ramp_occupied",
         idempotency: null,
         updatedAt: "2026-08-31T10:00:00.000Z",

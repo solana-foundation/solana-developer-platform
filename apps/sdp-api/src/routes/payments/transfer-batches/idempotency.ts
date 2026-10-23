@@ -1,7 +1,7 @@
 import { canonicalJson } from "@sdp/types/idempotency";
 import type { z } from "zod";
 import { canonicalizeDecimalFields, type JsonValue } from "@/lib/idempotency";
-import { normalizePaymentToken } from "@/services/payment-operation.service";
+import { normalizePaymentToken, resolvePaymentAsset } from "@/services/payment-operation.service";
 import type { transferBatchOptionsSchema } from "./schemas";
 import { DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION } from "./transaction";
 
@@ -23,39 +23,46 @@ function isDefaultedOption(name: string): name is DefaultedOption {
 }
 
 /**
- * The Idempotency-Key fingerprint form of a create-batch body (HOO-1918):
+ * The Idempotency-Key fingerprint form of a create-batch body (HOO-1918,
+ * ADR 0012): the token as the asset it names on the project's cluster (the
+ * mint, or "SOL" for native SOL), so "USDC" and its mint are one batch;
  * recipients with canonical amounts ("1.0" and "1" move the same), sorted by
  * their own canonical JSON, because the order they are listed in does not
- * change what moves (APE-667), and options at their default value dropped,
+ * change what moves (APE-667); and options at their default value dropped,
  * then empty `options`, because `{}`, no options and an explicit default mean
- * the same (APE-665), and the token as the mint it executes as. Anything that
- * is not a recipients array is left as sent; validation refuses it.
+ * the same (APE-665). Anything that is not a recipients array is left as
+ * sent; validation refuses it.
  */
 export function canonicalizeTransferBatchBody(body: JsonValue): JsonValue {
-  const canonical = canonicalBatchBody(body, withoutDefaultOptions);
-  if (canonical === null || typeof canonical !== "object" || Array.isArray(canonical)) {
-    return canonical;
-  }
-  // The mint the batch executes as: a symbol and its mint move the same asset (APE SOLA9-695).
-  const { token } = canonical;
-  return typeof token === "string"
-    ? { ...canonical, token: normalizePaymentToken(token) }
-    : canonical;
+  return withCanonicalToken(canonicalBatchBody(body), (token) => {
+    const asset = resolvePaymentAsset(token);
+    return asset.kind === "native" ? "SOL" : asset.mint;
+  });
 }
 
 /**
- * {@link canonicalizeTransferBatchBody} as it was before APE-665, with options
- * as sent, so a key or batch row saved under it still matches its retry
- * (`previousCanonicalize`).
+ * {@link canonicalizeTransferBatchBody} as it was before ADR 0012, with the
+ * token as the mint it executed as (native SOL and the wrapped SOL mint were
+ * one asset then), so a key or batch row saved under it still matches its
+ * retry (`previousCanonicalize`).
  */
 export function previousCanonicalTransferBatchBody(body: JsonValue): JsonValue {
-  return canonicalBatchBody(body, (options) => options);
+  return withCanonicalToken(canonicalBatchBody(body), normalizePaymentToken);
 }
 
-function canonicalBatchBody(
-  body: JsonValue,
-  canonicalOptions: (options: JsonValue | undefined) => JsonValue | undefined
+/** The batch body with its `token` spelled by `canonicalToken`; anything else as it is. */
+function withCanonicalToken(
+  canonical: JsonValue,
+  canonicalToken: (token: string) => string
 ): JsonValue {
+  if (canonical === null || typeof canonical !== "object" || Array.isArray(canonical)) {
+    return canonical;
+  }
+  const { token } = canonical;
+  return typeof token === "string" ? { ...canonical, token: canonicalToken(token) } : canonical;
+}
+
+function canonicalBatchBody(body: JsonValue): JsonValue {
   if (body === null || typeof body !== "object" || Array.isArray(body)) {
     return body;
   }
@@ -64,7 +71,7 @@ function canonicalBatchBody(
     return body;
   }
   const { options: sentOptions, ...rest } = body;
-  const options = canonicalOptions(sentOptions);
+  const options = withoutDefaultOptions(sentOptions);
   const emptyOptions =
     options !== null &&
     typeof options === "object" &&

@@ -1,17 +1,14 @@
-import {
-  accountExists,
-  getMinimumBalanceForRentExemption,
-  getRecentBlockhash,
-} from "@sdp/rpc/solana";
+import { getMinimumBalanceForRentExemption, getRecentBlockhash } from "@sdp/rpc/solana";
+import { associatedTokenAccountSize } from "@sdp/solana/token-movement";
 import {
   compileTransaction,
   createNoopSigner,
   type TransactionMessageBytesBase64,
 } from "@solana/kit";
-import { getTokenSize } from "@solana-program/token-2022";
 import { estimateNotAvailable } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { quotedAmounts } from "@/routes/payments/mappers";
 import {
   resolveRequestSponsorshipScope,
   resolveSponsoredFeePayer,
@@ -22,10 +19,9 @@ import {
   buildInstructionGroups,
   chunkInstructionGroups,
   DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION,
-  type RecipientInstructionGroup,
   type TransactionChunk,
 } from "./transaction";
-import type { Rpc, TokenContext } from "./types";
+import type { ResolvedBatchRequest, Rpc } from "./types";
 
 /**
  * Sums the network fee across all chunk transactions via getFeeForMessage.
@@ -52,35 +48,38 @@ async function estimateNetworkFeeLamports(rpc: Rpc, chunks: TransactionChunk[]):
 
 /**
  * Estimates the rent the fee payer would fund for recipient token accounts
- * that do not exist yet. Zero for SOL batches.
+ * that do not exist yet, sized for the mint's account extensions. The batch's
+ * account read already saw each one, so this reads only the rent. Zero for
+ * native SOL.
  *
  * @param rpc - Solana RPC client.
- * @param groups - Instruction groups with derived destination token accounts.
- * @param tokenContext - Resolved token parameters for the batch.
+ * @param resolved - The resolved batch, its recipients' destinations read.
  * @returns Total rent-exemption lamports for missing token accounts.
  */
 async function estimateMissingAtaRentLamports(
   rpc: Rpc,
-  groups: RecipientInstructionGroup[],
-  tokenContext: TokenContext
+  resolved: ResolvedBatchRequest
 ): Promise<bigint> {
-  if (tokenContext.kind === "sol") {
+  const { terms } = resolved.plan;
+  // Native SOL opens no token account.
+  if (terms.readAt === null) {
     return 0n;
   }
-
-  const [rentLamports, existence] = await Promise.all([
-    getMinimumBalanceForRentExemption(rpc, getTokenSize()),
-    Promise.all(
-      groups.map((group) =>
-        group.destinationTokenAccount
-          ? accountExists(rpc, group.destinationTokenAccount)
-          : Promise.resolve(true)
-      )
-    ),
-  ]);
-
-  const missing = existence.filter((exists) => !exists).length;
-  return rentLamports * BigInt(missing);
+  const missing = new Set(
+    resolved.recipients.flatMap(({ leg }) =>
+      leg.accounts.kind === "token" && !leg.accounts.destination.exists
+        ? [leg.accounts.destination.tokenAccount]
+        : []
+    )
+  );
+  if (missing.size === 0) {
+    return 0n;
+  }
+  const rentLamports = await getMinimumBalanceForRentExemption(
+    rpc,
+    associatedTokenAccountSize(terms)
+  );
+  return rentLamports * BigInt(missing.size);
 }
 
 /**
@@ -100,8 +99,8 @@ export async function estimateTransferBatch(
     resolveSponsoredFeePayer(c.env, resolveRequestSponsorshipScope(c)),
     getRecentBlockhash(resolved.rpc, "confirmed"),
   ]);
-  const groups = await buildInstructionGroups({
-    tokenContext: resolved.tokenContext,
+  const groups = buildInstructionGroups({
+    plan: resolved.plan,
     recipients: resolved.recipients,
     sourceSigner,
     feePayer,
@@ -116,13 +115,14 @@ export async function estimateTransferBatch(
   });
   const [networkFeeLamports, tokenAccountRentLamports] = await Promise.all([
     estimateNetworkFeeLamports(resolved.rpc, chunks),
-    estimateMissingAtaRentLamports(resolved.rpc, groups, resolved.tokenContext),
+    estimateMissingAtaRentLamports(resolved.rpc, resolved),
   ]);
 
   return success(c, {
     estimate: {
       recipientCount: resolved.recipients.length,
       transactionCount: chunks.length,
+      amounts: quotedAmounts(resolved.recipients.map((recipient) => recipient.leg.quote)),
       estimatedFees: {
         networkFeeLamports: networkFeeLamports.toString(),
         priorityFeeLamports: "0",

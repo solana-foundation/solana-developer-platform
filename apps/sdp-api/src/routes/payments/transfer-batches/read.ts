@@ -2,7 +2,11 @@ import { z } from "zod";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequestParams, badRequestQuery, notFound } from "@/lib/errors";
 import { paginated, success } from "@/lib/response";
-import { type AppContext, getPaymentTransferBatchesRepository } from "@/routes/payments/context";
+import {
+  type AppContext,
+  getPaymentTransferBatchesRepository,
+  getTokenMovementLegsRepository,
+} from "@/routes/payments/context";
 import { normalizePaymentToken } from "@/services/payment-operation.service";
 import { buildTransferBatchResponse, mapBatchRow } from "./respond";
 import { listTransferBatchesQuerySchema, transferBatchIdParamsSchema } from "./schemas";
@@ -34,9 +38,13 @@ export async function listTransferBatches(c: AppContext) {
     offset: (query.data.page - 1) * query.data.pageSize,
   });
 
+  const totals = await getTokenMovementLegsRepository(c).sumLegsByBatches(
+    result.rows.map((row) => row.id)
+  );
   return paginated(
     c,
-    result.rows.map((row) => mapBatchRow(row)),
+    // A batch written before quotes has no legs (legacy = no leg).
+    result.rows.map((row) => mapBatchRow(row, totals.get(row.id) ?? null)),
     {
       total: result.total,
       page: query.data.page,

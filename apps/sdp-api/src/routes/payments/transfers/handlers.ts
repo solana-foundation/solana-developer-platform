@@ -1,14 +1,10 @@
 import { compareDecimalAmounts } from "@sdp/payments/decimal";
 // biome-ignore lint/style/noRestrictedImports: the transfers list reads wallet signature history through the Helius-first pool
 import { createClusterHistoryRpc, createClusterRpc } from "@sdp/rpc/factory";
-import {
-  confirmTransaction,
-  getRecentBlockhash,
-  getSignaturesForAddress,
-  type SolanaRpc,
-} from "@sdp/rpc/solana";
-import { assertValidAddress } from "@sdp/solana/address";
-import { formatDecimalAmount, parseTokenAmount } from "@sdp/solana/amount";
+import { confirmTransaction, getRecentBlockhash, getSignaturesForAddress } from "@sdp/rpc/solana";
+import { formatDecimalAmount } from "@sdp/solana/amount";
+import type { MovementQuote } from "@sdp/solana/movement-quote";
+import { toTokenAmount } from "@sdp/solana/token-amount";
 import type { Action } from "@sdp/types/actions";
 import {
   isRampTransferType,
@@ -23,7 +19,8 @@ import {
   transferLandingStatus,
   WALLET_TRANSFER_TYPES,
 } from "@sdp/types/payments";
-import { SOL_DECIMALS } from "@sdp/types/well-known-tokens";
+import type { TokenMovementBasis } from "@sdp/types/token-movements";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import {
   type Address,
   address,
@@ -38,7 +35,6 @@ import {
   type TransactionSigner,
 } from "@solana/kit";
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
-import { getTransferSolInstruction } from "@solana-program/system";
 import { z } from "zod";
 import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
@@ -47,7 +43,6 @@ import {
   type PaymentTransferDirection as TransferDirection,
   type PaymentTransferRow as TransferRow,
 } from "@/db/repositories/payments.repository";
-import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import {
@@ -84,15 +79,14 @@ import {
   isModuleInChannel,
 } from "@/middleware/require-module";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { type AppContext, getPaymentsRepository } from "@/routes/payments/context";
-import { mapTransferRow } from "@/routes/payments/mappers";
-import { transferIdParamsSchema } from "@/routes/payments/schemas";
 import {
-  buildSplTransferInstructions,
-  resolveSourceTokenAccount,
-  resolveTokenLabel,
-  type SplTransferSource,
-} from "@/routes/payments/token-accounts";
+  type AppContext,
+  getPaymentsRepository,
+  getTokenMovementLegsRepository,
+} from "@/routes/payments/context";
+import { mapTransferWithLegs } from "@/routes/payments/mappers";
+import { transferIdParamsSchema } from "@/routes/payments/schemas";
+import { resolveTokenLabel } from "@/routes/payments/token-accounts";
 import {
   admitPaymentWalletRuntimeExecution,
   type ResolvedScope,
@@ -104,7 +98,6 @@ import { describeError, logEvent } from "@/runtime/money-path-events";
 import { AuditService } from "@/services/audit.service";
 import {
   assertPaymentProjectScope,
-  isNativePaymentToken,
   normalizePaymentToken,
   type OutboundPaymentOperation,
   resolveOutboundPaymentOperation,
@@ -117,7 +110,6 @@ import {
 } from "@/services/payments/fireblocks-transfer";
 import { signWithFreshBlockhash } from "@/services/payments/sign-with-fresh-blockhash";
 import { createTransferSignedSubmissionStore } from "@/services/payments/signed-submission";
-import { loadPaymentMint, parseStaticPaymentAmount } from "@/services/payments/token-amount";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
   createSponsorshipFeePayment,
@@ -130,13 +122,24 @@ import {
 } from "@/services/sponsorship-submission";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import {
+  buildPlannedLeg,
+  type PlannedLeg,
+  type PlannedTokenMovement,
+  planTokenMovement,
+} from "@/services/token-movement/build";
+import { claimOfframpDepositWithLeg, recordQuotedTransfer } from "@/services/token-movement/record";
+import {
   buildObservedTransfersForSignatures,
   dedupeSignatureHistory,
   MAX_TOKEN_ACCOUNT_SIGNATURE_LOOKUPS,
   resolveWalletTokenAccountAddresses,
   SIGNATURE_HISTORY_LOOKUP_CONCURRENCY,
 } from "./observed-transfers";
-import { type createTransferSchema, listTransfersQuerySchema } from "./schemas";
+import {
+  type createTransferSchema,
+  listTransfersQuerySchema,
+  requestedTransferBasis,
+} from "./schemas";
 
 async function createTransferRecord(
   c: AppContext,
@@ -148,13 +151,11 @@ async function createTransferRecord(
     sourceAddress: string;
     destinationAddress: string;
     token: string;
-    amount: string;
+    /** The quoted movement: the row's amount is its debit, and its leg is the quote. */
+    quote: MovementQuote;
     memo?: string;
-    type?: TransferType;
-    direction?: TransferDirection;
-    status?: TransferStatus;
-    serializedTx?: string;
-    initiatedByKeyId?: string;
+    status: TransferStatus;
+    initiatedByKeyId: string;
     /**
      * The request's credential-bound record key and the key layer's
      * fingerprint, recorded on the row; `replayFromRecord` answers a retry
@@ -166,41 +167,38 @@ async function createTransferRecord(
 ): Promise<{ row: TransferRow; replayed: boolean }> {
   const idempotencyKey = input.idempotency?.key ?? null;
   try {
-    const db = getDb(c.env);
-    const repository = createPostgresPaymentsRepository(db, getRequestTenantScope(c));
-
-    const createdRow = await repository.createTransfer({
-      id: generatePaymentTransferId(),
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      custodyWalletId: input.custodyWalletId,
-      walletId: input.walletId,
-      counterpartyId: null,
-      sourceAddress: input.sourceAddress,
-      destinationAddress: input.destinationAddress,
-      token: input.token,
-      amount: input.amount,
-      memo: input.memo ?? null,
-      type: input.type ?? "transfer",
-      direction: input.direction ?? "outbound",
-      status: input.status ?? "pending",
-      provider: null,
-      providerReference: null,
-      deliveryMode: null,
-      fiatCurrency: null,
-      fiatAmount: null,
-      providerData: input.providerData ?? {},
-      serializedTx: input.serializedTx ?? null,
-      signature: null,
-      slot: null,
-      initiatedByKeyId: input.initiatedByKeyId ?? null,
-      idempotencyKey,
-      idempotencyFingerprint: input.idempotency?.fingerprint ?? null,
-    });
-
-    if (!createdRow) {
-      throw internalError("Failed to create payment transfer record");
-    }
+    const createdRow = await recordQuotedTransfer(
+      getDb(c.env),
+      getRequestTenantScope(c),
+      {
+        id: generatePaymentTransferId(),
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        custodyWalletId: input.custodyWalletId,
+        walletId: input.walletId,
+        counterpartyId: null,
+        sourceAddress: input.sourceAddress,
+        destinationAddress: input.destinationAddress,
+        token: input.token,
+        memo: input.memo ?? null,
+        type: "transfer",
+        direction: "outbound",
+        status: input.status,
+        provider: null,
+        providerReference: null,
+        deliveryMode: null,
+        fiatCurrency: null,
+        fiatAmount: null,
+        providerData: input.providerData ?? {},
+        serializedTx: null,
+        signature: null,
+        slot: null,
+        initiatedByKeyId: input.initiatedByKeyId,
+        idempotencyKey,
+        idempotencyFingerprint: input.idempotency?.fingerprint ?? null,
+      },
+      input.quote
+    );
 
     return { row: createdRow, replayed: false };
   } catch (error) {
@@ -230,8 +228,19 @@ type CreateTransferBody = z.output<typeof createTransferSchema>;
 interface TransferResolved {
   scope: ResolvedScope;
   operation: OutboundPaymentOperation;
+  /** Which side of the transfer the request's amount fixes, its default applied. */
+  basis: TokenMovementBasis;
   /** The ramp deposit a `transferId` request funds, in the caller's project, whatever its state. */
   rampTransfer: TransferRow | null;
+}
+
+/** The one leg of a movement to one destination. */
+function singleLeg(plan: PlannedTokenMovement): PlannedLeg {
+  const [leg, ...rest] = plan.legs;
+  if (leg === undefined || rest.length > 0) {
+    throw internalError("A transfer plans exactly one leg");
+  }
+  return leg;
 }
 
 function rampTransferHasOnchainValues(transfer: TransferRow): boolean {
@@ -259,32 +268,22 @@ function getRampCryptoDeposit(transfer: TransferRow) {
 }
 
 /**
- * Refuses a token deposit the source wallet cannot send now. It runs before
- * the claim: a send that fails after it fails the sale for good, while this
- * refusal leaves it awaiting payment for a retry.
- *
- * @returns The source it read, which the send reuses; undefined for SOL.
+ * Refuses a token deposit the source wallet cannot send now: its quoted debit,
+ * the provider's deposit grossed up by the mint's fee. It runs before the
+ * claim: a send that fails after it fails the sale for good, while this
+ * refusal leaves it awaiting payment for a retry. A native SOL deposit is not
+ * checked here; the chain refuses one the wallet cannot pay.
  */
-async function assertRampDepositFunded(
-  transfer: TransferRow,
-  operation: OutboundPaymentOperation
-): Promise<SplTransferSource | undefined> {
-  if (isNativePaymentToken(operation.token)) return undefined;
-  const mint = assertValidAddress(operation.token, "token");
-  const paymentMint = await loadPaymentMint(mint);
-  const { tokenProgram, toBaseUnits } = paymentMint;
-  const account = await resolveSourceTokenAccount(
-    address(operation.sourceWallet.publicKey),
-    mint,
-    tokenProgram
-  );
-  const source = { ...account, ...paymentMint };
-  const needed = toBaseUnits(operation.amount);
-  if (!source.frozen && source.amount >= needed) return { ...source, tokenProgram, toBaseUnits };
+function assertRampDepositFunded(transfer: TransferRow, plan: PlannedTokenMovement): void {
+  const { source, terms } = plan;
+  if (source === null) return;
+  const needed = singleLeg(plan).quote.debit;
+  if (!source.frozen && source.amount >= needed) return;
 
+  const mint = transfer.token;
   const token = resolveTokenLabel(mint);
-  const held = formatDecimalAmount(source.amount, source.decimals);
-  const neededAmount = formatDecimalAmount(needed, source.decimals);
+  const held = formatDecimalAmount(source.amount, terms.decimals);
+  const neededAmount = toTokenAmount(needed, terms.decimals).value;
   logEvent("info", {
     event: "sdp_api_ramp_deposit_refused",
     reason: source.frozen ? "account_frozen" : "insufficient_balance",
@@ -306,6 +305,15 @@ async function assertRampDepositFunded(
   );
 }
 
+/**
+ * Claims the off-ramp deposit a request funds and records its leg. The
+ * provider's deposit amount is a receipt: the request names it, the quote is
+ * its credit, and the wallet is debited the credit grossed up by the mint's
+ * fee. A SOL sale takes native SOL, never wrapped SOL.
+ *
+ * RPC budget: the plan's two reads (mint with the destination, and source),
+ * as the mint owner and source reads before.
+ */
 async function updateOnchainTransferForRamp(
   c: AppContext,
   input: {
@@ -313,10 +321,11 @@ async function updateOnchainTransferForRamp(
     existing: TransferRow;
     scope: ResolvedScope;
     operation: OutboundPaymentOperation;
+    basis: TokenMovementBasis;
     destinationAddress: string;
     idempotency: { key: string; fingerprint: string } | null;
   }
-): Promise<{ row: TransferRow; splSource: SplTransferSource | undefined }> {
+): Promise<{ row: TransferRow; plan: PlannedTokenMovement }> {
   const { existing, scope, operation, destinationAddress } = input;
   const tenant = {
     transferId: existing.id,
@@ -334,6 +343,7 @@ async function updateOnchainTransferForRamp(
     existing.wallet_id !== operation.sourceWallet.walletId ||
     existing.source_address !== operation.sourceWallet.publicKey ||
     existing.token !== operation.token ||
+    (existing.token === SOL_MINT) !== (operation.asset.kind === "native") ||
     existing.amount === null ||
     compareDecimalAmounts(existing.amount, operation.amount) !== 0 ||
     !deposit ||
@@ -349,28 +359,35 @@ async function updateOnchainTransferForRamp(
   if (existing.status !== "awaiting_payment") {
     throw conflict(`Ramp transfer is no longer awaiting payment (status: ${existing.status})`);
   }
-  const splSource = await assertRampDepositFunded(existing, operation);
-
-  const db = getDb(c.env);
-  const updated = await createPostgresPaymentsRepository(
-    db,
-    getRequestTenantScope(c)
-  ).updateOnchainTransferForRamp({
-    ...tenant,
-    custodyWalletId: operation.sourceWallet.id,
-    walletId: operation.sourceWallet.walletId,
-    sourceAddress: operation.sourceWallet.publicKey,
-    destinationAddress,
-    token: operation.token,
-    amount: operation.amount,
-    initiatedByKeyId: scope.auth.id,
-    idempotency: input.idempotency,
-    updatedAt: new Date().toISOString(),
+  const plan = await planTokenMovement({
+    asset: operation.asset,
+    basis: input.basis,
+    source: operation.sourceAddress,
+    destinations: [{ owner: operation.destinationAddress, amount: operation.amount }],
+    memo: null,
   });
+  assertRampDepositFunded(existing, plan);
+
+  const updated = await claimOfframpDepositWithLeg(
+    getDb(c.env),
+    getRequestTenantScope(c),
+    {
+      ...tenant,
+      custodyWalletId: operation.sourceWallet.id,
+      walletId: operation.sourceWallet.walletId,
+      sourceAddress: operation.sourceWallet.publicKey,
+      destinationAddress,
+      token: operation.token,
+      initiatedByKeyId: scope.auth.id,
+      idempotency: input.idempotency,
+      updatedAt: new Date().toISOString(),
+    },
+    singleLeg(plan).quote
+  );
   if (!updated) {
     throw conflict("Ramp transfer already has an on-chain transaction");
   }
-  return { row: updated, splSource };
+  return { row: updated, plan };
 }
 
 /**
@@ -388,6 +405,12 @@ export async function authorizeTransfer(
 ): Promise<TransferResolved> {
   // SAFETY: mounted after validateBody(createTransferSchema).
   const body = input.body as CreateTransferBody;
+  const basis = requestedTransferBasis(body);
+  if (body.transferId !== undefined && basis !== "credit") {
+    throw badRequest(
+      "amountBasis must be credit when funding an off-ramp deposit: amount is the provider's deposit amount, which must arrive in full"
+    );
+  }
   const scope = await resolveScope(c, body.sourceCustodyWalletId);
   assertPaymentProjectScope(body.projectId, requireProjectId(c));
   const operation = resolveOutboundPaymentOperation({
@@ -413,7 +436,7 @@ export async function authorizeTransfer(
     });
     if (!rampTransfer) throw notFound("Ramp transfer");
   }
-  return { scope, operation, rampTransfer };
+  return { scope, operation, basis, rampTransfer };
 }
 
 /**
@@ -633,7 +656,7 @@ async function settleTransferExecutionFailure(
   transfer: TransferRow,
   recorder: { submittedRow(): Promise<TransferRow | null> },
   error: unknown,
-  toPayload: (row: TransferRow) => Record<string, unknown>,
+  toPayload: (row: TransferRow) => Promise<Record<string, unknown>>,
   onConcurrentChainVerdict?: (settled: TransferRow) => Promise<void>
 ): Promise<Response> {
   const submitted = await recorder.submittedRow();
@@ -653,7 +676,7 @@ async function settleTransferExecutionFailure(
     if (isSuccessfulPaymentTransferStatus(current.status)) {
       await onConcurrentChainVerdict?.(current);
     }
-    return success(c, toPayload(current));
+    return success(c, await toPayload(current));
   }
   const message = error instanceof Error ? error.message : "Unknown transfer error";
   const answer = mapTransferExecutionError(error);
@@ -672,7 +695,7 @@ async function settleTransferExecutionFailure(
   );
   if (settled.status !== "failed") {
     await onConcurrentChainVerdict?.(settled);
-    return success(c, toPayload(settled));
+    return success(c, await toPayload(settled));
   }
   throw answer;
 }
@@ -706,8 +729,7 @@ async function executeSponsoredTransfer(
     buildInstructions: (context: {
       signer: TransactionSigner;
       feePayer: Address;
-      rpc: SolanaRpc;
-    }) => Promise<readonly Instruction[]>;
+    }) => readonly Instruction[];
   }
 ): Promise<{ signature: string; slot: number | null; blockTime: string | null }> {
   const auth = getAuth(c);
@@ -731,7 +753,7 @@ async function executeSponsoredTransfer(
     { custodyWalletId: params.sourceWallet.id }
   );
   const feePayer = await feePayment.getFeePayer();
-  const instructions = await params.buildInstructions({ signer, feePayer, rpc });
+  const instructions = params.buildInstructions({ signer, feePayer });
   const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
 
   const message = pipe(
@@ -771,63 +793,37 @@ async function executeSponsoredTransfer(
   };
 }
 
-async function executeSolTransfer(
+/**
+ * Signs and sends the one transfer a plan builds, through the custody signer
+ * and the fee sponsor (ADR 0007). The plan was read and quoted before the row
+ * was written, so building reads nothing.
+ */
+async function executePlannedTransfer(
   c: AppContext,
   sourceWallet: CustodyWallet,
-  destinationAddress: Address,
-  amount: string,
+  plan: PlannedTokenMovement,
   submissionStore: SignedSubmissionStore,
   landingStatus: TransferLandingStatus
 ): Promise<{ signature: string; slot: number | null; blockTime: string | null }> {
-  const lamports = parseTokenAmount(amount, SOL_DECIMALS);
-  if (lamports <= 0n) {
-    throw badRequest("Transfer amount must be greater than zero");
-  }
+  const leg = singleLeg(plan);
   return executeSponsoredTransfer(c, {
     sourceWallet,
     submissionStore,
     landingStatus,
-    buildInstructions: async ({ signer }) => [
-      getTransferSolInstruction({
-        source: signer,
-        destination: destinationAddress,
-        amount: lamports,
-      }),
-    ],
+    buildInstructions: ({ signer, feePayer }) =>
+      buildPlannedLeg(plan, leg, { authority: signer, feePayer }),
   });
 }
 
-async function executeSplTransfer(
-  c: AppContext,
-  sourceWallet: CustodyWallet,
-  destinationAddress: Address,
-  mintAddress: Address,
-  amount: string,
-  submissionStore: SignedSubmissionStore,
-  source: SplTransferSource | undefined,
-  landingStatus: TransferLandingStatus
-): Promise<{ signature: string; slot: number | null; blockTime: string | null }> {
-  return executeSponsoredTransfer(c, {
-    sourceWallet,
-    submissionStore,
-    landingStatus,
-    buildInstructions: async ({ signer, feePayer }) => {
-      const { createDestinationAtaInstruction, transferInstruction } =
-        await buildSplTransferInstructions({
-          authority: signer,
-          destination: destinationAddress,
-          mint: mintAddress,
-          amount,
-          ataRentPayer: feePayer,
-          source,
-        });
-      return [createDestinationAtaInstruction, transferInstruction];
-    },
-  });
+/** A transfer as the API answers with it: the row with its legs' amounts and verification. */
+async function transferWithLegs(c: AppContext, row: TransferRow) {
+  const legs = await getTokenMovementLegsRepository(c).listLegsByTransfers([row.id]);
+  // A row written before quotes has no leg (legacy = no leg).
+  return mapTransferWithLegs(row, legs.get(row.id) ?? []);
 }
 
-function buildTransferReplayPayload(replay: TransferRow) {
-  return { transfer: mapTransferRow(replay) };
+async function transferPayload(c: AppContext, row: TransferRow) {
+  return { transfer: await transferWithLegs(c, row) };
 }
 
 /** Where a failed transfer keeps the error code its request was answered with. */
@@ -843,9 +839,9 @@ function executionFailureData(code: ErrorCode): Record<string, unknown> {
  * never a 200: the key is spent on that failure, so the message says to retry
  * with a new Idempotency-Key.
  */
-function replayTransferRow(c: AppContext, row: TransferRow): Response {
+async function replayTransferRow(c: AppContext, row: TransferRow): Promise<Response> {
   if (row.status !== "failed") {
-    return success(c, buildTransferReplayPayload(row));
+    return success(c, await transferPayload(c, row));
   }
   // Returned, not thrown: replayFromRecord marks the Response the finder builds.
   return appErrorResponse(c, failedTransferError(row));
@@ -950,12 +946,18 @@ async function executeFireblocksTransfer(
   }
   if (updated.status === "failed")
     throw transactionFailed(updated.error ?? "Fireblocks refused the transfer");
-  return success(c, { transfer: mapTransferRow(updated) });
+  return success(c, await transferPayload(c, updated));
 }
 
+/**
+ * POST /transfers. The movement is read, gated and quoted before its row is
+ * written, so a refusal (an amount the mint cannot hold, a paused mint) costs
+ * no Idempotency-Key; the row and its leg are then written together, and the
+ * transfer is built from the plan, signed and sent.
+ */
 export async function createTransfer(c: ValidatedBodyContext<typeof createTransferSchema>) {
   const body = c.req.valid("json");
-  const { scope, operation, rampTransfer } = getAuthorized<TransferResolved>(c);
+  const { scope, operation, basis, rampTransfer } = getAuthorized<TransferResolved>(c);
   // The credential-bound record key (ADR 0009), never the raw client key.
   const recordKey = getIdempotencyRecordKey(c);
   const fingerprint = getIdempotencyFingerprint(c);
@@ -967,41 +969,51 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
     requireProjectId(c),
     operation
   );
-  // Reject unsupported Fireblocks mints before attempting an unused Solana read.
-  // Before the row: a too-precise amount is the caller's 400, never a failed transfer.
-  await parseStaticPaymentAmount(operation.amount, assertValidAddress(operation.token, "token"));
+  // Unsupported Fireblocks mints are refused above, before the planner reads the chain; the plan
+  // refuses a too-precise amount before the row, so it is the caller's 400, never a failed transfer.
   if (fireblocks && body.transferId)
     throw badRequest("Fireblocks native transfers currently support direct wallet payments only");
 
-  const rampClaim = rampTransfer
-    ? await updateOnchainTransferForRamp(c, {
-        existing: rampTransfer,
-        scope,
-        operation,
-        destinationAddress: body.destination,
-        idempotency,
-      })
-    : null;
-  const { row: transfer, replayed } = rampClaim
-    ? { row: rampClaim.row, replayed: false }
-    : await createTransferRecord(c, {
-        organizationId: scope.auth.organizationId,
-        projectId: requireProjectId(c),
-        custodyWalletId: operation.sourceWallet.id,
-        walletId: operation.sourceWallet.walletId,
-        sourceAddress: operation.sourceWallet.publicKey,
-        destinationAddress: body.destination,
-        token: operation.token,
-        amount: operation.amount,
-        memo: body.memo,
-        status: "processing",
-        initiatedByKeyId: scope.auth.id,
-        idempotency,
-        providerData: fireblocks ? { fireblocksTransfer: fireblocks.intent } : undefined,
-      });
-
-  if (replayed) {
-    return replayTransferRow(c, transfer);
+  let transfer: TransferRow;
+  let plan: PlannedTokenMovement;
+  if (rampTransfer) {
+    const claimed = await updateOnchainTransferForRamp(c, {
+      existing: rampTransfer,
+      scope,
+      operation,
+      basis,
+      destinationAddress: body.destination,
+      idempotency,
+    });
+    transfer = claimed.row;
+    plan = claimed.plan;
+  } else {
+    plan = await planTokenMovement({
+      asset: operation.asset,
+      basis,
+      source: operation.sourceAddress,
+      destinations: [{ owner: operation.destinationAddress, amount: operation.amount }],
+      memo: body.memo ?? null,
+    });
+    const created = await createTransferRecord(c, {
+      organizationId: scope.auth.organizationId,
+      projectId: requireProjectId(c),
+      custodyWalletId: operation.sourceWallet.id,
+      walletId: operation.sourceWallet.walletId,
+      sourceAddress: operation.sourceWallet.publicKey,
+      destinationAddress: body.destination,
+      token: operation.token,
+      quote: singleLeg(plan).quote,
+      memo: body.memo,
+      status: "processing",
+      initiatedByKeyId: scope.auth.id,
+      idempotency,
+      providerData: fireblocks ? { fireblocksTransfer: fireblocks.intent } : undefined,
+    });
+    if (created.replayed) {
+      return replayTransferRow(c, created.row);
+    }
+    transfer = created.row;
   }
   // The row exists under the key: from here every answer is the request's own,
   // stored for its retries even when it is a 400 or 409.
@@ -1028,6 +1040,7 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
         // the audit redaction policy, and a mint address is not a secret.
         tokenMint: operation.token,
         amount: operation.amount,
+        amountBasis: basis,
       },
     });
   } catch (error) {
@@ -1045,42 +1058,13 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
   }
   if (fireblocks) return executeFireblocksTransfer(c, transfer, auditService, auditIntent);
   try {
-    if (isNativePaymentToken(operation.token)) {
-      const solResult = await executeSolTransfer(
-        c,
-        operation.sourceWallet,
-        operation.destinationAddress,
-        operation.amount,
-        submissionStore,
-        landingStatus
-      );
-      const updated = resolveTransferUpdateResult(
-        await updateTransferRecord(c, transfer, {
-          status: landingStatus,
-          signature: solResult.signature,
-          slot: solResult.slot,
-          blockTime: solResult.blockTime,
-          error: null,
-        })
-      );
-      await auditService.completeCritical(c, auditIntent, {
-        metadata: { signature: solResult.signature, slot: solResult.slot?.toString() ?? null },
-      });
-      return success(c, { transfer: mapTransferRow(updated) });
-    }
-
-    const mintAddress = assertValidAddress(operation.token, "token");
-    const result = await executeSplTransfer(
+    const result = await executePlannedTransfer(
       c,
       operation.sourceWallet,
-      operation.destinationAddress,
-      mintAddress,
-      operation.amount,
+      plan,
       submissionStore,
-      rampClaim?.splSource,
       landingStatus
     );
-
     const updated = resolveTransferUpdateResult(
       await updateTransferRecord(c, transfer, {
         status: landingStatus,
@@ -1094,7 +1078,7 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
       metadata: { signature: result.signature, slot: result.slot?.toString() ?? null },
     });
 
-    return success(c, { transfer: mapTransferRow(updated) });
+    return success(c, await transferPayload(c, updated));
   } catch (error) {
     try {
       return await settleTransferExecutionFailure(
@@ -1102,7 +1086,7 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
         transfer,
         submissionStore,
         error,
-        (row) => ({ transfer: mapTransferRow(row) }),
+        (row) => transferPayload(c, row),
         async (settled) => {
           // A concurrent writer (reconciliation, a replayed submission) already
           // proved the chain outcome; the intent resolves with that verdict
@@ -1489,7 +1473,11 @@ export async function listTransfers(c: AppContext) {
     )
   );
   transferRows = transferRows.map((row) => byId.get(row.id) ?? row);
-  const transfers = transferRows.map(mapTransferRow);
+  const legs = await getTokenMovementLegsRepository(c).listLegsByTransfers(
+    transferRows.map((row) => row.id)
+  );
+  // A row written before quotes, or observed on chain, has no leg (legacy = no leg).
+  const transfers = transferRows.map((row) => mapTransferWithLegs(row, legs.get(row.id) ?? []));
   return paginated(c, transfers, { total, page, pageSize });
 }
 
@@ -1516,5 +1504,5 @@ export async function getTransfer(c: AppContext) {
   }
 
   const refreshed = await refreshFireblocksTransfer(c.env, repo, row);
-  return success(c, { transfer: mapTransferRow(refreshed) });
+  return success(c, await transferPayload(c, refreshed));
 }
