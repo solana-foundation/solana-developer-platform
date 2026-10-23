@@ -135,7 +135,13 @@ function makeInput(overrides: Partial<Parameters<typeof createChannelTransfer>[1
     gatewayAuth: auth,
     projectRpc: {
       cluster: "devnet" as const,
-      rpc: privateChannelWriteRpc(null),
+      rpc: privateChannelWriteRpc(
+        {
+          escrowProgramId: PRIVATE_CHANNEL_ESCROW_PROGRAM_ADDRESS,
+          escrowInstanceAddr: senderSigner.address,
+        },
+        null
+      ),
       probe: vi.fn(),
     },
     ...overrides,
