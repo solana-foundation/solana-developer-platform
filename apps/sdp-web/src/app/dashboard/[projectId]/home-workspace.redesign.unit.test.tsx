@@ -185,11 +185,14 @@ describe("Overview (HomeWorkspace redesign)", () => {
     // The total and the USDC row it is made of.
     expect(scoped.getAllByText("$250.00")).toHaveLength(2);
     expect(scoped.getByText("SDP-Minted")).toBeTruthy();
-    expect(scoped.getByRole("link", { name: "2 wallets" }).getAttribute("href")).toBe(
-      "/dashboard/prj_test_sandbox/wallets"
-    );
-    expect(scoped.getByRole("link", { name: "2 tokens held" })).toBeTruthy();
-    expect(scoped.getByRole("link", { name: "$1,234.50 today’s volume" })).toBeTruthy();
+    const wallets = scoped.getByRole("link", { name: "2 wallets" });
+    expect(wallets.getAttribute("href")).toBe("/dashboard/prj_test_sandbox/wallets");
+    const tokens = scoped.getByRole("link", { name: "2 tokens held" });
+    const volume = scoped.getByRole("link", { name: "$1,234.50 today’s volume" });
+    // Wallets and tokens share a line and today's volume holds its own, so the volume figure
+    // landing after the counts never rewraps them.
+    expect(tokens.parentElement).toBe(wallets.parentElement);
+    expect(wallets.parentElement?.contains(volume)).toBe(false);
 
     const actions = within(requireSection("actions"));
     expect(actions.getByText("Create a wallet")).toBeTruthy();
