@@ -25,7 +25,8 @@ const previous = onDevnet(previousCanonicalTransferBody);
 
 describe("canonicalizeTransferBody", () => {
   it("hashes the intent: the asset, the canonical amount and the basis with its default", () => {
-    expect(canonical(body)).toEqual({ ...body, token: USDC, amount: "1.5", amountBasis: "debit" });
+    const { token: _token, ...rest } = body;
+    expect(canonical(body)).toEqual({ ...rest, asset: USDC, amount: "1.5", amountBasis: "debit" });
     expect(canonical({ ...body, token: USDC, amount: "1.5", amountBasis: "debit" })).toEqual(
       canonical(body)
     );
@@ -33,8 +34,17 @@ describe("canonicalizeTransferBody", () => {
   });
 
   it("keeps native SOL and the wrapped SOL mint apart", () => {
-    expect(canonical({ ...body, token: "SOL" })).toMatchObject({ token: "SOL" });
-    expect(canonical({ ...body, token: SOL_MINT })).toMatchObject({ token: SOL_MINT });
+    expect(canonical({ ...body, token: "SOL" })).toMatchObject({ asset: "native" });
+    expect(canonical({ ...body, token: SOL_MINT })).toMatchObject({ asset: SOL_MINT });
+  });
+
+  it("never gives a new request the earlier form's fingerprint of another asset", () => {
+    // A new wrapped SOL transfer on a credit basis and a retry naming native SOL are two assets.
+    for (const amountBasis of ["debit", "credit"] as const) {
+      const wrapped = canonical({ ...body, token: SOL_MINT, amountBasis });
+      expect(previous({ ...body, token: "SOL", amountBasis })).not.toEqual(wrapped);
+      expect(previous({ ...body, token: SOL_MINT, amountBasis })).not.toEqual(wrapped);
+    }
   });
 
   it("defaults an off-ramp deposit's basis to credit", () => {
