@@ -1,4 +1,3 @@
-import { createClusterRpc } from "@sdp/rpc/factory";
 /**
  * Balances in their three units (ADR 0012): base units summed per mint, the
  * exact token amount, and the display value a wallet shows.
@@ -11,10 +10,17 @@ import { createClusterRpc } from "@sdp/rpc/factory";
  * RPC budget per balance request: no extra request when every held mint is
  * native SOL or classic SPL; otherwise one `getMultipleAccounts` for the Clock
  * and every Token-2022 mint held across all the request's wallets (99 mints
- * per request, pages in parallel). Nothing is cached: an interest-bearing
- * mint's display changes every second.
+ * per request, pages in parallel). A read with no deadline and no slot floor
+ * (the custody wallet list and aggregate, whose holdings are cached for 10
+ * seconds) asks only for the mints whose terms no read in the last 10 seconds
+ * answered, and joins a read already running for a mint, so the home page's
+ * list and aggregate make one terms read between them. A bounded read (a
+ * balance read after a transfer) always reads live. `displayAsOf` says when
+ * the terms were read.
  */
 
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import { AmountError } from "@sdp/solana/amount";
 import type { TokenAsset } from "@sdp/solana/asset-ref";
 import { fetchTokenTermsOfMints } from "@sdp/solana/read-token-terms";
@@ -24,7 +30,19 @@ import type { CustodyWalletBalance, CustodyWalletTokenBalance } from "@sdp/types
 import { SOL_DECIMALS, SOL_MINT, type TokenProgramKind } from "@sdp/types/well-known-tokens";
 import { address } from "@solana/kit";
 import { getLogger } from "@/runtime/logger";
+import { createMintLookupCache } from "@/services/mint-lookup-cache";
 import { chainTimeIso } from "./chain-time";
+
+/** As long as the custody wallet list keeps a wallet's holdings (`routes/custody/wallet-balances.ts`). */
+const TERMS_CACHE_TTL_MS = 10_000;
+
+/** Terms by cluster and mint, for reads with no bounds. A failed read is never kept. */
+const termsCache = createMintLookupCache<MintTokenTerms | TokenTermsError>(TERMS_CACHE_TTL_MS);
+
+/** @internal Test-only: forget every kept and running terms read. */
+export function clearBalanceTermsCacheForTests(): void {
+  termsCache.clearForTests();
+}
 
 /** One mint's holding before display: base units summed over the owner's accounts. */
 export interface HeldTokenBalance {
@@ -133,7 +151,8 @@ export function sumHoldings(sets: readonly (readonly HeldTokenBalance[])[]): Hel
 /**
  * The balance read a display follows: the caller's deadline (undefined for
  * none), and the slot the holdings were read at or after (undefined when the
- * read named none), which the terms read must see too.
+ * read named none), which the terms read must see too. A read with neither
+ * takes terms up to 10 seconds old.
  */
 export type BalanceRead = Readonly<{
   abortSignal: AbortSignal | undefined;
@@ -174,6 +193,45 @@ export async function withDisplayAmount(
   return displayed;
 }
 
+/**
+ * The terms of each Token-2022 mint: read live for a bounded read, otherwise
+ * from the cache, which reads the mints it does not hold in one request.
+ *
+ * @throws When this request's own terms read fails.
+ */
+async function readTerms(
+  mints: string[],
+  read: BalanceRead
+): Promise<Map<string, MintTokenTerms | TokenTermsError>> {
+  const readLive = async (unread: string[]) => {
+    const assets: TokenAsset[] = unread.map((mint) => ({
+      kind: "token",
+      mint: address(mint),
+      program: "token-2022",
+    }));
+    const terms = await fetchTokenTermsOfMints(createClusterRpc(), assets, read);
+    return new Map(unread.map((mint, index) => [mint, terms[index]]));
+  };
+  // A bounded read must see its own slot within its own deadline: a kept or
+  // running read can promise neither.
+  if (read.abortSignal !== undefined || read.minContextSlot !== undefined) {
+    return readLive(mints);
+  }
+  // The cache answers a failed read with no terms; this request's own failure
+  // is thrown as it came, so the caller logs its cause.
+  const failures: unknown[] = [];
+  const terms = await termsCache.lookup(currentClusterScope().cluster, mints, (unread) =>
+    readLive(unread).catch((error: unknown) => {
+      failures.push(error);
+      throw error;
+    })
+  );
+  if (failures.length > 0) {
+    throw failures[0];
+  }
+  return terms;
+}
+
 /** Each set displayed, in order, from one terms read for all of them. */
 async function displaySets(
   sets: readonly (readonly HeldTokenBalance[])[],
@@ -187,18 +245,10 @@ async function displaySets(
         .map((holding) => holding.mint)
     ),
   ];
-  const assets: TokenAsset[] = token2022Mints.map((mint) => ({
-    kind: "token",
-    mint: address(mint),
-    program: "token-2022",
-  }));
-  const termsByMint = new Map<string, MintTokenTerms | TokenTermsError>();
-  if (assets.length > 0) {
-    const termsRead = await fetchTokenTermsOfMints(createClusterRpc(), assets, read);
-    termsRead.forEach((terms, index) => {
-      termsByMint.set(token2022Mints[index], terms);
-    });
-  }
+  const termsByMint =
+    token2022Mints.length === 0
+      ? new Map<string, MintTokenTerms | TokenTermsError>()
+      : await readTerms(token2022Mints, read);
 
   const displayed = (holding: HeldTokenBalance): CustodyWalletTokenBalance[] => {
     if (holding.program !== "token-2022") {

@@ -226,11 +226,14 @@ them in one place, not adding special cases to every flow.
   (`services/token-movement/balance-display.ts`). This fixes a wallet with several accounts of one
   mint showing its first account's RPC value. A classic SPL mint or native SOL shows its token
   amount with no read. Every Token-2022 mint a balance request holds, across all its wallets, is
-  read in one `getMultipleAccounts` with the Clock (99 mints per request, pages in parallel); none
-  is cached, because interest accrues every second. A Token-2022 holding whose mint does not
-  decode, or whose display overflows the program's f64 math, is left out and logged: anyone can
-  send a wallet such a token. An aggregate sums base units per mint (native SOL and wrapped SOL as
-  one, as the dashboard keys it) and shows the display of the sum. `usdValue` prices
+  read in one `getMultipleAccounts` with the Clock (99 mints per request, pages in parallel). The
+  custody wallet list and aggregate, whose holdings are cached for 10 seconds, keep each mint's
+  terms per cluster as long and join a read already running, so the home page's two reads make one
+  terms read; a failed read is never kept. A balance read after a transfer (a deadline and a slot
+  floor) reads the terms live. `displayAsOf` says when they were read. A Token-2022 holding whose
+  mint does not decode, or whose display overflows the program's f64 math, is left out and logged:
+  anyone can send a wallet such a token. An aggregate sums base units per mint (native SOL and
+  wrapped SOL as one, as the dashboard keys it) and shows the display of the sum. `usdValue` prices
   `displayAmount`. The old `uiAmount` field is removed, not kept beside the new ones, which is
   acceptable only before launch.
   Private Channels balances report `tokenAmount` (SPC accounts are classic); Earn's share

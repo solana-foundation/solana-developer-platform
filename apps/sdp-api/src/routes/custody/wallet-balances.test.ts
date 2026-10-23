@@ -107,7 +107,7 @@ describe("readWalletBalances", () => {
 
     const balances = await result;
     expect(balances.get("cwlt_1")).toEqual([
-      // Holdings in base units; display is added per request, never cached.
+      // Holdings in base units; display is added per request.
       { token: "SOL", mint: SOL_MINT, amount: "1500000000", decimals: 9, program: null },
       // Unlabeled by the organization; the well-known symbol still applies.
       { token: "USDC", mint: USDC_MINT, amount: "1500000", decimals: 6, program: "spl-token" },

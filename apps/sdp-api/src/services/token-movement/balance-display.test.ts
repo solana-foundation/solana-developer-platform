@@ -3,7 +3,7 @@ import { SOL_MINT, SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
 import { type Address, getAddressDecoder } from "@solana/kit";
 import { SYSVAR_CLOCK_ADDRESS } from "@solana/sysvars";
 import type { ExtensionArgs } from "@solana-program/token-2022";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
 import {
   answerMovementAccounts,
@@ -12,6 +12,7 @@ import {
   TEST_CLOCK,
 } from "@/test/helpers/token-movement";
 import {
+  clearBalanceTermsCacheForTests,
   type HeldTokenBalance,
   nativeSolHolding,
   sumHoldings,
@@ -59,6 +60,10 @@ describe("balance display", () => {
   const rpc = installClusterRpcResponder();
 
   const termsReads = () => rpc.requests.filter(({ method }) => method === "getMultipleAccounts");
+
+  beforeEach(() => {
+    clearBalanceTermsCacheForTests();
+  });
 
   function inScope<T>(operation: () => Promise<T>): Promise<T> {
     return runInClusterScope({ projectId: null, environment: "sandbox" }, operation);
@@ -197,16 +202,42 @@ describe("balance display", () => {
     expect(termsReads()[0]?.params[1]).toMatchObject({ minContextSlot: 4_242 });
   });
 
-  it("fails when the terms read itself fails", async () => {
+  // RPC budget: the home page reads the wallet list and the aggregate together, over holdings
+  // cached for 10 seconds, and each read the same terms again.
+  it("shares one terms read between unbounded reads, and reads a bounded one live", async () => {
+    answerMints();
+    const scaled = [holding(SCALED_MINT, "1000000", "token-2022")];
+
+    await inScope(() =>
+      Promise.all([
+        withDisplayAmount(scaled, NO_READ_BOUNDS),
+        withDisplayAmount(scaled, NO_READ_BOUNDS),
+      ])
+    );
+    await inScope(() => withDisplayAmount(scaled, NO_READ_BOUNDS));
+    expect(termsReads()).toHaveLength(1);
+
+    await inScope(() =>
+      withDisplayAmount(scaled, { abortSignal: undefined, minContextSlot: 4_242n })
+    );
+    expect(termsReads()).toHaveLength(2);
+  });
+
+  it("fails when the terms read itself fails, and keeps no failure", async () => {
     rpc.respond("getMultipleAccounts", () => ({
       error: { code: -32_005, message: "Node is unhealthy" },
     }));
+    const scaled = [holding(SCALED_MINT, "1000000", "token-2022")];
 
-    await expect(
-      inScope(() =>
-        withDisplayAmount([holding(SCALED_MINT, "1000000", "token-2022")], NO_READ_BOUNDS)
-      )
-    ).rejects.toThrow();
+    await expect(inScope(() => withDisplayAmount(scaled, NO_READ_BOUNDS))).rejects.toThrow(
+      "Node is unhealthy"
+    );
+
+    answerMints();
+    await expect(inScope(() => withDisplayAmount(scaled, NO_READ_BOUNDS))).resolves.toEqual([
+      expect.objectContaining({ displayAmount: "2", displayRule: "scaled" }),
+    ]);
+    expect(termsReads()).toHaveLength(2);
   });
 });
 

@@ -1,8 +1,8 @@
 /**
  * Live SOL and SPL holdings for custody wallets, read from the chain, in base
  * units summed per mint. Display is added after, for every wallet of the
- * request at once (`withDisplayAmounts`), and never cached: an
- * interest-bearing mint's display changes every second.
+ * request at once (`withDisplayAmounts`), from terms kept as long as these
+ * holdings: a display is never older than the holdings it shows.
  *
  * Home and DvP create ask for every wallet at once, often from several requests
  * together, so the read is shaped for that: SOL for every wallet the cache missed
