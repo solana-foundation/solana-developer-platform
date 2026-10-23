@@ -1644,7 +1644,13 @@
               "destinationAddress": "So11111111111111111111111111111111111111112",
               "destinationTokenAccount": "So11111111111111111111111111111111111111112",
               "token": "example",
-              "amount": "100.00",
+              "amount": "100",
+              "amounts": {
+                "basis": "debit",
+                "debit": "25",
+                "decimals": 6,
+                "maxFeePerPull": "0"
+              },
               "periodHours": 720,
               "firstCollectionAt": "2025-01-01T00:00:00.000Z",
               "nextCollectionDueAt": "2025-01-01T00:00:00.000Z",
@@ -1762,7 +1768,13 @@
                 "destinationAddress": "So11111111111111111111111111111111111111112",
                 "destinationTokenAccount": "So11111111111111111111111111111111111111112",
                 "token": "example",
-                "amount": "100.00",
+                "amount": "100",
+                "amounts": {
+                  "basis": "debit",
+                  "debit": "25",
+                  "decimals": 6,
+                  "maxFeePerPull": "0"
+                },
                 "periodHours": 720,
                 "firstCollectionAt": "2025-01-01T00:00:00.000Z",
                 "nextCollectionDueAt": "2025-01-01T00:00:00.000Z",
@@ -1833,7 +1845,13 @@
               "destinationAddress": "So11111111111111111111111111111111111111112",
               "destinationTokenAccount": "So11111111111111111111111111111111111111112",
               "token": "example",
-              "amount": "100.00",
+              "amount": "100",
+              "amounts": {
+                "basis": "debit",
+                "debit": "25",
+                "decimals": 6,
+                "maxFeePerPull": "0"
+              },
               "periodHours": 720,
               "firstCollectionAt": "2025-01-01T00:00:00.000Z",
               "nextCollectionDueAt": "2025-01-01T00:00:00.000Z",
@@ -1890,7 +1908,13 @@
               "destinationAddress": "So11111111111111111111111111111111111111112",
               "destinationTokenAccount": "So11111111111111111111111111111111111111112",
               "token": "example",
-              "amount": "100.00",
+              "amount": "100",
+              "amounts": {
+                "basis": "debit",
+                "debit": "25",
+                "decimals": 6,
+                "maxFeePerPull": "0"
+              },
               "periodHours": 720,
               "firstCollectionAt": "2025-01-01T00:00:00.000Z",
               "nextCollectionDueAt": "2025-01-01T00:00:00.000Z",
@@ -1947,7 +1971,13 @@
               "destinationAddress": "So11111111111111111111111111111111111111112",
               "destinationTokenAccount": "So11111111111111111111111111111111111111112",
               "token": "example",
-              "amount": "100.00",
+              "amount": "100",
+              "amounts": {
+                "basis": "debit",
+                "debit": "25",
+                "decimals": 6,
+                "maxFeePerPull": "0"
+              },
               "periodHours": 720,
               "firstCollectionAt": "2025-01-01T00:00:00.000Z",
               "nextCollectionDueAt": "2025-01-01T00:00:00.000Z",
@@ -2004,7 +2034,13 @@
               "destinationAddress": "So11111111111111111111111111111111111111112",
               "destinationTokenAccount": "So11111111111111111111111111111111111111112",
               "token": "example",
-              "amount": "100.00",
+              "amount": "100",
+              "amounts": {
+                "basis": "debit",
+                "debit": "25",
+                "decimals": 6,
+                "maxFeePerPull": "0"
+              },
               "periodHours": 720,
               "firstCollectionAt": "2025-01-01T00:00:00.000Z",
               "nextCollectionDueAt": "2025-01-01T00:00:00.000Z",
@@ -2061,7 +2097,13 @@
               "destinationAddress": "So11111111111111111111111111111111111111112",
               "destinationTokenAccount": "So11111111111111111111111111111111111111112",
               "token": "example",
-              "amount": "100.00",
+              "amount": "100",
+              "amounts": {
+                "basis": "debit",
+                "debit": "25",
+                "decimals": 6,
+                "maxFeePerPull": "0"
+              },
               "periodHours": 720,
               "firstCollectionAt": "2025-01-01T00:00:00.000Z",
               "nextCollectionDueAt": "2025-01-01T00:00:00.000Z",
@@ -2224,7 +2266,13 @@
               "destinationAddress": "So11111111111111111111111111111111111111112",
               "destinationTokenAccount": "So11111111111111111111111111111111111111112",
               "token": "example",
-              "amount": "100.00",
+              "amount": "100",
+              "amounts": {
+                "basis": "debit",
+                "debit": "25",
+                "decimals": 6,
+                "maxFeePerPull": "0"
+              },
               "periodHours": 720,
               "firstCollectionAt": "2025-01-01T00:00:00.000Z",
               "nextCollectionDueAt": "2025-01-01T00:00:00.000Z",
@@ -2278,7 +2326,13 @@
               "ownerWalletId": "privy_wallet_123",
               "ownerAddress": "So11111111111111111111111111111111111111112",
               "token": "example",
-              "amount": "100.00",
+              "amount": "100",
+              "amounts": {
+                "basis": "debit",
+                "debit": "25",
+                "decimals": 6,
+                "maxFeePerPull": "0"
+              },
               "periodHours": 720,
               "programPlanId": "17014118346046923173",
               "planPda": "So11111111111111111111111111111111111111112",
@@ -2355,7 +2409,13 @@
                 "ownerWalletId": "privy_wallet_123",
                 "ownerAddress": "So11111111111111111111111111111111111111112",
                 "token": "example",
-                "amount": "100.00",
+                "amount": "100",
+                "amounts": {
+                  "basis": "debit",
+                  "debit": "25",
+                  "decimals": 6,
+                  "maxFeePerPull": "0"
+                },
                 "periodHours": 720,
                 "programPlanId": "17014118346046923173",
                 "planPda": "So11111111111111111111111111111111111111112",
@@ -2416,7 +2476,13 @@
               "ownerWalletId": "privy_wallet_123",
               "ownerAddress": "So11111111111111111111111111111111111111112",
               "token": "example",
-              "amount": "100.00",
+              "amount": "100",
+              "amounts": {
+                "basis": "debit",
+                "debit": "25",
+                "decimals": 6,
+                "maxFeePerPull": "0"
+              },
               "periodHours": 720,
               "programPlanId": "17014118346046923173",
               "planPda": "So11111111111111111111111111111111111111112",
@@ -2470,7 +2536,13 @@
               "ownerWalletId": "privy_wallet_123",
               "ownerAddress": "So11111111111111111111111111111111111111112",
               "token": "example",
-              "amount": "100.00",
+              "amount": "100",
+              "amounts": {
+                "basis": "debit",
+                "debit": "25",
+                "decimals": 6,
+                "maxFeePerPull": "0"
+              },
               "periodHours": 720,
               "programPlanId": "17014118346046923173",
               "planPda": "So11111111111111111111111111111111111111112",
@@ -2527,7 +2599,13 @@
               "ownerWalletId": "privy_wallet_123",
               "ownerAddress": "So11111111111111111111111111111111111111112",
               "token": "example",
-              "amount": "100.00",
+              "amount": "100",
+              "amounts": {
+                "basis": "debit",
+                "debit": "25",
+                "decimals": 6,
+                "maxFeePerPull": "0"
+              },
               "periodHours": 720,
               "programPlanId": "17014118346046923173",
               "planPda": "So11111111111111111111111111111111111111112",

@@ -1,5 +1,4 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
-import type * as solanaRpc from "@sdp/rpc/solana";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import {
   isCollectableRecurringPaymentStatus,
@@ -35,7 +34,7 @@ import * as paymentSubscriptionsRepositoryPostgres from "@/db/repositories/payme
 import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories/payment-subscriptions.repository.postgres";
 import * as paymentsRepositoryPostgres from "@/db/repositories/payments.repository.postgres";
 import { app as baseApp } from "@/index";
-import { AppError, badRequest, PUBLIC_INTERNAL_ERROR_MESSAGE } from "@/lib/errors";
+import { AppError, PUBLIC_INTERNAL_ERROR_MESSAGE } from "@/lib/errors";
 import { MoneyMovementRefusedError } from "@/lib/money-admission";
 import * as organizationAccess from "@/lib/organization-access";
 import { deriveIdempotencyRecordKey } from "@/middleware/idempotency";
@@ -48,7 +47,6 @@ import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-p
 import { cancelRecurringPaymentsActivatedByKey } from "@/services/payments/recurring-payments/cancel-activated-by-key";
 import { skipRefusedRecurringCollectionPeriod } from "@/services/payments/recurring-payments/collection";
 import * as recurringShared from "@/services/payments/recurring-payments/shared";
-import * as paymentAmounts from "@/services/payments/token-amount";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { authenticateTestClerkUser } from "@/test/helpers/clerk";
 import {
@@ -84,8 +82,10 @@ import {
   TEST_ORG,
   TEST_PRODUCTION_PROJECT_ID,
   TEST_PROJECT,
+  TEST_SPONSORSHIP_PROVIDER_CONFIG,
   TEST_USER,
   TEST_WALLET_ID,
+  testKoraAdapter,
 } from "@/test/helpers/payments-routes";
 import { seedConfigOwnedDuplicateProviderWallet } from "@/test/helpers/payments-transfers";
 import {
@@ -97,6 +97,7 @@ import {
   parseRecurringResponse,
   poolSentSignatures,
   RECURRING_HEADERS,
+  recurringMintAccounts,
   rejectPoolSendAfter,
   seedRecurringCollectionJournal,
   setRecurringCollectionDue,
@@ -104,7 +105,15 @@ import {
 } from "@/test/helpers/recurring-payments";
 import { required } from "@/test/helpers/required";
 import { sendTransactionPreflightError } from "@/test/helpers/rpc-errors";
-import { respondMintAccounts, scaledUiAmountConfig } from "@/test/helpers/token-mints";
+import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
+import { scaledUiAmountConfig } from "@/test/helpers/token-mints";
+import {
+  answerMovementAccounts,
+  mintRpcAccount,
+  movementAccountsReply,
+  readsAccount,
+  testMandate,
+} from "@/test/helpers/token-movement";
 
 // Every mutation carries a fresh key unless a test sets its own (HOO-1918).
 const app = withIdempotencyKeys(baseApp);
@@ -278,8 +287,10 @@ async function seedIssuedTokenMint(params: {
 }
 
 /** An active schedule on a token issued in the project, and a way to pause that token. */
-async function activateOnIssuedToken() {
+async function activateOnIssuedToken(execution: ReturnType<typeof installRecurringExecutionHooks>) {
   const issuedMint = (await generateKeyPairSigner()).address;
+  // Its mandate is made from the issued mint's terms.
+  await execution.answerIssuedMints([issuedMint]);
   const issuedTokenId = await seedIssuedTokenMint({
     projectId: TEST_PROJECT.id,
     mintAddress: issuedMint,
@@ -924,12 +935,15 @@ describe("Payments routes — recurring", () => {
       mintAddress: scaledMint,
       status: "active",
     });
-    respondMintAccounts(recurringExecution.rpc, {
-      mints: new Map([
-        [issuedMint, { decimals: 6, extensions: null }],
+    // The issued mints are read for their terms when the mandate is made.
+    answerMovementAccounts(
+      recurringExecution.rpc,
+      new Map([
+        ...(await recurringMintAccounts([])),
+        [issuedMint, mintRpcAccount("spl-token", { decimals: 6, extensions: null })],
         [
           scaledMint,
-          {
+          mintRpcAccount("token-2022", {
             decimals: 6,
             extensions: [
               scaledUiAmountConfig({
@@ -938,18 +952,21 @@ describe("Payments routes — recurring", () => {
                 newMultiplierEffectiveTimestamp: 0n,
               }),
             ],
-          },
+          }),
         ],
-      ]),
-      clockUnixTimestamp: 1_750_000_000n,
-    });
+      ])
+    );
     await expectTokenRejected(pausedMint);
 
+    // Main refused a scaled UI amount mint, its per-period cap fixed in base units. A mandate is
+    // base units (ADR 0012): the multiplier changes only what a wallet shows, never the pull.
     const scaledRes = await createRecurring(scaledMint);
-    expect(scaledRes.status).toBe(400);
-    expect(errorResponseSchema.parse(await scaledRes.json()).error.message).toBe(
-      "Payments do not support the ScaledUiAmountConfig mint extension"
-    );
+    expect(scaledRes.status).toBe(201);
+    const scaledBody = await parseRecurringResponse(scaledRes);
+    expect(scaledBody.data.recurringPayment).toMatchObject({
+      token: scaledMint,
+      amounts: { basis: "debit", debit: "25", decimals: 6 },
+    });
 
     const issuedRes = await createRecurring(issuedMint);
     expect(issuedRes.status).toBe(201);
@@ -1041,7 +1058,7 @@ describe("Payments routes — recurring", () => {
   });
 
   it("refuses a fresh update that keeps its issued token after the token pauses, sending nothing", async () => {
-    const { activated, pauseToken } = await activateOnIssuedToken();
+    const { activated, pauseToken } = await activateOnIssuedToken(recurringExecution);
     await pauseToken();
     const sendsBefore = sendTransactionMock.mock.calls.length;
 
@@ -2120,14 +2137,10 @@ describe("Payments routes — recurring", () => {
       tokenProgram: address("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
       mint: address(DEVNET_USDC_MINT),
     });
-    getAccountInfoMock.mockImplementation(async (_rpc, accountAddress) =>
-      accountAddress === expectedSourceAta
-        ? null
-        : ({
-            lamports: 4200000000n,
-            owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
-          } as Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>)
-    );
+    // The activation's terms read carries the source's token account; this one has none.
+    const accounts = await recurringMintAccounts(Object.values(TEST_SOLANA_ADDRESSES));
+    expect(accounts.has(expectedSourceAta)).toBe(false);
+    answerMovementAccounts(recurringExecution.rpc, accounts);
 
     const activateRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
@@ -2205,6 +2218,7 @@ describe("Payments routes — recurring", () => {
 
   it("cancels an active recurring payment whose issued token was paused after activation", async () => {
     const issuedMint = (await generateKeyPairSigner()).address;
+    await recurringExecution.answerIssuedMints([issuedMint]);
     const issuedTokenId = await seedIssuedTokenMint({
       projectId: TEST_PROJECT.id,
       mintAddress: issuedMint,
@@ -3207,6 +3221,7 @@ describe("Payments routes — recurring", () => {
       ownerAddress: TEST_SOLANA_ADDRESSES.wallet1,
       token: DEVNET_USDC_MINT,
       amount: "25.00",
+      mandate: testMandate(DEVNET_USDC_MINT, "25.00", 6),
       periodHours: 24,
       programPlanId: "1004",
       planPda: null,
@@ -3238,22 +3253,29 @@ describe("Payments routes — recurring", () => {
       updatedAt: now,
     });
 
-    let releaseMintLookup: (() => void) | undefined;
-    let signalMintLookupReached: (() => void) | undefined;
-    const mintLookupReached = new Promise<void>((resolve) => {
-      signalMintLookupReached = resolve;
+    // The plan's stored mandate needs no mint read, so the preparation is held at its fee
+    // payer lookup, between reading the subscription and persisting its addresses.
+    let releaseFeePayerLookup: (() => void) | undefined;
+    let signalFeePayerLookupReached: (() => void) | undefined;
+    const feePayerLookupReached = new Promise<void>((resolve) => {
+      signalFeePayerLookupReached = resolve;
     });
-    const mintLookupReleased = new Promise<void>((resolve) => {
-      releaseMintLookup = resolve;
+    const feePayerLookupReleased = new Promise<void>((resolve) => {
+      releaseFeePayerLookup = resolve;
     });
-    const loadPaymentMint = paymentAmounts.loadPaymentMint;
-    const mintLookup = vi
-      .spyOn(paymentAmounts, "loadPaymentMint")
-      .mockImplementationOnce(async (mint) => {
-        if (signalMintLookupReached) signalMintLookupReached();
-        await mintLookupReleased;
-        return loadPaymentMint(mint);
-      });
+    createKoraAdapterMock.mockReturnValueOnce(
+      testKoraAdapter({
+        getFeePayer: vi.fn().mockImplementation(async () => {
+          if (signalFeePayerLookupReached) {
+            signalFeePayerLookupReached();
+          }
+          await feePayerLookupReleased;
+          return TEST_MOCK_FEE_PAYER;
+        }),
+        getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
+        signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
+      })
+    );
 
     const preparePromise = app.request(
       `/v1/payments/subscriptions/${subscriptionId}/prepare-authorization`,
@@ -3269,7 +3291,7 @@ describe("Payments routes — recurring", () => {
       env
     );
 
-    await mintLookupReached;
+    await feePayerLookupReached;
     await repo.updateSubscription({
       subscriptionId,
       organizationId: TEST_ORG.id,
@@ -3280,12 +3302,11 @@ describe("Payments routes — recurring", () => {
       nextCollectionDueAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
       updatedAt: new Date().toISOString(),
     });
-    if (releaseMintLookup) {
-      releaseMintLookup();
+    if (releaseFeePayerLookup) {
+      releaseFeePayerLookup();
     }
 
     const prepareRes = await preparePromise;
-    mintLookup.mockRestore();
     expect(prepareRes.status).toBe(409);
     const persisted = await repo.getSubscriptionById({
       subscriptionId,
@@ -3310,12 +3331,12 @@ describe("Payments routes — recurring", () => {
         "3hdAMf5sGEHn2UAjViFvX9YtZQdRfeHEGwNEc8GjVKFG5MGNs27jVrNuQXHcr1JAkzjcJtS4Lo6z33Z5fbT2gq13"
       );
       const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
-      const mintAdmission = vi
-        .spyOn(paymentAmounts, "loadPaymentMint")
-        .mockRejectedValue(
-          badRequest("Payments do not support the InterestBearingConfig mint extension")
-        );
-      onTestFinished(() => mintAdmission.mockRestore());
+      // Recovery proves saved work from the stored mandate: a mint whose terms cannot be read
+      // now never strands it.
+      recurringExecution.rpc.respond("getMultipleAccounts", () => ({
+        error: { code: -32_000, message: "Mint terms unavailable" },
+      }));
+      const requestsBeforeRecovery = recurringExecution.rpc.requests.length;
       const dueAt = new Date(Date.now() - 60 * 1000).toISOString();
       const now = new Date().toISOString();
       const staleAt = new Date(Date.now() - 20 * 60 * 1000).toISOString();
@@ -3434,7 +3455,11 @@ describe("Payments routes — recurring", () => {
         status: "confirmed",
         signature: submittedSignature,
       });
-      expect(mintAdmission).not.toHaveBeenCalled();
+      expect(
+        recurringExecution.rpc.requests
+          .slice(requestsBeforeRecovery)
+          .some((request) => request.method === "getMultipleAccounts")
+      ).toBe(false);
       expect(sendTransactionMock).toHaveBeenCalledTimes(2);
     }
   );
@@ -4247,9 +4272,13 @@ describe("Payments routes — recurring", () => {
       const activated = await activateProductionUsdcSchedule();
 
       expect(activated.token).toBe(MAINNET_USDC_MINT);
-      expect(
-        recurringExecution.rpc.calls.filter((call) => call.method === "getTokenSupply")
-      ).toEqual([]);
+      expect(recurringExecution.rpc.calls).toContainEqual({
+        cluster: "mainnet-beta",
+        method: "getMultipleAccounts",
+      });
+      expect(new Set(recurringExecution.rpc.calls.map((call) => call.cluster))).toEqual(
+        new Set(["mainnet-beta"])
+      );
       expect(
         new Set(
           [
@@ -4280,10 +4309,18 @@ describe("Payments routes — recurring", () => {
         await collectDueRecurringPayments(env, now);
       });
 
-      const tokenSupplyReads = recurringExecution.rpc.requests
+      // Each pull reads its mint's terms once before it is claimed (ADR 0012).
+      const termsReads = recurringExecution.rpc.requests
         .slice(requestsBefore)
-        .filter((request) => request.method === "getTokenSupply");
-      expect(tokenSupplyReads).toEqual([]);
+        .filter((request) => request.method === "getMultipleAccounts");
+      const clustersReadingMint = (mint: string) =>
+        new Set(
+          termsReads
+            .filter((request) => readsAccount(request, mint))
+            .map((request) => request.cluster)
+        );
+      expect(clustersReadingMint(DEVNET_USDC_MINT)).toEqual(new Set(["devnet"]));
+      expect(clustersReadingMint(MAINNET_USDC_MINT)).toEqual(new Set(["mainnet-beta"]));
       const clustersConfirming = (collectionSignature: string) =>
         new Set(
           confirmTransactionMock.mock.calls
@@ -4939,7 +4976,19 @@ describe("Payments routes — recurring", () => {
       .prepare("UPDATE payment_recurring_payments SET updated_at = ? WHERE id = ?")
       .bind(new Date(Date.now() - 16 * 60 * 1000).toISOString(), created.id)
       .run();
-    getAccountInfoMock.mockRejectedValueOnce(new Error("RPC unavailable"));
+    // The recovered activation's first read, its terms read, fails.
+    const accounts = await recurringMintAccounts([
+      recurringExecution.sourceSigner().address,
+      ...Object.values(TEST_SOLANA_ADDRESSES),
+    ]);
+    let termsReadFailed = false;
+    recurringExecution.rpc.respond("getMultipleAccounts", (request) => {
+      if (termsReadFailed) {
+        return movementAccountsReply(accounts, request);
+      }
+      termsReadFailed = true;
+      return { error: { code: -32000, message: "RPC unavailable" } };
+    });
 
     expect(await collectDueRecurringPaymentsIn("sandbox", new Date())).toMatchObject({
       recovered: 0,
@@ -7118,7 +7167,8 @@ describe("Payments routes — recurring", () => {
       ])(
         "refuses a claimed update before sending when its issued token pauses: %j",
         async (update) => {
-          const { activated, issuedMint, pauseToken } = await activateOnIssuedToken();
+          const { activated, issuedMint, pauseToken } =
+            await activateOnIssuedToken(recurringExecution);
           const key = crypto.randomUUID();
           const request = () =>
             app.request(
@@ -7152,7 +7202,8 @@ describe("Payments routes — recurring", () => {
       );
 
       it("settles a landed replacement plan but refuses new authorization when its token pauses", async () => {
-        const { activated, issuedMint, pauseToken } = await activateOnIssuedToken();
+        const { activated, issuedMint, pauseToken } =
+          await activateOnIssuedToken(recurringExecution);
         const key = crypto.randomUUID();
         const request = () =>
           app.request(
@@ -7182,7 +7233,8 @@ describe("Payments routes — recurring", () => {
       });
 
       it("finishes a landed update naming its issued token after the token pauses, without sending it again", async () => {
-        const { activated, issuedMint, pauseToken } = await activateOnIssuedToken();
+        const { activated, issuedMint, pauseToken } =
+          await activateOnIssuedToken(recurringExecution);
         const key = crypto.randomUUID();
         const metadataUri = "https://example.com/recurring/paused-token.json";
         const request = () =>
@@ -7316,7 +7368,7 @@ describe("Payments routes — recurring", () => {
       });
 
       it("finishes a landed resume after its issued token pauses, without sending it again", async () => {
-        const { activated, pauseToken } = await activateOnIssuedToken();
+        const { activated, pauseToken } = await activateOnIssuedToken(recurringExecution);
         const lifecycle = (action: "cancel" | "resume", key: string) =>
           app.request(
             actionPath(activated.id, action),
@@ -7342,7 +7394,7 @@ describe("Payments routes — recurring", () => {
       });
 
       it("refuses a resume that did not land once its issued token pauses, back to canceled and sending nothing", async () => {
-        const { activated, pauseToken } = await activateOnIssuedToken();
+        const { activated, pauseToken } = await activateOnIssuedToken(recurringExecution);
         const lifecycle = (action: "cancel" | "resume", key: string) =>
           app.request(
             actionPath(activated.id, action),

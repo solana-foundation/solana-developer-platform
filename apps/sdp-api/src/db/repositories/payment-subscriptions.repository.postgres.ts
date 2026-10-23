@@ -7,6 +7,12 @@ import {
 } from "@sdp/types/payments";
 import { z } from "zod";
 import type { DatabaseExecutor } from "@/db/client";
+import {
+  MANDATE_COLUMNS,
+  MANDATE_VALUES,
+  mandateValues,
+  parseRecurringMandate,
+} from "@/db/repositories/recurring-mandate";
 import type {
   CreatePaymentSubscriptionCollectionAttemptInput,
   CreatePaymentSubscriptionInput,
@@ -86,7 +92,7 @@ const attemptRowSchema = z.object({
 });
 
 function mapPlanRow(row: Record<string, unknown>): PaymentSubscriptionPlanRow {
-  return planRowSchema.parse(row);
+  return { ...planRowSchema.parse(row), mandate: parseRecurringMandate(row) };
 }
 
 function mapSubscriptionRow(row: Record<string, unknown>): PaymentSubscriptionRow {
@@ -174,6 +180,7 @@ export function createPostgresPaymentSubscriptionsRepository(
              owner_address,
              token,
              amount,
+             ${MANDATE_COLUMNS},
              period_hours,
              program_plan_id,
              plan_pda,
@@ -185,7 +192,7 @@ export function createPostgresPaymentSubscriptionsRepository(
              created_by,
              created_at,
              updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ${MANDATE_VALUES}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT DO NOTHING`
         )
         .bind(
@@ -196,6 +203,7 @@ export function createPostgresPaymentSubscriptionsRepository(
           input.ownerAddress,
           input.token,
           input.amount,
+          ...mandateValues(input.mandate),
           input.periodHours,
           input.programPlanId,
           input.planPda,
