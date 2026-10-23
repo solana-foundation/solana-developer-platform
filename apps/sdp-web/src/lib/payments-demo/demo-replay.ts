@@ -380,7 +380,6 @@ function applySchedule(world: DemoWorld, op: DemoOpOf<"schedule">): void {
     organizationId: ORGANIZATION_ID,
     projectId: PROJECT_ID,
     sourceCustodyWalletId: wallet.id,
-    sourceProviderWalletId: wallet.walletId,
     sourceAddress: wallet.publicKey,
     counterpartyId: op.cp,
     counterpartyAccountId: account.id,
@@ -499,7 +498,6 @@ function applyScheduleUpdate(world: DemoWorld, op: DemoOpOf<"schedule-update">):
   const wallet = op.wallet === undefined ? undefined : findWallet(world, op.wallet);
   if (wallet) {
     schedule.sourceCustodyWalletId = wallet.id;
-    schedule.sourceProviderWalletId = wallet.walletId;
     schedule.sourceAddress = wallet.publicKey;
   }
   const account = op.account === undefined ? undefined : accountById(world, op.account);

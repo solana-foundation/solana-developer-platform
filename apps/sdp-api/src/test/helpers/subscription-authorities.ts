@@ -102,6 +102,7 @@ export async function seedAuthoritySubscription(
       organizationId: TEST_ORG.id,
       projectId: tenant.projectId,
       ownerWalletId: tenant.providerWalletId,
+      ownerCustodyWalletId: tenant.custodyWalletId,
       ownerAddress: tenant.walletAddress,
       token: input.tokenMint,
       amount: "1",

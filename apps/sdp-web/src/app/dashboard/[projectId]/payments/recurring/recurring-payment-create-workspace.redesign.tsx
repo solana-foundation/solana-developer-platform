@@ -25,7 +25,11 @@ import {
 } from "@/app/dashboard/[projectId]/payments/ramps/components/payment-form-fields";
 import { RampWizardShell } from "@/app/dashboard/[projectId]/payments/ramps/components/ramp-wizard-shell.redesign";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { accountAddress, parsePeriodHours } from "./recurring-payments-shared.redesign";
+import {
+  accountAddress,
+  parsePeriodHours,
+  walletLabel,
+} from "./recurring-payments-shared.redesign";
 import {
   amountErrorMessage,
   firstCollectionAtIsValid,
@@ -371,7 +375,7 @@ function ReviewStep({ form }: StepProps) {
   const firstRunDetail = firstRunDate
     ? t("DashboardPayments.recurring.firstRun", { date: firstRunDate })
     : t("DashboardPayments.recurring.firstRunAfterActivation");
-  const walletName = selectedWallet?.label ?? selectedWallet?.walletId ?? "";
+  const walletName = walletLabel(selectedWallet, "");
   const destinationDetail = selectedAccount
     ? (selectedAccount.label ?? shortenAddress(accountAddress(selectedAccount)))
     : "";

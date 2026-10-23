@@ -338,8 +338,28 @@ describe("collectDueRecurringPayments", () => {
     warn.mockRestore();
   });
 
+  it("collects the exact source when only its provider reference changed", async () => {
+    mocks.rows.due = [recurringRow("active")];
+    mocks.findOperationalWalletById.mockResolvedValue({
+      id: "cwlt_1",
+      walletId: "wallet_other",
+      publicKey: "source_address",
+    });
+
+    const result = await collectDueRecurringPaymentsIn("sandbox", new Date());
+
+    expect(result).toEqual({ recovered: 0, collected: 1, failed: 0, skipped: 0, refused: 0 });
+    expect(collectRecurringPayment).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        recurringPayment: expect.objectContaining({ source_wallet_id: "wallet_1" }),
+        sourceWallet: expect.objectContaining({ id: "cwlt_1", walletId: "wallet_other" }),
+      })
+    );
+    expect(mocks.journalAutomatedCollectionFailure).not.toHaveBeenCalled();
+  });
+
   it.each([
-    ["provider wallet ID", { id: "cwlt_1", walletId: "wallet_other", publicKey: "source_address" }],
+    ["custody wallet ID", { id: "cwlt_other", walletId: "wallet_1", publicKey: "source_address" }],
     ["public key", { id: "cwlt_1", walletId: "wallet_1", publicKey: "other_address" }],
   ])("fails closed when the exact source wallet %s does not match its pin", async (_, wallet) => {
     const warn = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);

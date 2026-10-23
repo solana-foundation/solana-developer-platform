@@ -1110,7 +1110,7 @@ export interface PaymentSubscriptionPlan {
   id: string;
   organizationId: string;
   projectId: string;
-  ownerWalletId: string;
+  ownerCustodyWalletId: string | null;
   ownerAddress: string;
   token: string;
   amount: string;
@@ -1118,7 +1118,7 @@ export interface PaymentSubscriptionPlan {
   programPlanId: string;
   planPda: string | null;
   destinationAddress: string | null;
-  pullerWalletId: string | null;
+  pullerCustodyWalletId: string | null;
   pullerAddress: string | null;
   metadataUri: string | null;
   status: PaymentSubscriptionPlanStatus;
@@ -1171,7 +1171,6 @@ export interface PaymentRecurringPayment {
   organizationId: string;
   projectId: string;
   sourceCustodyWalletId: string | null;
-  sourceProviderWalletId: string;
   sourceAddress: string;
   counterpartyId: string;
   counterpartyAccountId: string;
@@ -1255,26 +1254,26 @@ export interface ListPaymentRequestsResponse {
   pageSize: number;
 }
 
-export interface CreatePaymentSubscriptionPlanRequest {
-  ownerWalletId: string;
+export type CreatePaymentSubscriptionPlanRequest = {
+  ownerCustodyWalletId: string;
+  pullerCustodyWalletId?: string;
   token: string;
   amount: string;
   periodHours: number;
   programPlanId?: string;
   planPda?: string;
   destinationAddress?: string;
-  pullerWalletId?: string;
   metadataUri?: string;
   status?: PaymentSubscriptionPlanStatus;
-}
+};
 
-export interface UpdatePaymentSubscriptionPlanRequest {
+export type UpdatePaymentSubscriptionPlanRequest = {
+  pullerCustodyWalletId?: string | null;
   planPda?: string | null;
   destinationAddress?: string | null;
-  pullerWalletId?: string | null;
   metadataUri?: string | null;
   status?: PaymentSubscriptionPlanStatus;
-}
+};
 
 export interface CreatePaymentSubscriptionRequest {
   planId: string;

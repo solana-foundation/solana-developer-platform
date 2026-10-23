@@ -5,11 +5,13 @@ import { IdempotencyOutcomeUnknownError } from "@/lib/idempotency";
 import { setWindowPathname } from "@/test/window-location";
 import {
   createRecurringPayment,
+  getRecurringPayment,
   runRecurringPaymentAction,
   updateRecurringPayment,
 } from "./recurring-payments.data";
 import {
   createRecurringPayment as createRecurringPaymentRedesign,
+  getRecurringPayment as getRedesignRecurringPayment,
   updateRecurringPayment as updateRecurringPaymentRedesign,
 } from "./recurring-payments.data.redesign";
 
@@ -22,7 +24,6 @@ const responseEnvelope = {
       organizationId: "org_1",
       projectId: "project_1",
       sourceCustodyWalletId: "cwlt_create",
-      sourceProviderWalletId: "provider-wallet-1",
       sourceAddress: "source-address-1",
       counterpartyId: "cpty_1",
       counterpartyAccountId: "cpa_1",
@@ -53,6 +54,28 @@ const responseEnvelope = {
 describe("recurring payment write requests", () => {
   beforeEach(() => setWindowPathname("/dashboard/prj_test_sandbox/payments/recurring"));
   afterEach(() => vi.unstubAllGlobals());
+
+  it.each([getRecurringPayment, getRedesignRecurringPayment])(
+    "reads saved exact identity and address without exposing provider response metadata",
+    async (getPayment) => {
+      vi.stubGlobal("fetch", () =>
+        Promise.resolve(
+          Response.json({
+            data: {
+              recurringPayment: {
+                ...responseEnvelope.data.recurringPayment,
+                sourceProviderWalletId: "provider-wallet-1",
+              },
+            },
+          })
+        )
+      );
+      const payment = await getPayment("prp_1", undefined, t);
+      expect(payment.sourceCustodyWalletId).toBe("cwlt_create");
+      expect(payment.sourceAddress).toBe("source-address-1");
+      expect(payment).not.toHaveProperty("sourceProviderWalletId");
+    }
+  );
 
   it("sends the exact SDP Wallet ID for create and source replacement", async () => {
     const fetchMock = vi.fn<typeof globalThis.fetch>(() =>

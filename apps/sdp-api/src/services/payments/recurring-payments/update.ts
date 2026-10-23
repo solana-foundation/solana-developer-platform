@@ -154,6 +154,7 @@ type RecurringPaymentUpdateField = (typeof RECURRING_PAYMENT_UPDATE_FIELDS)[numb
 
 type ResolvedRecurringPaymentUpdate = {
   sourceWallet: CustodyWallet;
+  sourceProviderWalletId: string;
   counterpartyId: string;
   counterpartyAccountId: string;
   destinationAddress: string;
@@ -407,6 +408,10 @@ async function resolveRecurringPaymentUpdate(input: {
 
   return {
     sourceWallet: finalSourceWallet,
+    sourceProviderWalletId:
+      finalSourceWallet.id === input.recurringPayment.source_custody_wallet_id
+        ? input.recurringPayment.source_wallet_id
+        : finalSourceWallet.walletId,
     counterpartyId,
     counterpartyAccountId,
     destinationAddress: destination.destinationAddress,
@@ -619,7 +624,7 @@ async function updatePendingRecurringPaymentRow(
     organizationId: input.organizationId,
     projectId: input.projectId,
     sourceCustodyWalletId: input.resolved.sourceWallet.id,
-    sourceWalletId: input.resolved.sourceWallet.walletId,
+    sourceWalletId: input.resolved.sourceProviderWalletId,
     sourceAddress: input.resolved.sourceWallet.publicKey,
     counterpartyId: input.resolved.counterpartyId,
     counterpartyAccountId: input.resolved.counterpartyAccountId,
@@ -1193,7 +1198,8 @@ async function getOrCreateReplacementPlan(input: {
     id: `psp_${crypto.randomUUID()}`,
     organizationId: input.organizationId,
     projectId: input.projectId,
-    ownerWalletId: input.sourceWallet.walletId,
+    ownerWalletId: input.resolved.sourceProviderWalletId,
+    ownerCustodyWalletId: input.sourceWallet.id,
     ownerAddress: input.sourceWallet.publicKey,
     token: input.resolved.token,
     amount: input.resolved.amount,
@@ -1201,7 +1207,8 @@ async function getOrCreateReplacementPlan(input: {
     programPlanId: generateProgramPlanId(),
     planPda: null,
     destinationAddress: input.resolved.destinationAddress,
-    pullerWalletId: input.sourceWallet.walletId,
+    pullerWalletId: input.resolved.sourceProviderWalletId,
+    pullerCustodyWalletId: input.sourceWallet.id,
     pullerAddress: input.sourceWallet.publicKey,
     metadataUri: input.resolved.metadataUri,
     status: "draft",
@@ -1344,7 +1351,7 @@ async function finalizeReplacementUpdate(input: {
       organizationId: input.organizationId,
       projectId: input.projectId,
       sourceCustodyWalletId: input.resolved.sourceWallet.id,
-      sourceWalletId: input.resolved.sourceWallet.walletId,
+      sourceWalletId: input.resolved.sourceProviderWalletId,
       sourceAddress: input.resolved.sourceWallet.publicKey,
       counterpartyId: input.resolved.counterpartyId,
       counterpartyAccountId: input.resolved.counterpartyAccountId,
@@ -1708,7 +1715,7 @@ async function runReplacementUpdate(input: {
       await resolveProjectSponsorshipScope(input.env, {
         organizationId: input.organizationId,
         projectId: input.projectId,
-        actor: { type: "wallet", id: input.resolved.sourceWallet.walletId },
+        actor: { type: "wallet", id: input.resolved.sourceWallet.id },
       }),
       "recurring.update",
       { custodyWalletId: input.resolved.sourceWallet.id }
@@ -1982,7 +1989,7 @@ async function claimRecurringPaymentUpdateAtSnapshot(input: {
       input.recurringPayment.status,
       input.recurringPayment.updated_at,
       input.sourceWallet.id,
-      input.sourceWallet.walletId,
+      input.recurringPayment.source_wallet_id,
       input.sourceWallet.publicKey,
       input.recurringPayment.subscription_id,
       input.recurringPayment.next_collection_due_at

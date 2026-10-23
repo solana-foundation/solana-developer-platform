@@ -426,6 +426,7 @@ describe("PaymentRecurringPaymentsRepository collection job reads (postgres)", (
         organizationId: TEST_ORG.id,
         projectId,
         ownerWalletId: sourceWallet.walletId,
+        ownerCustodyWalletId: sourceWallet.custodyWalletId,
         ownerAddress: TEST_SOURCE_ADDRESS,
         token: usdcMint(environment),
         amount: "10.00",

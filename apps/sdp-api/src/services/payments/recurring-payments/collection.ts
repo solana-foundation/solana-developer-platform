@@ -731,7 +731,7 @@ async function claimCollectionUnderRecurringLock(input: {
       organizationId: input.organizationId,
       projectId: input.projectId,
       custodyWalletId: input.sourceWallet.id,
-      walletId: input.sourceWallet.walletId,
+      walletId: recurringPayment.source_wallet_id,
       counterpartyId: recurringPayment.counterparty_id,
       sourceAddress: input.sourceWallet.publicKey,
       destinationAddress: recurringPayment.destination_address,
@@ -1777,7 +1777,7 @@ export async function collectRecurringPayment(input: {
       await resolveProjectSponsorshipScope(input.env, {
         organizationId: input.organizationId,
         projectId: input.projectId,
-        actor: { type: "wallet", id: input.sourceWallet.walletId },
+        actor: { type: "wallet", id: input.sourceWallet.id },
       }),
       "recurring.collect",
       { custodyWalletId: input.sourceWallet.id }

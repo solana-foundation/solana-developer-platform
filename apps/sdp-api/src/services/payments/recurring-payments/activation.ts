@@ -113,7 +113,8 @@ async function getOrCreateActivationPlan(input: {
     id: `psp_${crypto.randomUUID()}`,
     organizationId: input.organizationId,
     projectId: input.projectId,
-    ownerWalletId: input.sourceWallet.walletId,
+    ownerWalletId: input.claimed.source_wallet_id,
+    ownerCustodyWalletId: input.sourceWallet.id,
     ownerAddress: input.sourceWallet.publicKey,
     token: input.claimed.token,
     amount: input.claimed.amount,
@@ -121,7 +122,8 @@ async function getOrCreateActivationPlan(input: {
     programPlanId: generateProgramPlanId(),
     planPda: null,
     destinationAddress: input.destination,
-    pullerWalletId: input.sourceWallet.walletId,
+    pullerWalletId: input.claimed.source_wallet_id,
+    pullerCustodyWalletId: input.sourceWallet.id,
     pullerAddress: input.sourceWallet.publicKey,
     metadataUri: input.claimed.metadata_uri,
     status: "draft",
@@ -794,7 +796,6 @@ export async function activateRecurringPayment(input: {
       destination,
       createdBy: input.createdBy,
     });
-
     const programPlanId = parseU64String(plan.program_plan_id, "programPlanId");
     const [planPda] = await subscriptionsProgram.findPlanPda({ owner, planId: programPlanId });
     const planUpdatedAt = new Date().toISOString();
@@ -1019,7 +1020,7 @@ export async function activateRecurringPayment(input: {
         await resolveProjectSponsorshipScope(input.env, {
           organizationId: input.organizationId,
           projectId: input.projectId,
-          actor: { type: "wallet", id: input.sourceWallet.walletId },
+          actor: { type: "wallet", id: input.sourceWallet.id },
         }),
         "recurring.activate",
         { custodyWalletId: input.sourceWallet.id }
