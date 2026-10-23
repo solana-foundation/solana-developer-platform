@@ -87,9 +87,11 @@ interface SignatureScanOutcome {
   stuck: StuckSignature;
 }
 
-type TransferExpectation =
-  | { kind: "expected"; fields: PaymentRequestTransferFields }
-  | { kind: "blocked"; reason: SettlementBlockedReason };
+const transferExpectationSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("expected"), fields: z.custom<PaymentRequestTransferFields>() }),
+  z.object({ kind: z.literal("blocked"), reason: z.enum(SETTLEMENT_BLOCKED_REASONS) }),
+]);
+type TransferExpectation = z.infer<typeof transferExpectationSchema>;
 
 interface PaidTransition {
   row: PaymentRequestRow;
