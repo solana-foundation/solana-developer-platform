@@ -31,7 +31,7 @@ export function registerMemberPaths(registry: OpenAPIRegistry) {
     summary: "List organization members",
     operationId: "listMembers",
     description:
-      "Lists members of the authenticated organization, followed by any pending invitations the caller is permitted to see. The two page as one sequence. Invitations require `members.manage`, because each carries a shareable acceptance link.",
+      "Lists members of the authenticated organization, followed by any pending invitations the caller is permitted to see. The two page as one sequence. Invitations require `members.manage`, because each names an invitee's email address. Clerk's acceptance link is never returned: it reaches only the invitee's inbox.",
     security: [{ clerkBearerAuth: [] }],
     request: {
       query: listMembersQuerySchema,
