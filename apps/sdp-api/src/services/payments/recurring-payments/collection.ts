@@ -231,7 +231,7 @@ function retryCollectionMetadata(input: {
   /** Why the pull was held before it was signed; null for any other failure. */
   holdReason: TokenMovementRefusal | null;
 }): PaymentSubscriptionCollectionAttemptMetadata {
-  return {
+  const metadata: PaymentSubscriptionCollectionAttemptMetadata = {
     source: "retry",
     recurringPaymentId: input.metadata.recurringPaymentId,
     initiatedByKeyId: input.metadata.initiatedByKeyId,
@@ -239,8 +239,11 @@ function retryCollectionMetadata(input: {
     transferId: input.transferId,
     error: input.error,
     retryAfterAt: input.retryAfterAt,
-    ...(input.holdReason === null ? {} : { holdReason: input.holdReason }),
   };
+  if (input.holdReason !== null) {
+    metadata.holdReason = input.holdReason;
+  }
+  return metadata;
 }
 
 function linkedTransferCollectionMetadata(input: {
@@ -1547,6 +1550,21 @@ async function handleRecurringPaymentCollectionError(input: {
   throw input.error;
 }
 
+/**
+ * The mandate a pull is made under: the plan's, which is the one on chain,
+ * else the payment's (a plan written before mandates has none); null when
+ * neither row has one.
+ */
+function storedPullMandate(
+  plan: Pick<PaymentSubscriptionPlanRow, "mandate"> | null,
+  recurringPayment: Pick<PaymentRecurringPaymentRow, "mandate">
+): RecurringMandate | null {
+  if (plan !== null && plan.mandate !== null) {
+    return plan.mandate;
+  }
+  return recurringPayment.mandate;
+}
+
 async function recoverRecurringPaymentCollection(input: {
   env: Env;
   recurringRepo: PaymentRecurringPaymentsRepository;
@@ -1703,15 +1721,25 @@ async function recoverRecurringPaymentCollection(input: {
         organizationId: input.organizationId,
         projectId: input.projectId,
       })) ?? input.subscription;
-    // The stored mandate needs no read; a payment written before mandates reads the terms
+    // The mandate the pull was made under needs no read: the plan's, or the
+    // payment's. Only when neither row has one does recovery read the terms,
     // once, as the mint's owner and supply reads did before.
+    const plan =
+      currentRecurringPayment.plan_id === null
+        ? null
+        : await input.subscriptionsRepo.getPlanById({
+            planId: currentRecurringPayment.plan_id,
+            organizationId: input.organizationId,
+            projectId: input.projectId,
+          });
+    const stored = storedPullMandate(plan, currentRecurringPayment);
     const mandate =
-      currentRecurringPayment.mandate === null
+      stored === null
         ? rowMandate(
             currentRecurringPayment,
             (await readRecurringTerms(currentRecurringPayment.token, null, [])).terms
           )
-        : currentRecurringPayment.mandate;
+        : stored;
     const destinationTokenAccount = currentRecurringPayment.destination_token_account
       ? assertValidAddress(
           currentRecurringPayment.destination_token_account,
@@ -1870,10 +1898,8 @@ async function decideRecurringPull(input: {
   ) {
     throw conflict("Recurring payment collection is already processing");
   }
-  // The plan's mandate is the one on chain. A plan written before mandates has none: the
-  // payment's then, or for a payment written before mandates too, its amount at the decimals
-  // read now (`rowMandate`).
-  const stored = input.plan.mandate === null ? recurringPayment.mandate : input.plan.mandate;
+  // For a payment written before mandates too, its amount at the decimals read now (`rowMandate`).
+  const stored = storedPullMandate(input.plan, recurringPayment);
   let terms: MintTokenTerms;
   let destination: DestinationTokenAccount | undefined;
   let mandate: RecurringMandate;
