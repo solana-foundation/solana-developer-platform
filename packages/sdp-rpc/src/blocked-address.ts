@@ -77,12 +77,15 @@ const EMBEDDED_IPV4_PREFIXES: readonly (readonly number[])[] = [
   [0x0064, 0xff9b, 0x0000, 0x0000, 0x0000, 0x0000], // 64:ff9b::/96 (NAT64 well-known)
 ];
 
+/** The eight 16-bit groups of one expanded IPv6 address. */
+type Ipv6Groups = readonly [number, number, number, number, number, number, number, number];
+
 /**
  * Expand a textual IPv6 address into its eight 16-bit groups, or null when it
  * is not an IPv6 address Node could have canonicalised. Accepts the compressed
  * `::` form and an optional trailing dotted-quad (`::127.0.0.1`).
  */
-function parseIpv6Groups(host: string): readonly number[] | null {
+function parseIpv6Groups(host: string): Ipv6Groups | null {
   const halves = host.split("::");
   if (halves.length > 2) return null;
   const head = parseIpv6GroupList(halves[0] ?? "");
@@ -94,7 +97,10 @@ function parseIpv6Groups(host: string): readonly number[] | null {
   if (fill < 0 || (halves.length === 1 && fill !== 0) || (halves.length === 2 && fill === 0)) {
     return null;
   }
-  return [...head, ...Array<number>(fill).fill(0), ...tail];
+  // The fill check above makes head, fill and tail total exactly eight groups,
+  // so each name below is a present group.
+  const [g0, g1, g2, g3, g4, g5, g6, g7] = [...head, ...Array<number>(fill).fill(0), ...tail];
+  return [g0, g1, g2, g3, g4, g5, g6, g7];
 }
 
 /** Parse one `::`-free run of groups; the last may be a dotted quad. */
@@ -119,13 +125,12 @@ function parseIpv6GroupList(run: string): readonly number[] | null {
 }
 
 /** The address's last 32 bits as a dotted quad when the address carries `prefix`, else null. */
-function embeddedIpv4(groups: readonly number[], prefix: readonly number[]): string | null {
-  if (groups.length !== 8) return null;
+function embeddedIpv4(groups: Ipv6Groups, prefix: readonly number[]): string | null {
   for (const [index, group] of prefix.entries()) {
     if (groups[index] !== group) return null;
   }
-  const high = groups[6] ?? 0;
-  const low = groups[7] ?? 0;
+  const high = groups[6];
+  const low = groups[7];
   return [high >> 8, high & 0xff, low >> 8, low & 0xff].map(String).join(".");
 }
 

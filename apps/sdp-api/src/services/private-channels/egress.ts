@@ -260,9 +260,6 @@ const MAX_GATEWAY_RESPONSE_BYTES = 4 * 1024 * 1024;
  */
 const MAX_AUTH_RESPONSE_BYTES = 64 * 1024;
 
-/** A runtime leg follows a few guarded hops, exactly like a customer RPC endpoint. */
-const MAX_SPC_RUNTIME_REDIRECTS = 3;
-
 /**
  * The time bound joins the caller's signal rather than yielding to it: the Kit
  * transport always supplies one, and a caller's cancellation must not disable
@@ -281,6 +278,9 @@ function boundedRuntimeSignal(signal: AbortSignal | undefined): AbortSignal {
  * long after connect: routing the runtime legs through the same guard keeps a
  * rebinding DNS name or a tampered row from pointing SDP's process at an
  * internal address while it carries bearer tokens and channel instructions.
+ * Like the probe it does not follow redirects: a `Location` names an origin
+ * nothing approved, so a 3xx surfaces as its own non-2xx error rather than
+ * walking the request off the allowlisted destination.
  */
 export function createPrivateChannelGatewayTransport(
   env: Env,
@@ -305,7 +305,6 @@ export function createPrivateChannelGatewayTransport(
       },
       body: JSON.stringify(payload),
       signal: boundedRuntimeSignal(signal),
-      maxRedirects: MAX_SPC_RUNTIME_REDIRECTS,
       maxResponseBytes: MAX_GATEWAY_RESPONSE_BYTES,
       rejectOversizeResponse: true,
       approvedInsecureDestination: checked.approved.insecure,
@@ -319,6 +318,9 @@ export function createPrivateChannelGatewayTransport(
       );
     }
 
+    // SAFETY: the body is whatever the approved gateway answered a JSON-RPC
+    // call with; kit's RPC methods decode and validate the fields they read,
+    // and a non-JSON answer throws at the parse right here.
     return (await upstream.json()) as TResponse;
   };
 }
@@ -328,8 +330,10 @@ export function createPrivateChannelGatewayTransport(
  * `fetchImpl`), guarded the same way as the probe transport: every call is
  * re-checked against the deployment allowlist and resolved through the egress
  * guard, so an allowlisted name that starts answering from a private address
- * is dropped while connecting. Auth answers are small; anything past the cap
- * is refused as corruption.
+ * is dropped while connecting. Like the probe it does not follow redirects —
+ * a `Location` names an origin nothing approved — and like `createGuardedFetch`
+ * it refuses a body it cannot send rather than sending a different one. Auth
+ * answers are small; anything past the cap is refused as corruption.
  */
 export function createPrivateChannelAuthFetch(
   env: Pick<Env, "PRIVATE_CHANNEL_EGRESS_ALLOWLIST">
@@ -339,6 +343,9 @@ export function createPrivateChannelAuthFetch(
   return async (input, init) => {
     if (typeof input !== "string" && !(input instanceof URL)) {
       throw new TypeError("guarded auth fetch takes a URL, not a Request");
+    }
+    if (init?.body !== undefined && init.body !== null && typeof init.body !== "string") {
+      throw new TypeError("guarded auth fetch only sends string bodies");
     }
 
     const checked = checkPrivateChannelDestination(input.toString(), allowlist, "Auth URL");
@@ -352,9 +359,8 @@ export function createPrivateChannelAuthFetch(
     return guardedFetch(checked.url.toString(), {
       method: init?.method ?? "GET",
       headers,
-      body: typeof init?.body === "string" ? init.body : "",
-      ...(init?.signal ? { signal: init.signal } : {}),
-      maxRedirects: MAX_SPC_RUNTIME_REDIRECTS,
+      body: init?.body ?? "",
+      signal: init?.signal ?? undefined,
       maxResponseBytes: MAX_AUTH_RESPONSE_BYTES,
       rejectOversizeResponse: true,
       approvedInsecureDestination: checked.approved.insecure,
