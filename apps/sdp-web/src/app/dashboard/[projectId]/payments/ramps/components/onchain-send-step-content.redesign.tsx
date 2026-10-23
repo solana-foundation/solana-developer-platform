@@ -304,6 +304,7 @@ function PayAmountFields({ wizard }: { wizard: OnchainSendWizard }) {
     amountEntry,
     fields,
     setField,
+    submitting,
   } = wizard;
   const assetSelectOptions = useMemo(
     () => assetOptions.map((asset) => ({ value: asset.value, label: asset.label })),
@@ -347,7 +348,7 @@ function PayAmountFields({ wizard }: { wizard: OnchainSendWizard }) {
         </p>
       )}
       <NoAssetsHint walletId={fields.walletId} assetCount={assetSelectOptions.length} />
-      <AmountUnitToggle entry={amountEntry} />
+      <AmountUnitToggle entry={amountEntry} busy={submitting} />
       <TokenAmountQuotePreview
         entry={amountEntry}
         symbol={WELL_KNOWN_TOKEN_BY_MINT.get(assetLabel)?.symbol ?? assetLabel}

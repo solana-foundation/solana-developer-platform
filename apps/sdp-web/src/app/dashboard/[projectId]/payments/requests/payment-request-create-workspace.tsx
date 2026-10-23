@@ -212,11 +212,14 @@ function AmountField({
   onChange,
   entry,
   symbol,
+  busy,
 }: {
   amount: string;
   onChange: (next: string) => void;
   entry: TokenAmountEntry;
   symbol: string;
+  /** True while the request is being created. */
+  busy: boolean;
 }) {
   const t = useTranslations();
   const displayEntry = entry.unit === "display";
@@ -245,7 +248,7 @@ function AmountField({
       {typed.trim() && !isValidAmount(typed) ? (
         <p className="text-meta text-error">{t("DashboardPayments.requests.invalidAmount")}</p>
       ) : null}
-      <AmountUnitToggle entry={entry} />
+      <AmountUnitToggle entry={entry} busy={busy} />
       <TokenAmountQuotePreview entry={entry} symbol={symbol} />
     </div>
   );
@@ -445,6 +448,7 @@ function PaymentRequestCreateForm({ wallets, walletsError }: PaymentRequestCreat
             onChange={setAmount}
             entry={amountEntry}
             symbol={token === null ? "" : token.symbol}
+            busy={busy}
           />
           <Combobox
             label={t("DashboardPayments.requests.token")}
