@@ -26,10 +26,7 @@ import {
   summaryAmount,
 } from "@/app/dashboard/[projectId]/payments/ramps/wizard-summary";
 import { sendTransferUnderKey } from "@/app/dashboard/[projectId]/payments/transfer-idempotency";
-import {
-  type TokenAmountEntry,
-  useTokenAmountEntry,
-} from "@/app/dashboard/[projectId]/payments/use-token-amount-entry";
+import { useTokenAmountEntry } from "@/app/dashboard/[projectId]/payments/use-token-amount-entry";
 import type { WizardSummaryDetail } from "@/app/dashboard/[projectId]/payments/wizard-summary-list";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
@@ -41,7 +38,11 @@ import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useZodForm } from "@/lib/use-zod-form";
 import { usePaymentsActionWallets } from "./use-payments-action-wallets";
 import type { RampWizardStep } from "./use-ramp-wizard.redesign";
-import { type UnresolvedTransfer, useUnresolvedTransfers } from "./use-unresolved-transfers";
+import {
+  pinnedSendEntry,
+  type UnresolvedTransfer,
+  useUnresolvedTransfers,
+} from "./use-unresolved-transfers";
 
 // One details step (contact, destination, wallet, amount, memo) and a review that also shows the
 // outcome once sent.
@@ -343,24 +344,11 @@ export function useOnchainSendWizard({
   });
   // The payment as the user typed it. While its last attempt is unresolved it is
   // shown and sent as that attempt was, never at a token amount a later quote priced.
-  const typedEntry = JSON.stringify([
-    fields.walletId,
-    destinationAddress,
-    selectedMint,
-    amountEntry.unit,
-    amountEntry.unit === "display" ? fields.displayAmount.trim() : fields.amount.trim(),
-    fields.memo.trim(),
-  ]);
-  const unresolved = unresolvedFor(typedEntry);
-  const shownEntry: TokenAmountEntry =
-    unresolved === null
-      ? amountEntry
-      : {
-          ...amountEntry,
-          tokenAmount: unresolved.submission.amount,
-          quote: unresolved.quote,
-          quoteError: null,
-        };
+  const { typedEntry, unresolved, shownEntry } = pinnedSendEntry(
+    { ...fields, destinationAddress, mint: selectedMint },
+    amountEntry,
+    unresolvedFor
+  );
   // As sent: the unit the input is in, and the amount in token units.
   const sendFields = { ...fields, amountUnit: amountEntry.unit, amount: shownEntry.tokenAmount };
   const exceedsBalance = onchainAmountExceedsBalance(sendFields.amount, availableAmount);
