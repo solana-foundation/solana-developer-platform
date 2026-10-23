@@ -10,7 +10,6 @@ import type { DatabaseExecutor } from "@/db/client";
 import {
   MANDATE_COLUMNS,
   MANDATE_VALUES,
-  mandateUpdateBindings,
   mandateValues,
   parseRecurringMandate,
 } from "@/db/repositories/recurring-mandate";
@@ -238,15 +237,6 @@ export function createPostgresPaymentSubscriptionsRepository(
         .prepare(
           `UPDATE payment_subscription_plans
               SET plan_pda = CASE WHEN ?::boolean THEN ? ELSE plan_pda END,
-                  token = CASE WHEN ?::boolean THEN ? ELSE token END,
-                  amount = CASE WHEN ?::boolean THEN ? ELSE amount END,
-                  asset_kind = CASE WHEN ?::boolean THEN ? ELSE asset_kind END,
-                  mint = CASE WHEN ?::boolean THEN ? ELSE mint END,
-                  token_program = CASE WHEN ?::boolean THEN ? ELSE token_program END,
-                  decimals = CASE WHEN ?::boolean THEN ?::smallint ELSE decimals END,
-                  mandate_debit = CASE WHEN ?::boolean THEN ?::numeric ELSE mandate_debit END,
-                  max_fee_per_pull =
-                    CASE WHEN ?::boolean THEN ?::numeric ELSE max_fee_per_pull END,
                   destination_address = CASE WHEN ?::boolean THEN ? ELSE destination_address END,
                   puller_wallet_id = CASE WHEN ?::boolean THEN ? ELSE puller_wallet_id END,
                   puller_address = CASE WHEN ?::boolean THEN ? ELSE puller_address END,
@@ -260,11 +250,6 @@ export function createPostgresPaymentSubscriptionsRepository(
         .bind(
           input.planPda !== undefined,
           input.planPda ?? null,
-          input.token !== undefined,
-          input.token ?? null,
-          input.amount !== undefined,
-          input.amount ?? null,
-          ...mandateUpdateBindings(input.mandate),
           input.destinationAddress !== undefined,
           input.destinationAddress ?? null,
           input.pullerWalletId !== undefined,

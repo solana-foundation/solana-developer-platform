@@ -868,20 +868,6 @@ export async function activateRecurringPayment(input: {
     );
     if (!onChainPlan) {
       sendMayLand = false;
-      if (claimed.plan_id !== null) {
-        // An earlier activation wrote this plan row but never put the plan on
-        // chain, and a pending edit since may have changed the mandate. The
-        // plan is made from the payment's mandate, and pulls read the row's.
-        await subscriptionsRepo.updatePlan({
-          planId: plan.id,
-          organizationId: input.organizationId,
-          projectId: input.projectId,
-          token: claimed.token,
-          amount: claimed.amount,
-          mandate,
-          updatedAt: new Date().toISOString(),
-        });
-      }
       const planSigner = await signerForNewSend();
       const createPlanInstruction = await subscriptionsProgram.getCreatePlanOverlayInstructionAsync(
         {

@@ -96,11 +96,6 @@ export interface UpdatePaymentSubscriptionPlanInput {
   organizationId: string;
   projectId: string;
   planPda?: string | null;
-  /** Set with `amount` and `mandate`: the mandate's mint, which the row's CHECK holds equal. */
-  token?: string;
-  /** The mandate's debit in token units. */
-  amount?: string;
-  mandate?: RecurringMandate;
   destinationAddress?: string | null;
   pullerWalletId?: string | null;
   pullerAddress?: string | null;
