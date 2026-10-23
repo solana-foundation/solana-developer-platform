@@ -35,7 +35,7 @@ import {
  */
 function mapPaymentRequest(row: PaymentRequestRow): PaymentRequest {
   const expired = isPaymentRequestExpired(row.expires_at);
-  return {
+  const request: PaymentRequest = {
     id: row.id,
     organizationId: row.organization_id,
     projectId: row.project_id,
@@ -43,7 +43,6 @@ function mapPaymentRequest(row: PaymentRequestRow): PaymentRequest {
     destinationAddress: row.destination_address,
     token: row.token,
     amount: row.amount,
-    ...(row.expectation === null ? {} : { amounts: paymentRequestAmounts(row.expectation) }),
     reference: row.reference,
     status: expired && row.status === "awaiting_payment" ? "expired" : row.status,
     expiresAt: row.expires_at,
@@ -54,6 +53,10 @@ function mapPaymentRequest(row: PaymentRequestRow): PaymentRequest {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+  if (row.expectation !== null) {
+    request.amounts = paymentRequestAmounts(row.expectation);
+  }
+  return request;
 }
 
 export async function listPaymentRequests(c: AppContext) {
