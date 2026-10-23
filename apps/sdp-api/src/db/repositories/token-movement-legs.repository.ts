@@ -30,9 +30,14 @@ import { assertTenantClaim, type TenantScope } from "@/lib/tenant-scope";
  */
 
 /** The row a leg belongs to. */
-export type TokenMovementLegOwner =
-  | Readonly<{ kind: "transfer"; transferId: string }>
-  | Readonly<{ kind: "batch_recipient"; recipientId: string }>;
+const tokenMovementLegOwnerSchema = z
+  .discriminatedUnion("kind", [
+    z.object({ kind: z.literal("transfer"), transferId: z.string() }),
+    z.object({ kind: z.literal("batch_recipient"), recipientId: z.string() }),
+  ])
+  .readonly();
+
+export type TokenMovementLegOwner = z.infer<typeof tokenMovementLegOwnerSchema>;
 
 /** The three base-unit amounts of a movement; `debit = credit + fee`. */
 export type LegAmounts = Readonly<{ debit: BaseUnits; fee: BaseUnits; credit: BaseUnits }>;
@@ -183,10 +188,16 @@ function legAsset(row: LegRow): AssetRef {
 
 function legOwner(row: LegRow): TokenMovementLegOwner {
   if (row.payment_transfer_id !== null) {
-    return { kind: "transfer", transferId: row.payment_transfer_id };
+    return tokenMovementLegOwnerSchema.parse({
+      kind: "transfer",
+      transferId: row.payment_transfer_id,
+    });
   }
   if (row.payment_transfer_recipient_id !== null) {
-    return { kind: "batch_recipient", recipientId: row.payment_transfer_recipient_id };
+    return tokenMovementLegOwnerSchema.parse({
+      kind: "batch_recipient",
+      recipientId: row.payment_transfer_recipient_id,
+    });
   }
   throw new Error(`Token movement leg ${row.id} has no owner`);
 }
