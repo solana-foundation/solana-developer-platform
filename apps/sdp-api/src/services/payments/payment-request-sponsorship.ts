@@ -239,6 +239,7 @@ export async function issuePaymentRequestTransaction(
     currentBlockHeight,
   });
   if (!claimed) {
+    assertNotExpired(request);
     const winner = await serveLiveClaim();
     if (winner) {
       return winner;

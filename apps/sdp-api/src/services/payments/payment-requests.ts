@@ -7,7 +7,6 @@ import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { type Address, type Signature, signature } from "@solana/kit";
 import { ValidateTransferError } from "@solana/pay";
 import { z } from "zod";
-import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import type {
   PaymentRequestRow,
@@ -26,11 +25,9 @@ import {
 } from "@/db/repositories/repository-factory";
 import { AppError, internalError, rateLimited } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
-import { createAuditLedgerCheckpointStore } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
-import { AuditService, type SystemAuditLogEntry } from "@/services/audit.service";
-import { AUDIT_LEDGER_REDIS_TIMEOUT_MS } from "@/services/audit-ledger-timeout";
+import { createSystemAuditService, type SystemAuditLogEntry } from "@/services/audit.service";
 import {
   type PaymentRequestTransferFields,
   validatePaymentRequestTransfer,
@@ -409,7 +406,7 @@ async function settlePaymentRequest(
   const key = paymentRequestKey(row);
   const scope = createTenantScope({ organizationId: key.organizationId, projectId: key.projectId });
   const paidLate = isPaidLate(found.blockTime, row.expires_at);
-  const audit = systemAuditService(env);
+  const audit = createSystemAuditService(env);
   const settle = () =>
     audit.logSystemWithin(async (db) => {
       const transfer = await recordInboundTransfer(
@@ -498,7 +495,7 @@ function settlementAuditEntry(
 async function markExpired(env: Env, row: PaymentRequestRow): Promise<PaymentRequestRow> {
   const key = paymentRequestKey(row);
   const scope = createTenantScope({ organizationId: key.organizationId, projectId: key.projectId });
-  return systemAuditService(env).logSystemWithin(async (db) => {
+  return createSystemAuditService(env).logSystemWithin(async (db) => {
     const requestsRepo = createTransactionalPaymentRequestsRepository(db, scope);
     const expired = await requestsRepo.markPaymentRequest({
       ...key,
@@ -531,13 +528,6 @@ function expiryAuditEntry(expired: PaymentRequestRow): SystemAuditLogEntry {
       walletId: expired.wallet_id,
     },
   };
-}
-
-function systemAuditService(env: Env): AuditService {
-  return new AuditService(
-    getDb(env),
-    createAuditLedgerCheckpointStore(env, AUDIT_LEDGER_REDIS_TIMEOUT_MS)
-  );
 }
 
 async function reread(

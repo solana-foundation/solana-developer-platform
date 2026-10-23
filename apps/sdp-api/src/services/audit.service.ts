@@ -6,7 +6,7 @@
 
 import { scrubAuditMetadata } from "@sdp/redaction/scrub";
 import type { Context } from "hono";
-import { asTransactionalClient, type DatabaseExecutor } from "@/db/client";
+import { asTransactionalClient, type DatabaseExecutor, getDb } from "@/db/client";
 import {
   currentDatabaseIdentity,
   type DatabaseIdentity,
@@ -1435,4 +1435,12 @@ export interface AssetAuditRecord {
   metadata: Record<string, unknown> | null;
   status: "success" | "failure";
   createdAt: string;
+}
+
+/** The audit ledger for jobs, provider events and other callers without a request. */
+export function createSystemAuditService(env: Env): AuditService {
+  return new AuditService(
+    getDb(env),
+    createAuditLedgerCheckpointStore(env, AUDIT_LEDGER_REDIS_TIMEOUT_MS)
+  );
 }
