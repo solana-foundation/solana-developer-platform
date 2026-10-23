@@ -34,10 +34,12 @@ import { getCreateAssociatedTokenIdempotentInstruction } from "@solana-program/t
 import { z } from "zod";
 import { type DatabaseExecutor, getDb } from "@/db/client";
 import type {
+  ClaimedRecurringPaymentRow,
   PaymentRecurringPaymentRow,
   PaymentRecurringPaymentsRepository,
   PaymentRecurringPaymentUpdateAttemptRow,
   RecurringPaymentActivator,
+  RecurringPaymentLease,
   StoredRecurringPaymentActivator,
 } from "@/db/repositories/payment-recurring-payments.repository";
 import { createPostgresPaymentRecurringPaymentsRepository } from "@/db/repositories/payment-recurring-payments.repository.postgres";
@@ -88,6 +90,7 @@ import {
   readRecurringPaymentStep,
   readRecurringPaymentStepIfResumed,
   recurringPaymentErrorMessage,
+  recurringPaymentLease,
   refuseWhileSubscriptionAuthorityRevokes,
   requireUpdatedAttempt,
   requireUpdatedPlan,
@@ -806,6 +809,7 @@ async function finalizeMetadataScheduleUpdate(input: {
   organizationId: string;
   projectId: string;
   claimed: PaymentRecurringPaymentRow;
+  lease: RecurringPaymentLease;
   subscription: PaymentSubscriptionRow | null;
   attempt: PaymentRecurringPaymentUpdateAttemptRow;
   resolved: ResolvedRecurringPaymentUpdate;
@@ -817,6 +821,7 @@ async function finalizeMetadataScheduleUpdate(input: {
   return getDb(input.env).transaction(async (tx) => {
     const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
     const subscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
+    await recurringRepo.assertRecurringPaymentLease(input.lease);
 
     if (input.claimed.plan_id && input.resolved.metadataUri !== input.claimed.metadata_uri) {
       requireUpdatedPlan(
@@ -909,6 +914,7 @@ async function runMetadataScheduleUpdate(input: {
   projectId: string;
   sourceWallet: CustodyWallet;
   claimed: PaymentRecurringPaymentRow;
+  lease: RecurringPaymentLease;
   subscription: PaymentSubscriptionRow | null;
   attempt: PaymentRecurringPaymentUpdateAttemptRow;
   resolved: ResolvedRecurringPaymentUpdate;
@@ -968,6 +974,7 @@ async function runMetadataScheduleUpdate(input: {
       env: input.env,
       organizationId: input.organizationId,
       projectId: input.projectId,
+      lease: input.lease,
       rows: [{ slot: { row: "update_attempt", column: "plan_update_signature" }, id: attempt.id }],
     } as const satisfies SubscriptionStep;
     const step =
@@ -1028,9 +1035,9 @@ async function runMetadataScheduleUpdate(input: {
         instructions: [instruction],
         submissionStore: createSubscriptionStepStore({
           ...planUpdateStep,
-          save: async (send) => {
+          save: async (send, tx) => {
             attempt = requireUpdatedAttempt(
-              await recurringRepo.updateUpdateAttempt({
+              await createPostgresPaymentRecurringPaymentsRepository(tx).updateUpdateAttempt({
                 attemptId: attempt.id,
                 organizationId: input.organizationId,
                 projectId: input.projectId,
@@ -1054,6 +1061,7 @@ async function runMetadataScheduleUpdate(input: {
     organizationId: input.organizationId,
     projectId: input.projectId,
     claimed: input.claimed,
+    lease: input.lease,
     subscription: input.subscription,
     attempt,
     resolved: input.resolved,
@@ -1065,7 +1073,7 @@ async function runMetadataScheduleUpdate(input: {
 
 async function prepareSubscriptionAuthorityForUpdate(input: {
   env: Env;
-  recurringRepo: PaymentRecurringPaymentsRepository;
+  lease: RecurringPaymentLease;
   attempt: PaymentRecurringPaymentUpdateAttemptRow;
   organizationId: string;
   projectId: string;
@@ -1122,9 +1130,10 @@ async function prepareSubscriptionAuthorityForUpdate(input: {
       env: input.env,
       organizationId: input.organizationId,
       projectId: input.projectId,
-      save: async (send) => {
+      lease: input.lease,
+      save: async (send, tx) => {
         requireUpdatedAttempt(
-          await input.recurringRepo.updateUpdateAttempt({
+          await createPostgresPaymentRecurringPaymentsRepository(tx).updateUpdateAttempt({
             attemptId: input.attempt.id,
             organizationId: input.organizationId,
             projectId: input.projectId,
@@ -1269,6 +1278,7 @@ async function finalizeReplacementUpdate(input: {
   organizationId: string;
   projectId: string;
   claimed: PaymentRecurringPaymentRow;
+  lease: RecurringPaymentLease;
   oldSubscription: PaymentSubscriptionRow;
   plan: PaymentSubscriptionPlanRow;
   subscription: PaymentSubscriptionRow;
@@ -1291,6 +1301,7 @@ async function finalizeReplacementUpdate(input: {
   return getDb(input.env).transaction(async (tx) => {
     const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
     const subscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
+    await recurringRepo.assertRecurringPaymentLease(input.lease);
 
     requireUpdatedSubscription(
       await subscriptionsRepo.updateSubscription({
@@ -1440,6 +1451,7 @@ async function runReplacementUpdate(input: {
   projectId: string;
   oldSourceWallet: CustodyWallet;
   claimed: PaymentRecurringPaymentRow;
+  lease: RecurringPaymentLease;
   subscription: PaymentSubscriptionRow | null;
   attempt: PaymentRecurringPaymentUpdateAttemptRow;
   resolved: ResolvedRecurringPaymentUpdate;
@@ -1551,6 +1563,7 @@ async function runReplacementUpdate(input: {
     env: input.env,
     organizationId: input.organizationId,
     projectId: input.projectId,
+    lease: input.lease,
     rows: [{ slot: { row: "update_attempt", column: "plan_creation_signature" }, id: attempt.id }],
   } as const satisfies SubscriptionStep;
   let onChainPlan = await readRecurringPaymentStepIfResumed(resumedAttempt, {
@@ -1599,9 +1612,9 @@ async function runReplacementUpdate(input: {
       instructions: [createPlanInstruction],
       submissionStore: createSubscriptionStepStore({
         ...planCreationStep,
-        save: async (send) => {
+        save: async (send, tx) => {
           attempt = requireUpdatedAttempt(
-            await recurringRepo.updateUpdateAttempt({
+            await createPostgresPaymentRecurringPaymentsRepository(tx).updateUpdateAttempt({
               attemptId: attempt.id,
               organizationId: input.organizationId,
               projectId: input.projectId,
@@ -1671,6 +1684,7 @@ async function runReplacementUpdate(input: {
     env: input.env,
     organizationId: input.organizationId,
     projectId: input.projectId,
+    lease: input.lease,
     rows: [{ slot: { row: "update_attempt", column: "authorization_signature" }, id: attempt.id }],
   } as const satisfies SubscriptionStep;
   const subscribedOnChain =
@@ -1717,7 +1731,7 @@ async function runReplacementUpdate(input: {
     const payer = createNoopSigner(feePayer);
     subscriptionAuthority = await prepareSubscriptionAuthorityForUpdate({
       env: input.env,
-      recurringRepo,
+      lease: input.lease,
       attempt,
       organizationId: input.organizationId,
       projectId: input.projectId,
@@ -1761,9 +1775,9 @@ async function runReplacementUpdate(input: {
       feePayer,
       submissionStore: createSubscriptionStepStore({
         ...authorizationStep,
-        save: async (send) => {
+        save: async (send, tx) => {
           attempt = requireUpdatedAttempt(
-            await recurringRepo.updateUpdateAttempt({
+            await createPostgresPaymentRecurringPaymentsRepository(tx).updateUpdateAttempt({
               attemptId: attempt.id,
               organizationId: input.organizationId,
               projectId: input.projectId,
@@ -1787,6 +1801,7 @@ async function runReplacementUpdate(input: {
     env: input.env,
     organizationId: input.organizationId,
     projectId: input.projectId,
+    lease: input.lease,
     rows: [{ slot: { row: "update_attempt", column: "old_cancel_signature" }, id: attempt.id }],
   } as const satisfies SubscriptionStep;
   const oldCanceledOnChain =
@@ -1842,9 +1857,9 @@ async function runReplacementUpdate(input: {
       instructions: [cancelInstruction],
       submissionStore: createSubscriptionStepStore({
         ...oldCancelStep,
-        save: async (send) => {
+        save: async (send, tx) => {
           attempt = requireUpdatedAttempt(
-            await recurringRepo.updateUpdateAttempt({
+            await createPostgresPaymentRecurringPaymentsRepository(tx).updateUpdateAttempt({
               attemptId: attempt.id,
               organizationId: input.organizationId,
               projectId: input.projectId,
@@ -1875,6 +1890,7 @@ async function runReplacementUpdate(input: {
     organizationId: input.organizationId,
     projectId: input.projectId,
     claimed: input.claimed,
+    lease: input.lease,
     oldSubscription,
     plan,
     subscription,
@@ -1898,6 +1914,8 @@ async function recordRecurringPaymentUpdateFailure(input: {
   env: Env;
   attempt: PaymentRecurringPaymentUpdateAttemptRow;
   claimed: PaymentRecurringPaymentRow;
+  /** A run another one took over writes nothing: the schedule is that run's now. */
+  lease: RecurringPaymentLease;
   organizationId: string;
   projectId: string;
   error: Error;
@@ -1906,6 +1924,7 @@ async function recordRecurringPaymentUpdateFailure(input: {
   const failedAt = new Date().toISOString();
   await getDb(input.env).transaction(async (tx) => {
     const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
+    await recurringRepo.assertRecurringPaymentLease(input.lease);
     requireUpdatedAttempt(
       await recurringRepo.updateUpdateAttempt({
         attemptId: input.attempt.id,
@@ -1958,7 +1977,7 @@ async function claimRecurringPaymentUpdateAtSnapshot(input: {
   updatedAt: string;
   staleBefore: string;
   activatedBy: RecurringPaymentActivator | null;
-}): Promise<PaymentRecurringPaymentRow | null> {
+}): Promise<ClaimedRecurringPaymentRow | null> {
   const locked = await input.db
     .prepare(
       `SELECT id
@@ -2083,7 +2102,7 @@ async function claimActiveRecurringPaymentUpdate(input: {
   recoveringStaleUpdate: boolean;
   idempotency: RecurringPaymentUpdateIdempotency | null;
 }): Promise<{
-  claimed: PaymentRecurringPaymentRow;
+  claimed: ClaimedRecurringPaymentRow;
   attempt: PaymentRecurringPaymentUpdateAttemptRow;
 } | null> {
   const updatedAt = new Date().toISOString();
@@ -2268,6 +2287,7 @@ export async function updateRecurringPayment(input: {
     throw conflict("Recurring payment update is already processing");
   }
   const { attempt, claimed } = claimResult;
+  const lease = recurringPaymentLease(claimed, "update");
 
   let updated: PaymentRecurringPaymentRow;
   try {
@@ -2278,6 +2298,7 @@ export async function updateRecurringPayment(input: {
         projectId: input.projectId,
         sourceWallet: input.sourceWallet,
         claimed,
+        lease,
         subscription: settled.subscription,
         attempt,
         resolved,
@@ -2292,6 +2313,7 @@ export async function updateRecurringPayment(input: {
         projectId: input.projectId,
         oldSourceWallet: input.sourceWallet,
         claimed,
+        lease,
         subscription: settled.subscription,
         attempt,
         resolved,
@@ -2341,6 +2363,7 @@ export async function updateRecurringPayment(input: {
         env: input.env,
         attempt: currentAttempt,
         claimed,
+        lease,
         organizationId: input.organizationId,
         projectId: input.projectId,
         error,

@@ -8340,4 +8340,230 @@ describe("Payments routes — recurring", () => {
       });
     });
   });
+
+  describe("lease fencing (SOLA9-697, SOLA9-732, SOLA9-716)", () => {
+    const TAKEOVER_LEASE = "lease_takeover";
+
+    /**
+     * Another run takes the claim over, as a stale claim's takeover does: a new lease and a
+     * fresh `updated_at` on the row, nothing else. The original run carries on afterwards.
+     */
+    function takeOver(recurringPaymentId: string) {
+      return getDb(env)
+        .prepare("UPDATE payment_recurring_payments SET lease_id = ?, updated_at = ? WHERE id = ?")
+        .bind(TAKEOVER_LEASE, new Date().toISOString(), recurringPaymentId)
+        .run();
+    }
+
+    /** Takes the claim over while the original run builds its next send, before it saves it. */
+    function takeOverBeforeNextSend(recurringPaymentId: string) {
+      const blockhash = required(getRecentBlockhashMock.getMockImplementation());
+      getRecentBlockhashMock.mockImplementationOnce(async (...args) => {
+        await takeOver(recurringPaymentId);
+        return blockhash(...args);
+      });
+    }
+
+    function scheduleState(recurringPaymentId: string) {
+      return getDb(env)
+        .prepare(
+          `SELECT status, lease_id, plan_creation_signature, authorization_signature
+             FROM payment_recurring_payments
+            WHERE id = ?`
+        )
+        .bind(recurringPaymentId)
+        .first<{
+          status: string;
+          lease_id: string | null;
+          plan_creation_signature: string | null;
+          authorization_signature: string | null;
+        }>();
+    }
+
+    async function errorMessage(response: Response) {
+      return errorResponseSchema.parse(await response.json()).error.message;
+    }
+
+    it("refuses an activation's save after a takeover, broadcasting and resetting nothing", async () => {
+      const created = await createRecurringPaymentFixture({
+        ...DEFAULT_RECURRING_FIXTURE,
+        headers: RECURRING_HEADERS,
+      });
+      takeOverBeforeNextSend(created.id);
+      const sendsBefore = sendTransactionMock.mock.calls.length;
+
+      const response = await app.request(
+        `/v1/payments/recurring-payments/${created.id}/activate`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+
+      expect(response.status).toBe(409);
+      expect(await errorMessage(response)).toBe(
+        "Recurring payment activation was taken over by another run"
+      );
+      expect(sendTransactionMock).toHaveBeenCalledTimes(sendsBefore);
+      // The schedule is the new run's: still activating under its lease, no signature saved,
+      // and the attempt it resumes still in flight.
+      expect(await scheduleState(created.id)).toEqual({
+        status: "activating",
+        lease_id: TAKEOVER_LEASE,
+        plan_creation_signature: null,
+        authorization_signature: null,
+      });
+      expect(await activationState(created.id)).toMatchObject({
+        attempt_status: "processing",
+        last_valid_block_height: null,
+      });
+    });
+
+    it("refuses an activation's finalize after a takeover, leaving the schedule activating", async () => {
+      const created = await createRecurringPaymentFixture({
+        ...DEFAULT_RECURRING_FIXTURE,
+        headers: RECURRING_HEADERS,
+      });
+      // The takeover lands once the authorization is sent, while the run confirms it.
+      const confirm = required(confirmTransactionMock.getMockImplementation());
+      confirmTransactionMock
+        .mockImplementationOnce(confirm)
+        .mockImplementationOnce(async (...args) => {
+          await takeOver(created.id);
+          return confirm(...args);
+        });
+
+      const response = await app.request(
+        `/v1/payments/recurring-payments/${created.id}/activate`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+
+      expect(response.status).toBe(409);
+      expect(await errorMessage(response)).toBe(
+        "Recurring payment activation was taken over by another run"
+      );
+      const [planCreationSignature, authorizationSignature] = poolSentSignatures();
+      expect(await scheduleState(created.id)).toEqual({
+        status: "activating",
+        lease_id: TAKEOVER_LEASE,
+        plan_creation_signature: planCreationSignature,
+        authorization_signature: authorizationSignature,
+      });
+      expect((await activationState(created.id))?.attempt_status).toBe("processing");
+    });
+
+    it("refuses an update's save after a takeover, broadcasting and resetting nothing", async () => {
+      const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      takeOverBeforeNextSend(activated.id);
+      const sendsBefore = sendTransactionMock.mock.calls.length;
+
+      const response = await app.request(
+        `/v1/payments/recurring-payments/${activated.id}`,
+        {
+          method: "PATCH",
+          headers: RECURRING_HEADERS,
+          body: JSON.stringify({ metadataUri: "https://example.com/recurring/fenced.json" }),
+        },
+        env
+      );
+
+      expect(response.status).toBe(409);
+      expect(await errorMessage(response)).toBe(
+        "Recurring payment update was taken over by another run"
+      );
+      expect(sendTransactionMock).toHaveBeenCalledTimes(sendsBefore);
+      expect(await scheduleState(activated.id)).toMatchObject({
+        status: "updating",
+        lease_id: TAKEOVER_LEASE,
+      });
+      const attempt = await getDb(env)
+        .prepare(
+          `SELECT status, plan_update_signature, last_valid_block_height, error
+             FROM payment_recurring_payment_update_attempts
+            WHERE recurring_payment_id = ?`
+        )
+        .bind(activated.id)
+        .first();
+      expect(attempt).toEqual({
+        status: "processing",
+        plan_update_signature: null,
+        last_valid_block_height: null,
+        error: null,
+      });
+    });
+
+    it("refuses a cancel's save after a takeover, broadcasting and resetting nothing", async () => {
+      const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      takeOverBeforeNextSend(activated.id);
+      const sendsBefore = sendTransactionMock.mock.calls.length;
+
+      const response = await app.request(
+        `/v1/payments/recurring-payments/${activated.id}/cancel`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+
+      expect(response.status).toBe(409);
+      expect(await errorMessage(response)).toBe(
+        "Recurring payment cancel was taken over by another run"
+      );
+      expect(sendTransactionMock).toHaveBeenCalledTimes(sendsBefore);
+      expect(await scheduleState(activated.id)).toMatchObject({
+        status: "canceling",
+        lease_id: TAKEOVER_LEASE,
+      });
+      const attempt = await getDb(env)
+        .prepare(
+          `SELECT status, signature, last_valid_block_height, error
+             FROM payment_recurring_payment_lifecycle_attempts
+            WHERE recurring_payment_id = ?`
+        )
+        .bind(activated.id)
+        .first();
+      expect(attempt).toEqual({
+        status: "processing",
+        signature: null,
+        last_valid_block_height: null,
+        error: null,
+      });
+    });
+
+    it("refuses a cancel's finalize after a takeover, leaving the schedule canceling", async () => {
+      const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const confirm = required(confirmTransactionMock.getMockImplementation());
+      confirmTransactionMock.mockImplementationOnce(async (...args) => {
+        await takeOver(activated.id);
+        return confirm(...args);
+      });
+
+      const response = await app.request(
+        `/v1/payments/recurring-payments/${activated.id}/cancel`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+
+      expect(response.status).toBe(409);
+      expect(await errorMessage(response)).toBe(
+        "Recurring payment cancel was taken over by another run"
+      );
+      expect(await scheduleState(activated.id)).toMatchObject({
+        status: "canceling",
+        lease_id: TAKEOVER_LEASE,
+      });
+      const attempt = await getDb(env)
+        .prepare(
+          `SELECT status, stage, signature, error
+             FROM payment_recurring_payment_lifecycle_attempts
+            WHERE recurring_payment_id = ?`
+        )
+        .bind(activated.id)
+        .first();
+      // The send was saved before the takeover; nothing after it was written.
+      expect(attempt).toEqual({
+        status: "processing",
+        stage: "submit",
+        signature: poolSentSignatures()[2],
+        error: null,
+      });
+    });
+  });
 });

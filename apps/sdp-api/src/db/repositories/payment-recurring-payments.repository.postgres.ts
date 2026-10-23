@@ -16,8 +16,9 @@ import {
 } from "@sdp/types/payments";
 import { z } from "zod";
 import type { DatabaseExecutor } from "@/db/client";
-import { AppError } from "@/lib/errors";
+import { AppError, conflict } from "@/lib/errors";
 import type {
+  ClaimedRecurringPaymentRow,
   ClaimPaymentRecurringPaymentLifecycleInput,
   ClaimPaymentRecurringPaymentUpdateInput,
   ClearPaymentRecurringPaymentStepSignatureInput,
@@ -40,6 +41,7 @@ import type {
   PaymentRecurringPaymentUpdateEventRow,
   RecoverableCollectionRecurringPaymentRow,
   RecurringPaymentActivator,
+  RecurringPaymentLease,
   RecurringPaymentStepSignatureSlot,
   StalePaymentRecurringPaymentUpdateRow,
   UpdatePaymentRecurringPaymentActivationAttemptInput,
@@ -191,6 +193,17 @@ const staleUpdateRowSchema = z.object({
 function mapRecurringPaymentRow(row: Record<string, unknown>): PaymentRecurringPaymentRow {
   return recurringPaymentRowSchema.parse(row);
 }
+
+const claimedRecurringPaymentRowSchema = recurringPaymentRowSchema.extend({
+  lease_id: z.string().min(1),
+});
+
+function mapClaimedRecurringPaymentRow(row: Record<string, unknown>): ClaimedRecurringPaymentRow {
+  return claimedRecurringPaymentRowSchema.parse(row);
+}
+
+/** A claim's new lease: every claim, fresh or a takeover, writes its own. */
+const NEW_LEASE_ASSIGNMENT = `lease_id = 'lease_' || gen_random_uuid()::text`;
 
 const collectibleRecurringPaymentProjectionSchema = z.object({
   status: z.literal("active"),
@@ -630,6 +643,21 @@ export function createPostgresPaymentRecurringPaymentsRepository(
         .run();
     },
 
+    async assertRecurringPaymentLease(lease: RecurringPaymentLease) {
+      const held = await db
+        .prepare(
+          `SELECT 1 AS held
+             FROM payment_recurring_payments
+            WHERE id = ? AND organization_id = ? AND project_id = ? AND lease_id = ?
+            FOR UPDATE`
+        )
+        .bind(lease.recurringPaymentId, lease.organizationId, lease.projectId, lease.leaseId)
+        .first<{ held: number }>();
+      if (!held) {
+        throw conflict(`Recurring payment ${lease.operation} was taken over by another run`);
+      }
+    },
+
     async claimRecurringPaymentActivation(params) {
       const staleBefore = params.staleBefore ?? null;
       const row = await db
@@ -637,7 +665,8 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           `UPDATE payment_recurring_payments
               SET status = 'activating',
                   updated_at = ?,
-                  ${ACTIVATED_BY_ASSIGNMENTS}
+                  ${ACTIVATED_BY_ASSIGNMENTS},
+                  ${NEW_LEASE_ASSIGNMENT}
             WHERE id = ?
               AND organization_id = ?
               AND project_id = ?
@@ -658,7 +687,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
         )
         .first<Record<string, unknown>>();
 
-      return row ? mapRecurringPaymentRow(row) : null;
+      return row ? mapClaimedRecurringPaymentRow(row) : null;
     },
 
     async resetRecurringPaymentActivationIfNotActive(params) {
@@ -808,7 +837,8 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           `UPDATE payment_recurring_payments
               SET status = ?,
                   updated_at = ?,
-                  ${ACTIVATED_BY_ASSIGNMENTS}
+                  ${ACTIVATED_BY_ASSIGNMENTS},
+                  ${NEW_LEASE_ASSIGNMENT}
             WHERE id = ?
               AND organization_id = ?
               AND project_id = ?
@@ -832,7 +862,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
         )
         .first<Record<string, unknown>>();
 
-      return row ? mapRecurringPaymentRow(row) : null;
+      return row ? mapClaimedRecurringPaymentRow(row) : null;
     },
 
     async claimRecurringPaymentUpdate(input: ClaimPaymentRecurringPaymentUpdateInput) {
@@ -842,7 +872,8 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           `UPDATE payment_recurring_payments
               SET status = 'updating',
                   updated_at = ?,
-                  ${ACTIVATED_BY_ASSIGNMENTS}
+                  ${ACTIVATED_BY_ASSIGNMENTS},
+                  ${NEW_LEASE_ASSIGNMENT}
             WHERE id = ?
               AND organization_id = ?
               AND project_id = ?
@@ -863,7 +894,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
         )
         .first<Record<string, unknown>>();
 
-      return row ? mapRecurringPaymentRow(row) : null;
+      return row ? mapClaimedRecurringPaymentRow(row) : null;
     },
 
     async updateRecurringPaymentLifecycle(input: UpdatePaymentRecurringPaymentLifecycleInput) {

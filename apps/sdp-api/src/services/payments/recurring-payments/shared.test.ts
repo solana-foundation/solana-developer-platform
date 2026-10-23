@@ -84,7 +84,8 @@ describe("readRecurringPaymentStep", () => {
     await getDb(env)
       .prepare(
         `UPDATE payment_recurring_payments
-            SET status = 'activating', plan_creation_signature = ?, updated_at = ?
+            SET status = 'activating', plan_creation_signature = ?, updated_at = ?,
+                lease_id = 'lease_step'
           WHERE id = ?`
       )
       .bind(SAVED_SEND.signature, now, created.id)
@@ -95,6 +96,13 @@ describe("readRecurringPaymentStep", () => {
       env,
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT.id,
+      lease: {
+        recurringPaymentId: created.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        leaseId: "lease_step",
+        operation: "activation",
+      },
       rows: [
         { slot: { row: "recurring_payment", column: "plan_creation_signature" }, id: created.id },
         { slot: { row: "activation_attempt", column: "plan_creation_signature" }, id: attempt.id },
