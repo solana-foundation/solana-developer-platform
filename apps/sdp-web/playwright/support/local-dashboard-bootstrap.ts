@@ -792,7 +792,7 @@ async function initializeOrCreateWallet(
   const created = await api.post<CreateWalletResponse>("/v1/wallets", {
     provider,
     label,
-    purpose: "root",
+    purpose: "transfer",
   });
   return created.wallet.walletId;
 }

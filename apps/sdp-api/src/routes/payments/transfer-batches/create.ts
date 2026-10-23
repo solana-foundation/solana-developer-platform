@@ -7,7 +7,6 @@ import type {
 } from "@/db/repositories/payment-transfer-batches.repository";
 import { createPostgresPaymentTransferBatchesRepository } from "@/db/repositories/payment-transfer-batches.repository.postgres";
 import { AppError, badRequest, internalError } from "@/lib/errors";
-import { assertCallerWalletInScope } from "@/lib/money-admission";
 import { success } from "@/lib/response";
 import { type AuthorizeInput, getAuthorized } from "@/middleware/authorize";
 import {
@@ -62,13 +61,7 @@ export async function authorizeTransferBatch(
 ): Promise<AuthorizedBatchRequest> {
   // SAFETY: mounted after validateBody(createTransferBatchSchema).
   const body = input.body as CreateTransferBatchInput;
-  const authorized = await authorizeBatchRequest(c, body, body.sourceCustodyWalletId);
-  // The custody signer refuses a wallet outside the key's scope (HOO-2099).
-  // Refusing here as well, before the key is claimed, keeps a refused batch
-  // from writing failed recipients and an Idempotency-Key that would replay
-  // them after the scope is fixed.
-  assertCallerWalletInScope(authorized.scope.auth, authorized.sourceWallet.id);
-  return authorized;
+  return authorizeBatchRequest(c, body, body.sourceCustodyWalletId);
 }
 
 /** The custody runtime takes the source wallet: state, after the replay exits. */
@@ -153,7 +146,8 @@ export async function createTransferBatch(
   const feePayment = createSponsorshipFeePayment(
     c.env,
     resolveRequestSponsorshipScope(c),
-    "payments.transfer_batch"
+    "payments.transfer_batch",
+    { custodyWalletId: resolved.sourceWallet.id }
   );
   const [signer, feePayer, lifetime] = await Promise.all([
     createOrgSignerForCustodyWallet(

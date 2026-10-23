@@ -15,7 +15,9 @@ import {
   runWithTenantDatabaseIdentity,
 } from "@/db/identity";
 import { parseOptionalPostgresJson } from "@/db/postgres-utils";
+import { getOptionalAuth } from "@/lib/auth";
 import { getClientIp } from "@/lib/client-ip";
+import { forbidden } from "@/lib/errors";
 import type { KVStore } from "@/runtime/kv";
 import { createAuditLedgerCheckpointStore } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
@@ -699,10 +701,30 @@ export class AuditService {
    * side effect. If the later outcome write fails, the immutable unresolved
    * intent remains visible to verification and reconciliation instead of
    * turning an already-completed operation into a misleading 500 response.
+   *
+   * The intent row carries the entry's organization, so an unauthenticated
+   * caller (the public `/pay` route) still files it under its tenant. An
+   * authenticated request's organization wins: an entry naming a different one
+   * is refused before anything is written.
+   *
+   * @param c - The request context, for the actor and the authenticated organization.
+   * @param entry - The operation the intent admits; its outcome is appended against it.
+   * @returns The durable intent `completeCritical` resolves.
+   * @throws AppError `FORBIDDEN` when the entry names an organization other than the
+   *   authenticated caller's.
    */
   async beginCritical(c: Context<{ Bindings: Env }>, entry: AuditLogEntry): Promise<AuditIntent> {
+    const auth = getOptionalAuth(c);
+    if (
+      auth !== null &&
+      entry.organizationId !== undefined &&
+      entry.organizationId !== auth.organizationId
+    ) {
+      throw forbidden("Audit intent names an organization other than the caller's");
+    }
     const intentId = `aint_${crypto.randomUUID()}`;
     await this.log(c, {
+      organizationId: entry.organizationId,
       action: "maintenance",
       resourceType: "audit_ledger",
       resourceId: intentId,

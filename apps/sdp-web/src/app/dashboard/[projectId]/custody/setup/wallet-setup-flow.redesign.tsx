@@ -70,7 +70,6 @@ const CUSTODY_MODE_LABEL_KEYS = {
 
 /** The purposes the create endpoint accepts, in the order the picker lists them. */
 const WALLET_PURPOSES = [
-  { value: "root", labelKey: "DashboardCustody.rootWallet" },
   { value: "transfer", labelKey: "DashboardCustody.transfers" },
   { value: "mint_authority", labelKey: "DashboardCustody.mintAuthority" },
   { value: "freeze_authority", labelKey: "DashboardCustody.freezeAuthority" },
@@ -540,12 +539,12 @@ function DetailsStep({
                 : t("DashboardCustody.walletPurposeFirstWalletHint")
             }
           />
-          {/* The first wallet on a provider is created with the provider and is always its root
+          {/* The first wallet on a provider is created with the provider and is always a transfer
               wallet, so there is nothing to choose until the provider is connected. */}
           <Select
             name={isConnected ? "purpose" : undefined}
             ariaLabel={t("DashboardCustody.purpose")}
-            defaultValue="root"
+            defaultValue="transfer"
             disabled={!isConnected}
             size="xl"
           >

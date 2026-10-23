@@ -46,7 +46,7 @@ import {
 } from "@/lib/feature-flags";
 import { isSelfHostedDeployment } from "@/lib/runtime-env";
 import { logEvent } from "@/runtime/money-path-events";
-import { resolveManagedRampCredentials } from "@/services/ramps/runtime";
+import { isManagedRampConfigured } from "@/services/ramps/runtime";
 import type { Env } from "@/types/env";
 
 type OrganizationProviderRow = {
@@ -97,23 +97,18 @@ function hasAllEnv(env: Env, keys: readonly (keyof Env)[]): boolean {
 }
 
 /**
- * A ramp provider on SDP's managed keys: configured exactly when every call to
- * it could run, so availability never disagrees with the call. Production is
- * never managed.
+ * A ramp provider on SDP's managed keys: configured exactly when every key it
+ * declares serves the mode, so availability never disagrees with a call or a
+ * webhook.
  *
  * @param provider - The ramp provider.
- * @param alsoRequired - Env keys it needs beyond its account keys.
  * @returns Its availability definition.
  */
-function managedRampDefinition(
-  provider: RampProviderId,
-  alsoRequired: readonly (keyof Env)[]
-): ProviderAvailabilityDefinition {
+function managedRampDefinition(provider: RampProviderId): ProviderAvailabilityDefinition {
   return {
     label: RAMP_PROVIDER_CLIENTS[provider].label,
     isConfigured: (env, testMode) =>
-      resolveManagedRampCredentials(env, provider, testMode === false ? "production" : "sandbox")
-        .ok && hasAllEnv(env, alsoRequired),
+      isManagedRampConfigured(env, provider, testMode === false ? "production" : "sandbox"),
   };
 }
 
@@ -260,8 +255,8 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
     },
   },
   ramps: {
-    moonpay: managedRampDefinition("moonpay", []),
-    stripe: managedRampDefinition("stripe", ["STRIPE_SANDBOX_WEBHOOK_SECRET"]),
+    moonpay: managedRampDefinition("moonpay"),
+    stripe: managedRampDefinition("stripe"),
   },
   earn: {
     // Keyless like Kamino, though for a cluster reason rather than Kamino's

@@ -53,6 +53,7 @@ export interface CreateSponsorshipReservationInput {
   feePayer: string;
   providerConfigFingerprint: string;
   recentBlockhash: string;
+  lastValidBlockHeight: bigint;
   reservedLamports: number;
   hourBucket: string;
   dayBucket: string;
@@ -91,7 +92,8 @@ export interface SponsorshipReconciliationReservation extends SponsorshipReserva
   projectId: string;
   feePayer: string;
   providerConfigFingerprint: string;
-  recentBlockhash: string;
+  /** Null only on rows admitted before migration 0159; a later contract migration deletes them. */
+  lastValidBlockHeight: bigint | null;
   hourBucket: string;
   dayBucket: string;
   missCount: number;
@@ -243,8 +245,9 @@ export class SponsorshipBudgetRepository {
       `INSERT INTO sponsorship_budget_reservations (
          id, network, product_environment, organization_id, project_id, actor_type, actor_id,
          transaction_digest, fee_payer, provider_config_fingerprint, recent_blockhash,
-         reserved_lamports, hour_bucket, day_bucket, policy_versions, status
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'reserved')
+         last_valid_block_height, reserved_lamports, hour_bucket, day_bucket, policy_versions,
+         status
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'reserved')
        ON CONFLICT (id) DO NOTHING`,
       [
         input.id,
@@ -258,6 +261,7 @@ export class SponsorshipBudgetRepository {
         input.feePayer,
         input.providerConfigFingerprint,
         input.recentBlockhash,
+        input.lastValidBlockHeight.toString(),
         input.reservedLamports,
         input.hourBucket,
         input.dayBucket,
@@ -299,6 +303,8 @@ export class SponsorshipBudgetRepository {
     input: CreateSponsorshipReservationInput,
     expectedAttempt: number
   ): Promise<number | null> {
+    // last_valid_block_height stays: the row id hashes the message digest, so a reopened row
+    // sponsors the same blockhash and its stored bound still holds.
     const updated = await this.db.queryOne<{ attempt: number }>(
       `UPDATE sponsorship_budget_reservations SET
          status = 'reserved', reserved_lamports = ?, actual_lamports = NULL,
@@ -649,7 +655,7 @@ export class SponsorshipBudgetRepository {
       project_id: string;
       fee_payer: string;
       provider_config_fingerprint: string;
-      recent_blockhash: string;
+      last_valid_block_height: string | null;
       hour_bucket: string;
       day_bucket: string;
       miss_count: number;
@@ -659,7 +665,7 @@ export class SponsorshipBudgetRepository {
       `SELECT id, status, signature, signed_transaction, reserved_lamports, actual_lamports,
               attempt, network,
               organization_id, project_id, fee_payer, provider_config_fingerprint,
-              recent_blockhash, hour_bucket, day_bucket,
+              last_valid_block_height, hour_bucket, day_bucket,
               miss_count, updated_at, redis_settled_at
        FROM sponsorship_budget_reservations
        WHERE network = ? AND (
@@ -683,7 +689,8 @@ export class SponsorshipBudgetRepository {
       projectId: row.project_id,
       feePayer: row.fee_payer,
       providerConfigFingerprint: row.provider_config_fingerprint,
-      recentBlockhash: row.recent_blockhash,
+      lastValidBlockHeight:
+        row.last_valid_block_height === null ? null : BigInt(row.last_valid_block_height),
       hourBucket: row.hour_bucket,
       dayBucket: row.day_bucket,
       missCount: row.miss_count,

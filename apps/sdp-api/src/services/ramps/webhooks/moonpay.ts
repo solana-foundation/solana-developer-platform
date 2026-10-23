@@ -18,7 +18,7 @@ import { z } from "zod";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import type { PaymentsRepository, PaymentTransferRow } from "@/db/repositories/payments.repository";
 import { createSystemTransactionalPaymentsRepository } from "@/db/repositories/repository-factory";
-import { AppError, badRequest, providerNotConfigured } from "@/lib/errors";
+import { AppError, badRequest } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
@@ -28,28 +28,9 @@ import {
   type RecordRampAudit,
   withRampSettlementTransaction,
 } from "@/services/payments/ramp-settlements";
+import { managedRampWebhookSecret } from "@/services/ramps/runtime";
 import type { Env } from "@/types/env";
 import type { RampWebhookValidationContext, WebhookProcessor } from "./processor";
-
-/**
- * The key that signs `environment`'s MoonPay events. SDP holds the sandbox key
- * only: production projects bring their own MoonPay account (HOO-1942).
- */
-function readMoonpayWebhookKey(
-  env: Record<string, string | undefined>,
-  environment: SdpEnvironment
-): string {
-  if (environment === "production") {
-    throw providerNotConfigured("MoonPay webhooks are not configured for production.");
-  }
-  const webhookKey = env.MOONPAY_SANDBOX_WEBHOOK_KEY?.trim();
-  if (!webhookKey) {
-    throw providerNotConfigured(
-      "MoonPay sandbox webhook key is not configured (MOONPAY_SANDBOX_WEBHOOK_KEY)."
-    );
-  }
-  return webhookKey;
-}
 
 function parseMoonpaySignatureV2Header(
   header: string
@@ -367,7 +348,7 @@ export const moonpayWebhook = {
     headers,
     rawBody,
   }: RampWebhookValidationContext): Promise<string> {
-    const webhookKey = readMoonpayWebhookKey(env, environment);
+    const webhookKey = managedRampWebhookSecret(env, this.provider, environment);
     const signatureHeader = headers.get("moonpay-signature-v2")?.trim();
     if (!signatureHeader) {
       throw new AppError("UNAUTHORIZED", "MoonPay webhook is missing Moonpay-Signature-V2 header", {

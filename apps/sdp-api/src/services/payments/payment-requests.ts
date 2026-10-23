@@ -1,16 +1,11 @@
+import { SdpRpcError } from "@sdp/rpc/errors";
 import { createClusterRpc } from "@sdp/rpc/factory";
-import type { SolanaRpc } from "@sdp/rpc/solana";
 import { verifyTransactionLanded } from "@sdp/rpc/verified-confirmation";
 import { assertValidAddress } from "@sdp/solana/address";
-import { toNumberAmount } from "@sdp/solana/amount";
+import { AmountError, parseTokenAmount } from "@sdp/solana/amount";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import type { Signature } from "@solana/kit";
-import {
-  FindReferenceError,
-  findReference,
-  ValidateTransferError,
-  validateTransfer,
-} from "@solana/pay";
+import { FindReferenceError, findReference, ValidateTransferError } from "@solana/pay";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
 import {
@@ -24,6 +19,8 @@ import {
 import { AppError, internalError, nullOnExpected } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
+import { validatePaymentRequestTransfer } from "@/services/payments/payment-request-transfer";
+import { loadPaymentMint, type PaymentMint } from "@/services/payments/token-amount";
 import type { Env } from "@/types/env";
 
 export function isPaymentRequestExpired(expiresAt: string | null): boolean {
@@ -70,11 +67,15 @@ export async function reconcilePaymentRequest(
     throw new AppError("CONFLICT", "Payment request wallet identity is unresolved");
   }
 
-  const rpc = createClusterRpc();
   try {
-    return await settlePaymentRequestIfPaid(env, rpc, row, row.custody_wallet_id);
+    return await settlePaymentRequestIfPaid(env, row, row.custody_wallet_id);
   } catch (err) {
-    if (!options.bestEffort || err instanceof AppError) {
+    // Best effort degrades on RPC transport failures only; configuration and scope errors stay loud.
+    if (
+      !options.bestEffort ||
+      err instanceof AppError ||
+      (err instanceof SdpRpcError && err.code !== "SOLANA_RPC_ERROR")
+    ) {
       throw err;
     }
     getLogger().error(
@@ -98,7 +99,6 @@ export async function reconcilePaymentRequest(
  */
 async function settlePaymentRequestIfPaid(
   env: Env,
-  rpc: SolanaRpc,
   row: PaymentRequestRow,
   custodyWalletId: string
 ): Promise<PaymentRequestRow> {
@@ -111,22 +111,55 @@ async function settlePaymentRequestIfPaid(
   const reference = assertValidAddress(row.reference, "reference");
 
   const found = await nullOnExpected(
-    findReference(rpc, reference, { commitment: "confirmed" }),
+    findReference(createClusterRpc(), reference, { commitment: "confirmed" }),
     FindReferenceError
   );
   if (found === null) {
     return row;
   }
 
-  const verified = await verifyTransactionLanded(rpc, found.signature as unknown as Signature);
+  const verified = await verifyTransactionLanded(
+    createClusterRpc(),
+    found.signature as unknown as Signature
+  );
   if (!verified.ok) {
     return row;
   }
 
+  let mint: PaymentMint;
+  try {
+    mint = await loadPaymentMint(assertValidAddress(row.token, "token"));
+  } catch (error) {
+    if (!(error instanceof AppError) || error.code !== "BAD_REQUEST") throw error;
+    getLogger().warn(
+      { payment_request_id: row.id, reason: "mint_not_admitted", error: error.message },
+      "Payment request settlement skipped"
+    );
+    return row;
+  }
+  let expectedAmount: bigint;
+  try {
+    expectedAmount = parseTokenAmount(row.amount, mint.decimals);
+  } catch (error) {
+    // Legacy requests may predate create-time precision checks. They must
+    // never settle against a rounded or out-of-range amount.
+    if (error instanceof AmountError) {
+      getLogger().warn(
+        { payment_request_id: row.id, reason: "invalid_amount", error: error.message },
+        "Payment request settlement skipped"
+      );
+      return row;
+    }
+    throw error;
+  }
+  const recipient = assertValidAddress(row.destination_address, "destinationAddress");
+
   const validated = await nullOnExpected(
-    validateTransfer(rpc, found.signature, {
-      recipient: assertValidAddress(row.destination_address, "destinationAddress"),
-      amount: toNumberAmount(row.amount),
+    validatePaymentRequestTransfer(found.signature, {
+      recipient,
+      amount: expectedAmount,
+      decimals: mint.decimals,
+      tokenProgram: mint.tokenProgram,
       reference,
       ...(row.token === SOL_MINT ? {} : { splToken: assertValidAddress(row.token, "token") }),
     }),

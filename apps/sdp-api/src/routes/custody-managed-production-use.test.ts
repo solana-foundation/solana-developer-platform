@@ -90,7 +90,7 @@ describe("Managed custody use by project environment", () => {
           walletId: "privy_managed_production_use_created",
           publicKey: CREATED_PUBLIC_KEY,
           label: null,
-          purpose: null,
+          purpose: "transfer",
           status: "active",
           createdAt: expect.any(String),
         },

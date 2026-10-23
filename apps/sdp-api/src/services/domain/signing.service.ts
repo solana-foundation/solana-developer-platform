@@ -307,14 +307,14 @@ export class SigningService {
       return null;
     }
 
-    const [rootWallet] = await this.configStore.getWallets(existingProviderConfig.id);
-    if (!rootWallet) {
+    const [firstWallet] = await this.configStore.getWallets(existingProviderConfig.id);
+    if (!firstWallet) {
       return null;
     }
 
     return {
       config: existingProviderConfig,
-      wallet: rootWallet,
+      wallet: firstWallet,
     };
   }
 
@@ -340,7 +340,7 @@ export class SigningService {
 
   /**
    * Atomically persist a freshly provisioned provider: the config row with
-   * its full encrypted payload and the root wallet record land in one
+   * its full encrypted payload and the first wallet record land in one
    * transaction, so the config is never readable in a partially initialized
    * state.
    */
@@ -363,7 +363,7 @@ export class SigningService {
         walletId: params.walletId,
         publicKey: params.publicKey,
         label: params.walletLabel,
-        purpose: "root",
+        purpose: "transfer",
       },
     });
 
@@ -1024,7 +1024,7 @@ export class SigningService {
    * @param params - The wallet to create.
    * @param params.provider - The provider whose Managed config owns the new wallet.
    * @param params.label - Optional wallet label.
-   * @param params.purpose - Optional wallet purpose.
+   * @param params.purpose - What the wallet is for.
    * @param params.idempotency - A keyed request's derived request id (sent to
    *   providers that dedupe on one) and fingerprint, recorded on the row.
    * @returns The persisted config wallet.
@@ -1035,7 +1035,7 @@ export class SigningService {
     params: {
       provider: SigningConfiguration["provider"];
       label?: string;
-      purpose?: WalletPurpose;
+      purpose: WalletPurpose;
       idempotency?: CustodyWalletIdempotency | null;
     }
   ): Promise<CustodyConfigWallet> {

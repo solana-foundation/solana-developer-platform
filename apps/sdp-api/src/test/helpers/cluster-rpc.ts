@@ -433,20 +433,6 @@ export function systemAccountInfoResult(slot: number, lamports: number): JsonRpc
 }
 
 /**
- * A `getTokenSupply` result for a mint with no supply yet, which is all a decimals read needs.
- *
- * @param slot - The context slot the answer claims.
- * @param decimals - The mint's decimals.
- * @returns The JSON-RPC `result` to pass to {@link ClusterRpcStub.answer}.
- */
-export function tokenSupplyResult(slot: number, decimals: number): JsonRpcResult {
-  return {
-    context: { slot },
-    value: { amount: "0", decimals, uiAmount: 0, uiAmountString: "0" },
-  };
-}
-
-/**
  * The cluster whose `createClusterRpc()` client `client` is, so a test can tell which cluster a
  * spied chain helper was handed. The factory memoizes one client per cluster and pool, so the
  * client work received under a scope is the one this resolves; call it while the stub is installed

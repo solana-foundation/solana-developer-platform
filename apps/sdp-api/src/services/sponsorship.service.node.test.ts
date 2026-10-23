@@ -18,6 +18,8 @@ import {
 } from "@solana/kit";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { MoneyAdmissionSubject } from "@/lib/money-admission";
+import { runAsMoneyPrincipal } from "@/lib/money-principal";
 import { ProjectService } from "@/services/project.service";
 import {
   createSponsorshipFeePayment,
@@ -59,6 +61,10 @@ const SPONSORED_WALLET: SponsorshipScope = {
   projectId: "project_1",
   actor: { type: "wallet", id: "cwlt_1" },
 };
+
+/** The custody wallet the sponsored transfer signs with. */
+const SIGNING_WALLET = { custodyWalletId: "cwlt_1" } as const;
+const NO_CUSTODY_WALLET = { custodyWalletId: null } as const;
 
 const KORA_URLS = {
   devnet: "https://kora-devnet.sponsorship.sdp.test",
@@ -114,7 +120,8 @@ describe("sponsorship identity boundary", () => {
           projectId: "project/one",
           actor: { type: "api_key", id: "key:primary" },
         },
-        "payments.transfer"
+        "payments.transfer",
+        SIGNING_WALLET
       )
     );
     expect(createKoraAdapter).toHaveBeenCalledWith(
@@ -132,7 +139,8 @@ describe("sponsorship identity boundary", () => {
             projectId: "project_1",
             actor: { type: "user", id: " " },
           },
-          "payments.transfer"
+          "payments.transfer",
+          SIGNING_WALLET
         )
       )
     ).toThrow("Sponsorship actor id is required");
@@ -157,7 +165,8 @@ describe("sponsorship identity boundary", () => {
         createSponsorshipFeePayment(
           BOTH_CLUSTERS_ENV,
           SPONSORED_WALLET,
-          "payments.transfer"
+          "payments.transfer",
+          SIGNING_WALLET
         ).getFeePayer()
       );
 
@@ -170,7 +179,7 @@ describe("sponsorship identity boundary", () => {
   it("refuses a production scope before signing when the mainnet paymaster is not wired", () => {
     expect(() =>
       runInClusterScope(PRODUCTION, () =>
-        createSponsorshipFeePayment(testEnv, SPONSORED_WALLET, "payments.transfer")
+        createSponsorshipFeePayment(testEnv, SPONSORED_WALLET, "payments.transfer", SIGNING_WALLET)
       )
     ).toThrow(expect.objectContaining({ code: "PROVIDER_NOT_AVAILABLE" }));
   });
@@ -183,7 +192,10 @@ describe("sponsorship identity boundary", () => {
       expect(runInClusterScope(scope, () => isKoraSponsorshipConfigured(testEnv))).toBe(configured);
     }
   );
-  function selfHostedFeePayment(signAsFeePayer: (transaction: Uint8Array) => Promise<Uint8Array>) {
+  function selfHostedFeePayment(
+    signAsFeePayer: (transaction: Uint8Array) => Promise<Uint8Array>,
+    subject: MoneyAdmissionSubject
+  ) {
     vi.spyOn(KoraAdapter.prototype, "getFeePayer").mockResolvedValue(FEE_PAYER);
     vi.spyOn(KoraAdapter.prototype, "signAsFeePayer").mockImplementation(signAsFeePayer);
     return runInClusterScope(SANDBOX, () =>
@@ -194,7 +206,8 @@ describe("sponsorship identity boundary", () => {
           projectId: "project_1",
           actor: { type: "user", id: "usr_test_sponsorship" },
         },
-        "payments.transfer"
+        "payments.transfer",
+        subject
       )
     );
   }
@@ -203,7 +216,7 @@ describe("sponsorship identity boundary", () => {
       admittedMoneyFacts({ organizationStatus: "deleted" })
     );
     const signAsFeePayer = vi.fn(async (transaction: Uint8Array) => transaction);
-    const feePayment = selfHostedFeePayment(signAsFeePayer);
+    const feePayment = selfHostedFeePayment(signAsFeePayer, SIGNING_WALLET);
 
     await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toMatchObject({
       code: "FORBIDDEN",
@@ -211,22 +224,102 @@ describe("sponsorship identity boundary", () => {
     });
     expect(signAsFeePayer).not.toHaveBeenCalled();
   });
+  // SOLA9-834: the sponsor names the custody wallet it pays for, so a key whose
+  // wallet scope dropped that wallet after the custody signer admitted it gets
+  // no sponsor signature either.
+  const selectedKey = (walletListed: boolean | null) =>
+    admittedMoneyFacts({
+      principal: {
+        kind: "api_key",
+        key: {
+          status: "active",
+          expires_at: null,
+          rotation_deadline: null,
+          grants: ["transfers.execute"],
+          walletScope: "selected",
+          walletListed,
+        },
+      },
+    });
+  it("reads the sponsored custody wallet and refuses a key whose scope no longer lists it", async () => {
+    readMoneyAdmissionFacts.mockResolvedValue(selectedKey(false));
+    const signAsFeePayer = vi.fn(async (transaction: Uint8Array) => transaction);
+    const feePayment = selfHostedFeePayment(signAsFeePayer, SIGNING_WALLET);
+
+    await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      reason: "wallet_out_of_scope",
+    });
+    expect(readMoneyAdmissionFacts).toHaveBeenCalledWith(
+      expect.anything(),
+      { organizationId: "org_test_sponsorship", projectId: "project_1" },
+      SIGNING_WALLET
+    );
+    expect(signAsFeePayer).not.toHaveBeenCalled();
+  });
+  it("sponsors a key that still lists the custody wallet", async () => {
+    readMoneyAdmissionFacts.mockResolvedValue(selectedKey(true));
+    const signedTransaction = await sponsorSignTestTransaction(buildTransaction());
+    const feePayment = selfHostedFeePayment(async () => signedTransaction, SIGNING_WALLET);
+
+    await expect(feePayment.signAsFeePayer(buildTransaction())).resolves.toStrictEqual(
+      signedTransaction
+    );
+  });
+  it("refuses an exit's sponsor signature for a wallet outside the key's scope, as the custody signer does", async () => {
+    readMoneyAdmissionFacts.mockResolvedValue(selectedKey(false));
+    vi.spyOn(KoraAdapter.prototype, "getFeePayer").mockResolvedValue(FEE_PAYER);
+    const signAsFeePayer = vi
+      .spyOn(KoraAdapter.prototype, "signAsFeePayer")
+      .mockImplementation(async (transaction) => transaction);
+    const feePayment = runInClusterScope(SANDBOX, () =>
+      createSponsorshipFeePayment(
+        { ...testEnv, SDP_DEPLOYMENT_MODE: "self_hosted" },
+        SPONSORED_WALLET,
+        "dvp.cancel",
+        SIGNING_WALLET
+      )
+    );
+
+    await expect(
+      runAsMoneyPrincipal({ kind: "api_key", apiKeyId: "key_1" }, () =>
+        feePayment.signAsFeePayer(buildTransaction())
+      )
+    ).rejects.toMatchObject({ code: "FORBIDDEN", reason: "wallet_out_of_scope" });
+    expect(signAsFeePayer).not.toHaveBeenCalled();
+  });
+  it("sponsors a `/pay` transaction, which names no custody wallet, without a wallet check", async () => {
+    readMoneyAdmissionFacts.mockResolvedValue(selectedKey(null));
+    const signedTransaction = await sponsorSignTestTransaction(buildTransaction());
+    const feePayment = selfHostedFeePayment(async () => signedTransaction, NO_CUSTODY_WALLET);
+
+    await expect(feePayment.signAsFeePayer(buildTransaction())).resolves.toStrictEqual(
+      signedTransaction
+    );
+    expect(readMoneyAdmissionFacts).toHaveBeenCalledWith(expect.anything(), expect.anything(), {
+      custodyWalletId: null,
+    });
+  });
   it("refuses self-hosted sponsor bytes without the sponsor signature", async () => {
-    const feePayment = selfHostedFeePayment(async (transaction) => transaction);
+    const feePayment = selfHostedFeePayment(async (transaction) => transaction, SIGNING_WALLET);
     await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toThrow(
       "missing the sponsor fee-payer signature"
     );
   });
   it("refuses self-hosted sponsor bytes whose signature does not verify", async () => {
-    const feePayment = selfHostedFeePayment(async (transaction) =>
-      garbageSignTestTransaction(transaction)
+    const feePayment = selfHostedFeePayment(
+      async (transaction) => garbageSignTestTransaction(transaction),
+      SIGNING_WALLET
     );
     await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toThrow(
       "invalid sponsor fee-payer signature"
     );
   });
   it("refuses self-hosted sponsor bytes returned over a different message", async () => {
-    const feePayment = selfHostedFeePayment(() => sponsorSignTestTransaction(otherTransaction()));
+    const feePayment = selfHostedFeePayment(
+      () => sponsorSignTestTransaction(otherTransaction()),
+      SIGNING_WALLET
+    );
     const lifecycle = {
       persistSigned: vi.fn(),
       markStarted: vi.fn(),
@@ -239,7 +332,7 @@ describe("sponsorship identity boundary", () => {
   });
   it("adapts self-hosted providers to the owned persist-before-marker lifecycle", async () => {
     const signedTransaction = await sponsorSignTestTransaction(buildTransaction());
-    const feePayment = selfHostedFeePayment(async () => signedTransaction);
+    const feePayment = selfHostedFeePayment(async () => signedTransaction, SIGNING_WALLET);
     const lifecycle = {
       persistSigned: vi.fn().mockResolvedValue(undefined),
       markStarted: vi.fn().mockResolvedValue(undefined),

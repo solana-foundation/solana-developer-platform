@@ -18,7 +18,7 @@ import type { Env } from "@/types/env";
  * @param params.projectId - The project the wallet belongs to.
  * @param params.owner - The connection or Managed provider the wallet lives under.
  * @param params.label - Optional wallet label.
- * @param params.purpose - Optional wallet purpose.
+ * @param params.purpose - What the wallet is for.
  * @returns The new wallet's record ID and provider wallet ID.
  */
 export async function provisionApiKeyWallet(
@@ -31,7 +31,7 @@ export async function provisionApiKeyWallet(
     projectId: string;
     owner: CustodyWalletOwnerTarget;
     label?: string;
-    purpose?: CustodyWalletPurpose;
+    purpose: CustodyWalletPurpose;
   }
 ): Promise<{ id: string; walletId: string }> {
   if (params.owner.connectionId !== undefined) {

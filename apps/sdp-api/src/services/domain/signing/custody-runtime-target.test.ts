@@ -302,22 +302,42 @@ describe("CustodyRuntimeTargets", () => {
       await expect(exit.signTransactions([])).resolves.toEqual([]);
     });
 
-    it("signs a start for an active organization, as a live member", async () => {
+    it("signs a start for an active organization, as a live member of the project", async () => {
       const config = await seedConfig({ provider: "privy", projectId: PROJECT_ID });
-      await getDb(env)
-        .prepare(
-          `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-           VALUES ('om_runtime_targets', ?, ?, 'admin', 'active')`
-        )
-        .bind(ORGANIZATION_ID, USER_ID)
-        .run();
+      const db = getDb(env);
+      await db.batch([
+        db
+          .prepare(
+            `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+             VALUES ('om_runtime_targets', ?, ?, 'admin', 'active')`
+          )
+          .bind(ORGANIZATION_ID, USER_ID),
+        db
+          .prepare(
+            `INSERT INTO project_members (id, project_id, user_id, role)
+             VALUES ('pm_runtime_targets', ?, ?, 'admin') ON CONFLICT DO NOTHING`
+          )
+          .bind(PROJECT_ID, USER_ID),
+      ]);
 
       const start = await signerFor(`cwlt_${config.id}`, "payments.transfer");
+      const asMember = <T>(fn: () => Promise<T>) =>
+        runAsMoneyPrincipal({ kind: "member", userId: USER_ID }, fn);
 
       // A start signs only for an authenticated principal (HOO-2099).
-      await expect(
-        runAsMoneyPrincipal({ kind: "member", userId: USER_ID }, () => start.signTransactions([]))
-      ).resolves.toEqual([]);
+      await expect(asMember(() => start.signTransactions([]))).resolves.toEqual([]);
+
+      // SOLA9-790: removed from the project after ingress, the member's
+      // in-flight start gets no custody signature; an exit still signs.
+      await db
+        .prepare("DELETE FROM project_members WHERE project_id = ? AND user_id = ?")
+        .bind(PROJECT_ID, USER_ID)
+        .run();
+      await expect(asMember(() => start.signTransactions([]))).rejects.toMatchObject({
+        reason: "principal_not_live",
+      });
+      const exit = await signerFor(`cwlt_${config.id}`, "recurring.cancel");
+      await expect(asMember(() => exit.signTransactions([]))).resolves.toEqual([]);
     });
   });
 
@@ -507,7 +527,7 @@ describe("CustodyRuntimeTargets", () => {
       walletId: `${connection.walletId}_secondary`,
       publicKey: SECOND_CONNECTION_PUBLIC_KEY,
       label: null,
-      purpose: null,
+      purpose: "transfer",
       status: "active",
     });
     await getDb(env)
@@ -615,6 +635,27 @@ describe("CustodyRuntimeTargets", () => {
       code: "CONFLICT",
       details: { reason: "runtime_execution_unavailable" },
     });
+    expect(getConfigAdapter).not.toHaveBeenCalled();
+  });
+
+  it("refuses a recurring collection from a DvP settlement authority wallet before constructing its signer", async () => {
+    const config = await seedConfig({ provider: "privy", projectId: PROJECT_ID });
+    await getDb(env)
+      .prepare("UPDATE custody_wallets SET purpose = 'dvp_settlement_authority' WHERE id = ?")
+      .bind(`cwlt_${config.id}`)
+      .run();
+    const getConfigAdapter = createConfigAdapterFactory(CONFIG_PUBLIC_KEY);
+    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+
+    await expect(
+      targets.getTransactionSignerForWalletRecord(
+        ORGANIZATION_ID,
+        PROJECT_ID,
+        `cwlt_${config.id}`,
+        "recurring.collect",
+        getConfigAdapter
+      )
+    ).rejects.toStrictEqual(new MoneyMovementRefusedError("wallet_purpose"));
     expect(getConfigAdapter).not.toHaveBeenCalled();
   });
 
@@ -1164,7 +1205,7 @@ describe("CustodyRuntimeTargets", () => {
           walletId: config.walletId,
           publicKey: CONFIG_PUBLIC_KEY,
           label: null,
-          purpose: null,
+          purpose: "transfer",
           status: "active",
           createdAt: expect.any(String),
         },
@@ -1176,7 +1217,7 @@ describe("CustodyRuntimeTargets", () => {
           walletId: connection.walletId,
           publicKey: CONNECTION_PUBLIC_KEY,
           label: null,
-          purpose: null,
+          purpose: "transfer",
           status: "active",
           createdAt: expect.any(String),
         },
@@ -1241,7 +1282,7 @@ async function seedConfig(params: {
         walletId,
         publicKey: CONFIG_PUBLIC_KEY,
         label: null,
-        purpose: null,
+        purpose: "transfer",
         status: "active",
       },
     ],
@@ -1267,7 +1308,7 @@ async function seedConnection(
         walletId,
         publicKey: CONNECTION_PUBLIC_KEY,
         label: null,
-        purpose: null,
+        purpose: "transfer",
         status: "active",
       },
     ],

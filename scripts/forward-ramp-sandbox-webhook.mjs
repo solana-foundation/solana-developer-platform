@@ -7,7 +7,7 @@
 //   node scripts/forward-ramp-sandbox-webhook.mjs moonpay <xfr_transferId>
 //   node scripts/forward-ramp-sandbox-webhook.mjs stripe <cos_sessionId>
 //
-// Reads MOONPAY_SANDBOX_API_KEY and MOONPAY_SANDBOX_WEBHOOK_KEY, or
+// Reads MOONPAY_SANDBOX_API_KEY and MOONPAY_SANDBOX_WEBHOOK_SECRET, or
 // STRIPE_SANDBOX_SECRET_KEY and STRIPE_SANDBOX_WEBHOOK_SECRET (the values the
 // running API verifies with), and SDP_API_URL (default http://127.0.0.1:8787).
 // Never prints a key.
@@ -34,7 +34,7 @@ const sdpApiUrlSchema = z.url().default(DEFAULT_SDP_API_URL);
 /** The environment a MoonPay replay reads, parsed before its first request. */
 export const moonpayEnvSchema = z.object({
   MOONPAY_SANDBOX_API_KEY: nonBlankStringSchema,
-  MOONPAY_SANDBOX_WEBHOOK_KEY: nonBlankStringSchema,
+  MOONPAY_SANDBOX_WEBHOOK_SECRET: nonBlankStringSchema,
   SDP_API_URL: sdpApiUrlSchema,
 });
 
@@ -183,7 +183,7 @@ async function forwardMoonpay(transferId, env) {
     const timestamp = Math.floor(Date.now() / 1000);
     const outcome = await postWebhook(env.SDP_API_URL, "moonpay", body, {
       "moonpay-signature-v2": moonpaySignatureHeader(
-        env.MOONPAY_SANDBOX_WEBHOOK_KEY,
+        env.MOONPAY_SANDBOX_WEBHOOK_SECRET,
         timestamp,
         body
       ),

@@ -1,9 +1,10 @@
 import { MOVEMENTS, type MovementId } from "@sdp/types/movements";
-import { ORGANIZATION_STATUSES } from "@sdp/types/organizations";
+import { type MemberStatus, ORGANIZATION_STATUSES } from "@sdp/types/organizations";
 import type { ProjectEnvironment } from "@sdp/types/projects";
+import type { LegacyOrganizationRole } from "@sdp/types/roles";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
-import { runWithSystemDatabaseIdentity } from "@/db/identity";
+import { runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db/identity";
 import {
   assertCallerWalletInScope,
   assertMoneyStartAdmitted,
@@ -461,21 +462,49 @@ describe("decidePrincipal", () => {
     });
   });
 
+  const member = (
+    status: MemberStatus,
+    role: LegacyOrganizationRole,
+    inProject: boolean
+  ): MoneyPrincipalFacts => ({
+    kind: "member",
+    member: { status, role, inProject },
+  });
+
   it("admits an active member whose role holds the action, and refuses one who left", () => {
-    expect(decide({ kind: "member", member: { status: "active", role: "member" } })).toEqual({
-      admitted: true,
-    });
-    expect(decide({ kind: "member", member: { status: "removed", role: "admin" } })).toEqual({
+    expect(decide(member("active", "member", true))).toEqual({ admitted: true });
+    expect(decide(member("removed", "admin", true))).toEqual({
       admitted: false,
       reason: "principal_not_live",
     });
-    expect(
-      decide(
-        { kind: "member", member: { status: "active", role: "member" } },
-        WALLET,
-        "issuance.seize"
-      )
-    ).toEqual({ admitted: false, reason: "action_not_held", action: "issuance.enforce" });
+    expect(decide(member("active", "member", true), WALLET, "issuance.seize")).toEqual({
+      admitted: false,
+      reason: "action_not_held",
+      action: "issuance.enforce",
+    });
+  });
+
+  // SOLA9-790: ingress admits a dashboard member to a project by their
+  // `project_members` row; one removed from the project since starts nothing
+  // there, whatever their organization role, and still unwinds.
+  it.each(["member", "admin", "owner"] as const satisfies readonly LegacyOrganizationRole[])(
+    "refuses a start by an active %s no longer in the project",
+    (role) => {
+      expect(decide(member("active", role, false))).toEqual({
+        admitted: false,
+        reason: "principal_not_live",
+      });
+      expect(decide(member("active", role, false), NO_WALLET, "payments.transfer")).toEqual({
+        admitted: false,
+        reason: "principal_not_live",
+      });
+    }
+  );
+
+  it("admits an exit by a live member no longer in the project", () => {
+    expect(decide(member("active", "member", false), WALLET, "private_channels.withdraw")).toEqual({
+      admitted: true,
+    });
   });
 
   it("admits a mandate only for its own movement, status and source wallet", () => {
@@ -587,6 +616,59 @@ describe("money admission reads the principal in the same statement", () => {
       code: "FORBIDDEN",
       reason: "principal_not_live",
     });
+  });
+
+  // SOLA9-790: the same statement proves the member still belongs to the
+  // project, read under the tenant identity a signed-in request signs with.
+  it("refuses a member's next start once they are removed from the project, uncached", async () => {
+    const db = getDb(env);
+    await db
+      .prepare(
+        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+         VALUES (?, ?, ?, 'owner', 'active') ON CONFLICT DO NOTHING`
+      )
+      .bind("om_money_admission", TEST_ORG.id, TEST_USER.id)
+      .run();
+    const sandbox = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id };
+    const asMember = <T>(fn: () => Promise<T>) =>
+      runWithTenantDatabaseIdentity({ organizationId: TEST_ORG.id }, () =>
+        runAsMoneyPrincipal({ kind: "member", userId: TEST_USER.id }, fn)
+      );
+    const start = (movement: MovementId) =>
+      asMember(() =>
+        assertMoneyStartAdmitted(
+          env,
+          sandbox,
+          { surface: "http", movement, subjectId: "tr_test" },
+          NO_WALLET
+        )
+      );
+
+    await expect(
+      asMember(() => readMoneyAdmissionFacts(env, sandbox, NO_WALLET))
+    ).resolves.toMatchObject({
+      principal: { kind: "member", member: { status: "active", role: "owner", inProject: true } },
+    });
+    await expect(start("payments.transfer")).resolves.toBeUndefined();
+
+    await db
+      .prepare("DELETE FROM project_members WHERE project_id = ? AND user_id = ?")
+      .bind(TEST_PROJECT.id, TEST_USER.id)
+      .run();
+    await expect(start("payments.transfer")).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      reason: "principal_not_live",
+    });
+    // Still in the organization: an exit unwinds.
+    await expect(
+      asMember(async () =>
+        decideMovement(
+          "private_channels.withdraw",
+          await readMoneyAdmissionFacts(env, sandbox, NO_WALLET),
+          NO_WALLET
+        )
+      )
+    ).resolves.toEqual({ admitted: true });
   });
 
   it("finds no key of another project", async () => {

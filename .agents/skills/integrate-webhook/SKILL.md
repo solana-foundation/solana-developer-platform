@@ -32,9 +32,10 @@ The same typed processor handles the background apply and replay.
 
 `verify(context: RampWebhookValidationContext): Promise<string>` (defined beside
 `WebhookProcessor` in `apps/sdp-api/src/services/ramps/webhooks/processor.ts`).
-`context` = `{ env, environment, headers, rawBody, requestUrl? }`. Read the mode-keyed
-verification key, verify the signature over the **raw** body, and return that
-body. Throw `UNAUTHORIZED` on a missing or invalid signature. Use
+`context` = `{ env, environment, headers, rawBody, requestUrl? }`. Read the mode's
+secret with `managedRampWebhookSecret(env, this.provider, environment)`
+(`services/ramps/runtime.ts`), verify the signature over the **raw** body, and
+return that body. Throw `UNAUTHORIZED` on a missing or invalid signature. Use
 `apps/sdp-api/src/lib/webhook-signature.ts` with the provider-signed timestamp.
 
 The shared verifier currently supports HMAC-SHA256, and it requires a provider-signed timestamp. If the upstream uses another algorithm or does not sign a timestamp, stop and extend/review the shared verification contract; do not fabricate a local timestamp or bypass replay protection.
@@ -45,8 +46,8 @@ Signature variety across the registered webhook providers:
 
 | Provider | Header | Algorithm | Env keys |
 |---|---|---|---|
-| MoonPay | `moonpay-signature-v2` | HMAC-SHA256 (hex, `t=…,s=…`) | `MOONPAY_SANDBOX_WEBHOOK_KEY` (sandbox only) |
-| Stripe | `stripe-signature` | HMAC-SHA256 (hex, `t=…,v1=…`) | `STRIPE_SANDBOX_WEBHOOK_SECRET` (sandbox only; events must carry `livemode: false`) |
+| MoonPay | `moonpay-signature-v2` | HMAC-SHA256 (hex, `t=…,s=…`) | `MOONPAY_{SANDBOX,PRODUCTION}_WEBHOOK_SECRET` (`wk_test_…` / `wk_live_…`) |
+| Stripe | `stripe-signature` | HMAC-SHA256 (hex, `t=…,v1=…`) | `STRIPE_{SANDBOX,PRODUCTION}_WEBHOOK_SECRET` (one per endpoint; an event's `livemode` must match the endpoint's mode) |
 
 ## parse
 

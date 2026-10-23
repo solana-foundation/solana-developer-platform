@@ -16,7 +16,7 @@ import {
   paymentRecurringPaymentResponseSchema,
 } from "@/openapi/schemas/payments";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
-import { installClusterRpcResponder, tokenSupplyResult } from "@/test/helpers/cluster-rpc";
+import { installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import {
   createKoraAdapterMock,
@@ -32,6 +32,7 @@ import {
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
+import { mintAccountInfoResult } from "@/test/helpers/token-mints";
 import { withIdempotencyKeys } from "./idempotency-keys";
 
 // Every mutation carries a fresh key unless a test sets its own (HOO-1918).
@@ -62,7 +63,7 @@ export function installRecurringExecutionHooks() {
     sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
-    rpc.answer("getTokenSupply", tokenSupplyResult(1, 6));
+    rpc.answer("getAccountInfo", mintAccountInfoResult({ decimals: 6, extensions: null }));
     signAsFeePayerMock = vi
       .fn<(transaction: Uint8Array) => Promise<Uint8Array>>()
       .mockImplementation(async (transaction) => fullySignTestTransaction(transaction));
@@ -352,8 +353,8 @@ export async function seedRecurringDatabaseTenant(options: {
     db
       .prepare(
         `INSERT INTO custody_wallets
-           (id, custody_config_id, wallet_id, public_key, status)
-         VALUES (?, ?, ?, ?, 'active')`
+           (id, custody_config_id, wallet_id, public_key, purpose, status)
+         VALUES (?, ?, ?, ?, 'transfer', 'active')`
       )
       .bind(
         options.custodyWalletId,

@@ -505,7 +505,8 @@ export async function createDvpTrade(
         projectId: input.projectId,
         actor: { type: "wallet", id: settlement.custodyWalletId },
       }),
-      "dvp.create"
+      "dvp.create",
+      { custodyWalletId: settlement.custodyWalletId }
     );
     const sponsor = await feePayment.getFeePayer();
 

@@ -2,12 +2,17 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { EARN_PROVIDER_CLIENTS } from "@sdp/earn";
 import { supportsPortfolioWallets } from "@sdp/earn/capabilities";
-import { EARN_PROVIDER_DEPOSIT_STYLE, EARN_PROVIDERS } from "@sdp/types/provider-access";
+import {
+  EARN_PROVIDER_DEPOSIT_STYLE,
+  EARN_PROVIDERS,
+  RAMP_PROVIDERS,
+} from "@sdp/types/provider-access";
 import { describe, expect, it } from "vitest";
 import {
   EARN_CREDENTIAL_ENV_KEYS,
   EARN_CREDENTIAL_ENV_KEYS_BY_PROVIDER,
 } from "./provider-availability.service";
+import { MANAGED_RAMP_KEY_NAMES } from "./ramps/runtime";
 
 const repoRoot = join(process.cwd(), "..", "..");
 
@@ -77,6 +82,30 @@ describe("earn provider credential key drift", () => {
         keys: [],
       });
     }
+  });
+});
+
+/**
+ * Managed ramp key names derive from each provider's key formats
+ * (`MANAGED_RAMP_KEY_NAMES`), but these files hand-list them. Each must name
+ * exactly that set, so a new provider's keys reach the local API and a renamed
+ * key leaves no stale name behind.
+ */
+describe("managed ramp key drift", () => {
+  const rampKeyPattern = new RegExp(
+    `\\b(?:${RAMP_PROVIDERS.map((provider) => provider.toUpperCase()).join("|")})_[A-Z0-9_]+`,
+    "g"
+  );
+
+  it.each([
+    "turbo.json",
+    "scripts/secret-keys.mjs",
+    "apps/sdp-api/.env.local.example",
+    "apps/sdp-api/src/types/env.d.ts",
+  ])("names exactly the managed ramp keys in %s", (path) => {
+    const named = new Set(readFileSync(join(repoRoot, path), "utf8").match(rampKeyPattern));
+
+    expect([...named].sort()).toEqual([...MANAGED_RAMP_KEY_NAMES].sort());
   });
 });
 
