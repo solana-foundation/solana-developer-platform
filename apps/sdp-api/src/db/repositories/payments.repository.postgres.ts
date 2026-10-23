@@ -303,6 +303,10 @@ function buildUpdateTransferWhere(input: UpdatePaymentTransferInput) {
   if (input.requireUnstarted) {
     clauses.push("submission_started_at IS NULL");
   }
+  if (input.expectedProviderReference !== undefined) {
+    clauses.push("provider_reference IS NOT DISTINCT FROM ?");
+    values.push(input.expectedProviderReference);
+  }
   // Ramp statuses move only through RAMP_TRANSFER_TRANSITIONS.
   if (input.status !== undefined) {
     clauses.push("type <> ALL(?)");
@@ -1252,9 +1256,64 @@ export function createPostgresPaymentsRepository(
       };
     },
 
+    async claimFireblocksTransferSubmission(input) {
+      assertScope(input);
+      const scope = buildTransferScopeWhere({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        includeAllOrganizationProjects: canAccessAllOrganizationProjects,
+        extraClauses: [
+          "id = ?",
+          "status = 'processing'",
+          "provider_data->'fireblocksTransfer' IS NOT NULL",
+          // biome-ignore lint/security/noSecrets: SQL JSON field name, not a credential.
+          "provider_data->>'fireblocksSubmissionStartedAt' IS NULL",
+        ],
+        extraValues: [input.transferId],
+      });
+      const row = await db
+        .prepare(`WITH pt AS (
+        UPDATE payment_transfers SET provider_data = provider_data || ?::jsonb, updated_at = ?
+        WHERE ${scope.where} RETURNING *
+      ) SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind FROM pt`)
+        .bind(
+          JSON.stringify({ fireblocksSubmissionStartedAt: input.now }),
+          input.now,
+          ...scope.values
+        )
+        .first<PaymentTransferProjectionRow>();
+      return row ? mapTransferRow(row) : null;
+    },
+
+    async claimFireblocksTransferPoll(input) {
+      assertScope(input);
+      const scope = buildTransferScopeWhere({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        includeAllOrganizationProjects: canAccessAllOrganizationProjects,
+        extraClauses: [
+          "id = ?",
+          "status = 'processing'",
+          "provider_data->'fireblocksTransfer' IS NOT NULL",
+          // biome-ignore lint/security/noSecrets: SQL JSON field names, not credentials.
+          "(provider_data->>'fireblocksLastPolledAt' IS NULL OR provider_data->>'fireblocksLastPolledAt' < ?)",
+        ],
+        extraValues: [input.transferId, input.polledBefore],
+      });
+      const row = await db
+        .prepare(`WITH pt AS (
+        UPDATE payment_transfers SET provider_data = provider_data || ?::jsonb, updated_at = ?
+        WHERE ${scope.where} RETURNING *
+      ) SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind FROM pt`)
+        .bind(JSON.stringify({ fireblocksLastPolledAt: input.now }), input.now, ...scope.values)
+        .first<PaymentTransferProjectionRow>();
+      return row ? mapTransferRow(row) : null;
+    },
+
     async listTransfersByStatus({
       environment,
       statuses,
+      fireblocks,
       types,
       hasSignature,
       createdBefore,
@@ -1273,6 +1332,14 @@ export function createPostgresPaymentsRepository(
 
       const clauses = ["p.environment = ?", `pt.status IN (${buildInClause(statuses.length)})`];
       const values: unknown[] = [environment, ...statuses];
+
+      if (fireblocks !== undefined) {
+        clauses.push(
+          fireblocks
+            ? "pt.provider_data->'fireblocksTransfer' IS NOT NULL"
+            : "pt.provider_data->'fireblocksTransfer' IS NULL"
+        );
+      }
 
       if (types?.length) {
         clauses.push(`pt.type IN (${buildInClause(types.length)})`);

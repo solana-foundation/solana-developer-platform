@@ -14,6 +14,9 @@ import { useOnchainSendWizard } from "./use-onchain-send-wizard.redesign";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
+  useOptionalDashboardWorkspace: () => ({
+    dashboardCacheScope: { orgId: "org_test", userId: "user_test" },
+  }),
   useDashboardWorkspace: () => ({
     dashboardCacheScope: { orgId: "org_test", userId: "user_test" },
     selectedProjectId: "proj_test",

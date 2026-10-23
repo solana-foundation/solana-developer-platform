@@ -4,6 +4,7 @@ import type { SigningConfigRecord } from "@/services/adapters/signing";
 import type { CustodyCipher } from "@/services/custody-cipher/cipher-router";
 import {
   createAdapterFromEncryptedConfig,
+  createFireblocksAdapterFromCredential,
   createPrivyAdapterFromCredential,
   type PrivyCredentialAdapterInput,
 } from "@/services/domain/signing/provider-adapter-factory";
@@ -106,6 +107,28 @@ describe("custody adapter factories and the release channel", () => {
     expect(() =>
       createPrivyAdapterFromCredential(createEnv(), createObservedCredential(read))
     ).toThrow(custodyProviderNotInReleaseChannel("privy", "byok"));
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it("refuses a BYOK Fireblocks credential out of channel before reading it", () => {
+    custodyReleaseChannel.outOfChannelMode = "byok";
+    const read = vi.fn(() => "must not be read");
+    const input = {
+      get apiKey() {
+        return read();
+      },
+      get apiSecretPem() {
+        return read();
+      },
+      get walletId() {
+        return read();
+      },
+      assetId: "SOL_TEST" as const,
+    };
+
+    expect(() => createFireblocksAdapterFromCredential(createEnv(), input)).toThrow(
+      custodyProviderNotInReleaseChannel("fireblocks", "byok")
+    );
     expect(read).not.toHaveBeenCalled();
   });
 

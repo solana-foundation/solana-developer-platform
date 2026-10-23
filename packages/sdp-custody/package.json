@@ -93,6 +93,31 @@
       "types": "./src/signing.ts",
       "import": "./src/signing.ts",
       "default": "./src/signing.ts"
+    },
+    "./provisioning/fireblocks-address-book": {
+      "types": "./src/provisioning/fireblocks-address-book.ts",
+      "import": "./src/provisioning/fireblocks-address-book.ts",
+      "default": "./src/provisioning/fireblocks-address-book.ts"
+    },
+    "./provisioning/fireblocks-http": {
+      "types": "./src/provisioning/fireblocks-http.ts",
+      "import": "./src/provisioning/fireblocks-http.ts",
+      "default": "./src/provisioning/fireblocks-http.ts"
+    },
+    "./provisioning/fireblocks-transfers": {
+      "types": "./src/provisioning/fireblocks-transfers.ts",
+      "import": "./src/provisioning/fireblocks-transfers.ts",
+      "default": "./src/provisioning/fireblocks-transfers.ts"
+    },
+    "./provisioning/fireblocks-vaults": {
+      "types": "./src/provisioning/fireblocks-vaults.ts",
+      "import": "./src/provisioning/fireblocks-vaults.ts",
+      "default": "./src/provisioning/fireblocks-vaults.ts"
+    },
+    "./provisioning/fireblocks-credential": {
+      "types": "./src/provisioning/fireblocks-credential.ts",
+      "import": "./src/provisioning/fireblocks-credential.ts",
+      "default": "./src/provisioning/fireblocks-credential.ts"
     }
   },
   "imports": {
@@ -121,6 +146,7 @@
     "@solana/keychain-utila": "1.4.0",
     "@solana/kit": "catalog:",
     "@solana/signers": "catalog:",
-    "jose": "6.2.12"
+    "jose": "6.2.12",
+    "zod": "4.6.5"
   }
 }

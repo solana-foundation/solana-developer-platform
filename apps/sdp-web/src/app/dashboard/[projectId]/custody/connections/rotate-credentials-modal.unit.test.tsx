@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 
+import { isByokCustodyProvider } from "@sdp/types/custody";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as csrActions from "@/app/dashboard/[projectId]/custody/setup/fireblocks-csr-actions";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
@@ -19,6 +21,22 @@ import { ConnectionCredentialsSection } from "./connection-credentials-section";
 import type { CustodyCredentialLifecycle } from "./connection-detail.data";
 import { RotateCredentialsModal } from "./rotate-credentials-modal";
 
+beforeEach(() => {
+  vi.spyOn(csrActions, "loadFireblocksCsrAction").mockResolvedValue({
+    status: "success",
+    csr: {
+      id: "fbcsr_11111111-1111-4111-8111-111111111111",
+      csrPem: "public-csr",
+      expiresAt: new Date(Date.now() + 7 * 86_400_000).toISOString(),
+    },
+  });
+  vi.spyOn(csrActions, "generateFireblocksCsrAction");
+  vi.spyOn(csrActions, "loadFireblocksVaultsAction").mockResolvedValue({
+    status: "success",
+    vaults: [{ id: "0", name: "Treasury", hasSolanaWallet: true }],
+    nextCursor: null,
+  });
+});
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -52,13 +70,15 @@ function modal(
   currentLifecycle = lifecycle,
   canRotate = true
 ) {
+  const provider = currentLifecycle.providerCredential.provider;
+  if (!isByokCustodyProvider(provider)) throw new Error("Expected BYOK fixture");
   return (
     <I18nProvider locale="en" messages={getMessages("en")}>
       <RotateCredentialsModal
         isOpen
         onClose={onClose}
         lifecycle={currentLifecycle}
-        provider="privy"
+        provider={provider}
         connectionId="cconn_1"
         canRotate={canRotate}
       />
@@ -161,7 +181,10 @@ describe("rotation recovery", () => {
       );
       expect(retry?.[0]).toBe(first?.[0]);
       expect(first?.[1]?.body).toBe(
-        JSON.stringify({ fields: { appId: "test-app-id", appSecret: "test-app-secret" } })
+        JSON.stringify({
+          provider: "privy",
+          fields: { appId: "test-app-id", appSecret: "test-app-secret" },
+        })
       );
       expect(retry?.[1]?.body).toBe(first?.[1]?.body);
       const originalKey = new Headers(first?.[1]?.headers).get("Idempotency-Key");
@@ -240,7 +263,10 @@ describe("rotation recovery", () => {
       const corrected = rotation.mock.calls[1]?.[1];
       expect(new Headers(corrected?.headers).get("Idempotency-Key")).not.toBe(originalKey);
       expect(corrected?.body).toBe(
-        JSON.stringify({ fields: { appId: "test-app-id", appSecret: "corrected-secret" } })
+        JSON.stringify({
+          provider: "privy",
+          fields: { appId: "test-app-id", appSecret: "corrected-secret" },
+        })
       );
     }
   );
@@ -443,7 +469,10 @@ describe("rotation recovery", () => {
     expect(replay?.body).toBe(original?.body);
     expect(new Headers(corrected?.headers).get("Idempotency-Key")).not.toBe(originalKey);
     expect(corrected?.body).toBe(
-      JSON.stringify({ fields: { appId: "test-app-id", appSecret: "corrected-secret" } })
+      JSON.stringify({
+        provider: "privy",
+        fields: { appId: "test-app-id", appSecret: "corrected-secret" },
+      })
     );
   });
 
@@ -462,5 +491,34 @@ describe("rotation recovery", () => {
     expect(screen.getByLabelText("New Privy app secret")).toHaveProperty("value", "");
     expect(screen.getByLabelText("New Privy app secret")).toHaveProperty("disabled", false);
     expect(rotation).not.toHaveBeenCalled();
+  });
+});
+
+it("rotates Fireblocks credentials using a generated key reference and the pinned vault", async () => {
+  const rotation = mockApi();
+  rotation.mockResolvedValue(Response.json({ data: { rotation: { status: "success" } } }));
+  const onClose = vi.fn();
+  render(
+    modal(onClose, {
+      ...lifecycle,
+      providerCredential: { ...lifecycle.providerCredential, provider: "fireblocks" },
+    })
+  );
+  const user = userEvent.setup();
+  await waitFor(() =>
+    expect(screen.getByLabelText("API user ID")).toHaveProperty("disabled", false)
+  );
+  await user.type(screen.getByLabelText("API user ID"), "next-api-user");
+  await user.click(screen.getByRole("button", { name: "Load vaults" }));
+  await user.click(await screen.findByRole("radio", { name: /Treasury/ }));
+  await user.click(screen.getByRole("button", { name: "Rotate for 1 connections" }));
+  await waitFor(() => expect(onClose).toHaveBeenCalledWith(false));
+  expect(JSON.parse(String(rotation.mock.calls[0]?.[1]?.body))).toEqual({
+    provider: "fireblocks",
+    fields: {
+      apiKey: "next-api-user",
+      signingKeyId: "fbcsr_11111111-1111-4111-8111-111111111111",
+      vaultAccountId: "0",
+    },
   });
 });

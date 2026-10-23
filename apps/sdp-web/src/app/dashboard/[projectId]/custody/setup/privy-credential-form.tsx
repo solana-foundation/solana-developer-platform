@@ -1,10 +1,11 @@
 "use client";
 
+import type { ByokCustodyProvider } from "@sdp/types/custody";
 import { Button } from "@sdp/ui/button";
 import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
 import { useRouter } from "next/navigation";
-import { type FormEvent, useRef, useState, useTransition } from "react";
+import { type FormEvent, useCallback, useRef, useState, useTransition } from "react";
 import {
   type PrivyByokSubmitResult,
   recheckPrivyCredentialAction,
@@ -15,6 +16,7 @@ import { getCustodyProviderEntry } from "@/app/dashboard/[projectId]/custody/pro
 import { useWalletInventoryRefresh } from "@/app/dashboard/[projectId]/custody/use-wallet-inventory-refresh";
 import { useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
+import { FireblocksCredentialFields } from "./fireblocks-credential-fields";
 
 type CheckState =
   | { kind: "idle" }
@@ -48,14 +50,22 @@ const FIELD_INPUT_CLASS =
  * mounted input is the one way it could reappear.
  */
 function CredentialFields({
+  provider,
   appSecret,
   defaultLabel,
   onAppSecretChange,
+  onFireblocksReadyChange,
+  onFireblocksPendingChange,
+  fireblocksResetKey,
   t,
 }: {
+  provider: ByokCustodyProvider;
   appSecret: string;
   defaultLabel: string;
   onAppSecretChange: (value: string) => void;
+  onFireblocksReadyChange: (ready: boolean) => void;
+  onFireblocksPendingChange: (pending: boolean) => void;
+  fireblocksResetKey: number;
   t: ReturnType<typeof useTranslations>;
 }) {
   return (
@@ -76,31 +86,43 @@ function CredentialFields({
         </p>
       </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="byok-app-id">{t("DashboardCustody.providerPrivyAppId")}</Label>
-        <Input id="byok-app-id" name="appId" required className={FIELD_INPUT_CLASS} />
-        <p className="text-sm leading-5 text-tertiary">
-          {t("DashboardCustody.providerPrivyAppIdDescription")}
-        </p>
-      </div>
+      {provider === "fireblocks" ? (
+        <FireblocksCredentialFields
+          key={fireblocksResetKey}
+          onReadyChange={onFireblocksReadyChange}
+          onPendingChange={onFireblocksPendingChange}
+        />
+      ) : (
+        <>
+          <div className="space-y-2">
+            <Label htmlFor="byok-app-id">{t("DashboardCustody.providerPrivyAppId")}</Label>
+            <Input id="byok-app-id" name="appId" required className={FIELD_INPUT_CLASS} />
+            <p className="text-sm leading-5 text-tertiary">
+              {t("DashboardCustody.providerPrivyAppIdDescription")}
+            </p>
+          </div>
 
-      <SecretField
-        name="appSecret"
-        label={t("DashboardCustody.providerPrivyAppSecret")}
-        hint={t("DashboardCustody.providerPrivyAppSecretDescription")}
-        value={appSecret}
-        onChange={onAppSecretChange}
-      />
+          <SecretField
+            name="appSecret"
+            label={t("DashboardCustody.providerPrivyAppSecret")}
+            hint={t("DashboardCustody.providerPrivyAppSecretDescription")}
+            value={appSecret}
+            onChange={onAppSecretChange}
+          />
+        </>
+      )}
 
-      <div className="space-y-2">
-        <Label htmlFor="byok-wallet-label">
-          {t("DashboardCustody.providerInitialWalletLabel")}
-        </Label>
-        <Input id="byok-wallet-label" name="walletLabel" className={FIELD_INPUT_CLASS} />
-        <p className="text-sm leading-5 text-tertiary">
-          {t("DashboardCustody.providerInitialWalletLabelDescription")}
-        </p>
-      </div>
+      {provider === "privy" ? (
+        <div className="space-y-2">
+          <Label htmlFor="byok-wallet-label">
+            {t("DashboardCustody.providerInitialWalletLabel")}
+          </Label>
+          <Input id="byok-wallet-label" name="walletLabel" className={FIELD_INPUT_CLASS} />
+          <p className="text-sm leading-5 text-tertiary">
+            {t("DashboardCustody.providerInitialWalletLabelDescription")}
+          </p>
+        </div>
+      ) : null}
     </>
   );
 }
@@ -178,11 +200,13 @@ function isRecoveryState(check: CheckState): check is RecoveryCheckState {
  * attempt rather than from an effect a render later.
  */
 function usePrivyCredentialSubmission({
+  canSubmit,
   onPendingChange,
   onRecoveryChange,
   onRecoveryLockChange,
   onSuccess,
 }: {
+  canSubmit: boolean;
   onPendingChange?: (pending: boolean) => void;
   onRecoveryChange?: (inRecovery: boolean) => void;
   onRecoveryLockChange?: (locked: boolean) => void;
@@ -193,6 +217,7 @@ function usePrivyCredentialSubmission({
   const refreshWalletInventory = useWalletInventoryRefresh();
   const [isPending, startTransition] = useTransition();
   const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
+  const [credentialAttempt, setCredentialAttempt] = useState(0);
   const [check, setCheck] = useState<CheckState>({ kind: "idle" });
   const [appSecret, setAppSecret] = useState("");
   const lastPayloadRef = useRef(new FormData());
@@ -247,6 +272,9 @@ function usePrivyCredentialSubmission({
       // of colliding with it as a fresh submission.
       onRecoveryLockChange?.(false);
       setIdempotencyKey(crypto.randomUUID());
+      // Each rejection can consume the CSR, including consecutive failures
+      // with the same check.kind. Validation errors and unknown outcomes keep it.
+      setCredentialAttempt((attempt) => attempt + 1);
       setAppSecret("");
       setCheck({ kind: "failed", message: result.message, connectionId: result.connectionId });
       return;
@@ -273,7 +301,7 @@ function usePrivyCredentialSubmission({
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = event.currentTarget;
-    if (isPending || !form.reportValidity()) {
+    if (isPending || !canSubmit || !form.reportValidity()) {
       return;
     }
     const formData = new FormData(form);
@@ -330,7 +358,16 @@ function usePrivyCredentialSubmission({
     });
   };
 
-  return { appSecret, check, handleRecheck, handleReplay, handleSubmit, isPending, setAppSecret };
+  return {
+    appSecret,
+    check,
+    credentialAttempt,
+    handleRecheck,
+    handleReplay,
+    handleSubmit,
+    isPending,
+    setAppSecret,
+  };
 }
 
 /** The four statuses whose render replaces the form with a recovery panel. */
@@ -425,8 +462,8 @@ function CredentialRecoveryPanel({
  * self-service install in this catalog — in which case this form has no fields
  * to offer and does not render.
  */
-function resolvePrivyDefaultLabel(): string | null {
-  const setup = getCustodyProviderEntry("privy").storedCredentialSetup;
+function resolveDefaultLabel(provider: ByokCustodyProvider): string | null {
+  const setup = getCustodyProviderEntry(provider).storedCredentialSetup;
   if (setup.mode !== "self_service") {
     return null;
   }
@@ -446,14 +483,18 @@ function resolvePrivyDefaultLabel(): string | null {
  *   than resubmitting; the credential and secret are already stored
  *   server-side.
  */
-export function PrivyCredentialForm({
+export function ByokCredentialForm({
+  provider = "privy",
   formId,
   onRecoveryLockChange,
   onRecoveryChange,
   onSuccess,
   showSubmitButton = true,
   onPendingChange,
+  onReadyChange,
 }: {
+  provider?: ByokCustodyProvider;
+  onReadyChange?: (ready: boolean) => void;
   formId: string;
   /** True while leaving this form would strand a stored credential or key. */
   onRecoveryLockChange?: (locked: boolean) => void;
@@ -486,15 +527,41 @@ export function PrivyCredentialForm({
   onPendingChange?: (pending: boolean) => void;
 }) {
   const t = useTranslations();
-  const { appSecret, check, handleRecheck, handleReplay, handleSubmit, isPending, setAppSecret } =
-    usePrivyCredentialSubmission({
-      onPendingChange,
-      onRecoveryChange,
-      onRecoveryLockChange,
-      onSuccess,
-    });
+  const [fireblocksReady, setFireblocksReady] = useState(false);
+  const [childPending, setChildPending] = useState(false);
+  const ready = provider !== "fireblocks" || fireblocksReady;
+  const handleReady = useCallback(
+    (value: boolean) => {
+      setFireblocksReady(value);
+      onReadyChange?.(value);
+    },
+    [onReadyChange]
+  );
+  const handleChildPending = useCallback(
+    (value: boolean) => {
+      setChildPending(value);
+      onPendingChange?.(value);
+    },
+    [onPendingChange]
+  );
+  const {
+    appSecret,
+    check,
+    credentialAttempt,
+    handleRecheck,
+    handleReplay,
+    handleSubmit,
+    isPending,
+    setAppSecret,
+  } = usePrivyCredentialSubmission({
+    canSubmit: ready && !childPending,
+    onPendingChange,
+    onRecoveryChange,
+    onRecoveryLockChange,
+    onSuccess,
+  });
 
-  const defaultLabel = resolvePrivyDefaultLabel();
+  const defaultLabel = resolveDefaultLabel(provider);
   if (defaultLabel === null) {
     return null;
   }
@@ -513,12 +580,19 @@ export function PrivyCredentialForm({
 
   return (
     <form id={formId} onSubmit={handleSubmit} className="grid gap-4" data-privy-byok-form="true">
-      <CredentialFields
-        appSecret={appSecret}
-        defaultLabel={defaultLabel}
-        onAppSecretChange={setAppSecret}
-        t={t}
-      />
+      <input type="hidden" name="provider" value={provider} />
+      <fieldset disabled={isPending} className="grid gap-4">
+        <CredentialFields
+          provider={provider}
+          appSecret={appSecret}
+          defaultLabel={defaultLabel}
+          onAppSecretChange={setAppSecret}
+          onFireblocksReadyChange={handleReady}
+          onFireblocksPendingChange={handleChildPending}
+          fireblocksResetKey={credentialAttempt}
+          t={t}
+        />
+      </fieldset>
 
       {check.kind === "failed" ? (
         <div
@@ -531,7 +605,7 @@ export function PrivyCredentialForm({
 
       {showSubmitButton ? (
         <div>
-          <Button type="submit" disabled={isPending}>
+          <Button type="submit" disabled={isPending || childPending || !ready}>
             {isPending ? t("DashboardCustody.byokChecking") : t("DashboardCustody.byokConnect")}
           </Button>
         </div>
@@ -539,3 +613,5 @@ export function PrivyCredentialForm({
     </form>
   );
 }
+
+export const PrivyCredentialForm = ByokCredentialForm;

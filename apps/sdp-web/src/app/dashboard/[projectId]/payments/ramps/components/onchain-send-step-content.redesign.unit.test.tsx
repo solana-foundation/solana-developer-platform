@@ -238,4 +238,35 @@ describe("OnchainSendStepContent", () => {
       );
     }
   );
+  it("explains Fireblocks approval and vault fees and links to the pending transaction", () => {
+    renderStep({
+      ...baseWizard,
+      currentStepId: "REVIEW",
+      selectedWallet: {
+        ...labeledWallet,
+        provider: "fireblocks",
+        custodyConfigId: undefined,
+        custodyConnectionId: "cconn_fireblocks",
+      },
+      transferResult: {
+        id: "xfr_fireblocks",
+        custodyWalletId: labeledWallet.id,
+        providerWalletId: "fb_0",
+        status: "processing",
+        signature: null,
+        rampsMemo: {},
+        fireblocks: {
+          transactionId: "fireblocks-proposal",
+          status: "PENDING_AUTHORIZATION",
+          subStatus: null,
+        },
+      },
+    });
+    expect(screen.getByText(/Payment submitted to Fireblocks/)).toBeTruthy();
+    expect(screen.getByText(/Your source vault pays the network fee in SOL/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "View transaction" }).getAttribute("href")).toContain(
+      "/payments/transactions/xfr_fireblocks"
+    );
+    expect(screen.queryByText("Your transfer was sent successfully.")).toBeNull();
+  });
 });

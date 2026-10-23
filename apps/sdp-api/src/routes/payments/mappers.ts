@@ -80,6 +80,19 @@ export function mapTransferRow(row: TransferRow) {
     confirmedAt: row.confirmed_at ?? undefined,
     fee: row.fee,
     error: row.error,
+    fireblocks: row.provider_data.fireblocksTransfer
+      ? {
+          transactionId: row.provider_reference,
+          status:
+            typeof row.provider_data.fireblocksStatus === "string"
+              ? row.provider_data.fireblocksStatus
+              : "SUBMISSION_PENDING",
+          subStatus:
+            typeof row.provider_data.fireblocksSubStatus === "string"
+              ? row.provider_data.fireblocksSubStatus
+              : null,
+        }
+      : undefined,
     ...(row.initiated_by_key_id
       ? {
           initiatedBy: {

@@ -109,6 +109,13 @@ import {
   type OutboundPaymentOperation,
   resolveOutboundPaymentOperation,
 } from "@/services/payment-operation.service";
+import {
+  isFireblocksTransfer,
+  prepareFireblocksTransfer,
+  refreshFireblocksTransfer,
+  submitFireblocksTransfer,
+} from "@/services/payments/fireblocks-transfer";
+import { signWithFreshBlockhash } from "@/services/payments/sign-with-fresh-blockhash";
 import { createTransferSignedSubmissionStore } from "@/services/payments/signed-submission";
 import { loadPaymentMint, parseStaticPaymentAmount } from "@/services/payments/token-amount";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
@@ -717,7 +724,6 @@ async function executeSponsoredTransfer(
   }
 
   const rpc = createClusterRpc();
-  const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
   const feePayment = createSponsorshipFeePayment(
     c.env,
     resolveRequestSponsorshipScope(c),
@@ -726,6 +732,7 @@ async function executeSponsoredTransfer(
   );
   const feePayer = await feePayment.getFeePayer();
   const instructions = await params.buildInstructions({ signer, feePayer, rpc });
+  const { blockhash, lastValidBlockHeight } = await getRecentBlockhash(rpc, "confirmed");
 
   const message = pipe(
     createTransactionMessage({ version: 0 }),
@@ -735,7 +742,10 @@ async function executeSponsoredTransfer(
     (m) => addSignersToTransactionMessage([signer], m)
   );
 
-  const partiallySigned = await partiallySignTransactionMessageWithSigners(message);
+  const partiallySigned = await signWithFreshBlockhash({
+    blockhash,
+    sign: () => partiallySignTransactionMessageWithSigners(message),
+  });
   const txEncoder = getTransactionEncoder();
   const txBytes = new Uint8Array(txEncoder.encode(partiallySigned));
   const signature = await submitSponsoredTransaction({
@@ -914,16 +924,54 @@ function compareTransferRows(
   return createdAtComparison || right.id.localeCompare(left.id);
 }
 
+async function executeFireblocksTransfer(
+  c: AppContext,
+  transfer: TransferRow,
+  auditService: AuditService,
+  auditIntent: Awaited<ReturnType<AuditService["beginCritical"]>>
+) {
+  // Once claimed, an ambiguous provider response must never enter the local
+  // transaction failure/rebroadcast path. The durable provider intent owns recovery.
+  let updated: TransferRow;
+  try {
+    updated = await submitFireblocksTransfer(c.env, getPaymentsRepository(c), transfer);
+  } catch (error) {
+    await auditService.completeCritical(c, auditIntent, {
+      status: "failure",
+      metadata: { status: "failed" },
+    });
+    throw error;
+  }
+  if (updated.provider_reference || updated.status === "failed") {
+    await auditService.completeCritical(c, auditIntent, {
+      status: updated.status === "failed" ? "failure" : "success",
+      metadata: { fireblocksTransactionId: updated.provider_reference, status: updated.status },
+    });
+  }
+  if (updated.status === "failed")
+    throw transactionFailed(updated.error ?? "Fireblocks refused the transfer");
+  return success(c, { transfer: mapTransferRow(updated) });
+}
+
 export async function createTransfer(c: ValidatedBodyContext<typeof createTransferSchema>) {
   const body = c.req.valid("json");
   const { scope, operation, rampTransfer } = getAuthorized<TransferResolved>(c);
-  // Before the row: a too-precise amount is the caller's 400, never a failed transfer.
-  await parseStaticPaymentAmount(operation.amount, assertValidAddress(operation.token, "token"));
   // The credential-bound record key (ADR 0009), never the raw client key.
   const recordKey = getIdempotencyRecordKey(c);
   const fingerprint = getIdempotencyFingerprint(c);
   const idempotency =
     recordKey !== undefined && fingerprint !== undefined ? { key: recordKey, fingerprint } : null;
+  const fireblocks = await prepareFireblocksTransfer(
+    c.env,
+    scope.auth.organizationId,
+    requireProjectId(c),
+    operation
+  );
+  // Reject unsupported Fireblocks mints before attempting an unused Solana read.
+  // Before the row: a too-precise amount is the caller's 400, never a failed transfer.
+  await parseStaticPaymentAmount(operation.amount, assertValidAddress(operation.token, "token"));
+  if (fireblocks && body.transferId)
+    throw badRequest("Fireblocks native transfers currently support direct wallet payments only");
 
   const rampClaim = rampTransfer
     ? await updateOnchainTransferForRamp(c, {
@@ -949,6 +997,7 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
         status: "processing",
         initiatedByKeyId: scope.auth.id,
         idempotency,
+        providerData: fireblocks ? { fireblocksTransfer: fireblocks.intent } : undefined,
       });
 
   if (replayed) {
@@ -994,6 +1043,7 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
     });
     throw error;
   }
+  if (fireblocks) return executeFireblocksTransfer(c, transfer, auditService, auditIntent);
   try {
     if (isNativePaymentToken(operation.token)) {
       const solResult = await executeSolTransfer(
@@ -1426,6 +1476,19 @@ export async function listTransfers(c: AppContext) {
     transferRows = result.rows;
   }
 
+  // Reconcile only a bounded slice; independent reads share a 15s durable poll claim.
+  const pending = transferRows
+    .filter((row) => isFireblocksTransfer(row) && row.status === "processing")
+    .slice(0, 4);
+  const refreshed = await mapSettledWithConcurrency(pending, 4, (row) =>
+    refreshFireblocksTransfer(c.env, repo, row)
+  );
+  const byId = new Map(
+    refreshed.flatMap((result) =>
+      result.status === "fulfilled" ? [[result.value.id, result.value] as const] : []
+    )
+  );
+  transferRows = transferRows.map((row) => byId.get(row.id) ?? row);
   const transfers = transferRows.map(mapTransferRow);
   return paginated(c, transfers, { total, page, pageSize });
 }
@@ -1452,5 +1515,6 @@ export async function getTransfer(c: AppContext) {
     throw notFound("Transfer");
   }
 
-  return success(c, { transfer: mapTransferRow(row) });
+  const refreshed = await refreshFireblocksTransfer(c.env, repo, row);
+  return success(c, { transfer: mapTransferRow(refreshed) });
 }

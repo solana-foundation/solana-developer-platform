@@ -2,6 +2,10 @@ import type { CustodyProvider } from "@sdp/types/custody";
 import type { ComplianceProviderId, RampProviderId } from "@sdp/types/provider-access";
 import type { Context } from "hono";
 import { z } from "zod";
+import {
+  fireblocksRegistrationSchema,
+  privyAuthenticationSchema,
+} from "@/services/custody/byok-credential";
 import { isProviderConfigured } from "@/services/provider-availability.service";
 import {
   cancelProviderCredentialInstallation,
@@ -53,8 +57,7 @@ const privyCredentialFieldsSchema = z
   .object({
     credentialLabel: z.string().trim().min(1),
     scope: z.literal("project"),
-    appId: z.string().trim().min(1).max(4096),
-    appSecret: z.string().min(1).max(4096),
+    ...privyAuthenticationSchema.shape,
   })
   .strict();
 
@@ -69,15 +72,43 @@ const privyCredentialSetupSchema = privyCredentialSetupBaseSchema
   .strict();
 
 export type PrivyCredentialSetupPayload = z.infer<typeof privyCredentialSetupSchema>;
+const fireblocksCredentialSetupSchema = privyCredentialSetupBaseSchema
+  .extend({
+    provider: z.literal("fireblocks"),
+    fireblocksVaultAccountIds: z
+      .array(z.string().regex(/^\d{1,100}$/))
+      .min(1)
+      .max(20)
+      .optional(),
+    fields: privyCredentialFieldsSchema
+      .omit({ appId: true, appSecret: true })
+      .extend(fireblocksRegistrationSchema.shape)
+      .strict(),
+  })
+  .strict()
+  .refine(
+    (input) =>
+      !input.fireblocksVaultAccountIds ||
+      (input.fireblocksVaultAccountIds.includes(input.fields.vaultAccountId) &&
+        new Set(input.fireblocksVaultAccountIds).size === input.fireblocksVaultAccountIds.length),
+    "Select distinct vaults including the connection's signing vault"
+  );
+const custodyCredentialSetupSchema = z.discriminatedUnion("provider", [
+  privyCredentialSetupSchema,
+  fireblocksCredentialSetupSchema,
+]);
+export function validateCustodySetupPayload(payload: unknown) {
+  return custodyCredentialSetupSchema.safeParse(payload);
+}
 
-interface PrivyStoreCredentialsInput {
+interface CustodyStoreCredentialsInput {
   context: AppContext;
   idempotencyKey: string;
-  payload: PrivyCredentialSetupPayload;
+  payload: z.infer<typeof custodyCredentialSetupSchema>;
   connectionId?: string;
 }
 
-interface PrivyConnectionOperationInput {
+interface CustodyConnectionOperationInput {
   context: AppContext;
   connectionId: string;
 }
@@ -86,7 +117,7 @@ function validatePrivySetupPayload(payload: unknown) {
   return privyCredentialSetupSchema.safeParse(payload);
 }
 
-async function storePrivyCredentials(input: PrivyStoreCredentialsInput) {
+export async function storeCustodyCredentials(input: CustodyStoreCredentialsInput) {
   if (input.connectionId) {
     return replaceProviderCredential(
       input.context,
@@ -154,16 +185,27 @@ function rampSetup<const Provider extends RampProviderId>(provider: Provider) {
 export const PROVIDER_SETUP_REGISTRY = {
   custody: {
     local: { family: "custody", provider: "local", setupMode: "platform_managed" },
-    fireblocks: { family: "custody", provider: "fireblocks", setupMode: "contact" },
+    fireblocks: {
+      family: "custody",
+      provider: "fireblocks",
+      setupMode: "self_service",
+      validateSetupPayload: (payload: unknown) =>
+        fireblocksCredentialSetupSchema.safeParse(payload),
+      storeCredentials: storeCustodyCredentials,
+      activate: ({ context, connectionId }: CustodyConnectionOperationInput) =>
+        completeProviderCredentialInstallation(context, connectionId),
+      deactivate: ({ context, connectionId }: CustodyConnectionOperationInput) =>
+        cancelProviderCredentialInstallation(context, connectionId),
+    },
     privy: {
       family: "custody",
       provider: "privy",
       setupMode: "self_service",
       validateSetupPayload: validatePrivySetupPayload,
-      storeCredentials: storePrivyCredentials,
-      activate: ({ context, connectionId }: PrivyConnectionOperationInput) =>
+      storeCredentials: storeCustodyCredentials,
+      activate: ({ context, connectionId }: CustodyConnectionOperationInput) =>
         completeProviderCredentialInstallation(context, connectionId),
-      deactivate: ({ context, connectionId }: PrivyConnectionOperationInput) =>
+      deactivate: ({ context, connectionId }: CustodyConnectionOperationInput) =>
         cancelProviderCredentialInstallation(context, connectionId),
     },
     coinbase_cdp: {

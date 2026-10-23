@@ -75,6 +75,9 @@ importers:
       '@biomejs/biome':
         specifier: 2.5.14
         version: 2.5.14
+      '@sdp/types':
+        specifier: workspace:*
+        version: link:packages/sdp-types
       turbo:
         specifier: 2.11.4
         version: 2.11.4
@@ -232,6 +235,12 @@ importers:
       '@asteasolutions/zod-to-openapi':
         specifier: 9.1.0
         version: 9.1.0(zod@4.6.5)
+      '@solana/keychain-core':
+        specifier: 1.4.0
+        version: 1.4.0(@solana/addresses@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/codecs-core@8.4.0(typescript@6.0.3))(@solana/codecs-strings@8.4.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/keys@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/signers@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/transactions@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))
+      '@solana/keychain-fireblocks':
+        specifier: 1.4.0
+        version: 1.4.0(@solana/addresses@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/codecs-core@8.4.0(typescript@6.0.3))(@solana/codecs-strings@8.4.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/keys@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/signers@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/transactions@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))
       '@testcontainers/postgresql':
         specifier: 12.1.0
         version: 12.1.0
@@ -585,6 +594,9 @@ importers:
       jose:
         specifier: 6.2.12
         version: 6.2.12
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
     devDependencies:
       '@types/node':
         specifier: 26.6.2
@@ -15856,7 +15868,7 @@ snapshots:
       eslint: 10.11.0(jiti@2.7.0)
       eslint-import-resolver-node: 0.3.10
       eslint-import-resolver-typescript: 3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.70.1(eslint@10.11.0(jiti@2.7.0))(typescript@6.0.3))(eslint@10.11.0(jiti@2.7.0)))(eslint@10.11.0(jiti@2.7.0))
-      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.70.1(eslint@10.11.0(jiti@2.7.0))(typescript@6.0.3))(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.70.1(eslint@10.11.0(jiti@2.7.0))(typescript@6.0.3))(eslint@10.11.0(jiti@2.7.0)))(eslint@10.11.0(jiti@2.7.0)))(eslint@10.11.0(jiti@2.7.0))
+      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.70.1(eslint@10.11.0(jiti@2.7.0))(typescript@6.0.3))(eslint-import-resolver-typescript@3.10.1)(eslint@10.11.0(jiti@2.7.0))
       eslint-plugin-jsx-a11y: 6.10.2(eslint@10.11.0(jiti@2.7.0))
       eslint-plugin-react: 7.37.5(eslint@10.11.0(jiti@2.7.0))
       eslint-plugin-react-hooks: 7.1.1(eslint@10.11.0(jiti@2.7.0))
@@ -15889,7 +15901,7 @@ snapshots:
       tinyglobby: 0.2.17
       unrs-resolver: 1.12.2
     optionalDependencies:
-      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.70.1(eslint@10.11.0(jiti@2.7.0))(typescript@6.0.3))(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.70.1(eslint@10.11.0(jiti@2.7.0))(typescript@6.0.3))(eslint@10.11.0(jiti@2.7.0)))(eslint@10.11.0(jiti@2.7.0)))(eslint@10.11.0(jiti@2.7.0))
+      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.70.1(eslint@10.11.0(jiti@2.7.0))(typescript@6.0.3))(eslint-import-resolver-typescript@3.10.1)(eslint@10.11.0(jiti@2.7.0))
     transitivePeerDependencies:
       - supports-color
 
@@ -15904,7 +15916,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.70.1(eslint@10.11.0(jiti@2.7.0))(typescript@6.0.3))(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.70.1(eslint@10.11.0(jiti@2.7.0))(typescript@6.0.3))(eslint@10.11.0(jiti@2.7.0)))(eslint@10.11.0(jiti@2.7.0)))(eslint@10.11.0(jiti@2.7.0)):
+  eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.70.1(eslint@10.11.0(jiti@2.7.0))(typescript@6.0.3))(eslint-import-resolver-typescript@3.10.1)(eslint@10.11.0(jiti@2.7.0)):
     dependencies:
       '@rtsao/scc': 1.1.0
       array-includes: 3.2.0

@@ -397,7 +397,16 @@
       "transferFailed": "Transfer failed.",
       "transferSuccess": "Your transfer was sent successfully.",
       "transferStatus": "Status: {status}",
-      "viewOnExplorer": "View on explorer"
+      "viewOnExplorer": "View on explorer",
+      "fireblocksReview": "Approve this payment in Fireblocks. Your source vault pays the network fee in SOL, including for USDC. The destination must be permitted by your Fireblocks one-time-address policy. The memo is a payment note, not an on-chain memo.",
+      "fireblocksPending": "Payment submitted to Fireblocks. Review and approve it there; SDP will update its status after signing and confirmation.",
+      "fireblocksUnknown": "SDP is checking whether Fireblocks received this payment. Check its transaction details before starting another payment.",
+      "viewTransaction": "View transaction",
+      "fireblocksTransactionId": "Fireblocks transaction ID",
+      "fireblocksStatus": "Fireblocks status",
+      "fireblocks": "Fireblocks",
+      "whitelistWarning": "This address is not whitelisted in Fireblocks.",
+      "whitelistDescription": "Add {address} for {asset} in Fireblocks, or use an allowed one-time transfer. “Don’t show again” applies to this project on this browser."
     },
     "onchainReceive": {
       "wallet": "Wallet",
@@ -1585,6 +1594,21 @@
         }
       }
     },
-    "noTransactions": "No transactions found yet."
+    "noTransactions": "No transactions found yet.",
+    "fireblocksPolicy": {
+      "missing": "No matching Fireblocks transfer policy was found. Set up a transfer rule in Fireblocks before sending.",
+      "blocked": "A Fireblocks transfer policy blocks this payment. Review the rule in Fireblocks before sending.",
+      "unknown": "SDP could not determine whether Fireblocks allows this payment. Review your transfer policy in Fireblocks.",
+      "permissions": "Your Fireblocks API user cannot read policies. Check in Fireblocks that a transfer rule allows this payment.",
+      "recheck": "Check again",
+      "openFireblocks": "Open Fireblocks",
+      "configure": "Configure a Transfer policy in Fireblocks for this API user, source vault, destination and asset, with your approvers and a designated human signer. SDP cannot inspect policies using the recommended Editor role."
+    },
+    "fireblocksWarnings": {
+      "suppress": "Don’t show again",
+      "dismiss": "Dismiss",
+      "scope": "Hide these warnings for this project on this browser.",
+      "saveFailed": "Couldn’t save this preference. Check that browser storage is enabled."
+    }
   }
 }

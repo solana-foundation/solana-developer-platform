@@ -2,7 +2,7 @@
 
 import type { CounterpartyAccount } from "@sdp/types/counterparties";
 import type { PaymentsDashboardWallet, PaymentTransferSummary } from "@sdp/types/payments";
-import { SOL_MINT } from "@sdp/types/well-known-tokens";
+import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { SWRConfig } from "swr";
@@ -116,14 +116,13 @@ function wrapper({ children }: { children: ReactNode }) {
   );
 }
 
-function renderWizard() {
-  const onExit = vi.fn();
+function renderWizard(onExit = vi.fn(), sourceWallets = wallets) {
   return {
     onExit,
     ...renderHook(
       () =>
         useOnchainSendWizard({
-          wallets,
+          wallets: sourceWallets,
           walletsError: null,
           issuedTokenSymbolsByMint: {},
           counterpartyId: "counterparty-test",
@@ -209,6 +208,56 @@ afterEach(() => {
 });
 
 describe("useOnchainSendWizard", () => {
+  it("resets unsupported assets when switching to Fireblocks BYOK and rejects stale selections", async () => {
+    const balances = [SOL_MINT, WELL_KNOWN_TOKENS.USDC.mints.devnet.address, SECOND_MINT].map(
+      (mint) => ({
+        mint,
+        token: mint === SOL_MINT ? "SOL" : "USDC",
+        amount: "1000000",
+        uiAmount: "1",
+        decimals: 6,
+      })
+    );
+    const sourceWallets: PaymentsDashboardWallet[] = [
+      { ...wallets[0], id: "managed", provider: "fireblocks", balances },
+      {
+        ...wallets[0],
+        id: "byok",
+        provider: "fireblocks",
+        custodyConnectionId: "cconn_fb",
+        balances,
+      },
+    ];
+    const fallback = fetchMock.getMockImplementation();
+    if (!fallback) throw new Error("Missing fetch fixture");
+    fetchMock.mockImplementation((input, init) =>
+      String(input) === "/api/dashboard/wallets?view=summary&includeBalances=true"
+        ? Promise.resolve(Response.json({ data: { wallets: sourceWallets } }))
+        : fallback(input, init)
+    );
+    const { result } = renderWizard(vi.fn(), sourceWallets);
+    await resolveAccounts();
+    act(() => {
+      result.current.setField("accountId", cryptoAccount.id);
+      result.current.selectWallet("managed");
+    });
+    act(() => {
+      result.current.setField("asset", SECOND_MINT);
+      result.current.setField("amount", "0.5");
+    });
+    expect(result.current.readySubmission?.token).toBe(SECOND_MINT);
+    act(() => result.current.selectWallet("byok"));
+    expect(result.current.assetOptions.map((option) => option.value)).toEqual([
+      SOL_MINT,
+      WELL_KNOWN_TOKENS.USDC.mints.devnet.address,
+    ]);
+    expect(result.current.fields.asset).toBe(SOL_MINT);
+    act(() => result.current.setField("asset", SECOND_MINT));
+    expect(result.current.selectedAssetBalance).toBeNull();
+    expect(result.current.readySubmission).toBeNull();
+    expect(transferPosts()).toHaveLength(0);
+  });
+
   it("loads active crypto destinations and navigates destination steps", async () => {
     const { result, onExit } = renderWizard();
 
