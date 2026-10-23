@@ -408,8 +408,11 @@ async function resolveRecurringPaymentUpdate(input: {
     metadataUri,
   };
   const diff = buildUpdateDiff(before, after);
+  // A recovered update makes no mandate here: an earlier run may already hold one on chain, so
+  // runReplacementUpdate makes one only for a new replacement plan.
   const newMandate =
-    diff.changedFields.includes("token") || diff.changedFields.includes("amount")
+    !input.recoveringStaleUpdate &&
+    (diff.changedFields.includes("token") || diff.changedFields.includes("amount"))
       ? await makeUpdateMandate({
           token,
           amount,
@@ -1195,8 +1198,8 @@ async function prepareSubscriptionAuthorityForUpdate(input: {
 
 async function getOrCreateReplacementPlan(input: {
   subscriptionsRepo: PaymentSubscriptionsRepository;
-  /** The mandate a new replacement plan records. */
-  mandate: RecurringMandate;
+  /** Makes the mandate a new replacement plan records; an existing plan keeps its own. */
+  makeMandate: () => RecurringMandate;
   attempt: PaymentRecurringPaymentUpdateAttemptRow;
   organizationId: string;
   projectId: string;
@@ -1224,7 +1227,7 @@ async function getOrCreateReplacementPlan(input: {
     ownerAddress: input.sourceWallet.publicKey,
     token: input.resolved.token,
     amount: input.resolved.amount,
-    mandate: input.mandate,
+    mandate: input.makeMandate(),
     periodHours: input.resolved.periodHours,
     programPlanId: generateProgramPlanId(),
     planPda: null,
@@ -1540,24 +1543,39 @@ async function runReplacementUpdate(input: {
   // one the request made with a new mandate, or one now. RPC budget: the mint's owner, the
   // source token account and `getTokenSupply` → one `getMultipleAccounts`.
   const { newMandate } = input.resolved;
+  const changesMandate =
+    input.resolved.changedFields.includes("token") ||
+    input.resolved.changedFields.includes("amount");
   const read =
     newMandate === null
-      ? await readRecurringTerms(input.resolved.token, input.claimed.mandate, [destination, owner])
+      ? await readRecurringTerms(
+          input.resolved.token,
+          changesMandate ? null : input.claimed.mandate,
+          [destination, owner]
+        )
       : newMandate.read;
   const [destinationAccount, sourceAccount] = read.destinations;
   if (destinationAccount === undefined || sourceAccount === undefined) {
     throw internalError("The recurring terms read returned no token accounts");
   }
   assertMandateActivatable(read.terms, destinationAccount);
-  const requestedMandate =
-    newMandate === null ? rowMandate(input.claimed, read.terms) : newMandate.mandate;
+  // Today's fee checks apply only to a mandate made now: a recovered update finishes the
+  // replacement plan an earlier run created with the mandate it holds.
+  const makeMandate = (): RecurringMandate => {
+    if (newMandate !== null) {
+      return newMandate.mandate;
+    }
+    return changesMandate
+      ? createRecurringMandate(read.terms, input.resolved.amount)
+      : rowMandate(input.claimed, read.terms);
+  };
   const sourceTokenAccount = {
     tokenAccount: sourceAccount.tokenAccount,
     exists: sourceAccount.exists,
   };
 
   let plan = await getOrCreateReplacementPlan({
-    mandate: requestedMandate,
+    makeMandate,
     subscriptionsRepo,
     attempt,
     organizationId: input.organizationId,
@@ -1568,7 +1586,7 @@ async function runReplacementUpdate(input: {
   });
   // A plan an earlier run created keeps the mandate it was created with on chain; one written
   // before mandates has none, so the request's applies.
-  const mandate = plan.mandate === null ? requestedMandate : plan.mandate;
+  const mandate = plan.mandate === null ? makeMandate() : plan.mandate;
   const { mint, tokenProgram } = mandateProgramAccounts(mandate);
   const amountBaseUnits = mandate.debit;
   if (attempt.new_plan_id !== plan.id) {

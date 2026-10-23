@@ -655,6 +655,30 @@ describe("Public payment request routes", () => {
 
       expect((await postTransaction(request.public_token)).status).toBe(200);
     });
+
+    it("refuses a payer paying into the request's own wallet, which would move nothing", async () => {
+      stubSponsorship();
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+
+      const response = await postTransaction(
+        request.public_token,
+        SANDBOX_REQUEST_WALLET.publicKey
+      );
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: {
+          message: "The destination is the source account: the transfer would move nothing",
+        },
+      });
+      const windows = await getDb(env)
+        .prepare(
+          "SELECT COUNT(*)::integer AS count FROM payment_request_transactions WHERE payment_request_id = ?"
+        )
+        .bind(request.id)
+        .first<{ count: number }>();
+      expect(windows).toEqual({ count: 0 });
+    });
   });
 
   describe("payment through the token movement builder (ADR 0012)", () => {
