@@ -638,7 +638,7 @@ describe("money admission reads the principal in the same statement", () => {
     await db
       .prepare(
         `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-         VALUES (?, ?, ?, 'owner', 'active') ON CONFLICT DO NOTHING`
+         VALUES (?, ?, ?, 'admin', 'active') ON CONFLICT DO NOTHING`
       )
       .bind("om_money_admission", TEST_ORG.id, TEST_USER.id)
       .run();
@@ -660,7 +660,7 @@ describe("money admission reads the principal in the same statement", () => {
     await expect(
       asMember(() => readMoneyAdmissionFacts(env, sandbox, NO_WALLET))
     ).resolves.toMatchObject({
-      principal: { kind: "member", member: { status: "active", role: "owner", inProject: true } },
+      principal: { kind: "member", member: { status: "active", role: "admin", inProject: true } },
     });
     await expect(start("payments.transfer")).resolves.toBeUndefined();
 
