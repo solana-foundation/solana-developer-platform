@@ -14,7 +14,7 @@ import {
 } from "@sdp/types/custody";
 import type { MovementId } from "@sdp/types/movements";
 import type { OrganizationProviderAvailabilityResponse } from "@sdp/types/provider-access";
-import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
+import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import type { Address, TransactionSigner } from "@solana/kit";
 import type { Context } from "hono";
 import type { DatabaseClient } from "@/db/client";
@@ -359,7 +359,7 @@ export class CustodyRuntimeTargets {
       this.findOperationalWallets(params.organizationId, params.projectId),
       // Custody entries only: ramp provider stages cannot change them.
       getProviderAvailability(this.env, this.db, params.organizationId, {
-        rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
+        rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY,
       }),
     ]);
     const configRows = ownedWallets.filter(isConfigOwnedWalletRow);

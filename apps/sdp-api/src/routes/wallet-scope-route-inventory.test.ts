@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { actionVerbOf, isAction, isApiKeyGrantableAction } from "@sdp/types/actions";
 import { MOVEMENTS } from "@sdp/types/movements";
-import { SDP_RAMP_PROVIDER_STAGES, type SdpModule } from "@sdp/types/release-channels";
+import { SDP_RAMP_PROVIDER_MATURITY, type SdpModule } from "@sdp/types/release-channels";
 import { describe, expect, it } from "vitest";
 import { createApp } from "@/app";
 import { registeredRouteAuthorizations } from "@/routes/route-actions";
@@ -323,7 +323,7 @@ const MOVEMENT_MODULES: ReadonlySet<SdpModule> = new Set(
 );
 
 function valueMovingRoutes(): string[] {
-  const app = createApp({ rampProviderStages: SDP_RAMP_PROVIDER_STAGES });
+  const app = createApp({ rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY });
   return registeredRouteAuthorizations(app)
     .flatMap((route) => {
       if (!MUTATING_METHODS.has(route.method) || !route.path.startsWith("/v1/")) return [];

@@ -288,8 +288,8 @@ export class ApiKeyService {
     }
 
     const keyId = `key_${crypto.randomUUID()}`;
-    const { key, prefix } = createApiKeyMaterial(project.environment);
-    const keyHash = await hashApiKey(key, input.pepper);
+    const { key, publicId, secret, prefix } = createApiKeyMaterial();
+    const keyHash = await hashApiKey(secret, input.pepper);
 
     const createdBy = input.createdByUserId;
     const actor = await this.db
@@ -306,8 +306,8 @@ export class ApiKeyService {
         .prepare(
           `INSERT INTO api_keys (
             id, organization_id, project_id, created_by, name, description, key_prefix, key_hash,
-            grants, allowed_ips, wallet_scope, expires_at, status
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`
+            public_id, grants, allowed_ips, wallet_scope, expires_at, status
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`
         )
         .bind(
           keyId,
@@ -318,6 +318,7 @@ export class ApiKeyService {
           input.description ?? null,
           prefix,
           keyHash,
+          publicId,
           normalizeGrants(input.grants),
           input.allowedIps ? JSON.stringify(input.allowedIps) : null,
           input.walletScope.scope,
@@ -533,8 +534,13 @@ export class ApiKeyService {
     assertGrantableApiKeyGrants(actorRole, grants);
 
     const newKeyId = `key_${crypto.randomUUID()}`;
-    const { key: newKey, prefix: newPrefix } = createApiKeyMaterial(target.environment);
-    const newKeyHash = await hashApiKey(newKey, pepper);
+    const {
+      key: newKey,
+      publicId: newPublicId,
+      secret: newSecret,
+      prefix: newPrefix,
+    } = createApiKeyMaterial();
+    const newKeyHash = await hashApiKey(newSecret, pepper);
 
     const requestedDeadline = new Date(now + gracePeriodHours * 60 * 60 * 1000).toISOString();
     // Never extend a deadline: a second rotation inside a grace period keeps
@@ -552,8 +558,9 @@ export class ApiKeyService {
     await this.db.execute(
       `INSERT INTO api_keys (
          id, organization_id, project_id, created_by, name, description, key_prefix, key_hash,
-         grants, grants_assigned, allowed_ips, wallet_scope, rotated_from, status, expires_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
+         public_id, grants, grants_assigned, allowed_ips, wallet_scope, rotated_from, status,
+         expires_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
       [
         newKeyId,
         organizationId,
@@ -563,6 +570,7 @@ export class ApiKeyService {
         target.description,
         newPrefix,
         newKeyHash,
+        newPublicId,
         grants,
         // A replacement for a key that predates grants predates them too.
         target.grants_assigned,

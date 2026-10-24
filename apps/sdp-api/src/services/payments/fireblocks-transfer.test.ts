@@ -1,5 +1,5 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
-import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
+import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -149,7 +149,7 @@ const SIG =
   "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy";
 const USDC = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
 const paymentApp = createApp({
-  rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
+  rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY,
 });
 let walletId: string;
 let createBody: import("@sdp/custody/provisioning/fireblocks-transfers").FireblocksTransferRequest;

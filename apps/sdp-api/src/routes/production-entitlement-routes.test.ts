@@ -1,4 +1,4 @@
-import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
+import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import { inspectRoutes } from "hono/dev";
 import { beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "@/app";
@@ -55,7 +55,7 @@ function exemption(method: string, path: string): string | undefined {
 
 describe("production entitlement covers every project route (APE-351)", () => {
   const app = createApp({
-    rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
+    rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY,
   });
   const routes = new Map<string, { method: string; path: string }>();
   for (const { method, path, isMiddleware } of inspectRoutes(app)) {

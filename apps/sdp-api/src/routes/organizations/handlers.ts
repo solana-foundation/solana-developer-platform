@@ -197,7 +197,7 @@ export const getOrganizationProviderAccess = async (c: AppContext) => {
   }
 
   const response = await getProviderAvailability(c.env, getDb(c.env), orgId, {
-    rampProviderStages: c.get("rampProviderStages"),
+    rampProviderMaturity: c.get("rampProviderMaturity"),
   });
   return success(c, response);
 };

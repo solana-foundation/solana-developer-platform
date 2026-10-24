@@ -403,7 +403,7 @@ function toPostmanCollection(spec) {
       },
       {
         key: "sdpApiKey",
-        value: "sk_test_your_api_key",
+        value: "sf_your_api_key",
         type: "string",
       },
     ],

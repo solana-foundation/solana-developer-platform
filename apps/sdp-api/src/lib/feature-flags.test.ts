@@ -8,12 +8,12 @@ import {
   isModuleInReleaseChannel,
   isRampProviderInReleaseChannel,
   resolveSdpReleaseChannel,
-  SDP_BYOK_CUSTODY_PROVIDER_STAGES,
-  SDP_MANAGED_CUSTODY_PROVIDER_STAGES,
-  SDP_RAMP_PROVIDER_STAGES,
+  SDP_BYOK_CUSTODY_PROVIDER_MATURITY,
+  SDP_MANAGED_CUSTODY_PROVIDER_MATURITY,
+  SDP_RAMP_PROVIDER_MATURITY,
   SDP_RELEASE_CHANNEL_NAMES,
   SDP_RELEASE_CHANNELS,
-  type SdpRampProviderStages,
+  type SdpRampProviderMaturity,
 } from "@sdp/types/release-channels";
 import { describe, expect, it } from "vitest";
 import type { Env } from "@/types/env";
@@ -284,7 +284,7 @@ describe("release channels", () => {
   });
 
   it("pins each custody (provider, mode) pair's stage", () => {
-    expect(SDP_MANAGED_CUSTODY_PROVIDER_STAGES).toEqual({
+    expect(SDP_MANAGED_CUSTODY_PROVIDER_MATURITY).toEqual({
       local: "beta",
       fireblocks: "beta",
       privy: "stable",
@@ -296,7 +296,7 @@ describe("release channels", () => {
       anchorage: "beta",
       utila: "beta",
     });
-    expect(SDP_BYOK_CUSTODY_PROVIDER_STAGES).toEqual({ privy: "stable", fireblocks: "beta" });
+    expect(SDP_BYOK_CUSTODY_PROVIDER_MATURITY).toEqual({ privy: "stable", fireblocks: "beta" });
   });
 
   it.each(SDP_RELEASE_CHANNEL_NAMES)("gates Fireblocks custody modes on %s", (channel) => {
@@ -311,14 +311,14 @@ describe("release channels", () => {
   it.each(SDP_RELEASE_CHANNEL_NAMES)(
     "runs custody on %s because a custody provider is staged there",
     (releaseChannel) => {
-      expect(isModuleInReleaseChannel(releaseChannel, "custody", SDP_RAMP_PROVIDER_STAGES)).toBe(
+      expect(isModuleInReleaseChannel(releaseChannel, "custody", SDP_RAMP_PROVIDER_MATURITY)).toBe(
         true
       );
     }
   );
 
   it("runs ramps only where at least one ramp provider is in the release channel", () => {
-    const stripeInBeta: SdpRampProviderStages = {
+    const stripeInBeta: SdpRampProviderMaturity = {
       moonpay: "experimental",
       stripe: "beta",
     };

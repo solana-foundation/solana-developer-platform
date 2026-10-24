@@ -30,7 +30,7 @@ SDP puts one stable API in front of the Solana ecosystem's providers, so you int
 const response = await fetch("https://api.solana.com/v1/wallets", {
   method: "POST",
   headers: {
-    Authorization: "Bearer sk_test_...",
+    Authorization: "Bearer sf_...",
     "Content-Type": "application/json",
   },
   body: JSON.stringify({
@@ -47,7 +47,7 @@ import requests
 
 response = requests.post(
     "https://api.solana.com/v1/wallets",
-    headers={"Authorization": "Bearer sk_test_..."},
+    headers={"Authorization": "Bearer sf_..."},
     json={"provider": "privy", "label": "Treasury wallet"},
 )
 wallet = response.json()
@@ -56,7 +56,7 @@ wallet = response.json()
 <Tab value="curl">
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/wallets \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -d '{ "provider": "privy", "label": "Treasury wallet" }'
 ```
@@ -89,7 +89,7 @@ SDP exposes unified endpoints for onchain transfers, built on official Solana pr
 <Tab value="Recurring Payments">
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/recurring-payments \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Idempotency-Key: recurring-subscriber-42" \
   -H "Content-Type: application/json" \
   -d '{
@@ -105,7 +105,7 @@ curl -X POST https://api.solana.com/v1/payments/recurring-payments \
 <Tab value="Payment Requests">
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/requests \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -d '{
     "walletId": "privy_wallet_123",
@@ -118,7 +118,7 @@ curl -X POST https://api.solana.com/v1/payments/requests \
 <Tab value="Batch Transfers">
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/transfer-batches \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Idempotency-Key: payroll-2026-06-30" \
   -H "Content-Type: application/json" \
   -d '{

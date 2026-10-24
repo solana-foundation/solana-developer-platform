@@ -8,7 +8,7 @@ import type { ApiKeyWalletScope } from "@sdp/types/api-keys";
 import {
   isModuleInReleaseChannel,
   resolveSdpReleaseChannel,
-  type SdpRampProviderStages,
+  type SdpRampProviderMaturity,
   type SdpReleaseChannel,
 } from "@sdp/types/release-channels";
 import type { OrganizationRole } from "@sdp/types/roles";
@@ -48,14 +48,14 @@ export function assertGrantableApiKeyGrants(
 /** The deployment's release channel, which bounds the grants a key may be given. */
 export interface ApiKeyGrantChannel {
   releaseChannel: SdpReleaseChannel;
-  rampProviderStages: SdpRampProviderStages;
+  rampProviderMaturity: SdpRampProviderMaturity;
 }
 
 /** The request's deployment channel, read where the grants are decided. */
 export function requestApiKeyGrantChannel(c: Context<{ Bindings: Env }>): ApiKeyGrantChannel {
   return {
     releaseChannel: resolveSdpReleaseChannel(c.env.SDP_RELEASE_CHANNEL),
-    rampProviderStages: c.get("rampProviderStages"),
+    rampProviderMaturity: c.get("rampProviderMaturity"),
   };
 }
 
@@ -73,7 +73,7 @@ export function assertApiKeyGrantsInReleaseChannel(
   const outside = requestedGrants.filter(
     (grant) =>
       !isActionInReleaseChannel(grant, (module) =>
-        isModuleInReleaseChannel(channel.releaseChannel, module, channel.rampProviderStages)
+        isModuleInReleaseChannel(channel.releaseChannel, module, channel.rampProviderMaturity)
       )
   );
   if (outside.length > 0) {

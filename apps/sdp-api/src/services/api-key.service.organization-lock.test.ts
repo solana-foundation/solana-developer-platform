@@ -1,4 +1,4 @@
-import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
+import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import { beforeEach, describe, expect, it } from "vitest";
 import { asTransactionalClient, getDb } from "@/db/client";
 import { runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db/identity";
@@ -23,7 +23,10 @@ const INPUT: CreateApiKeyInput = {
   projectId: TEST_PROJECT.id,
   createdByUserId: TEST_USER.id,
   actorRole: "admin",
-  grantChannel: { releaseChannel: "experimental", rampProviderStages: SDP_RAMP_PROVIDER_STAGES },
+  grantChannel: {
+    releaseChannel: "experimental",
+    rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY,
+  },
   name: "Racing key",
   grants: ["transfers.read"],
   walletScope: { scope: "all" },

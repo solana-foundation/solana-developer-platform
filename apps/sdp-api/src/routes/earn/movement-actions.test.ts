@@ -1,6 +1,6 @@
 import { type Action, apiKeyMayPerform, isAction } from "@sdp/types/actions";
 import { type MovementOf, movementActions } from "@sdp/types/movements";
-import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
+import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import { describe, expect, it } from "vitest";
 import { createApp } from "@/app";
 import { registeredRouteAuthorizations } from "@/routes/route-actions";
@@ -33,7 +33,7 @@ function samplePath(pattern: string): string {
 }
 
 function earnStartRoutes(): EarnStartRoute[] {
-  const app = createApp({ rampProviderStages: SDP_RAMP_PROVIDER_STAGES });
+  const app = createApp({ rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY });
   return registeredRouteAuthorizations(app).flatMap(({ method, path, declarations }) => {
     if (method !== "POST") return [];
     const movement = earnPostRouteMovement(samplePath(path));
