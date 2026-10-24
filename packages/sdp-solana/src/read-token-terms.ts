@@ -1,7 +1,7 @@
 /**
  * Reads Token Terms through the caller's client (ADR 0012): one
- * `getMultipleAccounts([mint, Clock])` request, so the fee epoch and display
- * time belong to the slot that held these mint bytes. For the packages and
+ * `getMultipleAccounts([mint, Clock])` request, so the fee epoch belongs to
+ * the slot that held these mint bytes. For the packages and
  * the legacy-RPC modules (issuance, DvP, Private Channels, Earn) that hold
  * their own client; the API's Payments planner reads through
  * `services/token-movement/read-terms.ts`, which also batches destinations.

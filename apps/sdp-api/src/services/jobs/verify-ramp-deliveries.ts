@@ -413,7 +413,6 @@ async function judgeOnrampDelivery(
           asset.kind === "native"
             ? null
             : { slot: transaction.slot, unixTimestamp: unixTimestamp(transaction.blockTime) },
-        displayRule: null,
       },
       observed: amounts,
     },
