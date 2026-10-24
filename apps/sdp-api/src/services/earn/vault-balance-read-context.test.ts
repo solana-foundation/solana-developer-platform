@@ -1,5 +1,6 @@
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { runInClusterScope } from "@sdp/rpc/scope";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import type { Env } from "@/types/env";
@@ -25,7 +26,6 @@ const input = {
   movementIds: ["one", "two", "three"],
   organizationId: "org",
   projectId: "project",
-  environment: "sandbox" as const,
   custodyWalletIds: ["wallet"],
 };
 const movement = {
@@ -39,10 +39,12 @@ const movement = {
 const status = (slot: bigint) => ({ slot, confirmationStatus: "confirmed", err: null });
 
 /** One read, in the cluster scope the project middleware opens for the project it names. */
-function resolveInScope(readInput: Parameters<typeof resolveVaultBalanceReadContext>[1]) {
-  return runInClusterScope(
-    { projectId: readInput.projectId, environment: readInput.environment },
-    () => resolveVaultBalanceReadContext({} as Env, readInput)
+function resolveInScope(
+  readInput: Parameters<typeof resolveVaultBalanceReadContext>[1],
+  environment: SdpEnvironment
+) {
+  return runInClusterScope({ projectId: readInput.projectId, environment }, () =>
+    resolveVaultBalanceReadContext({} as Env, readInput)
   );
 }
 
@@ -58,7 +60,7 @@ beforeEach(() => {
 
 describe("vault balance confirmation context", () => {
   it("uses the highest confirmed slot across repeated or offsetting movements", async () => {
-    await expect(resolveInScope(input)).resolves.toEqual({
+    await expect(resolveInScope(input, "sandbox")).resolves.toEqual({
       afterMovementIds: input.movementIds,
       minimumSlot: 103,
       minimumSlotByPositionId: new Map([["position", 103]]),
@@ -74,7 +76,7 @@ describe("vault balance confirmation context", () => {
 
   it("keeps each position's bound separate while retaining the overall wallet bound", async () => {
     mocks.movement.mockResolvedValueOnce({ ...movement, position_id: "other" });
-    await expect(resolveInScope(input)).resolves.toEqual({
+    await expect(resolveInScope(input, "sandbox")).resolves.toEqual({
       afterMovementIds: input.movementIds,
       minimumSlot: 103,
       minimumSlotByPositionId: new Map([
@@ -92,7 +94,7 @@ describe("vault balance confirmation context", () => {
     { ...movement, execution_model: "custodial" },
   ])("refuses a foreign or unreadable movement before any RPC call", async (row) => {
     mocks.movement.mockResolvedValueOnce(row);
-    await expect(resolveInScope(input)).rejects.toMatchObject({
+    await expect(resolveInScope(input, "sandbox")).rejects.toMatchObject({
       statusCode: 404,
     });
     expect(mocks.statuses).not.toHaveBeenCalled();
@@ -105,13 +107,13 @@ describe("vault balance confirmation context", () => {
     { ...status(101n), slot: undefined },
   ])("does not acknowledge missing or nonconfirmed chain evidence", async (unknown) => {
     mocks.statuses.mockResolvedValue([status(100n), unknown, status(102n)]);
-    await expect(resolveInScope(input)).rejects.toMatchObject({
+    await expect(resolveInScope(input, "sandbox")).rejects.toMatchObject({
       statusCode: 503,
     });
   });
 
   it("preserves ordinary position reads without a confirmation constraint", async () => {
-    await expect(resolveInScope({ ...input, movementIds: [] })).resolves.toBeUndefined();
+    await expect(resolveInScope({ ...input, movementIds: [] }, "sandbox")).resolves.toBeUndefined();
     expect(mocks.movement).not.toHaveBeenCalled();
     expect(mocks.statuses).not.toHaveBeenCalled();
   });
@@ -154,7 +156,7 @@ describe("finalized signature statuses are read once", () => {
     chain.set("sig-three", finalized(102n));
 
     for (let poll = 0; poll < 3; poll += 1) {
-      await expect(resolveInScope(input)).resolves.toEqual(expected);
+      await expect(resolveInScope(input, "sandbox")).resolves.toEqual(expected);
     }
 
     expect(mocks.statuses).toHaveBeenCalledTimes(1);
@@ -166,11 +168,11 @@ describe("finalized signature statuses are read once", () => {
     chain.set("sig-two", status(103n));
     chain.set("sig-three", finalized(102n));
 
-    await expect(resolveInScope(input)).resolves.toEqual(expected);
-    await expect(resolveInScope(input)).resolves.toEqual(expected);
+    await expect(resolveInScope(input, "sandbox")).resolves.toEqual(expected);
+    await expect(resolveInScope(input, "sandbox")).resolves.toEqual(expected);
     chain.set("sig-two", finalized(103n));
-    await expect(resolveInScope(input)).resolves.toEqual(expected);
-    await expect(resolveInScope(input)).resolves.toEqual(expected);
+    await expect(resolveInScope(input, "sandbox")).resolves.toEqual(expected);
+    await expect(resolveInScope(input, "sandbox")).resolves.toEqual(expected);
 
     expect(mocks.statuses.mock.calls.map(([, signatures]) => signatures)).toEqual([
       ["sig-one", "sig-two", "sig-three"],
@@ -182,11 +184,11 @@ describe("finalized signature statuses are read once", () => {
   it("never remembers a failed read or a status the checks refuse", async () => {
     const single = { ...input, movementIds: ["one"] };
     mocks.statuses.mockRejectedValueOnce(new Error("RPC request timed out after 3000ms"));
-    await expect(resolveInScope(single)).rejects.toThrow("timed out");
+    await expect(resolveInScope(single, "sandbox")).rejects.toThrow("timed out");
 
     chain.set("sig-one", { ...finalized(100n), err: { InstructionError: [0, "Custom"] } });
     for (let poll = 0; poll < 2; poll += 1) {
-      await expect(resolveInScope(single)).rejects.toMatchObject({
+      await expect(resolveInScope(single, "sandbox")).rejects.toMatchObject({
         statusCode: 503,
       });
     }
@@ -200,12 +202,12 @@ describe("finalized signature statuses are read once", () => {
     const now = Date.now();
     const clock = vi.spyOn(Date, "now").mockReturnValue(now);
     try {
-      await resolveInScope(single);
-      await resolveInScope(single);
+      await resolveInScope(single, "sandbox");
+      await resolveInScope(single, "sandbox");
       expect(mocks.statuses).toHaveBeenCalledTimes(1);
 
       clock.mockReturnValue(now + FINALIZED_SIGNATURE_STATUS_TTL_MS + 1);
-      await resolveInScope(single);
+      await resolveInScope(single, "sandbox");
       expect(mocks.statuses).toHaveBeenCalledTimes(2);
     } finally {
       clock.mockRestore();
@@ -216,18 +218,18 @@ describe("finalized signature statuses are read once", () => {
       environment: "production",
       signature: "sig-one",
     });
-    await resolveInScope({ ...single, environment: "production" });
+    await resolveInScope(single, "production");
     expect(mocks.statuses).toHaveBeenCalledTimes(3);
   });
 
   it("holds a bounded number of statuses, dropping the oldest", async () => {
     const movementIds = Array.from({ length: 1_025 }, (_, index) => `m${index}`);
     for (const id of movementIds) chain.set(`sig-${id}`, finalized(100n));
-    await resolveInScope({ ...input, movementIds });
+    await resolveInScope({ ...input, movementIds }, "sandbox");
 
-    await resolveInScope({ ...input, movementIds: ["m1024"] });
+    await resolveInScope({ ...input, movementIds: ["m1024"] }, "sandbox");
     expect(mocks.statuses).toHaveBeenCalledTimes(1);
-    await resolveInScope({ ...input, movementIds: ["m0"] });
+    await resolveInScope({ ...input, movementIds: ["m0"] }, "sandbox");
     expect(mocks.statuses).toHaveBeenCalledTimes(2);
     expect(mocks.statuses.mock.calls[1]?.[1]).toEqual(["sig-m0"]);
   });

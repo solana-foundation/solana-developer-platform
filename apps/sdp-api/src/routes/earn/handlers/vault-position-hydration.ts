@@ -2,17 +2,17 @@ import { createHash } from "node:crypto";
 import type { EarnVaultPositionSnapshot } from "@sdp/earn/types";
 import { addDecimalAmounts } from "@sdp/payments/decimal";
 import { readStamp, withMinimumRpcSlot, withReadFloor } from "@sdp/rpc/read-context";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import { isDecimalString } from "@sdp/solana/amount";
-import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { type EarnVaultPositionIntermediate, isEarnVaultHoldingEmpty } from "@sdp/types/earn";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { isAddress } from "@solana/kit";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import type { AppContext } from "@/routes/earn/context";
-import { earnRuntime } from "@/routes/earn/context";
 import { getLogger } from "@/runtime/logger";
 import { earnProviderEndpointUrls } from "@/services/earn/cluster-rpc";
-import { earnClusterFor, resolveVaultDirectClient } from "@/services/earn/execution-registry";
+import { resolveVaultDirectClient } from "@/services/earn/execution-registry";
+import { earnRuntime } from "@/services/earn/runtime";
 import { createVaultDeadline, type VaultDeadline } from "@/services/earn/vault-deadline";
 
 const MAX_IN_FLIGHT_VAULT_POSITION_READS = 256;
@@ -121,7 +121,8 @@ export interface VaultPositionHydrationOptions {
 }
 
 /**
- * Hydrate vault claims in bounded owner/provider batches.
+ * Hydrate vault claims in bounded owner/provider batches, on the open cluster
+ * scope's cluster.
  *
  * Both SDP-custody and external-wallet reads use this exact identity check and
  * failure posture: provider failures leave the affected value unavailable,
@@ -130,10 +131,10 @@ export interface VaultPositionHydrationOptions {
  */
 export async function hydrateVaultPositions(
   c: AppContext,
-  environment: SdpEnvironment,
   positions: readonly HydratableVaultPosition[],
   options: VaultPositionHydrationOptions
 ): Promise<Map<string, HydratedVaultPositionValue>> {
+  const { environment, cluster } = currentClusterScope();
   // One request gets one absolute provider budget. Giving every queued owner a
   // fresh deadline makes worst-case latency grow with portfolio size: eight
   // slow owners finish, then the next eight each receive another full timeout.
@@ -185,15 +186,15 @@ export async function hydrateVaultPositions(
         hydrate: async () => {
           const client = resolveVaultDirectClient(c.env, provider, hydrationDeadline);
           if (!client) return;
-          const runtime = earnRuntime(c);
+          const runtime = earnRuntime(c.env);
           const providerReferences = [...trustedByReference.keys()];
           const read = () => client.readVaultPositions(runtime, { owner, providerReferences });
           // The whole scoped read is shared, never the inner one: a joiner's
           // own minimum-slot scope would observe no RPC context and fail.
           const snapshots = await sharedVaultPositionRead(
             JSON.stringify([
-              runtime.environment,
-              rpcEndpointIdentity(earnClusterFor(runtime.environment)),
+              environment,
+              rpcEndpointIdentity(cluster),
               provider,
               owner,
               [...providerReferences].sort(),
@@ -208,7 +209,7 @@ export async function hydrateVaultPositions(
             if (
               !trustedPositions ||
               snapshot.owner !== owner ||
-              snapshot.cluster !== earnClusterFor(environment) ||
+              snapshot.cluster !== cluster ||
               !isBoundedSnapshotAmount(snapshot.shares) ||
               !isBoundedSnapshotAmount(snapshot.withdrawableShares) ||
               (snapshot.tokenValue !== undefined &&

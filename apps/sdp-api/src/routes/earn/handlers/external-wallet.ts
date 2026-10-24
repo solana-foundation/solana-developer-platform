@@ -7,6 +7,7 @@ import {
   subtractDecimalAmounts,
   sumDecimalAmounts,
 } from "@sdp/payments/decimal";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type {
   EarnDepositSwap,
@@ -48,7 +49,6 @@ import { badRequest, internalError, notFound } from "@/lib/errors";
 import { isEarnHastraDexExitConfigured } from "@/lib/feature-flags";
 import { encodeKeysetCursor } from "@/lib/keyset-cursor";
 import { success } from "@/lib/response";
-import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { type AppContext, requireEarnStrategyForCaller } from "@/routes/earn/context";
@@ -67,6 +67,7 @@ import {
 import { getLogger } from "@/runtime/logger";
 import { resolveVaultWithdrawClient } from "@/services/earn/execution-registry";
 import type { JupiterSwapLeg } from "@/services/earn/jupiter-swap.service";
+import { earnRuntime } from "@/services/earn/runtime";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import {
   buildExternalWalletDepositTransaction,
@@ -168,7 +169,7 @@ export async function getEarnExternalWalletPositionSummary(c: AppContext) {
     c,
     earnExternalWalletPositionSummaryQuerySchema
   );
-  const environment = resolveSdpEnvironment(c);
+  const { environment } = currentClusterScope();
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
   const portfolio = await observeExternalWalletPortfolio(
@@ -242,7 +243,7 @@ async function loadExternalWalletPortfolio(
   );
   const rowsReadAt = markVaultPositionRowsRead();
   const holdings = rows.map((row) => requireExternalWalletHolding(row, projectId));
-  const live = await hydrateVaultPositions(c, environment, holdings.map(toHydratableHolding), {
+  const live = await hydrateVaultPositions(c, holdings.map(toHydratableHolding), {
     ownerKind: "external-wallet",
     rowsReadAt,
   });
@@ -278,7 +279,7 @@ export async function listEarnExternalWalletPositions(c: AppContext) {
   if (query.before && !before) {
     throw badRequest("Invalid external-wallet position pagination cursor");
   }
-  const environment = resolveSdpEnvironment(c);
+  const { environment } = currentClusterScope();
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
   const repo = createPostgresEarnMovementsRepository(getDb(c.env));
@@ -293,7 +294,7 @@ export async function listEarnExternalWalletPositions(c: AppContext) {
   });
   const rowsReadAt = markVaultPositionRowsRead();
   const holdings = page.rows.map((row) => requireExternalWalletHolding(row, projectId));
-  const live = await hydrateVaultPositions(c, environment, holdings.map(toHydratableHolding), {
+  const live = await hydrateVaultPositions(c, holdings.map(toHydratableHolding), {
     ownerKind: "external-wallet",
     rowsReadAt,
   });
@@ -376,7 +377,7 @@ export async function listEarnExternalWalletMovements(c: AppContext) {
   if (query.before && !before) {
     throw badRequest("Invalid external-wallet movement pagination cursor");
   }
-  const environment = resolveSdpEnvironment(c);
+  const { environment } = currentClusterScope();
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
   const repo = createPostgresEarnMovementsRepository(getDb(c.env));
@@ -456,7 +457,7 @@ function requirePositionTokenMint(position: EarnPositionRow): string {
  */
 export async function getEarnExternalWalletMovement(c: AppContext) {
   const { movementId } = parseParams(c, earnExternalWalletMovementParamsSchema);
-  const environment = resolveSdpEnvironment(c);
+  const { environment } = currentClusterScope();
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
 
@@ -523,7 +524,7 @@ export async function getEarnExternalWalletMovement(c: AppContext) {
  */
 export async function getEarnExternalWalletEarnings(c: AppContext) {
   const { ownerAddress } = parseQuery(c, earnExternalWalletEarningsQuerySchema);
-  const environment = resolveSdpEnvironment(c);
+  const { environment } = currentClusterScope();
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
   const repo = createPostgresEarnMovementsRepository(getDb(c.env));
@@ -542,7 +543,7 @@ export async function getEarnExternalWalletEarnings(c: AppContext) {
   ]);
   const rowsReadAt = markVaultPositionRowsRead();
   const holdings = rows.map((row) => requireExternalWalletHolding(row, projectId));
-  const live = await hydrateVaultPositions(c, environment, holdings.map(toHydratableHolding), {
+  const live = await hydrateVaultPositions(c, holdings.map(toHydratableHolding), {
     ownerKind: "external-wallet",
     rowsReadAt,
   });
@@ -706,8 +707,6 @@ export interface ExternalWalletExitLocator {
 
 export interface ResolvedExternalWalletExit {
   buildContext: ExternalWalletBuildContext;
-  /** The tenant's environment. */
-  environment: ReturnType<typeof resolveSdpEnvironment>;
   positionId: string;
   provider: string;
   vaultAddress: string;
@@ -729,7 +728,7 @@ export async function resolveExternalWalletExit(
   locator: ExternalWalletExitLocator
 ): Promise<ResolvedExternalWalletExit> {
   const authenticated = getAuthenticatedEarnRequest(c);
-  const environment = resolveSdpEnvironment(c);
+  const { environment } = currentClusterScope();
   const positionRow = await createPostgresEarnMovementsRepository(getDb(c.env)).getPositionById({
     organizationId: authenticated.auth.organizationId,
     environment,
@@ -739,7 +738,6 @@ export async function resolveExternalWalletExit(
   if (!position) throw notFound("Earn external-wallet position");
   return {
     buildContext: toExternalWalletBuildContext(authenticated),
-    environment,
     provider: position.provider,
     positionId: position.id,
     vaultAddress: position.vaultAddress,
@@ -803,14 +801,13 @@ export async function createEarnExternalWalletDepositTransaction(
   // wording; the shared predicate re-checks them for free. `body.amount` is
   // the SOURCE stablecoin's units on a swap-funded build, which the cap treats
   // dollar-for-dollar by design.
-  await assertVaultDepositAdmissible(c, strategy, body.amount, { environment });
+  await assertVaultDepositAdmissible(c, strategy, body.amount);
 
   const swap = resolveDepositSwapRequest(
     {
       sourceTokenMint: body.sourceTokenMint,
       swapSlippageBps: body.swapSlippageBps,
     },
-    environment,
     tokenMint
   );
 
@@ -820,7 +817,6 @@ export async function createEarnExternalWalletDepositTransaction(
 
   const result = await buildExternalWalletDepositTransaction(c.env, {
     ...toExternalWalletBuildContext(authenticated),
-    environment,
     provider,
     strategyId: strategy.id,
     providerReference: strategy.provider_reference,
@@ -919,7 +915,6 @@ export async function createEarnExternalWalletWithdrawalTransaction(
 ) {
   const body: EarnExternalWalletWithdrawalTransactionBody = c.req.valid("json");
   const target = await resolveExternalWalletExit(c, body);
-  const environment = target.environment;
 
   // Same provider-policy exit floor as the custody withdrawal: a non-null
   // `withdrawalSlippage` refuses a floor-less build (caller-fixable 400,
@@ -939,7 +934,6 @@ export async function createEarnExternalWalletWithdrawalTransaction(
 
   const built = await buildExternalWalletWithdrawalTransaction(c.env, {
     ...target.buildContext,
-    environment,
     provider: target.provider,
     positionId: target.positionId,
     vaultAddress: target.vaultAddress,
@@ -979,7 +973,6 @@ export async function createEarnExternalWalletWithdrawalPreview(
 ) {
   const body: EarnExternalWalletWithdrawalPreviewBody = c.req.valid("json");
   const target = await resolveExternalWalletExit(c, body);
-  const environment = target.environment;
 
   const deadline = createVaultDeadline();
   const client = resolveVaultWithdrawClient(c.env, target.provider, deadline);
@@ -989,13 +982,10 @@ export async function createEarnExternalWalletWithdrawalPreview(
 
   let quote: EarnVaultWithdrawQuote;
   try {
-    quote = await client.quoteVaultWithdrawal(
-      { env: c.env, environment },
-      {
-        providerReference: target.vaultAddress,
-        shares: body.shares,
-      }
-    );
+    quote = await client.quoteVaultWithdrawal(earnRuntime(c.env), {
+      providerReference: target.vaultAddress,
+      shares: body.shares,
+    });
   } catch (error) {
     rethrowVaultProviderFailure(error);
   }
@@ -1023,7 +1013,6 @@ export async function createEarnExternalWalletDeposit(
 ) {
   const body: EarnExternalWalletSubmitBody = c.req.valid("json");
   const requestId = requireExternalWalletIdempotencyKey(c, "external-wallet deposits");
-  const environment = resolveSdpEnvironment(c);
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
 
@@ -1048,7 +1037,6 @@ export async function createEarnExternalWalletDeposit(
     result = await submitExternalWalletDeposit(c.env, {
       organizationId: auth.organizationId,
       projectId,
-      environment,
       transactionId: body.transactionId,
       signedTransaction: body.signedTransaction,
       requestId,
@@ -1092,14 +1080,12 @@ export async function createEarnExternalWalletWithdrawal(
 ) {
   const body: EarnExternalWalletSubmitBody = c.req.valid("json");
   const requestId = requireExternalWalletIdempotencyKey(c, "external-wallet withdrawals");
-  const environment = resolveSdpEnvironment(c);
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
 
   const result = await submitExternalWalletWithdrawal(c.env, {
     organizationId: auth.organizationId,
     projectId,
-    environment,
     transactionId: body.transactionId,
     signedTransaction: body.signedTransaction,
     requestId,

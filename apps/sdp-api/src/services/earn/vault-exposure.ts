@@ -1,4 +1,5 @@
 import type { EarnVaultDepositQuoteIssue } from "@sdp/earn/types";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import {
   addDecimalAmounts,
   compareDecimalAmounts,
@@ -20,7 +21,6 @@ import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import { serviceUnavailable, vaultExposureCapExceeded } from "@/lib/errors";
 import { isEarnVolumeCapsEnforced } from "@/lib/feature-flags";
-import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import {
   DEFAULT_VAULT_EXPOSURE_CAP,
   VAULT_EXPOSURE_CAPS,
@@ -28,7 +28,6 @@ import {
 } from "@/routes/earn/handlers/curation";
 import { describeError, logEvent } from "@/runtime/money-path-events";
 import type { Env } from "@/types/env";
-import { earnClusterFor } from "./execution-registry";
 
 /**
  * ADR 0004, layer 1: SDP-wide exposure per vault, checked at deposit admission.
@@ -336,19 +335,15 @@ export interface VaultExposureVerdict {
  */
 export async function assessVaultExposure(input: {
   env: Pick<Env, "EARN_VOLUME_CAPS_ENFORCED">;
-  environment: SdpEnvironment;
   strategy: Pick<EarnStrategyRow, "provider" | "provider_reference" | "risk_metadata">;
   amount: string;
   stage: VaultExposureStage;
   readExposure: (key: VaultExposureKey) => Promise<string>;
 }): Promise<VaultExposureVerdict> {
-  const { environment, strategy, amount, stage } = input;
+  const { strategy, amount, stage } = input;
+  const { environment, cluster } = currentClusterScope();
   const enforced = isEarnVolumeCapsEnforced(input.env);
-  const cap = resolveVaultExposureCap(
-    earnClusterFor(environment),
-    strategy.provider,
-    strategy.provider_reference
-  );
+  const cap = resolveVaultExposureCap(cluster, strategy.provider, strategy.provider_reference);
   const tvl = strategyTvlForExposure(strategy);
   const key: VaultExposureKey = {
     environment,
@@ -410,11 +405,10 @@ export function checkVaultExposure(
   c: ExposureContext,
   strategy: EarnStrategyRow,
   amount: string,
-  options: { environment?: SdpEnvironment; fresh?: boolean } = {}
+  options: { fresh: boolean }
 ): Promise<VaultExposureVerdict> {
   return assessVaultExposure({
     env: c.env,
-    environment: options.environment ?? resolveSdpEnvironment(c),
     strategy,
     amount,
     stage: options.fresh ? "admission" : "preview",
@@ -456,13 +450,9 @@ function admitOrRefuse(verdict: VaultExposureVerdict, amount: string): VaultExpo
 export async function assertVaultExposureWithinCap(
   c: ExposureContext,
   strategy: EarnStrategyRow,
-  amount: string,
-  options: { environment?: SdpEnvironment } = {}
+  amount: string
 ): Promise<VaultExposureVerdict> {
-  const verdict = await checkVaultExposure(c, strategy, amount, {
-    ...options,
-    fresh: true,
-  });
+  const verdict = await checkVaultExposure(c, strategy, amount, { fresh: true });
   return admitOrRefuse(verdict, amount);
 }
 
@@ -504,7 +494,7 @@ export async function assertVaultExposureWithinCap(
  */
 export function ledgerVaultExposureGate(
   env: Env,
-  input: { environment: SdpEnvironment; provider: string; vaultAddress: string; amount: string }
+  input: { provider: string; vaultAddress: string; amount: string }
 ): (transaction: DatabaseExecutor) => Promise<void> {
   return async (transaction) => {
     // The repositories on THIS connection, so the catalogue read and the
@@ -513,11 +503,10 @@ export function ledgerVaultExposureGate(
     const strategy = await createPostgresEarnRepository(db).getStrategyByReference({
       provider: input.provider,
       providerReference: input.vaultAddress,
-      environment: input.environment,
+      environment: currentClusterScope().environment,
     });
     const verdict = await assessVaultExposure({
       env,
-      environment: input.environment,
       strategy: strategy ?? {
         provider: input.provider,
         provider_reference: input.vaultAddress,

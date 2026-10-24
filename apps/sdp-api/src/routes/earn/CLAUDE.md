@@ -1622,12 +1622,20 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
 
 ## Conventions
 
-- Environment resolution is the shared `@/lib/sdp-environment` helper: API-key
-  callers use the key's (project-derived) environment; dashboard/session
-  callers use the membership-verified `x-project-id` project's environment; a
-  request with neither fails closed (500), never defaults to sandbox, and the
-  deployment's `ENVIRONMENT` never decides. A production-project dashboard
-  session therefore drives provider production.
+- **Environment and cluster come from the open cluster scope**
+  (`currentClusterScope()`, ADR 0007), never from `c`. The project middleware
+  opens it with the API key's (project-derived) environment or the
+  membership-verified `x-project-id` project's; the deployment's `ENVIRONMENT`
+  never decides. Code outside a scope fails closed (`CLUSTER_SCOPE_MISSING`,
+  500), never defaults to sandbox. Services take neither as a parameter and
+  read the scope where they need it; a provider client gets the scope's
+  environment through `earnRuntime(env)` (`services/earn/runtime.ts`). A read
+  about one recorded row (a queued request re-read before its cancel, the
+  post-exit close-out) keeps the row's own environment, which the URL helpers
+  refuse unless it is the scope's. `services/earn/cluster-rpc.boundary.test.ts`
+  fails an Earn route or service that imports `resolveSdpEnvironment` or
+  `CLUSTER_BY_SDP_ENVIRONMENT`. A production-project dashboard session
+  therefore drives provider production.
 - `EARN_ENABLED` gates the whole family (index.ts), and Earn is a sub-module of
   Markets — `isEarnEnabled` also requires the parent `MARKETS_ENABLED`, so
   clearing that one flag darkens every Markets API surface. Both default off.

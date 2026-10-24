@@ -1,5 +1,4 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
-import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { SdpVedaError } from "@sdp/veda/errors";
 import type { Blockhash } from "@solana/kit";
 import {
@@ -79,12 +78,12 @@ vi.mock("./vault-execution.service", async (importOriginal) => ({
 
 const service = await import("./vault-external-wallet.service");
 
-/** Each call in the cluster scope its request opens, from the environment it names. */
-function inRequestScope<TInput extends { environment: SdpEnvironment }, TResult>(
+/** Each call in the cluster scope a sandbox request opens: every case here is on devnet. */
+function inRequestScope<TInput, TResult>(
   operation: (env: Env, input: TInput) => Promise<TResult>
 ): (env: Env, input: TInput) => Promise<TResult> {
   return (scopedEnv, input) =>
-    runInClusterScope({ projectId: null, environment: input.environment }, () =>
+    runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
       operation(scopedEnv, input)
     );
 }
@@ -163,7 +162,6 @@ function depositInput(
   return {
     organizationId: ORG,
     projectId: PROJECT,
-    environment: "sandbox",
     provider: "kamino",
     strategyId: "strategy_ext_test",
     providerReference: VAULT,
@@ -226,7 +224,6 @@ function withdrawalInput(
   return {
     organizationId: ORG,
     projectId: PROJECT,
-    environment: "sandbox",
     provider: "kamino",
     positionId,
     vaultAddress: VAULT,
@@ -298,7 +295,6 @@ function submitDeposit(
   return submitExternalWalletDeposit(env, {
     organizationId: ORG,
     projectId: PROJECT,
-    environment: "sandbox",
     transactionId: built.id,
     signedTransaction,
     requestId,
@@ -1282,7 +1278,6 @@ describe("external-wallet withdrawals", () => {
     const result = await submitExternalWalletWithdrawal(env, {
       organizationId: ORG,
       projectId: PROJECT,
-      environment: "sandbox",
       transactionId: built.id,
       signedTransaction: await signBuiltTransaction(built),
       requestId: crypto.randomUUID(),
@@ -1358,7 +1353,6 @@ describe("external-wallet withdrawals", () => {
     const result = await submitExternalWalletWithdrawal(env, {
       organizationId: ORG,
       projectId: PROJECT,
-      environment: "sandbox",
       transactionId: built.id,
       signedTransaction: await signBuiltTransaction(built),
       requestId: crypto.randomUUID(),

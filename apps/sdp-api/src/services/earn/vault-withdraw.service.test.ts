@@ -1,3 +1,4 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
@@ -38,7 +39,14 @@ vi.mock("./vault-sponsorship", async (importOriginal) => ({
   resolveVaultSponsorship,
 }));
 
-const { withdrawFromVault } = await import("./vault-withdraw.service");
+const service = await import("./vault-withdraw.service");
+
+/** A custody exit, in the cluster scope the project middleware opens for its project. */
+function withdrawFromVault(...args: Parameters<typeof service.withdrawFromVault>) {
+  return runInClusterScope({ projectId: PROJECT, environment: "sandbox" }, () =>
+    service.withdrawFromVault(...args)
+  );
+}
 
 const ORG = "org_vault_withdraw";
 const PROJECT = "prj_vault_withdraw";
@@ -56,7 +64,6 @@ function input(overrides: Partial<VaultWithdrawalInput> = {}): VaultWithdrawalIn
   return {
     organizationId: ORG,
     projectId: PROJECT,
-    environment: "sandbox",
     provider: "kamino",
     positionId,
     vaultAddress: VAULT,

@@ -1,12 +1,12 @@
 import { notImplemented } from "@sdp/earn/errors";
 import type {
-  EarnRuntimeContext,
   EarnVaultParRedemptionQuote,
   EarnVaultParRedemptionRequestPlan,
   EarnVaultQueuedWithdrawalQuote,
   EarnVaultQueuedWithdrawalRequestPlan,
   EarnVaultTransactionPlan,
 } from "@sdp/earn/types";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import { compareDecimalAmounts } from "@sdp/solana/amount";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { address } from "@solana/kit";
@@ -32,10 +32,10 @@ import { getLogger } from "@/runtime/logger";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import type { Env } from "@/types/env";
 import {
-  earnClusterFor,
   resolveVaultParRedemptionClient,
   resolveVaultQueuedWithdrawClient,
 } from "./execution-registry";
+import { earnRuntime } from "./runtime";
 import { createVaultDeadline } from "./vault-deadline";
 import {
   appendVaultRequestMemo,
@@ -61,10 +61,10 @@ export interface QueuedWithdrawalPosition {
   custodyWalletId?: string | null;
 }
 
+/** The tenant behind a keyed request. Its project's cluster scope decides the environment. */
 export interface QueuedWithdrawalActor {
   organizationId: string;
   projectId: string;
-  environment: SdpEnvironment;
   userId?: string | null;
   apiKeyId?: string | null;
 }
@@ -241,7 +241,6 @@ function throwBlockingQuote(quote: {
 async function quoteAndBuildRequest(
   env: Env,
   input: {
-    actor: Pick<QueuedWithdrawalActor, "environment">;
     position: QueuedWithdrawalPosition;
     terms: AsyncWithdrawalTermsInput;
     memoId: string;
@@ -254,7 +253,7 @@ async function quoteAndBuildRequest(
   mechanism: EarnVaultWithdrawalMechanism;
 }> {
   const deadline = createVaultDeadline();
-  const runtime: EarnRuntimeContext = { env, environment: input.actor.environment };
+  const runtime = earnRuntime(env);
   let quote: NormalizedAsyncWithdrawalQuote;
   let built: NormalizedAsyncWithdrawalPlan;
   const mechanism = asyncMechanism(input.terms);
@@ -365,9 +364,10 @@ async function quoteAndBuildRequest(
   } catch (error) {
     rethrowVaultProviderFailure(error);
   }
-  if (built.cluster !== earnClusterFor(input.actor.environment)) {
+  const { cluster } = currentClusterScope();
+  if (built.cluster !== cluster) {
     throw internalError(
-      `Asynchronous withdrawal builder returned a ${built.cluster} plan for the configured ${earnClusterFor(input.actor.environment)} cluster`
+      `Asynchronous withdrawal builder returned a ${built.cluster} plan for the configured ${cluster} cluster`
     );
   }
   return {
@@ -392,13 +392,11 @@ async function prepareCustodyTransaction(
   }
 ): Promise<{ signed: SignedVaultTransaction; fee: VaultFeeMode }> {
   const deadline = createVaultDeadline();
-  const cluster = earnClusterFor(input.actor.environment);
   const fee = await resolveVaultSponsorship(env, {
     movement: "earn.queued_withdraw_cancel",
     organizationId: input.actor.organizationId,
     projectId: input.actor.projectId,
     walletId: input.actor.custodyWalletId,
-    cluster,
     deadline,
   });
   const expectedAssetIdentity = {
@@ -477,9 +475,10 @@ export async function createCustodyQueuedWithdrawal(
     clientRequestId: string;
   }
 ): Promise<QueuedWithdrawalMutationResult> {
+  const { environment } = currentClusterScope();
   const repository = createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env));
   const fingerprint = requestFingerprint({
-    environment: input.actor.environment,
+    environment,
     provider: input.position.provider,
     positionId: input.position.id,
     terms: input.terms,
@@ -511,11 +510,9 @@ export async function createCustodyQueuedWithdrawal(
     organizationId: input.actor.organizationId,
     projectId: input.actor.projectId,
     walletId: input.actor.custodyWalletId,
-    cluster: earnClusterFor(input.actor.environment),
     deadline,
   });
   const { quote, plan, mechanism } = await quoteAndBuildRequest(env, {
-    actor: input.actor,
     position: input.position,
     terms: input.terms,
     memoId: input.clientRequestId,
@@ -527,7 +524,7 @@ export async function createCustodyQueuedWithdrawal(
     id: reservationId,
     organizationId: input.actor.organizationId,
     projectId: input.actor.projectId,
-    environment: input.actor.environment,
+    environment,
     provider: input.position.provider,
     vaultAddress: input.position.vaultAddress,
     ownerAddress: input.position.ownerAddress,
@@ -584,7 +581,7 @@ export async function createCustodyQueuedWithdrawal(
         actionId,
         organizationId: input.actor.organizationId,
         projectId: input.actor.projectId,
-        environment: input.actor.environment,
+        environment,
         provider: input.position.provider,
         positionId: input.position.id,
         custodyWalletId: input.actor.custodyWalletId,
@@ -709,9 +706,10 @@ export async function cancelCustodyQueuedWithdrawal(
     clientRequestId: string;
   }
 ): Promise<QueuedWithdrawalMutationResult> {
+  const { environment } = currentClusterScope();
   const repository = createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env));
   const fingerprint = buildEarnVaultQueuedWithdrawalCancelFingerprint({
-    environment: input.actor.environment,
+    environment,
     withdrawalRequestId: input.request.id,
     requestAddress: input.request.request_address,
   });
@@ -732,7 +730,7 @@ export async function cancelCustodyQueuedWithdrawal(
   await requireCancelableProviderRequest(env, input.request, input.position.ownerAddress);
   let plan: EarnVaultTransactionPlan;
   try {
-    const runtime = { env, environment: input.actor.environment };
+    const runtime = earnRuntime(env);
     const cancelInput = {
       providerReference: input.request.vault_address,
       owner: input.position.ownerAddress,
@@ -773,7 +771,7 @@ export async function cancelCustodyQueuedWithdrawal(
     actionId: generateEarnVaultWithdrawalRequestActionId(),
     organizationId: input.actor.organizationId,
     projectId: input.actor.projectId,
-    environment: input.actor.environment,
+    environment,
     withdrawalRequestId: input.request.id,
     signature: signed.signature,
     signedTransaction: Buffer.from(signed.bytes).toString("base64"),
@@ -834,7 +832,6 @@ export async function buildExternalQueuedWithdrawalRequest(
   const transactionId = generateEarnExternalWalletWithdrawalRequestTransactionId();
   const feePayer = input.feePayer === input.position.ownerAddress ? undefined : input.feePayer;
   const { quote, plan, mechanism } = await quoteAndBuildRequest(env, {
-    actor: input.actor,
     position: input.position,
     terms: input.terms,
     memoId: transactionId,
@@ -849,7 +846,7 @@ export async function buildExternalQueuedWithdrawalRequest(
   });
   const built: ExternalQueuedWithdrawalBuiltTransaction = {
     id: transactionId,
-    environment: input.actor.environment,
+    environment: currentClusterScope().environment,
     provider: input.position.provider,
     position_id: input.position.id,
     withdrawal_request_id: null,
@@ -919,6 +916,8 @@ export async function buildExternalQueuedWithdrawalCancel(
     feePayer?: string;
   }
 ): Promise<ExternalQueuedWithdrawalBuiltTransaction> {
+  const { environment, cluster } = currentClusterScope();
+  const runtime = earnRuntime(env);
   const parClient = resolveVaultParRedemptionClient(
     env,
     input.position.provider,
@@ -929,7 +928,6 @@ export async function buildExternalQueuedWithdrawalCancel(
   const transactionId = generateEarnExternalWalletWithdrawalRequestTransactionId();
   let plan: EarnVaultTransactionPlan;
   try {
-    const runtime = { env, environment: input.actor.environment };
     const cancelInput = {
       providerReference: input.position.vaultAddress,
       owner: input.position.ownerAddress,
@@ -956,9 +954,9 @@ export async function buildExternalQueuedWithdrawalCancel(
   } catch (error) {
     rethrowVaultProviderFailure(error);
   }
-  if (plan.cluster !== earnClusterFor(input.actor.environment)) {
+  if (plan.cluster !== cluster) {
     throw internalError(
-      `Queued cancellation builder returned a ${plan.cluster} plan for the configured ${earnClusterFor(input.actor.environment)} cluster`
+      `Queued cancellation builder returned a ${plan.cluster} plan for the configured ${cluster} cluster`
     );
   }
   const feePayer = input.feePayer === input.position.ownerAddress ? undefined : input.feePayer;
@@ -970,7 +968,7 @@ export async function buildExternalQueuedWithdrawalCancel(
   });
   const built: ExternalQueuedWithdrawalBuiltTransaction = {
     id: transactionId,
-    environment: input.actor.environment,
+    environment,
     provider: input.position.provider,
     position_id: input.position.id,
     withdrawal_request_id: input.request.id,
@@ -1036,7 +1034,7 @@ async function requireExternalBuild(
   if (
     !build ||
     build.project_id !== input.actor.projectId ||
-    build.environment !== input.actor.environment ||
+    build.environment !== currentClusterScope().environment ||
     build.action !== input.action
   ) {
     throw notFound("Earn external-wallet queued withdrawal transaction");

@@ -1,3 +1,4 @@
+import { currentClusterScope } from "@sdp/rpc/scope";
 import type { EarnMovementRecord, EarnMovementsPage } from "@sdp/types/earn";
 import { z } from "zod";
 import { getDb } from "@/db/client";
@@ -9,7 +10,6 @@ import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest } from "@/lib/errors";
 import { decodeKeysetCursor, encodeKeysetCursor } from "@/lib/keyset-cursor";
 import { success } from "@/lib/response";
-import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import type { AppContext } from "@/routes/earn/context";
 import { movementStatusOnWire } from "@/routes/earn/handlers/movement-settlement-wire";
 import { earnMovementsQuerySchema } from "@/routes/earn/schemas";
@@ -42,7 +42,7 @@ export async function listEarnMovements(c: AppContext) {
   if (query.before && !before) {
     throw badRequest("Invalid earn movement pagination cursor");
   }
-  const environment = resolveSdpEnvironment(c);
+  const { environment } = currentClusterScope();
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
 

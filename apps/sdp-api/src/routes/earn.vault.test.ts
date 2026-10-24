@@ -49,6 +49,7 @@ import { buildEarnVaultDepositFingerprint } from "@/lib/idempotency";
 import { AuditService } from "@/services/audit.service";
 import { resolveEarnExecutionClient } from "@/services/earn/execution-registry";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
+import { recordCallScopes } from "@/test/helpers/cluster-scope";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import {
   seedTestPrivyConnection,
@@ -533,6 +534,7 @@ describe("POST /v1/earn/vault-deposits — custody runtime admission", () => {
 describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
   it("opens Kamino from production and requires the caller's minSharesOut (PRO-1986)", async () => {
     await seedAuth();
+    const scopes = recordCallScopes(depositIntoVault);
     await seedProductionConnectionWallet({
       connectionId: "cconn_earn_vault_kamino_prod",
       credentialId: "pcred_earn_vault_kamino_prod",
@@ -572,12 +574,9 @@ describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
     expect(res.status).toBe(200);
     expect(depositIntoVault).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({
-        environment: "production",
-        provider: "kamino",
-        minSharesOut: "9.99",
-      })
+      expect.objectContaining({ provider: "kamino", minSharesOut: "9.99" })
     );
+    expect(scopes).toEqual([expect.objectContaining({ environment: "production" })]);
   });
 
   it("keeps production closed for a provider the deposit-environment map leaves sandbox-only", async () => {
@@ -613,6 +612,7 @@ describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
 
   it("opens Jupiter Lend only from production and requires the caller's minSharesOut", async () => {
     await seedAuth();
+    const scopes = recordCallScopes(depositIntoVault);
     await seedProductionConnectionWallet({
       connectionId: "cconn_earn_vault_jupiter",
       credentialId: "pcred_earn_vault_jupiter",
@@ -657,16 +657,14 @@ describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
     expect(res.status).toBe(200);
     expect(depositIntoVault).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({
-        environment: "production",
-        provider: "jupiter_lend",
-        minSharesOut: "9.99",
-      })
+      expect.objectContaining({ provider: "jupiter_lend", minSharesOut: "9.99" })
     );
+    expect(scopes).toEqual([expect.objectContaining({ environment: "production" })]);
   });
 
   it("opens Ondo USDY only from production and requires the caller's minSharesOut", async () => {
     await seedAuth();
+    const scopes = recordCallScopes(depositIntoVault);
     await seedProductionConnectionWallet({
       connectionId: "cconn_earn_vault_ondo",
       credentialId: "pcred_earn_vault_ondo",
@@ -734,12 +732,9 @@ describe("POST /v1/earn/vault-deposits — catalogue admission", () => {
     expect(res.status).toBe(200);
     expect(depositIntoVault).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({
-        environment: "production",
-        provider: "ondo",
-        minSharesOut: "9.9",
-      })
+      expect.objectContaining({ provider: "ondo", minSharesOut: "9.9" })
     );
+    expect(scopes).toEqual([expect.objectContaining({ environment: "production" })]);
   });
 
   it("refuses a paused strategy", async () => {
