@@ -223,15 +223,6 @@ export function chainDeltaVerdict(matched: boolean): AmountVerificationVerdict {
   return matched ? CHAIN_DELTA_MATCHED : CHAIN_DELTA_MISMATCH;
 }
 
-/** The three amounts as a scaled or interest-bearing mint's wallets show them. */
-export interface TokenMovementDisplay {
-  debit: string;
-  fee: string;
-  credit: string;
-  /** The chain time the display values were computed at (ISO 8601). */
-  asOf: string;
-}
-
 /**
  * What an expectation or a mandate fixes before any movement exists, in token
  * units. A payment request fixes the credit its payment must deliver; the

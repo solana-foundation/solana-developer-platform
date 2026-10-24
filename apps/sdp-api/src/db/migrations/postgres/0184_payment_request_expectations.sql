@@ -74,7 +74,6 @@ CREATE TABLE payment_request_transactions (
     fee_epoch sdp_u64,
     as_of_slot sdp_u64,
     as_of_unix_timestamp BIGINT,
-    display_rule JSONB,
     outcome TEXT NOT NULL DEFAULT 'open'
         CHECK (outcome IN ('open', 'landed', 'failed', 'lapsed')),
     -- The slot the signature's status reported; set with a `landed` or `failed` outcome.
@@ -94,7 +93,7 @@ CREATE TABLE payment_request_transactions (
     ),
     CONSTRAINT payment_request_transactions_native_terms CHECK (
         asset_kind <> 'native'
-        OR (decimals = 9 AND quoted_fee = 0 AND fee_epoch IS NULL AND display_rule IS NULL)
+        OR (decimals = 9 AND quoted_fee = 0 AND fee_epoch IS NULL)
     ),
     CONSTRAINT payment_request_transactions_terms_read CHECK (
         (as_of_slot IS NULL) = (as_of_unix_timestamp IS NULL)
@@ -102,9 +101,7 @@ CREATE TABLE payment_request_transactions (
     ),
     CONSTRAINT payment_request_transactions_quote_splits
         CHECK (quoted_debit = quoted_credit + quoted_fee),
-    CONSTRAINT payment_request_transactions_quote_credits CHECK (quoted_credit > 0),
-    CONSTRAINT payment_request_transactions_display_rule_object
-        CHECK (display_rule IS NULL OR jsonb_typeof(display_rule) = 'object')
+    CONSTRAINT payment_request_transactions_quote_credits CHECK (quoted_credit > 0)
 );
 
 -- One claim per unsigned transaction: the store step finds its window by it.

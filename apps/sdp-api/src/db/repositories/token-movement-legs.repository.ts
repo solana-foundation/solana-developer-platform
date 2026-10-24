@@ -117,7 +117,7 @@ export interface NewTokenMovementLeg {
  */
 export type RecordedLegQuote = Pick<
   TokenMovementLeg,
-  "asset" | "decimals" | "basis" | "quoted" | "feeEpoch" | "asOf" | "displayRule"
+  "asset" | "decimals" | "basis" | "quoted" | "feeEpoch" | "asOf"
 >;
 
 const LEG_PENDING_STATE = "pending" satisfies AmountVerificationState;
@@ -127,25 +127,6 @@ const NOT_EXECUTED_STATE = "not_required" satisfies AmountVerificationState;
 const LEG_BY_CONSTRUCTION = "construction" satisfies LegVerifier;
 
 const LEG_FROM_CHAIN = "chain" satisfies LegVerifier;
-
-/** `display_rule` as stored: the rule, with its timestamps as decimal strings. */
-const storedDisplayRuleSchema = z.discriminatedUnion("kind", [
-  z.object({
-    kind: z.literal("scaled"),
-    multiplier: z.number(),
-    newMultiplier: z.number(),
-    newMultiplierEffectiveAt: z.string(),
-  }),
-  z.object({
-    kind: z.literal("interest"),
-    initializedAt: z.string(),
-    lastUpdateAt: z.string(),
-    preUpdateAverageRate: z.number().int(),
-    currentRate: z.number().int(),
-  }),
-]);
-
-type StoredDisplayRule = z.infer<typeof storedDisplayRuleSchema>;
 
 const legRowSchema = z.object({
   id: z.string(),
@@ -189,7 +170,6 @@ const recordedQuoteRowSchema = legRowSchema.pick({
   fee_epoch: true,
   as_of_slot: true,
   as_of_unix_timestamp: true,
-  display_rule: true,
 });
 
 type RecordedQuoteRow = z.infer<typeof recordedQuoteRowSchema>;
@@ -246,56 +226,6 @@ function observedAmounts(row: LegRow): LegAmounts | null {
   return amounts(debit, fee, credit);
 }
 
-function displayRuleOf(stored: StoredDisplayRule): Exclude<DisplayRule, { kind: "plain" }> {
-  switch (stored.kind) {
-    case "scaled":
-      return {
-        kind: "scaled",
-        multiplier: stored.multiplier,
-        newMultiplier: stored.newMultiplier,
-        newMultiplierEffectiveAt: unixTimestamp(BigInt(stored.newMultiplierEffectiveAt)),
-      };
-    case "interest":
-      return {
-        kind: "interest",
-        initializedAt: unixTimestamp(BigInt(stored.initializedAt)),
-        lastUpdateAt: unixTimestamp(BigInt(stored.lastUpdateAt)),
-        preUpdateAverageRate: stored.preUpdateAverageRate,
-        currentRate: stored.currentRate,
-      };
-    default: {
-      const exhaustive: never = stored;
-      throw new Error(`Unknown stored display rule: ${JSON.stringify(exhaustive)}`);
-    }
-  }
-}
-
-function storedDisplayRule(rule: DisplayRule): StoredDisplayRule | null {
-  switch (rule.kind) {
-    case "plain":
-      return null;
-    case "scaled":
-      return {
-        kind: "scaled",
-        multiplier: rule.multiplier,
-        newMultiplier: rule.newMultiplier,
-        newMultiplierEffectiveAt: rule.newMultiplierEffectiveAt.toString(),
-      };
-    case "interest":
-      return {
-        kind: "interest",
-        initializedAt: rule.initializedAt.toString(),
-        lastUpdateAt: rule.lastUpdateAt.toString(),
-        preUpdateAverageRate: rule.preUpdateAverageRate,
-        currentRate: rule.currentRate,
-      };
-    default: {
-      const exhaustive: never = rule;
-      throw new Error(`Unknown display rule: ${JSON.stringify(exhaustive)}`);
-    }
-  }
-}
-
 function recordedQuoteOf(row: RecordedQuoteRow): RecordedLegQuote {
   return {
     asset: recordedAsset(row),
@@ -310,7 +240,6 @@ function recordedQuoteOf(row: RecordedQuoteRow): RecordedLegQuote {
             slot: BigInt(row.as_of_slot),
             unixTimestamp: unixTimestamp(BigInt(row.as_of_unix_timestamp)),
           },
-    displayRule: row.display_rule === null ? null : displayRuleOf(row.display_rule),
   };
 }
 
@@ -348,14 +277,8 @@ export function ownWalletAmount(quote: MovementQuote): string {
   return toTokenAmount(quote.debit, quote.decimals).value;
 }
 
-/** The display rule a quote was priced under, from its display values. */
-function quoteDisplayRule(quote: MovementQuote): DisplayRule {
-  return quote.display === null ? { kind: "plain" } : quote.display.debit.rule;
-}
-
 /** A quote as a leg records it. */
 export function recordedLegQuote(quote: MovementQuote): RecordedLegQuote {
-  const rule = quoteDisplayRule(quote);
   return {
     asset: quote.intent.asset,
     decimals: quote.decimals,
@@ -366,18 +289,16 @@ export function recordedLegQuote(quote: MovementQuote): RecordedLegQuote {
       quote.asOf === null
         ? null
         : { slot: quote.asOf.slot, unixTimestamp: quote.asOf.unixTimestamp },
-    displayRule: rule.kind === "plain" ? null : rule,
   };
 }
 
 /** The recorded-quote columns, in the order `recordedQuoteValues` binds them. */
 export const RECORDED_QUOTE_COLUMNS = `asset_kind, mint, token_program, decimals, basis,
-  quoted_debit, quoted_fee, quoted_credit, fee_epoch, as_of_slot, as_of_unix_timestamp,
-  display_rule`;
+  quoted_debit, quoted_fee, quoted_credit, fee_epoch, as_of_slot, as_of_unix_timestamp`;
 
 /** Placeholders for `RECORDED_QUOTE_COLUMNS`. */
 export const RECORDED_QUOTE_VALUES =
-  "?, ?, ?, ?, ?, ?::numeric, ?::numeric, ?::numeric, ?::numeric, ?::numeric, ?, ?::jsonb";
+  "?, ?, ?, ?, ?, ?::numeric, ?::numeric, ?::numeric, ?::numeric, ?::numeric, ?";
 
 /** A value a leg statement binds: text (base units travel as decimal text), a number or NULL. */
 export type LegBinding = string | number | null;
@@ -385,7 +306,6 @@ export type LegBinding = string | number | null;
 /** A recorded quote's values, in `RECORDED_QUOTE_COLUMNS` order. */
 export function recordedQuoteValues(quote: RecordedLegQuote): LegBinding[] {
   const { asset } = quote;
-  const displayRule = quote.displayRule === null ? null : storedDisplayRule(quote.displayRule);
   return [
     asset.kind,
     asset.kind === "token" ? asset.mint : null,
@@ -398,7 +318,6 @@ export function recordedQuoteValues(quote: RecordedLegQuote): LegBinding[] {
     quote.feeEpoch === null ? null : quote.feeEpoch.toString(),
     quote.asOf === null ? null : quote.asOf.slot.toString(),
     quote.asOf === null ? null : Number(quote.asOf.unixTimestamp),
-    displayRule === null ? null : JSON.stringify(displayRule),
   ];
 }
 
