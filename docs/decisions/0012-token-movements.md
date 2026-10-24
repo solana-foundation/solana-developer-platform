@@ -117,7 +117,7 @@ them in one place, not adding special cases to every flow.
   with it. The reader is one request, native none.
 - **Ledger (PR 2).** `token_movement_legs` holds one row per (movement, destination): its asset,
   decimals, basis, quoted debit, fee and credit in base units (`debit = credit + fee`), the fee
-  epoch, the Clock read and the display rule. A leg belongs to a transfer row (a single transfer,
+  epoch and the Clock read. A leg belongs to a transfer row (a single transfer,
   an off-ramp deposit) or to a batch recipient, whose chunk row carries the signature. Its quote
   is sealed once that signature is saved. A new row's `amount` text is written only from the
   quote. Rows written before quotes have no leg; there is no backfill.
