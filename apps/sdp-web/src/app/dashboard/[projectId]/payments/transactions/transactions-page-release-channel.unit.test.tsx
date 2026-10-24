@@ -27,12 +27,29 @@ type WorkspaceProps = {
 /** The API paths the page read, so a test can see which module it asked for. */
 const requestedPaths: string[] = [];
 
-/** Answers every read the page makes with an empty page, recording each path. */
+/** Each read the two pages make, answered as the API answers an empty Project. */
+const EMPTY_PROJECT_ANSWERS: Record<string, unknown> = {
+  "/v1/issuance/tokens?page=1&pageSize=100": { data: { tokens: [] }, meta: { hasMore: false } },
+  "/v1/wallets?view=summary": { data: { wallets: [] } },
+  "/v1/counterparties?page=1&pageSize=100": { data: { counterparties: [], total: 0 } },
+};
+
+/** Reads no answer covers; the page's readers swallow the throw, so each test checks this. */
+const unexpectedPaths: string[] = [];
+
+/**
+ * Answers the reads the page makes for an empty Project, recording each path. Any other read
+ * throws and is recorded, so a page that starts reading something new fails the test.
+ */
 function emptyApiClient(): sdpApi.SdpApiClient {
-  const body = (path: string) =>
-    path.startsWith("/v1/transactions")
-      ? { transactions: [], nextCursor: null }
-      : { data: [], pagination: { page: 1, pageSize: 100, total: 0, totalPages: 0 } };
+  const body = (path: string) => {
+    if (path.startsWith("/v1/transactions?")) return { transactions: [], nextCursor: null };
+    if (!(path in EMPTY_PROJECT_ANSWERS)) {
+      unexpectedPaths.push(path);
+      throw new Error(`Unexpected request: ${path}`);
+    }
+    return EMPTY_PROJECT_ANSWERS[path];
+  };
   return {
     request: async (path: string) => {
       requestedPaths.push(path);
@@ -66,10 +83,12 @@ async function renderPage(
 
 beforeEach(() => {
   requestedPaths.length = 0;
+  unexpectedPaths.length = 0;
   vi.spyOn(sdpApi, "createSdpApiClient").mockImplementation(async () => emptyApiClient());
 });
 
 afterEach(() => {
+  expect(unexpectedPaths).toEqual([]);
   vi.restoreAllMocks();
 });
 

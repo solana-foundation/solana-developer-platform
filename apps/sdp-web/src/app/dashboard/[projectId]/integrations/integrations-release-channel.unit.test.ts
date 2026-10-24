@@ -34,10 +34,16 @@ const AVAILABILITY = projectProviderAvailability({
   earn: [],
 });
 
-/** Answers the reads both pages make, and fails on any other so a new read is noticed. */
+/** Reads no answer covers; the pages swallow some read errors, so each test checks this. */
+const unexpectedPaths: string[] = [];
+
+/** Answers the reads both pages make, and records any other so a new read is noticed. */
 function apiClient(answers: Record<string, unknown>): sdpApi.SdpApiClient {
   const answer = (path: string) => {
-    if (!(path in answers)) throw new Error(`Unexpected request: ${path}`);
+    if (!(path in answers)) {
+      unexpectedPaths.push(path);
+      throw new Error(`Unexpected request: ${path}`);
+    }
     return answers[path];
   };
   return {
@@ -58,6 +64,7 @@ function useChannel(releaseChannel: SdpReleaseChannel) {
 }
 
 beforeEach(() => {
+  unexpectedPaths.length = 0;
   resetRequestProject();
   setPageRequest(`/dashboard/${SANDBOX_PROJECT.id}/integrations`);
   vi.spyOn(sdpApi, "createRequestScopedSdpApiClients").mockImplementation(async () => ({
@@ -73,6 +80,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  expect(unexpectedPaths).toEqual([]);
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
 });

@@ -24,8 +24,9 @@ import * as workspace from "@/contexts/dashboard-workspace-context";
 import type { DashboardFlags } from "@/flags/dashboard";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { setDashboardUrl } from "@/test/dashboard-navigation";
-import { SANDBOX_PROJECT } from "@/test/projects";
+import { PRODUCTION_PROJECT, SANDBOX_PROJECT } from "@/test/projects";
 import { DASHBOARD_DESIGNS, dashboardFlagsAt } from "@/test/release-channel-flags";
 
 vi.mock("@clerk/nextjs", () => ({
@@ -39,20 +40,31 @@ vi.mock("next/navigation", () => import("@/test/next-navigation"));
 const PROJECT = `/dashboard/${SANDBOX_PROJECT.id}`;
 const MESSAGES = getMessages("en");
 
-/** The shell's workspace: a signed-in admin on the sandbox Project with the sidebar open. */
-const WORKSPACE = {
-  dashboardAccess: { capabilities: { canReadApprovals: true, canManageOrgSettings: true } },
-  dashboardCacheScope: { orgId: "org-release-channel", userId: "user-release-channel" },
-  selectedProjectId: SANDBOX_PROJECT.id,
-  isSidebarOpen: true,
-  setSidebarOpen: () => undefined,
-  isProjectSwitching: false,
-};
+type DashboardWorkspace = ReturnType<typeof workspace.useDashboardWorkspace>;
+
+/** The shell's workspace: an admin on the sandbox Project with the sidebar open. */
+function workspaceFor(flags: DashboardFlags): DashboardWorkspace {
+  return {
+    initialQuickStartStatus: null,
+    initialQuickStartStep: null,
+    dashboardAccess: resolveDashboardAccess("org:admin"),
+    flags,
+    dashboardCacheScope: { orgId: "org-release-channel", userId: "user-release-channel" },
+    projects: [SANDBOX_PROJECT, PRODUCTION_PROJECT],
+    sandboxProject: SANDBOX_PROJECT,
+    productionProject: PRODUCTION_PROJECT,
+    selectedProjectId: SANDBOX_PROJECT.id,
+    sdpEnvironment: "sandbox",
+    isSidebarOpen: true,
+    issuanceTab: "tokens",
+    isProjectSwitching: false,
+    selectProject: () => undefined,
+    setSidebarOpen: () => undefined,
+    toggleSidebar: () => undefined,
+  };
+}
 
 beforeEach(() => {
-  // SAFETY: the shell reads only the fields above from its workspace.
-  const value = WORKSPACE as unknown as ReturnType<typeof workspace.useDashboardWorkspace>;
-  vi.spyOn(workspace, "useDashboardWorkspace").mockReturnValue(value);
   vi.spyOn(workspace, "useOptionalDashboardWorkspace").mockReturnValue(undefined);
   // Chrome with its own data reads, none of which lists a module.
   vi.spyOn(workspaceSwitcher, "WorkspaceSwitcher").mockReturnValue(<span />);
@@ -69,6 +81,7 @@ afterEach(() => {
 });
 
 function shell(flags: DashboardFlags) {
+  vi.spyOn(workspace, "useDashboardWorkspace").mockReturnValue(workspaceFor(flags));
   return (
     <I18nProvider locale="en" messages={MESSAGES}>
       <DashboardShell flags={flags}>
