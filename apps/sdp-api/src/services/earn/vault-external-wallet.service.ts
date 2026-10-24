@@ -1,7 +1,6 @@
 import { notImplemented } from "@sdp/earn/errors";
 import type { EarnVaultTransactionPlan } from "@sdp/earn/types";
 import { currentClusterScope } from "@sdp/rpc/scope";
-import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { EarnProviderId } from "@sdp/types/provider-access";
 import {
   address,
@@ -823,7 +822,7 @@ export async function submitExternalWalletDeposit(
   input: ExternalWalletSubmitInput
 ): Promise<ExternalWalletSubmitResult> {
   const { environment } = currentClusterScope();
-  const built = await requireSubmittableBuiltTransaction(env, input, environment, "deposit");
+  const built = await requireSubmittableBuiltTransaction(env, input, "deposit");
   const fingerprint = buildEarnExternalWalletDepositFingerprint({
     environment,
     provider: built.provider,
@@ -851,7 +850,7 @@ export async function submitExternalWalletDeposit(
       projectId: input.projectId,
       idempotencyFingerprint: fingerprint,
     });
-    return replayedSubmitResult(ledger, input, environment, prior);
+    return replayedSubmitResult(ledger, input, prior);
   }
 
   const signed = await verifySignedExternalWalletTransaction(built, input.signedTransaction);
@@ -901,7 +900,7 @@ export async function submitExternalWalletWithdrawal(
   input: ExternalWalletSubmitInput
 ): Promise<ExternalWalletSubmitResult> {
   const { environment } = currentClusterScope();
-  const built = await requireSubmittableBuiltTransaction(env, input, environment, "withdrawal");
+  const built = await requireSubmittableBuiltTransaction(env, input, "withdrawal");
   if (!built.position_id) {
     throw internalError(`Earn external-wallet withdrawal build ${built.id} names no position`);
   }
@@ -928,7 +927,7 @@ export async function submitExternalWalletWithdrawal(
       projectId: input.projectId,
       idempotencyFingerprint: fingerprint,
     });
-    return replayedSubmitResult(ledger, input, environment, prior);
+    return replayedSubmitResult(ledger, input, prior);
   }
 
   const signed = await verifySignedExternalWalletTransaction(built, input.signedTransaction);
@@ -968,7 +967,6 @@ export async function submitExternalWalletWithdrawal(
 async function requireSubmittableBuiltTransaction(
   env: Env,
   input: ExternalWalletSubmitInput,
-  environment: SdpEnvironment,
   direction: "deposit" | "withdrawal"
 ): Promise<EarnExternalWalletTransactionRow> {
   const built = await createPostgresEarnExternalWalletTransactionsRepository(getDb(env)).getById({
@@ -977,7 +975,7 @@ async function requireSubmittableBuiltTransaction(
   });
   if (
     !built ||
-    built.environment !== environment ||
+    built.environment !== currentClusterScope().environment ||
     // Exact match: a null project_id means the project was deleted, and a
     // deleted project's builds are unaddressable, not shared.
     built.project_id !== input.projectId ||
@@ -991,12 +989,11 @@ async function requireSubmittableBuiltTransaction(
 async function replayedSubmitResult(
   ledger: ReturnType<typeof createPostgresEarnMovementsRepository>,
   input: ExternalWalletSubmitInput,
-  environment: SdpEnvironment,
   movement: EarnMovementRow
 ): Promise<ExternalWalletSubmitResult> {
   const position = await ledger.getPositionById({
     organizationId: input.organizationId,
-    environment,
+    environment: currentClusterScope().environment,
     positionId: movement.position_id,
   });
   if (!position || !movement.signature) {

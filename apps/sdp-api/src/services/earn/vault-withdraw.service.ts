@@ -2,7 +2,6 @@ import { notImplemented } from "@sdp/earn/errors";
 import type { EarnVaultTransactionPlan } from "@sdp/earn/types";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { compareDecimalAmounts } from "@sdp/solana/amount";
-import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { getDb } from "@/db/client";
 import {
   assertMovementIsOwnReplay,
@@ -103,7 +102,6 @@ export function requireAcceptedWithdrawalPlan(
 async function replayResult(
   ledger: ReturnType<typeof createPostgresEarnMovementsRepository>,
   input: VaultWithdrawalInput,
-  environment: SdpEnvironment,
   movement: EarnMovementRow
 ): Promise<VaultWithdrawalResult> {
   if (movement.direction !== "withdrawal") {
@@ -111,7 +109,7 @@ async function replayResult(
   }
   const position = await ledger.getPositionById({
     organizationId: input.organizationId,
-    environment,
+    environment: currentClusterScope().environment,
     positionId: movement.position_id,
   });
   if (!position || !movement.signature) {
@@ -147,7 +145,7 @@ export async function withdrawFromVault(
       projectId: input.projectId,
       idempotencyFingerprint: fingerprint,
     });
-    return replayResult(ledger, input, environment, prior);
+    return replayResult(ledger, input, prior);
   }
 
   const deadline = createVaultDeadline();

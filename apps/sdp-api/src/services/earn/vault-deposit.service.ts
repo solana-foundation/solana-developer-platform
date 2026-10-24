@@ -2,7 +2,6 @@ import { notImplemented } from "@sdp/earn/errors";
 import type { EarnVaultTransactionPlan } from "@sdp/earn/types";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { compareDecimalAmounts } from "@sdp/solana/amount";
-import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { EarnProviderId } from "@sdp/types/provider-access";
 import { address } from "@solana/kit";
 import { getDb } from "@/db/client";
@@ -88,12 +87,11 @@ export interface VaultDepositResult {
 async function replayResult(
   ledger: ReturnType<typeof createPostgresEarnMovementsRepository>,
   input: VaultDepositInput,
-  environment: SdpEnvironment,
   movement: EarnMovementRow
 ): Promise<VaultDepositResult> {
   const position = await ledger.getPositionById({
     organizationId: input.organizationId,
-    environment,
+    environment: currentClusterScope().environment,
     positionId: movement.position_id,
   });
   if (!position) {
@@ -185,7 +183,7 @@ export async function depositIntoVault(
       projectId: input.projectId,
       idempotencyFingerprint: fingerprint,
     });
-    return replayResult(ledger, input, environment, prior);
+    return replayResult(ledger, input, prior);
   }
 
   // Replays above are pure durable reads: they must keep working during an RPC
