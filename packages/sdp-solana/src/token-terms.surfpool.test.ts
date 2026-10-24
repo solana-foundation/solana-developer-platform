@@ -8,8 +8,6 @@
  * against what the program does:
  *
  * - a real transfer debits, withholds and credits exactly the quoted amounts;
- * - `toDisplay` equals the program's own `AmountToUiAmount`, and the RPC's
- *   `uiAmountString` where Surfpool computes it, before and after time moves;
  * - `requiredAccountExtensions` sizes a token account as the program does;
  * - paused, hook, frozen-default and fee-change mints behave as their terms say.
  */
@@ -56,51 +54,18 @@ import {
   mintTokens,
   openTokenAccount,
   pauseMint,
-  programDisplay,
   SCALED_MULTIPLIER,
   SWITCHED_MULTIPLIER,
   sendInstructions,
 } from "./test/mint-matrix";
-import { baseUnits, parseTokenAmount } from "./token-amount";
-import { decodeTokenTerms, type MintTokenTerms, toDisplay } from "./token-terms";
+import { parseTokenAmount } from "./token-amount";
+import { decodeTokenTerms, type MintTokenTerms } from "./token-terms";
 
 const ENABLED = process.env.TOKEN_MOVEMENT_SURFPOOL_E2E === "true";
 
 type SurfnetCheatcodes = ReturnType<typeof createSurfnetCheatcodesRpc>;
 
 const ONE_HOUR_SECONDS = 3_600n;
-const ONE_YEAR_SECONDS = 365n * 24n * ONE_HOUR_SECONDS;
-
-/** Amounts a display check holds, above 2^53 included. */
-const DISPLAY_AMOUNTS = [1n, 7n, 1_000_001n, 2n ** 53n + 1n, 2n ** 60n + 12_345n] as const;
-
-const DISPLAY_PROFILES = [
-  "classic",
-  "token2022Plain",
-  "scaled",
-  "scaledSwitch",
-  "interestPositive",
-  "interestNegative",
-] as const;
-
-/**
- * Profiles whose RPC `uiAmountString` on a surfnet follows the program, before
- * and after the time travel. Surfpool 1.5.0's account parser leaves the
- * interest rate out, and after a time travel it keeps the old multiplier, so
- * those are checked against the program alone. Its `getTokenAccountBalance`
- * ignores every display extension, so the test reads parsed accounts.
- */
-const RPC_DISPLAYS_NOW: ReadonlySet<MintProfile> = new Set([
-  "classic",
-  "token2022Plain",
-  "scaled",
-  "scaledSwitch",
-]);
-const RPC_DISPLAYS_LATER: ReadonlySet<MintProfile> = new Set([
-  "classic",
-  "token2022Plain",
-  "scaled",
-]);
 
 /** The mint's terms, from the one request and the decoder `readTokenTerms` uses. */
 async function termsOf(chain: MatrixChain, mint: MatrixMint): Promise<MintTokenTerms> {
@@ -164,7 +129,7 @@ async function assertRefused(sending: Promise<unknown>, logLine: string): Promis
 
 describe("Token Terms on a surfnet mint matrix", { skip: !ENABLED }, () => {
   let surfnet: Surfnet;
-  let cheatcodes: SurfnetCheatcodes;
+  let _cheatcodes: SurfnetCheatcodes;
   let chain: MatrixChain;
   let matrix: MintMatrix;
   let hookProgram: Address;
@@ -174,7 +139,7 @@ describe("Token Terms on a surfnet mint matrix", { skip: !ENABLED }, () => {
     const { Surfnet: SurfnetRuntime } = await import("@solana/surfpool");
     const { createSurfnetCheatcodesRpc } = await import("@solana/surfpool/kit");
     surfnet = SurfnetRuntime.start();
-    cheatcodes = createSurfnetCheatcodesRpc(surfnet.rpcUrl);
+    _cheatcodes = createSurfnetCheatcodesRpc(surfnet.rpcUrl);
     const rpc = createSolanaRpc(surfnet.rpcUrl);
     chain = { rpc, payer: await createKeyPairSignerFromBytes(surfnet.payerSecretKey) };
     hookProgram = (await generateKeyPairSigner()).address;
@@ -309,48 +274,6 @@ describe("Token Terms on a surfnet mint matrix", { skip: !ENABLED }, () => {
       assert.equal(destinationAfter.amount - destination.amount, quote.credit, label);
       assert.equal(destinationAfter.withheld - destination.withheld, quote.fee, label);
     }
-  });
-
-  it("shows what the program and the RPC show, before and after time moves", async () => {
-    const owners = await Promise.all(
-      DISPLAY_AMOUNTS.map(async () => (await generateKeyPairSigner()).address)
-    );
-    const held: { mint: MatrixMint; owner: Address; amount: bigint }[] = [];
-    for (const profile of DISPLAY_PROFILES) {
-      const mint = matrix[profile];
-      for (const [index, amount] of DISPLAY_AMOUNTS.entries()) {
-        const tokenAccount = await openTokenAccount(chain, mint, owners[index]);
-        await mintTokens(chain, mint, tokenAccount, amount);
-        held.push({ mint, owner: owners[index], amount });
-      }
-    }
-
-    const compareAll = async (moment: string, rpcDisplays: ReadonlySet<MintProfile>) => {
-      for (const { mint, owner, amount } of held) {
-        const terms = await termsOf(chain, mint);
-        const shown = toDisplay(terms, baseUnits(amount), terms.readAt.unixTimestamp).value;
-        const label = `${moment} ${mint.profile} ${amount}`;
-        assert.equal(shown, await programDisplay(chain, mint, amount), label);
-        if (rpcDisplays.has(mint.profile)) {
-          const { value } = await chain.rpc
-            .getTokenAccountsByOwner(owner, { mint: mint.mint }, { encoding: "jsonParsed" })
-            .send();
-          assert.equal(value.length, 1, label);
-          assert.equal(shown, value[0].account.data.parsed.info.tokenAmount.uiAmountString, label);
-        }
-      }
-    };
-
-    // A paused clock keeps the mint read and the program's own read at one
-    // timestamp, which interest-bearing display depends on to the second.
-    await cheatcodes.pauseClock().send();
-    await compareAll("now", RPC_DISPLAYS_NOW);
-    const now = (await termsOf(chain, matrix.scaled)).readAt.unixTimestamp;
-    surfnet.timeTravelToTimestamp(Number((now + ONE_YEAR_SECONDS) * 1_000n));
-    const later = await termsOf(chain, matrix.scaledSwitch);
-    assert.ok(later.readAt.unixTimestamp >= newMultiplierAt);
-    await compareAll("a year later", RPC_DISPLAYS_LATER);
-    await cheatcodes.resumeClock().send();
   });
 
   it("refuses transfers of a paused mint and of a mint whose hook program is set", async () => {

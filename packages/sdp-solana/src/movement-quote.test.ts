@@ -65,7 +65,6 @@ describe("quoteMovement", () => {
     assert.equal(quote.credit, 1_500_000_000n);
     assert.equal(quote.decimals, 9);
     assert.equal(quote.feeEpoch, null);
-    assert.equal(quote.display, null);
     assert.equal(quote.asOf, null);
   });
 
@@ -118,28 +117,6 @@ describe("quoteMovement", () => {
     assert.equal(quoteMovement(pending, intent("1", "debit")).fee, 5_000n);
     const effective = mintTerms({ older: FIFTY_BPS, newer: rate(700n, 100, 50_000n) }, PLAIN);
     assert.equal(quoteMovement(effective, intent("1", "debit")).fee, 10_000n);
-  });
-
-  it("adds display values for a scaled mint", () => {
-    const terms = mintTerms(
-      { older: FIFTY_BPS, newer: FIFTY_BPS },
-      {
-        kind: "scaled",
-        multiplier: 1.5,
-        newMultiplier: 1.5,
-        newMultiplierEffectiveAt: unixTimestamp(0n),
-      }
-    );
-    const quote = quoteMovement(terms, intent("1", "debit"));
-    assert.deepEqual(
-      quote.display && {
-        debit: quote.display.debit.value,
-        fee: quote.display.fee.value,
-        credit: quote.display.credit.value,
-        asOf: quote.display.debit.asOf,
-      },
-      { debit: "1.5", fee: "0.0075", credit: "1.4925", asOf: READ_AT.unixTimestamp }
-    );
   });
 
   it("refuses an amount at another scale than the mint", () => {

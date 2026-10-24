@@ -28,10 +28,8 @@ import {
   epochFee,
   feeFor,
   type MintTokenTerms,
-  NATIVE_TOKEN_TERMS,
   TOKEN_TERMS_REFUSALS,
   TokenTermsError,
-  toDisplay,
 } from "./token-terms";
 
 const testAddress = (byte: number): Address =>
@@ -45,7 +43,7 @@ const SPL_TOKEN = address(SPL_TOKEN_PROGRAMS["spl-token"]);
 const TOKEN_2022 = address(SPL_TOKEN_PROGRAMS["token-2022"]);
 
 /** `INT_SECONDS_PER_YEAR` in the program's tests. */
-const SECONDS_PER_YEAR = 31_556_736n;
+const _SECONDS_PER_YEAR = 31_556_736n;
 
 const READ_AT = { slot: 284_617_079n, unixTimestamp: unixTimestamp(1_800_000_000n), epoch: 700n };
 
@@ -448,83 +446,5 @@ describe("transfer fee rules", () => {
       assert.ok(minimal <= debit, label);
       assert.ok(minimal === 0n || creditOf(terms, minimal - 1n) < credit, label);
     }
-  });
-});
-
-describe("display rules", () => {
-  const scaled = (multiplier: number, decimals: number) =>
-    displayTerms(
-      {
-        kind: "scaled",
-        multiplier,
-        newMultiplier: multiplier,
-        newMultiplierEffectiveAt: unixTimestamp(1n),
-      },
-      decimals
-    );
-  const interest = (preUpdateAverageRate: number, currentRate: number, decimals: number) =>
-    displayTerms(
-      {
-        kind: "interest",
-        initializedAt: unixTimestamp(0n),
-        lastUpdateAt: unixTimestamp(SECONDS_PER_YEAR),
-        preUpdateAverageRate,
-        currentRate,
-      },
-      decimals
-    );
-  const shown = (terms: MintTokenTerms, units: bigint, at: bigint) =>
-    toDisplay(terms, baseUnits(units), unixTimestamp(at)).value;
-
-  // The program's `specific_amount_to_ui_amount` vectors, `scaled_ui_amount/mod.rs`.
-  it("matches the program's scaled vectors, truncation included", () => {
-    assert.equal(shown(scaled(5, 0), 1n, 0n), "5");
-    assert.equal(shown(scaled(5, 1), 1n, 0n), "0.5");
-    assert.equal(shown(scaled(5, 10), 1n, 0n), "0.0000000005");
-    assert.equal(shown(scaled(5, 10), 10_000_000_000n, 0n), "5");
-    assert.equal(shown(scaled(0.99, 2), 101n, 0n), "0.99");
-    assert.throws(() => shown(scaled(Number.MAX_VALUE, 0), U64_MAX, 0n), AmountError);
-  });
-
-  // The program's `specific_amount_to_ui_amount` vectors, `interest_bearing_mint/mod.rs`.
-  it("matches the program's interest vectors", () => {
-    const one = 1_000_000_000_000_000_000n;
-    assert.equal(shown(interest(500, 500, 18), one, SECONDS_PER_YEAR), "1.051271096376024117");
-    assert.equal(shown(interest(500, 500, 19), one, SECONDS_PER_YEAR), "0.1051271096376024117");
-    assert.equal(
-      shown(interest(500, 500, 28), one, SECONDS_PER_YEAR),
-      "0.0000000001051271096376024175"
-    );
-    assert.equal(shown(interest(500, 500, 10), 10_000_000_000n, SECONDS_PER_YEAR), "1.0512710964");
-    assert.equal(shown(interest(-500, -500, 18), one, SECONDS_PER_YEAR), "0.951229424500713905");
-    assert.equal(shown(interest(-500, 500, 0), 1n, SECONDS_PER_YEAR * 2n), "1");
-    assert.equal(
-      shown(interest(500, 500, 0), U64_MAX, SECONDS_PER_YEAR * 2n),
-      "20386805083448098816"
-    );
-  });
-
-  it("switches to the new multiplier at its effective time", () => {
-    const terms = displayTerms(
-      {
-        kind: "scaled",
-        multiplier: 1.5,
-        newMultiplier: 2,
-        newMultiplierEffectiveAt: unixTimestamp(1_000n),
-      },
-      6
-    );
-    assert.equal(shown(terms, 1_000_000n, 999n), "1.5");
-    assert.equal(shown(terms, 1_000_000n, 1_000n), "2");
-  });
-
-  it("shows plain mints exactly, carrying the rule and time", () => {
-    const at = unixTimestamp(5n);
-    assert.deepEqual(toDisplay(NATIVE_TOKEN_TERMS, baseUnits(1_500_000_000n), at), {
-      value: "1.5",
-      rule: { kind: "plain" },
-      asOf: at,
-    });
-    assert.equal(shown(displayTerms(PLAIN, 6), U64_MAX, 0n), "18446744073709.551615");
   });
 });

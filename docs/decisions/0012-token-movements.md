@@ -53,17 +53,15 @@ them in one place, not adding special cases to every flow.
 
 1. **Base units are the ledger, and units are types.** `@sdp/solana/token-amount` defines
    `BaseUnits` (a u64 bigint) and `TokenAmount` (an exact decimal equal to base units ÷
-   10^decimals, with its decimals). `@sdp/solana/token-terms` defines `DisplayAmount` (what a
-   wallet shows, with its rule and `asOf`); it never builds or verifies a transaction. Each type
-   is branded, and only its constructors make it. These modules are client-safe: no RPC import.
+   10^decimals, with its decimals). Each type is branded, and only its constructors make it. These modules are client-safe: no RPC import.
 2. **One asset identity.** `AssetRef = { kind: "native" } | { kind: "token", mint, program }`
    (`@sdp/solana/asset-ref`). `resolveAssetRequest(token, cluster)` resolves a request once:
    "SOL" is native, a catalogue symbol is that cluster's mint, the wrapped SOL mint is an SPL
    token, and any other mint is read to learn its program.
 3. **Token Terms are read live, once per movement.** `readTokenTerms(asset)`
    (`apps/sdp-api/src/services/token-movement/read-terms.ts`) makes one
-   `getMultipleAccounts([mint, Clock])` request, so the fee epoch and display time belong to the
-   slot that held the mint bytes. Native SOL makes no request. Nothing is cached: every field
+   `getMultipleAccounts([mint, Clock])` request, so the fee epoch belongs to the slot that held
+   the mint bytes. Native SOL makes no request. Nothing is cached: every field
    moves value, and a mint with a close authority can be closed and created again with other
    decimals. The terms hold decimals and program, `readAt` (slot, timestamp, epoch), the fee
    schedule (older and newer), the display rule, the hook program, paused, non-transferable,
@@ -74,14 +72,12 @@ them in one place, not adding special cases to every flow.
    `epochFee`, `feeFor` (`min(ceil(debit × bps ÷ 10 000), maximumFee)`) and `debitForCredit`
    are exact bigint math. The credit never decreases and grows by at most 1 per base unit, so
    every credit is reachable exactly: `debitForCredit` starts from the program's
-   `calculate_pre_fee_amount` and confirms it with the forward rule. `toDisplay` repeats the
-   program's f64 steps, because wallets and the RPC show what they produce. The pinned client
-   (`@solana-program/token-2022` 0.17.0) does not match the program for display (it rounds
-   scaled amounts where the program truncates, and orders the interest exponent differently),
-   so SDP mirrors the program and uses the client only to decode accounts.
+   `calculate_pre_fee_amount` and confirms it with the forward rule. A display rule (scaled or
+   interest-bearing) is decoded so every path can refuse it; SDP computes no display value while
+   display units are deferred (open decision 7).
 5. **One quote.** `MovementIntent = { asset, amount: TokenAmount, basis: "debit" | "credit" }`.
-   `quoteMovement(terms, intent)` returns `MovementQuote { debit, fee, credit, feeEpoch, display,
-   asOf }` in base units, with `debit = credit + fee`.
+   `quoteMovement(terms, intent)` returns `MovementQuote { debit, fee, credit, feeEpoch, asOf }` in
+   base units, with `debit = credit + fee`.
 6. **The API's `amount` is token units:** base units ÷ 10^decimals, never a display value.
    Every request amount defaults to basis `debit`. An amount that is a receipt by definition (a
    payment request's amount, a provider's deposit amount) is documented as one, and its flow
@@ -97,7 +93,8 @@ them in one place, not adding special cases to every flow.
    pulls with plain `TransferChecked` and its cap counts the debit, so a fee has no finite worst
    case. Before each pull the terms are read again; above the tolerance, the collection is held
    with a reason.
-10. **Interest-bearing display is shown as approximate, with its `asOf`.**
+10. **Display units are deferred.** Interest-bearing and scaled mints are refused on every
+    movement path, and SDP computes no display value (open decision 7).
 11. **Verification.** A top-level transfer SDP built is verified by construction: once it lands,
     its debit and fee are what SDP signed. CPI pulls, inbound transfers and provider-built
     transactions are verified from the chain's balance deltas.
@@ -106,7 +103,7 @@ them in one place, not adding special cases to every flow.
 
 - PR 1 changes no behavior: no call site uses the new modules yet.
 - **No casts.** `pnpm check:value-movement` fails any `as` or `<T>` assertion to `BaseUnits`,
-  `TokenAmount`, `DisplayAmount`, `MovementQuote`, `MovementIntent` or `AssetRef`, and any
+  `TokenAmount`, `MovementQuote`, `MovementIntent` or `AssetRef`, and any
   `as never` or `as any` that lands in one, outside the type's own module and tests, in the API,
   the dashboard and every package. It lands now because
   nothing uses the types yet. The pins on transfer builders and conversion helpers land in PR 5,
@@ -125,14 +122,9 @@ them in one place, not adding special cases to every flow.
   on an embedded offline surfnet: classic, Token-2022 plain, fee 0 bps, fee 50 bps with a cap,
   scaled 1.5×, a scaled multiplier switch, interest ±5%, a hook program set, paused, and frozen
   by default. `pnpm token-movements:surfpool:e2e` checks the decoder and the rules against the
-  program: real transfers move exactly the quoted debit, fee and credit; `toDisplay` equals the
-  program's `AmountToUiAmount`; the account size matches; a stale fee after an epoch change is
-  refused. It needs no network or secret but is not in CI yet. Surfpool 1.5.0's RPC leaves the
-  interest rate out of `uiAmountString` and keeps an old multiplier after a time travel, so the
-  program's own instruction is the display reference there.
-- A client at `@solana-program/token-2022` 0.20.0 or later matches the program's display math.
-  When the catalogue moves to it, `toDisplay` may call it; the program's test vectors in
-  `token-terms.test.ts` guard that change.
+  program: real transfers move exactly the quoted debit, fee and credit; the account size
+  matches; a stale fee after an epoch change is refused. It needs no network or secret but is
+  not in CI yet.
 
 ## Rollout
 
@@ -147,14 +139,15 @@ Each PR ships alone.
    moves to debit mandates with a fee tolerance and pre-pull holds.
 4. **Adapters:** issuance, the DvP, Private Channels and Earn refusal rows, the capability table
    with its Kora CI test, observed inbound transfers, on-ramp.
-5. **Display and finish:** balances, the terms and quote routes, `uiAmount` stripped at the RPC
-   boundary, the generic amount helper split from token conversion, the check-script pins, and
-   validated constraints.
+5. **Enforcement:** the builder pin, and the migration that validates PR 3's NOT VALID CHECKs.
+
+Display units are deferred. Interest-bearing and scaled mints stay refused on every path until
+balances, the dashboard and a quote can show and take them: the terms and quote routes, balances
+in base, token and display units, and the builder's refusal lifted, in one change.
 
 ## Open decisions
 
-1. **Stable docs wording.** "UI units" becomes "token units (base units ÷ 10^decimals); see
-   `amounts.display` for wallet display" in PR 2. This is a stable-surface change and needs
+1. **Stable docs wording.** "UI units" becomes "token units (base units ÷ 10^decimals)" in PR 2. This is a stable-surface change and needs
    sign-off. For classic mints, and for every movement SDP has made so far, the values do not
    change.
 2. **Mint watch alerts:** decided in PR 1 (daily, Slack on failure). Open: whether a fee or hook
@@ -166,3 +159,4 @@ Each PR ships alone.
    that open accounts frozen.
 6. **Issuer operations** (update a multiplier or fee, harvest withheld fees) are out of scope;
    Token Terms can support them later.
+7. **Display units:** when to show and accept interest-bearing and scaled mints (Rollout).

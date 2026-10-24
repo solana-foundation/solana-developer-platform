@@ -16,13 +16,11 @@ import { AmountError } from "./amount";
 import { type AssetRef, isSameAsset } from "./asset-ref";
 import { type BaseUnits, baseUnits, type TokenAmount, toBaseUnits } from "./token-amount";
 import {
-  type DisplayAmount,
   debitForCredit,
   feeFor,
   type MintTokenTerms,
   type TermsReadAt,
   type TokenTerms,
-  toDisplay,
 } from "./token-terms";
 
 declare const movementQuoteBrand: unique symbol;
@@ -49,8 +47,6 @@ export type MovementQuote = MovementSplit &
     decimals: number;
     /** The epoch whose fee entry priced `fee`; null when the mint has no fee config. */
     feeEpoch: Epoch | null;
-    /** The three amounts as a wallet shows them; null when display equals token units. */
-    display: Readonly<{ debit: DisplayAmount; fee: DisplayAmount; credit: DisplayAmount }> | null;
     /** The read the quote is priced at; null for native SOL, whose terms are static. */
     asOf: TermsReadAt | null;
   }> & { readonly [movementQuoteBrand]: true };
@@ -82,8 +78,8 @@ function splitAtEpoch(
  *
  * @param terms - Token Terms read for `intent.asset`.
  * @param intent - What to move.
- * @returns Debit, fee and credit in base units, with the fee epoch, the
- * display values and the read they are priced at.
+ * @returns Debit, fee and credit in base units, with the fee epoch and the
+ * read they are priced at.
  * @throws {AmountError} When the amount's decimals are not the mint's, or no
  * u64 debit credits the amount.
  * @throws {Error} When the terms are for another asset: the caller read the
@@ -99,7 +95,7 @@ export function quoteMovement(terms: TokenTerms, intent: MovementIntent): Moveme
   const amount = toBaseUnits(intent.amount);
 
   if (terms.readAt === null) {
-    // Native SOL: no fee and no display rule.
+    // Native SOL: no fee.
     // SAFETY: debit equals credit and the fee is zero, the quote's invariant.
     return {
       intent,
@@ -108,12 +104,11 @@ export function quoteMovement(terms: TokenTerms, intent: MovementIntent): Moveme
       fee: baseUnits(0n),
       credit: amount,
       feeEpoch: null,
-      display: null,
       asOf: null,
     } as MovementQuote;
   }
 
-  const { epoch, unixTimestamp } = terms.readAt;
+  const { epoch } = terms.readAt;
   const split = splitAtEpoch(terms, amount, intent.basis, epoch);
   // SAFETY: `splitAtEpoch` keeps `debit = credit + fee` under the read's
   // fee entry, the quote's invariant.
@@ -122,14 +117,6 @@ export function quoteMovement(terms: TokenTerms, intent: MovementIntent): Moveme
     decimals: terms.decimals,
     ...split,
     feeEpoch: terms.transferFee === null ? null : epoch,
-    display:
-      terms.display.kind === "plain"
-        ? null
-        : {
-            debit: toDisplay(terms, split.debit, unixTimestamp),
-            fee: toDisplay(terms, split.fee, unixTimestamp),
-            credit: toDisplay(terms, split.credit, unixTimestamp),
-          },
     asOf: terms.readAt,
   } as MovementQuote;
 }

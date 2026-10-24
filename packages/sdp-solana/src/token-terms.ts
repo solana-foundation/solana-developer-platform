@@ -1,20 +1,12 @@
 /**
  * Token Terms: a mint's state at one instant, and the pure rules that say what
- * an amount moves and shows under it (ADR 0012).
+ * an amount moves under it (ADR 0012).
  *
- * The rules mirror the Token-2022 program, `solana-program/token-2022`,
- * `interface/src/extension/`:
- *
- * - Fees are exact integer math (`transfer_fee/mod.rs`).
- * - Display repeats the program's own f64 steps (`scaled_ui_amount/mod.rs`,
- *   `interest_bearing_mint/mod.rs`). Wallets and the RPC show what those steps
- *   produce, so display is defined by them. It is the only float math here,
- *   and a display value never builds or verifies a transaction.
- *
- * `@solana-program/token-2022` 0.17.0, the version pinned here, does not match
- * the program for display: it rounds scaled amounts where the program
- * truncates, and it groups the interest exponent differently. So this module
- * mirrors the program itself, and uses the client only to decode accounts.
+ * The fee rules are the Token-2022 program's exact integer math
+ * (`solana-program/token-2022`, `interface/src/extension/transfer_fee/mod.rs`).
+ * A mint's display rule (scaled or interest-bearing) is decoded so every path
+ * can refuse it; SDP computes no display value while display units are
+ * deferred (ADR 0012, open decision 7).
  *
  * Client-safe: no RPC and no Node-only import.
  */
@@ -46,8 +38,6 @@ import {
 import { AmountError } from "./amount";
 import { NATIVE_ASSET, type NativeAsset, type TokenAsset, type UnreadMint } from "./asset-ref";
 import { type BaseUnits, baseUnits, U64_MAX } from "./token-amount";
-
-declare const displayAmountBrand: unique symbol;
 
 /** The Clock sysvar read in the same request as the mint. */
 export type TermsReadAt = Readonly<{ slot: Slot; unixTimestamp: UnixTimestamp; epoch: Epoch }>;
@@ -144,18 +134,6 @@ export type MintTokenTerms = TokenTermsFields &
 
 export type TokenTerms = NativeTokenTerms | MintTokenTerms;
 
-/**
- * What a wallet shows for an amount at `asOf`. It carries its rule so a reader
- * knows how it was made; an interest-bearing value is approximate and changes
- * every second. Never used to build or verify a transaction.
- */
-export type DisplayAmount = Readonly<{
-  /** Canonical decimal string. */
-  value: string;
-  rule: DisplayRule;
-  asOf: UnixTimestamp;
-}> & { readonly [displayAmountBrand]: true };
-
 export const NATIVE_TOKEN_TERMS: NativeTokenTerms = {
   asset: NATIVE_ASSET,
   decimals: SOL_DECIMALS,
@@ -206,9 +184,6 @@ const ONE_IN_BASIS_POINTS = 10_000n;
 
 /** A `MaybeNull<Address>` with no value is the zero address. */
 const UNSET_ADDRESS = "11111111111111111111111111111111";
-
-/** `SECONDS_PER_YEAR` in `interest_bearing_mint/mod.rs`. */
-const SECONDS_PER_YEAR = 60 * 60 * 24 * 365.24;
 
 /** The smallest normal f64; the program accepts only positive normal multipliers. */
 const MIN_NORMAL_F64 = 2 ** -1022;
@@ -560,134 +535,4 @@ export function debitForCredit(terms: TokenTerms, credit: BaseUnits, epoch: Epoc
     }
   }
   return baseUnits(low);
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Display: `scaled_ui_amount/mod.rs`, `interest_bearing_mint/mod.rs`
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * `num_traits::pow(10_f64, decimals)`, the program's power of ten:
- * exponentiation by squaring, so the f64 rounding matches.
- */
-function powTen(decimals: number): number {
-  let base = 10;
-  let exponent = decimals;
-  if (exponent === 0) return 1;
-  while ((exponent & 1) === 0) {
-    base *= base;
-    exponent >>= 1;
-  }
-  if (exponent === 1) return base;
-  let accumulator = base;
-  while (exponent > 1) {
-    exponent >>= 1;
-    base *= base;
-    if ((exponent & 1) === 1) accumulator *= base;
-  }
-  return accumulator;
-}
-
-/** `digits` without its trailing zeros; a loop, so its cost stays linear in the length. */
-function trimTrailingZeros(digits: string): string {
-  let end = digits.length;
-  while (end > 0 && digits[end - 1] === "0") {
-    end -= 1;
-  }
-  return digits.slice(0, end);
-}
-
-/** `quotient ÷ 10^decimals` as a decimal string, trimmed like `trim_ui_amount_string`. */
-function formatScaledInteger(quotient: bigint, decimals: number): string {
-  const digits = quotient.toString().padStart(decimals + 1, "0");
-  if (decimals === 0) {
-    return digits;
-  }
-  const whole = digits.slice(0, -decimals);
-  const fraction = trimTrailingZeros(digits.slice(-decimals));
-  return fraction === "" ? whole : `${whole}.${fraction}`;
-}
-
-/**
- * `format!("{value:.decimals$}")` then `trim_ui_amount_string`: the exact
- * binary value of a non-negative f64, rounded half to even at `decimals`
- * digits. Null when the value is not finite, which Rust prints as "inf".
- */
-function formatF64(value: number, decimals: number): string | null {
-  if (!Number.isFinite(value)) {
-    return null;
-  }
-  const view = new DataView(new ArrayBuffer(8));
-  view.setFloat64(0, value);
-  const bits = view.getBigUint64(0);
-  const biasedExponent = Number((bits >> 52n) & 0x7ffn);
-  const fractionBits = bits & 0xf_ffff_ffff_ffffn;
-  const mantissa = biasedExponent === 0 ? fractionBits : fractionBits | (1n << 52n);
-  const exponent = biasedExponent === 0 ? -1074 : biasedExponent - 1075;
-  let numerator = mantissa * 10n ** BigInt(decimals);
-  let denominator = 1n;
-  if (exponent >= 0) {
-    numerator <<= BigInt(exponent);
-  } else {
-    denominator = 1n << BigInt(-exponent);
-  }
-  let quotient = numerator / denominator;
-  const twiceRemainder = (numerator % denominator) * 2n;
-  if (twiceRemainder > denominator || (twiceRemainder === denominator && (quotient & 1n) === 1n)) {
-    quotient += 1n;
-  }
-  return formatScaledInteger(quotient, decimals);
-}
-
-/** `exp(rate × timespan ÷ SECONDS_PER_YEAR ÷ 10 000)`, as `pre_update_exp` and `post_update_exp`. */
-function interestExp(rate: number, timespan: bigint): number {
-  const numerator = Number(BigInt(rate) * timespan);
-  return Math.exp(numerator / SECONDS_PER_YEAR / Number(ONE_IN_BASIS_POINTS));
-}
-
-/** The display string, or null where the program's f64 overflows. */
-function displayString(terms: TokenTerms, units: bigint, at: UnixTimestamp): string | null {
-  const { decimals } = terms;
-  const rule = terms.display;
-  switch (rule.kind) {
-    case "plain":
-      return formatScaledInteger(units, decimals);
-    case "scaled": {
-      // `ScaledUiAmountConfig::amount_to_ui_amount`.
-      const multiplier = at >= rule.newMultiplierEffectiveAt ? rule.newMultiplier : rule.multiplier;
-      const scaled = Number(units) * multiplier;
-      return formatF64(Math.trunc(scaled) / powTen(decimals), decimals);
-    }
-    case "interest": {
-      // `InterestBearingConfig::amount_to_ui_amount`. `Math.exp` and Rust's
-      // `exp` may differ in the last bit, so the last digit can differ.
-      const preUpdateExp = interestExp(
-        rule.preUpdateAverageRate,
-        rule.lastUpdateAt - rule.initializedAt
-      );
-      const postUpdateExp = interestExp(rule.currentRate, at - rule.lastUpdateAt);
-      const totalScale = (preUpdateExp * postUpdateExp) / powTen(decimals);
-      return formatF64(Number(units) * totalScale, decimals);
-    }
-    default: {
-      const exhaustive: never = rule;
-      throw new Error(`Unknown display rule: ${JSON.stringify(exhaustive)}`);
-    }
-  }
-}
-
-/**
- * What a wallet shows for `units` at `at`, by the mint's display rule. A
- * scaled mint uses `newMultiplier` once `at` reaches its effective time.
- *
- * @throws {AmountError} When the program's f64 math overflows for this amount.
- */
-export function toDisplay(terms: TokenTerms, units: BaseUnits, at: UnixTimestamp): DisplayAmount {
-  const value = displayString(terms, units, at);
-  if (value === null) {
-    throw new AmountError("Display amount is out of range");
-  }
-  // SAFETY: the value comes from the mint's own display rule at `at`, which
-  // is what the brand promises.
-  return { value, rule: terms.display, asOf: at } as DisplayAmount;
 }

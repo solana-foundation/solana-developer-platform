@@ -16,14 +16,10 @@ import {
   type Address,
   address,
   appendTransactionMessageInstructions,
-  compileTransaction,
-  createNoopSigner,
   createTransactionMessage,
   generateKeyPairSigner,
   getBase64EncodedWireTransaction,
-  getBase64Encoder,
   getSignatureFromTransaction,
-  getUtf8Decoder,
   type Instruction,
   pipe,
   type Rpc,
@@ -40,7 +36,6 @@ import {
   AccountState,
   type ExtensionArgs,
   findAssociatedTokenPda,
-  getAmountToUiAmountInstruction,
   getCreateAssociatedTokenIdempotentInstruction,
   getInitializeMintInstruction,
   getMintSize,
@@ -132,46 +127,6 @@ export async function sendInstructions(
     await new Promise((resolve) => setTimeout(resolve, CONFIRMATION_POLL_MS));
   }
   throw new Error(`Transaction ${signature} was not confirmed`);
-}
-
-/**
- * What the program itself shows for `amount` of a mint: the return data of
- * its `AmountToUiAmount` instruction, simulated against the current Clock.
- * The RPC's `uiAmountString` mirrors this; on a surfnet it is the reference,
- * because Surfpool 1.5.0's RPC leaves the interest rate out of it.
- */
-export async function programDisplay(
-  chain: MatrixChain,
-  mint: MatrixMint,
-  amount: bigint
-): Promise<string> {
-  const { value: blockhash } = await chain.rpc.getLatestBlockhash().send();
-  const message = pipe(
-    createTransactionMessage({ version: 0 }),
-    (draft) => setTransactionMessageFeePayerSigner(createNoopSigner(chain.payer.address), draft),
-    (draft) => setTransactionMessageLifetimeUsingBlockhash(blockhash, draft),
-    (draft) =>
-      appendTransactionMessageInstructions(
-        [
-          getAmountToUiAmountInstruction(
-            { mint: mint.mint, amount },
-            { programAddress: address(SPL_TOKEN_PROGRAMS[mint.program]) }
-          ),
-        ],
-        draft
-      )
-  );
-  const { value } = await chain.rpc
-    .simulateTransaction(getBase64EncodedWireTransaction(compileTransaction(message)), {
-      encoding: "base64",
-      sigVerify: false,
-      replaceRecentBlockhash: true,
-    })
-    .send();
-  if (value.err !== null || value.returnData === null) {
-    throw new Error(`AmountToUiAmount failed: ${JSON.stringify(value.err)}`);
-  }
-  return getUtf8Decoder().decode(getBase64Encoder().encode(value.returnData.data[0]));
 }
 
 /** The mint extensions each profile is created with. */

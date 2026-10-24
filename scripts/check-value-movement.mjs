@@ -34,8 +34,8 @@
  * authenticated it set it, so no handler can name a more privileged one.
  *
  * It also bans casts to the token-movement amount types (ADR 0012, token
- * movements): `BaseUnits`, `TokenAmount`, `DisplayAmount`, `MovementQuote`,
- * `MovementIntent` and `AssetRef`. Their constructors check the u64 range, the
+ * movements): `BaseUnits`, `TokenAmount`, `MovementQuote`, `MovementIntent`
+ * and `AssetRef`. Their constructors check the u64 range, the
  * mint's scale and `debit = credit + fee`; an `as` or `<T>` assertion skips
  * them, and so does an `as never` or `as any` that lands in one. Only each
  * type's defining module may assert it, and tests are free.
@@ -225,7 +225,6 @@ const SOLANA = "packages/sdp-solana/src";
 export const BRANDED_TYPES = [
   { file: `${SOLANA}/token-amount.ts`, name: "BaseUnits" },
   { file: `${SOLANA}/token-amount.ts`, name: "TokenAmount" },
-  { file: `${SOLANA}/token-terms.ts`, name: "DisplayAmount" },
   { file: `${SOLANA}/movement-quote.ts`, name: "MovementQuote" },
   { file: `${SOLANA}/movement-quote.ts`, name: "MovementIntent" },
   { file: `${SOLANA}/asset-ref.ts`, name: "AssetRef" },
