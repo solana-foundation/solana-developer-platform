@@ -181,28 +181,12 @@ describe("token movement legs (postgres)", () => {
       quoted: { debit: 1_000_000n, fee: 5_000n, credit: 995_000n },
       feeEpoch: 900n,
       asOf: { slot: 4_200n, unixTimestamp: 1_800_000_000n },
-      displayRule: null,
       observed: null,
       verification: { state: "pending", reason: null },
     });
   });
 
-  it("round-trips a scaled mint's display rule and a native leg's fixed terms", async () => {
-    const scaled = mintTerms([
-      {
-        __kind: "ScaledUiAmountConfig",
-        authority: AUTHORITY,
-        multiplier: 1.5,
-        newMultiplierEffectiveTimestamp: 1_900_000_000n,
-        newMultiplier: 3,
-      },
-    ]);
-    const scaledRow = await recordQuotedTransfer(
-      db(),
-      tenant,
-      transferInput("xfr_leg_scaled"),
-      tokenQuote(scaled, "2", "debit")
-    );
+  it("round-trips a native leg's fixed terms", async () => {
     const nativeRow = await recordQuotedTransfer(
       db(),
       tenant,
@@ -210,8 +194,7 @@ describe("token movement legs (postgres)", () => {
       nativeQuote("0.5", "debit")
     );
 
-    const byTransfer = await legs().listLegsByTransfers([scaledRow.id, nativeRow.id]);
-    expect(byTransfer.get(scaledRow.id)?.[0]?.displayRule).toEqual(scaled.display);
+    const byTransfer = await legs().listLegsByTransfers([nativeRow.id]);
     expect(byTransfer.get(nativeRow.id)?.[0]).toMatchObject({
       asset: { kind: "native" },
       decimals: 9,

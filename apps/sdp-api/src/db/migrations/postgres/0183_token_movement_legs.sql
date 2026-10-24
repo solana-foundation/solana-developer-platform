@@ -13,8 +13,7 @@
 -- The quote is the ledger: debit = credit + fee, where the fee is the mint's
 -- transfer fee withheld in the destination (never the network fee, which is
 -- payment_transfers.fee). `fee_epoch` is the epoch whose fee entry priced it;
--- `as_of_*` is the Clock read with the mint; `display_rule` is the mint's
--- scaled or interest rule, from which the API derives the display values.
+-- `as_of_*` is the Clock read with the mint.
 -- The observed amounts stay NULL until a movement is checked against the
 -- chain; a movement SDP built and signed is verified by construction once it
 -- lands.
@@ -47,7 +46,6 @@ CREATE TABLE token_movement_legs (
     fee_epoch sdp_u64,
     as_of_slot sdp_u64,
     as_of_unix_timestamp BIGINT,
-    display_rule JSONB,
     observed_debit sdp_u64,
     observed_fee sdp_u64,
     observed_credit sdp_u64,
@@ -70,10 +68,10 @@ CREATE TABLE token_movement_legs (
         (asset_kind = 'native') = (mint IS NULL)
         AND (mint IS NULL) = (token_program IS NULL)
     ),
-    -- Native SOL has fixed terms: 9 decimals, no fee, no display rule, nothing read.
+    -- Native SOL has fixed terms: 9 decimals, no fee, nothing read.
     CONSTRAINT token_movement_legs_native_terms CHECK (
         asset_kind <> 'native'
-        OR (decimals = 9 AND quoted_fee = 0 AND fee_epoch IS NULL AND display_rule IS NULL)
+        OR (decimals = 9 AND quoted_fee = 0 AND fee_epoch IS NULL)
     ),
     CONSTRAINT token_movement_legs_terms_read CHECK (
         (as_of_slot IS NULL) = (as_of_unix_timestamp IS NULL)
@@ -81,8 +79,6 @@ CREATE TABLE token_movement_legs (
     ),
     CONSTRAINT token_movement_legs_quote_splits CHECK (quoted_debit = quoted_credit + quoted_fee),
     CONSTRAINT token_movement_legs_quote_credits CHECK (quoted_credit > 0),
-    CONSTRAINT token_movement_legs_display_rule_object
-        CHECK (display_rule IS NULL OR jsonb_typeof(display_rule) = 'object'),
     CONSTRAINT token_movement_legs_observed CHECK (
         num_nulls(observed_debit, observed_fee, observed_credit) IN (0, 3)
         AND (observed_debit IS NULL OR observed_debit = observed_credit + observed_fee)
@@ -140,11 +136,11 @@ CREATE TRIGGER token_movement_legs_quote_sealed
         (OLD.organization_id, OLD.project_id, OLD.payment_transfer_id,
          OLD.payment_transfer_recipient_id, OLD.asset_kind, OLD.mint, OLD.token_program,
          OLD.decimals, OLD.basis, OLD.quoted_debit, OLD.quoted_fee, OLD.quoted_credit,
-         OLD.fee_epoch, OLD.as_of_slot, OLD.as_of_unix_timestamp, OLD.display_rule)
+         OLD.fee_epoch, OLD.as_of_slot, OLD.as_of_unix_timestamp)
         IS DISTINCT FROM
         (NEW.organization_id, NEW.project_id, NEW.payment_transfer_id,
          NEW.payment_transfer_recipient_id, NEW.asset_kind, NEW.mint, NEW.token_program,
          NEW.decimals, NEW.basis, NEW.quoted_debit, NEW.quoted_fee, NEW.quoted_credit,
-         NEW.fee_epoch, NEW.as_of_slot, NEW.as_of_unix_timestamp, NEW.display_rule)
+         NEW.fee_epoch, NEW.as_of_slot, NEW.as_of_unix_timestamp)
     )
     EXECUTE FUNCTION sdp_reject_sealed_token_movement_leg();

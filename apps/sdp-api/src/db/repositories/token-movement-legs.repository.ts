@@ -1,7 +1,6 @@
 import type { AssetRef } from "@sdp/solana/asset-ref";
 import type { MovementQuote } from "@sdp/solana/movement-quote";
 import { type BaseUnits, parseBaseUnits, toTokenAmount } from "@sdp/solana/token-amount";
-import type { DisplayRule } from "@sdp/solana/token-terms";
 import {
   AMOUNT_VERIFICATION_REASONS,
   AMOUNT_VERIFICATION_STATES,
@@ -56,8 +55,6 @@ export interface TokenMovementLeg {
   feeEpoch: Epoch | null;
   /** The Clock read with the mint; null for native SOL. */
   asOf: Readonly<{ slot: Slot; unixTimestamp: UnixTimestamp }> | null;
-  /** The mint's scaled or interest rule; null when display equals token units. */
-  displayRule: Exclude<DisplayRule, { kind: "plain" }> | null;
   /** What the chain shows the movement moved, once checked. */
   observed: LegAmounts | null;
   verification: Readonly<{
@@ -106,25 +103,6 @@ export interface NewTokenMovementLeg {
 
 const LEG_PENDING_STATE = "pending" satisfies AmountVerificationState;
 
-/** `display_rule` as stored: the rule, with its timestamps as decimal strings. */
-const storedDisplayRuleSchema = z.discriminatedUnion("kind", [
-  z.object({
-    kind: z.literal("scaled"),
-    multiplier: z.number(),
-    newMultiplier: z.number(),
-    newMultiplierEffectiveAt: z.string(),
-  }),
-  z.object({
-    kind: z.literal("interest"),
-    initializedAt: z.string(),
-    lastUpdateAt: z.string(),
-    preUpdateAverageRate: z.number().int(),
-    currentRate: z.number().int(),
-  }),
-]);
-
-type StoredDisplayRule = z.infer<typeof storedDisplayRuleSchema>;
-
 const legRowSchema = z.object({
   id: z.string(),
   organization_id: z.string(),
@@ -142,7 +120,6 @@ const legRowSchema = z.object({
   fee_epoch: z.string().nullable(),
   as_of_slot: z.string().nullable(),
   as_of_unix_timestamp: z.number().int().nullable(),
-  display_rule: storedDisplayRuleSchema.nullable(),
   observed_debit: z.string().nullable(),
   observed_fee: z.string().nullable(),
   observed_credit: z.string().nullable(),
@@ -206,56 +183,6 @@ function observedAmounts(row: LegRow): LegAmounts | null {
   return amounts(debit, fee, credit);
 }
 
-function displayRuleOf(stored: StoredDisplayRule): Exclude<DisplayRule, { kind: "plain" }> {
-  switch (stored.kind) {
-    case "scaled":
-      return {
-        kind: "scaled",
-        multiplier: stored.multiplier,
-        newMultiplier: stored.newMultiplier,
-        newMultiplierEffectiveAt: unixTimestamp(BigInt(stored.newMultiplierEffectiveAt)),
-      };
-    case "interest":
-      return {
-        kind: "interest",
-        initializedAt: unixTimestamp(BigInt(stored.initializedAt)),
-        lastUpdateAt: unixTimestamp(BigInt(stored.lastUpdateAt)),
-        preUpdateAverageRate: stored.preUpdateAverageRate,
-        currentRate: stored.currentRate,
-      };
-    default: {
-      const exhaustive: never = stored;
-      throw new Error(`Unknown stored display rule: ${JSON.stringify(exhaustive)}`);
-    }
-  }
-}
-
-function storedDisplayRule(rule: DisplayRule): StoredDisplayRule | null {
-  switch (rule.kind) {
-    case "plain":
-      return null;
-    case "scaled":
-      return {
-        kind: "scaled",
-        multiplier: rule.multiplier,
-        newMultiplier: rule.newMultiplier,
-        newMultiplierEffectiveAt: rule.newMultiplierEffectiveAt.toString(),
-      };
-    case "interest":
-      return {
-        kind: "interest",
-        initializedAt: rule.initializedAt.toString(),
-        lastUpdateAt: rule.lastUpdateAt.toString(),
-        preUpdateAverageRate: rule.preUpdateAverageRate,
-        currentRate: rule.currentRate,
-      };
-    default: {
-      const exhaustive: never = rule;
-      throw new Error(`Unknown display rule: ${JSON.stringify(exhaustive)}`);
-    }
-  }
-}
-
 /** Parses a `token_movement_legs` row: the database is a trust boundary too. */
 export function parseTokenMovementLegRow(raw: Record<string, unknown>): TokenMovementLeg {
   const row = legRowSchema.parse(raw);
@@ -276,7 +203,6 @@ export function parseTokenMovementLegRow(raw: Record<string, unknown>): TokenMov
             slot: BigInt(row.as_of_slot),
             unixTimestamp: unixTimestamp(BigInt(row.as_of_unix_timestamp)),
           },
-    displayRule: row.display_rule === null ? null : displayRuleOf(row.display_rule),
     observed: observedAmounts(row),
     verification: { state: row.verification_state, reason: row.verification_reason },
     createdAt: row.created_at,
@@ -293,18 +219,12 @@ export function ownWalletAmount(quote: MovementQuote): string {
   return toTokenAmount(quote.debit, quote.decimals).value;
 }
 
-/** The display rule a quote was priced under, from its display values. */
-function quoteDisplayRule(quote: MovementQuote): DisplayRule {
-  return quote.display === null ? { kind: "plain" } : quote.display.debit.rule;
-}
-
 const LEG_COLUMNS = `id, organization_id, project_id, payment_transfer_id,
   payment_transfer_recipient_id, asset_kind, mint, token_program, decimals, basis,
-  quoted_debit, quoted_fee, quoted_credit, fee_epoch, as_of_slot, as_of_unix_timestamp,
-  display_rule`;
+  quoted_debit, quoted_fee, quoted_credit, fee_epoch, as_of_slot, as_of_unix_timestamp`;
 
 const LEG_VALUES =
-  "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::numeric, ?::numeric, ?::numeric, ?::numeric, ?::numeric, ?, ?::jsonb)";
+  "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::numeric, ?::numeric, ?::numeric, ?::numeric, ?::numeric, ?)";
 
 function generateTokenMovementLegId(): string {
   return `tml_${crypto.randomUUID()}`;
@@ -317,7 +237,6 @@ export type LegBinding = string | number | null;
 function legValues(tenant: TenantScope, id: string, leg: NewTokenMovementLeg): LegBinding[] {
   const { quote, owner } = leg;
   const asset = quote.intent.asset;
-  const displayRule = storedDisplayRule(quoteDisplayRule(quote));
   return [
     id,
     tenant.organizationId,
@@ -335,7 +254,6 @@ function legValues(tenant: TenantScope, id: string, leg: NewTokenMovementLeg): L
     quote.feeEpoch === null ? null : quote.feeEpoch.toString(),
     quote.asOf === null ? null : quote.asOf.slot.toString(),
     quote.asOf === null ? null : Number(quote.asOf.unixTimestamp),
-    displayRule === null ? null : JSON.stringify(displayRule),
   ];
 }
 
@@ -438,7 +356,6 @@ export function createPostgresTokenMovementLegsRepository(
                        fee_epoch = excluded.fee_epoch,
                        as_of_slot = excluded.as_of_slot,
                        as_of_unix_timestamp = excluded.as_of_unix_timestamp,
-                       display_rule = excluded.display_rule,
                        verification_state = ?,
                        verification_reason = NULL,
                        updated_at = sdp_iso_now()

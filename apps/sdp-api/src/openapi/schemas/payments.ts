@@ -81,7 +81,7 @@ const tokenAmountSchema = z.string().openapi({
 });
 
 const TOKEN_UNITS_NOTE =
-  "token units: base units ÷ 10^decimals, as a decimal string. Never the display value a scaled or interest-bearing mint shows; see `amounts.display`.";
+  "token units: base units ÷ 10^decimals, as a decimal string. Never the display value a scaled or interest-bearing mint shows.";
 
 /** A token amount in token units, for the fields token movements define. */
 export const tokenUnitsAmountSchema = z.string().openapi({
@@ -115,22 +115,6 @@ export const tokenMovementAmountsSchema = z
       .number()
       .int()
       .openapi({ description: "The mint's decimals the amounts are in.", example: 6 }),
-    display: z
-      .object({
-        debit: z.string().openapi({ description: "`debit` as wallets show it.", example: "150" }),
-        fee: z.string().openapi({ description: "`fee` as wallets show it.", example: "0" }),
-        credit: z.string().openapi({ description: "`credit` as wallets show it.", example: "150" }),
-        asOf: isoDateTimeSchema.openapi({
-          description:
-            "The chain time the display values are for. An interest-bearing mint's display changes every second, so they are approximate.",
-          example: "2025-01-01T00:00:00.000Z",
-        }),
-      })
-      .optional()
-      .openapi({
-        description:
-          "The amounts as wallets show them, for one movement of a scaled or interest-bearing mint only.",
-      }),
   })
   .openapi({
     description:

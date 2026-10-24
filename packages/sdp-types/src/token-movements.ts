@@ -165,15 +165,6 @@ export function builtOfframpDepositVerdict(
   return verdicts[transition] ?? null;
 }
 
-/** The three amounts as a scaled or interest-bearing mint's wallets show them. */
-export interface TokenMovementDisplay {
-  debit: string;
-  fee: string;
-  credit: string;
-  /** The chain time the display values were computed at (ISO 8601). */
-  asOf: string;
-}
-
 /**
  * What a movement moves, in token units. `debit = credit + fee`; the fee is
  * the mint's transfer fee, withheld in the destination, never the network fee.
@@ -184,6 +175,4 @@ export interface TokenMovementAmounts {
   fee: string;
   credit: string;
   decimals: number;
-  /** Present only for a scaled or interest-bearing mint. */
-  display?: TokenMovementDisplay;
 }

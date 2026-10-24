@@ -1,6 +1,5 @@
 import { formatDecimalAmount } from "@sdp/solana/amount";
 import type { MovementQuote } from "@sdp/solana/movement-quote";
-import { displayUnder } from "@sdp/solana/token-terms";
 import {
   isRampTransferType,
   type PaymentSubscriptionCollectionAttempt,
@@ -153,7 +152,7 @@ export function mapTransferRow(row: TransferRow) {
   };
 }
 
-/** Summed amounts in token units, with no display: a sum shows no single wallet's view. */
+/** Summed amounts in token units. */
 export function totalsAmounts(totals: LegTotals): TokenMovementAmounts {
   return {
     basis: totals.basis,
@@ -194,28 +193,14 @@ export function quotedAmounts(quotes: readonly MovementQuote[]): TokenMovementAm
 
 /**
  * What a movement moves, in token units, summed over its legs: one leg for a
- * transfer, a chunk's recipients otherwise. Display values are shown for one
- * leg of a scaled or interest-bearing mint only.
+ * transfer, a chunk's recipients otherwise.
  *
  * @throws Error when the legs disagree on basis or decimals: they are not one movement.
  */
 export function movementAmounts(
   legs: readonly [TokenMovementLeg, ...TokenMovementLeg[]]
 ): TokenMovementAmounts {
-  const amounts = totalsAmounts(legTotals(legs));
-  const [first, ...rest] = legs;
-  if (rest.length === 0 && first.displayRule !== null && first.asOf !== null) {
-    const { displayRule, asOf, quoted } = first;
-    const shown = (part: "debit" | "fee" | "credit") =>
-      displayUnder(displayRule, first.decimals, quoted[part], asOf.unixTimestamp).value;
-    amounts.display = {
-      debit: shown("debit"),
-      fee: shown("fee"),
-      credit: shown("credit"),
-      asOf: new Date(Number(asOf.unixTimestamp) * 1000).toISOString(),
-    };
-  }
-  return amounts;
+  return totalsAmounts(legTotals(legs));
 }
 
 /** Whether SDP has checked what the legs moved, summarized over the legs. */
