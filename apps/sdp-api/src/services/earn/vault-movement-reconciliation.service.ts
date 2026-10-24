@@ -28,7 +28,6 @@ import {
 import { getLogger } from "@/runtime/logger";
 import { describeError, logEvent } from "@/runtime/money-path-events";
 import {
-  earnClusterFor,
   resolveRecordedVaultWithdrawClient,
   resolveVaultDirectClient,
 } from "@/services/earn/execution-registry";
@@ -794,6 +793,7 @@ async function closePositionIfEmpty(
   try {
     const client = resolveVaultDirectClient(env, movement.provider, createVaultDeadline());
     if (!client) return;
+    const { cluster } = currentClusterScope();
     // A close decision never reuses a provider request sent before this one.
     const snapshots = await withReadFloor(readStamp(), () =>
       client.readVaultPositions(
@@ -805,7 +805,7 @@ async function closePositionIfEmpty(
       (candidate) =>
         candidate.providerReference === vault &&
         candidate.owner === owner &&
-        candidate.cluster === earnClusterFor(movement.environment) &&
+        candidate.cluster === cluster &&
         candidate.tokenMint === position.token_mint &&
         candidate.shareMint === position.share_mint
     );

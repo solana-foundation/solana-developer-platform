@@ -1,4 +1,5 @@
 import { isClusterFundableInEnvironment } from "@sdp/earn/support";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type {
   EarnStrategy,
@@ -12,12 +13,10 @@ import {
   isEarnProviderSurfaced,
   SURFACED_EARN_PROVIDERS,
 } from "@sdp/types/provider-access";
-import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
 import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
 import { notFound } from "@/lib/errors";
 import { isEarnHastraDexExitConfigured, isEarnVaultSponsorshipEnabled } from "@/lib/feature-flags";
 import { success } from "@/lib/response";
-import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import {
   type AppContext,
   getEarnRepository,
@@ -145,14 +144,14 @@ export const listEarnStrategies = async (c: AppContext) => {
   const query = parseQuery(c, listEarnStrategiesQuerySchema);
 
   const repo = getEarnRepository(c);
-  const environment = resolveSdpEnvironment(c);
+  const { environment, cluster: projectCluster } = currentClusterScope();
   // The shelf a caller can act on is the default; `?cluster=` is the explicit
   // opt-in that browses another cluster's sub-shelf — in practice a sandbox
   // reader reviewing the mirrored mainnet catalogue (PRO-1742). Opting in
   // changes what is LISTED, never what can take a deposit: a foreign-cluster
   // row still arrives `fundable: false` and every provider mutation re-asserts
   // the same predicate.
-  const cluster = query.cluster ?? CLUSTER_BY_SDP_ENVIRONMENT[environment];
+  const cluster = query.cluster ?? projectCluster;
   const { rows, total } = await repo.listStrategies({
     environment,
     hostCluster: cluster,

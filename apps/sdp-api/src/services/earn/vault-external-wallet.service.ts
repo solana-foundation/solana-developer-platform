@@ -1,5 +1,6 @@
 import { notImplemented } from "@sdp/earn/errors";
-import type { EarnRuntimeContext, EarnVaultTransactionPlan } from "@sdp/earn/types";
+import type { EarnVaultTransactionPlan } from "@sdp/earn/types";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { EarnProviderId } from "@sdp/types/provider-access";
 import {
@@ -36,11 +37,7 @@ import {
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 import { assertVaultDepositEligible } from "./deposit-eligibility";
-import {
-  earnClusterFor,
-  resolveVaultDirectClient,
-  resolveVaultWithdrawClient,
-} from "./execution-registry";
+import { resolveVaultDirectClient, resolveVaultWithdrawClient } from "./execution-registry";
 import {
   bufferedComputeUnitLimit,
   fetchJupiterSwapLeg,
@@ -52,6 +49,7 @@ import {
   withComputeUnitLimit,
 } from "./jupiter-swap.service";
 import { readOwnerMintBalance } from "./owner-token-balance";
+import { earnRuntime } from "./runtime";
 import { createVaultDeadline } from "./vault-deadline";
 import { requireAcceptedPlan } from "./vault-deposit.service";
 import {
@@ -120,8 +118,8 @@ export type ExternalWalletBuiltTransaction = Pick<
   | "last_valid_block_height"
 >;
 
+/** An external-wallet deposit build. The open cluster scope decides its environment and cluster. */
 export type ExternalWalletDepositBuildInput = ExternalWalletBuildContext & {
-  environment: SdpEnvironment;
   provider: EarnProviderId;
   /** Catalogue row id, so a split-swap advisory can name the strategy (PRO-1864). */
   strategyId: string;
@@ -266,7 +264,7 @@ export async function buildExternalWalletDepositTransaction(
   if (!client) {
     throw notImplemented(input.provider, "direct vault deposits");
   }
-  const cluster = earnClusterFor(input.environment);
+  const { environment, cluster } = currentClusterScope();
   // Minted BEFORE the build because the memo binds it into the instructions:
   // it is the transaction's on-chain identity, the way the custody flow binds
   // the caller's idempotency key. The submit's key cannot serve here — it does
@@ -276,7 +274,7 @@ export async function buildExternalWalletDepositTransaction(
     depositTokenMint: input.tokenMint,
     shareMint: input.shareMint,
   };
-  const runtime: EarnRuntimeContext = { env, environment: input.environment };
+  const runtime = earnRuntime(env);
   // A fee payer equal to the owner IS the default; normalized here (the route
   // does too) so no caller can store a fee payer the compiled transaction does
   // not actually require. One fee mode then drives the provider's rent payer,
@@ -457,7 +455,6 @@ export async function buildExternalWalletDepositTransaction(
     // blockhash window. The baseline fails closed alongside the advisory insert.
     const [swapTransaction, baseline] = await Promise.all([
       compileStandaloneSwapTransaction({
-        cluster,
         deadline,
         ownerAddress: input.ownerAddress,
         sourceTokenMint,
@@ -481,7 +478,7 @@ export async function buildExternalWalletDepositTransaction(
       id: generateEarnSplitSwapAdvisoryId(),
       organizationId: input.organizationId,
       projectId: input.projectId,
-      environment: input.environment,
+      environment,
       provider: input.provider,
       strategyId: input.strategyId,
       vaultAddress: input.providerReference,
@@ -506,7 +503,7 @@ export async function buildExternalWalletDepositTransaction(
     id: transactionId,
     organizationId: input.organizationId,
     projectId: input.projectId,
-    environment: input.environment,
+    environment,
     provider: input.provider,
     direction: "deposit",
     ownerAddress: input.ownerAddress,
@@ -574,7 +571,6 @@ async function pinProbedComputeUnitLimit(input: {
  * token out) since there is no vault leg to testify to.
  */
 async function compileStandaloneSwapTransaction(input: {
-  cluster: ReturnType<typeof earnClusterFor>;
   deadline: ReturnType<typeof createVaultDeadline>;
   ownerAddress: string;
   sourceTokenMint: string;
@@ -588,7 +584,7 @@ async function compileStandaloneSwapTransaction(input: {
     shareMint: input.depositTokenMint,
   };
   const bare: EarnVaultTransactionPlan = {
-    cluster: input.cluster,
+    cluster: currentClusterScope().cluster,
     instructions: input.swapLeg.instructions,
     lookupTables: input.swapLeg.lookupTableAddresses,
     assetIdentity,
@@ -628,8 +624,8 @@ async function compileStandaloneSwapTransaction(input: {
   });
 }
 
+/** An external-wallet exit build. The open cluster scope decides its environment and cluster. */
 export type ExternalWalletWithdrawalBuildInput = ExternalWalletBuildContext & {
-  environment: SdpEnvironment;
   provider: string;
   /** The EXISTING external-wallet holding being exited. */
   positionId: string;
@@ -663,13 +659,13 @@ export async function buildExternalWalletWithdrawalTransaction(
   if (!client) {
     throw notImplemented(input.provider, "vault withdrawals");
   }
-  const cluster = earnClusterFor(input.environment);
+  const { environment, cluster } = currentClusterScope();
   const transactionId = generateEarnExternalWalletTransactionId();
   const expectedAssetIdentity = {
     depositTokenMint: input.tokenMint,
     shareMint: input.shareMint,
   };
-  const runtime: EarnRuntimeContext = { env, environment: input.environment };
+  const runtime = earnRuntime(env);
 
   // Legacy provider-specific hint. Kamino ignores it for existing accounts;
   // a pre-build creation claim cannot identify the payer of their live instance.
@@ -773,7 +769,7 @@ export async function buildExternalWalletWithdrawalTransaction(
     id: transactionId,
     organizationId: input.organizationId,
     projectId: input.projectId,
-    environment: input.environment,
+    environment,
     provider: input.provider,
     direction: "withdrawal",
     ownerAddress: input.ownerAddress,
@@ -801,10 +797,10 @@ export async function buildExternalWalletWithdrawalTransaction(
   });
 }
 
+/** A submit of a keyed build, in its project's cluster scope. */
 export interface ExternalWalletSubmitInput {
   organizationId: string;
   projectId: string;
-  environment: SdpEnvironment;
   /** The built transaction being submitted. */
   transactionId: string;
   /** Base64 wire bytes of the SIGNED transaction. */
@@ -826,9 +822,10 @@ export async function submitExternalWalletDeposit(
   env: Env,
   input: ExternalWalletSubmitInput
 ): Promise<ExternalWalletSubmitResult> {
-  const built = await requireSubmittableBuiltTransaction(env, input, "deposit");
+  const { environment } = currentClusterScope();
+  const built = await requireSubmittableBuiltTransaction(env, input, environment, "deposit");
   const fingerprint = buildEarnExternalWalletDepositFingerprint({
-    environment: input.environment,
+    environment,
     provider: built.provider,
     providerReference: built.vault_address,
     ownerAddress: built.owner_address,
@@ -854,7 +851,7 @@ export async function submitExternalWalletDeposit(
       projectId: input.projectId,
       idempotencyFingerprint: fingerprint,
     });
-    return replayedSubmitResult(ledger, input, prior);
+    return replayedSubmitResult(ledger, input, environment, prior);
   }
 
   const signed = await verifySignedExternalWalletTransaction(built, input.signedTransaction);
@@ -862,7 +859,7 @@ export async function submitExternalWalletDeposit(
   const result = await ledger.createSignedExternalWalletDepositIntent({
     organizationId: input.organizationId,
     projectId: input.projectId,
-    environment: input.environment,
+    environment,
     provider: built.provider,
     vaultAddress: built.vault_address,
     ownerAddress: built.owner_address,
@@ -878,7 +875,6 @@ export async function submitExternalWalletDeposit(
     // and records nothing, which is the ADR's direction over landing a
     // deposit past the cap.
     admit: ledgerVaultExposureGate(env, {
-      environment: input.environment,
       provider: built.provider,
       vaultAddress: built.vault_address,
       amount: built.amount_requested,
@@ -904,12 +900,13 @@ export async function submitExternalWalletWithdrawal(
   env: Env,
   input: ExternalWalletSubmitInput
 ): Promise<ExternalWalletSubmitResult> {
-  const built = await requireSubmittableBuiltTransaction(env, input, "withdrawal");
+  const { environment } = currentClusterScope();
+  const built = await requireSubmittableBuiltTransaction(env, input, environment, "withdrawal");
   if (!built.position_id) {
     throw internalError(`Earn external-wallet withdrawal build ${built.id} names no position`);
   }
   const fingerprint = buildEarnExternalWalletWithdrawalFingerprint({
-    environment: input.environment,
+    environment,
     provider: built.provider,
     positionId: built.position_id,
     ownerAddress: built.owner_address,
@@ -931,7 +928,7 @@ export async function submitExternalWalletWithdrawal(
       projectId: input.projectId,
       idempotencyFingerprint: fingerprint,
     });
-    return replayedSubmitResult(ledger, input, prior);
+    return replayedSubmitResult(ledger, input, environment, prior);
   }
 
   const signed = await verifySignedExternalWalletTransaction(built, input.signedTransaction);
@@ -939,7 +936,7 @@ export async function submitExternalWalletWithdrawal(
   const result = await ledger.createSignedExternalWalletWithdrawalIntent({
     organizationId: input.organizationId,
     projectId: input.projectId,
-    environment: input.environment,
+    environment,
     provider: built.provider,
     positionId: built.position_id,
     vaultAddress: built.vault_address,
@@ -964,12 +961,14 @@ export async function submitExternalWalletWithdrawal(
 
 /**
  * Resolve the built transaction a submit names, with every scoping rule
- * answering 404: organization (in the query), exact project, environment, and
- * direction. A caller who may not submit a build must not learn it exists.
+ * answering 404: organization (in the query), exact project, the scope's
+ * environment, and direction. A caller who may not submit a build must not
+ * learn it exists.
  */
 async function requireSubmittableBuiltTransaction(
   env: Env,
   input: ExternalWalletSubmitInput,
+  environment: SdpEnvironment,
   direction: "deposit" | "withdrawal"
 ): Promise<EarnExternalWalletTransactionRow> {
   const built = await createPostgresEarnExternalWalletTransactionsRepository(getDb(env)).getById({
@@ -978,7 +977,7 @@ async function requireSubmittableBuiltTransaction(
   });
   if (
     !built ||
-    built.environment !== input.environment ||
+    built.environment !== environment ||
     // Exact match: a null project_id means the project was deleted, and a
     // deleted project's builds are unaddressable, not shared.
     built.project_id !== input.projectId ||
@@ -992,11 +991,12 @@ async function requireSubmittableBuiltTransaction(
 async function replayedSubmitResult(
   ledger: ReturnType<typeof createPostgresEarnMovementsRepository>,
   input: ExternalWalletSubmitInput,
+  environment: SdpEnvironment,
   movement: EarnMovementRow
 ): Promise<ExternalWalletSubmitResult> {
   const position = await ledger.getPositionById({
     organizationId: input.organizationId,
-    environment: input.environment,
+    environment,
     positionId: movement.position_id,
   });
   if (!position || !movement.signature) {

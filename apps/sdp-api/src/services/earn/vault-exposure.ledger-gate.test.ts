@@ -1,3 +1,4 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { asTransactionalClient, getDb } from "@/db/client";
 import { runWithTenantDatabaseIdentity } from "@/db/identity";
@@ -192,7 +193,6 @@ describe("vault exposure cap: the ledger write gate", () => {
       createdBy: USER,
       initiatedByKeyId: null,
       admit: ledgerVaultExposureGate(env, {
-        environment: "sandbox",
         provider: "kamino",
         vaultAddress: VAULT,
         amount,
@@ -201,9 +201,18 @@ describe("vault exposure cap: the ledger write gate", () => {
     };
   }
 
-  /** Write as the organization would: a tenant-stamped transaction, not the test's system identity. */
-  function asTenant<T>(organizationId: string, fn: () => Promise<T>): Promise<T> {
-    return runWithTenantDatabaseIdentity({ organizationId }, fn);
+  /**
+   * Write as the organization's request would: in its project's sandbox cluster scope, through a
+   * tenant-stamped transaction, not the test's system identity.
+   */
+  function asTenant<T>(
+    organizationId: string,
+    projectId: string,
+    fn: () => Promise<T>
+  ): Promise<T> {
+    return runInClusterScope({ projectId, environment: "sandbox" }, () =>
+      runWithTenantDatabaseIdentity({ organizationId }, fn)
+    );
   }
 
   async function ledgerRows() {
@@ -263,7 +272,7 @@ describe("vault exposure cap: the ledger write gate", () => {
 
   it("lets exactly one of two overlapping deposits land when together they exceed the cap", async () => {
     const meet = rendezvous(2);
-    const outcomes = await asTenant(ORG, () =>
+    const outcomes = await asTenant(ORG, PROJECT, () =>
       Promise.allSettled([
         overlappingWrite(meet, intent("60")),
         overlappingWrite(meet, intent("60")),
@@ -308,7 +317,7 @@ describe("vault exposure cap: the ledger write gate", () => {
       signedTransaction: "earn-gate-transaction-twin",
     };
 
-    const results = await asTenant(ORG, () =>
+    const results = await asTenant(ORG, PROJECT, () =>
       Promise.all([overlappingWrite(meet, first), overlappingWrite(meet, twin)])
     );
 
@@ -374,7 +383,6 @@ describe("vault exposure cap: the ledger write gate", () => {
       createdBy: USER,
       initiatedByKeyId: null,
       admit: ledgerVaultExposureGate(env, {
-        environment: "sandbox",
         provider: "kamino",
         vaultAddress: VAULT,
         amount: "100",
@@ -389,7 +397,7 @@ describe("vault exposure cap: the ledger write gate", () => {
           asTransactionalClient(transaction)
         ).createSignedExternalWalletDepositIntent(input);
       });
-    const outcomes = await asTenant(ORG, () =>
+    const outcomes = await asTenant(ORG, PROJECT, () =>
       Promise.allSettled([overlapping(submit(builtA)), overlapping(submit(builtB))])
     );
 
@@ -410,7 +418,7 @@ describe("vault exposure cap: the ledger write gate", () => {
     // The other organization fills most of the vault. Then ORG writes under
     // ITS tenant identity, which row-level security would ordinarily scope to
     // ORG's own rows: the cap must still see the other organization's 90.
-    await asTenant(ORG_OTHER, () =>
+    await asTenant(ORG_OTHER, PROJECT_OTHER, () =>
       ledger().createSignedVaultDepositIntent(
         intent("90", {
           organizationId: ORG_OTHER,
@@ -422,7 +430,7 @@ describe("vault exposure cap: the ledger write gate", () => {
     );
 
     await expect(
-      asTenant(ORG, () => ledger().createSignedVaultDepositIntent(intent("11")))
+      asTenant(ORG, PROJECT, () => ledger().createSignedVaultDepositIntent(intent("11")))
     ).rejects.toMatchObject({
       code: "VAULT_EXPOSURE_CAP",
       details: { vaultAddress: VAULT },
@@ -430,7 +438,7 @@ describe("vault exposure cap: the ledger write gate", () => {
     // The cross-tenant sum is proven by the event, not by the response body.
     expect(ledgerWriteEvents().at(-1)).toMatchObject({ exposure: "90", projected: "101" });
     // Landing exactly on the ceiling is admitted (strict comparison).
-    await asTenant(ORG, () => ledger().createSignedVaultDepositIntent(intent("10")));
+    await asTenant(ORG, PROJECT, () => ledger().createSignedVaultDepositIntent(intent("10")));
 
     expect((await ledgerRows()).map((row) => row.amount_requested).sort()).toEqual(["10", "90"]);
   });
@@ -441,7 +449,7 @@ describe("vault exposure cap: the ledger write gate", () => {
     // statement after it in the same ledger transaction read across
     // organizations, so the caller's identity must come back exactly as it
     // went in, and a tenant read right after must still be tenant-scoped.
-    await asTenant(ORG_OTHER, () =>
+    await asTenant(ORG_OTHER, PROJECT_OTHER, () =>
       ledger().createSignedVaultDepositIntent(
         intent("90", {
           organizationId: ORG_OTHER,
@@ -452,7 +460,7 @@ describe("vault exposure cap: the ledger write gate", () => {
       )
     );
 
-    const observed = await asTenant(ORG, () =>
+    const observed = await asTenant(ORG, PROJECT, () =>
       getDb(env).transaction(async (transaction) => {
         const client = asTransactionalClient(transaction);
         const exposure = await createPostgresEarnMovementsRepository(
@@ -485,13 +493,15 @@ describe("vault exposure cap: the ledger write gate", () => {
 
   it("answers a replay from its recorded row without re-deciding the cap", async () => {
     const first = intent("100");
-    const created = await asTenant(ORG, () => ledger().createSignedVaultDepositIntent(first));
+    const created = await asTenant(ORG, PROJECT, () =>
+      ledger().createSignedVaultDepositIntent(first)
+    );
     expect(created.replayed).toBe(false);
     logEvent.mockClear();
 
     // The vault is now full; a retry of the SAME request is the same deposit,
     // not a new one, and must come back as the replay rather than a 409.
-    const replayed = await asTenant(ORG, () =>
+    const replayed = await asTenant(ORG, PROJECT, () =>
       ledger().createSignedVaultDepositIntent({
         ...first,
         signature: "earn-gate-signature-retry",
@@ -505,8 +515,8 @@ describe("vault exposure cap: the ledger write gate", () => {
   it("only observes in shadow mode: both deposits land and the overshoot is on the event", async () => {
     env.EARN_VOLUME_CAPS_ENFORCED = undefined;
 
-    await asTenant(ORG, () => ledger().createSignedVaultDepositIntent(intent("60")));
-    await asTenant(ORG, () => ledger().createSignedVaultDepositIntent(intent("60")));
+    await asTenant(ORG, PROJECT, () => ledger().createSignedVaultDepositIntent(intent("60")));
+    await asTenant(ORG, PROJECT, () => ledger().createSignedVaultDepositIntent(intent("60")));
 
     expect((await ledgerRows()).map((row) => row.amount_requested)).toEqual(["60", "60"]);
     expect(ledgerWriteEvents().at(-1)).toMatchObject({

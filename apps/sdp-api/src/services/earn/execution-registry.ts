@@ -24,8 +24,6 @@ import {
   assertNotPortfolioProvider as assertOndoNotPortfolioProvider,
   OndoVaultDirectClient,
 } from "@sdp/ondo/client";
-import type { SdpEnvironment } from "@sdp/types/api-keys";
-import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types/well-known-tokens";
 import {
   assertNotPortfolioProvider as assertVedaNotPortfolioProvider,
   VedaVaultDirectClient,
@@ -54,14 +52,10 @@ import { createVaultRpcFailover } from "./vault-rpc-failover";
  * mapped to an executing client. Everything downstream narrows with
  * `supportsVaultDirect`, never an id check.
  *
- * Every client gets its endpoints from the named cluster's managed pool
+ * Every client gets its endpoints from the open cluster scope's managed pool
  * (`./cluster-rpc`), one pinned per operation attempt, each proven to serve
  * that cluster before the provider touches it.
  */
-
-export function earnClusterFor(environment: SdpEnvironment): SolanaCluster {
-  return CLUSTER_BY_SDP_ENVIRONMENT[environment];
-}
 
 /**
  * Build the executing client for a provider, or `null` when this deployment has
