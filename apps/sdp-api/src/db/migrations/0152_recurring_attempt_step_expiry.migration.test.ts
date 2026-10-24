@@ -127,7 +127,7 @@ beforeEach(async () => {
        DROP CONSTRAINT payment_recurring_lifecycle_attempts_expiry_signature_check,
        DROP COLUMN last_valid_block_height`
   );
-  // Later migrations use the domain too (0153, 0159, 0183, 0175, 0176); rolled back with the rest.
+  // Later migrations use the domain too (0153, 0159, 0183, 0184, 0185); rolled back with the rest.
   await client.query(
     `ALTER TABLE payment_subscription_authority_revocations
        DROP COLUMN last_valid_block_height`

@@ -5,7 +5,7 @@ import { address } from "@solana/kit";
 import { z } from "zod";
 
 /**
- * A recurring mandate (ADR 0012, migration 0176): what each pull of a
+ * A recurring mandate (ADR 0012, migration 0185): what each pull of a
  * recurring payment or a subscription plan debits, in base units, stored once
  * when the mandate is made. Mandates are debit-only: the subscriptions
  * program's plan cap counts the debit.

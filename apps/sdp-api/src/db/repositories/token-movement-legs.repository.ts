@@ -22,7 +22,7 @@ import { buildInClause } from "@/db/postgres-utils";
 import { assertTenantClaim, type TenantScope } from "@/lib/tenant-scope";
 
 /**
- * Token movement legs (ADR 0012, migrations 0183 and 0177): what each movement
+ * Token movement legs (ADR 0012, migrations 0183 and 0186): what each movement
  * SDP builds moves, in base units, one row per (movement, destination). This
  * is the only writer. Rows written before quotes have no leg (legacy = no leg).
  *

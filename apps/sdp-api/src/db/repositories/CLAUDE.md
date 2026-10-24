@@ -143,7 +143,7 @@ moves, in base units. `token-movement-legs.repository.ts` is its only writer.
   off-ramp deposit outcome transitions, `settleTransferBatch` and the unsent
   recipient failures. Add a new settling write there, not a second statement.
 - **A leg is verified by construction or from the chain** (`verified_by`,
-  migration 0177). A landed verdict in `legVerdictStatement` skips `chain`
+  migration 0186). A landed verdict in `legVerdictStatement` skips `chain`
   legs; a recurring pull's leg is written with its claim (`insertChainLeg`)
   and gets its observed amounts and verdict from the landed transaction
   (`recordChainVerdict`), in the collection's finalize transaction.

@@ -14,7 +14,7 @@ export interface PaymentSubscriptionPlanRow {
   owner_address: string;
   token: string;
   amount: string;
-  /** The plan's mandate in base units (migration 0176); null for a plan written before mandates. */
+  /** The plan's mandate in base units (migration 0185); null for a plan written before mandates. */
   mandate: RecurringMandate | null;
   period_hours: number;
   program_plan_id: string;

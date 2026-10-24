@@ -65,7 +65,7 @@ async function createRequest(params: { token: string; expiresAt: string | null }
   });
 }
 
-/** A request written before expectations (migration 0175): its check reads the mint. */
+/** A request written before expectations (migration 0184): its check reads the mint. */
 async function createLegacyRequest(params: { token: string; expiresAt: string | null }) {
   const request = await createRequest(params);
   await updateRow(request.id, {
