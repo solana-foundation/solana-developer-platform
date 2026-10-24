@@ -367,7 +367,7 @@ describe("ramps and the release channel", () => {
   });
 
   it("walks no ramp stable hides: no sample transfer of one and every quote refused", async () => {
-    // The providers stable's capped flags leave on, from the stage table, not picked here.
+    // The providers stable's capped flags leave on, from the maturity table, not picked here.
     browser.rampProviders = rampProvidersInReleaseChannel("stable");
     const hidden = RAMP_PROVIDERS.filter((provider) => !browser.rampProviders.includes(provider));
     const transfers = await data<{ id: string; provider?: string }[]>(

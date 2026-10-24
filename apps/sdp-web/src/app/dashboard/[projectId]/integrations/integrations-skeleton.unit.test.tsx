@@ -23,7 +23,7 @@ const EVERY_FAMILY = integrationsSkeletonLayout({
   privateChannels: true,
 });
 
-// What `stable` serves, from the module and ramp provider stages.
+// What `stable` serves, from the module and ramp provider maturity tables.
 const STABLE = integrationsSkeletonLayout(dashboardFlagsAt("stable"));
 
 const SECTION = /space-y-4/g;

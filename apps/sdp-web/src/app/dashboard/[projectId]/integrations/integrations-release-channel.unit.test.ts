@@ -1,7 +1,7 @@
 import { COMPLIANCE_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types/provider-access";
 import {
   isModuleInReleaseChannel,
-  SDP_RAMP_PROVIDER_STAGES,
+  SDP_RAMP_PROVIDER_MATURITY,
   SDP_RELEASE_CHANNEL_NAMES,
   type SdpReleaseChannel,
 } from "@sdp/types/release-channels";
@@ -111,10 +111,10 @@ describe("integration detail deep links on each release channel", () => {
       const compliance = isModuleInReleaseChannel(
         releaseChannel,
         "compliance",
-        SDP_RAMP_PROVIDER_STAGES
+        SDP_RAMP_PROVIDER_MATURITY
       );
       const expectations = [
-        ["privy", isModuleInReleaseChannel(releaseChannel, "custody", SDP_RAMP_PROVIDER_STAGES)],
+        ["privy", isModuleInReleaseChannel(releaseChannel, "custody", SDP_RAMP_PROVIDER_MATURITY)],
         ...RAMP_PROVIDERS.map((provider) => [provider, offered.includes(provider)] as const),
         ...COMPLIANCE_PROVIDERS.map((provider) => [provider, compliance] as const),
       ] as const;

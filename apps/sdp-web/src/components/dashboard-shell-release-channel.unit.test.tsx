@@ -2,7 +2,7 @@
 
 import {
   isModuleInReleaseChannel,
-  SDP_RAMP_PROVIDER_STAGES,
+  SDP_RAMP_PROVIDER_MATURITY,
   SDP_RELEASE_CHANNEL_NAMES,
   type SdpModule,
   type SdpReleaseChannel,
@@ -101,7 +101,7 @@ function hrefs(anchors: Iterable<Element>): string[] {
 }
 
 function runs(releaseChannel: SdpReleaseChannel, module: SdpModule): boolean {
-  return isModuleInReleaseChannel(releaseChannel, module, SDP_RAMP_PROVIDER_STAGES);
+  return isModuleInReleaseChannel(releaseChannel, module, SDP_RAMP_PROVIDER_MATURITY);
 }
 
 /**

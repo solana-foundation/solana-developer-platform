@@ -1,7 +1,7 @@
 import { RAMP_PROVIDERS } from "@sdp/types/provider-access";
 import {
   isModuleInReleaseChannel,
-  SDP_RAMP_PROVIDER_STAGES,
+  SDP_RAMP_PROVIDER_MATURITY,
   type SdpReleaseChannel,
 } from "@sdp/types/release-channels";
 import type { ReactNode } from "react";
@@ -126,7 +126,7 @@ describe("IntegrationDetailView", () => {
     expect(stable).toContain(labels.transfers);
     for (const module of ["issuance", "compliance"] as const) {
       expect(stable.includes(labels[module]), module).toBe(
-        isModuleInReleaseChannel("stable", module, SDP_RAMP_PROVIDER_STAGES)
+        isModuleInReleaseChannel("stable", module, SDP_RAMP_PROVIDER_MATURITY)
       );
     }
   });

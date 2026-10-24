@@ -1,6 +1,6 @@
 import {
   isModuleInReleaseChannel,
-  SDP_RAMP_PROVIDER_STAGES,
+  SDP_RAMP_PROVIDER_MATURITY,
   type SdpModule,
   type SdpReleaseChannel,
 } from "@sdp/types/release-channels";
@@ -13,13 +13,13 @@ export type DashboardDesign = "legacy" | "redesign";
 export const DASHBOARD_DESIGNS = ["legacy", "redesign"] as const satisfies DashboardDesign[];
 
 function inChannel(releaseChannel: SdpReleaseChannel, module: SdpModule): boolean {
-  return isModuleInReleaseChannel(releaseChannel, module, SDP_RAMP_PROVIDER_STAGES);
+  return isModuleInReleaseChannel(releaseChannel, module, SDP_RAMP_PROVIDER_MATURITY);
 }
 
 /**
  * The dashboard's flag snapshot on `releaseChannel` when Vercel serves every flag on, so the
  * release channel is the only thing that turns a module off. Derived from the module and ramp
- * provider stages, so promoting a module moves every test built on it.
+ * provider maturity tables, so promoting a module moves every test built on it.
  *
  * @param releaseChannel - The deployment's release channel.
  * @param design - Which design the snapshot picks; `redesign` turns on every design module too.
