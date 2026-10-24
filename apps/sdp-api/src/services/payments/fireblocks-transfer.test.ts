@@ -15,8 +15,10 @@ import * as credentialSecretStore from "@/services/credential-secret-store";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
+import { installClusterRpcResponder, tokenAccountsByOwnerResult } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { answerMovementAccounts, mintRpcAccount } from "@/test/helpers/token-movement";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
@@ -148,6 +150,8 @@ afterEach(() => vi.restoreAllMocks());
 const SIG =
   "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy";
 const USDC = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+/** The Fireblocks wallet's USDC token account, which the planner reads as the source. */
+const SOURCE_USDC_ACCOUNT = "Vote111111111111111111111111111111111111111";
 const paymentApp = createApp({
   rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY,
 });
@@ -160,6 +164,8 @@ let createStatus = 200;
 let createResultPatch: Record<string, unknown> = {};
 let settlementPatch: Record<string, unknown> = {};
 async function ready(projectId = PROJECT_ID) {
+  // A token transfer is planned from the mint's live terms first: chain reads go to the cluster RPC.
+  const chainFetch = globalThis.fetch;
   const mock = providerResponse();
   const connection = await connect(projectId);
   const wallet = await getDb(env).queryOne<{ id: string }>(
@@ -175,6 +181,8 @@ async function ready(projectId = PROJECT_ID) {
   createResultPatch = {};
   settlementPatch = {};
   mock.mockImplementation(async (url, init) => {
+    if (!String(url).startsWith(testEnv.FIREBLOCKS_API_BASE_URL ?? ""))
+      return chainFetch(url, init);
     const path = String(url).replace(testEnv.FIREBLOCKS_API_BASE_URL ?? "", "");
     expect(new Headers(init?.headers).get("X-API-Key")).toBe(fields.apiKey);
     if (path === "/v1/supported_assets")
@@ -268,6 +276,8 @@ async function refresh(id: string) {
 }
 
 describe("native Fireblocks BYOK payment routes", () => {
+  const rpc = installClusterRpcResponder();
+
   it.each([undefined, SIG])(
     "keeps a COMPLETED create response pending until a verified detail read (hash: %s)",
     async (txHash) => {
@@ -492,6 +502,23 @@ describe("native Fireblocks BYOK payment routes", () => {
   });
   it("maps USDC by exact mint and network and rejects unsupported assets and precision", async () => {
     const mock = await ready();
+    answerMovementAccounts(
+      rpc,
+      new Map([[USDC, mintRpcAccount("spl-token", { decimals: 6, extensions: null })]])
+    );
+    rpc.answer(
+      "getTokenAccountsByOwner",
+      tokenAccountsByOwnerResult(1, [
+        {
+          pubkey: SOURCE_USDC_ACCOUNT,
+          mint: USDC,
+          amount: "1000000",
+          decimals: 6,
+          uiAmountString: "1",
+          state: "initialized",
+        },
+      ])
+    );
     const response = await send("usdc", { token: USDC, amount: "0.123456" });
     expect(response.status, await response.clone().text()).toBe(200);
     expect(createBody.assetId).toBe("SOL_USDC_JKVK");
