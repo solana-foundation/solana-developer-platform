@@ -44,7 +44,8 @@
  * Adding a file to any list below is a security-reviewed change.
  */
 
-import { existsSync, readdirSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
@@ -229,6 +230,196 @@ export const BRANDED_TYPES = [
   { file: `${SOLANA}/movement-quote.ts`, name: "MovementIntent" },
   { file: `${SOLANA}/asset-ref.ts`, name: "AssetRef" },
 ];
+
+// biome-ignore-start lint/security/noSecrets: SDK and function names, not secrets.
+/**
+ * @typedef {{
+ *   id: string,
+ *   why: string,
+ *   imports: { packages: string[], names: string[] }[],
+ *   allow: string[],
+ * }} BuilderRule
+ */
+
+/**
+ * Who may build a token movement (ADR 0012, decisions 7 and 8): a source file
+ * that imports one of a rule's builders from its package must be on the rule's
+ * list, and every listed file must still import one, so the lists only
+ * shrink. A text check: it sees named, renamed and namespace imports, not a
+ * builder handed on through another module, so a listed file is reviewed like
+ * the waists. Tests are free.
+ *
+ * @type {BuilderRule[]}
+ */
+export const TOKEN_MOVEMENT_BUILDERS = [
+  {
+    id: "token-movement-transfer",
+    why: "builds a token transfer; only the token movement builder and the registered adapters may",
+    imports: [
+      {
+        packages: ["@solana-program/token", "@solana-program/token-2022"],
+        names: [
+          "getTransferCheckedInstruction",
+          "getTransferCheckedWithFeeInstruction",
+          "getTransferCheckedWithTransferHookInstructionAsync",
+          "getTransferToATAInstructionPlan",
+          "getTransferToATAInstructionPlanAsync",
+        ],
+      },
+      // A Solana Pay transfer from a decimal amount it converts itself; /pay builds with the builder.
+      { packages: ["@solana/pay"], names: ["createTransfer"] },
+    ],
+    allow: [
+      // The builder: `TransferCheckedWithFee` when the mint has a fee config, else `TransferChecked`.
+      `${SOLANA}/token-movement.ts`,
+      // SPC's Token-2022 `TransferChecked`; the `private_channels` row refuses fee and hook mints.
+      `${API}/services/private-channels/transfer.ts`,
+      // Moves the owner's classic kvault share tokens into its ATA.
+      "packages/sdp-kamino/src/withdraw-instructions.ts",
+      // WisdomTree's legs: its resolver adds the fund's hook accounts, and Earn's row decides the mint.
+      "packages/sdp-wisdomtree/src/plan.ts",
+    ],
+  },
+  {
+    id: "token-movement-unchecked-transfer",
+    why: "builds the unchecked `Transfer`, which names no mint or decimals, so a fee settles short",
+    imports: [
+      {
+        packages: ["@solana-program/token", "@solana-program/token-2022"],
+        names: ["getTransferInstruction"],
+      },
+    ],
+    allow: [
+      // SPC checks instruction bytes against its program allowlist, so a classic mint keeps `Transfer`.
+      `${API}/services/private-channels/transfer.ts`,
+    ],
+  },
+  {
+    id: "token-movement-mosaic",
+    why: "Mosaic mints, burns or moves tokens from a JS number it converts itself; only the issuance adapter may",
+    imports: [
+      {
+        packages: ["@solana/mosaic-sdk"],
+        names: [
+          "createMintToTransaction",
+          "createBurnTransaction",
+          "createPermissionedBurnTransaction",
+          "createForceBurnTransaction",
+          "createForceTransferTransaction",
+          "createTransferInstructions",
+          "createTransferTransaction",
+          "createMintLockTransaction",
+          "createBurnLockTransaction",
+          "createSettleMintLockTransaction",
+          "createCancelMintLockTransaction",
+          "createSettleBurnLockTransaction",
+          "createCancelBurnLockTransaction",
+          "decimalAmountToRaw",
+        ],
+      },
+    ],
+    allow: [
+      // Mint, seize and force burn, each amount from `mosaicAmountUnderLiveTerms`.
+      "packages/sdp-issuance/src/mosaic/service.ts",
+      // Burn, its amount from `mosaicAmountUnderLiveTerms`.
+      `${SOLANA}/token-2022.ts`,
+      // Checks that Mosaic's conversion gives back exactly the amount's base units.
+      `${SOLANA}/mosaic-amount.ts`,
+    ],
+  },
+  {
+    id: "token-movement-recurring",
+    why: "builds a subscriptions-program pull or writes the amount it pulls later; only the recurring adapter may",
+    imports: [
+      {
+        packages: ["@solana/subscriptions"],
+        names: [
+          "getTransferSubscriptionInstruction",
+          "getTransferSubscriptionInstructionAsync",
+          "getTransferSubscriptionOverlayInstructionAsync",
+          "getTransferFixedInstruction",
+          "getTransferFixedInstructionAsync",
+          "getTransferFixedOverlayInstructionAsync",
+          "getTransferRecurringInstruction",
+          "getTransferRecurringInstructionAsync",
+          "getTransferRecurringOverlayInstructionAsync",
+          "getCreatePlanInstruction",
+          "getCreatePlanOverlayInstructionAsync",
+          "getSubscribeInstruction",
+          "getSubscribeInstructionAsync",
+          "getSubscribeOverlayInstructionAsync",
+          "getCreateFixedDelegationInstruction",
+          "getCreateFixedDelegationOverlayInstructionAsync",
+          "getCreateRecurringDelegationInstruction",
+          "getCreateRecurringDelegationOverlayInstructionAsync",
+        ],
+      },
+    ],
+    allow: [
+      `${API}/services/payments/recurring-payments/collection.ts`,
+      `${API}/services/payments/recurring-payments/activation.ts`,
+      `${API}/services/payments/recurring-payments/update.ts`,
+      `${API}/routes/payments/subscription-plans/handlers.ts`,
+      `${API}/routes/payments/subscriptions/handlers.ts`,
+    ],
+  },
+];
+// biome-ignore-end lint/security/noSecrets: SDK and function names, not secrets.
+
+/**
+ * The `names` a file imports from `pkg`: in a value import's braces (renamed
+ * or not), or read off a namespace import of it.
+ *
+ * @param {string} text
+ * @param {string} pkg
+ * @param {string[]} names
+ */
+function importedNames(text, pkg, names) {
+  const from = `\\s*from\\s*["']${pkg}["']`;
+  const clauses = [...text.matchAll(new RegExp(`import\\s+\\{([^}]*)\\}${from}`, "g"))].map(
+    ([, clause]) => clause
+  );
+  const namespaces = [
+    ...text.matchAll(new RegExp(`import\\s+\\*\\s+as\\s+(\\w+)${from}`, "g")),
+  ].map(([, namespace]) => namespace);
+  return names.filter(
+    (name) =>
+      clauses.some((clause) => new RegExp(`(^|[\\s,])${name}([\\s,]|$)`).test(clause)) ||
+      namespaces.some((namespace) => text.includes(`${namespace}.${name}`))
+  );
+}
+
+/**
+ * Every use of a {@link TOKEN_MOVEMENT_BUILDERS} rule outside its list, and
+ * every listed file that no longer uses it.
+ *
+ * @param {{ rootDir: string, rules: BuilderRule[], files: string[] }} input
+ *   `files` are repo paths to scan; test files are skipped.
+ * @returns {string[]} One message per violation.
+ */
+export function findTokenMovementBuilderViolations({ rootDir, rules, files }) {
+  const violations = [];
+  const used = new Set();
+  for (const file of files) {
+    if (!/\.(ts|tsx|mts)$/.test(file) || isTestFile(file)) continue;
+    const text = readFileSync(path.join(rootDir, file), "utf8");
+    for (const rule of rules) {
+      const named = rule.imports.flatMap(({ packages, names }) =>
+        packages.flatMap((pkg) => importedNames(text, pkg, names))
+      );
+      if (named.length === 0) continue;
+      if (rule.allow.includes(file)) used.add(`${rule.id} ${file}`);
+      else violations.push(`${file} uses ${named.join(", ")}: it ${rule.why} (${rule.id})`);
+    }
+  }
+  for (const rule of rules) {
+    for (const file of rule.allow) {
+      if (!used.has(`${rule.id} ${file}`))
+        violations.push(`${file} no longer uses ${rule.id}: remove it from the list`);
+    }
+  }
+  return violations;
+}
 
 /** A tsconfig's root files and compiler options. */
 function parseTsconfig(tsconfig) {
@@ -921,6 +1112,20 @@ if (isMain) {
     brandedTypes: BRANDED_TYPES,
     scanRoots: [`${API}/`, "apps/sdp-web/", "packages/"],
   });
+  const builderViolations = findTokenMovementBuilderViolations({
+    rootDir,
+    rules: TOKEN_MOVEMENT_BUILDERS,
+    files: execFileSync("git", ["ls-files", `${API}/`, "packages/"], {
+      cwd: rootDir,
+      encoding: "utf8",
+    })
+      .split("\n")
+      .filter(Boolean),
+  });
+  if (builderViolations.length > 0) {
+    console.error("Token movement builder check failed (ADR 0012):");
+    for (const violation of builderViolations) console.error(`  ${violation}`);
+  }
   if (violations.length > 0) {
     console.error("Value movement check failed (HOO-1955):");
     for (const violation of violations) console.error(`  ${violation}`);
@@ -929,7 +1134,7 @@ if (isMain) {
     console.error("Token amount cast check failed (ADR 0012):");
     for (const violation of castViolations) console.error(`  ${violation}`);
   }
-  if (violations.length > 0 || castViolations.length > 0) {
+  if (violations.length > 0 || castViolations.length > 0 || builderViolations.length > 0) {
     process.exit(1);
   }
   console.log("Value movement check passed.");

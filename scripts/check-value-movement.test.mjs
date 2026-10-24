@@ -3,7 +3,11 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { findBrandedCastViolations, findValueMovementViolations } from "./check-value-movement.mjs";
+import {
+  findBrandedCastViolations,
+  findTokenMovementBuilderViolations,
+  findValueMovementViolations,
+} from "./check-value-movement.mjs";
 
 function fixture(files) {
   const rootDir = mkdtempSync(path.join(tmpdir(), "value-movement-"));
@@ -473,3 +477,47 @@ test("fails when a branded type is missing from its module or from every program
     rmSync(rootDir, { recursive: true, force: true });
   }
 });
+
+// biome-ignore-start lint/security/noSecrets: SDK function names, not secrets.
+test("pins token movement builders to their files, however they are imported", () => {
+  const files = {
+    "src/builder.ts":
+      'import { getTransferCheckedInstruction } from "@solana-program/token-2022";\n',
+    "src/renamed.ts":
+      'import { getTransferCheckedInstruction as transfer } from "@solana-program/token";\n',
+    "src/namespace.ts":
+      'import * as token from "@solana-program/token-2022";\ntoken.getTransferCheckedWithFeeInstruction;\n',
+    // A repository method of the same name, and the package's constants: not a builder.
+    "src/repository.ts":
+      'import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";\nrepo.getTransferCheckedInstruction();\n',
+    "src/builder.test.ts": 'import { getTransferInstruction } from "@solana-program/token";\n',
+  };
+  const rootDir = fixture(files);
+  try {
+    const violations = findTokenMovementBuilderViolations({
+      rootDir,
+      files: Object.keys(files),
+      rules: [
+        {
+          id: "transfer",
+          why: "builds a transfer",
+          imports: [
+            {
+              packages: ["@solana-program/token", "@solana-program/token-2022"],
+              names: ["getTransferCheckedInstruction", "getTransferCheckedWithFeeInstruction"],
+            },
+          ],
+          allow: ["src/builder.ts", "src/gone.ts"],
+        },
+      ],
+    });
+    assert.deepEqual(violations, [
+      "src/renamed.ts uses getTransferCheckedInstruction: it builds a transfer (transfer)",
+      "src/namespace.ts uses getTransferCheckedWithFeeInstruction: it builds a transfer (transfer)",
+      "src/gone.ts no longer uses transfer: remove it from the list",
+    ]);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+// biome-ignore-end lint/security/noSecrets: SDK function names, not secrets.
