@@ -111,8 +111,9 @@ them in one place, not adding special cases to every flow.
   `TokenAmount`, `MovementQuote`, `MovementIntent` or `AssetRef`, and any
   `as never` or `as any` that lands in one, outside the type's own module and tests, in the API,
   the dashboard and every package. It lands now because
-  nothing uses the types yet. The pins on transfer builders and conversion helpers land in PR 5,
-  with no allowlist of offenders: each PR moves its paths first.
+  nothing uses the types yet. The builder pin lands in PR 5: a file that imports a transfer,
+  Mosaic or subscriptions builder from its package must be on that rule's list
+  (`TOKEN_MOVEMENT_BUILDERS` in `check:value-movement`), and the lists only shrink.
 - **Target RPC budget.** A classic-mint transfer keeps its two reads; the mint read now brings the Clock
   with it. The reader is one request, native none.
 - **Ledger (PR 2).** `token_movement_legs` holds one row per (movement, destination): its asset,
@@ -125,14 +126,14 @@ them in one place, not adding special cases to every flow.
   its legs' verdict: `verified` when it confirms, `not_required` when it fails or is released.
   No extra `getTransaction`. Transfer status values do not change.
 - **Builder refusals (PR 2).** Paused, non-transferable and frozen-by-default mints (until the Token
-  ACL thaw, PR 4), interest-bearing and scaled mints (until PR 5), an unresolved hook, a
+  ACL thaw, PR 4), interest-bearing and scaled mints (display units are deferred), an unresolved hook, a
   memo-required destination with no memo, and a fee that leaves nothing to credit are refused
   with `400` before the movement is recorded.
 - **Payments' stopgap, transfers (PR 2).** Single transfers, batches and off-ramp funding leave
   `loadPaymentMint`: the quote parses exactly in u64 against the live decimals, and `support`
   refuses a non-transferable mint. `support` still refuses interest-bearing and scaled mints:
-  balances and the dashboard show their display amount until PR 5, so a user would type one
-  amount and move another. /pay keeps the stopgap until PR 3, recurring until PR 3.
+  balances and the dashboard show their display amount, so a user would type one amount and move
+  another; display units are deferred (Rollout). /pay keeps the stopgap until PR 3, recurring until PR 3.
 - **Payment requests (PR 3).** A request stores its expectation, the credit in base units with
   the asset and decimals read at creation (migration 0186); an amount with more decimals than the
   mint, or a mint the builder refuses, is a 400 then. /pay quotes that credit under the terms it
@@ -149,8 +150,7 @@ them in one place, not adding special cases to every flow.
   while a signed one can still land: it closes the ones that failed at confirmed or above, or
   have no record past their blockhash's last valid block height (the `readSavedSend` rule), and
   answers 429 while any other stays open. /pay leaves `loadPaymentMint`; a scaled or
-  interest-bearing mint is still refused, at creation and at /pay, since the builder refuses it
-  until PR 5.
+  interest-bearing mint is still refused, at creation and at /pay, since the builder refuses it.
 - **Recurring mandates (PR 3).** A recurring payment and its plan store the mandate once: the
   debit in base units, the decimals and the fee tolerance (`maxFeePerPull`, the larger of the
   current and next epoch's fee for the debit; migration 0187). Each pull reads the terms once
@@ -164,7 +164,7 @@ them in one place, not adding special cases to every flow.
   tolerance, which a pull landing in the next epoch may pay instead of the quote's fee. Create,
   plan create and an update that changes the token or amount make the mandate before any row (the
   precision check `loadPaymentMint` made); token admission stays start admission, so cancel and
-  recovery never ask it. Interest-bearing and scaled mints are still refused until PR 5: the
+  recovery never ask it. Interest-bearing and scaled mints are still refused: the
   recurring row takes the builder's refusals.
 - **One capability table (PR 4).** `support(terms, path)` answers from one table with a row per
   path: `builder` and the adapters `recurring` (PR 3's row), `issuance` (mint, burn),
