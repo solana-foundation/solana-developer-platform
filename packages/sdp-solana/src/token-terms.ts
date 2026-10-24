@@ -43,7 +43,7 @@ import {
   type Mint,
   type TransferFee,
 } from "@solana-program/token-2022";
-import { AmountError, isDecimalString } from "./amount";
+import { AmountError } from "./amount";
 import { NATIVE_ASSET, type NativeAsset, type TokenAsset, type UnreadMint } from "./asset-ref";
 import { type BaseUnits, baseUnits, U64_MAX } from "./token-amount";
 
@@ -155,11 +155,6 @@ export type DisplayAmount = Readonly<{
   rule: DisplayRule;
   asOf: UnixTimestamp;
 }> & { readonly [displayAmountBrand]: true };
-
-/** Which base-unit amount `fromDisplay` picks when no amount shows exactly the input. */
-export const DISPLAY_ROUNDINGS = ["atLeast", "atMost"] as const;
-
-export type DisplayRounding = (typeof DISPLAY_ROUNDINGS)[number];
 
 export const NATIVE_TOKEN_TERMS: NativeTokenTerms = {
   asset: NATIVE_ASSET,
@@ -681,32 +676,6 @@ function displayString(terms: TokenTerms, units: bigint, at: UnixTimestamp): str
   }
 }
 
-/** A plain decimal string split at its point; either side may be empty, never both. */
-function decimalParts(value: string): Readonly<{ whole: string; fraction: string }> {
-  const dot = value.indexOf(".");
-  if (dot === -1) {
-    return { whole: value, fraction: "" };
-  }
-  return { whole: value.slice(0, dot), fraction: value.slice(dot + 1) };
-}
-
-/**
- * Compares two plain unsigned decimal strings exactly, at any size. A display
- * value can pass the 256 bits `compareDecimalAmounts` parses: a 10^60
- * multiplier on a zero-decimal mint shows about 10^79 for the u64 maximum.
- */
-function compareDisplayValues(left: string, right: string): number {
-  const leftParts = decimalParts(left);
-  const rightParts = decimalParts(right);
-  const scale = Math.max(leftParts.fraction.length, rightParts.fraction.length);
-  const leftDigits = BigInt(`${leftParts.whole}${leftParts.fraction.padEnd(scale, "0")}`);
-  const rightDigits = BigInt(`${rightParts.whole}${rightParts.fraction.padEnd(scale, "0")}`);
-  if (leftDigits === rightDigits) {
-    return 0;
-  }
-  return leftDigits < rightDigits ? -1 : 1;
-}
-
 /**
  * What a wallet shows for `units` at `at`, by the mint's display rule. A
  * scaled mint uses `newMultiplier` once `at` reaches its effective time.
@@ -721,63 +690,4 @@ export function toDisplay(terms: TokenTerms, units: BaseUnits, at: UnixTimestamp
   // SAFETY: the value comes from the mint's own display rule at `at`, which
   // is what the brand promises.
   return { value, rule: terms.display, asOf: at } as DisplayAmount;
-}
-
-/**
- * The base units that show as `display` at `at`. Display never decreases as
- * base units grow, so a binary search over the whole u64 range is exact:
- * `atLeast` returns the smallest amount that shows at least `display`, and
- * `atMost` the largest that shows at most `display`.
- *
- * @param display - A plain unsigned decimal string, as a user typed it.
- * @throws {AmountError} When `display` is not a plain decimal, or `atLeast`
- * asks for more than the u64 range shows.
- */
-export function fromDisplay(
-  terms: TokenTerms,
-  display: string,
-  at: UnixTimestamp,
-  rounding: DisplayRounding
-): BaseUnits {
-  const target = display.trim();
-  if (!isDecimalString(target)) {
-    throw new AmountError("Invalid decimal amount");
-  }
-  /** -1, 0 or 1 as the display of `units` is below, at or above the target; overflow is above. */
-  const compareShown = (units: bigint) => {
-    const shown = displayString(terms, units, at);
-    return shown === null ? 1 : compareDisplayValues(shown, target);
-  };
-
-  let low = 0n;
-  let high = U64_MAX;
-  switch (rounding) {
-    case "atLeast":
-      if (compareShown(high) < 0) {
-        throw new AmountError("Amount is out of range");
-      }
-      while (low < high) {
-        const middle = (low + high) / 2n;
-        if (compareShown(middle) >= 0) {
-          high = middle;
-        } else {
-          low = middle + 1n;
-        }
-      }
-      return baseUnits(low);
-    case "atMost":
-      while (low < high) {
-        const middle = (low + high + 1n) / 2n;
-        if (compareShown(middle) <= 0) {
-          low = middle;
-        } else {
-          high = middle - 1n;
-        }
-      }
-      return baseUnits(low);
-    default: {
-      const exhaustive: never = rounding;
-      throw new Error(`Unknown display rounding: ${String(exhaustive)}`);
-    }
-  }
 }

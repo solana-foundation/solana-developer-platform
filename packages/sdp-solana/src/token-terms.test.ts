@@ -8,7 +8,6 @@ import {
   getAddressDecoder,
   lamports,
   type ReadonlyUint8Array,
-  type UnixTimestamp,
   unixTimestamp,
 } from "@solana/kit";
 import { getSysvarClockEncoder, SYSVAR_CLOCK_ADDRESS } from "@solana/sysvars";
@@ -21,14 +20,13 @@ import {
 } from "@solana-program/token-2022";
 import { AmountError } from "./amount";
 import { seededRandom } from "./test/seeded-random";
-import { type BaseUnits, baseUnits, U64_MAX } from "./token-amount";
+import { baseUnits, U64_MAX } from "./token-amount";
 import {
   type DisplayRule,
   debitForCredit,
   decodeTokenTerms,
   epochFee,
   feeFor,
-  fromDisplay,
   type MintTokenTerms,
   NATIVE_TOKEN_TERMS,
   TOKEN_TERMS_REFUSALS,
@@ -528,70 +526,5 @@ describe("display rules", () => {
       asOf: at,
     });
     assert.equal(shown(displayTerms(PLAIN, 6), U64_MAX, 0n), "18446744073709.551615");
-  });
-
-  it("inverts plain display exactly, rounding extra digits as asked", () => {
-    const terms = displayTerms(PLAIN, 6);
-    const at = unixTimestamp(0n);
-    assert.equal(fromDisplay(terms, "1.5", at, "atLeast"), 1_500_000n);
-    assert.equal(fromDisplay(terms, "1.5", at, "atMost"), 1_500_000n);
-    assert.equal(fromDisplay(terms, "1.0000005", at, "atLeast"), 1_000_001n);
-    assert.equal(fromDisplay(terms, "1.0000005", at, "atMost"), 1_000_000n);
-    assert.equal(fromDisplay(terms, "18446744073709.551615", at, "atMost"), U64_MAX);
-    assert.throws(() => fromDisplay(terms, "18446744073709.551616", at, "atLeast"), AmountError);
-    assert.throws(() => fromDisplay(terms, "1e3", at, "atLeast"), AmountError);
-  });
-
-  it("inverts a display above 256 bits exactly", () => {
-    // 10^60 × the u64 maximum shows about 10^79, past a 256-bit parse.
-    const terms = scaled(1e60, 0);
-    const at = unixTimestamp(0n);
-    assert.equal(fromDisplay(terms, "1", at, "atLeast"), 1n);
-    assert.equal(fromDisplay(terms, "1", at, "atMost"), 0n);
-    assertRoundTrip(terms, U64_MAX, at);
-    assertRoundTrip(terms, 2n ** 60n + 12_345n, at);
-  });
-
-  /**
-   * `fromDisplay` brackets every amount that shows the same value: `atLeast`
-   * is the first amount showing it, `atMost` the last.
-   */
-  function assertRoundTrip(terms: MintTokenTerms, units: bigint, at: UnixTimestamp) {
-    const display = toDisplay(terms, baseUnits(units), at).value;
-    const show = (value: bigint) => toDisplay(terms, baseUnits(value), at).value;
-    const low: BaseUnits = fromDisplay(terms, display, at, "atLeast");
-    const high: BaseUnits = fromDisplay(terms, display, at, "atMost");
-    const label = `${JSON.stringify(terms.display, (_, v) => (typeof v === "bigint" ? `${v}` : v))} ${units}`;
-    assert.ok(low <= units && units <= high, label);
-    assert.equal(show(low), display, label);
-    assert.equal(show(high), display, label);
-    assert.ok(low === 0n || show(low - 1n) !== display, label);
-    assert.ok(high === U64_MAX || show(high + 1n) !== display, label);
-  }
-
-  it("round-trips scaled display, above 2^53 included", () => {
-    const random = seededRandom(0xd15b_0001n);
-    const at = unixTimestamp(0n);
-    for (const multiplier of [1.5, 0.001, 1e6]) {
-      for (const decimals of [0, 6, 9]) {
-        const terms = scaled(multiplier, decimals);
-        const samples = [0n, 1n, 999n, 2n ** 53n + 1n, 2n ** 60n + 12_345n, U64_MAX];
-        for (let index = 0; index < 40; index += 1) samples.push(random.u64());
-        for (const units of samples) assertRoundTrip(terms, units, at);
-      }
-    }
-  });
-
-  it("round-trips interest display at ±5% and ±50%, above 2^53 included", () => {
-    const random = seededRandom(0x1e57_0001n);
-    const at = unixTimestamp(SECONDS_PER_YEAR * 3n);
-    for (const rate of [500, -500, 5_000, -5_000]) {
-      for (const decimals of [0, 6]) {
-        const terms = interest(rate, rate, decimals);
-        const samples = [0n, 1n, 2n ** 53n + 1n, 2n ** 60n + 12_345n, U64_MAX];
-        for (let index = 0; index < 40; index += 1) samples.push(random.u64());
-        for (const units of samples) assertRoundTrip(terms, units, at);
-      }
-    }
   });
 });

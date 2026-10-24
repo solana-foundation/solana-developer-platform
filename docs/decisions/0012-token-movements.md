@@ -75,8 +75,7 @@ them in one place, not adding special cases to every flow.
    are exact bigint math. The credit never decreases and grows by at most 1 per base unit, so
    every credit is reachable exactly: `debitForCredit` starts from the program's
    `calculate_pre_fee_amount` and confirms it with the forward rule. `toDisplay` repeats the
-   program's f64 steps, because wallets and the RPC show what they produce. `fromDisplay` is a
-   binary search over all of u64, so it is exact. The pinned client
+   program's f64 steps, because wallets and the RPC show what they produce. The pinned client
    (`@solana-program/token-2022` 0.17.0) does not match the program for display (it rounds
    scaled amounts where the program truncates, and orders the interest exponent differently),
    so SDP mirrors the program and uses the client only to decode accounts.
