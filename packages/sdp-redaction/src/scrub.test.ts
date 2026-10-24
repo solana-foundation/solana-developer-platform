@@ -70,6 +70,24 @@ describe("scrubTelemetry", () => {
     });
   });
 
+  it("redacts a bare derivation seed and a wallet passphrase by key", () => {
+    // A signer helper that logs its derivation input does so under `seed`,
+    // and custodian configs carry `walletPassphrase` — both key material no
+    // suffix rule catches. A sibling PDA `seeds` array is public derivation
+    // data and survives.
+    const scrubbed = scrubTelemetry({
+      seed: "jZ2ZCg8BfJqknAfGCgerDECGjTzXAHAqdBPLDdBZqMkEAAAAAAAAAAQ==",
+      walletPassphrase: "correct horse battery staple",
+      seeds: ["owner", "aux"],
+    });
+
+    assert.deepEqual(scrubbed, {
+      seed: "[REDACTED]",
+      walletPassphrase: "[REDACTED]",
+      seeds: ["owner", "aux"],
+    });
+  });
+
   it("redacts an end-user owner address by key while the treasury address survives", () => {
     const scrubbed = scrubTelemetry({
       event: "sdp_api_earn_split_swap_orphaned",
@@ -206,6 +224,75 @@ describe("scrubTelemetryString — prefixed keys in a serialized body", () => {
 
     assert.ok(!scrubbed.includes("sk_live_supersecret"));
     assert.ok(scrubbed.includes("x-api-key"));
+  });
+
+  it("redacts a cookie that arrives inside a serialized header blob", () => {
+    // A Sentry request-header dump serializes headers to a string, where the
+    // object-key `cookie` rule cannot reach; the string forms have to cover it.
+    const scrubbed = scrubTelemetryString(
+      '{"headers":{"accept":"*/*","cookie":"session=supersecret-value"}}'
+    );
+
+    assert.ok(!scrubbed.includes("supersecret-value"));
+    assert.ok(scrubbed.includes("cookie"));
+
+    const assignment = scrubTelemetryString("Cookie: session=supersecret-value; theme=dark");
+
+    assert.ok(!assignment.includes("supersecret-value"));
+  });
+
+  it("redacts every cookie pair in a raw header, not only the one before the first space", () => {
+    // The generic assignment rule's value stops at whitespace, so a session
+    // cookie that is not the first pair — and every pair after it — stayed
+    // readable. A cookie header is one credential blob; the rule consumes it
+    // to the end of the line.
+    const scrubbed = scrubTelemetryString("Cookie: theme=dark; session=supersecret-value");
+
+    assert.ok(!scrubbed.includes("supersecret-value"));
+    assert.ok(!scrubbed.includes("theme=dark"));
+    assert.ok(scrubbed.includes("Cookie:"));
+
+    const twoCookies = scrubTelemetryString("Cookie: session=first; refresh=second");
+
+    assert.ok(!twoCookies.includes("first"));
+    assert.ok(!twoCookies.includes("second"));
+  });
+
+  it("redacts a seed and a passphrase in a serialized body while public seeds survive", () => {
+    // The object-key rules catch a scrubbed object, but a log argument that
+    // is already a string — a serialized body, an error message carrying one
+    // — only passes through the string patterns, so the same names have to
+    // live there too. The bare `seed` stays exact-only: a PDA `seeds` array
+    // is public derivation data.
+    const scrubbed = scrubTelemetryString(
+      '{"seed":"jZ2ZCg8BfJqknAfGCgerDECGjTzXAHAqdBPLDdBZqMkE=","walletPassphrase":"correct horse battery staple"}'
+    );
+
+    assert.ok(!scrubbed.includes("jZ2ZCg8BfJqknAfGCgerDECGjTzXAHAqdBPLDdBZqMkE="));
+    assert.ok(!scrubbed.includes("correct horse battery staple"));
+    assert.ok(scrubbed.includes('"seed"'));
+    assert.ok(scrubbed.includes("walletPassphrase"));
+
+    const assignments = scrubTelemetryString(
+      "seed=jZ2ZCg8BfJqknAfG; walletPassphrase=correct-horse"
+    );
+
+    assert.ok(!assignments.includes("jZ2ZCg8BfJqknAfG"));
+    assert.ok(!assignments.includes("correct-horse"));
+
+    const publicSeeds = scrubTelemetryString('{"seeds":["owner","aux"]}');
+
+    assert.ok(publicSeeds.includes('"seeds":["owner","aux"]'));
+  });
+
+  it("keeps seed exact-only in serialized fields and assignments", () => {
+    const body =
+      '{"pda_seed":"public-derivation","pda-seed":"public-derivation","seeds":["owner","aux"]}';
+    const assignment = "pda_seed=public-derivation; pda-seed=public-derivation";
+
+    assert.equal(scrubTelemetryString(body), body);
+    assert.equal(scrubTelemetryString(assignment), assignment);
+    assert.equal(scrubTelemetryString('{"seed":"recovery phrase"}'), '{"seed":"[REDACTED]"}');
   });
 
   it("keeps a key that merely contains a denied name as a prefix", () => {

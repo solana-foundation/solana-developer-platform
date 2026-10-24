@@ -1,4 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { SignatureStatusInfo } from "@sdp/rpc/solana";
+import * as solanaRpc from "@sdp/rpc/solana";
+import { signature } from "@solana/kit";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as rpcEgress from "@/services/rpc-egress";
 import type { Env } from "@/types/env";
 
 // --- Mocks (hoisted so the vi.mock factories can reference them) --------------
@@ -34,20 +38,12 @@ vi.mock("@/db/repositories/repository-factory", async (importOriginal) => ({
   createPrivateChannelSettlementObservationRepository: mocks.createObservationRepo,
 }));
 
-const { createRpc, getSignatureStatuses, getSignaturesForAddress, getTransaction } = vi.hoisted(
-  () => ({
-    createRpc: vi.fn(() => ({ __rpc: true })),
-    getSignatureStatuses: vi.fn(),
-    getSignaturesForAddress: vi.fn(async (): Promise<unknown[]> => []),
-    getTransaction: vi.fn(async (): Promise<unknown> => null),
-  })
-);
-vi.mock("@sdp/rpc/solana", () => ({
-  createRpc,
-  getSignatureStatuses,
-  getSignaturesForAddress,
-  getTransaction,
-}));
+// Keep the real RPC factories; replace only network reads on the shared module.
+const createRpc = vi.spyOn(solanaRpc, "createRpc");
+const createRpcFromTransport = vi.spyOn(solanaRpc, "createRpcFromTransport");
+const getSignatureStatuses = vi.spyOn(solanaRpc, "getSignatureStatuses");
+const getSignaturesForAddress = vi.spyOn(solanaRpc, "getSignaturesForAddress");
+const getTransaction = vi.spyOn(solanaRpc, "getTransaction");
 
 const { loadProjectRpcClient } = vi.hoisted(() => {
   const PROJECT_RPC = { __projectRpc: true };
@@ -74,6 +70,21 @@ vi.mock("@/services/private-channels/withdraw-events", () => ({ emitWithdrawalEv
 
 import { trackPendingWithdrawals } from "./track-pending-withdrawals";
 
+// Observe the guarded transport factory without replacing its implementation.
+const createCustomerRpcTransportSpy = vi.spyOn(rpcEgress, "createCustomerRpcTransport");
+
+// SAFETY: the reconciler reads only ENVIRONMENT (it picks the guarded
+// transport outside development) and hands the rest of Env opaquely to the
+// repository factories this file mocks.
+const DEV_ENV = { ENVIRONMENT: "development" } as Env;
+// SAFETY: only ENVIRONMENT matters — it must be outside development so the
+// persisted gateway URL is dialed through the guarded egress transport.
+const PROD_ENV = { ENVIRONMENT: "production" } as Env;
+
+// Development keeps the plain per-URL client — local gateway endpoints
+// legitimately resolve to loopback — so the existing reconciliation tests
+// assert against `createRpc` directly.
+
 // Valid base58 addresses (the reconciler runs `address()` on these fixtures).
 const MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
 const ESCROW_INSTANCE = "7C1Pu8mbHaDDTFnGH8YTqemNDofqXP3XEotzSo6TbwHz";
@@ -81,6 +92,20 @@ const DESTINATION = "J231K9UEpS4y4KAPwGc4gsMNCjKFRMYcQBcjVW7vBhVi";
 const NOW_ISO = "2026-07-17T00:00:00.000Z";
 const RELEASE_STALE_ISO = "2026-07-16T20:00:00.000Z"; // > 30 min before NOW
 const STALE_ISO = "2026-07-16T23:00:00.000Z"; // > 5 min before NOW
+
+const RELEASE_SIGNATURE = signature("1".repeat(64));
+const TAKEN_SIGNATURE = signature(`${"1".repeat(63)}2`);
+const FREE_SIGNATURE = signature(`${"1".repeat(63)}3`);
+
+function signatureStatus(overrides: Partial<SignatureStatusInfo>): SignatureStatusInfo {
+  return {
+    slot: 1n,
+    confirmations: 1n,
+    confirmationStatus: "confirmed",
+    err: null,
+    ...overrides,
+  };
+}
 
 function withdrawalRow(overrides: Record<string, unknown>) {
   return {
@@ -122,8 +147,19 @@ function instanceRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+afterAll(() => {
+  vi.restoreAllMocks();
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
+  getSignatureStatuses.mockReset();
+  getSignaturesForAddress.mockReset();
+  getTransaction.mockReset();
   vi.useFakeTimers();
   vi.setSystemTime(new Date(NOW_ISO));
   withdrawalRepo.updateWithdrawal.mockImplementation(async (input: Record<string, unknown>) => ({
@@ -143,7 +179,7 @@ beforeEach(() => {
 describe("trackPendingWithdrawals", () => {
   it("does nothing when there are no non-terminal withdrawals", async () => {
     withdrawalRepo.listNonTerminal.mockResolvedValueOnce([]);
-    await trackPendingWithdrawals({} as Env);
+    await trackPendingWithdrawals(DEV_ENV);
     expect(withdrawalRepo.updateWithdrawal).not.toHaveBeenCalled();
   });
 
@@ -152,13 +188,38 @@ describe("trackPendingWithdrawals", () => {
       withdrawalRow({ id: "w1", status: "submitted" }),
     ]);
     instanceRepo.getById.mockResolvedValueOnce(instanceRow({ gateway_url: "http://gw-live" }));
-    getSignatureStatuses.mockResolvedValueOnce([{ confirmationStatus: "confirmed" }]);
+    getSignatureStatuses.mockResolvedValueOnce([signatureStatus({})]);
 
-    await trackPendingWithdrawals({} as Env);
+    await trackPendingWithdrawals(DEV_ENV);
 
     expect(createRpc).toHaveBeenCalledWith(expect.anything(), { rpcUrl: "http://gw-live" });
+    expect(createCustomerRpcTransportSpy).not.toHaveBeenCalled();
     expect(withdrawalRepo.updateWithdrawal).toHaveBeenCalledWith(
       expect.objectContaining({ id: "w1", status: "confirmed", expectedStatus: "submitted" })
+    );
+  });
+
+  it("dials a persisted gateway through the guarded egress outside development", async () => {
+    withdrawalRepo.listNonTerminal.mockResolvedValueOnce([
+      withdrawalRow({ id: "w1", status: "submitted" }),
+    ]);
+    instanceRepo.getById.mockResolvedValueOnce(instanceRow({ gateway_url: "https://gw-live" }));
+    getSignatureStatuses.mockResolvedValueOnce([signatureStatus({})]);
+
+    await trackPendingWithdrawals(PROD_ENV);
+
+    // A tenant-controlled gateway URL is DNS-checked at connect time and its
+    // redirects re-guarded per hop — it never rides the plain transport the
+    // development path keeps for loopback endpoints.
+    expect(createCustomerRpcTransportSpy).toHaveBeenCalledWith("https://gw-live");
+    expect(createRpcFromTransport).toHaveBeenCalledExactlyOnceWith(
+      createCustomerRpcTransportSpy.mock.results[0].value
+    );
+    expect(createRpc).not.toHaveBeenCalled();
+    expect(getSignatureStatuses).toHaveBeenCalledWith(
+      createRpcFromTransport.mock.results[0].value,
+      ["burnsig"],
+      { searchTransactionHistory: true }
     );
   });
 
@@ -168,11 +229,11 @@ describe("trackPendingWithdrawals", () => {
       withdrawalRow({ id: "w2", status: "submitted", signature: "burnsig2" }),
     ]);
     getSignatureStatuses.mockResolvedValueOnce([
-      { confirmationStatus: "confirmed" },
-      { err: { InstructionError: [0, "Custom"] } },
+      signatureStatus({}),
+      signatureStatus({ err: { InstructionError: [0, { Custom: 1 }] } }),
     ]);
 
-    await trackPendingWithdrawals({} as Env);
+    await trackPendingWithdrawals(DEV_ENV);
 
     // One batched read for the whole tick, not one RPC per row; one RPC client
     // per gateway.
@@ -203,10 +264,10 @@ describe("trackPendingWithdrawals", () => {
       .mockResolvedValueOnce(instanceRow({ gateway_url: "http://gw-a" }))
       .mockResolvedValueOnce(instanceRow({ id: "inst-2", gateway_url: "http://gw-b" }));
     getSignatureStatuses
-      .mockResolvedValueOnce([{ confirmationStatus: "confirmed" }])
-      .mockResolvedValueOnce([{ confirmationStatus: "confirmed" }]);
+      .mockResolvedValueOnce([signatureStatus({})])
+      .mockResolvedValueOnce([signatureStatus({})]);
 
-    await trackPendingWithdrawals({} as Env);
+    await trackPendingWithdrawals(DEV_ENV);
 
     expect(createRpc).toHaveBeenCalledTimes(2);
     expect(getSignatureStatuses).toHaveBeenCalledTimes(2);
@@ -222,9 +283,11 @@ describe("trackPendingWithdrawals", () => {
     withdrawalRepo.listNonTerminal.mockResolvedValueOnce([
       withdrawalRow({ id: "w1", status: "submitted" }),
     ]);
-    getSignatureStatuses.mockResolvedValueOnce([{ err: { InstructionError: [0, "Custom"] } }]);
+    getSignatureStatuses.mockResolvedValueOnce([
+      signatureStatus({ err: { InstructionError: [0, { Custom: 1 }] } }),
+    ]);
 
-    await trackPendingWithdrawals({} as Env);
+    await trackPendingWithdrawals(DEV_ENV);
 
     expect(withdrawalRepo.updateWithdrawal).toHaveBeenCalledWith(
       expect.objectContaining({ id: "w1", status: "failed", expectedStatus: "submitted" })
@@ -236,7 +299,7 @@ describe("trackPendingWithdrawals", () => {
       withdrawalRow({ id: "w1", status: "pending", signature: null, updated_at: STALE_ISO }),
     ]);
 
-    await trackPendingWithdrawals({} as Env);
+    await trackPendingWithdrawals(DEV_ENV);
 
     expect(withdrawalRepo.updateWithdrawal).toHaveBeenCalledWith(
       expect.objectContaining({ id: "w1", status: "failed", expectedStatus: "pending" })
@@ -247,9 +310,9 @@ describe("trackPendingWithdrawals", () => {
     withdrawalRepo.listNonTerminal.mockResolvedValueOnce([
       withdrawalRow({ id: "w7", status: "pending", signature: "sig7", updated_at: STALE_ISO }),
     ]);
-    getSignatureStatuses.mockResolvedValueOnce([{ confirmationStatus: "confirmed" }]);
+    getSignatureStatuses.mockResolvedValueOnce([signatureStatus({})]);
 
-    await trackPendingWithdrawals({} as Env);
+    await trackPendingWithdrawals(DEV_ENV);
 
     expect(withdrawalRepo.updateWithdrawal).toHaveBeenCalledWith(
       expect.objectContaining({ id: "w7", status: "submitted", expectedStatus: "pending" })
@@ -264,7 +327,7 @@ describe("trackPendingWithdrawals", () => {
       withdrawalRow({ id: "w8", status: "pending", signature: null, updated_at: STALE_ISO }),
     ]);
 
-    await trackPendingWithdrawals({} as Env);
+    await trackPendingWithdrawals(DEV_ENV);
 
     expect(withdrawalRepo.updateWithdrawal).toHaveBeenCalledWith(
       expect.objectContaining({ id: "w8", status: "failed", expectedSignatureAbsent: true })
@@ -276,22 +339,25 @@ describe("trackPendingWithdrawals", () => {
       withdrawalRow({ id: "w1", status: "confirmed" }),
     ]);
     getSignaturesForAddress.mockResolvedValueOnce([
-      { signature: "relSig", err: null, blockTime: 1_700_000_000n },
+      { signature: RELEASE_SIGNATURE, slot: 1n, err: null, blockTime: 1_700_000_000n },
     ]);
     getTransaction.mockResolvedValueOnce({
       slot: 1n,
+      accountKeys: [],
+      executionResultKnown: true,
       err: null,
       instructions: [
         // amount "10" @ 6 decimals = 10_000_000 base units; destination = ata:<DESTINATION>
         {
           programId: "tok",
+          accounts: [],
           parsedType: "transfer",
           info: { destination: `ata:${DESTINATION}`, amount: "10000000" },
         },
       ],
     });
 
-    await trackPendingWithdrawals({} as Env);
+    await trackPendingWithdrawals(DEV_ENV);
 
     // Scanned the CURRENT instance's escrow ATA on devnet.
     expect(getSignaturesForAddress).toHaveBeenCalledWith(
@@ -302,7 +368,7 @@ describe("trackPendingWithdrawals", () => {
     // Attribution recorded in settlement_observations.
     expect(observationRepo.claimSettlement).toHaveBeenCalledWith(
       expect.objectContaining({
-        signature: "relSig",
+        signature: RELEASE_SIGNATURE,
         instructionIndex: 0,
         intentKind: "withdrawal",
         intentId: "w1",
@@ -313,7 +379,7 @@ describe("trackPendingWithdrawals", () => {
       expect.objectContaining({
         id: "w1",
         status: "settled",
-        settlementRef: "relSig",
+        settlementRef: RELEASE_SIGNATURE,
         expectedStatus: "confirmed",
       })
     );
@@ -331,21 +397,24 @@ describe("trackPendingWithdrawals", () => {
       withdrawalRow({ id: "w1", status: "confirmed" }),
     ]);
     getSignaturesForAddress.mockResolvedValueOnce([
-      { signature: "relSig", err: null, blockTime: null },
+      { signature: RELEASE_SIGNATURE, slot: 1n, err: null, blockTime: null },
     ]);
     getTransaction.mockResolvedValueOnce({
       slot: 1n,
+      accountKeys: [],
+      executionResultKnown: true,
       err: null,
       instructions: [
         {
           programId: "tok",
+          accounts: [],
           parsedType: "transfer",
           info: { destination: `ata:${DESTINATION}`, amount: "9999999" },
         },
       ],
     });
 
-    await trackPendingWithdrawals({} as Env);
+    await trackPendingWithdrawals(DEV_ENV);
 
     const settled = withdrawalRepo.updateWithdrawal.mock.calls.some(
       ([c]) => (c as { status?: string }).status === "settled"
@@ -360,7 +429,7 @@ describe("trackPendingWithdrawals", () => {
     ]);
     // No matching release found.
 
-    await trackPendingWithdrawals({} as Env);
+    await trackPendingWithdrawals(DEV_ENV);
 
     // Never failed after confirmed.
     const failed = withdrawalRepo.updateWithdrawal.mock.calls.some(
@@ -393,7 +462,7 @@ describe("trackPendingWithdrawals", () => {
       }),
     ]);
 
-    await trackPendingWithdrawals({} as Env);
+    await trackPendingWithdrawals(DEV_ENV);
 
     expect(withdrawalRepo.patchContext).not.toHaveBeenCalled();
     expect(emitWithdrawalEvent).not.toHaveBeenCalled();
@@ -404,14 +473,17 @@ describe("trackPendingWithdrawals", () => {
       withdrawalRow({ id: "w1", status: "confirmed" }),
     ]);
     getSignaturesForAddress.mockResolvedValueOnce([
-      { signature: "relSig", err: null, blockTime: null },
+      { signature: RELEASE_SIGNATURE, slot: 1n, err: null, blockTime: null },
     ]);
     getTransaction.mockResolvedValueOnce({
       slot: 1n,
+      accountKeys: [],
+      executionResultKnown: true,
       err: null,
       instructions: [
         {
           programId: "tok",
+          accounts: [],
           parsedType: "transfer",
           info: { destination: `ata:${DESTINATION}`, amount: "10000000" },
         },
@@ -431,7 +503,7 @@ describe("trackPendingWithdrawals", () => {
       observed_at: NOW_ISO,
     });
 
-    await trackPendingWithdrawals({} as Env);
+    await trackPendingWithdrawals(DEV_ENV);
 
     expect(withdrawalRepo.updateWithdrawal).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -451,16 +523,19 @@ describe("trackPendingWithdrawals", () => {
       withdrawalRow({ id: "w2", status: "confirmed" }),
     ]);
     getSignaturesForAddress.mockResolvedValueOnce([
-      { signature: "sigTaken", err: null, blockTime: null },
-      { signature: "sigFree", err: null, blockTime: null },
+      { signature: TAKEN_SIGNATURE, slot: 1n, err: null, blockTime: null },
+      { signature: FREE_SIGNATURE, slot: 1n, err: null, blockTime: null },
     ]);
     getTransaction
       .mockResolvedValueOnce({
         slot: 1n,
+        accountKeys: [],
+        executionResultKnown: true,
         err: null,
         instructions: [
           {
             programId: "tok",
+            accounts: [],
             parsedType: "transfer",
             info: { destination: `ata:${DESTINATION}`, amount: "10000000" },
           },
@@ -468,10 +543,13 @@ describe("trackPendingWithdrawals", () => {
       })
       .mockResolvedValueOnce({
         slot: 2n,
+        accountKeys: [],
+        executionResultKnown: true,
         err: null,
         instructions: [
           {
             programId: "tok",
+            accounts: [],
             parsedType: "transfer",
             info: { destination: `ata:${DESTINATION}`, amount: "10000000" },
           },
@@ -487,14 +565,14 @@ describe("trackPendingWithdrawals", () => {
       }));
     observationRepo.findByIntent.mockResolvedValueOnce(null);
 
-    await trackPendingWithdrawals({} as Env);
+    await trackPendingWithdrawals(DEV_ENV);
 
     expect(observationRepo.claimSettlement).toHaveBeenCalledTimes(2);
     expect(withdrawalRepo.updateWithdrawal).toHaveBeenCalledWith(
       expect.objectContaining({
         id: "w2",
         status: "settled",
-        settlementRef: "sigFree",
+        settlementRef: FREE_SIGNATURE,
         expectedStatus: "confirmed",
       })
     );
