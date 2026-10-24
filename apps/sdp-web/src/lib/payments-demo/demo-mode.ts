@@ -15,15 +15,16 @@ import { isNewDesignOn } from "@/flags/new-design";
 import { parseDashboardPathname } from "@/lib/dashboard-project-path";
 import { designModuleForPath } from "@/lib/design-modules";
 import { PROJECT_HEADER_NAME } from "@/lib/project-cookie";
-import { isPaymentsPath, PAYMENTS_DEMO_COOKIE_NAME, TAB_DEMO_HEADER_NAME } from "./demo-cookie";
+import { isDemoPath, PAYMENTS_DEMO_COOKIE_NAME, TAB_DEMO_HEADER_NAME } from "./demo-cookie";
 import { buildWorld, demoPathParts, demoWorldBody } from "./demo-fixtures";
 import { type DemoAnswer, demoFlowRead, demoWrite } from "./demo-handlers";
 import { applyDemoOps } from "./demo-replay";
 import { appendDemoOps, readDemoOps } from "./demo-session";
+import { issuanceRead } from "./issuance-reads";
 
 /*
- * Demo mode: on the Payments screens of the project the demo cookie names, nothing about
- * payments reaches the SDP API. Reads come from the fixtures with the visitor's own actions
+ * Demo mode: on the Payments and Issuance screens of the project the demo cookie names, nothing
+ * about payments or issuance reaches the SDP API. Reads come from the fixtures with the visitor's own actions
  * replayed over them; writes are checked as the API would, recorded in the browser's demo
  * session and answered with the result. Reads that aren't about payment data (the project, the
  * organization) still go to the API, and change nothing.
@@ -43,9 +44,9 @@ const DEMO_RESOURCES = new Set([
 const LOOKUP_WRITES = new Set(["places"]);
 
 /**
- * Whether this request renders, or is fetched by, a Payments screen of the project the demo
- * cookie names. A page carries its own path (the proxy stamps `x-sdp-pathname`); a dashboard
- * API route counts only when a Payments page called it (its Referer). Everything else, the API
+ * Whether this request renders, or is fetched by, a Payments or Issuance screen of the project
+ * the demo cookie names. A page carries its own path (the proxy stamps `x-sdp-pathname`); a
+ * dashboard API route counts only when such a page called it (its Referer). Everything else, the API
  * playground included, keeps real data. An organization-level read has no project of its own,
  * so it is judged by the project of the request (its URL's or its header's).
  */
@@ -60,12 +61,12 @@ const demoRequested = cache(async (projectId: string | null): Promise<boolean> =
     const pathname = headerStore.get("x-sdp-pathname");
     const ownPage = pathname ? parseDashboardPathname(pathname).dashboardPath : null;
     const referer = pathname?.startsWith("/api/dashboard/") ? headerStore.get("referer") : null;
-    const page = isPaymentsPath(ownPage)
+    const page = isDemoPath(ownPage)
       ? ownPage
       : referer
         ? parseDashboardPathname(new URL(referer).pathname).dashboardPath
         : null;
-    if (!page || !isPaymentsPath(page)) {
+    if (!page || !isDemoPath(page)) {
       return false;
     }
     // Demo data is part of the new design and has a flag of its own: a page on the previous
@@ -241,6 +242,10 @@ export async function paymentsDemoResponse(
   if (verb === "GET") {
     if (resource === "organizations" && parts.segments[2] === "provider-access") {
       return demoProviderAccess(upstream, rampProviders);
+    }
+    if (resource === "issuance") {
+      const answer = issuanceRead(world.issuance, parts.segments.slice(1), parts.params);
+      return answer ? respond(answer) : notInDemo();
     }
     const fixture = demoWorldBody(world, path);
     if (fixture !== undefined) return Response.json(fixture);

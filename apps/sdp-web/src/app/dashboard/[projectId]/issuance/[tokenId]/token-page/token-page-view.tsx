@@ -17,6 +17,7 @@ import {
   useDashboardTab,
   useDashboardUrlState,
 } from "@/lib/dashboard-url-state";
+import { DEMO_DEPLOY_POLL_MS, usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { TokenActivityTab } from "./activity-tab";
 import { TokenComplianceTab } from "./compliance-tab";
 import { TokenDetailsTab } from "./details-tab";
@@ -101,11 +102,12 @@ const DEPLOY_POLL_MS = 5_000;
  */
 function useRefreshWhileDeploying(deploying: boolean) {
   const router = useRouter();
+  const pollMs = usePaymentsDemo() ? DEMO_DEPLOY_POLL_MS : DEPLOY_POLL_MS;
   useEffect(() => {
     if (!deploying) return;
-    const timer = window.setInterval(() => refreshKeepingDashboardUrl(router), DEPLOY_POLL_MS);
+    const timer = window.setInterval(() => refreshKeepingDashboardUrl(router), pollMs);
     return () => window.clearInterval(timer);
-  }, [deploying, router]);
+  }, [deploying, router, pollMs]);
 }
 
 /** The mint on the explorer, at the header's end on every tab once the token is on chain. */
