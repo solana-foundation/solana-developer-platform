@@ -1,6 +1,6 @@
 import type { RateLimitTier } from "@sdp/types/api-keys";
 import type { Context, Next } from "hono";
-import { extractApiKey, looksLikeApiKey } from "@/lib/api-key-format";
+import { presentsApiKey } from "@/lib/api-key-format";
 import { BoundedLruMap } from "@/lib/bounded-lru";
 import { verifyClerkJwtForRequest } from "@/lib/clerk-token";
 import { getClientIp } from "@/lib/client-ip";
@@ -213,6 +213,23 @@ export class InProcessRateLimiter {
     maxRequests: number,
     windowMs: number
   ): void {
+    const { windowStart, count } = this.assertNotExhausted(c, identifier, maxRequests, windowMs);
+    this.windows.set(identifier, { windowStart, count: count + 1 });
+  }
+
+  /**
+   * Refuses, as `enforce` would, an identifier that has used `maxRequests` in
+   * the current window, without counting this call: for a limit that counts
+   * only failures, checked before the work that might fail.
+   *
+   * @throws AppError RATE_LIMITED (429) with a Retry-After header.
+   */
+  assertNotExhausted(
+    c: Context<{ Bindings: Env }>,
+    identifier: string,
+    maxRequests: number,
+    windowMs: number
+  ): { windowStart: number; count: number } {
     const now = Date.now();
     const windowStart = Math.floor(now / windowMs) * windowMs;
     const current = this.windows.get(identifier);
@@ -232,7 +249,7 @@ export class InProcessRateLimiter {
       );
       throw rateLimited(`Rate limit exceeded. Retry after ${retryAfter} seconds.`);
     }
-    this.windows.set(identifier, { windowStart, count: count + 1 });
+    return { windowStart, count };
   }
 
   /** Forget every count, so a test starts from an empty instance. */
@@ -450,11 +467,8 @@ export function skipRateLimitPaths(...paths: string[]) {
       // limit below, which is what bounds signature-spray against the JWKS check.
     }
 
-    const apiKey = extractApiKey(c);
-    const presentsApiKey = apiKey !== null && looksLikeApiKey(apiKey);
-
     const clientIp = getClientIp(c) ?? "unknown";
-    if (presentsApiKey) {
+    if (presentsApiKey(c)) {
       await enforceRateLimit(c, clientIp, KEYED_IP_BACKSTOP_MAX_REQUESTS, {
         fallback: keyedIpBackstopFallback,
       });

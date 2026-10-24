@@ -1,4 +1,5 @@
 import { type Context, Hono, type Next } from "hono";
+import { presentsApiKey } from "@/lib/api-key-format";
 import { AppError } from "@/lib/errors";
 import { isEarnEnabled } from "@/lib/feature-flags";
 import { unifiedAuthMiddleware } from "@/middleware/auth";
@@ -135,7 +136,8 @@ const EARN_CHAIN_READ_QUOTA = { name: "earn-chain-read", actorMax: 30, orgMax: 1
 // A request with none gets the API-facing 401 before projectContextMiddleware
 // can turn a missing project into a 400.
 async function requireKeyedEarnCredential(c: Context<{ Bindings: Env }>, next: Next) {
-  if (!c.req.header("Authorization")) {
+  // A credential in Authorization, or a key the gateway authenticated.
+  if (!c.req.header("Authorization") && !presentsApiKey(c)) {
     throw new AppError("UNAUTHORIZED", "API key required for this Earn route");
   }
   await next();

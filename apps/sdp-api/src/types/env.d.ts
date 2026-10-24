@@ -2,6 +2,7 @@
 
 import type { WalletAccess } from "@/lib/auth";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
+import type { GatewayIdentity } from "@/lib/gateway-identity";
 import type { Action } from "@sdp/types/actions";
 import type { ApiKeyEnvironment } from "@sdp/types/api-keys";
 import type { EgressReadiness } from "@sdp/types/health";
@@ -42,6 +43,10 @@ export interface Env extends ManagedRpcEnv {
   // replaces caller-supplied forwarding headers. Unset: forwarded headers are
   // caller-controlled and no client IP resolves.
   TRUST_PROXY_HEADERS?: string;
+  // The Foundation API gateway's identity issuer and JWKS (HOO-2256). Set
+  // together, or neither: unset, `X-SF-Identity` is ignored.
+  SF_GATEWAY_ISSUER?: string;
+  SF_GATEWAY_JWKS_URL?: string;
 
   // Public-facing origin of this API (e.g. "https://api.example.com"). The
   // SDP-hosted token metadata URL burned into the on-chain MetadataPointer is
@@ -319,6 +324,8 @@ declare module "hono" {
     rampProviderMaturity: SdpRampProviderMaturity;
     // Set by createApp on every request; see AppDeps.egressReadiness
     egressReadiness?: () => EgressReadiness;
+    // Set by gatewayIdentityMiddleware from a verified X-SF-Identity
+    gatewayIdentity?: GatewayIdentity;
     // API key auth context set by middleware
     projectId?: string;
     projectEnvironment?: ApiKeyEnvironment;
