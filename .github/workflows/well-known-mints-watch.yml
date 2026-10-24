@@ -1,0 +1,74 @@
+# Daily mint watch (ADR 0012): reads every catalogue mint and fails when a
+# transfer would pay a fee or a transfer hook program is set. Non-gating: it
+# runs on a schedule only, because it reads public RPC. Pull requests that
+# change the catalogue run the same check as a gate (well-known-mints.yml);
+# this one catches a fee or hook set after an entry merged, and alerts.
+name: Well-known mints watch
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: well-known-mints-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 10.16.0
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.22.1
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Check catalogue mints
+        id: watch
+        run: |
+          set -o pipefail
+          pnpm check:well-known-mints 2>&1 | tee /tmp/mint-watch.log
+
+      - name: Install Doppler CLI
+        if: failure() && steps.watch.outcome == 'failure'
+        uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
+
+      - name: Doppler OIDC login
+        if: failure() && steps.watch.outcome == 'failure'
+        run: scripts/doppler/oidc-login.sh "${{ vars.DOPPLER_CI_IDENTITY_ID }}"
+
+      - name: Notify Slack
+        if: failure() && steps.watch.outcome == 'failure'
+        continue-on-error: true
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          SLACK=$(doppler secrets get SLACK_ALERT_WEBHOOK_URL --plain --scope=. --project solana-developer-platform --config dev_ci 2>/dev/null || true)
+          if [ -z "$SLACK" ]; then echo "::warning::SLACK_ALERT_WEBHOOK_URL missing — skipping notification"; exit 0; fi
+          echo "::add-mask::$SLACK"
+          FAILURES=$(grep '^FAIL' /tmp/mint-watch.log | head -c 2500 || true)
+          PAYLOAD=$(jq -n --arg failures "$FAILURES" --arg run "$RUN_URL" \
+            '{ text: "*[FIRING] well-known-mints-watch [solana-developer-platform]*",
+               attachments: [ { color: "#cc0000", blocks: [
+                 {type: "section", text: {type: "mrkdwn", text: "*A catalogue mint charges a transfer fee, set a transfer hook, or could not be read.*\nCheck it before SDP moves it again (ADR 0012).\n```\($failures)```\n<\($run)|watch run>"}} ] } ] }')
+          curl -sS --fail-with-body -X POST -H 'Content-Type: application/json' --data "$PAYLOAD" "$SLACK"

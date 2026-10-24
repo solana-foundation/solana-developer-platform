@@ -555,6 +555,9 @@ const signingSinkInventory: Record<string, string[]> = {
   "apps/sdp-api/src/services/private-channels/transfer.ts": ["signTransactionMessageWithSigners"],
   "apps/sdp-api/src/services/private-channels/withdraw.ts": ["signTransactionMessageWithSigners"],
   "packages/sdp-issuance/src/mosaic/service.ts": ["signTransactionMessageWithSigners"],
+  // The surfnet mint matrix signs with the local validator's own payer key, on
+  // an offline surfnet only; only the opt-in surfpool tests import it.
+  "packages/sdp-solana/src/test/mint-matrix.ts": ["signTransactionMessageWithSigners"],
   "packages/sdp-solana/src/token-2022.ts": ["signTransactionMessageWithSigners"],
 };
 
