@@ -42,16 +42,29 @@ describe("HeliusRingsZoneRepository (postgres)", () => {
       ids: { sandbox: TEST_PROJECT_ID, production: `${TEST_PROJECT_ID}_production` },
     });
 
+    await db.execute(
+      `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted)
+       VALUES ('cfg_hrk_repo_test', ?, ?, 'privy', '{}')`,
+      [TEST_ORG.id, TEST_PROJECT_ID]
+    );
+    await db.execute(
+      `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key) VALUES
+         ('cw_hrk_repo_test', 'cfg_hrk_repo_test', 'wal_hrk_repo_test', 'TreasuryOwner'),
+         ('cw_hrk_repo_other', 'cfg_hrk_repo_test', 'wal_hrk_repo_other', 'OperationsOwner')`
+    );
+
     const walletRepo = createPostgresHeliusRingsWalletRepository(db);
     const wallet = await walletRepo.createWallet({
       ...scope,
       sdpWalletId: "wal_hrk_repo_test",
+      custodyWalletId: "cw_hrk_repo_test",
       name: "Treasury",
       materialTag: "simulated",
     });
     const other = await walletRepo.createWallet({
       ...scope,
       sdpWalletId: "wal_hrk_repo_other",
+      custodyWalletId: "cw_hrk_repo_other",
       name: "Operations",
       materialTag: "simulated",
     });

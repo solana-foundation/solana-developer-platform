@@ -167,16 +167,11 @@ export function HeliusRingsWorkspace({
     health !== null && RINGS_HEALTH_COMPONENTS.some((component) => health[component] === "red");
   const alerts = healthAlerts(health);
 
-  const custodyByWalletId = useMemo(
-    () => new Map(custodyWallets.map((wallet) => [wallet.walletId, wallet])),
-    [custodyWallets]
-  );
-
   // One custody wallet = one private wallet. Anything already bound (including a
   // pending row: it holds the slot too) drops out of the create form.
   const availableCustodyWallets = useMemo(() => {
-    const boundIds = new Set(wallets.map((wallet) => wallet.sdpWalletId));
-    return custodyWallets.filter((wallet) => !boundIds.has(wallet.walletId));
+    const boundIds = new Set(wallets.map((wallet) => wallet.custodyWalletId));
+    return custodyWallets.filter((wallet) => !boundIds.has(wallet.id));
   }, [custodyWallets, wallets]);
 
   // Derive the effective selection rather than reconcile a stored id in an
@@ -252,7 +247,8 @@ export function HeliusRingsWorkspace({
                       (wallet) => wallet.id !== selectedWallet.id && wallet.shieldedAddress !== null
                     )}
                     custodyPublicKey={
-                      custodyByWalletId.get(selectedWallet.sdpWalletId)?.publicKey ?? null
+                      custodyWallets.find((wallet) => wallet.id === selectedWallet.custodyWalletId)
+                        ?.publicKey ?? null
                     }
                     projectRings={projectRings}
                     gatewayRed={upstreamsRed}

@@ -10,7 +10,7 @@ import {
 import { getAuth } from "@/lib/auth";
 import { AppError, type ErrorCode, notFound } from "@/lib/errors";
 import { assertCallerWalletInScope } from "@/lib/money-admission";
-import { resolveScope, resolveWallet } from "@/routes/payments/wallets";
+import { resolveScope, resolveWalletByCustodyWalletId } from "@/routes/payments/wallets";
 import { createHeliusRingsService, type HeliusRingsTenant } from "@/services/helius-rings/service";
 import type { Env } from "@/types/env";
 
@@ -73,9 +73,7 @@ export async function requireRingsOperation(
 
 /**
  * The key's scope lists exact custody wallet ids. A Rings wallet records the
- * custody wallet that signs for it; one created before live provisioning
- * names only the provider id, resolved to its one custody wallet (ambiguity
- * refuses, APE-390). An all-wallets key reads nothing more.
+ * custody wallet that signs for it. An all-wallets key reads nothing more.
  */
 async function assertRingsWalletInScope(
   c: AppContext,
@@ -83,10 +81,17 @@ async function assertRingsWalletInScope(
 ): Promise<void> {
   const auth = getAuth(c);
   if (auth.walletAccess.scope === "all") return;
-  const custodyWalletId =
-    wallet.custody_wallet_id ??
-    resolveWallet((await resolveScope(c)).wallets, wallet.sdp_wallet_id).id;
-  assertCallerWalletInScope(auth, custodyWalletId);
+  assertCallerWalletInScope(auth, wallet.custody_wallet_id);
+}
+
+/** A pending identity gets its owner from the exact linked Custody wallet. */
+export async function resolveRingsWalletOwner(
+  c: AppContext,
+  wallet: HeliusRingsWalletRow
+): Promise<string> {
+  if (wallet.owner_address !== null) return wallet.owner_address;
+  const scope = await resolveScope(c);
+  return resolveWalletByCustodyWalletId(scope.wallets, wallet.custody_wallet_id).publicKey;
 }
 
 export function getHeliusRingsZoneRepository(c: AppContext) {

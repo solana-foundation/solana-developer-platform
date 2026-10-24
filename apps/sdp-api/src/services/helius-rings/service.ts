@@ -177,7 +177,7 @@ export interface ProvisionPrivateWalletInput {
    * The immutable custody_wallets row id. Recorded at creation so later
    * signing resolves the same wallet even if the provider reissues its own id.
    */
-  custodyWalletId?: string | null;
+  custodyWalletId: string;
 }
 
 /** States `executeOperation` acts on; the rest return unchanged. */
@@ -304,10 +304,13 @@ export class HeliusRingsService {
       sdpWalletId: input.sdpWalletId,
       name: input.name,
       materialTag: "simulated",
-      custodyWalletId: input.custodyWalletId ?? null,
+      custodyWalletId: input.custodyWalletId,
     });
     if (!wallet) {
-      throw new AppError("INTERNAL_ERROR", "rings wallet reservation returned no row");
+      throw new HeliusRingsError(
+        "conflict",
+        "the existing rings wallet has a different custody binding"
+      );
     }
     if (wallet.status !== "pending") {
       return mapHeliusRingsWalletRow(wallet);
@@ -377,7 +380,7 @@ export class HeliusRingsService {
    */
   async rekeyWalletIdentity(
     walletId: string,
-    input: { confirmation: string; custodyOwner: string | null },
+    input: { confirmation: string; custodyOwner: string },
     actor: HeliusRingsActor
   ): Promise<PrivateWallet> {
     const wallet = await this.requireWallet(walletId);
@@ -596,7 +599,7 @@ export class HeliusRingsService {
     return mapHeliusRingsWalletRow(adopted);
   }
 
-  async readWalletIdentity(walletId: string, owner: string | null): Promise<WalletIdentityResult> {
+  async readWalletIdentity(walletId: string, owner: string): Promise<WalletIdentityResult> {
     const wallet = await this.requireWallet(walletId);
     if (!owner) {
       throw new HeliusRingsError(
