@@ -10,4 +10,4 @@ pnpm kora:surfpool:run -- \
   pnpm --filter sdp-web exec playwright test \
     --config=playwright.config.ts \
     --project=issuance \
-    playwright/tests/issuance-redesign.e2e.spec.ts
+    playwright/tests/issuance.e2e.spec.ts
