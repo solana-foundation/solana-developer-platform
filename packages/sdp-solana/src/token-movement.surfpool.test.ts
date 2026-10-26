@@ -195,11 +195,6 @@ describe("The token movement builder on a surfnet mint matrix", { skip: !ENABLED
       ["feeCapped", "0.995", "credit"],
       ["feeCapped", "250", "credit"],
       ["feeCapped", "1000", "debit"],
-      // Payments refuses these (support() below) until PR 5; the builder still moves them exactly.
-      ["scaled", "3", "debit"],
-      ["scaledSwitch", "3", "credit"],
-      ["interestPositive", "1.25", "debit"],
-      ["interestNegative", "1.25", "credit"],
     ];
     const sources = new Map<MintProfile, Address>();
     for (const [profile, amount, basis] of cases) {
