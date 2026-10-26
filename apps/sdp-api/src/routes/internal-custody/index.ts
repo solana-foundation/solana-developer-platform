@@ -4,6 +4,7 @@ import {
   type CustodyProvider,
 } from "@sdp/types/custody";
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
 import { getDb } from "@/db/client";
 import { getAuth, requireProjectId } from "@/lib/auth";
@@ -51,8 +52,14 @@ const rotationQuota = { name: "credential-rotation", actorMax: 5, orgMax: 20 };
 // Rotation retries must not consume the budget for rollback or candidate cancellation.
 const recoveryQuota = { name: "credential-recovery", actorMax: 5, orgMax: 20 };
 
+// Same backstop the /v1 surface applies: handlers buffer the body whole
+// before zod validation, and this router mounts under /internal/dashboard,
+// which that backstop does not cover.
+const MAX_INTERNAL_BODY_BYTES = 1024 * 1024;
+
 export const internalCustody = new Hono<{ Bindings: Env }>();
 
+internalCustody.use("*", bodyLimit({ maxSize: MAX_INTERNAL_BODY_BYTES }));
 internalCustody.use("*", credentialAdminAuthMiddleware());
 internalCustody.use("*", projectContextMiddleware());
 internalCustody.use("*", idempotencyKeyMiddleware());

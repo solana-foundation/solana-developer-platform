@@ -44,6 +44,14 @@ describe("isCredentialKey", () => {
       "seedMnemonic",
       "seedPhrase",
       "seed_phrase",
+      // `seed` is the exact name `KeyPair.fromSeed` gives its raw key
+      // material; the plural `seeds` of a public PDA derivation stays
+      // readable, as does a `seedId`-style resource id.
+      "seed",
+      "SEED",
+      "keystorePassphrase",
+      "accountPasswd",
+      "pwd",
       "signingKey",
       "__clerk_ticket",
       // Normalization strips the separators, so an exact `apikey` rule would
@@ -59,8 +67,16 @@ describe("isCredentialKey", () => {
   it("leaves public ids alone", () => {
     // `signingKeyId` is a persisted resource id on the DFNS provider config,
     // the join key for signing-path debugging — only the bare `signingKey`
-    // key-material name is a credential.
-    for (const key of ["tokenId", "walletId", "apiKeyId", "credentialId", "signingKeyId"]) {
+    // key-material name is a credential. `seeds` is a PDA derivation's
+    // public, on-chain input.
+    for (const key of [
+      "tokenId",
+      "walletId",
+      "apiKeyId",
+      "credentialId",
+      "signingKeyId",
+      "seeds",
+    ]) {
       assert.equal(isCredentialKey(key), false, key);
     }
   });

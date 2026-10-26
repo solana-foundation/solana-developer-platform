@@ -46,14 +46,24 @@ export function localRateLimit(options: LocalRateLimitOptions) {
       sweptWindow = windowStart;
     }
 
-    // An address the proxy did not verify, and everything past the tracking
-    // cap, shares one bucket: the map stays bounded, so a spray of distinct
-    // source addresses cannot grow it into the memory it was meant to protect.
+    // An address the proxy did not verify shares one bucket, so a request
+    // that invented its source cannot buy its own allowance. A verified
+    // address is always tracked under its own key: once the cap is reached
+    // the oldest entry is evicted to make room, rather than collapsing the
+    // new caller into the shared bucket — a collapse would let a spray of
+    // distinct addresses spend the shared budget first and starve every
+    // legitimate caller the map had never seen, while the map stays bounded
+    // either way.
     const clientIp = getClientIp(c);
-    const key =
-      clientIp && (buckets.has(clientIp) || buckets.size < options.maxTrackedKeys)
-        ? clientIp
-        : UNTRACKED_KEY;
+    if (clientIp && !buckets.has(clientIp) && buckets.size >= options.maxTrackedKeys) {
+      for (const [oldest] of buckets) {
+        if (oldest !== UNTRACKED_KEY) {
+          buckets.delete(oldest);
+          break;
+        }
+      }
+    }
+    const key = clientIp ? clientIp : UNTRACKED_KEY;
 
     const bucket = buckets.get(key);
     const count = bucket && bucket.windowStart === windowStart ? bucket.count + 1 : 1;

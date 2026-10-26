@@ -21,6 +21,7 @@ import {
   setInstructionAccountDefaultValues,
   updateInstructionBumps,
 } from "./codama-updates";
+import { patchSafeNumbers } from "./patch-safe-numbers";
 
 // The REAL deployed escrow program (devnet). The IDL declares the placeholder
 // `GokvZqD2…`; mirror of `SANDBOX_DEFAULTS.escrowProgramId` in `@sdp/private-channels`.
@@ -53,5 +54,10 @@ codama.accept(
     kitImportStrategy: "rootOnly",
   })
 );
+
+// Require lossless bigints for every u64/i64 instruction arg and account
+// field, so a `number` amount or nonce cannot round on the wire (see
+// ./patch-safe-numbers.ts).
+patchSafeNumbers(generatedDir);
 
 console.log(`Generated escrow client → ${generatedDir} (program ${ESCROW_PROGRAM_ID})`);

@@ -11,7 +11,7 @@
  * A non-interactive mode reads answers straight from the process environment,
  * which is convenient for scripted/CI provisioning.
  */
-import { writeFileSync } from "node:fs";
+import { chmodSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import * as readline from "node:readline/promises";
 import { Writable } from "node:stream";
@@ -369,7 +369,11 @@ async function main(): Promise<void> {
   // With --out the CLI writes the file itself, so interactive prompts (stderr)
   // and the result never share a stream — unlike `… > .env`, which a TTY merges.
   if (outPath) {
-    writeFileSync(outPath, env);
+    // The .env carries the API key pepper and provider credentials, so it is
+    // created owner-only, and an already existing file is tightened too —
+    // writeFileSync applies the mode only at creation.
+    writeFileSync(outPath, env, { mode: 0o600 });
+    chmodSync(outPath, 0o600);
     note(`\n.env written to ${outPath}`);
   } else {
     process.stdout.write(env);

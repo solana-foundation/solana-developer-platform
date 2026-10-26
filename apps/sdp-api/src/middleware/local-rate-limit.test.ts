@@ -91,9 +91,12 @@ describe("localRateLimit", () => {
     expect(refused.headers.get("X-RateLimit-Remaining")).toBeNull();
   });
 
-  it("holds a spray of distinct addresses to one shared bucket", async () => {
+  it("keeps a spray of distinct addresses memory-bounded on their own buckets", async () => {
     // The point of the cap: the limiter must not become the memory exhaustion
-    // it was added to prevent, so everything past it is counted together.
+    // it was added to prevent. Rotation past the cap evicts the oldest
+    // address instead of collapsing callers into one shared bucket, so the
+    // map stays bounded while every identified address keeps its own
+    // allowance — a spray cannot spend a legitimate address's budget for it.
     const app = buildApp({ maxRequests: 2, maxTrackedKeys: 2 });
 
     expect((await app.request("/", fromAddress("198.51.100.1"), CLOUD_RUN_ENV)).status).toBe(200);
@@ -106,7 +109,25 @@ describe("localRateLimit", () => {
       );
     }
 
-    expect(sprayed).toEqual([200, 200, 429, 429, 429, 429]);
+    // Each rotated address is admitted fresh; eviction keeps the map at the
+    // cap rather than growing it.
+    expect(sprayed).toEqual([200, 200, 200, 200, 200, 200]);
+
+    // The address the rotation just evicted is admitted again against its
+    // own fresh allowance, not the residue of a shared one.
+    expect((await app.request("/", fromAddress("198.51.100.1"), CLOUD_RUN_ENV)).status).toBe(200);
+  });
+
+  it("holds an address to its own allowance while other addresses rotate in", async () => {
+    const app = buildApp({ maxRequests: 2, maxTrackedKeys: 2 });
+
+    expect((await app.request("/", fromAddress("198.51.100.7"), CLOUD_RUN_ENV)).status).toBe(200);
+    expect((await app.request("/", fromAddress("198.51.100.7"), CLOUD_RUN_ENV)).status).toBe(200);
+
+    // Another address arriving under the cap neither spends nor resets the
+    // refused caller's own count.
+    expect((await app.request("/", fromAddress("198.51.100.8"), CLOUD_RUN_ENV)).status).toBe(200);
+    expect((await app.request("/", fromAddress("198.51.100.7"), CLOUD_RUN_ENV)).status).toBe(429);
   });
 
   it("counts a caller the proxy did not verify against the shared bucket", async () => {

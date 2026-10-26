@@ -50,24 +50,40 @@ const nextConfig: NextConfig = {
       {
         // Baseline hardening for every route. nosniff and the referrer
         // default are safe universally; HSTS is ignored over plain HTTP, so
-        // self-hosted plain-HTTP deployments are unaffected.
+        // self-hosted plain-HTTP deployments are unaffected. The CSP subset
+        // closes the injection sinks that need no nonce to pin down
+        // (plugin/object content and a hostile <base> hijacking relative
+        // URLs); a script-src needs a per-request nonce rollout before it
+        // can be enforced without breaking the framework's inline runtime.
         source: "/:path*",
         headers: [
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
           { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains" },
+          {
+            key: "Content-Security-Policy",
+            value: "object-src 'none'; base-uri 'self'",
+          },
         ],
       },
       {
         // Clickjacking protection where the money-movement actions live.
         // Scoped to the dashboard and the BFF: the public /pay/:token request
-        // page stays embeddable for issuers.
+        // page stays embeddable for issuers. frame-ancestors states the same
+        // rule in CSP form, which some browsers honor in place of the
+        // deprecated X-Frame-Options.
         source: "/dashboard/:path*",
-        headers: [{ key: "X-Frame-Options", value: "SAMEORIGIN" }],
+        headers: [
+          { key: "X-Frame-Options", value: "SAMEORIGIN" },
+          { key: "Content-Security-Policy", value: "frame-ancestors 'self'" },
+        ],
       },
       {
         source: "/api/:path*",
-        headers: [{ key: "X-Frame-Options", value: "SAMEORIGIN" }],
+        headers: [
+          { key: "X-Frame-Options", value: "SAMEORIGIN" },
+          { key: "Content-Security-Policy", value: "frame-ancestors 'self'" },
+        ],
       },
     ];
   },

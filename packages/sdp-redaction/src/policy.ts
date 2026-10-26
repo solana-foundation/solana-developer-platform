@@ -40,10 +40,17 @@ const CREDENTIAL_KEYS = new Set([
   "cookies",
   "credential",
   "credentials",
+  "passphrase",
   "password",
+  "passwd",
   "pem",
+  "pwd",
   "secret",
   "setcookie",
+  // `seed` is the exact name both `KeyPair.fromSeed` and `Keypair.fromSeed`
+  // give their raw key material. The plural `seeds` — how PDA derivations
+  // name their public, on-chain seeds — is deliberately not matched.
+  "seed",
   // `signingKey` names key material far more often than metadata, so the bare
   // form is a credential while `signingKeyId` stays readable as a resource id
   // (the DFNS provider config persists one).
@@ -55,7 +62,15 @@ const CREDENTIAL_KEYS = new Set([
 // separators from the `x-api-key` header to `xapikey`, which an exact match
 // would miss — and that header is exactly what lands in a Sentry
 // `request.headers` payload.
-const CREDENTIAL_KEY_SUFFIXES = ["secret", "password", "token", "pem", "apikey"];
+const CREDENTIAL_KEY_SUFFIXES = [
+  "passphrase",
+  "passwd",
+  "secret",
+  "password",
+  "token",
+  "pem",
+  "apikey",
+];
 
 // Key-material names that no suffix or exact rule above catches. `secretKey`
 // is the literal field a Solana keypair JSON file uses for the full 64-byte

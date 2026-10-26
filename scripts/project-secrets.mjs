@@ -11,7 +11,12 @@ function collectEntries(keys) {
 
 function emit(contents, outPath) {
   if (outPath) {
-    fs.writeFileSync(outPath, contents, "utf8");
+    // The projected file carries deployment secrets (the API key pepper and
+    // provider credentials), so it is created owner-only, and an already
+    // existing file is tightened too — writeFileSync applies the mode only
+    // at creation.
+    fs.writeFileSync(outPath, contents, { encoding: "utf8", mode: 0o600 });
+    fs.chmodSync(outPath, 0o600);
     process.stdout.write(`wrote ${outPath}\n`);
     return;
   }

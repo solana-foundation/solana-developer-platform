@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 import { renderVisitor as renderJavaScriptVisitor } from "@codama/renderers-js";
 import { createFromJson } from "codama";
 import { appendAccountDiscriminator, setInstructionAccountDefaultValues } from "./codama-updates";
+import { patchSafeNumbers } from "./patch-safe-numbers";
 
 // The REAL deployed withdraw program (devnet) — already declared in the IDL.
 const WITHDRAW_PROGRAM_ID = "J231K9UEpS4y4KAPwGc4gsMNCjKFRMYcQBcjVW7vBhVi";
@@ -44,5 +45,10 @@ codama.accept(
     kitImportStrategy: "rootOnly",
   })
 );
+
+// Require lossless bigints for every u64/i64 instruction arg and account
+// field, so a `number` amount cannot round on the wire (see
+// ./patch-safe-numbers.ts).
+patchSafeNumbers(generatedDir);
 
 console.log(`Generated withdraw client → ${generatedDir} (program ${WITHDRAW_PROGRAM_ID})`);

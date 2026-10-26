@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
 import { badRequest, badRequestParams } from "@/lib/errors";
 import { created, success } from "@/lib/response";
@@ -25,7 +26,13 @@ const connectionInputSchema = z.strictObject({
 });
 const connectionParamsSchema = z.strictObject({ connectionId: z.string().trim().min(1) });
 
+// Same backstop the /v1 surface applies: POST handlers buffer the body whole
+// before zod validation, and this router mounts under /internal/dashboard,
+// which that backstop does not cover.
+const MAX_INTERNAL_BODY_BYTES = 1024 * 1024;
+
 export const internalHeliusRings = new Hono<{ Bindings: Env }>();
+internalHeliusRings.use("*", bodyLimit({ maxSize: MAX_INTERNAL_BODY_BYTES }));
 internalHeliusRings.use("*", requireModule("helius_rings"));
 internalHeliusRings.use("*", organizationCredentialAdminAuthMiddleware());
 internalHeliusRings.use("*", projectContextMiddleware());

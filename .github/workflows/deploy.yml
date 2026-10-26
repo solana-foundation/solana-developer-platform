@@ -39,10 +39,10 @@ jobs:
           MODE: ${{ inputs.services || 'auto' }}
           EVENT_NAME: ${{ github.event_name }}
           CONTINUOUS_PROD_DEPLOY: ${{ vars.CONTINUOUS_PROD_DEPLOY }}
+          BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
-          BEFORE="${{ github.event.before }}"
-          if [ "${{ github.event_name }}" = "push" ] && [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] && git cat-file -e "$BEFORE" 2>/dev/null; then
+          if [ "$EVENT_NAME" = "push" ] && [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] && git cat-file -e "$BEFORE" 2>/dev/null; then
             CHANGED_FILES=$(git diff --name-only "$BEFORE" HEAD)
           else
             CHANGED_FILES=$(git diff --name-only HEAD^ HEAD)
