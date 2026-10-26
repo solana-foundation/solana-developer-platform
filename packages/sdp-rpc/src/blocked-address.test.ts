@@ -89,6 +89,19 @@ describe("assertReachableTenantEndpoint", () => {
     assertUnreachable("https://[64:ff9b::7f00:1]/rpc");
   });
 
+  it("refuses local-use NAT64 addresses embedding a private or metadata IPv4 target", () => {
+    for (const address of [
+      "64:ff9b:1::7f00:1",
+      "64:ff9b:1::127.0.0.1",
+      "64:ff9b:1::a9fe:a9fe",
+      "64:ff9b:1::10.0.0.5",
+      "64:ff9b:1::192.168.1.10",
+    ]) {
+      assert.equal(isBlockedAddress(address), true, address);
+    }
+    assertUnreachable("https://[64:ff9b:1::169.254.169.254]/rpc");
+  });
+
   it("allows embedded-IPv4 spellings of public addresses", () => {
     for (const address of ["::808:808", "::ffff:0:808:808", "64:ff9b::808:808"]) {
       assert.equal(isBlockedAddress(address), false, address);

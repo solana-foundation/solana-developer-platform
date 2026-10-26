@@ -46,6 +46,22 @@ const NO_STATUS_CHANGE_SQL: StatusChangeSql = {
   assignmentValues: [],
 };
 
+/**
+ * Whitelist of sortable keys → physical SQL for the transfer list. Looked up
+ * with `Object.hasOwn`, so even a caller that skips the route's zod enum
+ * cannot reach a prototype key ("constructor", "toString") and interpolate
+ * something that is not a column.
+ */
+const TRANSFER_LIST_SORT_COLUMNS: Record<
+  NonNullable<ListTransfersInput["sortBy"]>,
+  { column: string; nulls: string }
+> = {
+  amount: { column: "NULLIF(pt.amount, '')::numeric", nulls: " NULLS LAST" },
+  createdAt: { column: "pt.created_at", nulls: "" },
+  status: { column: "pt.status", nulls: "" },
+  updatedAt: { column: "pt.updated_at", nulls: "" },
+};
+
 const SIGNED_SUBMISSION_STATUS_CLAUSE =
   "((type = 'offramp' AND status = ANY(?::text[])) OR (type <> 'offramp' AND status = ANY(?::text[])))";
 const SIGNED_SUBMISSION_STATUS_VALUES = [
@@ -1205,12 +1221,10 @@ export function createPostgresPaymentsRepository(
       assertScope(params);
       const { whereClause, values } = buildTransferListWhere(params);
       const paginationValues = [...values, params.limit, params.offset];
-      const sort = {
-        amount: { column: "NULLIF(pt.amount, '')::numeric", nulls: " NULLS LAST" },
-        createdAt: { column: "pt.created_at", nulls: "" },
-        status: { column: "pt.status", nulls: "" },
-        updatedAt: { column: "pt.updated_at", nulls: "" },
-      }[params.sortBy ?? "createdAt"] ?? { column: "pt.created_at", nulls: "" };
+      const { sortBy = "createdAt" } = params;
+      const sort = Object.hasOwn(TRANSFER_LIST_SORT_COLUMNS, sortBy)
+        ? TRANSFER_LIST_SORT_COLUMNS[sortBy]
+        : TRANSFER_LIST_SORT_COLUMNS.createdAt;
       const sortDirection = params.sortDirection === "asc" ? "ASC" : "DESC";
       const orderBy = `${sort.column} ${sortDirection}${sort.nulls}, pt.created_at DESC, pt.id DESC`;
 

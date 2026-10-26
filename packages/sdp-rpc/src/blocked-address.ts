@@ -53,10 +53,10 @@ function isBlockedIpv6(address: string): boolean {
 
   // Further prefixes embed an IPv4 address in their last 32 bits, so the
   // embedded address is classified as IPv4: the deprecated IPv4-compatible
-  // (`::a.b.c.d`) and IPv4-translated (`::ffff:0:a.b.c.d`) forms, and NAT64
-  // (`64:ff9b::/96`), which a dual-stack host routes to a real IPv4 target.
-  // The local-use NAT64 prefix (`64:ff9b:1::/48`) embeds its IPv4 at a
-  // different offset and is not classified here.
+  // (`::a.b.c.d`) and IPv4-translated (`::ffff:0:a.b.c.d`) forms, and both
+  // NAT64 prefixes — the well-known one (`64:ff9b::/96`) and the local-use
+  // one (`64:ff9b:1::/48`, RFC 8215) — which a dual-stack host routes to a
+  // real IPv4 target.
   const groups = parseIpv6Groups(host);
   if (groups) {
     for (const prefix of EMBEDDED_IPV4_PREFIXES) {
@@ -75,6 +75,7 @@ const EMBEDDED_IPV4_PREFIXES: readonly (readonly number[])[] = [
   [0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000], // ::/96 (deprecated IPv4-compatible)
   [0x0000, 0x0000, 0x0000, 0x0000, 0xffff, 0x0000], // ::ffff:0:0/96 (deprecated IPv4-translated)
   [0x0064, 0xff9b, 0x0000, 0x0000, 0x0000, 0x0000], // 64:ff9b::/96 (NAT64 well-known)
+  [0x0064, 0xff9b, 0x0001, 0x0000, 0x0000, 0x0000], // 64:ff9b:1::/48 (NAT64 local-use)
 ];
 
 /** The eight 16-bit groups of one expanded IPv6 address. */

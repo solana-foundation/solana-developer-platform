@@ -68,10 +68,11 @@ export interface RingsGatewayConfig {
   readonly allowInsecureHttp?: boolean;
   readonly healthTimeoutMs?: number;
   /**
-   * Carries every leg this package dials directly — health probes, the
-   * indexer, the prover, and ring bring-up's Ring RPC. The Zolana client's
-   * own Solana RPC transport cannot take one (upstream gap), so that leg
-   * stays on the library's plain transport.
+   * Carries every leg the gateway dials — health probes, the indexer, the
+   * prover, ring bring-up's Ring RPC, and the Zolana client's own Solana RPC
+   * transport. With it, every request to a tenant-supplied URL runs through
+   * the caller's egress guard; without it, the library falls back to the
+   * global fetch.
    */
   readonly fetch?: typeof globalThis.fetch;
 }

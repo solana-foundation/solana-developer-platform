@@ -16,8 +16,9 @@ export interface RingsClientConfig {
    */
   readonly allowInsecureHttp?: boolean;
   /**
-   * Carries the indexer and prover legs; the client's own Solana RPC leg
-   * builds its transport internally and cannot take one (upstream gap).
+   * Carries every leg the client dials — the indexer, the prover, and its own
+   * Solana RPC transport (the transport is built from this fetch by a local
+   * patch to the library).
    */
   readonly fetch?: typeof globalThis.fetch;
 }

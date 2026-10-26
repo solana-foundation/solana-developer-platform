@@ -62,8 +62,9 @@ export async function resolvePersistedRingsGateway(
  * hostname cannot rebind or bounce the API into a private or metadata address
  * after passing the literal write-time check. Development returns undefined —
  * local endpoints legitimately resolve to loopback, which the guard exists to
- * refuse. The one leg this cannot cover is the Zolana client's own Solana RPC
- * transport, which the library builds internally (upstream gap).
+ * refuse. The Zolana client's own Solana RPC transport dials through this
+ * fetch too, via the local patch to the library that threads it into the Kit
+ * transport.
  */
 export function ringsEgressFetch(
   env: Env,

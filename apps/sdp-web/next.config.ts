@@ -50,12 +50,20 @@ const nextConfig: NextConfig = {
       {
         // Baseline hardening for every route. nosniff and the referrer
         // default are safe universally; HSTS is ignored over plain HTTP, so
-        // self-hosted plain-HTTP deployments are unaffected.
+        // self-hosted plain-HTTP deployments are unaffected. The CSP subset
+        // bars plugin content and <base> hijacking everywhere without
+        // constraining scripts or connections, so it cannot break Clerk or
+        // Next's own loading; a script-src policy needs coordinated nonces
+        // and a Clerk-domain allowlist before it can ship.
         source: "/:path*",
         headers: [
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
           { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains" },
+          {
+            key: "Content-Security-Policy",
+            value: "object-src 'none'; base-uri 'self'",
+          },
         ],
       },
       {

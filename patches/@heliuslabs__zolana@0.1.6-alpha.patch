@@ -1,0 +1,79 @@
+diff --git a/dist/client/client.js b/dist/client/client.js
+index 438e48a0ba270c513067b4998d5c6c258d3e3be2..878970179c2c4df2660bcfd023933d03087c2757 100644
+--- a/dist/client/client.js
++++ b/dist/client/client.js
+@@ -53,6 +53,7 @@ export class ZolanaClient {
+             ...(endpoints.solanaRpcSubscriptions === undefined
+                 ? {}
+                 : { solanaRpcSubscriptionsUrl: endpoints.solanaRpcSubscriptions }),
++            ...(input.fetch === undefined ? {} : { fetch: input.fetch }),
+         });
+         const allowInsecureHttp = input.allowInsecureHttp ?? false;
+         const indexerUrl = checkedServiceUrl(endpoints.photon, endpoints.photonField, allowInsecureHttp);
+diff --git a/dist/client/kit.d.ts b/dist/client/kit.d.ts
+index edf206aafaabff0f6b9fbda5dd4a91e02671ce86..19a0c2c09098739e229fab96e3b37d0cf1507da7 100644
+--- a/dist/client/kit.d.ts
++++ b/dist/client/kit.d.ts
+@@ -9,6 +9,12 @@ export interface LatestBlockhash {
+ export declare function createKitClients(input: Readonly<{
+     solanaRpcUrl: string | URL;
+     solanaRpcSubscriptionsUrl?: string | URL;
++    /**
++     * When present, the Solana RPC HTTP leg dials through it instead of the
++     * global fetch, so a host-level egress guard covers that leg too (the
++     * indexer and prover already take it).
++     */
++    fetch?: typeof globalThis.fetch;
+ }>): Readonly<{
+     solanaRpc: SolanaRpc;
+     solanaRpcSubscriptions: SolanaRpcSubscriptions;
+diff --git a/dist/client/kit.js b/dist/client/kit.js
+index 7a20f23728eaf16ee3bcf9cc23ebaef31f23262a..715a34595aebff8124e833c0c76367871a01e40d 100644
+--- a/dist/client/kit.js
++++ b/dist/client/kit.js
+@@ -1,13 +1,43 @@
+-import { createSolanaRpc, createSolanaRpcSubscriptions, isSolanaError, setTransactionMessageLifetimeUsingBlockhash, SOLANA_ERROR__JSON_RPC__METHOD_NOT_FOUND, } from "@solana/kit";
++import { createSolanaRpc, createSolanaRpcFromTransport, createSolanaRpcSubscriptions, isSolanaError, setTransactionMessageLifetimeUsingBlockhash, SolanaError, SOLANA_ERROR__JSON_RPC__METHOD_NOT_FOUND, SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR, } from "@solana/kit";
+ import { ClientError, isClientError } from "./error.js";
+ import { composeSignal } from "./internal.js";
++/**
++ * A Kit RPC transport that dials `rpcUrl` through `fetchImpl` instead of the
++ * global fetch. Same wire shape as the default HTTP transport — JSON-RPC POST,
++ * `accept`/`content-type` headers, abort signal passed through, `SolanaError`
++ * on a non-2xx — minus request coalescing, which is an optimization. Callers
++ * that supply a fetch do so to route the leg through their own egress guard.
++ */
++function fetchBackedRpcTransport(fetchImpl, rpcUrl) {
++    return async ({ payload, signal }) => {
++        const response = await fetchImpl(rpcUrl, {
++            body: JSON.stringify(payload),
++            headers: {
++                accept: "application/json",
++                "content-type": "application/json; charset=utf-8",
++            },
++            method: "POST",
++            ...(signal === undefined ? {} : { signal }),
++        });
++        if (!response.ok) {
++            throw new SolanaError(SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR, {
++                headers: response.headers,
++                message: response.statusText,
++                statusCode: response.status,
++            });
++        }
++        return await response.json();
++    };
++}
+ export function createKitClients(input) {
+     const rpcUrl = urlString(input.solanaRpcUrl, "solanaRpcUrl", ["http:", "https:"]);
+     const subscriptionsUrl = input.solanaRpcSubscriptionsUrl === undefined
+         ? defaultSolanaRpcSubscriptionsUrl(rpcUrl)
+         : urlString(input.solanaRpcSubscriptionsUrl, "solanaRpcSubscriptionsUrl", ["ws:", "wss:"]);
+     return Object.freeze({
+-        solanaRpc: createSolanaRpc(rpcUrl),
++        solanaRpc: input.fetch === undefined
++            ? createSolanaRpc(rpcUrl)
++            : createSolanaRpcFromTransport(fetchBackedRpcTransport(input.fetch, rpcUrl)),
+         solanaRpcSubscriptions: createSolanaRpcSubscriptions(subscriptionsUrl),
+     });
+ }

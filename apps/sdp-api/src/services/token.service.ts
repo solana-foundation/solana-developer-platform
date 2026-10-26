@@ -792,7 +792,9 @@ export class TokenService {
     const tenant = this.tenantTokenScope();
     const scopedWhereClause = `${whereClause}${tenant.clause}`;
     const scopedValues = [...values, ...tenant.values];
-    const sortColumn = TOKEN_LIST_SORT_COLUMNS[sortBy] ?? TOKEN_LIST_SORT_COLUMNS.createdAt;
+    const sortColumn = Object.hasOwn(TOKEN_LIST_SORT_COLUMNS, sortBy)
+      ? TOKEN_LIST_SORT_COLUMNS[sortBy]
+      : TOKEN_LIST_SORT_COLUMNS.createdAt;
     const direction = sortDirection === "asc" ? "ASC" : "DESC";
 
     const [countResult, result] = await Promise.all([
