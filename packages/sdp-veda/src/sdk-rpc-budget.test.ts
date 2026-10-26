@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { address } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { VedaVaultDirectClient, type VedaVaultOperationRunner } from "./client";
+import depositWithdraw from "./fixtures/devnet-deposit-withdraw.json";
 import positionRead from "./fixtures/devnet-position-read.json";
 import queuedWithdrawal from "./fixtures/devnet-queued-withdrawal.json";
 import { resetVedaReadCaches } from "./sdk";
@@ -17,8 +18,8 @@ import { resetVedaReadCaches } from "./sdk";
  * so requests the code has in flight together always overlap, as they do on a
  * real network, and the round count is the sequential round-trip depth. Each
  * phase answers at its own recorded slot, so no phase reuses another's block
- * time; a live read that straddles a slot boundary sends one more
- * `getBlockTime` (devnet measured 6 warm for one holder).
+ * time; live, concurrent operations whose batches land on different slots send
+ * one `getBlockTime` each.
  */
 
 const VAULT_PROGRAM = "ASN8Cz36kQSZf2ZrgUbRShaKUpN4CJoTGdv6C5uMsy3J";
@@ -88,6 +89,7 @@ interface Recording {
   rent?: Readonly<Record<string, number>>;
 }
 
+const DEPOSIT_WITHDRAW: Recording = depositWithdraw;
 const POSITION_READ: Recording = positionRead;
 const QUEUED_WITHDRAWAL: Recording = queuedWithdrawal;
 
@@ -233,6 +235,16 @@ function readHolding(client: VedaVaultDirectClient, owner: string) {
 
 const sorted = (...lists: string[][]) => lists.map((list) => list.join(",")).sort();
 
+/** What a position read holds: the SDK's quote context, then the holder's records. */
+const holdingAccounts = (owner: typeof HOLDER_A | typeof HOLDER_B) => [
+  VAULT,
+  ASSET_DATA,
+  SHARE_MINT,
+  USDC,
+  SHARE_ACCOUNT[owner],
+  ALLOWED_USER[owner],
+];
+
 beforeEach(() => {
   resetVedaReadCaches();
   // WebCrypto finishes each address derivation's SHA-256 on the thread pool,
@@ -255,7 +267,7 @@ afterEach(() => {
 describe("Veda position read RPC budget (recorded devnet Test Vault)", () => {
   const [COLD_SLOT, WARM_SLOT] = POSITION_READ.slots;
 
-  it("reads one holder in 10 requests cold and 5 warm", async () => {
+  it("reads one holder in 8 requests cold and 2 warm", async () => {
     const chain = recordedChain(POSITION_READ);
     const client = vedaClient();
     const read = () => readHolding(client, HOLDER_A).catch((cause: unknown) => cause);
@@ -263,17 +275,15 @@ describe("Veda position read RPC budget (recorded devnet Test Vault)", () => {
     chain.at(COLD_SLOT);
     const cold = await read();
     expect(chain.take()).toEqual({
-      requests: { getMultipleAccounts: 8, getBlockTime: 1, getProgramAccounts: 1 },
-      rounds: 6,
+      requests: { getMultipleAccounts: 6, getBlockTime: 1, getProgramAccounts: 1 },
+      rounds: 5,
       accountLists: sorted(
         [VAULT_PROGRAM],
         [HOOK_PROGRAM],
         [QUEUE_PROGRAM],
         [VAULT],
         [SHARE_MINT],
-        [SHARE_ACCOUNT[HOLDER_A], ALLOWED_USER[HOLDER_A]],
-        [VAULT, ASSET_DATA],
-        [VAULT, ASSET_DATA, SHARE_MINT, USDC]
+        holdingAccounts(HOLDER_A)
       ),
       unexpected: [],
     });
@@ -282,20 +292,15 @@ describe("Veda position read RPC budget (recorded devnet Test Vault)", () => {
     chain.at(WARM_SLOT);
     const warm = await read();
     expect(chain.take()).toEqual({
-      requests: { getMultipleAccounts: 4, getBlockTime: 1 },
-      rounds: 5,
-      accountLists: sorted(
-        [VAULT],
-        [SHARE_ACCOUNT[HOLDER_A], ALLOWED_USER[HOLDER_A]],
-        [VAULT, ASSET_DATA],
-        [VAULT, ASSET_DATA, SHARE_MINT, USDC]
-      ),
+      requests: { getMultipleAccounts: 1, getBlockTime: 1 },
+      rounds: 2,
+      accountLists: sorted(holdingAccounts(HOLDER_A)),
       unexpected: [],
     });
     expect(warm).toEqual([POSITION[HOLDER_A]]);
   });
 
-  it("reads two concurrent holders in 11 requests cold and 6 warm", async () => {
+  it("reads two concurrent holders in 9 requests cold and 3 warm", async () => {
     const chain = recordedChain(POSITION_READ);
     const client = vedaClient();
     const read = () =>
@@ -306,35 +311,28 @@ describe("Veda position read RPC budget (recorded devnet Test Vault)", () => {
     chain.at(COLD_SLOT);
     const cold = await read();
     expect(chain.take()).toEqual({
-      requests: { getMultipleAccounts: 9, getBlockTime: 1, getProgramAccounts: 1 },
-      rounds: 6,
+      requests: { getMultipleAccounts: 7, getBlockTime: 1, getProgramAccounts: 1 },
+      rounds: 5,
       accountLists: sorted(
         [VAULT_PROGRAM],
         [HOOK_PROGRAM],
         [QUEUE_PROGRAM],
         [VAULT],
         [SHARE_MINT],
-        [SHARE_ACCOUNT[HOLDER_A], ALLOWED_USER[HOLDER_A]],
-        [SHARE_ACCOUNT[HOLDER_B], ALLOWED_USER[HOLDER_B]],
-        [VAULT, ASSET_DATA],
-        [VAULT, ASSET_DATA, SHARE_MINT, USDC]
+        holdingAccounts(HOLDER_A),
+        holdingAccounts(HOLDER_B)
       ),
       unexpected: [],
     });
     expect(cold).toEqual([[POSITION[HOLDER_A]], [POSITION[HOLDER_B]]]);
 
+    // Each holding is its own read; the two share the slot's block time.
     chain.at(WARM_SLOT);
     const warm = await read();
     expect(chain.take()).toEqual({
-      requests: { getMultipleAccounts: 5, getBlockTime: 1 },
-      rounds: 5,
-      accountLists: sorted(
-        [VAULT],
-        [SHARE_ACCOUNT[HOLDER_A], ALLOWED_USER[HOLDER_A]],
-        [SHARE_ACCOUNT[HOLDER_B], ALLOWED_USER[HOLDER_B]],
-        [VAULT, ASSET_DATA],
-        [VAULT, ASSET_DATA, SHARE_MINT, USDC]
-      ),
+      requests: { getMultipleAccounts: 2, getBlockTime: 1 },
+      rounds: 2,
+      accountLists: sorted(holdingAccounts(HOLDER_A), holdingAccounts(HOLDER_B)),
       unexpected: [],
     });
     expect(warm).toEqual([[POSITION[HOLDER_A]], [POSITION[HOLDER_B]]]);
@@ -610,5 +608,198 @@ describe("Veda queued-withdrawal RPC budget (recorded devnet Test Vault)", () =>
       unexpected: [],
     });
     expect(warm).toEqual(lookup);
+  });
+});
+
+describe("Veda deposit and instant-exit RPC budget (recorded devnet Test Vault)", () => {
+  const QUEUE_STATE = "7XbSKzG8Kf1qsprNV1XE9YHNNpSV7jZBWLx1n4B6tSDf";
+  // A wallet that never deposited: its share account and allowed-user record
+  // were recorded absent.
+  const FIRST_OWNER = "3Sr7ssBmfccHcRBd39CcB8XtErhXsWxMbfWPnN7RFY8x";
+  const FIRST_RECORDS = [
+    "EGerxys9apaYoN26kNcJ4yXkhmfFXqpW9uc44KkzwS8d",
+    "DALEdTBmSVhEcVHc46PtsWgaqmk5Tgy51exA2tHyLtgc",
+  ];
+  const QUOTE_ACCOUNTS = [VAULT, ASSET_DATA, SHARE_MINT, USDC];
+  const records = (owner: typeof HOLDER_A | typeof HOLDER_B) => [
+    SHARE_ACCOUNT[owner],
+    ALLOWED_USER[owner],
+  ];
+  const IDENTITY = { depositTokenMint: USDC, shareMint: SHARE_MINT };
+  const DEPOSIT = { providerReference: VAULT, amount: "1", minSharesOut: "0.99" };
+  const EXIT = { providerReference: VAULT, owner: HOLDER_B, shares: "1", minAmountOut: "0.99" };
+  const slots = DEPOSIT_WITHDRAW.slots;
+  const settle = <T>(call: Promise<T>) => call.catch((cause: unknown) => cause);
+
+  /** The shared client and the vault's static facts, as a portfolio read leaves them. */
+  async function warmed(chain: ReturnType<typeof recordedChain>) {
+    const client = vedaClient();
+    chain.at(slots[0]);
+    await readHolding(client, HOLDER_A);
+    expect(chain.take().unexpected).toEqual([]);
+    return client;
+  }
+
+  it("quotes a deposit in 3 requests the first time and 2 after", async () => {
+    const chain = recordedChain(DEPOSIT_WITHDRAW);
+    const client = await warmed(chain);
+    const quote = { sharesOut: "0.999999", shareDecimals: 6, blockingIssues: [] };
+
+    // The first quote also reads the asset mint's decimals, once per cache window.
+    chain.at(slots[1]);
+    const first = await settle(
+      client.quoteVaultDeposit(sandbox, { providerReference: VAULT, amount: "1" })
+    );
+    expect(chain.take()).toEqual({
+      requests: { getMultipleAccounts: 1, getAccountInfo: 1, getBlockTime: 1 },
+      rounds: 2,
+      accountLists: sorted(QUOTE_ACCOUNTS),
+      unexpected: [],
+    });
+    expect(first).toEqual(quote);
+
+    chain.at(slots[2]);
+    const warm = await settle(
+      client.quoteVaultDeposit(sandbox, { providerReference: VAULT, amount: "1" })
+    );
+    expect(chain.take()).toEqual({
+      requests: { getMultipleAccounts: 1, getBlockTime: 1 },
+      rounds: 2,
+      accountLists: sorted(QUOTE_ACCOUNTS),
+      unexpected: [],
+    });
+    expect(warm).toEqual(quote);
+  });
+
+  it("builds a deposit from one read of the quote context and the holder's records", async () => {
+    const chain = recordedChain(DEPOSIT_WITHDRAW);
+    const client = vedaClient();
+    const build = (input: { owner: string; rentPayer?: string }) =>
+      settle(client.buildVaultDeposit(sandbox, { ...DEPOSIT, ...input }));
+
+    // The compatibility verdict (its own client, ten minutes), the shared
+    // client, the static facts and the mint's decimals, all filled once.
+    chain.at(slots[0]);
+    await build({ owner: HOLDER_A });
+    expect(chain.take().unexpected).toEqual([]);
+
+    chain.at(slots[1]);
+    const repeat = await build({ owner: HOLDER_A });
+    expect(chain.take()).toEqual({
+      requests: { getMultipleAccounts: 1, getBlockTime: 1 },
+      rounds: 2,
+      accountLists: sorted([...QUOTE_ACCOUNTS, ...records(HOLDER_A)]),
+      unexpected: [],
+    });
+    expect(repeat).toMatchObject({
+      assetIdentity: IDENTITY,
+      accepted: { amount: "1", minSharesOut: "0.99" },
+      createsShareAccount: false,
+    });
+    expect(digest(repeat)).toBe("14ec1fecc13e4a70c4cd51b6a6b80bb4dc3f6f3bba26bb02b43fceacc60b882c");
+
+    // The share account and allowed-user record whose existence a sponsored
+    // plan reports come from the same read.
+    chain.at(slots[2]);
+    const sponsored = await build({ owner: HOLDER_A, rentPayer: HOLDER_B });
+    expect(chain.take()).toEqual({
+      requests: { getMultipleAccounts: 1, getBlockTime: 1 },
+      rounds: 2,
+      accountLists: sorted([...QUOTE_ACCOUNTS, ...records(HOLDER_A)]),
+      unexpected: [],
+    });
+    expect(sponsored).toMatchObject({ createsShareAccount: false });
+    expect(digest(sponsored)).toBe(
+      "c2ca37656c1dca45d00a46f3c075214623c1036aec7a1025ba81762a3c285ca5"
+    );
+
+    // A first deposit reads the allowed-user rent minimum live.
+    chain.at(slots[3]);
+    const first = await build({ owner: FIRST_OWNER, rentPayer: HOLDER_B });
+    expect(chain.take()).toEqual({
+      requests: {
+        getMultipleAccounts: 1,
+        getBlockTime: 1,
+        getMinimumBalanceForRentExemption: 1,
+      },
+      rounds: 3,
+      accountLists: sorted([...QUOTE_ACCOUNTS, ...FIRST_RECORDS]),
+      unexpected: [],
+    });
+    expect(first).toMatchObject({ createsShareAccount: true });
+    expect(digest(first)).toBe("d9ff7029917261067ed0c37302a96e86397e29ea2fd4f6cc57d4243637acfcab");
+
+    chain.at(slots[4]);
+    const unsponsored = await build({ owner: FIRST_OWNER });
+    expect(chain.take()).toEqual({
+      requests: { getMultipleAccounts: 1, getBlockTime: 1 },
+      rounds: 2,
+      accountLists: sorted([...QUOTE_ACCOUNTS, ...FIRST_RECORDS]),
+      unexpected: [],
+    });
+    expect(digest(unsponsored)).toBe(
+      "340f160fc4076bf078a57ee6405e4bfc5388a22447737ce7ff004c025b924867"
+    );
+  });
+
+  it("quotes and builds an instant exit from one read of its accounts", async () => {
+    const chain = recordedChain(DEPOSIT_WITHDRAW);
+    const client = await warmed(chain);
+    const exitAccounts = [...QUOTE_ACCOUNTS, ...records(HOLDER_B), QUEUE_STATE];
+
+    chain.at(slots[1]);
+    const quote = await settle(
+      client.quoteVaultWithdrawal(sandbox, { providerReference: VAULT, shares: "1" })
+    );
+    expect(chain.take()).toEqual({
+      requests: { getMultipleAccounts: 1, getAccountInfo: 1, getBlockTime: 1 },
+      rounds: 2,
+      accountLists: sorted(QUOTE_ACCOUNTS),
+      unexpected: [],
+    });
+    expect(quote).toEqual({ assetsOut: "1", assetDecimals: 6, blockingIssues: [] });
+
+    // The build's route check reads the queue state too.
+    chain.at(slots[2]);
+    const exit = await settle(client.buildVaultWithdrawal(sandbox, EXIT));
+    expect(chain.take()).toEqual({
+      requests: { getMultipleAccounts: 1, getBlockTime: 1 },
+      rounds: 2,
+      accountLists: sorted(exitAccounts),
+      unexpected: [],
+    });
+    expect(exit).toMatchObject({
+      assetIdentity: IDENTITY,
+      accepted: { shares: "1", minAmountOut: "0.99" },
+    });
+    expect(digest(exit)).toBe("84e0ef3bf156d6b004c317a086e0bbd14b57fadb0ce1ad88f5e65edfff0b6443");
+
+    chain.at(slots[3]);
+    const sponsored = await settle(
+      client.buildVaultWithdrawal(sandbox, { ...EXIT, rentPayer: HOLDER_A })
+    );
+    expect(chain.take()).toEqual({
+      requests: { getMultipleAccounts: 1, getBlockTime: 1 },
+      rounds: 2,
+      accountLists: sorted(exitAccounts),
+      unexpected: [],
+    });
+    expect(digest(sponsored)).toBe(
+      "1bf88a9e6eff2353394599a00c3f1d246b7aaf57c676c252be1190833acfee38"
+    );
+
+    // The SDK's balance check refuses from the same live holding.
+    chain.at(slots[4]);
+    const refused = await settle(client.buildVaultWithdrawal(sandbox, { ...EXIT, shares: "4" }));
+    expect(chain.take()).toEqual({
+      requests: { getMultipleAccounts: 1, getBlockTime: 1 },
+      rounds: 2,
+      accountLists: sorted(exitAccounts),
+      unexpected: [],
+    });
+    expect(refused).toMatchObject({
+      code: "INVALID_AMOUNT",
+      message: expect.stringContaining("Insufficient share balance"),
+    });
   });
 });
