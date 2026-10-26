@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { isDisabledTest, testBlock } from "@/test/helpers/test-evidence";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "../../../..");
 
@@ -688,9 +689,19 @@ describe("value-moving authorization and replay conformance", () => {
   it.each(contracts)("keeps explicit replay evidence for $family", (contract) => {
     expect(contract.replay.length).toBeGreaterThan(0);
     for (const replay of contract.replay) {
-      expect(readSource(replay.file), `${contract.family}: ${replay.mode}`).toContain(
-        replay.evidence
-      );
+      // The evidence names a test. Resolve the test itself, so a gate stays
+      // green only while a live (not skipped, todo or deleted) test carries
+      // the replay proof — a bare substring would survive a disabled test.
+      const source = readSource(replay.file);
+      const block = testBlock(source, replay.evidence);
+      expect(
+        block,
+        `${contract.family}: ${replay.mode} has no test "${replay.evidence}" in ${replay.file}`
+      ).not.toBeNull();
+      expect(
+        isDisabledTest(source, replay.evidence),
+        `${contract.family}: ${replay.mode} disables its replay test "${replay.evidence}" in ${replay.file}`
+      ).toBe(false);
     }
   });
 

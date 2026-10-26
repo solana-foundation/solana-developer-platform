@@ -47,7 +47,7 @@ function workspaceFor(flags: DashboardFlags): DashboardWorkspace {
   return {
     initialQuickStartStatus: null,
     initialQuickStartStep: null,
-    dashboardAccess: resolveDashboardAccess("org:admin"),
+    dashboardAccess: resolveDashboardAccess("admin"),
     flags,
     dashboardCacheScope: { orgId: "org-release-channel", userId: "user-release-channel" },
     projects: [SANDBOX_PROJECT, PRODUCTION_PROJECT],

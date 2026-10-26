@@ -67,6 +67,9 @@ beforeEach(() => {
   unexpectedPaths.length = 0;
   resetRequestProject();
   setPageRequest(`/dashboard/${SANDBOX_PROJECT.id}/integrations`);
+  // The member's role comes from SDP (ADR 0012), never the Clerk session, so
+  // the pages under test read it from here instead of reaching for a token.
+  vi.spyOn(sdpApi, "requestMemberRole").mockResolvedValue("admin");
   vi.spyOn(sdpApi, "createRequestScopedSdpApiClients").mockImplementation(async () => ({
     organizationClient: apiClient({
       "/v1/onboarding/status": { linked: true, organization: { id: "org_test" } },
