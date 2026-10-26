@@ -1,6 +1,10 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { EarnRuntimeContext } from "@sdp/earn/types";
-import { pinRpcTelemetryEndpoint, runWithPinnedRpcTelemetry } from "@sdp/rpc/telemetry";
+import {
+  emitPinnedRpcFailover,
+  pinRpcTelemetryEndpoint,
+  runWithPinnedRpcTelemetry,
+} from "@sdp/rpc/telemetry";
 import { isTransientRpcError } from "@sdp/rpc/transient";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { earnPoolNotConfigured, earnProviderEndpointUrls } from "./cluster-rpc";
@@ -76,6 +80,7 @@ export function createVaultRpcFailover(
                 return await operation(() => deadline.assertActive(label));
               } catch (error) {
                 if (!transientCause(error) || attempt.index + 1 >= attempt.urls.length) throw error;
+                emitPinnedRpcFailover();
                 attempt.index += 1;
               }
             }

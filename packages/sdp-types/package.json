@@ -209,6 +209,11 @@
       "import": "./src/tokens.ts",
       "default": "./src/tokens.ts"
     },
+    "./trace-correlation": {
+      "types": "./src/trace-correlation.ts",
+      "import": "./src/trace-correlation.ts",
+      "default": "./src/trace-correlation.ts"
+    },
     "./unified-transactions": {
       "types": "./src/unified-transactions.ts",
       "import": "./src/unified-transactions.ts",
