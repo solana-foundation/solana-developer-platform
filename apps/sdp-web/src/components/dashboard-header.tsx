@@ -1169,7 +1169,6 @@ function getHomePageConfig(
 export function getDashboardPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>,
-  privateChannelsEnabled: boolean,
   paymentsEnabled = true
 ): DashboardPageConfig {
   const accessControlPageConfig = getAccessControlPageConfig(pathname, t);
@@ -1220,9 +1219,7 @@ export function getDashboardPageConfig(
     return privateChannelsConfig;
   }
   if (pathname.startsWith("/dashboard/payments/")) {
-    const action = getPaymentsActions(t, privateChannelsEnabled).find((item) =>
-      pathname.startsWith(item.href)
-    );
+    const action = getPaymentsActions(t).find((item) => pathname.startsWith(item.href));
     const title = action
       ? action.label
       : pathname.endsWith("/receive")

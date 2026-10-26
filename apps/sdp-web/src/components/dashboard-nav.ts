@@ -106,10 +106,7 @@ export function withSubnavToggled(
   return { ...current, [key]: !current[key] };
 }
 
-export function getPaymentsActions(
-  t: ReturnType<typeof useTranslations>,
-  _privateChannelsEnabled: boolean
-): SubNavItem[] {
+export function getPaymentsActions(t: ReturnType<typeof useTranslations>): SubNavItem[] {
   return [
     {
       label: t("Shared.dashboardShell.transactions"),
@@ -294,7 +291,7 @@ export function getNavSections(
                 label: t("Shared.dashboardShell.payments"),
                 href: DASHBOARD_SIDE_NAV_HREFS.payments,
                 icon: ArrowLeftRightIcon,
-                children: getPaymentsActions(t, options.privateChannelsEnabled),
+                children: getPaymentsActions(t),
                 subnavKey: "payments" as const,
               },
             ]
