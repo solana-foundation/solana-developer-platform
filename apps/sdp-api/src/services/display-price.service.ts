@@ -81,6 +81,7 @@ const tokensSnapshotRowSchema = z
 
 interface PriceBatchResult {
   readonly prices: Map<string, number>;
+  readonly rateLimited?: boolean;
 }
 
 function emptyPriceBatchResult(): PriceBatchResult {
@@ -165,7 +166,7 @@ async function fetchPriceChunk(
       startedAt,
       { boundary: "upstream_http", http_status: response.status, requested_count: mints.length }
     );
-    return result;
+    return response.status === 429 ? { ...result, rateLimited: true } : result;
   }
 
   // A mint Jupiter cannot price reliably is omitted from the object entirely — no null
@@ -325,8 +326,10 @@ async function fetchBatches(
   const result = emptyPriceBatchResult();
   const batches = chunk(mints, batchSize);
   let nextBatch = 0;
+  let rateLimited = false;
   const workers = Array.from({ length: Math.min(concurrency, batches.length) }, async () => {
     for (;;) {
+      if (rateLimited) return;
       const remainingMs = deadlineAt - Date.now();
       const batch = batches[nextBatch];
       if (!batch || remainingMs <= 0) return;
@@ -334,6 +337,10 @@ async function fetchBatches(
       try {
         const answered = await fetchBatch(batch, AbortSignal.timeout(remainingMs));
         for (const [mint, price] of answered.prices) result.prices.set(mint, price);
+        if (answered.rateLimited) {
+          rateLimited = true;
+          return;
+        }
       } catch {
         // Each vendor call logs its own failure. An independent batch may still succeed.
       }

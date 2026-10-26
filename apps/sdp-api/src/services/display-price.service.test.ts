@@ -82,6 +82,25 @@ describe("fetchDisplayUsdPrices", () => {
     await expect(fetchPricesIn("production", env, ["MintA"])).resolves.toEqual(new Map());
   });
 
+  it("stops remaining Jupiter batches after a rate limit", async () => {
+    const mints = Array.from({ length: 120 }, (_, index) => `Mint${index}`);
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(priceResponse({}, 429));
+
+    await expect(fetchPricesIn("production", env, mints)).resolves.toEqual(new Map());
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(requestedMints(required(fetchSpy.mock.calls[0])[0])).toHaveLength(50);
+  });
+
+  it("stops keyed batches after the in-flight rate-limited requests", async () => {
+    const mints = Array.from({ length: 120 }, (_, index) => `Mint${index}`);
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(priceResponse({}, 429));
+
+    await fetchPricesIn("production", { ...env, JUPITER_PRICE_API_KEY: "k" }, mints);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
   it("ignores non-numeric and negative prices", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       priceResponse(
