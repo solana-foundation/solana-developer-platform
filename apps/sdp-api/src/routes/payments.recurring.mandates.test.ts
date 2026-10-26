@@ -592,4 +592,45 @@ describe("Payments routes — recurring mandates in base units (ADR 0012)", () =
     });
     expect(sendTransactionMock.mock.calls.length).toBe(sendsBefore);
   });
+
+  it("finishes a recovered activation of a payment written before mandates from its plan's mandate after the fee grew to take the debit", async () => {
+    await answerPyusd({ extensions: [transferFeeExtension(0, 0n)], destinationExtensions: [] });
+    const activated = await activateRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      token: PYUSD,
+    });
+    // A payment row written before mandates, whose earlier run landed its sends and died
+    // before writing `active`; its plan holds the mandate that is on chain.
+    const staleAt = new Date(Date.now() - 16 * 60 * 1000).toISOString();
+    await getDb(env)
+      .prepare(
+        `UPDATE payment_recurring_payments
+            SET asset_kind = NULL, mint = NULL, token_program = NULL, decimals = NULL,
+                mandate_debit = NULL, max_fee_per_pull = NULL, status = 'activating',
+                updated_at = ?
+          WHERE id = ?`
+      )
+      .bind(staleAt, activated.id)
+      .run();
+    // Since then the fee grew to take every pull whole: a mandate made now would be refused.
+    await answerPyusd({
+      extensions: [transferFeeExtension(10_000, 1_000_000_000n)],
+      destinationExtensions: [],
+    });
+    const sendsBefore = sendTransactionMock.mock.calls.length;
+
+    const response = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/activate`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+
+    const text = await response.text();
+    expect(response.status, text).toBe(200);
+    expect((await parseRecurringResponse(new Response(text))).data.recurringPayment).toMatchObject({
+      status: "active",
+      planId: activated.planId,
+    });
+    expect(sendTransactionMock.mock.calls.length).toBe(sendsBefore);
+  });
 });

@@ -94,8 +94,8 @@ async function resetRecurringPaymentActivationUnlessAlreadyActive(input: {
 
 async function getOrCreateActivationPlan(input: {
   subscriptionsRepo: PaymentSubscriptionsRepository;
-  /** The mandate the plan records: the payment's, made once in base units. */
-  mandate: RecurringMandate;
+  /** Makes the mandate a new plan records; an existing plan keeps its own. */
+  makeMandate: () => RecurringMandate;
   claimed: PaymentRecurringPaymentRow;
   organizationId: string;
   projectId: string;
@@ -124,7 +124,7 @@ async function getOrCreateActivationPlan(input: {
     ownerAddress: input.sourceWallet.publicKey,
     token: input.claimed.token,
     amount: input.claimed.amount,
-    mandate: input.mandate,
+    mandate: input.makeMandate(),
     periodHours: input.claimed.period_hours,
     programPlanId: generateProgramPlanId(),
     planPda: null,
@@ -791,22 +791,15 @@ export async function activateRecurringPayment(input: {
     if (destinationAccount === undefined || sourceAccount === undefined) {
       throw internalError("The recurring terms read returned no token accounts");
     }
-    const mandate = rowMandate(claimed, read.terms);
     // A send an earlier run saved may have landed, so that run finishes from its saved records:
     // refusing now would strand an authorization that may exist. Each pull re-checks the mint
     // and the destination and holds when they no longer allow it.
     if (!sendMayLand) {
       assertMandateActivatable(read.terms, destinationAccount);
     }
-    const { mint, tokenProgram } = mandateProgramAccounts(mandate);
-    const sourceTokenAccount = {
-      tokenAccount: sourceAccount.tokenAccount,
-      exists: sourceAccount.exists,
-    };
-    const amountBaseUnits = mandate.debit;
-
+    const makeMandate = () => rowMandate(claimed, read.terms);
     const plan = await getOrCreateActivationPlan({
-      mandate,
+      makeMandate,
       subscriptionsRepo,
       claimed,
       organizationId: input.organizationId,
@@ -815,6 +808,15 @@ export async function activateRecurringPayment(input: {
       destination,
       createdBy: input.createdBy,
     });
+    // A plan an earlier run created keeps the mandate it was created with, so a recovered run
+    // never makes one under today's fee; one written before mandates has none.
+    const mandate = plan.mandate === null ? makeMandate() : plan.mandate;
+    const { mint, tokenProgram } = mandateProgramAccounts(mandate);
+    const sourceTokenAccount = {
+      tokenAccount: sourceAccount.tokenAccount,
+      exists: sourceAccount.exists,
+    };
+    const amountBaseUnits = mandate.debit;
 
     const programPlanId = parseU64String(plan.program_plan_id, "programPlanId");
     const [planPda] = await subscriptionsProgram.findPlanPda({ owner, planId: programPlanId });
