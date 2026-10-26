@@ -78,7 +78,7 @@
   "dependencies": {
     "@sdp/types": "workspace:*",
     "@solana/kit": "catalog:",
-    "zod": "4.6.5"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "tsx": "4.23.15"

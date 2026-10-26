@@ -251,7 +251,7 @@
   },
   "dependencies": {
     "@solana/addresses": "catalog:",
-    "zod": "4.6.5"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "typescript": "6.0.3"
