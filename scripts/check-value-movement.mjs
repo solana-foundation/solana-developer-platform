@@ -470,6 +470,14 @@ function namespaceReads(node, names) {
       : keys.map((key) => key.text);
   }
   if (ts.isShorthandPropertyAssignment(parent)) return names;
+  if (ts.isExportSpecifier(parent)) {
+    // `export { token }` and `export { token as t }` hand the namespace out; in `export { x as token }`
+    // the alias is only a name.
+    const reference = parent.propertyName ?? parent.name;
+    return reference === node && !parent.isTypeOnly && !parent.parent.parent.isTypeOnly
+      ? names
+      : [];
+  }
   if (parent.name === node || parent.propertyName === node || inTypePosition(node)) return [];
   return names;
 }

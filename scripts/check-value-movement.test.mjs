@@ -495,6 +495,12 @@ test("pins token movement builders to their files, however they are imported", (
     "src/handed-on.ts": 'import * as token from "@solana-program/token";\nuse(token);\n',
     "apps/sdp-web/src/pay.tsx":
       'import { getTransferCheckedInstruction } from "@solana-program/token";\n',
+    "src/exported.ts": 'import * as token from "@solana-program/token";\nexport { token };\n',
+    "src/exported-renamed.ts":
+      'import * as token from "@solana-program/token";\nexport { token as spl };\n',
+    // An alias is only a name, and a type-only export hands out no value.
+    "src/alias-only.ts":
+      'import * as token from "@solana-program/token";\ndeclare const x: number;\nexport { x as token };\nexport type { token as Types };\n',
     "src/dynamic.ts":
       'const { getTransferCheckedInstruction } = await import("@solana-program/token");\n',
     "src/required.ts": 'const token = require("@solana-program/token-2022");\n',
@@ -536,6 +542,8 @@ test("pins token movement builders to their files, however they are imported", (
       "src/destructured.ts uses getTransferCheckedInstruction: it builds a transfer (transfer)",
       "src/handed-on.ts uses getTransferCheckedInstruction, getTransferCheckedWithFeeInstruction: it builds a transfer (transfer)",
       "apps/sdp-web/src/pay.tsx uses getTransferCheckedInstruction: it builds a transfer (transfer)",
+      "src/exported.ts uses getTransferCheckedInstruction, getTransferCheckedWithFeeInstruction: it builds a transfer (transfer)",
+      "src/exported-renamed.ts uses getTransferCheckedInstruction, getTransferCheckedWithFeeInstruction: it builds a transfer (transfer)",
       "src/dynamic.ts uses getTransferCheckedInstruction, getTransferCheckedWithFeeInstruction: it builds a transfer (transfer)",
       "src/required.ts uses getTransferCheckedInstruction, getTransferCheckedWithFeeInstruction: it builds a transfer (transfer)",
       "src/reexported.ts uses getTransferCheckedInstruction: it builds a transfer (transfer)",
