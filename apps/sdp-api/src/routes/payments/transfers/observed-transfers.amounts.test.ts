@@ -219,6 +219,44 @@ describe("observed transfer amounts", () => {
     });
   });
 
+  it("ignores a transfer back into the same account, so a valid receipt stays verified", async () => {
+    const selfTransfer = {
+      program: "spl-token-2022",
+      programId: TOKEN_2022,
+      parsed: {
+        type: "transferCheckedWithFee",
+        info: {
+          source: WALLET_TOKEN_ACCOUNT,
+          destination: WALLET_TOKEN_ACCOUNT,
+          mint: FEE_MINT,
+          authority: WALLET,
+          tokenAmount: scaledAmount("500000"),
+          feeAmount: scaledAmount("5000"),
+        },
+      },
+      stackHeight: 1,
+    };
+    const [observed, self] = await observe(
+      tokenTransactionOf(
+        [token2022Transfer("transferCheckedWithFee", "1000000", "10000"), selfTransfer],
+        "9000000",
+        "990000"
+      )
+    );
+
+    expect(observed?.movement.amounts).toEqual({
+      debit: 1_000_000n,
+      fee: 10_000n,
+      credit: 990_000n,
+    });
+    expect(observed?.movement.verification).toEqual({
+      state: "verified",
+      reason: "chain_delta_matched",
+    });
+    // The self-move states 500000 and a 5000 fee, but moved and withheld nothing.
+    expect(self?.movement.amounts).toEqual({ debit: 0n, fee: 0n, credit: 0n });
+  });
+
   it("leaves two plain transfers into one fee account unverified, as the chain does not split their fees", async () => {
     const transfer = token2022Transfer("transferChecked", "1000000", null);
     const observed = await observe(tokenTransactionOf([transfer, transfer], "8000000", "1980000"));

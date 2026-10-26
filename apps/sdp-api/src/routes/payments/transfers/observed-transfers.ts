@@ -878,13 +878,25 @@ function observedMovements(
       return movement(split(stated(move.statedFee)), MOVEMENT_NOT_EXECUTED);
     }
 
+    // A move back into its own account moves nothing and withholds no fee, whatever
+    // amount and fee it states: it must not report them as verified.
+    if (move.sourceAccount === move.destinationAccount) {
+      return movement(
+        { debit: baseUnits(0n), fee: baseUnits(0n), credit: baseUnits(0n) },
+        CHAIN_DELTA_MATCHED
+      );
+    }
+
     const native = move.asset.kind === "native";
     const sameFamily = (other: ObservedMove) => (other.asset.kind === "native") === native;
+    // A self-move is no credit into, and no debit out of, the account.
+    const counted = (other: ObservedMove) =>
+      sameFamily(other) && other.sourceAccount !== other.destinationAccount;
     const into = moves.filter(
-      (other) => sameFamily(other) && other.destinationAccount === move.destinationAccount
+      (other) => counted(other) && other.destinationAccount === move.destinationAccount
     );
     const outOf = moves.filter(
-      (other) => sameFamily(other) && other.sourceAccount === move.destinationAccount
+      (other) => counted(other) && other.sourceAccount === move.destinationAccount
     );
     const delta = (native ? deltas.lamports : deltas.tokens).get(move.destinationAccount);
     if (delta === undefined) {
@@ -970,7 +982,8 @@ function buildObservedTransfers(
     }
     const movement = movements[index];
     // The row's amount is its own wallet's effect: what it received, or what it sent.
-    const ownEffect = move.direction === "inbound" ? movement.amounts.credit : move.debit;
+    const ownEffect =
+      move.direction === "inbound" ? movement.amounts.credit : movement.amounts.debit;
     const row: TransferRow = {
       id: observedTransferRowId({
         walletId,
