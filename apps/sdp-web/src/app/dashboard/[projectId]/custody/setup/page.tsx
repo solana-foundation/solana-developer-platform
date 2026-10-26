@@ -7,7 +7,6 @@ import {
   type KnownCustodyProvider,
 } from "@/app/dashboard/[projectId]/custody/provider-catalog";
 import type { OnboardingStatusResponse } from "@/app/dashboard/[projectId]/onboarding-status";
-import { withLegacyDesign } from "@/flags/new-design";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { availableCustodyProviders } from "@/lib/provider-availability";
@@ -19,7 +18,6 @@ import {
   requestProjectHref,
   type SdpApiClient,
 } from "@/lib/sdp-api";
-import { CurrentCustodySetupPage as RedesignCurrentCustodySetupPage } from "./page.redesign";
 import { WalletSetupFlow } from "./wallet-setup-flow";
 
 interface CustodySetupPageProps {
@@ -60,7 +58,7 @@ async function getConnectedCustodyProviders(
     .filter(isKnownCustodyProvider);
 }
 
-async function CustodySetupPage({ searchParams }: CustodySetupPageProps) {
+export default async function CustodySetupPage({ searchParams }: CustodySetupPageProps) {
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -134,5 +132,3 @@ async function CustodySetupPage({ searchParams }: CustodySetupPageProps) {
     />
   );
 }
-
-export default withLegacyDesign(RedesignCurrentCustodySetupPage, CustodySetupPage, "wallets");

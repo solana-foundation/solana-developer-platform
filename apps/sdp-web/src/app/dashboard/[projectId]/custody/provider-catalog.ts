@@ -1,7 +1,5 @@
 import {
   CUSTODY_PROVIDER_CAPABILITIES,
-  CUSTODY_PROVIDER_CATEGORIES,
-  CUSTODY_PROVIDER_CATEGORY_DETAILS,
   CUSTODY_PROVIDER_USE_CASE_LABEL_KEYS,
   type CustodyProvider,
   type CustodyProviderAvailabilityClass,
@@ -17,16 +15,7 @@ import type { MessageKey } from "@/i18n/messages";
 export const CUSTODY_CAPABILITY_LABEL_KEYS: Record<CustodyProviderUseCase, MessageKey> =
   CUSTODY_PROVIDER_USE_CASE_LABEL_KEYS;
 
-export const WALLET_PROVIDER_CATEGORIES = CUSTODY_PROVIDER_CATEGORIES;
-export type WalletProviderCategory = CustodyProviderCategory;
-
-export const WALLET_PROVIDER_CATEGORY_DETAILS: Record<
-  WalletProviderCategory,
-  {
-    labelKey: MessageKey;
-    descriptionKey: MessageKey;
-  }
-> = CUSTODY_PROVIDER_CATEGORY_DETAILS;
+type WalletProviderCategory = CustodyProviderCategory;
 
 export type KnownCustodyProvider = CustodyProvider;
 
@@ -105,10 +94,6 @@ export function getCustodyProviderEntry(
     throw new Error(`Custody provider missing from the catalog: ${provider}`);
   }
   return entry;
-}
-
-export function getCustodyProviderCategory(provider: KnownCustodyProvider): WalletProviderCategory {
-  return getCustodyProviderEntry(provider).category;
 }
 
 export function getCustodyProvidersByCategory(
