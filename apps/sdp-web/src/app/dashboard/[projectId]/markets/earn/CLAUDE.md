@@ -160,11 +160,11 @@ nothing else; the program create still sends the body `requestId` form.
 - Both routes are `dynamic = "force-dynamic"` and resolve
   `loadEarnProviderAccess()` server-side per request. Provider access is
   organization-scoped; caching it would hand one org's entitlement to another.
-- No layout of its own: `../layout.tsx` gates the whole Markets segment on
-  both `markets()` and `earn()` (`notFound()`), enforced once there so no child
-  layout suspends on a flag read (which would paint the parent's loading
-  boundary on hard navigations). Pages hold no flag checks: add new Earn routes
-  under this segment and they inherit both gates.
+- Gates by segment: `../layout.tsx` holds `markets()`, which every Markets
+  surface shares, and each Earn segment (`../embedded-yield`,
+  `../treasury-solutions`, and this directory's legacy alias routes) holds
+  `earn()` in its own layout (`notFound()`), so DvP is not hidden by it. Pages
+  hold no flag checks: a new Earn route goes under one of those segments.
 - Loading states come from `../markets-route-skeletons`, with distinct portfolio,
   configuration and integration-guide shapes. The shell's navigation-loading
   resolver (`lib/dashboard-navigation-loading.ts`) maps each pathname to the
@@ -646,11 +646,12 @@ browser pass on `/dashboard/markets/embedded-yield` and
 
 ## Rules
 
-- **Flags: declare in `src/flags.ts`, gate by segment.** `markets`
+- **Flags: declare in `src/flags/definitions.ts`, gate by segment.** `markets`
   (`MARKETS_ENABLED`) and `earn` (`EARN_ENABLED`) are `flagDefault(..., false)`
-  declarations resolved in the dashboard layout and enforced once in the
-  Markets segment layout (`../layout.tsx`). A bespoke env helper, a
-  `process.env` read, or a `NEXT_PUBLIC_*` twin is wrong.
+  declarations resolved in the dashboard layout and enforced by segment
+  layouts: `markets()` in `../layout.tsx`, `earn()` in each Earn segment's (see
+  "Routes"). A bespoke env helper, a `process.env` read, or a `NEXT_PUBLIC_*`
+  twin is wrong.
 - **i18n: English only.** Edit `messages/en/dashboard-earn.json` (this module's
   copy is the `DashboardMarkets.earnProgram.*` and `DashboardEarn.*` namespaces;
   `DashboardMarkets.treasury.*` in the same file belongs to Treasury Solutions

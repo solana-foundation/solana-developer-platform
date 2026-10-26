@@ -112,11 +112,16 @@ describe("DvP route skeletons", () => {
   });
 
   it.each([
-    [{ earn: true, dvp: true }, 3],
-    [{ earn: true, dvp: false }, 2],
-    [{ earn: false, dvp: true }, 1],
-  ])("draws a landing path block per card the page renders for %o", (modules, cards) => {
-    const html = renderToStaticMarkup(<MarketsLandingSkeleton {...modules} />);
-    expect(html.match(/h-40 w-full rounded-2xl/g)).toHaveLength(cards);
-  });
+    [{ earn: true, dvp: true }, 2, 3],
+    [{ earn: true, dvp: false }, 1, 2],
+    [{ earn: false, dvp: true }, 1, 1],
+  ])(
+    "draws a landing group and a tile per path the page renders for %o",
+    (modules, groups, tiles) => {
+      const html = renderToStaticMarkup(<MarketsLandingSkeleton {...modules} />);
+      expect(occurrences(html, "<section")).toBe(groups);
+      // The ActionTile's 120px height and its control corners.
+      expect(html.match(/h-\[120px\] w-full rounded-control/g)).toHaveLength(tiles);
+    }
+  );
 });

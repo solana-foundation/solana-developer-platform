@@ -748,8 +748,8 @@ function getMarketsRoutePageConfig(
   if (pathname === "/dashboard/markets") {
     return {
       title: t("Shared.dashboardShell.markets"),
-      titlePosition: "center",
-      contentWidthClass: "max-w-none",
+      titlePosition: "left",
+      contentWidthClass: REFRESH_PAGE_WIDTH,
     };
   }
   // Create is a detail/action route, so it keeps a centred title and a way back

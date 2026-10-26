@@ -23,6 +23,7 @@ describe("themeScopeForPath", () => {
     "/dashboard/issuance",
     "/dashboard/issuance/create",
     "/dashboard/issuance/tok_1",
+    "/dashboard/markets",
   ])("puts %s in the refresh scope", (pathname) => {
     expect(themeScopeForPath(pathname)).toBe("refresh");
   });
@@ -39,6 +40,12 @@ describe("themeScopeForPath", () => {
     "/dashboard/integrations/private-channels/overview",
     "/dashboard/integrations/private-channels/inst_1/channels",
     "/dashboard/integrations/private-channels/inst_1/setup/extra",
+    "/dashboard/markets-archive",
+    "/dashboard/markets/treasury-solutions",
+    "/dashboard/markets/embedded-yield",
+    "/dashboard/markets/dvp",
+    "/dashboard/markets/dvp/create",
+    "/dashboard/markets/dvp/trade_1",
   ])("keeps %s in the base design", (pathname) => {
     expect(themeScopeForPath(pathname)).toBeNull();
   });
