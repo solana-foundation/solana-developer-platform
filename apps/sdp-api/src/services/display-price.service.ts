@@ -350,7 +350,7 @@ function shouldSampleTokensXyz(env: Env, now: number): boolean {
   ) {
     return false;
   }
-  if (env.SDP_RELEASE_CHANNEL === "stable" && Math.random() >= TOKENS_STABLE_SAMPLE_RATE) {
+  if (env.TOKENS_XYZ_SHADOW_SAMPLE_ALL !== "true" && Math.random() >= TOKENS_STABLE_SAMPLE_RATE) {
     return false;
   }
   lastTokensShadowSampleAt = now;
