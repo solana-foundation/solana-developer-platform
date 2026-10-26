@@ -4,19 +4,14 @@ import { renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { SWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as dashboardFetchModule from "@/lib/dashboard-fetch";
 import {
   kaminoAllocationsVault,
   kaminoAllocationsVaults,
   useKaminoVaultAllocations,
 } from "./kamino-allocations";
 
-const mocks = vi.hoisted(() => ({
-  fetch: vi.fn(),
-}));
-
-vi.mock("@/lib/dashboard-fetch", () => ({
-  dashboardFetch: mocks.fetch,
-}));
+const mocks = { fetch: vi.fn() };
 
 function payload() {
   return {
@@ -68,6 +63,7 @@ describe("kaminoAllocationsVaults", () => {
 
 describe("useKaminoVaultAllocations", () => {
   beforeEach(() => {
+    vi.spyOn(dashboardFetchModule, "dashboardFetch").mockImplementation(mocks.fetch);
     mocks.fetch.mockResolvedValue({
       ok: true,
       data: { vaults: { Kvault1111: payload(), Kvault2222: payload() } },
@@ -76,7 +72,8 @@ describe("useKaminoVaultAllocations", () => {
   });
 
   afterEach(() => {
-    vi.clearAllMocks();
+    vi.restoreAllMocks();
+    mocks.fetch.mockReset();
   });
 
   it("reads every vault in one request through the BFF seam", async () => {
@@ -91,6 +88,23 @@ describe("useKaminoVaultAllocations", () => {
     expect(result.current.allocationsByVault?.Kvault2222?.allocations[0]?.marketName).toBe(
       "SOL/BTC Market"
     );
+  });
+
+  it("splits a list past one batch into reads of at most 100 and merges them", async () => {
+    const vaults = Array.from({ length: 150 }, (_, index) => `Kvault${index}`);
+    const requested = (url: string) =>
+      new URL(url, "https://dashboard.test").searchParams.get("vaults")?.split(",") ?? [];
+    mocks.fetch.mockImplementation(async (url: string) => ({
+      ok: true,
+      data: { vaults: Object.fromEntries(requested(url).map((vault) => [vault, payload()])) },
+      status: 200,
+    }));
+
+    const { result } = renderIsolatedHook(vaults);
+
+    await waitFor(() => expect(result.current.allocationsByVault).toBeDefined());
+    expect(mocks.fetch.mock.calls.map(([url]) => requested(url).length)).toEqual([100, 50]);
+    expect(Object.keys(result.current.allocationsByVault ?? {})).toHaveLength(150);
   });
 
   it("issues no request when no row has a readable vault", async () => {

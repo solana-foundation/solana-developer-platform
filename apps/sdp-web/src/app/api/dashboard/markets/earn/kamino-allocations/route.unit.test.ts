@@ -9,15 +9,10 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@clerk/nextjs/server", () => ({
   auth: mocks.auth,
 }));
-
-vi.mock("@/lib/sdp-api", () => ({
-  createSdpApiClient: vi.fn(async () => ({
-    request: vi.fn(),
-    fetch: mocks.catalogue,
-  })),
-}));
+vi.mock("next/headers", () => import("@/test/next-headers"));
 
 import { kaminoVaultAllocationsBatchSchema } from "@/app/dashboard/[projectId]/markets/treasury-solutions/kamino-allocations-schema";
+import * as sdpApi from "@/lib/sdp-api";
 import { resetAllowedVaultsForTests } from "./kamino-allocations-store";
 import { GET } from "./route";
 
@@ -117,6 +112,11 @@ describe("GET /api/dashboard/markets/earn/kamino-allocations", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubGlobal("fetch", mocks.fetch);
+    // The allowlist's catalogue read goes through the shared SDP API client.
+    vi.spyOn(sdpApi, "createSdpApiClient").mockResolvedValue({
+      request: vi.fn(),
+      fetch: mocks.catalogue,
+    });
     resetAllowedVaultsForTests();
     mocks.auth.mockResolvedValue({ userId: "user_1", orgId: "org_1" });
     // A fresh Response per upstream call: one Response body is consumable

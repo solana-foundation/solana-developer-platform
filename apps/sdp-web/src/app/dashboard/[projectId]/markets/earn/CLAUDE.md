@@ -23,7 +23,9 @@ api/dashboard/markets/earn/
                                      THIRD PARTY (Kamino's public allocations
                                      endpoint) server-side for the Treasury
                                      "Information" column. One batched read
-                                     per table (`?vaults=a,b,c`, at most 100)
+                                     per table (`?vaults=a,b,c`, zod-parsed,
+                                     at most 100 per request; the hook splits
+                                     a longer list and merges the answers)
                                      fans out to a per-vault TTL cache (45s,
                                      in-flight reads shared), so the browser
                                      sends one request and Kamino still sees

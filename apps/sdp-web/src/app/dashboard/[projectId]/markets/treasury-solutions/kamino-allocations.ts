@@ -2,8 +2,10 @@
 
 import type { EarnStrategy } from "@sdp/types/earn";
 import useSWR from "swr";
+import { earnQueryKeys } from "@/app/dashboard/[projectId]/markets/earn/earn-query-key";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import {
+  KAMINO_ALLOCATIONS_MAX_VAULTS,
   type KaminoVaultAllocationsBatch,
   kaminoVaultAllocationsBatchSchema,
 } from "./kamino-allocations-schema";
@@ -53,27 +55,44 @@ export function kaminoAllocationsVaults(
 }
 
 /**
- * One read for `vaults` (from `kaminoAllocationsVaults`); an empty list issues
- * no request. The request states its cluster explicitly for the BFF's
- * mainnet-only gate, and the store behind it independently refuses a value
- * that is not a public key or that the strategy catalogue does not front (each
- * vault is interpolated into an upstream URL).
+ * One BFF read of at most `KAMINO_ALLOCATIONS_MAX_VAULTS` vaults. The request
+ * states its cluster explicitly for the BFF's mainnet-only gate, and the store
+ * behind it independently refuses a value that is not a public key or that the
+ * strategy catalogue does not front (each vault is interpolated into an
+ * upstream URL).
+ */
+async function readKaminoAllocationsBatch(
+  vaults: readonly string[]
+): Promise<KaminoVaultAllocationsBatch["vaults"]> {
+  const result = await dashboardFetch<unknown>(
+    `/api/dashboard/markets/earn/kamino-allocations?vaults=${vaults
+      .map(encodeURIComponent)
+      .join(",")}&cluster=mainnet-beta`
+  );
+  if (!result.ok) throw new Error(result.error);
+  // Re-parsed with the same schema module the route parsed upstream with: the
+  // client trusts nothing about a response it did not shape.
+  return kaminoVaultAllocationsBatchSchema.parse(result.data).vaults;
+}
+
+/**
+ * One read for `vaults` (from `kaminoAllocationsVaults`), split into BFF reads
+ * of at most `KAMINO_ALLOCATIONS_MAX_VAULTS` and merged, so a catalogue past one
+ * page still fills every cell; an empty list issues no request.
  *
  * @param vaults - The vaults to read, already deduplicated and sorted.
- * @returns The parsed reads keyed by vault, the batch's error, and its loading state.
+ * @returns The parsed reads keyed by vault, the read's error, and its loading state.
  */
 export function useKaminoVaultAllocations(vaults: readonly string[]) {
-  const query = vaults.map(encodeURIComponent).join(",");
   const { data, error, isLoading } = useSWR<KaminoVaultAllocationsBatch["vaults"], Error>(
-    vaults.length > 0 ? ["dashboard-earn-kamino-allocations", query] : null,
+    vaults.length > 0 ? earnQueryKeys.kaminoAllocations({ vaults: vaults.join(",") }) : null,
     async () => {
-      const result = await dashboardFetch<unknown>(
-        `/api/dashboard/markets/earn/kamino-allocations?vaults=${query}&cluster=mainnet-beta`
-      );
-      if (!result.ok) throw new Error(result.error);
-      // Re-parsed with the same schema module the route parsed upstream with:
-      // the client trusts nothing about a response it did not shape.
-      return kaminoVaultAllocationsBatchSchema.parse(result.data).vaults;
+      const batches: string[][] = [];
+      for (let start = 0; start < vaults.length; start += KAMINO_ALLOCATIONS_MAX_VAULTS) {
+        batches.push(vaults.slice(start, start + KAMINO_ALLOCATIONS_MAX_VAULTS));
+      }
+      const reads = await Promise.all(batches.map(readKaminoAllocationsBatch));
+      return Object.fromEntries(reads.flatMap((read) => Object.entries(read)));
     },
     {
       refreshInterval: ALLOCATIONS_REFRESH_MS,

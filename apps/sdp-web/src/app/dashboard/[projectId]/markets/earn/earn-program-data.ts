@@ -153,7 +153,7 @@ export function earnVaultPositionsRefreshInterval(
 }
 
 /** A discovery ledger polls at its own cadence while it lists a movement, and idle while empty. */
-export function earnLedgerRefreshInterval(rows: readonly unknown[] | undefined): number {
+export function earnLedgerRefreshInterval<Row>(rows: readonly Row[] | undefined): number {
   return rows?.length === 0 ? IDLE_REFRESH_MS : LEDGER_REFRESH_MS;
 }
 

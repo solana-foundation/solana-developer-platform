@@ -4,6 +4,8 @@ import { act, cleanup, render, screen, waitFor, within } from "@testing-library/
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EnglishTestI18n } from "@/app/dashboard/[projectId]/markets/test-i18n";
+import * as kaminoAllocations from "./kamino-allocations";
+import type { KaminoVaultAllocations } from "./kamino-allocations-schema";
 import {
   EarnTransactionModalLoading,
   TreasurySolutionsWorkspace,
@@ -175,7 +177,7 @@ const mocks = vi.hoisted(() => ({
     | Array<{ token: string; mint: string; amount: string; uiAmount: string; decimals: number }>
     | undefined,
   // Vault address -> "loading" | "error" | a Kamino allocations payload.
-  allocationsByVault: {} as Record<string, "loading" | "error" | Record<string, unknown>>,
+  allocationsByVault: {} as Record<string, "loading" | "error" | KaminoVaultAllocations>,
   allocationsRequests: [] as Array<string | undefined>,
 }));
 
@@ -183,31 +185,6 @@ const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const SHARE_MINT = "Share1111111111111111111111111111111111111";
 // A share mint known only through the strategy catalogue — no position row.
 const CATALOGUE_SHARE_MINT = "ShareCatalogue11111111111111111111111111111";
-
-vi.mock("./kamino-allocations", async (importOriginal) => ({
-  // The real vault selection, so the rows the table reads are the real rule's.
-  ...(await importOriginal<typeof import("./kamino-allocations")>()),
-  useKaminoVaultAllocations: (vaults: readonly string[]) => {
-    // Mirrors the hook's contract: one read for the table's mainnet Kamino
-    // vaults, none at all without one, and a vault whose read failed is
-    // simply absent from the batch.
-    mocks.allocationsRequests.push(...vaults);
-    if (vaults.length === 0) {
-      return { allocationsByVault: undefined, error: undefined, isLoading: false };
-    }
-    if (vaults.some((vault) => mocks.allocationsByVault[vault] === "loading")) {
-      return { allocationsByVault: undefined, error: undefined, isLoading: true };
-    }
-    const allocationsByVault: Record<string, Record<string, unknown>> = {};
-    for (const vault of vaults) {
-      const state = mocks.allocationsByVault[vault];
-      if (state !== undefined && state !== "loading" && state !== "error") {
-        allocationsByVault[vault] = state;
-      }
-    }
-    return { allocationsByVault, error: undefined, isLoading: false };
-  },
-}));
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
@@ -842,6 +819,25 @@ beforeEach(() => {
   mocks.allocationsByVault = {};
   mocks.allocationsRequests = [];
   vi.clearAllMocks();
+  // Mirrors the read's contract: one read for the table's mainnet Kamino vaults,
+  // none at all without one, and a vault whose read failed is absent from it.
+  vi.spyOn(kaminoAllocations, "useKaminoVaultAllocations").mockImplementation((vaults) => {
+    mocks.allocationsRequests.push(...vaults);
+    if (vaults.length === 0) {
+      return { allocationsByVault: undefined, error: undefined, isLoading: false };
+    }
+    if (vaults.some((vault) => mocks.allocationsByVault[vault] === "loading")) {
+      return { allocationsByVault: undefined, error: undefined, isLoading: true };
+    }
+    const allocationsByVault: Record<string, KaminoVaultAllocations> = {};
+    for (const vault of vaults) {
+      const state = mocks.allocationsByVault[vault];
+      if (state !== undefined && state !== "loading" && state !== "error") {
+        allocationsByVault[vault] = state;
+      }
+    }
+    return { allocationsByVault, error: undefined, isLoading: false };
+  });
 });
 
 afterEach(() => {

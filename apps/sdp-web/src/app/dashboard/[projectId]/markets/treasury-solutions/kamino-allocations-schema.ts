@@ -38,6 +38,9 @@ export const kaminoVaultAllocationsSchema = z.object({
     .optional(),
 });
 
+/** The most vaults one batched read names (one catalogue page); the hook splits a longer list. */
+export const KAMINO_ALLOCATIONS_MAX_VAULTS = 100;
+
 /**
  * The batched BFF body: one parsed read per vault, keyed by vault address. A
  * vault the catalogue does not front, or whose upstream read failed, is simply

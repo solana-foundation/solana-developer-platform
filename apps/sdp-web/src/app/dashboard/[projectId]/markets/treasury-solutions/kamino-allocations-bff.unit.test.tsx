@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { SWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GET } from "@/app/api/dashboard/markets/earn/kamino-allocations/route";
+import * as sdpApi from "@/lib/sdp-api";
 import { useKaminoVaultAllocations } from "./kamino-allocations";
 
 /**
@@ -31,26 +32,32 @@ vi.mock("@clerk/nextjs/server", () => ({
   auth: mocks.auth,
 }));
 
-// The route resolves its vault allowlist from the strategy catalogue through
-// the SDP API client; the seam stands in for that client with a catalogue
-// that fronts this file's vaults. It never touches global fetch, so the
-// `seenUrls` assertions below still see exactly the browser→BFF and BFF→
-// Kamino hops.
-vi.mock("@/lib/sdp-api", () => ({
-  createSdpApiClient: async () => ({
-    request: () => {
+vi.mock("next/headers", () => import("@/test/next-headers"));
+
+/**
+ * The route resolves its vault allowlist from the strategy catalogue through
+ * the SDP API client; the seam stands in for that client with a catalogue
+ * that fronts this file's vaults. It never touches global fetch, so the
+ * `seenUrls` assertions below still see exactly the browser→BFF and BFF→
+ * Kamino hops.
+ */
+function stubCatalogueClient() {
+  const catalogue = vi.fn();
+  catalogue.mockResolvedValue({
+    strategies: Object.values(VAULTS).map((providerReference) => ({
+      provider: "kamino",
+      providerReference,
+      hostCluster: "mainnet-beta",
+    })),
+    total: Object.keys(VAULTS).length,
+  });
+  vi.spyOn(sdpApi, "createSdpApiClient").mockResolvedValue({
+    request: vi.fn(() => {
       throw new Error("Unexpected SDP API request");
-    },
-    fetch: async () => ({
-      strategies: Object.values(VAULTS).map((providerReference) => ({
-        provider: "kamino",
-        providerReference,
-        hostCluster: "mainnet-beta",
-      })),
-      total: Object.keys(VAULTS).length,
     }),
-  }),
-}));
+    fetch: catalogue,
+  });
+}
 
 const BFF_PATH = "/api/dashboard/markets/earn/kamino-allocations";
 const UPSTREAM_BASE = "https://api.kamino.finance/kvaults/vaults";
@@ -118,11 +125,13 @@ describe("Kamino allocations: route → dashboardFetch → hook", () => {
     seenUrls.length = 0;
     upstreamResponse = () => Response.json(upstreamPayload());
     mocks.auth.mockResolvedValue({ userId: "user_1", orgId: "org_1" });
+    stubCatalogueClient();
     vi.stubGlobal("fetch", vi.fn(wiredFetch));
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
     vi.clearAllMocks();
   });
 

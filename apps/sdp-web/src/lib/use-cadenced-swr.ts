@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import useSWR, { type Key, type SWRConfiguration, type SWRResponse } from "swr";
 
 /**
@@ -27,7 +27,10 @@ export function useCadencedSWR<Data>(
 ): SWRResponse<Data, Error> {
   const [refreshInterval, setRefreshInterval] = useState(() => cadence(undefined));
   const response = useSWR<Data, Error>(key, fetcher, { ...config, refreshInterval });
+  // The interval is SWR's input and the data its output, so the cadence a read implies is stored
+  // during render (React's previous-value pattern): React re-renders at once with the new number,
+  // before SWR's poll effect runs.
   const next = cadence(response.data);
-  useEffect(() => setRefreshInterval(next), [next]);
+  if (next !== refreshInterval) setRefreshInterval(next);
   return response;
 }

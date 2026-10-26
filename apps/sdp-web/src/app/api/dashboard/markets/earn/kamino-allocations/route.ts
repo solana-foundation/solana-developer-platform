@@ -1,6 +1,8 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { BASE58_ADDRESS_PATTERN } from "@/app/dashboard/[projectId]/markets/base58-address";
+import { KAMINO_ALLOCATIONS_MAX_VAULTS } from "@/app/dashboard/[projectId]/markets/treasury-solutions/kamino-allocations-schema";
 import { readVaultsAllocations } from "./kamino-allocations-store";
 
 /**
@@ -30,8 +32,19 @@ import { readVaultsAllocations } from "./kamino-allocations-store";
  * of this public read rather than a client-visible side effect.
  */
 
-/** One catalogue page: the client asks for every Kamino row the table renders. */
-const MAX_VAULTS_PER_READ = 100;
+/**
+ * The query, parsed at the boundary: a mainnet-only cluster, and 1 to
+ * `KAMINO_ALLOCATIONS_MAX_VAULTS` distinct public keys, comma-separated.
+ */
+const allocationsQuerySchema = z.object({
+  cluster: z.literal("mainnet-beta"),
+  vaults: z
+    .string()
+    .transform((value) => [...new Set(value.split(","))])
+    .pipe(
+      z.array(z.string().regex(BASE58_ADDRESS_PATTERN)).min(1).max(KAMINO_ALLOCATIONS_MAX_VAULTS)
+    ),
+});
 
 function jsonError(status: number, message: string): NextResponse {
   return NextResponse.json(
@@ -48,19 +61,22 @@ export async function GET(request: Request) {
   }
 
   const params = new URL(request.url).searchParams;
-  if ((params.get("cluster") ?? "") !== "mainnet-beta") {
-    return jsonError(400, "Vault allocations are available for mainnet-beta vaults only");
-  }
-  const vaults = [...new Set((params.get("vaults") ?? "").split(","))];
-  if (vaults.length > MAX_VAULTS_PER_READ) {
-    return jsonError(400, `At most ${MAX_VAULTS_PER_READ} vaults per read`);
-  }
+  const query = allocationsQuerySchema.safeParse({
+    cluster: params.get("cluster"),
+    vaults: params.get("vaults"),
+  });
   // Refused before anything downstream: the catalogue allowlist and Kamino
-  // are never asked about a value that cannot name one vault. The store
-  // re-checks this (it is the server boundary), but the caller deserves the
-  // client-error status, not an answer that reads like an outage.
-  if (!vaults.every((vault) => BASE58_ADDRESS_PATTERN.test(vault))) {
-    return jsonError(400, "vaults must be Solana public keys");
+  // are never asked about another cluster or a value that cannot name one
+  // vault. The store re-checks the keys (it is the server boundary), but the
+  // caller deserves the client-error status, not an answer that reads like an
+  // outage.
+  if (!query.success) {
+    return jsonError(
+      400,
+      query.error.issues.some((issue) => issue.path[0] === "cluster")
+        ? "Vault allocations are available for mainnet-beta vaults only"
+        : `vaults must list 1 to ${KAMINO_ALLOCATIONS_MAX_VAULTS} Solana public keys`
+    );
   }
 
   try {
@@ -68,7 +84,7 @@ export async function GET(request: Request) {
     // hands the parsed JSON straight to the SWR hook, which re-parses it with
     // the same schema module the store parsed upstream with. Upstream and
     // catalogue failures are already folded into the batch as absent vaults.
-    const payload = await readVaultsAllocations(vaults);
+    const payload = await readVaultsAllocations(query.data.vaults);
     return NextResponse.json(payload, { headers: { "Cache-Control": "private, no-store" } });
   } catch {
     // The reason is deliberately not surfaced: the dashboard renders the same

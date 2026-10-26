@@ -968,19 +968,29 @@ describe("earnProgramsRefreshInterval", () => {
 });
 
 describe("earnVaultPositionsRefreshInterval", () => {
-  const read = (count: number) => ({
-    positions: Array.from({ length: count }, () => ({}) as EarnVaultPosition),
-    startedAt: 0,
-    landedAt: 0,
-  });
+  const position: EarnVaultPosition = {
+    id: "position",
+    provider: "kamino",
+    providerReference: "vault",
+    custodyWalletId: "wallet",
+    tokenMint: USDC,
+    shareMint: "shares",
+    label: "Vault",
+    createdAt: TIMESTAMP,
+    closedAt: null,
+    tokenValue: "10",
+    shares: "10",
+    feeSponsored: false,
+  };
+  const read = (positions: EarnVaultPosition[]) => ({ positions, startedAt: 0, landedAt: 0 });
 
   it("polls live values while any position exists", () => {
-    expect(earnVaultPositionsRefreshInterval(read(1))).toBe(15_000);
+    expect(earnVaultPositionsRefreshInterval(read([position]))).toBe(15_000);
   });
 
   it("idles once a read lists no position", () => {
     // A first position only arrives through a movement Treasury reads directly.
-    expect(earnVaultPositionsRefreshInterval(read(0))).toBe(120_000);
+    expect(earnVaultPositionsRefreshInterval(read([]))).toBe(120_000);
   });
 
   it("keeps the live cadence until a read says otherwise", () => {
