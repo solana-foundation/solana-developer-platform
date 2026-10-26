@@ -422,6 +422,40 @@ describe("Payments routes — recurring mandates in base units (ADR 0012)", () =
     expect(after.data.recurringPayment.nextCollectionDueAt).toBe(dueAt);
   });
 
+  it("refuses to prepare a collection once the mint's fee is above the mandate's tolerance", async () => {
+    await answerPyusd({ extensions: [transferFeeExtension(0, 0n)], destinationExtensions: [] });
+    const activated = await activateRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      token: PYUSD,
+    });
+    // The subscriptions program does not enforce the tolerance, so the route must.
+    await answerPyusd({
+      extensions: [transferFeeExtension(50, 1_000_000n)],
+      destinationExtensions: [],
+    });
+
+    const response = await app.request(
+      `/v1/payments/subscriptions/${activated.subscriptionId}/prepare-collection`,
+      {
+        method: "POST",
+        headers: RECURRING_HEADERS,
+        body: JSON.stringify({
+          receiverTokenAccount: await associatedTokenAccount(
+            "token-2022",
+            PYUSD,
+            TEST_SOLANA_ADDRESSES.wallet2
+          ),
+        }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(409);
+    expect(errorResponseSchema.parse(await response.json()).error.details).toMatchObject({
+      reason: "fee_above_tolerance",
+    });
+  });
+
   it("skips a period still held when it ends, as the subscriptions program forfeits it", async () => {
     await answerPyusd({ extensions: [transferFeeExtension(0, 0n)], destinationExtensions: [] });
     const activated = await activateRecurringPaymentFixture({
