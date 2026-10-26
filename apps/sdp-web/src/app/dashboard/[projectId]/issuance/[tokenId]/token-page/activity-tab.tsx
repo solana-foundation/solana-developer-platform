@@ -199,7 +199,7 @@ function ActivityTable({
     // 28px under the toolbar, 8px more than the chips and notes between them.
     <TokenTable
       className="mt-2"
-      tableClassName="min-w-[40rem]"
+      tableClassName="min-w-[28rem]"
       columns={[
         { className: "w-[30%]", label: t("DashboardIssuance.newDesign.activity.event") },
         { className: "w-[22%]", label: t("DashboardIssuance.newDesign.activity.actor") },
@@ -226,7 +226,10 @@ function ActivityTable({
             <TableCell className={PAYMENTS_TABLE_CELL}>
               <StatusText tone={status.tone}>{status.label}</StatusText>
             </TableCell>
-            <TableCell className={`${PAYMENTS_TABLE_CELL} text-primary tabular-nums`}>
+            {/* The date may wrap: at a phone's width its column is narrower than a date and time. */}
+            <TableCell
+              className={`${PAYMENTS_TABLE_CELL} whitespace-normal text-primary tabular-nums`}
+            >
               {formatter.format(new Date(event.createdAt))}
             </TableCell>
             <TableCell className={`${PAYMENTS_TABLE_CELL} text-right`}>

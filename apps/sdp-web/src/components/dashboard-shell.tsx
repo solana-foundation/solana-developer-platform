@@ -62,7 +62,7 @@ import {
   useSyncDashboardUrlStateWithRouter,
 } from "@/lib/dashboard-url-state";
 import { isDesignModuleOn, isNewDesignPage } from "@/lib/design-modules";
-import { isPaymentsPath } from "@/lib/payments-demo/demo-cookie";
+import { isDemoPath } from "@/lib/payments-demo/demo-cookie";
 import {
   isPaymentsDemoOn,
   PaymentsDemoProvider,
@@ -419,6 +419,31 @@ function usesWorkspaceViewport(pathname: string, issuanceRedesigned: boolean): b
 
 const DEMO_OFF: PaymentsDemoState = { demoProjectId: null };
 
+/** Where a refresh page's header starts, from the top of the content area. */
+type RefreshHeaderTop = "flush" | "flushOverDemoSwitch" | "underBackLink" | "underTitle";
+
+/**
+ * The design's spacing above a refresh header: 44px above the title row (a 34px button sits on
+ * it), 40px above a back link's row. A flow that sets its own top spacing meets the edge from
+ * md, unless the demo switch sits in its header: that keeps 24px over it.
+ */
+const REFRESH_HEADER_TOP_CLASS = {
+  flush: "pt-6 md:pt-0",
+  flushOverDemoSwitch: "pt-6",
+  underBackLink: "pt-6 md:pt-10",
+  underTitle: "pt-6 md:pt-11",
+} as const satisfies Record<RefreshHeaderTop, string>;
+
+/** Which of the header's top spacings applies, one yes-or-no question at a time. */
+function refreshHeaderTop(page: {
+  flushTopOnDesktop: boolean;
+  demoSwitchInHeader: boolean;
+  backLinkAboveTitle: boolean;
+}): RefreshHeaderTop {
+  if (page.flushTopOnDesktop) return page.demoSwitchInHeader ? "flushOverDemoSwitch" : "flush";
+  return page.backLinkAboveTitle ? "underBackLink" : "underTitle";
+}
+
 /* biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing shell orchestration */ /* react-doctor-disable-next-line no-high-complexity-react-function -- this change only supplies Private Channels route configuration */
 export function DashboardShell({
   children,
@@ -454,8 +479,7 @@ export function DashboardShell({
   // Demo data is part of the new design and has a flag of its own (payments-demo-mode; absent in
   // older fixtures, it follows NEW DESIGN). A page on the previous design never shows it or its
   // switch.
-  const demoAvailable =
-    isPaymentsPath(pathname) && newDesignPage && flags.paymentsDemoMode !== false;
+  const demoAvailable = isDemoPath(pathname) && newDesignPage && flags.paymentsDemoMode !== false;
   const demoMode =
     newDesignEnabled &&
     flags.paymentsDemoMode !== false &&
@@ -892,11 +916,13 @@ export function DashboardShell({
                       "shrink-0",
                       isRefresh && [
                         refreshGutterClass,
-                        pageConfig.flushTopOnDesktop
-                          ? "pt-6 md:pt-0"
-                          : stacksBackAboveTitle
-                            ? "pt-6 md:pt-10"
-                            : "pt-6 md:pt-11",
+                        REFRESH_HEADER_TOP_CLASS[
+                          refreshHeaderTop({
+                            flushTopOnDesktop: pageConfig.flushTopOnDesktop === true,
+                            demoSwitchInHeader: newDesignEnabled && demoAvailable,
+                            backLinkAboveTitle: stacksBackAboveTitle,
+                          })
+                        ],
                       ]
                     )}
                   >

@@ -30,6 +30,21 @@ export interface DashboardHeaderTabsConfig {
 
 const EMPTY_HEADER_TAB_COUNTS: Record<string, number> = {};
 
+/** The strip's right edge while tabs sit past it: the last 2.5rem fade out. */
+const TAB_STRIP_FADE = "linear-gradient(to right, black calc(100% - 2.5rem), transparent)";
+
+/**
+ * The shell's tab row, which scrolls the strip sideways: the strip's parent when it scrolls on
+ * the x axis, or null when it doesn't. Only that one element is checked, so a page's own scroll
+ * container is never faded.
+ */
+function tabRowScroller(strip: HTMLElement): HTMLElement | null {
+  const row = strip.parentElement;
+  if (!row) return null;
+  const { overflowX } = getComputedStyle(row);
+  return overflowX === "auto" || overflowX === "scroll" ? row : null;
+}
+
 let headerTabCounts = EMPTY_HEADER_TAB_COUNTS;
 const headerTabCountListeners = new Set<() => void>();
 
@@ -117,6 +132,31 @@ export function DashboardHeaderTabs({ tabs, hideOnMobile }: DashboardHeaderTabsC
       ?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')
       ?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [activeTab]);
+
+  // While tabs sit past the strip's right edge, that edge fades so they read as scrollable; the
+  // fade goes once the strip is scrolled to its end. The shell's tab row does the scrolling, so
+  // that is the element measured and faded. Runs after every render so it follows the strip
+  // mounting on a resize from mobile, and the sidebar opening.
+  useEffect(() => {
+    const strip = stripRef.current;
+    const list = strip?.querySelector<HTMLElement>('[role="tablist"]');
+    const scroller = strip ? tabRowScroller(strip) : null;
+    if (!list || !scroller) return;
+    const update = () => {
+      const hiddenWidth = scroller.scrollWidth - scroller.clientWidth - scroller.scrollLeft;
+      scroller.style.maskImage = hiddenWidth > 1 ? TAB_STRIP_FADE : "";
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(scroller);
+    observer.observe(list);
+    scroller.addEventListener("scroll", update, { passive: true });
+    return () => {
+      observer.disconnect();
+      scroller.removeEventListener("scroll", update);
+      scroller.style.maskImage = "";
+    };
+  });
 
   useEffect(() => {
     const mediaQuery = window.matchMedia("(max-width: 767px)");

@@ -8,13 +8,13 @@ import type {
 import type { RampProviderId } from "@sdp/types/provider-access";
 import { z } from "zod";
 import { getRampProviderLabel } from "@/lib/ramps";
+import { MINUTE_MS } from "./demo-basics";
 import {
   DEMO_TOKENS,
   type DemoTokenKey,
   type DemoWorld,
   findWallet,
   fromBaseUnits,
-  MINUTE_MS,
   symbolForMint,
   toBaseUnits,
 } from "./demo-fixtures";
@@ -28,6 +28,7 @@ import {
   transferById,
   walletHolding,
 } from "./demo-replay";
+import { issuanceWrite } from "./issuance-handlers";
 
 /*
  * What the demo answers for the writes and mid-flow reads the Payments screens make: the same
@@ -46,7 +47,7 @@ export interface DemoWriteResult {
   answer: (world: DemoWorld) => DemoAnswer;
 }
 
-interface WriteContext {
+export interface WriteContext {
   segments: readonly string[];
   body: unknown;
   world: DemoWorld;
@@ -955,6 +956,7 @@ function matchesShape(segments: readonly string[], shape: string): boolean {
  * shapes are tried before wildcard ones, so `ramps/sandbox/simulate` never reads as a quote.
  */
 export function demoWrite(method: string, context: WriteContext): DemoWriteResult | undefined {
+  if (context.segments[0] === "issuance") return issuanceWrite(method, context);
   const candidates = WRITE_ROUTES.filter(
     ([routeMethod, shape]) => routeMethod === method && matchesShape(context.segments, shape)
   ).sort(([, left], [, right]) => left.split("*").length - right.split("*").length);

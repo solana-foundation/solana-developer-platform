@@ -1,5 +1,7 @@
+import { ASSET_CATEGORIES } from "@sdp/types/asset-profiles";
 // biome-ignore lint/style/noRestrictedImports: recognises a provider id stored in the demo session; what the demo offers comes from the channel-capped flags (see demo-mode.ts)
 import { RAMP_PROVIDERS } from "@sdp/types/provider-access";
+import type { TokenTemplate } from "@sdp/types/tokens";
 import { z } from "zod";
 
 /*
@@ -10,9 +12,31 @@ import { z } from "zod";
  * `demo_new_` prefix, so nothing about them can reach the real API.
  */
 
+export const TOKEN_TEMPLATES = [
+  "stablecoin",
+  "rwa",
+  "arcade",
+  "tokenized-security",
+  "custom",
+] as const satisfies readonly TokenTemplate[];
+
 const id = z.string().min(1).max(80);
 const at = z.number().int().nonnegative();
 const text = z.string().max(200);
+const longText = z.string().max(600);
+
+/** The token fields a PATCH can move: what the handler accepted, so replay never re-checks them. */
+const tokenPatchSchema = z.object({
+  signingCustodyWalletId: id.optional(),
+  name: text.optional(),
+  symbol: text.optional(),
+  decimals: z.number().int().min(0).max(18).optional(),
+  description: longText.nullable().optional(),
+  uri: z.string().max(512).nullable().optional(),
+  imageUrl: z.string().max(512).nullable().optional(),
+  requiresAllowlist: z.boolean().optional(),
+  maxSupply: text.nullable().optional(),
+});
 
 const demoOpSchema = z.discriminatedUnion("k", [
   z.object({
@@ -98,6 +122,83 @@ const demoOpSchema = z.discriminatedUnion("k", [
     period: z.number().int().positive().optional(),
     wallet: id.optional(),
     account: id.optional(),
+  }),
+  // Issuance: `id` is the token's. A draft keeps what the create flow sent, metadata included.
+  z.object({
+    k: z.literal("iss-create"),
+    id,
+    at,
+    profile: id,
+    name: text,
+    symbol: text,
+    description: longText.nullable(),
+    decimals: z.number().int().min(0).max(18),
+    template: z.enum(TOKEN_TEMPLATES),
+    category: z.enum(ASSET_CATEGORIES),
+    type: text,
+    requiresAllowlist: z.boolean(),
+    freezable: z.boolean(),
+    maxSupply: text.nullable(),
+    signer: id.nullable(),
+    metadata: z.record(z.string(), z.unknown()),
+  }),
+  /** A deploy submitted; it lands DEMO_DEPLOY_MS later. `auth` maps authority to wallet id. */
+  z.object({
+    k: z.literal("iss-deploy"),
+    id,
+    at,
+    tx: id,
+    signer: id.nullable(),
+    auth: z.record(z.string(), id),
+  }),
+  z.object({
+    k: z.literal("iss-supply"),
+    id,
+    at,
+    tx: id,
+    type: z.enum(["mint", "burn", "seize", "force_burn"]),
+    amount: text,
+    from: text.nullable(),
+    to: text.nullable(),
+    memo: text.nullable(),
+  }),
+  z.object({ k: z.literal("iss-pause"), id, at, tx: id, paused: z.boolean() }),
+  z.object({
+    k: z.literal("iss-freeze"),
+    id,
+    at,
+    tx: id,
+    frozen: z.boolean(),
+    account: text,
+    reason: longText.nullable(),
+  }),
+  z.object({
+    k: z.literal("iss-authority"),
+    id,
+    at,
+    tx: id,
+    role: z.enum(["mint", "freeze", "permanentDelegate", "metadata"]),
+    next: text.nullable(),
+  }),
+  z.object({
+    k: z.literal("iss-list-add"),
+    id,
+    at,
+    entry: id,
+    address: text,
+    label: text.nullable(),
+  }),
+  z.object({ k: z.literal("iss-list-remove"), id, at, entry: id }),
+  /** Token fields a PATCH changed, as the API accepts them. */
+  z.object({ k: z.literal("iss-update"), id, at, patch: tokenPatchSchema }),
+  /** An asset profile's PATCH; `id` is the profile's. */
+  z.object({
+    k: z.literal("iss-profile"),
+    id,
+    at,
+    category: z.enum(ASSET_CATEGORIES).optional(),
+    type: text.optional(),
+    metadata: z.record(z.string(), z.unknown()).optional(),
   }),
 ]);
 

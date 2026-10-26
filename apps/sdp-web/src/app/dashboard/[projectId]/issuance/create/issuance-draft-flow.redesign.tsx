@@ -9,6 +9,7 @@ import { WizardFrame } from "@/components/wizard-frame";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useZodForm } from "@/lib/use-zod-form";
 import { saveIssuanceDraft } from "./actions";
@@ -80,6 +81,23 @@ function initialDraft(wallets: readonly PaymentsDashboardWallet[]): DraftState {
       "freeze-authority": first,
       "permanent-delegate": first,
     },
+  };
+}
+
+/**
+ * The draft demo mode opens with, every step already filled in (a stablecoin, its details,
+ * the sample wallets on its keys), so the flow can be walked to Create draft on Continue alone.
+ */
+function demoDraft(wallets: readonly PaymentsDashboardWallet[]): DraftState {
+  return {
+    ...initialDraft(wallets),
+    name: "Harbor Dollar",
+    symbol: "HRBR",
+    description:
+      "A dollar stablecoin for paying suppliers, backed one to one by cash at a regulated bank.",
+    maxSupply: "10000000",
+    issuerName: "Hoodies Inc",
+    pegCurrency: "USD",
   };
 }
 
@@ -390,6 +408,25 @@ function useDraftSave({
 }
 
 /**
+ * The draft the flow opens on: the kept draft `resumeFrom` as it was left, else in demo mode a
+ * draft filled in end to end, else an empty one.
+ */
+function openingDraft(
+  wallets: readonly PaymentsDashboardWallet[],
+  resumeFrom: LocalDraft | null,
+  demo: boolean
+): DraftState {
+  if (resumeFrom) {
+    return restoreDraft(
+      initialDraft(wallets),
+      resumeFrom.draft,
+      new Set(wallets.map((wallet) => wallet.id))
+    );
+  }
+  return demo ? demoDraft(wallets) : initialDraft(wallets);
+}
+
+/**
  * The flow's state: the step, whether a classification was picked, the draft and its access
  * list, starting from the kept draft `resumeFrom` when there is one, and the id the browser
  * keeps it under.
@@ -399,20 +436,13 @@ function useDraftFlowState(
   keptId: string | null,
   resumeFrom: LocalDraft | null
 ) {
+  // Demo mode starts a new draft filled in; a kept draft opens as it was left.
+  const demo = usePaymentsDemo();
   const [step, setStep] = useState(() =>
     resumeFrom ? Math.min(Math.max(resumeFrom.step, 0), STEPS.length - 1) : 0
   );
-  const [classified, setClassified] = useState(resumeFrom !== null);
-  const form = useZodForm(
-    draftSchema,
-    resumeFrom
-      ? restoreDraft(
-          initialDraft(wallets),
-          resumeFrom.draft,
-          new Set(wallets.map((wallet) => wallet.id))
-        )
-      : initialDraft(wallets)
-  );
+  const [classified, setClassified] = useState(resumeFrom !== null || demo);
+  const form = useZodForm(draftSchema, openingDraft(wallets, resumeFrom, demo));
   const [access, setAccess] = useState<DraftAccess>(resumeFrom?.access ?? "blocklist");
   const { storageKey } = useLocalDrafts();
   const [localId] = useState(() => keptId ?? crypto.randomUUID());
