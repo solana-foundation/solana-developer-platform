@@ -11,6 +11,7 @@ import {
   GATEWAY_AUDIENCE,
   GATEWAY_IDENTITY_HEADER,
   resolveGatewayIdentityConfig,
+  verifyGatewayIdentity,
 } from "@/lib/gateway-identity";
 import { invalidGatewayIdentityLimiter } from "@/middleware/gateway-identity";
 import { TEST_REVOKED_KEY, TEST_SEEDED_API_KEY } from "@/test/fixtures/api-keys";
@@ -134,6 +135,42 @@ describe("gateway identity (X-SF-Identity)", () => {
     });
 
     expect(res.status).toBe(200);
+  });
+
+  // The gateway's Principal serializes every absent field as null and adds a
+  // grants array; these tokens are signed exactly as it signs them.
+  it("authenticates a gateway-shaped key identity (nulls and grants included)", async () => {
+    await seedSfKey();
+
+    const res = await request({
+      [GATEWAY_IDENTITY_HEADER]: await identityToken({
+        project_id: "prj_gateway",
+        org_id: "prj_gateway",
+        key_id: sfKey.keyId,
+        clerk_user_id: null,
+        plan: null,
+        grants: [],
+        request_id: null,
+      }),
+    });
+
+    expect(res.status).toBe(200);
+  });
+
+  it("refuses a legacy sk_ key's row id as a gateway key_id", async () => {
+    await seedSfKey();
+
+    const res = await request({
+      [GATEWAY_IDENTITY_HEADER]: await identityToken({
+        key_id: TEST_SEEDED_API_KEY.id,
+        clerk_user_id: null,
+        plan: null,
+        grants: [],
+      }),
+    });
+
+    expect(res.status).toBe(401);
+    expect(errorBodySchema.parse(await res.json()).error.message).toBe("Invalid gateway identity");
   });
 
   it("still accepts a key presented directly, without the header", async () => {
@@ -333,6 +370,36 @@ describe("gateway identity (X-SF-Identity)", () => {
         message: "Invalid gateway identity",
       });
     });
+  });
+});
+
+describe("verifyGatewayIdentity", () => {
+  it("reads a gateway-shaped Clerk session identity", async () => {
+    const token = await identityToken({
+      project_id: null,
+      org_id: "org_gateway",
+      key_id: null,
+      clerk_user_id: "user_gateway",
+      plan: null,
+      grants: [],
+      request_id: "req_1",
+    });
+
+    expect(await verifyGatewayIdentity(token, { issuer, jwksUrl })).toEqual({
+      projectId: null,
+      orgId: "org_gateway",
+      keyId: null,
+      clerkUserId: "user_gateway",
+      plan: null,
+      clientIp: CLIENT_IP,
+      requestId: "req_1",
+    });
+  });
+
+  it("refuses an identity whose key_id and clerk_user_id are both null", async () => {
+    const token = await identityToken({ project_id: null, key_id: null, clerk_user_id: null });
+
+    await expect(verifyGatewayIdentity(token, { issuer, jwksUrl })).rejects.toThrow();
   });
 });
 

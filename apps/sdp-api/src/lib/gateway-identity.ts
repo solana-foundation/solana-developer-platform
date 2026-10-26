@@ -25,27 +25,37 @@ export const GATEWAY_AUDIENCE = "sdp";
 const GATEWAY_MAX_TOKEN_AGE_SECONDS = 60;
 const GATEWAY_CLOCK_TOLERANCE_SECONDS = 5;
 
+// The gateway serializes an absent claim as JSON `null` rather than omitting
+// it, so every optional claim accepts both. Claims SDP does not read (such as
+// `grants`) are ignored.
 const claimsSchema = z
   .object({
-    project_id: z.string().min(1).optional(),
-    org_id: z.string().min(1).optional(),
+    project_id: z.string().min(1).nullish(),
+    org_id: z.string().min(1).nullish(),
+    // An `sf_` key ID only. A legacy `sk_` key the gateway forwards carries its
+    // SDP row id here and is refused: `sk_` keys are retired (the prerelease
+    // database is wiped) before gateway mode is enabled.
     key_id: z
       .string()
       .regex(/^[0-9a-f]{16}$/)
-      .optional(),
-    clerk_user_id: z.string().min(1).optional(),
-    plan: z.string().min(1).optional(),
+      .nullish(),
+    clerk_user_id: z.string().min(1).nullish(),
+    plan: z.string().min(1).nullish(),
     client_ip: z.string().refine((value) => isIP(value) !== 0, "client_ip must be an IP address"),
-    request_id: z.string().min(1).optional(),
+    request_id: z.string().min(1).nullish(),
   })
-  .refine((claims) => (claims.key_id === undefined) !== (claims.clerk_user_id === undefined), {
+  .refine((claims) => (claims.key_id == null) !== (claims.clerk_user_id == null), {
     message: "exactly one of key_id and clerk_user_id",
   });
 
 export interface GatewayIdentity {
   /** The gateway project: the customer team, one per SDP organization. */
   projectId: string | null;
-  /** The Clerk organization of a forwarded session, or null for a key. */
+  /**
+   * The organization the gateway authenticated under: a Clerk session's active
+   * organization, or (for now) the project for a key. Compared only against a
+   * forwarded Clerk session.
+   */
   orgId: string | null;
   /** The `sf_` key ID the gateway authenticated, or null for a Clerk session. */
   keyId: string | null;
