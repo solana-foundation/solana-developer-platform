@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { getMessages, type MessageKey } from "@/i18n/messages";
 import { type TranslationValues, translate } from "@/i18n/translate";
 import type { RampPair, SelectedRampPair } from "@/lib/ramps";
-import { buildProviderExclusion, type ProviderReasonFormat } from "./provider-exclusions.redesign";
+import { buildProviderExclusion, type ProviderReasonFormat } from "./provider-exclusions";
 
 const t = (key: MessageKey, values?: TranslationValues) =>
   translate(getMessages("en"), key, values);

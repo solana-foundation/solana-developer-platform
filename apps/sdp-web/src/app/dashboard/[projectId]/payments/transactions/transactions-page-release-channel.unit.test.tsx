@@ -5,20 +5,18 @@ import {
 } from "@sdp/types/unified-transactions";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import LegacyOrRedesignTransactionsPage from "@/app/dashboard/[projectId]/payments/transactions/page";
-import { TransactionsPage as RedesignTransactionsPage } from "@/app/dashboard/[projectId]/payments/transactions/page.redesign";
+import TransactionsPage from "@/app/dashboard/[projectId]/payments/transactions/page";
 import { enabledTransactionModules } from "@/app/dashboard/[projectId]/payments/transactions/transaction-modules";
-import * as flags from "@/flags";
 import * as dashboardFlags from "@/flags/dashboard";
 import * as sdpApi from "@/lib/sdp-api";
-import { type DashboardDesign, dashboardFlagsAt } from "@/test/release-channel-flags";
+import { dashboardFlagsAt } from "@/test/release-channel-flags";
 
 vi.mock("@clerk/nextjs/server", () => ({
   auth: async () => ({ userId: "user_test", orgId: "org_test" }),
 }));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
-/** What both designs' pages hand their workspace that the release channel decides. */
+/** What the page hands its workspace that the release channel decides. */
 type WorkspaceProps = {
   modules: UnifiedTransactionModule[];
   initialFilters: { module?: UnifiedTransactionModule };
@@ -27,7 +25,7 @@ type WorkspaceProps = {
 /** The API paths the page read, so a test can see which module it asked for. */
 const requestedPaths: string[] = [];
 
-/** Each read the two pages make, answered as the API answers an empty Project. */
+/** Each read the page makes, answered as the API answers an empty Project. */
 const EMPTY_PROJECT_ANSWERS: Record<string, unknown> = {
   "/v1/issuance/tokens?page=1&pageSize=100": { data: { tokens: [] }, meta: { hasMore: false } },
   "/v1/wallets?view=summary": { data: { wallets: [] } },
@@ -65,17 +63,11 @@ function emptyApiClient(): sdpApi.SdpApiClient {
 
 async function renderPage(
   releaseChannel: SdpReleaseChannel,
-  design: DashboardDesign,
   searchParams: Record<string, string>
 ): Promise<WorkspaceProps> {
-  vi.spyOn(dashboardFlags, "getDashboardFlags").mockResolvedValue(
-    dashboardFlagsAt(releaseChannel, design)
-  );
-  // The legacy route picks its design by NEW DESIGN; the redesign is rendered directly.
-  vi.spyOn(flags, "newDesign").mockResolvedValue(false);
-  const page = design === "redesign" ? RedesignTransactionsPage : LegacyOrRedesignTransactionsPage;
-  // SAFETY: both pages return their workspace element, whose props include `WorkspaceProps`.
-  const element = (await page({
+  vi.spyOn(dashboardFlags, "getDashboardFlags").mockResolvedValue(dashboardFlagsAt(releaseChannel));
+  // SAFETY: the page returns its workspace element, whose props include `WorkspaceProps`.
+  const element = (await TransactionsPage({
     searchParams: Promise.resolve(searchParams),
   })) as ReactElement<WorkspaceProps>;
   return element.props;
@@ -92,40 +84,26 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// Legacy carries the module in `?tab=` (its header tabs), the redesign in `?module=`.
-const MODULE_PARAM = { legacy: "tab", redesign: "module" } as const;
-
-const CASES = SDP_RELEASE_CHANNEL_NAMES.flatMap((releaseChannel) =>
-  (["legacy", "redesign"] as const).map((design) => ({ releaseChannel, design }))
-);
-
 describe("transactions page on each release channel", () => {
-  it.each(CASES)(
-    "hands the workspace only $releaseChannel's modules on $design",
-    async ({ releaseChannel, design }) => {
-      const { modules } = await renderPage(releaseChannel, design, {});
+  it.each(SDP_RELEASE_CHANNEL_NAMES)(
+    "hands the workspace only %s's modules",
+    async (releaseChannel) => {
+      const { modules } = await renderPage(releaseChannel, {});
       expect(modules).toEqual(enabledTransactionModules(dashboardFlagsAt(releaseChannel)));
     }
   );
 
-  it.each(["legacy", "redesign"] as const)(
-    "opens All on stable for a deep link to a module stable hides (%s)",
-    async (design) => {
-      const shown = enabledTransactionModules(dashboardFlagsAt("stable"));
-      const hidden = UNIFIED_TRANSACTION_MODULES.filter((module) => !shown.includes(module));
-      expect(hidden).not.toEqual([]);
-      for (const module of hidden) {
-        requestedPaths.length = 0;
-        const { initialFilters } = await renderPage("stable", design, {
-          [MODULE_PARAM[design]]: module,
-        });
-        expect(initialFilters.module, module).toBeUndefined();
-        const transactionsRead = requestedPaths.filter((path) =>
-          path.startsWith("/v1/transactions")
-        );
-        expect(transactionsRead, module).toHaveLength(1);
-        expect(transactionsRead[0], module).not.toContain(`module=${module}`);
-      }
+  it("opens All on stable for a deep link to a module stable hides", async () => {
+    const shown = enabledTransactionModules(dashboardFlagsAt("stable"));
+    const hidden = UNIFIED_TRANSACTION_MODULES.filter((module) => !shown.includes(module));
+    expect(hidden).not.toEqual([]);
+    for (const module of hidden) {
+      requestedPaths.length = 0;
+      const { initialFilters } = await renderPage("stable", { module });
+      expect(initialFilters.module, module).toBeUndefined();
+      const transactionsRead = requestedPaths.filter((path) => path.startsWith("/v1/transactions"));
+      expect(transactionsRead, module).toHaveLength(1);
+      expect(transactionsRead[0], module).not.toContain(`module=${module}`);
     }
-  );
+  });
 });

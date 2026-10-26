@@ -5,7 +5,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { SWRConfig } from "swr";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CounterpartyDetailWorkspace } from "./counterparty-detail-workspace.redesign";
+import { CounterpartyDetailWorkspace } from "./counterparty-detail-workspace";
 
 vi.mock("@/i18n/provider", () => ({
   useTranslations: () => (key: string) => key,
@@ -37,7 +37,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("redesigned Contacts provider accounts", () => {
+describe("Contacts provider accounts", () => {
   it.each([false, true])("respects ramps visibility when enabled is %s", async (rampsEnabled) => {
     const fetch = vi.fn(async (_input: RequestInfo | URL) =>
       Response.json({ data: { accounts: [] } })

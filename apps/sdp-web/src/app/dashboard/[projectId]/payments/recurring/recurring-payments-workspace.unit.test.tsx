@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
-import { RecurringPaymentsWorkspace } from "./recurring-payments-workspace.redesign";
+import { RecurringPaymentsWorkspace } from "./recurring-payments-workspace";
 
 // jsdom implements no matchMedia, while the workspace's motion components read it through
 // useReducedMotion.

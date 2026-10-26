@@ -4,8 +4,8 @@ import { act, type ReactNode } from "react";
 import type { Root } from "react-dom/client";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { builtinEnvironments, type EnvironmentReturn } from "vitest/environments";
-import { filterDirectory } from "./counterparty-directory-filter.redesign";
-import { CounterpartyWorkspace } from "./counterparty-workspace.redesign";
+import { filterDirectory } from "./counterparty-directory-filter";
+import { CounterpartyWorkspace } from "./counterparty-workspace";
 
 vi.mock("@/i18n/provider", () => ({
   useTranslations: () => (key: string) => key,
