@@ -14,6 +14,7 @@ import { Modal } from "@sdp/ui/modal";
 import { Loader2Icon } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { EARN_TRANSACTION_MODAL_FRAME } from "@/app/dashboard/[projectId]/markets/earn/earn-modal";
 import {
   EarnVaultDepositOutcomeTracker,
   EarnVaultWithdrawalOutcomeTracker,
@@ -57,10 +58,10 @@ export function EarnTransactionModalLoading() {
   const t = useTranslations();
   const label = t("Shared.SharedComponents.loading");
   return (
-    <Modal isOpen ariaLabel={label} showCloseButton={false} size="sm">
+    <Modal isOpen ariaLabel={label} showCloseButton={false} {...EARN_TRANSACTION_MODAL_FRAME}>
       <div
         aria-live="polite"
-        className="flex min-h-28 items-center justify-center gap-2 p-6 text-sm text-secondary"
+        className="flex min-h-28 items-center justify-center gap-2 p-6 text-body text-secondary"
         role="status"
       >
         <Loader2Icon aria-hidden="true" className="size-4 motion-safe:animate-spin" />

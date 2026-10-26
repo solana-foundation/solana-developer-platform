@@ -661,6 +661,12 @@ browser pass on `/dashboard/markets/embedded-yield` and
   surface: the integration guide's `ui/code-block`, which is mono by design.
   Selection state is `border-primary bg-fill-subtle` across the whole module.
   `Badge` is status-only.
+- **Transaction dialogs share one frame.** Every deposit, withdrawal, exit,
+  queued and par dialog, and the placeholder Treasury shows while one loads,
+  spreads `EARN_TRANSACTION_MODAL_FRAME` (`earn-modal.ts`): one width, and a
+  top edge that stays put as steps change height. A step that only gathers
+  input is a `<form>`, so Enter continues; a step whose primary action moves
+  money never submits on Enter: its button is the only way to confirm.
 - **Zero layout shift on Treasury.** Every loading, empty and error state keeps
   the ready footprint: the route skeleton and the in-page states share
   `treasury-solutions/treasury-layout.ts` (column widths, the positions body's
