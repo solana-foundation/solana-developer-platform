@@ -495,6 +495,11 @@ test("pins token movement builders to their files, however they are imported", (
     "src/handed-on.ts": 'import * as token from "@solana-program/token";\nuse(token);\n',
     "apps/sdp-web/src/pay.tsx":
       'import { getTransferCheckedInstruction } from "@solana-program/token";\n',
+    // A same-named parameter or local is not the namespace; the namespace's own use still counts.
+    "src/shadowed.ts":
+      'import * as token from "@solana-program/token";\ntoken.TOKEN_PROGRAM_ADDRESS;\nexport function format(token: string) {\n  return token;\n}\n',
+    "src/shadowed-use.ts":
+      'import * as token from "@solana-program/token";\nexport function format(token: string) {\n  return token;\n}\ntoken.getTransferCheckedInstruction;\n',
     "src/exported.ts": 'import * as token from "@solana-program/token";\nexport { token };\n',
     "src/exported-renamed.ts":
       'import * as token from "@solana-program/token";\nexport { token as spl };\n',
@@ -542,6 +547,7 @@ test("pins token movement builders to their files, however they are imported", (
       "src/destructured.ts uses getTransferCheckedInstruction: it builds a transfer (transfer)",
       "src/handed-on.ts uses getTransferCheckedInstruction, getTransferCheckedWithFeeInstruction: it builds a transfer (transfer)",
       "apps/sdp-web/src/pay.tsx uses getTransferCheckedInstruction: it builds a transfer (transfer)",
+      "src/shadowed-use.ts uses getTransferCheckedInstruction: it builds a transfer (transfer)",
       "src/exported.ts uses getTransferCheckedInstruction, getTransferCheckedWithFeeInstruction: it builds a transfer (transfer)",
       "src/exported-renamed.ts uses getTransferCheckedInstruction, getTransferCheckedWithFeeInstruction: it builds a transfer (transfer)",
       "src/dynamic.ts uses getTransferCheckedInstruction, getTransferCheckedWithFeeInstruction: it builds a transfer (transfer)",

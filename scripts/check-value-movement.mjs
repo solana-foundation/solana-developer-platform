@@ -378,7 +378,7 @@ export const TOKEN_MOVEMENT_BUILDERS = [
  */
 function importedNames(source, pkg, names) {
   const taken = new Set();
-  const namespaces = new Set();
+  const namespaces = [];
   const take = (taking) => {
     for (const name of taking) taken.add(name);
   };
@@ -390,23 +390,77 @@ function importedNames(source, pkg, names) {
     }
     const clause = statement.importClause;
     if (!clause || clause.isTypeOnly) continue;
-    if (clause.name) namespaces.add(clause.name.text);
+    if (clause.name) namespaces.push(clause.name);
     const bindings = clause.namedBindings;
     if (bindings && ts.isNamespaceImport(bindings)) {
-      namespaces.add(bindings.name.text);
+      namespaces.push(bindings.name);
     } else if (bindings) {
       take(
         bindings.elements.filter((e) => !e.isTypeOnly).map((e) => (e.propertyName ?? e.name).text)
       );
     }
   }
+  // A name another declaration shadows (a parameter, a local) is not the namespace.
+  const checker = namespaces.length > 0 ? localChecker(source) : undefined;
+  const symbols = new Set(namespaces.map((name) => checker.getSymbolAtLocation(name)));
+  symbols.delete(undefined);
   const visit = (node) => {
-    if (ts.isIdentifier(node) && namespaces.has(node.text)) take(namespaceReads(node, names));
+    if (ts.isIdentifier(node) && symbols.size > 0 && symbols.has(referredSymbol(checker, node))) {
+      take(namespaceReads(node, names));
+    }
     if (loadsPackage(node, pkg)) take(names);
     ts.forEachChild(node, visit);
   };
   ts.forEachChild(source, visit);
   return names.filter((name) => taken.has(name));
+}
+
+/**
+ * The declaration an identifier refers to. An export specifier and a shorthand
+ * property name the declaration they read, not a symbol of their own.
+ */
+function referredSymbol(checker, node) {
+  const { parent } = node;
+  if (ts.isExportSpecifier(parent) && (parent.propertyName ?? parent.name) === node) {
+    return checker.getExportSpecifierLocalTargetSymbol(parent);
+  }
+  if (ts.isShorthandPropertyAssignment(parent) && parent.name === node) {
+    return checker.getShorthandAssignmentValueSymbol(parent);
+  }
+  return checker.getSymbolAtLocation(node);
+}
+
+/** One checker per file read, built when a namespace import needs its references resolved. */
+const localCheckers = new WeakMap();
+
+/**
+ * A checker for one file alone: it tells which declaration a name in the file
+ * refers to, and resolves no module, so it needs no program of the repo.
+ */
+function localChecker(source) {
+  let checker = localCheckers.get(source);
+  if (checker === undefined) {
+    const host = {
+      getSourceFile: (name) => (name === source.fileName ? source : undefined),
+      getDefaultLibFileName: () => "lib.d.ts",
+      writeFile: () => {},
+      getCurrentDirectory: () => "",
+      getCanonicalFileName: (name) => name,
+      useCaseSensitiveFileNames: () => true,
+      getNewLine: () => "\n",
+      fileExists: (name) => name === source.fileName,
+      readFile: () => undefined,
+    };
+    checker = ts
+      .createProgram({
+        rootNames: [source.fileName],
+        options: { noResolve: true, noLib: true, types: [] },
+        host,
+      })
+      .getTypeChecker();
+    localCheckers.set(source, checker);
+  }
+  return checker;
 }
 
 /** Whether a statement is a value import or re-export from `pkg`. */
