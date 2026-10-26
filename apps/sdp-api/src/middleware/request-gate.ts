@@ -5,16 +5,17 @@ import { IDEMPOTENCY_KEY_HEADER } from "./idempotency-key";
 
 type GateContext = Context<{ Bindings: Env }>;
 
-export interface RequestGateExtraction {
+export interface RequestGateExtraction<TResolved = unknown> {
   /** The validated request body the handler works from. */
   body: Record<string, unknown>;
   /** Resources the extractor resolved so the handler does not resolve them twice. */
-  resolved: unknown;
+  resolved: TResolved;
 }
 
-export interface RequestGateConfig {
+/** @typeParam TResolved - What the route's extractor resolves; the replay and admission hooks read it typed. */
+export interface RequestGateConfig<TResolved = unknown> {
   /** Validate the request and resolve what the handler needs. Runs first, always. */
-  extract: (c: GateContext) => Promise<RequestGateExtraction>;
+  extract: (c: GateContext) => Promise<RequestGateExtraction<TResolved>>;
   /**
    * Answer a request whose Idempotency-Key already has a recorded outcome. A
    * returned response is sent verbatim and the handler never runs; null means
@@ -22,11 +23,11 @@ export interface RequestGateConfig {
    */
   findIdempotentKeyReplay?: (
     c: GateContext,
-    extraction: RequestGateExtraction,
+    extraction: RequestGateExtraction<TResolved>,
     idempotencyKey: string
   ) => Promise<Response | null>;
   /** Admit genuinely new work, after the replay exit. Throw to refuse it. */
-  admit?: (c: GateContext, extraction: RequestGateExtraction) => Promise<void>;
+  admit?: (c: GateContext, extraction: RequestGateExtraction<TResolved>) => Promise<void>;
 }
 
 export interface RequestGateContext<TBody = unknown, TResolved = unknown> {
@@ -52,7 +53,9 @@ export interface RequestGateContext<TBody = unknown, TResolved = unknown> {
  * @param config - The route's extractor and optional replay finder and admission hook.
  * @returns Hono middleware.
  */
-export function requestGate(config: RequestGateConfig): MiddlewareHandler<{ Bindings: Env }> {
+export function requestGate<TResolved = unknown>(
+  config: RequestGateConfig<TResolved>
+): MiddlewareHandler<{ Bindings: Env }> {
   return async (c: GateContext, next: Next) => {
     const extraction = await config.extract(c);
 

@@ -107,9 +107,9 @@ type MintResolved = MintExecutionResolved | MintReplayResolved;
 
 export async function admitMintRuntimeExecution(
   c: AppContext,
-  extraction: RequestGateExtraction
+  extraction: RequestGateExtraction<MintResolved>
 ): Promise<void> {
-  const resolved = extraction.resolved as MintResolved;
+  const { resolved } = extraction;
   const { auth, tokenService, custodyWalletId } = resolved;
   await admitIssuanceRuntimeExecution({
     env: c.env,
@@ -259,10 +259,10 @@ function mintReplayResponse(c: AppContext, input: MintBody, transaction: TokenTr
 /** Return a validated persisted mint before admitting new work. */
 export async function findMintIdempotentKeyReplay(
   c: AppContext,
-  extraction: RequestGateExtraction,
+  extraction: RequestGateExtraction<MintResolved>,
   idempotencyKey: string
 ): Promise<Response | null> {
-  const resolved = extraction.resolved as MintResolved;
+  const { resolved } = extraction;
   if (!("replay" in resolved)) return null;
   if (resolved.replay.idempotencyKey !== idempotencyKey) {
     throw conflict("Idempotency key already used with different request payload");
@@ -626,7 +626,7 @@ async function recordPreSubmissionMintFailure(options: {
  */
 export async function extractMintRequest(
   c: ValidatedBodyContext<typeof mintSchema>
-): Promise<RequestGateExtraction> {
+): Promise<RequestGateExtraction<MintResolved>> {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
   const input = c.req.valid("json");
