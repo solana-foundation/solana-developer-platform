@@ -111,11 +111,17 @@ describe("KoraAdapter fee-payer address cache", () => {
     const first = new KoraAdapter({ rpcUrl: sharedUrl, userId: "user_a", client });
     const second = new KoraAdapter({ rpcUrl: sharedUrl, userId: "user_b", client });
 
-    assert.deepEqual(await Promise.all([first.getFeePayer(), second.getFeePayer()]), [
+    assert.equal(first.feePayerReadSource(), "network");
+    const firstRead = first.getFeePayer();
+    assert.equal(second.feePayerReadSource(), "shared");
+
+    assert.deepEqual(await Promise.all([firstRead, second.getFeePayer()]), [
       syntheticSigner(1),
       syntheticSigner(1),
     ]);
+    assert.equal(first.feePayerReadSource(), "pinned");
     const later = new KoraAdapter({ rpcUrl: sharedUrl, userId: "user_c", client });
+    assert.equal(later.feePayerReadSource(), "cache");
     assert.equal(await later.getFeePayer(), syntheticSigner(1));
     const otherKora = new KoraAdapter({
       rpcUrl: "https://kora-other.mock.invalid",

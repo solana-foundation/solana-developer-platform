@@ -1,15 +1,12 @@
 import type { Context, Next } from "hono";
 import { routePath } from "hono/route";
 import { getOptionalAuth } from "@/lib/auth";
-import { getLogger, runWithLogContext } from "@/runtime/logger";
+import { runWithLogContext } from "@/runtime/logger";
+import { logEvent } from "@/runtime/money-path-events";
 import type { Env } from "@/types/env";
 
 const TRACE_ID_HEADER = "X-SDP-Trace-ID";
 const TRACE_SOURCE_HEADER = "X-SDP-Trace-Source";
-const MAX_TRACE_ID_LENGTH = 128;
-const MAX_TRACE_SOURCE_LENGTH = 64;
-const TRACE_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
-const TRACE_SOURCE_PATTERN = /^[A-Za-z0-9._:-]+$/;
 
 function roundDuration(durationMs: number): number {
   return Math.round(durationMs * 10) / 10;
@@ -19,41 +16,21 @@ function appendServerTiming(existingValue: string | null, nextEntry: string): st
   return existingValue ? `${existingValue}, ${nextEntry}` : nextEntry;
 }
 
-function normalizeHeaderValue(
-  value: string | null | undefined,
-  maxLength: number,
-  pattern: RegExp
-): string | null {
-  if (!value) {
-    return null;
+function traceSource(value: string | undefined): string {
+  if (value === "sdp-web") return "sdp-web";
+  if (value?.startsWith("route.playground.")) return "playground";
+  if (value?.startsWith("route.dashboard.") || value?.startsWith("dashboard.")) {
+    return "dashboard";
   }
-
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return null;
-  }
-
-  const candidate = trimmed.slice(0, maxLength);
-  if (!pattern.test(candidate)) {
-    return null;
-  }
-
-  return candidate;
+  return "unknown";
 }
 
 export function requestTracingMiddleware() {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
     const startedAt = performance.now();
     const requestId = c.get("requestId");
-    const traceId =
-      normalizeHeaderValue(c.req.header(TRACE_ID_HEADER), MAX_TRACE_ID_LENGTH, TRACE_ID_PATTERN) ||
-      requestId;
-    const requestSource =
-      normalizeHeaderValue(
-        c.req.header(TRACE_SOURCE_HEADER),
-        MAX_TRACE_SOURCE_LENGTH,
-        TRACE_SOURCE_PATTERN
-      ) || "unknown";
+    const traceId = requestId;
+    const requestSource = traceSource(c.req.header(TRACE_SOURCE_HEADER));
 
     c.set("traceId", traceId);
     c.set("requestSource", requestSource);
@@ -73,21 +50,18 @@ export function requestTracingMiddleware() {
             appendServerTiming(c.res.headers.get("Server-Timing"), `app;dur=${durationMs}`)
           );
 
-          getLogger().info(
-            {
-              event: "sdp_api_request_timing",
-              source: requestSource,
-              method: c.req.method,
-              path,
-              status: c.res.status,
-              duration_ms: durationMs,
-              ...(auth?.organizationId ? { organization_id: auth.organizationId } : {}),
-              ...(auth?.projectId ? { project_id: auth.projectId } : {}),
-              ...(auth?.apiKeyId ? { api_key_id: auth.apiKeyId } : {}),
-              ...(auth ? { auth_type: auth.authType } : {}),
-            },
-            "request completed"
-          );
+          logEvent("info", {
+            event: "sdp_api_request_timing",
+            source: requestSource,
+            method: c.req.method,
+            path,
+            status: c.res.status,
+            duration_ms: durationMs,
+            ...(auth?.organizationId ? { organization_id: auth.organizationId } : {}),
+            ...(auth?.projectId ? { project_id: auth.projectId } : {}),
+            ...(auth?.apiKeyId ? { api_key_id: auth.apiKeyId } : {}),
+            ...(auth ? { auth_type: auth.authType } : {}),
+          });
         }
       }
     });

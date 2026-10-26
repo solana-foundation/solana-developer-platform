@@ -48,6 +48,7 @@ describe("logVendorCallFailure", () => {
       error_code: "BAD_REQUEST",
     });
     expect(Object.keys(payload).sort()).toEqual([
+      "boundary",
       "duration_ms",
       "error_code",
       "error_name",
@@ -70,6 +71,7 @@ describe("instrumentVendorPort", () => {
       vendor: "kora",
       operation: "double",
       outcome: "succeeded",
+      boundary: "adapter_operation",
     });
   });
 
@@ -82,6 +84,7 @@ describe("instrumentVendorPort", () => {
       vendor: "kora",
       operation: "fetch",
       outcome: "succeeded",
+      boundary: "adapter_operation",
     });
   });
 
@@ -134,6 +137,18 @@ describe("instrumentVendorPort", () => {
     const port = instrumentVendorPort("kora", new Adapter());
     expect(port.add(2)).toBe(42);
   });
+
+  it("does not block an adapter when telemetry source lookup fails", () => {
+    const port = instrumentVendorPort("kora", { getFeePayer: () => "address" }, () => {
+      throw new Error("telemetry unavailable");
+    });
+
+    expect(port.getFeePayer()).toBe("address");
+    expect(vendorEvents()[0]?.[1]).toMatchObject({
+      boundary: "adapter_operation",
+      outcome: "succeeded",
+    });
+  });
 });
 
 describe("withVendorCall", () => {
@@ -147,6 +162,7 @@ describe("withVendorCall", () => {
       vendor: "tokens-xyz",
       operation: "market-snapshots",
       outcome: "succeeded",
+      boundary: "call_site",
     });
     expect(JSON.stringify(vendorEvents()[0]?.[1])).not.toContain("secret");
   });

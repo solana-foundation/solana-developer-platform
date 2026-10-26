@@ -98,6 +98,8 @@ function createSdpApiRequest(
     if (options.body !== undefined && options.body !== null) {
       headers.set("Content-Type", "application/json");
     }
+    // The API replaces these IDs; its returned X-Request-ID joins this web log
+    // to the API log, while these server-generated values also reach the gateway.
     headers.set(TRACE_ID_HEADER, traceId);
     headers.set(TRACE_SOURCE_HEADER, source);
     headers.set("X-Request-ID", requestId);
@@ -106,10 +108,6 @@ function createSdpApiRequest(
     }
     const method = options.method ?? "GET";
     const startedAt = performance.now();
-    // The query string is caller-supplied and may carry a pasted credential
-    // (e.g. a playground request); the log keeps the route only while the
-    // upstream request still receives the full path.
-    const loggedPath = path.split("?", 1)[0];
 
     const send = () =>
       fetch(url, {
@@ -134,7 +132,6 @@ function createSdpApiRequest(
         source,
         requestId,
         method,
-        path: loggedPath,
         status: response.status,
         durationMs: roundDuration(performance.now() - startedAt),
         upstreamRequestId: response.headers.get("X-Request-ID"),

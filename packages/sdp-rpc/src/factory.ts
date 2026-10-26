@@ -23,6 +23,7 @@ import { MANAGED_RPC_ENV_KEYS } from "./managed-rpc-env-keys";
 import { currentClusterScope } from "./scope";
 import { withReadSocketRetry } from "./socket-retry";
 import { DEFAULT_RPC_REQUEST_TIMEOUT_MS, type SolanaRpc } from "./solana";
+import { emitRpcTelemetry, rpcProviderForEndpoint } from "./telemetry";
 import { isTransientRpcError } from "./transient";
 
 /** How long a genesis match is trusted before re-probing: the node behind a URL can be repointed. */
@@ -55,31 +56,6 @@ const genesisProbes = new Map<string, Promise<void>>();
  * requests return to the preferred provider once it recovers.
  */
 const ENDPOINT_COOLDOWN_MS = 30_000;
-
-export interface RpcTelemetryEvent {
-  event: "sdp_rpc_attempt" | "sdp_rpc_failover" | "sdp_rpc_cooldown";
-  provider: string;
-  cluster: SolanaCluster;
-  method: string;
-  outcome?: "succeeded" | "failed";
-  status_code?: number;
-  duration_ms?: number;
-}
-
-let rpcTelemetrySink: ((event: RpcTelemetryEvent) => void) | null = null;
-
-/** The API supplies its structured logger; telemetry must never change an RPC outcome. */
-export function setRpcTelemetrySink(sink: ((event: RpcTelemetryEvent) => void) | null): void {
-  rpcTelemetrySink = sink;
-}
-
-function emitRpcTelemetry(event: RpcTelemetryEvent): void {
-  try {
-    rpcTelemetrySink?.(event);
-  } catch {
-    // Monitoring is best-effort. A broken sink must not change a money movement.
-  }
-}
 
 /** One family of pooled clients: they share failover and cooldown state only with each other. */
 interface PoolMemo {
@@ -343,6 +319,7 @@ interface RpcEndpoint {
   transport: RpcTransport;
   provider: string;
   cluster: SolanaCluster;
+  genesisProofKey: string;
 }
 
 function emitAttemptTelemetry<TResponse>(
@@ -351,7 +328,8 @@ function emitAttemptTelemetry<TResponse>(
   outcome: AttemptOutcome<TResponse>,
   verdict: AttemptVerdict,
   hasNext: boolean,
-  startedAt: number
+  startedAt: number,
+  genesisProbeRequired: boolean
 ): void {
   const statusCode =
     !outcome.ok && isSolanaError(outcome.cause, SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR)
@@ -360,13 +338,19 @@ function emitAttemptTelemetry<TResponse>(
   const common = { provider: endpoint.provider, cluster: endpoint.cluster, method };
   emitRpcTelemetry({
     event: "sdp_rpc_attempt",
+    surface: "managed_pool",
     ...common,
     outcome: outcome.ok && servedJsonRpcError(outcome.response) === null ? "succeeded" : "failed",
     ...(statusCode !== undefined ? { status_code: statusCode } : {}),
-    duration_ms: Date.now() - startedAt,
+    duration_ms: performance.now() - startedAt,
+    genesis_probe_required: genesisProbeRequired,
   });
-  if (verdict.cooldown) emitRpcTelemetry({ event: "sdp_rpc_cooldown", ...common });
-  if (verdict.tryNext && hasNext) emitRpcTelemetry({ event: "sdp_rpc_failover", ...common });
+  if (verdict.cooldown) {
+    emitRpcTelemetry({ event: "sdp_rpc_cooldown", surface: "managed_pool", ...common });
+  }
+  if (verdict.tryNext && hasNext) {
+    emitRpcTelemetry({ event: "sdp_rpc_failover", surface: "managed_pool", ...common });
+  }
 }
 
 /**
@@ -390,11 +374,21 @@ function createPoolTransport(endpoints: readonly RpcEndpoint[]) {
       const endpointIndex = attemptOrder[attempt];
       const endpoint = endpoints[endpointIndex];
       const method = isJsonRpcPayload(rpcRequest.payload) ? rpcRequest.payload.method : "batch";
-      const startedAt = Date.now();
+      const genesisProbeRequired =
+        (genesisProofExpiry.get(endpoint.genesisProofKey) ?? 0) <= Date.now();
+      const startedAt = performance.now();
       const outcome = await attemptEndpoint<TResponse>(endpoint.transport, rpcRequest);
       const verdict = judgeAttempt(outcome, rpcRequest);
       const isLastEndpoint = attempt === attemptOrder.length - 1;
-      emitAttemptTelemetry(endpoint, method, outcome, verdict, !isLastEndpoint, startedAt);
+      emitAttemptTelemetry(
+        endpoint,
+        method,
+        outcome,
+        verdict,
+        !isLastEndpoint,
+        startedAt,
+        genesisProbeRequired
+      );
       if (verdict.cooldown) lastFailedAt[endpointIndex] = Date.now();
       if (verdict.tryNext && !isLastEndpoint) continue;
       if (outcome.ok) return outcome.response;
@@ -598,7 +592,7 @@ export async function proveEarnClusterEndpoint(
   const proofExpiresAt = genesisProofExpiry.get(genesisProofKey);
   if (proofExpiresAt !== undefined && proofExpiresAt > Date.now()) return;
   await proveGenesis(
-    withReadSocketRetry(createDefaultRpcTransport({ url: endpointUrl })),
+    withReadSocketRetry(createDefaultRpcTransport({ url: endpointUrl }), endpointUrl),
     cluster,
     genesisProofKey
   );
@@ -623,12 +617,13 @@ function pooledClusterTransport(
   if (memoizedTransport) return { poolKey, poolTransport: memoizedTransport };
   const endpoints = endpointUrls.map((endpointUrl): RpcEndpoint => {
     const provider =
-      Object.entries(MANAGED_RPC_ENV_KEYS[cluster]).find(
-        ([, key]) => process.env[key] === endpointUrl
-      )?.[0] ?? "kora-upstream";
+      memoizedTransports === koraUpstreamPools.transports
+        ? "kora-upstream"
+        : rpcProviderForEndpoint(cluster, endpointUrl);
     return {
       provider,
       cluster,
+      genesisProofKey: `${cluster} ${endpointUrl}`,
       transport: withAttemptDeadline(
         withGenesisGuard(
           withReadSocketRetry(createDefaultRpcTransport({ url: endpointUrl })),

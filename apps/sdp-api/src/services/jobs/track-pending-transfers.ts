@@ -406,7 +406,8 @@ async function finalizeConfirmedTransfers(
   const finalized = polled.filter((transfer) => transfer.finalized);
   for (const transfer of finalized) {
     logEvent("info", {
-      event: "sdp_api_payment_finalization_observed",
+      event: "sdp_api_payment_chain_finality_observed",
+      observation_source: "rpc",
       transfer_id: transfer.transferId,
       organization_id: transfer.organizationId,
       signature: transfer.signature,

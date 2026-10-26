@@ -44,6 +44,11 @@
       "import": "./src/socket-retry.ts",
       "default": "./src/socket-retry.ts"
     },
+    "./telemetry": {
+      "types": "./src/telemetry.ts",
+      "import": "./src/telemetry.ts",
+      "default": "./src/telemetry.ts"
+    },
     "./solana": {
       "types": "./src/solana.ts",
       "import": "./src/solana.ts",

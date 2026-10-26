@@ -26,11 +26,10 @@ import {
   createKoraUpstreamRpc,
   earnClusterEndpointUrls,
   proveEarnClusterEndpoint,
-  type RpcTelemetryEvent,
-  setRpcTelemetrySink,
 } from "./factory";
 import { runInClusterScope } from "./scope";
 import { DEFAULT_RPC_REQUEST_TIMEOUT_MS } from "./solana";
+import { type RpcTelemetryEvent, setRpcTelemetrySink } from "./telemetry";
 import type { ManagedRpcEnv } from "./types";
 
 type Answer =
