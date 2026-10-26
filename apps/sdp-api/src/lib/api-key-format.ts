@@ -152,6 +152,16 @@ export function looksLikeApiKey(token: string): boolean {
   return token.startsWith(SF_API_KEY_PREFIX) || token.startsWith(LEGACY_API_KEY_PREFIX);
 }
 
+/**
+ * Whether the request authenticates as an API key: it presents one, or the
+ * gateway authenticated one and forwarded its key ID (HOO-2256). Auth, the
+ * pre-auth rate limit and optional-auth surfaces must agree on this.
+ */
+export function presentsApiKey(c: Context<{ Bindings: Env }>): boolean {
+  const apiKey = extractApiKey(c);
+  return (apiKey !== null && looksLikeApiKey(apiKey)) || Boolean(c.get("gatewayIdentity")?.keyId);
+}
+
 /** A presented API key, as far as its format alone can tell. */
 export type PresentedApiKey =
   | { format: "sf"; keyId: string; secret: string }

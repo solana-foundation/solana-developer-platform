@@ -76,16 +76,8 @@ export function requireModule(module: SdpModule) {
   };
 }
 
-/** Refuses every request to one ramp provider's routes when its release channel leaves it out. */
-export function requireRampProvider(provider: RampProviderId) {
-  return async (c: ReleaseChannelContext, next: Next) => {
-    assertRampProviderInChannel(c, provider);
-    await next();
-  };
-}
-
 /**
- * `requireRampProvider` for routes that name the provider in a path parameter.
+ * Refuses a ramp provider outside the release channel, read from a path parameter.
  * A name that is not a ramp provider passes through, so the route answers it as before.
  */
 export function requireRampProviderParam(param: string) {

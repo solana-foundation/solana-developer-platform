@@ -36,12 +36,12 @@ export const counterpartyIdParamSchema = withOpenApi(
   }
 );
 
-export const counterpartyEntityTypeSchema = withOpenApi(counterpartyEntityTypeSchemaBase, {
+const counterpartyEntityTypeSchema = withOpenApi(counterpartyEntityTypeSchemaBase, {
   description: "Counterparty entity type.",
   example: "individual",
 });
 
-export const counterpartyStatusSchema = withOpenApi(counterpartyStatusSchemaBase, {
+const counterpartyStatusSchema = withOpenApi(counterpartyStatusSchemaBase, {
   description: "Counterparty status.",
   example: "active",
 });
@@ -195,16 +195,16 @@ export const counterpartyRequirementsResponseSchema = withOpenApi(
   }
 );
 
-export const counterpartyAccountKindSchema = withOpenApi(counterpartyAccountKindSchemaBase, {
+const counterpartyAccountKindSchema = withOpenApi(counterpartyAccountKindSchemaBase, {
   description: "Counterparty account kind.",
   example: "crypto_wallet",
 });
 
-export const counterpartyAccountStatusSchema = z
+const counterpartyAccountStatusSchema = z
   .enum(["active", "archived"])
   .openapi({ description: "Counterparty account status.", example: "active" });
 
-export const counterpartySchema = withOpenApi(
+const counterpartySchema = withOpenApi(
   z.object({
     id: counterpartyIdParamSchema,
     organizationId: orgIdParamSchema,
@@ -261,7 +261,7 @@ export const counterpartyAccountPathParamsSchema = counterpartyAccountParamsSche
   })
   .openapi({ description: "Counterparty account path parameters." });
 
-export const counterpartyAccountDetailsSchema = z.record(z.string(), z.unknown()).openapi({
+const counterpartyAccountDetailsSchema = z.record(z.string(), z.unknown()).openapi({
   description:
     'Account details. For crypto_wallet accounts, include network: "solana" and address as a Solana wallet address.',
   example: {
@@ -270,12 +270,12 @@ export const counterpartyAccountDetailsSchema = z.record(z.string(), z.unknown()
   },
 });
 
-export const counterpartyAccountProviderDataSchema = z.record(z.string(), z.unknown()).openapi({
+const counterpartyAccountProviderDataSchema = z.record(z.string(), z.unknown()).openapi({
   description: "Provider-specific account metadata preserved by SDP.",
   example: {},
 });
 
-export const counterpartyAccountSchema = withOpenApi(
+const counterpartyAccountSchema = withOpenApi(
   z.object({
     id: withOpenApi(z.string(), {
       description: "Counterparty account identifier.",
@@ -429,7 +429,7 @@ const customerLinkBaseDocFields = {
   }),
 };
 
-export const counterpartyProviderAccountSchema = withOpenApi(
+const counterpartyProviderAccountSchema = withOpenApi(
   z.object({
     id: withOpenApi(z.string(), {
       description: "Counterparty provider-account row identifier.",

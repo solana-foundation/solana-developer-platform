@@ -18,7 +18,7 @@ export const privyAuthenticationSchema = z
   })
   .strict();
 
-export const fireblocksAuthenticationSchema = z
+const fireblocksAuthenticationSchema = z
   .object({
     apiKey: z.string().trim().min(1).max(4096),
     apiSecretPem: z.string().trim().min(1).max(16384),
@@ -41,7 +41,7 @@ export type ByokCredentialFields = ByokRegistration["fields"];
 export type ByokCredentialSecretFields =
   | z.infer<typeof privyAuthenticationSchema>
   | z.infer<typeof fireblocksAuthenticationSchema>;
-export const byokCredentialAuthenticationSchema = z.discriminatedUnion("provider", [
+const byokCredentialAuthenticationSchema = z.discriminatedUnion("provider", [
   privyAuthenticationSchema.extend({ provider: z.literal("privy") }),
   fireblocksAuthenticationSchema.extend({
     provider: z.literal("fireblocks"),

@@ -63,7 +63,7 @@ const CREDENTIAL_DEACTIVATION_UNAVAILABLE =
   "Credential cannot be deactivated from its current state";
 const CREDENTIAL_IN_USE = "Credential cannot be deactivated while it is in use";
 
-export type RotationFailureCode = "invalid_credentials" | "provider_account_mismatch";
+type RotationFailureCode = "invalid_credentials" | "provider_account_mismatch";
 
 export interface ProviderCredentialLifecycle {
   providerCredential: LifecycleProviderCredential;
@@ -78,7 +78,7 @@ export interface ProviderCredentialLifecycle {
   } | null;
 }
 
-export interface LifecycleProviderCredential extends SafeProviderCredential {
+interface LifecycleProviderCredential extends SafeProviderCredential {
   source: LifecycleCredentialRow["source"];
 }
 

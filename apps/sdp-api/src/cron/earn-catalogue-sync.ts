@@ -116,7 +116,7 @@ function catalogueRuntime(env: Env, environment: SdpEnvironment): EarnRuntimeCon
   };
 }
 
-export async function syncEarnCatalogue(env: Env): Promise<void> {
+async function syncEarnCatalogue(env: Env): Promise<void> {
   const repo = createEarnRepository(env);
   // Providers read their own credentials from the raw env keyed by
   // environment — same contract as the route-layer earnRuntime().

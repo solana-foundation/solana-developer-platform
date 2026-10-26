@@ -70,7 +70,7 @@ export interface CreateApiKeyInput {
  * The ids are checked to be the project's custody wallets before they reach
  * here ({@link resolveSigningWalletsInProject}).
  */
-export const apiKeySigningWalletScopeSchema = z.discriminatedUnion("scope", [
+const apiKeySigningWalletScopeSchema = z.discriminatedUnion("scope", [
   z.object({ scope: z.literal("all") }),
   z.object({ scope: z.literal("selected"), custodyWalletIds: z.array(z.string()).readonly() }),
 ]);

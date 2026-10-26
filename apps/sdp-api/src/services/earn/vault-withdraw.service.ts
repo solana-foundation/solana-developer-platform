@@ -1,7 +1,7 @@
 import { notImplemented } from "@sdp/earn/errors";
-import type { EarnRuntimeContext, EarnVaultTransactionPlan } from "@sdp/earn/types";
+import type { EarnVaultTransactionPlan } from "@sdp/earn/types";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import { compareDecimalAmounts } from "@sdp/solana/amount";
-import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { getDb } from "@/db/client";
 import {
   assertMovementIsOwnReplay,
@@ -12,8 +12,9 @@ import {
 import { internalError } from "@/lib/errors";
 import { buildEarnVaultWithdrawalFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
-import { earnClusterFor, resolveVaultWithdrawClient } from "@/services/earn/execution-registry";
+import { resolveVaultWithdrawClient } from "@/services/earn/execution-registry";
 import type { Env } from "@/types/env";
+import { earnRuntime } from "./runtime";
 import { createVaultDeadline } from "./vault-deadline";
 import { appendVaultRequestMemo } from "./vault-execution.service";
 import { executeSignedVaultIntent } from "./vault-intent-execution.service";
@@ -27,11 +28,11 @@ import { resolveVaultSponsorship, vaultRentPayer } from "./vault-sponsorship";
  * The signed movement is persisted before any bytes reach the network, so an
  * ambiguous broadcast remains recoverable by the shared vault reconciler.
  * Plans that do not fit one Solana transaction are rejected before recording.
+ * The open cluster scope decides the environment and cluster.
  */
 export interface VaultWithdrawalInput {
   organizationId: string;
   projectId: string;
-  environment: SdpEnvironment;
   provider: string;
   positionId: string;
   vaultAddress: string;
@@ -108,7 +109,7 @@ async function replayResult(
   }
   const position = await ledger.getPositionById({
     organizationId: input.organizationId,
-    environment: input.environment,
+    environment: currentClusterScope().environment,
     positionId: movement.position_id,
   });
   if (!position || !movement.signature) {
@@ -121,9 +122,10 @@ export async function withdrawFromVault(
   env: Env,
   input: VaultWithdrawalInput
 ): Promise<VaultWithdrawalResult> {
+  const { environment, cluster } = currentClusterScope();
   const ledger = createPostgresEarnMovementsRepository(getDb(env));
   const fingerprint = buildEarnVaultWithdrawalFingerprint({
-    environment: input.environment,
+    environment,
     provider: input.provider,
     positionId: input.positionId,
     shares: input.shares,
@@ -150,8 +152,6 @@ export async function withdrawFromVault(
   const client = resolveVaultWithdrawClient(env, input.provider, deadline);
   if (!client) throw notImplemented(input.provider, "vault withdrawals");
 
-  const cluster = earnClusterFor(input.environment);
-
   // Same ordering rule as deposit: after the replay reads, before the build.
   //
   // Sponsorship matters here mostly for the FEE. klend's exit emits an
@@ -169,7 +169,6 @@ export async function withdrawFromVault(
     organizationId: input.organizationId,
     projectId: input.projectId,
     walletId: input.wallet.id,
-    cluster,
     deadline,
   });
   const rentPayer = vaultRentPayer(fee);
@@ -177,7 +176,7 @@ export async function withdrawFromVault(
     depositTokenMint: input.tokenMint,
     shareMint: input.shareMint,
   };
-  const runtime: EarnRuntimeContext = { env, environment: input.environment };
+  const runtime = earnRuntime(env);
 
   // Who gets the share-ATA rent back when this exit empties the account. Read
   // from the position rather than derived from the CURRENT fee mode: the rent
@@ -187,7 +186,7 @@ export async function withdrawFromVault(
   // custody wallet funded it and keeps it.
   const position = await ledger.getPositionById({
     organizationId: input.organizationId,
-    environment: input.environment,
+    environment,
     positionId: input.positionId,
   });
   if (!position) {
@@ -238,7 +237,7 @@ export async function withdrawFromVault(
       createPostgresEarnMovementsRepository(db).createSignedVaultWithdrawalIntent({
         organizationId: input.organizationId,
         projectId: input.projectId,
-        environment: input.environment,
+        environment,
         provider: input.provider,
         positionId: input.positionId,
         vaultAddress: input.vaultAddress,

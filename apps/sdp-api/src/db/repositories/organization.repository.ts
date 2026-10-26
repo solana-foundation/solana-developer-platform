@@ -1,12 +1,12 @@
 import type { MemberStatus } from "@sdp/types/organizations";
 import type { OrganizationRole } from "@sdp/types/roles";
 
-export interface OrganizationMembershipRow {
+interface OrganizationMembershipRow {
   role: OrganizationRole;
   status: MemberStatus;
 }
 
-export interface ActiveOrganizationMemberRow {
+interface ActiveOrganizationMemberRow {
   memberId: string;
   role: OrganizationRole;
 }

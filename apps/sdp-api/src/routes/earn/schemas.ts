@@ -231,7 +231,7 @@ export const earnProgramWithdrawalsListQuerySchema = z.object(earnPageQueryShape
  * `earnSwapSourceTokens` — the schema only pins the address shape, the same
  * split the owner address follows.
  */
-export const earnDepositSwapShape = {
+const earnDepositSwapShape = {
   /**
    * Fund the deposit in this stablecoin instead of the vault's own token.
    * Equal to the strategy's deposit mint, it is a no-op (no swap is built),
@@ -548,7 +548,7 @@ export const earnVaultWithdrawalRequestsQuerySchema = z
 // ---------------------------------------------------------------------------
 
 /** Same trim + isAddress convention as the payments destination schema. */
-export const solanaOwnerAddressSchema = z.preprocess(
+const solanaOwnerAddressSchema = z.preprocess(
   (value) => (typeof value === "string" ? value.trim() : value),
   z.string().refine((value) => value.length >= 32 && value.length <= 44 && isAddress(value), {
     message: "ownerAddress must be a base58 Solana address",
@@ -570,7 +570,7 @@ const solanaFeePayerAddressSchema = z.preprocess(
  * requires its signature alongside the owner's. Sending the owner's own
  * address is accepted and normalizes to the default.
  */
-export const earnExternalWalletFeePayerShape = {
+const earnExternalWalletFeePayerShape = {
   feePayer: solanaFeePayerAddressSchema.optional(),
 } as const;
 

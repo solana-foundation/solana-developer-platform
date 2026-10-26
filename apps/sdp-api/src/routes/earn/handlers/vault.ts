@@ -2,7 +2,7 @@ import { isEarnProviderId } from "@sdp/earn";
 import { supportsVaultDepositQuote, supportsVaultWithdrawQuote } from "@sdp/earn/capabilities";
 import { notImplemented, providerNotConfigured } from "@sdp/earn/errors";
 import type { EarnVaultDepositQuote, EarnVaultWithdrawQuote } from "@sdp/earn/types";
-import type { SdpEnvironment } from "@sdp/types/api-keys";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import type {
   EarnVaultDepositRecord,
   EarnVaultDepositResponse,
@@ -30,13 +30,11 @@ import {
 import { decodeKeysetCursor, encodeKeysetCursor } from "@/lib/keyset-cursor";
 import { assertCallerWalletInScope } from "@/lib/money-admission";
 import { success } from "@/lib/response";
-import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import { getRequestGateContext, type RequestGateExtraction } from "@/middleware/request-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import {
   type AppContext,
-  earnRuntime,
   getEarnRepository,
   requireEarnStrategyForCaller,
 } from "@/routes/earn/context";
@@ -58,10 +56,10 @@ import {
 } from "@/services/domain/signing/custody-runtime-target";
 import { createSigningService } from "@/services/domain/signing.service";
 import {
-  earnClusterFor,
   resolveVaultDirectClient,
   resolveVaultWithdrawClient,
 } from "@/services/earn/execution-registry";
+import { earnRuntime } from "@/services/earn/runtime";
 import { resolveVaultBalanceReadContext } from "@/services/earn/vault-balance-read-context";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import { depositIntoVault } from "@/services/earn/vault-deposit.service";
@@ -116,17 +114,17 @@ export async function createEarnVaultDepositPreview(
   c: ValidatedBodyContext<typeof earnVaultDepositPreviewSchema>
 ) {
   const body = c.req.valid("json");
-  const { strategy, environment } = await requireEarnStrategyForCaller(c, body.strategyId);
+  const { strategy } = await requireEarnStrategyForCaller(c, body.strategyId);
   // No amount: the preview reports the cap below as a blocking issue instead
   // of throwing it.
-  const provider = await assertVaultDepositAdmissible(c, strategy, undefined, { environment });
+  const provider = await assertVaultDepositAdmissible(c, strategy);
   // The exposure cap, evaluated WITHOUT throwing (the deposit's 409 becomes a
   // blocking issue here, ADR 0004 "previews are the contract"), but only after
   // the same gates the deposit takes and before the provider is asked: a
   // caller refused by a cheaper gate hears that reason. In shadow mode the
   // verdict is emitted and NOT reported, so the preview never claims a block
   // the deposit would not apply. An unreadable exposure is a 503 here too.
-  const exposure = await checkVaultExposure(c, strategy, body.amount, { environment });
+  const exposure = await checkVaultExposure(c, strategy, body.amount, { fresh: false });
 
   const deadline = createVaultDeadline();
   const client = resolveVaultDirectClient(c.env, provider, deadline);
@@ -136,13 +134,10 @@ export async function createEarnVaultDepositPreview(
 
   let quote: EarnVaultDepositQuote;
   try {
-    quote = await client.quoteVaultDeposit(
-      { env: c.env, environment },
-      {
-        providerReference: strategy.provider_reference,
-        amount: body.amount,
-      }
-    );
+    quote = await client.quoteVaultDeposit(earnRuntime(c.env), {
+      providerReference: strategy.provider_reference,
+      amount: body.amount,
+    });
   } catch (error) {
     // A refused quote is the CALLER's, in the provider's own words — the SAME
     // code-shape mapping the deposit build applies (vault-refusals.ts), so the
@@ -164,7 +159,7 @@ export async function createEarnVaultDepositPreview(
     // flag+cluster gate resolveVaultSponsorship applies at execution. A
     // swap-funded deposit forces wallet-pays regardless; the swap choice lives
     // client-side, so the client applies that override to the copy.
-    feeSponsored: isEarnVaultSponsorshipEnabled(c.env, earnClusterFor(environment)),
+    feeSponsored: isEarnVaultSponsorshipEnabled(c.env, currentClusterScope().cluster),
   });
 }
 
@@ -175,8 +170,7 @@ export async function createEarnVaultDeposit(
     EarnVaultDepositBody,
     EarnVaultDepositResolved
   >(c);
-  const { strategy, wallet, auth, projectId, environment, provider, tokenMint, shareMint } =
-    resolved;
+  const { strategy, wallet, auth, projectId, provider, tokenMint, shareMint } = resolved;
   const requestId = resolved.requestId;
 
   // Fail-closed audit admission (PRO-1866): no durable intent, no deposit.
@@ -204,7 +198,6 @@ export async function createEarnVaultDeposit(
     result = await depositIntoVault(c.env, {
       organizationId: auth.organizationId,
       projectId,
-      environment,
       provider,
       providerReference: strategy.provider_reference,
       wallet,
@@ -275,7 +268,6 @@ interface EarnVaultDepositResolved {
   wallet: CustodyRuntimeWalletProjection;
   auth: ApiKeyContext;
   projectId: string;
-  environment: SdpEnvironment;
   provider: EarnProviderId;
   tokenMint: string;
   shareMint: string;
@@ -307,7 +299,7 @@ export async function extractEarnVaultDeposit(
   if (requestId === undefined) {
     throw badRequest(`${IDEMPOTENCY_KEY_HEADER} is required for vault deposits`);
   }
-  const environment = resolveSdpEnvironment(c);
+  const { environment } = currentClusterScope();
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
   const wallets = await new CustodyRuntimeTargets(getDb(c.env), c.env, new Map()).listWallets({
@@ -342,7 +334,7 @@ export async function extractEarnVaultDeposit(
   // Swap funding, normalized before the handler runs. A source equal to the vault's own token is a
   // no-op (null), and an unsupported mint is refused here, before any
   // custody-shaped work.
-  const swap = resolveDepositSwapRequest(body, environment, tokenMint);
+  const swap = resolveDepositSwapRequest(body, tokenMint);
 
   // The wallet must be one SDP can sign for. Resolve only the exposed custody
   // row id: provider wallet ids are unique only within one custody
@@ -359,7 +351,6 @@ export async function extractEarnVaultDeposit(
     wallet,
     auth,
     projectId,
-    environment,
     provider,
     tokenMint,
     shareMint,
@@ -407,7 +398,7 @@ export async function admitEarnVaultDeposit(
   // settlement.
   assertDepositFloorPresent(
     strategy.provider,
-    resolveSdpEnvironment(c),
+    currentClusterScope().environment,
     body.minSharesOut,
     strategy.host_cluster
   );
@@ -496,7 +487,7 @@ export async function findEarnVaultDepositIdempotentKeyReplay(
     }
     const position = await repo.getPositionById({
       organizationId: resolved.auth.organizationId,
-      environment: resolved.environment,
+      environment: currentClusterScope().environment,
       positionId: movement.position_id,
     });
     if (!position) {
@@ -610,7 +601,7 @@ function isMovementInProject(movement: { project_id: string | null }, projectId:
  */
 export async function getEarnVaultDeposit(c: AppContext) {
   const { movementId } = parseParams(c, earnVaultDepositParamsSchema);
-  const environment = resolveSdpEnvironment(c);
+  const { environment } = currentClusterScope();
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
 
@@ -744,7 +735,7 @@ export async function listEarnVaultDeposits(c: AppContext) {
   if (query.before && !before) {
     throw badRequest("Invalid vault deposit pagination cursor");
   }
-  const environment = resolveSdpEnvironment(c);
+  const { environment } = currentClusterScope();
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
 
@@ -887,7 +878,7 @@ export async function listEarnVaultPositions(c: AppContext) {
   if (query.before && !before) {
     throw badRequest("Invalid vault position pagination cursor");
   }
-  const environment = resolveSdpEnvironment(c);
+  const { environment } = currentClusterScope();
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
 
@@ -901,7 +892,6 @@ export async function listEarnVaultPositions(c: AppContext) {
     movementIds: query.afterMovementIds?.split(",") ?? [],
     organizationId: auth.organizationId,
     projectId,
-    environment,
     custodyWalletIds,
   });
   if (custodyWalletIds.length === 0) {
@@ -928,7 +918,6 @@ export async function listEarnVaultPositions(c: AppContext) {
   );
   const live = await hydrateVaultPositions(
     c,
-    environment,
     rows.map((row) => {
       const ownerAddress = walletAddresses.get(row.custodyWalletId);
       if (!ownerAddress) {
@@ -966,7 +955,7 @@ export async function listEarnVaultPositions(c: AppContext) {
   // position's exit runs on the environment's cluster, so the copy a client
   // shows on the exit step can read this instead of a quote that a provider
   // with no exit floor never produces.
-  const feeSponsored = isEarnVaultSponsorshipEnabled(c.env, earnClusterFor(environment));
+  const feeSponsored = isEarnVaultSponsorshipEnabled(c.env, currentClusterScope().cluster);
 
   return success(c, {
     balanceReadContext: balanceReadContext
@@ -1012,7 +1001,6 @@ interface EarnVaultWithdrawalResolved {
   wallet: CustodyRuntimeWalletProjection;
   auth: ApiKeyContext;
   projectId: string;
-  environment: SdpEnvironment;
   requestId: string;
   idempotencyFingerprint: string;
 }
@@ -1041,7 +1029,7 @@ export async function extractEarnVaultWithdrawal(
   if (requestId === undefined) {
     throw badRequest(`${IDEMPOTENCY_KEY_HEADER} is required for vault withdrawals`);
   }
-  const environment = resolveSdpEnvironment(c);
+  const { environment } = currentClusterScope();
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
 
@@ -1080,7 +1068,6 @@ export async function extractEarnVaultWithdrawal(
     wallet,
     auth,
     projectId,
-    environment,
     requestId,
     idempotencyFingerprint: buildEarnVaultWithdrawalFingerprint({
       environment,
@@ -1181,7 +1168,7 @@ export async function createEarnVaultWithdrawalPreview(
   c: ValidatedBodyContext<typeof earnVaultWithdrawalPreviewSchema>
 ) {
   const body = c.req.valid("json");
-  const environment = resolveSdpEnvironment(c);
+  const { environment } = currentClusterScope();
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
 
@@ -1211,7 +1198,7 @@ export async function createEarnVaultWithdrawalPreview(
 
   let quote: EarnVaultWithdrawQuote;
   try {
-    quote = await client.quoteVaultWithdrawal(earnRuntime(c), {
+    quote = await client.quoteVaultWithdrawal(earnRuntime(c.env), {
       providerReference: position.vaultAddress,
       shares: body.shares,
     });
@@ -1227,7 +1214,7 @@ export async function createEarnVaultWithdrawalPreview(
     assetDecimals: quote.assetDecimals,
     blockingIssues: quote.blockingIssues,
     // Same sponsorship intent as the deposit preview; exits have no swap leg.
-    feeSponsored: isEarnVaultSponsorshipEnabled(c.env, earnClusterFor(environment)),
+    feeSponsored: isEarnVaultSponsorshipEnabled(c.env, currentClusterScope().cluster),
   });
 }
 
@@ -1243,13 +1230,12 @@ export async function createEarnVaultWithdrawal(
     EarnVaultWithdrawalBody,
     EarnVaultWithdrawalResolved
   >(c);
-  const { position, wallet, auth, projectId, environment } = resolved;
+  const { position, wallet, auth, projectId } = resolved;
   const requestId = resolved.requestId;
 
   const result = await withdrawFromVault(c.env, {
     organizationId: auth.organizationId,
     projectId,
-    environment,
     provider: position.provider,
     positionId: position.id,
     vaultAddress: position.vaultAddress,
@@ -1347,7 +1333,7 @@ function toEarnVaultWithdrawal(movement: EarnMovementRow, replayed?: boolean): E
  */
 export async function getEarnVaultWithdrawal(c: AppContext) {
   const { movementId } = parseParams(c, earnVaultWithdrawalParamsSchema);
-  const environment = resolveSdpEnvironment(c);
+  const { environment } = currentClusterScope();
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
 
@@ -1391,7 +1377,7 @@ export async function listEarnVaultWithdrawals(c: AppContext) {
   if (query.before && !before) {
     throw badRequest("Invalid vault withdrawal pagination cursor");
   }
-  const environment = resolveSdpEnvironment(c);
+  const { environment } = currentClusterScope();
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
 

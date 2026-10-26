@@ -14,13 +14,13 @@ import type { DatabaseClient as AppDb } from "@/db/client";
  * shown and exist for display only. The detector compares atoms to atoms.
  */
 
-export const EARN_SPLIT_SWAP_ADVISORY_ID_PREFIX = "earn_split_swap_advisory_";
+const EARN_SPLIT_SWAP_ADVISORY_ID_PREFIX = "earn_split_swap_advisory_";
 
 export function generateEarnSplitSwapAdvisoryId(): string {
   return `${EARN_SPLIT_SWAP_ADVISORY_ID_PREFIX}${crypto.randomUUID()}`;
 }
 
-export type EarnSplitSwapAdvisoryResolution = "deposit_observed" | "unfunded" | "acknowledged";
+type EarnSplitSwapAdvisoryResolution = "deposit_observed" | "unfunded" | "acknowledged";
 
 export interface EarnSplitSwapAdvisoryRow {
   id: string;
@@ -54,7 +54,7 @@ export interface EarnSplitSwapAdvisoryRow {
   resolving_movement_id: string | null;
 }
 
-export interface CreateEarnSplitSwapAdvisoryInput {
+interface CreateEarnSplitSwapAdvisoryInput {
   id: string;
   organizationId: string;
   projectId: string;

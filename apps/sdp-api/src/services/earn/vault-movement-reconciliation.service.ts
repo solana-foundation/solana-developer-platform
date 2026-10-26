@@ -28,7 +28,6 @@ import {
 import { getLogger } from "@/runtime/logger";
 import { describeError, logEvent } from "@/runtime/money-path-events";
 import {
-  earnClusterFor,
   resolveRecordedVaultWithdrawClient,
   resolveVaultDirectClient,
 } from "@/services/earn/execution-registry";
@@ -794,6 +793,7 @@ async function closePositionIfEmpty(
   try {
     const client = resolveVaultDirectClient(env, movement.provider, createVaultDeadline());
     if (!client) return;
+    const { cluster } = currentClusterScope();
     // A close decision never reuses a provider request sent before this one.
     const snapshots = await withReadFloor(readStamp(), () =>
       client.readVaultPositions(
@@ -805,7 +805,7 @@ async function closePositionIfEmpty(
       (candidate) =>
         candidate.providerReference === vault &&
         candidate.owner === owner &&
-        candidate.cluster === earnClusterFor(movement.environment) &&
+        candidate.cluster === cluster &&
         candidate.tokenMint === position.token_mint &&
         candidate.shareMint === position.share_mint
     );
@@ -829,9 +829,9 @@ async function closePositionIfEmpty(
 }
 
 /** How far back the payout repair looks: RPC transaction history is finite. */
-export const WITHDRAWAL_PAYOUT_REPAIR_WINDOW_MS = 14 * 24 * 60 * 60 * 1_000;
+const WITHDRAWAL_PAYOUT_REPAIR_WINDOW_MS = 14 * 24 * 60 * 60 * 1_000;
 /** Minimum spacing between two repair attempts on the same movement. */
-export const WITHDRAWAL_PAYOUT_REPAIR_RETRY_MS = 15 * 60 * 1_000;
+const WITHDRAWAL_PAYOUT_REPAIR_RETRY_MS = 15 * 60 * 1_000;
 const WITHDRAWAL_PAYOUT_REPAIR_BATCH_SIZE = 25;
 
 export interface WithdrawalPayoutRepairStats {

@@ -17,7 +17,7 @@ import {
 } from "@/services/provider-credential-submission.service";
 import type { Env } from "@/types/env";
 
-export const PROVIDER_SETUP_FAMILIES = ["custody", "compliance", "ramps"] as const;
+const PROVIDER_SETUP_FAMILIES = ["custody", "compliance", "ramps"] as const;
 export type ProviderSetupFamily = (typeof PROVIDER_SETUP_FAMILIES)[number];
 
 type ProviderIdByFamily = {
@@ -27,7 +27,7 @@ type ProviderIdByFamily = {
 };
 
 /** Who owns setup for the current first-party integration. */
-export type ProviderSetupMode = "self_service" | "platform_managed" | "contact";
+type ProviderSetupMode = "self_service" | "platform_managed" | "contact";
 
 type ProviderSetupHook = (...args: never[]) => unknown;
 
@@ -71,7 +71,6 @@ const privyCredentialSetupSchema = privyCredentialSetupBaseSchema
   .extend({ fields: privyCredentialFieldsSchema })
   .strict();
 
-export type PrivyCredentialSetupPayload = z.infer<typeof privyCredentialSetupSchema>;
 const fireblocksCredentialSetupSchema = privyCredentialSetupBaseSchema
   .extend({
     provider: z.literal("fireblocks"),
@@ -129,12 +128,12 @@ export async function storeCustodyCredentials(input: CustodyStoreCredentialsInpu
   return submitProviderCredential(input.context, input.payload, input.idempotencyKey);
 }
 
-export interface ProviderConfigurationCheckInput {
+interface ProviderConfigurationCheckInput {
   env: Env;
   testMode?: boolean;
 }
 
-export interface ProviderConfigurationCheckResult {
+interface ProviderConfigurationCheckResult {
   kind: "configuration";
   status: "configured" | "not_configured";
   checkedAt: string;

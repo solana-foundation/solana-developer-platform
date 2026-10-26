@@ -912,7 +912,7 @@ function statusAt(
   return "expired_cancelable";
 }
 
-export function assertRequestedEvent(
+function assertRequestedEvent(
   request: EarnVaultWithdrawalRequestRow,
   event: RequestedLifecycleEvent
 ): void {

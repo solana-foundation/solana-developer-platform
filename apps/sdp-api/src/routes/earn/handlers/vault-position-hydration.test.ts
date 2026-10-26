@@ -17,18 +17,20 @@ import {
   markVaultPositionRowsRead,
 } from "./vault-position-hydration";
 
-/** One hydration in the cluster scope its request opens, from the environment it hydrates. */
+/** One hydration in the cluster scope its request opens for `environment`. */
 function hydrateVaultPositions(
-  ...args: Parameters<typeof hydrateUnscoped>
+  c: Parameters<typeof hydrateUnscoped>[0],
+  environment: SdpEnvironment,
+  positions: Parameters<typeof hydrateUnscoped>[1],
+  options: Parameters<typeof hydrateUnscoped>[2]
 ): ReturnType<typeof hydrateUnscoped> {
-  const [, environment] = args;
-  return runInClusterScope({ projectId: null, environment }, () => hydrateUnscoped(...args));
+  return runInClusterScope({ projectId: null, environment }, () =>
+    hydrateUnscoped(c, positions, options)
+  );
 }
 
 const mocks = vi.hoisted(() => ({ readVaultPositions: vi.fn(), resolveClient: vi.fn() }));
 vi.mock("@/services/earn/execution-registry", () => ({
-  earnClusterFor: (environment: string) =>
-    environment === "production" ? "mainnet-beta" : "devnet",
   resolveVaultDirectClient: mocks.resolveClient,
 }));
 vi.mock("@/services/earn/vault-deadline", async (importOriginal) => {

@@ -1,4 +1,5 @@
 import { SdpKaminoError } from "@sdp/kamino/errors";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { SdpVedaError } from "@sdp/veda/errors";
 import {
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
@@ -52,7 +53,14 @@ vi.mock("./vault-sponsorship", async (importOriginal) => ({
   resolveVaultSponsorship,
 }));
 
-const { depositIntoVault } = await import("./vault-deposit.service");
+const service = await import("./vault-deposit.service");
+
+/** A custody deposit, in the cluster scope the project middleware opens for its project. */
+function depositIntoVault(...args: Parameters<typeof service.depositIntoVault>) {
+  return runInClusterScope({ projectId: PROJECT, environment: "sandbox" }, () =>
+    service.depositIntoVault(...args)
+  );
+}
 const { VaultTransactionTooLargeError } = await import("./vault-execution.service");
 
 const ORG = "org_vault_deposit";
@@ -76,7 +84,6 @@ function depositInput(overrides: Partial<VaultDepositInput> = {}): VaultDepositI
   return {
     organizationId: ORG,
     projectId: PROJECT,
-    environment: "sandbox" as const,
     provider: "kamino",
     providerReference: VAULT_A,
     wallet,

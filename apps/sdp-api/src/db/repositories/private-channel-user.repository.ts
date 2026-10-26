@@ -3,12 +3,6 @@
 //   - `private_channel_memberships`  (channel × identity junction)
 // New identities are project-scoped and do not belong to an SDP user.
 
-import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
-
-export function generatePrivateChannelUserId(): string {
-  return `pcu_${crypto.randomUUID()}`;
-}
-
 export function generatePrivateChannelMembershipId(): string {
   return `pcm_${crypto.randomUUID()}`;
 }
@@ -93,10 +87,6 @@ export interface AddMembershipInput {
   channelId: string;
   privateChannelUserId: string;
   addedBy: string | null;
-}
-
-export interface PrivateChannelUserRepositoryContext {
-  db: RepositoryDbClient;
 }
 
 export interface PrivateChannelUserRepository {

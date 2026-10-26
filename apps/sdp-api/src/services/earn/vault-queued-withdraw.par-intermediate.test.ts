@@ -1,3 +1,4 @@
+import { runInClusterScope } from "@sdp/rpc/scope";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { buildEarnVaultParRedemptionFingerprint } from "@/lib/idempotency";
@@ -44,11 +45,23 @@ vi.mock("./vault-intent-execution.service", async (importOriginal) => ({
   readConfirmedBlockHeight,
 }));
 
-const {
-  buildExternalQueuedWithdrawalRequest,
-  createCustodyQueuedWithdrawal,
-  submitExternalQueuedWithdrawalAction,
-} = await import("./vault-queued-withdraw.service");
+const service = await import("./vault-queued-withdraw.service");
+
+/** Each call in the cluster scope the project middleware opens for the sandbox project. */
+function inProjectScope<TArgs extends unknown[], TResult>(
+  operation: (...args: TArgs) => Promise<TResult>
+): (...args: TArgs) => Promise<TResult> {
+  return (...args) =>
+    runInClusterScope({ projectId: PROJECT, environment: "sandbox" }, () => operation(...args));
+}
+
+const buildExternalQueuedWithdrawalRequest = inProjectScope(
+  service.buildExternalQueuedWithdrawalRequest
+);
+const createCustodyQueuedWithdrawal = inProjectScope(service.createCustodyQueuedWithdrawal);
+const submitExternalQueuedWithdrawalAction = inProjectScope(
+  service.submitExternalQueuedWithdrawalAction
+);
 
 const ORG = "org_par_intermediate";
 const PROJECT = "prj_par_intermediate";
@@ -186,7 +199,6 @@ describe("a par request over held intermediate", () => {
       actor: {
         organizationId: ORG,
         projectId: PROJECT,
-        environment: "sandbox",
         custodyWalletId: WALLET_ROW_ID,
         custodyWalletPublicKey: WALLET_ADDRESS,
         userId: USER,
@@ -225,7 +237,6 @@ describe("a par request over held intermediate", () => {
         actor: {
           organizationId: ORG,
           projectId: PROJECT,
-          environment: "sandbox",
           custodyWalletId: WALLET_ROW_ID,
           custodyWalletPublicKey: WALLET_ADDRESS,
           userId: USER,
@@ -243,7 +254,6 @@ describe("a par request over held intermediate", () => {
     const actor = {
       organizationId: ORG,
       projectId: PROJECT,
-      environment: "sandbox" as const,
       userId: USER,
     };
 

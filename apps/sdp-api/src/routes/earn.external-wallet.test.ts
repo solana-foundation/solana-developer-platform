@@ -7,6 +7,7 @@ import { generateEarnPositionId } from "@/db/repositories/earn-movements.reposit
 import { app } from "@/index";
 import { badRequest, conflict } from "@/lib/errors";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
+import { recordCallScopes } from "@/test/helpers/cluster-scope";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
@@ -390,6 +391,7 @@ afterEach(() => {
 describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates", () => {
   it("builds against a resolved, admitted strategy", async () => {
     await seedAuth();
+    const scopes = recordCallScopes(buildExternalWalletDepositTransaction);
     const strategy = await seedStrategy();
 
     const res = await post("deposit-transactions", {
@@ -411,13 +413,15 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
       expect.objectContaining({
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT.id,
-        environment: "sandbox",
         provider: "kamino",
         providerReference: strategy.provider_reference,
         ownerAddress: OWNER,
         amount: "25",
       })
     );
+    expect(scopes).toEqual([
+      expect.objectContaining({ projectId: TEST_PROJECT.id, environment: "sandbox" }),
+    ]);
   });
 
   it("404s an unknown strategy", async () => {
@@ -798,6 +802,7 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
 
   it("opens Kamino from production and requires the caller's minSharesOut (PRO-1986)", async () => {
     await seedAuth();
+    const scopes = recordCallScopes(buildExternalWalletDepositTransaction);
     const strategy = await seedStrategy({ environment: "production", hostCluster: "mainnet-beta" });
     const missingFloor = await post(
       "deposit-transactions",
@@ -825,8 +830,9 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
     expect(res.status).toBe(200);
     expect(buildExternalWalletDepositTransaction).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ environment: "production", provider: "kamino", minSharesOut: "1" })
+      expect.objectContaining({ provider: "kamino", minSharesOut: "1" })
     );
+    expect(scopes).toEqual([expect.objectContaining({ environment: "production" })]);
   });
 
   it("keeps production closed for a provider the deposit-environment map leaves sandbox-only", async () => {
@@ -851,6 +857,7 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
 
   it("opens Jupiter Lend only from production and requires the caller's minSharesOut", async () => {
     await seedAuth();
+    const scopes = recordCallScopes(buildExternalWalletDepositTransaction);
     const strategy = await seedStrategy({
       provider: "jupiter_lend",
       providerReference: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
@@ -883,12 +890,9 @@ describe("POST /v1/earn/external-wallet/deposit-transactions — money-in gates"
     expect(res.status).toBe(200);
     expect(buildExternalWalletDepositTransaction).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({
-        environment: "production",
-        provider: "jupiter_lend",
-        minSharesOut: "24.9",
-      })
+      expect.objectContaining({ provider: "jupiter_lend", minSharesOut: "24.9" })
     );
+    expect(scopes).toEqual([expect.objectContaining({ environment: "production" })]);
   });
 });
 
@@ -926,6 +930,7 @@ describe("POST /v1/earn/external-wallet/deposits — the submit contract", () =>
 
   it("records the submit and answers the movement in ledger vocabulary", async () => {
     await seedAuth();
+    const scopes = recordCallScopes(submitExternalWalletDeposit);
     const key = crypto.randomUUID();
     const res = await post(
       "deposits",
@@ -944,12 +949,14 @@ describe("POST /v1/earn/external-wallet/deposits — the submit contract", () =>
       expect.objectContaining({
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT.id,
-        environment: "sandbox",
         transactionId: "earn_ext_tx",
         signedTransaction: "AQ==",
         requestId: key,
       })
     );
+    expect(scopes).toEqual([
+      expect.objectContaining({ projectId: TEST_PROJECT.id, environment: "sandbox" }),
+    ]);
   });
 });
 

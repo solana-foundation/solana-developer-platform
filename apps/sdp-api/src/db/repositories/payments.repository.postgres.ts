@@ -191,7 +191,7 @@ function buildTransferListWhere(params: ListTransfersInput): {
   return { whereClause: clauses.join(" AND "), values };
 }
 
-export type PaymentTransferProjectionRow = Record<string, unknown> & {
+type PaymentTransferProjectionRow = Record<string, unknown> & {
   kind: PaymentTransactionKind;
 };
 
@@ -199,7 +199,7 @@ export type PaymentTransferProjectionRow = Record<string, unknown> & {
 const storedTransferProviderSchema = z.enum(PERSISTED_RAMP_PROVIDERS).nullable();
 
 /** Maps a raw `payment_transfers` projection row into the shared row shape; `kind` must ride the SELECT. */
-export function mapTransferRow(row: PaymentTransferProjectionRow): PaymentTransferRow {
+function mapTransferRow(row: PaymentTransferProjectionRow): PaymentTransferRow {
   return {
     id: row.id as string,
     organization_id: row.organization_id as string,

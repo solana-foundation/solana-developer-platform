@@ -1,6 +1,7 @@
 import { isEarnProviderId } from "@sdp/earn";
 import { providerNotConfigured } from "@sdp/earn/errors";
 import { isClusterFundableInEnvironment } from "@sdp/earn/support";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import {
   type EarnProviderId,
@@ -11,7 +12,6 @@ import {
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import type { EarnStrategyRow } from "@/db/repositories/earn.repository";
 import { badRequest, forbidden } from "@/lib/errors";
-import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import type { AppContext } from "@/routes/earn/context";
 import { assertVaultExposureWithinCap } from "@/services/earn/vault-exposure";
 import { assertProviderAvailable } from "@/services/provider-availability.service";
@@ -36,10 +36,7 @@ import { assertProviderAvailable } from "@/services/provider-availability.servic
  * separate, earlier gates with their own error codes, because "SDP does not
  * offer this" and "this instrument is halted" are different answers.
  */
-export function assertStrategyDepositable(
-  strategy: EarnStrategyRow,
-  environment: SdpEnvironment
-): void {
+function assertStrategyDepositable(strategy: EarnStrategyRow, environment: SdpEnvironment): void {
   if (strategy.environment !== environment) {
     // Phrased as "not found" upstream; reaching here means a caller crossed
     // project environments with a valid id from the other one.
@@ -73,7 +70,7 @@ export function assertStrategyDepositable(
  * fronts it. The dashboard reads the same predicate, so it never advertises
  * an action this refuses. Exits never call this (ADR 0002).
  */
-export function assertVaultDepositEnvironmentOpen(
+function assertVaultDepositEnvironmentOpen(
   environment: SdpEnvironment,
   provider: EarnProviderId
 ): void {
@@ -126,12 +123,9 @@ export function assertVaultDirectDepositStyle(provider: string): void {
 export async function assertVaultDepositAdmissible(
   c: AppContext,
   strategy: EarnStrategyRow,
-  amount?: string,
-  options: {
-    environment?: SdpEnvironment;
-  } = {}
+  amount?: string
 ): Promise<EarnProviderId> {
-  const environment = options.environment ?? resolveSdpEnvironment(c);
+  const { environment } = currentClusterScope();
 
   assertVaultDirectDepositStyle(strategy.provider);
   if (!isEarnProviderId(strategy.provider)) {
@@ -149,26 +143,10 @@ export async function assertVaultDepositAdmissible(
     // Deposits only. The withdrawal handlers never call this function, and
     // must not start to: refusing an exit over a platform cap traps funds
     // (ADR 0002), which is the one thing no cap may do.
-    await assertVaultExposureWithinCap(c, strategy, amount, { environment });
+    await assertVaultExposureWithinCap(c, strategy, amount);
   }
 
   return provider;
-}
-
-/**
- * Non-throwing form, for callers filtering a page of rows rather than admitting
- * one named row. Keeps the two uses on the same definition.
- */
-export function isStrategyDepositable(
-  strategy: EarnStrategyRow,
-  environment: SdpEnvironment
-): boolean {
-  try {
-    assertStrategyDepositable(strategy, environment);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 /**

@@ -663,7 +663,7 @@ export async function readMoneyAdmissionFacts(
  * The joins the principal does not use match nothing, so the cost is the
  * same one round trip the organization read always made.
  */
-export async function readMoneyAdmissionFactsWith(
+async function readMoneyAdmissionFactsWith(
   db: DatabaseExecutor,
   scope: MoneyAdmissionScope,
   subject: MoneyAdmissionSubject

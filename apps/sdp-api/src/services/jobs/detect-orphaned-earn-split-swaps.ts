@@ -95,7 +95,7 @@ interface ChainHeight {
   absoluteSlot: Slot;
 }
 
-export interface EarnSplitSwapDetectionStats {
+interface EarnSplitSwapDetectionStats {
   checked: number;
   depositObserved: number;
   followUpPending: number;

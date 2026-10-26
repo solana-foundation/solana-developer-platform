@@ -21,9 +21,9 @@ export type EarnVaultWithdrawalRequestStatus =
   | "cancelled"
   | "failed";
 
-export type EarnVaultWithdrawalRequestActionKind = "request" | "cancel";
+type EarnVaultWithdrawalRequestActionKind = "request" | "cancel";
 export type EarnVaultWithdrawalMechanism = "solver_queue" | "operator_redemption";
-export type EarnVaultWithdrawalRequestActionStatus =
+type EarnVaultWithdrawalRequestActionStatus =
   | "requested"
   | "submitted"
   | "confirmed"
@@ -134,10 +134,10 @@ export interface EarnExternalWalletWithdrawalRequestTransactionRow {
   updated_at: string;
 }
 
-export const EARN_VAULT_WITHDRAWAL_REQUEST_ID_PREFIX = "earn_vault_withdrawal_request_";
-export const EARN_VAULT_WITHDRAWAL_ACTION_ID_PREFIX = "earn_vault_withdrawal_action_";
-export const EARN_VAULT_WITHDRAWAL_RESERVATION_ID_PREFIX = "earn_vault_withdrawal_reservation_";
-export const EARN_EXTERNAL_WALLET_WITHDRAWAL_REQUEST_TRANSACTION_ID_PREFIX =
+const EARN_VAULT_WITHDRAWAL_REQUEST_ID_PREFIX = "earn_vault_withdrawal_request_";
+const EARN_VAULT_WITHDRAWAL_ACTION_ID_PREFIX = "earn_vault_withdrawal_action_";
+const EARN_VAULT_WITHDRAWAL_RESERVATION_ID_PREFIX = "earn_vault_withdrawal_reservation_";
+const EARN_EXTERNAL_WALLET_WITHDRAWAL_REQUEST_TRANSACTION_ID_PREFIX =
   "earn_external_wallet_withdrawal_request_transaction_";
 
 export function generateEarnVaultWithdrawalRequestId(): string {
@@ -192,7 +192,7 @@ export interface CreateSignedQueuedWithdrawalRequestInput {
   initiatedByKeyId?: string | null;
 }
 
-export interface CreateSignedQueuedWithdrawalCancelInput {
+interface CreateSignedQueuedWithdrawalCancelInput {
   actionId: string;
   organizationId: string;
   projectId: string;
@@ -208,7 +208,7 @@ export interface CreateSignedQueuedWithdrawalCancelInput {
   initiatedByKeyId?: string | null;
 }
 
-export interface CreateExternalWalletQueuedTransactionInput {
+interface CreateExternalWalletQueuedTransactionInput {
   id: string;
   organizationId: string;
   projectId: string;
@@ -242,7 +242,7 @@ export interface CreateExternalWalletQueuedTransactionInput {
   initiatedByKeyId?: string | null;
 }
 
-export interface FailQueuedWithdrawalActionInput {
+interface FailQueuedWithdrawalActionInput {
   actionId: string;
   organizationId: string;
   failureReason: string;

@@ -26,6 +26,7 @@ import { AppError, badRequest, payloadTooLarge, serviceUnavailable } from "@/lib
 import { appErrorResponse, mapErrorStatusCode } from "@/lib/response";
 import { corsMiddleware } from "@/middleware/cors";
 import { databaseIdentityBoundary } from "@/middleware/database-identity";
+import { gatewayIdentityMiddleware } from "@/middleware/gateway-identity";
 import { idempotencyKeyMiddleware } from "@/middleware/idempotency-key";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { skipRateLimitPaths } from "@/middleware/rate-limit";
@@ -279,6 +280,10 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
 
   // Request ID for tracing
   app.use("*", requestIdMiddleware());
+
+  // The gateway's signed caller identity, before anything reads the caller or
+  // its address (rate limits, auth, IP allowlists).
+  app.use("*", gatewayIdentityMiddleware());
 
   // Database identity boundary: public surfaces run as named system
   // components, everything else is identity-less until an auth middleware

@@ -41,7 +41,7 @@ export function mapBatchRow(row: PaymentTransferBatchRow) {
  * @param row - Recipient row from the repository.
  * @returns The camelCase API representation.
  */
-export function mapRecipientRow(row: PaymentTransferRecipientRow) {
+function mapRecipientRow(row: PaymentTransferRecipientRow) {
   return {
     id: row.id,
     batchId: row.batch_id,

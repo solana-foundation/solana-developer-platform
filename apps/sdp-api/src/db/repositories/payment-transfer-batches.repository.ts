@@ -172,7 +172,7 @@ export interface CreatePaymentTransferBatchWithRecipientsInput {
   recipients: Omit<CreatePaymentTransferRecipientInput, "batchId">[];
 }
 
-export interface CreatePaymentTransferBatchWithRecipientsResult {
+interface CreatePaymentTransferBatchWithRecipientsResult {
   batch: PaymentTransferBatchRow;
   recipients: PaymentTransferRecipientRow[];
 }

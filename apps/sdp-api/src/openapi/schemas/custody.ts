@@ -51,17 +51,6 @@ const connectionWalletOwnerOpenApiSchema = connectionWalletOwnerSchemaBase
     }),
   });
 
-export const custodyWalletOwnerRequestSchema = z
-  .union([
-    managedWalletOwnerOpenApiSchema.meta({ not: { required: ["connectionId"] } }),
-    connectionWalletOwnerOpenApiSchema.meta({ not: { required: ["provider"] } }),
-  ])
-  .openapi({
-    description:
-      "The provider account a new wallet lives under: exactly one of provider (the project's Managed config for that provider) or connectionId (a Custody Connection).",
-    example: { connectionId: "cconn_123" },
-  });
-
 const walletCreationFieldsOpenApi = {
   label: withOpenApi(createManagedWalletSchemaBase.shape.label, {
     description: "Optional label for the new wallet.",
@@ -239,7 +228,7 @@ const custodyWalletTokenBalanceSchema = z
   })
   .openapi({ description: "Tracked fungible token balance." });
 
-export const custodyWalletSchema = custodyWalletBaseSchema
+const custodyWalletSchema = custodyWalletBaseSchema
   .extend({
     balances: z.array(custodyWalletTokenBalanceSchema).optional().openapi({
       description:

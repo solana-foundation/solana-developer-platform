@@ -16,7 +16,7 @@ import {
 } from "./base";
 import { userSchema } from "./organizations";
 
-export const projectSettingsSchema = z
+const projectSettingsSchema = z
   .object({
     webhookUrl: z.string().url().optional().openapi({
       description: "Webhook URL for event notifications.",
@@ -33,7 +33,7 @@ export const projectSettingsSchema = z
   .strict()
   .openapi({ description: "Project settings." });
 
-export const projectSchema = z
+const projectSchema = z
   .object({
     id: projectIdParamSchema,
     organizationId: orgIdParamSchema,
@@ -68,19 +68,7 @@ export const projectSchema = z
   })
   .openapi({ description: "Project record." });
 
-export const projectMemberSchema = z
-  .object({
-    id: projectMemberIdSchema,
-    projectId: projectIdParamSchema,
-    userId: userIdSchema,
-    createdAt: isoDateTimeSchema.openapi({
-      description: "Membership creation timestamp.",
-      example: "2025-01-01T00:00:00.000Z",
-    }),
-  })
-  .openapi({ description: "Project member record." });
-
-export const projectMemberWithUserSchema = z
+const projectMemberWithUserSchema = z
   .object({
     id: projectMemberIdSchema,
     projectId: projectIdParamSchema,

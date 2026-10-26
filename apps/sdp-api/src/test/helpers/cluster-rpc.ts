@@ -47,7 +47,7 @@ export type JsonRpcResult =
   | { readonly [field: string]: JsonRpcResult };
 
 /** One JSON-RPC request that reached a cluster's endpoint, genesis probes included. */
-export interface ClusterRpcCall {
+interface ClusterRpcCall {
   cluster: SolanaCluster;
   method: string;
 }

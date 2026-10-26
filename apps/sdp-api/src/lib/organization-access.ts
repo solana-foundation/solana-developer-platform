@@ -122,19 +122,25 @@ type ApiKeyAuthorizationRow = ApiKeyLifecycleColumns & {
 };
 
 /** Everything an API key may do on this request, all from one read. */
+/** How a request names its API key row. */
+export type ApiKeyLookup =
+  /** A presented key: its hash, and an `sf_` key's key ID (null for `sk_`). */
+  | { kind: "secret"; keyHash: string; publicId: string | null }
+  /** A key the gateway authenticated and named by key ID (HOO-2256). */
+  | { kind: "gateway"; publicId: string };
+
 /**
- * What the instance's refusal and throttle caches remember a presented key by.
- * An `sf_` key's hash covers its secret alone, so its key ID is part of the
- * entry: a secret refused under a wrong key ID must not refuse the real key.
+ * What the instance's refusal and throttle caches remember a lookup by: the
+ * hash of a presented key, or the key ID the gateway named. An `sf_` key's
+ * hash covers its secret alone, so its key ID is part of the entry: a secret
+ * refused under a wrong key ID must not refuse the real key. Prefixed so no
+ * two kinds of entry can collide.
  */
-export function apiKeyRefusalKey({
-  keyHash,
-  publicId,
-}: {
-  keyHash: string;
-  publicId: string | null;
-}): string {
-  return publicId === null ? keyHash : `sf:${publicId}:${keyHash}`;
+export function apiKeyRefusalKey(lookup: ApiKeyLookup): string {
+  if (lookup.kind === "gateway") {
+    return `gateway:${lookup.publicId}`;
+  }
+  return lookup.publicId === null ? lookup.keyHash : `sf:${lookup.publicId}:${lookup.keyHash}`;
 }
 
 export interface ApiKeyAuthorization {
@@ -168,16 +174,9 @@ export interface ApiKeyAuthorization {
  */
 export async function authorizeApiKey(
   c: Context<{ Bindings: Env }>,
-  {
-    keyHash,
-    publicId,
-  }: {
-    keyHash: string;
-    /** An `sf_` key's key ID; null for a legacy `sk_` key, which has none. */
-    publicId: string | null;
-  }
+  lookup: ApiKeyLookup
 ): Promise<ApiKeyAuthorization> {
-  const refusalKey = apiKeyRefusalKey({ keyHash, publicId });
+  const refusalKey = apiKeyRefusalKey(lookup);
   const row = await getDb(c.env)
     .prepare(
       `SELECT ak.id, ak.organization_id, ak.project_id, ak.grants, ak.grants_assigned,
@@ -194,11 +193,16 @@ export async function authorizeApiKey(
          FROM api_keys ak
          JOIN organizations o ON o.id = ak.organization_id
          JOIN projects p ON p.id = ak.project_id AND p.organization_id = ak.organization_id
-        WHERE ak.key_hash = ? AND ak.public_id IS NOT DISTINCT FROM ?`
+        WHERE ${
+          lookup.kind === "secret"
+            ? "ak.key_hash = ? AND ak.public_id IS NOT DISTINCT FROM ?"
+            : "ak.public_id = ?"
+        }`
     )
-    // The key ID must match the row the secret belongs to: an `sf_` secret
-    // under another key's ID is no key at all.
-    .bind(keyHash, publicId)
+    // A presented key: the key ID must match the row the secret belongs to,
+    // since an `sf_` secret under another key's ID is no key at all. A
+    // gateway identity: the gateway verified the secret; the ID names the row.
+    .bind(...(lookup.kind === "secret" ? [lookup.keyHash, lookup.publicId] : [lookup.publicId]))
     .first<ApiKeyAuthorizationRow>();
 
   if (!row) {

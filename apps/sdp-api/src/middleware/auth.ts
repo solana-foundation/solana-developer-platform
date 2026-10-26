@@ -2,8 +2,9 @@
  * API Key Authentication Middleware
  *
  * Flow:
- * 1. Extract API key from Authorization header
- * 2. Check its format (an `sf_` key's checksum) and hash it
+ * 1. Extract the API key from Authorization, or the key ID from a verified
+ *    gateway identity (HOO-2256)
+ * 2. Check a presented key's format (an `sf_` key's checksum) and hash it
  * 3. Flood guard per key hash at the highest rate-limit tier
  * 4. Read and judge the key's live rows in one Postgres statement
  * 5. Enforce the key's own tier per key id
@@ -15,7 +16,7 @@ import type { ApiKeyEnvironment } from "@sdp/types/api-keys";
 import type { Context, Next } from "hono";
 import { getDb } from "@/db/client";
 import { runWithSystemDatabaseIdentity, runWithTenantDatabaseIdentity } from "@/db/identity";
-import { extractApiKey, looksLikeApiKey, parsePresentedApiKey } from "@/lib/api-key-format";
+import { extractApiKey, parsePresentedApiKey, presentsApiKey } from "@/lib/api-key-format";
 import { hashApiKey } from "@/lib/api-key-hash";
 import {
   assertNoCachedTerminalRefusal,
@@ -26,7 +27,7 @@ import type { WalletAccess } from "@/lib/auth";
 import { getClientIp } from "@/lib/client-ip";
 import { AppError } from "@/lib/errors";
 import { runAsMoneyPrincipal } from "@/lib/money-principal";
-import { apiKeyRefusalKey, authorizeApiKey } from "@/lib/organization-access";
+import { type ApiKeyLookup, apiKeyRefusalKey, authorizeApiKey } from "@/lib/organization-access";
 import { recordOrganizationEntitlements } from "@/lib/production-entitlement";
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
@@ -212,10 +213,19 @@ export function authMiddleware() {
   };
 }
 
-async function authenticateApiKeyRequest(c: Context<{ Bindings: Env }>): Promise<ApiKeyContext> {
+/**
+ * Names the request's API key row: a presented key (hashed here), or the key
+ * ID a verified gateway identity carries (HOO-2256). A key presented alongside
+ * an identity must be the key the gateway authenticated.
+ */
+async function resolveApiKeyLookup(c: Context<{ Bindings: Env }>): Promise<ApiKeyLookup> {
+  const gatewayIdentity = c.get("gatewayIdentity");
   const apiKey = extractApiKey(c);
 
   if (!apiKey) {
+    if (gatewayIdentity?.keyId) {
+      return { kind: "gateway", publicId: gatewayIdentity.keyId };
+    }
     throw new AppError("UNAUTHORIZED", "API key required");
   }
 
@@ -225,6 +235,9 @@ async function authenticateApiKeyRequest(c: Context<{ Bindings: Env }>): Promise
   if (!presented) {
     throw new AppError("INVALID_API_KEY", "Invalid API key format");
   }
+  if (gatewayIdentity && (presented.format !== "sf" || presented.keyId !== gatewayIdentity.keyId)) {
+    throw new AppError("INVALID_API_KEY", "API key does not match the gateway identity");
+  }
 
   // Hash the key: an `sf_` key's secret alone, as the gateway will; a legacy
   // `sk_` key whole, as it was issued.
@@ -232,8 +245,15 @@ async function authenticateApiKeyRequest(c: Context<{ Bindings: Env }>): Promise
     presented.format === "sf" ? presented.secret : presented.key,
     c.env.API_KEY_PEPPER
   );
+  return {
+    kind: "secret",
+    keyHash,
+    publicId: presented.format === "sf" ? presented.keyId : null,
+  };
+}
 
-  const lookup = { keyHash, publicId: presented.format === "sf" ? presented.keyId : null };
+async function authenticateApiKeyRequest(c: Context<{ Bindings: Env }>): Promise<ApiKeyContext> {
+  const lookup = await resolveApiKeyLookup(c);
   const refusalKey = apiKeyRefusalKey(lookup);
 
   // A key this instance recently refused for good (unknown, revoked,
@@ -243,7 +263,7 @@ async function authenticateApiKeyRequest(c: Context<{ Bindings: Env }>): Promise
   // would next admit it, with no Redis call or DB read (see the cache).
   assertNotThrottled(refusalKey, (seconds) => c.header("Retry-After", seconds.toString()));
 
-  // A flood guard per key hash and client IP before the row is read, at the
+  // A flood guard per key and client IP before the row is read, at the
   // highest tier since the key's own is not known yet: a flooding credential,
   // valid or not, is bounded before it costs a DB read. It is keyed by the
   // client IP too, so a leaked key used from outside its IP allowlist only
@@ -299,9 +319,7 @@ async function authenticateApiKeyRequest(c: Context<{ Bindings: Env }>): Promise
 export function optionalAuth(options: { rejectInvalid?: boolean } = {}) {
   const rejectInvalid = options.rejectInvalid ?? true;
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
-    const apiKey = extractApiKey(c);
-
-    if (apiKey && looksLikeApiKey(apiKey)) {
+    if (presentsApiKey(c)) {
       // Reuse the main auth logic. Rate limiting and strict optional-auth
       // failures must never proceed as anonymous.
       try {
@@ -333,9 +351,8 @@ export function optionalAuth(options: { rejectInvalid?: boolean } = {}) {
  */
 export function unifiedAuthMiddleware() {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
-    // Try API key first
-    const apiKey = extractApiKey(c);
-    if (apiKey && looksLikeApiKey(apiKey)) {
+    // Try API key first: a presented one, or one the gateway authenticated
+    if (presentsApiKey(c)) {
       const authMw = authMiddleware();
       return await authMw(c, next);
     }
@@ -345,7 +362,7 @@ export function unifiedAuthMiddleware() {
     if (bearerToken) {
       // Non-JWT bearer tokens should still be treated as API keys
       // so invalid formats return INVALID_API_KEY consistently.
-      if (looksLikeApiKey(bearerToken) || !looksLikeJwt(bearerToken)) {
+      if (!looksLikeJwt(bearerToken)) {
         const authMw = authMiddleware();
         return await authMw(c, next);
       }

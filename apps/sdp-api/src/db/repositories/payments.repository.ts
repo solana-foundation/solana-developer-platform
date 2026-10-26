@@ -9,10 +9,9 @@ import type {
 } from "@sdp/types/payments";
 import type { PersistedRampProviderId, RampProviderId } from "@sdp/types/provider-access";
 import type { PaymentTransactionKind } from "@sdp/types/unified-transactions";
-import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export type PaymentTransferDirection = "inbound" | "outbound";
-export type PaymentTransferDeliveryMode = "hosted" | "manual_instructions" | "session_widget";
+type PaymentTransferDeliveryMode = "hosted" | "manual_instructions" | "session_widget";
 
 export interface PaymentTransferRow {
   id: string;
@@ -130,7 +129,7 @@ export interface UpdatePaymentTransferInput {
 }
 
 /** Row fields a guarded status change may write alongside the status. */
-export interface TransferStatusChangeFields {
+interface TransferStatusChangeFields {
   sourceAddress?: string | null;
   destinationAddress?: string | null;
   signature?: string | null;
@@ -202,7 +201,7 @@ export interface ListTransfersResult {
   total: number;
 }
 
-export type GetTransferByProviderReferenceInput = {
+type GetTransferByProviderReferenceInput = {
   provider: RampProviderId;
   providerReference: string;
 } & (
@@ -215,10 +214,6 @@ export type GetTransferByProviderReferenceInput = {
       projectId?: never;
     }
 );
-
-export interface PaymentsRepositoryContext {
-  db: RepositoryDbClient;
-}
 
 export interface PaymentsRepository {
   /** Exactly one provider submission attempt per durable Fireblocks intent. */

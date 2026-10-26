@@ -1,9 +1,6 @@
-export type ComplianceProviderName = "range" | "elliptic" | "trm" | "chainalysis";
+type ComplianceProviderName = "range" | "elliptic" | "trm" | "chainalysis";
 
-export type ComplianceScreeningIntent =
-  | "transfer_destination"
-  | "wallet_address_addition"
-  | "unknown";
+type ComplianceScreeningIntent = "transfer_destination" | "wallet_address_addition" | "unknown";
 
 /**
  * Normalized decision, deliberately narrower than any provider's own status
@@ -16,7 +13,7 @@ export type ComplianceScreeningIntent =
  *  - `error`       — the call failed, or the response was malformed or
  *                    ambiguous; fail closed rather than guess.
  */
-export type ComplianceScreeningStatus = "ok" | "pending" | "unavailable" | "error";
+type ComplianceScreeningStatus = "ok" | "pending" | "unavailable" | "error";
 
 export interface ComplianceAddressScreeningInput {
   address: string;

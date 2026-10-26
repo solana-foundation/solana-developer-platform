@@ -18,10 +18,7 @@ import { createChannelGatewayRpc } from "@sdp/private-channels/gateway";
 import type { SolanaRpc } from "@sdp/rpc/solana";
 import { isUnauthorizedRpcError } from "@sdp/rpc/transient";
 import type { PrivateChannelUserRow } from "@/db/repositories/private-channel-user.repository";
-import {
-  createPrivateChannelInstanceRepository,
-  createPrivateChannelUserRepository,
-} from "@/db/repositories/repository-factory";
+import { createPrivateChannelUserRepository } from "@/db/repositories/repository-factory";
 import { forbidden } from "@/lib/errors";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { logVendorCallFailure } from "@/runtime/vendor-calls";
@@ -36,7 +33,7 @@ import { getSpcSession } from "./spc-session";
 const SPC_AUTH_TIMEOUT_MS = 8_000;
 
 /** The instance fields needed to mint a gateway token. */
-export interface GatewayAuthInstance {
+interface GatewayAuthInstance {
   /** Instance id — the SPC-session cache is scoped per (instance, SPC user). */
   id: string;
   authUrl: string;
@@ -209,87 +206,5 @@ export async function withSpcAuth<T>(
       logVendorCallFailure("spc-gateway", "auth-rest", retryError, startedAt);
       throw retryError;
     }
-  }
-}
-
-/**
- * Outcome of resolving gateway auth for a background job, which — unlike a request
- * — has no user to attribute the read to and must not throw on a missing identity
- * (it would just re-throw every cron tick).
- */
-export type OwnerGatewayAuth =
-  | { kind: "token"; context: SpcAuthContext }
-  | { kind: "unavailable"; reason: string };
-
-export interface ResolveMemberGatewayAuthInput {
-  organizationId: string;
-  projectId: string;
-  /** The row's persisted instance (auth config is read from the CURRENT row). */
-  instanceId: string;
-  /**
-   * The member who created the intent, from the row's `private_channel_user_id`.
-   * Null when the member was revoked after the fact (FK is ON DELETE SET NULL).
-   */
-  privateChannelUserId: string | null;
-}
-
-/**
- * Resolve gateway auth for a background job from the member persisted on the row.
- *
- * The acting member is captured at intent time, while the request is still
- * authenticated, so the cron reads it rather than re-deriving it. An on-chain address
- * cannot stand in for the actor: `private_channel_verified_wallets` answers a
- * different question (who verified this wallet, unique on
- * `user_id + instance_id + pubkey`, so 0, 1 or many answers), a cross-member deposit
- * resolves to the RECIPIENT rather than the actor, and an external recipient has no
- * row at all.
- *
- * Returns `unavailable` (never throws) when no identity is available — a revoked
- * member, a deleted instance, or a failed SPC login. The caller should skip that
- * row and leave it for manual resolution rather than fail the whole tick.
- *
- * NOTE: `auth_url` comes from the instance's CURRENT row, not the row's snapshot
- * (the snapshot pins the chain/gateway, and carries no auth endpoint).
- * Authenticating against the current auth service is the desired behaviour; if
- * that ever needs pinning too, add it to the snapshot.
- */
-export async function resolveMemberGatewayAuth(
-  env: Env,
-  { organizationId, projectId, instanceId, privateChannelUserId }: ResolveMemberGatewayAuthInput
-): Promise<OwnerGatewayAuth> {
-  if (!privateChannelUserId) {
-    return {
-      kind: "unavailable",
-      reason: "the member who created this intent has been revoked",
-    };
-  }
-
-  const instance = await createPrivateChannelInstanceRepository(env).getById(instanceId);
-  if (!instance) {
-    return { kind: "unavailable", reason: `instance ${instanceId} no longer exists` };
-  }
-
-  const pcUser = await createPrivateChannelUserRepository(env).getById(
-    { organizationId, projectId },
-    privateChannelUserId
-  );
-  if (!pcUser) {
-    return { kind: "unavailable", reason: `member ${privateChannelUserId} no longer exists` };
-  }
-
-  try {
-    const client = createAuthClient(instance.auth_url, {
-      timeoutMs: SPC_AUTH_TIMEOUT_MS,
-      fetchImpl: createPrivateChannelAuthFetch(env),
-    });
-    return {
-      kind: "token",
-      context: await openSpcAuthContext(env, organizationId, instanceId, pcUser, client),
-    };
-  } catch (error) {
-    return {
-      kind: "unavailable",
-      reason: `SPC login failed: ${error instanceof Error ? error.message : String(error)}`,
-    };
   }
 }

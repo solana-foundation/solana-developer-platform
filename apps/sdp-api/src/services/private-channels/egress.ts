@@ -52,7 +52,7 @@ const MAX_PROBE_RESPONSE_BYTES = 64 * 1024;
 /** Origins SDP ships as approved: the project's own public sandbox instance. */
 const BUILT_IN_ORIGINS: readonly string[] = [SANDBOX_DEFAULTS.gatewayUrl, SANDBOX_DEFAULTS.authUrl];
 
-export interface ApprovedOrigin {
+interface ApprovedOrigin {
   /** Canonical `scheme://host[:port]`. */
   origin: string;
   /**
