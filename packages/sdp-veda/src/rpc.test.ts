@@ -326,8 +326,10 @@ describe("withVedaOperationReads", () => {
     await withVedaOperationReads(async () => {
       await hold(read, sent, [A, B, C], 9n, ["a", null, "c"]);
       await expect(read(accounts([C, A]))).resolves.toEqual(answer(9n, ["c", "a"]));
-      // The SDK's own re-read at the slot it already observed.
-      await expect(read(accounts([B], { minContextSlot: 9 }))).resolves.toEqual(answer(9n, [null]));
+      // The SDK's own re-read at the slot it already observed, a bigint as it sends it.
+      await expect(read(accounts([B], { minContextSlot: 9n }))).resolves.toEqual(
+        answer(9n, [null])
+      );
     });
 
     expect(sent).toHaveLength(1);

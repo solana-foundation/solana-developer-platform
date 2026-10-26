@@ -6,6 +6,7 @@ import {
   createSolanaRpcFromTransport,
   type RpcTransport,
 } from "@solana/kit";
+import { z } from "zod";
 
 /**
  * Maximum time a single Veda RPC request may hold a worker open.
@@ -98,6 +99,40 @@ interface InFlightRead {
 /** Most `getMultipleAccounts` answers one operation holds. */
 const VEDA_OPERATION_HELD_CAPACITY = 16;
 
+/**
+ * A `getMultipleAccounts` an operation may hold or serve: a list of addresses
+ * and the SDK's plain config, never a data slice.
+ */
+const heldAccountsRequestSchema = z.object({
+  method: z.literal("getMultipleAccounts"),
+  params: z.union([
+    z.tuple([z.array(z.string())]),
+    z.tuple([
+      z.array(z.string()),
+      z.looseObject({
+        // Kit sends it as the SDK passed it, a bigint, and downcasts only on the wire.
+        minContextSlot: z
+          .union([z.number().int().nonnegative(), z.bigint().nonnegative()])
+          .optional(),
+        dataSlice: z.never().optional(),
+      }),
+    ]),
+  ]),
+});
+
+/** A successful `getMultipleAccounts` answer: account values at one context slot. */
+const heldAccountsAnswerSchema = z.looseObject({
+  error: z.never().optional(),
+  result: z.looseObject({
+    context: z.looseObject({
+      slot: z.union([z.number().int().nonnegative(), z.bigint().nonnegative()]),
+    }),
+    value: z.array(z.unknown()),
+  }),
+});
+
+type HeldAccountsAnswer = z.infer<typeof heldAccountsAnswerSchema>;
+
 /** One `getMultipleAccounts` answer an operation holds. */
 interface HeldAccounts {
   /** `stableKey` of the request's config without `minContextSlot`. */
@@ -106,11 +141,9 @@ interface HeldAccounts {
   slot: number;
   /** `readStamp()` of the request that answered it. */
   stamp: number;
-  /** Each requested address and its position in `value`. */
+  /** Each requested address and its position in the answer's `value`. */
   index: ReadonlyMap<string, number>;
-  envelope: Record<string, unknown>;
-  context: unknown;
-  value: readonly unknown[];
+  answer: HeldAccountsAnswer;
 }
 
 const operationReads = new AsyncLocalStorage<HeldAccounts[]>();
@@ -133,9 +166,9 @@ const operationReads = new AsyncLocalStorage<HeldAccounts[]>();
  * Only plain `getMultipleAccounts` is served, never a data slice, another
  * method or an error. It sits below the read context, so a scoped read's
  * minimum slot is checked against the held answer's slot, and an answer is
- * served only to a caller whose read floor it postdates. A nested call joins
- * the operation already open, so a build's own quote shares the build's reads;
- * a failover re-attempt is a new call and gets a fresh scope.
+ * served only to a caller whose read floor it postdates. `VedaVaultDirectClient`
+ * opens one per operation attempt, so a failover re-attempt starts with nothing
+ * held; a nested scope joins the one already open.
  */
 export function withVedaOperationReads<T>(operation: () => Promise<T>): Promise<T> {
   return operationReads.getStore() ? operation() : operationReads.run([], operation);
@@ -146,33 +179,19 @@ interface AccountsRead {
   addresses: readonly string[];
   /** `stableKey` of its config without `minContextSlot`. */
   config: string;
-  /** Its `minContextSlot`, 0 when absent. */
-  minimumSlot: number;
+  /** Its `minContextSlot`, when it names one. */
+  minimumSlot: number | undefined;
 }
 
-function accountsRead(params: unknown): AccountsRead | undefined {
-  if (!Array.isArray(params) || params.length > 2) return undefined;
-  const [addresses, config] = params as [unknown, unknown];
-  if (!Array.isArray(addresses) || !addresses.every((item) => typeof item === "string")) {
-    return undefined;
-  }
-  if (config !== undefined && asRecord(config) === undefined) return undefined;
-  const { minContextSlot, ...rest } = asRecord(config) ?? {};
-  if ("dataSlice" in rest) return undefined;
-  const minimumSlot = minContextSlot === undefined ? 0 : Number(minContextSlot);
-  if (!Number.isSafeInteger(minimumSlot) || minimumSlot < 0) return undefined;
-  return { addresses, config: stableKey(rest), minimumSlot };
-}
-
-/** The open operation's held answers and what it may hold of `request`, if anything. */
-function operationRead(request: {
-  method: string;
-  params: unknown;
-}): { held: HeldAccounts[]; read: AccountsRead } | undefined {
-  const held = operationReads.getStore();
-  if (!held || request.method !== "getMultipleAccounts") return undefined;
-  const read = accountsRead(request.params);
-  return read && { held, read };
+function accountsRead(request: z.infer<typeof heldAccountsRequestSchema>): AccountsRead {
+  const [addresses, config] = request.params;
+  if (config === undefined) return { addresses, config: stableKey({}), minimumSlot: undefined };
+  const { minContextSlot, ...rest } = config;
+  return {
+    addresses,
+    config: stableKey(rest),
+    minimumSlot: minContextSlot === undefined ? undefined : Number(minContextSlot),
+  };
 }
 
 /** The held answer, newest slot first, that covers every requested address. */
@@ -180,49 +199,43 @@ function serveHeld(
   held: readonly HeldAccounts[],
   read: AccountsRead,
   floor: number | undefined
-): Record<string, unknown> | undefined {
+): HeldAccountsAnswer | undefined {
   let best: { from: HeldAccounts; value: unknown[] } | undefined;
   for (const from of held) {
-    if (from.config !== read.config || from.slot < read.minimumSlot) continue;
+    if (from.config !== read.config) continue;
+    if (read.minimumSlot !== undefined && from.slot < read.minimumSlot) continue;
     if (floor !== undefined && from.stamp <= floor) continue;
     if (best && best.from.slot >= from.slot) continue;
     const value: unknown[] = [];
     for (const key of read.addresses) {
       const position = from.index.get(key);
       if (position === undefined) break;
-      value.push(from.value[position]);
+      value.push(from.answer.result.value[position]);
     }
     if (value.length === read.addresses.length) best = { from, value };
   }
   if (!best) return undefined;
-  return { ...best.from.envelope, result: { context: best.from.context, value: best.value } };
+  return { ...best.from.answer, result: { ...best.from.answer.result, value: best.value } };
 }
 
 function holdAnswer(
   held: HeldAccounts[],
   read: AccountsRead,
   stamp: number,
-  response: unknown
+  answer: HeldAccountsAnswer
 ): void {
-  const envelope = asRecord(response);
-  if (!envelope || envelope.error !== undefined) return;
-  const result = asRecord(envelope.result);
-  const answered = asRecord(result?.context)?.slot;
-  const slot = typeof answered === "bigint" ? Number(answered) : answered;
-  const value = result?.value;
-  if (
-    typeof slot !== "number" ||
-    !Number.isSafeInteger(slot) ||
-    !Array.isArray(value) ||
-    value.length !== read.addresses.length
-  ) {
-    return;
-  }
+  if (answer.result.value.length !== read.addresses.length) return;
   const index = new Map<string, number>();
   read.addresses.forEach((key, position) => {
     if (!index.has(key)) index.set(key, position);
   });
-  held.push({ config: read.config, slot, stamp, index, envelope, context: result?.context, value });
+  held.push({
+    config: read.config,
+    slot: Number(answer.result.context.slot),
+    stamp,
+    index,
+    answer,
+  });
   while (held.length > VEDA_OPERATION_HELD_CAPACITY) held.shift();
 }
 
@@ -266,65 +279,85 @@ export function withVedaReadDeduplication(transport: RpcTransport): RpcTransport
     }
   };
 
+  /** An identical request sent after the caller's floor and inside the join window, or a new one. */
+  const inFlightRead = (
+    key: string,
+    method: string,
+    config: Parameters<RpcTransport>[0],
+    floor: number | undefined
+  ): InFlightRead => {
+    const entry = inFlight.get(key);
+    if (
+      entry &&
+      (floor === undefined || entry.stamp > floor) &&
+      Date.now() - entry.sentAt < VEDA_SHARED_READ_JOIN_WINDOW_MS
+    ) {
+      return entry;
+    }
+    const controller = new AbortController();
+    const created: InFlightRead = {
+      stamp: readStamp(),
+      sentAt: Date.now(),
+      response: transport<unknown>({ ...config, signal: controller.signal }),
+      consumers: 0,
+      controller,
+    };
+    created.response.then(
+      (response) => {
+        if (inFlight.get(key) === created) inFlight.delete(key);
+        if (method === "getBlockTime" && isBlockTimeAnswer(response)) remember(key, response);
+      },
+      () => {
+        if (inFlight.get(key) === created) inFlight.delete(key);
+      }
+    );
+    inFlight.set(key, created);
+    return created;
+  };
+
+  /** One shared read, answered from the operation's held reads, a remembered block time, or the wire. */
+  const sharedRead = async (
+    key: string,
+    method: string,
+    config: Parameters<RpcTransport>[0]
+  ): Promise<unknown> => {
+    const floor = readFloor();
+    const held = operationReads.getStore();
+    const parsed = heldAccountsRequestSchema.safeParse(config.payload);
+    const operation =
+      held !== undefined && parsed.success ? { held, read: accountsRead(parsed.data) } : undefined;
+    const served = operation && serveHeld(operation.held, operation.read, floor);
+    if (served) {
+      if (config.signal?.aborted) throw config.signal.reason;
+      return served;
+    }
+
+    const remembered = blockTimes.get(key);
+    if (remembered && remembered.expiresAt > Date.now()) return remembered.response;
+    if (remembered) blockTimes.delete(key);
+
+    const joined = inFlightRead(key, method, config, floor);
+    const answer = await consume(joined, config.signal, () => {
+      if (inFlight.get(key) === joined) inFlight.delete(key);
+    });
+    if (operation) {
+      const heldAnswer = heldAccountsAnswerSchema.safeParse(answer);
+      if (heldAnswer.success) {
+        holdAnswer(operation.held, operation.read, joined.stamp, heldAnswer.data);
+      }
+    }
+    return answer;
+  };
+
   return async <TResponse>(config: Parameters<RpcTransport>[0]) => {
     const request = jsonRpcRequest(config.payload);
     if (!request || !VEDA_SHARED_READ_METHODS.has(request.method)) {
       return transport<TResponse>(config);
     }
     const key = stableKey([request.method, request.params]);
-    const floor = readFloor();
-
-    const operation = operationRead(request);
-    const served = operation && serveHeld(operation.held, operation.read, floor);
-    if (served) {
-      if (config.signal?.aborted) throw config.signal.reason;
-      return served as TResponse;
-    }
-
-    const remembered = blockTimes.get(key);
-    if (remembered && remembered.expiresAt > Date.now()) return remembered.response as TResponse;
-    if (remembered) blockTimes.delete(key);
-
-    let entry = inFlight.get(key);
-    if (
-      entry &&
-      ((floor !== undefined && entry.stamp <= floor) ||
-        Date.now() - entry.sentAt >= VEDA_SHARED_READ_JOIN_WINDOW_MS)
-    ) {
-      entry = undefined;
-    }
-    if (!entry) {
-      const controller = new AbortController();
-      const created: InFlightRead = {
-        stamp: readStamp(),
-        sentAt: Date.now(),
-        response: transport<unknown>({ ...config, signal: controller.signal }),
-        consumers: 0,
-        controller,
-      };
-      created.response.then(
-        (response) => {
-          if (inFlight.get(key) === created) inFlight.delete(key);
-          if (request.method === "getBlockTime" && isBlockTimeAnswer(response)) {
-            remember(key, response);
-          }
-        },
-        () => {
-          if (inFlight.get(key) === created) inFlight.delete(key);
-        }
-      );
-      inFlight.set(key, created);
-      entry = created;
-    }
-    const joined = entry;
-    const response = consume(joined, config.signal, () => {
-      if (inFlight.get(key) === joined) inFlight.delete(key);
-    });
-    if (!operation) return response as Promise<TResponse>;
-    return response.then((answer) => {
-      holdAnswer(operation.held, operation.read, joined.stamp, answer);
-      return answer;
-    }) as Promise<TResponse>;
+    // SAFETY: every shared answer is the envelope a transport returned for this
+    // exact method and params, which is the response `TResponse` names.
+    return (await sharedRead(key, request.method, config)) as TResponse;
   };
 }
 
@@ -358,12 +391,6 @@ function consume(
       signal.removeEventListener("abort", onAbort);
     });
   });
-}
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
 }
 
 function jsonRpcRequest(payload: unknown): { method: string; params: unknown } | undefined {

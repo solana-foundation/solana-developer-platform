@@ -272,27 +272,32 @@ fresh `client()` per call.
 
 ## The queue lifecycle reads each account once per operation
 
-Each queue function (options, preview, request build, cancel build, the two
-request reads) runs as one operation (`withVedaOperationReads`, `rpc.ts`). It
-first reads every account its SDK calls will fetch in ONE `getMultipleAccounts`
+Every `VedaVaultDirectClient` operation attempt runs in one scope
+(`withRuntime` opens `withVedaOperationReads`, `rpc.ts`). Each queue function
+(options, preview, request build, cancel build, the request read) first reads
+every account its SDK calls will fetch in ONE `getMultipleAccounts`
 (`holdAccounts`), naming them from the cached facts with the SDK's exported PDA
-helpers, then runs the SDK calls. Inside the operation the transport answers a
+helpers, then runs the SDK calls. Inside the scope the transport answers a
 `getMultipleAccounts` from an answer the operation already holds when that
 answer covers every address, under the same config, at a slot no older than the
 request's `minContextSlot`: exactly what the narrower request would have
 returned at that slot, and the one consistent snapshot the SDK's own
 `minContextSlot: preflight.slot` re-read asks for. Before this, one request
-build fetched the vault state 15 times.
+build fetched the vault state 15 times. Requests and answers are parsed with
+zod before anything is held, and the SDK's `getState` identity (share mint,
+vault id) where it crosses into the cached facts.
 
 Live still means live. The batched read runs in the caller's scope (read floor,
 minimum slot) on every call, and held answers die with the operation, so nothing
 value-bearing outlives it. Only plain `getMultipleAccounts` is held or served,
-never a slice, an error or another method. A nested call joins the open
-operation (a build's own quote shares the build's read), and the API's failover
-re-attempt is a new call with a fresh scope. An account the SDK reads that the
-batch did not name (an oracle feed taken from live asset data) is fetched on its
-own: an SDK upgrade that reads something new costs requests, never correctness,
-and `sdk-rpc-budget.test.ts` shows it as a second account list.
+never a slice, an error or another method. A build's own quote runs inside the
+build's operation and shares its read, and the API's failover re-attempt opens a
+fresh scope. A function called outside the client (the Surfpool proof) has no
+scope, so nothing is served and its batch is one extra request. An account the
+SDK reads that the batch did not name (an oracle feed taken from live asset
+data) is fetched on its own: an SDK upgrade that reads something new costs
+requests, never correctness, and `sdk-rpc-budget.test.ts` shows it as a second
+account list.
 
 Devnet, 2026-10-26, warm, before → after: withdrawal options 24 → 2, queued
 preview 22 → 2 (3 on the first, which reads the mint's decimals), request build
