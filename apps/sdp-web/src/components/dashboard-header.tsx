@@ -1227,7 +1227,7 @@ export function getDashboardPageConfig(
     return privateChannelsConfig;
   }
   if (pathname.startsWith("/dashboard/payments/")) {
-    const action = getPaymentsActions(t).find((item) => pathname.startsWith(item.href));
+    const action = getPaymentsActions(t, true).find((item) => pathname.startsWith(item.href));
     const title = action
       ? action.label
       : pathname.endsWith("/receive")

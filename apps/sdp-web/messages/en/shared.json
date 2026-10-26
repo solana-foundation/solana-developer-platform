@@ -280,7 +280,7 @@
   },
   "dashboardShell": {
     "readOnly": "Read-only",
-    "readOnlyEmptyNote": "You have read-only access. An admin or member can add the first one.",
+    "readOnlyEmptyNote": "You have read-only access. Ask a teammate who can make changes to add the first one.",
     "workspace": "Workspace",
     "openNavigation": "Open navigation",
     "primaryNavigation": "Primary",

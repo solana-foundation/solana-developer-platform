@@ -43,6 +43,7 @@ vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => mocks.workspace,
   useOptionalDashboardWorkspace: () => mocks.workspace,
+  useCanWrite: () => mocks.workspace.dashboardAccess.capabilities.canWrite,
 }));
 
 const { HomeWorkspace } = await import("./home-workspace");
@@ -260,6 +261,11 @@ describe("Overview (HomeWorkspace)", () => {
     };
     renderOverview({ wallets: [], balances: [], walletCount: 0, totalBalance: null });
     expect(screen.queryByRole("link", { name: "Create a wallet" })).toBeNull();
+    expect(
+      screen.getByText(
+        "You have read-only access. Ask a teammate who can make changes to add the first one."
+      )
+    ).toBeTruthy();
     expect(section("actions")).toBeNull();
   });
 

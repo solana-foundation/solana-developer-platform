@@ -493,6 +493,7 @@ export function DashboardShell({
     marketsEnabled,
     paymentsEnabled,
     privateChannelsEnabled,
+    canWrite: dashboardAccess.capabilities.canWrite,
     walletFavorites: walletFavoriteItems,
     rampsEnabled,
   });
@@ -539,9 +540,12 @@ export function DashboardShell({
     ) : null;
   // A read-only member sees why no page offers a write, in the slot a route's action would take.
   const readOnlyBadge = dashboardAccess.capabilities.canWrite ? null : (
-    <Badge variant="outline" className="gap-1" data-testid="dashboard-read-only-badge">
-      <LockIcon className="size-3" aria-hidden />
-      {t("Shared.dashboardShell.readOnly")}
+    <Badge variant="outline" data-testid="dashboard-read-only-badge">
+      {/* The badge wraps its children in one block span, so the icon and label need a row. */}
+      <span className="inline-flex items-center gap-1">
+        <LockIcon className="size-3" aria-hidden />
+        {t("Shared.dashboardShell.readOnly")}
+      </span>
     </Badge>
   );
   // A page's own actions (a wallet's star) sit before the route's action, in the same slot.
