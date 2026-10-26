@@ -176,6 +176,8 @@ const mocks = vi.hoisted(() => ({
     | undefined,
   // Vault address -> "loading" | "error" | a Kamino allocations payload.
   allocationsByVault: {} as Record<string, "loading" | "error" | Record<string, unknown>>,
+  // Real SWR keeps the last read beside a later error.
+  allocationsFailAfterRead: false,
   allocationsRequests: [] as Array<string | undefined>,
 }));
 
@@ -204,7 +206,11 @@ vi.mock("./kamino-allocations", () => ({
         isLoading: false,
       };
     }
-    return { allocations: state, error: undefined, isLoading: false };
+    return {
+      allocations: state,
+      error: mocks.allocationsFailAfterRead ? new Error("refresh failed") : undefined,
+      isLoading: false,
+    };
   },
 }));
 
@@ -773,6 +779,19 @@ function rerenderWorkspace(view: ReturnType<typeof renderWorkspace>) {
   view.rerender(workspaceElement());
 }
 
+/** The summary's hero figure: what is deposited across open positions. */
+function summaryFigure(): string | undefined {
+  const label = within(document.body).getByRole("heading", { name: "Deposited" });
+  return label.nextElementSibling?.textContent ?? undefined;
+}
+
+/** One custody wallet's tile. */
+function walletTile(walletId: string): HTMLElement {
+  const tile = document.querySelector<HTMLElement>(`[data-treasury-wallet="${walletId}"]`);
+  if (!tile) throw new Error(`Expected the ${walletId} wallet tile`);
+  return tile;
+}
+
 /** The Active positions row for the recorded live position. */
 function livePositionRow(): HTMLTableRowElement {
   const row = screen
@@ -839,6 +858,7 @@ beforeEach(() => {
   mocks.walletsEmpty = false;
   mocks.corruptStableShareMint = false;
   mocks.allocationsByVault = {};
+  mocks.allocationsFailAfterRead = false;
   mocks.allocationsRequests = [];
   vi.clearAllMocks();
 });
@@ -912,25 +932,21 @@ describe("TreasurySolutionsWorkspace", () => {
       within(activePositionsTable)
         .getAllByRole("columnheader")
         .map((header) => header.textContent)
-    ).toEqual(["Position", "Asset", "Balance", "Wallet", "Status", "Actions"]);
-    expect(
-      within(vaultPositionRow)
-        .getByText("Active")
-        .closest("[data-variant]")
-        ?.getAttribute("data-variant")
-    ).toBe("success");
+    ).toEqual(["Position", "Wallet", "Status", "Balance", "Actions"]);
+    // Status reads as words in its tone, not a pill.
+    expect(within(vaultPositionRow).getByText("Active").className).toContain("text-success");
 
     // PRO-1723: the allocation summary totals the float above the tables.
     expect(screen.getByText("Deposited")).toBeTruthy();
     expect(screen.getAllByText("Available cash").length).toBeGreaterThan(0);
-    expect(screen.getByText("Est. APY")).toBeTruthy();
-    expect(screen.getByLabelText("$130.50 in open vault positions")).toBeTruthy();
+    expect(screen.getByText("est. APY")).toBeTruthy();
+    expect(summaryFigure()).toBe("$130.50");
 
     // Vault ownership renders as the wallet's deployed line, never as a
     // receipt-token tile or a raw share count.
     expect(screen.queryByText("kUSDC")).toBeNull();
     expect(screen.queryByText("119.5")).toBeNull();
-    expect(screen.getByText("Deployed")).toBeTruthy();
+    expect(screen.getAllByText("Deployed").length).toBeGreaterThan(0);
     expect(screen.getAllByText("$130.50").length).toBeGreaterThan(0);
     expect(screen.getByText("Retired provider vault")).toBeTruthy();
     expect(screen.queryByText("Exited provider vault")).toBeNull();
@@ -969,7 +985,7 @@ describe("TreasurySolutionsWorkspace", () => {
       "$2,000.00"
     );
     expect(within(residualRow).queryByRole("button", { name: "Withdraw" })).toBeNull();
-    expect(screen.getByLabelText("$2,130.50 in open vault positions")).toBeTruthy();
+    expect(summaryFigure()).toBe("$2,130.50");
 
     await userEvent
       .setup()
@@ -1139,9 +1155,7 @@ describe("TreasurySolutionsWorkspace", () => {
     const depositedStatus = within(depositedPositionRow).getByRole("button", {
       name: "Active: This position is active.",
     });
-    expect(depositedStatus.querySelector("[data-variant]")?.getAttribute("data-variant")).toBe(
-      "success"
-    );
+    expect(depositedStatus.querySelector(".text-success")).not.toBeNull();
   });
 
   it("applies the modal's deposit movement update to the matching table row", async () => {
@@ -1218,7 +1232,7 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(updatingBalance?.querySelector("[data-earn-vault-balance-value]")?.textContent).toBe(
       "Updating balance…"
     );
-    expect(updatingBalance?.className).toContain("animate-pulse");
+    expect(updatingBalance?.querySelector(".animate-pulse")).not.toBeNull();
     expect(updatingBalance?.textContent).toContain("Updating balance…");
     // One read for the submission, one asked for by the commit.
     expect(mocks.refreshPositions).toHaveBeenCalledTimes(2);
@@ -1484,7 +1498,7 @@ describe("TreasurySolutionsWorkspace", () => {
     const updatingBalance = within(pendingRow).getByText("Updating balance…");
     const updatingBalanceContainer = updatingBalance.closest("[data-earn-vault-balance]");
     expect(updatingBalanceContainer?.getAttribute("data-earn-vault-balance")).toBe("syncing");
-    expect(updatingBalanceContainer?.className).toContain("animate-pulse");
+    expect(updatingBalanceContainer?.querySelector(".animate-pulse")).not.toBeNull();
 
     mocks.positionsEmpty = false;
     mocks.livePositionTokenValue = "10";
@@ -1633,7 +1647,7 @@ describe("TreasurySolutionsWorkspace", () => {
       });
     });
     expect(screen.getAllByRole("status", { name: "Updating balance…" }).length).toBeGreaterThan(1);
-    expect(screen.getByRole("heading", { name: "Operating treasury" })).toBeTruthy();
+    expect(walletTile("cwlt_live").textContent).toContain("Operating treasury");
     expect(mocks.refreshPositions).toHaveBeenCalledTimes(1);
     await act(async () => finishWalletRead?.());
     expect(screen.getAllByRole("status", { name: "Updating balance…" }).length).toBeGreaterThan(1);
@@ -1700,9 +1714,7 @@ describe("TreasurySolutionsWorkspace", () => {
     const withdrawnStatus = within(withdrawnPositionRow).getByRole("button", {
       name: "Active: This position is active.",
     });
-    expect(withdrawnStatus.querySelector("[data-variant]")?.getAttribute("data-variant")).toBe(
-      "success"
-    );
+    expect(withdrawnStatus.querySelector(".text-success")).not.toBeNull();
   });
 
   it("applies the modal's withdrawal movement update to the matching table row", async () => {
@@ -1774,15 +1786,15 @@ describe("TreasurySolutionsWorkspace", () => {
     });
 
     const updatingBalance = within(positionRow).getByText("Updating balance…");
-    expect(updatingBalance.closest("[data-earn-vault-balance]")?.className).toContain(
-      "animate-pulse"
-    );
+    expect(
+      updatingBalance.closest("[data-earn-vault-balance]")?.querySelector(".animate-pulse")
+    ).not.toBeNull();
     expect(
       within(positionRow).getByRole("button", { name: "Active: This position is active." })
     ).toBeTruthy();
   });
 
-  it("renders lean strategy columns with the provider under each position", () => {
+  it("renders lean strategy columns with the provider under each strategy", () => {
     renderWorkspace();
 
     const instantRow = screen
@@ -1790,9 +1802,9 @@ describe("TreasurySolutionsWorkspace", () => {
       .map((element) => element.closest("tr"))
       .find((row) => row?.textContent?.includes("6.2%"));
     if (!instantRow) throw new Error("Expected the instant strategy row");
-    expect(within(instantRow).getByText("Kamino")).toBeTruthy();
+    expect(within(instantRow).getByText("Kamino · Devnet")).toBeTruthy();
     expect(within(instantRow).queryByText("Instant")).toBeNull();
-    expect(within(instantRow).getAllByRole("cell")).toHaveLength(7);
+    expect(within(instantRow).getAllByRole("cell")).toHaveLength(5);
 
     const strategyTable = instantRow.closest("table");
     if (!strategyTable) throw new Error("Expected the available strategies table");
@@ -1800,15 +1812,15 @@ describe("TreasurySolutionsWorkspace", () => {
       within(strategyTable)
         .getAllByRole("columnheader")
         .map((header) => header.textContent)
-    ).toEqual(["Position", "Asset", "Your position", "APY", "TVL", "Information", "Actions"]);
+    ).toEqual(["Strategy", "APY", "TVL", "Your position", "Actions"]);
     expect(within(instantRow).getByText("$12,345,678.90")).toBeTruthy();
 
     const delayedRow = screen.getByText("Veda Treasury Fund").closest("tr");
     if (!delayedRow) throw new Error("Expected the delayed strategy row");
-    expect(within(delayedRow).getByText("Veda")).toBeTruthy();
+    expect(within(delayedRow).getByText("Veda · Devnet")).toBeTruthy();
     expect(within(delayedRow).queryByText("Delayed · 7 days")).toBeNull();
     // No observed APY renders the placeholder, never a fabricated rate.
-    expect(within(delayedRow).getAllByRole("cell")[3]?.textContent).toBe("\u2014");
+    expect(within(delayedRow).getAllByRole("cell")[1]?.textContent).toBe("\u2014");
     expect(delayedRow.textContent).not.toMatch(/\d%/);
   });
 
@@ -1953,7 +1965,7 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(within(mainnetRow).queryByText(/deployed/)).toBeNull();
   });
 
-  it("degrades the Information cell to the placeholder when the allocations read fails", () => {
+  it("adds no allocation detail when the allocations read fails", () => {
     mocks.allocationsByVault.KvaultMainnet111111111111111111111111111111 = "error";
     renderWorkspace();
 
@@ -1962,12 +1974,30 @@ describe("TreasurySolutionsWorkspace", () => {
       .map((element) => element.closest("tr"))
       .find((row) => row?.textContent?.includes("8.1%"));
     if (!mainnetRow) throw new Error("Expected the mainnet mirror strategy row");
-    // Same placeholder as a non-Kamino row — never a partial or stale figure.
-    expect(within(mainnetRow).getAllByRole("cell")[5]?.textContent).toBe("—");
+    // The same detail line as a non-Kamino row: never a partial figure.
+    expect(within(mainnetRow).getByText("Kamino")).toBeTruthy();
     expect(within(mainnetRow).queryByText(/deployed/)).toBeNull();
+    expect(within(mainnetRow).queryByRole("button", { name: /Allocation details/ })).toBeNull();
   });
 
-  it("renders the Information placeholder for devnet Kamino rows without requesting", () => {
+  it("keeps the last allocation disclosure when a later read fails", () => {
+    mocks.allocationsByVault.KvaultMainnet111111111111111111111111111111 = {
+      allocations: [{ reserve: "reserve-1", marketName: "SOL/BTC Market", actualPct: "99.94" }],
+      unallocated: { pct: "0.06" },
+    };
+    mocks.allocationsFailAfterRead = true;
+    renderWorkspace();
+
+    const mainnetRow = screen
+      .getAllByText("Kamino JLP Vault")
+      .map((element) => element.closest("tr"))
+      .find((row) => row?.textContent?.includes("8.1%"));
+    if (!mainnetRow) throw new Error("Expected the mainnet mirror strategy row");
+    // A refresh that failed says nothing new about the vault: the last read still stands.
+    expect(within(mainnetRow).getByRole("button", { name: /99.9% deployed/ })).toBeTruthy();
+  });
+
+  it("adds no allocation detail to devnet Kamino rows and requests none", () => {
     renderWorkspace();
 
     // The devnet shelf's instant row shares the mainnet mirror's name: pick
@@ -1978,27 +2008,27 @@ describe("TreasurySolutionsWorkspace", () => {
       .find((row) => row?.textContent?.includes("6.2%"));
     if (!instantRow) throw new Error("Expected the instant strategy row");
     // Kamino's allocations source is mainnet-only: the devnet vault is an
-    // unsupported read, so it takes the placeholder without a request.
-    expect(within(instantRow).getAllByRole("cell")[5]?.textContent).toBe("—");
-    const informationCell = within(instantRow).getAllByRole("cell")[5];
-    if (!informationCell) throw new Error("Expected the Information cell");
-    expect(within(informationCell).queryByRole("button")).toBeNull();
+    // unsupported read, so its detail line is the provider and network alone.
+    const strategyCell = within(instantRow).getAllByRole("cell")[0];
+    if (!strategyCell) throw new Error("Expected the strategy cell");
+    expect(within(strategyCell).getByText("Kamino · Devnet")).toBeTruthy();
+    expect(within(strategyCell).queryByRole("button")).toBeNull();
     expect(mocks.allocationsRequests).not.toContain("Kvault11111111111111111111111111111111111");
     // The devnet-only vault has no mainnet counterpart: the rough-name
     // intersection hides the whole row, so no cell of it can render at all.
     expect(screen.queryByText("Kamino Vault USDC")).toBeNull();
   });
 
-  it("renders the Information placeholder for a non-Kamino strategy", () => {
+  it("adds no allocation detail to a non-Kamino strategy", () => {
     renderWorkspace();
 
     const delayedRow = screen.getByText("Veda Treasury Fund").closest("tr");
     if (!delayedRow) throw new Error("Expected the delayed strategy row");
-    expect(within(delayedRow).getAllByRole("cell")[5]?.textContent).toBe("—");
+    expect(within(delayedRow).getByText("Veda · Devnet")).toBeTruthy();
     expect(within(delayedRow).queryByRole("button", { name: /deployed/ })).toBeNull();
   });
 
-  it("sorts active balances, strategy APYs, and TVLs while keeping unavailable values last", async () => {
+  it("keeps positions newest first until sorted, and sorts balances, APYs and TVLs with unavailable values last", async () => {
     const user = userEvent.setup();
     renderWorkspace();
 
@@ -2019,17 +2049,25 @@ describe("TreasurySolutionsWorkspace", () => {
         .map((row) => within(row).getAllByRole("cell")[0]?.textContent);
 
     const balanceHeader = within(activeTable).getByRole("columnheader", { name: "Balance" });
+    // The API's order, newest first: a balance that changes under an action never moves its row.
+    expect(balanceHeader.getAttribute("aria-sort")).toBe("none");
+    expect(firstColumn(activeTable)).toEqual([
+      "Steakhouse USDCKamino · USDC",
+      "Retired provider vaultKamino · USDC",
+    ]);
+
+    await user.click(within(activeTable).getByRole("button", { name: "Balance" }));
     expect(balanceHeader.getAttribute("aria-sort")).toBe("descending");
     expect(firstColumn(activeTable)).toEqual([
-      "Steakhouse USDCKamino",
-      "Retired provider vaultKamino",
+      "Steakhouse USDCKamino · USDC",
+      "Retired provider vaultKamino · USDC",
     ]);
 
     await user.click(within(activeTable).getByRole("button", { name: "Balance" }));
     expect(balanceHeader.getAttribute("aria-sort")).toBe("ascending");
     expect(firstColumn(activeTable)).toEqual([
-      "Retired provider vaultKamino",
-      "Steakhouse USDCKamino",
+      "Retired provider vaultKamino · USDC",
+      "Steakhouse USDCKamino · USDC",
     ]);
 
     const apyHeader = within(strategiesTable).getByRole("columnheader", { name: "APY" });
@@ -2040,9 +2078,9 @@ describe("TreasurySolutionsWorkspace", () => {
       "Kamino JLP VaultKamino",
       "Steakhouse USDCKamino",
       "Allez USDCKamino",
-      "Steakhouse USDCDevnetKamino",
-      "Allez USDCDevnetKamino",
-      "Veda Treasury FundDevnetVeda",
+      "Steakhouse USDCKamino · Devnet",
+      "Allez USDCKamino · Devnet",
+      "Veda Treasury FundVeda · Devnet",
     ]);
 
     await user.click(within(strategiesTable).getByRole("button", { name: "APY" }));
@@ -2051,9 +2089,9 @@ describe("TreasurySolutionsWorkspace", () => {
       "Allez USDCKamino",
       "Steakhouse USDCKamino",
       "Kamino JLP VaultKamino",
-      "Allez USDCDevnetKamino",
-      "Steakhouse USDCDevnetKamino",
-      "Veda Treasury FundDevnetVeda",
+      "Allez USDCKamino · Devnet",
+      "Steakhouse USDCKamino · Devnet",
+      "Veda Treasury FundVeda · Devnet",
     ]);
 
     await user.click(within(strategiesTable).getByRole("button", { name: "TVL" }));
@@ -2063,9 +2101,9 @@ describe("TreasurySolutionsWorkspace", () => {
       "Steakhouse USDCKamino",
       "Kamino JLP VaultKamino",
       "Allez USDCKamino",
-      "Allez USDCDevnetKamino",
-      "Steakhouse USDCDevnetKamino",
-      "Veda Treasury FundDevnetVeda",
+      "Allez USDCKamino · Devnet",
+      "Steakhouse USDCKamino · Devnet",
+      "Veda Treasury FundVeda · Devnet",
     ]);
 
     await user.click(within(strategiesTable).getByRole("button", { name: "TVL" }));
@@ -2074,9 +2112,9 @@ describe("TreasurySolutionsWorkspace", () => {
       "Allez USDCKamino",
       "Kamino JLP VaultKamino",
       "Steakhouse USDCKamino",
-      "Steakhouse USDCDevnetKamino",
-      "Allez USDCDevnetKamino",
-      "Veda Treasury FundDevnetVeda",
+      "Steakhouse USDCKamino · Devnet",
+      "Allez USDCKamino · Devnet",
+      "Veda Treasury FundVeda · Devnet",
     ]);
   });
 
@@ -2198,13 +2236,14 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(screen.queryByTestId("treasury-allocation-bar")).toBeNull();
   });
 
-  it("renders the Figma summary trio without the legacy allocation bar", () => {
+  it("renders the summary hero and stat line without the legacy allocation bar", () => {
     renderWorkspace();
 
     expect(screen.queryByTestId("treasury-allocation-bar")).toBeNull();
     expect(screen.getByText("Deposited")).toBeTruthy();
     expect(screen.getAllByText("Available cash").length).toBeGreaterThan(0);
-    expect(screen.getByText("Est. APY")).toBeTruthy();
+    expect(screen.getByText("available cash")).toBeTruthy();
+    expect(screen.getByText("est. APY")).toBeTruthy();
   });
 
   it("treats a catalogue row with no share mint as an incomplete vocabulary", () => {
@@ -2324,7 +2363,7 @@ describe("TreasurySolutionsWorkspace", () => {
 
     // Readable zeros are real zeros; only the shares stay unallocated.
     expect(screen.getAllByText("$0.00").length).toBeGreaterThan(0);
-    expect(screen.getByText("Est. APY")).toBeTruthy();
+    expect(screen.getByText("est. APY")).toBeTruthy();
   });
 
   it("reads an unhydratable position as unavailable in the summary, never zero", () => {
@@ -2407,9 +2446,8 @@ describe("TreasurySolutionsWorkspace", () => {
 
     const row = screen.getByText("Veda Treasury Fund").closest("tr");
     if (!row) throw new Error("Expected vault strategy row");
-    expect(
-      (within(row).getByRole("button", { name: "Deposit" }) as HTMLButtonElement).disabled
-    ).toBe(true);
+    // The reason it cannot be funded, as words, never a dead button.
+    expect(within(row).queryByRole("button", { name: "Deposit" })).toBeNull();
     expect(within(row).getByText("Sandbox only")).toBeTruthy();
     expect(screen.getByLabelText(/Rates are provider-reported and variable/)).toBeTruthy();
   });
@@ -2420,9 +2458,7 @@ describe("TreasurySolutionsWorkspace", () => {
 
     const programRow = screen.getByText("Legacy treasury program").closest("tr");
     if (!programRow) throw new Error("Expected existing provider program row");
-    expect(
-      (within(programRow).getByRole("button", { name: "Withdraw" }) as HTMLButtonElement).disabled
-    ).toBe(true);
+    expect(within(programRow).queryByRole("button", { name: "Withdraw" })).toBeNull();
     expect(within(programRow).getByText("Provider withdrawal unavailable")).toBeTruthy();
   });
 
@@ -2604,11 +2640,10 @@ describe("TreasurySolutionsWorkspace — combined strategy catalogue (PRO-1742)"
     expect(devnetRow).toBeDefined();
     const mainnetCells = within(mainnetRow as HTMLTableRowElement);
     expect(mainnetCells.getByText("$32,000,000.00")).toBeTruthy();
-    expect(mainnetCells.queryByText("Devnet")).toBeNull();
-    expect(within(devnetRow as HTMLTableRowElement).getByText("Devnet")).toBeTruthy();
-    expect(mainnetCells.getByRole("button", { name: "Deposit" }).hasAttribute("disabled")).toBe(
-      true
-    );
+    expect(mainnetCells.queryByText(/Devnet/)).toBeNull();
+    expect(within(devnetRow as HTMLTableRowElement).getByText("Kamino · Devnet")).toBeTruthy();
+    expect(mainnetCells.queryByRole("button", { name: "Deposit" })).toBeNull();
+    expect(mainnetCells.getByText("Mainnet only")).toBeTruthy();
     expect(
       within(devnetRow as HTMLTableRowElement)
         .getByRole("button", { name: "Deposit" })
@@ -2616,8 +2651,8 @@ describe("TreasurySolutionsWorkspace — combined strategy catalogue (PRO-1742)"
     ).toBe(false);
 
     const reason = "Mainnet vaults are view-only in Sandbox.";
-    const disabledTrigger = mainnetCells.getByRole("note", { name: reason });
-    await user.hover(disabledTrigger);
+    const reasonHint = mainnetCells.getByRole("button", { name: reason });
+    await user.hover(reasonHint);
     expect(await screen.findByText(reason)).toBeTruthy();
   });
 

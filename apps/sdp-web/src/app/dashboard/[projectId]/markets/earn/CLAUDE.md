@@ -651,12 +651,22 @@ browser pass on `/dashboard/markets/embedded-yield` and
   (`EARN_PROVIDER_SURFACING`), while the sync keeps storing both so the DB stays
   a truthful provider inventory. Do not reimplement either here: a client-side
   copy would drift, and a hidden row never reaches the browser to begin with.
-- Design system: SDP quiet-institutional (see `.claude/skills/sdp-ui-designer`).
-  Inter only — monospace is forbidden, including for addresses; use
+- Design system: the 2026 refresh on the routes `lib/theme-scope-routes.ts`
+  lists. Type, colour and shapes come from `@sdp/design-tokens` in the
+  `refresh` scope; pages compose the shared refresh blocks (`RecordStack` and
+  `RecordBlock`, `StatusText` for status as words, the borderless design-system
+  `Table` in the Payments list type, `ActionTile`, `ListEmptyState`) rather than
+  bordered cards. Monospace is forbidden, including for addresses; use
   `tabular-nums` for numeric alignment. The ONE exception is a genuine code
-  surface: the integration guide's `ui/code-block`, which is mono by design. Selection
-  state is `border-primary bg-fill-subtle` across the whole module. `Badge` is
-  status-only.
+  surface: the integration guide's `ui/code-block`, which is mono by design.
+  Selection state is `border-primary bg-fill-subtle` across the whole module.
+  `Badge` is status-only.
+- **Zero layout shift on Treasury.** Every loading, empty and error state keeps
+  the ready footprint: the route skeleton and the in-page states share
+  `treasury-solutions/treasury-layout.ts` (column widths, the positions body's
+  two-row floor) and `markets-route-skeletons.tsx`, and sections that most
+  treasuries never show (queued requests, custodial programs) render nothing
+  until they have rows. A table's columns drop below `@2xl`, never its action.
 - **Nothing may overlap — provider and fund names run long.**
   `@solana/design-system`'s `cn` is a plain string join — **no tailwind-merge**.
   A class handed to `Table*` that conflicts with one of its own base classes

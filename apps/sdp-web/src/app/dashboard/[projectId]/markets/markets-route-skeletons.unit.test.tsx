@@ -75,6 +75,32 @@ function occurrences(markup: string, needle: string): number {
   return markup.split(needle).length - 1;
 }
 
+// Treasury loads into the footprint it ends with: the same summary, tiles and tables the page
+// draws, so nothing under them moves when the reads land.
+describe("Treasury route skeleton", () => {
+  const html = renderToStaticMarkup(<TreasurySolutionsSkeleton />);
+
+  it("draws the summary, the wallet tiles and both tables in the page column's stack", () => {
+    expect(html).toContain('data-loading-layout="treasury"');
+    expect(html).toContain('data-treasury-loading="summary"');
+    expect(html).toContain('data-treasury-loading="wallets"');
+    expect(occurrences(html, 'data-treasury-loading="table"')).toBe(2);
+    expect(html).not.toContain("max-w-[90rem]");
+  });
+
+  it("draws one wallet tile where tiles stack and two where they pair", () => {
+    const wallets = html.slice(html.indexOf('data-treasury-loading="wallets"'));
+    expect(occurrences(wallets, "rounded-card bg-surface-tile")).toBe(2);
+    expect(wallets).toContain("hidden @xl:flex");
+  });
+
+  it("holds the positions table's two-row footprint", () => {
+    expect(html).toContain("flex min-h-40 min-w-0 flex-col");
+    // The positions and strategies heads, five columns each.
+    expect(occurrences(html, "<th ")).toBe(10);
+  });
+});
+
 // Each DvP skeleton mirrors the page it stands in for. These pin the parts
 // that went stale before: a five-step wizard with a side rail stood in for a
 // two-step create form, and two coarse blocks for the trade page.

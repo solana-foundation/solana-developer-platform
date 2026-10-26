@@ -1,17 +1,30 @@
+import { cn } from "@sdp/ui/cn";
 import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 import { TableCell } from "@sdp/ui/table";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
-import { Fragment } from "react";
+import { Fragment, type ReactNode } from "react";
+import {
+  PAYMENTS_TABLE_CELL,
+  PAYMENTS_TABLE_HEAD,
+} from "@/app/dashboard/[projectId]/payments/payments-table";
 import {
   DashboardWorkspaceCard,
   DashboardWorkspaceOverviewPanel,
 } from "@/components/dashboard-workspace-panel";
 import { RecordStack } from "@/components/refresh-record";
 import type { DashboardFlags } from "@/flags/dashboard";
+import {
+  TREASURY_POSITION_COLUMNS,
+  TREASURY_POSITIONS_BODY,
+  TREASURY_STRATEGY_COLUMNS,
+  TREASURY_TABLE,
+  TREASURY_TABLE_FRAME,
+  TREASURY_WALLET_GRID,
+} from "./treasury-solutions/treasury-layout";
 
 const BALANCE_SKELETON_IDS = ["one", "two", "three"];
-const STRATEGY_SKELETON_IDS = ["one", "two", "three"];
-const TREASURY_SECTION_SKELETON_IDS = ["one", "two"];
+const TREASURY_TILE_FIGURE_SKELETON_IDS = ["cash", "deployed"];
+const TREASURY_TABLE_SKELETON_ROW_IDS = ["one", "two", "three", "four"];
 const EARN_PATH_SKELETON_IDS = ["treasury", "program"];
 const DVP_PATH_SKELETON_IDS = ["dvp"];
 const INTEGRATION_SECTION_SKELETON_IDS = ["client", "deposit", "portfolio", "withdraw"];
@@ -53,40 +66,151 @@ export function MarketsLandingFlagsSkeleton({ flags }: { flags?: DashboardFlags 
   return <MarketsLandingSkeleton earn={flags?.earn ?? false} dvp={flags?.dvp ?? false} />;
 }
 
-export function TreasurySolutionsSkeleton() {
+/**
+ * Treasury's summary while it loads: the 16px label line, the 44px hero figure 6px under it,
+ * then the rule and the 24px stat line, as the page sets them.
+ */
+export function TreasurySummarySkeleton() {
   return (
-    <DashboardWorkspaceOverviewPanel aria-busy="true">
-      <div className="mx-auto flex w-full max-w-[90rem] flex-col gap-16">
-        <div className="grid gap-2 sm:grid-cols-3">
-          {BALANCE_SKELETON_IDS.map((id) => (
-            <SkeletonBlock className="h-[7.5625rem] rounded-xl" key={`summary-${id}`} />
-          ))}
+    <section className="min-w-0" data-treasury-loading="summary">
+      <div className="flex h-4 items-center">
+        <SkeletonBlock className="h-3 w-20" />
+      </div>
+      <SkeletonBlock className="mt-1.5 h-11 w-40" />
+      <div className="mt-10 border-t border-border-default pt-6">
+        <div className="flex h-6 items-center">
+          <SkeletonBlock className="h-4 w-64 max-w-full" />
         </div>
-        <section>
-          <div className="flex items-center justify-between gap-4">
-            <SkeletonBlock className="h-6 w-36" />
-            <SkeletonBlock className="h-7 w-16 rounded-md" />
+      </div>
+    </section>
+  );
+}
+
+/** One custody wallet tile: the mark beside two 20px lines, then the two 36px figures. */
+function TreasuryWalletTileSkeleton({ className }: { className?: string }) {
+  return (
+    <div className={cn("flex min-w-0 flex-col rounded-card bg-surface-tile", className)}>
+      <div className="flex items-center gap-3 px-4 pt-4">
+        <SkeletonBlock className="size-8 shrink-0 rounded-full" />
+        <div className="min-w-0 flex-1">
+          <div className="flex h-5 items-center">
+            <SkeletonBlock className="h-3.5 w-28" />
           </div>
-          <div className="mt-4 grid gap-2 md:grid-cols-3">
-            {BALANCE_SKELETON_IDS.map((id) => (
-              <SkeletonBlock className="h-[10.9375rem] rounded-2xl" key={`wallet-${id}`} />
-            ))}
+          <div className="flex h-5 items-center">
+            <SkeletonBlock className="h-3 w-16" />
           </div>
-        </section>
-        {TREASURY_SECTION_SKELETON_IDS.map((section) => (
-          <section key={section}>
-            <SkeletonBlock className="h-6 w-40" />
-            <div className="mt-4 overflow-hidden rounded-2xl border border-border-default">
-              {STRATEGY_SKELETON_IDS.map((id) => (
-                <SkeletonBlock
-                  className="h-[3.75rem] w-full rounded-none"
-                  key={`${section}-${id}`}
-                />
-              ))}
+        </div>
+      </div>
+      <div className="mt-5 grid grid-cols-2 gap-x-6 border-t border-border-subtle px-4 pt-3 pb-3">
+        {TREASURY_TILE_FIGURE_SKELETON_IDS.map((id) => (
+          <div key={id}>
+            <div className="flex h-4 items-center">
+              <SkeletonBlock className="h-3 w-20" />
             </div>
-          </section>
+            <div className="flex h-5 items-center">
+              <SkeletonBlock className="h-3.5 w-14" />
+            </div>
+          </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+/**
+ * The tiles' first row: one tile where they stack, two where they pair, so a treasury with one
+ * or two wallets loads into the footprint it ends with.
+ */
+export function TreasuryWalletTilesSkeleton() {
+  return (
+    <div className={TREASURY_WALLET_GRID} data-treasury-loading="wallets">
+      <TreasuryWalletTileSkeleton />
+      <TreasuryWalletTileSkeleton className="hidden @xl:flex" />
+    </div>
+  );
+}
+
+/**
+ * A Treasury table while it loads, in the same table, columns and type the rows render into:
+ * the first cell's two 20px lines, every other cell's one.
+ */
+export function TreasuryTableSkeleton({
+  columns,
+  rows,
+}: {
+  columns: Readonly<Record<string, string>>;
+  rows: number;
+}) {
+  const entries = Object.entries(columns);
+  // Each block sits where its column sets its text: numbers and actions at the right.
+  const lineClass = (className: string) =>
+    cn("flex h-5 items-center", className.includes("text-right") && "justify-end");
+  return (
+    <div className={TREASURY_TABLE_FRAME} data-treasury-loading="table">
+      <Table className={TREASURY_TABLE}>
+        <TableHeader>
+          <TableRow>
+            {entries.map(([id, className]) => (
+              <TableHead className={cn(PAYMENTS_TABLE_HEAD, className)} key={id}>
+                <div className={lineClass(className)}>
+                  <SkeletonBlock className="h-3 w-14" />
+                </div>
+              </TableHead>
+            ))}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {TREASURY_TABLE_SKELETON_ROW_IDS.slice(0, rows).map((row) => (
+            <TableRow key={row}>
+              {entries.map(([id, className], index) => (
+                <TableCell className={cn(PAYMENTS_TABLE_CELL, className)} key={id}>
+                  <div className={lineClass(className)}>
+                    <SkeletonBlock className={index === 0 ? "h-3.5 w-32" : "h-3.5 w-12"} />
+                  </div>
+                  {index === 0 ? (
+                    <div className="flex h-5 items-center">
+                      <SkeletonBlock className="h-3 w-20" />
+                    </div>
+                  ) : null}
+                </TableCell>
+              ))}
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
+/** A Treasury section's 24px heading line over its body. */
+function TreasurySectionSkeleton({ children }: { children: ReactNode }) {
+  return (
+    <section className="flex min-w-0 flex-col gap-4">
+      <div className="flex h-6 items-center">
+        <SkeletonBlock className="h-4 w-36" />
+      </div>
+      {children}
+    </section>
+  );
+}
+
+export function TreasurySolutionsSkeleton() {
+  return (
+    <DashboardWorkspaceOverviewPanel aria-busy="true" data-loading-layout="treasury">
+      <RecordStack>
+        <TreasurySummarySkeleton />
+        <TreasurySectionSkeleton>
+          <TreasuryWalletTilesSkeleton />
+        </TreasurySectionSkeleton>
+        <TreasurySectionSkeleton>
+          <div className={TREASURY_POSITIONS_BODY}>
+            <TreasuryTableSkeleton columns={TREASURY_POSITION_COLUMNS} rows={2} />
+          </div>
+        </TreasurySectionSkeleton>
+        <TreasurySectionSkeleton>
+          <TreasuryTableSkeleton columns={TREASURY_STRATEGY_COLUMNS} rows={4} />
+        </TreasurySectionSkeleton>
+      </RecordStack>
     </DashboardWorkspaceOverviewPanel>
   );
 }

@@ -778,8 +778,14 @@ function getMarketsRoutePageConfig(
       contentWidthClass: "max-w-none",
     };
   }
+  if (pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions) {
+    return {
+      title: t("Shared.dashboardShell.treasurySolutions"),
+      titlePosition: "left",
+      contentWidthClass: REFRESH_PAGE_WIDTH,
+    };
+  }
   if (
-    pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions ||
     pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram ||
     pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.dvp
   ) {

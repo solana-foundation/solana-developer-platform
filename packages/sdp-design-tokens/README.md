@@ -61,7 +61,7 @@ carry the attribute itself.
 
 In the dashboard the shell sets the attribute on `<main>` from the route
 (`themeScopeForPath` in `apps/sdp-web/src/lib/theme-scope-routes.ts`: Overview, Wallets, Issuance,
-Payments, the Markets landing and the Privacy connect form), and always on the sidebar. `ThemeScopeProvider` carries the scope to portaled content, which re-stamps it
+Payments, the Markets landing, Treasury and the Privacy connect form), and always on the sidebar. `ThemeScopeProvider` carries the scope to portaled content, which re-stamps it
 through `useThemeScopeAttributes` (`packages/sdp-ui/src/theme-scope.ts`); where structure
 differs as well, a client component reads `useThemeScope() === "refresh"`.
 

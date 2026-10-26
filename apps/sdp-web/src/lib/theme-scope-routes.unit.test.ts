@@ -24,6 +24,7 @@ describe("themeScopeForPath", () => {
     "/dashboard/issuance/create",
     "/dashboard/issuance/tok_1",
     "/dashboard/markets",
+    "/dashboard/markets/treasury-solutions",
   ])("puts %s in the refresh scope", (pathname) => {
     expect(themeScopeForPath(pathname)).toBe("refresh");
   });
@@ -41,7 +42,7 @@ describe("themeScopeForPath", () => {
     "/dashboard/integrations/private-channels/inst_1/channels",
     "/dashboard/integrations/private-channels/inst_1/setup/extra",
     "/dashboard/markets-archive",
-    "/dashboard/markets/treasury-solutions",
+    "/dashboard/markets/treasury-solutions/extra",
     "/dashboard/markets/embedded-yield",
     "/dashboard/markets/dvp",
     "/dashboard/markets/dvp/create",

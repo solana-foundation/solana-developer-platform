@@ -17,21 +17,32 @@ describe("Markets dashboard headers", () => {
     expect(config.headerAction).toBeUndefined();
   });
 
-  it.each([
-    "/dashboard/markets/treasury-solutions",
-    "/dashboard/markets/embedded-yield",
-    "/dashboard/markets/dvp",
-  ])("centers the shared Markets title without redundant route tabs for %s", (pathname) => {
-    const config = getDashboardPageConfig(pathname, t);
+  it("titles Treasury left over the page column, without header tabs", () => {
+    const config = getDashboardPageConfig("/dashboard/markets/treasury-solutions", t);
 
     expect(config).toMatchObject({
-      title: "Shared.dashboardShell.markets",
-      titlePosition: "center",
-      contentWidthClass: "max-w-none",
+      title: "Shared.dashboardShell.treasurySolutions",
+      titlePosition: "left",
+      contentWidthClass: "max-w-page",
     });
     expect(config.headerTabs).toBeUndefined();
     expect(config.routeTabs).toBeUndefined();
   });
+
+  it.each(["/dashboard/markets/embedded-yield", "/dashboard/markets/dvp"])(
+    "centers the shared Markets title without redundant route tabs for %s",
+    (pathname) => {
+      const config = getDashboardPageConfig(pathname, t);
+
+      expect(config).toMatchObject({
+        title: "Shared.dashboardShell.markets",
+        titlePosition: "center",
+        contentWidthClass: "max-w-none",
+      });
+      expect(config.headerTabs).toBeUndefined();
+      expect(config.routeTabs).toBeUndefined();
+    }
+  );
 
   it("centers the Embedded Yield integration title without header tabs", () => {
     const config = getDashboardPageConfig("/dashboard/markets/embedded-yield/integrate", t);

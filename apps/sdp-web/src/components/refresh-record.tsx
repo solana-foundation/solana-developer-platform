@@ -62,16 +62,19 @@ export function StateBand({
 
 /**
  * A titled part of a record: an 18px heading (or a quiet 15px label, as over a balance) with
- * the part's one action at its right, 16px to the body. Parts sit 64px apart in `RecordStack`.
+ * the part's one action at its right, 16px to the body. A hint puts an (i) after the title.
+ * Parts sit 64px apart in `RecordStack`.
  */
 export function RecordBlock({
   title,
+  hint,
   quiet = false,
   aside,
   children,
   className,
 }: {
   title?: string;
+  hint?: string;
   quiet?: boolean;
   aside?: ReactNode;
   children: ReactNode;
@@ -82,11 +85,13 @@ export function RecordBlock({
       {title ? (
         <div className="flex min-h-6 flex-wrap items-center justify-between gap-4 [&>a]:-my-1 [&>a]:[--button-height-md:1.875rem] [&>button]:-my-1 [&>button]:[--button-height-md:1.875rem]">
           <h2
-            className={
+            className={cn(
+              hint && "flex items-center gap-1.5",
               quiet ? "text-nav text-secondary" : "text-subheading font-medium text-primary"
-            }
+            )}
           >
             {title}
+            {hint ? <InfoHint text={hint} /> : null}
           </h2>
           {aside}
         </div>
