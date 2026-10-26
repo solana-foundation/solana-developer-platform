@@ -2,7 +2,6 @@ import { Button } from "@sdp/ui/button";
 import { TableCell } from "@sdp/ui/table";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
 import Link from "next/link";
-import type { ReactNode } from "react";
 import { requirePrivateChannelsAccess } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-access";
 import { PrivateChannelsLoadError } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-load-error";
 import {
@@ -78,15 +77,28 @@ async function loadDirectory(client: SdpClient, t: Translate) {
   } as const;
 }
 
-type ChannelAction =
-  | { kind: "none" }
-  | { kind: "createChannel"; instanceId: string }
-  | { kind: "connect" };
-
-function channelActionFor(canWrite: boolean, activeInstance: { id: string } | null): ChannelAction {
-  if (!canWrite) return { kind: "none" };
-  if (activeInstance) return { kind: "createChannel", instanceId: activeInstance.id };
-  return { kind: "connect" };
+/**
+ * The directory header's action: none for a read-only member, a new channel once an instance is
+ * connected, else the way to connect one.
+ */
+function ChannelHeaderAction({
+  canWrite,
+  activeInstanceId,
+  setupHref,
+  setupLabel,
+}: {
+  canWrite: boolean;
+  activeInstanceId: string | null;
+  setupHref: string;
+  setupLabel: string;
+}) {
+  if (!canWrite) return null;
+  if (activeInstanceId !== null) return <CreateChannelButton instanceId={activeInstanceId} />;
+  return (
+    <Button asChild>
+      <Link href={setupHref}>{setupLabel}</Link>
+    </Button>
+  );
 }
 
 export default async function PrivateChannelsOverviewPage() {
@@ -101,32 +113,6 @@ export default async function PrivateChannelsOverviewPage() {
   const result = await loadDirectory(client, t);
   if (!result.ok) return <PrivateChannelsLoadError message={result.error} />;
   const { activeInstance, rows } = result.data;
-
-  // The header's action: none for a read-only member, a new channel once an instance is
-  // connected, else the way to connect one.
-  const action = channelActionFor(canWrite, activeInstance);
-  let channelAction: ReactNode;
-  switch (action.kind) {
-    case "none":
-      channelAction = null;
-      break;
-    case "createChannel":
-      channelAction = <CreateChannelButton instanceId={action.instanceId} />;
-      break;
-    case "connect":
-      channelAction = (
-        <Button asChild>
-          <Link href={await requestProjectHref(PRIVATE_CHANNELS_SETUP_PATH)}>
-            {t("DashboardPrivateChannels.directory.setupChannel")}
-          </Link>
-        </Button>
-      );
-      break;
-    default: {
-      const exhaustive: never = action;
-      throw new Error(`Unhandled channel action: ${JSON.stringify(exhaustive)}`);
-    }
-  }
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6" data-private-channels-directory>
@@ -143,7 +129,12 @@ export default async function PrivateChannelsOverviewPage() {
               {t("DashboardPrivateChannels.directory.channelsDescription")}
             </p>
           </div>
-          {channelAction}
+          <ChannelHeaderAction
+            canWrite={canWrite}
+            activeInstanceId={activeInstance?.id ?? null}
+            setupHref={await requestProjectHref(PRIVATE_CHANNELS_SETUP_PATH)}
+            setupLabel={t("DashboardPrivateChannels.directory.setupChannel")}
+          />
         </div>
         <DashboardWorkspaceCard className="grow-0">
           <div className="overflow-x-auto">
