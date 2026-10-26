@@ -192,11 +192,34 @@ describe("refreshEarnStrategyMetrics", () => {
   it("skips providers without the live-metrics capability", async () => {
     // Capability, not a provider list. Upshift has no client at all — a
     // five-minute pass must not re-pay a catalogue cost for the rate alone.
-    mocks.providerClients.upshift = catalogueOnlyProvider("upshift");
+    const upshift = catalogueOnlyProvider("upshift");
+    mocks.providerClients.upshift = upshift;
+    mocks.providerClients.kamino = liveMetricsProvider("kamino", async () => [
+      metrics("vault-a", "0.051"),
+    ]);
 
     await refreshIn("sandbox");
 
-    expect(mocks.updateStrategyMetrics).not.toHaveBeenCalled();
+    // The live provider still refreshes, and it is the only one written: the
+    // capability-less provider contributes no update.
+    expect(mocks.updateStrategyMetrics.mock.calls.map(([update]) => update)).toEqual([
+      {
+        provider: "kamino",
+        providerReference: "vault-a",
+        environment: "sandbox",
+        currentApy: "0.051",
+        riskMetadata: { tvlUsd: 1_000_000 },
+      },
+    ]);
+    // The skip is quiet and cheap. The pass never pays the catalogue read for
+    // the rate alone, and the missing metrics read never reaches the vendor
+    // call log — dropping the capability gate would send the pass after
+    // upshift's absent `listStrategyMetrics` and log exactly that failure.
+    expect(vi.mocked(upshift.listStrategies)).not.toHaveBeenCalled();
+    expect(mocks.logEvent).not.toHaveBeenCalledWith(
+      "error",
+      expect.objectContaining({ vendor: "upshift" })
+    );
   });
 
   it("clears a rate the provider has stopped reporting", async () => {
