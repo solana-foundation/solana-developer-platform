@@ -670,7 +670,7 @@ export function DashboardShell({
     // scope itself on every route.
     <main
       {...themeScopeAttributes(themeScope)}
-      data-sdp-new-design=""
+      data-sdp-dashboard-shell=""
       // globals.css drops the root's reserved scrollbar track while the shell is locked.
       data-sdp-locked-viewport={shouldLockShellViewport ? "" : undefined}
       aria-busy={isWorkspaceSwitching}

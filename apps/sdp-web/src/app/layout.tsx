@@ -12,7 +12,7 @@ import Script from "next/script";
 
 // The refresh design's faces, from the design-tokens package so a Storybook loads the same
 // files. tokens.css reads the two variables inside [data-sdp-theme="refresh"], and sdp-theme.css
-// on every page while NEW DESIGN is on; with the flag off the base design keeps its stack.
+// on every dashboard page; pages outside the dashboard keep the base stack.
 const seasonSans = localFont({
   src: [
     {

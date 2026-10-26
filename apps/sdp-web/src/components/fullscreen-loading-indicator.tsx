@@ -55,7 +55,7 @@ export function FullscreenLoadingIndicator({
     <main
       aria-busy={!paused}
       data-shell-loading-skeleton
-      data-sdp-new-design=""
+      data-sdp-dashboard-shell=""
       className={cn(
         "flex min-h-screen bg-[var(--sdp-shell-bg)] text-primary",
         paused && "[&_*]:animate-none"
