@@ -292,9 +292,9 @@ function observedDelivery(
 /**
  * The mint's token program's moves in `transaction` that touch `accounts`:
  * each transfer into them (its debit), the fee those transfers stated (null
- * when one stated none), and what left them, moved out or burned. A move out
- * or a burn lowers the balance change without being a fee. Null when an
- * amount cannot be read.
+ * when one stated none), and what left them, moved out or burned, or was
+ * withheld moving between them. Either lowers the balance change without
+ * being the delivery's fee. Null when an amount cannot be read.
  */
 function tokenMovesTouching(
   transaction: ParsedTransaction,
@@ -309,23 +309,39 @@ function tokenMovesTouching(
     // tops up rent for an account that already held some: only the mint's own
     // token program moves its tokens.
     if (programId !== tokenProgram || parsedType === null || info === null) continue;
-    const transfer = TOKEN_TRANSFER_TYPES.has(parsedType);
-    const out = accounts.has(
-      String(TOKEN_BURN_TYPES.has(parsedType) ? info.account : transfer ? info.source : undefined)
-    );
-    const into = transfer && accounts.has(String(info.destination));
-    // A move between the owner's own accounts delivers nothing.
-    if (out === into) continue;
+    const { out, into } = touches(parsedType, info, accounts);
+    if (!out && !into) continue;
+    const fee = parsedType === "transferCheckedWithFee" ? rawAmountOf(info, "feeAmount") : null;
+    // A move between the owner's own accounts delivers nothing, but the fee it
+    // withheld lowered the balance change: a stated one is added back.
+    if (out && into) {
+      left += fee ?? 0n;
+      continue;
+    }
     const amount = rawAmountOf(info, "tokenAmount");
     if (amount === null) return null;
-    if (out) left += amount;
-    if (into) {
-      debits.push(amount);
-      const fee = parsedType === "transferCheckedWithFee" ? rawAmountOf(info, "feeAmount") : null;
-      statedFee = statedFee === null || fee === null ? null : statedFee + fee;
+    if (out) {
+      left += amount;
+      continue;
     }
+    debits.push(amount);
+    statedFee = statedFee === null || fee === null ? null : statedFee + fee;
   }
   return { debits, statedFee, left };
+}
+
+/** Whether a token instruction moves out of (or burns from) `accounts`, and into them. */
+function touches(
+  parsedType: string,
+  info: Record<string, unknown>,
+  accounts: ReadonlySet<string>
+): { out: boolean; into: boolean } {
+  const transfer = TOKEN_TRANSFER_TYPES.has(parsedType);
+  const from = TOKEN_BURN_TYPES.has(parsedType) ? info.account : transfer ? info.source : undefined;
+  return {
+    out: accounts.has(String(from)),
+    into: transfer && accounts.has(String(info.destination)),
+  };
 }
 
 /**
