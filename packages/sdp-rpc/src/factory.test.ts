@@ -26,6 +26,8 @@ import {
   createKoraUpstreamRpc,
   earnClusterEndpointUrls,
   proveEarnClusterEndpoint,
+  type RpcTelemetryEvent,
+  setRpcTelemetrySink,
 } from "./factory";
 import { runInClusterScope } from "./scope";
 import { DEFAULT_RPC_REQUEST_TIMEOUT_MS } from "./solana";
@@ -246,6 +248,7 @@ function isolateRpcEnv(): void {
 }
 
 function restoreRpcEnv(): void {
+  setRpcTelemetrySink(null);
   mock.timers.reset();
   globalThis.fetch = originalFetch;
   clearRpcEnv();
@@ -256,6 +259,57 @@ describe("createClusterRpc", () => {
   beforeEach(isolateRpcEnv);
 
   afterEach(restoreRpcEnv);
+
+  it("records each provider attempt, 429 failover and cooldown without logging URLs", async () => {
+    const throttled = "https://devnet-throttled.example.test/?api-key=private";
+    const healthy = "https://devnet-healthy.example.test/?api-key=private";
+    configurePool({
+      SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: throttled,
+      SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: healthy,
+    });
+    stubEndpoints({ [throttled]: devnetHttpStatus(429), [healthy]: SERVES_DEVNET });
+    const events: RpcTelemetryEvent[] = [];
+    setRpcTelemetrySink((event) => events.push(event));
+
+    assert.equal(await runInClusterScope(SANDBOX, createClusterRpc).getSlot().send(), BigInt(SLOT));
+
+    assert.deepEqual(
+      events.map(({ event, provider, outcome, status_code }) => ({
+        event,
+        provider,
+        outcome,
+        status_code,
+      })),
+      [
+        { event: "sdp_rpc_attempt", provider: "triton", outcome: "failed", status_code: 429 },
+        {
+          event: "sdp_rpc_cooldown",
+          provider: "triton",
+          outcome: undefined,
+          status_code: undefined,
+        },
+        {
+          event: "sdp_rpc_failover",
+          provider: "triton",
+          outcome: undefined,
+          status_code: undefined,
+        },
+        {
+          event: "sdp_rpc_attempt",
+          provider: "helius",
+          outcome: "succeeded",
+          status_code: undefined,
+        },
+      ]
+    );
+    assert.ok(events.every((event) => event.cluster === "devnet" && event.method === "getSlot"));
+    assert.ok(
+      events.every(
+        (event) => typeof event.duration_ms === "number" || event.event !== "sdp_rpc_attempt"
+      )
+    );
+    assert.ok(!JSON.stringify(events).includes("private"));
+  });
 
   it("refuses to build a client outside a cluster scope", () => {
     configurePool({ SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: "https://devnet-unscoped.example.test" });

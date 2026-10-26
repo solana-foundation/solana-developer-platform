@@ -1,4 +1,6 @@
 import type { Context, Next } from "hono";
+import { routePath } from "hono/route";
+import { getOptionalAuth } from "@/lib/auth";
 import { getLogger, runWithLogContext } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 
@@ -62,7 +64,8 @@ export function requestTracingMiddleware() {
       } finally {
         if (c.res) {
           const durationMs = roundDuration(performance.now() - startedAt);
-          const pathname = new URL(c.req.url).pathname;
+          const auth = getOptionalAuth(c);
+          const path = routePath(c, -1) || "unmatched";
 
           c.header(TRACE_ID_HEADER, traceId);
           c.header(
@@ -75,9 +78,13 @@ export function requestTracingMiddleware() {
               event: "sdp_api_request_timing",
               source: requestSource,
               method: c.req.method,
-              path: pathname,
+              path,
               status: c.res.status,
               duration_ms: durationMs,
+              ...(auth?.organizationId ? { organization_id: auth.organizationId } : {}),
+              ...(auth?.projectId ? { project_id: auth.projectId } : {}),
+              ...(auth?.apiKeyId ? { api_key_id: auth.apiKeyId } : {}),
+              ...(auth ? { auth_type: auth.authType } : {}),
             },
             "request completed"
           );

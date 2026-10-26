@@ -2,6 +2,16 @@ import { describeError, logEvent } from "./money-path-events";
 
 export const VENDOR_CALL_EVENT = "sdp_api_vendor_call";
 
+function logVendorCallSuccess(vendor: string, operation: string, startedAt: number): void {
+  logEvent("info", {
+    event: VENDOR_CALL_EVENT,
+    vendor,
+    operation,
+    outcome: "succeeded",
+    duration_ms: Date.now() - startedAt,
+  });
+}
+
 export function logVendorCallFailure(
   vendor: string,
   operation: string,
@@ -25,7 +35,9 @@ export async function withVendorCall<T>(
 ): Promise<T> {
   const startedAt = Date.now();
   try {
-    return await work();
+    const result = await work();
+    logVendorCallSuccess(vendor, operation, startedAt);
+    return result;
   } catch (error) {
     logVendorCallFailure(vendor, operation, error, startedAt);
     throw error;
@@ -44,11 +56,18 @@ export function instrumentVendorPort<T extends object>(vendor: string, port: T):
         try {
           const result = value.apply(target, args);
           if (result instanceof Promise) {
-            return result.catch((error: unknown) => {
-              logVendorCallFailure(vendor, prop, error, startedAt);
-              throw error;
-            });
+            return result.then(
+              (value: unknown) => {
+                logVendorCallSuccess(vendor, prop, startedAt);
+                return value;
+              },
+              (error: unknown) => {
+                logVendorCallFailure(vendor, prop, error, startedAt);
+                throw error;
+              }
+            );
           }
+          logVendorCallSuccess(vendor, prop, startedAt);
           return result;
         } catch (error) {
           logVendorCallFailure(vendor, prop, error, startedAt);

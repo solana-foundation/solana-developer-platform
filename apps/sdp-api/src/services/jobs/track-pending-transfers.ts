@@ -405,15 +405,13 @@ async function finalizeConfirmedTransfers(
 
   const finalized = polled.filter((transfer) => transfer.finalized);
   for (const transfer of finalized) {
-    getLogger().info(
-      {
-        transfer_id: transfer.transferId,
-        organization_id: transfer.organizationId,
-        signature: transfer.signature,
-        slot: transfer.slot,
-      },
-      "trackPendingTransfers: transfer finalized"
-    );
+    logEvent("info", {
+      event: "sdp_api_payment_finalization_observed",
+      transfer_id: transfer.transferId,
+      organization_id: transfer.organizationId,
+      signature: transfer.signature,
+      slot: transfer.slot,
+    });
   }
   if (finalized.length > 0) {
     getLogger().info(
