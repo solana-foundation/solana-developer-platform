@@ -1,4 +1,3 @@
-import { normalizeOrganizationRole } from "@sdp/types/roles";
 import {
   ACTION_ALIASES,
   ACTION_MODULES,
@@ -15,6 +14,7 @@ import {
   ORGANIZATION_ROLE_ACTIONS,
   organizationRoleMayPerform,
 } from "@sdp/types/actions";
+import { normalizeOrganizationRole } from "@sdp/types/roles";
 import { describe, expect, it } from "vitest";
 
 /**
