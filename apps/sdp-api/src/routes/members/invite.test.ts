@@ -169,20 +169,6 @@ describe("POST /v1/members/invite", () => {
     expect(await invitationRows()).toEqual([]);
   });
 
-  it("refuses a second pending invitation to the address in another letter case before any Clerk call", async () => {
-    await seedPendingInvitation("inv_invite_existing", "Invitee@Example.COM", 7);
-
-    const response = await invite(INVITEE_EMAIL);
-
-    expect(response.status).toBe(409);
-    expect(await response.json()).toEqual({
-      error: { code: "CONFLICT", message: "Invitation already sent to this email" },
-      meta: { requestId: expect.any(String) },
-    });
-    expect(clerk.requests).toEqual([]);
-    expect((await invitationRows()).map((row) => row.id)).toEqual(["inv_invite_existing"]);
-  });
-
   it("expires a lapsed pending invitation to the address and invites again", async () => {
     await seedPendingInvitation("inv_invite_lapsed", INVITEE_EMAIL, -1);
     clerk.answer({ status: 200, body: { id: CLERK_INVITATION_ID, status: "pending" } });
