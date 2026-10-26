@@ -129,7 +129,7 @@ const SECOND_SIGNATURE =
   "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV";
 const TEST_TOKEN_ACCOUNT = TEST_SOLANA_ADDRESSES.wallet3;
 /** A Token-2022 mint the catalogue does not name, so its program comes from the read. */
-const UNCATALOGUED_TOKEN_2022_MINT = "Bm3Ue2xDWJ1V26ecNqz1Uy7rRbC4f7CdMUrfrPGgKT6W";
+const UNCATALOGUED_TOKEN_2022_MINT = syntheticAddress(23);
 
 const labeledSignatures = new Map<string, string>();
 
