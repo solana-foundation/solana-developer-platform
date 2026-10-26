@@ -1,6 +1,6 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as moneyPathEvents from "@/runtime/money-path-events";
 import { env } from "@/test/helpers/env";
 import { required } from "@/test/helpers/required";
@@ -37,6 +37,10 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.useRealTimers();
   clearDisplayPriceCacheForTests();
+});
+
+beforeEach(() => {
+  vi.spyOn(Math, "random").mockReturnValue(0);
 });
 
 describe("fetchDisplayUsdPrices", () => {
@@ -379,7 +383,7 @@ describe("fetchDisplayUsdPrices", () => {
     await vi.waitFor(() => expect(tokensAborted).toBe(true), { timeout: 1_500 });
   });
 
-  it("samples at most one percent on stable and once per minute per process", async () => {
+  it("samples at most one percent by default and once per minute per process", async () => {
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockImplementation(async (input) =>
@@ -404,6 +408,15 @@ describe("fetchDisplayUsdPrices", () => {
     expect(
       fetchSpy.mock.calls.filter(([input]) => String(input).includes("tokens.xyz"))
     ).toHaveLength(1);
+
+    clearDisplayPriceCacheForTests();
+    randomSpy.mockReturnValue(0.5);
+    await fetchPricesIn("production", { ...stableEnv, TOKENS_XYZ_SHADOW_SAMPLE_ALL: "true" }, [
+      "MintD",
+    ]);
+    expect(
+      fetchSpy.mock.calls.filter(([input]) => String(input).includes("tokens.xyz"))
+    ).toHaveLength(2);
   });
 
   it("makes no request when there is nothing to price", async () => {
