@@ -487,6 +487,15 @@ test("pins token movement builders to their files, however they are imported", (
       'import { getTransferCheckedInstruction as transfer } from "@solana-program/token";\n',
     "src/namespace.ts":
       'import * as token from "@solana-program/token-2022";\ntoken.getTransferCheckedWithFeeInstruction;\n',
+    "src/keyed.ts":
+      'import * as token from "@solana-program/token";\ntoken["getTransferCheckedInstruction"];\n',
+    "src/destructured.ts":
+      'import * as token from "@solana-program/token";\nconst { getTransferCheckedInstruction: transfer } = token;\n',
+    // The namespace handed on: the check can no longer see what is read off it.
+    "src/handed-on.ts": 'import * as token from "@solana-program/token";\nuse(token);\n',
+    // Other members, a same-named property and a type read nothing pinned.
+    "src/other-members.ts":
+      'import * as token from "@solana-program/token";\ntoken.TOKEN_PROGRAM_ADDRESS;\nconst x = { token: 1 };\nlet m: typeof token;\n',
     // A repository method of the same name, and the package's constants: not a builder.
     "src/repository.ts":
       'import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";\nrepo.getTransferCheckedInstruction();\n',
@@ -514,6 +523,9 @@ test("pins token movement builders to their files, however they are imported", (
     assert.deepEqual(violations, [
       "src/renamed.ts uses getTransferCheckedInstruction: it builds a transfer (transfer)",
       "src/namespace.ts uses getTransferCheckedWithFeeInstruction: it builds a transfer (transfer)",
+      "src/keyed.ts uses getTransferCheckedInstruction: it builds a transfer (transfer)",
+      "src/destructured.ts uses getTransferCheckedInstruction: it builds a transfer (transfer)",
+      "src/handed-on.ts uses getTransferCheckedInstruction, getTransferCheckedWithFeeInstruction: it builds a transfer (transfer)",
       "src/gone.ts no longer uses transfer: remove it from the list",
     ]);
   } finally {

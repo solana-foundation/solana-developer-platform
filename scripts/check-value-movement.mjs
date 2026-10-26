@@ -367,26 +367,78 @@ export const TOKEN_MOVEMENT_BUILDERS = [
 // biome-ignore-end lint/security/noSecrets: SDK and function names, not secrets.
 
 /**
- * The `names` a file imports from `pkg`: in a value import's braces (renamed
- * or not), or read off a namespace import of it.
+ * The `names` a file takes from `pkg`: a value import of one (renamed or not),
+ * or a read of a namespace or default import of the package (see
+ * {@link namespaceReads}).
  *
- * @param {string} text
+ * @param {ts.SourceFile} source
  * @param {string} pkg
  * @param {string[]} names
  */
-function importedNames(text, pkg, names) {
-  const from = `\\s*from\\s*["']${pkg}["']`;
-  const clauses = [...text.matchAll(new RegExp(`import\\s+\\{([^}]*)\\}${from}`, "g"))].map(
-    ([, clause]) => clause
-  );
-  const namespaces = [
-    ...text.matchAll(new RegExp(`import\\s+\\*\\s+as\\s+(\\w+)${from}`, "g")),
-  ].map(([, namespace]) => namespace);
-  return names.filter(
-    (name) =>
-      clauses.some((clause) => new RegExp(`(^|[\\s,])${name}([\\s,]|$)`).test(clause)) ||
-      namespaces.some((namespace) => text.includes(`${namespace}.${name}`))
-  );
+function importedNames(source, pkg, names) {
+  const taken = new Set();
+  const namespaces = new Set();
+  for (const statement of source.statements) {
+    if (
+      !ts.isImportDeclaration(statement) ||
+      !ts.isStringLiteral(statement.moduleSpecifier) ||
+      statement.moduleSpecifier.text !== pkg
+    ) {
+      continue;
+    }
+    const clause = statement.importClause;
+    if (!clause || clause.isTypeOnly) continue;
+    if (clause.name) namespaces.add(clause.name.text);
+    const bindings = clause.namedBindings;
+    if (bindings && ts.isNamespaceImport(bindings)) {
+      namespaces.add(bindings.name.text);
+    } else if (bindings) {
+      for (const element of bindings.elements) {
+        if (!element.isTypeOnly) taken.add((element.propertyName ?? element.name).text);
+      }
+    }
+  }
+  const visit = (node) => {
+    if (ts.isIdentifier(node) && namespaces.has(node.text)) {
+      for (const name of namespaceReads(node, names)) taken.add(name);
+    }
+    ts.forEachChild(node, visit);
+  };
+  if (namespaces.size > 0) ts.forEachChild(source, visit);
+  return names.filter((name) => taken.has(name));
+}
+
+/**
+ * The members one mention of a namespace's identifier reads: what a dot, a
+ * string key or a destructuring names; none for a declaration, a same-named
+ * property or a type; every name for any other use (a computed key, a rest
+ * pattern, the namespace passed on), which the check cannot follow.
+ *
+ * @param {ts.Identifier} node
+ * @param {string[]} names
+ */
+function namespaceReads(node, names) {
+  const parent = node.parent;
+  if (ts.isPropertyAccessExpression(parent)) {
+    return parent.expression === node ? [parent.name.text] : [];
+  }
+  if (ts.isElementAccessExpression(parent) && parent.expression === node) {
+    return ts.isStringLiteralLike(parent.argumentExpression)
+      ? [parent.argumentExpression.text]
+      : names;
+  }
+  if (ts.isVariableDeclaration(parent) && parent.initializer === node) {
+    const pattern = parent.name;
+    if (!ts.isObjectBindingPattern(pattern)) return names;
+    const keys = pattern.elements.map((element) => element.propertyName ?? element.name);
+    return pattern.elements.some((element) => element.dotDotDotToken) ||
+      keys.some((key) => !ts.isIdentifier(key) && !ts.isStringLiteralLike(key))
+      ? names
+      : keys.map((key) => key.text);
+  }
+  if (ts.isShorthandPropertyAssignment(parent)) return names;
+  if (parent.name === node || parent.propertyName === node || inTypePosition(node)) return [];
+  return names;
 }
 
 /**
@@ -403,9 +455,17 @@ export function findTokenMovementBuilderViolations({ rootDir, rules, files }) {
   for (const file of files) {
     if (!/\.(ts|tsx|mts)$/.test(file) || isTestFile(file)) continue;
     const text = readFileSync(path.join(rootDir, file), "utf8");
+    if (
+      !rules.some((rule) =>
+        rule.imports.some(({ packages }) => packages.some((pkg) => text.includes(pkg)))
+      )
+    ) {
+      continue;
+    }
+    const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
     for (const rule of rules) {
       const named = rule.imports.flatMap(({ packages, names }) =>
-        packages.flatMap((pkg) => importedNames(text, pkg, names))
+        packages.flatMap((pkg) => importedNames(source, pkg, names))
       );
       if (named.length === 0) continue;
       if (rule.allow.includes(file)) used.add(`${rule.id} ${file}`);
