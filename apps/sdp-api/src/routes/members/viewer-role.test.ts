@@ -24,7 +24,7 @@ async function requestAs(
   actor: SeededOrganizationMember,
   method: "GET" | "POST" | "PATCH",
   path: string,
-  body?: unknown
+  body?: Record<string, string>
 ): Promise<Response> {
   const token = await signSeededClerkMember(env, getDb(env), actor.userId, ORGANIZATION.id);
   return app.request(

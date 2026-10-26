@@ -16,7 +16,7 @@ vi.mock("@/i18n/provider", () => ({
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
-const access = vi.hoisted(() => ({ role: "member" as OrganizationRole }));
+const access = vi.hoisted((): { role: OrganizationRole } => ({ role: "member" }));
 vi.mock("@/contexts/dashboard-workspace-context", async () => {
   const { resolveDashboardAccess: resolve } = await import("@/lib/dashboard-access");
   return {

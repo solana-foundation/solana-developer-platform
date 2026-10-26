@@ -31,6 +31,10 @@ function roleLabel(role: OrganizationRole, t: Translate): string {
       return t("Shared.members.roleMember");
     case "viewer":
       return t("Shared.members.roleViewer");
+    default: {
+      const exhaustive: never = role;
+      throw new Error(`Unhandled organization role: ${JSON.stringify(exhaustive)}`);
+    }
   }
 }
 
