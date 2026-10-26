@@ -367,9 +367,10 @@ export const TOKEN_MOVEMENT_BUILDERS = [
 // biome-ignore-end lint/security/noSecrets: SDK and function names, not secrets.
 
 /**
- * The `names` a file takes from `pkg`: a value import of one (renamed or not),
- * or a read of a namespace or default import of the package (see
- * {@link namespaceReads}).
+ * The `names` a file takes from `pkg`: a value import or re-export of one
+ * (renamed or not), or a read of a namespace or default import of the package
+ * (see {@link namespaceReads}). `export *`, a dynamic `import()` and a
+ * `require()` of it take every name: the check cannot follow them.
  *
  * @param {ts.SourceFile} source
  * @param {string} pkg
@@ -378,12 +379,13 @@ export const TOKEN_MOVEMENT_BUILDERS = [
 function importedNames(source, pkg, names) {
   const taken = new Set();
   const namespaces = new Set();
+  const take = (taking) => {
+    for (const name of taking) taken.add(name);
+  };
   for (const statement of source.statements) {
-    if (
-      !ts.isImportDeclaration(statement) ||
-      !ts.isStringLiteral(statement.moduleSpecifier) ||
-      statement.moduleSpecifier.text !== pkg
-    ) {
+    if (!fromPackage(statement, pkg)) continue;
+    if (ts.isExportDeclaration(statement)) {
+      take(reexportedNames(statement, names));
       continue;
     }
     const clause = statement.importClause;
@@ -393,19 +395,50 @@ function importedNames(source, pkg, names) {
     if (bindings && ts.isNamespaceImport(bindings)) {
       namespaces.add(bindings.name.text);
     } else if (bindings) {
-      for (const element of bindings.elements) {
-        if (!element.isTypeOnly) taken.add((element.propertyName ?? element.name).text);
-      }
+      take(
+        bindings.elements.filter((e) => !e.isTypeOnly).map((e) => (e.propertyName ?? e.name).text)
+      );
     }
   }
   const visit = (node) => {
-    if (ts.isIdentifier(node) && namespaces.has(node.text)) {
-      for (const name of namespaceReads(node, names)) taken.add(name);
-    }
+    if (ts.isIdentifier(node) && namespaces.has(node.text)) take(namespaceReads(node, names));
+    if (loadsPackage(node, pkg)) take(names);
     ts.forEachChild(node, visit);
   };
-  if (namespaces.size > 0) ts.forEachChild(source, visit);
+  ts.forEachChild(source, visit);
   return names.filter((name) => taken.has(name));
+}
+
+/** Whether a statement is a value import or re-export from `pkg`. */
+function fromPackage(statement, pkg) {
+  return (
+    (ts.isImportDeclaration(statement) ||
+      (ts.isExportDeclaration(statement) && !statement.isTypeOnly)) &&
+    statement.moduleSpecifier !== undefined &&
+    ts.isStringLiteral(statement.moduleSpecifier) &&
+    statement.moduleSpecifier.text === pkg
+  );
+}
+
+/** The names a re-export from the package passes on: all of them for `export *`. */
+function reexportedNames(statement, names) {
+  const exported = statement.exportClause;
+  if (!exported || ts.isNamespaceExport(exported)) return names;
+  return exported.elements.filter((e) => !e.isTypeOnly).map((e) => (e.propertyName ?? e.name).text);
+}
+
+/** Whether a node is a dynamic `import()` or a `require()` of `pkg`. */
+function loadsPackage(node, pkg) {
+  if (!ts.isCallExpression(node)) return false;
+  const callee = node.expression;
+  const [specifier] = node.arguments;
+  return (
+    (callee.kind === ts.SyntaxKind.ImportKeyword ||
+      (ts.isIdentifier(callee) && callee.text === "require")) &&
+    specifier !== undefined &&
+    ts.isStringLiteralLike(specifier) &&
+    specifier.text === pkg
+  );
 }
 
 /**
