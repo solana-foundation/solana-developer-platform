@@ -8,7 +8,7 @@ import {
   parseBulkCsv,
   splitPastedRows,
   validateBulkRows,
-} from "./bulk-import.redesign";
+} from "./bulk-import";
 
 const t = (key: MessageKey, values?: TranslationValues) =>
   translate(getMessages("en"), key, values);

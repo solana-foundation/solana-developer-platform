@@ -7,7 +7,7 @@ import { Callout } from "@sdp/ui/callout";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { formatRampQuoteTimeRemaining } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
 import { formatDecimalAmount } from "@/app/dashboard/[projectId]/payments/payments-presentation";
-import type { OnrampWizard } from "@/app/dashboard/[projectId]/payments/ramps/hooks/use-onramp-wizard.redesign";
+import type { OnrampWizard } from "@/app/dashboard/[projectId]/payments/ramps/hooks/use-onramp-wizard";
 import { useRampEstimate } from "@/app/dashboard/[projectId]/payments/ramps/hooks/use-ramp-estimate";
 import {
   estimateRateCopy,

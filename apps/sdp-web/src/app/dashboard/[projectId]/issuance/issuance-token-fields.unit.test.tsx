@@ -5,8 +5,6 @@ import { type TranslationValues, translate } from "@/i18n/translate";
 import type { AuthorityRoleKey } from "./asset-overview-hero";
 import {
   buildOverviewHeroData,
-  deploymentStatusBadge,
-  getDeploymentStatus,
   getTokenChips,
   type IssuanceTokenView,
 } from "./issuance-token-fields";
@@ -292,33 +290,6 @@ describe("buildOverviewHeroData", () => {
       buildOverviewHeroData(baseToken({ assetProfile: stablecoinProfile }), [], t, "en").website
     ).toBe("https://veritas.finance");
     expect(buildOverviewHeroData(baseToken(), [], t, "en").website).toBeNull();
-  });
-});
-
-// Deployment first, then the operator's own state. Paused used to collapse into
-// "Active", which told an operator the opposite of what they had just done.
-describe("getDeploymentStatus", () => {
-  const deployed = { mintAddress: "MINT1111111111111111111111111111111111111111" };
-
-  it("reports a deployed token as active", () => {
-    expect(getDeploymentStatus(baseToken({ ...deployed, status: "active" }))).toBe("active");
-  });
-
-  it("reports a deployed token whose status is paused as paused", () => {
-    expect(getDeploymentStatus(baseToken({ ...deployed, status: "paused" }))).toBe("paused");
-  });
-
-  it("keeps an undeployed token a draft whatever its status says", () => {
-    expect(getDeploymentStatus(baseToken({ status: "paused" }))).toBe("draft");
-    expect(getDeploymentStatus(baseToken({ status: "active" }))).toBe("draft");
-  });
-
-  it("gives paused its own label and the warning tint, not the live one", () => {
-    const paused = deploymentStatusBadge("paused", t);
-    const active = deploymentStatusBadge("active", t);
-    expect(paused.label).toBe(t("DashboardIssuance.status.paused"));
-    expect(paused.badge).toContain("warning");
-    expect(active.badge).toContain("success");
   });
 });
 

@@ -1,7 +1,11 @@
 "use client";
 
 import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
-import type { PaymentOnrampQuoteRequest, PaymentTransferSummary } from "@sdp/types/payments";
+import type {
+  PaymentOnrampQuoteRequest,
+  PaymentRampQuote,
+  PaymentTransferSummary,
+} from "@sdp/types/payments";
 import { CoinsIcon, DollarSignIcon, WalletIcon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -12,8 +16,9 @@ import {
   simulateSandboxTransfer,
 } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import { rampTransferPollInterval } from "@/app/dashboard/[projectId]/payments/ramps/ramp-phase";
+import { getRampTransferState } from "@/app/dashboard/[projectId]/payments/ramps/ramp-transfer-state";
 import {
-  depositAmountSchema,
+  depositDetailsSchema,
   depositSelectionSchema,
 } from "@/app/dashboard/[projectId]/payments/ramps/schema";
 import {
@@ -27,27 +32,36 @@ import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import type { TranslationValues } from "@/i18n/translate";
+import { demoRampPairs } from "@/lib/payments-demo/demo-ramp-assets";
+import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { onrampPairs } from "@/lib/ramps";
 import { type RampWizardStep, type UseRampWizardProps, useRampWizard } from "./use-ramp-wizard";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
-export type OnrampStepId = "DEPOSIT" | "MEMO" | "PROVIDER" | "REQUIREMENTS";
+export type OnrampStepId = "DEPOSIT" | "MEMO" | "REVIEW" | "PROVIDER" | "REQUIREMENTS";
 
+/**
+ * Details (contact, amount, wallet, provider), what the provider needs (memo, plus the
+ * requirements step when the provider asks for more), a review built from the chosen
+ * provider's estimate, and completion. Nothing is persisted before completion: the quote, and
+ * the transfer it records, are created when the wizard lands on the last step.
+ */
 export function getOnrampSteps(t: Translate): readonly RampWizardStep<OnrampStepId>[] {
   return [
-    {
-      id: "DEPOSIT",
-      label: t("DashboardPayments.ramps.onrampDepositStep"),
-      title: t("DashboardPayments.ramps.onrampDepositTitle"),
-    },
+    { id: "DEPOSIT", label: t("DashboardPayments.onchainSend.details"), title: "" },
     {
       id: "MEMO",
-      label: t("DashboardPayments.ramps.rampMemoStep"),
+      label: t("DashboardPayments.ramps.providerDetailsStep"),
       title: t("DashboardPayments.ramps.rampMemoStepTitle"),
     },
     {
+      id: "REVIEW",
+      label: t("DashboardPayments.onchainSend.review"),
+      title: t("DashboardPayments.ramps.reviewBeforeContinue"),
+    },
+    {
       id: "PROVIDER",
-      label: t("DashboardPayments.ramps.provider"),
+      label: t("DashboardPayments.ramps.completeStep"),
       title: t("DashboardPayments.ramps.onrampProviderTitle"),
     },
   ];
@@ -56,22 +70,49 @@ export function getOnrampSteps(t: Translate): readonly RampWizardStep<OnrampStep
 function getOnrampRequirementsStep(t: Translate): RampWizardStep<OnrampStepId> {
   return {
     id: "REQUIREMENTS",
-    label: t("DashboardPayments.ramps.detailsStep"),
+    label: t("DashboardPayments.ramps.providerDetailsStep"),
     title: t("DashboardPayments.ramps.onrampRequirementsTitle"),
   };
 }
 
+interface SimulationContext {
+  quote: PaymentRampQuote | null;
+  transferId: string | null;
+  transferStatus: PaymentTransferSummary | undefined;
+  succeeded: boolean;
+  demo: boolean;
+  sandbox: boolean;
+}
+
+/**
+ * Whether a deposit can be marked paid: while it waits for its money (and as done until it
+ * finishes), through a sandbox provider's own simulation, or in demo mode for any provider, the
+ * demo standing in for checkouts that would open elsewhere. A production deposit never offers
+ * it: the sandbox can't fund a live deposit.
+ */
+function simulationOffered(context: SimulationContext): context is SimulationContext & {
+  quote: PaymentRampQuote;
+  transferId: string;
+} {
+  const { quote, transferId, transferStatus } = context;
+  if (quote === null || transferId === null || transferStatus === undefined) return false;
+  if (getRampTransferState(transferStatus.status).terminal) return false;
+  if (transferStatus.status !== "awaiting_payment" && !context.succeeded) return false;
+  return context.demo;
+}
+
 export function useOnrampWizard(props: UseRampWizardProps) {
   const { sdpEnvironment } = useDashboardWorkspace();
+  const demo = usePaymentsDemo();
   const t = useTranslations();
   const locale = useLocale();
   const [quoteSimulationLoading, setQuoteSimulationLoading] = useState(false);
   const [quoteSimulationSucceeded, setQuoteSimulationSucceeded] = useState(false);
 
   const wizard = useRampWizard<OnrampStepId>(props, {
-    pairs: onrampPairs(sdpEnvironment, props.enabledRampProviders),
+    pairs: demoRampPairs(onrampPairs(sdpEnvironment, props.enabledRampProviders), demo),
     steps: getOnrampSteps(t),
-    stepSchemas: { DEPOSIT: depositAmountSchema },
+    stepSchemas: { DEPOSIT: depositDetailsSchema },
     quoteStepId: "MEMO",
     memoStepId: "MEMO",
     requirements: {
@@ -142,10 +183,21 @@ export function useOnrampWizard(props: UseRampWizardProps) {
 
   const showCompleteScreen = transferStatus?.status === "completed";
 
+  const simulation = {
+    quote: wizard.quote,
+    transferId: wizard.quoteTransferId,
+    transferStatus,
+    succeeded: quoteSimulationSucceeded,
+    demo,
+    sandbox: sdpEnvironment === "sandbox",
+  };
+  const simulateAvailable = simulationOffered(simulation);
+
   const simulateCurrentQuote = async () => {
-    if (!wizard.selectedWallet || wizard.quoteTransferId === null) {
+    if (!simulationOffered(simulation) || !wizard.selectedWallet) {
       return;
     }
+    const { transferId } = simulation;
 
     setQuoteSimulationLoading(true);
     const toastId = toast.loading(t("DashboardPayments.ramps.simulatingQuoteFunding"), {
@@ -153,7 +205,7 @@ export function useOnrampWizard(props: UseRampWizardProps) {
     });
 
     try {
-      await simulateSandboxTransfer({ transferId: wizard.quoteTransferId }, t);
+      await simulateSandboxTransfer({ transferId }, t);
       setQuoteSimulationSucceeded(true);
       toast.success(t("DashboardPayments.ramps.quoteFundingSimulated"), {
         id: toastId,
@@ -180,6 +232,7 @@ export function useOnrampWizard(props: UseRampWizardProps) {
     transferStatusLoading,
     quoteSimulationLoading,
     quoteSimulationSucceeded,
+    simulateAvailable,
     simulateCurrentQuote,
     showCompleteScreen,
   };

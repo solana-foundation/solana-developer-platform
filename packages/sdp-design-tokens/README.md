@@ -43,9 +43,9 @@ In a Tailwind v4 stylesheet, import the tokens before anything that reads them:
 ```
 
 `apps/sdp-web/src/app/globals.css` imports them this way, so the dashboard reads the base
-palette from the package. While the `new-design` flag is on, `apps/sdp-web/src/app/sdp-theme.css`
-also points the base names at the refresh palette and faces for the whole document (every page
-gets the colours and type; only refresh surfaces get the refresh shapes).
+palette from the package. On every dashboard route, `apps/sdp-web/src/app/sdp-theme.css` also
+points the base names at the refresh palette and faces for the whole document (every dashboard
+page gets the colours and type; only refresh surfaces get the refresh shapes).
 
 Opt a surface into the refresh design with the attribute. On `<html>` it adopts the design
 app-wide, in light and dark:
@@ -60,9 +60,8 @@ Content portaled out of that element (modals, menus, popovers) leaves the scope,
 carry the attribute itself.
 
 In the dashboard the shell sets the attribute on `<main>` from the route
-(`themeScopeForPath` in `apps/sdp-web/src/lib/theme-scope-routes.ts`: the routes a redesigned area
-registers in `lib/design-modules.ts`, and the Privacy connect form), and on the sidebar whenever
-`new-design` is on. `ThemeScopeProvider` carries the scope to portaled content, which re-stamps it
+(`themeScopeForPath` in `apps/sdp-web/src/lib/theme-scope-routes.ts`: Overview, Wallets, Issuance,
+Payments and the Privacy connect form), and always on the sidebar. `ThemeScopeProvider` carries the scope to portaled content, which re-stamps it
 through `useThemeScopeAttributes` (`packages/sdp-ui/src/theme-scope.ts`); where structure
 differs as well, a client component reads `useThemeScope() === "refresh"`.
 

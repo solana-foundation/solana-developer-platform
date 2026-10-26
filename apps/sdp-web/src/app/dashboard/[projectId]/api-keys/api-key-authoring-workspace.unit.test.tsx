@@ -33,11 +33,6 @@ vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
-vi.mock("@/lib/dashboard-quick-start", () => ({
-  completeQuickStartStep: vi.fn(),
-  quickStartKey: vi.fn(() => "quick-start"),
-}));
-
 const WALLET_A: PaymentsDashboardWallet = {
   id: "wallet_a",
   walletId: "wallet_a",

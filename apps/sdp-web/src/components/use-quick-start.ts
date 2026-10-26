@@ -15,7 +15,7 @@ import {
   resolveQuickStartSteps,
   subscribeQuickStart,
   subscribeQuickStartStatusStale,
-} from "@/lib/dashboard-quick-start.redesign";
+} from "@/lib/dashboard-quick-start";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { quickStartQueryKeys } from "./quick-start-query-key";
 

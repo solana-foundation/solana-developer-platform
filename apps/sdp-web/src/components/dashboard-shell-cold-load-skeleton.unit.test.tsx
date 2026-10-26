@@ -53,7 +53,6 @@ function renderColdLoad(pathname: string): string {
         payments: true,
         privateChannels: false,
         releaseChannel: "experimental",
-        newDesign: false,
         ramps: true,
       }}
     >
@@ -65,17 +64,7 @@ function renderColdLoad(pathname: string): string {
 const identityTranslate = ((key: string) => key) as Parameters<typeof getDashboardPageConfig>[1];
 
 function settledContentWidthClassFor(pathname: string): string {
-  // The same previous design the shell above is rendered in.
-  const config = getDashboardPageConfig(
-    pathname,
-    identityTranslate,
-    false,
-    false,
-    [],
-    true,
-    true,
-    false
-  );
+  const config = getDashboardPageConfig(pathname, identityTranslate, true);
   return config.contentWidthClass ?? "max-w-5xl";
 }
 
@@ -136,10 +125,10 @@ describe("dashboard cold load", () => {
   it("titles Helius Rings and the Members redirect instead of falling through to Home", () => {
     const t = identityTranslate;
 
-    expect(getDashboardPageConfig("/dashboard/helius-rings", t, false, false, []).title).toBe(
+    expect(getDashboardPageConfig("/dashboard/helius-rings", t).title).toBe(
       "Shared.dashboardShell.heliusRings"
     );
-    expect(getDashboardPageConfig("/dashboard/members", t, false, false, []).title).toBe(
+    expect(getDashboardPageConfig("/dashboard/members", t).title).toBe(
       "Shared.dashboardShell.settings"
     );
   });

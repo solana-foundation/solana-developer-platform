@@ -23,7 +23,6 @@ import { projectSwitchDestination } from "@/lib/dashboard-navigation-loading";
 import { projectHref } from "@/lib/dashboard-project-path";
 import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
 import { readDashboardTabFromUrl, useDashboardUrlState } from "@/lib/dashboard-url-state";
-import { isNewDesignPage } from "@/lib/design-modules";
 import { setIdempotencyKeyScope } from "@/lib/idempotency-key-store";
 import { useDashboardPathname, useProjectId } from "@/lib/use-dashboard-project";
 import { shouldClearDashboardTabAfterPathnameChange } from "./dashboard-workspace-url-state";
@@ -31,9 +30,7 @@ import { shouldClearDashboardTabAfterPathnameChange } from "./dashboard-workspac
 export type IssuanceWorkspaceTab = "tokens" | "playground";
 
 type DashboardWorkspaceContextValue = {
-  initialQuickStartStatus: import("@/lib/dashboard-quick-start.redesign").QuickStartStatus | null;
-  /** The previous design's quick start (NEW DESIGN off). */
-  initialQuickStartStep: import("@/lib/dashboard-quick-start").QuickStartStep | null;
+  initialQuickStartStatus: import("@/lib/dashboard-quick-start").QuickStartStatus | null;
   dashboardAccess: DashboardAccess;
   flags: DashboardFlags;
   dashboardCacheScope: DashboardCacheScope;
@@ -55,8 +52,7 @@ const DashboardWorkspaceContext = createContext<DashboardWorkspaceContextValue |
 );
 
 type DashboardWorkspaceProviderProps = {
-  initialQuickStartStatus?: import("@/lib/dashboard-quick-start.redesign").QuickStartStatus | null;
-  initialQuickStartStep?: import("@/lib/dashboard-quick-start").QuickStartStep | null;
+  initialQuickStartStatus?: import("@/lib/dashboard-quick-start").QuickStartStatus | null;
   children: ReactNode;
   scopeRefreshFallback: ReactNode;
   dashboardAccess: DashboardAccess;
@@ -68,7 +64,6 @@ type DashboardWorkspaceProviderProps = {
 
 export function DashboardWorkspaceProvider({
   initialQuickStartStatus = null,
-  initialQuickStartStep = null,
   children,
   scopeRefreshFallback,
   dashboardAccess,
@@ -165,17 +160,10 @@ export function DashboardWorkspaceProvider({
     // The snapshot can still hold the previous page's tab here; acting on that stale
     // value would wipe an explicit deep-link destination (e.g. ?tab=playground).
     const tab = readDashboardTabFromUrl();
-    if (
-      shouldClearDashboardTabAfterPathnameChange({
-        previousPathname,
-        pathname,
-        tab,
-        newDesign: isNewDesignPage(pathname, flags),
-      })
-    ) {
+    if (shouldClearDashboardTabAfterPathnameChange({ previousPathname, pathname, tab })) {
       replaceSearchParams({ tab: null });
     }
-  }, [flags, pathname, replaceSearchParams]);
+  }, [pathname, replaceSearchParams]);
 
   const issuanceTab: IssuanceWorkspaceTab = useMemo(() => {
     const tab = searchParams.get("tab");
@@ -193,7 +181,6 @@ export function DashboardWorkspaceProvider({
   const value = useMemo<DashboardWorkspaceContextValue>(
     () => ({
       initialQuickStartStatus: dashboardScopeIsFresh ? initialQuickStartStatus : null,
-      initialQuickStartStep: dashboardScopeIsFresh ? initialQuickStartStep : null,
       dashboardAccess,
       flags,
       dashboardCacheScope: liveDashboardCacheScope,
@@ -211,7 +198,6 @@ export function DashboardWorkspaceProvider({
     }),
     [
       initialQuickStartStatus,
-      initialQuickStartStep,
       dashboardScopeIsFresh,
       dashboardAccess,
       flags,

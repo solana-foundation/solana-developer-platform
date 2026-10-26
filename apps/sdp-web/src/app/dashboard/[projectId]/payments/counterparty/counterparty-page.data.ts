@@ -10,7 +10,7 @@ import type {
 } from "@sdp/types/payments";
 import type { SdpApiClient } from "@/lib/sdp-api";
 
-export const COUNTERPARTY_PAGE_SIZE = 10;
+const COUNTERPARTY_PAGE_SIZE = 10;
 
 export async function fetchCounterparties(
   request: SdpApiClient["request"],

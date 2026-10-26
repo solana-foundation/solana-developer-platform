@@ -7,14 +7,12 @@ import { act, cleanup, render, renderHook, screen, waitFor } from "@testing-libr
 import type { ReactNode } from "react";
 import { SWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useOnchainSendWizard as useLegacyWizard } from "@/app/dashboard/[projectId]/payments/ramps/hooks/use-onchain-send-wizard";
-import { useOnchainSendWizard as useRedesignWizard } from "@/app/dashboard/[projectId]/payments/ramps/hooks/use-onchain-send-wizard.redesign";
+import { useOnchainSendWizard } from "@/app/dashboard/[projectId]/payments/ramps/hooks/use-onchain-send-wizard";
 import { DashboardWorkspaceProvider } from "@/contexts/dashboard-workspace-context";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
-import { OnchainSendStepContent as LegacyContent } from "./onchain-send-step-content";
-import { OnchainSendStepContent as RedesignContent } from "./onchain-send-step-content.redesign";
+import { OnchainSendStepContent } from "./onchain-send-step-content";
 
 vi.mock("@clerk/nextjs", () => ({ useAuth: () => ({ isLoaded: false }) }));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
@@ -112,14 +110,11 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe.each([
-  { name: "legacy", useWizard: useLegacyWizard, Content: LegacyContent },
-  { name: "redesign", useWizard: useRedesignWizard, Content: RedesignContent },
-])("$name Fireblocks payment selection", ({ useWizard, Content }) => {
+describe("Fireblocks payment selection", () => {
   it("limits native transfer checks and instructions to connected Fireblocks BYOK wallets", async () => {
     const { result } = renderHook(
       () =>
-        useWizard({
+        useOnchainSendWizard({
           wallets,
           walletsError: null,
           issuedTokenSymbolsByMint: {},
@@ -134,7 +129,7 @@ describe.each([
       result.current.setField("amount", "0.01");
     });
     const view = render(
-      <Content
+      <OnchainSendStepContent
         wizard={{ ...result.current, currentStepId: "DETAILS" }}
         counterpartyName="Destination"
       />,
@@ -145,7 +140,7 @@ describe.each([
       fetchMock.mockClear();
       act(() => result.current.selectWallet(walletId));
       view.rerender(
-        <Content
+        <OnchainSendStepContent
           wizard={{ ...result.current, currentStepId: "DETAILS" }}
           counterpartyName="Destination"
         />
@@ -161,7 +156,7 @@ describe.each([
         walletId === "wallet_byok"
       );
       view.rerender(
-        <Content
+        <OnchainSendStepContent
           wizard={{ ...result.current, currentStepId: "REVIEW" }}
           counterpartyName="Destination"
         />

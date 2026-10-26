@@ -20,14 +20,7 @@ type FlagCap =
 
 const FLAG_CAPS = {
   homepageOpenSignup: "uncapped",
-  newDesign: "uncapped",
   paymentsDemoMode: "uncapped",
-  newDesignOverview: "uncapped",
-  newDesignWallets: "uncapped",
-  newDesignContacts: "uncapped",
-  newDesignPayDeposit: "uncapped",
-  newDesignActivity: "uncapped",
-  newDesignIssuance: "uncapped",
   issuance: { module: "issuance" },
   assetProfiles: { module: "issuance" },
   privateChannels: { module: "private_channels" },
@@ -108,19 +101,7 @@ describe("defineDashboardFlags", () => {
   it("keeps uncapped flags on Vercel's decision on stable", async () => {
     const values = await decideAll(defineFlags("stable"));
     const delegated = Object.keys(FLAG_CAPS).filter((name) => !EXCLUDED_FROM_STABLE.includes(name));
-    expect(delegated.sort()).toEqual(
-      [
-        "homepageOpenSignup",
-        "newDesign",
-        "paymentsDemoMode",
-        "newDesignOverview",
-        "newDesignWallets",
-        "newDesignContacts",
-        "newDesignPayDeposit",
-        "newDesignActivity",
-        "newDesignIssuance",
-      ].sort()
-    );
+    expect(delegated.sort()).toEqual(["homepageOpenSignup", "paymentsDemoMode"]);
     for (const name of delegated) {
       expect(values[name], name).toBe(true);
     }

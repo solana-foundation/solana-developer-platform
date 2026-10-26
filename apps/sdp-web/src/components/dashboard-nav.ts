@@ -28,7 +28,6 @@ import {
   DASHBOARD_PAYMENTS_SUBNAV_HREFS,
   DASHBOARD_SIDE_NAV_HREFS,
 } from "@/lib/dashboard-navigation-loading";
-import { type DesignFlags, type DesignModuleFlags, isDesignModuleOn } from "@/lib/design-modules";
 import { resolveDocsUrl } from "@/lib/docs-url";
 
 export type SubNavItem = {
@@ -107,12 +106,7 @@ export function withSubnavToggled(
   return { ...current, [key]: !current[key] };
 }
 
-export function getPaymentsActions(
-  t: ReturnType<typeof useTranslations>,
-  _privateChannelsEnabled: boolean,
-  design: DesignFlags = { newDesign: true }
-): SubNavItem[] {
-  const activityDesign = isDesignModuleOn(design, "activity");
+export function getPaymentsActions(t: ReturnType<typeof useTranslations>): SubNavItem[] {
   return [
     {
       label: t("Shared.dashboardShell.transactions"),
@@ -120,9 +114,7 @@ export function getPaymentsActions(
       icon: ReceiptTextIcon,
     },
     {
-      label: isDesignModuleOn(design, "contacts")
-        ? t("Shared.dashboardShell.contacts")
-        : t("Shared.dashboardShell.counterparty"),
+      label: t("Shared.dashboardShell.contacts"),
       href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.counterparty,
       icon: UsersIcon,
     },
@@ -142,9 +134,7 @@ export function getPaymentsActions(
       icon: FileTextIcon,
     },
     {
-      label: activityDesign
-        ? t("Shared.dashboardShell.newDesign.recurring")
-        : t("Shared.dashboardShell.recurring"),
+      label: t("Shared.dashboardShell.newDesign.recurring"),
       href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.recurring,
       icon: RepeatIcon,
     },
@@ -254,28 +244,18 @@ export function getNavSections(
     privateChannelsEnabled: boolean;
     /** Wallets pinned from the Wallets page, listed under Wallets in the order they were pinned. */
     walletFavorites?: SubNavItem[];
-    /** NEW DESIGN; the previous design's labels when off. */
-    newDesign?: boolean;
-    /** Each design module's own flag: a redesigned area's labels follow it. */
-    newDesignModules?: DesignModuleFlags;
     rampsEnabled: boolean;
   }
 ): NavSection[] {
   const marketsActions = getMarketsActions(t, options.earnEnabled, options.dvpEnabled);
   const integrationActions = getIntegrationActions(t, options);
-  const design: DesignFlags = {
-    newDesign: options.newDesign ?? true,
-    newDesignModules: options.newDesignModules,
-  };
 
   return [
     {
       title: t("Shared.dashboardShell.create"),
       items: [
         {
-          label: isDesignModuleOn(design, "overview")
-            ? t("Shared.dashboardShell.newDesign.home")
-            : t("Shared.dashboardShell.home"),
+          label: t("Shared.dashboardShell.newDesign.home"),
           href: DASHBOARD_SIDE_NAV_HREFS.home,
           icon: LayoutDashboardIcon,
         },
@@ -311,7 +291,7 @@ export function getNavSections(
                 label: t("Shared.dashboardShell.payments"),
                 href: DASHBOARD_SIDE_NAV_HREFS.payments,
                 icon: ArrowLeftRightIcon,
-                children: getPaymentsActions(t, options.privateChannelsEnabled, design),
+                children: getPaymentsActions(t),
                 subnavKey: "payments" as const,
               },
             ]

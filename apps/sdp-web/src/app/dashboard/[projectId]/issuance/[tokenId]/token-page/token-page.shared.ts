@@ -6,7 +6,7 @@ import type { AccessControlMode } from "@/app/dashboard/[projectId]/issuance/acc
 import {
   type TokenLifecycle,
   tokenLifecycle,
-} from "@/app/dashboard/[projectId]/issuance/issuance-token-state.redesign";
+} from "@/app/dashboard/[projectId]/issuance/issuance-token-state";
 import type { MessageKey } from "@/i18n/messages";
 import type { useTranslations } from "@/i18n/provider";
 

@@ -6,8 +6,8 @@ import { Modal } from "@sdp/ui/modal";
 import { Loader2Icon } from "lucide-react";
 import { useTranslations } from "@/i18n/provider";
 
-// The Private Channels connection's confirmation dialogs. Both designs of the connect form and the
-// channel actions menu render the same dialogs, so they live here once.
+// The Private Channels connection's confirmation dialogs. The connect form and the channel actions
+// menu render the same dialogs, so they live here once.
 
 export function ReactivateConfirmationDialog(props: {
   prompt: { existing: PrivateChannelInstance } | null;

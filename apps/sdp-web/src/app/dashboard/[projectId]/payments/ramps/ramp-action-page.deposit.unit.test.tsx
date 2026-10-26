@@ -8,10 +8,8 @@ import { I18nProvider } from "@/i18n/provider";
 import * as urlState from "@/lib/dashboard-url-state";
 import * as providerAvailability from "@/lib/provider-availability";
 import * as depositAddressPanel from "./components/deposit-address-panel";
-import * as onchainReceiveRail from "./onchain-receive-rail";
-import * as onrampRail from "./onramp-rail.redesign";
-import { PaymentsActionPage as LegacyPaymentsActionPage } from "./ramp-action-page";
-import { PaymentsActionPage } from "./ramp-action-page.redesign";
+import * as onrampRail from "./onramp-rail";
+import { PaymentsActionPage } from "./ramp-action-page";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
@@ -48,9 +46,6 @@ beforeEach(() => {
     <div>address panel</div>
   ));
   vi.spyOn(onrampRail, "OnrampRail").mockImplementation(() => <div>onramp</div>);
-  vi.spyOn(onchainReceiveRail, "OnchainReceiveRail").mockImplementation(() => (
-    <div>receive by address</div>
-  ));
 });
 
 afterEach(() => {
@@ -70,17 +65,5 @@ describe("deposit for a read-only member", () => {
     renderWith(<PaymentsActionPage {...PROPS} />);
     expect(screen.getByText("address panel")).toBeTruthy();
     expect(screen.queryByText("onramp")).toBeNull();
-  });
-
-  it("takes a viewer on the previous design straight to the address, past the contact step", () => {
-    arrange({ canWrite: false, tab: null });
-    renderWith(<LegacyPaymentsActionPage {...PROPS} />);
-    expect(screen.getByText("receive by address")).toBeTruthy();
-  });
-
-  it("keeps a member on the previous design at the contact step", () => {
-    arrange({ canWrite: true, tab: null });
-    renderWith(<LegacyPaymentsActionPage {...PROPS} />);
-    expect(screen.queryByText("receive by address")).toBeNull();
   });
 });
