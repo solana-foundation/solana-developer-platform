@@ -15,6 +15,9 @@ const REFRESH_ROUTES = [
   /^\/dashboard\/issuance(?:\/|$)/,
   // Payments: every page.
   /^\/dashboard\/payments(?:\/|$)/,
+  // Markets: the landing that routes to Earn's surfaces and DvP. DvP's own pages keep the base
+  // design.
+  /^\/dashboard\/markets\/?$/,
   // The Private Channels connect form, with or without an instance: /private-channels/setup and
   // /private-channels/<instanceId>/setup. The rest of Private Channels keeps the base design.
   /^\/dashboard\/integrations\/private-channels\/(?:[^/]+\/)?setup\/?$/,

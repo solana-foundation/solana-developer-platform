@@ -3,10 +3,8 @@
     "landing": {
       "earnHeading": "Earn",
       "settlementHeading": "Settlement",
-      "treasuryAudience": "For corporate treasury",
-      "treasuryDescription": "Deposit from your custody wallets into provider strategies, and track positions and yield in one place.",
-      "programAudience": "For payments platforms",
-      "programDescription": "Let your customers earn inside your product. Pick a strategy and integrate the API."
+      "treasuryTileDescription": "Earn on idle custody cash.",
+      "programTileDescription": "Offer yield in your product."
     },
     "liquidity": {
       "instant": "Instant",
@@ -363,8 +361,7 @@
       "kindAgentBadge": "Set up for two other parties",
       "kindBilateralBadge": "Both legs are yours",
       "kindPrincipalBadge": "You hold a leg",
-      "landingAudience": "For settlement",
-      "landingDescription": "Trade an issued asset against cash with no counterparty risk. Both legs move together or neither does.",
+      "landingTileDescription": "Both legs settle, or neither does.",
       "legA": "Asset leg",
       "legAwaiting": "Awaiting deposit",
       "legB": "Cash leg",

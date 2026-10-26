@@ -5,15 +5,16 @@ type Translate = Parameters<typeof getDashboardPageConfig>[1];
 const t = ((key: string) => key) as Translate;
 
 describe("Markets dashboard headers", () => {
-  it("centers the Markets landing title without header tabs", () => {
+  it("sets the Markets landing title left over the page column, without header tabs", () => {
     const config = getDashboardPageConfig("/dashboard/markets", t);
 
     expect(config).toMatchObject({
       title: "Shared.dashboardShell.markets",
-      titlePosition: "center",
-      contentWidthClass: "max-w-none",
+      titlePosition: "left",
+      contentWidthClass: "max-w-page",
     });
     expect(config.headerTabs).toBeUndefined();
+    expect(config.headerAction).toBeUndefined();
   });
 
   it.each([

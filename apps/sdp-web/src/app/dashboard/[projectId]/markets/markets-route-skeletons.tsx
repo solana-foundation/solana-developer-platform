@@ -6,6 +6,7 @@ import {
   DashboardWorkspaceCard,
   DashboardWorkspaceOverviewPanel,
 } from "@/components/dashboard-workspace-panel";
+import { RecordStack } from "@/components/refresh-record";
 import type { DashboardFlags } from "@/flags/dashboard";
 
 const BALANCE_SKELETON_IDS = ["one", "two", "three"];
@@ -15,26 +16,34 @@ const EARN_PATH_SKELETON_IDS = ["treasury", "program"];
 const DVP_PATH_SKELETON_IDS = ["dvp"];
 const INTEGRATION_SECTION_SKELETON_IDS = ["client", "deposit", "portfolio", "withdraw"];
 
+/** A landing group: its 24px heading line, then a tile per path, two to a row. */
+function MarketsPathGroupSkeleton({ paths }: { paths: readonly string[] }) {
+  return (
+    <section className="flex min-w-0 flex-col gap-4">
+      <div className="flex h-6 items-center">
+        <SkeletonBlock className="h-4 w-24" />
+      </div>
+      <div className="grid min-w-0 grid-cols-2 gap-2">
+        {paths.map((id) => (
+          <SkeletonBlock className="h-[120px] w-full rounded-control" key={id} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
 /**
- * One block per path card the landing renders: Earn's two, then DvP's. Markets runs when
- * either sub-module does, so drawing both showed a DvP card on stage (Earn `beta`, DvP
+ * The landing's groups and a tile per path it renders: Earn's two, then DvP's. Markets runs
+ * when either sub-module does, so drawing both showed a DvP tile on stage (Earn `beta`, DvP
  * `experimental`) that the page leaves out.
  */
 export function MarketsLandingSkeleton({ earn, dvp }: { earn: boolean; dvp: boolean }) {
-  const paths = [...(earn ? EARN_PATH_SKELETON_IDS : []), ...(dvp ? DVP_PATH_SKELETON_IDS : [])];
   return (
-    <DashboardWorkspaceOverviewPanel aria-busy="true">
-      <div className="mx-auto w-full max-w-4xl space-y-5">
-        <div className="max-w-3xl">
-          <SkeletonBlock className="h-3 w-28" />
-          <SkeletonBlock className="mt-3 h-4 w-[32rem] max-w-full" />
-        </div>
-        <div className="grid gap-4 md:grid-cols-2">
-          {paths.map((id) => (
-            <SkeletonBlock className="h-40 w-full rounded-2xl" key={id} />
-          ))}
-        </div>
-      </div>
+    <DashboardWorkspaceOverviewPanel aria-busy="true" data-loading-layout="markets-landing">
+      <RecordStack>
+        {earn ? <MarketsPathGroupSkeleton paths={EARN_PATH_SKELETON_IDS} /> : null}
+        {dvp ? <MarketsPathGroupSkeleton paths={DVP_PATH_SKELETON_IDS} /> : null}
+      </RecordStack>
     </DashboardWorkspaceOverviewPanel>
   );
 }
