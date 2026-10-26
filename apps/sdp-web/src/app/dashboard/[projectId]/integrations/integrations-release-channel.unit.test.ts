@@ -19,7 +19,7 @@ import { dashboardFlagsAt } from "@/test/release-channel-flags";
 import { resetRequestProject, setPageRequest } from "@/test/request-project";
 
 vi.mock("@clerk/nextjs/server", () => ({
-  auth: async () => ({ userId: "user_test", orgId: "org_test", orgRole: "org:admin" }),
+  auth: async () => ({ userId: "user_test", orgId: "org_test" }),
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
@@ -67,6 +67,8 @@ beforeEach(() => {
   unexpectedPaths.length = 0;
   resetRequestProject();
   setPageRequest(`/dashboard/${SANDBOX_PROJECT.id}/integrations`);
+  // The member's SDP role comes from the API (`/v1/members/me`), not the Clerk session.
+  vi.spyOn(sdpApi, "requestMemberRole").mockResolvedValue("admin");
   vi.spyOn(sdpApi, "createRequestScopedSdpApiClients").mockImplementation(async () => ({
     organizationClient: apiClient({
       "/v1/onboarding/status": { linked: true, organization: { id: "org_test" } },
