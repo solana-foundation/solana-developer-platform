@@ -112,12 +112,8 @@ export interface Env extends ManagedRpcEnv {
   SOLANA_RPC_TRITON_API_KEY?: string;
   SOLANA_RPC_HELIUS_URL?: string;
   SOLANA_RPC_HELIUS_API_KEY?: string;
-  /** Defaults to Jupiter's gateway; a key raises its rate limit. */
-  JUPITER_PRICE_API_URL?: string;
-  JUPITER_PRICE_API_KEY?: string;
+  /** Tokens.xyz server key with assets:read; used only for display estimates. */
   TOKENS_XYZ_API_KEY?: string;
-  /** Opt into each eligible shadow lookup. Configure only in stage. */
-  TOKENS_XYZ_SHADOW_SAMPLE_ALL?: string;
   /**
    * Jupiter Swap API (swap-funded Earn deposits and provider DEX exits). Fail-closed: with no key
    * present, a deposit that names a `sourceTokenMint` is refused before any

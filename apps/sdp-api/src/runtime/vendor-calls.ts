@@ -10,6 +10,7 @@ export interface VendorCallDetails {
   readonly http_status?: number;
   readonly requested_count?: number;
   readonly priced_count?: number;
+  readonly unpriced_count?: number;
   readonly confirmed_missing_count?: number;
   readonly invalid_row_count?: number;
   readonly stale_row_count?: number;
@@ -17,7 +18,8 @@ export interface VendorCallDetails {
   readonly max_snapshot_age_ms?: number;
 }
 
-function logVendorCallSuccess(
+/** Records one successful vendor operation at the supplied boundary. */
+export function logVendorCallSuccess(
   vendor: string,
   operation: string,
   startedAt: number,

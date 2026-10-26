@@ -2,35 +2,64 @@ import { runInClusterScope } from "@sdp/rpc/scope";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as moneyPathEvents from "@/runtime/money-path-events";
-import { env } from "@/test/helpers/env";
+import { createDisplayPriceStore } from "@/services/display-price-store";
+import { tokensPriceRow } from "@/test/helpers/display-prices";
 import { required } from "@/test/helpers/required";
 import type { Env } from "@/types/env";
 import { clearDisplayPriceCacheForTests, fetchDisplayUsdPrices } from "./display-price.service";
 
-type JupiterPriceBody = Readonly<
-  Record<string, { readonly usdPrice: number | string; readonly decimals?: number } | null>
->;
+vi.mock("@/services/display-price-store", () => ({ createDisplayPriceStore: vi.fn() }));
 
-function fetchPricesIn(
-  environment: SdpEnvironment,
-  priceEnv: Env,
-  mints: string[]
-): Promise<Map<string, number>> {
+const store = {
+  lookup: vi.fn(async (mints: string[], owner: string | null) => ({
+    prices: new Map(),
+    claimed: owner ? mints : [],
+    pending: [] as string[],
+  })),
+  admitRequest: vi.fn(async () => true),
+  backOff: vi.fn(async () => undefined),
+  complete: vi.fn(async () => undefined),
+};
+
+beforeEach(() => {
+  vi.mocked(createDisplayPriceStore).mockReturnValue(store);
+  store.lookup.mockImplementation(async (mints, owner) => ({
+    prices: new Map(),
+    claimed: owner ? mints : [],
+    pending: [],
+  }));
+  store.admitRequest.mockResolvedValue(true);
+  store.backOff.mockResolvedValue(undefined);
+  store.complete.mockResolvedValue(undefined);
+});
+
+const env: Env = {
+  ENVIRONMENT: "development",
+  API_VERSION: "v1",
+  TOKENS_XYZ_API_KEY: "test-tokens-key",
+};
+const MAX_AGE_MS = 2 * 60 * 60_000;
+
+function prices(mints: string[], priceEnv: Env = env, environment: SdpEnvironment = "production") {
   return runInClusterScope({ projectId: null, environment }, () =>
     fetchDisplayUsdPrices(priceEnv, mints)
   );
 }
 
-function priceResponse(body: JupiterPriceBody, status: number): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json" },
+function requestedMints(init: RequestInit | undefined): string[] {
+  const parsed: unknown = JSON.parse(String(required(init).body));
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    !("mints" in parsed) ||
+    !Array.isArray(parsed.mints)
+  ) {
+    throw new Error("Expected a mint batch");
+  }
+  return parsed.mints.map((mint: unknown) => {
+    if (typeof mint !== "string") throw new Error("Expected a mint string");
+    return mint;
   });
-}
-
-function requestedMints(input: Parameters<typeof fetch>[0]): string[] {
-  const requestUrl = input instanceof Request ? input.url : input;
-  return required(new URL(requestUrl).searchParams.get("ids")).split(",");
 }
 
 afterEach(() => {
@@ -39,468 +68,320 @@ afterEach(() => {
   clearDisplayPriceCacheForTests();
 });
 
-beforeEach(() => {
-  vi.spyOn(Math, "random").mockReturnValue(0);
-});
-
-describe("fetchDisplayUsdPrices", () => {
-  it("reads usdPrice per mint", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      priceResponse(
-        {
-          MintA: { usdPrice: 1.0001, decimals: 6 },
-          MintB: { usdPrice: 74.19, decimals: 9 },
-        },
-        200
-      )
-    );
-
-    const prices = await fetchPricesIn("production", env, ["MintA", "MintB"]);
-
-    expect(prices.get("MintA")).toBeCloseTo(1.0001);
-    expect(prices.get("MintB")).toBeCloseTo(74.19);
-  });
-
-  it("omits a mint Jupiter could not price rather than pricing it at zero", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(priceResponse({ MintA: { usdPrice: 2 } }, 200));
-
-    const prices = await fetchPricesIn("production", env, ["MintA", "MintUnknown"]);
-
-    expect(prices.get("MintA")).toBe(2);
-    expect(prices.has("MintUnknown")).toBe(false);
-  });
-
-  it("returns an empty map instead of throwing when the request fails", async () => {
-    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network down"));
-
-    await expect(fetchPricesIn("production", env, ["MintA"])).resolves.toEqual(new Map());
-  });
-
-  it("returns an empty map on a non-ok response", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(priceResponse({}, 429));
-
-    await expect(fetchPricesIn("production", env, ["MintA"])).resolves.toEqual(new Map());
-  });
-
-  it("stops remaining Jupiter batches after a rate limit", async () => {
-    const mints = Array.from({ length: 120 }, (_, index) => `Mint${index}`);
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(priceResponse({}, 429));
-
-    await expect(fetchPricesIn("production", env, mints)).resolves.toEqual(new Map());
-
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    expect(requestedMints(required(fetchSpy.mock.calls[0])[0])).toHaveLength(50);
-  });
-
-  it("stops keyed batches after the in-flight rate-limited requests", async () => {
-    const mints = Array.from({ length: 120 }, (_, index) => `Mint${index}`);
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(priceResponse({}, 429));
-
-    await fetchPricesIn("production", { ...env, JUPITER_PRICE_API_KEY: "k" }, mints);
-
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
-  });
-
-  it("ignores non-numeric and negative prices", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      priceResponse(
-        {
-          MintA: { usdPrice: "1.5" },
-          MintB: { usdPrice: -3 },
-          MintC: { usdPrice: Number.NaN },
-          MintD: null,
-        },
-        200
-      )
-    );
-
-    await expect(
-      fetchPricesIn("production", env, ["MintA", "MintB", "MintC", "MintD"])
-    ).resolves.toEqual(new Map());
-  });
-
-  it("chunks large mint lists and merges the results", async () => {
-    const mints = Array.from({ length: 120 }, (_, index) => `Mint${index}`);
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      return priceResponse(
-        Object.fromEntries(requestedMints(input).map((id) => [id, { usdPrice: 1 }])),
-        200
-      );
-    });
-
-    const prices = await fetchPricesIn("production", env, mints);
-
-    expect(fetchSpy).toHaveBeenCalledTimes(3);
-    expect(prices.size).toBe(120);
-  });
-
-  it("keeps prices from the batches that succeeded when one batch fails", async () => {
-    const mints = Array.from({ length: 60 }, (_, index) => `Mint${index}`);
-    let call = 0;
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      call += 1;
-      if (call === 1) {
-        throw new Error("first batch failed");
-      }
-      return priceResponse(
-        Object.fromEntries(requestedMints(input).map((id) => [id, { usdPrice: 5 }])),
-        200
-      );
-    });
-
-    const prices = await fetchPricesIn("production", env, mints);
-
-    expect(prices.size).toBe(10);
-  });
-
-  it("sends the api key only when one is configured", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(priceResponse({}, 200));
-
-    await fetchPricesIn("production", env, ["MintA"]);
-    expect(required(required(fetchSpy.mock.calls[0])[1]).headers).toBeUndefined();
-
-    await fetchPricesIn(
-      "production",
-      { ...env, JUPITER_PRICE_API_URL: "https://api.jup.ag/price/v3", JUPITER_PRICE_API_KEY: "k" },
-      ["MintA"]
-    );
-    const [url, init] = required(fetchSpy.mock.calls[1]);
-    expect(String(url)).toContain("https://api.jup.ag/price/v3");
-    expect(required(init).headers).toEqual({ "x-api-key": "k" });
-  });
-
-  it("uses the Jupiter gateway with or without a price key", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(priceResponse({}, 200));
-
-    await fetchPricesIn("production", env, ["MintA"]);
-    await fetchPricesIn("production", { ...env, JUPITER_PRICE_API_KEY: "k" }, ["MintA"]);
-
-    expect(String(required(fetchSpy.mock.calls[0])[0])).toContain("api.jup.ag/price/v3");
-    expect(required(required(fetchSpy.mock.calls[0])[1]).headers).toBeUndefined();
-    expect(String(required(fetchSpy.mock.calls[1])[0])).toContain("api.jup.ag/price/v3");
-    expect(required(required(fetchSpy.mock.calls[1])[1]).headers).toEqual({ "x-api-key": "k" });
-  });
-
-  it("serves Jupiter while comparing a Tokens.xyz snapshot eligible by fetch time", async () => {
-    const logEvent = vi.spyOn(moneyPathEvents, "logEvent").mockImplementation(() => {});
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      if (String(input).includes("tokens.xyz")) {
-        return new Response(
-          JSON.stringify([
-            {
-              address: "MintB",
-              hasMarket: true,
-              token: { address: "MintB", price: 3.5, lastFetchedAt: Date.now() },
-            },
-          ]),
-          { status: 200 }
-        );
-      }
-      return priceResponse({ MintA: { usdPrice: 2 }, MintB: { usdPrice: 9 } }, 200);
-    });
-
-    const prices = await fetchPricesIn("production", { ...env, TOKENS_XYZ_API_KEY: "xyz-key" }, [
-      "MintA",
-      "MintB",
-    ]);
-
-    expect(prices).toEqual(
-      new Map([
-        ["MintA", 2],
-        ["MintB", 9],
-      ])
-    );
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
-    expect(requestedMints(required(fetchSpy.mock.calls[0])[0])).toEqual(["MintA", "MintB"]);
-    const [url, init] = required(fetchSpy.mock.calls[1]);
-    expect(String(url)).toBe("https://api.tokens.xyz/v1/assets/market-snapshots");
-    expect(JSON.parse(String(required(init).body))).toEqual({ mints: ["MintA", "MintB"] });
-    expect(required(init).headers).toEqual({
-      "content-type": "application/json",
-      "x-api-key": "xyz-key",
-    });
-    await vi.waitFor(() =>
-      expect(
-        logEvent.mock.calls.some(([, payload]) => payload.event === "sdp_api_display_price_shadow")
-      ).toBe(true)
-    );
-    const comparison = logEvent.mock.calls.find(
-      ([, payload]) => payload.event === "sdp_api_display_price_shadow"
-    )?.[1];
-    expect(comparison).toMatchObject({
-      requested_count: 2,
-      jupiter_priced_count: 2,
-      tokens_priced_count: 1,
-      overlap_count: 1,
-      divergent_gt_10pct_count: 1,
-    });
-    expect(comparison).not.toHaveProperty("mint");
-    expect(comparison).not.toHaveProperty("price");
-  });
-
-  it("still serves Jupiter when Tokens.xyz prices every mint", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
-      String(input).includes("tokens.xyz")
-        ? Response.json([
-            {
-              address: "MintA",
-              hasMarket: true,
-              token: { address: "MintA", price: 2, lastFetchedAt: Date.now() },
-            },
-          ])
-        : priceResponse({ MintA: { usdPrice: 3 } }, 200)
-    );
-
-    await expect(
-      fetchPricesIn("production", { ...env, TOKENS_XYZ_API_KEY: "xyz-key" }, ["MintA"])
-    ).resolves.toEqual(new Map([["MintA", 3]]));
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
-    expect(String(required(fetchSpy.mock.calls[0])[0])).toContain("api.jup.ag");
-    expect(String(required(fetchSpy.mock.calls[1])[0])).toContain("api.tokens.xyz");
-  });
-
-  it("keeps missing or invalid Tokens.xyz prices unknown", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      if (String(input).includes("tokens.xyz")) {
-        return new Response(
-          JSON.stringify([
-            { address: "MintA", hasMarket: false, token: { address: "MintA", price: 0 } },
-            { address: "MintB", hasMarket: true, token: { address: "Other", price: 9 } },
-            { address: "MintC", hasMarket: true, token: null },
-            {
-              address: "Unrequested",
-              hasMarket: true,
-              token: { address: "Unrequested", price: 7 },
-            },
-          ]),
-          { status: 200 }
-        );
-      }
-      return priceResponse({}, 200);
-    });
-
-    await expect(
-      fetchPricesIn("production", { ...env, TOKENS_XYZ_API_KEY: "xyz-key" }, [
-        "MintA",
-        "MintB",
-        "MintC",
-      ])
-    ).resolves.toEqual(new Map());
-  });
-
-  it("serves Jupiter when a Tokens.xyz snapshot is stale or has no timestamp", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      if (String(input).includes("tokens.xyz")) {
-        return Response.json([
-          {
-            address: "MintA",
-            hasMarket: true,
-            token: { address: "MintA", price: 3, lastFetchedAt: Date.now() - 2 * 60 * 60_000 - 1 },
-          },
-          { address: "MintB", hasMarket: true, token: { address: "MintB", price: 4 } },
-        ]);
-      }
-      return priceResponse({ MintA: { usdPrice: 2 }, MintB: { usdPrice: 5 } }, 200);
-    });
-
-    const prices = await fetchPricesIn("production", { ...env, TOKENS_XYZ_API_KEY: "xyz-key" }, [
-      "MintA",
-      "MintB",
-    ]);
-
-    expect(prices).toEqual(
-      new Map([
-        ["MintA", 2],
-        ["MintB", 5],
-      ])
-    );
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
-  });
-
-  it("does not remember a missing price after a successful response", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(priceResponse({}, 200));
-
-    await fetchPricesIn("production", env, ["MintA"]);
-    await fetchPricesIn("production", env, ["MintA"]);
-
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
-  });
-
-  it("samples at most one 250-mint Tokens.xyz batch", async () => {
-    const mints = Array.from({ length: 501 }, (_, index) => `Mint${index}`);
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      if (String(input).includes("tokens.xyz")) return Response.json([]);
-      return priceResponse(
-        Object.fromEntries(requestedMints(input).map((mint) => [mint, { usdPrice: 2 }])),
-        200
-      );
-    });
-
-    expect(
-      (await fetchPricesIn("production", { ...env, TOKENS_XYZ_API_KEY: "xyz-key" }, mints)).size
-    ).toBe(501);
-    const tokensCalls = fetchSpy.mock.calls.filter(([input]) =>
-      String(input).includes("tokens.xyz")
-    );
-    expect(tokensCalls).toHaveLength(1);
-    expect(JSON.parse(String(required(required(tokensCalls[0])[1]).body)).mints).toHaveLength(250);
-  });
-
-  it("never sends the Jupiter key to an override host or follows a redirect", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(priceResponse({}, 200));
-
-    await fetchPricesIn(
-      "production",
-      {
-        ...env,
-        JUPITER_PRICE_API_KEY: "price-key",
-        JUPITER_PRICE_API_URL: "https://other.example/price/v3",
-      },
-      ["MintA"]
-    );
-
-    const [url, init] = required(fetchSpy.mock.calls[0]);
-    expect(String(url)).toContain("https://api.jup.ag/price/v3");
-    expect(required(init).headers).toEqual({ "x-api-key": "price-key" });
-    expect(required(init).redirect).toBe("error");
-  });
-
-  it("keeps balances unpriced when both price sources fail", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(priceResponse({}, 429));
-
-    await expect(
-      fetchPricesIn("production", { ...env, TOKENS_XYZ_API_KEY: "xyz-key" }, ["MintA"])
-    ).resolves.toEqual(new Map());
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
-  });
-
-  it("does not delay Jupiter when Tokens.xyz never answers", async () => {
-    let tokensAborted = false;
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
-      if (String(input).includes("tokens.xyz")) {
-        return new Promise<Response>((_resolve, reject) => {
-          const signal = required(required(init).signal);
-          const onAbort = () => {
-            tokensAborted = true;
-            reject(signal.reason);
-          };
-          if (signal.aborted) onAbort();
-          else signal.addEventListener("abort", onAbort, { once: true });
-        });
-      }
-      return Promise.resolve(priceResponse({ MintA: { usdPrice: 2 } }, 200));
-    });
-
-    const startedAt = performance.now();
-    const prices = await fetchPricesIn("production", { ...env, TOKENS_XYZ_API_KEY: "xyz-key" }, [
-      "MintA",
-    ]);
-
-    expect(prices).toEqual(new Map([["MintA", 2]]));
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
-    expect(performance.now() - startedAt).toBeLessThan(500);
-    await vi.waitFor(() => expect(tokensAborted).toBe(true), { timeout: 1_500 });
-  });
-
-  it("samples at most one percent by default and once per minute per process", async () => {
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockImplementation(async (input) =>
-        String(input).includes("tokens.xyz")
-          ? Response.json([])
-          : priceResponse(
-              Object.fromEntries(requestedMints(input).map((mint) => [mint, { usdPrice: 2 }])),
-              200
-            )
-      );
-    const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.5);
-    const stableEnv = { ...env, SDP_RELEASE_CHANNEL: "stable", TOKENS_XYZ_API_KEY: "xyz-key" };
-
-    await fetchPricesIn("production", stableEnv, ["MintA"]);
-    expect(
-      fetchSpy.mock.calls.filter(([input]) => String(input).includes("tokens.xyz"))
-    ).toHaveLength(0);
-
-    randomSpy.mockReturnValue(0.009);
-    await fetchPricesIn("production", stableEnv, ["MintB"]);
-    await fetchPricesIn("production", stableEnv, ["MintC"]);
-    expect(
-      fetchSpy.mock.calls.filter(([input]) => String(input).includes("tokens.xyz"))
-    ).toHaveLength(1);
-
-    clearDisplayPriceCacheForTests();
-    randomSpy.mockReturnValue(0.5);
-    await fetchPricesIn("production", { ...stableEnv, TOKENS_XYZ_SHADOW_SAMPLE_ALL: "true" }, [
-      "MintD",
-    ]);
-    expect(
-      fetchSpy.mock.calls.filter(([input]) => String(input).includes("tokens.xyz"))
-    ).toHaveLength(2);
-  });
-
-  it("makes no request when there is nothing to price", async () => {
+describe("Tokens display prices", () => {
+  it("makes no upstream request when shared coordination is unavailable", async () => {
+    store.lookup.mockRejectedValue(new Error("Redis unavailable"));
     const fetchSpy = vi.spyOn(globalThis, "fetch");
-
-    await expect(fetchPricesIn("production", env, ["", "   "])).resolves.toEqual(new Map());
+    expect(await prices(["A"])).toEqual(new Map());
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("reuses a price for 30 seconds, then asks again", async () => {
+  it("waits for a different replica's result without sending a duplicate request", async () => {
+    const value = { usdPrice: 2, snapshotFetchedAt: Date.now(), expiresAt: Date.now() + 60_000 };
+    store.lookup
+      .mockResolvedValueOnce({ prices: new Map(), claimed: [], pending: ["A"] })
+      .mockResolvedValueOnce({ prices: new Map([["A", value]]), claimed: [], pending: [] });
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    expect(await prices(["A"])).toEqual(new Map([["A", 2]]));
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(store.lookup).toHaveBeenLastCalledWith(["A"], null);
+  });
+
+  it("uses one fixed authenticated Tokens endpoint and preserves depeg prices", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(Response.json([tokensPriceRow("USDC", 0.92), tokensPriceRow("SOL", 101)]));
+
+    expect(await prices(["USDC", "SOL"])).toEqual(
+      new Map([
+        ["USDC", 0.92],
+        ["SOL", 101],
+      ])
+    );
+    expect(fetchSpy).toHaveBeenCalledExactlyOnceWith(
+      "https://api.tokens.xyz/v1/assets/market-snapshots",
+      expect.objectContaining({
+        method: "POST",
+        headers: { "content-type": "application/json", "x-api-key": "test-tokens-key" },
+        body: JSON.stringify({ mints: ["USDC", "SOL"] }),
+        redirect: "error",
+        signal: expect.any(AbortSignal),
+      })
+    );
+  });
+
+  it("reports a missing key once without sending anonymous requests", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const log = vi.spyOn(moneyPathEvents, "logEvent").mockImplementation(() => undefined);
+    const unconfigured = { ...env, TOKENS_XYZ_API_KEY: "  " };
+
+    expect(await prices(["MintA"], unconfigured)).toEqual(new Map());
+    await prices(["MintB"], unconfigured);
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledExactlyOnceWith("warn", {
+      event: "sdp_price_config_missing",
+      vendor: "tokens-xyz",
+    });
+  });
+
+  it("trims the key and never caches missing configuration", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(Response.json([tokensPriceRow("A", 2)]));
+    await prices(["A"], { ...env, TOKENS_XYZ_API_KEY: undefined });
+    expect(await prices(["A"], { ...env, TOKENS_XYZ_API_KEY: " key " })).toEqual(
+      new Map([["A", 2]])
+    );
+    expect(required(fetchSpy.mock.calls[0])[1]?.headers).toEqual({
+      "content-type": "application/json",
+      "x-api-key": "key",
+    });
+  });
+
+  it("keeps unsupported and missing mints unpriced and asks for them again", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        Response.json([tokensPriceRow("A", 2), { address: "B", hasMarket: false, token: null }])
+      )
+      .mockResolvedValueOnce(Response.json([tokensPriceRow("B", 3), tokensPriceRow("C", 4)]));
+
+    expect(await prices(["A", "B", "C"])).toEqual(new Map([["A", 2]]));
+    expect(await prices(["A", "B", "C"])).toEqual(
+      new Map([
+        ["A", 2],
+        ["B", 3],
+        ["C", 4],
+      ])
+    );
+    expect(requestedMints(required(fetchSpy.mock.calls[1])[1])).toEqual(["B", "C"]);
+  });
+
+  it.each([0, -1, "1.5", null, Number.NaN, Number.POSITIVE_INFINITY])(
+    "rejects an invalid price (%s) without discarding other mints",
+    async (price) => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        Response.json([
+          {
+            address: "A",
+            hasMarket: true,
+            token: { address: "A", price, lastFetchedAt: Date.now() },
+          },
+          tokensPriceRow("B", 2),
+        ])
+      );
+      expect(await prices(["A", "B"])).toEqual(new Map([["B", 2]]));
+    }
+  );
+
+  it("rejects mismatched, unexpected and duplicate rows", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json([
+        { ...tokensPriceRow("A", 2), token: tokensPriceRow("B", 2).token },
+        tokensPriceRow("Extra", 2),
+        tokensPriceRow("C", 2),
+        tokensPriceRow("C", 3),
+        tokensPriceRow("D", 4),
+      ])
+    );
+    expect(await prices(["A", "C", "D"])).toEqual(new Map([["D", 4]]));
+  });
+
+  it("rejects snapshots with missing, old or future timestamps", async () => {
+    const now = Date.now();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json([
+        { address: "Unknown", hasMarket: true, token: { address: "Unknown", price: 2 } },
+        tokensPriceRow("Old", 2, now - MAX_AGE_MS - 1),
+        tokensPriceRow("Future", 2, now + 120_000),
+        tokensPriceRow("Fresh", 2, now - 60_000),
+        { ...tokensPriceRow("NoMarket", 2), hasMarket: false },
+      ])
+    );
+    expect(await prices(["Unknown", "Old", "Future", "Fresh", "NoMarket"])).toEqual(
+      new Map([["Fresh", 2]])
+    );
+  });
+
+  it("never extends snapshot eligibility through the 60 second cache", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
-      .mockImplementation(async () => priceResponse({ MintA: { usdPrice: 2 } }, 200));
-
-    await fetchPricesIn("production", env, ["MintA"]);
-    vi.advanceTimersByTime(29_000);
-    await expect(fetchPricesIn("production", env, ["MintA"])).resolves.toEqual(
-      new Map([["MintA", 2]])
-    );
+      .mockResolvedValue(Response.json([tokensPriceRow("A", 2, Date.now() - MAX_AGE_MS + 1_000)]));
+    expect(await prices(["A"])).toEqual(new Map([["A", 2]]));
+    vi.advanceTimersByTime(2_000);
+    expect(await prices(["A"])).toEqual(new Map());
     expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
 
+  it("reuses valid snapshots for 60 seconds", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => Response.json([tokensPriceRow("A", 2)]));
+    await prices(["A"]);
+    vi.advanceTimersByTime(59_000);
+    expect(await prices(["A"])).toEqual(new Map([["A", 2]]));
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
     vi.advanceTimersByTime(1_000);
-    await fetchPricesIn("production", env, ["MintA"]);
+    await prices(["A"]);
     expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 
-  it("asks again after a failed request instead of remembering no price", async () => {
+  it("batches 250 unique mints per request", async () => {
+    const mints = Array.from({ length: 501 }, (_, index) => `Mint${index}`);
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
-      .mockRejectedValueOnce(new Error("network down"))
-      .mockImplementation(async () => priceResponse({ MintA: { usdPrice: 2 } }, 200));
-
-    await expect(fetchPricesIn("production", env, ["MintA"])).resolves.toEqual(new Map());
-    await expect(fetchPricesIn("production", env, ["MintA"])).resolves.toEqual(
-      new Map([["MintA", 2]])
-    );
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
-  });
-
-  it("sends one request for two callers pricing the same mint at once", async () => {
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockImplementation(async () => priceResponse({ MintA: { usdPrice: 2 } }, 200));
-
-    const [first, second] = await Promise.all([
-      fetchPricesIn("production", env, ["MintA"]),
-      fetchPricesIn("production", env, ["MintA"]),
+      .mockImplementation(async (_input, init) =>
+        Response.json(requestedMints(init).map((mint) => tokensPriceRow(mint, 2)))
+      );
+    expect((await prices([...mints, "Mint0", "", "  Mint1  "])).size).toBe(501);
+    expect(fetchSpy.mock.calls.map(([, init]) => requestedMints(init).length)).toEqual([
+      250, 250, 1,
     ]);
+  });
 
-    expect(first).toEqual(new Map([["MintA", 2]]));
-    expect(second).toEqual(first);
+  it("shares overlapping mint requests without exposing unrequested results", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (_input, init) =>
+        Response.json(requestedMints(init).map((mint) => tokensPriceRow(mint, 2)))
+      );
+    const [first, second] = await Promise.all([prices(["A", "B"]), prices(["B", "C"])]);
+    expect(first).toEqual(
+      new Map([
+        ["A", 2],
+        ["B", 2],
+      ])
+    );
+    expect(second).toEqual(
+      new Map([
+        ["B", 2],
+        ["C", 2],
+      ])
+    );
+    expect(fetchSpy.mock.calls.map(([, init]) => requestedMints(init))).toEqual([
+      ["A", "B"],
+      ["C"],
+    ]);
+  });
+
+  it("bounds disjoint wallet requests to two active requests per process", async () => {
+    let active = 0;
+    let peak = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
+      active += 1;
+      peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      active -= 1;
+      return Response.json(requestedMints(init).map((mint) => tokensPriceRow(mint, 2)));
+    });
+    const results = await Promise.all(
+      Array.from({ length: 12 }, (_, index) => prices([`Mint${index}`]))
+    );
+    expect(results.every((result) => result.size === 1)).toBe(true);
+    expect(peak).toBe(2);
+  });
+
+  it("backs off across lookups after 429 without caching failed mints", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(null, { status: 429 }));
+    expect(await prices(["A"])).toEqual(new Map());
+    expect(store.backOff).toHaveBeenCalled();
+    store.admitRequest.mockResolvedValue(false);
+    expect(await prices(["A"])).toEqual(new Map());
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    store.admitRequest.mockResolvedValue(true);
+    fetchSpy.mockResolvedValue(Response.json([tokensPriceRow("A", 2)]));
+    expect(await prices(["A"])).toEqual(new Map([["A", 2]]));
+  });
+
+  it.each([401, 403, 429])("stops remaining batches after HTTP %i", async (status) => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => new Response(null, { status }));
+    const mints = Array.from({ length: 1_001 }, (_, index) => `Mint${index}`);
+    expect(await prices(mints)).toEqual(new Map());
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps successful independent batches when another fails", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockRejectedValueOnce(new TypeError("network down"))
+      .mockImplementation(async (_input, init) =>
+        Response.json(requestedMints(init).map((mint) => tokensPriceRow(mint, 2)))
+      );
+    const mints = Array.from({ length: 251 }, (_, index) => `Mint${index}`);
+    expect(await prices(mints)).toEqual(new Map([["Mint250", 2]]));
+    expect((await prices(mints)).size).toBe(251);
+  });
+
+  it.each([
+    ["invalid JSON", "{broken"],
+    ["wrong envelope", JSON.stringify({ prices: [] })],
+    ["too many rows", JSON.stringify(Array.from({ length: 251 }, () => tokensPriceRow("A", 2)))],
+    ["oversized body", "x".repeat(1024 * 1024 + 1)],
+  ])("rejects %s without breaking balances", async (_name, body) => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(body));
+    expect(await prices(["A"])).toEqual(new Map());
+  });
+
+  it("applies one deadline to active requests and queued wallets, then releases capacity", async () => {
+    const abort = new AbortController();
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockReturnValue(abort.signal);
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
+      (_input, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          const signal = required(required(init).signal);
+          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        })
+    );
+    const pending = Promise.all([prices(["A"]), prices(["B"]), prices(["C"])]);
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+    abort.abort(new DOMException("deadline", "TimeoutError"));
+    expect(await pending).toEqual([new Map(), new Map(), new Map()]);
+    expect(timeoutSpy).toHaveBeenCalledWith(4_000);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    timeoutSpy.mockRestore();
+    fetchSpy.mockResolvedValue(Response.json([tokensPriceRow("A", 2)]));
+    expect(await prices(["A"])).toEqual(new Map([["A", 2]]));
+  });
+
+  it("does not price devnet or empty input, including warm mainnet mints", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(Response.json([tokensPriceRow("A", 2)]));
+    expect(await prices(["A"], env, "sandbox")).toEqual(new Map());
+    expect(await prices(["", " "])).toEqual(new Map());
+    expect(fetchSpy).not.toHaveBeenCalled();
+    await prices(["A"]);
+    expect(await prices(["A"], env, "sandbox")).toEqual(new Map());
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("prices nothing off mainnet, even a mint mainnet priced moments ago", async () => {
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockImplementation(async () => priceResponse({ MintA: { usdPrice: 2 } }, 200));
-
-    await expect(fetchPricesIn("sandbox", env, ["MintA"])).resolves.toEqual(new Map());
-    expect(fetchSpy).not.toHaveBeenCalled();
-
-    await fetchPricesIn("production", env, ["MintA"]);
-    await expect(fetchPricesIn("sandbox", env, ["MintA"])).resolves.toEqual(new Map());
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  it("logs aggregate coverage without the credential, mint IDs or price values", async () => {
+    const log = vi.spyOn(moneyPathEvents, "logEvent").mockImplementation(() => undefined);
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json([tokensPriceRow("PrivateMint", 1.234567)])
+    );
+    await prices(["PrivateMint"]);
+    expect(log).toHaveBeenCalledWith(
+      "info",
+      expect.objectContaining({
+        event: "sdp_api_vendor_call",
+        vendor: "tokens-xyz",
+        outcome: "succeeded",
+        boundary: "upstream_http",
+        requested_count: 1,
+        priced_count: 1,
+      })
+    );
+    const logged = JSON.stringify(log.mock.calls);
+    for (const value of ["PrivateMint", "test-tokens-key", "1.234567"])
+      expect(logged).not.toContain(value);
   });
 });

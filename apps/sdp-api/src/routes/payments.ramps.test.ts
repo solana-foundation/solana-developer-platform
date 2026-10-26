@@ -450,10 +450,10 @@ describe("Payments routes — ramps", () => {
               : []
           ),
         }));
-        const jupiterPrices = vi
+        const displayPrices = vi
           .spyOn(displayPriceService, "fetchDisplayUsdPrices")
           .mockResolvedValue(new Map([[SOL_MINT, 150]]));
-        onTestFinished(() => jupiterPrices.mockRestore());
+        onTestFinished(() => displayPrices.mockRestore());
 
         const res = await requestBalances(walletId, "");
 

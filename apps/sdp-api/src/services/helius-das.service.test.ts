@@ -10,7 +10,11 @@ import {
   clearHeliusDasCachesForTests,
 } from "@/services/helius-das.service";
 import { ENVIRONMENT_CLUSTER_CASES } from "@/test/helpers/cluster-rpc";
+import { tokensPriceRow } from "@/test/helpers/display-prices";
 import { env } from "@/test/helpers/env";
+import { flushWorkerRedis } from "@/test/mocks/kv";
+
+const priceEnv = { ...env, TOKENS_XYZ_API_KEY: "test-tokens-key" };
 
 const TEST_DAS_MINT = "DasC1usterMint11111111111111111111111111111";
 const TEST_LOOKALIKE_USDC_MINT = "FakeUsdcMint1111111111111111111111111111111";
@@ -27,7 +31,8 @@ function inScope<TResult>(
 }
 
 describe("helius-das service", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await flushWorkerRedis(env);
     vi.stubEnv("SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL", HELIUS_DAS_URL_BY_CLUSTER.devnet);
     vi.stubEnv("SOLANA_RPC_HELIUS_MAINNET_API_KEY_URL", HELIUS_DAS_URL_BY_CLUSTER["mainnet-beta"]);
   });
@@ -40,7 +45,7 @@ describe("helius-das service", () => {
     vi.unstubAllEnvs();
   });
 
-  it("prices USDC at Jupiter's quote and leaves a lookalike USDC mint unpriced", async () => {
+  it("prices USDC from Tokens and leaves a lookalike USDC mint unpriced", async () => {
     const usdcMint = WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"];
     const usdcBalance = {
       token: WELL_KNOWN_TOKENS.USDC.symbol,
@@ -57,11 +62,11 @@ describe("helius-das service", () => {
       decimals: 6,
     };
     vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
-      Response.json({ [usdcMint.address]: { usdPrice: 0.9998, decimals: usdcMint.decimals } })
+      Response.json([tokensPriceRow(usdcMint.address, 0.9998)])
     );
 
     const balances = await inScope("production", () =>
-      attachUsdValuesToBalances(env, [usdcBalance, lookalikeBalance])
+      attachUsdValuesToBalances(priceEnv, [usdcBalance, lookalikeBalance])
     );
 
     expect(balances).toEqual([
@@ -79,11 +84,11 @@ describe("helius-das service", () => {
       uiAmount: Number.MAX_VALUE.toString(),
       decimals: 6,
     };
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ [mint]: { usdPrice: 10 } }));
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json([tokensPriceRow(mint, 10)]));
 
-    expect(await inScope("production", () => attachUsdValuesToBalances(env, [balance]))).toEqual([
-      { ...balance, usdPrice: 10 },
-    ]);
+    expect(
+      await inScope("production", () => attachUsdValuesToBalances(priceEnv, [balance]))
+    ).toEqual([{ ...balance, usdPrice: 10 }]);
   });
 
   it("attaches DAS symbols to unlabeled token balances", async () => {
@@ -134,10 +139,12 @@ describe("helius-das service", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       if (String(input).includes("helius-das")) return dasResponse;
       priceRequestedBeforeDasResolved = true;
-      return Response.json({ [mint]: { usdPrice: 2 } });
+      return Response.json([tokensPriceRow(mint, 2)]);
     });
 
-    const decorated = inScope("production", () => attachDisplayValuesToBalances(env, [balance]));
+    const decorated = inScope("production", () =>
+      attachDisplayValuesToBalances(priceEnv, [balance])
+    );
     await vi.waitFor(() => expect(priceRequestedBeforeDasResolved).toBe(true));
     releaseDas(Response.json({ result: [{ id: mint, token_info: { symbol: "EURC" } }] }));
 
