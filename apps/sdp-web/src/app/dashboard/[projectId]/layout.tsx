@@ -35,14 +35,15 @@ export default async function ProjectLayout({
   children: ReactNode;
   params: Promise<{ projectId: string }>;
 }) {
-  const [{ projectId }, projects, { orgId, userId }, flags, cookieStore] = await Promise.all([
-    params,
-    listSdpProjects(),
-    getSdpAuth(),
-    getDashboardFlags(),
-    cookies(),
-  ]);
-  const initialQuickStartStatus = await loadQuickStartStatus();
+  const [{ projectId }, projects, { orgId, userId }, flags, cookieStore, initialQuickStartStatus] =
+    await Promise.all([
+      params,
+      listSdpProjects(),
+      getSdpAuth(),
+      getDashboardFlags(),
+      cookies(),
+      loadQuickStartStatus(),
+    ]);
   if (projects.some((project) => project.id === projectId)) {
     if (!orgId || !userId) {
       throw new Error("The dashboard layout admits only signed-in members of an organization");
