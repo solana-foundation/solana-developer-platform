@@ -745,16 +745,46 @@ function brandedTypeIn(checker, typeNode, targets) {
   return visit(typeNode);
 }
 
+/** How deep the check looks into a type's elements and fields for a branded type. */
+const CONTAINER_DEPTH = 3;
+
 /**
- * The branded type a resolved type is, or one member of the union it is; or
- * undefined. It catches what no type node names, such as `ReturnType<typeof f>`.
+ * The branded type a resolved type is, one member of the union it is, or holds
+ * in an element, a type argument or a field (`TokenAmount[]`, `Promise<Quote>`,
+ * `{ amount: TokenAmount }`); or undefined. It catches what no type node names,
+ * such as `ReturnType<typeof f>`, and a cast of the whole container.
  */
-function brandedTypeOf(type, targets) {
-  for (const candidate of [type, ...(type.isUnion() ? type.types : [])]) {
+function brandedTypeOf(checker, type, targets, depth = 0, seen = new Set()) {
+  if (seen.has(type)) return undefined;
+  seen.add(type);
+  const members = type.isUnion() ? type.types : [];
+  for (const candidate of [type, ...members]) {
     const brandedType = targets.get(candidate.aliasSymbol) ?? targets.get(candidate.symbol);
     if (brandedType) return brandedType;
   }
+  if (depth >= CONTAINER_DEPTH) return undefined;
+  for (const candidate of members.length > 0 ? members : [type]) {
+    for (const part of containedTypes(checker, candidate)) {
+      const brandedType = brandedTypeOf(checker, part, targets, depth + 1, seen);
+      if (brandedType) return brandedType;
+    }
+  }
   return undefined;
+}
+
+/**
+ * What a type holds: a generic type's arguments (arrays, tuples, `Promise`,
+ * `Map`), or an object's fields and index signatures. A function holds none.
+ */
+function containedTypes(checker, type) {
+  if (!(type.flags & ts.TypeFlags.Object) || type.getCallSignatures().length > 0) return [];
+  if (type.objectFlags & ts.ObjectFlags.Reference && checker.getTypeArguments(type).length > 0) {
+    return checker.getTypeArguments(type);
+  }
+  return [
+    ...checker.getIndexInfosOfType(type).map((info) => info.type),
+    ...type.getProperties().map((property) => checker.getTypeOfSymbol(property)),
+  ];
 }
 
 /**
@@ -793,8 +823,8 @@ function brandedCastsIn(checker, source, relativePath, targets) {
           : undefined;
       const brandedType =
         brandedTypeIn(checker, node.type, targets) ??
-        brandedTypeOf(asserted, targets) ??
-        (landsIn ? brandedTypeOf(landsIn, targets) : undefined);
+        brandedTypeOf(checker, asserted, targets) ??
+        (landsIn ? brandedTypeOf(checker, landsIn, targets) : undefined);
       if (brandedType && brandedType.file !== relativePath) {
         const { line } = source.getLineAndCharacterOfPosition(node.getStart(source));
         violations.push(

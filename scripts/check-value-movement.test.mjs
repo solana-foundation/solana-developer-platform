@@ -396,14 +396,24 @@ export const q = raw as ReturnType<typeof make>;
 export const r = raw as Parameters<typeof take>[0];
 export const s: bigint = raw as never;
 export const t = [raw] as never[];
+declare function takeAll(amounts: Units[]): void;
+takeAll([{}] as never);
+export const u: Units[] = [{}] as never;
+export const v: Promise<Units> = {} as never;
+export const w: { nested: { amount: Units } } = {} as never;
+export const x: Record<string, Units> = {} as never;
+export const y: readonly [Units, string] = [] as never;
+export const z: { amounts: bigint[] } = {} as never;
+export const aa: Map<string, bigint> = new Map() as never;
 `,
   });
 
   assert.deepEqual(
     found.map((violation) => violation.split(": ")[0]),
-    [6, 7, 8, 9, 10, 11, 12, 13, 14, 19, 20, 21, 22, 23, 27, 28, 29, 30, 31].map(
-      (line) => `src/casts.ts:${line}`
-    )
+    [
+      6, 7, 8, 9, 10, 11, 12, 13, 14, 19, 20, 21, 22, 23, 27, 28, 29, 30, 31, 35, 36, 37, 38, 39,
+      40,
+    ].map((line) => `src/casts.ts:${line}`)
   );
   assert.match(found[0], /asserts Units \(Units\)/);
   assert.match(found[9], /asserts Units \(never\)/);
