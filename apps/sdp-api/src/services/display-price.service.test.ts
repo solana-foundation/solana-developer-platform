@@ -1,36 +1,36 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import * as moneyPathEvents from "@/runtime/money-path-events";
-import { createDisplayPriceStore } from "@/services/display-price-store";
+import * as priceStore from "@/services/display-price-store";
+import type { DisplayPrice } from "@/services/tokens-xyz-price-client";
 import { tokensPriceRow } from "@/test/helpers/display-prices";
 import { required } from "@/test/helpers/required";
 import type { Env } from "@/types/env";
 import { clearDisplayPriceCacheForTests, fetchDisplayUsdPrices } from "./display-price.service";
 
-vi.mock("@/services/display-price-store", () => ({ createDisplayPriceStore: vi.fn() }));
-
 const store = {
-  lookup: vi.fn(async (mints: string[], owner: string | null) => ({
-    prices: new Map(),
+  lookup: vi.fn<priceStore.DisplayPriceStore["lookup"]>(async (mints, owner) => ({
+    prices: new Map<string, DisplayPrice>(),
     claimed: owner ? mints : [],
-    pending: [] as string[],
+    pending: [],
   })),
-  admitRequest: vi.fn(async () => true),
-  backOff: vi.fn(async () => undefined),
-  complete: vi.fn(async () => undefined),
+  admitRequest: vi.fn<priceStore.DisplayPriceStore["admitRequest"]>(async () => true),
+  backOff: vi.fn<priceStore.DisplayPriceStore["backOff"]>(async () => undefined),
+  complete: vi.fn<priceStore.DisplayPriceStore["complete"]>(async () => undefined),
 };
 
 beforeEach(() => {
-  vi.mocked(createDisplayPriceStore).mockReturnValue(store);
-  store.lookup.mockImplementation(async (mints, owner) => ({
-    prices: new Map(),
+  vi.spyOn(priceStore, "createDisplayPriceStore").mockReturnValue(store);
+  store.lookup.mockReset().mockImplementation(async (mints, owner) => ({
+    prices: new Map<string, DisplayPrice>(),
     claimed: owner ? mints : [],
     pending: [],
   }));
-  store.admitRequest.mockResolvedValue(true);
-  store.backOff.mockResolvedValue(undefined);
-  store.complete.mockResolvedValue(undefined);
+  store.admitRequest.mockReset().mockResolvedValue(true);
+  store.backOff.mockReset().mockResolvedValue(undefined);
+  store.complete.mockReset().mockResolvedValue(undefined);
 });
 
 const env: Env = {
@@ -46,20 +46,10 @@ function prices(mints: string[], priceEnv: Env = env, environment: SdpEnvironmen
   );
 }
 
+const mintRequestSchema = z.object({ mints: z.array(z.string()) });
+
 function requestedMints(init: RequestInit | undefined): string[] {
-  const parsed: unknown = JSON.parse(String(required(init).body));
-  if (
-    typeof parsed !== "object" ||
-    parsed === null ||
-    !("mints" in parsed) ||
-    !Array.isArray(parsed.mints)
-  ) {
-    throw new Error("Expected a mint batch");
-  }
-  return parsed.mints.map((mint: unknown) => {
-    if (typeof mint !== "string") throw new Error("Expected a mint string");
-    return mint;
-  });
+  return mintRequestSchema.parse(JSON.parse(String(required(init).body))).mints;
 }
 
 afterEach(() => {
@@ -110,7 +100,8 @@ describe("Tokens display prices", () => {
     );
   });
 
-  it("reports a missing key once without sending anonymous requests", async () => {
+  it("reports a missing key once per minute without sending anonymous requests", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
     const fetchSpy = vi.spyOn(globalThis, "fetch");
     const log = vi.spyOn(moneyPathEvents, "logEvent").mockImplementation(() => undefined);
     const unconfigured = { ...env, TOKENS_XYZ_API_KEY: "  " };
@@ -123,6 +114,10 @@ describe("Tokens display prices", () => {
       event: "sdp_price_config_missing",
       vendor: "tokens-xyz",
     });
+    vi.advanceTimersByTime(60_000);
+    await prices(["MintA"], unconfigured);
+    expect(log).toHaveBeenCalledTimes(2);
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("trims the key and never caches missing configuration", async () => {

@@ -40,7 +40,7 @@ cannot suspend a background price refresh that another request relies on.
 ## Data boundary
 
 The request goes to a fixed HTTPS endpoint and refuses redirects. The server
-key has `assets:read`, stays in Doppler/Secret Manager, and is never logged or
+key requires `assets:read`, stays in Doppler/Secret Manager, and is never logged or
 stored in Redis. Redis keys contain a SHA-256 fingerprint. Stored values
 contain public mint prices, not wallets or tenant data.
 
@@ -69,6 +69,15 @@ alone does not import Doppler secrets.
 been removed. `JUPITER_SWAP_API_KEY` and Kora's separate key retain their
 existing roles. Kora currently runs free sponsorship with no SPL-paid tokens.
 
+Swap quotes (`/swap/v2/order`) and builds (`/swap/v2/build`) require
+`JUPITER_SWAP_API_KEY` and send it as `x-api-key`, following
+[Jupiter's production guidance](https://developers.jup.ag/docs/swap).
+That key is never used for display prices; the Tokens key is never sent to
+Jupiter. On October 26 the Jupiter swap key was present in dev and stage
+configs but absent in `prd`. Before enabling production swaps, add the key
+there, sync `sdp-prod-app-jupiter-swap-api-key`, and enable
+`sdp_api_jupiter_swap_key_ready`. The local infra branch includes that mount.
+
 ## Ticket acceptance
 
 PRO-1977's earlier Jupiter-primary/fallback plan is superseded by the
@@ -84,3 +93,23 @@ per-asset trust and depeg checks. This change adds no such path.
 PRO-1711's inventory and alert coverage live in sdp-infra's
 `kora/SIGNAL_INVENTORY.md`. Static validation does not close its remaining
 live Grafana, stage scrape, Kora ingress and Sentry verification requirements.
+
+## Local verification, October 26
+
+- Separate dev, stage and prod credentials each returned HTTP 200.
+- The application priced all 14 well-known mainnet mints. Fifty concurrent
+  lookups shared one upstream request (325 ms); a second process reused Redis
+  with zero upstream requests (42 ms). Warm reads took less than 1 ms.
+  These are individual smoke-test observations, not production latency bounds.
+- Focused regression suites: 140 API pricing, wallet and telemetry tests;
+  56 swap tests; 20 web tests. API/web typechecks, Biome, module boundaries
+  and value-movement checks passed.
+- Jupiter dev and stage keys each returned a live unsigned quote through the
+  application's swap client. Production was not queried without its key.
+- Public docs regenerated; 266 Markdown links and 27 external URLs passed.
+- Infra: 148 inventoried signals, 162 alert rules and four contact points
+  validated. Terraform 1.7.5 validated dev, stage and prod without a backend.
+  Dev required adding the missing Linux provider checksum in a disposable
+  copy; checked-in provider versions and lockfiles were unchanged.
+
+No rollout, live Grafana check, browser E2E or full workspace suite was run.

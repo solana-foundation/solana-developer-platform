@@ -94,7 +94,7 @@ function parseSnapshots(body: unknown, mints: string[]) {
       invalid_row_count: invalidRows,
       stale_row_count: staleRows,
       unknown_age_row_count: unknownAgeRows,
-      ...(prices.size > 0 ? { max_snapshot_age_ms: maxSnapshotAgeMs } : {}),
+      max_snapshot_age_ms: prices.size > 0 ? maxSnapshotAgeMs : undefined,
     },
   };
 }
@@ -139,14 +139,15 @@ export async function fetchTokensPriceBatch(
       http_status: httpStatus,
       requested_count: mints.length,
     });
-    return {
-      prices: new Map(),
-      status:
-        httpStatus === 429
-          ? "rate_limited"
-          : httpStatus === 401 || httpStatus === 403
-            ? "unauthorized"
-            : "failed",
-    };
+    const prices = new Map<string, DisplayPrice>();
+    switch (httpStatus) {
+      case 429:
+        return { prices, status: "rate_limited" };
+      case 401:
+      case 403:
+        return { prices, status: "unauthorized" };
+      default:
+        return { prices, status: "failed" };
+    }
   }
 }

@@ -20,7 +20,7 @@ const priceCache = createMintLookupCache<DisplayPrice>(PRICE_CACHE_TTL_MS, {
 });
 let activeRequests = 0;
 const requestWaiters = new Set<() => void>();
-let missingKeyReported = false;
+let nextMissingKeyReportAt = 0;
 
 function releaseRequestSlot(): void {
   const next = requestWaiters.values().next().value;
@@ -165,13 +165,15 @@ export async function fetchDisplayUsdPrices(
   if (cluster !== "mainnet-beta") return new Map();
   const apiKey = env.TOKENS_XYZ_API_KEY?.trim();
   if (!apiKey) {
-    if (!missingKeyReported) {
-      missingKeyReported = true;
+    const now = Date.now();
+    if (now >= nextMissingKeyReportAt) {
+      // Keep a broken deployment visible without one warning per wallet read.
+      nextMissingKeyReportAt = now + 60_000;
       logEvent("warn", { event: "sdp_price_config_missing", vendor: "tokens-xyz" });
     }
     return new Map();
   }
-  missingKeyReported = false;
+  nextMissingKeyReportAt = 0;
   const snapshots = await priceCache.lookup(cluster, mints, (missing) =>
     fetchMissingPrices(env, apiKey, missing)
   );
@@ -188,5 +190,5 @@ export async function fetchDisplayUsdPrices(
 /** @internal Test-only: reset completed local lookups; shared state belongs to Redis. */
 export function clearDisplayPriceCacheForTests(): void {
   priceCache.clearForTests();
-  missingKeyReported = false;
+  nextMissingKeyReportAt = 0;
 }
