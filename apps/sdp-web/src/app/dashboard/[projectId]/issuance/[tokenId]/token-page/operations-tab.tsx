@@ -29,7 +29,7 @@ import { issuanceQueryKeys } from "@/app/dashboard/[projectId]/issuance/issuance
 import {
   isOnChain,
   type TokenLifecycle,
-} from "@/app/dashboard/[projectId]/issuance/issuance-token-state.redesign";
+} from "@/app/dashboard/[projectId]/issuance/issuance-token-state";
 import { formatDecimalAmount } from "@/app/dashboard/[projectId]/payments/payments-presentation";
 import { PAYMENTS_TABLE_CELL } from "@/app/dashboard/[projectId]/payments/payments-table";
 import { RecordBlock, RecordStack } from "@/components/refresh-record";

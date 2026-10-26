@@ -18,7 +18,7 @@ import {
   DetailsStep,
   PermissionsStep,
   ReviewStep,
-} from "./draft-flow-steps.redesign";
+} from "./draft-flow-steps";
 import { type DraftState, draftSchema } from "./draft-model";
 import {
   type DraftAccess,
@@ -27,7 +27,7 @@ import {
   restoreDraft,
   saveLocalDraft,
   useLocalDrafts,
-} from "./local-drafts.redesign";
+} from "./local-drafts";
 
 const STEPS: { label: MessageKey; title: MessageKey }[] = [
   {

@@ -16,9 +16,8 @@ interface TokenPageProps {
 }
 
 // The API's contract for a token and its asset profile is `Token` and `AssetProfile` in
-// @sdp/types, the same types the typed client and the previous design's page use. The envelope
-// and the record's identity are checked here; no second, hand-written copy of every field is
-// kept beside the interface.
+// @sdp/types. The envelope and the record's identity are checked here; no second, hand-written
+// copy of every field is kept beside the interface.
 const tokenResponseSchema = z.object({
   data: z.object({
     token: z.custom<Token>((value) => z.object({ id: z.string() }).safeParse(value).success),
@@ -86,7 +85,7 @@ async function readLatestDeploy(
   return latest;
 }
 
-/** One token's page on the new design. */
+/** One token's page. */
 export async function TokenPage({ params }: TokenPageProps) {
   const [t, { userId, orgId }, { tokenId }] = await Promise.all([
     getTranslations(),

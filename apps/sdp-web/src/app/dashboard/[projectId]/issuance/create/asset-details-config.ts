@@ -57,14 +57,14 @@ export type DetailFieldKey =
   | "propertyType"
   | "propertyLocation";
 
-export interface FieldOption {
+interface FieldOption {
   value: string;
   labelKey: MessageKey;
   /** Leading glyph for the option — jurisdictions carry their region's flag. */
   flag?: string | null;
 }
 
-export interface FieldDescriptor {
+interface FieldDescriptor {
   key: DetailFieldKey;
   labelKey: MessageKey;
   control: FieldControl;
@@ -74,7 +74,7 @@ export interface FieldDescriptor {
 }
 
 /** Option label led by its flag where the option has one, e.g. "🇺🇸 United States". */
-export function fieldOptionLabel(option: FieldOption, t: Translate): string {
+function fieldOptionLabel(option: FieldOption, t: Translate): string {
   const label = t(option.labelKey);
   return option.flag ? `${option.flag} ${label}` : label;
 }

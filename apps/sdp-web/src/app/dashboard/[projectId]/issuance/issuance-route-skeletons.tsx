@@ -1,10 +1,6 @@
 import { cn } from "@sdp/ui/cn";
 import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
-import { DesignSwitch } from "@/components/new-design";
-import { IssuanceCreateSkeleton as LegacyIssuanceCreateSkeleton } from "./issuance-create-skeleton";
-import { IssuanceDetailSkeleton as LegacyIssuanceDetailSkeleton } from "./issuance-detail-skeleton";
-import { IssuancePageSkeleton as LegacyIssuancePageSkeleton } from "./issuance-page-skeleton";
 
 const ROWS = ["one", "two", "three", "four", "five", "six"] as const;
 const RECORD_ROWS = ["one", "two", "three"] as const;
@@ -111,33 +107,15 @@ function CurrentIssuanceCreateSkeleton() {
 }
 
 export function IssuancePageSkeleton() {
-  return (
-    <DesignSwitch
-      designModule="issuance"
-      current={<CurrentIssuancePageSkeleton />}
-      legacy={<LegacyIssuancePageSkeleton assetProfilesEnabled />}
-    />
-  );
+  return <CurrentIssuancePageSkeleton />;
 }
 
 export function IssuanceDetailSkeleton() {
-  return (
-    <DesignSwitch
-      designModule="issuance"
-      current={<CurrentIssuanceDetailSkeleton />}
-      legacy={<LegacyIssuanceDetailSkeleton />}
-    />
-  );
+  return <CurrentIssuanceDetailSkeleton />;
 }
 
 export function IssuanceCreateSkeleton() {
-  return (
-    <DesignSwitch
-      designModule="issuance"
-      current={<CurrentIssuanceCreateSkeleton />}
-      legacy={<LegacyIssuanceCreateSkeleton />}
-    />
-  );
+  return <CurrentIssuanceCreateSkeleton />;
 }
 
 export {

@@ -211,26 +211,6 @@ export function formatDate(value: string | null | undefined, locale: AppLocale):
   });
 }
 
-/** Full date + time, e.g. "Jul 21, 2026, 3:45 PM" — used in the audit table. */
-export function formatDateTime(value: string | null | undefined, locale: AppLocale): string {
-  if (!value) {
-    return "—";
-  }
-
-  const date = parseActivityDate(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return date.toLocaleString(locale, {
-    month: "short",
-    day: "2-digit",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
-
 /**
  * Compact activity timestamp: just the time when the event happened today,
  * otherwise the short date. Keeps the recent-activity preview scannable.

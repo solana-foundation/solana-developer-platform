@@ -24,7 +24,7 @@ import { useProjectHref } from "@/lib/use-dashboard-project";
 // sit on both sides of that route boundary.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function shortenAddress(address: string, lead = 5, tail = 4): string {
+function shortenAddress(address: string, lead = 5, tail = 4): string {
   return address.length > lead + tail + 3
     ? `${address.slice(0, lead)}…${address.slice(-tail)}`
     : address;

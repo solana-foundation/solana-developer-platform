@@ -13,9 +13,9 @@ import {
   removeLocalDraft,
   saveLocalDraft,
   useLocalDrafts,
-} from "./create/local-drafts.redesign";
-import { formatTokenDay } from "./issuance-token-state.redesign";
-import { IssuedTokenMark } from "./issued-token-mark.redesign";
+} from "./create/local-drafts";
+import { formatTokenDay } from "./issuance-token-state";
+import { IssuedTokenMark } from "./issued-token-mark";
 
 const CREATE_PATH = "/dashboard/issuance/create";
 const DRAFT_STEPS = 5;

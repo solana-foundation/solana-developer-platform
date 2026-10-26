@@ -9,7 +9,7 @@ import { useEffect, useMemo, useRef } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { issuanceQueryKeys } from "./issuance-query-key";
-import type { DeployAttemptStatus } from "./issuance-token-state.redesign";
+import type { DeployAttemptStatus } from "./issuance-token-state";
 
 /** How often the list re-reads deploys while one is still on its way. */
 const DEPLOY_POLL_MS = 5000;

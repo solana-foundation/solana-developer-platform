@@ -1,54 +1,81 @@
 "use client";
 
-import { Popover } from "@base-ui/react/popover";
 import { ArrowPagination } from "@sdp/ui/arrow-pagination";
 import { Button } from "@sdp/ui/button";
 import { cn } from "@sdp/ui/cn";
+import { FilterMenu, FilterMenuOptions, type FilterMenuSection } from "@sdp/ui/filter-menu";
+import { ListEmptyState } from "@sdp/ui/list-empty-state";
+import { ListToolbar, RowsPerPageSelect } from "@sdp/ui/list-toolbar";
 import { SearchInput } from "@sdp/ui/search-input";
-import { Info, PlusIcon } from "lucide-react";
+import { Select, SelectItem } from "@sdp/ui/select";
+import { StatusText } from "@sdp/ui/status-text";
+import { XIcon } from "lucide-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { type ReactNode, useCallback, useEffect, useMemo } from "react";
-import {
-  WalletMetadataCopyButton,
-  WalletMetaValue,
-} from "@/app/dashboard/[projectId]/custody/wallet-address-copy-button";
-import { formatWalletMeta } from "@/app/dashboard/[projectId]/custody/wallet-format-utils";
+import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
 import {
   dashboardWorkspaceOverviewPanelClassName,
   dashboardWorkspacePlaygroundPanelClassName,
 } from "@/components/dashboard-workspace-panel";
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { isRenderableLogoUrl } from "@/lib/token-logo-url";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { IssuanceFilterPopover } from "./issuance-filter-popover";
-import { IssuanceLegacyOverview } from "./issuance-legacy-overview";
-import type { IssuanceFilterState, IssuanceListQuery } from "./issuance-list-query";
-import { IssuanceListSkeleton } from "./issuance-list-skeleton";
-import { IssuancePlaygroundLoading } from "./issuance-playground-loading";
+import type {
+  IssuanceDateFilter,
+  IssuanceListQuery,
+  IssuanceSortOption,
+  IssuanceStatusFilter,
+} from "./issuance-list-query";
+import { IssuanceListRowsSkeleton } from "./issuance-route-skeletons";
+import { getTokenTypeLabel, type IssuanceTokenView } from "./issuance-token-fields";
 import {
-  buildSmartDate,
-  deploymentStatusBadge,
-  getDeploymentStatus,
-  getTokenTypeLabel,
-  type IssuanceTokenView,
-  tokenMarkInitial,
-} from "./issuance-token-fields";
+  type DeployAttemptStatus,
+  formatTokenDay,
+  TOKEN_LIFECYCLE_LABEL,
+  TOKEN_LIFECYCLE_TONE,
+  tokenLifecycle,
+} from "./issuance-token-state";
 import type { IssuanceTokenFacets } from "./issuance-tokens.data";
-import { useIssuancePlaygroundTokens, useIssuanceTokenList } from "./use-issuance-token-list";
+import { ISSUANCE_TOOLBAR_CONTROLS } from "./issuance-toolbar";
+import { IssuedTokenMark } from "./issued-token-mark";
+import { LocalDraftsBlock } from "./local-drafts-block";
+import {
+  type UseIssuanceTokenListResult,
+  useIssuancePlaygroundTokens,
+  useIssuanceTokenList,
+} from "./use-issuance-token-list";
+import { useLatestDeploys } from "./use-latest-deploys";
 
-// Every creation entry point opens the same draft form.
-const CREATE_DRAFT_PATH = "/dashboard/issuance/create";
+export const ISSUANCE_CREATE_PATH = "/dashboard/issuance/create";
 
 const IssuancePlayground = dynamic(
   () => import("./issuance-playground").then((module) => module.IssuancePlayground),
-  {
-    loading: () => <IssuancePlaygroundLoading />,
-  }
+  { loading: () => <ApiPlaygroundShellSkeleton /> }
 );
+
+// Multiples of the list's default page (24), so an untouched list keeps its clean URL.
+const ISSUANCE_PAGE_SIZES = [12, 24, 48, 96] as const;
+
+const STATUS_OPTIONS: { value: Exclude<IssuanceStatusFilter, "all">; label: MessageKey }[] = [
+  { value: "draft", label: "DashboardIssuance.newDesign.state.draft" },
+  { value: "active", label: "DashboardIssuance.newDesign.state.live" },
+  { value: "paused", label: "DashboardIssuance.newDesign.state.paused" },
+];
+
+const DATE_OPTIONS: { value: Exclude<IssuanceDateFilter, "all">; label: MessageKey }[] = [
+  { value: "7d", label: "DashboardIssuance.newDesign.list.last7Days" },
+  { value: "30d", label: "DashboardIssuance.newDesign.list.last30Days" },
+  { value: "12m", label: "DashboardIssuance.newDesign.list.last12Months" },
+];
+
+const SORT_OPTIONS: { value: IssuanceSortOption; label: MessageKey }[] = [
+  { value: "newest", label: "DashboardIssuance.newDesign.list.sortNewest" },
+  { value: "oldest", label: "DashboardIssuance.newDesign.list.sortOldest" },
+  { value: "name-asc", label: "DashboardIssuance.newDesign.list.sortNameAsc" },
+  { value: "name-desc", label: "DashboardIssuance.newDesign.list.sortNameDesc" },
+];
 
 interface IssuanceTemplateOption {
   id: string;
@@ -56,13 +83,9 @@ interface IssuanceTemplateOption {
   description?: string;
 }
 
-interface IssuanceWorkspaceProps {
-  assetProfilesEnabled: boolean;
-  /** List state parsed from the URL — the request the server already answered. */
+export interface IssuanceWorkspaceProps {
   initialQuery: IssuanceListQuery;
-  /** The page the server rendered, reused as SWR's fallback for that same query. */
   initialTokens: IssuanceTokenView[];
-  /** Rows matching `initialQuery` (not the project total — that's `facets.total`). */
   initialTotal: number;
   facets: IssuanceTokenFacets;
   templates: IssuanceTemplateOption[];
@@ -71,550 +94,438 @@ interface IssuanceWorkspaceProps {
   tokensNotice: string | null;
 }
 
-// Classes for the scrolling overview panel (the tab shell's `overflow-y-auto` div —
-// the shell locks the viewport, so that inner panel is what actually scrolls).
-//
-// `overflow-anchor: none` is deliberate. Expanding a list row grows the scroll extent
-// (transformed overflow counts toward scrollHeight) and collapsing shrinks it again.
-// Chrome's scroll anchoring reacts to that extent change by reconciling scrollTop —
-// a discrete layout hit that showed up as an intermittent stutter on collapse, and
-// disabling it measurably smoothed the close. Anchoring exists to stop content from
-// jumping when something above the viewport resizes asynchronously; this list only
-// ever resizes in direct response to a click, so there is nothing here for it to
-// protect and we pay the cost for no benefit. Scoped to issuance rather than added
-// to the shared panel class so other dashboard surfaces keep the default behaviour.
-// `pt-0` hands the panel's top padding to the pinned header below, so the header
-// keeps its breathing room once it is stuck to the top of the scrollport.
-const ISSUANCE_OVERVIEW_PANEL_CLASS = "pt-0 [overflow-anchor:none]";
-
-// The pinned header (toolbar + asset count) sits in the scroll flow and sticks to
-// the top, so cards pass *behind* it — which only works with an opaque backdrop.
-// The scrolling panel's own backdrop is the shell's content section; --sdp-page-backdrop
-// (sdp-theme.css) is that section's colour in either design and theme: NEW DESIGN's opaque
-// `bg-surface-raised`, or the previous design's `bg-surface-raised/80` over the shell.
-const PINNED_HEADER_BG = "var(--sdp-page-backdrop)";
-
-// That backdrop is painted as a gradient rather than a flat fill: solid down to the
-// asset-count row, then out to transparent over this band. A flat fill guillotines
-// what scrolls under it — a row's top border and its badges were being cut mid-stroke
-// at a hard horizontal line — whereas the fade dissolves them. The band sits entirely
-// inside the header's bottom padding, below every child, so nothing in the header is
-// ever painted on a see-through backdrop; and at rest it fades over the same composite
-// color it starts from, so it is invisible until something scrolls behind it.
-//
-// The header's `pb-*` is the ceiling on how long the fade can be — the band cannot
-// hang below the header's box, because at rest the box's bottom edge is exactly the
-// first card's top edge, and the header paints above the cards (z-20). Any overhang
-// would wash out that card's top border while it is sitting still. Smoothstep is
-// what buys the softness back at this length.
-const PINNED_HEADER_FADE_PX = 12;
-
-// A *linear* alpha ramp still reads as an edge. Alpha falls fastest right where the
-// band begins, so the eye catches that kink and resolves it as a line — the very
-// artifact the fade exists to remove. These stops sample smoothstep (3t² − 2t³)
-// instead: the ramp leaves full opacity and arrives at full transparency with zero
-// slope, so both ends of the band blend into what they meet. Generated rather than
-// hand-written as an arbitrary-value class — nine nested color-mix stops make for an
-// unreadable class name, and inline keeps it one static string.
-function buildPinnedHeaderBackdrop(): string {
-  const segments = 8;
-  const stops = Array.from({ length: segments + 1 }, (_, index) => {
-    const t = index / segments;
-    const alpha = 1 - (3 * t * t - 2 * t * t * t);
-    const fromBottom = PINNED_HEADER_FADE_PX * (1 - t);
-    return `color-mix(in srgb, ${PINNED_HEADER_BG} ${(alpha * 100).toFixed(2)}%, transparent) calc(100% - ${fromBottom.toFixed(2)}px)`;
-  });
-  return `linear-gradient(to bottom, ${PINNED_HEADER_BG} 0, ${stops.join(", ")})`;
-}
-
-const PINNED_HEADER_STYLE = { backgroundImage: buildPinnedHeaderBackdrop() } as const;
-
-// The (i) beside the grid tile's date label. Needs `relative z-10` because the
-// card's full-bleed link is an `absolute inset-0` sibling that otherwise paints
-// over the label and swallows its pointer events — which is why a plain `title`
-// attribute here would never fire. Clicking the icon therefore does not follow
-// the card's link; the rest of the card still does.
-function StatHint({ hint }: { hint: { label: string; value: string } }) {
-  return (
-    <Popover.Root>
-      <Popover.Trigger
-        openOnHover
-        delay={100}
-        closeDelay={140}
-        aria-label={hint.label}
-        onClick={(event) => event.stopPropagation()}
-        // `p-0.5 -m-0.5` keeps the glyph subordinate to the label while giving the
-        // hit area back the pixels the padding adds — the negative margin cancels it
-        // out, so the icon takes exactly as much room in the label row as before.
-        className="relative z-10 -m-0.5 inline-flex shrink-0 cursor-default items-center justify-center rounded-full p-0.5 text-tertiary outline-none transition-colors hover:text-secondary focus-visible:text-secondary"
-      >
-        <Info className="h-2.5 w-2.5" />
-      </Popover.Trigger>
-      <Popover.Portal>
-        {/* Above the workspace's pinned header (z-20) — it opens upward from a
-            scrolling card. */}
-        <Popover.Positioner side="top" align="center" sideOffset={8} className="z-30">
-          <Popover.Popup className="overflow-hidden rounded-xl border border-border-default bg-surface-raised outline-none">
-            <div className="px-3 py-2 text-left text-[12px] leading-snug">
-              <p className="text-tertiary">{hint.label}</p>
-              <p className="mt-0.5 font-medium text-primary">{hint.value}</p>
-            </div>
-          </Popover.Popup>
-        </Popover.Positioner>
-      </Popover.Portal>
-    </Popover.Root>
-  );
-}
-
-function IssuanceTokenGridCard({
-  token,
-  t,
-  locale,
-}: {
-  token: IssuanceTokenView;
-  t: ReturnType<typeof useTranslations>;
-  locale: ReturnType<typeof useLocale>;
-}) {
-  const href = useProjectHref();
-  const statusBadge = deploymentStatusBadge(getDeploymentStatus(token), t);
-  const supplyLocked = Boolean(token.mintAddress && (!token.isMintable || !token.mintAuthority));
-  const smartDate = buildSmartDate(token, t, locale);
-
-  return (
-    <article
-      data-testid={`token-card-${token.id}`}
-      className="relative flex flex-col rounded-2xl border border-border-default bg-surface-raised p-5 shadow-[0_2px_10px_rgba(28,28,29,0.05)] transition hover:border-primary/30 hover:shadow-[0_4px_16px_rgba(28,28,29,0.08)]"
-    >
-      <Link
-        href={href(`/dashboard/issuance/${token.id}`)}
-        aria-label={t("DashboardIssuance.workspace.manageAsset", {
-          name: token.name,
-        })}
-        className="absolute inset-0 rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-default"
-      />
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex min-w-0 items-center gap-3">
-          <div className="h-12 w-12 shrink-0 overflow-hidden rounded-2xl border border-border-subtle bg-fill-subtle">
-            {token.imageUrl && isRenderableLogoUrl(token.imageUrl) ? (
-              // biome-ignore lint/performance/noImgElement: user-supplied external logo URL; next/image can't be configured for arbitrary hosts here.
-              <img
-                src={token.imageUrl}
-                alt={t("DashboardIssuance.workspace.tokenLogo", {
-                  name: token.name,
-                })}
-                className="h-full w-full object-cover"
-              />
-            ) : (
-              <div className="flex h-full w-full items-center justify-center text-lg font-semibold text-tertiary">
-                {tokenMarkInitial(token.symbol)}
-              </div>
-            )}
-          </div>
-          <div className="min-w-0">
-            <p className="text-sm font-medium tracking-wide text-tertiary">{token.symbol}</p>
-            <h3 className="mt-0.5 truncate text-2xl leading-tight font-medium tracking-tight text-primary">
-              {token.name}
-            </h3>
-          </div>
-        </div>
-        <div className="flex shrink-0 flex-col items-end gap-1.5">
-          <span
-            data-testid={`token-card-status-${token.id}`}
-            className={cn(
-              "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium capitalize",
-              statusBadge.badge
-            )}
-          >
-            {statusBadge.label}
-          </span>
-          {supplyLocked ? (
-            <span className="inline-flex items-center rounded-full bg-fill px-2.5 py-1 text-xs font-medium text-secondary">
-              {t("DashboardIssuance.management.supplyLocked")}
-            </span>
-          ) : null}
-        </div>
-      </div>
-
-      <div className="mt-5 space-y-1.5">
-        <div className="flex h-6 items-center justify-between gap-3 text-xs">
-          <span className="text-tertiary">{t("DashboardIssuance.list.mintAddress")}</span>
-          {token.mintAddress !== null ? (
-            <div className="relative z-10 flex min-w-0 items-center gap-1">
-              <WalletMetaValue
-                value={token.mintAddress}
-                displayValue={formatWalletMeta(token.mintAddress)}
-              />
-              <WalletMetadataCopyButton
-                value={token.mintAddress}
-                label={t("DashboardIssuance.list.mintAddress")}
-                tooltip={token.mintAddress}
-              />
-            </div>
-          ) : (
-            <span className="text-tertiary italic">
-              {t("DashboardIssuance.header.notDeployed")}
-            </span>
-          )}
-        </div>
-        <div className="flex h-6 items-center justify-between gap-3 text-xs">
-          <span className="text-tertiary">{t("DashboardIssuance.header.tokenId")}</span>
-          <div className="relative z-10 flex min-w-0 items-center gap-1">
-            <WalletMetaValue value={token.id} displayValue={formatWalletMeta(token.id, 10, 6)} />
-            <WalletMetadataCopyButton
-              value={token.id}
-              label={t("DashboardIssuance.header.tokenId")}
-              tooltip={token.id}
-            />
-          </div>
-        </div>
-        <div className="flex h-6 items-center justify-between gap-3 text-xs">
-          <span className="flex min-w-0 items-center gap-1 text-tertiary">
-            <span className="truncate">{smartDate.label}</span>
-            {smartDate.hint ? <StatHint hint={smartDate.hint} /> : null}
-          </span>
-          <span className="shrink-0 text-secondary">{smartDate.value}</span>
-        </div>
-      </div>
-    </article>
-  );
-}
-
-// The results area: placeholders or the grid.
-//
-// Extracted from the workspace so the loading branch doesn't push that function
-// over the complexity budget.
-function IssuanceResults({
-  isLoadingNewResults,
-  isLoadingAnotherPage,
-  skeletonCount,
-  tokens,
-  onCreate,
-  pagination,
-  t,
-  locale,
-}: {
-  isLoadingNewResults: boolean;
-  isLoadingAnotherPage: boolean;
-  skeletonCount: number;
-  tokens: IssuanceTokenView[];
-  onCreate: () => void;
-  pagination: ReactNode;
-  t: ReturnType<typeof useTranslations>;
-  locale: ReturnType<typeof useLocale>;
-}) {
-  const grid = (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-      {tokens.map((token) => (
-        <IssuanceTokenGridCard key={token.id} token={token} t={t} locale={locale} />
-      ))}
-
-      <button
-        type="button"
-        onClick={onCreate}
-        data-testid="token-add-card"
-        className="flex min-h-36 flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border-strong bg-surface-raised text-tertiary transition-colors hover:border-primary/40 hover:text-secondary"
-      >
-        <PlusIcon className="h-6 w-6" />
-        <span className="text-sm font-medium">{t("DashboardIssuance.workspace.addNewToken")}</span>
-      </button>
-    </div>
-  );
-
-  return (
-    <>
-      {/* One announcement for every kind of load, so a screen reader hears that the
-          grid is working whether the tiles were replaced or only dimmed. */}
-      <span className="sr-only" role="status" aria-live="polite">
-        {isLoadingNewResults || isLoadingAnotherPage
-          ? t("DashboardIssuance.workspace.loadingAssets")
-          : ""}
-      </span>
-
-      <div
-        // Paging keeps the tiles on screen (keepPreviousData) because they are a
-        // neighbouring slice of the same list; the dim is what marks them as the
-        // previous ones. A new result set gets placeholders instead — those tiles
-        // answer a question that is no longer being asked.
-        aria-busy={isLoadingNewResults || isLoadingAnotherPage}
-        className={isLoadingAnotherPage ? "opacity-60 transition-opacity" : "transition-opacity"}
-      >
-        {isLoadingNewResults ? <IssuanceListSkeleton count={skeletonCount} /> : grid}
-      </div>
-
-      {isLoadingNewResults ? null : pagination}
-    </>
-  );
-}
-
-/** Loads the playground's code while the browser is idle, until its tab is opened. */
-function usePreloadIssuancePlayground(isPlaygroundTab: boolean) {
-  useEffect(() => {
-    if (isPlaygroundTab) {
-      return;
-    }
-
-    const preloadPlayground = () => {
-      void import("./issuance-playground");
-    };
-
-    if (typeof window !== "undefined" && "requestIdleCallback" in window) {
-      const idleId = window.requestIdleCallback(preloadPlayground);
-      return () => window.cancelIdleCallback(idleId);
-    }
-
-    const timeoutId = globalThis.setTimeout(preloadPlayground, 600);
-    return () => globalThis.clearTimeout(timeoutId);
-  }, [isPlaygroundTab]);
-}
-
-export function IssuanceWorkspace({
-  assetProfilesEnabled,
-  initialQuery,
-  initialTokens,
-  initialTotal,
-  facets,
-  templates,
-  apiBaseUrl,
-  templatesError,
-  tokensNotice,
-}: IssuanceWorkspaceProps) {
-  const t = useTranslations();
-  const locale = useLocale();
+/**
+ * Issuance as the design lays it out: Overview, the project's tokens one per row with their
+ * state and the date that matters, and the API Playground beside it in the header's tabs.
+ */
+export function IssuanceWorkspace(props: IssuanceWorkspaceProps) {
   const { issuanceTab } = useDashboardWorkspace();
-  const router = useRouter();
-  const href = useProjectHref();
   const isPlaygroundTab = issuanceTab === "playground";
-
-  // Search, filters, sort and paging are one server-side query; the hook owns it,
-  // mirrors it into the URL, and hands back the page it resolves to.
-  const {
-    query,
-    search,
-    setSearch,
-    updateQuery,
-    clearFilters,
-    tokens,
-    total,
-    pageCount,
-    rangeStart,
-    rangeEnd,
-    isFiltered,
-    isInitialLoading,
-    isRefreshing,
-    isLoadingNewResults,
-    isLoadingAnotherPage,
-    isSearchPending,
-    errorMessage: listFetchError,
-  } = useIssuanceTokenList({ initialQuery, initialTokens, initialTotal });
-  const listErrorMessage = listFetchError ? t("DashboardIssuance.errors.unableToLoadTokens") : null;
-  // Unfiltered project count: what separates "no assets yet" from "no matches".
-  const hasTokens = facets.total > 0;
-  // The playground's picker must see the project, not the filtered page; falls
-  // back to the visible rows so it is never empty while loading.
-  const playgroundTokens = useIssuancePlaygroundTokens(isPlaygroundTab) ?? tokens;
-
-  // All creation entry points use the simplified full-page form.
-  const startTokenCreation = () => {
-    router.push(href(CREATE_DRAFT_PATH));
-  };
-
-  usePreloadIssuancePlayground(isPlaygroundTab);
-
-  // Template options for the filter popover. Sourced from the project-wide facet
-  // counts rather than the loaded rows, so the choices don't shrink to whatever
-  // happens to be on the current page.
-  const templateOptions = useMemo(() => {
-    return facets.templates
-      .map(({ template }) => ({ value: template, label: getTokenTypeLabel(template, t) }))
-      .sort((a, b) => a.label.localeCompare(b.label));
-  }, [facets.templates, t]);
-
-  const updateFilters = useCallback(
-    (changes: Partial<IssuanceFilterState>) => updateQuery(changes),
-    [updateQuery]
-  );
-
-  const playgroundContent = (
-    <IssuancePlayground
-      apiBaseUrl={apiBaseUrl}
-      templates={templates}
-      templatesError={templatesError}
-      tokens={playgroundTokens}
-    />
-  );
-
-  // Shared pager. Stays live during a fetch: the arrows only ever move `page`, and
-  // the rendered rows follow whichever page is current, so a second click while
-  // the first is still in flight lands on the right page instead of being
-  // swallowed. Bounds are the only thing that disables an arrow.
-  const pagination =
-    pageCount > 1 ? (
-      <ArrowPagination
-        className="mt-4"
-        page={query.page}
-        pageCount={pageCount}
-        onPageChange={(page) => updateQuery({ page })}
-        summary={t("DashboardIssuance.pagination.range", {
-          start: rangeStart,
-          end: rangeEnd,
-          total,
-        })}
-      />
-    ) : null;
-
-  // How many placeholders to stand in for the rows. Matching what's on screen keeps
-  // the page roughly its current height, so the swap doesn't move the scroll
-  // position; a handful covers a first load with nothing to match.
-  const skeletonCount = Math.min(tokens.length || 6, query.pageSize);
-
-  // Empty results read differently depending on why: an over-filtered list needs
-  // "no matches", a project with no assets at all needs its create affordances.
-  // Never while loading — "no assets match" is a verdict, and the query answering
-  // it hasn't come back yet.
-  const emptyResultsNotice =
-    !isInitialLoading &&
-    !isLoadingNewResults &&
-    tokens.length === 0 &&
-    hasTokens &&
-    !listErrorMessage ? (
-      <p className="mb-4 text-sm text-secondary">
-        {t(
-          isFiltered
-            ? "DashboardIssuance.workspace.noTokensMatch"
-            : "DashboardIssuance.workspace.noTokensOnPage"
-        )}
-      </p>
-    ) : null;
-
-  // Legacy overview when the Asset Profiles UI flag is off.
-  if (!assetProfilesEnabled) {
-    return (
-      <DashboardWorkspaceTabShell
-        panels={[
-          {
-            id: "overview",
-            className: cn(dashboardWorkspaceOverviewPanelClassName, "space-y-6"),
-            content: (
-              <IssuanceLegacyOverview
-                tokens={tokens}
-                search={search}
-                onSearchChange={setSearch}
-                isRefreshing={isRefreshing}
-                tokensNotice={tokensNotice}
-                emptyResultsNotice={emptyResultsNotice}
-                pagination={pagination}
-              />
-            ),
-          },
-          {
-            id: "playground",
-            className: dashboardWorkspacePlaygroundPanelClassName,
-            content: playgroundContent,
-          },
-        ]}
-      />
-    );
-  }
+  const playgroundTokens = useIssuancePlaygroundTokens(isPlaygroundTab) ?? props.initialTokens;
 
   return (
     <DashboardWorkspaceTabShell
       panels={[
         {
           id: "overview",
-          className: cn(dashboardWorkspaceOverviewPanelClassName, ISSUANCE_OVERVIEW_PANEL_CLASS),
+          className: dashboardWorkspaceOverviewPanelClassName,
           content: (
-            <>
-              {/* Pinned header. Negative margins bleed the backdrop across the panel's
-              horizontal padding so nothing shows through at the edges as content
-              scrolls behind it.
-
-              Issuance z ladder: header z-20 < this feature's popovers z-30 < the DS
-              popup layer z-50 (Select, DropdownMenu, Combobox, Modal — all portalled
-              to body). Keeping the whole ladder under 50 is what lets a Select opened
-              inside the filter popover paint above that popover's panel. */}
-              <div
-                // Even `py-6` around the toolbar. The 12px fade band sits entirely
-                // inside the bottom padding (it must never hang below the header's
-                // box — at rest that edge is the first card's top), so the toolbar
-                // always reads as being on solid backdrop.
-                className="sticky top-0 z-20 -mx-3 space-y-4 px-3 py-6 md:-mx-6 md:px-6"
-                style={PINNED_HEADER_STYLE}
-              >
-                {tokensNotice && tokens.length > 0 ? (
-                  <div className="rounded-xl border border-border-default bg-fill-subtle px-4 py-3">
-                    <p className="text-sm font-medium text-primary">
-                      {t("DashboardIssuance.workspace.tokenListUnavailable")}
-                    </p>
-                    <p className="mt-1 text-sm text-secondary">{tokensNotice}</p>
-                  </div>
-                ) : null}
-
-                {/* Toolbar: stacks into two rows below sm, one row from sm up. The
-              breakpoint is the viewport, not the toolbar width — at ≥sm the sidebar
-              is hidden below xl, so even iPad portrait has room for a single row. */}
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="w-full sm:max-w-md">
-                    <SearchInput
-                      value={search}
-                      onChange={(event) => setSearch(event.target.value)}
-                      placeholder={t("DashboardIssuance.workspace.search")}
-                      // Keystrokes are debounced and answered by the server, so the
-                      // input says so — otherwise typing has no acknowledgement at
-                      // all until the rows change.
-                      pending={isSearchPending}
-                      clear={{
-                        label: t("DashboardIssuance.workspace.clearSearch"),
-                        onClear: () => setSearch(""),
-                      }}
-                    />
-                  </div>
-                  <div className="flex items-center gap-3">
-                    {/* Filter & sort — icon-only trigger opening a popover. */}
-                    <IssuanceFilterPopover
-                      filters={query}
-                      onChange={updateFilters}
-                      onClear={clearFilters}
-                      templateOptions={templateOptions}
-                    />
-                    <Button
-                      asChild
-                      className="h-10 w-full rounded-[10px] bg-primary px-4 text-on-primary hover:opacity-90 sm:w-auto"
-                    >
-                      <Link href={href(CREATE_DRAFT_PATH)}>
-                        <PlusIcon className="h-4 w-4" />
-                        {t("DashboardIssuance.workspace.createDraft")}
-                      </Link>
-                    </Button>
-                  </div>
-                </div>
-              </div>
-
-              {listErrorMessage ? (
-                <p className="mb-4 text-sm text-error" role="alert">
-                  {listErrorMessage}
-                </p>
-              ) : null}
-              {emptyResultsNotice}
-
-              <IssuanceResults
-                isLoadingNewResults={isLoadingNewResults}
-                isLoadingAnotherPage={isLoadingAnotherPage}
-                skeletonCount={skeletonCount}
-                tokens={tokens}
-                onCreate={startTokenCreation}
-                pagination={pagination}
-                t={t}
-                locale={locale}
-              />
-            </>
+            <div className="flex flex-col gap-8">
+              <LocalDraftsBlock />
+              <IssuanceTokenList {...props} />
+            </div>
           ),
         },
         {
           id: "playground",
           className: dashboardWorkspacePlaygroundPanelClassName,
-          content: playgroundContent,
+          content: (
+            <IssuancePlayground
+              apiBaseUrl={props.apiBaseUrl}
+              templates={props.templates}
+              templatesError={props.templatesError}
+              tokens={playgroundTokens}
+            />
+          ),
         },
       ]}
     />
+  );
+}
+
+function IssuanceTokenList({
+  initialQuery,
+  initialTokens,
+  initialTotal,
+  facets,
+  tokensNotice,
+}: IssuanceWorkspaceProps) {
+  const list = useIssuanceTokenList({ initialQuery, initialTokens, initialTotal });
+  const { sections, chips } = useIssuanceFilterSections(list.query, list.updateQuery, facets);
+  const latestDeploys = useLatestDeploys(list.tokens);
+  const searchOnly = Boolean(list.query.search) && chips.length === 0;
+
+  // The project's own count, not the filtered page's: what tells "no tokens yet" from
+  // "nothing matches".
+  if (facets.total === 0 && !list.isFiltered && list.tokens.length === 0) {
+    return <IssuanceProjectEmpty notice={tokensNotice} />;
+  }
+
+  return (
+    <div className="flex flex-col gap-4" aria-busy={list.isRefreshing}>
+      <IssuanceListToolbar list={list} sections={sections} />
+      <FilterChips chips={chips} />
+      <IssuanceListResults
+        list={list}
+        latestDeploys={latestDeploys}
+        search={searchOnly ? list.query.search : null}
+        projectTotal={facets.total}
+      />
+    </div>
+  );
+}
+
+/** A project with no tokens yet, or whose tokens could not be read. */
+function IssuanceProjectEmpty({ notice }: { notice: string | null }) {
+  const t = useTranslations();
+  const projectHref = useProjectHref();
+  return notice ? (
+    <ListEmptyState
+      message={t("DashboardIssuance.newDesign.list.loadFailed")}
+      description={notice}
+    />
+  ) : (
+    <ListEmptyState
+      message={t("DashboardIssuance.newDesign.list.emptyTitle")}
+      description={t("DashboardIssuance.newDesign.list.emptyBody")}
+      hidesPageAction
+      action={
+        <Button asChild>
+          <Link href={projectHref(ISSUANCE_CREATE_PATH)}>
+            {t("DashboardIssuance.newDesign.createDraft")}
+          </Link>
+        </Button>
+      }
+    />
+  );
+}
+
+/** The list's Filter menu, sort, page size and search. */
+function IssuanceListToolbar({
+  list,
+  sections,
+}: {
+  list: UseIssuanceTokenListResult;
+  sections: FilterMenuSection[];
+}) {
+  const t = useTranslations();
+  const { query, updateQuery, search, setSearch } = list;
+  return (
+    <ListToolbar
+      // Below a wide screen (the sidebar takes a third of a tablet) the design keeps Filter, sort
+      // and page size on one row and gives the search the next one, full width: the controls'
+      // group gives way so all four wrap as one row.
+      // 40px under the tabs, 4 more than the panel's 36, as the design sets the list's toolbar.
+      className={cn(
+        ISSUANCE_TOOLBAR_CONTROLS,
+        "mt-1 max-lg:flex-wrap max-lg:[&>:last-child]:contents"
+      )}
+      filters={
+        <FilterMenu
+          label={t("Shared.SharedComponents.filter")}
+          searchPlaceholder={t("Shared.SharedComponents.filterBy")}
+          sections={sections}
+        />
+      }
+    >
+      <Select
+        ariaLabel={t("DashboardIssuance.newDesign.list.sort")}
+        value={query.sort}
+        onValueChange={(value) => {
+          const sort = SORT_OPTIONS.find((option) => option.value === value)?.value;
+          if (sort) updateQuery({ sort });
+        }}
+        className="w-auto shrink-0"
+        textSize="body"
+      >
+        {SORT_OPTIONS.map((option) => (
+          <SelectItem key={option.value} value={option.value}>
+            {t(option.label)}
+          </SelectItem>
+        ))}
+      </Select>
+      <RowsPerPageSelect
+        value={query.pageSize}
+        sizes={ISSUANCE_PAGE_SIZES}
+        onChange={(pageSize) => updateQuery({ pageSize })}
+      />
+      <SearchInput
+        value={search}
+        onChange={(event) => setSearch(event.target.value)}
+        clear={{
+          label: t("DashboardIssuance.newDesign.list.clearSearch"),
+          onClear: () => setSearch(""),
+        }}
+        placeholder={t("DashboardIssuance.newDesign.list.searchPlaceholder")}
+        aria-label={t("DashboardIssuance.newDesign.list.searchLabel")}
+        className="min-w-0 flex-1 max-lg:basis-full lg:w-56 lg:flex-none"
+      />
+    </ListToolbar>
+  );
+}
+
+/** What the list holds below its toolbar: an error, a skeleton, no matches, or the rows. */
+function IssuanceListResults({
+  list,
+  latestDeploys,
+  search,
+  projectTotal,
+}: {
+  list: UseIssuanceTokenListResult;
+  latestDeploys: ReturnType<typeof useLatestDeploys>;
+  search: string | null;
+  projectTotal: number;
+}) {
+  const t = useTranslations();
+  if (list.errorMessage) {
+    return (
+      <ListEmptyState
+        message={t("DashboardIssuance.newDesign.list.loadFailed")}
+        description={t("DashboardIssuance.errors.unableToLoadTokens")}
+      />
+    );
+  }
+  if (list.isLoadingNewResults) return <IssuanceListRowsSkeleton />;
+  if (list.tokens.length === 0) {
+    return <NoMatches search={search} total={projectTotal} onClear={list.clearFilters} />;
+  }
+  return <IssuanceTokenRows list={list} latestDeploys={latestDeploys} />;
+}
+
+/** The page's rows, dimmed while another page loads, over the pager when there is more than one. */
+function IssuanceTokenRows({
+  list,
+  latestDeploys,
+}: {
+  list: UseIssuanceTokenListResult;
+  latestDeploys: ReturnType<typeof useLatestDeploys>;
+}) {
+  const t = useTranslations();
+  const { query, updateQuery, tokens, pageCount } = list;
+  return (
+    <>
+      <ul
+        className={cn(
+          "flex flex-col transition-opacity",
+          list.isLoadingAnotherPage ? "opacity-60" : null
+        )}
+      >
+        {tokens.map((token) => (
+          <li key={token.id}>
+            <IssuanceTokenRow token={token} latestDeploy={latestDeploys[token.id]} />
+          </li>
+        ))}
+      </ul>
+      {pageCount > 1 ? (
+        <ArrowPagination
+          page={query.page}
+          pageCount={pageCount}
+          onPageChange={(page) => updateQuery({ page })}
+          summary={t("DashboardIssuance.pagination.range", {
+            start: list.rangeStart,
+            end: list.rangeEnd,
+            total: list.total,
+          })}
+        />
+      ) : null}
+    </>
+  );
+}
+
+interface FilterChip {
+  id: string;
+  label: string;
+  value: string;
+  clear: () => void;
+}
+
+/** The Filter menu's three axes, Status, Template and Created, and a chip for each one set. */
+function useIssuanceFilterSections(
+  query: IssuanceListQuery,
+  updateQuery: (changes: Partial<IssuanceListQuery>) => void,
+  facets: IssuanceTokenFacets
+): { sections: FilterMenuSection[]; chips: FilterChip[] } {
+  const t = useTranslations();
+  const anyLabel = t("Shared.SharedComponents.any");
+  const templateOptions = facets.templates
+    .map(({ template }) => ({ value: template, label: getTokenTypeLabel(template, t) }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+  const statusLabel = STATUS_OPTIONS.find((option) => option.value === query.status)?.label;
+  const dateLabel = DATE_OPTIONS.find((option) => option.value === query.date)?.label;
+  const templateLabel =
+    query.template === "all"
+      ? undefined
+      : (templateOptions.find((option) => option.value === query.template)?.label ??
+        query.template);
+  const sections: (FilterMenuSection & { reset: Partial<IssuanceListQuery> })[] = [
+    {
+      id: "status",
+      label: t("DashboardIssuance.newDesign.list.filterStatus"),
+      value: statusLabel ? t(statusLabel) : undefined,
+      reset: { status: "all" },
+      content: (
+        <FilterMenuOptions
+          value={query.status === "all" ? undefined : query.status}
+          anyLabel={anyLabel}
+          options={STATUS_OPTIONS.map((option) => ({
+            value: option.value,
+            label: t(option.label),
+          }))}
+          onChange={(value) =>
+            updateQuery({
+              status: STATUS_OPTIONS.find((option) => option.value === value)?.value ?? "all",
+            })
+          }
+        />
+      ),
+    },
+    {
+      id: "template",
+      label: t("DashboardIssuance.newDesign.list.filterTemplate"),
+      value: templateLabel,
+      reset: { template: "all" },
+      content: (
+        <FilterMenuOptions
+          value={query.template === "all" ? undefined : query.template}
+          anyLabel={anyLabel}
+          options={templateOptions}
+          onChange={(value) => updateQuery({ template: value ?? "all" })}
+        />
+      ),
+    },
+    {
+      id: "date",
+      label: t("DashboardIssuance.newDesign.list.filterCreated"),
+      value: dateLabel ? t(dateLabel) : undefined,
+      reset: { date: "all" },
+      content: (
+        <FilterMenuOptions
+          value={query.date === "all" ? undefined : query.date}
+          anyLabel={anyLabel}
+          options={DATE_OPTIONS.map((option) => ({ value: option.value, label: t(option.label) }))}
+          onChange={(value) =>
+            updateQuery({
+              date: DATE_OPTIONS.find((option) => option.value === value)?.value ?? "all",
+            })
+          }
+        />
+      ),
+    },
+  ];
+  const chips = sections.flatMap((section) =>
+    section.value === undefined
+      ? []
+      : [
+          {
+            id: section.id,
+            label: section.label,
+            value: section.value,
+            clear: () => updateQuery(section.reset),
+          },
+        ]
+  );
+  return { sections, chips };
+}
+
+/** No row answers the search, or the filters. */
+function NoMatches({
+  search,
+  total,
+  onClear,
+}: {
+  search: string | null;
+  total: number;
+  onClear: () => void;
+}) {
+  const t = useTranslations();
+  return (
+    <ListEmptyState
+      message={
+        search
+          ? t("DashboardIssuance.newDesign.list.noSearchMatchTitle", { search })
+          : t("DashboardIssuance.newDesign.list.noFilterMatchTitle")
+      }
+      description={
+        search
+          ? t("DashboardIssuance.newDesign.list.noSearchMatchBody", { count: total })
+          : t("DashboardIssuance.newDesign.list.noFilterMatchBody")
+      }
+      action={
+        <Button variant="secondary" onClick={onClear}>
+          {search
+            ? t("DashboardIssuance.newDesign.list.clearSearch")
+            : t("DashboardIssuance.newDesign.list.clearAll")}
+        </Button>
+      }
+    />
+  );
+}
+
+/** The filters in force, each with a button that clears it. */
+function FilterChips({ chips }: { chips: readonly FilterChip[] }) {
+  const t = useTranslations();
+  if (chips.length === 0) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {chips.map((chip) => (
+        <span
+          key={chip.id}
+          className="inline-flex h-7 items-center gap-1.5 rounded-control bg-fill-subtle pr-1 pl-2.5 text-meta text-secondary"
+        >
+          {chip.label}: <span className="text-primary">{chip.value}</span>
+          <button
+            type="button"
+            aria-label={t("Shared.SharedComponents.clearFilter", { filter: chip.label })}
+            onClick={chip.clear}
+            className="rounded-control-inner p-0.5 text-tertiary hover:bg-fill hover:text-primary"
+          >
+            <XIcon className="size-3.5" aria-hidden="true" />
+          </button>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * One token: its mark, name and ticker over its state, and on the right when it went on
+ * chain, or when it was drafted while it has not.
+ */
+function IssuanceTokenRow({
+  token,
+  latestDeploy,
+}: {
+  token: IssuanceTokenView;
+  latestDeploy?: DeployAttemptStatus | null;
+}) {
+  const t = useTranslations();
+  const projectHref = useProjectHref();
+  const locale = useLocale();
+  const state = tokenLifecycle(token, latestDeploy);
+  const deployed = Boolean(token.deployedAt);
+  // A ticker that only repeats the name adds nothing beside it.
+  const ticker = token.symbol.toLowerCase() === token.name.toLowerCase() ? "" : token.symbol;
+
+  return (
+    <Link
+      href={projectHref(`/dashboard/issuance/${token.id}`)}
+      data-issuance-token-row={token.id}
+      className="-mx-2 grid grid-cols-[2.25rem_minmax(0,1fr)_max-content] items-center gap-x-3 rounded-control border-b border-border-subtle px-2 py-4.5 outline-none hover:bg-fill-subtle focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary"
+    >
+      <IssuedTokenMark symbol={token.symbol} name={token.name} logoUrl={token.imageUrl} />
+      <span className="flex min-w-0 flex-col gap-0.5">
+        <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+          <span className="truncate text-body font-medium text-primary">{token.name}</span>
+          {ticker ? (
+            <span className="text-meta tracking-wide text-tertiary uppercase">{ticker}</span>
+          ) : null}
+        </span>
+        <StatusText tone={TOKEN_LIFECYCLE_TONE[state]} className="text-meta">
+          {t(TOKEN_LIFECYCLE_LABEL[state])}
+        </StatusText>
+      </span>
+      <span className="flex flex-col items-end gap-1 text-right">
+        <span className="text-meta text-tertiary">
+          {t(
+            deployed
+              ? "DashboardIssuance.newDesign.list.deployed"
+              : "DashboardIssuance.newDesign.list.created"
+          )}
+        </span>
+        <span className="text-body text-primary tabular-nums">
+          {formatTokenDay(deployed ? token.deployedAt : token.createdAt, locale) ?? "—"}
+        </span>
+      </span>
+    </Link>
   );
 }
