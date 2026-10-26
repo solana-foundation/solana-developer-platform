@@ -10,11 +10,12 @@ import { createMintLookupCache } from "@/services/mint-lookup-cache";
 import type { Env } from "@/types/env";
 
 /**
- * Display USD spot prices from Tokens.xyz, with Jupiter coverage for other mints.
+ * Display USD spot prices from Jupiter, with sampled Tokens.xyz comparisons.
  *
  * Helius DAS reports a price only for assets it happens to know, which leaves anything
  * that is neither USD-stable nor in its index unpriced. Tokens.xyz supplies
- * registered Solana mint snapshots; Jupiter covers unregistered or missing mints.
+ * registered Solana mint snapshots, but its price and fetch timestamp can come
+ * from different underlying records. Compare it without using it for balances.
  */
 
 const JUPITER_PRICE_URL = "https://api.jup.ag/price/v3";
@@ -25,7 +26,9 @@ const MAX_MINTS_PER_REQUEST = 50;
 const MAX_TOKENS_XYZ_MINTS_PER_REQUEST = 250;
 
 const LOOKUP_BUDGET_MS = 4_000;
-const TOKENS_PRIMARY_BUDGET_MS = 1_800;
+const TOKENS_SHADOW_BUDGET_MS = 1_000;
+const TOKENS_SHADOW_MIN_INTERVAL_MS = 60_000;
+const TOKENS_STABLE_SAMPLE_RATE = 0.01;
 const MAX_BATCHES_IN_FLIGHT = 2;
 // Tokens.xyz refreshes each curated mint roughly hourly, independently of its 1m HTTP cache.
 const MAX_TOKEN_SNAPSHOT_AGE_MS = 2 * 60 * 60_000;
@@ -35,6 +38,7 @@ const PRICE_CACHE_TTL_MS = 30_000;
 
 const priceCache = createMintLookupCache<number>(PRICE_CACHE_TTL_MS);
 let warnedAboutJupiterPriceUrl = false;
+let lastTokensShadowSampleAt: number | null = null;
 
 function logPriceLookupSuccess(
   vendor: string,
@@ -55,6 +59,7 @@ function logPriceLookupSuccess(
 /** @internal Test-only: forget cached prices so specs are order-independent. */
 export function clearDisplayPriceCacheForTests(): void {
   priceCache.clearForTests();
+  lastTokensShadowSampleAt = null;
 }
 
 const jupiterPriceBodySchema = z.record(z.string(), z.unknown());
@@ -147,6 +152,7 @@ async function fetchPriceChunk(
     signal,
   }).catch((error: unknown) => {
     logVendorCallFailure("jupiter", "price", error, startedAt, {
+      boundary: "upstream_http",
       requested_count: mints.length,
     });
     throw error;
@@ -157,7 +163,7 @@ async function fetchPriceChunk(
       "price",
       new Error(`price request returned ${response.status}`),
       startedAt,
-      { http_status: response.status, requested_count: mints.length }
+      { boundary: "upstream_http", http_status: response.status, requested_count: mints.length }
     );
     return result;
   }
@@ -166,6 +172,7 @@ async function fetchPriceChunk(
   // entry and no error — so absence is the only signal that a price is unavailable.
   const body: unknown = await response.json().catch((error: unknown) => {
     logVendorCallFailure("jupiter", "price", error, startedAt, {
+      boundary: "upstream_http",
       http_status: response.status,
       requested_count: mints.length,
     });
@@ -174,6 +181,7 @@ async function fetchPriceChunk(
   const parsed = jupiterPriceBodySchema.safeParse(body);
   if (!parsed.success) {
     logVendorCallFailure("jupiter", "price", new Error("invalid price response"), startedAt, {
+      boundary: "upstream_http",
       http_status: response.status,
       requested_count: mints.length,
     });
@@ -200,6 +208,7 @@ async function fetchPriceChunk(
     }
   }
   logPriceLookupSuccess("jupiter", "price", startedAt, {
+    boundary: "upstream_http",
     http_status: response.status,
     requested_count: mints.length,
     priced_count: result.prices.size,
@@ -226,6 +235,7 @@ async function fetchTokensXyzPriceChunk(
     signal,
   }).catch((error: unknown) => {
     logVendorCallFailure("tokens-xyz", "market-snapshots", error, startedAt, {
+      boundary: "upstream_http",
       requested_count: mints.length,
     });
     throw error;
@@ -236,13 +246,14 @@ async function fetchTokensXyzPriceChunk(
       "market-snapshots",
       new Error(`market snapshots request returned ${response.status}`),
       startedAt,
-      { http_status: response.status, requested_count: mints.length }
+      { boundary: "upstream_http", http_status: response.status, requested_count: mints.length }
     );
     return result;
   }
 
   const body: unknown = await response.json().catch((error: unknown) => {
     logVendorCallFailure("tokens-xyz", "market-snapshots", error, startedAt, {
+      boundary: "upstream_http",
       http_status: response.status,
       requested_count: mints.length,
     });
@@ -254,7 +265,7 @@ async function fetchTokensXyzPriceChunk(
       "market-snapshots",
       new Error("market snapshots response is not an array"),
       startedAt,
-      { http_status: response.status, requested_count: mints.length }
+      { boundary: "upstream_http", http_status: response.status, requested_count: mints.length }
     );
     return result;
   }
@@ -291,6 +302,7 @@ async function fetchTokensXyzPriceChunk(
     result.prices.set(address, token.price);
   }
   logPriceLookupSuccess("tokens-xyz", "market-snapshots", startedAt, {
+    boundary: "upstream_http",
     http_status: response.status,
     requested_count: mints.length,
     priced_count: result.prices.size,
@@ -331,17 +343,73 @@ async function fetchBatches(
   return result;
 }
 
+function shouldSampleTokensXyz(env: Env, now: number): boolean {
+  if (
+    lastTokensShadowSampleAt !== null &&
+    now - lastTokensShadowSampleAt < TOKENS_SHADOW_MIN_INTERVAL_MS
+  ) {
+    return false;
+  }
+  if (env.SDP_RELEASE_CHANNEL === "stable" && Math.random() >= TOKENS_STABLE_SAMPLE_RATE) {
+    return false;
+  }
+  lastTokensShadowSampleAt = now;
+  return true;
+}
+
+async function compareTokensXyzShadow(
+  apiKey: string,
+  mints: string[],
+  jupiterResult: Promise<PriceBatchResult>,
+  lookupDeadlineAt: number
+): Promise<void> {
+  const startedAt = Date.now();
+  const remainingMs = Math.min(TOKENS_SHADOW_BUDGET_MS, lookupDeadlineAt - startedAt);
+  if (remainingMs <= 0) return;
+
+  // This never blocks the balance response. The vendor request has its own short
+  // timeout, and failures are logged by fetchTokensXyzPriceChunk.
+  const tokens = await fetchTokensXyzPriceChunk(apiKey, mints, AbortSignal.timeout(remainingMs));
+  const jupiter = await jupiterResult;
+  let jupiterPricedCount = 0;
+  let overlapCount = 0;
+  let divergentCount = 0;
+  let maxRelativeDivergenceBps = 0;
+  for (const mint of mints) {
+    const jupiterPrice = jupiter.prices.get(mint);
+    if (jupiterPrice === undefined) continue;
+    jupiterPricedCount += 1;
+    const tokensPrice = tokens.prices.get(mint);
+    if (tokensPrice === undefined) continue;
+    overlapCount += 1;
+    const relativeDivergence = Math.abs(tokensPrice - jupiterPrice) / jupiterPrice;
+    const divergenceBps = Math.min(Math.round(relativeDivergence * 10_000), 100_000);
+    if (divergenceBps > 1_000) divergentCount += 1;
+    maxRelativeDivergenceBps = Math.max(maxRelativeDivergenceBps, divergenceBps);
+  }
+  logEvent("info", {
+    event: "sdp_api_display_price_shadow",
+    requested_count: mints.length,
+    jupiter_priced_count: jupiterPricedCount,
+    tokens_priced_count: tokens.prices.size,
+    overlap_count: overlapCount,
+    divergent_gt_10pct_count: divergentCount,
+    max_relative_divergence_bps: maxRelativeDivergenceBps,
+    duration_ms: Date.now() - startedAt,
+  });
+}
+
 /**
- * Display-only USD prices. Tokens.xyz is preferred for registered mints when
- * configured; Jupiter covers anything Tokens.xyz cannot price. Unpriced mints
- * are absent.
+ * Display-only USD prices from Jupiter. Tokens.xyz is sampled for comparison
+ * when configured, but its blended snapshot does not prove price freshness.
+ * Unpriced mints are absent.
  *
  * Jupiter quotes mainnet markets only, so off mainnet every mint is unpriced: a devnet
  * mint has no market, and one sharing a mainnet address (native SOL) would borrow a
  * price it does not trade at.
  *
- * A price is reused for 30 seconds per mint. A mint left unpriced, by Jupiter or by a
- * failed batch, is asked about again on the next call.
+ * A price is reused for 30 seconds per mint. A mint left unpriced by Jupiter
+ * or a failed batch is asked about again on the next call.
  *
  * Never throws. Pricing decorates a balance response; a pricing outage should render
  * balances unpriced, not fail the request that carries them.
@@ -361,25 +429,26 @@ export async function fetchDisplayUsdPrices(
     const prices = new Map<string, number>();
     const lookupStartedAt = Date.now();
     const lookupDeadlineAt = lookupStartedAt + LOOKUP_BUDGET_MS;
-    if (tokensXyzApiKey) {
-      const tokensResult = await fetchBatches(
-        missingMints,
-        MAX_TOKENS_XYZ_MINTS_PER_REQUEST,
-        MAX_BATCHES_IN_FLIGHT,
-        Math.min(lookupDeadlineAt, Date.now() + TOKENS_PRIMARY_BUDGET_MS),
-        (batch, signal) => fetchTokensXyzPriceChunk(tokensXyzApiKey, batch, signal)
-      );
-      for (const [mint, price] of tokensResult.prices) prices.set(mint, price);
-    }
-
-    const unpriced = missingMints.filter((mint) => !prices.has(mint));
-    const jupiterResult = await fetchBatches(
-      unpriced,
+    const jupiterLookup = fetchBatches(
+      missingMints,
       MAX_MINTS_PER_REQUEST,
       apiKey ? MAX_BATCHES_IN_FLIGHT : 1,
       lookupDeadlineAt,
       (batch, signal) => fetchPriceChunk(url, apiKey, batch, signal)
     );
+    const tokensShadowSampled =
+      Boolean(tokensXyzApiKey) && shouldSampleTokensXyz(env, lookupStartedAt);
+    if (tokensXyzApiKey && tokensShadowSampled) {
+      void compareTokensXyzShadow(
+        tokensXyzApiKey,
+        missingMints.slice(0, MAX_TOKENS_XYZ_MINTS_PER_REQUEST),
+        jupiterLookup,
+        lookupDeadlineAt
+      ).catch(() => {
+        // The Tokens.xyz request logs its own failure; shadow work is best effort.
+      });
+    }
+    const jupiterResult = await jupiterLookup;
     for (const [mint, price] of jupiterResult.prices) prices.set(mint, price);
 
     logEvent("info", {
@@ -388,7 +457,8 @@ export async function fetchDisplayUsdPrices(
       priced_count: prices.size,
       unpriced_count: missingMints.length - prices.size,
       duration_ms: Date.now() - lookupStartedAt,
-      tokens_configured: Boolean(tokensXyzApiKey),
+      tokens_shadow_configured: Boolean(tokensXyzApiKey),
+      tokens_shadow_sampled: tokensShadowSampled,
       jupiter_keyed: Boolean(apiKey),
     });
 

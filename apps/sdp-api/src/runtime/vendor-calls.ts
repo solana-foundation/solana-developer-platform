@@ -3,6 +3,7 @@ import { describeError, logEvent } from "./money-path-events";
 export const VENDOR_CALL_EVENT = "sdp_api_vendor_call";
 
 export interface VendorCallDetails {
+  readonly boundary?: "upstream_http" | "adapter_operation";
   readonly http_status?: number;
   readonly requested_count?: number;
   readonly priced_count?: number;
