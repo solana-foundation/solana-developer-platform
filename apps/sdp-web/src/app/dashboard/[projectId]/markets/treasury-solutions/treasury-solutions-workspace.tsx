@@ -98,7 +98,12 @@ import { useLocale, useTranslations } from "@/i18n/provider";
 import { DASHBOARD_SIDE_NAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { filterSandboxDevnetStrategies } from "./devnet-mainnet-intersection";
-import { useKaminoVaultAllocations } from "./kamino-allocations";
+import {
+  type KaminoVaultAllocationsRead,
+  kaminoAllocationsVault,
+  kaminoAllocationsVaults,
+  useKaminoVaultAllocations,
+} from "./kamino-allocations";
 import {
   formatAllocationWeight,
   formatKaminoAsOf,
@@ -810,20 +815,23 @@ function KaminoAllocationsTooltipContent({
 /**
  * The strategies table's "Information" cell. Kamino rows disclose how the
  * vault's capital is deployed (the vault's own allocation weights, condensed
- * behind a summary line); every other provider renders the same plain
- * placeholder as an unavailable read, and issues no request.
+ * behind a summary line), read once for the whole table; every other provider
+ * renders the same plain placeholder as an unavailable read.
  */
-function StrategyInformationCell({ strategy }: { strategy: EarnStrategy }) {
+function StrategyInformationCell({
+  allocationsRead,
+  strategy,
+}: {
+  allocationsRead: KaminoVaultAllocationsRead;
+  strategy: EarnStrategy;
+}) {
   const t = useTranslations();
   const locale = useLocale();
-  const vaultAddress = strategy.provider === "kamino" ? strategy.providerReference : undefined;
   // Kamino's allocations source is mainnet-only: devnet vaults are an
-  // unsupported read, so they take the same no-request placeholder path as
-  // non-Kamino rows instead of a doomed upstream call.
-  const { allocations, error, isLoading } = useKaminoVaultAllocations(
-    vaultAddress,
-    strategy.hostCluster
-  );
+  // unsupported read, so they take the same placeholder path as non-Kamino
+  // rows and are never part of the table's read.
+  const vaultAddress = kaminoAllocationsVault(strategy);
+  const allocations = vaultAddress ? allocationsRead.allocationsByVault?.[vaultAddress] : undefined;
 
   const placeholder = (
     <span className="text-sm text-tertiary" role="note">
@@ -831,8 +839,10 @@ function StrategyInformationCell({ strategy }: { strategy: EarnStrategy }) {
     </span>
   );
 
-  if (isLoading) return <SkeletonBlock className="h-4 w-24 rounded-md" />;
-  if (error || !vaultAddress || !allocations || !hasKaminoAllocationContent(allocations)) {
+  if (vaultAddress && allocationsRead.isLoading) {
+    return <SkeletonBlock className="h-4 w-24 rounded-md" />;
+  }
+  if (allocationsRead.error || !allocations || !hasKaminoAllocationContent(allocations)) {
     return placeholder;
   }
 
@@ -915,6 +925,7 @@ function StrategyDepositAction({
 
 function StrategyTable({
   environment,
+  kaminoAllocations,
   onDeposit,
   positions,
   providerAccess,
@@ -922,6 +933,7 @@ function StrategyTable({
   unrecordedShareMints,
 }: {
   environment: SdpEnvironment;
+  kaminoAllocations: KaminoVaultAllocationsRead;
   onDeposit: (strategy: EarnStrategy) => void;
   positions: readonly EarnVaultPosition[] | undefined;
   providerAccess: EarnProviderAccess | null;
@@ -953,7 +965,6 @@ function StrategyTable({
       field,
     }));
   };
-
   return (
     <div className="overflow-x-auto">
       <Table
@@ -1040,7 +1051,10 @@ function StrategyTable({
                   {formatUsd(tvlUsd, locale)}
                 </TableCell>
                 <TableCell>
-                  <StrategyInformationCell strategy={strategy} />
+                  <StrategyInformationCell
+                    allocationsRead={kaminoAllocations}
+                    strategy={strategy}
+                  />
                 </TableCell>
                 <TableCell align="right">
                   <div className="flex flex-col items-end gap-2">
@@ -1461,6 +1475,8 @@ interface TreasuryStrategiesCardProps {
   environment: SdpEnvironment;
   error: unknown;
   isLoading: boolean;
+  /** The Information column's one table-wide read, owned by the container. */
+  kaminoAllocations: KaminoVaultAllocationsRead;
   mainnetError: unknown;
   mainnetLoading: boolean;
   onDeposit: (strategy: EarnStrategy) => void;
@@ -1528,6 +1544,7 @@ function TreasuryStrategiesCardBody({
   environment,
   error,
   isLoading,
+  kaminoAllocations,
   mainnetError,
   mainnetLoading,
   onDeposit,
@@ -1579,6 +1596,7 @@ function TreasuryStrategiesCardBody({
       ) : (
         <StrategyTable
           environment={environment}
+          kaminoAllocations={kaminoAllocations}
           onDeposit={onDeposit}
           positions={positions}
           providerAccess={providerAccess}
@@ -1747,9 +1765,12 @@ interface TreasuryWorkspaceContentProps {
   devnetCatalogueError: unknown;
   devnetCatalogueLoading: boolean;
   environment: SdpEnvironment;
+  kaminoAllocations: KaminoVaultAllocationsRead;
   mainnetCatalogueError: unknown;
   mainnetCatalogueLoading: boolean;
   onDeposit: (strategy: EarnStrategy) => void;
+  /** A queued request settled: re-read holdings and cash, nothing else. */
+  onHoldingsChanged: () => void;
   onRefresh: () => void;
   onWithdrawPosition: (
     position: EarnVaultPosition,
@@ -1783,9 +1804,11 @@ function TreasuryWorkspaceContent(props: TreasuryWorkspaceContentProps) {
     devnetCatalogueError,
     devnetCatalogueLoading,
     environment,
+    kaminoAllocations,
     mainnetCatalogueError,
     mainnetCatalogueLoading,
     onDeposit,
+    onHoldingsChanged,
     onRefresh,
     onWithdrawPosition,
     onWithdrawProgram,
@@ -1836,7 +1859,7 @@ function TreasuryWorkspaceContent(props: TreasuryWorkspaceContentProps) {
         withdrawals={vaultWithdrawals}
       />
 
-      <EarnVaultWithdrawalRequestsCard onChanged={onRefresh} />
+      <EarnVaultWithdrawalRequestsCard onChanged={onHoldingsChanged} />
 
       <TreasuryStrategiesCard
         devnetError={devnetCatalogueError}
@@ -1844,6 +1867,7 @@ function TreasuryWorkspaceContent(props: TreasuryWorkspaceContentProps) {
         environment={environment}
         error={catalogueError}
         isLoading={catalogueLoading}
+        kaminoAllocations={kaminoAllocations}
         mainnetError={mainnetCatalogueError}
         mainnetLoading={mainnetCatalogueLoading}
         onDeposit={onDeposit}
@@ -2000,6 +2024,12 @@ export function TreasurySolutionsWorkspace({
     strategiesError,
     strategiesLoading,
   } = useTreasuryCatalogueShelves(sdpEnvironment);
+  // The Information column's one read for every Kamino row the table shows.
+  const kaminoAllocationVaults = useMemo(
+    () => kaminoAllocationsVaults(catalogueStrategies ?? []),
+    [catalogueStrategies]
+  );
+  const kaminoAllocations = useKaminoVaultAllocations(kaminoAllocationVaults);
   const {
     state: programsState,
     error: programsError,
@@ -2198,6 +2228,9 @@ export function TreasurySolutionsWorkspace({
     if (catalogueCluster !== undefined) refreshCatalogue();
     refreshPrograms();
   };
+  // A queued request settling moves holdings and cash, never the catalogue or a
+  // custodial program, so it re-reads balances alone.
+  const refreshHoldings = () => void refreshTreasuryBalances();
 
   return (
     <DashboardWorkspaceOverviewPanel>
@@ -2210,9 +2243,11 @@ export function TreasurySolutionsWorkspace({
         devnetCatalogueError={devnetCatalogueError}
         devnetCatalogueLoading={devnetCatalogueLoading}
         environment={sdpEnvironment}
+        kaminoAllocations={kaminoAllocations}
         mainnetCatalogueError={mainnetCatalogueError}
         mainnetCatalogueLoading={mainnetCatalogueLoading}
         onDeposit={setDepositStrategy}
+        onHoldingsChanged={refreshHoldings}
         onRefresh={refreshTreasury}
         onWithdrawPosition={openVaultExit}
         onWithdrawProgram={setWithdrawProgram}
@@ -2238,10 +2273,11 @@ export function TreasurySolutionsWorkspace({
           onClose={() => setDepositStrategy(null)}
           projectId={selectedProjectId}
           onDeposited={(deposit, intent) => {
-            // Two refreshes, for two different moments. This starts an
-            // uncached balance read for a fast landing; the watch below reads
-            // again once the chain has actually decided, which is the only
-            // point at which the holding is real.
+            // No balance read here: a read before the chain decides cannot show
+            // the moved amount, and the position stays "updating" meanwhile.
+            // The watch below triggers the one read that can, the
+            // confirmation-floored refresh, including when this response is
+            // already confirmed.
             const authoritativePosition = positions?.find(
               (position) => position.id === deposit.positionId
             );
@@ -2259,7 +2295,6 @@ export function TreasurySolutionsWorkspace({
                 custodyWalletId: intent.custodyWalletId,
               },
             ]);
-            void refreshTreasuryBalances();
           }}
           onSubmissionStart={(custodyWalletId) =>
             beginSubmission({
@@ -2290,6 +2325,8 @@ export function TreasurySolutionsWorkspace({
           environment={sdpEnvironment}
           onClose={() => setWithdrawPosition(null)}
           onWithdrawn={(withdrawal, intent) => {
+            // Like a deposit, the watch triggers the confirmation-floored read;
+            // a read now would only fetch the pre-exit balance.
             addVaultWithdrawalWatches([
               {
                 createdAt: withdrawal.createdAt,
@@ -2301,7 +2338,6 @@ export function TreasurySolutionsWorkspace({
                 custodyWalletId: withdrawPosition.custodyWalletId,
               },
             ]);
-            void refreshTreasuryBalances();
           }}
           onSubmissionStart={() => beginSubmission(withdrawPosition)}
           onMovementUpdated={updateVaultWithdrawalWatch}
@@ -2310,7 +2346,7 @@ export function TreasurySolutionsWorkspace({
             // assets yet. Refresh holdings without projecting an instant exit.
             void refreshTreasuryBalances();
           }}
-          onAsyncRequestSettled={refreshTreasury}
+          onAsyncRequestSettled={refreshHoldings}
           parSource={withdrawParSource}
           position={withdrawPosition}
           projectId={selectedProjectId}

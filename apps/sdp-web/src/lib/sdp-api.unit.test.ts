@@ -11,6 +11,7 @@ import {
   createRequestScopedSdpApiClients,
   createSdpApiClient,
   proxyToSdpApi,
+  requestOnboardingStatus,
   requestProjectHref,
   requestProjectId,
   SdpApiResponseError,
@@ -123,6 +124,20 @@ describe("createSdpApiClient", () => {
 
     await expect(createSdpApiClient()).rejects.toThrow("x-project-id missing");
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("requestOnboardingStatus", () => {
+  it("reads the organization's status with the request-bound token and no project", async () => {
+    const status = { linked: true, organization: { id: "org_test" }, setup: null };
+    const fetchMock = apiFetchMock(() => Response.json(status));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(requestOnboardingStatus()).resolves.toEqual(status);
+
+    const headers = headersOfCall(fetchMock, "/v1/onboarding/status");
+    expect(headers.get("Authorization")).toBe("Bearer token_test");
+    expect(headers.get("x-project-id")).toBeNull();
   });
 });
 

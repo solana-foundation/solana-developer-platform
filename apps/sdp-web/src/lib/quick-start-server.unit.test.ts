@@ -5,6 +5,9 @@ const mocks = vi.hoisted(() => ({ fetch: vi.fn(), projects: vi.fn() }));
 vi.mock("./sdp-api", () => ({
   createOrgSdpApiClient: async () => ({ fetch: mocks.fetch }),
   listSdpProjects: mocks.projects,
+  // The request's shared onboarding read, through the same fetch mock so each
+  // case below keeps its order: onboarding first, then each project's keys.
+  requestOnboardingStatus: () => mocks.fetch("/v1/onboarding/status"),
 }));
 
 const onboarding = (setup: Record<string, unknown> | null, linked = true) => ({
