@@ -62,8 +62,9 @@ accounting marks or token fees. Executable swap quotes remain separate.
 Set `TOKENS_XYZ_API_KEY` in the SDP Doppler config. For Cloud Run, mirror it to
 `sdp-<env>-app-tokens-xyz-api-key` and enable
 `sdp_api_tokens_xyz_key_ready` only after the real secret version exists.
-The local infra branch includes dev, stage and prod wiring; image deployment
-alone does not import Doppler secrets.
+[Infrastructure PR #292](https://github.com/solana-foundation/sdp-infra/pull/292)
+includes dev, stage and prod wiring; image deployment alone does not import
+Doppler secrets.
 
 `JUPITER_PRICE_API_KEY`, `JUPITER_PRICE_API_URL` and the Tokens shadow flag have
 been removed. `JUPITER_SWAP_API_KEY` and Kora's separate key retain their
@@ -76,7 +77,7 @@ That key is never used for display prices; the Tokens key is never sent to
 Jupiter. On October 26 the Jupiter swap key was present in dev and stage
 configs but absent in `prd`. Before enabling production swaps, add the key
 there, sync `sdp-prod-app-jupiter-swap-api-key`, and enable
-`sdp_api_jupiter_swap_key_ready`. The local infra branch includes that mount.
+`sdp_api_jupiter_swap_key_ready`. The infrastructure PR includes that mount.
 
 ## Ticket acceptance
 
@@ -112,4 +113,17 @@ live Grafana, stage scrape, Kora ingress and Sentry verification requirements.
   Dev required adding the missing Linux provider checksum in a disposable
   copy; checked-in provider versions and lockfiles were unchanged.
 
-No rollout, live Grafana check, browser E2E or full workspace suite was run.
+Publication checks used CI's Node 24.22.1. The full API run passed 8,186 of
+8,187 tests; the remaining assertion expected a caller-supplied audit request
+ID. It now checks the generated server ID against the response and rejects the
+supplied ID; all 12 tests in that suite passed on rerun. Web passed all 3,377
+tests, and the other 24 workspace test tasks passed. Workspace typechecking
+passed all 28 tasks.
+
+Full Biome reported 26 SVG title errors in files unchanged from main. Local
+integration setup stopped on an existing
+`earn_movements_kamino_deposit_receipt_check` constraint. These remain local
+verification gaps; the focused checks above passed.
+
+The full suite was not repeated after the audit assertion fix. No rollout,
+live Grafana check or local browser E2E was run.
