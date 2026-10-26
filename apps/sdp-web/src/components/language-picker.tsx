@@ -16,8 +16,7 @@ import { supportedLocales } from "@/i18n/config";
 import { useLocale, useTranslations } from "@/i18n/provider";
 
 /**
- * The language button: the landing page's, and the previous design's dashboard header's. On the
- * new design the dashboard's choice lives in the account menu.
+ * The language button: the landing page's. The dashboard's choice lives in the account menu.
  */
 export function LanguagePicker({ variant = "topbar" }: { variant?: "topbar" | "landing" }) {
   const locale = useLocale();

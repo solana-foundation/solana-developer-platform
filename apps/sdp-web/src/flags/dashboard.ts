@@ -6,16 +6,13 @@ import {
   heliusRings,
   issuance,
   markets,
-  newDesign,
   paymentsDemoMode,
   privateChannels,
 } from "@/flags";
-import { getDesignModuleFlags } from "@/flags/new-design";
 import {
   deploymentReleaseChannel,
   isModuleInDeploymentReleaseChannel,
 } from "@/flags/release-channel";
-import type { DesignModuleFlags } from "@/lib/design-modules";
 import { isRampsEnabled } from "./ramps";
 
 export type DashboardFlags = {
@@ -28,12 +25,8 @@ export type DashboardFlags = {
   heliusRings: boolean;
   issuance: boolean;
   markets: boolean;
-  /** NEW DESIGN; absent (older fixtures) means off. */
-  newDesign?: boolean;
-  /** Each design module's own flag (lib/design-modules.ts); counts only with NEW DESIGN on. */
-  newDesignModules?: DesignModuleFlags;
   payments: boolean;
-  /** Payments' Demo switch; absent (older fixtures) follows NEW DESIGN. */
+  /** Payments' Demo switch; absent (older fixtures) means on. */
   paymentsDemoMode?: boolean;
   privateChannels: boolean;
   ramps: boolean;
@@ -59,8 +52,6 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
     heliusRingsEnabled,
     issuanceEnabled,
     marketsEnabled,
-    newDesignEnabled,
-    newDesignModules,
     paymentsDemoModeEnabled,
     privateChannelsEnabled,
     rampsEnabled,
@@ -71,8 +62,6 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
     heliusRings(),
     issuance(),
     markets(),
-    newDesign(),
-    getDesignModuleFlags(),
     paymentsDemoMode(),
     privateChannels(),
     isRampsEnabled(),
@@ -88,8 +77,6 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
     heliusRings: heliusRingsEnabled,
     issuance: issuanceEnabled,
     markets: marketsEnabled,
-    newDesign: newDesignEnabled,
-    newDesignModules,
     payments: isModuleInDeploymentReleaseChannel("payments"),
     paymentsDemoMode: paymentsDemoModeEnabled,
     privateChannels: privateChannelsEnabled,
