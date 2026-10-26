@@ -147,7 +147,7 @@ export function resolveClerkEmail(payload: ClerkJwtPayload): string | null {
   return isPlausibleEmail(first) ? first : null;
 }
 
-export function resolveClerkConfig(env: Env) {
+function resolveClerkConfig(env: Env) {
   const issuer = env.CLERK_ISSUER?.trim();
   const jwksUrl = env.CLERK_JWKS_URL?.trim();
 

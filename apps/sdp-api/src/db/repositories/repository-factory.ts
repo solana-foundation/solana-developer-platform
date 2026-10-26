@@ -198,10 +198,6 @@ export function createCounterpartiesRepository(
   );
 }
 
-export function createSystemCounterpartiesRepository(env: Env): CounterpartiesRepository {
-  return createPostgresCounterpartiesRepository(getDb(env));
-}
-
 export function createCounterpartyAccountsRepository(
   env: Env,
   scope: TenantScope

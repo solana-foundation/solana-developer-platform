@@ -274,7 +274,7 @@ export async function mintEarnPositionForProviderWallet(
  * skippable by the next caller.
  */
 
-export interface EarnMovementCursor {
+interface EarnMovementCursor {
   createdAt: string;
   id: string;
 }
@@ -736,7 +736,7 @@ export interface CreateSignedVaultDepositIntentInput
  * whose same-key twin committed while this write waited for the lock, is
  * answered from that row.
  */
-export interface LedgerAdmissionHook {
+interface LedgerAdmissionHook {
   admit?: (transaction: DatabaseExecutor) => Promise<void>;
 }
 
@@ -748,7 +748,7 @@ export interface LedgerAdmissionHook {
  * locks in `db/client.ts`; a hash collision with another key only adds
  * serialization. Exits never take it (ADR 0002: nothing queues money out).
  */
-export function earnVaultDepositWriteLockKey(key: {
+function earnVaultDepositWriteLockKey(key: {
   environment: SdpEnvironment;
   provider: string;
   vaultAddress: string;
@@ -768,7 +768,7 @@ async function lockVaultDepositWrites(
 }
 
 /** Planning metadata only. The ledger cannot infer a rent payment from a build. */
-export interface ShareAccountRentAttribution {
+interface ShareAccountRentAttribution {
   /** The builder observed the ATA missing before execution. */
   createsShareAccount?: boolean;
   /** Planned payer for a creation, or null for the owner. */
@@ -794,7 +794,7 @@ export interface ExternalWalletMovementTotals {
   openWithdrawalRequestCount: number;
 }
 
-export interface AdvanceVaultMovementInput {
+interface AdvanceVaultMovementInput {
   movementId: string;
   organizationId: string;
   toStatus: string;
@@ -811,7 +811,7 @@ export interface AdvanceVaultMovementInput {
   tokenAmountSettled?: string | null;
 }
 
-export interface CreateSignedVaultWithdrawalIntentInput extends ShareAccountRentAttribution {
+interface CreateSignedVaultWithdrawalIntentInput extends ShareAccountRentAttribution {
   organizationId: string;
   projectId: string;
   environment: SdpEnvironment;
@@ -876,7 +876,7 @@ export interface CreateSignedExternalWalletDepositIntentInput extends LedgerAdmi
   initiatedByKeyId?: string | null;
 }
 
-export interface CreateSignedExternalWalletWithdrawalIntentInput {
+interface CreateSignedExternalWalletWithdrawalIntentInput {
   organizationId: string;
   projectId: string;
   environment: SdpEnvironment;
@@ -923,11 +923,11 @@ export interface CreateCustodialMovementInput {
   initiatedByKeyId: string | null;
 }
 
-export type UpdateCustodialMovementSelector =
+type UpdateCustodialMovementSelector =
   | { movementId: string }
   | { provider: string; providerReference: string };
 
-export interface UpdateCustodialMovementGuardedInput {
+interface UpdateCustodialMovementGuardedInput {
   selector: UpdateCustodialMovementSelector;
   organizationId: string;
   toStatus: string;

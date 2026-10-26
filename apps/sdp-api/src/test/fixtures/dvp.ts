@@ -21,7 +21,7 @@ import type { DvpTradeRow } from "@/db/repositories/dvp-trade.repository";
 import type { OwnedSubmissionLifecycle } from "@/services/sponsorship.service";
 
 export const DVP_TEST_T22: Address = address("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
-export const DVP_TEST_USER_A: Address = address("5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn");
+const DVP_TEST_USER_A: Address = address("5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn");
 export const DVP_TEST_USER_B: Address = address("7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg");
 export const DVP_TEST_AUTHORITY: Address = address("9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY");
 
@@ -101,15 +101,6 @@ export function buildFundedDvpTradeRow(overrides: Partial<DvpTradeRow> = {}): Dv
     escrowBPeakAmount: "2000",
     escrowAFrozen: false,
     escrowBFrozen: false,
-    ...overrides,
-  });
-}
-
-/** Settled: the trade account and both escrows are gone. */
-export function buildClosedDvpTradeRow(overrides: Partial<DvpTradeRow> = {}): DvpTradeRow {
-  return buildFundedDvpTradeRow({
-    status: "settled",
-    closedAt: "2026-09-03T00:10:00.000Z",
     ...overrides,
   });
 }

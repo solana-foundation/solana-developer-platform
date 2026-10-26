@@ -4,7 +4,7 @@ import type { Env } from "@/types/env";
 
 const CLERK_API_URL = "https://clerk-backend.example.test/v1";
 
-export interface ClerkBackendRequest {
+interface ClerkBackendRequest {
   method: string;
   path: string;
   body: Record<string, unknown> | null;

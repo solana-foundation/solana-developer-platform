@@ -1,4 +1,4 @@
-export const KMS_ENVELOPE_VERSION = "sdp-custody-kms-v2";
+const KMS_ENVELOPE_VERSION = "sdp-custody-kms-v2";
 const PREFIX = "v2.";
 const IV_LENGTH = 12;
 
@@ -7,7 +7,7 @@ export interface EnvelopeKms {
   decrypt(ciphertext: string, aad: string): Promise<Uint8Array>;
 }
 
-export class EnvelopeCipherError extends Error {
+class EnvelopeCipherError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "EnvelopeCipherError";

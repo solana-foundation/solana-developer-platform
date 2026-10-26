@@ -1,10 +1,4 @@
 import { extendZodWithOpenApi } from "@asteasolutions/zod-to-openapi";
-import {
-  CRYPTO_RAIL_ASSET_LABELS,
-  type CryptoAssetSymbol,
-  type CryptoRailNetwork,
-  SOLANA_CRYPTO_RAILS,
-} from "@sdp/types/payment-rails";
 import { TOKEN_TRANSACTION_STATUSES } from "@sdp/types/tokens";
 import { z } from "zod";
 import { IDEMPOTENCY_KEY_PATTERN } from "@/middleware/idempotency-key";
@@ -27,11 +21,6 @@ export const isoDateTimeSchema = z.string().datetime().openapi({
   example: "2025-01-01T00:00:00.000Z",
 });
 
-export const isoDateSchema = z.iso.date().openapi({
-  description: "ISO 8601 calendar date (YYYY-MM-DD).",
-  example: "1990-01-15",
-});
-
 export const idempotencyKeyHeaderSchema = z.string().regex(IDEMPOTENCY_KEY_PATTERN).openapi({
   description:
     "Idempotency key for safely retrying mutating requests. 1-255 printable ASCII characters; echoed back on the response.",
@@ -49,7 +38,7 @@ export const projectScopeHeaderSchema = z
     example: "prj_example",
   });
 
-export const requestIdSchema = z.string().min(1).openapi({
+const requestIdSchema = z.string().min(1).openapi({
   description: "Request identifier for tracing.",
   example: "req_example",
 });
@@ -64,20 +53,6 @@ export const solanaAddressSchema = z.string().min(32).max(44).openapi({
   example: "So11111111111111111111111111111111111111112",
 });
 
-export const cryptoAssetSymbolSchema = z.enum(
-  Object.values(CRYPTO_RAIL_ASSET_LABELS) as [CryptoAssetSymbol, ...CryptoAssetSymbol[]]
-);
-
-export const cryptoRailNetworkSchema = z.enum(
-  Array.from(
-    new Set(
-      SOLANA_CRYPTO_RAILS.map((rail) => rail.split(".")[1]?.toUpperCase()).filter(
-        (network): network is CryptoRailNetwork => Boolean(network)
-      )
-    )
-  ) as [CryptoRailNetwork, ...CryptoRailNetwork[]]
-);
-
 const idSchema = (label: string, example: string) =>
   z.string().min(1).openapi({ description: label, example });
 
@@ -87,10 +62,6 @@ export const memberIdParamSchema = idSchema("Member identifier.", "mem_example")
 export const projectIdParamSchema = idSchema("Project identifier.", "prj_example");
 export const tokenIdParamSchema = idSchema("Token identifier.", "tok_example");
 export const allowlistEntryIdParamSchema = idSchema("Allowlist entry identifier.", "al_example");
-export const signingRequestIdParamSchema = idSchema(
-  "Wallet signing request identifier.",
-  "sigreq_example"
-);
 export const WALLET_ID_INPUT_NOTE =
   "the `walletId` field returned by GET /v1/wallets. The wallet record `id` and the public key are not accepted.";
 export const walletIdParamSchema = idSchema(
@@ -144,10 +115,6 @@ export const includeArchivedQuerySchema = withOpenApi(queryBooleanSchema, {
   example: false,
 });
 
-export const tokenStatusQuerySchema = z
-  .enum(["pending", "active", "paused", "revoked"])
-  .openapi({ description: "Filter by token status.", example: "active" });
-
 export const allowlistTypeQuerySchema = z
   .enum(["email", "domain"])
   .openapi({ description: "Filter by allowlist entry type.", example: "domain" });
@@ -160,12 +127,7 @@ export const tokenTransactionStatusQuerySchema = z
   .enum(TOKEN_TRANSACTION_STATUSES)
   .openapi({ description: "Filter by token transaction status.", example: "confirmed" });
 
-export const magicLinkTokenQuerySchema = z.string().openapi({
-  description: "Magic link token from email.",
-  example: "magic_token_example",
-});
-
-export const errorCodeSchema = z
+const errorCodeSchema = z
   .enum([
     "BAD_REQUEST",
     "UNAUTHORIZED",

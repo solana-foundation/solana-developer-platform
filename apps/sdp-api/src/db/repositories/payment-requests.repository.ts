@@ -70,7 +70,7 @@ export type SettlementBlockedReason = (typeof SETTLEMENT_BLOCKED_REASONS)[number
  * How one background check ended: it read the chain, skipped a row that needed no read, stopped on
  * a blocked mint or amount, or failed. A read or a failure clears a recorded block; a skip keeps it.
  */
-export const paymentRequestCheckOutcomeSchema = z.discriminatedUnion("kind", [
+const paymentRequestCheckOutcomeSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("read") }),
   z.object({ kind: z.literal("skipped") }),
   z.object({ kind: z.literal("blocked"), reason: z.enum(SETTLEMENT_BLOCKED_REASONS) }),
@@ -131,7 +131,7 @@ export interface ListPaymentRequestsResult {
   total: number;
 }
 
-export interface SponsoredTransactionClaim {
+interface SponsoredTransactionClaim {
   account: string;
   unsignedTransaction: string;
   signedTransaction: string | null;

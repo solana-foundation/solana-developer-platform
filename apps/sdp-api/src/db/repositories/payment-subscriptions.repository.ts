@@ -4,7 +4,6 @@ import type {
   PaymentSubscriptionPlanStatus,
   PaymentSubscriptionStatus,
 } from "@sdp/types/payments";
-import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export interface PaymentSubscriptionPlanRow {
   id: string;
@@ -220,10 +219,6 @@ export interface ListPaymentSubscriptionsResult {
 export interface ListPaymentSubscriptionCollectionAttemptsResult {
   rows: PaymentSubscriptionCollectionAttemptRow[];
   total: number;
-}
-
-export interface PaymentSubscriptionsRepositoryContext {
-  db: RepositoryDbClient;
 }
 
 export interface PaymentSubscriptionsRepository {

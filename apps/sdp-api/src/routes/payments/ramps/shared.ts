@@ -289,7 +289,7 @@ export async function persistRampQuoteTransfer(
 }
 
 /** Ceiling on simultaneous live provider estimate calls per request. */
-export const RAMP_ESTIMATE_PROVIDER_CONCURRENCY = 3;
+const RAMP_ESTIMATE_PROVIDER_CONCURRENCY = 3;
 
 export async function estimateAcrossProviders<Direction extends RampQuoteDirection>(
   c: AppContext,

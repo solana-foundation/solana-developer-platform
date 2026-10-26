@@ -17,7 +17,7 @@ import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { AppContext } from "@/routes/payments/context";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 
-export const fireblocksRuntime: CustodyProvisioningRuntime = {
+const fireblocksRuntime: CustodyProvisioningRuntime = {
   fetch: (input, init) => globalThis.fetch(input, init),
   sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   now: () => Date.now(),
@@ -35,7 +35,7 @@ export interface FireblocksDestinationInput {
   token: string;
   address: string;
 }
-export type FireblocksDestinationState = "approved" | "pending" | "not_whitelisted";
+type FireblocksDestinationState = "approved" | "pending" | "not_whitelisted";
 export interface FireblocksDestinationResult {
   state: FireblocksDestinationState;
   assetId: string;
@@ -65,7 +65,7 @@ function entryState(
     return "pending";
   return "not_whitelisted";
 }
-export async function resolveFireblocksDestinationContext(
+async function resolveFireblocksDestinationContext(
   c: AppContext,
   input: FireblocksDestinationInput
 ) {

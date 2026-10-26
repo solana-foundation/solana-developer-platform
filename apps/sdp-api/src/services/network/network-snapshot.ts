@@ -26,7 +26,7 @@ function quotient(numerator: number, denominator: number): number | null {
   return denominator === 0 ? null : numerator / denominator;
 }
 
-export const NETWORK_READINGS = {
+const NETWORK_READINGS = {
   stablecoinSupply: {
     inputs: ["Circulating Supply"],
     derive: ([supply]) => supply,

@@ -43,7 +43,7 @@ import { listResponse, pageWindow, parseParams, parseQuery } from "./shared";
  * still accepts it from the stored catalogue precisely because hiding a
  * customer's own position would hide their money.
  */
-export function isHiddenStrategy(row: EarnStrategyRow): boolean {
+function isHiddenStrategy(row: EarnStrategyRow): boolean {
   if (!isEarnProviderSurfaced(row.provider)) {
     return true;
   }
@@ -130,7 +130,7 @@ export function mapToEarnStrategy(
  * Loads a strategy and applies the same environment and visibility policy as
  * the list route: the caller sees its project's environment.
  */
-export async function requireEarnStrategy(
+async function requireEarnStrategy(
   c: AppContext,
   strategyId: string
 ): Promise<{ strategy: EarnStrategyRow; environment: SdpEnvironment }> {

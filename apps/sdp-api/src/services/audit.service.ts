@@ -26,7 +26,7 @@ import { AUDIT_LEDGER_REDIS_TIMEOUT_MS } from "./audit-ledger-timeout";
 
 // Runtime list is the source of truth for the AuditAction type so callers can
 // validate arbitrary input (e.g. an ?action= query filter) at runtime.
-export const AUDIT_ACTIONS = [
+const AUDIT_ACTIONS = [
   "create",
   "read",
   "update",
@@ -475,7 +475,7 @@ export class AuditPersistenceError extends Error {
  * Deliberately not an email-shape check: `name` is free-form, and the fault being guarded
  * against is the unsubstituted placeholder, whichever field it landed in.
  */
-export function displayableIdentity(value: string | null | undefined): string | null {
+function displayableIdentity(value: string | null | undefined): string | null {
   const trimmed = value?.trim();
   if (!trimmed || /\{\{.*\}\}/.test(trimmed)) {
     return null;

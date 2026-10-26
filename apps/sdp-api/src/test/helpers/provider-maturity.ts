@@ -19,13 +19,13 @@ export type ReleaseChannelMaturityModule = Omit<
 };
 
 /** One ramp provider whose stage a test replaces. */
-export interface RampMaturityOverride {
+interface RampMaturityOverride {
   provider: RampProviderId;
   stage: SdpReleaseChannel;
 }
 
 /** One module whose stage a test replaces. */
-export interface ModuleMaturityOverride {
+interface ModuleMaturityOverride {
   module: SdpModule;
   stage: SdpReleaseChannel;
 }

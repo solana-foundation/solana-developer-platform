@@ -86,7 +86,6 @@ import {
   paymentRecurringPaymentListResponseSchema,
   paymentRecurringPaymentResponseSchema,
   paymentSubscriptionCollectionAttemptListResponseSchema,
-  paymentSubscriptionCollectionAttemptResponseSchema,
   paymentSubscriptionListResponseSchema,
   paymentSubscriptionPlanListResponseSchema,
   paymentSubscriptionPlanResponseSchema,
@@ -313,9 +312,6 @@ export const preparePaymentSubscriptionLifecycleResponse = successResponseSchema
 );
 export const paymentSubscriptionListResponse = successResponseSchema(
   paymentSubscriptionListResponseSchema
-);
-export const paymentSubscriptionCollectionAttemptResponse = successResponseSchema(
-  paymentSubscriptionCollectionAttemptResponseSchema
 );
 export const preparePaymentSubscriptionCollectionResponse = successResponseSchema(
   preparePaymentSubscriptionCollectionResponseSchema

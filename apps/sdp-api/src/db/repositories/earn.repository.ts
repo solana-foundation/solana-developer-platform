@@ -224,7 +224,7 @@ export interface ListEarnStrategiesInput {
  * `tvl_usd` is lifted out of the `risk_metadata` bag and is null unless the
  * stored value is a JSON number, the same guard `listStrategies` ranks by.
  */
-export interface EarnStrategyFigureRow {
+interface EarnStrategyFigureRow {
   provider_reference: string;
   host_cluster: SolanaCluster;
   status: EarnStrategyStatus;

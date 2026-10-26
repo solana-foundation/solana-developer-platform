@@ -89,7 +89,7 @@ const CLOSABLE: ReadonlySet<DvpTradeStatus> = new Set([
 ]);
 
 /** Grace period covering a request that is still waiting on Kora's timeout. */
-export const DVP_CREATE_CLAIM_GRACE_MS = 15 * 60 * 1_000;
+const DVP_CREATE_CLAIM_GRACE_MS = 15 * 60 * 1_000;
 
 /**
  * Derives a status when the SwapDvp account is absent from chain.

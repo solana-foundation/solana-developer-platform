@@ -3,7 +3,7 @@ import { logVendorCallFailure } from "@/runtime/vendor-calls";
 import type { Env } from "@/types/env";
 import { describeClerkFailure } from "./clerk-error";
 
-export interface ClerkEmailAddress {
+interface ClerkEmailAddress {
   id: string;
   email_address: string;
   verification?: {

@@ -18,7 +18,7 @@ import {
   withOpenApi,
 } from "./base";
 
-export const organizationSettingsSchema = z
+const organizationSettingsSchema = z
   .object({
     defaultEnvironment: z.enum(["sandbox", "production"]).optional().openapi({
       description: "Default environment for new resources.",
@@ -90,7 +90,7 @@ export const userSchema = z
   })
   .openapi({ description: "User summary." });
 
-export const organizationMemberSchema = z
+const organizationMemberSchema = z
   .object({
     id: memberIdParamSchema,
     role: z
@@ -133,7 +133,7 @@ export const updateMemberRoleRequestSchema = updateMemberRoleSchemaBase
   })
   .openapi({ description: "Update member role request body." });
 
-export const invitationSchema = z
+const invitationSchema = z
   .object({
     id: invitationIdSchema,
     email: z
@@ -161,7 +161,7 @@ export const listMembersQuerySchema = z.object({
   }),
 });
 
-export const pendingInvitationSchema = z
+const pendingInvitationSchema = z
   .object({
     id: invitationIdSchema,
     email: z
@@ -185,7 +185,7 @@ export const pendingInvitationSchema = z
     description: "Pending invitation, returned only to callers holding `members.manage`.",
   });
 
-export const listMembersMetaSchema = z
+const listMembersMetaSchema = z
   .object({
     total: z.number().int().nonnegative().openapi({
       description:

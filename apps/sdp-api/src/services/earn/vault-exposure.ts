@@ -84,14 +84,14 @@ import { earnClusterFor } from "./execution-registry";
  */
 
 /** The `blockingIssues` code the deposit preview reports for this cap. */
-export const VAULT_EXPOSURE_CAP_ISSUE_CODE = "VAULT_EXPOSURE_CAP";
+const VAULT_EXPOSURE_CAP_ISSUE_CODE = "VAULT_EXPOSURE_CAP";
 
 /**
  * The one sentence a refused caller reads, on the 409 and on the preview's
  * blocking issue alike. Fixed on purpose: no `projected`, `exposure` or
  * `limit`, see "Figures stay internal" above.
  */
-export const VAULT_EXPOSURE_CAP_MESSAGE =
+const VAULT_EXPOSURE_CAP_MESSAGE =
   "This deposit would take SDP's total holdings in the vault past its exposure cap. " +
   "The vault is exit-only for new money until other positions leave; existing positions are unaffected.";
 
@@ -99,7 +99,7 @@ export const VAULT_EXPOSURE_CAP_MESSAGE =
 export const EARN_VOLUME_CAP_EVALUATED_EVENT = "sdp_api_earn_volume_cap_evaluated";
 
 /** How long one vault's exposure figure is reused before the ledger is re-read. */
-export const VAULT_EXPOSURE_CACHE_TTL_MS = 30_000;
+const VAULT_EXPOSURE_CACHE_TTL_MS = 30_000;
 
 /**
  * Which step evaluated: a preview (cached read, never refuses), the admission
@@ -303,7 +303,7 @@ const defaultReader = createVaultExposureReader({ sum: ledgerSum });
  * SDP-wide exposure to one vault, in deposit-token units. Cached for previews;
  * pass `fresh` for an admission so the enforced verdict reads the ledger.
  */
-export function readVaultExposure(
+function readVaultExposure(
   db: AppDb,
   key: VaultExposureKey,
   options: { fresh?: boolean } = {}
@@ -312,7 +312,7 @@ export function readVaultExposure(
 }
 
 /** Fold an admitted deposit into the cached exposure (see reader `reserve`). */
-export function reserveVaultExposure(key: VaultExposureKey, amount: string): void {
+function reserveVaultExposure(key: VaultExposureKey, amount: string): void {
   defaultReader.reserve(key, amount);
 }
 

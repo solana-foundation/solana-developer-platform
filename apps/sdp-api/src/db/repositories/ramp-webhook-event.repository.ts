@@ -15,7 +15,7 @@ import {
 import { z } from "zod";
 import type { DatabaseClient as AppDb } from "@/db/client";
 
-export function generateRampWebhookEventId(): string {
+function generateRampWebhookEventId(): string {
   return `rwe_${crypto.randomUUID()}`;
 }
 
@@ -35,20 +35,20 @@ export interface RampWebhookEventRow {
   updated_at: string;
 }
 
-export interface InsertRampWebhookEventInput {
+interface InsertRampWebhookEventInput {
   provider: RampProviderId;
   environment: SdpEnvironment;
   payload: unknown;
 }
 
-export interface InsertVerifiedRampWebhookEventInput {
+interface InsertVerifiedRampWebhookEventInput {
   provider: RampProviderId;
   environment: SdpEnvironment;
   rawBody: string;
   providerEventId: string | null;
 }
 
-export interface ClaimReplayableRampWebhookEventsInput {
+interface ClaimReplayableRampWebhookEventsInput {
   /** Only rows created — and last touched — at or before this instant are
    * claimed. The created_at bound keeps the claim off events whose in-request
    * background apply is still due; the updated_at bound is a lease, so a row
@@ -62,7 +62,7 @@ export interface ClaimReplayableRampWebhookEventsInput {
   excludedProviders: readonly RampProviderId[];
 }
 
-export interface RecordRampWebhookEventFailureInput {
+interface RecordRampWebhookEventFailureInput {
   id: string;
   error: string;
   /** Attempts spent INCLUDING the one that just failed; at or past
@@ -77,7 +77,7 @@ export interface RecordRampWebhookEventFailureInput {
   outcome?: RampWebhookFailureOutcome;
 }
 
-export interface ParkExhaustedRampWebhookEventsInput {
+interface ParkExhaustedRampWebhookEventsInput {
   /** Lease bound: only rows untouched since this instant are parked, so a
    * final attempt still running is not swept out from under its worker. */
   updatedBefore: string;
@@ -87,7 +87,7 @@ export interface ParkExhaustedRampWebhookEventsInput {
   excludedProviders: readonly RampProviderId[];
 }
 
-export interface RearmRampWebhookEventsInput {
+interface RearmRampWebhookEventsInput {
   appRevision: string;
   /** Rows from these providers are never re-armed. */
   excludedProviders: readonly RampProviderId[];

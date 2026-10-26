@@ -53,7 +53,7 @@ export const EARN_DEPOSIT_MINT_DRIFT_EVENT = "sdp_api_earn_deposit_mint_drift";
 export const EARN_DEPOSIT_MINT_GUARD_SKIPPED_EVENT = "sdp_api_earn_deposit_mint_guard_skipped";
 
 /** Deadline for the guard's one batched mint read per pass. */
-export const DEPOSIT_MINT_READ_TIMEOUT_MS = 10_000;
+const DEPOSIT_MINT_READ_TIMEOUT_MS = 10_000;
 
 /** The extension state a Token-2022 deposit mint is expected to hold. */
 export interface PinnedToken2022MintState {
@@ -116,7 +116,7 @@ export function token2022DepositMints(cluster: SolanaCluster): Token2022DepositM
   return mints;
 }
 
-export type MintDriftField =
+type MintDriftField =
   | "owner"
   | "transfer_hook_extension"
   | "transfer_hook_program"
