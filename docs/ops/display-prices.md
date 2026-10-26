@@ -41,8 +41,10 @@ cannot suspend a background price refresh that another request relies on.
 
 The request goes to a fixed HTTPS endpoint and refuses redirects. The server
 key requires `assets:read`, stays in Doppler/Secret Manager, and is never logged or
-stored in Redis. Redis keys contain a SHA-256 fingerprint. Stored values
-contain public mint prices, not wallets or tenant data.
+stored in Redis. Redis namespaces use HMAC-SHA-256 with the provider key and
+a fixed display-pricing context. Replicas sharing a key derive the same
+namespace; separate keys isolate their quotas. Stored values contain public
+mint prices, not wallets or tenant data.
 
 Responses have a 1 MiB cap. Only requested, matching mint addresses with
 positive finite prices and `hasMarket: true` are eligible. Conflicting

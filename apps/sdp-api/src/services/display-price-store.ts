@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import type { Redis } from "ioredis";
 import { z } from "zod";
 import { getDisplayPriceRedisClient } from "@/runtime/kv-redis";
@@ -162,7 +162,9 @@ export class RedisDisplayPriceStore implements DisplayPriceStore {
 
 /** Never puts the provider credential into a Redis key, value or log. */
 export function createDisplayPriceStore(env: Env, apiKey: string): DisplayPriceStore {
-  const fingerprint = createHash("sha256").update(apiKey).digest("hex");
+  // Derive a purpose-specific identifier from the provider-issued random key.
+  // Replicas must derive the same namespace to share quota and cooldown state.
+  const fingerprint = createHmac("sha256", apiKey).update("sdp:display-prices:v1").digest("hex");
   const worker = process.env.VITEST_POOL_ID;
   const namespace = worker ? `vitest-${worker}:` : "";
   return new RedisDisplayPriceStore(

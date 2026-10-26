@@ -3,7 +3,7 @@ import Redis from "ioredis";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { env } from "@/test/helpers/env";
 import { required } from "@/test/helpers/required";
-import { RedisDisplayPriceStore } from "./display-price-store";
+import { createDisplayPriceStore, RedisDisplayPriceStore } from "./display-price-store";
 import type { DisplayPrice } from "./tokens-xyz-price-client";
 
 describe("shared Tokens price coordination", () => {
@@ -34,6 +34,33 @@ describe("shared Tokens price coordination", () => {
     const [seconds, microseconds] = await first.time();
     return Number(seconds) * 1_000 + Math.floor(Number(microseconds) / 1_000);
   }
+
+  it("shares state by provider key without exposing credentials in Redis", async () => {
+    const apiKey = `test-tokens-${randomUUID()}`;
+    const otherApiKey = `test-tokens-${randomUUID()}`;
+    const keyedStore = createDisplayPriceStore(env, apiKey);
+    const keyedReplica = createDisplayPriceStore(env, apiKey);
+    const isolatedStore = createDisplayPriceStore(env, otherApiKey);
+    const mint = randomUUID();
+    const answer = new Map([[mint, price(2)]]);
+
+    expect((await keyedStore.lookup([mint], "one")).claimed).toEqual([mint]);
+    expect((await keyedReplica.lookup([mint], "two")).pending).toEqual([mint]);
+    await keyedStore.complete([mint], "one", answer);
+    expect((await keyedReplica.lookup([mint], null)).prices).toEqual(answer);
+    expect((await isolatedStore.lookup([mint], null)).prices.size).toBe(0);
+
+    await keyedStore.backOff();
+    expect(await keyedReplica.admitRequest()).toBe(false);
+    expect(await isolatedStore.admitRequest()).toBe(true);
+
+    const keys = await first.keys(`vitest-${process.env.VITEST_POOL_ID}:sdp:display-prices:*`);
+    expect(keys.length).toBeGreaterThan(0);
+    for (const key of keys) {
+      expect(key).not.toContain(apiKey);
+      expect(key).not.toContain(otherApiKey);
+    }
+  });
 
   it("grants each mint to one replica and shares the published answer", async () => {
     const [one, two] = await Promise.all([
