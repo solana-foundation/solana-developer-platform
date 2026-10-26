@@ -667,6 +667,45 @@ describe("verifyRampDeliveries", () => {
       });
     });
 
+    it("holds a move between the quoted wallet's own accounts, which delivers nothing", async () => {
+      await settleUsdc("xfr_internal", "0.5");
+      const balance = (accountIndex: number, amount: string) => ({
+        accountIndex,
+        mint: MINT,
+        owner: "quoted-destination",
+        amount,
+        decimals: 6,
+      });
+      getTransactionMock.mockResolvedValue({
+        slot: 42n,
+        blockTime: LANDED_AFTER_TRANSFER,
+        accountKeys: ["fee-payer", "wallet-account-a", "wallet-account-b"],
+        executionResultKnown: true,
+        err: null,
+        preTokenBalances: [balance(1, "500000"), balance(2, "0")],
+        postTokenBalances: [balance(1, "0"), balance(2, "500000")],
+        instructions: [
+          {
+            programId: SPL_TOKEN_PROGRAMS["spl-token"],
+            accounts: [],
+            parsedType: "transferChecked",
+            info: {
+              source: "wallet-account-a",
+              destination: "wallet-account-b",
+              mint: MINT,
+              tokenAmount: { amount: "500000", decimals: 6, uiAmountString: "0.5" },
+            },
+          },
+        ],
+      });
+
+      await sweep();
+
+      expect((await row("xfr_internal"))?.provider_data.deliveryMismatch).toMatchObject({
+        reason: "not_delivered",
+      });
+    });
+
     it("holds a reported signature still missing an hour after the report", async () => {
       await settleUsdc("xfr_never_landed", "0.5");
       getTransactionMock.mockResolvedValue(null);

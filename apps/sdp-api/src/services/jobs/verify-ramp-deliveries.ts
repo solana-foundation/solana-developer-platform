@@ -314,7 +314,8 @@ function tokenMovesTouching(
       String(TOKEN_BURN_TYPES.has(parsedType) ? info.account : transfer ? info.source : undefined)
     );
     const into = transfer && accounts.has(String(info.destination));
-    if (!out && !into) continue;
+    // A move between the owner's own accounts delivers nothing.
+    if (out === into) continue;
     const amount = rawAmountOf(info, "tokenAmount");
     if (amount === null) return null;
     if (out) left += amount;
