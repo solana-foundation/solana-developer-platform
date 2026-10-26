@@ -119,15 +119,21 @@ export default async function RecurringPaymentDetailRoute({
       });
 
       if (!recurringPaymentResult.ok) {
-        switch (
-          recurringPaymentReadFailureOutcome(recurringPaymentId, recurringPaymentResult.status)
-        ) {
+        const outcome = recurringPaymentReadFailureOutcome(
+          recurringPaymentId,
+          recurringPaymentResult.status
+        );
+        switch (outcome) {
           case "list":
             return redirect(await requestProjectHref(PAYMENT_RECURRING_HREF));
           case "not_found":
             return notFound();
           case "failed":
             throw new Error(recurringPaymentResult.error);
+          default: {
+            const unhandled: never = outcome;
+            throw new Error(`Unhandled recurring payment read outcome: ${unhandled}`);
+          }
         }
       }
       const recurringPaymentResultData = recurringPaymentResult.data;
