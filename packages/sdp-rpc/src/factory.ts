@@ -341,7 +341,7 @@ function emitAttemptTelemetry<TResponse>(
     surface: "managed_pool",
     ...common,
     outcome: outcome.ok && servedJsonRpcError(outcome.response) === null ? "succeeded" : "failed",
-    ...(statusCode !== undefined ? { status_code: statusCode } : {}),
+    status_code: statusCode,
     duration_ms: performance.now() - startedAt,
     genesis_probe_required: genesisProbeRequired,
   });

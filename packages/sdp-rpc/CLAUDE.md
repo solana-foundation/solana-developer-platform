@@ -71,6 +71,8 @@ method; they never include endpoint URLs or request payloads.
   bounded to 64 KiB and one second without blocking the SDK. An unreadable
   result is `http_success_unverified`, never a confirmed success. Exclude
   those and genesis-proof attempts from successful latency percentiles.
+- Kit and fetch responses use the same Zod envelope parser and outcome
+  classifier. Results stay opaque; the caller receives the original response.
 
 Telemetry adds no RPC calls and preserves provider request budgets.
 

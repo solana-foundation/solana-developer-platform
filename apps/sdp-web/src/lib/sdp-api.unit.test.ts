@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { SANDBOX_PROJECT } from "@/test/projects";
 import { resetRequestProject, setApiRequest, setPageRequest } from "@/test/request-project";
 
@@ -211,7 +212,7 @@ describe("createRequestScopedSdpApiClients", () => {
     );
 
     const events = infoMock.mock.calls
-      .map(([payload]) => JSON.parse(String(payload)) as Record<string, unknown>)
+      .map(([payload]) => z.record(z.string(), z.unknown()).parse(JSON.parse(String(payload))))
       .filter(
         (event) => event.event === "sdp_web_api_attempt" || event.event === "sdp_web_api_request"
       );

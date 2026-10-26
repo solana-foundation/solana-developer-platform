@@ -6,6 +6,7 @@ import {
   type RpcTransport,
   SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR,
 } from "@solana/kit";
+import { z } from "zod";
 import { MANAGED_RPC_ENV_KEYS } from "./managed-rpc-env-keys";
 
 /** Provider attempts and pool decisions, without endpoint URLs or payloads. */
@@ -109,24 +110,53 @@ function rpcMethod(payload: unknown): string {
   return isJsonRpcPayload(payload) ? payload.method : "batch";
 }
 
-function hasJsonRpcError(response: unknown): boolean {
-  if (Array.isArray(response)) return response.some(hasJsonRpcError);
-  return typeof response === "object" && response !== null && "error" in response;
-}
+// Inspect only the envelope. RPC result payloads stay opaque to telemetry.
+const rpcEnvelopeStateSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("error") }),
+  z.object({ kind: z.literal("unverified") }),
+  z.object({ kind: z.literal("result"), result: z.unknown() }),
+]);
+const rpcEnvelopeSchema = z
+  .object({ result: z.unknown().optional(), error: z.unknown().optional() })
+  .transform((response): z.input<typeof rpcEnvelopeStateSchema> => {
+    if (response.error !== undefined) return { kind: "error" };
+    return response.result === undefined
+      ? { kind: "unverified" }
+      : { kind: "result", result: response.result };
+  })
+  .pipe(rpcEnvelopeStateSchema)
+  .catch({ kind: "unverified" });
+const rpcResponsesSchema = z.preprocess(
+  (value) => (Array.isArray(value) ? value : [value]),
+  z.array(rpcEnvelopeSchema).nonempty()
+);
 
-function isSuccessfulPinnedResponse(
-  response: unknown,
+function pinnedResponseOutcome(
+  responses: z.infer<typeof rpcResponsesSchema> | null,
   method: string,
   cluster: SolanaCluster
-): boolean {
-  if (hasJsonRpcError(response)) return false;
-  if (method !== "getGenesisHash") return true;
-  return (
-    typeof response === "object" &&
-    response !== null &&
-    "result" in response &&
-    response.result === GENESIS_HASH_BY_CLUSTER[cluster]
-  );
+): NonNullable<RpcTelemetryEvent["outcome"]> {
+  if (responses === null) return "http_success_unverified";
+  let outcome: NonNullable<RpcTelemetryEvent["outcome"]> = "succeeded";
+  for (const response of responses) {
+    switch (response.kind) {
+      case "error":
+        return "failed";
+      case "unverified":
+        outcome = "http_success_unverified";
+        break;
+      case "result":
+        if (method === "getGenesisHash" && response.result !== GENESIS_HASH_BY_CLUSTER[cluster]) {
+          return "failed";
+        }
+        break;
+      default: {
+        const unreachable: never = response;
+        return unreachable;
+      }
+    }
+  }
+  return outcome;
 }
 
 function httpStatusOf(error: unknown): number | undefined {
@@ -156,19 +186,21 @@ function emitPinnedAttempt(
 const MAX_RPC_CLASSIFICATION_BYTES = 64 * 1024;
 const RPC_CLASSIFICATION_TIMEOUT_MS = 1_000;
 
-async function boundedRpcResponse(response: Response): Promise<unknown | undefined> {
+async function boundedRpcResponse(
+  response: Response
+): Promise<z.infer<typeof rpcResponsesSchema> | null> {
   const contentLength = response.headers.get("content-length");
   if (contentLength !== null && Number(contentLength) > MAX_RPC_CLASSIFICATION_BYTES) {
-    return undefined;
+    return null;
   }
 
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   try {
     reader = response.clone().body?.getReader();
   } catch {
-    return undefined;
+    return null;
   }
-  if (!reader) return undefined;
+  if (!reader) return null;
 
   let expired = false;
   const timer = setTimeout(() => {
@@ -182,29 +214,25 @@ async function boundedRpcResponse(response: Response): Promise<unknown | undefin
       const { done, value } = await reader.read();
       if (done || expired) break;
       size += value.byteLength;
-      if (size > MAX_RPC_CLASSIFICATION_BYTES) return undefined;
+      if (size > MAX_RPC_CLASSIFICATION_BYTES) return null;
       chunks.push(value);
     }
-    if (expired) return undefined;
+    if (expired) return null;
     const body = new Uint8Array(size);
     let offset = 0;
     for (const chunk of chunks) {
       body.set(chunk, offset);
       offset += chunk.byteLength;
     }
-    return JSON.parse(new TextDecoder().decode(body));
+    const parsed = rpcResponsesSchema.safeParse(JSON.parse(new TextDecoder().decode(body)));
+    return parsed.success ? parsed.data : null;
   } catch {
-    return undefined;
+    return null;
   } finally {
     clearTimeout(timer);
     void reader.cancel().catch(() => undefined);
     reader.releaseLock();
   }
-}
-
-function hasJsonRpcResult(response: unknown): boolean {
-  if (Array.isArray(response)) return response.length > 0 && response.every(hasJsonRpcResult);
-  return typeof response === "object" && response !== null && "result" in response;
 }
 
 async function reportPinnedFetchResponse(
@@ -214,14 +242,7 @@ async function reportPinnedFetchResponse(
   startedAt: number
 ): Promise<void> {
   const body = await boundedRpcResponse(response);
-  const outcome =
-    body === undefined
-      ? "http_success_unverified"
-      : hasJsonRpcError(body)
-        ? "failed"
-        : hasJsonRpcResult(body)
-          ? "succeeded"
-          : "http_success_unverified";
+  const outcome = pinnedResponseOutcome(body, method, endpoint.cluster);
   emitPinnedAttempt(
     endpoint,
     method,
@@ -240,10 +261,11 @@ export function withPinnedRpcTelemetry(transport: RpcTransport, endpointUrl: str
     const startedAt = performance.now();
     try {
       const response = await transport<TResponse>(request);
+      const parsed = rpcResponsesSchema.safeParse(response);
       emitPinnedAttempt(
         endpoint,
         method,
-        isSuccessfulPinnedResponse(response, method, endpoint.cluster) ? "succeeded" : "failed",
+        pinnedResponseOutcome(parsed.success ? parsed.data : null, method, endpoint.cluster),
         startedAt
       );
       return response;
@@ -259,8 +281,7 @@ export async function fetchWithPinnedRpcTelemetry(
   input: Parameters<typeof fetch>[0],
   init?: RequestInit
 ): Promise<Response> {
-  const endpointUrl =
-    typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+  const endpointUrl = input instanceof Request ? input.url : input.toString();
   const endpoint = pinnedEndpoint(endpointUrl);
   if (!endpoint) return fetch(input, init);
   let payload: unknown;

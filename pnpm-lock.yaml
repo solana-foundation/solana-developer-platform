@@ -970,6 +970,9 @@ importers:
       '@solana/kit':
         specifier: 'catalog:'
         version: 7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6)
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
     devDependencies:
       tsx:
         specifier: 4.23.15

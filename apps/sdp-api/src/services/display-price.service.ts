@@ -60,13 +60,14 @@ async function fetchMissingPrices(
   const owner = randomUUID();
   const prices = new Map<string, DisplayPrice>();
   let cursor = 0;
-  let stop = false;
+  let stopUpstream = false;
+  let storeUnavailable = false;
   let budgetRefused = false;
 
   try {
     const store = createDisplayPriceStore(env, apiKey);
     const processBatch = async (batch: string[]): Promise<void> => {
-      const claim = await store.lookup(batch, owner);
+      const claim = await store.lookup(batch, stopUpstream ? null : owner);
       for (const [mint, price] of claim.prices) prices.set(mint, price);
       if (claim.claimed.length > 0) {
         const fetched = new Map<string, DisplayPrice>();
@@ -74,17 +75,33 @@ async function fetchMissingPrices(
         try {
           release = await acquireRequestSlot(signal);
           signal.throwIfAborted();
+          if (stopUpstream) return;
           if (await store.admitRequest()) {
+            if (stopUpstream) return;
             const result = await fetchTokensPriceBatch(apiKey, claim.claimed, signal);
             for (const [mint, price] of result.prices) {
               fetched.set(mint, price);
               prices.set(mint, price);
             }
-            if (result.status === "rate_limited") await store.backOff();
-            if (result.status === "rate_limited" || result.status === "unauthorized") stop = true;
+            switch (result.status) {
+              case "rate_limited":
+                stopUpstream = true;
+                await store.backOff();
+                break;
+              case "unauthorized":
+                stopUpstream = true;
+                break;
+              case "ok":
+              case "failed":
+                break;
+              default: {
+                const unreachable: never = result.status;
+                throw new Error(`Unexpected price response status: ${unreachable}`);
+              }
+            }
           } else {
             budgetRefused = true;
-            stop = true;
+            stopUpstream = true;
           }
         } finally {
           release?.();
@@ -105,14 +122,15 @@ async function fetchMissingPrices(
     const workers = Array.from(
       { length: Math.min(MAX_REQUESTS_IN_FLIGHT, Math.ceil(mints.length / MAX_MINTS_PER_REQUEST)) },
       async () => {
-        while (!stop && !signal.aborted) {
+        // An upstream refusal still permits reads of later cached batches.
+        while (!storeUnavailable && !signal.aborted) {
           const batch = mints.slice(cursor, cursor + MAX_MINTS_PER_REQUEST);
           if (batch.length === 0) return;
           cursor += MAX_MINTS_PER_REQUEST;
           try {
             await processBatch(batch);
           } catch (error) {
-            stop = true;
+            storeUnavailable = true;
             if (!signal.aborted) {
               logEvent("warn", {
                 event: "sdp_api_display_price_store_unavailable",

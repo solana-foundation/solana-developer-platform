@@ -9,12 +9,17 @@ import { requestTracingMiddleware } from "./request-tracing";
 
 afterEach(() => vi.restoreAllMocks());
 
+function captureLogs() {
+  const testLogger = logger.rootLogger.child({});
+  const info = vi.spyOn(testLogger, "info").mockImplementation(() => undefined);
+  const warn = vi.spyOn(testLogger, "warn").mockImplementation(() => undefined);
+  vi.spyOn(logger, "getLogger").mockReturnValue(testLogger);
+  return { info, warn };
+}
+
 describe("requestTracingMiddleware", () => {
   it("logs a route template without the requested resource ID", async () => {
-    const info = vi.fn();
-    vi.spyOn(logger, "getLogger").mockReturnValue({ info } as unknown as ReturnType<
-      typeof logger.getLogger
-    >);
+    const { info } = captureLogs();
     const app = new Hono<{ Bindings: Env }>();
     app.use("*", requestIdMiddleware());
     app.use("*", requestTracingMiddleware());
@@ -34,10 +39,7 @@ describe("requestTracingMiddleware", () => {
   });
 
   it("replaces inbound IDs and bounds the source before logging", async () => {
-    const info = vi.fn();
-    vi.spyOn(logger, "getLogger").mockReturnValue({ info } as unknown as ReturnType<
-      typeof logger.getLogger
-    >);
+    const { info } = captureLogs();
     const app = new Hono<{ Bindings: Env }>();
     app.use("*", requestIdMiddleware());
     app.use("*", requestTracingMiddleware());
@@ -59,10 +61,7 @@ describe("requestTracingMiddleware", () => {
   });
 
   it("joins a generated web trace by hash while keeping independent API IDs", async () => {
-    const info = vi.fn();
-    vi.spyOn(logger, "getLogger").mockReturnValue({ info } as unknown as ReturnType<
-      typeof logger.getLogger
-    >);
+    const { info } = captureLogs();
     const contexts: logger.LogContext[] = [];
     const app = new Hono<{ Bindings: Env }>();
     app.use("*", requestIdMiddleware());
@@ -90,10 +89,7 @@ describe("requestTracingMiddleware", () => {
   });
 
   it("ignores oversized and malformed correlation headers", async () => {
-    const info = vi.fn();
-    vi.spyOn(logger, "getLogger").mockReturnValue({ info } as unknown as ReturnType<
-      typeof logger.getLogger
-    >);
+    const { info } = captureLogs();
     const contexts: logger.LogContext[] = [];
     const app = new Hono<{ Bindings: Env }>();
     app.use("*", requestIdMiddleware());
@@ -133,11 +129,7 @@ describe("requestTracingMiddleware", () => {
   });
 
   it("keeps unmatched path and query secrets out of timing and rate-limit logs", async () => {
-    const info = vi.fn();
-    const warn = vi.fn();
-    vi.spyOn(logger, "getLogger").mockReturnValue({ info, warn } as unknown as ReturnType<
-      typeof logger.getLogger
-    >);
+    const { info, warn } = captureLogs();
     const app = new Hono<{ Bindings: Env }>();
     app.use("*", requestIdMiddleware());
     app.use("*", requestTracingMiddleware());

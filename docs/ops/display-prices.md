@@ -27,6 +27,8 @@ are cached upstream for 60 seconds.
 - On 429, pause requests across that key's replicas for 60 seconds plus jitter.
   If coordination fails or the quota is exhausted, keep valid cached prices
   and leave other balances unpriced. There is no uncoordinated retry.
+  Quota and credential refusals stop upstream work while later batches can
+  still read valid prices from Redis without claiming new leases.
 
 Every production replica using a key must use the same Redis backend. Use
 separate keys for dev, stage and prod. Local development and CI must not load
@@ -110,22 +112,20 @@ live Grafana, stage scrape, Kora ingress and Sentry verification requirements.
 - Jupiter dev and stage keys each returned a live unsigned quote through the
   application's swap client. Production was not queried without its key.
 - Public docs regenerated; 266 Markdown links and 27 external URLs passed.
-- Infra: 148 inventoried signals, 162 alert rules and four contact points
+- Infra: 148 inventoried signals, 164 alert rules and four contact points
   validated. Terraform 1.7.5 validated dev, stage and prod without a backend.
   Dev required adding the missing Linux provider checksum in a disposable
   copy; checked-in provider versions and lockfiles were unchanged.
 
-Publication checks used CI's Node 24.22.1. The full API run passed 8,186 of
-8,187 tests; the remaining assertion expected a caller-supplied audit request
-ID. It now checks the generated server ID against the response and rejects the
-supplied ID; all 12 tests in that suite passed on rerun. Web passed all 3,377
-tests, and the other 24 workspace test tasks passed. Workspace typechecking
-passed all 28 tasks.
+The full local workspace suite passed all 26 test tasks using CI's Node
+24.22.1 with caching disabled: all 8,189 API tests, 3,377 web tests, and the
+other 24 workspace tasks passed. Ten opt-in live tests retained their existing
+skips. All 245 root script tests passed. Workspace typechecking passed all
+28 tasks.
 
 Full Biome reported 26 SVG title errors in files unchanged from main. Local
 integration setup stopped on an existing
 `earn_movements_kamino_deposit_receipt_check` constraint. These remain local
 verification gaps; the focused checks above passed.
 
-The full suite was not repeated after the audit assertion fix. No rollout,
-live Grafana check or local browser E2E was run.
+No rollout, live Grafana check or local browser E2E was run.

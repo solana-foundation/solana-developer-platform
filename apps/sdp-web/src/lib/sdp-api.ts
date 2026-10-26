@@ -123,7 +123,7 @@ function createSdpApiRequest(
         source,
         requestId,
         method,
-        ...(webTraceHash ? { web_trace_hash: webTraceHash } : {}),
+        web_trace_hash: webTraceHash ?? undefined,
       };
       emitApiRequestLog("sdp_web_api_attempt", fields);
       const startedAt = performance.now();

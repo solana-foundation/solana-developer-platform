@@ -295,14 +295,40 @@ describe("Tokens display prices", () => {
     expect(await prices(["A"])).toEqual(new Map([["A", 2]]));
   });
 
-  it.each([401, 403, 429])("stops remaining batches after HTTP %i", async (status) => {
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockImplementation(async () => new Response(null, { status }));
-    const mints = Array.from({ length: 1_001 }, (_, index) => `Mint${index}`);
-    expect(await prices(mints)).toEqual(new Map());
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  function cacheLaterBatch() {
+    const cachedMint = "Mint1000";
+    const value = { usdPrice: 7, snapshotFetchedAt: Date.now(), expiresAt: Date.now() + 60_000 };
+    store.lookup.mockImplementation(async (mints, owner) => ({
+      prices: new Map(mints.includes(cachedMint) ? [[cachedMint, value]] : []),
+      claimed: owner ? mints.filter((mint) => mint !== cachedMint) : [],
+      pending: [],
+    }));
+    return Array.from({ length: 1_001 }, (_, index) => `Mint${index}`);
+  }
+
+  it("reads later shared prices after quota refusal without claiming or fetching misses", async () => {
+    const mints = cacheLaterBatch();
+    store.admitRequest.mockResolvedValue(false);
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    expect(await prices(mints)).toEqual(new Map([["Mint1000", 7]]));
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(store.lookup).toHaveBeenLastCalledWith(["Mint1000"], null);
+    expect(store.admitRequest).toHaveBeenCalledTimes(2);
   });
+
+  it.each([401, 403, 429])(
+    "reads later shared prices without upstream work after HTTP %i",
+    async (status) => {
+      const mints = cacheLaterBatch();
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockImplementation(async () => new Response(null, { status }));
+      expect(await prices(mints)).toEqual(new Map([["Mint1000", 7]]));
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      expect(store.lookup).toHaveBeenLastCalledWith(["Mint1000"], null);
+    }
+  );
 
   it("keeps successful independent batches when another fails", async () => {
     vi.spyOn(globalThis, "fetch")

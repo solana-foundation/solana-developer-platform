@@ -41,7 +41,7 @@ export function requestTracingMiddleware() {
       {
         request_id: requestId,
         trace_id: traceId,
-        ...(webTraceHash ? { web_trace_hash: webTraceHash } : {}),
+        web_trace_hash: webTraceHash ?? undefined,
       },
       async () => {
         try {
@@ -65,10 +65,10 @@ export function requestTracingMiddleware() {
               path,
               status: c.res.status,
               duration_ms: durationMs,
-              ...(auth?.organizationId ? { organization_id: auth.organizationId } : {}),
-              ...(auth?.projectId ? { project_id: auth.projectId } : {}),
-              ...(auth?.apiKeyId ? { api_key_id: auth.apiKeyId } : {}),
-              ...(auth ? { auth_type: auth.authType } : {}),
+              organization_id: auth?.organizationId,
+              project_id: auth?.projectId,
+              api_key_id: auth?.apiKeyId,
+              auth_type: auth?.authType,
             });
           }
         }

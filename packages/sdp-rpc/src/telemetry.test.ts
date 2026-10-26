@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types/well-known-tokens";
-import type { RpcTransport } from "@solana/kit";
+import { createDefaultRpcTransport } from "@solana/kit";
 import { fetchWithReadSocketRetry, withReadSocketRetry } from "./socket-retry";
 import {
   emitRpcTelemetry,
@@ -85,7 +85,8 @@ describe("RPC telemetry", () => {
       { jsonrpc: "2.0", result: "wrong-genesis" },
       { jsonrpc: "2.0", result: GENESIS_HASH_BY_CLUSTER.devnet },
     ];
-    const transport: RpcTransport = async <TResponse>() => responses.shift() as TResponse;
+    globalThis.fetch = async () => Response.json(responses.shift());
+    const transport = createDefaultRpcTransport({ url: endpointUrl });
     const send = withReadSocketRetry(transport, endpointUrl);
 
     await runWithPinnedRpcTelemetry(async () => {
@@ -186,6 +187,43 @@ describe("RPC telemetry", () => {
     assert.equal((await event).outcome, "http_success_unverified");
   });
 
+  const responseCases = [
+    { name: "null result", body: '{"result":null}', outcome: "succeeded" },
+    { name: "result batch", body: '[{"result":1},{"result":2}]', outcome: "succeeded" },
+    {
+      name: "error in a mixed batch",
+      body: '[7,{"error":{"code":-32005}}]',
+      outcome: "failed",
+    },
+    {
+      name: "malformed batch member",
+      body: '[{"result":1},7]',
+      outcome: "http_success_unverified",
+    },
+    { name: "empty batch", body: "[]", outcome: "http_success_unverified" },
+    { name: "missing result", body: "{}", outcome: "http_success_unverified" },
+    { name: "invalid JSON", body: "{broken", outcome: "http_success_unverified" },
+  ] as const;
+
+  for (const { name, body, outcome } of responseCases) {
+    it(`classifies ${name} without changing the response body`, async () => {
+      process.env[envKey] = endpointUrl;
+      globalThis.fetch = async () => new Response(body);
+      const observed = new Promise<RpcTelemetryEvent>((resolve) => setRpcTelemetrySink(resolve));
+
+      const response = await runWithPinnedRpcTelemetry(async () => {
+        pinRpcTelemetryEndpoint("devnet", endpointUrl);
+        return fetchWithReadSocketRetry(endpointUrl, {
+          method: "POST",
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getSlot", params: [] }),
+        });
+      });
+
+      assert.equal(await response.text(), body);
+      assert.equal((await observed).outcome, outcome);
+    });
+  }
+
   it("keeps concurrent Earn operations on their own pinned provider", async () => {
     const otherUrl = "https://rpc-other.example.test/?api-key=other-private";
     const otherKey = "SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL";
@@ -194,8 +232,7 @@ describe("RPC telemetry", () => {
     process.env[otherKey] = otherUrl;
     const events: RpcTelemetryEvent[] = [];
     setRpcTelemetrySink((event) => events.push(event));
-    const transport: RpcTransport = async <TResponse>() =>
-      ({ jsonrpc: "2.0", result: 7 }) as TResponse;
+    globalThis.fetch = async () => Response.json({ jsonrpc: "2.0", id: 1, result: 7 });
     try {
       await Promise.all(
         ([endpointUrl, otherUrl] as const).map((url) =>
@@ -203,7 +240,7 @@ describe("RPC telemetry", () => {
             pinRpcTelemetryEndpoint("devnet", url);
             await Promise.resolve();
             await withReadSocketRetry(
-              transport,
+              createDefaultRpcTransport({ url }),
               url
             )({
               payload: { jsonrpc: "2.0", id: 1, method: "getSlot", params: [] },
