@@ -55,11 +55,6 @@ export const withdrawSelectionSchema = makeRampSelectionSchema(
 );
 
 // Per-step gating schemas.
-export const depositAmountSchema = depositSelectionSchema.pick({
-  walletId: true,
-  amount: true,
-  provider: true,
-});
 /** Deposit's details step: the amount and provider fields plus the contact picked beside them. */
 export const depositDetailsSchema = depositSelectionSchema.pick({
   walletId: true,

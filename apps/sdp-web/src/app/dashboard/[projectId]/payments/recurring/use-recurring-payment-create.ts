@@ -33,12 +33,8 @@ import { useTranslations } from "@/i18n/provider";
 import { DEMO_PREFILL_AMOUNTS } from "@/lib/payments-demo/demo-prefill";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { createRecurringPayment } from "./recurring-payments.data.redesign";
-import {
-  accountAddress,
-  getSchedulePresets,
-  parsePeriodHours,
-} from "./recurring-payments-shared.redesign";
+import { createRecurringPayment } from "./recurring-payments.data";
+import { accountAddress, getSchedulePresets, parsePeriodHours } from "./recurring-payments-shared";
 
 export interface RecurringPaymentCreateInput {
   wallets: PaymentsDashboardWallet[];

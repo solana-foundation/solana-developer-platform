@@ -28,6 +28,8 @@ import {
   rampSelectionSchema,
 } from "@/app/dashboard/[projectId]/payments/ramps/schema";
 import { useTranslations } from "@/i18n/provider";
+import { DEMO_PREFILL_AMOUNTS } from "@/lib/payments-demo/demo-prefill";
+import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import type { RampProviderAccess } from "@/lib/provider-availability";
 import { DEFAULT_RAMP_PAIR, findRampPair, type RampPair, type SelectedRampPair } from "@/lib/ramps";
 import { useProjectHref } from "@/lib/use-dashboard-project";
@@ -115,12 +117,22 @@ export function useRampWizard<TId extends string>(
   const [hostedQuoteLoading, setHostedQuoteLoading] = useState(false);
   const [isCanceling, setIsCanceling] = useState(false);
   const [memoRows, setMemoRows] = useState<MemoRow[]>([]);
+  const demo = usePaymentsDemo();
+  const demoAmount =
+    config.requirements.direction === "onramp"
+      ? DEMO_PREFILL_AMOUNTS.deposit
+      : DEMO_PREFILL_AMOUNTS.payout;
   const { values: fields, setField } = useZodForm(rampSelectionSchema, {
     walletId: "",
-    amount: "",
+    amount: demo ? demoAmount : "",
     provider: null,
     counterpartyId: initialCounterpartyId,
   });
+
+  // Deposit picks its contact on the details step, outside this hook; follow it here.
+  useEffect(() => {
+    setField("counterpartyId", initialCounterpartyId);
+  }, [initialCounterpartyId, setField]);
 
   const { mutate: mutateSwrCache } = useSWRConfig();
   const selectProvider = (provider: RampProviderId) => {

@@ -2,15 +2,12 @@ import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { fetchPaymentsWallets } from "@/app/dashboard/[projectId]/payments/payments-page.data";
 import { PaymentRequestCreateWorkspace } from "@/app/dashboard/[projectId]/payments/requests/payment-request-create-workspace";
-import { withLegacyDesign } from "@/flags/new-design";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
-import { PAYMENT_REQUESTS_HREF } from "@/lib/payments-routes";
-import { requestProjectHref } from "@/lib/sdp-api";
 
 export const dynamic = "force-dynamic";
 
-async function PaymentRequestCreatePage() {
+export default async function PaymentRequestCreatePage() {
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -44,14 +41,3 @@ async function PaymentRequestCreatePage() {
     }
   );
 }
-
-/** The previous design creates a request from the Requests list. */
-async function LegacyPaymentRequestCreatePage(): Promise<never> {
-  redirect(await requestProjectHref(PAYMENT_REQUESTS_HREF));
-}
-
-export default withLegacyDesign(
-  PaymentRequestCreatePage,
-  LegacyPaymentRequestCreatePage,
-  "activity"
-);

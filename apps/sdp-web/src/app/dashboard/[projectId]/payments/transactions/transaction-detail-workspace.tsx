@@ -39,7 +39,7 @@ import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { RampOpenSale, useLiveRampTransfer } from "./ramp-open-sale";
 import type { PaymentTransferDetail } from "./transaction-detail.data";
-import { TRANSACTION_MODULE_HREFS, walletHref } from "./transaction-module-hrefs.redesign";
+import { TRANSACTION_MODULE_HREFS, walletHref } from "./transaction-module-hrefs";
 import { isPaymentTransferStatus, useTransactionStatus } from "./transaction-status";
 import { usePendingPaymentRefresh } from "./use-pending-payment-refresh";
 

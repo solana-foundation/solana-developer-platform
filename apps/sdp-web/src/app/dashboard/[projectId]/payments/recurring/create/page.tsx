@@ -6,14 +6,12 @@ import {
   fetchPaymentsWallets,
 } from "@/app/dashboard/[projectId]/payments/payments-page.data";
 import { RecurringPaymentCreateWorkspace } from "@/app/dashboard/[projectId]/payments/recurring/recurring-payment-create-workspace";
-import { withLegacyDesign } from "@/flags/new-design";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
-import { RecurringPaymentCreatePage as RedesignRecurringPaymentCreatePage } from "./page.redesign";
 
 export const dynamic = "force-dynamic";
 
-async function RecurringPaymentCreatePage() {
+export default async function RecurringPaymentCreatePage() {
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -73,9 +71,3 @@ async function RecurringPaymentCreatePage() {
     }
   );
 }
-
-export default withLegacyDesign(
-  RedesignRecurringPaymentCreatePage,
-  RecurringPaymentCreatePage,
-  "activity"
-);
