@@ -165,6 +165,9 @@ export const API_LOCAL_ENV_KEYS = [
   // Platform Jupiter swap key: swap-funded deposits and the Ondo provider's
   // readiness gate both read it.
   "JUPITER_SWAP_API_KEY",
+  "JUPITER_PRICE_API_KEY",
+  "JUPITER_PRICE_API_URL",
+  "TOKENS_XYZ_API_KEY",
   "WISDOMTREE_API_KEY",
   "WISDOMTREE_SANDBOX_API_KEY",
   "GOOGLE_ADDRESS_COMPLETION_API_KEY",

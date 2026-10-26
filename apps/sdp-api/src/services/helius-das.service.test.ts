@@ -2,12 +2,12 @@ import { runInClusterScope } from "@sdp/rpc/scope";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { type SolanaCluster, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { clearDisplayPriceCacheForTests } from "@/services/display-price.service";
 import {
   attachTokenSymbolsToBalances,
   attachUsdValuesToBalances,
   clearHeliusDasCachesForTests,
 } from "@/services/helius-das.service";
-import { clearJupiterPriceCacheForTests } from "@/services/jupiter-price.service";
 import { ENVIRONMENT_CLUSTER_CASES } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 
@@ -35,7 +35,7 @@ describe("helius-das service", () => {
     vi.restoreAllMocks();
     vi.useRealTimers();
     clearHeliusDasCachesForTests();
-    clearJupiterPriceCacheForTests();
+    clearDisplayPriceCacheForTests();
     vi.unstubAllEnvs();
   });
 

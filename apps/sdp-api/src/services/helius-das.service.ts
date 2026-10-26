@@ -4,7 +4,7 @@ import { currentClusterScope } from "@sdp/rpc/scope";
 import { formatDecimalAmount } from "@sdp/solana/amount";
 import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
 import { logVendorCallFailure } from "@/runtime/vendor-calls";
-import { fetchJupiterUsdPrices } from "@/services/jupiter-price.service";
+import { fetchDisplayUsdPrices } from "@/services/display-price.service";
 import { createMintLookupCache } from "@/services/mint-lookup-cache";
 import type { Env } from "@/types/env";
 
@@ -207,12 +207,12 @@ export async function attachTokenSymbolsToBalanceMap(
 }
 
 /**
- * Sets `usdPrice` and `usdValue` on each balance Jupiter priced. A mint it did not price
+ * Sets `usdPrice` and `usdValue` on each balance with a display price. An unpriced mint
  * stays unpriced: a symbol, a stablecoin template or a peg is not a market price, and
  * anyone can mint a token called "USDC".
  *
  * @param balances - Balances to decorate.
- * @param pricesByMint - Jupiter USD prices keyed by mint.
+ * @param pricesByMint - Display USD prices keyed by mint.
  * @returns The balances, priced where a price exists.
  */
 function enrichBalancesWithUsdValues(
@@ -235,12 +235,12 @@ function enrichBalancesWithUsdValues(
   });
 }
 
-/** Jupiter USD prices for the distinct mints across `balances`. */
+/** Display USD prices for the distinct mints across `balances`. */
 function fetchUsdPricesForBalances(
   env: Env,
   balances: CustodyWalletTokenBalance[]
 ): Promise<Map<string, number>> {
-  return fetchJupiterUsdPrices(env, [...new Set(balances.map((balance) => balance.mint))]);
+  return fetchDisplayUsdPrices(env, [...new Set(balances.map((balance) => balance.mint))]);
 }
 
 export async function attachUsdValuesToBalances(

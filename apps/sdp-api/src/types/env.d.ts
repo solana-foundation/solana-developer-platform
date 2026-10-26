@@ -115,6 +115,7 @@ export interface Env extends ManagedRpcEnv {
   /** Defaults to Jupiter's rate-limited lite endpoint; set both to use the keyed tier. */
   JUPITER_PRICE_API_URL?: string;
   JUPITER_PRICE_API_KEY?: string;
+  TOKENS_XYZ_API_KEY?: string;
   /**
    * Jupiter Swap API (swap-funded Earn deposits and provider DEX exits). Fail-closed: with no key
    * present, a deposit that names a `sourceTokenMint` is refused before any

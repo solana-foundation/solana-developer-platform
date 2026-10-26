@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { env } from "@/test/helpers/env";
 import { required } from "@/test/helpers/required";
 import type { Env } from "@/types/env";
-import { clearJupiterPriceCacheForTests, fetchJupiterUsdPrices } from "./jupiter-price.service";
+import { clearDisplayPriceCacheForTests, fetchDisplayUsdPrices } from "./display-price.service";
 
 type JupiterPriceBody = Readonly<
   Record<string, { readonly usdPrice: number | string; readonly decimals?: number } | null>
@@ -16,7 +16,7 @@ function fetchPricesIn(
   mints: string[]
 ): Promise<Map<string, number>> {
   return runInClusterScope({ projectId: null, environment }, () =>
-    fetchJupiterUsdPrices(priceEnv, mints)
+    fetchDisplayUsdPrices(priceEnv, mints)
   );
 }
 
@@ -35,10 +35,10 @@ function requestedMints(input: Parameters<typeof fetch>[0]): string[] {
 afterEach(() => {
   vi.restoreAllMocks();
   vi.useRealTimers();
-  clearJupiterPriceCacheForTests();
+  clearDisplayPriceCacheForTests();
 });
 
-describe("fetchJupiterUsdPrices", () => {
+describe("fetchDisplayUsdPrices", () => {
   it("reads usdPrice per mint", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       priceResponse(
@@ -143,6 +143,114 @@ describe("fetchJupiterUsdPrices", () => {
     const [url, init] = required(fetchSpy.mock.calls[1]);
     expect(String(url)).toContain("https://api.jup.ag/price/v3");
     expect(required(init).headers).toEqual({ "x-api-key": "k" });
+  });
+
+  it("uses the Jupiter gateway with or without a price key", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(priceResponse({}, 200));
+
+    await fetchPricesIn("production", env, ["MintA"]);
+    await fetchPricesIn("production", { ...env, JUPITER_PRICE_API_KEY: "k" }, ["MintA"]);
+
+    expect(String(required(fetchSpy.mock.calls[0])[0])).toContain("api.jup.ag/price/v3");
+    expect(required(required(fetchSpy.mock.calls[0])[1]).headers).toBeUndefined();
+    expect(String(required(fetchSpy.mock.calls[1])[0])).toContain("api.jup.ag/price/v3");
+    expect(required(required(fetchSpy.mock.calls[1])[1]).headers).toEqual({ "x-api-key": "k" });
+  });
+
+  it("prefers Tokens.xyz and asks Jupiter only for missing mints", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      if (String(input).includes("tokens.xyz")) {
+        return new Response(
+          JSON.stringify([
+            {
+              address: "MintB",
+              hasMarket: true,
+              token: { address: "MintB", price: 3.5 },
+            },
+          ]),
+          { status: 200 }
+        );
+      }
+      return priceResponse({ MintA: { usdPrice: 2 }, MintB: { usdPrice: 9 } }, 200);
+    });
+
+    const prices = await fetchPricesIn("production", { ...env, TOKENS_XYZ_API_KEY: "xyz-key" }, [
+      "MintA",
+      "MintB",
+    ]);
+
+    expect(prices).toEqual(
+      new Map([
+        ["MintA", 2],
+        ["MintB", 3.5],
+      ])
+    );
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    const [url, init] = required(fetchSpy.mock.calls[0]);
+    expect(String(url)).toBe("https://api.tokens.xyz/v1/assets/market-snapshots");
+    expect(JSON.parse(String(required(init).body))).toEqual({ mints: ["MintA", "MintB"] });
+    expect(required(init).headers).toEqual({
+      "content-type": "application/json",
+      "x-api-key": "xyz-key",
+    });
+    expect(requestedMints(required(fetchSpy.mock.calls[1])[0])).toEqual(["MintA"]);
+  });
+
+  it("skips Jupiter when Tokens.xyz prices every mint", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify([
+            { address: "MintA", hasMarket: true, token: { address: "MintA", price: 2 } },
+          ]),
+          { status: 200 }
+        )
+      );
+
+    await expect(
+      fetchPricesIn("production", { ...env, TOKENS_XYZ_API_KEY: "xyz-key" }, ["MintA"])
+    ).resolves.toEqual(new Map([["MintA", 2]]));
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(String(required(fetchSpy.mock.calls[0])[0])).toContain("api.tokens.xyz");
+  });
+
+  it("keeps missing or invalid Tokens.xyz prices unknown", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      if (String(input).includes("tokens.xyz")) {
+        return new Response(
+          JSON.stringify([
+            { address: "MintA", hasMarket: false, token: { address: "MintA", price: 0 } },
+            { address: "MintB", hasMarket: true, token: { address: "Other", price: 9 } },
+            { address: "MintC", hasMarket: true, token: null },
+            {
+              address: "Unrequested",
+              hasMarket: true,
+              token: { address: "Unrequested", price: 7 },
+            },
+          ]),
+          { status: 200 }
+        );
+      }
+      return priceResponse({}, 200);
+    });
+
+    await expect(
+      fetchPricesIn("production", { ...env, TOKENS_XYZ_API_KEY: "xyz-key" }, [
+        "MintA",
+        "MintB",
+        "MintC",
+      ])
+    ).resolves.toEqual(new Map());
+  });
+
+  it("keeps balances unpriced when both price sources fail", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(priceResponse({}, 429));
+
+    await expect(
+      fetchPricesIn("production", { ...env, TOKENS_XYZ_API_KEY: "xyz-key" }, ["MintA"])
+    ).resolves.toEqual(new Map());
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 
   it("makes no request when there is nothing to price", async () => {
