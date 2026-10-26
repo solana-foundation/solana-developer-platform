@@ -44,13 +44,35 @@ keep-alive socket the server closed as it was reused.
 
 A provider read transport must compose, innermost first:
 
-raw transport -> `withReadSocketRetry` -> in-flight dedup -> `withRpcReadContext`
--> deadline
+raw transport -> pinned telemetry (Earn scope) -> `withReadSocketRetry`
+-> in-flight dedup -> `withRpcReadContext` -> deadline
 
 Put the re-send below the dedup, so one re-send serves every joiner, and below
 the read context, so a minimum-slot scope sees only the attempt that answered,
 carrying the scoped payload. Sends, simulations and blockhash reads never take
 a shared or re-sent path.
+
+## RPC telemetry
+
+The API supplies `setRpcTelemetrySink` from `@sdp/rpc/telemetry`. Sink failures
+cannot change an RPC result. Events name the configured provider, cluster and
+method; they never include endpoint URLs or request payloads.
+
+- `managed_pool` counts one logical endpoint attempt, which may include a
+  genesis proof or socket retry. These are not billed request counts.
+- `earn_pinned` counts physical transport calls inside
+  `runWithPinnedRpcTelemetry`. Provider Kit transports pass their endpoint as
+  the second argument to `withReadSocketRetry`; the fetch helper already
+  instruments its calls. Outside the pinned scope those hooks do nothing.
+- Successes keep the first ten per surface/provider/cluster/method, then
+  every tenth with `sample_weight: 10`. Failures, failovers, cooldowns and
+  unverified HTTP successes remain exact. Queries must use the weights.
+- HTTP 200 can carry a JSON-RPC error. Fetch classification reads a clone
+  bounded to 64 KiB and one second without blocking the SDK. An unreadable
+  result is `http_success_unverified`, never a confirmed success. Exclude
+  those and genesis-proof attempts from successful latency percentiles.
+
+Telemetry adds no RPC calls and preserves provider request budgets.
 
 ## Read floors
 
