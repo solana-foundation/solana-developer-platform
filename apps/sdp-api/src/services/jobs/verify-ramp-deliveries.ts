@@ -200,7 +200,7 @@ function rampDeliveryAsset(transfer: PaymentTransferRow): AssetRef | null {
 /** What the chain shows a delivery moved into its destination, in base units. */
 interface ObservedDelivery {
   decimals: number;
-  /** The destination's balance change: what it received. */
+  /** What the destination received: its balance change plus what left its accounts. */
   credit: bigint;
   /** What the transfers into the destination debited, by their instruction data. */
   debit: bigint;
@@ -243,11 +243,12 @@ function rawAmountOf(
  * never a display value or a catalogue scale, and its debit is the instruction
  * data of the transfers into the owner's token accounts of the mint.
  */
-function observedDelivery(
+async function observedDelivery(
   asset: AssetRef,
   destination: string,
-  transaction: ParsedTransaction
-): ObservedDelivery | "absent" | null {
+  transaction: ParsedTransaction,
+  feeAt: FeeAtLanding
+): Promise<ObservedDelivery | "absent" | null> {
   if (asset.kind === "native") {
     const index = transaction.accountKeys.indexOf(destination);
     if (index < 0) return "absent";
@@ -280,7 +281,10 @@ function observedDelivery(
     destinationAccounts
   );
   if (moves === null) return null;
-  const credit = delta.baseUnits + moves.left;
+  // A fee no longer on chain leaves the credit short, which the amount checks
+  // then hold for a person.
+  const withheld = (await feeAt(moves.within)) ?? 0n;
+  const credit = delta.baseUnits + moves.left + withheld;
   const debit = moves.debits.reduce((total, amount) => total + amount, 0n);
   // A delivery by an instruction this reader does not parse (a CPI it cannot
   // attribute) is judged by its credit alone.
@@ -292,16 +296,18 @@ function observedDelivery(
 /**
  * The mint's token program's moves in `transaction` that touch `accounts`:
  * each transfer into them (its debit), the fee those transfers stated (null
- * when one stated none), and what left them, moved out or burned, or was
- * withheld moving between them. Either lowers the balance change without
- * being the delivery's fee. Null when an amount cannot be read.
+ * when one stated none), what left them, moved out or burned, or was withheld
+ * by a stated fee moving between them, and the moves between them that
+ * stated no fee. Each lowers the balance change without being the delivery's
+ * fee. Null when an amount cannot be read.
  */
 function tokenMovesTouching(
   transaction: ParsedTransaction,
   tokenProgram: string,
   accounts: ReadonlySet<string>
-): { debits: bigint[]; statedFee: bigint | null; left: bigint } | null {
+): { debits: bigint[]; statedFee: bigint | null; left: bigint; within: bigint[] } | null {
   const debits: bigint[] = [];
+  const within: bigint[] = [];
   let statedFee: bigint | null = 0n;
   let left = 0n;
   for (const { programId, parsedType, info } of transaction.instructions) {
@@ -311,15 +317,17 @@ function tokenMovesTouching(
     if (programId !== tokenProgram || parsedType === null || info === null) continue;
     const { out, into } = touches(parsedType, info, accounts);
     if (!out && !into) continue;
-    const fee = parsedType === "transferCheckedWithFee" ? rawAmountOf(info, "feeAmount") : null;
-    // A move between the owner's own accounts delivers nothing, but the fee it
-    // withheld lowered the balance change: a stated one is added back.
-    if (out && into) {
-      left += fee ?? 0n;
-      continue;
-    }
     const amount = rawAmountOf(info, "tokenAmount");
     if (amount === null) return null;
+    const fee = parsedType === "transferCheckedWithFee" ? rawAmountOf(info, "feeAmount") : null;
+    // A move between the owner's own accounts delivers nothing, but the fee it
+    // withheld lowered the balance change: a stated one is added back, and an
+    // unstated one is left for the fee rule to price.
+    if (out && into) {
+      if (fee === null) within.push(amount);
+      else left += fee;
+      continue;
+    }
     if (out) {
       left += amount;
       continue;
@@ -327,7 +335,7 @@ function tokenMovesTouching(
     debits.push(amount);
     statedFee = statedFee === null || fee === null ? null : statedFee + fee;
   }
-  return { debits, statedFee, left };
+  return { debits, statedFee, left, within };
 }
 
 /** Whether a token instruction moves out of (or burns from) `accounts`, and into them. */
@@ -345,20 +353,46 @@ function touches(
 }
 
 /**
+ * What the mint's transfer fee charged `debits` in the epoch the delivery
+ * landed, summed (each is capped and rounded on its own): 0 when nothing could
+ * charge one, null when both fee entries the mint keeps came after the
+ * delivery, so the fee it paid is no longer on chain and no later read could
+ * price it either. Reads the mint and the epoch once, on first need.
+ */
+type FeeAtLanding = (debits: readonly bigint[]) => Promise<bigint | null>;
+
+function feeAtLanding(
+  asset: AssetRef,
+  landedSlot: bigint,
+  chain: Pick<RampChainReader, "readTokenTerms" | "epochOfSlot">
+): FeeAtLanding {
+  let rule: Promise<{ terms: TokenTerms; epoch: Epoch } | null> | undefined;
+  return async (debits) => {
+    // Only a Token-2022 mint can charge a transfer fee.
+    if (debits.length === 0 || asset.kind !== "token" || asset.program !== "token-2022") return 0n;
+    rule ??= chain
+      .readTokenTerms(asset)
+      .then(async (terms) =>
+        terms.transferFee === null ? null : { terms, epoch: await chain.epochOfSlot(landedSlot) }
+      );
+    const read = await rule;
+    if (read === null) return 0n;
+    const { terms, epoch } = read;
+    if (terms.transferFee === null || epoch < terms.transferFee.older.epoch) return null;
+    return debits.reduce((total, debit) => total + feeFor(terms, baseUnits(debit), epoch), 0n);
+  };
+}
+
+/**
  * Whether the transfer fee rule explains a delivery's debit and credit
  * differing: the program checked a fee the transfers stated, or the mint's fee
- * entry in force in the epoch the delivery landed, read live, charges exactly
- * that fee, summed over the transfers (each is capped and rounded on its own).
- * Unexplained when both fee entries the mint keeps came after the delivery:
- * the fee it paid is no longer on chain, and the entries only get newer, so no
- * later read could explain it either; a person decides. Reads the mint and the
- * epoch only when a fee is not stated.
+ * entry in force in the epoch the delivery landed charges exactly that fee.
+ * Unexplained when that entry is no longer on chain; a person decides.
  */
 async function feeRuleExplains(
   asset: AssetRef,
   delivery: ObservedDelivery,
-  landedSlot: bigint,
-  chain: Pick<RampChainReader, "readTokenTerms" | "epochOfSlot">
+  feeAt: FeeAtLanding
 ): Promise<boolean> {
   const fee = delivery.debit - delivery.credit;
   if (fee === 0n) return true;
@@ -366,15 +400,7 @@ async function feeRuleExplains(
   if (delivery.statedFee !== null) {
     return delivery.statedFee === fee;
   }
-  const terms = await chain.readTokenTerms(asset);
-  if (terms.transferFee === null) return false;
-  const epoch = await chain.epochOfSlot(landedSlot);
-  if (epoch < terms.transferFee.older.epoch) return false;
-  const charged = delivery.debits.reduce(
-    (total, debit) => total + feeFor(terms, baseUnits(debit), epoch),
-    0n
-  );
-  return charged === fee;
+  return (await feeAt(delivery.debits)) === fee;
 }
 
 async function judgeOnrampDelivery(
@@ -394,7 +420,10 @@ async function judgeOnrampDelivery(
     return PENDING;
   }
   if (!landed) return mismatch("predates_transfer");
-  const delivery = observedDelivery(asset, destination, transaction);
+  // RPC budget: the mint and the epoch are read at most once, and only for a
+  // transfer that states no fee.
+  const feeAt = feeAtLanding(asset, transaction.slot, chain);
+  const delivery = await observedDelivery(asset, destination, transaction, feeAt);
   if (delivery === null) return PENDING;
   if (delivery === "absent" || delivery.credit <= 0n) return mismatch("not_delivered");
   const { decimals } = delivery;
@@ -402,8 +431,7 @@ async function judgeOnrampDelivery(
   // A provider may report what it received (the credit) or what it sent (the
   // debit): the debit counts only when the fee rule explains the difference.
   const debitCounts =
-    delivery.debit !== delivery.credit &&
-    (await feeRuleExplains(asset, delivery, transaction.slot, chain));
+    delivery.debit !== delivery.credit && (await feeRuleExplains(asset, delivery, feeAt));
   try {
     const reported = [settled.receivedAmount, settled.onchain?.amount].filter(
       (amount): amount is string => amount !== undefined

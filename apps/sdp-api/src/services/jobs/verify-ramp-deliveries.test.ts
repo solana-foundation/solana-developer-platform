@@ -1040,6 +1040,62 @@ describe("verifyRampDeliveries", () => {
       });
     });
 
+    it("prices the unstated fee a move between the wallet's own accounts withheld, reading the mint once", async () => {
+      await settleOnramp("xfr_leg_internal_rule", PYUSD_MINT, "1");
+      const landed = landedFeeMint("495000", "transferChecked", null);
+      getTransactionMock.mockResolvedValue({
+        ...landed,
+        accountKeys: [...landed.accountKeys, "destination-account-2"],
+        postTokenBalances: [
+          {
+            accountIndex: 2,
+            mint: PYUSD_MINT,
+            owner: "quoted-destination",
+            amount: "495000",
+            decimals: 6,
+          },
+          {
+            accountIndex: 3,
+            mint: PYUSD_MINT,
+            owner: "quoted-destination",
+            amount: "497500",
+            decimals: 6,
+          },
+        ],
+        instructions: [
+          ...landed.instructions,
+          {
+            programId: SPL_TOKEN_PROGRAMS["token-2022"],
+            accounts: [],
+            parsedType: "transferChecked",
+            info: {
+              source: "destination-account",
+              destination: "destination-account-2",
+              mint: PYUSD_MINT,
+              tokenAmount: { amount: "500000", decimals: 6, uiAmountString: "0.5" },
+            },
+          },
+        ],
+      });
+      // 0.5% of each transfer: 5 000 on the delivery, 2 500 on the internal move.
+      readTokenTermsMock.mockResolvedValue(
+        mintTermsAt(PYUSD_MINT, "token-2022", {
+          decimals: 6,
+          extensions: [transferFeeExtension(50, 1_000_000n)],
+        })
+      );
+
+      await sweep();
+
+      expect((await row("xfr_leg_internal_rule"))?.status).toBe("completed");
+      expect(await legOf("xfr_leg_internal_rule")).toMatchObject({
+        quoted_debit: "1000000",
+        quoted_fee: "5000",
+        quoted_credit: "995000",
+      });
+      expect(readTokenTermsMock).toHaveBeenCalledTimes(1);
+    });
+
     it("charges the fee per transfer: two capped transfers withhold two caps", async () => {
       await settleOnramp("xfr_leg_split", PYUSD_MINT, "2");
       // 1% of each 1 PYUSD transfer is 10 000, capped at 5 000 per transfer.
