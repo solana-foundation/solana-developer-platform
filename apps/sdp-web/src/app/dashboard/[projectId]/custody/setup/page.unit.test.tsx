@@ -16,10 +16,6 @@ vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("next/headers", () => import("@/test/next-headers"));
 vi.mock("@/lib/auth-entry", () => ({ getAuthEntryPath: async () => "/sign-in" }));
-// The route is the design switch; this test is about the previous design's page.
-vi.mock("@/flags/new-design", () => ({
-  withLegacyDesign: (_current: unknown, legacy: unknown) => legacy,
-}));
 vi.mock("@/lib/provider-availability.server", () => ({
   fetchProjectProviderAvailability: mocks.fetchProjectProviderAvailability,
 }));

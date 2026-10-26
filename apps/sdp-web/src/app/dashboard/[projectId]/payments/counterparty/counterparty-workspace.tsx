@@ -1,18 +1,9 @@
 "use client";
 
 import type { Counterparty } from "@sdp/types/counterparties";
+import type { CounterpartyAccountSummary } from "@sdp/types/payments";
 import { ArrowPagination } from "@sdp/ui/arrow-pagination";
-import { Badge } from "@sdp/ui/badge";
 import { Button } from "@sdp/ui/button";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@sdp/ui/card";
 import { cn } from "@sdp/ui/cn";
 import {
   DropdownMenu,
@@ -20,104 +11,439 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@sdp/ui/dropdown-menu";
+import { FilterMenu, FilterMenuOptions } from "@sdp/ui/filter-menu";
+import { ListEmptyState } from "@sdp/ui/list-empty-state";
+import { ListToolbar, RowsPerPageSelect } from "@sdp/ui/list-toolbar";
+import { SearchInput } from "@sdp/ui/search-input";
 import { TableCell } from "@sdp/ui/table";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
-import {
-  ChevronRightIcon,
-  MoreHorizontalIcon,
-  PlusIcon,
-  Trash2Icon,
-  UserIcon,
-  UsersIcon,
-} from "lucide-react";
-import dynamic from "next/dynamic";
+import { MoreHorizontalIcon, Trash2Icon, UserIcon } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { CounterpartyPlaygroundLoading } from "@/app/dashboard/[projectId]/payments/counterparty-menu-loading";
+import { WalletMetadataCopyButton } from "@/app/dashboard/[projectId]/custody/wallet-address-copy-button";
+import { shortenAddress } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import { formatDate } from "@/app/dashboard/[projectId]/payments/payments-presentation";
 import {
-  dashboardWorkspaceOverviewPanelClassName,
-  dashboardWorkspacePlaygroundPanelClassName,
-} from "@/components/dashboard-workspace-panel";
-import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
+  PAYMENTS_TABLE_CELL,
+  PAYMENTS_TABLE_HEAD,
+} from "@/app/dashboard/[projectId]/payments/payments-table";
+import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
-import { useDashboardTab } from "@/lib/dashboard-url-state";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import type { CounterpartyPlaygroundView } from "./counterparty-playground-config";
+import {
+  type AddressFilter,
+  type EntityType,
+  filterDirectory,
+} from "./counterparty-directory-filter";
 import { DeleteCounterpartyDialog } from "./delete-counterparty-dialog";
-import { useCounterpartyDirectory } from "./use-counterparty-directory";
 
-const CounterpartyPlayground = dynamic(
-  () => import("./counterparty-playground").then((module) => module.CounterpartyPlayground),
-  { loading: () => <CounterpartyPlaygroundLoading /> }
-);
+type Translate = ReturnType<typeof useTranslations>;
 
-interface CounterpartyWorkspaceProps {
-  initialCounterparties: Counterparty[];
-  initialTotal: number;
-  apiBaseUrl: string | null;
+function counterpartyHref(counterpartyId: string): string {
+  return `/dashboard/payments/counterparty/${counterpartyId}`;
 }
 
-export function CounterpartyWorkspace({
-  initialCounterparties,
-  initialTotal,
-  apiBaseUrl,
-}: CounterpartyWorkspaceProps) {
+function typeLabel(t: Translate, type: EntityType): string {
+  return type === "individual"
+    ? t("DashboardPayments.counterparty.individual")
+    : t("DashboardPayments.counterparty.business");
+}
+
+function addressFilterLabel(t: Translate, value: AddressFilter): string {
+  return value === "with"
+    ? t("DashboardPayments.counterparty.hasAddress")
+    : t("DashboardPayments.counterparty.noAddress");
+}
+
+interface CounterpartyWorkspaceProps {
+  counterparties: Counterparty[];
+  /** The directory's full size; more than `counterparties.length` when the load was capped. */
+  total: number;
+  /** True when the directory could not be read, so an empty list is not an empty directory. */
+  directoryFailed?: boolean;
+  accounts: CounterpartyAccountSummary[];
+  /** The project's saved account count; more than `accounts.length` when that load was capped. */
+  accountsTotal?: number;
+  /** True when the saved addresses could not all be read, so a missing one may just be unread. */
+  accountsFailed?: boolean;
+}
+
+function EmptyDirectory() {
+  const t = useTranslations();
+  const href = useProjectHref();
+  return (
+    <DashboardWorkspaceOverviewPanel className="flex flex-col">
+      <ListEmptyState
+        hidesPageAction
+        message={t("DashboardPayments.counterparty.noContacts")}
+        description={t("DashboardPayments.counterparty.noContactsDescription")}
+        action={
+          <Button asChild size="sm">
+            <Link href={href("/dashboard/payments/counterparty/create")}>
+              {t("DashboardPayments.counterparty.addContact")}
+            </Link>
+          </Button>
+        }
+      />
+    </DashboardWorkspaceOverviewPanel>
+  );
+}
+
+/** The directory could not be read: say so rather than offer to add a first contact. */
+function DirectoryLoadFailed() {
+  const t = useTranslations();
+  const router = useRouter();
+  return (
+    <DashboardWorkspaceOverviewPanel className="flex flex-col">
+      <ListEmptyState
+        message={t("DashboardPayments.counterparty.directoryLoadFailed")}
+        description={t("DashboardPayments.counterparty.directoryLoadFailedDescription")}
+        action={
+          <Button type="button" variant="outline" size="sm" onClick={() => router.refresh()}>
+            {t("Shared.SharedComponents.retry")}
+          </Button>
+        }
+      />
+    </DashboardWorkspaceOverviewPanel>
+  );
+}
+
+/** What the list could not load: contacts past the directory cap, and unread saved addresses. */
+function DirectoryNotices({
+  loaded,
+  total,
+  accountsLoaded,
+  accountsTotal,
+  accountsFailed,
+}: {
+  loaded: number;
+  total: number;
+  accountsLoaded: number;
+  accountsTotal: number;
+  accountsFailed: boolean;
+}) {
+  const t = useTranslations();
+  const directoryCapped = total > loaded;
+  const addressesCapped = accountsTotal > accountsLoaded;
+  if (!directoryCapped && !accountsFailed && !addressesCapped) return null;
+  let addressesNotice: string | null = null;
+  if (accountsFailed) {
+    addressesNotice = t("DashboardPayments.counterparty.addressesLoadFailed");
+  } else if (addressesCapped) {
+    addressesNotice = t("DashboardPayments.counterparty.addressesCapped", {
+      count: accountsLoaded,
+      total: accountsTotal,
+    });
+  }
+  return (
+    <div className="space-y-1 text-meta text-tertiary">
+      {directoryCapped ? (
+        <p>{t("DashboardPayments.counterparty.directoryCapped", { count: loaded, total })}</p>
+      ) : null}
+      {addressesNotice === null ? null : <p>{addressesNotice}</p>}
+    </div>
+  );
+}
+
+/**
+ * The list's filter menu, rows-per-page select and search. The address filter is offered only
+ * while every saved address was loaded: with some unloaded, "No address" would mislabel them.
+ */
+function DirectoryToolbar({
+  query,
+  typeFilter,
+  addressFilter,
+  addressFilterAvailable,
+  pageSize,
+  onQueryChange,
+  onTypeFilterChange,
+  onAddressFilterChange,
+  onPageSizeChange,
+}: {
+  query: string;
+  typeFilter: EntityType | undefined;
+  addressFilter: AddressFilter | undefined;
+  addressFilterAvailable: boolean;
+  pageSize: number;
+  onQueryChange: (value: string) => void;
+  onTypeFilterChange: (value: EntityType | undefined) => void;
+  onAddressFilterChange: (value: AddressFilter | undefined) => void;
+  onPageSizeChange: (value: number) => void;
+}) {
+  const t = useTranslations();
+  const sections = [
+    {
+      id: "type",
+      label: t("DashboardPayments.counterparty.type"),
+      value: typeFilter === undefined ? undefined : typeLabel(t, typeFilter),
+      content: (
+        <FilterMenuOptions
+          value={typeFilter}
+          anyLabel={t("Shared.SharedComponents.any")}
+          options={(["individual", "business"] as const).map((type) => ({
+            value: type,
+            label: typeLabel(t, type),
+          }))}
+          onChange={(value) =>
+            onTypeFilterChange(value === "individual" || value === "business" ? value : undefined)
+          }
+        />
+      ),
+    },
+  ];
+  if (addressFilterAvailable) {
+    sections.push({
+      id: "address",
+      label: t("DashboardPayments.counterparty.address"),
+      value: addressFilter === undefined ? undefined : addressFilterLabel(t, addressFilter),
+      content: (
+        <FilterMenuOptions
+          value={addressFilter}
+          anyLabel={t("Shared.SharedComponents.any")}
+          options={(["with", "without"] as const).map((value) => ({
+            value,
+            label: addressFilterLabel(t, value),
+          }))}
+          onChange={(value) =>
+            onAddressFilterChange(value === "with" || value === "without" ? value : undefined)
+          }
+        />
+      ),
+    });
+  }
+  return (
+    <ListToolbar
+      filters={
+        <FilterMenu
+          label={t("Shared.SharedComponents.filter")}
+          searchPlaceholder={t("Shared.SharedComponents.filterBy")}
+          sections={sections}
+        />
+      }
+    >
+      <RowsPerPageSelect value={pageSize} onChange={onPageSizeChange} />
+      <SearchInput
+        value={query}
+        onChange={(event) => onQueryChange(event.target.value)}
+        clear={{
+          label: t("DashboardPayments.counterparty.clearSearch"),
+          onClear: () => onQueryChange(""),
+        }}
+        placeholder={t("DashboardPayments.counterparty.searchPlaceholder")}
+        className="min-w-0 flex-1 sm:w-56 sm:flex-none"
+      />
+    </ListToolbar>
+  );
+}
+
+/** The Address column: the first saved address with a copy button and a count of the rest. */
+function AddressCell({
+  addresses,
+  addressesLoaded,
+}: {
+  addresses: string[];
+  /** False when the account load was capped, so an empty list may just be unloaded. */
+  addressesLoaded: boolean;
+}) {
+  const t = useTranslations();
+  if (addresses.length === 0) {
+    return (
+      <span className="text-tertiary">
+        {addressesLoaded
+          ? t("DashboardPayments.counterparty.noAddress")
+          : t("DashboardPayments.counterparty.addressNotLoaded")}
+      </span>
+    );
+  }
+  return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: Keeps copy clicks from opening the row.
+    // biome-ignore lint/a11y/useKeyWithClickEvents: The copy button inside handles the keyboard.
+    <span
+      className="inline-flex items-center gap-1.5 whitespace-nowrap text-primary [&_svg]:size-3.5"
+      onClick={(event) => event.stopPropagation()}
+    >
+      <span title={addresses[0]} className="tabular-nums">
+        {shortenAddress(addresses[0])}
+      </span>
+      <WalletMetadataCopyButton
+        value={addresses[0]}
+        label={t("DashboardPayments.counterparty.address")}
+      />
+      {addresses.length > 1 ? (
+        <span>{t("DashboardPayments.counterparty.andMore", { count: addresses.length - 1 })}</span>
+      ) : null}
+    </span>
+  );
+}
+
+function CounterpartyRow({
+  counterparty,
+  addresses,
+  addressesLoaded,
+  onDelete,
+}: {
+  counterparty: Counterparty;
+  addresses: string[];
+  addressesLoaded: boolean;
+  onDelete: (counterparty: Counterparty) => void;
+}) {
   const t = useTranslations();
   const locale = useLocale();
   const router = useRouter();
-  const href = useProjectHref();
-  const isPlaygroundTab = useDashboardTab() === "playground";
+  const toProjectHref = useProjectHref();
+  const href = toProjectHref(counterpartyHref(counterparty.id));
+  return (
+    <TableRow className="cursor-pointer" onClick={() => router.push(href)}>
+      <TableCell className={cn(PAYMENTS_TABLE_CELL, "max-w-64")}>
+        <Link
+          href={href}
+          className="block truncate font-medium text-primary focus-visible:underline focus-visible:outline-none"
+          onClick={(event) => event.stopPropagation()}
+        >
+          {counterparty.displayName}
+        </Link>
+      </TableCell>
+      <TableCell className={cn(PAYMENTS_TABLE_CELL, "text-secondary")}>
+        {typeLabel(t, counterparty.entityType)}
+      </TableCell>
+      <TableCell
+        className={cn(
+          PAYMENTS_TABLE_CELL,
+          counterparty.externalId ? "text-secondary tabular-nums" : "text-tertiary"
+        )}
+      >
+        <span className="block max-w-48 truncate">
+          {counterparty.externalId ?? t("Shared.SharedComponents.notSet")}
+        </span>
+      </TableCell>
+      <TableCell className={PAYMENTS_TABLE_CELL}>
+        <AddressCell addresses={addresses} addressesLoaded={addressesLoaded} />
+      </TableCell>
+      <TableCell
+        className={cn(PAYMENTS_TABLE_CELL, "whitespace-nowrap text-secondary tabular-nums")}
+      >
+        {formatDate(counterparty.createdAt, locale)}
+      </TableCell>
+      <TableCell className="text-right">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            {/* 24px, the copy button's size, so the menu never makes a row taller than its
+                address does. */}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className="[&_svg]:size-3.5"
+              aria-label={t("DashboardPayments.counterparty.counterpartyActions")}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <MoreHorizontalIcon />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent onClick={(event) => event.stopPropagation()}>
+            <DropdownMenuItem
+              className="text-xs [&_svg]:size-3.5"
+              onSelect={() => router.push(href)}
+            >
+              <UserIcon />
+              {t("DashboardPayments.counterparty.manageCounterparty")}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="text-xs text-error focus:text-error [&_svg]:size-3.5"
+              onSelect={() => onDelete(counterparty)}
+            >
+              <Trash2Icon />
+              {t("DashboardPayments.counterparty.deleteCounterparty")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </TableCell>
+    </TableRow>
+  );
+}
 
-  const {
-    page,
-    setPage,
-    counterparties,
-    total,
-    pageCount,
-    summary: pageSummary,
-    removeOptimistic,
-  } = useCounterpartyDirectory(initialCounterparties, initialTotal);
+/**
+ * The Contact list. The directory API has no search or filters, so the page loads the
+ * directory (up to a cap) with every saved Solana address (up to its own cap) once, and
+ * searches, filters and pages it here. When either cap cut the load short, the list says so.
+ */
+export function CounterpartyWorkspace({
+  counterparties: initialCounterparties,
+  total,
+  directoryFailed = false,
+  accounts,
+  accountsTotal = accounts.length,
+  accountsFailed = false,
+}: CounterpartyWorkspaceProps) {
+  const t = useTranslations();
+  const router = useRouter();
+  // Contacts whose delete is in flight or done, hidden until the refreshed directory drops them.
+  // The rows themselves always come from the props, so a refresh lands in the list.
+  const [deletedIds, setDeletedIds] = useState<ReadonlySet<string>>(() => new Set());
+  const counterparties = useMemo(
+    () => initialCounterparties.filter((counterparty) => !deletedIds.has(counterparty.id)),
+    [initialCounterparties, deletedIds]
+  );
+  const [query, setQuery] = useState("");
+  const [typeFilter, setTypeFilter] = useState<EntityType | undefined>();
+  const [addressFilter, setAddressFilter] = useState<AddressFilter | undefined>();
+  const [pageSize, setPageSize] = useState(25);
+  const [page, setPage] = useState(1);
+  const [pendingDelete, setPendingDelete] = useState<Counterparty | null>(null);
+  const addressesLoaded = !accountsFailed && accountsTotal <= accounts.length;
 
-  useEffect(() => {
-    if (isPlaygroundTab) return;
-
-    const preload = () => {
-      void import("./counterparty-playground");
-    };
-
-    if (typeof window !== "undefined" && "requestIdleCallback" in window) {
-      const idleId = window.requestIdleCallback(preload);
-      return () => window.cancelIdleCallback(idleId);
+  const addressesByCounterparty = useMemo(() => {
+    const byId = new Map<string, string[]>();
+    for (const account of accounts) {
+      const list = byId.get(account.counterpartyId) ?? [];
+      list.push(account.address);
+      byId.set(account.counterpartyId, list);
     }
+    return byId;
+  }, [accounts]);
 
-    const timeoutId = globalThis.setTimeout(preload, 600);
-    return () => globalThis.clearTimeout(timeoutId);
-  }, [isPlaygroundTab]);
-
-  const playgroundCounterparties = useMemo<CounterpartyPlaygroundView[]>(
-    () => counterparties.map((cp) => ({ id: cp.id, displayName: cp.displayName })),
-    [counterparties]
+  const filtered = useMemo(
+    () =>
+      filterDirectory(counterparties, addressesByCounterparty, {
+        query,
+        typeFilter,
+        // A hidden address filter must not keep narrowing the list: the menu no longer offers
+        // a way to clear it. It applies again, still selected, once the addresses load.
+        addressFilter: addressesLoaded ? addressFilter : undefined,
+      }),
+    [counterparties, addressesByCounterparty, query, typeFilter, addressFilter, addressesLoaded]
   );
 
-  const [pendingDelete, setPendingDelete] = useState<Counterparty | null>(null);
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const currentPage = Math.min(page, pageCount);
+  const rows = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const resetPage =
+    <T,>(set: (value: T) => void) =>
+    (value: T) => {
+      set(value);
+      setPage(1);
+    };
 
   async function confirmDelete() {
     if (!pendingDelete) return;
     const target = pendingDelete;
-
-    // Optimistically drop the row, then reconcile with the server below.
-    removeOptimistic(target.id);
+    setDeletedIds((current) => new Set(current).add(target.id));
     setPendingDelete(null);
-
     const result = await dashboardFetch(
       `/api/dashboard/counterparty/${encodeURIComponent(target.id)}`,
       { method: "DELETE" }
     );
     if (!result.ok) {
+      // Not deleted: bring the row back.
+      setDeletedIds((current) => {
+        const next = new Set(current);
+        next.delete(target.id);
+        return next;
+      });
       toast.error(result.error, { position: "bottom-right" });
-      router.refresh(); // restore the optimistically-removed row
       return;
     }
     toast.success(t("DashboardPayments.counterparty.deleted", { name: target.displayName }), {
@@ -126,202 +452,84 @@ export function CounterpartyWorkspace({
     router.refresh();
   }
 
+  if (initialCounterparties.length === 0) {
+    return directoryFailed ? <DirectoryLoadFailed /> : <EmptyDirectory />;
+  }
+
   return (
-    <>
-      <DashboardWorkspaceTabShell
-        panels={[
-          {
-            id: "overview",
-            className: cn(
-              dashboardWorkspaceOverviewPanelClassName,
-              "flex min-h-0 flex-col overflow-hidden"
-            ),
-            content: (
-              <Card className="flex min-h-0 flex-1 flex-col gap-0 overflow-hidden rounded-lg border border-border-default bg-surface-raised py-0 shadow-none ring-0">
-                <CardHeader className="p-4">
-                  <CardTitle>{t("DashboardPayments.counterparty.directory")}</CardTitle>
-                  <CardDescription>
-                    {t("DashboardPayments.counterparty.directoryDescription")}
-                  </CardDescription>
-                  {total > 0 && (
-                    <CardAction>
-                      <Button
-                        type="button"
-                        iconLeft={<PlusIcon />}
-                        onClick={() => router.push(href("/dashboard/payments/counterparty/create"))}
-                      >
-                        {t("DashboardPayments.counterparty.create")}
-                      </Button>
-                    </CardAction>
-                  )}
-                </CardHeader>
-                <CardContent className="flex min-h-0 flex-1 flex-col px-0">
-                  {total === 0 ? (
-                    <div className="flex flex-1 flex-col items-center justify-center gap-4 py-16 text-center">
-                      <UsersIcon className="h-10 w-10 text-muted" />
-                      <div className="space-y-1">
-                        <p className="text-sm font-medium text-primary">
-                          {t("DashboardPayments.counterparty.noCounterparties")}
-                        </p>
-                        <p className="text-sm text-tertiary">
-                          {t("DashboardPayments.counterparty.noCounterpartiesDescription")}
-                        </p>
-                      </div>
-                      <Button
-                        type="button"
-                        iconLeft={<PlusIcon />}
-                        onClick={() => router.push(href("/dashboard/payments/counterparty/create"))}
-                      >
-                        {t("DashboardPayments.counterparty.create")}
-                      </Button>
-                    </div>
-                  ) : (
-                    <div className="min-h-0 flex-1 overflow-y-auto">
-                      <div className="divide-y divide-border-default md:hidden">
-                        {counterparties.map((cp) => (
-                          <button
-                            key={cp.id}
-                            type="button"
-                            onClick={() =>
-                              router.push(href(`/dashboard/payments/counterparty/${cp.id}`))
-                            }
-                            className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-fill-subtle"
-                          >
-                            <span className="min-w-0 flex-1">
-                              <span className="flex items-center gap-2">
-                                <span className="truncate text-sm font-medium text-primary">
-                                  {cp.displayName}
-                                </span>
-                                <span className="shrink-0 text-xs text-tertiary">
-                                  {cp.entityType === "individual"
-                                    ? t("DashboardPayments.counterparty.individual")
-                                    : t("DashboardPayments.counterparty.business")}
-                                </span>
-                              </span>
-                            </span>
-                            <ChevronRightIcon className="size-4 shrink-0 text-tertiary" />
-                          </button>
-                        ))}
-                      </div>
-                      <Table
-                        className="hidden rounded-none border-0 [&_table]:min-w-220 [&_table]:table-fixed md:block"
-                        data-counterparty-directory-table
-                      >
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead className="w-2/5">
-                              {t("DashboardPayments.counterparty.displayName")}
-                            </TableHead>
-                            <TableHead className="w-1/6">
-                              {t("DashboardPayments.counterparty.type")}
-                            </TableHead>
-                            <TableHead className="w-1/5">
-                              {t("DashboardPayments.counterparty.externalId")}
-                            </TableHead>
-                            <TableHead className="w-1/5">
-                              {t("DashboardPayments.recurring.created")}
-                            </TableHead>
-                            <TableHead className="w-14" />
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {counterparties.map((cp) => (
-                            <TableRow key={cp.id}>
-                              <TableCell className="font-medium">
-                                <span className="block truncate">{cp.displayName}</span>
-                              </TableCell>
-                              <TableCell>
-                                <Badge>
-                                  {cp.entityType === "individual"
-                                    ? t("DashboardPayments.counterparty.individual")
-                                    : t("DashboardPayments.counterparty.business")}
-                                </Badge>
-                              </TableCell>
-                              <TableCell className="font-mono text-xs text-secondary">
-                                <span className="block truncate">{cp.externalId ?? "—"}</span>
-                              </TableCell>
-                              <TableCell className="text-sm text-secondary">
-                                {new Date(cp.createdAt).toLocaleDateString(locale, {
-                                  month: "short",
-                                  day: "2-digit",
-                                  year: "numeric",
-                                })}
-                              </TableCell>
-                              <TableCell className="text-right">
-                                <DropdownMenu>
-                                  <DropdownMenuTrigger asChild>
-                                    <Button
-                                      type="button"
-                                      variant="ghost"
-                                      size="icon-sm"
-                                      aria-label={t(
-                                        "DashboardPayments.counterparty.counterpartyActions"
-                                      )}
-                                    >
-                                      <MoreHorizontalIcon />
-                                    </Button>
-                                  </DropdownMenuTrigger>
-                                  <DropdownMenuContent>
-                                    <DropdownMenuItem
-                                      className="text-xs [&_svg]:size-3.5"
-                                      onSelect={() =>
-                                        router.push(
-                                          href(`/dashboard/payments/counterparty/${cp.id}`)
-                                        )
-                                      }
-                                    >
-                                      <UserIcon />
-                                      {t("DashboardPayments.counterparty.manageCounterparty")}
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                      className="text-xs text-error focus:text-error [&_svg]:size-3.5"
-                                      onSelect={() => setPendingDelete(cp)}
-                                    >
-                                      <Trash2Icon />
-                                      {t("DashboardPayments.counterparty.deleteCounterparty")}
-                                    </DropdownMenuItem>
-                                  </DropdownMenuContent>
-                                </DropdownMenu>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  )}
-                </CardContent>
-                {total > 0 && (
-                  <CardFooter className="shrink-0 border-t border-border-default px-4 py-3">
-                    <ArrowPagination
-                      className="w-full"
-                      page={page}
-                      pageCount={pageCount}
-                      onPageChange={setPage}
-                      summary={pageSummary}
-                    />
-                  </CardFooter>
-                )}
-              </Card>
-            ),
-          },
-          {
-            id: "playground",
-            className: dashboardWorkspacePlaygroundPanelClassName,
-            content: (
-              <CounterpartyPlayground
-                apiBaseUrl={apiBaseUrl}
-                counterparties={playgroundCounterparties}
-              />
-            ),
-          },
-        ]}
+    <DashboardWorkspaceOverviewPanel className="flex flex-col gap-5">
+      <DirectoryToolbar
+        query={query}
+        typeFilter={typeFilter}
+        addressFilter={addressFilter}
+        addressFilterAvailable={addressesLoaded}
+        pageSize={pageSize}
+        onQueryChange={resetPage(setQuery)}
+        onTypeFilterChange={resetPage(setTypeFilter)}
+        onAddressFilterChange={resetPage(setAddressFilter)}
+        onPageSizeChange={resetPage(setPageSize)}
       />
+      <DirectoryNotices
+        loaded={initialCounterparties.length}
+        total={total}
+        accountsLoaded={accounts.length}
+        accountsTotal={accountsTotal}
+        accountsFailed={accountsFailed}
+      />
+      {rows.length === 0 ? (
+        <p className="py-12 text-center text-body text-tertiary">
+          {t("DashboardPayments.counterparty.noMatches")}
+        </p>
+      ) : (
+        <div className="overflow-x-auto refresh:-mx-3">
+          <Table className="min-w-[760px] rounded-none border-0" data-counterparty-directory-table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className={PAYMENTS_TABLE_HEAD}>
+                  {t("DashboardPayments.counterparty.name")}
+                </TableHead>
+                <TableHead className={PAYMENTS_TABLE_HEAD}>
+                  {t("DashboardPayments.counterparty.type")}
+                </TableHead>
+                <TableHead className={PAYMENTS_TABLE_HEAD}>
+                  {t("DashboardPayments.counterparty.externalId")}
+                </TableHead>
+                <TableHead className={PAYMENTS_TABLE_HEAD}>
+                  {t("DashboardPayments.counterparty.address")}
+                </TableHead>
+                <TableHead className={PAYMENTS_TABLE_HEAD}>
+                  {t("DashboardPayments.recurring.created")}
+                </TableHead>
+                <TableHead className="w-12">
+                  <span className="sr-only">
+                    {t("DashboardPayments.counterparty.counterpartyActions")}
+                  </span>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((counterparty) => (
+                <CounterpartyRow
+                  key={counterparty.id}
+                  counterparty={counterparty}
+                  addresses={addressesByCounterparty.get(counterparty.id) ?? []}
+                  addressesLoaded={addressesLoaded}
+                  onDelete={setPendingDelete}
+                />
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+      {filtered.length > pageSize ? (
+        <ArrowPagination page={currentPage} pageCount={pageCount} onPageChange={setPage} />
+      ) : null}
       <DeleteCounterpartyDialog
         isOpen={pendingDelete !== null}
         displayName={pendingDelete?.displayName ?? null}
         onConfirm={confirmDelete}
         onClose={() => setPendingDelete(null)}
       />
-    </>
+    </DashboardWorkspaceOverviewPanel>
   );
 }

@@ -24,6 +24,7 @@ vi.mock("@clerk/nextjs", () => ({
   useAuth: () => ({ isLoaded: false, orgId: null, userId: null }),
 }));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
+
 vi.mock("sonner", () => ({
   toast: {
     error: mocks.toastError,
@@ -138,12 +139,15 @@ async function resolveAccounts() {
   await act(async () => accountsResponse?.());
 }
 
-async function prepareReview(result: ReturnType<typeof renderWizard>["result"]) {
+async function prepareReview(result: ReturnType<typeof renderWizard>["result"], memo = "") {
   await resolveAccounts();
   act(() => result.current.setField("accountId", cryptoAccount.id));
   await act(async () => result.current.handlePrimary());
   act(() => result.current.selectWallet("wallet-usdc"));
   act(() => result.current.setField("amount", "0.5"));
+  if (memo !== "") {
+    act(() => result.current.setField("memo", memo));
+  }
   await act(async () => result.current.handlePrimary());
 }
 
@@ -258,10 +262,10 @@ describe("useOnchainSendWizard", () => {
     expect(transferPosts()).toHaveLength(0);
   });
 
-  it("loads active crypto destinations and navigates destination steps", async () => {
+  it("loads active crypto destinations and holds the details step until it is complete", async () => {
     const { result, onExit } = renderWizard();
 
-    expect(result.current.currentStepId).toBe("DESTINATION");
+    expect(result.current.currentStepId).toBe("DETAILS");
     expect(result.current.canProceed).toBe(false);
     expect(result.current.accountsLoading).toBe(true);
 
@@ -271,12 +275,11 @@ describe("useOnchainSendWizard", () => {
 
     act(() => result.current.setField("accountId", cryptoAccount.id));
     expect(result.current.destinationAddress).toBe(DESTINATION);
-    expect(result.current.canProceed).toBe(true);
+    // A destination alone is not a payment: the wallet, token and amount share the step.
+    expect(result.current.canProceed).toBe(false);
 
     await act(async () => result.current.handlePrimary());
     expect(result.current.currentStepId).toBe("DETAILS");
-    act(() => result.current.handleSecondary());
-    expect(result.current.currentStepId).toBe("DESTINATION");
     act(() => result.current.handleSecondary());
     expect(onExit).toHaveBeenCalledOnce();
   });

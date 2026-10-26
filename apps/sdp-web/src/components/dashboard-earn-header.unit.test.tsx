@@ -6,7 +6,7 @@ const t = ((key: string) => key) as Translate;
 
 describe("Markets dashboard headers", () => {
   it("centers the Markets landing title without header tabs", () => {
-    const config = getDashboardPageConfig("/dashboard/markets", t, false, false, []);
+    const config = getDashboardPageConfig("/dashboard/markets", t);
 
     expect(config).toMatchObject({
       title: "Shared.dashboardShell.markets",
@@ -21,7 +21,7 @@ describe("Markets dashboard headers", () => {
     "/dashboard/markets/embedded-yield",
     "/dashboard/markets/dvp",
   ])("centers the shared Markets title without redundant route tabs for %s", (pathname) => {
-    const config = getDashboardPageConfig(pathname, t, false, false, []);
+    const config = getDashboardPageConfig(pathname, t);
 
     expect(config).toMatchObject({
       title: "Shared.dashboardShell.markets",
@@ -33,13 +33,7 @@ describe("Markets dashboard headers", () => {
   });
 
   it("centers the Embedded Yield integration title without header tabs", () => {
-    const config = getDashboardPageConfig(
-      "/dashboard/markets/embedded-yield/integrate",
-      t,
-      false,
-      false,
-      []
-    );
+    const config = getDashboardPageConfig("/dashboard/markets/embedded-yield/integrate", t);
 
     expect(config).toMatchObject({
       title: "Shared.dashboardShell.configureEarnButton",
@@ -50,13 +44,7 @@ describe("Markets dashboard headers", () => {
   });
 
   it("uses the integration title for Embedded Yield configuration", () => {
-    const config = getDashboardPageConfig(
-      "/dashboard/markets/embedded-yield/configure",
-      t,
-      false,
-      false,
-      []
-    );
+    const config = getDashboardPageConfig("/dashboard/markets/embedded-yield/configure", t);
 
     expect(config).toMatchObject({
       title: "Shared.dashboardShell.configureEarnButton",
@@ -68,31 +56,13 @@ describe("Markets dashboard headers", () => {
 
 describe("Integrations dashboard headers", () => {
   it("keeps category navigation in the sidebar submenu", () => {
-    const config = getDashboardPageConfig(
-      "/dashboard/integrations",
-      t,
-      false,
-      true,
-      [],
-      true,
-      true,
-      true
-    );
+    const config = getDashboardPageConfig("/dashboard/integrations", t, true);
 
     expect(config.headerTabs).toBeUndefined();
   });
 
   it("does not recreate category tabs when modules are disabled", () => {
-    const config = getDashboardPageConfig(
-      "/dashboard/integrations",
-      t,
-      false,
-      false,
-      [],
-      false,
-      false,
-      false
-    );
+    const config = getDashboardPageConfig("/dashboard/integrations", t, false);
 
     expect(config.headerTabs).toBeUndefined();
   });
@@ -113,6 +83,7 @@ describe("dashboard route headers", () => {
     ["/dashboard/custody/wallet_1", "Shared.dashboardShell.wallet"],
     ["/dashboard/issuance", "Shared.dashboardShell.issuance"],
     ["/dashboard/issuance/create", "DashboardIssuance.newDesign.draft.pageTitle"],
+    ["/dashboard/issuance/token_1", "DashboardIssuance.newDesign.token.pageTitle"],
     ["/dashboard/payments/counterparty", "Shared.dashboardShell.contactList"],
     ["/dashboard/payments/counterparty/create", "Shared.dashboardShell.newDesign.newCounterparty"],
     ["/dashboard/payments/counterparty/cp_1", "Shared.dashboardShell.contact"],
@@ -157,39 +128,6 @@ describe("dashboard route headers", () => {
     ["/dashboard/allowlist", "Shared.dashboardShell.allowlist"],
     ["/dashboard/unknown", "Shared.dashboardShell.newDesign.home"],
   ])("maps %s to its route-specific title", (pathname, title) => {
-    expect(getDashboardPageConfig(pathname, t, false, true, [], true, true, true).title).toBe(
-      title
-    );
-  });
-
-  it("uses the asset-management header only for enabled Asset Profiles", () => {
-    const legacy = (assetProfiles: boolean) =>
-      getDashboardPageConfig(
-        "/dashboard/issuance/token_1",
-        t,
-        assetProfiles,
-        false,
-        [],
-        true,
-        true,
-        false
-      ).title;
-    expect(legacy(true)).toBe("Shared.dashboardShell.assetManagement");
-    expect(legacy(false)).toBe("Shared.dashboardShell.issuance");
-  });
-
-  it("names a token's page Token on the new design, with or without Asset Profiles", () => {
-    for (const assetProfiles of [true, false]) {
-      expect(
-        getDashboardPageConfig("/dashboard/issuance/token_1", t, assetProfiles, false, []).title
-      ).toBe("DashboardIssuance.newDesign.token.pageTitle");
-    }
-  });
-
-  it("keeps the previous design's draft title with NEW DESIGN off", () => {
-    expect(
-      getDashboardPageConfig("/dashboard/issuance/create", t, false, true, [], true, true, false)
-        .title
-    ).toBe("Shared.dashboardShell.newAsset");
+    expect(getDashboardPageConfig(pathname, t, true).title).toBe(title);
   });
 });

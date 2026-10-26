@@ -9,7 +9,7 @@ import {
   invalidateQuickStartStatus,
   type QuickStartStatus,
   quickStartKey,
-} from "@/lib/dashboard-quick-start.redesign";
+} from "@/lib/dashboard-quick-start";
 
 const STATUS: QuickStartStatus = {
   custodyProvider: "privy",

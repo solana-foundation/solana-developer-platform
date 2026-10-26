@@ -1003,38 +1003,19 @@ jobs:
           - name: Dashboard E2E (Transactions / Surfpool Local)
             test_script: test:e2e:dashboard-transactions
             artifact_suffix: dashboard-transactions-surfpool
-          - name: Issuance E2E (basics)
-            issuance_group: basics
-            artifact_suffix: issuance-basics
-          - name: Issuance E2E (authority and supply)
-            issuance_group: authority-and-supply
-            artifact_suffix: issuance-authority-and-supply
-          - name: Issuance E2E (freeze controls)
-            issuance_group: freeze-controls
-            artifact_suffix: issuance-freeze-controls
-          - name: Issuance E2E (pause controls)
-            issuance_group: pause-controls
-            artifact_suffix: issuance-pause-controls
-          - name: Issuance E2E (allowlist)
-            issuance_group: allowlist
-            artifact_suffix: issuance-allowlist
-          - name: Issuance E2E (new design)
-            issuance_group: redesign
-            new_design_issuance: "true"
-            artifact_suffix: issuance-redesign
+          - name: Issuance E2E
+            issuance: "true"
+            artifact_suffix: issuance
     env:
       E2E_AFFECTED: ${{ needs.unit_test_scope.outputs.e2e }}
       CI_HAS_DOPPLER_TOKEN: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
       DATABASE_URL: postgresql://sdp:sdp@127.0.0.1:5432/sdp
       REDIS_URL: redis://127.0.0.1:6379
-      DOPPLER_PRESERVE_ENV: DATABASE_URL,REDIS_URL,SOLANA_NETWORK,NEXT_PUBLIC_SENTRY_DSN,SDP_API_BASE_URL,NEXT_PUBLIC_SDP_API_BASE_URL,PLAYWRIGHT_API_URL,PLAYWRIGHT_API_PORT,PLAYWRIGHT_BASE_URL,PLAYWRIGHT_NEXT_DIST_DIR,PLAYWRIGHT_USE_NEXT_START,ISSUANCE_ENABLED,SDP_FLAG_NEW_DESIGN_ISSUANCE,API_KEY_PEPPER
+      DOPPLER_PRESERVE_ENV: DATABASE_URL,REDIS_URL,SOLANA_NETWORK,NEXT_PUBLIC_SENTRY_DSN,SDP_API_BASE_URL,NEXT_PUBLIC_SDP_API_BASE_URL,PLAYWRIGHT_API_URL,PLAYWRIGHT_API_PORT,PLAYWRIGHT_BASE_URL,PLAYWRIGHT_NEXT_DIST_DIR,PLAYWRIGHT_USE_NEXT_START,ISSUANCE_ENABLED,API_KEY_PEPPER
       # The API refuses to start without a pepper (HOO-2219). A fixed CI value is
       # enough: each run starts from an empty database and mints its own keys.
       API_KEY_PEPPER: ci-e2e-pepper-not-a-secret
       ISSUANCE_ENABLED: "true"
-      # issuance.e2e.spec.ts drives the previous Issuance design, which production still serves
-      # (NEW DESIGN is off there). A matrix entry sets new_design_issuance to run the new one.
-      SDP_FLAG_NEW_DESIGN_ISSUANCE: ${{ matrix.new_design_issuance || 'false' }}
       SOLANA_NETWORK: devnet
       PLAYWRIGHT_API_URL: http://127.0.0.1:8787
       PLAYWRIGHT_API_PORT: "8787"
@@ -1164,8 +1145,8 @@ jobs:
           DOPPLER_CONFIG: dev_ci
           SOLANA_RPC_CI_PREFERRED_PROVIDER: quicknode
         run: |
-          if [ -n "${{ matrix.issuance_group }}" ]; then
-            scripts/doppler/run-with-config.sh pnpm kora:surfpool:e2e:issuance ${{ matrix.issuance_group }}
+          if [ "${{ matrix.issuance }}" = "true" ]; then
+            scripts/doppler/run-with-config.sh pnpm kora:surfpool:e2e:issuance
           else
             scripts/doppler/run-with-config.sh pnpm kora:surfpool:run -- pnpm --filter sdp-web run ${{ matrix.test_script }}
           fi
@@ -1192,7 +1173,7 @@ jobs:
     if: always() && needs.unit_test_scope.outputs.e2e == 'true'
     timeout-minutes: 5
     steps:
-      # The issuance groups share the browser_e2e matrix with the two Dashboard E2E
+      # The Issuance E2E job shares the browser_e2e matrix with the two Dashboard E2E
       # jobs, so this reads the whole matrix's result. The jobs API is not a substitute:
       # it reported finished shards' conclusions as null for minutes after they settled.
       # The Dashboard E2E jobs are required checks themselves, so gating on them too
@@ -1202,7 +1183,7 @@ jobs:
           SHARD_RESULT: ${{ needs.browser_e2e.result }}
         run: |
           if [ "${SHARD_RESULT}" != "success" ]; then
-            echo "One or more browser E2E shards (issuance groups or Dashboard E2E) finished with ${SHARD_RESULT}." >&2
+            echo "One or more browser E2E jobs (Issuance E2E or Dashboard E2E) finished with ${SHARD_RESULT}." >&2
             exit 1
           fi
-          echo "All issuance e2e groups and Dashboard E2E jobs passed."
+          echo "Issuance E2E and Dashboard E2E jobs passed."

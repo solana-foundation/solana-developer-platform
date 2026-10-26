@@ -8,10 +8,6 @@ import {
   runRecurringPaymentAction,
   updateRecurringPayment,
 } from "./recurring-payments.data";
-import {
-  createRecurringPayment as createRecurringPaymentRedesign,
-  updateRecurringPayment as updateRecurringPaymentRedesign,
-} from "./recurring-payments.data.redesign";
 
 const t: Parameters<typeof createRecurringPayment>[2] = (key) => key;
 
@@ -146,10 +142,7 @@ describe("recurring payment unknown outcomes", () => {
 // SOLA9-775: the action key is derived from the body text, and the API
 // fingerprints the canonical amount, so `25.00` re-entered after a lost `25.0`
 // minted a new key and could create the schedule twice.
-describe.each([
-  ["legacy", createRecurringPayment, updateRecurringPayment],
-  ["redesign", createRecurringPaymentRedesign, updateRecurringPaymentRedesign],
-])("recurring payment amount spelling (%s)", (_label, create, update) => {
+describe("recurring payment amount spelling", () => {
   beforeEach(() => setWindowPathname("/dashboard/prj_test_sandbox/payments/recurring"));
   afterEach(() => vi.unstubAllGlobals());
 
@@ -181,7 +174,9 @@ describe.each([
     });
 
     for (const amount of ["25.0", "25.00", "25.5"]) {
-      await expect(create(input(amount), undefined, t)).rejects.toThrow("Failed to fetch");
+      await expect(createRecurringPayment(input(amount), undefined, t)).rejects.toThrow(
+        "Failed to fetch"
+      );
     }
 
     const [first, respelled, different] = sent();
@@ -194,7 +189,9 @@ describe.each([
     const sent = lostAnswers();
 
     for (const amount of ["1.0", "1", "1.01"]) {
-      await expect(update("prp_1", { amount }, undefined, t)).rejects.toThrow("Failed to fetch");
+      await expect(updateRecurringPayment("prp_1", { amount }, undefined, t)).rejects.toThrow(
+        "Failed to fetch"
+      );
     }
 
     const [first, respelled, different] = sent();

@@ -80,38 +80,7 @@ export interface IssuanceTokenView {
 
 // ── Shared formatters / derivations ─────────────────────────────────────────
 
-/**
- * The label for a small logo stand-in, when the asset has no artwork: one
- * character, because most tickers run to four or more. A single initial reads as
- * a monogram, while any longer prefix of a longer symbol reads as truncated —
- * "HRB" beside a real logo looks like a bug rather than a mark. Surfaces with
- * room for the whole symbol should set that instead of a longer prefix. Casing is
- * the issuer's, as everywhere else the symbol appears.
- */
-export function tokenMarkInitial(symbol: string): string {
-  return symbol.trim().slice(0, 1) || "?";
-}
-
-export function formatDate(value: string | null | undefined, locale: string): string {
-  if (!value) {
-    return "—";
-  }
-
-  const isoDateMatch = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
-  if (isoDateMatch) {
-    const [, year, month, day] = isoDateMatch;
-    return new Date(`${year}-${month}-${day}T00:00:00`).toLocaleDateString(locale);
-  }
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return date.toLocaleDateString(locale);
-}
-
-export function formatSupply(value: string, locale: string): string {
+function formatSupply(value: string, locale: string): string {
   const normalized = value.trim();
   if (!normalized) {
     return "0";
@@ -144,80 +113,6 @@ export function getTokenTypeLabel(template: IssuanceTokenView["template"], t: Tr
   }
 
   return template;
-}
-
-/**
- * The token's own status as a dot, a colour and a word — the one place on these
- * surfaces where colour carries meaning. Shared by the asset-management header and
- * the overview tab so the same status cannot read two ways on one page.
- */
-export function tokenStatusPresentation(
-  t: Translate,
-  status: Token["status"]
-): { label: string; badgeClassName: string; textClassName: string; dotClassName: string } {
-  const presentations: Record<
-    Token["status"],
-    { label: string; badgeClassName: string; textClassName: string; dotClassName: string }
-  > = {
-    pending: {
-      label: t("DashboardIssuance.status.draft"),
-      badgeClassName: "bg-fill text-secondary",
-      textClassName: "text-secondary",
-      dotClassName: "bg-fill-strong",
-    },
-    active: {
-      label: t("DashboardIssuance.status.active"),
-      badgeClassName: "bg-success-bg text-success",
-      textClassName: "text-success",
-      dotClassName: "bg-success",
-    },
-    paused: {
-      label: t("DashboardIssuance.status.paused"),
-      badgeClassName: "bg-warning-bg text-warning",
-      textClassName: "text-warning",
-      dotClassName: "bg-warning",
-    },
-    revoked: {
-      label: t("DashboardIssuance.status.revoked"),
-      badgeClassName: "bg-error-bg text-error",
-      textClassName: "text-error",
-      dotClassName: "bg-error",
-    },
-  };
-  return presentations[status];
-}
-
-export type DeploymentStatus = "draft" | "active" | "paused";
-
-/**
- * The one status a token shows across the list row, the grid tile and the filter.
- *
- * Deployment comes first — a token with no mint is a draft whatever its row says.
- * Past that, `status` is the operator's own state, and `paused` is the one value of
- * it that changes what the token *does*: transfers have stopped. Reporting that as
- * "Active" (which is what collapsing to deployed-or-not did) contradicts the action
- * an operator just took. `revoked` still reads as Active here; it wants the same
- * treatment, but it's a separate state with its own copy.
- */
-export function getDeploymentStatus(token: IssuanceTokenView): DeploymentStatus {
-  if (!(token.mintAddress || token.deployedAt)) {
-    return "draft";
-  }
-  return token.status === "paused" ? "paused" : "active";
-}
-
-// Status is the one place colour carries meaning here: green for live, amber for
-// deliberately halted, neutral for not-yet-deployed. Borderless, per the badge rule.
-const DEPLOYMENT_STATUS_BADGE: Record<DeploymentStatus, { badge: string; labelKey: MessageKey }> = {
-  active: { badge: "bg-success-bg text-success", labelKey: "DashboardIssuance.status.active" },
-  paused: { badge: "bg-warning-bg text-warning", labelKey: "DashboardIssuance.status.paused" },
-  draft: { badge: "bg-fill text-secondary", labelKey: "DashboardIssuance.status.draft" },
-};
-
-/** Badge classes + label for a deployment status, shared by every surface. */
-export function deploymentStatusBadge(status: DeploymentStatus, t: Translate) {
-  const { badge, labelKey } = DEPLOYMENT_STATUS_BADGE[status];
-  return { badge, label: t(labelKey) };
 }
 
 // Mirrors getExplorerHref in the token-management utils; kept local so the list
@@ -531,7 +426,7 @@ export interface ListCardHeroData {
   categoryTiles: CategoryTile[];
 }
 
-export interface SmartDate {
+interface SmartDate {
   label: string;
   value: string;
   /** The complementary date, for the (i) beside the label: when the draft was
@@ -545,11 +440,7 @@ export interface SmartDate {
  * the created date in the (i); a draft just shows created. Shared by the list row,
  * the grid tile and the hero so a token reads the same in all three.
  */
-export function buildSmartDate(
-  view: IssuanceTokenView,
-  t: Translate,
-  locale: AppLocale
-): SmartDate {
+function buildSmartDate(view: IssuanceTokenView, t: Translate, locale: AppLocale): SmartDate {
   if (view.deployedAt) {
     return {
       label: t("DashboardIssuance.overview.deployed"),
