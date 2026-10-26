@@ -15,7 +15,7 @@ import {
   toBaseUnits,
   toTokenAmount,
 } from "@sdp/solana/token-amount";
-import { support } from "@sdp/solana/token-movement";
+import { support, TOKEN_MOVEMENT_REFUSALS } from "@sdp/solana/token-movement";
 import type { FinalPaymentRequestTransactionOutcome } from "@sdp/types/payments";
 import { BUILT_MOVEMENT_VERDICTS, type TokenMovementExpectation } from "@sdp/types/token-movements";
 import { SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
@@ -112,14 +112,19 @@ type ExpectationRead =
  *
  * RPC budget: one terms read (`getMultipleAccounts` of the mint and the
  * Clock); native SOL none.
+ *
+ * @param settling - The read verifies a payment that may have landed, not a new
+ *   transfer: a paused mint is no reason to skip it, because the pause cannot
+ *   undo a payment that already landed.
  */
 async function readPaymentRequestExpectation(
   token: string,
-  amount: string
+  amount: string,
+  settling = false
 ): Promise<ExpectationRead> {
   const terms = await readTokenTerms(paymentRequestAsset(token));
   const decision = support(terms, "builder");
-  if (!decision.supported) {
+  if (!decision.supported && !(settling && decision.refusal === TOKEN_MOVEMENT_REFUSALS.paused)) {
     return {
       kind: "refused",
       reason: "mint_not_admitted",
@@ -636,7 +641,7 @@ async function expectedTransfer(
   if (expectation === null) {
     let read: ExpectationRead;
     try {
-      read = await readPaymentRequestExpectation(row.token, row.amount);
+      read = await readPaymentRequestExpectation(row.token, row.amount, true);
     } catch (error) {
       if (!(error instanceof AppError) || error.code !== "BAD_REQUEST") throw error;
       read = { kind: "refused", reason: "mint_not_admitted", error };

@@ -36,6 +36,7 @@ import {
   getTransferCheckedInstruction,
   TOKEN_PROGRAM_ADDRESS,
 } from "@solana-program/token";
+import { TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import {
   afterEach,
   beforeAll,
@@ -952,8 +953,10 @@ async function exactTransferResponse(params: {
   rawAmount: bigint;
   reference: Address;
   lookupTable: Address | null;
+  /** The mint's token program; the classic program when omitted. */
+  tokenProgram?: Address;
 }): Promise<Awaited<ReturnType<typeof paymentRequestTransfer.validatePaymentRequestTransfer>>> {
-  const { token, rawAmount, reference, lookupTable } = params;
+  const { token, rawAmount, reference, lookupTable, tokenProgram = TOKEN_PROGRAM_ADDRESS } = params;
   const owner = address(TEST_CUSTODY_PUBLIC_KEY);
   const source = createNoopSigner(syntheticAddress(332));
   const destination =
@@ -963,20 +966,23 @@ async function exactTransferResponse(params: {
           await findAssociatedTokenPda({
             owner,
             mint: address(token),
-            tokenProgram: TOKEN_PROGRAM_ADDRESS,
+            tokenProgram,
           })
         )[0];
   const instruction =
     token === SOL_MINT
       ? getTransferSolInstruction({ source, destination, amount: rawAmount })
-      : getTransferCheckedInstruction({
-          source: syntheticAddress(333),
-          mint: address(token),
-          destination,
-          authority: source,
-          amount: rawAmount,
-          decimals: 6,
-        });
+      : getTransferCheckedInstruction(
+          {
+            source: syntheticAddress(333),
+            mint: address(token),
+            destination,
+            authority: source,
+            amount: rawAmount,
+            decimals: 6,
+          },
+          { programAddress: tokenProgram }
+        );
   const referenced = {
     ...instruction,
     accounts: [...instruction.accounts, { address: reference, role: AccountRole.READONLY }],
@@ -1009,7 +1015,7 @@ async function exactTransferResponse(params: {
     accountIndex,
     mint: address(token),
     owner,
-    programId: TOKEN_PROGRAM_ADDRESS,
+    programId: tokenProgram,
     uiTokenAmount: {
       amount: stringifiedBigInt(amount.toString()),
       decimals: 6,
@@ -1114,6 +1120,43 @@ describe("exact transfer validation", () => {
       expect(await listInboundTransfers()).toHaveLength(status === "paid" ? 1 : 0);
     }
   );
+
+  it("settles a legacy request's landed payment although its mint has paused since", async () => {
+    const pyusd = WELL_KNOWN_TOKENS.PYUSD.mints.devnet.address;
+    answerMovementAccounts(
+      rpc,
+      new Map([
+        [
+          pyusd,
+          mintRpcAccount("token-2022", {
+            decimals: 6,
+            extensions: [
+              { __kind: "PausableConfig", authority: syntheticAddress(334), paused: true },
+            ],
+          }),
+        ],
+      ])
+    );
+    const request = await createLegacyRequest({ token: pyusd, amount: "1", expiresAt: null });
+    mockExactCandidate();
+    rpc.answer(
+      "getTransaction",
+      asRpcJson(
+        await exactTransferResponse({
+          token: pyusd,
+          rawAmount: 1_000_000n,
+          reference: address(request.reference),
+          lookupTable: null,
+          tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
+        })
+      )
+    );
+
+    const settled = await onSandbox(() => checkAwaitingPaymentRequest(env, request));
+
+    expect(settled.status).toBe("paid");
+    expect(await listInboundTransfers()).toHaveLength(1);
+  });
 
   it("reads each candidate's transaction once", async () => {
     const request = await createRequest({ token: SOL_MINT, expiresAt: null });
