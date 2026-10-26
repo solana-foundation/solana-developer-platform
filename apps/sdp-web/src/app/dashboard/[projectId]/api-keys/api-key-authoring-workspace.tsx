@@ -14,7 +14,7 @@ import { type ReactNode, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
-import { recordQuickStartStep } from "@/lib/dashboard-quick-start.redesign";
+import { invalidateQuickStartStatus } from "@/lib/dashboard-quick-start";
 import { parseAllowedIps } from "@/lib/ip-allowlist-input";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { saveApiKeyAuthoringAction } from "./actions";
@@ -570,7 +570,7 @@ export function ApiKeyAuthoringWorkspace({
   const t = useTranslations();
   const router = useRouter();
   const href = useProjectHref();
-  const { sdpEnvironment, dashboardCacheScope, selectedProjectId, flags } = useDashboardWorkspace();
+  const { sdpEnvironment, selectedProjectId } = useDashboardWorkspace();
   const [currentStep, setCurrentStep] = useState<ApiKeyAuthoringStep>("details");
   const [draft, setDraft] = useState(() => draftFromInitialKey(initialKey));
   const [walletSelectionTouched, setWalletSelectionTouched] = useState(false);
@@ -615,7 +615,7 @@ export function ApiKeyAuthoringWorkspace({
       }
       toast.success(result.message, { position: "bottom-right" });
       if (mode === "create" && selectedProjectId) {
-        recordQuickStartStep(flags, dashboardCacheScope, "api-key");
+        invalidateQuickStartStatus();
       }
       router.push(href(API_KEYS_PATH));
       router.refresh();
