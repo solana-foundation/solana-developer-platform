@@ -315,6 +315,8 @@ function tokenMovesTouching(
     // tops up rent for an account that already held some: only the mint's own
     // token program moves its tokens.
     if (programId !== tokenProgram || parsedType === null || info === null) continue;
+    // A transfer back into its own account moves nothing and withholds no fee.
+    if (info.source !== undefined && info.source === info.destination) continue;
     const { out, into } = touches(parsedType, info, accounts);
     if (!out && !into) continue;
     const amount = rawAmountOf(info, "tokenAmount");

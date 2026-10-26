@@ -1096,6 +1096,38 @@ describe("verifyRampDeliveries", () => {
       expect(readTokenTermsMock).toHaveBeenCalledTimes(1);
     });
 
+    it("ignores a transfer back into the same account, which moves nothing", async () => {
+      await settleOnramp("xfr_leg_self", PYUSD_MINT, "1");
+      const landed = landedFeeMint("995000", "transferCheckedWithFee", "5000");
+      getTransactionMock.mockResolvedValue({
+        ...landed,
+        instructions: [
+          ...landed.instructions,
+          {
+            programId: SPL_TOKEN_PROGRAMS["token-2022"],
+            accounts: [],
+            parsedType: "transferChecked",
+            info: {
+              source: "destination-account",
+              destination: "destination-account",
+              mint: PYUSD_MINT,
+              tokenAmount: { amount: "500000", decimals: 6, uiAmountString: "0.5" },
+            },
+          },
+        ],
+      });
+
+      await sweep();
+
+      expect((await row("xfr_leg_self"))?.status).toBe("completed");
+      expect(await legOf("xfr_leg_self")).toMatchObject({
+        quoted_debit: "1000000",
+        quoted_fee: "5000",
+        quoted_credit: "995000",
+      });
+      expect(readTokenTermsMock).not.toHaveBeenCalled();
+    });
+
     it("charges the fee per transfer: two capped transfers withhold two caps", async () => {
       await settleOnramp("xfr_leg_split", PYUSD_MINT, "2");
       // 1% of each 1 PYUSD transfer is 10 000, capped at 5 000 per transfer.
