@@ -165,7 +165,7 @@ describe("fetchDisplayUsdPrices", () => {
             {
               address: "MintB",
               hasMarket: true,
-              token: { address: "MintB", price: 3.5 },
+              token: { address: "MintB", price: 3.5, lastFetchedAt: Date.now() },
             },
           ]),
           { status: 200 }
@@ -197,16 +197,18 @@ describe("fetchDisplayUsdPrices", () => {
   });
 
   it("skips Jupiter when Tokens.xyz prices every mint", async () => {
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValue(
-        new Response(
-          JSON.stringify([
-            { address: "MintA", hasMarket: true, token: { address: "MintA", price: 2 } },
-          ]),
-          { status: 200 }
-        )
-      );
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify([
+          {
+            address: "MintA",
+            hasMarket: true,
+            token: { address: "MintA", price: 2, lastFetchedAt: Date.now() },
+          },
+        ]),
+        { status: 200 }
+      )
+    );
 
     await expect(
       fetchPricesIn("production", { ...env, TOKENS_XYZ_API_KEY: "xyz-key" }, ["MintA"])
@@ -244,6 +246,96 @@ describe("fetchDisplayUsdPrices", () => {
     ).resolves.toEqual(new Map());
   });
 
+  it("falls back when a Tokens.xyz snapshot is stale or has no timestamp", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      if (String(input).includes("tokens.xyz")) {
+        return Response.json([
+          {
+            address: "MintA",
+            hasMarket: true,
+            token: { address: "MintA", price: 3, lastFetchedAt: Date.now() - 2 * 60 * 60_000 - 1 },
+          },
+          { address: "MintB", hasMarket: true, token: { address: "MintB", price: 4 } },
+        ]);
+      }
+      return priceResponse({ MintA: { usdPrice: 2 }, MintB: { usdPrice: 5 } }, 200);
+    });
+
+    const prices = await fetchPricesIn("production", { ...env, TOKENS_XYZ_API_KEY: "xyz-key" }, [
+      "MintA",
+      "MintB",
+    ]);
+
+    expect(prices).toEqual(
+      new Map([
+        ["MintA", 2],
+        ["MintB", 5],
+      ])
+    );
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not remember a missing price after a successful response", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(priceResponse({}, 200));
+
+    await fetchPricesIn("production", env, ["MintA"]);
+    await fetchPricesIn("production", env, ["MintA"]);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("bounds concurrent Tokens.xyz batches", async () => {
+    const mints = Array.from({ length: 501 }, (_, index) => `Mint${index}`);
+    const release: Array<() => void> = [];
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      if (!String(input).includes("tokens.xyz")) {
+        throw new Error("Jupiter should not be needed");
+      }
+      return new Promise<Response>((resolve) => {
+        const batch: string[] = JSON.parse(String(required(init).body)).mints;
+        release.push(() =>
+          resolve(
+            Response.json(
+              batch.map((mint) => ({
+                address: mint,
+                hasMarket: true,
+                token: { address: mint, price: 2, lastFetchedAt: Date.now() },
+              }))
+            )
+          )
+        );
+      });
+    });
+
+    const lookup = fetchPricesIn("production", { ...env, TOKENS_XYZ_API_KEY: "xyz-key" }, mints);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    required(release[0])();
+    required(release[1])();
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(3));
+    required(release[2])();
+
+    expect((await lookup).size).toBe(501);
+  });
+
+  it("never sends the Jupiter key to an override host or follows a redirect", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(priceResponse({}, 200));
+
+    await fetchPricesIn(
+      "production",
+      {
+        ...env,
+        JUPITER_PRICE_API_KEY: "price-key",
+        JUPITER_PRICE_API_URL: "https://other.example/price/v3",
+      },
+      ["MintA"]
+    );
+
+    const [url, init] = required(fetchSpy.mock.calls[0]);
+    expect(String(url)).toContain("https://api.jup.ag/price/v3");
+    expect(required(init).headers).toEqual({ "x-api-key": "price-key" });
+    expect(required(init).redirect).toBe("error");
+  });
+
   it("keeps balances unpriced when both price sources fail", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(priceResponse({}, 429));
 
@@ -251,6 +343,34 @@ describe("fetchDisplayUsdPrices", () => {
       fetchPricesIn("production", { ...env, TOKENS_XYZ_API_KEY: "xyz-key" }, ["MintA"])
     ).resolves.toEqual(new Map());
     expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("leaves Jupiter time to price a mint when Tokens.xyz never answers", async () => {
+    let tokensAborted = false;
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      if (String(input).includes("tokens.xyz")) {
+        return new Promise<Response>((_resolve, reject) => {
+          const signal = required(required(init).signal);
+          const onAbort = () => {
+            tokensAborted = true;
+            reject(signal.reason);
+          };
+          if (signal.aborted) onAbort();
+          else signal.addEventListener("abort", onAbort, { once: true });
+        });
+      }
+      expect(tokensAborted).toBe(true);
+      return Promise.resolve(priceResponse({ MintA: { usdPrice: 2 } }, 200));
+    });
+
+    const startedAt = performance.now();
+    const prices = await fetchPricesIn("production", { ...env, TOKENS_XYZ_API_KEY: "xyz-key" }, [
+      "MintA",
+    ]);
+
+    expect(prices).toEqual(new Map([["MintA", 2]]));
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(performance.now() - startedAt).toBeLessThan(4_000);
   });
 
   it("makes no request when there is nothing to price", async () => {

@@ -1,6 +1,11 @@
 import { currentClusterScope } from "@sdp/rpc/scope";
+import { z } from "zod";
 import { logEvent } from "@/runtime/money-path-events";
-import { logVendorCallFailure } from "@/runtime/vendor-calls";
+import {
+  logVendorCallFailure,
+  VENDOR_CALL_EVENT,
+  type VendorCallDetails,
+} from "@/runtime/vendor-calls";
 import { createMintLookupCache } from "@/services/mint-lookup-cache";
 import type { Env } from "@/types/env";
 
@@ -15,27 +20,35 @@ import type { Env } from "@/types/env";
 const JUPITER_PRICE_URL = "https://api.jup.ag/price/v3";
 const TOKENS_XYZ_MARKET_SNAPSHOTS_URL = "https://api.tokens.xyz/v1/assets/market-snapshots";
 
-/**
- * Conservative. The documented ceiling is not published and a URL that is too long fails
- * as an opaque 4xx, so requests are chunked well under any plausible limit.
- */
+/** Jupiter accepts up to 50 mints; Tokens.xyz accepts up to 250. */
 const MAX_MINTS_PER_REQUEST = 50;
 const MAX_TOKENS_XYZ_MINTS_PER_REQUEST = 250;
 
-const REQUEST_TIMEOUT_MS = 4_000;
+const LOOKUP_BUDGET_MS = 4_000;
+const TOKENS_PRIMARY_BUDGET_MS = 1_800;
+const MAX_BATCHES_IN_FLIGHT = 2;
+// Tokens.xyz refreshes each curated mint roughly hourly, independently of its 1m HTTP cache.
+const MAX_TOKEN_SNAPSHOT_AGE_MS = 2 * 60 * 60_000;
 
 /** A spot price is fresh enough for a balance view for this long, and no longer. */
 const PRICE_CACHE_TTL_MS = 30_000;
 
 const priceCache = createMintLookupCache<number>(PRICE_CACHE_TTL_MS);
+let warnedAboutJupiterPriceUrl = false;
 
-function logPriceLookupSuccess(vendor: string, operation: string, startedAt: number): void {
+function logPriceLookupSuccess(
+  vendor: string,
+  operation: string,
+  startedAt: number,
+  details: VendorCallDetails
+): void {
   logEvent("info", {
-    event: "sdp_api_vendor_call",
+    event: VENDOR_CALL_EVENT,
     vendor,
     operation,
     outcome: "succeeded",
     duration_ms: Date.now() - startedAt,
+    ...details,
   });
 }
 
@@ -44,8 +57,29 @@ export function clearDisplayPriceCacheForTests(): void {
   priceCache.clearForTests();
 }
 
-interface JupiterPriceEntry {
-  usdPrice?: number;
+const jupiterPriceBodySchema = z.record(z.string(), z.unknown());
+const jupiterPriceEntrySchema = z.object({ usdPrice: z.number().finite() }).passthrough();
+const tokensSnapshotRowSchema = z
+  .object({
+    address: z.string(),
+    hasMarket: z.boolean(),
+    token: z
+      .object({
+        address: z.string(),
+        price: z.number().finite(),
+        lastFetchedAt: z.number().finite().optional(),
+      })
+      .passthrough()
+      .nullable(),
+  })
+  .passthrough();
+
+interface PriceBatchResult {
+  readonly prices: Map<string, number>;
+}
+
+function emptyPriceBatchResult(): PriceBatchResult {
+  return { prices: new Map() };
 }
 
 /**
@@ -56,9 +90,36 @@ interface JupiterPriceEntry {
  */
 function resolveJupiterPriceConfig(env: Env): { url: string; apiKey: string | null } {
   const apiKey = env.JUPITER_PRICE_API_KEY?.trim() || null;
+  const configuredUrl = env.JUPITER_PRICE_API_URL?.trim() || JUPITER_PRICE_URL;
+  if (apiKey) {
+    try {
+      const parsed = new URL(configuredUrl);
+      if (
+        parsed.origin === "https://api.jup.ag" &&
+        parsed.pathname === "/price/v3" &&
+        parsed.search === "" &&
+        parsed.hash === "" &&
+        parsed.username === "" &&
+        parsed.password === ""
+      ) {
+        return { url: parsed.toString(), apiKey };
+      }
+    } catch {
+      // A malformed override must never receive the price API key.
+    }
+    if (!warnedAboutJupiterPriceUrl) {
+      warnedAboutJupiterPriceUrl = true;
+      logEvent("warn", {
+        event: "sdp_price_config_rejected",
+        vendor: "jupiter",
+        reason: "keyed_url_not_allowlisted",
+      });
+    }
+    return { url: JUPITER_PRICE_URL, apiKey };
+  }
   return {
-    url: env.JUPITER_PRICE_API_URL?.trim() || JUPITER_PRICE_URL,
-    apiKey,
+    url: configuredUrl,
+    apiKey: null,
   };
 }
 
@@ -73,18 +134,21 @@ function chunk<T>(items: T[], size: number): T[][] {
 async function fetchPriceChunk(
   url: string,
   apiKey: string | null,
-  mints: string[]
-): Promise<Map<string, number>> {
-  const prices = new Map<string, number>();
-  const requested = new Set(mints);
+  mints: string[],
+  signal: AbortSignal
+): Promise<PriceBatchResult> {
+  const result = emptyPriceBatchResult();
   const requestUrl = `${url}?${new URLSearchParams({ ids: mints.join(",") }).toString()}`;
 
   const startedAt = Date.now();
   const response = await fetch(requestUrl, {
     headers: apiKey ? { "x-api-key": apiKey } : undefined,
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    redirect: "error",
+    signal,
   }).catch((error: unknown) => {
-    logVendorCallFailure("jupiter", "price", error, startedAt);
+    logVendorCallFailure("jupiter", "price", error, startedAt, {
+      requested_count: mints.length,
+    });
     throw error;
   });
   if (!response.ok) {
@@ -92,39 +156,66 @@ async function fetchPriceChunk(
       "jupiter",
       "price",
       new Error(`price request returned ${response.status}`),
-      startedAt
+      startedAt,
+      { http_status: response.status, requested_count: mints.length }
     );
-    return prices;
+    return result;
   }
 
   // A mint Jupiter cannot price reliably is omitted from the object entirely — no null
   // entry and no error — so absence is the only signal that a price is unavailable.
-  const body = (await response.json().catch((error: unknown) => {
-    logVendorCallFailure("jupiter", "price", error, startedAt);
+  const body: unknown = await response.json().catch((error: unknown) => {
+    logVendorCallFailure("jupiter", "price", error, startedAt, {
+      http_status: response.status,
+      requested_count: mints.length,
+    });
     throw error;
-  })) as Record<string, JupiterPriceEntry | null>;
-  logPriceLookupSuccess("jupiter", "price", startedAt);
-  for (const [mint, entry] of Object.entries(body ?? {})) {
-    const usdPrice = entry?.usdPrice;
-    if (
-      requested.has(mint) &&
-      typeof usdPrice === "number" &&
-      Number.isFinite(usdPrice) &&
-      usdPrice > 0
-    ) {
-      prices.set(mint, usdPrice);
-    }
+  });
+  const parsed = jupiterPriceBodySchema.safeParse(body);
+  if (!parsed.success) {
+    logVendorCallFailure("jupiter", "price", new Error("invalid price response"), startedAt, {
+      http_status: response.status,
+      requested_count: mints.length,
+    });
+    return result;
   }
 
-  return prices;
+  let invalidRows = 0;
+  let confirmedMissing = 0;
+  for (const mint of mints) {
+    const row = parsed.data[mint];
+    if (row === undefined || row === null) {
+      confirmedMissing += 1;
+      continue;
+    }
+    const entry = jupiterPriceEntrySchema.safeParse(row);
+    if (!entry.success) {
+      invalidRows += 1;
+      continue;
+    }
+    if (entry.data.usdPrice > 0) {
+      result.prices.set(mint, entry.data.usdPrice);
+    } else {
+      confirmedMissing += 1;
+    }
+  }
+  logPriceLookupSuccess("jupiter", "price", startedAt, {
+    http_status: response.status,
+    requested_count: mints.length,
+    priced_count: result.prices.size,
+    confirmed_missing_count: confirmedMissing,
+    invalid_row_count: invalidRows,
+  });
+  return result;
 }
 
 /** Tokens.xyz only covers registered mainnet mints with a market snapshot. */
 async function fetchTokensXyzPriceChunk(
   apiKey: string,
-  mints: string[]
-): Promise<Map<string, number>> {
-  const prices = new Map<string, number>();
+  mints: string[],
+  signal: AbortSignal
+): Promise<PriceBatchResult> {
+  const result = emptyPriceBatchResult();
   const requested = new Set(mints);
   const startedAt = Date.now();
   const response = await fetch(TOKENS_XYZ_MARKET_SNAPSHOTS_URL, {
@@ -132,9 +223,11 @@ async function fetchTokensXyzPriceChunk(
     headers: { "content-type": "application/json", "x-api-key": apiKey },
     body: JSON.stringify({ mints }),
     redirect: "error",
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    signal,
   }).catch((error: unknown) => {
-    logVendorCallFailure("tokens-xyz", "market-snapshots", error, startedAt);
+    logVendorCallFailure("tokens-xyz", "market-snapshots", error, startedAt, {
+      requested_count: mints.length,
+    });
     throw error;
   });
   if (!response.ok) {
@@ -142,13 +235,17 @@ async function fetchTokensXyzPriceChunk(
       "tokens-xyz",
       "market-snapshots",
       new Error(`market snapshots request returned ${response.status}`),
-      startedAt
+      startedAt,
+      { http_status: response.status, requested_count: mints.length }
     );
-    return prices;
+    return result;
   }
 
   const body: unknown = await response.json().catch((error: unknown) => {
-    logVendorCallFailure("tokens-xyz", "market-snapshots", error, startedAt);
+    logVendorCallFailure("tokens-xyz", "market-snapshots", error, startedAt, {
+      http_status: response.status,
+      requested_count: mints.length,
+    });
     throw error;
   });
   if (!Array.isArray(body)) {
@@ -156,26 +253,82 @@ async function fetchTokensXyzPriceChunk(
       "tokens-xyz",
       "market-snapshots",
       new Error("market snapshots response is not an array"),
-      startedAt
+      startedAt,
+      { http_status: response.status, requested_count: mints.length }
     );
-    return prices;
+    return result;
   }
-  logPriceLookupSuccess("tokens-xyz", "market-snapshots", startedAt);
-  for (const rawRow of body as unknown[]) {
-    if (typeof rawRow !== "object" || rawRow === null) continue;
-    if (!("address" in rawRow) || typeof rawRow.address !== "string") continue;
-    if (!("hasMarket" in rawRow) || rawRow.hasMarket !== true) continue;
-    if (!("token" in rawRow) || typeof rawRow.token !== "object" || rawRow.token === null) {
+  let invalidRows = 0;
+  let staleRows = 0;
+  let unknownAgeRows = 0;
+  let confirmedMissing = 0;
+  let maxSnapshotAgeMs = 0;
+  for (const rawRow of body) {
+    const parsed = tokensSnapshotRowSchema.safeParse(rawRow);
+    if (!parsed.success) {
+      invalidRows += 1;
       continue;
     }
-    const { address, token } = rawRow;
-    if (!requested.has(address) || !("address" in token) || token.address !== address) continue;
-    if (!("price" in token) || typeof token.price !== "number") continue;
-    if (Number.isFinite(token.price) && token.price > 0) {
-      prices.set(address, token.price);
+    const { address, hasMarket, token } = parsed.data;
+    if (!requested.has(address) || (token && token.address !== address)) {
+      invalidRows += 1;
+      continue;
     }
+    if (!hasMarket || token === null || token.price <= 0) {
+      confirmedMissing += 1;
+      continue;
+    }
+    if (token.lastFetchedAt === undefined) {
+      unknownAgeRows += 1;
+      continue;
+    }
+    const ageMs = Date.now() - token.lastFetchedAt;
+    if (ageMs > MAX_TOKEN_SNAPSHOT_AGE_MS || ageMs < -60_000) {
+      staleRows += 1;
+      continue;
+    }
+    maxSnapshotAgeMs = Math.max(maxSnapshotAgeMs, ageMs);
+    result.prices.set(address, token.price);
   }
-  return prices;
+  logPriceLookupSuccess("tokens-xyz", "market-snapshots", startedAt, {
+    http_status: response.status,
+    requested_count: mints.length,
+    priced_count: result.prices.size,
+    confirmed_missing_count: confirmedMissing,
+    invalid_row_count: invalidRows,
+    stale_row_count: staleRows,
+    unknown_age_row_count: unknownAgeRows,
+    ...(result.prices.size > 0 ? { max_snapshot_age_ms: maxSnapshotAgeMs } : {}),
+  });
+  return result;
+}
+
+async function fetchBatches(
+  mints: string[],
+  batchSize: number,
+  concurrency: number,
+  deadlineAt: number,
+  fetchBatch: (batch: string[], signal: AbortSignal) => Promise<PriceBatchResult>
+): Promise<PriceBatchResult> {
+  const result = emptyPriceBatchResult();
+  const batches = chunk(mints, batchSize);
+  let nextBatch = 0;
+  const workers = Array.from({ length: Math.min(concurrency, batches.length) }, async () => {
+    for (;;) {
+      const remainingMs = deadlineAt - Date.now();
+      const batch = batches[nextBatch];
+      if (!batch || remainingMs <= 0) return;
+      nextBatch += 1;
+      try {
+        const answered = await fetchBatch(batch, AbortSignal.timeout(remainingMs));
+        for (const [mint, price] of answered.prices) result.prices.set(mint, price);
+      } catch {
+        // Each vendor call logs its own failure. An independent batch may still succeed.
+      }
+    }
+  });
+  await Promise.all(workers);
+  return result;
 }
 
 /**
@@ -206,31 +359,38 @@ export async function fetchDisplayUsdPrices(
 
   return priceCache.lookup(cluster, mints, async (missingMints) => {
     const prices = new Map<string, number>();
+    const lookupStartedAt = Date.now();
+    const lookupDeadlineAt = lookupStartedAt + LOOKUP_BUDGET_MS;
     if (tokensXyzApiKey) {
-      const tokensResults = await Promise.allSettled(
-        chunk(missingMints, MAX_TOKENS_XYZ_MINTS_PER_REQUEST).map((batch) =>
-          fetchTokensXyzPriceChunk(tokensXyzApiKey, batch)
-        )
+      const tokensResult = await fetchBatches(
+        missingMints,
+        MAX_TOKENS_XYZ_MINTS_PER_REQUEST,
+        MAX_BATCHES_IN_FLIGHT,
+        Math.min(lookupDeadlineAt, Date.now() + TOKENS_PRIMARY_BUDGET_MS),
+        (batch, signal) => fetchTokensXyzPriceChunk(tokensXyzApiKey, batch, signal)
       );
-      for (const result of tokensResults) {
-        if (result.status !== "fulfilled") continue;
-        for (const [mint, price] of result.value) {
-          prices.set(mint, price);
-        }
-      }
+      for (const [mint, price] of tokensResult.prices) prices.set(mint, price);
     }
 
     const unpriced = missingMints.filter((mint) => !prices.has(mint));
-    // Chunks are independent, so one failing batch must not discard the others.
-    const jupiterResults = await Promise.allSettled(
-      chunk(unpriced, MAX_MINTS_PER_REQUEST).map((batch) => fetchPriceChunk(url, apiKey, batch))
+    const jupiterResult = await fetchBatches(
+      unpriced,
+      MAX_MINTS_PER_REQUEST,
+      apiKey ? MAX_BATCHES_IN_FLIGHT : 1,
+      lookupDeadlineAt,
+      (batch, signal) => fetchPriceChunk(url, apiKey, batch, signal)
     );
-    for (const result of jupiterResults) {
-      if (result.status !== "fulfilled") continue;
-      for (const [mint, price] of result.value) {
-        prices.set(mint, price);
-      }
-    }
+    for (const [mint, price] of jupiterResult.prices) prices.set(mint, price);
+
+    logEvent("info", {
+      event: "sdp_api_display_price_lookup",
+      requested_count: missingMints.length,
+      priced_count: prices.size,
+      unpriced_count: missingMints.length - prices.size,
+      duration_ms: Date.now() - lookupStartedAt,
+      tokens_configured: Boolean(tokensXyzApiKey),
+      jupiter_keyed: Boolean(apiKey),
+    });
 
     return prices;
   });

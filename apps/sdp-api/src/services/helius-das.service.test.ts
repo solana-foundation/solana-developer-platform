@@ -4,6 +4,7 @@ import { type SolanaCluster, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tok
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearDisplayPriceCacheForTests } from "@/services/display-price.service";
 import {
+  attachDisplayValuesToBalances,
   attachTokenSymbolsToBalances,
   attachUsdValuesToBalances,
   clearHeliusDasCachesForTests,
@@ -69,6 +70,22 @@ describe("helius-das service", () => {
     ]);
   });
 
+  it("omits USD value when a finite amount and price overflow", async () => {
+    const mint = WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"].address;
+    const balance = {
+      token: "USDC",
+      mint,
+      amount: "1",
+      uiAmount: Number.MAX_VALUE.toString(),
+      decimals: 6,
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ [mint]: { usdPrice: 10 } }));
+
+    expect(await inScope("production", () => attachUsdValuesToBalances(env, [balance]))).toEqual([
+      { ...balance, usdPrice: 10 },
+    ]);
+  });
+
   it("attaches DAS symbols to unlabeled token balances", async () => {
     const mint = "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr";
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
@@ -104,6 +121,27 @@ describe("helius-das service", () => {
       uiAmount: "20",
       decimals: 6,
     });
+  });
+
+  it("fetches a symbol and display price concurrently", async () => {
+    const mint = "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr";
+    const balance = { token: mint, mint, amount: "20000000", uiAmount: "20", decimals: 6 };
+    let releaseDas: (response: Response) => void = () => {};
+    const dasResponse = new Promise<Response>((resolve) => {
+      releaseDas = resolve;
+    });
+    let priceRequestedBeforeDasResolved = false;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      if (String(input).includes("helius-das")) return dasResponse;
+      priceRequestedBeforeDasResolved = true;
+      return Response.json({ [mint]: { usdPrice: 2 } });
+    });
+
+    const decorated = inScope("production", () => attachDisplayValuesToBalances(env, [balance]));
+    await vi.waitFor(() => expect(priceRequestedBeforeDasResolved).toBe(true));
+    releaseDas(Response.json({ result: [{ id: mint, token_info: { symbol: "EURC" } }] }));
+
+    expect(await decorated).toEqual([{ ...balance, token: "EURC", usdPrice: 2, usdValue: 40 }]);
   });
 
   it("looks a symbol up once an hour, and again after a failed lookup", async () => {

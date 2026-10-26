@@ -2,11 +2,23 @@ import { describeError, logEvent } from "./money-path-events";
 
 export const VENDOR_CALL_EVENT = "sdp_api_vendor_call";
 
+export interface VendorCallDetails {
+  readonly http_status?: number;
+  readonly requested_count?: number;
+  readonly priced_count?: number;
+  readonly confirmed_missing_count?: number;
+  readonly invalid_row_count?: number;
+  readonly stale_row_count?: number;
+  readonly unknown_age_row_count?: number;
+  readonly max_snapshot_age_ms?: number;
+}
+
 export function logVendorCallFailure(
   vendor: string,
   operation: string,
   error: unknown,
-  startedAt?: number
+  startedAt?: number,
+  details?: VendorCallDetails
 ): void {
   logEvent("error", {
     event: VENDOR_CALL_EVENT,
@@ -14,6 +26,7 @@ export function logVendorCallFailure(
     operation,
     outcome: "failed",
     ...(startedAt !== undefined ? { duration_ms: Date.now() - startedAt } : {}),
+    ...details,
     ...describeError(error),
   });
 }

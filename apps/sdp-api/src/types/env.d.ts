@@ -112,7 +112,7 @@ export interface Env extends ManagedRpcEnv {
   SOLANA_RPC_TRITON_API_KEY?: string;
   SOLANA_RPC_HELIUS_URL?: string;
   SOLANA_RPC_HELIUS_API_KEY?: string;
-  /** Defaults to Jupiter's rate-limited lite endpoint; set both to use the keyed tier. */
+  /** Defaults to Jupiter's gateway; a key raises its rate limit. */
   JUPITER_PRICE_API_URL?: string;
   JUPITER_PRICE_API_KEY?: string;
   TOKENS_XYZ_API_KEY?: string;

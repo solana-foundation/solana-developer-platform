@@ -227,10 +227,15 @@ function enrichBalancesWithUsdValues(
       return balance;
     }
 
+    const usdValue = uiAmount * usdPrice;
+    if (!Number.isFinite(usdValue)) {
+      return { ...balance, usdPrice };
+    }
+
     return {
       ...balance,
       usdPrice,
-      usdValue: Number((uiAmount * usdPrice).toFixed(6)),
+      usdValue: Number(usdValue.toFixed(6)),
     };
   });
 }
@@ -249,6 +254,41 @@ export async function attachUsdValuesToBalances(
 ): Promise<CustodyWalletTokenBalance[]> {
   const pricesByMint = await fetchUsdPricesForBalances(env, balances);
   return enrichBalancesWithUsdValues(balances, pricesByMint);
+}
+
+/** Resolve display labels and USD prices together for the same balance set. */
+export async function attachDisplayValuesToBalances(
+  env: Env,
+  balances: CustodyWalletTokenBalance[]
+): Promise<CustodyWalletTokenBalance[]> {
+  const [labeled, priced] = await Promise.all([
+    attachTokenSymbolsToBalances(balances),
+    attachUsdValuesToBalances(env, balances),
+  ]);
+  return labeled.map((balance, index) => {
+    const price = priced[index];
+    if (price?.usdPrice === undefined) return balance;
+    if (price.usdValue === undefined) return { ...balance, usdPrice: price.usdPrice };
+    return { ...balance, usdPrice: price.usdPrice, usdValue: price.usdValue };
+  });
+}
+
+/** Resolve display labels and USD prices together across wallets. */
+export async function attachDisplayValuesToBalanceMap(
+  env: Env,
+  balancesByWalletId: Map<string, CustodyWalletTokenBalance[]>
+): Promise<Map<string, CustodyWalletTokenBalance[]>> {
+  const allBalances = [...balancesByWalletId.values()].flat();
+  const enriched = await attachDisplayValuesToBalances(env, allBalances);
+  let cursor = 0;
+  return new Map(
+    [...balancesByWalletId.entries()].map(([walletId, balances]) => {
+      const nextCursor = cursor + balances.length;
+      const walletBalances = enriched.slice(cursor, nextCursor);
+      cursor = nextCursor;
+      return [walletId, walletBalances] as const;
+    })
+  );
 }
 
 export async function attachUsdValuesToBalanceMap(
