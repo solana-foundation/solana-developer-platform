@@ -7,7 +7,7 @@ import {
   TOKEN_MOVEMENT_BASES,
 } from "@sdp/types/token-movements";
 import { TOKEN_PROGRAM_KINDS, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
-import { address } from "@solana/kit";
+import { type Address, address } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
 import type { ExtensionArgs } from "@solana-program/token-2022";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -454,6 +454,42 @@ describe("Payments routes — recurring mandates in base units (ADR 0012)", () =
     expect(errorResponseSchema.parse(await response.json()).error.details).toMatchObject({
       reason: "fee_above_tolerance",
     });
+  });
+
+  it("checks the receiver account a collection names, not the plan's stored destination", async () => {
+    await answerPyusd({ extensions: [], destinationExtensions: [] });
+    const activated = await activateRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      token: PYUSD,
+    });
+    // The plan's destination now requires memos; another wallet's account does not.
+    await answerPyusd({
+      extensions: [],
+      destinationExtensions: [{ __kind: "MemoTransfer", requireIncomingTransferMemos: true }],
+    });
+    const prepare = async (receiver: Address) =>
+      app.request(
+        `/v1/payments/subscriptions/${activated.subscriptionId}/prepare-collection`,
+        {
+          method: "POST",
+          headers: RECURRING_HEADERS,
+          body: JSON.stringify({ receiverTokenAccount: receiver }),
+        },
+        env
+      );
+
+    const memoReceiver = await prepare(
+      await associatedTokenAccount("token-2022", PYUSD, TEST_SOLANA_ADDRESSES.wallet2)
+    );
+    const plainReceiver = await prepare(
+      await associatedTokenAccount("token-2022", PYUSD, TEST_SOLANA_ADDRESSES.wallet3)
+    );
+
+    expect(memoReceiver.status).toBe(409);
+    expect(errorResponseSchema.parse(await memoReceiver.json()).error.details).toMatchObject({
+      reason: "memo_required",
+    });
+    expect(plainReceiver.status, await plainReceiver.clone().text()).toBe(200);
   });
 
   it("skips a period still held when it ends, as the subscriptions program forfeits it", async () => {

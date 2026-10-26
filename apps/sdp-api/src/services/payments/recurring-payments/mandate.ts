@@ -36,6 +36,7 @@ import { badRequest } from "@/lib/errors";
 import { resolvePaymentAsset } from "@/services/payment-operation.service";
 import {
   type MintMovementAccounts,
+  readMintMovementAccountAt,
   readMintMovementAccounts,
 } from "@/services/token-movement/read-terms";
 
@@ -67,6 +68,24 @@ export async function readRecurringTerms(
     throw badRequest("Recurring payments move SPL tokens only");
   }
   return readMintMovementAccounts(asset, owners);
+}
+
+/**
+ * The terms and the token account a new pull of a plan will pay, as the caller
+ * names that account (see {@link readMintMovementAccountAt}).
+ *
+ * @throws AppError (400) when the token is native SOL.
+ */
+export async function readRecurringReceiver(
+  token: string,
+  mandate: RecurringMandate | null,
+  receiverTokenAccount: Address
+): Promise<{ terms: MintTokenTerms; receiver: DestinationTokenAccount }> {
+  const asset = mandate === null ? resolvePaymentAsset(token) : mandate.asset;
+  if (asset.kind === "native") {
+    throw badRequest("Recurring payments move SPL tokens only");
+  }
+  return readMintMovementAccountAt(asset, receiverTokenAccount);
 }
 
 /**

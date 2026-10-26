@@ -39,7 +39,7 @@ import { resolveScope, resolveWallet } from "@/routes/payments/wallets";
 import { parseI64String, parseU64String } from "@/services/payment-operation.service";
 import {
   mandateProgramAccounts,
-  readRecurringTerms,
+  readRecurringReceiver,
   rowMandate,
 } from "@/services/payments/recurring-payments/mandate";
 import {
@@ -442,30 +442,13 @@ export const prepareSubscriptionCollection = async (
   const callerWallet = resolveWallet(scope.wallets, plan.puller_wallet_id ?? plan.owner_wallet_id);
 
   // The program does not enforce the mandate's fee tolerance, so a new pull is checked against
-  // today's terms here, as the collection job does. RPC budget: one `getMultipleAccounts` for the
-  // mint, the Clock and the plan's destination account (none before).
+  // today's terms and the account it pays, as the collection job does. RPC budget: one
+  // `getMultipleAccounts` for the mint, the Clock and the receiver (none before).
   assertSubscriptionTokenMint(plan.token);
-  const read = await readRecurringTerms(
-    plan.token,
-    plan.mandate,
-    plan.destination_address === null
-      ? []
-      : [assertValidAddress(plan.destination_address, "destinationAddress")]
-  );
-  const mandate = rowMandate(plan, read.terms);
-  // A plan with no destination wallet has no token account to read memos from: the mint and fee
-  // checks still apply.
-  const [destination] = read.destinations;
-  const decision = recurringPullSupport(
-    read.terms,
-    mandate,
-    destination ?? {
-      owner: assertValidAddress(plan.owner_address, "ownerAddress"),
-      tokenAccount: assertValidAddress(body.receiverTokenAccount, "receiverTokenAccount"),
-      exists: true,
-      requiresMemo: false,
-    }
-  );
+  const receiverAta = assertValidAddress(body.receiverTokenAccount, "receiverTokenAccount");
+  const { terms, receiver } = await readRecurringReceiver(plan.token, plan.mandate, receiverAta);
+  const mandate = rowMandate(plan, terms);
+  const decision = recurringPullSupport(terms, mandate, receiver);
   if (!decision.supported) {
     throw new AppError("CONFLICT", `Collection is held: ${decision.message}`, {
       reason: decision.refusal,
@@ -479,7 +462,6 @@ export const prepareSubscriptionCollection = async (
   const subscriptionPda = subscription.subscription_pda
     ? assertValidAddress(subscription.subscription_pda, "subscriptionPda")
     : derivedSubscriptionPda;
-  const receiverAta = assertValidAddress(body.receiverTokenAccount, "receiverTokenAccount");
   const caller = assertValidAddress(callerWallet.publicKey, "caller");
   const instruction = await getTransferSubscriptionOverlayInstructionAsync({
     amount: amountBaseUnits,
