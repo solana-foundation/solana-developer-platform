@@ -74,6 +74,23 @@ export function compareUnsignedDecimals(left: string, right: string): -1 | 0 | 1
 }
 
 /**
+ * Fail-soft "strictly above the ceiling": whether `value` overruns `ceiling`.
+ * A side that cannot be compared answers false — never a crash, never an
+ * overrun — the reading every caller gives `compareUnsignedDecimals`.
+ */
+export function isOverDecimal(value: string, ceiling: string): boolean {
+  return compareUnsignedDecimals(value, ceiling) === 1;
+}
+
+/**
+ * Fail-soft "strictly below the floor": whether `value` undershoots `floor`,
+ * the mirror of `isOverDecimal` with the same incomparable-means-false rule.
+ */
+export function isUnderDecimal(value: string, floor: string): boolean {
+  return compareUnsignedDecimals(value, floor) === -1;
+}
+
+/**
  * Whether the value parses as an unsigned decimal AND is strictly above zero.
  *
  * Every money surface answers the same question — a balance of "0" offers

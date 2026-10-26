@@ -19,7 +19,7 @@ import { fetchResultAnswer } from "@/lib/idempotency";
 import { settleMoneyIdempotencyKey } from "@/lib/idempotency-key-store";
 import { useModalFocus } from "@/lib/use-modal-focus";
 import { EarnAmountMaxButton } from "./earn-amount-max-button";
-import { compareUnsignedDecimals, isPositiveDecimal } from "./earn-decimal";
+import { isOverDecimal, isPositiveDecimal } from "./earn-decimal";
 import { EarnErrorNote } from "./earn-error-note";
 import { formatTokenValue, positionDisplayName } from "./earn-format";
 import { earnMintAsset, TransactionLink } from "./earn-market-presentation";
@@ -186,10 +186,10 @@ function deriveWithdrawalFormState(
   const hasStakedShares =
     position.shares !== undefined &&
     position.withdrawableShares !== undefined &&
-    compareUnsignedDecimals(position.shares, position.withdrawableShares) === 1;
+    isOverDecimal(position.shares, position.withdrawableShares);
   const overAvailableAmount =
     amountValidation.kind === "valid" && availableAmount !== undefined
-      ? compareUnsignedDecimals(amountValidation.canonicalAmount, availableAmount) === 1
+      ? isOverDecimal(amountValidation.canonicalAmount, availableAmount)
       : false;
   const amountError = vaultWithdrawalAmountError(
     amountInput,

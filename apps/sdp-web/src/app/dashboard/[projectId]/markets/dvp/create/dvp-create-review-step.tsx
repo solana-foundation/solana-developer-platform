@@ -5,7 +5,7 @@ import { DateTimePicker } from "@sdp/ui/date-picker";
 import { ArrowDownLeftIcon, ArrowUpRightIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { AddressWithCopy } from "@/app/dashboard/[projectId]/markets/dvp/dvp-party-cell";
-import { shortenAddress } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import { shortenAddress } from "@/app/dashboard/[projectId]/markets/truncate-middle";
 import { TokenMark } from "@/components/token-mark";
 import { useTranslations } from "@/i18n/provider";
 import { Field, ReferenceField } from "./dvp-create-fields";

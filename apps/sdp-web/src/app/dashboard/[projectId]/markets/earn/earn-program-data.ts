@@ -1451,7 +1451,7 @@ const earnVaultWithdrawalRequestRecordSchema: z.ZodType<EarnVaultWithdrawalReque
     replayed: z.boolean().optional(),
   });
 
-type QueuedReadResult<T> = { kind: "ready"; value: T } | { kind: "unavailable" };
+export type QueuedReadResult<T> = { kind: "ready"; value: T } | { kind: "unavailable" };
 
 /** Read settlement routes independently. No client-side provider list chooses one. */
 export async function fetchEarnVaultWithdrawalOptions(

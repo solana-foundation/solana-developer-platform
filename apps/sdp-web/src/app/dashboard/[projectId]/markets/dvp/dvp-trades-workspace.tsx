@@ -33,10 +33,8 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { Fragment, type ReactNode, useState } from "react";
-import {
-  formatTimestamp,
-  shortenAddress,
-} from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import { shortenAddress } from "@/app/dashboard/[projectId]/markets/truncate-middle";
+import { formatTimestamp } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
 import {
   DashboardWorkspaceCard,
   DashboardWorkspaceOverviewPanel,
