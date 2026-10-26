@@ -50,14 +50,31 @@ const CLOCK = rpcAccount(
   })
 );
 
+/**
+ * The id and addresses of a `getMultipleAccounts` request, read from what kit
+ * sends. Narrowed by checks, so an unexpected request fails here, by name.
+ */
+function readRequest(payload: unknown): { id: string | number; addresses: string[] } {
+  assert.ok(typeof payload === "object" && payload !== null, "request is not an object");
+  assert.ok(
+    "id" in payload && (typeof payload.id === "string" || typeof payload.id === "number"),
+    "request has no id"
+  );
+  assert.ok("method" in payload && payload.method === "getMultipleAccounts", "wrong method");
+  assert.ok("params" in payload && Array.isArray(payload.params), "request has no params");
+  const [addresses] = payload.params;
+  assert.ok(
+    Array.isArray(addresses) && addresses.every((at) => typeof at === "string"),
+    "request names no addresses"
+  );
+  return { id: payload.id, addresses };
+}
+
 /** An RPC whose `getMultipleAccounts` answers the mint (or nothing) and the Clock; it counts reads. */
 function stubChain(mint: { decimals: number; extensions: ExtensionArgs[] } | null) {
   const reads: string[][] = [];
   const transport: RpcTransport = async <TResponse>({ payload }: Parameters<RpcTransport>[0]) => {
-    // SAFETY: kit sends a JSON-RPC request; getMultipleAccounts names its addresses first.
-    const request = payload as { id: string; method: string; params: [string[], unknown] };
-    assert.equal(request.method, "getMultipleAccounts");
-    const [addresses] = request.params;
+    const { id, addresses } = readRequest(payload);
     reads.push(addresses);
     const value = addresses.map((at) => {
       if (at === SYSVAR_CLOCK_ADDRESS) return CLOCK;
@@ -75,7 +92,7 @@ function stubChain(mint: { decimals: number; extensions: ExtensionArgs[] } | nul
       );
     });
     // SAFETY: the transport returns the JSON-RPC response body kit asked for.
-    return { jsonrpc: "2.0", id: request.id, result: { context: { slot: 1 }, value } } as TResponse;
+    return { jsonrpc: "2.0", id, result: { context: { slot: 1 }, value } } as TResponse;
   };
   return { rpc: createSolanaRpcFromTransport(transport), reads };
 }
