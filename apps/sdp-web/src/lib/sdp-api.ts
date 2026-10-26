@@ -4,6 +4,7 @@
 import { auth } from "@clerk/nextjs/server";
 import type { ListProjectsResponse, Project } from "@sdp/types/projects";
 import { ORGANIZATION_ROLES, type OrganizationRole } from "@sdp/types/roles";
+import { hashWebTraceId } from "@sdp/types/trace-correlation";
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { cache } from "react";
@@ -72,6 +73,14 @@ function roundDuration(durationMs: number): number {
   return Math.round(durationMs * 10) / 10;
 }
 
+function emitApiRequestLog(event: string, payload: Record<string, unknown>): void {
+  try {
+    console.info(JSON.stringify({ event, timestamp: new Date().toISOString(), ...payload }));
+  } catch {
+    // A failed telemetry sink must not change an API request outcome.
+  }
+}
+
 function createTraceRequestId(traceId: string, sequence: number): string {
   const suffix = sequence.toString().padStart(2, "0");
   return `${traceId}:${suffix}`.slice(0, 128);
@@ -107,14 +116,40 @@ function createSdpApiRequest(
       headers.set(PROJECT_HEADER_NAME, projectId);
     }
     const method = options.method ?? "GET";
-    const startedAt = performance.now();
-
-    const send = () =>
-      fetch(url, {
-        ...options,
-        headers,
-        cache: "no-store",
-      });
+    const send = async () => {
+      const webTraceHash = await hashWebTraceId(traceId).catch(() => null);
+      const fields = {
+        traceId,
+        source,
+        requestId,
+        method,
+        ...(webTraceHash ? { web_trace_hash: webTraceHash } : {}),
+      };
+      emitApiRequestLog("sdp_web_api_attempt", fields);
+      const startedAt = performance.now();
+      try {
+        const response = await fetch(url, {
+          ...options,
+          headers,
+          cache: "no-store",
+        });
+        emitApiRequestLog("sdp_web_api_request", {
+          ...fields,
+          status: response.status,
+          durationMs: roundDuration(performance.now() - startedAt),
+          upstreamRequestId: response.headers.get("X-Request-ID"),
+          upstreamServerTiming: response.headers.get("Server-Timing"),
+        });
+        return response;
+      } catch (error) {
+        emitApiRequestLog("sdp_web_api_request", {
+          ...fields,
+          outcome: "network_failed",
+          durationMs: roundDuration(performance.now() - startedAt),
+        });
+        throw error;
+      }
+    };
 
     // Payments demo mode answers payment reads and writes itself; nothing about them goes out.
     const demoResponse = await paymentsDemoResponse(method, path, projectId, options.body, send);
@@ -122,24 +157,7 @@ function createSdpApiRequest(
       return demoResponse;
     }
 
-    const response = await send();
-
-    console.info(
-      JSON.stringify({
-        event: "sdp_web_api_request",
-        timestamp: new Date().toISOString(),
-        traceId,
-        source,
-        requestId,
-        method,
-        status: response.status,
-        durationMs: roundDuration(performance.now() - startedAt),
-        upstreamRequestId: response.headers.get("X-Request-ID"),
-        upstreamServerTiming: response.headers.get("Server-Timing"),
-      })
-    );
-
-    return response;
+    return send();
   };
 }
 

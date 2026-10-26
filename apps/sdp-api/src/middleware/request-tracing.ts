@@ -1,3 +1,4 @@
+import { hashWebTraceId } from "@sdp/types/trace-correlation";
 import type { Context, Next } from "hono";
 import { routePath } from "hono/route";
 import { getOptionalAuth } from "@/lib/auth";
@@ -31,39 +32,47 @@ export function requestTracingMiddleware() {
     const requestId = c.get("requestId");
     const traceId = requestId;
     const requestSource = traceSource(c.req.header(TRACE_SOURCE_HEADER));
+    const webTraceHash = await hashWebTraceId(c.req.header(TRACE_ID_HEADER)).catch(() => null);
 
     c.set("traceId", traceId);
     c.set("requestSource", requestSource);
 
-    await runWithLogContext({ request_id: requestId, trace_id: traceId }, async () => {
-      try {
-        await next();
-      } finally {
-        if (c.res) {
-          const durationMs = roundDuration(performance.now() - startedAt);
-          const auth = getOptionalAuth(c);
-          const path = routePath(c, -1) || "unmatched";
+    await runWithLogContext(
+      {
+        request_id: requestId,
+        trace_id: traceId,
+        ...(webTraceHash ? { web_trace_hash: webTraceHash } : {}),
+      },
+      async () => {
+        try {
+          await next();
+        } finally {
+          if (c.res) {
+            const durationMs = roundDuration(performance.now() - startedAt);
+            const auth = getOptionalAuth(c);
+            const path = routePath(c, -1) || "unmatched";
 
-          c.header(TRACE_ID_HEADER, traceId);
-          c.header(
-            "Server-Timing",
-            appendServerTiming(c.res.headers.get("Server-Timing"), `app;dur=${durationMs}`)
-          );
+            c.header(TRACE_ID_HEADER, traceId);
+            c.header(
+              "Server-Timing",
+              appendServerTiming(c.res.headers.get("Server-Timing"), `app;dur=${durationMs}`)
+            );
 
-          logEvent("info", {
-            event: "sdp_api_request_timing",
-            source: requestSource,
-            method: c.req.method,
-            path,
-            status: c.res.status,
-            duration_ms: durationMs,
-            ...(auth?.organizationId ? { organization_id: auth.organizationId } : {}),
-            ...(auth?.projectId ? { project_id: auth.projectId } : {}),
-            ...(auth?.apiKeyId ? { api_key_id: auth.apiKeyId } : {}),
-            ...(auth ? { auth_type: auth.authType } : {}),
-          });
+            logEvent("info", {
+              event: "sdp_api_request_timing",
+              source: requestSource,
+              method: c.req.method,
+              path,
+              status: c.res.status,
+              duration_ms: durationMs,
+              ...(auth?.organizationId ? { organization_id: auth.organizationId } : {}),
+              ...(auth?.projectId ? { project_id: auth.projectId } : {}),
+              ...(auth?.apiKeyId ? { api_key_id: auth.apiKeyId } : {}),
+              ...(auth ? { auth_type: auth.authType } : {}),
+            });
+          }
         }
       }
-    });
+    );
   };
 }

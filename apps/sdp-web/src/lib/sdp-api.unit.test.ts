@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SANDBOX_PROJECT } from "@/test/projects";
 import { resetRequestProject, setApiRequest, setPageRequest } from "@/test/request-project";
@@ -191,6 +192,43 @@ describe("createRequestScopedSdpApiClients", () => {
     expect(infoMock.mock.calls.map(([payload]) => String(payload)).join("\n")).not.toContain(
       "sk_pasted_segment"
     );
+  });
+
+  it("logs a safe join key before a missing upstream response", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new TypeError("response lost");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const webTraceId = `web_${"c".repeat(32)}`;
+    const infoMock = vi.mocked(console.info);
+    const client = await createSdpApiClient({
+      traceId: webTraceId,
+      source: "route.dashboard.test",
+    });
+
+    await expect(client.request("/v1/wallets/private-wallet-id?secret=sk_test")).rejects.toThrow(
+      "response lost"
+    );
+
+    const events = infoMock.mock.calls
+      .map(([payload]) => JSON.parse(String(payload)) as Record<string, unknown>)
+      .filter(
+        (event) => event.event === "sdp_web_api_attempt" || event.event === "sdp_web_api_request"
+      );
+    const expectedHash = createHash("sha256").update(webTraceId).digest("hex");
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({
+      event: "sdp_web_api_attempt",
+      web_trace_hash: expectedHash,
+      traceId: webTraceId,
+    });
+    expect(events[1]).toMatchObject({
+      event: "sdp_web_api_request",
+      web_trace_hash: expectedHash,
+      outcome: "network_failed",
+    });
+    expect(JSON.stringify(events)).not.toContain("private-wallet-id");
+    expect(JSON.stringify(events)).not.toContain("sk_test");
   });
 
   it("refuses to build clients when the request has no active organization", async () => {

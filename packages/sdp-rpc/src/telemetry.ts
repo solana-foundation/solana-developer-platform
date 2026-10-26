@@ -15,7 +15,7 @@ export interface RpcTelemetryEvent {
   provider: string;
   cluster: SolanaCluster;
   method: string;
-  outcome?: "succeeded" | "failed";
+  outcome?: "succeeded" | "failed" | "http_success_unverified";
   status_code?: number;
   duration_ms?: number;
   sample_weight?: number;
@@ -38,7 +38,7 @@ export function emitRpcTelemetry(event: RpcTelemetryEvent): void {
   if (event.event === "sdp_rpc_attempt") {
     let weight = 1;
     if (event.outcome === "succeeded") {
-      const key = `${event.surface}:${event.provider}:${event.cluster}`;
+      const key = `${event.surface}:${event.provider}:${event.cluster}:${event.method}`;
       const sequence = successSequences.get(key) ?? 0;
       successSequences.set(key, sequence < 19 ? sequence + 1 : 10);
       if (sequence >= 10) {
@@ -86,6 +86,19 @@ export function pinRpcTelemetryEndpoint(cluster: SolanaCluster, endpointUrl: str
   scope.cluster = cluster;
 }
 
+/** Record one Earn operation moving from its pinned endpoint to the next provider. */
+export function emitPinnedRpcFailover(): void {
+  const scope = pinnedRpcScopes.getStore();
+  if (!scope?.provider || !scope.cluster) return;
+  emitRpcTelemetry({
+    event: "sdp_rpc_failover",
+    surface: "earn_pinned",
+    provider: scope.provider,
+    cluster: scope.cluster,
+    method: "provider_operation",
+  });
+}
+
 function pinnedEndpoint(endpointUrl: string): { provider: string; cluster: SolanaCluster } | null {
   const scope = pinnedRpcScopes.getStore();
   if (!scope || scope.endpointUrl !== endpointUrl || !scope.provider || !scope.cluster) return null;
@@ -125,7 +138,7 @@ function httpStatusOf(error: unknown): number | undefined {
 function emitPinnedAttempt(
   endpoint: { provider: string; cluster: SolanaCluster },
   method: string,
-  outcome: "succeeded" | "failed",
+  outcome: NonNullable<RpcTelemetryEvent["outcome"]>,
   startedAt: number,
   statusCode?: number
 ): void {
@@ -138,6 +151,84 @@ function emitPinnedAttempt(
     status_code: statusCode,
     duration_ms: performance.now() - startedAt,
   });
+}
+
+const MAX_RPC_CLASSIFICATION_BYTES = 64 * 1024;
+const RPC_CLASSIFICATION_TIMEOUT_MS = 1_000;
+
+async function boundedRpcResponse(response: Response): Promise<unknown | undefined> {
+  const contentLength = response.headers.get("content-length");
+  if (contentLength !== null && Number(contentLength) > MAX_RPC_CLASSIFICATION_BYTES) {
+    return undefined;
+  }
+
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  try {
+    reader = response.clone().body?.getReader();
+  } catch {
+    return undefined;
+  }
+  if (!reader) return undefined;
+
+  let expired = false;
+  const timer = setTimeout(() => {
+    expired = true;
+    void reader.cancel().catch(() => undefined);
+  }, RPC_CLASSIFICATION_TIMEOUT_MS);
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done || expired) break;
+      size += value.byteLength;
+      if (size > MAX_RPC_CLASSIFICATION_BYTES) return undefined;
+      chunks.push(value);
+    }
+    if (expired) return undefined;
+    const body = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) {
+      body.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return JSON.parse(new TextDecoder().decode(body));
+  } catch {
+    return undefined;
+  } finally {
+    clearTimeout(timer);
+    void reader.cancel().catch(() => undefined);
+    reader.releaseLock();
+  }
+}
+
+function hasJsonRpcResult(response: unknown): boolean {
+  if (Array.isArray(response)) return response.length > 0 && response.every(hasJsonRpcResult);
+  return typeof response === "object" && response !== null && "result" in response;
+}
+
+async function reportPinnedFetchResponse(
+  response: Response,
+  endpoint: { provider: string; cluster: SolanaCluster },
+  method: string,
+  startedAt: number
+): Promise<void> {
+  const body = await boundedRpcResponse(response);
+  const outcome =
+    body === undefined
+      ? "http_success_unverified"
+      : hasJsonRpcError(body)
+        ? "failed"
+        : hasJsonRpcResult(body)
+          ? "succeeded"
+          : "http_success_unverified";
+  emitPinnedAttempt(
+    endpoint,
+    method,
+    outcome,
+    startedAt,
+    outcome === "succeeded" ? undefined : response.status
+  );
 }
 
 /** Count each physical Kit request, including genesis proof and socket retries. */
@@ -163,7 +254,7 @@ export function withPinnedRpcTelemetry(transport: RpcTransport, endpointUrl: str
   };
 }
 
-/** Count each physical web3.js or direct-fetch request without reading its body. */
+/** Count each physical web3.js or direct-fetch request; inspect only a bounded clone. */
 export async function fetchWithPinnedRpcTelemetry(
   input: Parameters<typeof fetch>[0],
   init?: RequestInit
@@ -184,13 +275,14 @@ export async function fetchWithPinnedRpcTelemetry(
   const startedAt = performance.now();
   try {
     const response = await fetch(input, init);
-    emitPinnedAttempt(
-      endpoint,
-      method,
-      response.ok ? "succeeded" : "failed",
-      startedAt,
-      response.ok ? undefined : response.status
-    );
+    if (response.ok) {
+      // Classify a bounded clone in the background. The SDK owns the original body.
+      void reportPinnedFetchResponse(response, endpoint, method, startedAt).catch(() => {
+        emitPinnedAttempt(endpoint, method, "http_success_unverified", startedAt, response.status);
+      });
+    } else {
+      emitPinnedAttempt(endpoint, method, "failed", startedAt, response.status);
+    }
     return response;
   } catch (error) {
     emitPinnedAttempt(endpoint, method, "failed", startedAt, httpStatusOf(error));

@@ -55,6 +55,28 @@ describe("RPC telemetry", () => {
     assert.equal(events.at(-1)?.sample_weight, 1);
   });
 
+  it("samples each RPC method even when methods repeat in a fixed order", () => {
+    const events: RpcTelemetryEvent[] = [];
+    setRpcTelemetrySink((event) => events.push(event));
+    for (let index = 0; index < 40; index++) {
+      emitRpcTelemetry({
+        event: "sdp_rpc_attempt",
+        surface: "managed_pool",
+        provider: "triton",
+        cluster: "devnet",
+        method: index % 2 === 0 ? "getSlot" : "getAccountInfo",
+        outcome: "succeeded",
+      });
+    }
+
+    for (const method of ["getSlot", "getAccountInfo"]) {
+      assert.deepEqual(
+        events.filter((event) => event.method === method).map((event) => event.sample_weight),
+        [...Array.from({ length: 10 }, () => 1), 10]
+      );
+    }
+  });
+
   it("counts physical pinned Kit proof attempts and transport errors without logging URLs", async () => {
     process.env[envKey] = endpointUrl;
     const events: RpcTelemetryEvent[] = [];
@@ -102,6 +124,66 @@ describe("RPC telemetry", () => {
       events.map((event) => [event.method, event.status_code, event.sample_weight]),
       [["getSlot", 429, 1]]
     );
+  });
+
+  it("classifies a 200 JSON-RPC error without consuming the caller's response", async () => {
+    process.env[envKey] = endpointUrl;
+    const body = { jsonrpc: "2.0", id: 1, error: { code: -32005, message: "rate limited" } };
+    globalThis.fetch = async () => new Response(JSON.stringify(body), { status: 200 });
+    let observed: (event: RpcTelemetryEvent) => void = () => undefined;
+    const event = new Promise<RpcTelemetryEvent>((resolve) => {
+      observed = resolve;
+    });
+    setRpcTelemetrySink(observed);
+
+    const response = await runWithPinnedRpcTelemetry(async () => {
+      pinRpcTelemetryEndpoint("devnet", endpointUrl);
+      return fetchWithReadSocketRetry(endpointUrl, {
+        method: "POST",
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getSlot", params: [] }),
+      });
+    });
+
+    assert.deepEqual(await response.json(), body);
+    assert.deepEqual(
+      (({ provider, method, outcome, status_code, sample_weight }) => ({
+        provider,
+        method,
+        outcome,
+        status_code,
+        sample_weight,
+      }))(await event),
+      {
+        provider: "triton",
+        method: "getSlot",
+        outcome: "failed",
+        status_code: 200,
+        sample_weight: 1,
+      }
+    );
+  });
+
+  it("marks a large HTTP 200 body unverified without buffering it for telemetry", async () => {
+    process.env[envKey] = endpointUrl;
+    const body = JSON.stringify({ jsonrpc: "2.0", id: 1, result: "x".repeat(65_536) });
+    globalThis.fetch = async () =>
+      new Response(body, { status: 200, headers: { "Content-Length": String(body.length) } });
+    let observed: (event: RpcTelemetryEvent) => void = () => undefined;
+    const event = new Promise<RpcTelemetryEvent>((resolve) => {
+      observed = resolve;
+    });
+    setRpcTelemetrySink(observed);
+
+    const response = await runWithPinnedRpcTelemetry(async () => {
+      pinRpcTelemetryEndpoint("devnet", endpointUrl);
+      return fetchWithReadSocketRetry(endpointUrl, {
+        method: "POST",
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getProgramAccounts", params: [] }),
+      });
+    });
+
+    assert.equal(await response.text(), body);
+    assert.equal((await event).outcome, "http_success_unverified");
   });
 
   it("keeps concurrent Earn operations on their own pinned provider", async () => {

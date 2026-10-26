@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as logger from "@/runtime/logger";
@@ -55,6 +56,65 @@ describe("requestTracingMiddleware", () => {
     expect(response.headers.get("X-SDP-Trace-ID")).toBe(response.headers.get("X-Request-ID"));
     expect(info.mock.calls[0]?.[0]).toMatchObject({ source: "dashboard" });
     expect(JSON.stringify(info.mock.calls[0]?.[0])).not.toContain("sk_live_exposed");
+  });
+
+  it("joins a generated web trace by hash while keeping independent API IDs", async () => {
+    const info = vi.fn();
+    vi.spyOn(logger, "getLogger").mockReturnValue({ info } as unknown as ReturnType<
+      typeof logger.getLogger
+    >);
+    const contexts: logger.LogContext[] = [];
+    const app = new Hono<{ Bindings: Env }>();
+    app.use("*", requestIdMiddleware());
+    app.use("*", requestTracingMiddleware());
+    app.get("/join", (c) => {
+      contexts.push(logger.getLogContext());
+      return c.text("ok");
+    });
+    const webTraceId = `web_${"a".repeat(32)}`;
+
+    const response = await app.request("https://example.test/join", {
+      headers: { "X-SDP-Trace-ID": webTraceId },
+    });
+
+    const expectedHash = createHash("sha256").update(webTraceId).digest("hex");
+    expect(contexts).toEqual([
+      {
+        request_id: response.headers.get("X-Request-ID"),
+        trace_id: response.headers.get("X-Request-ID"),
+        web_trace_hash: expectedHash,
+      },
+    ]);
+    expect(response.headers.get("X-SDP-Trace-ID")).toBe(response.headers.get("X-Request-ID"));
+    expect(JSON.stringify(info.mock.calls)).not.toContain(webTraceId);
+  });
+
+  it("ignores oversized and malformed correlation headers", async () => {
+    const info = vi.fn();
+    vi.spyOn(logger, "getLogger").mockReturnValue({ info } as unknown as ReturnType<
+      typeof logger.getLogger
+    >);
+    const contexts: logger.LogContext[] = [];
+    const app = new Hono<{ Bindings: Env }>();
+    app.use("*", requestIdMiddleware());
+    app.use("*", requestTracingMiddleware());
+    app.get("/join", (c) => {
+      contexts.push(logger.getLogContext());
+      return c.text("ok");
+    });
+    const oversized = `web_${"b".repeat(32)}${"secret".repeat(80)}`;
+    const malformed = "sk_live_exposed";
+
+    await app.request("https://example.test/join", {
+      headers: { "X-SDP-Trace-ID": oversized },
+    });
+    await app.request("https://example.test/join", {
+      headers: { "X-SDP-Trace-ID": malformed },
+    });
+
+    expect(contexts.every((context) => context.web_trace_hash === undefined)).toBe(true);
+    expect(JSON.stringify([contexts, info.mock.calls])).not.toContain(oversized);
+    expect(JSON.stringify([contexts, info.mock.calls])).not.toContain(malformed);
   });
 
   it("keeps a successful response when the request log sink fails", async () => {
