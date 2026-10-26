@@ -1,15 +1,10 @@
+import { EARN_WIDE_ONLY_COLUMN as WIDE_ONLY } from "@/app/dashboard/[projectId]/markets/earn/earn-table-layout";
+
 /**
  * The Treasury page's table columns, shared by the page and its route skeleton so the two draw
- * the same widths by construction. No "use client" directive: the server-rendered loading
- * boundary reads these as values, and a client module would hand it reference proxies instead.
- *
- * Each table is its columns in order, by id, as fixed-layout widths that sum to 100% at each
- * width. Columns that do not fit a phone drop out below `@2xl` (the work area's container query,
- * a 624px column), so a row's action is always on screen without scrolling the table sideways.
+ * the same widths by construction, in the frame every Earn table shares (`earn-table-layout.ts`,
+ * which says how the widths work). No "use client" directive, for the same reason.
  */
-
-/** Hidden until the column is 624px wide. */
-const WIDE_ONLY = "hidden @2xl:table-cell";
 
 export const TREASURY_POSITION_COLUMNS = {
   position: "w-[44%] @2xl:w-[34%]",
@@ -46,9 +41,3 @@ export const TREASURY_WALLET_GRID = "grid min-w-0 gap-5 @xl:grid-cols-2";
  * sections under them never move.
  */
 export const TREASURY_POSITIONS_BODY = "flex min-h-40 min-w-0 flex-col";
-
-/** A table set on the page: the design's 12px bleed, so cell text lines up with the title. */
-export const TREASURY_TABLE_FRAME = "min-w-0 refresh:-mx-3";
-
-/** The borderless design-system table, laid out by the column widths above. */
-export const TREASURY_TABLE = "rounded-none border-0 [&_table]:table-fixed";

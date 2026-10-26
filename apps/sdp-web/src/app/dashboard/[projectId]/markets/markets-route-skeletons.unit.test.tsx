@@ -82,9 +82,9 @@ describe("Treasury route skeleton", () => {
 
   it("draws the summary, the wallet tiles and both tables in the page column's stack", () => {
     expect(html).toContain('data-loading-layout="treasury"');
-    expect(html).toContain('data-treasury-loading="summary"');
+    expect(html).toContain('data-earn-loading="summary"');
     expect(html).toContain('data-treasury-loading="wallets"');
-    expect(occurrences(html, 'data-treasury-loading="table"')).toBe(2);
+    expect(occurrences(html, 'data-earn-loading="table"')).toBe(2);
     expect(html).not.toContain("max-w-[90rem]");
   });
 
@@ -98,6 +98,24 @@ describe("Treasury route skeleton", () => {
     expect(html).toContain("flex min-h-40 min-w-0 flex-col");
     // The positions and strategies heads, five columns each.
     expect(occurrences(html, "<th ")).toBe(10);
+  });
+});
+
+// Embedded Yield loads into its populated footprint: the summary Treasury shares, then the
+// strategy table in the columns its rows render into.
+describe("Embedded Yield route skeleton", () => {
+  const html = renderToStaticMarkup(<EmbeddedYieldPortfolioSkeleton />);
+
+  it("draws the summary and the strategy table in the page column's stack", () => {
+    expect(html).toContain('data-embedded-yield-loading="portfolio"');
+    expect(html).toContain('data-earn-loading="summary"');
+    expect(occurrences(html, 'data-earn-loading="table"')).toBe(1);
+    expect(html).not.toContain("max-w-[90rem]");
+  });
+
+  it("draws the strategy table's six columns and two rows", () => {
+    expect(occurrences(html, "<th ")).toBe(6);
+    expect(occurrences(html, "<tr ")).toBe(3);
   });
 });
 

@@ -15,9 +15,10 @@ const REFRESH_ROUTES = [
   /^\/dashboard\/issuance(?:\/|$)/,
   // Payments: every page.
   /^\/dashboard\/payments(?:\/|$)/,
-  // Markets: the landing that routes to Earn's surfaces and DvP, and Treasury. DvP's own pages
-  // keep the base design.
-  /^\/dashboard\/markets(?:\/treasury-solutions)?\/?$/,
+  // Markets: the landing that routes to Earn's surfaces and DvP, Treasury, and Embedded Yield
+  // with its integration guide, under the current prefix and the legacy `earn` aliases. DvP's
+  // own pages keep the base design.
+  /^\/dashboard\/markets(?:\/(?:treasury-solutions|embedded-yield(?:\/(?:configure|integrate))?|earn(?:\/configure)?))?\/?$/,
   // The Private Channels connect form, with or without an instance: /private-channels/setup and
   // /private-channels/<instanceId>/setup. The rest of Private Channels keeps the base design.
   /^\/dashboard\/integrations\/private-channels\/(?:[^/]+\/)?setup\/?$/,

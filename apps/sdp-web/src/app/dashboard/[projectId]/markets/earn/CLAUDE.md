@@ -111,9 +111,13 @@ nothing else; the program create still sends the body `requestId` form.
 ## Routes
 
 - `/dashboard/markets/embedded-yield` → `EmbeddedYieldDashboard`: the live
-  customer portfolio and entry point for configuration. Its strategy drawer
-  renders the positions already hydrated by the project summary; it must not
-  fan out one metered request per customer wallet.
+  customer portfolio. It opens with the portfolio's live value in dollars (the
+  token totals summed at par, withheld while any position is unread or a token
+  is not a dollar stablecoin) over a stat line of wallets, positions and assets,
+  then a borderless table by strategy. Integrate is the shell's page action. A
+  row opens its customer wallets from the positions already hydrated by the
+  project summary; it must not fan out one metered request per customer
+  wallet.
 - `/dashboard/markets/embedded-yield/configure` → `EarnIntegrationGuide`: one
   configuration surface with a strategy dropdown, the selected strategy ID,
   live APY and liquidity, and code that updates in place. The legacy
@@ -161,12 +165,13 @@ nothing else; the program create still sends the body `requestId` form.
   configuration and integration-guide shapes. The shell's navigation-loading
   resolver (`lib/dashboard-navigation-loading.ts`) maps each pathname to the
   same route-specific skeleton used by its `loading.tsx` boundary.
-- The portfolio's zero-position state is the onboarding card alone: the three
-  metric tiles are hidden at zero positions because all-zero tiles with empty
-  charts read as data rather than "nothing yet". The removed UI builder
-  persisted the only former configuration state, so there is no honest
-  "configured but awaiting a deposit" distinction to infer from the live
-  position summary.
+- The portfolio's zero-position state is the empty state alone: the live value
+  and its counts are hidden at zero positions because a zero hero and empty
+  counts read as data rather than "nothing yet". Its Integrate action repeats
+  the page's, so the state hides the header's copy (`hidesPageAction`). The
+  removed UI builder persisted the only former configuration state, so there
+  is no honest "configured but awaiting a deposit" distinction to infer from
+  the live position summary.
 
 ## Module map
 
@@ -185,12 +190,14 @@ nothing else; the program create still sends the body `requestId` form.
   fund it.
 - `earn-integration-guide.tsx` — owns strategy selection and re-checks
   availability rather than trusting a deep link. Unavailable strategies stay
-  visible but disabled. The selected strategy's ID, APY, liquidity, provider,
-  and availability sit in one plain line under the dropdown ("Kamino · Instant
-  liquidity · 6.2% APY", APY omitted when unknown) with the ID as its own
-  copyable code block. A short intro paragraph explains the loop, then five
-  freely navigable reference tabs (client setup, deposits, reads, direct
-  withdraw, queued withdraw).
+  visible but disabled, with the reason beside their APY. The selected
+  strategy's provider, liquidity and APY sit in one plain line under the
+  dropdown ("Kamino · Instant liquidity · 6.2% APY", APY omitted when unknown)
+  with the ID as its own copyable code block; only a fundable strategy gets
+  there, so no availability is restated. The shell sets the way back and the
+  title; a short intro paragraph explains the loop, then one segmented control
+  of five freely navigable reference sections (client setup, deposits, reads,
+  direct withdraw, queued withdraw), tightened on a phone so all five fit.
   "Copy all code" copies the whole module (`buildEarnServerIntegration`), not
   just the active tab. The snippets remain server-only and the page says so in
   an info callout that links to the API keys page (a Developer key includes
@@ -644,7 +651,7 @@ browser pass on `/dashboard/markets/embedded-yield` and
   Visibility and eligibility are different questions: a row is visible because
   the API returned it, and selectable because `earnVaultDepositAvailability`
   said so. Do not collapse them, and do not filter a row out of the table to
-  express "not available" — that is what the badge is for.
+  express "not available" — that is what the availability label is for.
 - **Two visibility rules live in the API and this module never sees either.**
   `/strategies` omits Aave- and Morpho-related rows (`HIDDEN_STRATEGY_TERMS`)
   and every row of a provider SDP does not currently offer
@@ -656,9 +663,12 @@ browser pass on `/dashboard/markets/embedded-yield` and
   `refresh` scope; pages compose the shared refresh blocks (`RecordStack` and
   `RecordBlock`, `StatusText` for status as words, the borderless design-system
   `Table` in the Payments list type, `ActionTile`, `ListEmptyState`) rather than
-  bordered cards. Monospace is forbidden, including for addresses; use
-  `tabular-nums` for numeric alignment. The ONE exception is a genuine code
-  surface: the integration guide's `ui/code-block`, which is mono by design.
+  bordered cards. Treasury and Embedded Yield share their summary hero and a
+  row's identity (`EarnSummary`, `EarnRowIdentity` in `earn-page-blocks.tsx`)
+  and their table frame (`earn-table-layout.ts`). Monospace is forbidden,
+  including for addresses; use `tabular-nums` for numeric alignment. The ONE
+  exception is a genuine code surface: the integration guide's
+  `ui/code-block`, which is mono by design.
   Selection state is `border-primary bg-fill-subtle` across the whole module.
   `Badge` is status-only.
 - **Transaction dialogs share one frame.** Every deposit, withdrawal, exit,
@@ -667,12 +677,14 @@ browser pass on `/dashboard/markets/embedded-yield` and
   top edge that stays put as steps change height. A step that only gathers
   input is a `<form>`, so Enter continues; a step whose primary action moves
   money never submits on Enter: its button is the only way to confirm.
-- **Zero layout shift on Treasury.** Every loading, empty and error state keeps
-  the ready footprint: the route skeleton and the in-page states share
-  `treasury-solutions/treasury-layout.ts` (column widths, the positions body's
-  two-row floor) and `markets-route-skeletons.tsx`, and sections that most
-  treasuries never show (queued requests, custodial programs) render nothing
-  until they have rows. A table's columns drop below `@2xl`, never its action.
+- **Zero layout shift on Treasury and Embedded Yield.** Every loading, empty
+  and error state keeps the ready footprint: the route skeleton and the
+  in-page states share the column widths (`treasury-solutions/treasury-layout.ts`
+  with the positions body's two-row floor, `embedded-yield-layout.ts`), the
+  summary's geometry (`EarnSummarySkeleton`) and `markets-route-skeletons.tsx`,
+  and sections that most treasuries never show (queued requests, custodial
+  programs) render nothing until they have rows. A table's columns drop below
+  `@2xl`, never its action.
 - **Nothing may overlap — provider and fund names run long.**
   `@solana/design-system`'s `cn` is a plain string join — **no tailwind-merge**.
   A class handed to `Table*` that conflicts with one of its own base classes
