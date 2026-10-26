@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { scrubTelemetry, scrubTelemetryString } from "@sdp/redaction/scrub";
+import { setRpcTelemetrySink } from "@sdp/rpc/telemetry";
 import pino, { type Logger, type LoggerOptions } from "pino";
 import { LOG_REDACTION_PATHS, REDACTION_CENSOR } from "./log-redaction";
 
@@ -82,6 +83,10 @@ export function baseLoggerOptions(): LoggerOptions {
 }
 
 export const rootLogger: Logger = pino(baseLoggerOptions());
+
+setRpcTelemetrySink((event) => {
+  rootLogger.info(event, event.event);
+});
 
 export function getLogger(): Logger {
   return rootLogger;

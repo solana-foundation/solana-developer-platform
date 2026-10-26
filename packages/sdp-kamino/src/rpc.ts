@@ -50,7 +50,7 @@ export function withKaminoRpcTimeout(
  * read whose pooled socket died before any response is re-sent once.
  */
 export function createKaminoRpc(rpcUrl: string, timeoutMs = KAMINO_RPC_REQUEST_TIMEOUT_MS) {
-  const transport = withReadSocketRetry(createDefaultRpcTransport({ url: rpcUrl }));
+  const transport = withReadSocketRetry(createDefaultRpcTransport({ url: rpcUrl }), rpcUrl);
   return createSolanaRpcFromTransport(withKaminoRpcTimeout(transport, timeoutMs));
 }
 
@@ -202,7 +202,7 @@ export function createKaminoReadRpc(rpcUrl: string, timeoutMs = KAMINO_RPC_REQUE
   let transport = readTransports.get(rpcUrl);
   if (!transport) {
     transport = withKaminoReadDeduplication(
-      withReadSocketRetry(createDefaultRpcTransport({ url: rpcUrl }))
+      withReadSocketRetry(createDefaultRpcTransport({ url: rpcUrl }), rpcUrl)
     );
     readTransports.set(rpcUrl, transport);
     while (readTransports.size > KAMINO_READ_TRANSPORT_CAPACITY) {

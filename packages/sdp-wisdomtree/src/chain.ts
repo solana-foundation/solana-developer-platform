@@ -57,7 +57,7 @@ export function createWisdomTreeChainReader(
   // A read whose pooled socket died is re-sent below the read context, so a
   // minimum-slot scope only sees the attempt that answered.
   const rpc = createSolanaRpcFromTransport(
-    withTimeout(withReadSocketRetry(createDefaultRpcTransport({ url: rpcUrl })), timeoutMs)
+    withTimeout(withReadSocketRetry(createDefaultRpcTransport({ url: rpcUrl }), rpcUrl), timeoutMs)
   );
   return {
     async getAccount(accountAddress) {

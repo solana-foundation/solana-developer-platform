@@ -23,6 +23,7 @@ import { MANAGED_RPC_ENV_KEYS } from "./managed-rpc-env-keys";
 import { currentClusterScope } from "./scope";
 import { withReadSocketRetry } from "./socket-retry";
 import { DEFAULT_RPC_REQUEST_TIMEOUT_MS, type SolanaRpc } from "./solana";
+import { emitRpcTelemetry, rpcProviderForEndpoint } from "./telemetry";
 import { isTransientRpcError } from "./transient";
 
 /** How long a genesis match is trusted before re-probing: the node behind a URL can be repointed. */
@@ -314,16 +315,55 @@ function endpointAttemptOrder(lastFailedAt: readonly number[], now: number): num
   ];
 }
 
+interface RpcEndpoint {
+  transport: RpcTransport;
+  provider: string;
+  cluster: SolanaCluster;
+  genesisProofKey: string;
+}
+
+function emitAttemptTelemetry<TResponse>(
+  endpoint: RpcEndpoint,
+  method: string,
+  outcome: AttemptOutcome<TResponse>,
+  verdict: AttemptVerdict,
+  hasNext: boolean,
+  startedAt: number,
+  genesisProbeRequired: boolean
+): void {
+  const statusCode =
+    !outcome.ok && isSolanaError(outcome.cause, SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR)
+      ? outcome.cause.context.statusCode
+      : undefined;
+  const common = { provider: endpoint.provider, cluster: endpoint.cluster, method };
+  emitRpcTelemetry({
+    event: "sdp_rpc_attempt",
+    surface: "managed_pool",
+    ...common,
+    outcome: outcome.ok && servedJsonRpcError(outcome.response) === null ? "succeeded" : "failed",
+    ...(statusCode !== undefined ? { status_code: statusCode } : {}),
+    duration_ms: performance.now() - startedAt,
+    genesis_probe_required: genesisProbeRequired,
+  });
+  if (verdict.cooldown) {
+    emitRpcTelemetry({ event: "sdp_rpc_cooldown", surface: "managed_pool", ...common });
+  }
+  if (verdict.tryNext && hasNext) {
+    emitRpcTelemetry({ event: "sdp_rpc_failover", surface: "managed_pool", ...common });
+  }
+}
+
 /**
  * Per-request failover across a cluster's endpoints: try each endpoint in `endpointAttemptOrder`
  * and let `judgeAttempt` decide whether to cool it down and whether to ask the next one. The last
  * endpoint's answer or error is returned as-is, so kit raises its typed error.
  *
- * @param endpointTransports - The guarded endpoint transports, in failover order.
+ * @param endpoints - Guarded transports with provider names, in failover order.
  * @returns The pool transport.
  */
-function createPoolTransport(endpointTransports: readonly RpcTransport[]) {
-  const lastFailedAt = endpointTransports.map(() => Number.NEGATIVE_INFINITY);
+
+function createPoolTransport(endpoints: readonly RpcEndpoint[]) {
+  const lastFailedAt = endpoints.map(() => Number.NEGATIVE_INFINITY);
   return async <TResponse>(rpcRequest: Parameters<RpcTransport>[0]): Promise<TResponse> => {
     const attemptOrder = endpointAttemptOrder(lastFailedAt, Date.now());
     // NOTE: perf. A `minContextSlot` no endpoint has reached yet walks every endpoint before the
@@ -332,13 +372,24 @@ function createPoolTransport(endpointTransports: readonly RpcTransport[]) {
     // confirmed, so the full walk is rare. If it shows up, stop after two -32016 answers.
     for (let attempt = 0; ; attempt += 1) {
       const endpointIndex = attemptOrder[attempt];
-      const outcome = await attemptEndpoint<TResponse>(
-        endpointTransports[endpointIndex],
-        rpcRequest
-      );
+      const endpoint = endpoints[endpointIndex];
+      const method = isJsonRpcPayload(rpcRequest.payload) ? rpcRequest.payload.method : "batch";
+      const genesisProbeRequired =
+        (genesisProofExpiry.get(endpoint.genesisProofKey) ?? 0) <= Date.now();
+      const startedAt = performance.now();
+      const outcome = await attemptEndpoint<TResponse>(endpoint.transport, rpcRequest);
       const verdict = judgeAttempt(outcome, rpcRequest);
-      if (verdict.cooldown) lastFailedAt[endpointIndex] = Date.now();
       const isLastEndpoint = attempt === attemptOrder.length - 1;
+      emitAttemptTelemetry(
+        endpoint,
+        method,
+        outcome,
+        verdict,
+        !isLastEndpoint,
+        startedAt,
+        genesisProbeRequired
+      );
+      if (verdict.cooldown) lastFailedAt[endpointIndex] = Date.now();
       if (verdict.tryNext && !isLastEndpoint) continue;
       if (outcome.ok) return outcome.response;
       throw outcome.cause instanceof UnsentRequestError ? outcome.cause.cause : outcome.cause;
@@ -541,7 +592,7 @@ export async function proveEarnClusterEndpoint(
   const proofExpiresAt = genesisProofExpiry.get(genesisProofKey);
   if (proofExpiresAt !== undefined && proofExpiresAt > Date.now()) return;
   await proveGenesis(
-    withReadSocketRetry(createDefaultRpcTransport({ url: endpointUrl })),
+    withReadSocketRetry(createDefaultRpcTransport({ url: endpointUrl }), endpointUrl),
     cluster,
     genesisProofKey
   );
@@ -564,17 +615,26 @@ function pooledClusterTransport(
   const poolKey = `${cluster} ${endpointUrls.join(" ")}`;
   const memoizedTransport = memoizedTransports.get(poolKey);
   if (memoizedTransport) return { poolKey, poolTransport: memoizedTransport };
-  const endpointTransports = endpointUrls.map((endpointUrl) =>
-    withAttemptDeadline(
-      withGenesisGuard(
-        withReadSocketRetry(createDefaultRpcTransport({ url: endpointUrl })),
-        cluster,
-        endpointUrl
+  const endpoints = endpointUrls.map((endpointUrl): RpcEndpoint => {
+    const provider =
+      memoizedTransports === koraUpstreamPools.transports
+        ? "kora-upstream"
+        : rpcProviderForEndpoint(cluster, endpointUrl);
+    return {
+      provider,
+      cluster,
+      genesisProofKey: `${cluster} ${endpointUrl}`,
+      transport: withAttemptDeadline(
+        withGenesisGuard(
+          withReadSocketRetry(createDefaultRpcTransport({ url: endpointUrl })),
+          cluster,
+          endpointUrl
+        ),
+        DEFAULT_RPC_REQUEST_TIMEOUT_MS
       ),
-      DEFAULT_RPC_REQUEST_TIMEOUT_MS
-    )
-  );
-  const poolTransport = createPoolTransport(endpointTransports);
+    };
+  });
+  const poolTransport = createPoolTransport(endpoints);
   memoizedTransports.set(poolKey, poolTransport);
   return { poolKey, poolTransport };
 }

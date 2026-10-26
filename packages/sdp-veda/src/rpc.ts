@@ -53,7 +53,7 @@ export function withVedaRpcTimeout(
  * payload the read context prepared.
  */
 function vedaTransport(rpcUrl: string): RpcTransport {
-  return withReadSocketRetry(createDefaultRpcTransport({ url: rpcUrl }));
+  return withReadSocketRetry(createDefaultRpcTransport({ url: rpcUrl }), rpcUrl);
 }
 
 /** One deadline-aware RPC client shared by this package and the pinned SDK. */
