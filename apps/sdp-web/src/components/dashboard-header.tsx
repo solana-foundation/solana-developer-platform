@@ -601,7 +601,7 @@ function playgroundHeaderTabs(t: ReturnType<typeof useTranslations>): DashboardH
  */
 function refreshFlowPageConfig(config: {
   title: string;
-  tabs: readonly { id: string; label: string }[];
+  tabs: DashboardHeaderTabsConfig["tabs"];
 }): DashboardPageConfig {
   return {
     title: config.title,
@@ -1232,7 +1232,11 @@ function getRefreshPaymentsPageConfig(
       title: t("Shared.dashboardShell.deposit"),
       tabs: [
         { id: "address", label: t("DashboardPayments.depositMethod.address") },
-        { id: "provider", label: t("DashboardPayments.depositMethod.provider") },
+        {
+          id: "provider",
+          label: t("DashboardPayments.depositMethod.provider"),
+          capability: "canWrite",
+        },
       ],
     });
   }

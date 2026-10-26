@@ -869,11 +869,6 @@ function StrategyInformationCell({ strategy }: { strategy: EarnStrategy }) {
   );
 }
 
-/**
- * Whether the member may change state. False for a read-only member (`viewer`): deposits and
- * withdrawals are hidden, since the API refuses them. A tree without the workspace (a test) can.
- */
-
 function StrategyDepositAction({
   availability,
   onDeposit,

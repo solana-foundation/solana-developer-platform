@@ -543,7 +543,12 @@ export function DashboardShell({
       : null;
   const pageTitle = activeTitleOverride?.title ?? pageConfig.title;
   const contentWidthClass = pageConfig.contentWidthClass ?? "max-w-5xl";
-  const headerTabs = pageConfig.headerTabs;
+  const headerTabs = pageConfig.headerTabs && {
+    ...pageConfig.headerTabs,
+    tabs: pageConfig.headerTabs.tabs.filter(
+      (tab) => !tab.capability || dashboardAccess.capabilities[tab.capability]
+    ),
+  };
   const routeTabs = pageConfig.routeTabs;
   const hasHeaderTabs = Boolean(headerTabs || routeTabs);
   // A refresh action page sets its way back over a left title, in the page's column, as the

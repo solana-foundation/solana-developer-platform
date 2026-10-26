@@ -13,6 +13,7 @@ import {
   fetchAllCounterparties,
   fetchCounterpartyAccounts,
 } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
+import { useCanWrite } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { hasEnabledRampProvider, type RampProviderAccess } from "@/lib/provider-availability";
 import { useProjectHref } from "@/lib/use-dashboard-project";
@@ -66,6 +67,7 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
   const { mode, rampProviderAccess } = props;
   const router = useRouter();
   const href = useProjectHref();
+  const canWrite = useCanWrite();
 
   const [phase, setPhase] = useState<RampsPhase>("counterparty");
   const [sendMode, setSendMode] = useState<SendMode>("single");
@@ -134,6 +136,27 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
   };
 
   const railOnExit = () => setPhase(showMethodStep ? "method" : "counterparty");
+
+  // A read-only member deposits by address only: straight to the wallet's address, with no
+  // contact step (whose picker can add a contact) and no provider method.
+  if (mode === "receive" && !canWrite) {
+    return (
+      <OnchainReceiveRail
+        wallets={props.wallets}
+        walletsError={props.walletsError}
+        issuedTokenSymbolsByMint={props.issuedTokenSymbolsByMint}
+        enabledRampProviders={props.enabledRampProviders}
+        rampProviderAccess={rampProviderAccess}
+        counterpartiesResult={liveCounterparties}
+        selectedCounterparty={null}
+        counterpartyId=""
+        counterpartyName=""
+        methodLabel={getPaymentMethodLabel(t, mode, "onchain")}
+        preSteps={[]}
+        onExit={() => router.push(href("/dashboard/payments"))}
+      />
+    );
+  }
 
   if (mode === "send" && sendMode === "batch") {
     return (

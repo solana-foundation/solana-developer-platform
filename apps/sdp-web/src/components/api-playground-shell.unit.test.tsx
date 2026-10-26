@@ -590,9 +590,9 @@ describe("ApiPlaygroundShell refresh layout", () => {
       flags: { releaseChannel: "experimental" },
       dashboardAccess: { capabilities: { canWrite: false } },
     };
-    vi.spyOn(playgroundCatalog, "filterPlaygroundEndpointsToReleaseChannel").mockImplementation(
-      (endpoints) => endpoints
-    );
+    const filter = vi
+      .spyOn(playgroundCatalog, "filterPlaygroundEndpointsToReleaseChannel")
+      .mockImplementation((endpoints) => endpoints);
     try {
       const withRead = render(
         <I18nProvider locale="en" messages={getMessages("en")}>
@@ -614,6 +614,7 @@ describe("ApiPlaygroundShell refresh layout", () => {
         )
       ).toBeTruthy();
     } finally {
+      filter.mockRestore();
       mocks.workspace = undefined;
     }
   });

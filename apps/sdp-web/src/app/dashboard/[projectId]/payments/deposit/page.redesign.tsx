@@ -3,7 +3,6 @@ import { redirect } from "next/navigation";
 import { loadPaymentsActionPageData } from "@/app/dashboard/[projectId]/payments/ramps/payments-action-page.server";
 import { PaymentsActionPage } from "@/app/dashboard/[projectId]/payments/ramps/ramp-action-page.redesign";
 import { getAuthEntryPath } from "@/lib/auth-entry";
-import { redirectUnlessCanWrite } from "@/lib/require-write-access";
 
 export async function PaymentsDepositPage() {
   const { userId, orgId } = await auth();
@@ -13,7 +12,6 @@ export async function PaymentsDepositPage() {
   if (!orgId) {
     redirect("/dashboard");
   }
-  await redirectUnlessCanWrite("/dashboard/payments");
 
   const actionPageData = await loadPaymentsActionPageData();
   return <PaymentsActionPage mode="receive" wallets={[]} walletsError={null} {...actionPageData} />;
