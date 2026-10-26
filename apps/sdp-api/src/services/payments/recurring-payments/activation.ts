@@ -792,7 +792,12 @@ export async function activateRecurringPayment(input: {
       throw internalError("The recurring terms read returned no token accounts");
     }
     const mandate = rowMandate(claimed, read.terms);
-    assertMandateActivatable(read.terms, destinationAccount);
+    // A send an earlier run saved may have landed, so that run finishes from its saved records:
+    // refusing now would strand an authorization that may exist. Each pull re-checks the mint
+    // and the destination and holds when they no longer allow it.
+    if (!sendMayLand) {
+      assertMandateActivatable(read.terms, destinationAccount);
+    }
     const { mint, tokenProgram } = mandateProgramAccounts(mandate);
     const sourceTokenAccount = {
       tokenAccount: sourceAccount.tokenAccount,

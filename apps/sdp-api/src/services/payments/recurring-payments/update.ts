@@ -1545,11 +1545,15 @@ async function runReplacementUpdate(input: {
   // there. A fresh attempt (`claim`) has sent nothing and reads nothing extra.
   const resumedAttempt = attempt.stage !== "claim";
   const replacementPeriodStartAt = attempt.created_at;
+  const sendMayLand =
+    planCreationSignature !== null ||
+    authorizationSignature !== null ||
+    oldCancelSignature !== null;
   const requestedNextDue = replacementNextCollectionDueAt({
     requested: input.request.nextCollectionDueAt,
     periodStartAt: replacementPeriodStartAt,
     periodHours: input.resolved.periodHours,
-    clampToMinimum: Boolean(planCreationSignature || authorizationSignature || oldCancelSignature),
+    clampToMinimum: sendMayLand,
   });
 
   const sourceSigner = await createOrgSignerForCustodyWallet(
@@ -1583,7 +1587,11 @@ async function runReplacementUpdate(input: {
   if (destinationAccount === undefined || sourceAccount === undefined) {
     throw internalError("The recurring terms read returned no token accounts");
   }
-  assertMandateActivatable(read.terms, destinationAccount);
+  // As on activation: a run with a saved send finishes it, and each pull re-checks the mint and
+  // the destination.
+  if (!sendMayLand) {
+    assertMandateActivatable(read.terms, destinationAccount);
+  }
   // Today's fee checks apply only to a mandate made now: a recovered update finishes the
   // replacement plan an earlier run created with the mandate it holds.
   const makeMandate = (): RecurringMandate => {

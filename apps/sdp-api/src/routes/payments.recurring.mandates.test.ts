@@ -557,4 +557,39 @@ describe("Payments routes — recurring mandates in base units (ADR 0012)", () =
     });
     expect(sendTransactionMock.mock.calls.length).toBe(sendsBefore);
   });
+
+  it("finishes a recovered activation whose sends landed after its destination began requiring memos", async () => {
+    await answerPyusd({ extensions: [], destinationExtensions: [] });
+    const activated = await activateRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      token: PYUSD,
+    });
+    // The earlier run's plan and authorization landed, and it died before writing `active`.
+    const staleAt = new Date(Date.now() - 16 * 60 * 1000).toISOString();
+    await getDb(env)
+      .prepare(
+        "UPDATE payment_recurring_payments SET status = 'activating', updated_at = ? WHERE id = ?"
+      )
+      .bind(staleAt, activated.id)
+      .run();
+    await answerPyusd({
+      extensions: [],
+      destinationExtensions: [{ __kind: "MemoTransfer", requireIncomingTransferMemos: true }],
+    });
+    const sendsBefore = sendTransactionMock.mock.calls.length;
+
+    const response = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/activate`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+
+    const text = await response.text();
+    expect(response.status, text).toBe(200);
+    expect((await parseRecurringResponse(new Response(text))).data.recurringPayment).toMatchObject({
+      status: "active",
+      subscriptionId: activated.subscriptionId,
+    });
+    expect(sendTransactionMock.mock.calls.length).toBe(sendsBefore);
+  });
 });
