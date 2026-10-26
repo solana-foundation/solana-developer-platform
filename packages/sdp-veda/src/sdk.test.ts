@@ -50,6 +50,9 @@ const mocks = vi.hoisted(() => ({
   minimumBalanceForRentExemption: vi.fn(),
   parseLifecycleEvents: vi.fn(),
   clientOptions: vi.fn(),
+  heldReads: vi.fn(),
+  /** The mocked SDK's PDA helpers: each answers its program, which is a valid address. */
+  pda: async (program: unknown) => [program, 255],
 }));
 
 vi.mock("@vedatech/svm-sdk", () => ({
@@ -61,6 +64,15 @@ vi.mock("@vedatech/svm-sdk", () => ({
     };
   },
   parseLifecycleEvents: mocks.parseLifecycleEvents,
+  findAllowedUserPda: mocks.pda,
+  findAssetDataPda: mocks.pda,
+  findExtraAccountMetasPda: mocks.pda,
+  findHookConfigPda: mocks.pda,
+  findPermissionPda: mocks.pda,
+  findQueuePda: mocks.pda,
+  findQueueStatePda: mocks.pda,
+  findQueueWithdrawAssetPda: mocks.pda,
+  findUserWithdrawStatePda: mocks.pda,
   VedaSdkError: class VedaSdkError extends Error {
     constructor(
       readonly code: string,
@@ -76,11 +88,21 @@ vi.mock("./accounts", () => ({
   accountExists: mocks.accountExists,
   minimumBalanceForRentExemption: mocks.minimumBalanceForRentExemption,
 }));
-// The RPC client is only handed to the (mocked) SDK; keep it inert. The read
-// client is tagged so a test can tell which one a construction received.
+// The RPC client is only handed to the (mocked) SDK; keep it inert. The shared
+// client is tagged so a test can tell which one a construction received, and
+// answers the one batched read a queue operation sends before the SDK runs.
 vi.mock("./rpc", () => ({
   createVedaRpc: vi.fn(() => ({})),
-  createVedaReadRpc: vi.fn(() => ({ positionReads: true })),
+  createVedaReadRpc: vi.fn(() => ({
+    sharedReads: true,
+    getMultipleAccounts: (addresses: unknown, config: unknown) => ({
+      send: async () => {
+        mocks.heldReads(addresses, config);
+        return { context: { slot: 1 }, value: [] };
+      },
+    }),
+  })),
+  withVedaOperationReads: (operation: () => Promise<unknown>) => operation(),
 }));
 
 import {
@@ -134,7 +156,7 @@ function holding(shares: bigint, extra: { unlockTimestamp?: bigint } = {}, share
 function primeVault(assets: { mint: string; allowDeposits: boolean }[]): void {
   mocks.validateDeployment.mockResolvedValue({});
   mocks.vault.validateCompatibility.mockResolvedValue({});
-  mocks.vault.getState.mockResolvedValue({ shareMint: SHARE_MINT, shareDecimals: 6 });
+  mocks.vault.getState.mockResolvedValue({ shareMint: SHARE_MINT, shareDecimals: 6, vaultId: 7n });
   mocks.vault.listAssets.mockResolvedValue(
     assets.map((asset) => ({ mint: asset.mint, allowDeposits: asset.allowDeposits }))
   );
@@ -180,6 +202,7 @@ function primeVault(assets: { mint: string; allowDeposits: boolean }[]): void {
   mocks.accountExists.mockResolvedValue(true);
   mocks.minimumBalanceForRentExemption.mockResolvedValue(1_000n);
   mocks.parseLifecycleEvents.mockReturnValue([]);
+  mocks.heldReads.mockReset();
 }
 
 beforeEach(() => {
@@ -262,7 +285,10 @@ describe("position reads reuse the client and the vault's static facts", () => {
 
     expect(mocks.clientOptions).toHaveBeenCalledTimes(1);
     expect(mocks.clientOptions).toHaveBeenCalledWith(
-      expect.objectContaining({ rpc: { positionReads: true }, commitment: "confirmed" })
+      expect.objectContaining({
+        rpc: expect.objectContaining({ sharedReads: true }),
+        commitment: "confirmed",
+      })
     );
     expect(mocks.vault.getState).toHaveBeenCalledTimes(1);
     expect(mocks.vault.listAssets).toHaveBeenCalledTimes(1);
@@ -302,17 +328,32 @@ describe("position reads reuse the client and the vault's static facts", () => {
     const clock = vi.spyOn(Date, "now").mockReturnValue(now);
     try {
       await read("https://first.test.invalid");
-      expect(vedaReadCacheSizes()).toEqual({ clients: 1, shareFacts: 1, assetMints: 1 });
+      expect(vedaReadCacheSizes()).toEqual({
+        clients: 1,
+        shareFacts: 1,
+        assetMints: 1,
+        mintDecimals: 0,
+      });
       clock.mockReturnValue(now + VEDA_READ_CACHE_TTL_MS + 1);
       await read("https://second.test.invalid");
-      expect(vedaReadCacheSizes()).toEqual({ clients: 1, shareFacts: 1, assetMints: 1 });
+      expect(vedaReadCacheSizes()).toEqual({
+        clients: 1,
+        shareFacts: 1,
+        assetMints: 1,
+        mintDecimals: 0,
+      });
       for (let index = 0; index < 40; index += 1) {
         await read(`https://rpc-${index}.test.invalid`);
       }
     } finally {
       clock.mockRestore();
     }
-    expect(vedaReadCacheSizes()).toEqual({ clients: 32, shareFacts: 41, assetMints: 41 });
+    expect(vedaReadCacheSizes()).toEqual({
+      clients: 32,
+      shareFacts: 41,
+      assetMints: 41,
+      mintDecimals: 0,
+    });
   });
 
   it("never reuses a client whose program validation rejected", async () => {
@@ -893,6 +934,149 @@ describe("readVedaWithdrawalOptions", () => {
   });
 });
 
+describe("queue operations reuse the shared client and the vault's static facts", () => {
+  const TERMS = { shares: "2.5", discountBps: 50, deadlineSeconds: 120 };
+
+  function primeCancel(): void {
+    mocks.vault.getWithdrawalRequest.mockResolvedValue({
+      address: REQUEST,
+      status: "expiredCancelable",
+      request: queuedRequestView({ status: "expiredCancelable" }),
+    });
+    mocks.vault.buildCancelWithdrawal.mockResolvedValue({ instructions: [] });
+  }
+
+  it("reads options, quotes and builds with one client, one facts read and one mint read", async () => {
+    primeVault([{ mint: USDC_DEVNET, allowDeposits: true }]);
+    primeCancel();
+    mocks.vault.buildRequestWithdrawal.mockResolvedValue({
+      instructions: [
+        queueInstruction(VEDA_REQUEST_WITHDRAW_DISCRIMINATOR, [
+          { address: OWNER, role: 3 },
+          ...Array.from({ length: 4 }, () => ({ address: OWNER, role: 0 })),
+          { address: REQUEST, role: 1 },
+        ]),
+      ],
+    });
+
+    await readVedaWithdrawalOptions(runtime, config, { vault: VAULT });
+    await previewVedaQueuedWithdrawal(runtime, config, { vault: VAULT, ...TERMS });
+    await buildVedaQueuedWithdrawalRequestPlan(runtime, config, {
+      vault: VAULT,
+      owner: OWNER,
+      ...TERMS,
+    });
+    await buildVedaQueuedWithdrawalCancelPlan(runtime, config, {
+      vault: VAULT,
+      owner: OWNER,
+      request: REQUEST,
+    });
+
+    expect(mocks.clientOptions).toHaveBeenCalledTimes(1);
+    expect(mocks.clientOptions).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rpc: expect.objectContaining({ sharedReads: true }),
+        commitment: "confirmed",
+      })
+    );
+    expect(mocks.vault.getState).toHaveBeenCalledTimes(1);
+    expect(mocks.vault.listAssets).toHaveBeenCalledTimes(1);
+    expect(mocks.readMintDecimals).toHaveBeenCalledTimes(1);
+    // One batched read per operation, before its SDK calls, at the client's commitment.
+    expect(mocks.heldReads).toHaveBeenCalledTimes(4);
+    for (const [addresses, options] of mocks.heldReads.mock.calls) {
+      expect(addresses).toContain(VAULT);
+      expect(options).toEqual({ commitment: "confirmed", encoding: "base64" });
+    }
+    // The build's quote is part of the build: the SDK is asked for each once.
+    expect(mocks.vault.previewRequestWithdrawal).toHaveBeenCalledTimes(2);
+    expect(mocks.vault.buildRequestWithdrawal).toHaveBeenCalledTimes(1);
+  });
+
+  it("never remembers a failed facts read", async () => {
+    primeVault([{ mint: USDC_DEVNET, allowDeposits: true }]);
+    const failure = new Error("vault state unavailable");
+    mocks.vault.getState.mockRejectedValueOnce(failure);
+
+    await expect(
+      readVedaWithdrawalOptions(runtime, config, { vault: VAULT })
+    ).rejects.toMatchObject({ code: "VAULT_UNREADABLE", cause: failure });
+    await expect(
+      readVedaWithdrawalOptions(runtime, config, { vault: VAULT })
+    ).resolves.toMatchObject({ queued: true });
+    expect(mocks.vault.getState).toHaveBeenCalledTimes(2);
+  });
+
+  it("maps a failed batched read like the SDK read it replaces", async () => {
+    primeVault([{ mint: USDC_DEVNET, allowDeposits: true }]);
+    primeCancel();
+    const failure = new Error("connection reset");
+    mocks.heldReads.mockImplementation(() => {
+      throw failure;
+    });
+
+    await expect(
+      readVedaWithdrawalOptions(runtime, config, { vault: VAULT })
+    ).rejects.toMatchObject({
+      code: "VAULT_UNREADABLE",
+      message: expect.stringContaining("could not read withdrawal options"),
+      cause: failure,
+    });
+    await expect(
+      previewVedaQueuedWithdrawal(runtime, config, { vault: VAULT, ...TERMS })
+    ).rejects.toMatchObject({ code: "VAULT_UNREADABLE", cause: failure });
+    await expect(
+      buildVedaQueuedWithdrawalCancelPlan(runtime, config, {
+        vault: VAULT,
+        owner: OWNER,
+        request: REQUEST,
+      })
+    ).rejects.toMatchObject({
+      code: "VAULT_UNREADABLE",
+      message: expect.stringContaining(`could not read withdrawal request ${REQUEST}`),
+      cause: failure,
+    });
+    expect(mocks.vault.getWithdrawalOptions).not.toHaveBeenCalled();
+    expect(mocks.vault.previewRequestWithdrawal).not.toHaveBeenCalled();
+    expect(mocks.vault.getWithdrawalRequest).not.toHaveBeenCalled();
+  });
+
+  it("issues the batched read in the caller's minimum-slot scope and the fills outside it", async () => {
+    primeVault([{ mint: USDC_DEVNET, allowDeposits: true }]);
+    const scopedSlot = () =>
+      (
+        prepareRpcRead({ method: "getMultipleAccounts", params: [[], {}] }) as {
+          params: [unknown, { minContextSlot?: number }];
+        }
+      ).params[1].minContextSlot;
+    const seen: Record<string, number | undefined> = {};
+    mocks.vault.getState.mockImplementation(async () => {
+      seen.getState = scopedSlot();
+      return { shareMint: SHARE_MINT, shareDecimals: 6, vaultId: 7n };
+    });
+    mocks.heldReads.mockImplementation(() => {
+      seen.held = scopedSlot();
+    });
+    mocks.vault.getWithdrawalOptions.mockImplementation(async () => {
+      seen.getWithdrawalOptions = scopedSlot();
+      return {
+        instant: true,
+        queued: true,
+        withdrawAuthority: "11111111111111111111111111111111",
+        queueState: QUEUE_STATE,
+      };
+    });
+
+    // The mocked SDK sends nothing, so the scope itself rejects for lack of an
+    // observed slot; what matters here is where each read was issued.
+    await expect(
+      withMinimumRpcSlot(100, () => readVedaWithdrawalOptions(runtime, config, { vault: VAULT }))
+    ).rejects.toThrow("did not establish");
+
+    expect(seen).toEqual({ getState: undefined, held: 100, getWithdrawalOptions: 100 });
+  });
+});
+
 describe("previewVedaQueuedWithdrawal", () => {
   it("passes exact atomics to the SDK and returns JSON-safe decimal and timestamp fields", async () => {
     primeVault([{ mint: USDC_DEVNET, allowDeposits: true }]);
@@ -1050,23 +1234,36 @@ describe("queued withdrawal lifecycle reads", () => {
       status: "pending",
       request: queuedRequestView(),
     });
-    await readVedaQueuedWithdrawalRequest(runtime, config, { vault: VAULT, request: REQUEST });
-    expect(mocks.clientOptions).toHaveBeenLastCalledWith(
-      expect.objectContaining({ commitment: "finalized" })
-    );
-    await readVedaQueuedWithdrawalRequests(runtime, config, { vault: VAULT, owner: OWNER });
-    expect(mocks.clientOptions).toHaveBeenLastCalledWith(
-      expect.objectContaining({ commitment: "finalized" })
-    );
-    await previewVedaQueuedWithdrawal(runtime, config, {
-      vault: VAULT,
-      shares: "2.5",
-      discountBps: 50,
-      deadlineSeconds: 120,
-    });
-    expect(mocks.clientOptions).toHaveBeenLastCalledWith(
-      expect.objectContaining({ commitment: "confirmed" })
-    );
+    // Each read starts from empty caches, so it constructs the client it reads through.
+    const commitmentOf = async (read: () => Promise<unknown>) => {
+      resetVedaReadCaches();
+      mocks.clientOptions.mockClear();
+      await read();
+      return mocks.clientOptions.mock.calls.map(
+        ([options]) => (options as { commitment: string }).commitment
+      );
+    };
+
+    await expect(
+      commitmentOf(() =>
+        readVedaQueuedWithdrawalRequest(runtime, config, { vault: VAULT, request: REQUEST })
+      )
+    ).resolves.toEqual(["finalized"]);
+    await expect(
+      commitmentOf(() =>
+        readVedaQueuedWithdrawalRequests(runtime, config, { vault: VAULT, owner: OWNER })
+      )
+    ).resolves.toEqual(["finalized"]);
+    await expect(
+      commitmentOf(() =>
+        previewVedaQueuedWithdrawal(runtime, config, {
+          vault: VAULT,
+          shares: "2.5",
+          discountBps: 50,
+          deadlineSeconds: 120,
+        })
+      )
+    ).resolves.toEqual(["confirmed"]);
   });
 
   it("lists only the SDP-facing asset and converts every atomic/timestamp field", async () => {

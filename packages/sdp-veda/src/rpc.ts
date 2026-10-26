@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { readFloor, readStamp, withRpcReadContext } from "@sdp/rpc/read-context";
 import { withReadSocketRetry } from "@sdp/rpc/socket-retry";
 import {
@@ -66,9 +67,9 @@ export const VEDA_BLOCK_TIME_TTL_MS = 60_000;
 const VEDA_BLOCK_TIME_CAPACITY = 256;
 
 /**
- * The reads a position read sends, and the only methods the read transport
- * shares. Anything else, above all a send, a simulation or a blockhash, always
- * goes out as its own request.
+ * The reads the SDK's position, quote and build methods send, and the only
+ * methods the read transport shares. Anything else, above all a send, a
+ * simulation or a blockhash, always goes out as its own request.
  */
 const VEDA_SHARED_READ_METHODS: ReadonlySet<string> = new Set([
   "getAccountInfo",
@@ -94,8 +95,139 @@ interface InFlightRead {
   controller: AbortController;
 }
 
+/** Most `getMultipleAccounts` answers one operation holds. */
+const VEDA_OPERATION_HELD_CAPACITY = 16;
+
+/** One `getMultipleAccounts` answer an operation holds. */
+interface HeldAccounts {
+  /** `stableKey` of the request's config without `minContextSlot`. */
+  config: string;
+  /** The context slot that answered it. */
+  slot: number;
+  /** `readStamp()` of the request that answered it. */
+  stamp: number;
+  /** Each requested address and its position in `value`. */
+  index: ReadonlyMap<string, number>;
+  envelope: Record<string, unknown>;
+  context: unknown;
+  value: readonly unknown[];
+}
+
+const operationReads = new AsyncLocalStorage<HeldAccounts[]>();
+
 /**
- * De-duplication for the long-lived position-read client only.
+ * Run one provider operation so it fetches each account once.
+ *
+ * The SDK re-reads the vault state in every public method and reads the rest of
+ * an operation's accounts in several small batches, so one queue build fetched
+ * the vault state 15 times. Inside this scope, a `getMultipleAccounts` whose
+ * addresses all appear in an answer the SAME operation already holds, under the
+ * same config and at a slot no older than its `minContextSlot`, is served from
+ * that answer: exactly what the narrower request would have returned at that
+ * slot, which is the one consistent snapshot the SDK's own
+ * `minContextSlot: preflight.slot` re-read asks for. An operation that reads
+ * every account it needs in one request first therefore sends nothing else but
+ * a block time. "Live" means read once per operation, never across operations:
+ * the held answers die with the scope.
+ *
+ * Only plain `getMultipleAccounts` is served, never a data slice, another
+ * method or an error. It sits below the read context, so a scoped read's
+ * minimum slot is checked against the held answer's slot, and an answer is
+ * served only to a caller whose read floor it postdates. A nested call joins
+ * the operation already open, so a build's own quote shares the build's reads;
+ * a failover re-attempt is a new call and gets a fresh scope.
+ */
+export function withVedaOperationReads<T>(operation: () => Promise<T>): Promise<T> {
+  return operationReads.getStore() ? operation() : operationReads.run([], operation);
+}
+
+/** What an operation may hold or serve of a `getMultipleAccounts` request. */
+interface AccountsRead {
+  addresses: readonly string[];
+  /** `stableKey` of its config without `minContextSlot`. */
+  config: string;
+  /** Its `minContextSlot`, 0 when absent. */
+  minimumSlot: number;
+}
+
+function accountsRead(params: unknown): AccountsRead | undefined {
+  if (!Array.isArray(params) || params.length > 2) return undefined;
+  const [addresses, config] = params as [unknown, unknown];
+  if (!Array.isArray(addresses) || !addresses.every((item) => typeof item === "string")) {
+    return undefined;
+  }
+  if (config !== undefined && asRecord(config) === undefined) return undefined;
+  const { minContextSlot, ...rest } = asRecord(config) ?? {};
+  if ("dataSlice" in rest) return undefined;
+  const minimumSlot = minContextSlot === undefined ? 0 : Number(minContextSlot);
+  if (!Number.isSafeInteger(minimumSlot) || minimumSlot < 0) return undefined;
+  return { addresses, config: stableKey(rest), minimumSlot };
+}
+
+/** The open operation's held answers and what it may hold of `request`, if anything. */
+function operationRead(request: {
+  method: string;
+  params: unknown;
+}): { held: HeldAccounts[]; read: AccountsRead } | undefined {
+  const held = operationReads.getStore();
+  if (!held || request.method !== "getMultipleAccounts") return undefined;
+  const read = accountsRead(request.params);
+  return read && { held, read };
+}
+
+/** The held answer, newest slot first, that covers every requested address. */
+function serveHeld(
+  held: readonly HeldAccounts[],
+  read: AccountsRead,
+  floor: number | undefined
+): Record<string, unknown> | undefined {
+  let best: { from: HeldAccounts; value: unknown[] } | undefined;
+  for (const from of held) {
+    if (from.config !== read.config || from.slot < read.minimumSlot) continue;
+    if (floor !== undefined && from.stamp <= floor) continue;
+    if (best && best.from.slot >= from.slot) continue;
+    const value: unknown[] = [];
+    for (const key of read.addresses) {
+      const position = from.index.get(key);
+      if (position === undefined) break;
+      value.push(from.value[position]);
+    }
+    if (value.length === read.addresses.length) best = { from, value };
+  }
+  if (!best) return undefined;
+  return { ...best.from.envelope, result: { context: best.from.context, value: best.value } };
+}
+
+function holdAnswer(
+  held: HeldAccounts[],
+  read: AccountsRead,
+  stamp: number,
+  response: unknown
+): void {
+  const envelope = asRecord(response);
+  if (!envelope || envelope.error !== undefined) return;
+  const result = asRecord(envelope.result);
+  const answered = asRecord(result?.context)?.slot;
+  const slot = typeof answered === "bigint" ? Number(answered) : answered;
+  const value = result?.value;
+  if (
+    typeof slot !== "number" ||
+    !Number.isSafeInteger(slot) ||
+    !Array.isArray(value) ||
+    value.length !== read.addresses.length
+  ) {
+    return;
+  }
+  const index = new Map<string, number>();
+  read.addresses.forEach((key, position) => {
+    if (!index.has(key)) index.set(key, position);
+  });
+  held.push({ config: read.config, slot, stamp, index, envelope, context: result?.context, value });
+  while (held.length > VEDA_OPERATION_HELD_CAPACITY) held.shift();
+}
+
+/**
+ * De-duplication for the long-lived shared clients (`sdk.ts`).
  *
  * The SDK re-reads vault state inside every public method and follows every
  * `getMultipleAccounts` with a `getBlockTime` for the slot that served it. Two
@@ -107,6 +239,9 @@ interface InFlightRead {
  *   are ever shared.
  * - A slot's block time is a fact of that slot, so a non-null answer is reused
  *   for a short window. Errors and nulls are never remembered.
+ *
+ * Inside `withVedaOperationReads`, an account read the operation already holds
+ * is answered from it first.
  *
  * Applied BELOW `withRpcReadContext`: the key already carries any
  * `minContextSlot` a scoped read adds, and every consumer still validates the
@@ -137,12 +272,19 @@ export function withVedaReadDeduplication(transport: RpcTransport): RpcTransport
       return transport<TResponse>(config);
     }
     const key = stableKey([request.method, request.params]);
+    const floor = readFloor();
+
+    const operation = operationRead(request);
+    const served = operation && serveHeld(operation.held, operation.read, floor);
+    if (served) {
+      if (config.signal?.aborted) throw config.signal.reason;
+      return served as TResponse;
+    }
 
     const remembered = blockTimes.get(key);
     if (remembered && remembered.expiresAt > Date.now()) return remembered.response as TResponse;
     if (remembered) blockTimes.delete(key);
 
-    const floor = readFloor();
     let entry = inFlight.get(key);
     if (
       entry &&
@@ -175,8 +317,13 @@ export function withVedaReadDeduplication(transport: RpcTransport): RpcTransport
       entry = created;
     }
     const joined = entry;
-    return consume(joined, config.signal, () => {
+    const response = consume(joined, config.signal, () => {
       if (inFlight.get(key) === joined) inFlight.delete(key);
+    });
+    if (!operation) return response as Promise<TResponse>;
+    return response.then((answer) => {
+      holdAnswer(operation.held, operation.read, joined.stamp, answer);
+      return answer;
     }) as Promise<TResponse>;
   };
 }
@@ -213,6 +360,12 @@ function consume(
   });
 }
 
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
 function jsonRpcRequest(payload: unknown): { method: string; params: unknown } | undefined {
   if (payload === null || typeof payload !== "object" || Array.isArray(payload)) return undefined;
   const { method, params } = payload as { method?: unknown; params?: unknown };
@@ -244,10 +397,11 @@ function stableKey(value: unknown): string {
 }
 
 /**
- * The position-read client: the same deadline and confirmation context as
- * `createVedaRpc`, over the de-duplicating transport. Never used to build. The
- * socket re-send sits below the de-duplication, so one re-send serves every
- * consumer of a shared read.
+ * The shared clients' RPC: the same deadline and confirmation context as
+ * `createVedaRpc`, over the de-duplicating transport. Queue builds use it too:
+ * the SDK's `build*` methods only read, and a send, a simulation or a
+ * blockhash never takes a shared path. The socket re-send sits below the
+ * de-duplication, so one re-send serves every consumer of a shared read.
  */
 export function createVedaReadRpc(rpcUrl: string, timeoutMs = VEDA_RPC_REQUEST_TIMEOUT_MS) {
   const transport = withVedaReadDeduplication(vedaTransport(rpcUrl));
