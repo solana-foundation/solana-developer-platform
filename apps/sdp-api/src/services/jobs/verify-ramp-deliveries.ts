@@ -216,6 +216,8 @@ const TOKEN_TRANSFER_TYPES: ReadonlySet<string> = new Set([
   "transferCheckedWithFee",
 ]);
 
+const TOKEN_BURN_TYPES: ReadonlySet<string> = new Set(["burn", "burnChecked"]);
+
 const rawTokenAmountSchema = z.object({ amount: z.string().regex(/^\d+$/) });
 
 /**
@@ -237,9 +239,9 @@ function rawAmountOf(
  * The asset's movement into `destination`: "absent" when the transaction moved
  * none, null when it cannot be read. Base units only: a token's credit is the
  * owner's raw balance change at the mint's own decimals as the chain reports
- * them (`tokenBalanceDelta`), never a display value or a catalogue scale, and
- * its debit is the instruction data of the transfers into the owner's token
- * accounts of the mint.
+ * them (`tokenBalanceDelta`) plus what left those accounts in the transaction,
+ * never a display value or a catalogue scale, and its debit is the instruction
+ * data of the transfers into the owner's token accounts of the mint.
  */
 function observedDelivery(
   asset: AssetRef,
@@ -272,46 +274,57 @@ function observedDelivery(
       .filter((balance) => balance.mint === asset.mint && balance.owner === destination)
       .map((balance) => transaction.accountKeys[balance.accountIndex])
   );
-  let debit = 0n;
+  const moves = tokenMovesTouching(
+    transaction,
+    SPL_TOKEN_PROGRAMS[asset.program],
+    destinationAccounts
+  );
+  if (moves === null) return null;
+  const credit = delta.baseUnits + moves.left;
+  const debit = moves.debits.reduce((total, amount) => total + amount, 0n);
+  // A delivery by an instruction this reader does not parse (a CPI it cannot
+  // attribute) is judged by its credit alone.
+  return moves.debits.length === 0 || debit < credit
+    ? { decimals: delta.decimals, credit, debit: credit, debits: [credit], statedFee: 0n }
+    : { decimals: delta.decimals, credit, debit, debits: moves.debits, statedFee: moves.statedFee };
+}
+
+/**
+ * The mint's token program's moves in `transaction` that touch `accounts`:
+ * each transfer into them (its debit), the fee those transfers stated (null
+ * when one stated none), and what left them, moved out or burned. A move out
+ * or a burn lowers the balance change without being a fee. Null when an
+ * amount cannot be read.
+ */
+function tokenMovesTouching(
+  transaction: ParsedTransaction,
+  tokenProgram: string,
+  accounts: ReadonlySet<string>
+): { debits: bigint[]; statedFee: bigint | null; left: bigint } | null {
   const debits: bigint[] = [];
   let statedFee: bigint | null = 0n;
-  let moves = 0;
-  const tokenProgram = SPL_TOKEN_PROGRAMS[asset.program];
-  for (const instruction of transaction.instructions) {
+  let left = 0n;
+  for (const { programId, parsedType, info } of transaction.instructions) {
     // The System program's "transfer" moves lamports, as when the ATA program
     // tops up rent for an account that already held some: only the mint's own
     // token program moves its tokens.
-    if (
-      instruction.programId !== tokenProgram ||
-      instruction.parsedType === null ||
-      !TOKEN_TRANSFER_TYPES.has(instruction.parsedType) ||
-      instruction.info === null ||
-      !destinationAccounts.has(String(instruction.info.destination))
-    ) {
-      continue;
-    }
-    const amount = rawAmountOf(instruction.info, "tokenAmount");
+    if (programId !== tokenProgram || parsedType === null || info === null) continue;
+    const transfer = TOKEN_TRANSFER_TYPES.has(parsedType);
+    const out = accounts.has(
+      String(TOKEN_BURN_TYPES.has(parsedType) ? info.account : transfer ? info.source : undefined)
+    );
+    const into = transfer && accounts.has(String(info.destination));
+    if (!out && !into) continue;
+    const amount = rawAmountOf(info, "tokenAmount");
     if (amount === null) return null;
-    debit += amount;
-    debits.push(amount);
-    moves += 1;
-    const fee =
-      instruction.parsedType === "transferCheckedWithFee"
-        ? rawAmountOf(instruction.info, "feeAmount")
-        : null;
-    statedFee = statedFee === null || fee === null ? null : statedFee + fee;
+    if (out) left += amount;
+    if (into) {
+      debits.push(amount);
+      const fee = parsedType === "transferCheckedWithFee" ? rawAmountOf(info, "feeAmount") : null;
+      statedFee = statedFee === null || fee === null ? null : statedFee + fee;
+    }
   }
-  // A delivery by an instruction this reader does not parse (a CPI it cannot
-  // attribute) is judged by its credit alone.
-  return moves === 0 || debit < delta.baseUnits
-    ? {
-        decimals: delta.decimals,
-        credit: delta.baseUnits,
-        debit: delta.baseUnits,
-        debits: [delta.baseUnits],
-        statedFee: 0n,
-      }
-    : { decimals: delta.decimals, credit: delta.baseUnits, debit, debits, statedFee };
+  return { debits, statedFee, left };
 }
 
 /**
