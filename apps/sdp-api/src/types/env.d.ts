@@ -116,7 +116,7 @@ export interface Env extends ManagedRpcEnv {
   JUPITER_PRICE_API_URL?: string;
   JUPITER_PRICE_API_KEY?: string;
   TOKENS_XYZ_API_KEY?: string;
-  /** Compare each eligible lookup in stage; production samples at most one percent. */
+  /** Opt into each eligible shadow lookup. Configure only in stage. */
   TOKENS_XYZ_SHADOW_SAMPLE_ALL?: string;
   /**
    * Jupiter Swap API (swap-funded Earn deposits and provider DEX exits). Fail-closed: with no key
