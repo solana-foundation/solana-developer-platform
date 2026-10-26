@@ -6,6 +6,7 @@ import { withLegacyDesign } from "@/flags/new-design";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import { PAYMENT_REQUESTS_HREF } from "@/lib/payments-routes";
+import { redirectUnlessCanWrite } from "@/lib/require-write-access";
 import { requestProjectHref } from "@/lib/sdp-api";
 
 export const dynamic = "force-dynamic";
@@ -18,6 +19,7 @@ async function PaymentRequestCreatePage() {
   if (!orgId) {
     redirect("/dashboard");
   }
+  await redirectUnlessCanWrite(PAYMENT_REQUESTS_HREF);
 
   return withDashboardPageTrace(
     "dashboard.payment-requests.create.page",

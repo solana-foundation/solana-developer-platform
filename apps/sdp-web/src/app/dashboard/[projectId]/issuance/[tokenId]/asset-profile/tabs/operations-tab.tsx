@@ -21,10 +21,12 @@ export function OperationsTab({
   ops,
   token,
   canManageTokenAdmin,
+  canWrite,
 }: {
   ops: TokenOperations;
   token: Token;
   canManageTokenAdmin: boolean;
+  canWrite: boolean;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -34,6 +36,7 @@ export function OperationsTab({
     ops,
     token,
     canManageTokenAdmin,
+    canWrite,
     t,
     onSelect: setActiveAction,
     labels,

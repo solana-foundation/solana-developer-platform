@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => {
       flags: { newDesign: true, custody: true, issuance: true, payments: true },
       dashboardAccess: {
         capabilities: {
+          canWrite: true,
           canManageCustody: true,
           canManageTokenWrite: true,
           canManageApiKeys: true,
@@ -149,6 +150,7 @@ beforeEach(() => {
   vi.setSystemTime(new Date("2026-09-25T12:00:00.000Z"));
   mocks.workspace.flags = { newDesign: true, custody: true, issuance: true, payments: true };
   mocks.workspace.dashboardAccess.capabilities = {
+    canWrite: true,
     canManageCustody: true,
     canManageTokenWrite: true,
     canManageApiKeys: true,
@@ -251,6 +253,7 @@ describe("Overview (HomeWorkspace redesign)", () => {
   it("offers nothing a viewer cannot do", () => {
     mocks.workspace.flags = { newDesign: true, custody: false, issuance: false, payments: false };
     mocks.workspace.dashboardAccess.capabilities = {
+      canWrite: false,
       canManageCustody: false,
       canManageTokenWrite: false,
       canManageApiKeys: false,
@@ -258,6 +261,20 @@ describe("Overview (HomeWorkspace redesign)", () => {
     renderOverview({ wallets: [], balances: [], walletCount: 0, totalBalance: null });
     expect(screen.queryByRole("link", { name: "Create a wallet" })).toBeNull();
     expect(section("actions")).toBeNull();
+  });
+
+  it("offers a read-only member no payment to send, with payments on", () => {
+    // A viewer's capabilities: every module flag on, but nothing beyond reads.
+    mocks.workspace.dashboardAccess.capabilities = {
+      canWrite: false,
+      canManageCustody: false,
+      canManageTokenWrite: false,
+      canManageApiKeys: false,
+    };
+    renderOverview();
+    expect(screen.queryByText("Send a payment")).toBeNull();
+    expect(section("actions")).toBeNull();
+    expect(screen.getByRole("link", { name: "See all payments" })).toBeTruthy();
   });
 
   it("lists recent activity with its status, amount, token and explorer link", () => {

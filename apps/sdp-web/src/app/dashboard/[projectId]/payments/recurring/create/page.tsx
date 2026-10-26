@@ -9,6 +9,7 @@ import { RecurringPaymentCreateWorkspace } from "@/app/dashboard/[projectId]/pay
 import { withLegacyDesign } from "@/flags/new-design";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
+import { redirectUnlessCanWrite } from "@/lib/require-write-access";
 import { RecurringPaymentCreatePage as RedesignRecurringPaymentCreatePage } from "./page.redesign";
 
 export const dynamic = "force-dynamic";
@@ -21,6 +22,7 @@ async function RecurringPaymentCreatePage() {
   if (!orgId) {
     redirect("/dashboard");
   }
+  await redirectUnlessCanWrite("/dashboard/payments/recurring");
 
   return withDashboardPageTrace(
     "dashboard.recurring-payments.create.page",

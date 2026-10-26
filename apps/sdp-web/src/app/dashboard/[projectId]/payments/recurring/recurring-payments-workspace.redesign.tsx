@@ -31,6 +31,8 @@ import {
   PAYMENTS_TABLE_HEAD,
 } from "@/app/dashboard/[projectId]/payments/payments-table";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
+import { ReadOnlyEmptyNote } from "@/components/read-only-empty-note";
+import { useCanWrite } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import {
@@ -236,18 +238,23 @@ function RecurringPaymentsLoadError({ error }: { error: string }) {
 function RecurringPaymentsEmpty() {
   const t = useTranslations();
   const projectHref = useProjectHref();
+  const canWrite = useCanWrite();
   return (
     <DashboardWorkspaceOverviewPanel className="flex flex-col">
       <ListEmptyState
-        hidesPageAction
+        hidesPageAction={canWrite}
         message={t("DashboardPayments.recurring.emptyTitle")}
         description={t("DashboardPayments.recurring.emptyDescription")}
         action={
-          <Button asChild size="sm">
-            <Link href={projectHref(CREATE_HREF)}>
-              {t("DashboardPayments.recurring.newSchedule")}
-            </Link>
-          </Button>
+          canWrite ? (
+            <Button asChild size="sm">
+              <Link href={projectHref(CREATE_HREF)}>
+                {t("DashboardPayments.recurring.newSchedule")}
+              </Link>
+            </Button>
+          ) : (
+            <ReadOnlyEmptyNote />
+          )
         }
       />
     </DashboardWorkspaceOverviewPanel>

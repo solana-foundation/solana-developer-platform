@@ -162,6 +162,9 @@ function ExternalAuthorityWarning({ ops }: { ops: TokenOperations }) {
   const href = useProjectHref();
   const workspace = useOptionalDashboardWorkspace();
   const custodyEnabled = workspace?.flags.custody ?? true;
+  // Wallet setup is for custody managers; anyone else gets the note without the link.
+  const canCreateWallet =
+    custodyEnabled && workspace?.dashboardAccess.capabilities.canManageCustody === true;
   const externalRows = ops.permissionRows.filter((row) => row.controlStatus === "external");
   const custodyWallet = ops.authorityWallets[0] ?? null;
 
@@ -212,7 +215,7 @@ function ExternalAuthorityWarning({ ops }: { ops: TokenOperations }) {
         ) : (
           <p className="text-xs text-warning">
             {t("DashboardIssuance.permissions.externalRemediationNoWallet")}{" "}
-            {custodyEnabled ? (
+            {canCreateWallet ? (
               <Link href={href("/dashboard/wallets/setup")} className="font-medium underline">
                 {t("DashboardIssuance.permissions.createWallet")}
               </Link>

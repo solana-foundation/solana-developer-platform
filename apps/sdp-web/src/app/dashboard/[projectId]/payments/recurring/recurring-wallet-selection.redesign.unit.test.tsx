@@ -26,6 +26,7 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
     dashboardCacheScope: { orgId: "org_test", userId: "user_test" },
     selectedProjectId: "proj_test",
     sdpEnvironment: "sandbox",
+    dashboardAccess: { capabilities: { canWrite: true } },
     flags: { custody: true },
   }),
   useOptionalDashboardWorkspace: () => null,

@@ -3,7 +3,10 @@ import { redirect } from "next/navigation";
 import { requirePrivateChannelsAccess } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-access";
 import { PrivateChannelsLoadError } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-load-error";
 import { loadInstance } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-page.data";
-import { PRIVATE_CHANNELS_SETUP_PATH } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
+import {
+  PRIVATE_CHANNELS_OVERVIEW_PATH,
+  PRIVATE_CHANNELS_SETUP_PATH,
+} from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-routes";
 import { getTranslations } from "@/i18n/server";
 import {
   fetchCustodyWallets,
@@ -12,6 +15,7 @@ import {
   fetchPrivateChannelTokenEligibility,
   fetchVerifiedWallets,
 } from "@/lib/private-channels";
+import { redirectUnlessCanWrite } from "@/lib/require-write-access";
 import { createSdpApiClient, extractSdpApiErrorMessage, requestProjectHref } from "@/lib/sdp-api";
 import { TransferForm } from "./transfer-form";
 import {
@@ -22,6 +26,7 @@ import {
 
 export default async function PrivateChannelsTransferPage() {
   await requirePrivateChannelsAccess();
+  await redirectUnlessCanWrite(PRIVATE_CHANNELS_OVERVIEW_PATH);
 
   const t = await getTranslations();
   const client = await createSdpApiClient();

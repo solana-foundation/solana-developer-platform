@@ -18,6 +18,7 @@ import {
   dashboardWorkspacePlaygroundPanelClassName,
 } from "@/components/dashboard-workspace-panel";
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
+import { ReadOnlyEmptyNote } from "@/components/read-only-empty-note";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
@@ -99,7 +100,7 @@ export interface IssuanceWorkspaceProps {
  * state and the date that matters, and the API Playground beside it in the header's tabs.
  */
 export function IssuanceWorkspace(props: IssuanceWorkspaceProps) {
-  const { issuanceTab } = useDashboardWorkspace();
+  const { issuanceTab, dashboardAccess } = useDashboardWorkspace();
   const isPlaygroundTab = issuanceTab === "playground";
   const playgroundTokens = useIssuancePlaygroundTokens(isPlaygroundTab) ?? props.initialTokens;
 
@@ -111,7 +112,8 @@ export function IssuanceWorkspace(props: IssuanceWorkspaceProps) {
           className: dashboardWorkspaceOverviewPanelClassName,
           content: (
             <div className="flex flex-col gap-8">
-              <LocalDraftsBlock />
+              {/* Unfinished drafts only open back into the create flow, which a viewer cannot use. */}
+              {dashboardAccess.capabilities.canWrite ? <LocalDraftsBlock /> : null}
               <IssuanceTokenList {...props} />
             </div>
           ),
@@ -169,6 +171,7 @@ function IssuanceTokenList({
 function IssuanceProjectEmpty({ notice }: { notice: string | null }) {
   const t = useTranslations();
   const projectHref = useProjectHref();
+  const { canWrite } = useDashboardWorkspace().dashboardAccess.capabilities;
   return notice ? (
     <ListEmptyState
       message={t("DashboardIssuance.newDesign.list.loadFailed")}
@@ -178,13 +181,17 @@ function IssuanceProjectEmpty({ notice }: { notice: string | null }) {
     <ListEmptyState
       message={t("DashboardIssuance.newDesign.list.emptyTitle")}
       description={t("DashboardIssuance.newDesign.list.emptyBody")}
-      hidesPageAction
+      hidesPageAction={canWrite}
       action={
-        <Button asChild>
-          <Link href={projectHref(ISSUANCE_CREATE_PATH)}>
-            {t("DashboardIssuance.newDesign.createDraft")}
-          </Link>
-        </Button>
+        canWrite ? (
+          <Button asChild>
+            <Link href={projectHref(ISSUANCE_CREATE_PATH)}>
+              {t("DashboardIssuance.newDesign.createDraft")}
+            </Link>
+          </Button>
+        ) : (
+          <ReadOnlyEmptyNote />
+        )
       }
     />
   );

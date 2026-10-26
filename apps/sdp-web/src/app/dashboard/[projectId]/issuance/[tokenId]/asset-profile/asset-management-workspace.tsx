@@ -67,6 +67,7 @@ export function AssetManagementWorkspace({
   const t = useTranslations();
   const { dashboardAccess, sdpEnvironment } = useDashboardWorkspace();
   const canManageTokenAdmin = dashboardAccess.capabilities.canManageTokenAdmin;
+  const canWrite = dashboardAccess.capabilities.canWrite;
   const searchParams = useSearchParams();
 
   const requestedTabParam = searchParams.get("tab");
@@ -115,7 +116,7 @@ export function AssetManagementWorkspace({
           assetProfile={form.assetProfile}
           networkLabel={sdpEnvironment === "production" ? "Mainnet" : "Devnet"}
           explorerHref={ops.explorerHref}
-          canDeployToken={ops.canDeployToken}
+          canDeployToken={ops.canDeployToken && canWrite}
           isPending={ops.isPending}
           deployDisabledReason={
             form.dirty
@@ -134,7 +135,8 @@ export function AssetManagementWorkspace({
             }
           }}
           onUnpause={() => ops.handlePause(false)}
-          onRefreshSupply={ops.handleRefreshSupply}
+          // Refreshing writes the stored supply (HOO-2283), so a read-only member does not see it.
+          onRefreshSupply={canWrite ? ops.handleRefreshSupply : undefined}
           isRefreshingSupply={ops.isRefreshingSupply}
         />
       </div>
@@ -162,7 +164,12 @@ export function AssetManagementWorkspace({
                 {t("DashboardIssuance.ux.working")}
               </p>
             ) : null}
-            <OperationsTab ops={ops} token={token} canManageTokenAdmin={canManageTokenAdmin} />
+            <OperationsTab
+              ops={ops}
+              token={token}
+              canManageTokenAdmin={canManageTokenAdmin}
+              canWrite={canWrite}
+            />
           </div>
         </AnimatedSection>
         <AnimatedSection

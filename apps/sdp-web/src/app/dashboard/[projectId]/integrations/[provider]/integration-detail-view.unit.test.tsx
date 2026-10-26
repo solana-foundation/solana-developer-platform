@@ -59,13 +59,14 @@ async function markupOf(node: ReactNode): Promise<string> {
 
 async function render(
   provider: string,
-  releaseChannel: SdpReleaseChannel = "experimental"
+  releaseChannel: SdpReleaseChannel = "experimental",
+  canManageCustody = true
 ): Promise<string> {
   const detail = resolveIntegrationDetail({ provider, ...INPUTS });
   if (!detail) throw new Error(`unknown provider ${provider}`);
   // The Capabilities read the deployment's release channel themselves.
   vi.stubEnv("SDP_RELEASE_CHANNEL", releaseChannel);
-  return markupOf(<IntegrationDetailView detail={detail} />);
+  return markupOf(<IntegrationDetailView detail={detail} canManageCustody={canManageCustody} />);
 }
 
 /** The Capabilities section's chips, by visible label. */
@@ -96,6 +97,12 @@ describe("IntegrationDetailView", () => {
     const markup = await render("para");
     expect(markup).toContain("Ready to connect");
     expect(markup).toContain(`${PROJECT_PATH}/wallets/setup?provider=para`);
+  });
+
+  it("offers no setup action to a member who cannot manage custody", async () => {
+    const markup = await render("para", "experimental", false);
+    expect(markup).toContain("Ready to connect");
+    expect(markup).not.toContain("/wallets/setup");
   });
 
   it("routes an available manual provider into setup and says it is by arrangement", async () => {

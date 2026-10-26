@@ -1,3 +1,4 @@
+import { normalizeOrganizationRole } from "@sdp/types/roles";
 import {
   ACTION_ALIASES,
   ACTION_MODULES,
@@ -181,6 +182,23 @@ describe("API key limits", () => {
 describe("organization roles", () => {
   it("gives an administrator every action", () => {
     expect(ORGANIZATION_ROLE_ACTIONS.admin).toEqual(ACTIONS);
+  });
+
+  it("gives a viewer every read and nothing else", () => {
+    expect(ORGANIZATION_ROLE_ACTIONS.viewer).toEqual(
+      ACTIONS.filter((action) => action.endsWith(".read"))
+    );
+    expect(organizationRoleMayPerform("viewer", "transfers.execute")).toBe(false);
+    expect(organizationRoleMayPerform("viewer", "issuance.execute")).toBe(false);
+    expect(organizationRoleMayPerform("viewer", "api_keys.manage")).toBe(false);
+  });
+
+  it("reads a stored role, and fails closed to viewer on a value no role names", () => {
+    expect(normalizeOrganizationRole("owner")).toBe("admin");
+    expect(normalizeOrganizationRole("developer")).toBe("member");
+    expect(normalizeOrganizationRole("viewer")).toBe("viewer");
+    expect(normalizeOrganizationRole("superuser")).toBe("viewer");
+    expect(normalizeOrganizationRole(null)).toBe("viewer");
   });
 
   it("gives a member everything but administration, configure, and the old admin-only actions", () => {

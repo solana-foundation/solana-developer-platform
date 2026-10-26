@@ -1,6 +1,7 @@
 "use client";
 
 import { SignInButton, useAuth } from "@clerk/nextjs";
+import { Badge } from "@sdp/ui/badge";
 import { cn } from "@sdp/ui/cn";
 import { type ThemeScope, themeScopeAttributes } from "@sdp/ui/theme-scope";
 import { ThemeScopeProvider } from "@sdp/ui/theme-scope-provider";
@@ -575,16 +576,25 @@ export function DashboardShell({
       dashboardAccess.capabilities[pageConfig.headerAction.capability]) ? (
       <DashboardHeaderAction action={pageConfig.headerAction} search={urlSearchParams.toString()} />
     ) : null;
+  // A read-only member sees why no page offers a write, in the slot a route's action would take.
+  const readOnlyBadge = dashboardAccess.capabilities.canWrite ? null : (
+    <Badge variant="outline" className="gap-1" data-testid="dashboard-read-only-badge">
+      <LockIcon className="size-3" aria-hidden />
+      {t("Shared.dashboardShell.readOnly")}
+    </Badge>
+  );
   // A page's own actions (a wallet's star) sit before the route's action, in the same slot.
   const pageActions = activeTitleOverride?.actions;
+  const slotItems = [pageActions, routeAction, readOnlyBadge].filter(Boolean);
   const headerAction =
-    pageActions && routeAction ? (
+    slotItems.length > 1 ? (
       <span className="flex items-center gap-2">
         {pageActions}
         {routeAction}
+        {readOnlyBadge}
       </span>
     ) : (
-      (pageActions ?? routeAction)
+      (slotItems[0] ?? null)
     );
   // Refresh pages put the title, the tabs and the content in one column with one gutter, so all
   // three share a left edge, and drop the full-bleed rule under the tabs. The column is the

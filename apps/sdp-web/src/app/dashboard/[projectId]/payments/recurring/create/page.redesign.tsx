@@ -8,6 +8,7 @@ import {
 import { RecurringPaymentCreateWorkspace } from "@/app/dashboard/[projectId]/payments/recurring/recurring-payment-create-workspace.redesign";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
+import { redirectUnlessCanWrite } from "@/lib/require-write-access";
 
 export async function RecurringPaymentCreatePage() {
   const { userId, orgId } = await auth();
@@ -17,6 +18,7 @@ export async function RecurringPaymentCreatePage() {
   if (!orgId) {
     redirect("/dashboard");
   }
+  await redirectUnlessCanWrite("/dashboard/payments/recurring");
 
   return withDashboardPageTrace(
     "dashboard.recurring-payments.create.page",

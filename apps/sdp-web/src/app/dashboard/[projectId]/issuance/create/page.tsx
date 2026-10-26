@@ -4,6 +4,7 @@ import { fetchPaymentsWallets } from "@/app/dashboard/[projectId]/payments/payme
 import { assetProfiles } from "@/flags";
 import { withLegacyDesign } from "@/flags/new-design";
 import { getTranslations } from "@/i18n/server";
+import { redirectUnlessCanWrite } from "@/lib/require-write-access";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { IssuanceDraftForm } from "./issuance-draft-form";
 import { CreateDraftPage } from "./page.redesign";
@@ -11,6 +12,7 @@ import { CreateDraftPage } from "./page.redesign";
 async function CreateAssetPage() {
   const t = await getTranslations();
   if (!(await assetProfiles())) notFound();
+  await redirectUnlessCanWrite("/dashboard/issuance");
   const client = await createSdpApiClient();
   const result = await fetchPaymentsWallets(client.request, {
     view: "summary",

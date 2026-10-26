@@ -421,6 +421,7 @@ export function RecurringPaymentDetailWorkspace({
   const href = useProjectHref();
   const workspace = useDashboardWorkspace();
   const custodyEnabled = workspace.flags.custody;
+  const canWrite = workspace.dashboardAccess.capabilities.canWrite;
   const [pendingAction, setPendingAction] = useState<RecurringPaymentAction | null>(null);
   const [actionError, setActionError] = useState<DetailActionError | null>(null);
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
@@ -461,7 +462,7 @@ export function RecurringPaymentDetailWorkspace({
   const receivingAccountAddress = accountAddress(receivingAccount);
   const {
     sourceWalletUnresolved,
-    isEditable,
+    isEditable: stateIsEditable,
     controlsDisabled,
     signingUnavailable,
     signingDisabled,
@@ -478,6 +479,8 @@ export function RecurringPaymentDetailWorkspace({
     selectedWallet,
     selectedCustodyWalletId,
   });
+  // Every edit control and action changes the schedule.
+  const isEditable = canWrite && stateIsEditable;
   const dueNow =
     recurringPayment.status === "active" && isDueNow(recurringPayment.nextCollectionDueAt);
 
@@ -644,18 +647,20 @@ export function RecurringPaymentDetailWorkspace({
               </p>
             </div>
           </div>
-          <RecurringPaymentActionsMenu
-            status={recurringPayment.status}
-            dueNow={dueNow}
-            pendingAction={pendingAction}
-            actionError={actionError}
-            editable={isEditable}
-            onEdit={openPaymentEditor}
-            disabled={controlsDisabled}
-            signingUnavailable={signingUnavailable}
-            onAction={(action) => void submitAction(action)}
-            onCancel={() => setCancelConfirmOpen(true)}
-          />
+          {canWrite ? (
+            <RecurringPaymentActionsMenu
+              status={recurringPayment.status}
+              dueNow={dueNow}
+              pendingAction={pendingAction}
+              actionError={actionError}
+              editable={isEditable}
+              onEdit={openPaymentEditor}
+              disabled={controlsDisabled}
+              signingUnavailable={signingUnavailable}
+              onAction={(action) => void submitAction(action)}
+              onCancel={() => setCancelConfirmOpen(true)}
+            />
+          ) : null}
         </div>
 
         {sourceWalletUnresolved ? (

@@ -52,7 +52,7 @@ export default async function SettingsPage({
       ) : null}
       {dashboardAccess.capabilities.canManageOrgSettings ? <OrganizationAccessSection /> : null}
       {/* Admins cannot leave; another admin removes them. */}
-      {dashboardAccess.role === "member" ? <LeaveOrganizationCard /> : null}
+      {dashboardAccess.role !== "admin" ? <LeaveOrganizationCard /> : null}
     </div>
   );
 }

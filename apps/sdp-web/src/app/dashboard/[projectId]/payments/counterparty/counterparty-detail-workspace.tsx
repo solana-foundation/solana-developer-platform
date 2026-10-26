@@ -31,6 +31,7 @@ import { toTitleCase } from "@/app/dashboard/[projectId]/activity-format-utils";
 import { WalletAddressCopyButton } from "@/app/dashboard/[projectId]/custody/wallet-address-copy-button";
 import { formatCreatedDate } from "@/app/dashboard/[projectId]/custody/wallet-format-utils";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
+import { useCanWrite } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { useProjectHref } from "@/lib/use-dashboard-project";
@@ -135,6 +136,7 @@ export function CounterpartyDetailWorkspace({
   const [addOpen, setAddOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<DetailTab>("details");
+  const canWrite = useCanWrite();
 
   async function confirmDelete() {
     const result = await dashboardFetch(
@@ -163,22 +165,25 @@ export function CounterpartyDetailWorkspace({
               {toTitleCase(counterparty.entityType)} · {t("DashboardPayments.counterpartyLabel")}
             </p>
           </div>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button type="button" variant="outline" size="sm" iconRight={<ChevronDownIcon />}>
-                {t("DashboardPayments.counterparty.manage")}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent>
-              <DropdownMenuItem
-                className="text-error focus:text-error [&_svg]:size-4"
-                onSelect={() => setDeleteOpen(true)}
-              >
-                <Trash2Icon />
-                {t("DashboardPayments.counterparty.deleteCounterparty")}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {/* The menu's one item deletes the counterparty. */}
+          {canWrite ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button type="button" variant="outline" size="sm" iconRight={<ChevronDownIcon />}>
+                  {t("DashboardPayments.counterparty.manage")}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent>
+                <DropdownMenuItem
+                  className="text-error focus:text-error [&_svg]:size-4"
+                  onSelect={() => setDeleteOpen(true)}
+                >
+                  <Trash2Icon />
+                  {t("DashboardPayments.counterparty.deleteCounterparty")}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
         </div>
 
         <div className="flex gap-6 border-b border-border-default">
@@ -261,14 +266,16 @@ export function CounterpartyDetailWorkspace({
                 <h3 className="text-2xl font-medium text-primary">
                   {t("DashboardPayments.counterparty.externalAccounts")}
                 </h3>
-                <Button
-                  type="button"
-                  size="sm"
-                  iconLeft={<PlusIcon />}
-                  onClick={() => setAddOpen(true)}
-                >
-                  {t("DashboardPayments.counterparty.addExternalAccountTitle")}
-                </Button>
+                {canWrite ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    iconLeft={<PlusIcon />}
+                    onClick={() => setAddOpen(true)}
+                  >
+                    {t("DashboardPayments.counterparty.addExternalAccountTitle")}
+                  </Button>
+                ) : null}
               </div>
               <ExternalAccountsList accounts={accounts} />
             </section>

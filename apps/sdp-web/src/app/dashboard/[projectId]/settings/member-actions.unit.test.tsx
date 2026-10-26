@@ -74,3 +74,19 @@ describe("MemberActions role change", () => {
     expect(new Set(keys).size).toBe(3);
   });
 });
+
+describe("MemberActions role choices", () => {
+  it("offers every other role, read-only included", async () => {
+    const change = vi.spyOn(membersActions, "changeMemberRole").mockResolvedValue(REFUSED);
+    const user = userEvent.setup();
+    render(row("mem_test_viewer", "member"));
+
+    await user.click(screen.getByRole("button", { name: "Actions for Teammate" }));
+    const items = (await screen.findAllByRole("menuitem")).map((item) => item.textContent);
+    expect(items).toEqual(["Make admin", "Make read-only", "Remove member"]);
+
+    await user.click(screen.getByRole("menuitem", { name: "Make read-only" }));
+    await waitFor(() => expect(change).toHaveBeenCalledTimes(1));
+    expect(change.mock.calls[0]?.slice(0, 2)).toEqual(["mem_test_viewer", "viewer"]);
+  });
+});

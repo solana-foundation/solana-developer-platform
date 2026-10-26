@@ -42,6 +42,7 @@ export function PrivateWalletsCard({
   selectedWalletId,
   onSelect,
   balancesTick,
+  canWrite,
   onWalletsChanged,
 }: {
   wallets: readonly RingsWallet[];
@@ -50,6 +51,8 @@ export function PrivateWalletsCard({
   selectedWalletId: string | null;
   onSelect: (walletId: string) => void;
   balancesTick: number;
+  /** False for a read-only member: create, retry and re-key are hidden. */
+  canWrite: boolean;
   onWalletsChanged: () => Promise<void>;
 }) {
   const t = useTranslations();
@@ -100,7 +103,7 @@ export function PrivateWalletsCard({
           </Callout>
         ) : null}
 
-        {custodyWallets.length === 0 ? (
+        {!canWrite ? null : custodyWallets.length === 0 ? (
           <p className="text-sm text-secondary">
             {t("DashboardHeliusRings.wallets.noCustodyWallets")}
           </p>
@@ -149,7 +152,7 @@ export function PrivateWalletsCard({
           </div>
         )}
 
-        <hr className="border-border-default" role="presentation" />
+        {canWrite ? <hr className="border-border-default" role="presentation" /> : null}
 
         {wallets.length === 0 ? (
           <p className="text-sm text-secondary">{t("DashboardHeliusRings.wallets.empty")}</p>
@@ -184,7 +187,8 @@ export function PrivateWalletsCard({
                     custodyName={custodyLabel(wallet.sdpWalletId)}
                     onSelect={() => onSelect(wallet.id)}
                     balancesTick={balancesTick}
-                    onWalletsChanged={onWalletsChanged}
+                    // Re-key and retry are writes; without one the row only reads.
+                    onWalletsChanged={canWrite ? onWalletsChanged : undefined}
                   />
                 ))}
               </TableBody>
@@ -270,7 +274,8 @@ function PrivateWalletRow({
   custodyName: string;
   onSelect: () => void;
   balancesTick: number;
-  onWalletsChanged: () => Promise<void>;
+  /** Absent for a read-only member, which hides retry and re-key. */
+  onWalletsChanged?: () => Promise<void>;
 }) {
   const t = useTranslations();
   return (
@@ -294,7 +299,7 @@ function PrivateWalletRow({
             {/* Paused counts as well as pending: a re-key claims the row before
                 it rotates, so a failed rotation leaves a wallet paused with no
                 address, and this check is where an operator sees why. */}
-            {wallet.status === "pending" ? (
+            {wallet.status === "pending" && onWalletsChanged ? (
               <RetryProvisionButton wallet={wallet} onRetried={onWalletsChanged} />
             ) : null}
             {wallet.status === "pending" || wallet.status === "paused" ? (

@@ -6,6 +6,12 @@ import { builtinEnvironments, type EnvironmentReturn } from "vitest/environments
 import { CounterpartyDetailWorkspace } from "./counterparty-detail-workspace";
 import { groupProviderAccounts } from "./counterparty-provider-accounts.utils";
 
+// A member who may write; the read-only cases live with each component's own viewer tests.
+vi.mock("@/contexts/dashboard-workspace-context", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/contexts/dashboard-workspace-context")>()),
+  useCanWrite: () => true,
+}));
+
 vi.mock("@/i18n/provider", () => ({
   useTranslations:
     () =>

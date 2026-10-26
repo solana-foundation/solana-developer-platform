@@ -27,6 +27,7 @@ import {
   DashboardWorkspaceOverviewPanel,
 } from "@/components/dashboard-workspace-panel";
 import { EntityLink } from "@/components/entity-link";
+import { ReadOnlyEmptyNote } from "@/components/read-only-empty-note";
 import { TokenMark } from "@/components/token-mark";
 import { PaginatedFooter } from "@/components/ui/paginated-footer";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
@@ -73,6 +74,7 @@ export function RecurringPaymentsWorkspace({
   const href = useProjectHref();
   const workspace = useDashboardWorkspace();
   const custodyEnabled = workspace.flags.custody;
+  const canWrite = workspace.dashboardAccess.capabilities.canWrite;
   const [query, setQuery] = useState("");
   const [isPending, startTransition] = useTransition();
 
@@ -212,7 +214,7 @@ export function RecurringPaymentsWorkspace({
                 </SelectItem>
               ))}
             </Select>
-            {listIsEmpty ? null : (
+            {listIsEmpty || !canWrite ? null : (
               <Button asChild size="sm">
                 <Link href={href("/dashboard/payments/recurring/create")}>
                   <PlusIcon className="size-4" />
@@ -236,12 +238,16 @@ export function RecurringPaymentsWorkspace({
             message={t("DashboardPayments.recurring.noPayments")}
             description={t("DashboardPayments.recurring.paymentsAppearHere")}
             action={
-              <Button asChild size="sm">
-                <Link href={href("/dashboard/payments/recurring/create")}>
-                  <PlusIcon className="size-4" />
-                  {t("DashboardPayments.recurring.createPayment")}
-                </Link>
-              </Button>
+              canWrite ? (
+                <Button asChild size="sm">
+                  <Link href={href("/dashboard/payments/recurring/create")}>
+                    <PlusIcon className="size-4" />
+                    {t("DashboardPayments.recurring.createPayment")}
+                  </Link>
+                </Button>
+              ) : (
+                <ReadOnlyEmptyNote />
+              )
             }
           />
         ) : visibleRecurringPayments.length === 0 ? (

@@ -28,6 +28,7 @@ import {
 } from "@/app/dashboard/[projectId]/payments/payments-presentation";
 import { DashboardPageTitle } from "@/components/dashboard-page-title";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
+import { useCanWrite } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { useProjectHref } from "@/lib/use-dashboard-project";
@@ -521,6 +522,7 @@ export function CounterpartyDetailWorkspace({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [selectedTransfer, setSelectedTransfer] = useState<PaymentTransferSummary | null>(null);
   const recentTransfers = initialTransfers.slice(0, RECENT_PAYMENTS);
+  const canWrite = useCanWrite();
 
   async function confirmDelete() {
     const result = await dashboardFetch(
@@ -537,11 +539,11 @@ export function CounterpartyDetailWorkspace({
     router.push(href("/dashboard/payments/counterparty"));
   }
 
-  const addAddressButton = (
+  const addAddressButton = canWrite ? (
     <Button type="button" variant="outline" size="sm" onClick={() => setAddOpen(true)}>
       {t("DashboardPayments.counterparty.detail.addAddress")}
     </Button>
-  );
+  ) : null;
 
   return (
     <DashboardWorkspaceOverviewPanel>
@@ -604,17 +606,19 @@ export function CounterpartyDetailWorkspace({
           </p>
         </DetailBlock>
 
-        <div className="pt-4">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="border-error-border text-error [--button-height-md:1.875rem] hover:bg-error-bg hover:text-error refresh:border-error-border refresh:hover:bg-error-bg"
-            onClick={() => setDeleteOpen(true)}
-          >
-            {t("DashboardPayments.counterparty.detail.delete")}
-          </Button>
-        </div>
+        {canWrite ? (
+          <div className="pt-4">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="border-error-border text-error [--button-height-md:1.875rem] hover:bg-error-bg hover:text-error refresh:border-error-border refresh:hover:bg-error-bg"
+              onClick={() => setDeleteOpen(true)}
+            >
+              {t("DashboardPayments.counterparty.detail.delete")}
+            </Button>
+          </div>
+        ) : null}
       </div>
 
       <AddExternalAccountDialog

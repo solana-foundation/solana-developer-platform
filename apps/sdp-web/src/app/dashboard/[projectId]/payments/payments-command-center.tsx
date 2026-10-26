@@ -15,10 +15,11 @@ import { loadOrganizationProviderAccess } from "@/app/dashboard/[projectId]/paym
 import { TokenMark } from "@/components/token-mark";
 import { getEnabledRampProviders } from "@/flags/ramps";
 import { getRequestLocale, getTranslations } from "@/i18n/server";
+import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { projectHref } from "@/lib/dashboard-project-path";
 import { filterEnabledRampProviderAccess } from "@/lib/provider-availability";
 import { createTimedTrace } from "@/lib/request-tracing";
-import { requestProjectId, type SdpApiClient } from "@/lib/sdp-api";
+import { requestMemberRole, requestProjectId, type SdpApiClient } from "@/lib/sdp-api";
 import { fetchCounterparties } from "./counterparty/counterparty-page.data";
 import {
   PAYMENT_COMMAND_ACTION_DESTINATIONS,
@@ -75,7 +76,15 @@ function SectionHeading({ title }: { title: string }) {
 }
 
 async function MoveMoneyActions() {
-  const [t, projectId] = await Promise.all([getTranslations(), requestProjectId()]);
+  const [t, projectId, role] = await Promise.all([
+    getTranslations(),
+    requestProjectId(),
+    requestMemberRole(),
+  ]);
+  // Every tile starts a payment; a read-only member has none to start.
+  if (!resolveDashboardAccess(role).capabilities.canWrite) {
+    return null;
+  }
   const actions = [
     {
       href: PAYMENT_COMMAND_ACTION_DESTINATIONS.pay,

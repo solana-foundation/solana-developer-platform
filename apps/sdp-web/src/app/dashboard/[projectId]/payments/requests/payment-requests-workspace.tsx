@@ -57,6 +57,7 @@ import {
   dashboardWorkspacePlaygroundPanelClassName,
 } from "@/components/dashboard-workspace-panel";
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
+import { ReadOnlyEmptyNote } from "@/components/read-only-empty-note";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
@@ -414,6 +415,7 @@ export function PaymentRequestsWorkspace({
   // another row, or closed the details, is dropped.
   const openingRequestId = useRef<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const canWrite = useDashboardWorkspace().dashboardAccess.capabilities.canWrite;
   const requests = initialPaymentRequests;
 
   // Reads never carry the pay link (APE-849): opening a row reads its token, which the
@@ -466,7 +468,7 @@ export function PaymentRequestsWorkspace({
                   <CardDescription>
                     {t("DashboardPayments.requests.paymentRequestsDescription")}
                   </CardDescription>
-                  {requests.length > 0 && (
+                  {requests.length > 0 && canWrite && (
                     <CardAction>
                       <Button
                         type="button"
@@ -494,13 +496,17 @@ export function PaymentRequestsWorkspace({
                           {t("DashboardPayments.requests.noPaymentRequestsDescription")}
                         </p>
                       </div>
-                      <Button
-                        type="button"
-                        iconLeft={<PlusIcon />}
-                        onClick={() => setCreateOpen(true)}
-                      >
-                        {t("DashboardPayments.requests.create")}
-                      </Button>
+                      {canWrite ? (
+                        <Button
+                          type="button"
+                          iconLeft={<PlusIcon />}
+                          onClick={() => setCreateOpen(true)}
+                        >
+                          {t("DashboardPayments.requests.create")}
+                        </Button>
+                      ) : (
+                        <ReadOnlyEmptyNote />
+                      )}
                     </div>
                   ) : (
                     <div className="min-h-0 flex-1 overflow-y-auto">

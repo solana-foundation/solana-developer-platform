@@ -6,6 +6,7 @@ import { Button } from "@sdp/ui/button";
 import { Card } from "@sdp/ui/card";
 import { Clock3Icon, Loader2Icon } from "lucide-react";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useCanWrite } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { formatEpochSecondsOr, formatTokenValue, shortenMarketAddress } from "./earn-format";
@@ -79,6 +80,8 @@ function WithdrawalRequestItem({
   request: EarnVaultWithdrawalRequestRecord;
 }) {
   const t = useTranslations();
+  // A read-only member (`viewer`) sees the request but not the cancel, which the API refuses them.
+  const canWrite = useCanWrite();
   const parRedemption = request.mechanism === "operatorRedemption";
   const status = parRedemption
     ? earnVaultParRedemptionStatusPresentation(request.status)
@@ -112,7 +115,7 @@ function WithdrawalRequestItem({
           </p>
         ) : null}
       </div>
-      {cancelable ? (
+      {cancelable && canWrite ? (
         <Button
           disabled={busy}
           iconLeft={busy ? <Loader2Icon aria-hidden="true" className="animate-spin" /> : null}

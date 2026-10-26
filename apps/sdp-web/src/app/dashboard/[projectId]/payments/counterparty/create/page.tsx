@@ -4,6 +4,7 @@ import { CounterpartyCreateProvider } from "@/app/dashboard/[projectId]/payments
 import { CounterpartyCreatePage } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-create-page";
 import { withLegacyDesign } from "@/flags/new-design";
 import { getAuthEntryPath } from "@/lib/auth-entry";
+import { redirectUnlessCanWrite } from "@/lib/require-write-access";
 import { CounterpartyCreateRoute as RedesignCounterpartyCreateRoute } from "./page.redesign";
 
 async function CounterpartyCreateRoute() {
@@ -14,6 +15,7 @@ async function CounterpartyCreateRoute() {
   if (!orgId) {
     redirect("/dashboard");
   }
+  await redirectUnlessCanWrite("/dashboard/payments/counterparty");
 
   return (
     <CounterpartyCreateProvider>

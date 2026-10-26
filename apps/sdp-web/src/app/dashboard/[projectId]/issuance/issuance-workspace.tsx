@@ -297,7 +297,8 @@ function IssuanceResults({
   isLoadingAnotherPage: boolean;
   skeletonCount: number;
   tokens: IssuanceTokenView[];
-  onCreate: () => void;
+  /** Null for a member who cannot write: the add card is hidden. */
+  onCreate: (() => void) | null;
   pagination: ReactNode;
   t: ReturnType<typeof useTranslations>;
   locale: ReturnType<typeof useLocale>;
@@ -308,15 +309,19 @@ function IssuanceResults({
         <IssuanceTokenGridCard key={token.id} token={token} t={t} locale={locale} />
       ))}
 
-      <button
-        type="button"
-        onClick={onCreate}
-        data-testid="token-add-card"
-        className="flex min-h-36 flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border-strong bg-surface-raised text-tertiary transition-colors hover:border-primary/40 hover:text-secondary"
-      >
-        <PlusIcon className="h-6 w-6" />
-        <span className="text-sm font-medium">{t("DashboardIssuance.workspace.addNewToken")}</span>
-      </button>
+      {onCreate ? (
+        <button
+          type="button"
+          onClick={onCreate}
+          data-testid="token-add-card"
+          className="flex min-h-36 flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border-strong bg-surface-raised text-tertiary transition-colors hover:border-primary/40 hover:text-secondary"
+        >
+          <PlusIcon className="h-6 w-6" />
+          <span className="text-sm font-medium">
+            {t("DashboardIssuance.workspace.addNewToken")}
+          </span>
+        </button>
+      ) : null}
     </div>
   );
 
@@ -380,7 +385,8 @@ export function IssuanceWorkspace({
 }: IssuanceWorkspaceProps) {
   const t = useTranslations();
   const locale = useLocale();
-  const { issuanceTab } = useDashboardWorkspace();
+  const { issuanceTab, dashboardAccess } = useDashboardWorkspace();
+  const canWrite = dashboardAccess.capabilities.canWrite;
   const router = useRouter();
   const href = useProjectHref();
   const isPlaygroundTab = issuanceTab === "playground";
@@ -576,15 +582,17 @@ export function IssuanceWorkspace({
                       onClear={clearFilters}
                       templateOptions={templateOptions}
                     />
-                    <Button
-                      asChild
-                      className="h-10 w-full rounded-[10px] bg-primary px-4 text-on-primary hover:opacity-90 sm:w-auto"
-                    >
-                      <Link href={href(CREATE_DRAFT_PATH)}>
-                        <PlusIcon className="h-4 w-4" />
-                        {t("DashboardIssuance.workspace.createDraft")}
-                      </Link>
-                    </Button>
+                    {canWrite ? (
+                      <Button
+                        asChild
+                        className="h-10 w-full rounded-[10px] bg-primary px-4 text-on-primary hover:opacity-90 sm:w-auto"
+                      >
+                        <Link href={href(CREATE_DRAFT_PATH)}>
+                          <PlusIcon className="h-4 w-4" />
+                          {t("DashboardIssuance.workspace.createDraft")}
+                        </Link>
+                      </Button>
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -601,7 +609,7 @@ export function IssuanceWorkspace({
                 isLoadingAnotherPage={isLoadingAnotherPage}
                 skeletonCount={skeletonCount}
                 tokens={tokens}
-                onCreate={startTokenCreation}
+                onCreate={canWrite ? startTokenCreation : null}
                 pagination={pagination}
                 t={t}
                 locale={locale}

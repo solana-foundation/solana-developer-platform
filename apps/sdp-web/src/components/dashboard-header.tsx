@@ -781,6 +781,7 @@ function getCounterpartyRoutePageConfig(
       },
       headerAction: {
         label: t("Shared.dashboardShell.pay"),
+        capability: "canWrite",
         href: `/dashboard/payments/pay?counterpartyId=${encodeURIComponent(counterpartyId)}`,
         variant: "primary",
       },
@@ -1132,6 +1133,7 @@ function getRefreshPaymentsPageConfig(
       contentWidthClass: REFRESH_PAGE_WIDTH,
       headerAction: {
         label: t("DashboardPayments.counterparty.add"),
+        capability: "canWrite",
         href: "/dashboard/payments/counterparty/create",
         icon: "plus",
         variant: "primary",
@@ -1167,6 +1169,7 @@ function getRefreshPaymentsPageConfig(
       contentWidthClass: REFRESH_PAGE_WIDTH,
       headerAction: {
         label: t("DashboardPayments.requests.new"),
+        capability: "canWrite",
         href: PAYMENT_REQUEST_NEW_HREF,
         icon: "plus",
         variant: "primary",
@@ -1208,6 +1211,7 @@ function getRefreshPaymentsPageConfig(
       contentWidthClass: REFRESH_PAGE_WIDTH,
       headerAction: {
         label: t("DashboardPayments.recurring.new"),
+        capability: "canWrite",
         href: "/dashboard/payments/recurring/create",
         icon: "plus",
         variant: "primary",

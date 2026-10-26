@@ -17,7 +17,8 @@ import {
 } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-view-data";
 import { DashboardWorkspaceCard } from "@/components/dashboard-workspace-panel";
 import { getTranslations } from "@/i18n/server";
-import { createSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
+import { resolveDashboardAccess } from "@/lib/dashboard-access";
+import { createSdpApiClient, requestMemberRole, requestProjectHref } from "@/lib/sdp-api";
 import { ChannelDirectoryRow } from "./channel-directory-row";
 import { CreateChannelButton } from "./create-channel-button";
 
@@ -79,7 +80,12 @@ async function loadDirectory(client: SdpClient, t: Translate) {
 export default async function PrivateChannelsOverviewPage() {
   await requirePrivateChannelsAccess();
 
-  const [t, client] = await Promise.all([getTranslations(), createSdpApiClient()]);
+  const [t, client, memberRole] = await Promise.all([
+    getTranslations(),
+    createSdpApiClient(),
+    requestMemberRole(),
+  ]);
+  const { canWrite } = resolveDashboardAccess(memberRole).capabilities;
   const result = await loadDirectory(client, t);
   if (!result.ok) return <PrivateChannelsLoadError message={result.error} />;
   const { activeInstance, rows } = result.data;
@@ -99,7 +105,7 @@ export default async function PrivateChannelsOverviewPage() {
               {t("DashboardPrivateChannels.directory.channelsDescription")}
             </p>
           </div>
-          {activeInstance ? (
+          {!canWrite ? null : activeInstance ? (
             <CreateChannelButton instanceId={activeInstance.id} />
           ) : (
             <Button asChild>

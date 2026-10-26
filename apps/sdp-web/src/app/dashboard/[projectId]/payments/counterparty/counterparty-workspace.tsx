@@ -40,6 +40,8 @@ import {
   dashboardWorkspacePlaygroundPanelClassName,
 } from "@/components/dashboard-workspace-panel";
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
+import { ReadOnlyEmptyNote } from "@/components/read-only-empty-note";
+import { useCanWrite } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { useDashboardTab } from "@/lib/dashboard-url-state";
@@ -69,6 +71,7 @@ export function CounterpartyWorkspace({
   const router = useRouter();
   const href = useProjectHref();
   const isPlaygroundTab = useDashboardTab() === "playground";
+  const canWrite = useCanWrite();
 
   const {
     page,
@@ -143,7 +146,7 @@ export function CounterpartyWorkspace({
                   <CardDescription>
                     {t("DashboardPayments.counterparty.directoryDescription")}
                   </CardDescription>
-                  {total > 0 && (
+                  {total > 0 && canWrite && (
                     <CardAction>
                       <Button
                         type="button"
@@ -167,13 +170,19 @@ export function CounterpartyWorkspace({
                           {t("DashboardPayments.counterparty.noCounterpartiesDescription")}
                         </p>
                       </div>
-                      <Button
-                        type="button"
-                        iconLeft={<PlusIcon />}
-                        onClick={() => router.push(href("/dashboard/payments/counterparty/create"))}
-                      >
-                        {t("DashboardPayments.counterparty.create")}
-                      </Button>
+                      {canWrite ? (
+                        <Button
+                          type="button"
+                          iconLeft={<PlusIcon />}
+                          onClick={() =>
+                            router.push(href("/dashboard/payments/counterparty/create"))
+                          }
+                        >
+                          {t("DashboardPayments.counterparty.create")}
+                        </Button>
+                      ) : (
+                        <ReadOnlyEmptyNote />
+                      )}
                     </div>
                   ) : (
                     <div className="min-h-0 flex-1 overflow-y-auto">
@@ -273,13 +282,15 @@ export function CounterpartyWorkspace({
                                       <UserIcon />
                                       {t("DashboardPayments.counterparty.manageCounterparty")}
                                     </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                      className="text-xs text-error focus:text-error [&_svg]:size-3.5"
-                                      onSelect={() => setPendingDelete(cp)}
-                                    >
-                                      <Trash2Icon />
-                                      {t("DashboardPayments.counterparty.deleteCounterparty")}
-                                    </DropdownMenuItem>
+                                    {canWrite ? (
+                                      <DropdownMenuItem
+                                        className="text-xs text-error focus:text-error [&_svg]:size-3.5"
+                                        onSelect={() => setPendingDelete(cp)}
+                                      >
+                                        <Trash2Icon />
+                                        {t("DashboardPayments.counterparty.deleteCounterparty")}
+                                      </DropdownMenuItem>
+                                    ) : null}
                                   </DropdownMenuContent>
                                 </DropdownMenu>
                               </TableCell>

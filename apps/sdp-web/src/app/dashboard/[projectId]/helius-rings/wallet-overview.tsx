@@ -4,6 +4,7 @@ import { Button } from "@sdp/ui/button";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@sdp/ui/card";
 import { Loader2, RefreshCw } from "lucide-react";
 import { formatCurrencyAmount } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import { useCanWrite } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import type { ProjectRing, RingsWallet, RingsWalletSync } from "./helius-rings.data";
 import {
@@ -54,7 +55,9 @@ export function WalletOverview({
   // server refuses to read an identity it cannot derive, so asking only turns a
   // known state into a generic read failure — and the refresh button would
   // invite an operator to keep asking.
-  const readable = wallet.shieldedAddress !== null && wallet.status !== "paused";
+  // The balance is read by a sync, which writes; a read-only member never asks.
+  const canWrite = useCanWrite();
+  const readable = canWrite && wallet.shieldedAddress !== null && wallet.status !== "paused";
   const { state, refresh } = useRingsBalance(readable ? wallet.id : null, refreshTick);
 
   const reading = state.name === "loading";
@@ -66,22 +69,24 @@ export function WalletOverview({
     <Card>
       <CardHeader>
         <CardTitle>{wallet.name}</CardTitle>
-        <CardAction>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            disabled={reading || !readable}
-            aria-label={refreshLabel}
-            title={refreshLabel}
-            onClick={refresh}
-          >
-            {reading ? (
-              <Loader2 className="animate-spin" aria-hidden="true" />
-            ) : (
-              <RefreshCw aria-hidden="true" />
-            )}
-          </Button>
-        </CardAction>
+        {canWrite ? (
+          <CardAction>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              disabled={reading || !readable}
+              aria-label={refreshLabel}
+              title={refreshLabel}
+              onClick={refresh}
+            >
+              {reading ? (
+                <Loader2 className="animate-spin" aria-hidden="true" />
+              ) : (
+                <RefreshCw aria-hidden="true" />
+              )}
+            </Button>
+          </CardAction>
+        ) : null}
       </CardHeader>
       <CardContent className="flex flex-col gap-3 text-sm">
         <hr className="border-border-default" role="presentation" />
@@ -92,6 +97,10 @@ export function WalletOverview({
           <p className="text-pretty text-secondary">{t("DashboardHeliusRings.balances.paused")}</p>
         ) : wallet.shieldedAddress === null ? (
           <p className="text-secondary">{t("DashboardHeliusRings.overview.notProvisioned")}</p>
+        ) : !canWrite ? (
+          <p className="text-pretty text-secondary">
+            {t("DashboardHeliusRings.balances.readOnly")}
+          </p>
         ) : state.name === "loading" ? (
           <p className="text-secondary">{t("DashboardHeliusRings.overview.loading")}</p>
         ) : state.name === "failed" ? (

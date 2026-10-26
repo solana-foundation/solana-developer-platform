@@ -6,6 +6,7 @@ import { AssetProfileHeader } from "@/app/dashboard/[projectId]/issuance/[tokenI
 import type { TokenOperations } from "@/app/dashboard/[projectId]/issuance/[tokenId]/asset-profile/use-token-operations";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { OperationsTab } from "./operations-tab";
 
 const token: Token = {
@@ -75,7 +76,12 @@ function makeOps(overrides: Partial<TokenOperations> = {}): TokenOperations {
   } as TokenOperations;
 }
 
-function render(input: Token = token, overrides: Partial<TokenOperations> = {}, admin = true) {
+function render(
+  input: Token = token,
+  overrides: Partial<TokenOperations> = {},
+  admin = true,
+  canWrite = true
+) {
   return renderToStaticMarkup(
     <I18nProvider locale="en" messages={getMessages("en")}>
       <main className="mx-auto max-w-5xl space-y-6 p-6 sm:p-10">
@@ -97,7 +103,12 @@ function render(input: Token = token, overrides: Partial<TokenOperations> = {}, 
           <span>Activity</span>
           <span>Settings</span>
         </div>
-        <OperationsTab token={input} ops={makeOps(overrides)} canManageTokenAdmin={admin} />
+        <OperationsTab
+          token={input}
+          ops={makeOps(overrides)}
+          canManageTokenAdmin={admin}
+          canWrite={canWrite}
+        />
       </main>
     </I18nProvider>
   );
@@ -140,6 +151,18 @@ describe("simplified token operations", () => {
     expect(html).toContain("Blocked recipients");
     expect(html).not.toContain('data-testid="fund-management-row-freeze"');
     expect(html).not.toContain("Recovery &amp; permanent changes");
+  });
+
+  it("offers a viewer no mint or burn", () => {
+    const { capabilities } = resolveDashboardAccess("viewer");
+    const html = render(token, {}, capabilities.canManageTokenAdmin, capabilities.canWrite);
+    expect(capabilities.canWrite).toBe(false);
+    expect(html).not.toContain('data-testid="fund-management-row-mint"');
+    expect(html).not.toContain('data-testid="fund-management-row-burn"');
+    expect(html).not.toContain(">Supply</h3>");
+    // Reading the token stays: the recipient list and the frozen-account count still show.
+    expect(html).toContain("Blocked recipients");
+    expect(html).toContain('data-testid="frozen-accounts-summary-card"');
   });
 
   it("omits unsupported controls for a custom token", () => {

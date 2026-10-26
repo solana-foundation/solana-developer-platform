@@ -4,6 +4,7 @@ import { loadPaymentsActionPageData } from "@/app/dashboard/[projectId]/payments
 import { PaymentsActionPage } from "@/app/dashboard/[projectId]/payments/ramps/ramp-action-page";
 import { withLegacyDesign } from "@/flags/new-design";
 import { getAuthEntryPath } from "@/lib/auth-entry";
+import { redirectUnlessCanWrite } from "@/lib/require-write-access";
 import { PaymentsPayPage as RedesignPaymentsPayPage } from "./page.redesign";
 
 async function PaymentsPayPage() {
@@ -14,6 +15,7 @@ async function PaymentsPayPage() {
   if (!orgId) {
     redirect("/dashboard");
   }
+  await redirectUnlessCanWrite("/dashboard/payments");
 
   const actionPageData = await loadPaymentsActionPageData();
   return <PaymentsActionPage mode="send" wallets={[]} walletsError={null} {...actionPageData} />;

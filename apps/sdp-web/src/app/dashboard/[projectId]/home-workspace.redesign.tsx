@@ -647,7 +647,7 @@ export function HomeWorkspace({
           } as const,
         ]
       : []),
-    ...(flags.payments && !firstRun
+    ...(flags.payments && capabilities.canWrite && !firstRun
       ? [
           {
             key: "payment",
