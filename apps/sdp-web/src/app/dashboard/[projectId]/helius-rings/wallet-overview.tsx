@@ -12,7 +12,7 @@ import {
   ringNameByProgramId,
   shortenShieldedAddress,
 } from "./helius-rings.utils";
-import { useRingsBalance } from "./use-rings-balance";
+import { type RingsBalanceState, useRingsBalance } from "./use-rings-balance";
 
 /**
  * Adjacent-run grouping over the API's deterministic order (default bucket
@@ -93,24 +93,58 @@ export function WalletOverview({
         <p className="text-xs font-medium uppercase tracking-wide text-tertiary">
           {t("DashboardHeliusRings.overview.privateBalanceLabel")}
         </p>
-        {wallet.status === "paused" ? (
-          <p className="text-pretty text-secondary">{t("DashboardHeliusRings.balances.paused")}</p>
-        ) : wallet.shieldedAddress === null ? (
-          <p className="text-secondary">{t("DashboardHeliusRings.overview.notProvisioned")}</p>
-        ) : !canWrite ? (
-          <p className="text-pretty text-secondary">
-            {t("DashboardHeliusRings.balances.readOnly")}
-          </p>
-        ) : state.name === "loading" ? (
-          <p className="text-secondary">{t("DashboardHeliusRings.overview.loading")}</p>
-        ) : state.name === "failed" ? (
-          <p className="text-error">{t("DashboardHeliusRings.overview.failed")}</p>
-        ) : (
-          <Summary sync={state.sync} locale={locale} projectRings={projectRings} />
-        )}
+        <PrivateBalance
+          wallet={wallet}
+          canWrite={canWrite}
+          state={state}
+          locale={locale}
+          projectRings={projectRings}
+        />
       </CardContent>
     </Card>
   );
+}
+
+/** The wallet's private balance, or why there is none to show. */
+function PrivateBalance({
+  wallet,
+  canWrite,
+  state,
+  locale,
+  projectRings,
+}: {
+  wallet: RingsWallet;
+  canWrite: boolean;
+  state: RingsBalanceState;
+  locale: string;
+  projectRings: ProjectRing[];
+}) {
+  const t = useTranslations();
+  if (wallet.status === "paused") {
+    return (
+      <p className="text-pretty text-secondary">{t("DashboardHeliusRings.balances.paused")}</p>
+    );
+  }
+  if (wallet.shieldedAddress === null) {
+    return <p className="text-secondary">{t("DashboardHeliusRings.overview.notProvisioned")}</p>;
+  }
+  if (!canWrite) {
+    return (
+      <p className="text-pretty text-secondary">{t("DashboardHeliusRings.balances.readOnly")}</p>
+    );
+  }
+  switch (state.name) {
+    case "loading":
+      return <p className="text-secondary">{t("DashboardHeliusRings.overview.loading")}</p>;
+    case "failed":
+      return <p className="text-error">{t("DashboardHeliusRings.overview.failed")}</p>;
+    case "observed":
+      return <Summary sync={state.sync} locale={locale} projectRings={projectRings} />;
+    default: {
+      const exhaustive: never = state;
+      throw new Error(`Unhandled balance state: ${JSON.stringify(exhaustive)}`);
+    }
+  }
 }
 
 function Summary({

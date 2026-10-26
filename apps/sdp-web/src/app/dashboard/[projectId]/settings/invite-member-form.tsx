@@ -86,9 +86,11 @@ export function InviteMemberForm() {
           <Select
             ariaLabel={t("Shared.members.inviteRole")}
             value={role}
-            onValueChange={(next) =>
-              setRole(ORGANIZATION_ROLES.find((candidate) => candidate === next) ?? "member")
-            }
+            onValueChange={(next) => {
+              // Only the options above can be chosen; anything else leaves the choice as it was.
+              const picked = ORGANIZATION_ROLES.find((candidate) => candidate === next);
+              if (picked) setRole(picked);
+            }}
           >
             <SelectItem value="member">{t("Shared.members.roleMember")}</SelectItem>
             <SelectItem value="viewer">{t("Shared.members.roleViewer")}</SelectItem>

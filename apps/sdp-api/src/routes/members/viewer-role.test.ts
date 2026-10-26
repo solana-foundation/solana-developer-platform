@@ -27,14 +27,15 @@ async function requestAs(
   body?: Record<string, string>
 ): Promise<Response> {
   const token = await signSeededClerkMember(env, getDb(env), actor.userId, ORGANIZATION.id);
+  const headers = clerkHeaders(token, sandboxProjectId);
+  if (method !== "GET") {
+    headers["Idempotency-Key"] = crypto.randomUUID();
+  }
   return app.request(
     path,
     {
       method,
-      headers: {
-        ...clerkHeaders(token, sandboxProjectId),
-        ...(method === "GET" ? {} : { "Idempotency-Key": crypto.randomUUID() }),
-      },
+      headers,
       body: body === undefined ? null : JSON.stringify(body),
     },
     env

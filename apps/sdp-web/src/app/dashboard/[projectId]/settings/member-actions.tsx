@@ -38,11 +38,11 @@ export function MemberActions({
   // call finishes the same request) and retired by the answer that settles it.
   const actionKey = useActionIdempotencyKey(null);
   const nextRoles = ORGANIZATION_ROLES.filter((candidate) => candidate !== role);
-  const makeRoleLabel: Record<OrganizationRole, string> = {
+  const makeRoleLabel = {
     admin: t("Shared.members.makeAdmin"),
     member: t("Shared.members.makeMember"),
     viewer: t("Shared.members.makeViewer"),
-  };
+  } as const satisfies Record<OrganizationRole, string>;
 
   const blockedRoleReasonFor = (nextRole: OrganizationRole): string | null => {
     if (isSelf) {

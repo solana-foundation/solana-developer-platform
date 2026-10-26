@@ -963,6 +963,14 @@ function canFundLeg(leg: DvpTradeLeg, status: DvpTrade["status"]): boolean {
   );
 }
 
+type CloseFooterKind = "partyHoldsLeg" | "closeActions" | "none";
+
+function closeFooterKind(partyView: boolean, canWrite: boolean): CloseFooterKind {
+  if (partyView) return "partyHoldsLeg";
+  if (canWrite) return "closeActions";
+  return "none";
+}
+
 export function DvpTradeDetailWorkspace({
   trade,
   cluster,
@@ -1041,6 +1049,30 @@ export function DvpTradeDetailWorkspace({
     ) : undefined;
   };
 
+  // A party reading somebody else's trade is told why it cannot close it; a read-only member
+  // gets no footer; the settlement authority gets settle and cancel.
+  const footerKind = closeFooterKind(partyView, canWrite);
+  let closeFooter: ReactNode;
+  switch (footerKind) {
+    case "partyHoldsLeg":
+      closeFooter = (
+        <p className="text-tertiary text-xs leading-relaxed">
+          {t("DashboardMarkets.dvp.partyHoldsLeg")}
+        </p>
+      );
+      break;
+    case "closeActions":
+      closeFooter = <DvpCloseActions onAct={act} pending={pending} trade={trade} />;
+      break;
+    case "none":
+      closeFooter = null;
+      break;
+    default: {
+      const exhaustive: never = footerKind;
+      throw new Error(`Unhandled trade footer: ${JSON.stringify(exhaustive)}`);
+    }
+  }
+
   // Your leg first, whichever it is. With no custodied leg (agent) or both
   // custodied (bilateral) the trade's own asset-then-cash order stays.
   const custodiedA = trade.legs.a.party.wallet !== null;
@@ -1104,13 +1136,7 @@ export function DvpTradeDetailWorkspace({
             reading somebody else's trade is not it. Offering the buttons put
             two irreversible-looking actions in front of somebody whose click
             could only ever come back "trade not found". */}
-        {partyView ? (
-          <p className="text-tertiary text-xs leading-relaxed">
-            {t("DashboardMarkets.dvp.partyHoldsLeg")}
-          </p>
-        ) : canWrite ? (
-          <DvpCloseActions onAct={act} pending={pending} trade={trade} />
-        ) : null}
+        {closeFooter}
 
         <OnChainDetails cluster={cluster} trade={trade} />
       </div>
