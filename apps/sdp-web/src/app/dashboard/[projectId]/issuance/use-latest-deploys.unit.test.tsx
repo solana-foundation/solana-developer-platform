@@ -5,8 +5,8 @@ import { renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { SWRConfig } from "swr";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { tokenLifecycle } from "./issuance-token-state.redesign";
-import { useLatestDeploys } from "./use-latest-deploys.redesign";
+import { tokenLifecycle } from "./issuance-token-state";
+import { useLatestDeploys } from "./use-latest-deploys";
 
 const wrapper = ({ children }: { children: ReactNode }) => (
   <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>{children}</SWRConfig>

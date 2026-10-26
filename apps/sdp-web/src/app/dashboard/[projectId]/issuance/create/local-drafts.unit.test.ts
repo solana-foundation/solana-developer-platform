@@ -40,7 +40,7 @@ const fresh: DraftState = {
 
 describe("localDraftsKey", () => {
   it("scopes drafts to the person, organization and project", async () => {
-    const { localDraftsKey } = await import("./local-drafts.redesign");
+    const { localDraftsKey } = await import("./local-drafts");
     expect(localDraftsKey(scope, "project-a")).not.toBe(localDraftsKey(scope, "project-b"));
     expect(localDraftsKey(scope, null)).toBeNull();
   });
@@ -57,13 +57,13 @@ describe("local drafts", () => {
   });
 
   it("keeps the newest first, replaces a draft saved again, and survives a fresh page load", async () => {
-    const firstPage = await import("./local-drafts.redesign");
+    const firstPage = await import("./local-drafts");
     firstPage.saveLocalDraft(key, entry("one", "First"));
     firstPage.saveLocalDraft(key, entry("two", "Second"));
     firstPage.saveLocalDraft(key, entry("one", "First again"));
 
     vi.resetModules();
-    const nextPage = await import("./local-drafts.redesign");
+    const nextPage = await import("./local-drafts");
     expect(nextPage.readLocalDrafts(key).map((draft) => draft.draft.name)).toEqual([
       "First again",
       "Second",
@@ -71,9 +71,7 @@ describe("local drafts", () => {
   });
 
   it("drops a removed draft and clears the key once none are left", async () => {
-    const { readLocalDrafts, removeLocalDraft, saveLocalDraft } = await import(
-      "./local-drafts.redesign"
-    );
+    const { readLocalDrafts, removeLocalDraft, saveLocalDraft } = await import("./local-drafts");
     saveLocalDraft(key, entry("one", "First"));
     removeLocalDraft(key, "one");
     expect(readLocalDrafts(key)).toEqual([]);
@@ -82,15 +80,15 @@ describe("local drafts", () => {
 
   it("ignores stored entries that are not drafts", async () => {
     window.localStorage.setItem(key, JSON.stringify([{ id: "x" }, entry("one", "First"), 7]));
-    const { readLocalDrafts } = await import("./local-drafts.redesign");
+    const { readLocalDrafts } = await import("./local-drafts");
     expect(readLocalDrafts(key).map((draft) => draft.id)).toEqual(["one"]);
   });
 });
 
 describe("restoreDraft", () => {
   it("takes stored fields of the right type and keeps keys only on wallets that still exist", async () => {
-    const { restoreDraft } = await import("./local-drafts.redesign");
-    const { parseStoredDraft } = await import("./local-drafts.redesign");
+    const { restoreDraft } = await import("./local-drafts");
+    const { parseStoredDraft } = await import("./local-drafts");
     const restored = restoreDraft(
       fresh,
       parseStoredDraft({
@@ -113,8 +111,8 @@ describe("restoreDraft", () => {
   });
 
   it("refuses values outside the draft's choices", async () => {
-    const { restoreDraft } = await import("./local-drafts.redesign");
-    const { parseStoredDraft } = await import("./local-drafts.redesign");
+    const { restoreDraft } = await import("./local-drafts");
+    const { parseStoredDraft } = await import("./local-drafts");
     const restored = restoreDraft(
       fresh,
       parseStoredDraft({ assetClass: "security", pegCurrency: "JPY" }),

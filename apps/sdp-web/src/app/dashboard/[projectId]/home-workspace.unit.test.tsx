@@ -25,7 +25,7 @@ const mocks = vi.hoisted(() => {
       dashboardCacheScope: { userId: "user_h", orgId: "org_h" },
       selectedProjectId: "prj_test_sandbox",
       initialQuickStartStatus: { custodyProvider: null, apiKeyCount: 0, lastCallAt: null },
-      flags: { newDesign: true, custody: true, issuance: true, payments: true },
+      flags: { custody: true, issuance: true, payments: true },
       dashboardAccess: {
         capabilities: {
           canManageCustody: true,
@@ -44,7 +44,7 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useOptionalDashboardWorkspace: () => mocks.workspace,
 }));
 
-const { HomeWorkspace } = await import("./home-workspace.redesign");
+const { HomeWorkspace } = await import("./home-workspace");
 
 function row(id: string, overrides: Partial<HomeActivityRow> = {}): HomeActivityRow {
   return {
@@ -147,7 +147,7 @@ beforeEach(() => {
   );
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-09-25T12:00:00.000Z"));
-  mocks.workspace.flags = { newDesign: true, custody: true, issuance: true, payments: true };
+  mocks.workspace.flags = { custody: true, issuance: true, payments: true };
   mocks.workspace.dashboardAccess.capabilities = {
     canManageCustody: true,
     canManageTokenWrite: true,
@@ -176,7 +176,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("Overview (HomeWorkspace redesign)", () => {
+describe("Overview (HomeWorkspace)", () => {
   it("leads a populated organization with its balance, holdings, census and every action", () => {
     renderOverview();
 
@@ -249,7 +249,7 @@ describe("Overview (HomeWorkspace redesign)", () => {
   });
 
   it("offers nothing a viewer cannot do", () => {
-    mocks.workspace.flags = { newDesign: true, custody: false, issuance: false, payments: false };
+    mocks.workspace.flags = { custody: false, issuance: false, payments: false };
     mocks.workspace.dashboardAccess.capabilities = {
       canManageCustody: false,
       canManageTokenWrite: false,

@@ -4,7 +4,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
-import { ClassifyStep } from "./draft-flow-steps.redesign";
+import { ClassifyStep } from "./draft-flow-steps";
 import type { DraftState } from "./draft-model";
 
 const messages = getMessages("en");

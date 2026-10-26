@@ -6,6 +6,11 @@ describe("themeScopeForPath", () => {
     "/dashboard",
     "/dashboard/payments",
     "/dashboard/payments/pay",
+    "/dashboard/payments/deposit",
+    "/dashboard/payments/transactions",
+    "/dashboard/payments/requests/new",
+    "/dashboard/payments/recurring/rp_1",
+    "/dashboard/payments/counterparty/create",
     "/dashboard/payments/counterparty/cp_1",
     "/dashboard/integrations/private-channels/setup",
     "/dashboard/integrations/private-channels/inst_1/setup",
@@ -23,6 +28,7 @@ describe("themeScopeForPath", () => {
   });
 
   it.each([
+    "/dashboard/tokens",
     "/dashboard/wallets/connections",
     "/dashboard/wallets/switch",
     "/dashboard/wallets/fb_wallet/policy",
@@ -36,11 +42,4 @@ describe("themeScopeForPath", () => {
   ])("keeps %s in the base design", (pathname) => {
     expect(themeScopeForPath(pathname)).toBeNull();
   });
-
-  it.each(["/dashboard/payments", "/dashboard/integrations/private-channels/setup"])(
-    "keeps %s in the base design with NEW DESIGN off",
-    (pathname) => {
-      expect(themeScopeForPath(pathname, false)).toBeNull();
-    }
-  );
 });

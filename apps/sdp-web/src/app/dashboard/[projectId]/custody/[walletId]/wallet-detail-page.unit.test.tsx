@@ -1,21 +1,6 @@
-import { Callout } from "@sdp/ui/callout";
-import {
-  Children,
-  type ComponentProps,
-  type ElementType,
-  isValidElement,
-  type ReactNode,
-} from "react";
-import { renderToStaticMarkup } from "react-dom/server";
+import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
+import { type ComponentProps, isValidElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  solBalance,
-  trackedBalances,
-} from "@/app/dashboard/[projectId]/custody/wallet-balances.fixtures";
-import { WalletLabelInlineEditor } from "@/app/dashboard/[projectId]/custody/wallet-label-inline-editor";
-import { getMessages } from "@/i18n/messages";
-import { I18nProvider } from "@/i18n/provider";
-import { getTranslations } from "@/i18n/server";
 import { PRODUCTION_PROJECT } from "@/test/projects";
 import { projectProviderAvailability } from "@/test/provider-availability";
 import { setPageRequest } from "@/test/request-project";
@@ -25,7 +10,6 @@ const {
   mockFetchProjectProviderAvailability,
   mockIssuanceFlag,
   mockLoadWalletActivity,
-  mockPoliciesFlag,
   mockRequest,
   mockRequestMemberRole,
 } = vi.hoisted(() => ({
@@ -33,7 +17,6 @@ const {
   mockFetchProjectProviderAvailability: vi.fn(),
   mockIssuanceFlag: vi.fn(),
   mockLoadWalletActivity: vi.fn(),
-  mockPoliciesFlag: vi.fn(),
   mockRequest: vi.fn(),
   mockRequestMemberRole: vi.fn(),
 }));
@@ -55,9 +38,7 @@ vi.mock("@/i18n/server", () => ({
 
 vi.mock("@/flags", () => ({
   issuance: mockIssuanceFlag,
-  policies: mockPoliciesFlag,
 }));
-vi.mock("@/flags/new-design", () => ({ isNewDesignOn: async () => false }));
 
 vi.mock("@/lib/sdp-api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/sdp-api")>()),
@@ -76,15 +57,16 @@ vi.mock("@/app/dashboard/[projectId]/custody/wallet-activity.data", async (impor
   };
 });
 
-import {
-  WalletBalanceSummary,
-  WalletBalancesSection,
-  WalletDetailPage,
-} from "./wallet-detail-page";
+import { WalletDetailPage } from "./wallet-detail-page";
+import { WalletDetailView } from "./wallet-detail-view";
 
-function renderPage() {
-  return WalletDetailPage({ params: Promise.resolve({ walletId: "wallet%2Fone" }) });
-}
+const solBalance: CustodyWalletTokenBalance = {
+  token: "SOL",
+  mint: "So11111111111111111111111111111111111111112",
+  amount: "0",
+  uiAmount: "0",
+  decimals: 9,
+};
 
 let walletOverrides: Record<string, unknown> = {};
 
@@ -95,6 +77,7 @@ function walletMetadataResponse(): Response {
         id: "wallet_record",
         custodyConfigId: "config_test",
         provider: "privy",
+        isDefaultProvider: true,
         isRuntimeExecutionAllowed: true,
         ...walletOverrides,
         walletId: "wallet/one",
@@ -108,90 +91,13 @@ function walletMetadataResponse(): Response {
   });
 }
 
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((nextResolve) => {
-    resolve = nextResolve;
-  });
-  return { promise, resolve };
-}
-
-function findElementProps<T extends ElementType>(
-  node: ReactNode,
-  type: T
-): ComponentProps<T> | null {
-  if (!isValidElement(node)) {
-    return null;
-  }
-
-  if (node.type === type) {
-    return node.props as ComponentProps<T>;
-  }
-
-  const { children } = node.props as { children?: ReactNode };
-  for (const child of Children.toArray(children)) {
-    const props = findElementProps(child, type);
-    if (props) {
-      return props;
-    }
-  }
-
-  return null;
-}
-
-function findWalletLabelEditor(
-  node: ReactNode
-): ComponentProps<typeof WalletLabelInlineEditor> | null {
-  return findElementProps(node, WalletLabelInlineEditor);
-}
-
-function renderWalletIdentity(page: ReactNode): string {
-  const identity = findElementProps(page, "section");
-  expect(identity).not.toBeNull();
-  return renderToStaticMarkup(
-    <I18nProvider locale="en" messages={getMessages("en")}>
-      {identity?.children}
-    </I18nProvider>
-  );
-}
-
-beforeEach(() => {
-  walletOverrides = {};
-  setPageRequest(`/dashboard/${PRODUCTION_PROJECT.id}/wallets/wallet%2Fone`);
-  mockAuth.mockReset();
-  mockFetchProjectProviderAvailability.mockReset();
-  mockIssuanceFlag.mockReset();
-  mockLoadWalletActivity.mockReset();
-  mockPoliciesFlag.mockReset();
-  mockRequest.mockReset();
-
-  mockAuth.mockResolvedValue({ userId: "user_test", orgId: "org_test" });
-  mockRequestMemberRole.mockReset();
-  mockRequestMemberRole.mockResolvedValue("member");
-  mockIssuanceFlag.mockResolvedValue(true);
-  mockPoliciesFlag.mockResolvedValue(true);
-  mockLoadWalletActivity.mockResolvedValue({
-    ok: true,
-    data: {
-      activityRows: [],
-      activityError: null,
-      activityNotice: null,
-    },
-  });
-  mockRequest.mockImplementation(defaultApiResponse);
-});
-
 async function defaultApiResponse(path: string): Promise<Response> {
   if (path.startsWith("/v1/wallets/wallet%2Fone")) {
     return walletMetadataResponse();
   }
 
   if (path.includes("/balances")) {
-    return Response.json({ data: { walletBalances: { balances: [solBalance("0")] } } });
-  }
-
-  if (path.includes("/policies")) {
-    return new Response(null, { status: 404 });
+    return Response.json({ data: { walletBalances: { balances: [solBalance] } } });
   }
 
   if (path.startsWith("/v1/issuance/tokens")) {
@@ -207,6 +113,7 @@ async function defaultApiResponse(path: string): Promise<Response> {
           label: "Treasury connection",
           status: "active",
           completion: null,
+          isDefault: true,
           canComplete: false,
           canReplaceCredentials: false,
           canCancel: false,
@@ -218,20 +125,102 @@ async function defaultApiResponse(path: string): Promise<Response> {
   throw new Error(`Unexpected request: ${path}`);
 }
 
-describe("WalletDetailPage critical path", () => {
-  it("keeps a connection-owned wallet readable without connection requests or links for a member", async () => {
+beforeEach(() => {
+  walletOverrides = {};
+  mockAuth.mockReset();
+  mockIssuanceFlag.mockReset();
+  mockLoadWalletActivity.mockReset();
+  mockFetchProjectProviderAvailability.mockReset();
+  mockRequest.mockReset();
+  setPageRequest(`/dashboard/${PRODUCTION_PROJECT.id}/wallets/wallet%2Fone`);
+
+  mockAuth.mockResolvedValue({ userId: "user_test", orgId: "org_test" });
+  mockRequestMemberRole.mockReset();
+  mockRequestMemberRole.mockResolvedValue("member");
+  mockIssuanceFlag.mockResolvedValue(true);
+  mockLoadWalletActivity.mockResolvedValue({
+    ok: true,
+    data: {
+      activityRows: [],
+      activityError: null,
+      activityNotice: null,
+    },
+  });
+  mockRequest.mockImplementation(defaultApiResponse);
+});
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve };
+}
+
+type ViewProps = ComponentProps<typeof WalletDetailView>;
+
+async function renderPage(): Promise<ViewProps> {
+  const page = (await WalletDetailPage({
+    params: Promise.resolve({ walletId: "wallet%2Fone" }),
+  })) as ReactNode;
+  expect(isValidElement(page)).toBe(true);
+  if (!isValidElement(page)) throw new Error("no element");
+  expect(page.type).toBe(WalletDetailView);
+  return page.props as ViewProps;
+}
+
+const requested = (fragment: string) =>
+  mockRequest.mock.calls.some(([path]) => String(path).includes(fragment));
+
+describe("WalletDetailPage", () => {
+  it("names the wallet and its provider, and says what it can sign", async () => {
+    const { wallet } = await renderPage();
+    expect(wallet).toMatchObject({
+      walletId: "wallet/one",
+      custodyWalletId: "wallet_record",
+      name: "Fast wallet",
+      label: "Fast wallet",
+      provider: "privy",
+      providerName: "Privy",
+      createdAt: "2026-07-18T00:00:00.000Z",
+      isRuntimeExecutionAllowed: true,
+      connection: null,
+    });
+  });
+
+  it("calls an unlabelled wallet untitled rather than by its address", async () => {
+    walletOverrides = { label: null };
+    mockRequest.mockImplementationOnce(async () =>
+      Response.json({
+        data: {
+          wallet: {
+            id: "wallet_record",
+            custodyConfigId: "config_test",
+            provider: "privy",
+            isRuntimeExecutionAllowed: true,
+            walletId: "wallet/one",
+            publicKey: "11111111111111111111111111111111",
+            label: null,
+            purpose: null,
+            status: "active",
+            createdAt: "2026-07-18T00:00:00.000Z",
+          },
+        },
+      })
+    );
+    const { wallet } = await renderPage();
+    expect(wallet.name).toBe("DashboardCustody.untitledWallet");
+    expect(wallet.label).toBeNull();
+  });
+
+  it("does not request admin-only connection data for a member", async () => {
     walletOverrides = { custodyConnectionId: "connection_one" };
     mockRequestMemberRole.mockResolvedValue("member");
-
-    const page = await renderPage();
-
-    expect(
-      mockRequest.mock.calls.some(([path]) => String(path).includes("/custody/connections"))
-    ).toBe(false);
+    const { wallet } = await renderPage();
+    expect(requested("/connections/")).toBe(false);
     expect(mockFetchProjectProviderAvailability).not.toHaveBeenCalled();
-    const markup = renderWalletIdentity(page);
-    expect(markup).toContain("Fast wallet");
-    expect(markup).not.toContain("/integrations/privy/connections/");
+    expect(wallet.connection).toEqual({ label: "connec..._one", href: null });
+    expect(wallet.canManageCustody).toBe(false);
   });
 
   it("loads the wallet's exact connection and links its label for an admin", async () => {
@@ -246,20 +235,15 @@ describe("WalletDetailPage critical path", () => {
         earn: [],
       })
     );
-
-    const page = await renderPage();
-
-    expect(
-      mockRequest.mock.calls.filter(([path]) => String(path).includes("/custody/connections"))
-    ).toEqual([["/internal/dashboard/custody/connections/connection_one"]]);
-    const markup = renderWalletIdentity(page);
-    expect(markup).toContain(
-      `href="/dashboard/${PRODUCTION_PROJECT.id}/integrations/privy/connections/connection_one"`
-    );
-    expect(markup).toContain("Treasury connection");
+    const { wallet } = await renderPage();
+    expect(wallet.connection).toEqual({
+      label: "Treasury connection",
+      href: `/dashboard/${PRODUCTION_PROJECT.id}/integrations/privy/connections/connection_one`,
+    });
+    expect(wallet.canManageCustody).toBe(true);
   });
 
-  it("renders the connection label unlinked for an admin when the project does not offer privy in byok", async () => {
+  it("leaves the connection label unlinked for an admin when the project does not offer privy in byok", async () => {
     walletOverrides = { custodyConnectionId: "connection_one" };
     mockRequestMemberRole.mockResolvedValue("admin");
     mockFetchProjectProviderAvailability.mockResolvedValue(
@@ -271,15 +255,12 @@ describe("WalletDetailPage critical path", () => {
         earn: [],
       })
     );
-
-    const markup = renderWalletIdentity(await renderPage());
-
-    expect(markup).toContain("Treasury connection");
-    expect(markup).not.toContain("/integrations/privy/connections/");
+    const { wallet } = await renderPage();
+    expect(wallet.connection).toEqual({ label: "Treasury connection", href: null });
   });
 
   it.each([403, 404])(
-    "renders the truncated connection id, unlinked, when the connection lookup returns %i",
+    "shows the truncated connection id, unlinked, when the connection lookup returns %i",
     async (status) => {
       walletOverrides = { custodyConnectionId: "connection_one" };
       mockRequestMemberRole.mockResolvedValue("admin");
@@ -288,11 +269,8 @@ describe("WalletDetailPage critical path", () => {
           ? new Response(null, { status })
           : defaultApiResponse(path)
       );
-
-      const markup = renderWalletIdentity(await renderPage());
-
-      expect(markup).toContain("connec..._one");
-      expect(markup).not.toContain("/integrations/privy/connections/");
+      const { wallet } = await renderPage();
+      expect(wallet.connection).toEqual({ label: "connec..._one", href: null });
       expect(mockFetchProjectProviderAvailability).not.toHaveBeenCalled();
     }
   );
@@ -321,120 +299,26 @@ describe("WalletDetailPage critical path", () => {
           ? connectionResponse()
           : defaultApiResponse(path)
       );
-
       await expect(renderPage()).rejects.toMatchObject(expectedError);
     }
   );
 
-  it("keeps wallet detail data cards on theme-aware surfaces", async () => {
-    const t = await getTranslations();
-    const [summary, populatedBalances, emptyBalances] = await Promise.all([
-      WalletBalanceSummary({
-        walletId: "wallet_one",
-        balancesPromise: Promise.resolve(trackedBalances([solBalance("0")], null)),
-        providerLabel: "Privy",
-        publicKey: "11111111111111111111111111111111",
-        purposeLabel: null,
-        t,
-      }),
-      WalletBalancesSection({
-        walletId: "wallet_one",
-        balancesPromise: Promise.resolve(trackedBalances([solBalance("0")], null)),
-        ownedTokensByMintPromise: Promise.resolve(new Map()),
-        issuanceEnabled: true,
-        t,
-      }),
-      WalletBalancesSection({
-        walletId: "wallet_one",
-        balancesPromise: Promise.resolve(trackedBalances([], null)),
-        ownedTokensByMintPromise: Promise.resolve(new Map()),
-        issuanceEnabled: true,
-        t,
-      }),
-    ]);
-    const markup = [summary, populatedBalances, emptyBalances]
-      .map((surface) => renderToStaticMarkup(surface))
-      .join("\n");
-
-    expect(markup.match(/bg-surface-raised/g)).toHaveLength(3);
-    expect(markup).not.toMatch(/\bbg-white(?:\/\d+)?\b/);
-  });
-
-  it.each([
-    ["admin", true],
-    ["member", false],
-  ] as const)("reuses the wallet label editor for %s users", async (role, canEdit) => {
-    mockRequestMemberRole.mockResolvedValue(role);
-
-    const page = await renderPage();
-
-    expect(findWalletLabelEditor(page)).toEqual({
-      canEdit,
-      emptyLabel: "DashboardCustody.untitledWallet",
-      label: "Fast wallet",
-      walletId: "wallet/one",
-    });
-  });
-
-  it("explains a signing restriction in the identity shell", async () => {
-    walletOverrides = { isRuntimeExecutionAllowed: false };
-    const restricted = await renderPage();
-    expect(findElementProps(restricted, Callout)).toMatchObject({
-      variant: "warning",
-      title: "DashboardCustody.signingDisabledTitle",
-    });
-
-    walletOverrides = {};
-    const allowed = await renderPage();
-    expect(findElementProps(allowed, Callout)).toBeNull();
-  });
-
-  it("loads metadata only and leaves wallet activity off the initial render path", async () => {
-    await renderPage();
-
-    expect(mockLoadWalletActivity).not.toHaveBeenCalled();
+  it("loads metadata only and hands the lower parts over as promises", async () => {
+    const props = await renderPage();
     expect(mockRequest).toHaveBeenCalledWith("/v1/wallets/wallet%2Fone?includeBalance=false");
+    await expect(props.balancesPromise).resolves.toEqual({ balances: [solBalance], error: null });
+    await expect(props.issuedTokensPromise).resolves.toEqual({});
   });
 
-  it("does not load or render policy controls when Policies is disabled", async () => {
-    mockPoliciesFlag.mockResolvedValue(false);
-
-    const page = await renderPage();
-    expect(page).toBeTruthy();
-
-    expect(mockRequest.mock.calls.some(([path]) => String(path).includes("/policies"))).toBe(false);
-  });
-
-  it("resolves the identity shell while lower wallet sections are still pending", async () => {
+  it("renders the page while the balances are still on their way", async () => {
     const balances = deferred<Response>();
-    const policy = deferred<Response>();
-    const ownedTokens = deferred<Response>();
-    mockRequest.mockImplementation((path: string) => {
-      if (path === "/v1/wallets/wallet%2Fone?includeBalance=false") {
-        return Promise.resolve(walletMetadataResponse());
-      }
-      if (path.includes("/balances")) return balances.promise;
-      if (path.includes("/policies")) return policy.promise;
-      if (path.startsWith("/v1/issuance/tokens")) return ownedTokens.promise;
-      return Promise.reject(new Error(`Unexpected request: ${path}`));
-    });
-
-    const pagePromise = renderPage();
-
-    try {
-      const result = await Promise.race([
-        pagePromise.then(() => "resolved" as const),
-        new Promise<"timed-out">((resolve) => setTimeout(() => resolve("timed-out"), 100)),
-      ]);
-
-      expect(result).toBe("resolved");
-    } finally {
-      balances.resolve(
-        Response.json({ data: { walletBalances: { balances: [solBalance("0")] } } })
-      );
-      policy.resolve(new Response(null, { status: 404 }));
-      ownedTokens.resolve(Response.json({ data: [] }));
-      await pagePromise;
-    }
+    const base = mockRequest.getMockImplementation();
+    mockRequest.mockImplementation(async (path: string) =>
+      path.includes("/balances") ? balances.promise : base?.(path)
+    );
+    const props = await renderPage();
+    expect(props.wallet.name).toBe("Fast wallet");
+    balances.resolve(Response.json({ data: { walletBalances: { balances: [] } } }));
+    await expect(props.balancesPromise).resolves.toEqual({ balances: [], error: null });
   });
 });

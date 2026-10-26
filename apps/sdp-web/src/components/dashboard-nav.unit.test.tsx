@@ -1,9 +1,7 @@
 import { LandmarkIcon, PercentIcon } from "lucide-react";
 import type { ComponentProps } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { resetDashboardNavigation, setDashboardUrl } from "@/test/dashboard-navigation";
-import { PRODUCTION_PROJECT, SANDBOX_PROJECT } from "@/test/projects";
+import { resetDashboardNavigation } from "@/test/dashboard-navigation";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
@@ -23,14 +21,10 @@ vi.mock("@/components/sidebar-user-menu", () => ({
   SidebarUserMenu: () => <div data-sidebar-user-menu="true" />,
 }));
 
-import { DashboardBottomNav } from "./dashboard-bottom-nav";
-import { DashboardMoreSheet } from "./dashboard-more-sheet";
 import { getNavSections, withSubnavOpen, withSubnavToggled } from "./dashboard-nav";
 
 type Translate = Parameters<typeof getNavSections>[0];
 const t = ((key: string) => key) as Translate;
-
-const SANDBOX_DASHBOARD = `/dashboard/${SANDBOX_PROJECT.id}`;
 
 beforeEach(() => {
   resetDashboardNavigation();
@@ -56,20 +50,6 @@ function findManageItem(options: ReturnType<typeof navOptions>, label: string) {
   return getNavSections(t, options)
     .find((section) => section.title === "Shared.dashboardShell.manage")
     ?.items.find((item) => item.label === label);
-}
-
-function moreSheetMarkup(overrides: Partial<ComponentProps<typeof DashboardMoreSheet>>): string {
-  return renderToStaticMarkup(
-    <DashboardMoreSheet
-      pathname="/dashboard"
-      dvpEnabled={false}
-      earnEnabled={false}
-      heliusRingsEnabled={false}
-      marketsEnabled={false}
-      onClose={() => {}}
-      {...overrides}
-    />
-  );
 }
 
 describe("Markets dashboard navigation", () => {
@@ -131,24 +111,6 @@ describe("Markets dashboard navigation", () => {
 
     expect(markets?.children?.map((child) => child.href)).not.toContain("/dashboard/markets/dvp");
   });
-
-  it("keeps Markets out of the mobile More sheet when the module flag is off", () => {
-    expect(moreSheetMarkup({ earnEnabled: true, marketsEnabled: false })).not.toContain(
-      `href="${SANDBOX_DASHBOARD}/markets"`
-    );
-  });
-
-  it("exposes the active Markets destination from the mobile More sheet", () => {
-    const markup = moreSheetMarkup({
-      pathname: "/dashboard/markets/treasury-solutions",
-      earnEnabled: true,
-      marketsEnabled: true,
-    });
-
-    expect(markup).toContain(`href="${SANDBOX_DASHBOARD}/markets"`);
-    expect(markup).toContain("Shared.dashboardShell.markets");
-    expect(markup).toContain('aria-current="page"');
-  });
 });
 
 describe("Helius Rings dashboard navigation", () => {
@@ -167,17 +129,6 @@ describe("Helius Rings dashboard navigation", () => {
     expect(JSON.stringify(getNavSections(t, navOptions({})))).not.toContain(
       "Shared.dashboardShell.heliusRings"
     );
-  });
-
-  it("surfaces the entry in the mobile More sheet when the flag is on", () => {
-    const markup = moreSheetMarkup({ heliusRingsEnabled: true });
-
-    expect(markup).toContain(`href="${SANDBOX_DASHBOARD}/helius-rings"`);
-    expect(markup).toContain("Shared.dashboardShell.heliusRings");
-  });
-
-  it("keeps the entry out of the mobile More sheet when the flag is off", () => {
-    expect(moreSheetMarkup({})).not.toContain("/helius-rings");
   });
 });
 
@@ -265,37 +216,6 @@ describe("module entries", () => {
   });
 });
 
-describe("mobile bottom bar", () => {
-  it("links every enabled module inside the URL's Project", () => {
-    setDashboardUrl(`/dashboard/${PRODUCTION_PROJECT.id}`, {});
-    const markup = renderToStaticMarkup(
-      <DashboardBottomNav
-        pathname="/dashboard"
-        custodyEnabled
-        issuanceEnabled
-        paymentsEnabled
-        onOpenMore={() => {}}
-      />
-    );
-
-    for (const segment of ["wallets", "payments", "issuance"]) {
-      expect(markup).toContain(`href="/dashboard/${PRODUCTION_PROJECT.id}/${segment}"`);
-    }
-  });
-
-  it.each([
-    { segment: "wallets", custodyEnabled: false, issuanceEnabled: true, paymentsEnabled: true },
-    { segment: "payments", custodyEnabled: true, issuanceEnabled: true, paymentsEnabled: false },
-    { segment: "issuance", custodyEnabled: true, issuanceEnabled: false, paymentsEnabled: true },
-  ])("keeps /$segment out when its module is disabled", ({ segment, ...flags }) => {
-    const markup = renderToStaticMarkup(
-      <DashboardBottomNav pathname="/dashboard" onOpenMore={() => {}} {...flags} />
-    );
-
-    expect(markup).not.toContain(`/${segment}"`);
-  });
-});
-
 describe("Removed Policies and Approvals navigation", () => {
   it("lists neither Policies nor Approvals, and keeps API Keys", () => {
     const navigation = JSON.stringify(getNavSections(t, navOptions({})));
@@ -303,20 +223,6 @@ describe("Removed Policies and Approvals navigation", () => {
     expect(navigation).not.toContain("Shared.dashboardShell.policies");
     expect(navigation).not.toContain("Shared.dashboardShell.approvals");
     expect(navigation).toContain("Shared.dashboardShell.apiKeys");
-  });
-
-  it("keeps Policies and Approvals out of the mobile More sheet, and keeps API Keys", () => {
-    const markup = moreSheetMarkup({});
-
-    expect(markup).not.toContain("/policies");
-    expect(markup).not.toContain("/approvals");
-    expect(markup).toContain(`href="${SANDBOX_DASHBOARD}/api-keys"`);
-  });
-});
-
-describe("Settings in the mobile More sheet", () => {
-  it("links Settings for every member, with no capability gate", () => {
-    expect(moreSheetMarkup({})).toContain(`href="${SANDBOX_DASHBOARD}/settings"`);
   });
 });
 

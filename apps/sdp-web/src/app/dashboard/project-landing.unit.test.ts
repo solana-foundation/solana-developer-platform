@@ -51,7 +51,7 @@ vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/lib/sdp-api", () => sdpApi);
 vi.mock("@/lib/sdp-auth", () => sdpAuth);
 vi.mock("@/flags/dashboard", () => ({ getDashboardFlags: async () => DASHBOARD_FLAGS }));
-vi.mock("@/lib/quick-start-server", () => ({ loadQuickStartStep: async () => null }));
+vi.mock("@/lib/quick-start-server", () => ({ loadQuickStartStatus: async () => null }));
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   DashboardWorkspaceProvider: dashboardShell.DashboardWorkspaceProvider,
 }));
