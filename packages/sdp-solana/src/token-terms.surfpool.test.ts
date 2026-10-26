@@ -45,7 +45,6 @@ import {
   INTEREST_RATE_BPS,
   MATRIX_DECIMALS,
   type MatrixChain,
-  type MatrixMint,
   type MintMatrix,
   type MintProfile,
   mintTokens,
