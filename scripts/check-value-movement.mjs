@@ -1175,7 +1175,7 @@ if (isMain) {
   const builderViolations = findTokenMovementBuilderViolations({
     rootDir,
     rules: TOKEN_MOVEMENT_BUILDERS,
-    files: execFileSync("git", ["ls-files", `${API}/`, "packages/"], {
+    files: execFileSync("git", ["ls-files", `${API}/`, "apps/sdp-web/", "packages/"], {
       cwd: rootDir,
       encoding: "utf8",
     })

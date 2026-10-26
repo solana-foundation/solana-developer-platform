@@ -493,6 +493,8 @@ test("pins token movement builders to their files, however they are imported", (
       'import * as token from "@solana-program/token";\nconst { getTransferCheckedInstruction: transfer } = token;\n',
     // The namespace handed on: the check can no longer see what is read off it.
     "src/handed-on.ts": 'import * as token from "@solana-program/token";\nuse(token);\n',
+    "apps/sdp-web/src/pay.tsx":
+      'import { getTransferCheckedInstruction } from "@solana-program/token";\n',
     // Other members, a same-named property and a type read nothing pinned.
     "src/other-members.ts":
       'import * as token from "@solana-program/token";\ntoken.TOKEN_PROGRAM_ADDRESS;\nconst x = { token: 1 };\nlet m: typeof token;\n',
@@ -526,6 +528,7 @@ test("pins token movement builders to their files, however they are imported", (
       "src/keyed.ts uses getTransferCheckedInstruction: it builds a transfer (transfer)",
       "src/destructured.ts uses getTransferCheckedInstruction: it builds a transfer (transfer)",
       "src/handed-on.ts uses getTransferCheckedInstruction, getTransferCheckedWithFeeInstruction: it builds a transfer (transfer)",
+      "apps/sdp-web/src/pay.tsx uses getTransferCheckedInstruction: it builds a transfer (transfer)",
       "src/gone.ts no longer uses transfer: remove it from the list",
     ]);
   } finally {
