@@ -15,31 +15,29 @@ import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
 import { Modal } from "@sdp/ui/modal";
 import { Loader2Icon } from "lucide-react";
-import { type ChangeEvent, useEffect, useMemo, useState } from "react";
-import { useSWRConfig } from "swr";
+import { type ChangeEvent, useMemo, useState } from "react";
 import { EarnFlowStepper } from "@/app/dashboard/[projectId]/markets/earn/earn-flow-stepper";
 import { EarnFlowTransition } from "@/app/dashboard/[projectId]/markets/earn/earn-flow-transition";
 import { EarnOutcomeMark } from "@/app/dashboard/[projectId]/markets/earn/earn-outcome-mark";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { fetchResultAnswer, uncertainMoneyAnswerMessage } from "@/lib/idempotency";
-import { settleIdempotencyKey, settleMoneyIdempotencyKey } from "@/lib/idempotency-key-store";
 import { EarnAmountMaxButton } from "./earn-amount-max-button";
 import { compareUnsignedDecimals, isPositiveDecimal } from "./earn-decimal";
-import { formatProviderAmount, formatTokenValue, shortenMarketAddress } from "./earn-format";
+import { formatProviderAmount, formatTokenValue, positionDisplayName } from "./earn-format";
 import { TransactionLink } from "./earn-market-presentation";
 import {
-  cancelEarnVaultWithdrawalRequest,
-  createEarnVaultWithdrawalRequest,
-  type EarnVaultQueuedWithdrawalOutcome,
   fetchEarnVaultParRedemptionPreview,
   useEarnVaultWithdrawalRequestOutcome,
 } from "./earn-program-data";
-import { earnQueryKeys } from "./earn-query-key";
 import {
-  vaultAsyncWithdrawalIdempotencyKeyStore,
-  vaultAsyncWithdrawalRequestFingerprint,
-} from "./earn-vault-async-withdrawal-tracking";
+  type VaultAsyncWithdrawalFormStep as FormStep,
+  useVaultAsyncWithdrawalPreview,
+  useVaultAsyncWithdrawalRequestView,
+  useVaultAsyncWithdrawalSubmission,
+  vaultAsyncWithdrawalStepIndex,
+  vaultAsyncWithdrawalStepKey,
+} from "./earn-vault-async-withdrawal-request";
+import type { EarnVaultAsyncWithdrawalIntent } from "./earn-vault-async-withdrawal-tracking";
 import type { VaultSubmissionObserver } from "./earn-vault-movement";
 import {
   earnVaultParRedemptionStatusPresentation,
@@ -67,8 +65,6 @@ interface EarnVaultParRedemptionModalProps {
   source?: EarnVaultParRedemptionSource;
   terms: EarnVaultParRedemptionTerms;
 }
-
-type FormStep = "details" | "review";
 
 /** Copy that names what the request redeems, chosen once per source. */
 const PAR_SOURCE_COPY: Record<
@@ -190,166 +186,26 @@ function parRedemptionSteps(t: ReturnType<typeof useTranslations>): string[] {
   ];
 }
 
-function parRedemptionStepIndex(
-  outcome: EarnVaultQueuedWithdrawalOutcome | null,
-  step: FormStep
-): number {
-  if (outcome) return 2;
-  return step === "review" ? 1 : 0;
-}
-
-function parRedemptionStepKey(outcome: EarnVaultQueuedWithdrawalOutcome | null, step: FormStep) {
-  return outcome ? `result:${outcome.kind}` : step;
-}
-
-function freshCancelRecord(
-  cancelResult: EarnVaultWithdrawalRequestRecord | null,
-  observed: EarnVaultWithdrawalRequestRecord | undefined,
-  submitted: EarnVaultWithdrawalRequestRecord
-): EarnVaultWithdrawalRequestRecord {
-  if (cancelResult === null) return observed ?? submitted;
-  if (!observed || Date.parse(cancelResult.updatedAt) >= Date.parse(observed.updatedAt)) {
-    return cancelResult;
-  }
-  return observed;
-}
-
-function useParRedemptionPreview(
-  input: EarnVaultParRedemptionTermsRequest | null,
-  active: boolean
-) {
-  const t = useTranslations();
-  const [preview, setPreview] = useState<EarnVaultParRedemptionPreview | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!active || !input) return;
-    const controller = new AbortController();
-    setPreview(null);
-    setLoading(true);
-    setError(null);
-    void fetchEarnVaultParRedemptionPreview(input, controller.signal)
-      .then((result) => {
-        if (controller.signal.aborted) return;
-        if (result.kind === "ready") setPreview(result.value);
-        else setError(t("DashboardEarn.parRedemption.previewError"));
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
-      });
-    return () => controller.abort();
-  }, [active, input, t]);
-
-  return { preview, loading, error, setError };
-}
-
-function useParRedemptionSubmission(options: {
-  onSubmissionStart?: VaultSubmissionObserver;
-  custodyWalletId: string;
-  onRequested?: (request: EarnVaultWithdrawalRequestRecord) => void;
-  projectId: string | null;
-  setError: (error: string | null) => void;
-}) {
-  const t = useTranslations();
-  const { mutate } = useSWRConfig();
-  const [submitting, setSubmitting] = useState(false);
-  const [outcome, setOutcome] = useState<EarnVaultQueuedWithdrawalOutcome | null>(null);
-
-  async function submit(
-    input: EarnVaultParRedemptionTermsRequest | null,
-    preview: EarnVaultParRedemptionPreview | null
-  ) {
-    if (!input || !preview || preview.blockingIssues.length > 0) return;
-    setSubmitting(true);
-    const finishSubmission = options.onSubmissionStart?.(options.custodyWalletId);
-    options.setError(null);
-    try {
-      const fingerprint = vaultAsyncWithdrawalRequestFingerprint({
-        projectId: options.projectId,
-        positionId: input.positionId,
-        ...(input.intermediateAmount === undefined
-          ? { shares: input.shares }
-          : { intermediateAmount: input.intermediateAmount }),
-        route: { kind: "operator_redemption" },
-      });
-      const { key, persisted } = vaultAsyncWithdrawalIdempotencyKeyStore.claim(fingerprint);
-      if (!persisted) {
-        options.setError(t("DashboardEarn.intentStorageUnavailable"));
-        return;
-      }
-      const result = await createEarnVaultWithdrawalRequest(input, key);
-      // A withdrawal request moves money: an unknown outcome or a reused key
-      // keeps the key, so the next press is answered under it.
-      const answer = fetchResultAnswer(result);
-      settleMoneyIdempotencyKey(vaultAsyncWithdrawalIdempotencyKeyStore, fingerprint, key, answer);
-      const uncertain = uncertainMoneyAnswerMessage(answer);
-      if (result.ok) {
-        setOutcome(result.data);
-        options.onRequested?.(result.data.withdrawalRequest);
-      } else if (uncertain !== null) {
-        options.setError(t(uncertain));
-        void mutate(earnQueryKeys.vaultWithdrawalRequestsOpen());
-      } else {
-        options.setError(result.error);
-      }
-    } finally {
-      finishSubmission?.();
-      setSubmitting(false);
-    }
-  }
-
-  return { submitting, outcome, submit };
+/** The redemption intent that makes one retry distinct from a changed request. */
+function parRedemptionIntent(
+  request: EarnVaultParRedemptionTermsRequest,
+  projectId: string | null
+): EarnVaultAsyncWithdrawalIntent {
+  return {
+    projectId,
+    positionId: request.positionId,
+    ...(request.intermediateAmount === undefined
+      ? { shares: request.shares }
+      : { intermediateAmount: request.intermediateAmount }),
+    route: { kind: "operator_redemption" },
+  };
 }
 
 /**
- * Owns the settled-request view model: local cancellation state wins only
- * until server polling reports a record at least as fresh, and the recovery
- * cancel action reuses one idempotency key per ambiguous transport attempt.
+ * The modal's three lifecycle hooks live in ./earn-vault-async-withdrawal-request,
+ * shared with the queued-withdrawal modal; this flow contributes its preview
+ * fetcher, its copy keys, its fingerprint fields and its cancelability rule.
  */
-function useParRedemptionRequestView(
-  submitted: EarnVaultWithdrawalRequestRecord,
-  observed: EarnVaultWithdrawalRequestRecord | undefined,
-  cancelAllowed: boolean
-) {
-  const [cancelResult, setCancelResult] = useState<EarnVaultWithdrawalRequestRecord | null>(null);
-  const [cancelling, setCancelling] = useState(false);
-  const [cancelError, setCancelError] = useState<string | null>(null);
-  const t = useTranslations();
-  const request = freshCancelRecord(cancelResult, observed, submitted);
-  const cancelable = cancelAllowed && isEarnVaultParRedemptionCancelable(request);
-
-  async function cancel() {
-    if (!cancelable || cancelling) return;
-    setCancelling(true);
-    setCancelError(null);
-    const fingerprint = `cancel:${request.withdrawalRequestId}`;
-    try {
-      const { key, persisted } = vaultAsyncWithdrawalIdempotencyKeyStore.claim(fingerprint);
-      if (!persisted) {
-        setCancelError(t("DashboardEarn.intentStorageUnavailable"));
-        return;
-      }
-      const result = await cancelEarnVaultWithdrawalRequest(request.withdrawalRequestId, key);
-      if (result.ok) {
-        vaultAsyncWithdrawalIdempotencyKeyStore.release(fingerprint, key);
-        setCancelResult(result.data);
-      } else {
-        settleIdempotencyKey(
-          vaultAsyncWithdrawalIdempotencyKeyStore,
-          fingerprint,
-          key,
-          fetchResultAnswer(result)
-        );
-        setCancelError(result.error);
-      }
-    } finally {
-      setCancelling(false);
-    }
-  }
-
-  return { cancel, cancelError, cancelable, cancelling, request };
-}
 
 function ParRedemptionResultDetails({
   environment,
@@ -408,11 +264,12 @@ function ParRedemptionResult({
 }) {
   const t = useTranslations();
   const observed = useEarnVaultWithdrawalRequestOutcome(submitted.withdrawalRequestId, onSettled);
-  const { cancel, cancelError, cancelable, cancelling, request } = useParRedemptionRequestView(
-    submitted,
-    observed,
-    terms.cancelable
-  );
+  const { cancel, cancelable, cancelError, cancelling, request } =
+    useVaultAsyncWithdrawalRequestView({
+      submitted,
+      observed,
+      isCancelable: (request) => terms.cancelable && isEarnVaultParRedemptionCancelable(request),
+    });
   const presentation = earnVaultParRedemptionStatusPresentation(request.status);
   const terminal = isEarnVaultParRedemptionTerminal(request.status);
 
@@ -767,25 +624,31 @@ export function EarnVaultParRedemptionModal({
       parPreviewInput(position, { belowMinimum, intermediateAmount, overAvailableAmount, shares }),
     [position, belowMinimum, intermediateAmount, overAvailableAmount, shares]
   );
-  const { preview, loading, error, setError } = useParRedemptionPreview(input, step === "review");
-  const { submitting, outcome, submit } = useParRedemptionSubmission({
+  const { preview, loading, error, setError } = useVaultAsyncWithdrawalPreview(
+    input,
+    step === "review",
+    fetchEarnVaultParRedemptionPreview,
+    "DashboardEarn.parRedemption.previewError"
+  );
+  const { submitting, outcome, submit } = useVaultAsyncWithdrawalSubmission({
+    intent: parRedemptionIntent,
     onSubmissionStart,
     custodyWalletId: position.custodyWalletId,
     onRequested,
     projectId,
     setError,
   });
-  const positionName = position.label || shortenMarketAddress(position.providerReference);
+  const positionName = positionDisplayName(position);
   const modalLabel = t(PAR_SOURCE_COPY[source].title, { position: positionName });
 
   return (
     <Modal isOpen ariaLabel={modalLabel} closeDisabled={submitting} onClose={onClose} size="md">
       <div className="p-6">
         <EarnFlowStepper
-          currentStep={parRedemptionStepIndex(outcome, step)}
+          currentStep={vaultAsyncWithdrawalStepIndex(outcome, step)}
           steps={parRedemptionSteps(t)}
         />
-        <EarnFlowTransition stepKey={parRedemptionStepKey(outcome, step)}>
+        <EarnFlowTransition stepKey={vaultAsyncWithdrawalStepKey(outcome, step)}>
           {outcome ? (
             <ParRedemptionResult
               environment={environment}

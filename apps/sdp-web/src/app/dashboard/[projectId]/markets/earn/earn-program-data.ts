@@ -511,6 +511,9 @@ export async function readEarnVaultPositions(
     }
   }
   if (batches.length > 1) {
+    // Batches partition the position ids and the loop above recorded a
+    // verified winner for every id, so seeding from the last batch's rows
+    // and overlaying those winners rebuilds the full position set.
     const combined = new Map(positions.map((position) => [position.id, position]));
     for (const [id, { position }] of verified) {
       if (position) combined.set(id, position);
@@ -1451,7 +1454,7 @@ const earnVaultWithdrawalRequestRecordSchema: z.ZodType<EarnVaultWithdrawalReque
     replayed: z.boolean().optional(),
   });
 
-type QueuedReadResult<T> = { kind: "ready"; value: T } | { kind: "unavailable" };
+export type QueuedReadResult<T> = { kind: "ready"; value: T } | { kind: "unavailable" };
 
 /** Read settlement routes independently. No client-side provider list chooses one. */
 export async function fetchEarnVaultWithdrawalOptions(
