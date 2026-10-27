@@ -2239,9 +2239,9 @@ describe("Payments routes — recurring", () => {
   });
 
   // HOO-2099: start admission runs only before a fresh update's claim. A
-  // recovered update whose saved signature landed only confirms it, so a key
-  // that has since lost the wallet still finishes it rather than leaving the
-  // mandate paused in `updating`.
+  // recovered update whose saved signature landed only confirms it. Since
+  // HOO-2337 a key that has lost the wallet is refused at authorize, so the
+  // mandate stays `updating` until a key holding it, or a session, retries.
   it("refuses a landed stale metadata update's retry once the key loses the wallet, and confirms it for a key that holds it", async () => {
     const updatePlanSignature = signature(
       "3agLAsjf2Qba9W59cqxbXFoPRJFDFKB3efqYRhT6wLxaM4KwV31NVrLDjKAw22hR1GFcQc4mePSjZ6XZEHUAjN4c"
