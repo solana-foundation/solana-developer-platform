@@ -11,7 +11,7 @@ export function sponsorshipNetworkForCluster(
 ): SponsorshipNetwork {
   return cluster === "mainnet-beta" ? "mainnet" : "devnet";
 }
-export type SponsorshipBudgetScopeType = "global" | "organization" | "project";
+export type SponsorshipBudgetScopeType = "global" | "project";
 export type SponsorshipReservationStatus =
   | "reserved"
   | "signed"
@@ -37,7 +37,6 @@ export interface SponsorshipBudgetPolicy {
 
 export interface SponsorshipBudgetUsage {
   global: number;
-  organization: number;
   project: number;
 }
 
@@ -82,13 +81,11 @@ export interface SponsorshipLiveWindowReservation {
   id: string;
   attempt: number;
   reservedLamports: number;
-  organizationId: string;
   projectId: string;
 }
 
 export interface SponsorshipReconciliationReservation extends SponsorshipReservation {
   network: SponsorshipNetwork;
-  organizationId: string;
   projectId: string;
   feePayer: string;
   providerConfigFingerprint: string;
@@ -115,6 +112,11 @@ type PolicyRow = {
   update_reason: string;
   updated_at: string;
 };
+
+/** A new policy row id. */
+function sponsorshipPolicyId(): string {
+  return `sbp_${randomUUID()}`;
+}
 
 function mapPolicy(row: PolicyRow): SponsorshipBudgetPolicy {
   return {
@@ -148,9 +150,8 @@ export class SponsorshipBudgetRepository {
   async listPolicies(network?: SponsorshipNetwork): Promise<SponsorshipBudgetPolicy[]> {
     const rows = await this.db.queryMany<PolicyRow>(
       `SELECT * FROM sponsorship_budget_policies
-       WHERE (?::text IS NULL OR network = ?)
-       ORDER BY network, CASE scope_type WHEN 'global' THEN 0 WHEN 'organization' THEN 1 ELSE 2 END,
-                scope_id NULLS FIRST`,
+       WHERE (?::text IS NULL OR network = ?) AND scope_type <> 'organization'
+       ORDER BY network, CASE scope_type WHEN 'global' THEN 0 ELSE 1 END, scope_id NULLS FIRST`,
       [network ?? null, network ?? null]
     );
     return rows.map(mapPolicy);
@@ -158,7 +159,6 @@ export class SponsorshipBudgetRepository {
 
   async resolvePolicies(input: {
     network: SponsorshipNetwork;
-    organizationId: string;
     projectId: string;
   }): Promise<SponsorshipBudgetPolicy[]> {
     const rows = await this.db.queryMany<PolicyRow>(
@@ -167,14 +167,13 @@ export class SponsorshipBudgetRepository {
        WHERE network = ?
          AND (
            (scope_type = 'global' AND scope_id IS NULL) OR
-           (scope_type = 'organization' AND (scope_id = ? OR scope_id IS NULL)) OR
            (scope_type = 'project' AND (scope_id = ? OR scope_id IS NULL))
          )
        ORDER BY scope_type, (scope_id IS NOT NULL) DESC`,
-      [input.network, input.organizationId, input.projectId]
+      [input.network, input.projectId]
     );
     const policies = rows.map(mapPolicy);
-    const requiredScopes: SponsorshipBudgetScopeType[] = ["global", "organization", "project"];
+    const requiredScopes: SponsorshipBudgetScopeType[] = ["global", "project"];
     if (requiredScopes.some((scopeType) => !policies.some((row) => row.scopeType === scopeType))) {
       throw new Error("Sponsorship budget policy hierarchy is incomplete");
     }
@@ -185,7 +184,27 @@ export class SponsorshipBudgetRepository {
     });
   }
 
-  async upsertPolicy(input: {
+  /**
+   * Write an operator's policy change as a compare-and-set on the version the
+   * operator read. Version 0 means the policy must not exist yet; a concurrent
+   * create of the same scope loses on the scope's unique index instead of
+   * raising. A breaker trip bumps the version, so a write computed before the
+   * trip refuses rather than silently resuming sponsorship.
+   *
+   * @param input - The policy scope, its new limits, and the operator's attribution.
+   * @param input.network - The budget network the policy governs.
+   * @param input.scopeType - The policy level.
+   * @param input.scopeId - The project id, or null for the global row or the project default.
+   * @param input.enabled - Whether the policy admits sponsorship.
+   * @param input.perTransactionLamports - The per-transaction lamport ceiling.
+   * @param input.hourlyLamports - The hourly lamport ceiling.
+   * @param input.dailyLamports - The daily lamport ceiling.
+   * @param input.expectedVersion - The version the operator read; 0 when the policy does not exist.
+   * @param input.operator - Who made the change.
+   * @param input.reason - Why the change was made.
+   * @returns The written policy, or null when its version no longer matches.
+   */
+  async writePolicyAtVersion(input: {
     network: SponsorshipNetwork;
     scopeType: SponsorshipBudgetScopeType;
     scopeId: string | null;
@@ -193,48 +212,88 @@ export class SponsorshipBudgetRepository {
     perTransactionLamports: number;
     hourlyLamports: number;
     dailyLamports: number;
+    expectedVersion: number;
     operator: string;
     reason: string;
-  }): Promise<SponsorshipBudgetPolicy> {
+  }): Promise<SponsorshipBudgetPolicy | null> {
     return this.db.transaction(async (tx) => {
-      const existing = await tx.queryOne<PolicyRow>(
-        `SELECT * FROM sponsorship_budget_policies
-         WHERE network = ? AND scope_type = ? AND scope_id IS NOT DISTINCT FROM ?
-         FOR UPDATE`,
-        [input.network, input.scopeType, input.scopeId]
-      );
-      const id = existing?.id ?? `sbp_${randomUUID()}`;
-      const version = (existing?.version ?? 0) + 1;
+      const row =
+        input.expectedVersion === 0
+          ? await tx.queryOne<PolicyRow>(
+              `INSERT INTO sponsorship_budget_policies (
+                 id, network, scope_type, scope_id, enabled, per_transaction_lamports,
+                 hourly_lamports, daily_lamports, version, updated_by, update_reason
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+               ON CONFLICT (network, scope_type, (COALESCE(scope_id, ''))) DO NOTHING
+               RETURNING *`,
+              [
+                sponsorshipPolicyId(),
+                input.network,
+                input.scopeType,
+                input.scopeId,
+                input.enabled,
+                input.perTransactionLamports,
+                input.hourlyLamports,
+                input.dailyLamports,
+                input.operator,
+                input.reason,
+              ]
+            )
+          : await tx.queryOne<PolicyRow>(
+              `UPDATE sponsorship_budget_policies SET
+                 enabled = ?, per_transaction_lamports = ?, hourly_lamports = ?,
+                 daily_lamports = ?, version = version + 1, updated_by = ?,
+                 update_reason = ?, updated_at = sdp_iso_now()
+               WHERE network = ? AND scope_type = ? AND scope_id IS NOT DISTINCT FROM ?
+                 AND version = ?
+               RETURNING *`,
+              [
+                input.enabled,
+                input.perTransactionLamports,
+                input.hourlyLamports,
+                input.dailyLamports,
+                input.operator,
+                input.reason,
+                input.network,
+                input.scopeType,
+                input.scopeId,
+                input.expectedVersion,
+              ]
+            );
+      if (!row) return null;
+      await this.insertRevision(tx, row, input.operator, input.reason);
+      return mapPolicy(row);
+    });
+  }
+
+  /**
+   * Resume a network's global policy as a compare-and-set on the version the
+   * operator read, whatever disabled it: an operator may resume an integrity
+   * trip, which the breaker's own recovery (`resumeGlobalBreaker`) refuses.
+   *
+   * @param input - The network, the version the operator read, and the attribution.
+   * @param input.network - The budget network to resume.
+   * @param input.expectedVersion - The global policy version the operator read.
+   * @param input.operator - Who resumed sponsorship.
+   * @param input.reason - Why sponsorship was resumed.
+   * @returns The resumed policy, or null when it is enabled or its version moved.
+   */
+  async resumeGlobalPolicyAtVersion(input: {
+    network: SponsorshipNetwork;
+    expectedVersion: number;
+    operator: string;
+    reason: string;
+  }): Promise<SponsorshipBudgetPolicy | null> {
+    return this.db.transaction(async (tx) => {
       const row = await tx.queryOne<PolicyRow>(
-        `INSERT INTO sponsorship_budget_policies (
-           id, network, scope_type, scope_id, enabled, per_transaction_lamports,
-           hourly_lamports, daily_lamports, version, updated_by, update_reason
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT (id) DO UPDATE SET
-           enabled = EXCLUDED.enabled,
-           per_transaction_lamports = EXCLUDED.per_transaction_lamports,
-           hourly_lamports = EXCLUDED.hourly_lamports,
-           daily_lamports = EXCLUDED.daily_lamports,
-           version = EXCLUDED.version,
-           updated_by = EXCLUDED.updated_by,
-           update_reason = EXCLUDED.update_reason,
-           updated_at = sdp_iso_now()
+        `UPDATE sponsorship_budget_policies
+           SET enabled = TRUE, version = version + 1, updated_by = ?, update_reason = ?, updated_at = sdp_iso_now()
+         WHERE network = ? AND scope_type = 'global' AND scope_id IS NULL
+           AND enabled = FALSE AND version = ?
          RETURNING *`,
-        [
-          id,
-          input.network,
-          input.scopeType,
-          input.scopeId,
-          input.enabled,
-          input.perTransactionLamports,
-          input.hourlyLamports,
-          input.dailyLamports,
-          version,
-          input.operator,
-          input.reason,
-        ]
+        [input.operator, input.reason, input.network, input.expectedVersion]
       );
-      if (!row) throw new Error("Failed to persist sponsorship budget policy");
+      if (!row) return null;
       await this.insertRevision(tx, row, input.operator, input.reason);
       return mapPolicy(row);
     });
@@ -520,12 +579,8 @@ export class SponsorshipBudgetRepository {
       input.hourBucket,
       input.hourBucket,
       input.organizationId,
-      input.hourBucket,
-      input.organizationId,
       input.projectId,
       input.dayBucket,
-      input.dayBucket,
-      input.organizationId,
       input.dayBucket,
       input.organizationId,
       input.projectId,
@@ -537,10 +592,8 @@ export class SponsorshipBudgetRepository {
     const row = await executor.queryOne<Record<string, number>>(
       `SELECT
          COALESCE(SUM(CASE WHEN hour_bucket = ? THEN COALESCE(actual_lamports, reserved_lamports) ELSE 0 END), 0)::bigint AS global_hour,
-         COALESCE(SUM(CASE WHEN hour_bucket = ? AND organization_id = ? THEN COALESCE(actual_lamports, reserved_lamports) ELSE 0 END), 0)::bigint AS organization_hour,
          COALESCE(SUM(CASE WHEN hour_bucket = ? AND organization_id = ? AND project_id = ? THEN COALESCE(actual_lamports, reserved_lamports) ELSE 0 END), 0)::bigint AS project_hour,
          COALESCE(SUM(CASE WHEN day_bucket = ? THEN COALESCE(actual_lamports, reserved_lamports) ELSE 0 END), 0)::bigint AS global_day,
-         COALESCE(SUM(CASE WHEN day_bucket = ? AND organization_id = ? THEN COALESCE(actual_lamports, reserved_lamports) ELSE 0 END), 0)::bigint AS organization_day,
          COALESCE(SUM(CASE WHEN day_bucket = ? AND organization_id = ? AND project_id = ? THEN COALESCE(actual_lamports, reserved_lamports) ELSE 0 END), 0)::bigint AS project_day
        FROM sponsorship_budget_reservations
        WHERE network = ? AND status <> 'released' AND (hour_bucket = ? OR day_bucket = ?)${
@@ -551,12 +604,10 @@ export class SponsorshipBudgetRepository {
     return {
       hour: {
         global: row?.global_hour ?? 0,
-        organization: row?.organization_hour ?? 0,
         project: row?.project_hour ?? 0,
       },
       day: {
         global: row?.global_day ?? 0,
-        organization: row?.organization_day ?? 0,
         project: row?.project_day ?? 0,
       },
     };
@@ -580,12 +631,11 @@ export class SponsorshipBudgetRepository {
       id: string;
       attempt: number;
       reserved_lamports: number;
-      organization_id: string;
       project_id: string;
       hour_bucket: string;
       day_bucket: string;
     }>(
-      `SELECT id, attempt, reserved_lamports, organization_id, project_id, hour_bucket, day_bucket
+      `SELECT id, attempt, reserved_lamports, project_id, hour_bucket, day_bucket
        FROM sponsorship_budget_reservations
        WHERE network = ? AND status IN ('reserved', 'signed', 'submitted')
          AND (hour_bucket = ? OR day_bucket = ?)${excludeReservationId ? " AND id <> ?" : ""}`,
@@ -598,7 +648,6 @@ export class SponsorshipBudgetRepository {
         id: row.id,
         attempt: row.attempt,
         reservedLamports: row.reserved_lamports,
-        organizationId: row.organization_id,
         projectId: row.project_id,
       };
       if (row.hour_bucket === input.hourBucket) {
@@ -651,7 +700,6 @@ export class SponsorshipBudgetRepository {
       actual_lamports: number | null;
       attempt: number;
       network: SponsorshipNetwork;
-      organization_id: string;
       project_id: string;
       fee_payer: string;
       provider_config_fingerprint: string;
@@ -664,7 +712,7 @@ export class SponsorshipBudgetRepository {
     }>(
       `SELECT id, status, signature, signed_transaction, reserved_lamports, actual_lamports,
               attempt, network,
-              organization_id, project_id, fee_payer, provider_config_fingerprint,
+              project_id, fee_payer, provider_config_fingerprint,
               last_valid_block_height, hour_bucket, day_bucket,
               miss_count, updated_at, redis_settled_at
        FROM sponsorship_budget_reservations
@@ -685,7 +733,6 @@ export class SponsorshipBudgetRepository {
       actualLamports: row.actual_lamports,
       attempt: row.attempt,
       network: row.network,
-      organizationId: row.organization_id,
       projectId: row.project_id,
       feePayer: row.fee_payer,
       providerConfigFingerprint: row.provider_config_fingerprint,

@@ -78,6 +78,8 @@ const entryPoints = {
   configure: "scripts/configure.ts",
   // ephemeral-db.js creates/drops per-PR databases from the prebuilt image (PRO-1767).
   "ephemeral-db": "scripts/ephemeral-db.mjs",
+  // sponsorship-budget.js is the operator CLI for sponsorship budget policies, run as a Cloud Run job.
+  "sponsorship-budget": "scripts/sponsorship-budget.ts",
 };
 
 const zkSdkNodeEntries = new Set();

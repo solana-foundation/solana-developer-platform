@@ -416,7 +416,6 @@ async function syncRedisSettlement(
   try {
     await budgetRedis.settle({
       network: reservation.network,
-      organizationId: reservation.organizationId,
       projectId: reservation.projectId,
       hourBucket: reservation.hourBucket,
       dayBucket: reservation.dayBucket,

@@ -573,7 +573,6 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     try {
       policies = await this.repository.resolvePolicies({
         network,
-        organizationId: this.scope.organizationId,
         projectId: this.scope.projectId,
       });
     } catch (error) {

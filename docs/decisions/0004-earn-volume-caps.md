@@ -127,7 +127,7 @@ Reuses the policy engine rather than adding a parallel limits system.
   non-failed operation amounts for a scope (org, wallet, or API key), with
   `window`, `max` and `assets`. Prior art is the sponsorship budget's
   per-transaction / hourly / daily limits
-  (`sponsorship-budget-operator.ts`). Implementation note (PRO-1933): the sum
+  (`apps/sdp-api/src/db/repositories/sponsorship-budget.repository.ts`). Implementation note (PRO-1933): the sum
   runs over `wallet_operations`, the generic ledger every policy-gated route
   writes, not `earn_movements`, which is what makes the rule reusable by
   payments unchanged. On breach the rule's `action` is the decision (default

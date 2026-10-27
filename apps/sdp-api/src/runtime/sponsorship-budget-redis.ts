@@ -280,22 +280,14 @@ export class SponsorshipBudgetRedis {
   ): Promise<"admitted" | "duplicate" | "denied" | "stale_policy"> {
     const client = await this.getClient();
     const keys = this.keys(input);
-    const fields = this.fields(input.organizationId, input.projectId);
-    const hourUsage = [
-      input.usage.hour.global,
-      input.usage.hour.organization,
-      input.usage.hour.project,
-    ];
-    const dayUsage = [
-      input.usage.day.global,
-      input.usage.day.organization,
-      input.usage.day.project,
-    ];
+    const fields = this.fields(input.projectId);
+    const hourUsage = [input.usage.hour.global, input.usage.hour.project];
+    const dayUsage = [input.usage.day.global, input.usage.day.project];
     const liveReservations = input.liveReservations ?? { hour: [], day: [] };
     const prefix = `sdp:sponsorship:{${input.network}}`;
     const reservationMarkerArgs = (reservations: SponsorshipLiveWindowReservation[]) =>
       reservations.flatMap((reservation) => {
-        const scopeFields = this.fields(reservation.organizationId, reservation.projectId);
+        const scopeFields = this.fields(reservation.projectId);
         return [
           this.ownershipField({ reservationId: reservation.id, attempt: reservation.attempt }),
           reservation.reservedLamports,
@@ -326,7 +318,7 @@ export class SponsorshipBudgetRedis {
     await Promise.all(input.policies.map((policy) => this.syncPolicy(policy)));
     const args: Array<string | number> = [input.amount, fields.length];
     for (let index = 0; index < fields.length; index += 1) {
-      const scopeType = index === 0 ? "global" : index === 1 ? "organization" : "project";
+      const scopeType = index === 0 ? "global" : "project";
       const policy = policyByScope.get(scopeType);
       if (!policy) throw new Error(`Missing ${scopeType} sponsorship budget policy`);
       args.push(
@@ -377,8 +369,7 @@ export class SponsorshipBudgetRedis {
   }
 
   private scopeTypeAt(index: number): SponsorshipBudgetScopeType {
-    if (index === 1) return "global";
-    return index === 2 ? "organization" : "project";
+    return index === 1 ? "global" : "project";
   }
 
   async cancel(input: Omit<BudgetAdmissionInput, "amount" | "policies" | "usage">): Promise<void> {
@@ -389,7 +380,7 @@ export class SponsorshipBudgetRedis {
       "cancel",
       CANCEL_LUA,
       [keys.hour, keys.day, keys.reservation],
-      [this.ownershipField(input), ...this.fields(input.organizationId, input.projectId)]
+      [this.ownershipField(input), ...this.fields(input.projectId)]
     );
     if (Number(result) === -1 || Number(result) === -2) {
       throw new Error("Sponsorship budget counter invariant violated during compensation");
@@ -427,7 +418,6 @@ export class SponsorshipBudgetRedis {
 
   async settle(input: {
     network: SponsorshipNetwork;
-    organizationId: string;
     projectId: string;
     hourBucket: string;
     dayBucket: string;
@@ -448,8 +438,8 @@ export class SponsorshipBudgetRedis {
       [
         input.reservedLamports,
         input.actualLamports,
-        this.fields(input.organizationId, input.projectId).length,
-        ...this.fields(input.organizationId, input.projectId),
+        this.fields(input.projectId).length,
+        ...this.fields(input.projectId),
         this.ttlUntilNextDay(),
         input.detectMissingReservation ? 1 : 0,
         this.ownershipField(input),
@@ -461,8 +451,8 @@ export class SponsorshipBudgetRedis {
     return Number(result[1]);
   }
 
-  private fields(organizationId: string, projectId: string): string[] {
-    return ["global", `organization:${organizationId}`, `project:${projectId}`];
+  private fields(projectId: string): string[] {
+    return ["global", `project:${projectId}`];
   }
 
   private getClient(): Promise<Redis> {
