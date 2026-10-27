@@ -336,7 +336,8 @@ export const transferSchema = z
       example: "sig_example",
     }),
     serializedTx: base64Schema.nullable().openapi({
-      description: "Base64-encoded transaction payload, if available.",
+      description:
+        "Base64-encoded transaction payload, if available. Always null for transfer batch chunks, whose signed bytes stay server-side.",
       example: "base64_tx_example",
     }),
     slot: z

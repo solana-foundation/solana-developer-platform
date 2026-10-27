@@ -74,7 +74,8 @@ export function mapTransferRow(row: TransferRow) {
     direction: row.direction,
     status: row.status,
     signature: row.signature,
-    serializedTx: row.serialized_tx,
+    // A batch chunk's signed bytes stay server-side; readers get the signature (HOO-2344).
+    serializedTx: row.type === "transfer_batch" ? null : row.serialized_tx,
     slot: row.slot,
     blockTime: row.block_time,
     confirmedAt: row.confirmed_at ?? undefined,
