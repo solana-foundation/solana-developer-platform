@@ -16,10 +16,13 @@ import type { DashboardFlags } from "@/flags/dashboard";
 import {
   TREASURY_POSITION_COLUMNS,
   TREASURY_POSITIONS_BODY,
+  TREASURY_STRATEGIES_BODY,
   TREASURY_STRATEGY_COLUMNS,
   TREASURY_TABLE,
   TREASURY_TABLE_FRAME,
   TREASURY_WALLET_GRID,
+  TREASURY_WALLETS_BODY,
+  type TreasuryTableColumns,
 } from "./treasury-solutions/treasury-layout";
 
 const BALANCE_SKELETON_IDS = ["one", "two", "three"];
@@ -138,7 +141,7 @@ export function TreasuryTableSkeleton({
   columns,
   rows,
 }: {
-  columns: Readonly<Record<string, string>>;
+  columns: TreasuryTableColumns;
   rows: number;
 }) {
   const entries = Object.entries(columns);
@@ -200,7 +203,9 @@ export function TreasurySolutionsSkeleton() {
       <RecordStack>
         <TreasurySummarySkeleton />
         <TreasurySectionSkeleton>
-          <TreasuryWalletTilesSkeleton />
+          <div className={TREASURY_WALLETS_BODY}>
+            <TreasuryWalletTilesSkeleton />
+          </div>
         </TreasurySectionSkeleton>
         <TreasurySectionSkeleton>
           <div className={TREASURY_POSITIONS_BODY}>
@@ -208,7 +213,9 @@ export function TreasurySolutionsSkeleton() {
           </div>
         </TreasurySectionSkeleton>
         <TreasurySectionSkeleton>
-          <TreasuryTableSkeleton columns={TREASURY_STRATEGY_COLUMNS} rows={4} />
+          <div className={TREASURY_STRATEGIES_BODY}>
+            <TreasuryTableSkeleton columns={TREASURY_STRATEGY_COLUMNS} rows={4} />
+          </div>
         </TreasurySectionSkeleton>
       </RecordStack>
     </DashboardWorkspaceOverviewPanel>

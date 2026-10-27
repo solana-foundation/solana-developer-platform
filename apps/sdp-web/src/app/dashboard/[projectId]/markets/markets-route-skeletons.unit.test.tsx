@@ -20,6 +20,11 @@ import {
   MarketsLandingSkeleton,
   TreasurySolutionsSkeleton,
 } from "./markets-route-skeletons";
+import {
+  TREASURY_POSITIONS_BODY,
+  TREASURY_STRATEGIES_BODY,
+  TREASURY_WALLETS_BODY,
+} from "./treasury-solutions/treasury-layout";
 
 /**
  * The text a reader would actually hear, i.e. everything outside a tag.
@@ -94,8 +99,10 @@ describe("Treasury route skeleton", () => {
     expect(wallets).toContain("hidden @xl:flex");
   });
 
-  it("holds the positions table's two-row footprint", () => {
-    expect(html).toContain("flex min-h-40 min-w-0 flex-col");
+  it("holds each section's ready footprint", () => {
+    expect(html).toContain(TREASURY_WALLETS_BODY);
+    expect(html).toContain(TREASURY_POSITIONS_BODY);
+    expect(html).toContain(TREASURY_STRATEGIES_BODY);
     // The positions and strategies heads, five columns each.
     expect(occurrences(html, "<th ")).toBe(10);
   });
