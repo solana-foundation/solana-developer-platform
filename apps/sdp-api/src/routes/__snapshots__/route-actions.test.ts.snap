@@ -164,7 +164,6 @@ exports[`route actions > pins each route's action 1`] = `
   "onramp.execute POST /v1/payments/ramps/onramp/quote",
   "onramp.read GET /v1/payments/ramps/onramp/currency",
   "onramp.read POST /v1/payments/ramps/onramp/estimate",
-  "organizations.manage DELETE /v1/organizations/:orgId",
   "organizations.manage PATCH /v1/organizations/:orgId",
   "organizations.read GET /v1/organizations/:orgId",
   "organizations.read GET /v1/organizations/:orgId/provider-access",
