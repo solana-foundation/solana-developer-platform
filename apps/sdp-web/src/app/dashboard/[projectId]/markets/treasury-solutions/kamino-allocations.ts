@@ -12,12 +12,13 @@ import {
  * One Kamino vault's allocations, read through the dashboard BFF
  * (`/api/dashboard/markets/earn/kamino-allocations`) so the browser never
  * touches api.kamino.finance. The BFF caches upstream for 45s and SWR keeps
- * the served cell fresh at its own slower cadence; a failed read surfaces as
- * `error` and the cell degrades to the shared placeholder.
+ * the served cell fresh at its own slower cadence; a failed refresh surfaces
+ * as `error` but the cell keeps its last good read, and a read that never
+ * succeeds shows nothing.
  *
  * Kamino's allocations source is mainnet-only, so a vault on any other
  * cluster is an UNSUPPORTED read, not a failing one: the SWR key stays null,
- * the same way a non-Kamino row's does, and the cell shows the placeholder.
+ * the same way a non-Kamino row's does, and the row shows no allocations.
  * This client-side gate keeps an unsupported row from costing any network at
  * all, and the request states its cluster explicitly so the BFF's own
  * mainnet-only refusal (a 400 for any other cluster) never fires for a row
