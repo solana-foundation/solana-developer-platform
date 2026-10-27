@@ -1,15 +1,11 @@
-import { sumDecimalAmounts } from "@sdp/payments/decimal";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { assertValidAddress } from "@sdp/solana/address";
-import { formatDecimalAmount } from "@sdp/solana/amount";
-import { SOL_DECIMALS, SOL_MINT } from "@sdp/types/well-known-tokens";
-import { type Address, address } from "@solana/kit";
+import type { Address } from "@solana/kit";
 import type { CounterpartyAccountRow } from "@/db/repositories/counterparty-account.repository";
 import { requireProjectId } from "@/lib/auth";
-import { badRequest, notFound } from "@/lib/errors";
+import { badRequest, internalError, notFound } from "@/lib/errors";
 import { assertCallerMaySignWith } from "@/lib/money-admission";
 import { type AppContext, getCounterpartyAccountsRepository } from "@/routes/payments/context";
-import { resolveSourceTokenAccount } from "@/routes/payments/token-accounts";
 import {
   type ResolvedScope,
   resolveScope,
@@ -18,72 +14,16 @@ import {
 import {
   assertPaymentProjectScope,
   assertPositivePaymentAmount,
-  isNativePaymentToken,
   normalizePaymentToken,
+  resolvePaymentAsset,
 } from "@/services/payment-operation.service";
-import { loadPaymentMint, type PaymentAmountConverter } from "@/services/payments/token-amount";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
+import { planTokenMovement } from "@/services/token-movement/build";
 import type {
   CreateTransferBatchInput,
   ResolvedBatchRequest,
-  ResolvedRecipient,
-  TokenContext,
   TransferBatchRecipientInput,
 } from "./types";
-
-/**
- * Parses a recipient amount into token base units, mapping amount-format
- * violations to a 400 response. Every recipient must move positive base units.
- *
- * @param amount - Decimal amount string from the request body.
- * @param toBaseUnits - The batch token's converter from UI amounts to base units.
- * @returns The amount in token base units.
- */
-function parseRecipientAmount(amount: string, toBaseUnits: PaymentAmountConverter): bigint {
-  const amountBaseUnits = toBaseUnits(assertPositivePaymentAmount(amount));
-  if (amountBaseUnits <= 0n) {
-    throw badRequest("Recipient amount must be greater than zero");
-  }
-  return amountBaseUnits;
-}
-
-/**
- * Resolves the batch token into transfer parameters: native SOL, or an SPL
- * mint with its token program and the source wallet's token account.
- *
- * @param token - "SOL" or an SPL mint address.
- * @param sourceAddress - Source wallet address holding the token.
- * @returns The token context used to build transfer instructions.
- */
-async function resolveTokenContext(token: string, sourceAddress: Address): Promise<TokenContext> {
-  if (isNativePaymentToken(token)) {
-    const { toBaseUnits } = await loadPaymentMint(address(SOL_MINT));
-    return {
-      kind: "sol",
-      token: SOL_MINT,
-      decimals: SOL_DECIMALS,
-      toBaseUnits,
-    };
-  }
-
-  const mintAddress = assertValidAddress(token, "token");
-  const { tokenProgram, decimals, toBaseUnits } = await loadPaymentMint(mintAddress);
-  const sourceTokenAccount = await resolveSourceTokenAccount(
-    sourceAddress,
-    mintAddress,
-    tokenProgram
-  );
-
-  return {
-    kind: "spl",
-    token,
-    decimals,
-    mintAddress,
-    tokenProgram,
-    sourceTokenAccount: sourceTokenAccount.tokenAccount,
-    toBaseUnits,
-  };
-}
 
 /**
  * Reads the Solana wallet address off a counterparty account, rejecting
@@ -109,37 +49,40 @@ function readCryptoWalletAddress(account: CounterpartyAccountRow, index: number)
   return assertValidAddress(address, `recipients.${index}.counterpartyAccountId`);
 }
 
+/** A recipient's destination and amount, before the batch is quoted. */
+interface RecipientDestination {
+  externalId: string | null;
+  counterpartyId: string;
+  counterpartyAccountId: string;
+  destinationAddress: Address;
+  amount: string;
+}
+
 /**
  * Resolves recipient inputs against the counterparty accounts `authorize`
- * loaded, normalizing amounts. An account archived since is refused here, as
- * new work, never in the access check.
+ * loaded. An account archived since is refused here, as new work, never in
+ * the access check.
  *
  * @param params.recipients - Recipient inputs from the request body.
  * @param params.accounts - The named accounts, by id, as authorize loaded them.
- * @param params.tokenContext - The batch token: its decimals and UI-amount converter.
- * @returns Recipients with resolved destination addresses and base-unit amounts.
+ * @returns Recipients with resolved destination addresses and their amounts.
  */
-function resolveRecipients(params: {
+function resolveRecipientDestinations(params: {
   recipients: TransferBatchRecipientInput[];
   accounts: ReadonlyMap<string, CounterpartyAccountRow>;
-  tokenContext: TokenContext;
-}): ResolvedRecipient[] {
-  const { decimals, toBaseUnits } = params.tokenContext;
+}): RecipientDestination[] {
   return params.recipients.map((recipient, index) => {
     const account = params.accounts.get(recipient.counterpartyAccountId);
     if (account?.status !== "active") {
       throw notFound(`Counterparty account ${recipient.counterpartyAccountId}`);
     }
 
-    const amountBaseUnits = parseRecipientAmount(recipient.amount, toBaseUnits);
     return {
-      index,
       externalId: recipient.externalId ?? null,
       counterpartyId: account.counterparty_id,
       counterpartyAccountId: recipient.counterpartyAccountId,
       destinationAddress: readCryptoWalletAddress(account, index),
-      amount: formatDecimalAmount(amountBaseUnits, decimals),
-      amountBaseUnits,
+      amount: assertPositivePaymentAmount(recipient.amount),
     };
   });
 }
@@ -199,31 +142,55 @@ export async function authorizeBatchRequest(
 }
 
 /**
- * What a batch moves, resolved after its access check: the token context (RPC)
- * and each recipient's destination and amount. New work only; a replay never
+ * What a batch moves, resolved after its access check: one terms read for the
+ * whole batch, and every recipient quoted on the debit and gated, so every
+ * refusal is a 400 before the batch row exists. New work only; a replay never
  * reaches it.
+ *
+ * RPC budget: the mint read (with every recipient's token account, in pages
+ * of 100) and the source accounts read, as the mint owner and source reads
+ * before; for a hook mint, one more read for the whole batch.
  */
 export async function resolveBatchMovement(
   input: CreateTransferBatchInput,
   authorized: AuthorizedBatchRequest
 ): Promise<ResolvedBatchRequest> {
-  const token = normalizePaymentToken(input.token);
-  const rpc = createClusterRpc();
-  const tokenContext = await resolveTokenContext(token, authorized.sourceAddress);
-  const recipients = resolveRecipients({
+  const destinations = resolveRecipientDestinations({
     recipients: input.recipients,
     accounts: authorized.accounts,
-    tokenContext,
+  });
+  const plan = await planTokenMovement({
+    asset: resolvePaymentAsset(input.token),
+    basis: "debit",
+    source: authorized.sourceAddress,
+    destinations: destinations.map((destination) => ({
+      owner: destination.destinationAddress,
+      amount: destination.amount,
+    })),
+    memo: null,
   });
   return {
     scope: authorized.scope,
     projectId: authorized.projectId,
     sourceWallet: authorized.sourceWallet,
     sourceAddress: authorized.sourceAddress,
-    tokenContext,
-    recipients,
-    totalAmount: sumDecimalAmounts(recipients.map((recipient) => recipient.amount)),
-    rpc,
+    token: normalizePaymentToken(input.token),
+    plan,
+    recipients: destinations.map((destination, index) => {
+      const leg = plan.legs[index];
+      if (leg === undefined) {
+        throw internalError("A batch plan has one leg per recipient");
+      }
+      return {
+        index,
+        externalId: destination.externalId,
+        counterpartyId: destination.counterpartyId,
+        counterpartyAccountId: destination.counterpartyAccountId,
+        destinationAddress: destination.destinationAddress,
+        leg,
+      };
+    }),
+    rpc: createClusterRpc(),
   };
 }
 

@@ -1,26 +1,44 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
-import { SOL_MINT, wellKnownMint } from "@sdp/types/well-known-tokens";
+import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { describe, expect, it } from "vitest";
-import { canonicalizeTransferBatchBody, previousCanonicalTransferBatchBody } from "./idempotency";
+import type { JsonValue } from "@/lib/idempotency";
+import {
+  canonicalizeTransferBatchBody as canonicalizeOnDevnet,
+  PREVIOUS_TRANSFER_BATCH_FORMS,
+} from "./idempotency";
+
+/** Runs `form` as a sandbox project's request does: its tokens resolve on devnet. */
+function onDevnet(form: (body: JsonValue) => JsonValue): (body: JsonValue) => JsonValue {
+  return (body) => runInClusterScope({ projectId: null, environment: "sandbox" }, () => form(body));
+}
+
+const canonicalizeTransferBatchBody = onDevnet(canonicalizeOnDevnet);
+const [beforeAdr0012, beforeApe665] = PREVIOUS_TRANSFER_BATCH_FORMS.map(onDevnet);
+
+const USDC = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
+const BODY = {
+  sourceCustodyWalletId: "cwlt_1",
+  recipients: [{ counterpartyAccountId: "cpa_a", amount: "1" }],
+};
 
 describe("canonicalizeTransferBatchBody", () => {
-  it("makes recipient order irrelevant and keeps everything else as sent", () => {
+  it("makes recipient order irrelevant and spells the token as the asset", () => {
     const a = { counterpartyId: "cp_a", amount: "1" };
     const b = { counterpartyId: "cp_b", amount: "2" };
-    const body = { sourceCustodyWalletId: "cwlt_1", token: SOL_MINT, recipients: [b, a] };
+    const body = { sourceCustodyWalletId: "cwlt_1", token: USDC, recipients: [b, a] };
 
-    expect(canonicalizeTransferBatchBody(body)).toEqual({ ...body, recipients: [a, b] });
+    expect(canonicalizeTransferBatchBody(body)).toEqual({
+      sourceCustodyWalletId: "cwlt_1",
+      asset: USDC,
+      recipients: [a, b],
+    });
     expect(canonicalizeTransferBatchBody({ ...body, recipients: [a, b] })).toEqual(
       canonicalizeTransferBatchBody(body)
     );
   });
 
   it("spells recipient amounts canonically and drops empty options", () => {
-    const body = {
-      sourceCustodyWalletId: "cwlt_1",
-      token: SOL_MINT,
-      recipients: [{ counterpartyAccountId: "cpa_a", amount: "1" }],
-    };
+    const body = { ...BODY, token: USDC };
     const respelled = {
       ...body,
       options: {},
@@ -29,17 +47,14 @@ describe("canonicalizeTransferBatchBody", () => {
 
     expect(canonicalizeTransferBatchBody(respelled)).toEqual(canonicalizeTransferBatchBody(body));
     expect(canonicalizeTransferBatchBody({ ...body, options: { preflight: false } })).toEqual({
-      ...body,
+      ...BODY,
+      asset: USDC,
       options: { preflight: false },
     });
   });
 
   it("treats options sent at their default as omitted (APE-665)", () => {
-    const body = {
-      sourceCustodyWalletId: "cwlt_1",
-      token: SOL_MINT,
-      recipients: [{ counterpartyAccountId: "cpa_a", amount: "1" }],
-    };
+    const body = { ...BODY, token: USDC };
 
     expect(
       canonicalizeTransferBatchBody({
@@ -52,59 +67,57 @@ describe("canonicalizeTransferBatchBody", () => {
         ...body,
         options: { maxRecipientsPerTransaction: 20, preflight: false },
       })
-    ).toEqual({ ...body, options: { preflight: false } });
+    ).toEqual({ ...BODY, asset: USDC, options: { preflight: false } });
     expect(
       canonicalizeTransferBatchBody({ ...body, options: { maxRecipientsPerTransaction: 8 } })
-    ).toEqual({ ...body, options: { maxRecipientsPerTransaction: 8 } });
+    ).toEqual({ ...BODY, asset: USDC, options: { maxRecipientsPerTransaction: 8 } });
   });
 
   it("treats an omitted priority fee as none (APE SOLA9-765)", () => {
-    const body = {
-      sourceCustodyWalletId: "cwlt_1",
-      token: SOL_MINT,
-      recipients: [{ counterpartyAccountId: "cpa_a", amount: "1" }],
-    };
+    const body = { ...BODY, token: USDC };
 
     expect(canonicalizeTransferBatchBody({ ...body, options: { priorityFee: "none" } })).toEqual(
       canonicalizeTransferBatchBody(body)
     );
     expect(canonicalizeTransferBatchBody({ ...body, options: { priorityFee: "high" } })).toEqual({
-      ...body,
+      ...BODY,
+      asset: USDC,
       options: { priorityFee: "high" },
     });
   });
 
-  it("fingerprints the token as the mint the batch executes as (APE SOLA9-695)", () => {
-    const usdc = wellKnownMint("USDC", "devnet");
-    const body = {
-      sourceCustodyWalletId: "cwlt_1",
-      recipients: [{ counterpartyAccountId: "cpa_a", amount: "1" }],
-    };
-
-    runInClusterScope({ projectId: null, environment: "sandbox" }, () => {
-      expect(canonicalizeTransferBatchBody({ ...body, token: "usdc" })).toEqual(
-        canonicalizeTransferBatchBody({ ...body, token: usdc ?? "" })
-      );
-      expect(canonicalizeTransferBatchBody({ ...body, token: "SOL" })).toEqual(
-        canonicalizeTransferBatchBody({ ...body, token: SOL_MINT })
-      );
+  it("fingerprints a symbol and its mint as one asset, and wrapped SOL apart from native (APE SOLA9-695)", () => {
+    expect(canonicalizeTransferBatchBody({ ...BODY, token: "usdc" })).toEqual(
+      canonicalizeTransferBatchBody({ ...BODY, token: USDC })
+    );
+    // ADR 0012: "SOL" moves native SOL; a wrapped SOL batch is refused when it runs, after the replay step.
+    expect(canonicalizeTransferBatchBody({ ...BODY, token: "sol" })).toEqual({
+      ...BODY,
+      asset: "native",
+    });
+    expect(canonicalizeTransferBatchBody({ ...BODY, token: SOL_MINT })).toEqual({
+      ...BODY,
+      asset: SOL_MINT,
     });
   });
 
-  it("keeps the pre-APE-665 form, options as sent, for keys saved before it", () => {
+  it("keeps both earlier forms, so a key or row saved under either still matches", () => {
     const body = {
-      sourceCustodyWalletId: "cwlt_1",
-      token: "SOL",
+      ...BODY,
+      token: "sol",
       recipients: [{ counterpartyAccountId: "cpa_a", amount: "1.0" }],
       options: { maxRecipientsPerTransaction: 20 },
     };
-    expect(previousCanonicalTransferBatchBody(body)).toEqual({
-      ...body,
-      recipients: [{ counterpartyAccountId: "cpa_a", amount: "1" }],
+
+    // Before ADR 0012: defaults dropped, the token as the mint it executed as.
+    expect(beforeAdr0012(body)).toEqual({ ...BODY, token: SOL_MINT });
+    expect(beforeAdr0012({ ...body, token: SOL_MINT })).toEqual(beforeAdr0012(body));
+    // Before APE-665: options and token as sent.
+    expect(beforeApe665(body)).toEqual({
+      ...BODY,
+      token: "sol",
+      options: { maxRecipientsPerTransaction: 20 },
     });
-    expect(previousCanonicalTransferBatchBody(body)).not.toEqual(
-      canonicalizeTransferBatchBody(body)
-    );
   });
 
   it("leaves a body without a recipients array untouched for validation to refuse", () => {

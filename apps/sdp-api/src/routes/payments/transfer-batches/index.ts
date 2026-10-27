@@ -13,7 +13,7 @@ import {
 import { estimateTransferBatch } from "@/routes/payments/transfer-batches/estimate";
 import { getTransferBatch, listTransferBatches } from "@/routes/payments/transfer-batches/read";
 import type { Env } from "@/types/env";
-import { canonicalizeTransferBatchBody, previousCanonicalTransferBatchBody } from "./idempotency";
+import { canonicalizeTransferBatchBody, PREVIOUS_TRANSFER_BATCH_FORMS } from "./idempotency";
 import { createTransferBatchSchema, estimateTransferBatchSchema } from "./schemas";
 
 export const transferBatches = new Hono<{ Bindings: Env }>();
@@ -37,7 +37,7 @@ transferBatches.post(
     recovery: "record",
     leaseSeconds: 300,
     canonicalize: canonicalizeTransferBatchBody,
-    previousCanonicalize: previousCanonicalTransferBatchBody,
+    previousCanonicalForms: PREVIOUS_TRANSFER_BATCH_FORMS,
   }),
   replayFromRecord(findTransferBatchRecordReplay),
   admit(admitTransferBatchExecution),

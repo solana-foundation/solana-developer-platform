@@ -605,7 +605,18 @@
                 "invoice": "INV-123",
                 "po": "PO-9"
               },
-              "amount": "100.00",
+              "amount": "100",
+              "amounts": {
+                "basis": "debit",
+                "debit": "100",
+                "fee": "0",
+                "credit": "100",
+                "decimals": 6
+              },
+              "amountVerification": {
+                "state": "verified",
+                "reason": "sdp_built_transfer_landed"
+              },
               "provider": "moonpay",
               "counterpartyId": "cpty_example",
               "counterpartyDisplayName": "Acme Studio",
@@ -893,7 +904,18 @@
                 "invoice": "INV-123",
                 "po": "PO-9"
               },
-              "amount": "100.00",
+              "amount": "100",
+              "amounts": {
+                "basis": "debit",
+                "debit": "100",
+                "fee": "0",
+                "credit": "100",
+                "decimals": 6
+              },
+              "amountVerification": {
+                "state": "verified",
+                "reason": "sdp_built_transfer_landed"
+              },
               "provider": "moonpay",
               "counterpartyId": "cpty_example",
               "counterpartyDisplayName": "Acme Studio",
@@ -996,7 +1018,18 @@
                 "invoice": "INV-123",
                 "po": "PO-9"
               },
-              "amount": "100.00",
+              "amount": "100",
+              "amounts": {
+                "basis": "debit",
+                "debit": "100",
+                "fee": "0",
+                "credit": "100",
+                "decimals": 6
+              },
+              "amountVerification": {
+                "state": "verified",
+                "reason": "sdp_built_transfer_landed"
+              },
               "provider": "moonpay",
               "counterpartyId": "cpty_example",
               "counterpartyDisplayName": "Acme Studio",
@@ -1070,6 +1103,13 @@
             "estimate": {
               "recipientCount": 1,
               "transactionCount": 1,
+              "amounts": {
+                "basis": "debit",
+                "debit": "100",
+                "fee": "0",
+                "credit": "100",
+                "decimals": 6
+              },
               "estimatedFees": {
                 "networkFeeLamports": "5000",
                 "priorityFeeLamports": "0",
@@ -1117,6 +1157,13 @@
               "token": "SOL",
               "status": "processing",
               "totalAmount": "1000.00",
+              "amounts": {
+                "basis": "debit",
+                "debit": "100",
+                "fee": "0",
+                "credit": "100",
+                "decimals": 6
+              },
               "recipientCount": 20,
               "transactionCount": 1,
               "createdAt": "2025-01-01T00:00:00.000Z",
@@ -1131,7 +1178,18 @@
                 "counterpartyId": "cpty_example",
                 "counterpartyAccountId": "cpa_example",
                 "destination": "So11111111111111111111111111111111111111112",
-                "amount": "100.00",
+                "amount": "100",
+                "amounts": {
+                  "basis": "debit",
+                  "debit": "100",
+                  "fee": "0",
+                  "credit": "100",
+                  "decimals": 6
+                },
+                "amountVerification": {
+                  "state": "verified",
+                  "reason": "sdp_built_transfer_landed"
+                },
                 "status": "pending",
                 "error": "example",
                 "createdAt": "2025-01-01T00:00:00.000Z",
@@ -1170,7 +1228,18 @@
                   "invoice": "INV-123",
                   "po": "PO-9"
                 },
-                "amount": "100.00",
+                "amount": "100",
+                "amounts": {
+                  "basis": "debit",
+                  "debit": "100",
+                  "fee": "0",
+                  "credit": "100",
+                  "decimals": 6
+                },
+                "amountVerification": {
+                  "state": "verified",
+                  "reason": "sdp_built_transfer_landed"
+                },
                 "provider": "moonpay",
                 "counterpartyId": "cpty_example",
                 "counterpartyDisplayName": "Acme Studio",
@@ -1315,6 +1384,13 @@
               "token": "SOL",
               "status": "processing",
               "totalAmount": "1000.00",
+              "amounts": {
+                "basis": "debit",
+                "debit": "100",
+                "fee": "0",
+                "credit": "100",
+                "decimals": 6
+              },
               "recipientCount": 20,
               "transactionCount": 1,
               "createdAt": "2025-01-01T00:00:00.000Z",
@@ -1361,6 +1437,13 @@
               "token": "SOL",
               "status": "processing",
               "totalAmount": "1000.00",
+              "amounts": {
+                "basis": "debit",
+                "debit": "100",
+                "fee": "0",
+                "credit": "100",
+                "decimals": 6
+              },
               "recipientCount": 20,
               "transactionCount": 1,
               "createdAt": "2025-01-01T00:00:00.000Z",
@@ -1375,7 +1458,18 @@
                 "counterpartyId": "cpty_example",
                 "counterpartyAccountId": "cpa_example",
                 "destination": "So11111111111111111111111111111111111111112",
-                "amount": "100.00",
+                "amount": "100",
+                "amounts": {
+                  "basis": "debit",
+                  "debit": "100",
+                  "fee": "0",
+                  "credit": "100",
+                  "decimals": 6
+                },
+                "amountVerification": {
+                  "state": "verified",
+                  "reason": "sdp_built_transfer_landed"
+                },
                 "status": "pending",
                 "error": "example",
                 "createdAt": "2025-01-01T00:00:00.000Z",
@@ -1414,7 +1508,18 @@
                   "invoice": "INV-123",
                   "po": "PO-9"
                 },
-                "amount": "100.00",
+                "amount": "100",
+                "amounts": {
+                  "basis": "debit",
+                  "debit": "100",
+                  "fee": "0",
+                  "credit": "100",
+                  "decimals": 6
+                },
+                "amountVerification": {
+                  "state": "verified",
+                  "reason": "sdp_built_transfer_landed"
+                },
                 "provider": "moonpay",
                 "counterpartyId": "cpty_example",
                 "counterpartyDisplayName": "Acme Studio",
@@ -1985,7 +2090,18 @@
                 "invoice": "INV-123",
                 "po": "PO-9"
               },
-              "amount": "100.00",
+              "amount": "100",
+              "amounts": {
+                "basis": "debit",
+                "debit": "100",
+                "fee": "0",
+                "credit": "100",
+                "decimals": 6
+              },
+              "amountVerification": {
+                "state": "verified",
+                "reason": "sdp_built_transfer_landed"
+              },
               "provider": "moonpay",
               "counterpartyId": "cpty_example",
               "counterpartyDisplayName": "Acme Studio",

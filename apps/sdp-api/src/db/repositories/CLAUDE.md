@@ -125,6 +125,26 @@ Architecture and the migration inventory are in
 [`packages/sdp-earn/README.md`](../../../../../packages/sdp-earn/README.md);
 invariants are in ADR 0002 (`docs/decisions/0002-earn-provider-pluggability.md`).
 
+## Token movement legs (ADR 0012)
+
+`token_movement_legs` (migration 0185) records what each movement SDP builds
+moves, in base units. `token-movement-legs.repository.ts` is its only writer.
+
+- **A leg is written with its owner, in one transaction**
+  (`services/token-movement/record.ts`, `createTransferBatchWithRecipients`).
+  A new outbound row's `amount` text comes from the quote only
+  (`ownWalletAmount`: the debit). An off-ramp row keeps the provider's deposit
+  amount, its credit, which the claim and the delivery verifier compare.
+- **The quote is sealed by the movement's signature.** Before it, a rerun may
+  replace the quote (`upsertTransferLeg`); after it, the upsert matches no row
+  and a trigger refuses any writer. Verdicts and observed amounts stay writable.
+- **Verdicts ride the statement that settles the movement**
+  (`legVerdictStatement`): `updateTransfer` with a chain verdict status, the
+  off-ramp deposit outcome transitions, `settleTransferBatch` and the unsent
+  recipient failures. Add a new settling write there, not a second statement.
+- **Legacy = no leg.** Rows written before quotes have none; reads map an
+  absent leg to no `amounts`.
+
 ## Ramps: one transition table
 
 `RAMP_TRANSFER_TRANSITIONS` (`@sdp/types`) names each legal ramp transfer

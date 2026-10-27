@@ -57,7 +57,9 @@ them in one place, not adding special cases to every flow.
 2. **One asset identity.** `AssetRef = { kind: "native" } | { kind: "token", mint, program }`
    (`@sdp/solana/asset-ref`). `resolveAssetRequest(token, cluster)` resolves a request once:
    "SOL" is native, a catalogue symbol is that cluster's mint, the wrapped SOL mint is an SPL
-   token, and any other mint is read to learn its program.
+   token, and any other mint is read to learn its program. Payments refuses the wrapped SOL mint
+   with `400` (`resolvePaymentAsset`): its rows and balances still store native SOL under that
+   mint, so a wrapped SOL move would read back as native SOL.
 3. **Token Terms are read live, once per movement.** `readTokenTerms(asset)`
    (`apps/sdp-api/src/services/token-movement/read-terms.ts`) makes one
    `getMultipleAccounts([mint, Clock])` request, so the fee epoch belongs to the slot that held
@@ -85,7 +87,10 @@ them in one place, not adding special cases to every flow.
 7. **One builder** (PR 2) is the only place a token transfer instruction is built:
    `TransferCheckedWithFee(debit, decimals, fee)` whenever a fee config exists, even at 0 bps, so
    a fee change fails on chain instead of settling short; `TransferChecked` otherwise; never
-   unchecked `Transfer`. Hook accounts are resolved there.
+   unchecked `Transfer`. Hook accounts are resolved there. It lives in `@sdp/solana/token-movement`
+   (`buildTokenMovement`, `support`, `resolveTransferHookAccounts`), so the surfnet matrix runs it
+   and adapters in packages can call it; Payments plans every movement through
+   `apps/sdp-api/src/services/token-movement/build.ts` before it records anything.
 8. **Every movement path is the builder or a registered adapter** with its own capability row.
    DvP, Private Channels and Earn get "refused" rows for fee and hook mints until their programs
    support them.
@@ -110,6 +115,24 @@ them in one place, not adding special cases to every flow.
   with no allowlist of offenders: each PR moves its paths first.
 - **Target RPC budget.** A classic-mint transfer keeps its two reads; the mint read now brings the Clock
   with it. The reader is one request, native none.
+- **Ledger (PR 2).** `token_movement_legs` holds one row per (movement, destination): its asset,
+  decimals, basis, quoted debit, fee and credit in base units (`debit = credit + fee`), the fee
+  epoch and the Clock read. A leg belongs to a transfer row (a single transfer,
+  an off-ramp deposit) or to a batch recipient, whose chunk row carries the signature. Its quote
+  is sealed once that signature is saved. A new row's `amount` text is written only from the
+  quote. Rows written before quotes have no leg; there is no backfill.
+- **Verification by construction (PR 2).** The statement that settles a movement SDP built writes
+  its legs' verdict: `verified` when it confirms, `not_required` when it fails or is released.
+  No extra `getTransaction`. Transfer status values do not change.
+- **Builder refusals (PR 2).** Paused, non-transferable and frozen-by-default mints (until the Token
+  ACL thaw, PR 4), interest-bearing and scaled mints (until PR 5), an unresolved hook, a
+  memo-required destination with no memo, and a fee that leaves nothing to credit are refused
+  with `400` before the movement is recorded.
+- **Payments' stopgap, transfers (PR 2).** Single transfers, batches and off-ramp funding leave
+  `loadPaymentMint`: the quote parses exactly in u64 against the live decimals, and `support`
+  refuses a non-transferable mint. `support` still refuses interest-bearing and scaled mints:
+  balances and the dashboard show their display amount until PR 5, so a user would type one
+  amount and move another. /pay keeps the stopgap until PR 3, recurring until PR 3.
 - **Mint watch.** `pnpm check:well-known-mints` decodes every catalogue mint with the same
   decoder, prints its extension state, and fails when a 1 000-token transfer would pay a fee
   under the current or the newer fee entry (bps alone is not the signal, since `maximumFee` is
@@ -155,8 +178,8 @@ in base, token and display units, and the builder's refusal lifted, in one chang
 3. **Credit-basis recurring mandates**, after v1.
 4. **When the DvP, Private Channels and Earn refusals lift:** when those programs support
    `TransferCheckedWithFee` and hooks.
-5. **Token ACL gating:** the terms carry the freeze authority; PR 2 decides the rule for mints
-   that open accounts frozen.
+5. **Token ACL gating:** PR 2 refuses mints that open accounts frozen; PR 4 adds the
+   permissionless thaw and lifts the refusal where the mint is gated.
 6. **Issuer operations** (update a multiplier or fee, harvest withheld fees) are out of scope;
    Token Terms can support them later.
 7. **Display units:** when to show and accept interest-bearing and scaled mints (Rollout).

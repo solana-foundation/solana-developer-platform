@@ -10,17 +10,20 @@
  * program cannot run the hook and no extra account metas exist.
  */
 
+import { decodeTokenTerms, type MintTokenTerms } from "@sdp/solana/token-terms";
 import type { TokenProgramKind } from "@sdp/types/well-known-tokens";
 import { SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
 import {
   type Address,
   address,
   appendTransactionMessageInstructions,
+  assertAccountExists,
   createTransactionMessage,
   generateKeyPairSigner,
   getBase64EncodedWireTransaction,
   getSignatureFromTransaction,
   type Instruction,
+  parseBase64RpcAccount,
   pipe,
   type Rpc,
   type Signature,
@@ -30,11 +33,14 @@ import {
   signTransactionMessageWithSigners,
   type TransactionSigner,
   type UnixTimestamp,
+  unwrapOption,
 } from "@solana/kit";
+import { SYSVAR_CLOCK_ADDRESS } from "@solana/sysvars";
 import { getCreateAccountInstruction } from "@solana-program/system";
 import {
   AccountState,
   type ExtensionArgs,
+  fetchToken,
   findAssociatedTokenPda,
   getCreateAssociatedTokenIdempotentInstruction,
   getInitializeMintInstruction,
@@ -43,6 +49,7 @@ import {
   getPauseInstruction,
   getPreInitializeInstructionsForMintExtensions,
   getUpdateMultiplierScaledUiMintInstruction,
+  isExtension,
 } from "@solana-program/token-2022";
 
 /** A local surfnet and the funded key that pays and signs as every authority. */
@@ -261,7 +268,7 @@ export async function createMintMatrix(
 /** Opens the owner's associated token account for a profile mint. */
 export async function openTokenAccount(
   chain: MatrixChain,
-  mint: MatrixMint,
+  mint: Pick<MatrixMint, "mint" | "program">,
   owner: Address
 ): Promise<Address> {
   const tokenProgram = address(SPL_TOKEN_PROGRAMS[mint.program]);
@@ -296,4 +303,32 @@ export async function mintTokens(
 /** Pauses a `paused`-profile mint: transfers, mints and burns of it then fail. */
 export async function pauseMint(chain: MatrixChain, mint: MatrixMint): Promise<void> {
   await sendInstructions(chain, [getPauseInstruction({ mint: mint.mint, authority: chain.payer })]);
+}
+
+/** A mint's terms, from the one request and the decoder `readTokenTerms` uses. */
+export async function readMatrixTerms(
+  chain: MatrixChain,
+  mint: Pick<MatrixMint, "mint" | "program">
+): Promise<MintTokenTerms> {
+  const response = await chain.rpc
+    .getMultipleAccounts([mint.mint, SYSVAR_CLOCK_ADDRESS], { encoding: "base64" })
+    .send();
+  const [mintAccount, clock] = [
+    parseBase64RpcAccount(mint.mint, response.value[0]),
+    parseBase64RpcAccount(SYSVAR_CLOCK_ADDRESS, response.value[1]),
+  ];
+  assertAccountExists(mintAccount);
+  assertAccountExists(clock);
+  return decodeTokenTerms(
+    { kind: "token", mint: mint.mint, program: mint.program },
+    { mint: mintAccount, clock }
+  );
+}
+
+/** A token account's balance and the fee withheld in it, in base units. */
+export async function holdings(chain: MatrixChain, tokenAccount: Address) {
+  const { data } = await fetchToken(chain.rpc, tokenAccount);
+  const extensions = unwrapOption(data.extensions);
+  const withheld = extensions?.find((extension) => isExtension("TransferFeeAmount", extension));
+  return { amount: data.amount, withheld: withheld ? withheld.withheldAmount : 0n, data };
 }

@@ -4,6 +4,7 @@ import { NATIVE_TOKEN_TERMS } from "@sdp/solana/token-terms";
 import { SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
 import {
   type Address,
+  address,
   getAddressDecoder,
   getBase64Decoder,
   type ReadonlyUint8Array,
@@ -13,12 +14,14 @@ import { getSysvarClockEncoder, SYSVAR_CLOCK_ADDRESS } from "@solana/sysvars";
 import {
   AccountState,
   type ExtensionArgs,
+  findAssociatedTokenPda,
   getMintEncoder,
   getTokenEncoder,
 } from "@solana-program/token-2022";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { type ClusterRpcRequest, installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
-import { readTokenTerms } from "./read-terms";
+import { readMintMovementAccounts, readTokenTerms } from "./read-terms";
 
 const testAddress = (byte: number): Address =>
   getAddressDecoder().decode(new Uint8Array(32).fill(byte));
@@ -197,5 +200,117 @@ describe("readTokenTerms", () => {
 
     await expect(failure).rejects.toThrow();
     await expect(failure).rejects.not.toMatchObject({ statusCode: 400 });
+  });
+});
+
+/** A `getMultipleAccounts` request's addresses. */
+const addressesParams = z.tuple([z.array(z.string())]).rest(z.unknown());
+
+describe("readMintMovementAccounts", () => {
+  const rpc = installClusterRpcResponder();
+  const OWNERS = Array.from({ length: 120 }, (_, index) => testAddress(10 + (index % 120)));
+
+  const ata = async (owner: Address, mint: Address, program: keyof typeof SPL_TOKEN_PROGRAMS) =>
+    (
+      await findAssociatedTokenPda({
+        owner,
+        mint,
+        tokenProgram: address(SPL_TOKEN_PROGRAMS[program]),
+      })
+    )[0];
+
+  /** Answers each `getMultipleAccounts` by address from `accounts`; absent ones are missing. */
+  function answerByAddress(accounts: ReadonlyMap<string, ReturnType<typeof encoded>>) {
+    rpc.respond("getMultipleAccounts", (request) => {
+      const [addresses] = addressesParams.parse(request.params);
+      return {
+        result: {
+          context: { slot: Number(CLOCK.slot) },
+          value: addresses.map((requested) =>
+            requested === SYSVAR_CLOCK_ADDRESS ? CLOCK_ACCOUNT : (accounts.get(requested) ?? null)
+          ),
+        },
+      };
+    });
+  }
+
+  const reads = () => rpc.requests.filter((request) => request.method === "getMultipleAccounts");
+  const readSizes = () => reads().map((request) => addressesParams.parse(request.params)[0].length);
+
+  const read = (asset: Parameters<typeof readMintMovementAccounts>[0], owners: Address[]) =>
+    runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+      readMintMovementAccounts(asset, owners)
+    );
+
+  it("reads a destination's token account in the mint's request, and its memo rule", async () => {
+    const owner = OWNERS[0];
+    const destination = await ata(owner, pyusd.mint, "token-2022");
+    answerByAddress(
+      new Map([
+        [pyusd.mint, PYUSD_LIKE_MINT],
+        [
+          destination,
+          encoded(
+            SPL_TOKEN_PROGRAMS["token-2022"],
+            getTokenEncoder().encode({
+              mint: pyusd.mint,
+              owner,
+              amount: 0n,
+              delegate: null,
+              state: AccountState.Initialized,
+              isNative: null,
+              delegatedAmount: 0n,
+              closeAuthority: null,
+              extensions: [
+                { __kind: "ImmutableOwner" },
+                { __kind: "MemoTransfer", requireIncomingTransferMemos: true },
+              ],
+            })
+          ),
+        ],
+      ])
+    );
+
+    const { terms, destinations } = await read(pyusd, [owner]);
+
+    expect(terms.asset).toEqual(pyusd);
+    expect(destinations).toEqual([
+      { owner, tokenAccount: destination, exists: true, requiresMemo: true },
+    ]);
+    expect(reads().map((request) => request.params[0])).toEqual([
+      [pyusd.mint, SYSVAR_CLOCK_ADDRESS, destination],
+    ]);
+  });
+
+  it("reads an uncatalogued mint's destinations under both programs and keeps its program's", async () => {
+    const owner = OWNERS[1];
+    answerByAddress(
+      new Map([[UNKNOWN_MINT, encoded(SPL_TOKEN_PROGRAMS["spl-token"], mintData(null))]])
+    );
+
+    const { destinations } = await read({ kind: "mint", mint: UNKNOWN_MINT }, [owner]);
+
+    expect(destinations).toEqual([
+      {
+        owner,
+        tokenAccount: await ata(owner, UNKNOWN_MINT, "spl-token"),
+        exists: false,
+        requiresMemo: false,
+      },
+    ]);
+    expect(readSizes()).toEqual([4]);
+  });
+
+  it("reads a large movement's accounts in concurrent pages of 100, each owner once", async () => {
+    answerByAddress(
+      new Map([[usdc.mint, encoded(SPL_TOKEN_PROGRAMS["spl-token"], mintData(null))]])
+    );
+    const owners = [...OWNERS, OWNERS[0]];
+
+    const { destinations } = await read(usdc, owners);
+
+    expect(destinations).toHaveLength(owners.length);
+    expect(destinations.at(-1)).toEqual(destinations[0]);
+    expect(readSizes()).toEqual([100, 22]);
   });
 });

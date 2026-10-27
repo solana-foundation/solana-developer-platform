@@ -23,6 +23,12 @@ export const SPL_TOKEN_PROGRAMS = {
 
 export type TokenProgramKind = keyof typeof SPL_TOKEN_PROGRAMS;
 
+/** Every token program in `SPL_TOKEN_PROGRAMS`, as a list. */
+export const TOKEN_PROGRAM_KINDS = [
+  "spl-token",
+  "token-2022",
+] as const satisfies readonly TokenProgramKind[];
+
 /** Broad grouping used to organise token pickers; not a protocol-level concept. */
 export type WellKnownTokenCategory = "native" | "stablecoin" | "staked-sol" | "wrapped";
 
