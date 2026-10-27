@@ -153,17 +153,17 @@ function PortfolioSummary({ summary }: { summary: EarnExternalWalletPositionSumm
  * later is announced as it happens; a portfolio with unread values says so from the start.
  */
 function PortfolioNotices({
-  error,
+  refreshFailed,
   unavailablePositionCount,
 }: {
-  error: unknown;
+  refreshFailed: boolean;
   unavailablePositionCount: number;
 }) {
   const t = useTranslations();
   return (
     <>
-      <div aria-atomic="true" className={error ? undefined : "sr-only"} role="status">
-        {error ? (
+      <div aria-atomic="true" className={refreshFailed ? undefined : "sr-only"} role="status">
+        {refreshFailed ? (
           <Callout variant="warning">
             {t("DashboardMarkets.earnProgram.portfolioRefreshError")}
           </Callout>
@@ -516,7 +516,7 @@ export function EmbeddedYieldDashboard({ configureHref }: { configureHref: strin
     // "configured, awaiting a deposit" state can be told apart from the live summary.
     content = (
       <div className="flex min-w-0 flex-col gap-4">
-        <PortfolioNotices error={error} unavailablePositionCount={0} />
+        <PortfolioNotices refreshFailed={Boolean(error)} unavailablePositionCount={0} />
         <ListEmptyState
           action={
             <Button asChild>
@@ -539,7 +539,7 @@ export function EmbeddedYieldDashboard({ configureHref }: { configureHref: strin
           cluster={cluster}
           notices={
             <PortfolioNotices
-              error={error}
+              refreshFailed={Boolean(error)}
               unavailablePositionCount={summary.unavailablePositionCount}
             />
           }
