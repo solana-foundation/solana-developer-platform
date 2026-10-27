@@ -309,6 +309,10 @@ async function clearPlaywrightOrganizations(
   );
 
   if (organizationIds.length > 0) {
+    await client.query(
+      "DELETE FROM sponsorship_budget_reservations WHERE organization_id = ANY($1::text[])",
+      [organizationIds]
+    );
     await client.query("DELETE FROM organizations WHERE id = ANY($1::text[])", [organizationIds]);
   }
 }
