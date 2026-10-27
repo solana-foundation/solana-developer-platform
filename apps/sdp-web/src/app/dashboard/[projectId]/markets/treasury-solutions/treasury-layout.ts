@@ -3,15 +3,16 @@ import { EARN_WIDE_ONLY_COLUMN as WIDE_ONLY } from "@/app/dashboard/[projectId]/
 /**
  * The Treasury page's table columns, shared by the page and its route skeleton so the two draw
  * the same widths by construction, in the frame every Earn table shares (`earn-table-layout.ts`,
- * which says how the widths work). No "use client" directive, for the same reason.
+ * which says how the widths work). No "use client" directive, for the same reason. A status
+ * that drops out on a phone reads under the row's balance instead.
  */
 
 export const TREASURY_POSITION_COLUMNS = {
-  position: "w-[44%] @2xl:w-[34%]",
+  position: "w-[46%] @2xl:w-[34%]",
   wallet: `${WIDE_ONLY} @2xl:w-[20%]`,
-  status: "w-[18%] @2xl:w-[14%]",
-  balance: "w-[18%] text-right @2xl:w-[14%]",
-  actions: "w-[20%] text-right @2xl:w-[18%]",
+  status: `${WIDE_ONLY} @2xl:w-[14%]`,
+  balance: "w-[26%] text-right @2xl:w-[14%]",
+  actions: "w-[28%] text-right @2xl:w-[18%]",
 } as const;
 
 export const TREASURY_STRATEGY_COLUMNS = {
@@ -23,10 +24,10 @@ export const TREASURY_STRATEGY_COLUMNS = {
 } as const;
 
 export const TREASURY_PROGRAM_COLUMNS = {
-  program: "w-[44%] @2xl:w-[40%]",
-  status: "w-[18%]",
-  balance: "w-[18%] text-right @2xl:w-[20%]",
-  actions: "w-[20%] text-right @2xl:w-[22%]",
+  program: "w-[46%] @2xl:w-[40%]",
+  status: `${WIDE_ONLY} @2xl:w-[18%]`,
+  balance: "w-[26%] text-right @2xl:w-[20%]",
+  actions: "w-[28%] text-right @2xl:w-[22%]",
 } as const;
 
 /**
