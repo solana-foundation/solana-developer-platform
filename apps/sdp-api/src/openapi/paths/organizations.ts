@@ -77,25 +77,4 @@ export function registerOrganizationPaths(registry: OpenAPIRegistry) {
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
     },
   });
-
-  registry.registerPath({
-    method: "delete",
-    path: "/v1/organizations/{orgId}",
-    tags: ["Organizations"],
-    summary: "Delete organization",
-    operationId: "deleteOrganization",
-    description: "Soft deletes the organization and revokes all API keys.",
-    security: [{ clerkBearerAuth: [] }],
-    request: {
-      params: z.object({
-        orgId: orgIdParamSchema,
-      }),
-    },
-    responses: {
-      204: {
-        description: "Organization deleted",
-      },
-      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
-    },
-  });
 }
