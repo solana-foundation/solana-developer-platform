@@ -100,7 +100,7 @@ describe("EarnVaultWithdrawModal", () => {
   it("caps Max at the dollar value of unstaked withdrawable shares", async () => {
     const user = userEvent.setup();
     renderModal();
-    expect(flowProgress()).toEqual({ step: "Details", label: "Step 1 of 4" });
+    expect(flowProgress()).toEqual({ step: "Details", label: "Details, Step 1 of 4" });
     expect(screen.getByText("$")).toBeTruthy();
 
     const amountInput = screen.getByLabelText("Amount") as HTMLInputElement;
@@ -117,7 +117,7 @@ describe("EarnVaultWithdrawModal", () => {
     renderModal();
 
     await user.type(screen.getByLabelText("Amount"), "2{Enter}");
-    expect(flowProgress()).toEqual({ step: "Review", label: "Step 2 of 4" });
+    expect(flowProgress()).toEqual({ step: "Review", label: "Review, Step 2 of 4" });
 
     await user.keyboard("{Enter}");
     expect(mocks.createEarnVaultWithdrawal).not.toHaveBeenCalled();
@@ -294,7 +294,7 @@ describe("EarnVaultWithdrawModal", () => {
     expect(screen.getByText("Active")).toBeTruthy();
     expect(document.querySelector(".earn-processing-modal")).toBeNull();
     expect(document.querySelector('[data-earn-outcome="success"]')).toBeTruthy();
-    expect(flowProgress()).toEqual({ step: "Complete", label: "Step 4 of 4" });
+    expect(flowProgress()).toEqual({ step: "Complete", label: "Complete, Step 4 of 4" });
   });
 
   it("keeps a finalized provider order visibly pending its separate payout", async () => {
@@ -331,7 +331,10 @@ describe("EarnVaultWithdrawModal", () => {
     expect(screen.getByText(/not proof of a provider payout/)).toBeTruthy();
     expect(screen.getByText(/neither delivers nor guarantees a cash amount/)).toBeTruthy();
     expect(screen.getByText("Provider settlement")).toBeTruthy();
-    expect(flowProgress()).toEqual({ step: "Provider settlement", label: "Step 4 of 5" });
+    expect(flowProgress()).toEqual({
+      step: "Provider settlement",
+      label: "Provider settlement, Step 4 of 5",
+    });
     expect(screen.queryByText(/proceeds are in the custody wallet/)).toBeNull();
     expect(screen.queryByText(/same transaction/i)).toBeNull();
   });
