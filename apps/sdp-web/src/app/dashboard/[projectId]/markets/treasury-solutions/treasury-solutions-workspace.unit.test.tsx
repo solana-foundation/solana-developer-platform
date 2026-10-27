@@ -4,6 +4,8 @@ import { act, cleanup, render, screen, waitFor, within } from "@testing-library/
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EnglishTestI18n } from "@/app/dashboard/[projectId]/markets/test-i18n";
+import * as kaminoAllocations from "./kamino-allocations";
+import type { KaminoVaultAllocations } from "./kamino-allocations-schema";
 import { TREASURY_WALLETS_BODY } from "./treasury-layout";
 import {
   EarnTransactionModalLoading,
@@ -177,7 +179,7 @@ const mocks = vi.hoisted(() => ({
     | Array<{ token: string; mint: string; amount: string; uiAmount: string; decimals: number }>
     | undefined,
   // Vault address -> "loading" | "error" | a Kamino allocations payload.
-  allocationsByVault: {} as Record<string, "loading" | "error" | Record<string, unknown>>,
+  allocationsByVault: {} as Record<string, "loading" | "error" | KaminoVaultAllocations>,
   // Real SWR keeps the last read beside a later error.
   allocationsFailAfterRead: false,
   allocationsRequests: [] as Array<string | undefined>,
@@ -187,34 +189,6 @@ const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const SHARE_MINT = "Share1111111111111111111111111111111111111";
 // A share mint known only through the strategy catalogue — no position row.
 const CATALOGUE_SHARE_MINT = "ShareCatalogue11111111111111111111111111111";
-
-vi.mock("./kamino-allocations", () => ({
-  useKaminoVaultAllocations: (vaultAddress?: string, cluster?: "devnet" | "mainnet-beta") => {
-    // Mirrors the hook's contract: a non-mainnet cluster is an unsupported
-    // read — the SWR key stays null, so nothing is requested and no cell ever
-    // sees data for it.
-    if (cluster !== "mainnet-beta") {
-      return { allocations: undefined, error: undefined, isLoading: false };
-    }
-    mocks.allocationsRequests.push(vaultAddress);
-    const state = vaultAddress === undefined ? undefined : mocks.allocationsByVault[vaultAddress];
-    if (state === "loading") {
-      return { allocations: undefined, error: undefined, isLoading: true };
-    }
-    if (state === "error") {
-      return {
-        allocations: undefined,
-        error: new Error("vault allocations unavailable"),
-        isLoading: false,
-      };
-    }
-    return {
-      allocations: state,
-      error: mocks.allocationsFailAfterRead ? new Error("refresh failed") : undefined,
-      isLoading: false,
-    };
-  },
-}));
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
@@ -865,6 +839,29 @@ beforeEach(() => {
   mocks.allocationsFailAfterRead = false;
   mocks.allocationsRequests = [];
   vi.clearAllMocks();
+  // Mirrors the read's contract: one read for the table's mainnet Kamino vaults,
+  // none at all without one, and a vault whose read failed is absent from it.
+  vi.spyOn(kaminoAllocations, "useKaminoVaultAllocations").mockImplementation((vaults) => {
+    mocks.allocationsRequests.push(...vaults);
+    if (vaults.length === 0) {
+      return { allocationsByVault: undefined, error: undefined, isLoading: false };
+    }
+    if (vaults.some((vault) => mocks.allocationsByVault[vault] === "loading")) {
+      return { allocationsByVault: undefined, error: undefined, isLoading: true };
+    }
+    const allocationsByVault: Record<string, KaminoVaultAllocations> = {};
+    for (const vault of vaults) {
+      const state = mocks.allocationsByVault[vault];
+      if (state !== undefined && state !== "loading" && state !== "error") {
+        allocationsByVault[vault] = state;
+      }
+    }
+    return {
+      allocationsByVault,
+      error: mocks.allocationsFailAfterRead ? new Error("refresh failed") : undefined,
+      isLoading: false,
+    };
+  });
 });
 
 afterEach(() => {
@@ -1290,8 +1287,11 @@ describe("TreasurySolutionsWorkspace", () => {
     );
     expect(updatingBalance?.querySelector(".animate-pulse")).not.toBeNull();
     expect(updatingBalance?.textContent).toContain("Updating balance…");
-    // One read for the submission, one asked for by the commit.
-    expect(mocks.refreshPositions).toHaveBeenCalledTimes(2);
+    // Only the commit asks for a read, floored on the movement: a read at
+    // submission could not carry the moved amount.
+    expect(mocks.refreshPositions).toHaveBeenCalledTimes(1);
+    expect(mocks.refreshPositions).toHaveBeenCalledWith([movementId]);
+    await waitFor(() => expect(mocks.refreshWalletBalances).toHaveBeenCalledTimes(1));
 
     // A read begun before confirmation cannot supply the completed balance.
     mocks.positionsReadStartedAt = 1_000;
@@ -1459,6 +1459,46 @@ describe("TreasurySolutionsWorkspace", () => {
     rerenderWorkspace(view);
     await waitFor(() => expect(syncingBalanceText(livePositionRow())).toBeUndefined());
     expect(within(livePositionRow()).getByText("$129.24")).toBeTruthy();
+  });
+
+  it("reads balances once per withdrawal, after it confirms, never at submission", async () => {
+    const user = userEvent.setup();
+    const movementId = "earn_vault_withdrawal_single_read";
+    renderWorkspace();
+    await user.click(within(livePositionRow()).getByRole("button", { name: "Withdraw" }));
+    const positionReads = mocks.refreshPositions.mock.calls.length;
+    const walletReads = mocks.refreshWalletBalances.mock.calls.length;
+
+    act(() => {
+      mocks.vaultWithdrawalModal?.onWithdrawn?.(
+        {
+          createdAt: "2026-09-24T12:00:05.000Z",
+          failureReason: null,
+          movementId,
+          positionId: "earn_vault_position_live",
+          status: "requested",
+        },
+        { amount: "6", submittedAt: Date.now() }
+      );
+    });
+    // The chain has not decided yet, so a read now could only return the
+    // pre-exit balance: nothing is read until the movement confirms.
+    expect(mocks.refreshPositions).toHaveBeenCalledTimes(positionReads);
+    expect(mocks.refreshWalletBalances).toHaveBeenCalledTimes(walletReads);
+    expect(syncingBalanceText(livePositionRow())).toBe("Updating balance…");
+
+    act(() => {
+      mocks.vaultWithdrawalModal?.onMovementUpdated?.({
+        createdAt: "2026-09-24T12:00:05.000Z",
+        failureReason: null,
+        movementId,
+        positionId: "earn_vault_position_live",
+        status: "confirmed",
+      });
+    });
+    expect(mocks.refreshPositions).toHaveBeenCalledTimes(positionReads + 1);
+    expect(mocks.refreshPositions).toHaveBeenLastCalledWith([movementId]);
+    await waitFor(() => expect(mocks.refreshWalletBalances).toHaveBeenCalledTimes(walletReads + 1));
   });
 
   it("keeps amounts updating through overlapping confirmations", async () => {
@@ -2477,6 +2517,9 @@ describe("TreasurySolutionsWorkspace", () => {
 
     expect(mocks.refreshPositions).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(mocks.refreshWalletBalances).toHaveBeenCalledTimes(1));
+    // A settled request moves holdings and cash only.
+    expect(mocks.refreshStrategies).not.toHaveBeenCalled();
+    expect(mocks.refreshPrograms).not.toHaveBeenCalled();
   });
 
   it("keeps the vault exit verb live in production, where deposits are closed", () => {

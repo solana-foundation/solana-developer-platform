@@ -1,10 +1,12 @@
 "use client";
 
+import { buildSnippets } from "@sdp/api-catalog/snippets";
 import { canonicalJson } from "@sdp/types/idempotency";
 import { IDEMPOTENCY_REQUIRED_ROUTES } from "@sdp/types/idempotency-required-routes";
 import { Button } from "@sdp/ui/button";
 import { cn } from "@sdp/ui/cn";
 import { Input } from "@sdp/ui/input";
+import { HighlightedCode, type HighlightLanguage } from "@sdp/ui/shiki-code";
 import { useThemeScope } from "@sdp/ui/theme-scope";
 import { Badge } from "@solana/design-system/badge";
 import { Braces, Clock3, Copy, Loader2, Play, Sparkles } from "lucide-react";
@@ -15,7 +17,6 @@ import {
   ApiPlaygroundEndpointOptions,
   ApiPlaygroundRefreshLayout,
 } from "@/components/api-playground-refresh-layout";
-import { buildSnippets } from "@/components/api-playground-snippets";
 import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
@@ -35,7 +36,6 @@ import {
 } from "@/lib/idempotency";
 import { createIdempotencyKeyStore } from "@/lib/idempotency-key-store";
 import { setNestedValue } from "@/lib/set-nested-value";
-import { HighlightedCode, type HighlightLanguage } from "@/lib/shiki-code";
 
 export type ApiPlaygroundMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 

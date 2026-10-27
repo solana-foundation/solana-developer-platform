@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { expandDocsBlocks } from "@/lib/docs-blocks";
+import { renderDocsIndexMarkdown } from "@/lib/docs-index-markdown";
 import { source } from "@/lib/source";
 
 export const runtime = "nodejs";
@@ -18,8 +19,35 @@ function isSafeSlugSegment(segment: string): boolean {
   return segment.length > 0 && segment !== ".." && segment !== "." && !/[/\\]/.test(segment);
 }
 
-export async function GET(_req: Request, { params }: { params: Promise<{ slug: string[] }> }) {
+function markdownResponse(body: string, pageUrl: string): Response {
+  return new Response(body, {
+    headers: {
+      "Content-Type": "text/markdown; charset=utf-8",
+      "Cache-Control": "public, max-age=300",
+      Vary: "Accept",
+      Link: `<${pageUrl}>; rel="canonical", <${pageUrl}.md>; rel="alternate"; type="text/markdown"`,
+    },
+  });
+}
+
+/** The home renders `DocsHome`, so it has no MDX body to serve; its Markdown is the nav. */
+function homeMarkdown(): Response {
+  const home = source.getPage([]);
+  if (!home) {
+    return new Response("Not Found", { status: 404 });
+  }
+  const descriptions = new Map(source.getPages().map((page) => [page.url, page.data.description]));
+  const body = renderDocsIndexMarkdown(home.data, source.pageTree, (url) => descriptions.get(url));
+  return markdownResponse(body, "/docs");
+}
+
+export async function GET(_req: Request, { params }: { params: Promise<{ slug?: string[] }> }) {
   const { slug } = await params;
+
+  // No segments is the docs home: `/docs.md`, or `/docs` asking for Markdown.
+  if (slug === undefined) {
+    return homeMarkdown();
+  }
 
   if (!slug.every(isSafeSlugSegment)) {
     return new Response("Not Found", { status: 404 });
@@ -43,17 +71,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ slug: s
     try {
       const raw = await readFile(filePath, "utf8");
       const body = stripMdxShell(expandDocsBlocks(raw, filePath));
-      const pageUrl = `/docs/${slug.join("/")}`;
-      const mdUrl = `${pageUrl}.md`;
-
-      return new Response(body, {
-        headers: {
-          "Content-Type": "text/markdown; charset=utf-8",
-          "Cache-Control": "public, max-age=300",
-          Vary: "Accept",
-          Link: `<${pageUrl}>; rel="canonical", <${mdUrl}>; rel="alternate"; type="text/markdown"`,
-        },
-      });
+      return markdownResponse(body, `/docs/${slug.join("/")}`);
     } catch {}
   }
 

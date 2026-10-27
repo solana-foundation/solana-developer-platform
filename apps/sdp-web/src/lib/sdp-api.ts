@@ -9,6 +9,7 @@ import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { cache } from "react";
 import { z } from "zod";
+import type { OnboardingStatusResponse } from "@/app/dashboard/[projectId]/onboarding-status";
 import { readApiErrorMessage } from "./api-error";
 import { projectHref } from "./dashboard-project-path";
 import { type ApiAnswer, apiErrorCode, IDEMPOTENCY_KEY_HEADER } from "./idempotency";
@@ -316,6 +317,29 @@ const getRequestMemberRole = cache(async (): Promise<OrganizationRole> => {
  */
 export function requestMemberRole(): Promise<OrganizationRole> {
   return getRequestMemberRole();
+}
+
+const getRequestOnboardingStatus = cache(async (): Promise<OnboardingStatusResponse> => {
+  const client = assembleSdpApiClient(
+    createSdpApiRequest(await getRequestClerkToken(), null, {
+      traceId: newWebTraceId(),
+      source: "dashboard.onboarding.status",
+    })
+  );
+  return client.fetch<OnboardingStatusResponse>("/v1/onboarding/status", {
+    signal: AbortSignal.timeout(10_000),
+  });
+});
+
+/**
+ * The organization's onboarding status, read once per request. The layout's quick start and a
+ * page's own gate (Earn's provider access) render in the same request, so they share this one
+ * call. A failure rejects every caller alike, and each decides what unknown means for it.
+ *
+ * @returns The status as the API answers it.
+ */
+export function requestOnboardingStatus(): Promise<OnboardingStatusResponse> {
+  return getRequestOnboardingStatus();
 }
 
 /**

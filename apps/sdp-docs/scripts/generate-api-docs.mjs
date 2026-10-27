@@ -2,13 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { escapeMarkdownTableCell } from "./lib/markdown-escaping.mjs";
-import {
-  getPrimaryTagName,
-  isPublicTag,
-  POSTMAN_COLLECTION_ROUTE,
-  PUBLIC_TAG_SLUGS,
-  slugify,
-} from "./lib/public-openapi.mjs";
+import { getOperationFamily, POSTMAN_COLLECTION_ROUTE, slugify } from "./lib/public-openapi.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -161,12 +155,7 @@ const validateGeneratedTagPages = async ({
   // The OpenAPI document is already narrowed to the build's release channel
   // (SDP_RELEASE_CHANNEL), so every public family it declares needs a page.
   const declaredSlugs = new Set([...tagDescriptions.keys()].map(slugify));
-  const requiredSlugs = [
-    ...new Set([
-      ...ALWAYS_PUBLIC_TAG_SLUGS,
-      ...[...PUBLIC_TAG_SLUGS].filter((slug) => declaredSlugs.has(slug)),
-    ]),
-  ];
+  const requiredSlugs = [...new Set([...ALWAYS_PUBLIC_TAG_SLUGS, ...declaredSlugs])];
   const missingPublicPages = requiredSlugs.filter((slug) => !generatedSlugs.has(slug));
 
   if (missingPublicPages.length > 0) {
@@ -217,15 +206,11 @@ const run = async () => {
 
   const groupedOperations = new Map();
   for (const operation of operations) {
-    const primaryTag = getPrimaryTagName(operation);
-    if (!primaryTag || !isPublicTag(primaryTag)) {
-      continue;
+    const family = getOperationFamily(operation, `${operation.method} ${operation.path}`);
+    if (!groupedOperations.has(family)) {
+      groupedOperations.set(family, []);
     }
-
-    if (!groupedOperations.has(primaryTag)) {
-      groupedOperations.set(primaryTag, []);
-    }
-    groupedOperations.get(primaryTag).push(operation);
+    groupedOperations.get(family).push(operation);
   }
 
   const orderedTags = [];

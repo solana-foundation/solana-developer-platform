@@ -1,7 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { SdpModule } from "@sdp/types/release-channels";
 import { expandDocsBlocks } from "@/lib/docs-blocks";
 import { DOCS_MODULES } from "@/lib/docs-catalog";
 import { isModulePublished, isPageSourcePublished } from "@/lib/release-channel";
@@ -53,16 +52,6 @@ const FEATURE_SUMMARY = DOCS_MODULES.filter(
   (entry) => entry.module === "core" || isModulePublished(entry.module)
 ).map((entry) => entry.capability);
 
-/**
- * Generated API reference pages carry no frontmatter; their family exists only
- * when the release channel runs its module.
- */
-const KEY_PAGE_MODULES: Record<string, SdpModule> = {
-  "reference/api/compliance": "compliance",
-  "reference/api/issuance": "issuance",
-  "reference/api/asset-profiles": "issuance",
-};
-
 const KEY_PAGE_SLUGS = [
   "introduction",
   "guides/setup-organization",
@@ -79,14 +68,6 @@ const KEY_PAGE_SLUGS = [
   "reference/provider-onboarding",
   "reference/docs-for-ai",
   "reference/postman-collection",
-  "reference/api/index",
-  "reference/api/health",
-  "reference/api/wallets",
-  "reference/api/projects",
-  "reference/api/issuance",
-  "reference/api/payments",
-  "reference/api/compliance",
-  "reference/api/asset-profiles",
 ];
 
 function stripMarkdownFormatting(value: string): string {
@@ -270,11 +251,25 @@ function buildSections(
   return sections;
 }
 
-function buildKeyPages(pages: Map<string, DocsPage>): DocsPage[] {
-  const inChannel = KEY_PAGE_SLUGS.filter(
-    (slug) => !excludedSlugs.has(slug) && isModulePublished(KEY_PAGE_MODULES[slug])
-  );
-  return inChannel.map((slug) => {
+/**
+ * The API reference pages `generate:api` wrote for this release channel, in its
+ * order. They come from the channel's public OpenAPI document, so no module gate
+ * applies to them.
+ */
+function apiReferenceSlugs(folderMetas: Map<string, DocsMeta>): string[] {
+  const pages = folderMetas.get("reference/api")?.pages;
+  if (!pages) {
+    throw new Error('Missing content/docs/reference/api/meta.json; run "pnpm generate:api" first');
+  }
+  return pages.map((page) => `reference/api/${page}`);
+}
+
+function buildKeyPages(
+  pages: Map<string, DocsPage>,
+  folderMetas: Map<string, DocsMeta>
+): DocsPage[] {
+  const guides = KEY_PAGE_SLUGS.filter((slug) => !excludedSlugs.has(slug));
+  return [...guides, ...apiReferenceSlugs(folderMetas)].map((slug) => {
     const page = pages.get(slug);
     if (!page) {
       throw new Error(`Missing required key docs page "${slug}" for llms.txt generation`);
@@ -366,7 +361,7 @@ async function run(): Promise<void> {
     loadFolderMetas(),
   ]);
   const sections = buildSections(meta, pages, folderMetas);
-  const keyPages = buildKeyPages(pages);
+  const keyPages = buildKeyPages(pages, folderMetas);
 
   await fs.mkdir(publicDir, { recursive: true });
 

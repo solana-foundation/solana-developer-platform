@@ -1,11 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { loadQuickStartStatus } from "./quick-start-server";
+import * as sdpApi from "./sdp-api";
 
-const mocks = vi.hoisted(() => ({ fetch: vi.fn(), projects: vi.fn() }));
-vi.mock("./sdp-api", () => ({
-  createOrgSdpApiClient: async () => ({ fetch: mocks.fetch }),
-  listSdpProjects: mocks.projects,
-}));
+vi.mock("next/headers", () => import("@/test/next-headers"));
+
+const mocks = { fetch: vi.fn(), projects: vi.fn() };
 
 const onboarding = (setup: Record<string, unknown> | null, linked = true) => ({
   linked,
@@ -21,7 +20,19 @@ const onboarding = (setup: Record<string, unknown> | null, linked = true) => ({
 });
 
 beforeEach(() => {
-  vi.resetAllMocks();
+  vi.restoreAllMocks();
+  mocks.fetch.mockReset();
+  mocks.projects.mockReset();
+  vi.spyOn(sdpApi, "createOrgSdpApiClient").mockResolvedValue({
+    request: vi.fn(),
+    fetch: mocks.fetch,
+  });
+  vi.spyOn(sdpApi, "listSdpProjects").mockImplementation(mocks.projects);
+  // The request's shared onboarding read rides the same fetch mock, so each case
+  // below keeps its order: onboarding first, then each project's keys.
+  vi.spyOn(sdpApi, "requestOnboardingStatus").mockImplementation(() =>
+    mocks.fetch("/v1/onboarding/status")
+  );
   mocks.projects.mockResolvedValue([{ id: "sandbox_project" }, { id: "production_project" }]);
 });
 

@@ -35,6 +35,7 @@ import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspac
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { filterSandboxDevnetStrategies } from "./devnet-mainnet-intersection";
+import { kaminoAllocationsVaults, useKaminoVaultAllocations } from "./kamino-allocations";
 import {
   estimatedTreasuryApy,
   summarizeTreasuryAllocation,
@@ -447,6 +448,12 @@ export function TreasurySolutionsWorkspace({
     strategiesError,
     strategiesLoading,
   } = useTreasuryCatalogueShelves(sdpEnvironment);
+  // The Information column's one read for every Kamino row the table shows.
+  const kaminoAllocationVaults = useMemo(
+    () => kaminoAllocationsVaults(catalogueStrategies ?? []),
+    [catalogueStrategies]
+  );
+  const kaminoAllocations = useKaminoVaultAllocations(kaminoAllocationVaults);
   const {
     state: programsState,
     error: programsError,
@@ -645,6 +652,9 @@ export function TreasurySolutionsWorkspace({
     if (catalogueCluster !== undefined) refreshCatalogue();
     refreshPrograms();
   };
+  // A queued request settling moves holdings and cash, never the catalogue or a
+  // custodial program, so it re-reads balances alone.
+  const refreshHoldings = () => void refreshTreasuryBalances();
 
   return (
     <DashboardWorkspaceOverviewPanel>
@@ -657,9 +667,11 @@ export function TreasurySolutionsWorkspace({
         devnetCatalogueFailed={Boolean(devnetCatalogueError)}
         devnetCatalogueLoading={devnetCatalogueLoading}
         environment={sdpEnvironment}
+        kaminoAllocations={kaminoAllocations}
         mainnetCatalogueFailed={Boolean(mainnetCatalogueError)}
         mainnetCatalogueLoading={mainnetCatalogueLoading}
         onDeposit={setDepositStrategy}
+        onHoldingsChanged={refreshHoldings}
         onRefresh={refreshTreasury}
         onWithdrawPosition={openVaultExit}
         onWithdrawProgram={setWithdrawProgram}
@@ -685,10 +697,11 @@ export function TreasurySolutionsWorkspace({
           onClose={() => setDepositStrategy(null)}
           projectId={selectedProjectId}
           onDeposited={(deposit, intent) => {
-            // Two refreshes, for two different moments. This starts an
-            // uncached balance read for a fast landing; the watch below reads
-            // again once the chain has actually decided, which is the only
-            // point at which the holding is real.
+            // No balance read here: a read before the chain decides cannot show
+            // the moved amount, and the position stays "updating" meanwhile.
+            // The watch below triggers the one read that can, the
+            // confirmation-floored refresh, including when this response is
+            // already confirmed.
             const authoritativePosition = positions?.find(
               (position) => position.id === deposit.positionId
             );
@@ -706,7 +719,6 @@ export function TreasurySolutionsWorkspace({
                 custodyWalletId: intent.custodyWalletId,
               },
             ]);
-            void refreshTreasuryBalances();
           }}
           onSubmissionStart={(custodyWalletId) =>
             beginSubmission({
@@ -737,6 +749,8 @@ export function TreasurySolutionsWorkspace({
           environment={sdpEnvironment}
           onClose={() => setWithdrawPosition(null)}
           onWithdrawn={(withdrawal, intent) => {
+            // Like a deposit, the watch triggers the confirmation-floored read;
+            // a read now would only fetch the pre-exit balance.
             addVaultWithdrawalWatches([
               {
                 createdAt: withdrawal.createdAt,
@@ -748,7 +762,6 @@ export function TreasurySolutionsWorkspace({
                 custodyWalletId: withdrawPosition.custodyWalletId,
               },
             ]);
-            void refreshTreasuryBalances();
           }}
           onSubmissionStart={() => beginSubmission(withdrawPosition)}
           onMovementUpdated={updateVaultWithdrawalWatch}
@@ -757,7 +770,7 @@ export function TreasurySolutionsWorkspace({
             // assets yet. Refresh holdings without projecting an instant exit.
             void refreshTreasuryBalances();
           }}
-          onAsyncRequestSettled={refreshTreasury}
+          onAsyncRequestSettled={refreshHoldings}
           parSource={withdrawParSource}
           position={withdrawPosition}
           projectId={selectedProjectId}

@@ -3,7 +3,7 @@ import { cache } from "react";
 import { z } from "zod";
 import type { QuickStartStatus } from "./dashboard-quick-start";
 import { PROJECT_HEADER_NAME } from "./project-cookie";
-import { createOrgSdpApiClient, listSdpProjects } from "./sdp-api";
+import { createOrgSdpApiClient, listSdpProjects, requestOnboardingStatus } from "./sdp-api";
 
 // Only the fields the guide reads: the rest of each response is not its business.
 const onboardingStatusSchema = z.object({
@@ -33,12 +33,11 @@ function latestTimestamp(values: readonly (string | null)[]): string | null {
  */
 export const loadQuickStartStatus = cache(async (): Promise<QuickStartStatus | null> => {
   try {
+    // Shared with the page's own gates: one onboarding read per request.
+    const status = onboardingStatusSchema.parse(await requestOnboardingStatus());
+    if (!status.linked || !status.setup?.canManage) return null;
     const client = await createOrgSdpApiClient();
     const signal = AbortSignal.timeout(10_000);
-    const status = onboardingStatusSchema.parse(
-      await client.fetch<unknown>("/v1/onboarding/status", { signal })
-    );
-    if (!status.linked || !status.setup?.canManage) return null;
 
     // A first call can come from a key in any project, not only the default sandbox.
     const projects = await listSdpProjects();

@@ -84,7 +84,7 @@ import { useCanWrite, useOptionalDashboardWorkspace } from "@/contexts/dashboard
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { DASHBOARD_SIDE_NAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { useProjectHref } from "@/lib/use-dashboard-project";
-import { useKaminoVaultAllocations } from "./kamino-allocations";
+import { type KaminoVaultAllocationsRead, kaminoAllocationsVault } from "./kamino-allocations";
 import {
   formatAllocationWeight,
   formatKaminoAsOf,
@@ -1075,16 +1075,24 @@ function KaminoAllocationsTooltipContent({
 
 /**
  * How a Kamino vault's capital is deployed, as the last part of its row's detail line: the
- * deployed weight, with the vault's own allocations on hover and focus. Other providers, and
- * devnet vaults Kamino's mainnet-only source cannot describe, add nothing and issue no request.
- * A later failed read keeps the last disclosure rather than blanking it.
+ * deployed weight, with the vault's own allocations on hover and focus, from the table's one
+ * read. Other providers, and devnet vaults Kamino's mainnet-only source cannot describe, add
+ * nothing and are never part of that read. A later failed read keeps the last disclosure rather
+ * than blanking it.
  */
-function StrategyAllocations({ strategy }: { strategy: EarnStrategy }) {
+function StrategyAllocations({
+  allocationsRead,
+  strategy,
+}: {
+  allocationsRead: KaminoVaultAllocationsRead;
+  strategy: EarnStrategy;
+}) {
   const t = useTranslations();
   const locale = useLocale();
-  const vaultAddress = strategy.provider === "kamino" ? strategy.providerReference : undefined;
-  const { allocations } = useKaminoVaultAllocations(vaultAddress, strategy.hostCluster);
-  if (!vaultAddress || !allocations || !hasKaminoAllocationContent(allocations)) return null;
+  const vaultAddress = kaminoAllocationsVault(strategy);
+  const allocations =
+    vaultAddress === undefined ? undefined : allocationsRead.allocationsByVault?.[vaultAddress];
+  if (!allocations || !hasKaminoAllocationContent(allocations)) return null;
 
   const deployedPct = kaminoDeployedWeightPct(allocations.unallocated?.pct);
   // A missing unallocated share only hides the SUMMARY weight; the per-reserve
@@ -1173,6 +1181,7 @@ function StrategyAction({
 
 function StrategyTable({
   environment,
+  kaminoAllocations,
   onDeposit,
   positions,
   providerAccess,
@@ -1180,6 +1189,7 @@ function StrategyTable({
   unrecordedShareMints,
 }: {
   environment: SdpEnvironment;
+  kaminoAllocations: KaminoVaultAllocationsRead;
   onDeposit: (strategy: EarnStrategy) => void;
   positions: readonly EarnVaultPosition[] | undefined;
   providerAccess: EarnProviderAccess | null;
@@ -1265,7 +1275,10 @@ function StrategyTable({
                             ? [SOLANA_CLUSTER_LABELS.devnet]
                             : []),
                         ])}
-                        <StrategyAllocations strategy={strategy} />
+                        <StrategyAllocations
+                          allocationsRead={kaminoAllocations}
+                          strategy={strategy}
+                        />
                       </>
                     }
                     name={strategy.name}
@@ -1348,6 +1361,8 @@ interface TreasuryStrategiesProps {
   environment: SdpEnvironment;
   failed: boolean;
   isLoading: boolean;
+  /** The Information detail's one table-wide read, owned by the container. */
+  kaminoAllocations: KaminoVaultAllocationsRead;
   mainnetFailed: boolean;
   mainnetLoading: boolean;
   onDeposit: (strategy: EarnStrategy) => void;
@@ -1364,6 +1379,7 @@ function StrategiesBody({
   environment,
   failed,
   isLoading,
+  kaminoAllocations,
   mainnetFailed,
   onDeposit,
   positions,
@@ -1395,6 +1411,7 @@ function StrategiesBody({
       {devnetFailed ? <CatalogueShelfError shelf="devnet" /> : null}
       <StrategyTable
         environment={environment}
+        kaminoAllocations={kaminoAllocations}
         onDeposit={onDeposit}
         positions={positions}
         providerAccess={providerAccess}
@@ -1451,6 +1468,7 @@ function TreasuryStrategies({
   environment,
   failed,
   isLoading,
+  kaminoAllocations,
   mainnetFailed,
   mainnetLoading,
   onDeposit,
@@ -1485,6 +1503,7 @@ function TreasuryStrategies({
           environment={environment}
           failed={failed}
           isLoading={isLoading}
+          kaminoAllocations={kaminoAllocations}
           mainnetFailed={mainnetFailed}
           onDeposit={onDeposit}
           positions={positions}
@@ -1652,9 +1671,12 @@ export interface TreasuryWorkspaceContentProps {
   devnetCatalogueFailed: boolean;
   devnetCatalogueLoading: boolean;
   environment: SdpEnvironment;
+  kaminoAllocations: KaminoVaultAllocationsRead;
   mainnetCatalogueFailed: boolean;
   mainnetCatalogueLoading: boolean;
   onDeposit: (strategy: EarnStrategy) => void;
+  /** A queued request settled: re-read holdings and cash, nothing else. */
+  onHoldingsChanged: () => void;
   onRefresh: () => void;
   onWithdrawPosition: (
     position: EarnVaultPosition,
@@ -1692,9 +1714,11 @@ export function TreasuryWorkspaceContent({
   devnetCatalogueFailed,
   devnetCatalogueLoading,
   environment,
+  kaminoAllocations,
   mainnetCatalogueFailed,
   mainnetCatalogueLoading,
   onDeposit,
+  onHoldingsChanged,
   onRefresh,
   onWithdrawPosition,
   onWithdrawProgram,
@@ -1740,13 +1764,14 @@ export function TreasuryWorkspaceContent({
         wallets={activeWallets}
         withdrawals={vaultWithdrawals}
       />
-      <EarnVaultWithdrawalRequestsCard onChanged={onRefresh} />
+      <EarnVaultWithdrawalRequestsCard onChanged={onHoldingsChanged} />
       <TreasuryStrategies
         devnetFailed={devnetCatalogueFailed}
         devnetLoading={devnetCatalogueLoading}
         environment={environment}
         failed={catalogueFailed}
         isLoading={catalogueLoading}
+        kaminoAllocations={kaminoAllocations}
         mainnetFailed={mainnetCatalogueFailed}
         mainnetLoading={mainnetCatalogueLoading}
         onDeposit={onDeposit}
