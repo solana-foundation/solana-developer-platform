@@ -80,6 +80,15 @@ Consequences to know about:
   the movement id and `earn_movements.owner_address` holds the value behind tenant scoping,
   the same arrangement the allowlist audit rows have.
 
+## Request correlation
+
+The API generates a fresh `X-Request-ID` for every request, including API-key
+requests. It never echoes a caller's ID: caller-controlled values can contain
+secrets, and logger context bypasses field scrubbing. Integrators should save
+the response's `X-Request-ID` beside their own correlation ID. CORS continues
+to allow the inbound header so existing browser clients pass preflight, and
+exposes the response header so they can read the generated ID.
+
 ## Provider payload bodies
 
 A provider's response body is unbounded and provider-shaped, so nothing inside it can be

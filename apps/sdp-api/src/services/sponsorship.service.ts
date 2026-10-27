@@ -149,7 +149,10 @@ function buildKoraUserId(scope: SponsorshipScope): string {
  * @returns The instrumented adapter for the open scope's cluster.
  */
 function instrumentedAdapter(env: Env, userId: string): FeePaymentPort {
-  return instrumentVendorPort("kora", createKoraAdapter(env, userId));
+  const adapter = createKoraAdapter(env, userId);
+  return instrumentVendorPort("kora", adapter, (operation) =>
+    operation === "getFeePayer" ? adapter.feePayerReadSource() : undefined
+  );
 }
 
 /**

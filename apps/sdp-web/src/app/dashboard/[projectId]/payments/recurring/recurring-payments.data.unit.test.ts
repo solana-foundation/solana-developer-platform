@@ -5,6 +5,7 @@ import { IdempotencyOutcomeUnknownError } from "@/lib/idempotency";
 import { setWindowPathname } from "@/test/window-location";
 import {
   createRecurringPayment,
+  fetchRecurringPaymentById,
   runRecurringPaymentAction,
   updateRecurringPayment,
 } from "./recurring-payments.data";
@@ -198,5 +199,34 @@ describe("recurring payment amount spelling", () => {
     expect(respelled?.key).toBe(first?.key);
     expect(different?.key).not.toBe(first?.key);
     expect(sent().map((call) => call.amount)).toEqual(["1", "1", "1.01"]);
+  });
+});
+
+describe("fetchRecurringPaymentById", () => {
+  it("carries the API's status when the read fails", async () => {
+    const request = vi.fn(async () =>
+      Response.json(
+        { error: { code: "not_found", message: "Recurring payment not found" } },
+        { status: 404 }
+      )
+    );
+
+    await expect(fetchRecurringPaymentById(request, "prp_unknown", t)).resolves.toEqual({
+      ok: false,
+      status: 404,
+      error: "Recurring payment not found",
+    });
+  });
+
+  it("has no status when the request itself fails", async () => {
+    const request = vi.fn(async () => {
+      throw new Error("fetch failed");
+    });
+
+    await expect(fetchRecurringPaymentById(request, "prp_1", t)).resolves.toEqual({
+      ok: false,
+      status: null,
+      error: "fetch failed",
+    });
   });
 });

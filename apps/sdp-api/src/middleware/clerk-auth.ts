@@ -543,9 +543,9 @@ export function clerkAuthMiddleware() {
 }
 
 /**
- * Authenticates a verified Clerk session that names no organization, for the
- * one route that creates a person's organization (ADR 0012): a new person has
- * no organization yet, so the member middleware refuses them. The rest of the
+ * Authenticates a verified Clerk session that names no organization SDP links,
+ * for the one route that creates a person's organization (ADR 0012): a new
+ * person has no organization yet, so the member middleware refuses them. The rest of the
  * request runs under a system database identity, since it writes the
  * organization before any tenant exists.
  *
@@ -562,9 +562,6 @@ export function clerkSignupSessionMiddleware() {
       if (!payload.sub) {
         throw unauthorized("Clerk token missing subject");
       }
-      if (resolveClerkOrganizationClaims(payload).organizationId) {
-        throw badRequest("Clear the active organization before creating one");
-      }
       const email = resolveClerkEmail(payload);
       if (!email) {
         throw unauthorized("Clerk token has no usable email claim");
@@ -575,7 +572,17 @@ export function clerkSignupSessionMiddleware() {
         `clerk:${payload.sub}:organization-signup`,
         DASHBOARD_ACTOR_MAX_REQUESTS
       );
-      const user = await ensureClerkUser(c.env, getDb(c.env), payload.sub, email);
+      const db = getDb(c.env);
+      // Clerk keeps an organization active whenever the person has one
+      // (personal accounts are off), so an active organization SDP never
+      // linked is no claim on anything and is allowed. One SDP links stays
+      // refused: that person belongs in it, not in a new one. Creation never
+      // reads the claim either way; it makes a new Clerk organization.
+      const activeClerkOrgId = resolveClerkOrganizationClaims(payload).organizationId;
+      if (activeClerkOrgId && (await resolveClerkOrganization(db, activeClerkOrgId))) {
+        throw badRequest("Clear the active organization before creating one");
+      }
+      const user = await ensureClerkUser(c.env, db, payload.sub, email);
       c.set("clerkSignup", { userId: user.userId, clerkUserId: payload.sub, email: user.email });
       await next();
     });

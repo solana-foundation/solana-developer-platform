@@ -45,7 +45,8 @@ const WALLET = "cw_earn_mv";
 const CONFIG = "cc_earn_mv";
 const TOKEN_MINT = "TokenMint1111111111111111111111111111111111";
 const SHARE_MINT = "ShareMint1111111111111111111111111111111111";
-const VAULT = "VaultAddress11111111111111111111111111111111";
+// Exposure spans organizations, so this vault must be unique to the suite.
+const VAULT = "EarnMovementVault11111111111111111111111111";
 const WALLET_PUBKEY = "DepositorPublicKey11111111111111111111111111";
 const EXTERNAL_OWNER = "3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF";
 const PROJECT_BY_ENVIRONMENT = {

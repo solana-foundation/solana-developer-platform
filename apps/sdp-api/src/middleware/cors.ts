@@ -46,6 +46,8 @@ export function corsMiddleware(env: Env["ENVIRONMENT"]) {
       return isAllowedOrigin(origin) ? origin : null;
     },
     allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    // Accept legacy callers' IDs without breaking preflight. The response ID
+    // is always server-generated; integrators correlate using that returned ID.
     allowHeaders: ["Content-Type", "Authorization", "X-Request-ID", "Idempotency-Key"],
     exposeHeaders: [
       "X-Request-ID",

@@ -30,6 +30,8 @@ import {
   PAYMENTS_TABLE_HEAD,
 } from "@/app/dashboard/[projectId]/payments/payments-table";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
+import { ReadOnlyEmptyNote } from "@/components/read-only-empty-note";
+import { useCanWrite } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { useProjectHref } from "@/lib/use-dashboard-project";
@@ -74,18 +76,23 @@ interface CounterpartyWorkspaceProps {
 function EmptyDirectory() {
   const t = useTranslations();
   const href = useProjectHref();
+  const canWrite = useCanWrite();
   return (
     <DashboardWorkspaceOverviewPanel className="flex flex-col">
       <ListEmptyState
-        hidesPageAction
+        hidesPageAction={canWrite}
         message={t("DashboardPayments.counterparty.noContacts")}
         description={t("DashboardPayments.counterparty.noContactsDescription")}
         action={
-          <Button asChild size="sm">
-            <Link href={href("/dashboard/payments/counterparty/create")}>
-              {t("DashboardPayments.counterparty.addContact")}
-            </Link>
-          </Button>
+          canWrite ? (
+            <Button asChild size="sm">
+              <Link href={href("/dashboard/payments/counterparty/create")}>
+                {t("DashboardPayments.counterparty.addContact")}
+              </Link>
+            </Button>
+          ) : (
+            <ReadOnlyEmptyNote />
+          )
         }
       />
     </DashboardWorkspaceOverviewPanel>
@@ -295,6 +302,7 @@ function CounterpartyRow({
   const router = useRouter();
   const toProjectHref = useProjectHref();
   const href = toProjectHref(counterpartyHref(counterparty.id));
+  const canWrite = useCanWrite();
   return (
     <TableRow className="cursor-pointer" onClick={() => router.push(href)}>
       <TableCell className={cn(PAYMENTS_TABLE_CELL, "max-w-64")}>
@@ -351,13 +359,15 @@ function CounterpartyRow({
               <UserIcon />
               {t("DashboardPayments.counterparty.manageCounterparty")}
             </DropdownMenuItem>
-            <DropdownMenuItem
-              className="text-xs text-error focus:text-error [&_svg]:size-3.5"
-              onSelect={() => onDelete(counterparty)}
-            >
-              <Trash2Icon />
-              {t("DashboardPayments.counterparty.deleteCounterparty")}
-            </DropdownMenuItem>
+            {canWrite ? (
+              <DropdownMenuItem
+                className="text-xs text-error focus:text-error [&_svg]:size-3.5"
+                onSelect={() => onDelete(counterparty)}
+              >
+                <Trash2Icon />
+                {t("DashboardPayments.counterparty.deleteCounterparty")}
+              </DropdownMenuItem>
+            ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
       </TableCell>

@@ -13,7 +13,7 @@ import * as moneyPathEvents from "@/runtime/money-path-events";
 import * as paymentAmounts from "@/services/payments/token-amount";
 import { TEST_CUSTODY_PUBLIC_KEY } from "@/test/fixtures/custody";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
-import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
+import { type ClusterRpcStub, installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -78,7 +78,7 @@ function onSandbox(fn: () => Promise<void>) {
   return runInClusterScope({ projectId: TEST_PROJECT_ID, environment: "sandbox" }, fn);
 }
 
-function installJobHooks() {
+function installJobHooks(): ClusterRpcStub {
   const clusterRpc = installClusterRpcStub();
 
   beforeAll(async () => {
@@ -133,6 +133,8 @@ function installJobHooks() {
       .bind(TEST_CUSTODY_WALLET_ID, TEST_CONFIG_ID, TEST_WALLET_ID, TEST_CUSTODY_PUBLIC_KEY)
       .run();
   });
+
+  return clusterRpc;
 }
 
 describe("reconcilePaymentRequests", () => {
@@ -403,7 +405,24 @@ describe("reconcilePaymentRequests", () => {
 });
 
 describe("reconcileHotPaymentRequests", () => {
-  installJobHooks();
+  const clusterRpc = installJobHooks();
+
+  it("asks the cluster nothing while no sponsored window is open", async () => {
+    const findReference = vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);
+    await createRequest({ token: SOL_MINT, expiresAt: null });
+    const log = vi.spyOn(moneyPathEvents, "logEvent");
+
+    await onSandbox(() => reconcileHotPaymentRequests(env));
+
+    // Neither the block height nor the genesis probe in front of it.
+    expect(clusterRpc.calls).toEqual([]);
+    expect(findReference).not.toHaveBeenCalled();
+    // The lane still reports its run.
+    expect(log).toHaveBeenCalledWith(
+      "info",
+      expect.objectContaining({ event: "payment_requests.lane_run", lane: "hot", checked: 0 })
+    );
+  });
 
   it("checks only rows whose sponsored transaction can still land", async () => {
     const findReference = vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);
@@ -421,6 +440,8 @@ describe("reconcileHotPaymentRequests", () => {
 
     expect(findReference).toHaveBeenCalledTimes(1);
     expect((await getRow(hot.id)).last_checked_at).not.toBeNull();
+    // An open window is what makes the height worth one read.
+    expect(clusterRpc.calls.filter((call) => call.method === "getBlockHeight")).toHaveLength(1);
   });
 
   it("fails the run when every hot check failed", async () => {
@@ -442,7 +463,16 @@ describe("reconcileHotPaymentRequests", () => {
 });
 
 describe("expirePaymentRequests", () => {
-  installJobHooks();
+  const clusterRpc = installJobHooks();
+
+  it("asks the cluster nothing while no request has lapsed", async () => {
+    const open = await createRequest({ token: SOL_MINT, expiresAt: "2099-01-01T00:00:00.000Z" });
+
+    await onSandbox(() => expirePaymentRequests(env));
+
+    expect(clusterRpc.calls).toEqual([]);
+    expect((await getRow(open.id)).status).toBe("awaiting_payment");
+  });
 
   it("stores expired for a lapsed request with no payment", async () => {
     vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);

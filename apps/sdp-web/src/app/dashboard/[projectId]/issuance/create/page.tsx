@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { fetchPaymentsWallets } from "@/app/dashboard/[projectId]/payments/payments-page.data";
 import { assetProfiles } from "@/flags";
 import { getTranslations } from "@/i18n/server";
+import { redirectUnlessCanWrite } from "@/lib/require-write-access";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { IssuanceDraftFlow } from "./issuance-draft-flow";
 
@@ -20,6 +21,7 @@ export default async function CreateDraftPage({ searchParams }: CreateDraftPageP
   ]);
   const resume = resolvedSearchParams?.draft;
   if (!(await assetProfiles())) notFound();
+  await redirectUnlessCanWrite("/dashboard/issuance");
   const client = await createSdpApiClient();
   const result = await fetchPaymentsWallets(client.request, {
     view: "summary",

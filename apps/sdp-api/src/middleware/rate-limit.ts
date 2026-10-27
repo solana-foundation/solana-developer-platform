@@ -1,5 +1,6 @@
 import type { RateLimitTier } from "@sdp/types/api-keys";
 import type { Context, Next } from "hono";
+import { routePath } from "hono/route";
 import { presentsApiKey } from "@/lib/api-key-format";
 import { BoundedLruMap } from "@/lib/bounded-lru";
 import { verifyClerkJwtForRequest } from "@/lib/clerk-token";
@@ -242,7 +243,7 @@ export class InProcessRateLimiter {
           event: "sdp_api_rate_limit_rejected",
           tier: `${this.name}_in_process_fallback`,
           method: c.req.method,
-          route: c.req.path,
+          route: routePath(c, -1) || "unmatched",
           limit: maxRequests,
         },
         "In-process fallback rate limit rejected request"
@@ -418,7 +419,7 @@ export async function enforceRateLimit(
         event: "sdp_api_rate_limit_rejected",
         tier: options.metricTier ?? "default",
         method: c.req.method,
-        route: c.req.path,
+        route: routePath(c, -1) || "unmatched",
         limit: maxRequests,
       },
       "Rate limit rejected request"

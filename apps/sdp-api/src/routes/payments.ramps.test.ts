@@ -10,7 +10,7 @@ import { getDb } from "@/db/client";
 import { app } from "@/index";
 import { errorResponseSchema } from "@/openapi/schemas/base";
 import * as tokenLabels from "@/routes/payments/token-labels";
-import * as jupiterPriceService from "@/services/jupiter-price.service";
+import * as displayPriceService from "@/services/display-price.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import {
@@ -450,10 +450,10 @@ describe("Payments routes — ramps", () => {
               : []
           ),
         }));
-        const jupiterPrices = vi
-          .spyOn(jupiterPriceService, "fetchJupiterUsdPrices")
+        const displayPrices = vi
+          .spyOn(displayPriceService, "fetchDisplayUsdPrices")
           .mockResolvedValue(new Map([[SOL_MINT, 150]]));
-        onTestFinished(() => jupiterPrices.mockRestore());
+        onTestFinished(() => displayPrices.mockRestore());
 
         const res = await requestBalances(walletId, "");
 

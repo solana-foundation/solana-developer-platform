@@ -1,4 +1,6 @@
+import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { SANDBOX_PROJECT } from "@/test/projects";
 import { resetRequestProject, setApiRequest, setPageRequest } from "@/test/request-project";
 
@@ -147,28 +149,87 @@ describe("createRequestScopedSdpApiClients", () => {
     expect(projectHeaders.get("x-project-id")).toBe(SANDBOX_PROJECT.id);
   });
 
-  it("logs a query-bearing request without the query string", async () => {
-    const fetchMock = okFetchMock();
+  it("logs an API request without caller-supplied path segments or query", async () => {
+    const fetchMock = apiFetchMock(
+      () => new Response("ok", { headers: { "X-Request-ID": "req_upstream" } })
+    );
     vi.stubGlobal("fetch", fetchMock);
     const infoMock = vi.mocked(console.info);
 
     const { projectClient } = await createRequestScopedSdpApiClients({});
-    await projectClient.request("/v1/payments/transfers?secret=sk_pasted_credential", {
-      method: "POST",
-    });
+    await projectClient.request(
+      "/v1/payments/transfers/sk_pasted_segment?secret=sk_pasted_credential",
+      {
+        method: "POST",
+      }
+    );
 
     expect(fetchMock.mock.calls.map(([input]) => requestUrl(input))).toEqual([
-      "https://api.example.test/v1/payments/transfers?secret=sk_pasted_credential",
+      "https://api.example.test/v1/payments/transfers/sk_pasted_segment?secret=sk_pasted_credential",
     ]);
     const transferEvents = infoMock.mock.calls
       .map(([payload]) => payload)
       .filter((payload): payload is string => typeof payload === "string")
-      .map((payload): { event: string; path: string } => JSON.parse(payload))
+      .map(
+        (
+          payload
+        ): {
+          event: string;
+          path?: string;
+          traceId: string;
+          requestId: string;
+          upstreamRequestId: string;
+        } => JSON.parse(payload)
+      )
       .filter((event) => event.event === "sdp_web_api_request");
-    expect(transferEvents.map((event) => event.path)).toEqual(["/v1/payments/transfers"]);
+    expect(transferEvents).toHaveLength(1);
+    expect(transferEvents[0]).not.toHaveProperty("path");
+    expect(transferEvents[0]?.traceId).toMatch(/^web_[0-9a-f]{32}$/);
+    expect(transferEvents[0]?.requestId).toBe(`${transferEvents[0]?.traceId}:01`);
+    expect(transferEvents[0]?.upstreamRequestId).toBe("req_upstream");
     expect(infoMock.mock.calls.map(([payload]) => String(payload)).join("\n")).not.toContain(
       "sk_pasted_credential"
     );
+    expect(infoMock.mock.calls.map(([payload]) => String(payload)).join("\n")).not.toContain(
+      "sk_pasted_segment"
+    );
+  });
+
+  it("logs a safe join key before a missing upstream response", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new TypeError("response lost");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const webTraceId = `web_${"c".repeat(32)}`;
+    const infoMock = vi.mocked(console.info);
+    const client = await createSdpApiClient({
+      traceId: webTraceId,
+      source: "route.dashboard.test",
+    });
+
+    await expect(client.request("/v1/wallets/private-wallet-id?secret=sk_test")).rejects.toThrow(
+      "response lost"
+    );
+
+    const events = infoMock.mock.calls
+      .map(([payload]) => z.record(z.string(), z.unknown()).parse(JSON.parse(String(payload))))
+      .filter(
+        (event) => event.event === "sdp_web_api_attempt" || event.event === "sdp_web_api_request"
+      );
+    const expectedHash = createHash("sha256").update(webTraceId).digest("hex");
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({
+      event: "sdp_web_api_attempt",
+      web_trace_hash: expectedHash,
+      traceId: webTraceId,
+    });
+    expect(events[1]).toMatchObject({
+      event: "sdp_web_api_request",
+      web_trace_hash: expectedHash,
+      outcome: "network_failed",
+    });
+    expect(JSON.stringify(events)).not.toContain("private-wallet-id");
+    expect(JSON.stringify(events)).not.toContain("sk_test");
   });
 
   it("refuses to build clients when the request has no active organization", async () => {

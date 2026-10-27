@@ -217,6 +217,7 @@ vi.mock("./kamino-allocations", () => ({
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => ({ sdpEnvironment: mocks.environment }),
+  useCanWrite: () => true,
   useOptionalDashboardWorkspace: () => ({
     dashboardAccess: { capabilities: { canManageCustody: mocks.canManageCustody } },
     flags: { custody: true },

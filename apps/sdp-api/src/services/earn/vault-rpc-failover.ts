@@ -1,5 +1,10 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { EarnRuntimeContext } from "@sdp/earn/types";
+import {
+  emitPinnedRpcFailover,
+  pinRpcTelemetryEndpoint,
+  runWithPinnedRpcTelemetry,
+} from "@sdp/rpc/telemetry";
 import { isTransientRpcError } from "@sdp/rpc/transient";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { earnPoolNotConfigured, earnProviderEndpointUrls } from "./cluster-rpc";
@@ -60,23 +65,27 @@ export function createVaultRpcFailover(
       if (attempt) attempt.urls = urls;
       const url = urls[attempt?.index ?? 0];
       if (url === undefined) throw earnPoolNotConfigured(cluster);
+      pinRpcTelemetryEndpoint(cluster, url);
       await prove(cluster, url);
       return url;
     },
     run<T>(label: string, operation: (assertActive: () => void) => Promise<T>): Promise<T> {
       const attempt: { index: number; urls: readonly string[] } = { index: 0, urls: [] };
-      return deadline.run(label, () =>
-        attempts.run(attempt, async () => {
-          for (;;) {
-            deadline.assertActive(label);
-            try {
-              return await operation(() => deadline.assertActive(label));
-            } catch (error) {
-              if (!transientCause(error) || attempt.index + 1 >= attempt.urls.length) throw error;
-              attempt.index += 1;
+      return runWithPinnedRpcTelemetry(() =>
+        deadline.run(label, () =>
+          attempts.run(attempt, async () => {
+            for (;;) {
+              deadline.assertActive(label);
+              try {
+                return await operation(() => deadline.assertActive(label));
+              } catch (error) {
+                if (!transientCause(error) || attempt.index + 1 >= attempt.urls.length) throw error;
+                emitPinnedRpcFailover();
+                attempt.index += 1;
+              }
             }
-          }
-        })
+          })
+        )
       );
     },
   };

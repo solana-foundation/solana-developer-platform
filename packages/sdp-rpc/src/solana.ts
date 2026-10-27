@@ -31,6 +31,7 @@ import {
 } from "./config";
 import { RpcTimeoutError, solanaRpcError } from "./errors";
 import { withReadSocketRetry } from "./socket-retry";
+import { markRpcAttemptDeadline } from "./telemetry";
 import { isTransientRpcError, withTransientRpcRetry } from "./transient";
 import type { RpcEnv } from "./types";
 
@@ -99,6 +100,7 @@ export function withRequestTimeout(transport: RpcTransport, timeoutMs: number): 
     // AbortController + setTimeout (not AbortSignal.timeout) so the timer is
     // cleared on settle and behaves consistently in Node and test environments.
     const controller = new AbortController();
+    markRpcAttemptDeadline(controller.signal);
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       return await transport<TResponse>({ ...config, signal: controller.signal });
