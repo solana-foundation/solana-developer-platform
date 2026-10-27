@@ -567,7 +567,7 @@ function DepositResult({
       <p className="mt-2 text-body text-secondary">{copy.body}</p>
 
       <DetailList className="mt-5" variant="summary">
-        <DetailRow label={t("DashboardEarn.deposit.vaultStrategy")}>
+        <DetailRow label={t("DashboardEarn.deposit.vaultStrategy")} wrap>
           {deposit.strategy.name}
         </DetailRow>
         <DetailRow label={t("DashboardEarn.withdraw.amountLabel")}>
@@ -575,7 +575,9 @@ function DepositResult({
             {formatTokenValue(outcome.amount, fundingMint, locale)}
           </span>
         </DetailRow>
-        <DetailRow label={t("DashboardEarn.deposit.vaultFrom")}>{outcome.walletName}</DetailRow>
+        <DetailRow label={t("DashboardEarn.deposit.vaultFrom")} wrap>
+          {outcome.walletName}
+        </DetailRow>
         <DetailRow label={t("DashboardEarn.deposit.vaultTransaction")}>
           <TransactionLink cluster={deposit.strategy.hostCluster} signature={deposit.signature} />
         </DetailRow>
@@ -792,14 +794,18 @@ function DepositReviewDetails({
         <span className="tabular-nums">{formatTokenValue(amount, fundingMint, locale)}</span>
       </DetailRow>
       {selectedWallet ? (
-        <DetailRow label={t("DashboardEarn.deposit.vaultFrom")}>
+        <DetailRow label={t("DashboardEarn.deposit.vaultFrom")} wrap>
           {walletDisplayName(selectedWallet, t("DashboardEarn.deposit.walletUnnamed"))}
         </DetailRow>
       ) : null}
       <DetailRow label={t("DashboardEarn.deposit.vaultPayWith")}>{fundingSymbol}</DetailRow>
-      <DetailRow label={t("DashboardEarn.deposit.vaultStrategy")}>{strategyName}</DetailRow>
+      <DetailRow label={t("DashboardEarn.deposit.vaultStrategy")} wrap>
+        {strategyName}
+      </DetailRow>
       {backing ? (
-        <DetailRow label={t("DashboardEarn.deposit.vaultBacking")}>{backing}</DetailRow>
+        <DetailRow label={t("DashboardEarn.deposit.vaultBacking")} wrap>
+          {backing}
+        </DetailRow>
       ) : null}
       <DepositSwapSummaryRow
         active={swapActive}
