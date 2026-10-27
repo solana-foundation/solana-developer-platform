@@ -5505,7 +5505,9 @@ describe("Payments routes — recurring", () => {
         env
       );
       expect(list.status).toBe(200);
-      const listed = (await list.json()) as { data: { recurringPayments: { id: string }[] } };
+      const listed = z
+        .object({ data: z.object({ recurringPayments: z.array(z.object({ id: z.string() })) }) })
+        .parse(await list.json());
       expect(listed.data.recurringPayments.map((row) => row.id)).toContain(payment.id);
     });
   });
