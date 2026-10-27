@@ -7,6 +7,7 @@
 - **`@sdp/design-tokens`** for every color, type size, radius, control height, motion value and font, so the docs match the dashboard's refresh design. `globals.css` imports `tokens.css` and `theme.css`; `<html>` carries `refreshThemeProps`
 - **Custom CSS** in `src/app/globals.css`: all layout classes are prefixed `launch-docs-*`
 - **Lucide React** for icons
+- **Docker image**: `Dockerfile.dockerignore` drops `packages/*` except an allowlist, so a new workspace dependency needs its own `!packages/<name>` line (and its `COPY` lines in the `Dockerfile`), or the image build fails with `not found`
 
 ---
 
