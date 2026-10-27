@@ -4,12 +4,12 @@
  * boundary reads these as values, and a client module would hand it reference proxies instead.
  *
  * Each table is its columns in order, by id, as fixed-layout widths that sum to 100% at each
- * width. Columns that do not fit a phone drop out below `@2xl` (the work area's container query,
- * a 624px column), so a row's action is always on screen without scrolling the table sideways.
- * A dropped status reads under the row's balance instead.
+ * width. Columns that do not fit a phone drop out below `@2xl` (a 672px work area), so a row's
+ * action is always on screen without scrolling the table sideways. A dropped status reads under
+ * the row's balance instead.
  */
 
-/** Hidden until the column is 624px wide. */
+/** Hidden until the work area is 672px wide (`@2xl`). */
 const WIDE_ONLY = "hidden @2xl:table-cell";
 
 export const TREASURY_POSITION_COLUMNS = {
