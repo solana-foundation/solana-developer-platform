@@ -2055,6 +2055,186 @@ describe("payment transfer batches", () => {
     });
   });
 
+  describe("retry failed recipients (HOO-2343)", () => {
+    type BatchBody = {
+      data: {
+        batch: { id: string; status: string; transactionCount: number };
+        recipients: Array<{ id: string; status: string; transferId: string | null }>;
+        transfers: Array<{ id: string; status: string }>;
+      };
+    };
+
+    /** Two recipients in two chunks; the first chunk sent is rejected, so it never lands. */
+    async function seedPartiallyFailedBatch() {
+      const sourceSigner = await generateKeyPairSigner();
+      await updateSeededWalletPublicKey(sourceSigner.address);
+      createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
+      createKoraAdapterMock.mockReturnValue(
+        testKoraAdapter({
+          getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
+          getSponsorshipConfiguration: vi.fn().mockResolvedValue(TEST_SPONSORSHIP_PROVIDER_CONFIG),
+          signAsFeePayer: vi.fn().mockImplementation(fullySignTestTransaction),
+        })
+      );
+      sendTransactionMock.mockRejectedValueOnce(sendTransactionPreflightError());
+      const counterpartyId = await seedCounterparty("batch_retry_counterparty");
+      const accountIds = await seedCryptoWalletCounterpartyAccounts(counterpartyId, [
+        TEST_SOLANA_ADDRESSES.wallet2,
+        TEST_SOLANA_ADDRESSES.wallet3,
+      ]);
+      const created = await app.request(
+        "/v1/payments/transfer-batches",
+        {
+          method: "POST",
+          headers: {
+            "Idempotency-Key": crypto.randomUUID(),
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            token: "SOL",
+            recipients: accountIds.map((counterpartyAccountId) => ({
+              counterpartyId,
+              counterpartyAccountId,
+              amount: "0.1",
+            })),
+            options: { preflight: false, maxRecipientsPerTransaction: 1 },
+          }),
+        },
+        env
+      );
+      expect(created.status).toBe(200);
+      const body = (await created.json()) as BatchBody;
+      // The chunk that was sent settles later, so the batch is still processing.
+      expect(body.data.batch.status).toBe("processing");
+      const failed = required(body.data.recipients.find((r) => r.status === "failed"));
+      const sent = required(body.data.recipients.find((r) => r.status !== "failed"));
+      return { batch: body.data.batch, failed, sent };
+    }
+
+    const retry = (batchId: string, idempotencyKey: string = crypto.randomUUID()) =>
+      app.request(
+        `/v1/payments/transfer-batches/${batchId}/retry`,
+        {
+          method: "POST",
+          headers: {
+            "Idempotency-Key": idempotencyKey,
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+        },
+        env
+      );
+
+    it("resends only the failed recipients of a partially failed batch", async () => {
+      const { batch, failed, sent } = await seedPartiallyFailedBatch();
+      vi.clearAllMocks();
+
+      const response = await retry(batch.id);
+
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as BatchBody;
+      expect(sendTransactionMock).toHaveBeenCalledTimes(1);
+      const resent = required(body.data.recipients.find((r) => r.id === failed.id));
+      expect(resent.status).toBe("processing");
+      expect(resent.transferId).not.toBe(failed.transferId);
+      // The recipient that was sent keeps its transfer and is not sent again.
+      expect(body.data.recipients.find((r) => r.id === sent.id)).toMatchObject({
+        status: sent.status,
+        transferId: sent.transferId,
+      });
+      expect(body.data.batch).toMatchObject({ status: "processing", transactionCount: 3 });
+    });
+
+    it("replays a same-key retry without sending again", async () => {
+      const { batch } = await seedPartiallyFailedBatch();
+      vi.clearAllMocks();
+      const key = crypto.randomUUID();
+
+      const first = await retry(batch.id, key);
+      const again = await retry(batch.id, key);
+
+      expect(first.status).toBe(200);
+      expect(again.status).toBe(200);
+      expect(((await again.json()) as BatchBody).data).toEqual(
+        ((await first.json()) as BatchBody).data
+      );
+      expect(sendTransactionMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("refuses a retry with no failed recipients and sends nothing", async () => {
+      const { batch } = await seedPartiallyFailedBatch();
+      expect((await retry(batch.id)).status).toBe(200);
+      vi.clearAllMocks();
+
+      const nothingLeft = await retry(batch.id);
+
+      expect(nothingLeft.status).toBe(409);
+      expect(await nothingLeft.json()).toMatchObject({
+        error: { code: "CONFLICT", details: { batchId: batch.id } },
+      });
+      expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
+      expect(sendTransactionMock).not.toHaveBeenCalled();
+    });
+
+    it("refuses a retry whose failed recipients another retry claimed first, sending nothing", async () => {
+      const { batch, failed } = await seedPartiallyFailedBatch();
+      const sourceSigner = await createOrgSignerForCustodyWalletMock.mock.results[0]?.value;
+      vi.clearAllMocks();
+      // The other retry claims between this one's read and its claim.
+      createOrgSignerForCustodyWalletMock.mockImplementation(async () => {
+        await batchesRepositoryPostgres
+          .createPostgresPaymentTransferBatchesRepository(getDb(env))
+          .claimFailedTransferRecipients({
+            batchId: batch.id,
+            organizationId: TEST_ORG.id,
+            projectId: TEST_PROJECT.id,
+            recipientIds: [failed.id],
+            addedTransactionCount: 1,
+          });
+        return sourceSigner;
+      });
+
+      const response = await retry(batch.id);
+
+      expect(response.status).toBe(409);
+      expect(((await response.json()) as { error: { message: string } }).error.message).toContain(
+        "claimed its failed recipients first"
+      );
+      expect(sendTransactionMock).not.toHaveBeenCalled();
+    });
+
+    it("refuses a retry from a wallet outside the key's scope before writing anything", async () => {
+      const { batch, failed } = await seedPartiallyFailedBatch();
+      vi.clearAllMocks();
+      const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
+      await seedApiKeyRow(env, keyHash, {
+        ...TEST_SEEDED_API_KEY,
+        walletScope: "selected",
+        walletIds: [],
+      });
+
+      const refused = await retry(batch.id);
+
+      expect(refused.status).toBe(403);
+      await expect(refused.json()).resolves.toMatchObject({
+        error: { details: { reason: "wallet_out_of_scope" } },
+      });
+      expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
+      const row = await getDb(env)
+        .prepare("SELECT status FROM payment_transfer_recipients WHERE id = ?")
+        .bind(failed.id)
+        .first<{ status: string }>();
+      expect(row).toEqual({ status: "failed" });
+    });
+
+    it("answers 404 for a batch outside the project", async () => {
+      const response = await retry("xbat_does_not_exist");
+      expect(response.status).toBe(404);
+    });
+  });
+
   it.each([
     {
       label: "legacy SPL Token",

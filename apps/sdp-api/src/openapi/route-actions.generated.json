@@ -249,6 +249,7 @@
   "POST /v1/payments/subscriptions/:_/prepare-collection": "recurring.execute",
   "POST /v1/payments/subscriptions/:_/prepare-resume": "recurring.execute",
   "POST /v1/payments/transfer-batches": "transfer_batches.execute",
+  "POST /v1/payments/transfer-batches/:_/retry": "transfer_batches.execute",
   "POST /v1/payments/transfer-batches/estimate": "transfer_batches.read",
   "POST /v1/payments/transfers": "transfers.execute",
   "POST /v1/places/autocomplete": "counterparties.manage",

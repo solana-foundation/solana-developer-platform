@@ -7,6 +7,7 @@
 export const IDEMPOTENCY_REQUIRED_ROUTES = [
   "POST /v1/payments/transfers",
   "POST /v1/payments/transfer-batches",
+  "POST /v1/payments/transfer-batches/:batchId/retry",
   "POST /v1/payments/recurring-payments",
   "PATCH /v1/payments/recurring-payments/:id",
   "POST /v1/payments/recurring-payments/:id/activate",

@@ -3,6 +3,7 @@ import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { internalError } from "@/lib/errors";
 import { parseNullableCustodyWalletId } from "./payment-execution-identity";
 import {
+  type ClaimFailedTransferRecipientsInput,
   type CreatePaymentTransferBatchInput,
   type CreatePaymentTransferBatchWithRecipientsInput,
   type CreatePaymentTransferRecipientInput,
@@ -673,7 +674,9 @@ export function createPostgresPaymentTransferBatchesRepository(
         projectId: input.projectId,
         extraClauses: [
           `id IN (${input.recipientIds.map(() => "?").join(", ")})`,
-          "status <> 'archived'",
+          input.requireUnsent === true
+            ? "status = 'pending' AND transfer_id IS NULL"
+            : "status <> 'archived'",
         ],
         extraValues: input.recipientIds,
       });
@@ -902,8 +905,55 @@ export function createPostgresPaymentTransferBatchesRepository(
         return recomputeBatchStatusInTransaction(tx, input);
       });
     },
+
+    async claimFailedTransferRecipients(input: ClaimFailedTransferRecipientsInput) {
+      if (input.recipientIds.length === 0) return null;
+      return db
+        .transaction(async (tx) => {
+          // The batch lock first, as every batch status writer takes it.
+          const batch = await tx
+            .prepare(
+              `UPDATE payment_transfer_batches
+                SET transaction_count = transaction_count + ?,
+                    updated_at = sdp_iso_now()
+              WHERE id = ? AND organization_id = ? AND project_id = ?
+                AND status <> 'archived'
+              RETURNING id`
+            )
+            .bind(input.addedTransactionCount, input.batchId, input.organizationId, input.projectId)
+            .first<{ id: string }>();
+          if (!batch) return null;
+          const claimed = await tx
+            .prepare(
+              `UPDATE payment_transfer_recipients
+                SET status = 'pending', transfer_id = NULL, error = NULL, updated_at = sdp_iso_now()
+              WHERE batch_id = ?
+                AND organization_id = ?
+                AND project_id = ?
+                AND status = 'failed'
+                AND id IN (${input.recipientIds.map(() => "?").join(", ")})
+              RETURNING *`
+            )
+            .bind(input.batchId, input.organizationId, input.projectId, ...input.recipientIds)
+            .all<Record<string, unknown>>();
+          if (claimed.results.length !== input.recipientIds.length) {
+            throw new ClaimLostError();
+          }
+          return {
+            batch: await recomputeBatchStatusInTransaction(tx, input),
+            recipients: claimed.results.map(mapPaymentTransferRecipientRow),
+          };
+        })
+        .catch((error: unknown) => {
+          if (error instanceof ClaimLostError) return null;
+          throw error;
+        });
+    },
   };
 }
+
+/** Rolls a partial claim back: another resend took one of the recipients. */
+class ClaimLostError extends Error {}
 
 /**
  * Locks the batch row, derives the batch status from its recipient rows, and

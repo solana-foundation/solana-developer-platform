@@ -222,6 +222,17 @@ export interface UpdatePaymentTransferRecipientsStatusInput {
   transferId: string | null;
   status: PaymentTransferBatchRecipientStatus;
   error: string | null;
+  /**
+   * Link CAS: update only recipients still pending with no chunk transfer, so
+   * a chunk never claims a recipient another writer failed or linked first.
+   */
+  requireUnsent?: true;
+}
+
+export interface ClaimFailedTransferRecipientsInput extends RecomputeTransferBatchStatusInput {
+  recipientIds: string[];
+  /** Chunks the resend adds to the batch's transaction count. */
+  addedTransactionCount: number;
 }
 
 export interface SettlePaymentTransferBatchInput {
@@ -333,6 +344,15 @@ export interface PaymentTransferBatchesRepository {
   failUnsentTransferRecipients(
     input: RecomputeTransferBatchStatusInput & { error: string }
   ): Promise<PaymentTransferBatchRow>;
+  /**
+   * Takes failed recipients back to pending with no chunk transfer for a
+   * resend (HOO-2343), under the batch lock. All or nothing: null when any of
+   * them is no longer failed (another resend claimed it first).
+   */
+  claimFailedTransferRecipients(input: ClaimFailedTransferRecipientsInput): Promise<{
+    batch: PaymentTransferBatchRow;
+    recipients: PaymentTransferRecipientRow[];
+  } | null>;
   /**
    * Processing batches created before `createdBefore` that still have pending
    * recipients with no chunk transfer: their request died before sending them.

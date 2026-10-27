@@ -132,6 +132,15 @@ the existing batch, and any other with `409 CONFLICT` and that batch's id. The h
 catches a race. `externalId` is optional: a caller who omits it gets no server-side guard against
 paying a run twice beyond the key.
 
+A partial failure is finished with `POST /transfer-batches/:batchId/retry` (HOO-2343), not a resend.
+It sends only `failed` recipients, which were definitely not paid. Before it sends, it claims them
+back to `pending` with no transfer under the batch lock, all or nothing, so a concurrent retry gets
+409. A chunk links a recipient only while it is still pending with no transfer, so a recipient that
+another writer failed or claimed first rolls the chunk back before it is signed. The retry has no
+row of its own to answer from (`serverErrors: "store"`): after a crash it answers
+`IDEMPOTENCY_KEY_OUTCOME_UNKNOWN`, and a retry under a new key is safe because only still-failed
+recipients are claimed.
+
 Recurring payments carve this out: their cron resumes and completes a half-finished row (an
 `activating`, `canceling` or `resuming` schedule, or a collection in flight) from the signature
 its attempt recorded; it does not fail the row. Every step saves its signature and its blockhash's

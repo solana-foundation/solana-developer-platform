@@ -222,6 +222,67 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
     expect(selected.rows[0]?.source_custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
   });
 
+  it("links only recipients still unsent, and claims failed ones all or nothing", async () => {
+    await seedProjectCryptoWalletCounterparty(getDb(env), {
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      createdBy: TEST_USER.id,
+      counterpartyId: "cpty_batch_claim",
+      counterpartyAccountId: "cpa_batch_claim",
+      walletAddress: "Dest111",
+    });
+    const recipient = {
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      externalId: null,
+      counterpartyId: "cpty_batch_claim",
+      counterpartyAccountId: "cpa_batch_claim",
+      destinationAddress: "Dest111",
+      amount: "1",
+      status: "pending" as const,
+      error: null,
+    };
+    const { batch, recipients } = await repo.createTransferBatchWithRecipients({
+      batch: { ...baseInput, projectId: TEST_PROJECT_ID, idempotencyKey: "claim-key" },
+      recipients: [recipient, recipient],
+    });
+    const [first, second] = recipients.map((row) => row.id);
+    const scope = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID };
+    await repo.updateTransferRecipientsStatus({
+      ...scope,
+      recipientIds: [first],
+      transferId: null,
+      status: "failed",
+      error: "rejected",
+    });
+
+    // A failed recipient is not unsent, so a chunk cannot link it.
+    expect(
+      await repo.updateTransferRecipientsStatus({
+        ...scope,
+        recipientIds: [first, second],
+        transferId: null,
+        status: "processing",
+        error: null,
+        requireUnsent: true,
+      })
+    ).toMatchObject([{ id: second }]);
+
+    const claim = (recipientIds: string[]) =>
+      repo.claimFailedTransferRecipients({
+        ...scope,
+        batchId: batch.id,
+        recipientIds,
+        addedTransactionCount: 1,
+      });
+    // The second recipient is processing, so a claim naming it takes neither.
+    expect(await claim([first, second])).toBeNull();
+    const claimed = await claim([first]);
+    expect(claimed?.recipients).toMatchObject([{ id: first, status: "pending", error: null }]);
+    expect(claimed?.batch.transaction_count).toBe(2);
+    expect(await claim([first])).toBeNull();
+  });
+
   it("names the idempotency index when a batch reuses its key", async () => {
     await repo.createTransferBatchWithRecipients({
       batch: { ...baseInput, projectId: TEST_PROJECT_ID, idempotencyKey: "named-key" },

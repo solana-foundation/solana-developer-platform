@@ -48,6 +48,9 @@ export const createTransferBatchSchema = z.strictObject({
 
 export const estimateTransferBatchSchema = createTransferBatchSchema;
 
+/** A retry names its batch in the path and carries no body. */
+export const retryTransferBatchSchema = z.strictObject({});
+
 export const listTransferBatchesQuerySchema = z.strictObject({
   sourceCustodyWalletId: z.string().min(1).optional(),
   token: z.string().optional(),

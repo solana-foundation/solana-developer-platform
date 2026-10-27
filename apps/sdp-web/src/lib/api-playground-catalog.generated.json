@@ -4,7 +4,7 @@
     "command": "pnpm -C apps/sdp-api playground:generate",
     "modules": {
       "wallets": 10,
-      "payments": 34,
+      "payments": 35,
       "counterparties": 13,
       "issuance": 37
     }
@@ -1327,6 +1327,140 @@
             "pageSize": 1,
             "hasMore": false,
             "requestId": "req_example"
+          }
+        }
+      },
+      {
+        "id": "retry-payment-transfer-batch",
+        "operationId": "retryPaymentTransferBatch",
+        "title": "Retry a transfer batch's failed recipients",
+        "method": "POST",
+        "path": "/v1/payments/transfer-batches/{batchId}/retry",
+        "releaseModule": "payments",
+        "shadowedBy": [],
+        "pathFields": [
+          {
+            "key": "batchId",
+            "label": "{batchId}",
+            "description": "Transfer batch identifier.",
+            "defaultValue": "xbatch_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "batch": {
+              "id": "xbatch_example",
+              "organizationId": "org_example",
+              "projectId": "prj_example",
+              "externalId": "payroll_2026_06_30",
+              "sourceCustodyWalletId": "cwlt_example",
+              "sourceProviderWalletId": "privy_wallet_123",
+              "sourceAddress": "So11111111111111111111111111111111111111112",
+              "token": "SOL",
+              "status": "processing",
+              "totalAmount": "1000.00",
+              "recipientCount": 20,
+              "transactionCount": 1,
+              "createdAt": "2025-01-01T00:00:00.000Z",
+              "updatedAt": "2025-01-01T00:00:00.000Z"
+            },
+            "recipients": [
+              {
+                "id": "_example",
+                "batchId": "batch_example",
+                "transferId": "xfr_example",
+                "externalId": "payroll_row_001",
+                "counterpartyId": "cpty_example",
+                "counterpartyAccountId": "cpa_example",
+                "destination": "So11111111111111111111111111111111111111112",
+                "amount": "100.00",
+                "status": "pending",
+                "error": "example",
+                "createdAt": "2025-01-01T00:00:00.000Z",
+                "updatedAt": "2025-01-01T00:00:00.000Z"
+              }
+            ],
+            "transfers": [
+              {
+                "fireblocks": {
+                  "transactionId": "transaction_example",
+                  "status": "example",
+                  "subStatus": "example"
+                },
+                "id": "xfr_example",
+                "organizationId": "org_example",
+                "custodyWalletId": "cwlt_example",
+                "providerWalletId": "privy_wallet_123",
+                "projectId": "prj_example",
+                "type": "transfer",
+                "kind": "pay",
+                "direction": "outbound",
+                "status": "confirmed",
+                "signature": "sig_example",
+                "serializedTx": "base64_tx_example",
+                "slot": 123456,
+                "blockTime": "2025-01-01T00:00:00.000Z",
+                "confirmedAt": "2025-01-01T00:00:00.000Z",
+                "fee": 5000,
+                "error": "Signature failed",
+                "initiatedBy": {
+                  "type": "api_key"
+                },
+                "source": "So11111111111111111111111111111111111111112",
+                "destination": "So11111111111111111111111111111111111111112",
+                "rampsMemo": {
+                  "invoice": "INV-123",
+                  "po": "PO-9"
+                },
+                "amount": "100.00",
+                "provider": "moonpay",
+                "counterpartyId": "cpty_example",
+                "counterpartyDisplayName": "Acme Studio",
+                "providerReference": "ramp_quote_example",
+                "deliveryMode": "session_widget",
+                "fiatCurrency": "USD",
+                "fiatAmount": "100.00",
+                "settlement": {
+                  "provider": "moonpay",
+                  "status": "completed",
+                  "transactionId": "transaction_example",
+                  "baseCurrencyCode": "example",
+                  "baseCurrencyAmount": 1,
+                  "quoteCurrencyCode": "example",
+                  "quoteCurrencyAmount": 1,
+                  "feeAmount": 1,
+                  "extraFeeAmount": 1,
+                  "networkFeeAmount": 1,
+                  "areFeesIncluded": false,
+                  "usdRate": 1
+                },
+                "fiatPayout": {
+                  "amount": "20.82",
+                  "currency": "USD",
+                  "reportedAt": "2025-01-02T00:00:00.000Z"
+                },
+                "deliveryMismatch": {
+                  "reason": "amount_mismatch",
+                  "checkedAt": "2025-01-02T00:00:00.000Z",
+                  "reportedAmount": "20",
+                  "observedAmount": "0.5"
+                },
+                "risk": {
+                  "provider": "trm",
+                  "score": "0.12",
+                  "level": "low",
+                  "evaluatedAt": "2025-01-01T00:00:00.000Z"
+                },
+                "createdAt": "2025-01-01T00:00:00.000Z",
+                "updatedAt": "2025-01-02T00:00:00.000Z"
+              }
+            ]
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
           }
         }
       },

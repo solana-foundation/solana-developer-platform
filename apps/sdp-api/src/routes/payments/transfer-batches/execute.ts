@@ -37,6 +37,7 @@ import type { ResolvedBatchRequest } from "./types";
  * @param params.transferId - Transfer row the recipients are linked to, or null when the chunk failed before its transfer row existed.
  * @param params.status - New recipient status.
  * @param params.error - Failure detail, or null.
+ * @param params.requireUnsent - Link CAS: a recipient another writer failed or linked first throws.
  * @returns Updated recipient rows keyed by recipient index.
  */
 export async function updateRecipientRows(params: {
@@ -48,6 +49,8 @@ export async function updateRecipientRows(params: {
   transferId: string | null;
   status: PaymentTransferRecipientRow["status"];
   error: string | null;
+  /** Update only recipients still unsent; any other makes this throw. */
+  requireUnsent?: true;
 }): Promise<Map<number, PaymentTransferRecipientRow>> {
   const targets = params.recipientIndexes.map((index) => {
     const existing = params.recipientsByIndex.get(index);
@@ -64,6 +67,7 @@ export async function updateRecipientRows(params: {
     transferId: params.transferId,
     status: params.status,
     error: params.error,
+    requireUnsent: params.requireUnsent,
   });
 
   const updatedById = new Map(updatedRows.map((row) => [row.id, row]));
@@ -99,7 +103,8 @@ export function applyRecipientRowUpdates(
  * confirmation: the pending-transfers job finalizes the chunk later.
  * Simulation or send failures settle the chunk as failed instead of throwing.
  * The transfer row and its recipient links are written in ONE transaction so
- * a processing chunk transfer always has linked recipients — the invariant
+ * a processing chunk transfer always has linked recipients, and only while
+ * every one of them is still pending with no transfer — the invariant
  * settleTransferBatch enforces when the pending-transfers job settles it.
  * The exact signed bytes and signature are persisted before the durable start
  * marker and first broadcast. Once that marker may exist, failures remain
@@ -187,6 +192,9 @@ export async function executeChunk(params: {
       transferId: created.id,
       status: "processing",
       error: null,
+      // A recipient another writer failed or claimed first rolls the chunk
+      // back before it is signed or sent.
+      requireUnsent: true,
     });
 
     return { created, linked };

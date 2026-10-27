@@ -76,6 +76,11 @@ const keyRequiredRerunHeaders = projectScopeWithDeclaredIdempotencyHeaders({
   serverErrors: "rerun",
   recovery: "record",
 });
+// A batch retry has no row of its own to answer from, so it stores its answers.
+const keyRequiredStoreHeaders = projectScopeWithDeclaredIdempotencyHeaders({
+  key: "required",
+  serverErrors: "store",
+});
 const keyAcceptedHeaders = projectScopeWithDeclaredIdempotencyHeaders({
   key: "accepted",
   serverErrors: "store",
@@ -225,7 +230,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     description:
       "Executes an outbound transfer batch from one exact SDP Wallet ID, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records. Requires an Idempotency-Key: a retry with the same key and request returns the original batch without another on-chain submission. Recipient order does not change the request. " +
       "An `externalId` already used by a batch on the same project and source wallet never pays again: the same request from the same credential returns that batch, and any other returns `409 CONFLICT` with its `batchId` in `error.details`. " +
-      "To recover from a partial failure, read the batch with `GET /v1/payments/transfer-batches/{batchId}` and send only its `failed` recipients in a new batch, with a new `externalId` and a new Idempotency-Key. Never resend a recipient still `pending` or `processing`: its transfer may still land.",
+      "To finish a batch after a partial failure, call `POST /v1/payments/transfer-batches/{batchId}/retry`: it sends only the batch's `failed` recipients. Never resend the whole batch under a new Idempotency-Key, which pays the recipients that succeeded again.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: movementKeyHeaders,
@@ -237,6 +242,29 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     responses: {
       200: {
         description: "Transfer batch created",
+        content: jsonContent(transferBatchResponse),
+      },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),
+    },
+  });
+
+  registry.registerPath({
+    method: "post",
+    path: "/v1/payments/transfer-batches/{batchId}/retry",
+    tags: ["Payments"],
+    summary: "Retry a transfer batch's failed recipients",
+    operationId: "retryPaymentTransferBatch",
+    description:
+      "Sends the batch's `failed` recipients again, from the same source wallet with the batch's options, and no other recipient. A failed recipient was not paid: its transaction never reached the network or the network rejected it. Recipients still `pending` or `processing` may land and are never sent again. Each resent recipient keeps its row and links to its new chunk transfer. " +
+      "Takes no body and requires an Idempotency-Key: a retry with the same key returns the first answer without sending again. Returns `409 CONFLICT` when the batch has no failed recipients, or when a concurrent retry claimed them first; nothing is sent. After a timeout, read the batch with `GET /v1/payments/transfer-batches/{batchId}` and retry again with a new key: only recipients that are still `failed` are ever sent.",
+    security: [{ apiKeyAuth: [] }],
+    request: {
+      headers: keyRequiredStoreHeaders,
+      params: paymentTransferBatchIdParamsSchema,
+    },
+    responses: {
+      200: {
+        description: "Failed recipients resent",
         content: jsonContent(transferBatchResponse),
       },
       ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 500]),

@@ -42,13 +42,21 @@ The batch `externalId` names the payout run, and it is unique per project and so
 
 ### Recovering from a partial failure
 
-A batch that ends `partially_failed` paid some recipients and not others. To finish the run:
+A batch with `failed` recipients paid some recipients and not others. A `failed` recipient was not paid: its transaction never reached the network, or the network rejected it. To finish the run, retry the batch:
 
-1. Read the batch with `GET /v1/payments/transfer-batches/{batchId}`.
-2. Collect the recipients whose `status` is `failed`. They were not paid.
-3. Send only those recipients in a new batch, with a new `externalId` (for example `payroll_2026-05-14_retry_1`) and a new `Idempotency-Key`.
+```bash
+curl -X POST https://api.solana.com/v1/payments/transfer-batches/{batchId}/retry \
+  -H "Authorization: Bearer sf_..." \
+  -H "Idempotency-Key: payroll-2026-05-14-retry-1"
+```
 
-Never resend a recipient whose status is still `pending` or `processing`: its transfer may still land. Poll the batch until it settles, then resend whatever ended `failed`.
+The retry sends only the batch's `failed` recipients, from the same wallet with the batch's options, and returns the batch with those recipients `processing` again. Recipients still `pending` or `processing` may still land, so they are never sent again. Each resent recipient keeps its row in the batch and links to its new transfer.
+
+- The same `Idempotency-Key` returns the first retry's answer without sending again.
+- A batch with nothing `failed` returns `409 CONFLICT`, as does a retry that loses to a concurrent one. Nothing is sent.
+- If a retry times out, read the batch with `GET /v1/payments/transfer-batches/{batchId}`, then retry again with a new key once its recipients settle. Only recipients that are still `failed` are sent.
+
+Never resend the whole batch under a new `Idempotency-Key` to finish it: that pays the recipients who already succeeded again.
 
 The rest of this page covers the per-recipient alternative for destinations that are not registered counterparty accounts.
 

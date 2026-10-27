@@ -1,4 +1,3 @@
-import { getRecentBlockhash } from "@sdp/rpc/solana";
 import { getDb } from "@/db/client";
 import type {
   PaymentTransferBatchRow,
@@ -8,7 +7,7 @@ import {
   createPostgresPaymentTransferBatchesRepository,
   transferBatchUniqueViolation,
 } from "@/db/repositories/payment-transfer-batches.repository.postgres";
-import { AppError, badRequest, conflict, internalError } from "@/lib/errors";
+import { AppError, conflict } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { type AuthorizeInput, getAuthorized } from "@/middleware/authorize";
 import {
@@ -22,24 +21,14 @@ import type { MovementStepInput, RecordAnswer } from "@/middleware/movement-step
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { type AppContext, getPaymentTransferBatchesRepository } from "@/routes/payments/context";
 import { admitPaymentWalletRuntimeExecution } from "@/routes/payments/wallets";
-import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
-import {
-  createSponsorshipFeePayment,
-  resolveRequestSponsorshipScope,
-} from "@/services/sponsorship.service";
-import { applyRecipientRowUpdates, executeChunk, updateRecipientRows } from "./execute";
 import {
   type AuthorizedBatchRequest,
   authorizeBatchRequest,
   resolveBatchMovement,
 } from "./resolve";
 import { buildTransferBatchResponse } from "./respond";
+import { prepareBatchChunks, runBatchChunks } from "./run";
 import type { createTransferBatchSchema } from "./schemas";
-import {
-  buildInstructionGroups,
-  chunkInstructionGroups,
-  DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION,
-} from "./transaction";
 import type { CreateTransferBatchInput } from "./types";
 
 async function respondToTransferBatchReplay(
@@ -199,19 +188,9 @@ export async function findTransferBatchRecordReplay(
 }
 
 /**
- * POST /transfer-batches — creates the batch aggregate, submits all chunks
- * concurrently, and responds without waiting for on-chain confirmation:
- * transfers come back processing and the pending-transfers job settles them.
- * A chunk whose execution throws is settled as failed recipients rather than
- * failing the request, so sibling submissions are never abandoned half-done.
- * That cleanup only touches recipients still unlinked (transfer_id null):
- * executeChunk creates its transfer row and links recipients in one
- * transaction, so a linked recipient implies a live transfer row that the
- * pending-transfers job settles via settleTransferBatch — unlinking it here
- * would orphan that transfer as permanently processing.
- * The final batch status comes from the locked repository recompute — never
- * from in-memory state — so a reconciliation run that settles chunks during
- * the request cannot be overwritten with a stale status.
+ * POST /transfer-batches — creates the batch aggregate with its recipients,
+ * then submits its chunks (runBatchChunks) without waiting for on-chain
+ * confirmation.
  * Replays idempotently by Idempotency-Key + payload fingerprint. An
  * externalId another batch on the source wallet holds replays that batch to
  * the same request from its credential, or refuses (409), before it reads the
@@ -244,45 +223,9 @@ export async function createTransferBatch(
     }
   }
   const resolved = await resolveBatchMovement(body, authorized);
+  const prepared = await prepareBatchChunks(c, resolved, body.options?.maxRecipientsPerTransaction);
+  const { chunks } = prepared;
 
-  const feePayment = createSponsorshipFeePayment(
-    c.env,
-    resolveRequestSponsorshipScope(c),
-    "payments.transfer_batch",
-    { custodyWalletId: resolved.sourceWallet.id }
-  );
-  const [signer, feePayer, lifetime] = await Promise.all([
-    createOrgSignerForCustodyWallet(
-      c.env,
-      resolved.scope.auth.organizationId,
-      resolved.projectId,
-      resolved.sourceWallet.id,
-      "payments.transfer_batch"
-    ),
-    feePayment.getFeePayer(),
-    getRecentBlockhash(resolved.rpc, "confirmed"),
-  ]);
-  if (signer.address !== resolved.sourceWallet.publicKey) {
-    throw badRequest("Resolved signing wallet does not match source wallet");
-  }
-  const groups = await buildInstructionGroups({
-    tokenContext: resolved.tokenContext,
-    recipients: resolved.recipients,
-    sourceSigner: signer,
-    feePayer,
-  });
-  const chunks = chunkInstructionGroups({
-    groups,
-    sourceSigner: signer,
-    feePayer,
-    lifetime,
-    maxRecipientsPerTransaction:
-      body.options?.maxRecipientsPerTransaction === undefined
-        ? DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION
-        : body.options.maxRecipientsPerTransaction,
-  });
-
-  const batchRepository = getPaymentTransferBatchesRepository(c);
   let batch: PaymentTransferBatchRow;
   let recipientRows: PaymentTransferRecipientRow[];
   try {
@@ -325,53 +268,13 @@ export async function createTransferBatch(
   } catch (error) {
     return answerLostBatchInsert(c, error, walletScope, idempotencyKey, externalId);
   }
-  const recipientsByIndex = new Map<number, PaymentTransferRecipientRow>(
-    resolved.recipients.map((recipient, position) => [recipient.index, recipientRows[position]])
-  );
-
-  const outcomes = await Promise.allSettled(
-    chunks.map((chunk) =>
-      executeChunk({
-        c,
-        resolved,
-        chunk,
-        recipientsByIndex,
-        feePayment,
-        lastValidBlockHeight: lifetime.lastValidBlockHeight,
-        preflight: body.options?.preflight !== false,
-      })
-    )
-  );
-  for (const [position, outcome] of outcomes.entries()) {
-    if (outcome.status === "rejected") {
-      const unlinkedIndexes = chunks[position].recipientIndexes.filter((index) => {
-        const row = recipientsByIndex.get(index);
-        if (!row) {
-          throw internalError("Transfer batch recipient row is missing");
-        }
-        return row.transfer_id === null;
-      });
-      if (unlinkedIndexes.length === 0) {
-        continue;
-      }
-      const updates = await updateRecipientRows({
-        repository: getPaymentTransferBatchesRepository(c),
-        recipientsByIndex,
-        recipientIndexes: unlinkedIndexes,
-        organizationId: resolved.scope.auth.organizationId,
-        projectId: resolved.projectId,
-        transferId: null,
-        status: "failed",
-        error: outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason),
-      });
-      applyRecipientRowUpdates(recipientsByIndex, updates);
-    }
-  }
-
-  const finalBatch = await batchRepository.recomputeTransferBatchStatus({
+  const finalBatch = await runBatchChunks({
+    c,
+    resolved,
     batchId: batch.id,
-    organizationId: resolved.scope.auth.organizationId,
-    projectId: resolved.projectId,
+    prepared,
+    recipientRows,
+    preflight: body.options?.preflight !== false,
   });
 
   return success(

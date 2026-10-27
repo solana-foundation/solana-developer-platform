@@ -248,6 +248,7 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
 
 - `POST /v1/payments/transfers`
 - `POST /v1/payments/transfer-batches`
+- `POST /v1/payments/transfer-batches/{batchId}/retry`
 - `POST /v1/payments/recurring-payments`
 - `PATCH /v1/payments/recurring-payments/{id}` (an edit to an active schedule signs and broadcasts a replacement subscription)
 - `POST /v1/payments/recurring-payments/{id}/activate`
@@ -327,7 +328,7 @@ Access is checked before the key on every request, so a retry passes exactly the
 | --- | --- |
 | Same key, same request, original finished | The original status and body, with the response header `Idempotent-Replayed: true`. |
 | Same key, original still running | `409 IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`. Wait, then retry with the same key. |
-| Same key, original never recorded its outcome (it crashed) | Until 15 minutes plus the route's lease have passed since the original was sent (about 16 minutes, or about 20 for transfer batches), `409 IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`, as if it were still running. After that, transfers, transfer batches, recurring payments and `POST /v1/wallets` take over and answer from the record the original wrote. A batch whose original stopped before sending some recipients answers with those recipients `failed`: they were never sent, so send them again in a new batch with a new key and a new `externalId`. Every other route returns `409 IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` with no `Retry-After`, to this and every later retry with the key: read the resource with `GET` to see whether it ran, then send again with a new key. |
+| Same key, original never recorded its outcome (it crashed) | Until 15 minutes plus the route's lease have passed since the original was sent (about 16 minutes, or about 20 for transfer batches), `409 IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`, as if it were still running. After that, transfers, transfer batches, recurring payments and `POST /v1/wallets` take over and answer from the record the original wrote. A batch whose original stopped before sending some recipients answers with those recipients `failed`: they were never sent, so send them again with `POST /v1/payments/transfer-batches/{batchId}/retry`. Every other route returns `409 IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` with no `Retry-After`, to this and every later retry with the key: read the resource with `GET` to see whether it ran, then send again with a new key. |
 | Same key, different request or different credential | `422 IDEMPOTENCY_KEY_REUSED`. Nothing runs. |
 | Same key, but the credential has since lost access to the wallet or resource | `403`. The stored response is not returned. |
 | Original was refused with `400`, `401`, `403`, `409` or `429` before it wrote anything | Nothing was stored. Fix the cause and retry with the same key; the request runs again. |
@@ -2696,13 +2697,21 @@ The batch `externalId` names the payout run, and it is unique per project and so
 
 ### Recovering from a partial failure
 
-A batch that ends `partially_failed` paid some recipients and not others. To finish the run:
+A batch with `failed` recipients paid some recipients and not others. A `failed` recipient was not paid: its transaction never reached the network, or the network rejected it. To finish the run, retry the batch:
 
-1. Read the batch with `GET /v1/payments/transfer-batches/{batchId}`.
-2. Collect the recipients whose `status` is `failed`. They were not paid.
-3. Send only those recipients in a new batch, with a new `externalId` (for example `payroll_2026-05-14_retry_1`) and a new `Idempotency-Key`.
+```bash
+curl -X POST https://api.solana.com/v1/payments/transfer-batches/{batchId}/retry \
+  -H "Authorization: Bearer sf_..." \
+  -H "Idempotency-Key: payroll-2026-05-14-retry-1"
+```
 
-Never resend a recipient whose status is still `pending` or `processing`: its transfer may still land. Poll the batch until it settles, then resend whatever ended `failed`.
+The retry sends only the batch's `failed` recipients, from the same wallet with the batch's options, and returns the batch with those recipients `processing` again. Recipients still `pending` or `processing` may still land, so they are never sent again. Each resent recipient keeps its row in the batch and links to its new transfer.
+
+- The same `Idempotency-Key` returns the first retry's answer without sending again.
+- A batch with nothing `failed` returns `409 CONFLICT`, as does a retry that loses to a concurrent one. Nothing is sent.
+- If a retry times out, read the batch with `GET /v1/payments/transfer-batches/{batchId}`, then retry again with a new key once its recipients settle. Only recipients that are still `failed` are sent.
+
+Never resend the whole batch under a new `Idempotency-Key` to finish it: that pays the recipients who already succeeded again.
 
 The rest of this page covers the per-recipient alternative for destinations that are not registered counterparty accounts.
 
@@ -5334,6 +5343,7 @@ Source: https://platform.solana.com/docs/reference/api/payments
 | `GET` | `/v1/payments/transfer-batches` | List transfer batches |
 | `POST` | `/v1/payments/transfer-batches` | Create transfer batch |
 | `GET` | `/v1/payments/transfer-batches/{batchId}` | Get transfer batch |
+| `POST` | `/v1/payments/transfer-batches/{batchId}/retry` | Retry a transfer batch's failed recipients |
 | `POST` | `/v1/payments/transfer-batches/estimate` | Estimate transfer batch |
 | `GET` | `/v1/payments/transfers` | List transfers |
 | `POST` | `/v1/payments/transfers` | Execute transfer (custody) |

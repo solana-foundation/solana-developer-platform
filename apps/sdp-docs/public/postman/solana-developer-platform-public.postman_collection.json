@@ -1069,7 +1069,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/payments/transfer-batches",
-            "description": "Executes an outbound transfer batch from one exact SDP Wallet ID, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records. Requires an Idempotency-Key: a retry with the same key and request returns the original batch without another on-chain submission. Recipient order does not change the request. An `externalId` already used by a batch on the same project and source wallet never pays again: the same request from the same credential returns that batch, and any other returns `409 CONFLICT` with its `batchId` in `error.details`. To recover from a partial failure, read the batch with `GET /v1/payments/transfer-batches/{batchId}` and send only its `failed` recipients in a new batch, with a new `externalId` and a new Idempotency-Key. Never resend a recipient still `pending` or `processing`: its transfer may still land.",
+            "description": "Executes an outbound transfer batch from one exact SDP Wallet ID, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records. Requires an Idempotency-Key: a retry with the same key and request returns the original batch without another on-chain submission. Recipient order does not change the request. An `externalId` already used by a batch on the same project and source wallet never pays again: the same request from the same credential returns that batch, and any other returns `409 CONFLICT` with its `batchId` in `error.details`. To finish a batch after a partial failure, call `POST /v1/payments/transfer-batches/{batchId}/retry`: it sends only the batch's `failed` recipients. Never resend the whole batch under a new Idempotency-Key, which pays the recipients that succeeded again.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"cpa_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
@@ -1079,6 +1079,21 @@
                 }
               }
             }
+          }
+        },
+        {
+          "name": "Retry a transfer batch's failed recipients",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey.retryPaymentTransferBatch}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/payments/transfer-batches/{{batchId}}/retry",
+            "description": "Sends the batch's `failed` recipients again, from the same source wallet with the batch's options, and no other recipient. A failed recipient was not paid: its transaction never reached the network or the network rejected it. Recipients still `pending` or `processing` may land and are never sent again. Each resent recipient keeps its row and links to its new chunk transfer. Takes no body and requires an Idempotency-Key: a retry with the same key returns the first answer without sending again. Returns `409 CONFLICT` when the batch has no failed recipients, or when a concurrent retry claimed them first; nothing is sent. After a timeout, read the batch with `GET /v1/payments/transfer-batches/{batchId}` and retry again with a new key: only recipients that are still `failed` are ever sent."
           }
         },
         {
