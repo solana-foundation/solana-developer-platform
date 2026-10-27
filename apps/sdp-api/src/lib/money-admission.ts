@@ -206,7 +206,8 @@ export class MoneyMovementRefusedError extends AppError {
  * signer's own refusal, made early so a flow that records, claims an
  * Idempotency-Key or calls a gateway before it signs (Private Channels,
  * Rings, transfers, transfer batches, signer check) does none of it. Same
- * 403; the waist still decides every signature (ADR 0007 addendum).
+ * 403; the waist still decides every signature (ADR 0007 addendum). Recurring
+ * payments also ask it for writes that sign nothing (HOO-2337).
  */
 export function assertCallerWalletInScope(
   caller: Pick<ApiKeyContext, "walletAccess" | "organizationId" | "projectId">,
@@ -242,12 +243,18 @@ export function assertCallerMaySignWith(
 
 /**
  * Refuses, before any work, a wallet whose purpose the movement does not
- * allow (APE-371), without requiring the caller's wallet scope: recurring
- * writes that sign nothing succeed on any project wallet (HOO-2099). A
- * refused wallet outside the scope is refused as out of scope instead, so a
- * key never learns the purpose of a wallet it cannot see. The custody signer
- * makes the same purpose refusal ({@link decideWalletPurpose}) on every path,
- * cron included.
+ * allow (APE-371), without requiring the caller's wallet scope. A refused
+ * wallet outside the scope is refused as out of scope instead, so a key never
+ * learns the purpose of a wallet it cannot see. The custody signer makes the
+ * same purpose refusal ({@link decideWalletPurpose}) on every path, cron
+ * included.
+ *
+ * Wallet scope usually bounds only what SDP signs with (a ramp cancel signs
+ * nothing and needs none). Recurring payments are the exception (HOO-2337):
+ * every write to a schedule, signing or not and cancel included, requires the
+ * source wallet in scope, because an in-scope activator signs whatever terms
+ * a pending edit left. Their authorize step asks
+ * {@link assertCallerWalletInScope} first and this only for the purpose.
  *
  * @param caller - The authenticated caller, as read at authentication.
  * @param wallet - The custody wallet the movement would sign with.

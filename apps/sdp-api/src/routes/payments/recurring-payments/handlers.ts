@@ -20,7 +20,7 @@ import {
   internalError,
   walletNotFound,
 } from "@/lib/errors";
-import { assertCallerWalletInScope, assertMoneyStartAdmitted } from "@/lib/money-admission";
+import { assertMoneyStartAdmitted } from "@/lib/money-admission";
 import { created, success } from "@/lib/response";
 import { getAuthorized } from "@/middleware/authorize";
 import {
@@ -422,7 +422,6 @@ async function mutateRecurringPaymentLifecycle(c: AppContext, operation: "cancel
           projectId,
           sourceWallet,
           recurringPayment,
-          admitCaller: () => assertCallerWalletInScope(auth, sourceWallet.id),
           idempotencyKey: requiredIdempotency(c).key,
         })
       : await resumeRecurringPaymentRecord({
