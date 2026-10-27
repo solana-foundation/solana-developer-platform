@@ -57,11 +57,6 @@ export function EarnSummary({
   );
 }
 
-/** The parts of a row's detail line, joined by the design's middle dot. */
-export function earnDetailLine(parts: readonly string[]): string {
-  return parts.join(" · ");
-}
-
 /**
  * A table row's subject over its 13px detail line, both truncating with the whole text kept in a
  * title, as every Earn table sets its first cell.

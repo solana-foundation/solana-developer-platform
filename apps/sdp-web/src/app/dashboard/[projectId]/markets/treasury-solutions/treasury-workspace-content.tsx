@@ -41,6 +41,7 @@ import {
 import {
   type EarnDepositAvailabilityLabels,
   earnDepositAvailabilityLabel,
+  earnDetailLine,
   earnProviderLabel,
   formatProviderAmount,
   formatTokenValue,
@@ -58,7 +59,6 @@ import {
 import {
   EarnRowIdentity,
   EarnSummary,
-  earnDetailLine,
 } from "@/app/dashboard/[projectId]/markets/earn/earn-page-blocks";
 import {
   type EarnProviderAccess,

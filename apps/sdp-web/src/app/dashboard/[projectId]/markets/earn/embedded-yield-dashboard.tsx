@@ -34,6 +34,7 @@ import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { isPositiveDecimal } from "./earn-decimal";
 import {
+  earnDetailLine,
   earnProviderLabel,
   earnStrategyLiquidityLabel,
   formatEpochSeconds,
@@ -47,7 +48,7 @@ import {
   earnStrategyReferenceKey,
   sumDecimalStrings,
 } from "./earn-market-presentation";
-import { EarnRowIdentity, EarnSummary, earnDetailLine } from "./earn-page-blocks";
+import { EarnRowIdentity, EarnSummary } from "./earn-page-blocks";
 import { useEarnExternalWalletPositionSummary, useEarnStrategies } from "./earn-program-data";
 import { EARN_TABLE, EARN_TABLE_FRAME } from "./earn-table-layout";
 import { earnVaultHoldingValue } from "./earn-vault-holding";
@@ -117,6 +118,7 @@ function formatLatestDepositDate(
 function PortfolioSummary({ summary }: { summary: EarnExternalWalletPositionSummary }) {
   const t = useTranslations();
   const locale = useLocale();
+  const countFormat = useMemo(() => new Intl.NumberFormat(locale), [locale]);
   const liveValue = portfolioLiveValue(summary);
   const counts = [
     { id: "wallets", count: summary.walletCount },
@@ -138,7 +140,7 @@ function PortfolioSummary({ summary }: { summary: EarnExternalWalletPositionSumm
       stats={counts.map(({ count, id }) => ({
         id,
         label: t(SUMMARY_COUNT_WORDS[id][count === 1 ? "one" : "other"]),
-        value: new Intl.NumberFormat(locale).format(count),
+        value: countFormat.format(count),
       }))}
     />
   );
