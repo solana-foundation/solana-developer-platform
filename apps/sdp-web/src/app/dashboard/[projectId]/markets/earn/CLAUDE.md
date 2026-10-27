@@ -685,6 +685,9 @@ browser pass on `/dashboard/markets/embedded-yield` and
   and sections that most treasuries never show (queued requests, custodial
   programs) render nothing until they have rows. A table's columns drop below
   `@2xl`, never its action; a dropped status reads under the row's balance.
+  The integration guide's skeleton draws its intro and API key callout at the
+  English copy's wrap widths, so editing `guideIntro` or the callout copy means
+  re-measuring it against the page from 360 to 1440.
 - **Nothing may overlap — provider and fund names run long.**
   `@solana/design-system`'s `cn` is a plain string join — **no tailwind-merge**.
   A class handed to `Table*` that conflicts with one of its own base classes
