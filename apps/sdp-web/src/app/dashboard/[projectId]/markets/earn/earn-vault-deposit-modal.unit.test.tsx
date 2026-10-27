@@ -1050,6 +1050,27 @@ describe("slippage-floored providers", () => {
     ).toBeNull();
   });
 
+  it("keeps the review's share figures whole instead of clipping their digits", async () => {
+    // A long decimal reads in full right before confirm; it wraps, never ends in an ellipsis.
+    primeQuote("123456789.123456");
+    render(
+      <EarnVaultDepositModal projectId={PROJECT_ID} strategy={flooredStrategy} onClose={vi.fn()} />
+    );
+    const user = userEvent.setup();
+    await screen.findByRole("dialog", { name: "Deposit into Institutional USDC Vault" });
+    await user.click(screen.getByRole("radio", { name: /Treasury wallet/ }));
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "1.000000" } });
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    await screen.findByText("Minimum shares received", undefined, { timeout: 3000 });
+    expect(screen.getByText("123456789.123456")).toBeTruthy();
+    for (const label of ["Expected shares", "Minimum shares received"]) {
+      const value = screen.getByText(label).closest("dt")?.nextElementSibling;
+      expect(value?.tagName).toBe("DD");
+      expect(value?.className).not.toContain("truncate");
+    }
+  });
+
   it("keeps the wallet-pays note while the strategy is not sponsored", async () => {
     primeQuote("0.99999");
     render(

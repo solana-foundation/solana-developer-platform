@@ -372,7 +372,7 @@ function QueuedWithdrawalResult({
       <p className="mt-2 text-body text-secondary">{t(presentation.bodyKey)}</p>
 
       <DetailList className="mt-5" variant="summary">
-        <DetailRow label={t("DashboardEarn.queuedWithdraw.quotedAmount")}>
+        <DetailRow label={t("DashboardEarn.queuedWithdraw.quotedAmount")} wrap>
           <span className="tabular-nums">
             {formatTokenValue(request.quotedAssets, request.assetMint, locale)}
           </span>
@@ -484,12 +484,12 @@ function QueueReview({
         </div>
       ) : preview ? (
         <DetailList className="mt-5" variant="summary">
-          <DetailRow label={t("DashboardEarn.queuedWithdraw.expectedAmount")}>
+          <DetailRow label={t("DashboardEarn.queuedWithdraw.expectedAmount")} wrap>
             <span className="tabular-nums">
               {formatTokenValue(preview.assets, position.tokenMint, locale)}
             </span>
           </DetailRow>
-          <DetailRow label={t("DashboardEarn.queuedWithdraw.discount")}>
+          <DetailRow label={t("DashboardEarn.queuedWithdraw.discount")} wrap>
             {bpsToPercent(preview.discountBps)}%
           </DetailRow>
           <DetailRow label={t("DashboardEarn.queuedWithdraw.maturity")} wrap>

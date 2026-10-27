@@ -349,10 +349,10 @@ function WithdrawPreviewPanel({
       {preview.phase === "ready" ? (
         <>
           <DetailList className="mt-1" variant="summary">
-            <DetailRow label={t("DashboardEarn.withdraw.previewFee")}>
+            <DetailRow label={t("DashboardEarn.withdraw.previewFee")} wrap>
               <span className="tabular-nums">{formatUsd(preview.preview.feeUsd, locale)}</span>
             </DetailRow>
-            <DetailRow label={t("DashboardEarn.withdraw.previewTotalAfter")}>
+            <DetailRow label={t("DashboardEarn.withdraw.previewTotalAfter")} wrap>
               <span className="tabular-nums">
                 {formatUsd(preview.preview.totalUsdAfterWithdrawal, locale)}
               </span>
@@ -396,7 +396,7 @@ function WithdrawalCreatedView({
       </p>
 
       <DetailList className="mt-5" variant="summary">
-        <DetailRow label={t("DashboardEarn.withdraw.amountLabel")}>
+        <DetailRow label={t("DashboardEarn.withdraw.amountLabel")} wrap>
           <span className="tabular-nums">
             {formatUsd(withdrawal.amountRequestedUsd ?? fallbackAmountUsd, locale)} ·{" "}
             {token.toUpperCase()}
