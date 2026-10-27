@@ -10,6 +10,13 @@
 -- Breaking: an API revision that reads scope_type or scope_id fails its budget
 -- queries. Deploy only with the API that reads these tables, and never roll back
 -- past it.
+--
+-- sdp:migration-locks: blocking
+-- The revisions foreign key validates without NOT VALID and the two reservation
+-- indexes rebuild without CONCURRENTLY, briefly blocking writes to the budget
+-- tables. That is harmless here: the platform is pre-launch, so the tables hold a
+-- handful of rows when this runs, and sponsorship admission waits for the
+-- transaction rather than failing.
 
 -- Lamport amounts the budget holds as JS numbers and as Redis Lua doubles:
 -- exact only up to 2^53 - 1, unlike Solana's u64 counters (sdp_u64).
