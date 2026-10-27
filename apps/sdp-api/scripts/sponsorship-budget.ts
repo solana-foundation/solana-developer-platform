@@ -72,6 +72,7 @@ interface PolicyChangePlan {
   inheritedDefault: SponsorshipBudgetPolicy | null;
   proposed: ProposedPolicy;
   expectedVersion: number | null;
+  currentVersion: number;
   result: SponsorshipBudgetPolicy | null;
 }
 
@@ -295,7 +296,7 @@ function proposedPolicy(
 async function applyChange(
   repository: SponsorshipBudgetRepository,
   redis: SponsorshipBudgetRedis,
-  command: Exclude<SponsorshipBudgetCommand, { command: "status" }>,
+  command: Extract<SponsorshipBudgetCommand, { mode: "apply" }>,
   target: PolicyTarget
 ): Promise<SponsorshipBudgetPolicy> {
   switch (command.command) {
@@ -390,6 +391,7 @@ async function planAndApply(
     inheritedDefault,
     proposed: proposedPolicy(command, current),
     expectedVersion,
+    currentVersion: current === null ? 0 : current.version,
     result: null,
   };
   if (command.mode === "preview") return plan;

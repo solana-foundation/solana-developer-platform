@@ -88,10 +88,11 @@ const writeFlagsSchema = z.strictObject({
 });
 
 const expectedVersionSchema = z
-  .string({ error: "--expected-version is required (0 when the policy does not exist yet)" })
+  .string()
   .regex(CANONICAL_NON_NEGATIVE_INTEGER, "--expected-version must be a non-negative integer")
   .transform(Number)
-  .pipe(z.number().int().max(Number.MAX_SAFE_INTEGER));
+  .pipe(z.number().int().max(Number.MAX_SAFE_INTEGER))
+  .optional();
 
 const policyWriteFlagsSchema = writeFlagsSchema.extend({
   "per-tx-lamports": z.string().optional(),
@@ -125,9 +126,17 @@ const sponsorshipBudgetCommandSchema = z.discriminatedUnion(
   { error: `Usage: sponsorship:budget <${SPONSORSHIP_BUDGET_COMMANDS.join("|")}> [flags]` }
 );
 
+/**
+ * The policy version a write is bound to. An apply always names the version the
+ * operator (or the workflow's preview) read; a preview may omit it and reports
+ * the current version instead.
+ */
+export type SponsorshipWriteVersion =
+  | { mode: "preview"; expectedVersion: number | null }
+  | { mode: "apply"; expectedVersion: number };
+
 export interface SponsorshipPolicyWrite {
   enabled: boolean;
-  expectedVersion: number;
   perTransactionLamports: number;
   hourlyLamports: number;
   dailyLamports: number;
@@ -135,7 +144,6 @@ export interface SponsorshipPolicyWrite {
 
 interface SponsorshipOperatorAttribution {
   network: SponsorshipNetwork;
-  mode: SponsorshipBudgetWriteMode;
   operator: string;
   reason: string;
 }
@@ -147,11 +155,38 @@ export type SponsorshipBudgetCommand =
       environment: (typeof SDP_ENVIRONMENTS)[number];
       organizationId: string;
     } & SponsorshipOperatorAttribution &
-      SponsorshipPolicyWrite)
+      SponsorshipPolicyWrite &
+      SponsorshipWriteVersion)
   | ({ command: "set-project-default" | "set-global" } & SponsorshipOperatorAttribution &
-      SponsorshipPolicyWrite)
-  | ({ command: "kill" } & SponsorshipOperatorAttribution)
-  | ({ command: "resume"; expectedVersion: number } & SponsorshipOperatorAttribution);
+      SponsorshipPolicyWrite &
+      SponsorshipWriteVersion)
+  | ({ command: "kill" } & SponsorshipOperatorAttribution &
+      ({ mode: "preview" } | { mode: "apply" }))
+  | ({ command: "resume" } & SponsorshipOperatorAttribution & SponsorshipWriteVersion);
+
+/**
+ * Bind a write to the version it was computed from. An apply without one is
+ * refused: it could overwrite a change (a breaker trip in particular) that its
+ * operator never saw.
+ *
+ * @param mode - Whether the write previews or applies.
+ * @param expectedVersion - The version given with `--expected-version`, if any.
+ * @returns The mode and version, with the version required for an apply.
+ */
+function writeVersion(
+  mode: SponsorshipBudgetWriteMode,
+  expectedVersion: number | undefined
+): SponsorshipWriteVersion {
+  if (mode === "preview") {
+    return { mode, expectedVersion: expectedVersion === undefined ? null : expectedVersion };
+  }
+  if (expectedVersion === undefined) {
+    throw new Error(
+      "--expected-version is required with --mode apply (0 when the policy does not exist yet)"
+    );
+  }
+  return { mode, expectedVersion };
+}
 
 /**
  * The budget network an SDP environment's projects draw sponsorship from.
@@ -167,8 +202,8 @@ export function sponsorshipNetworkForEnvironment(
 
 /**
  * Parse the operator CLI's command and flags. Every write names its environment,
- * mode, operator and reason; every write that can enable sponsorship also names the
- * policy version the operator read, so it refuses to overwrite a change it did
+ * mode, operator and reason; every apply that can enable sponsorship also names the
+ * policy version its preview read, so it refuses to overwrite a change it did
  * not see (a breaker trip in particular). `kill` takes no version: disabling is
  * always safe to apply over a concurrent change.
  *
@@ -205,21 +240,19 @@ export function parseSponsorshipBudgetCommand(input: {
       return {
         command: "resume",
         network,
-        mode: args.mode,
         operator: args.operator,
         reason: args.reason,
-        expectedVersion: args["expected-version"],
+        ...writeVersion(args.mode, args["expected-version"]),
       };
     case "set-project":
     case "set-project-default":
     case "set-global": {
       const write = {
         network,
-        mode: args.mode,
         operator: args.operator,
         reason: args.reason,
         enabled: args.enabled === "true",
-        expectedVersion: args["expected-version"],
+        ...writeVersion(args.mode, args["expected-version"]),
         ...toRedisLuaSafePolicyLimits(
           parseSponsorshipPolicyLimits({
             perTransactionLamports: args["per-tx-lamports"],
