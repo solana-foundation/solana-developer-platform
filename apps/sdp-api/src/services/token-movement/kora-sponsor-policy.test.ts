@@ -204,7 +204,7 @@ const MOVABLE_PROBES: Record<CapabilityExtension, ExtensionArgs[] | null> = {
       newerTransferFee: { epoch: 0n, maximumFee: 5_000n, transferFeeBasisPoints: 50 },
     },
   ],
-  // The builder refuses both until PR 5 (`scaled_display`), so Kora may block them for now.
+  // The builder refuses both while display units are deferred (`scaled_display`), so Kora may block them for now.
   ScaledUiAmountConfig: null,
   InterestBearingConfig: null,
   TransferHook: [{ __kind: "TransferHook", authority: AUTHORITY, programId: HOOK_PROGRAM }],

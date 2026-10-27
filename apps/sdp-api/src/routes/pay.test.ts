@@ -900,7 +900,7 @@ describe("Public payment request routes", () => {
 
     it("refuses a request in a scaled UI amount mint before claiming, until wallets show token units", async () => {
       stubSponsorship();
-      // Balances show the scaled amount until PR 5, so a payer would read one amount and pay another.
+      // Balances show the scaled amount while display units are deferred, so a payer would read one amount and pay another.
       const mint = syntheticAddress(355);
       answerMovementAccounts(
         rpc,

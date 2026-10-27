@@ -3,7 +3,11 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { findBrandedCastViolations, findValueMovementViolations } from "./check-value-movement.mjs";
+import {
+  findBrandedCastViolations,
+  findTokenMovementBuilderViolations,
+  findValueMovementViolations,
+} from "./check-value-movement.mjs";
 
 function fixture(files) {
   const rootDir = mkdtempSync(path.join(tmpdir(), "value-movement-"));
@@ -473,3 +477,87 @@ test("fails when a branded type is missing from its module or from every program
     rmSync(rootDir, { recursive: true, force: true });
   }
 });
+
+// biome-ignore-start lint/security/noSecrets: SDK function names, not secrets.
+test("pins token movement builders to their files, however they are imported", () => {
+  const files = {
+    "src/builder.ts":
+      'import { getTransferCheckedInstruction } from "@solana-program/token-2022";\n',
+    "src/renamed.ts":
+      'import { getTransferCheckedInstruction as transfer } from "@solana-program/token";\n',
+    "src/namespace.ts":
+      'import * as token from "@solana-program/token-2022";\ntoken.getTransferCheckedWithFeeInstruction;\n',
+    "src/keyed.ts":
+      'import * as token from "@solana-program/token";\ntoken["getTransferCheckedInstruction"];\n',
+    "src/destructured.ts":
+      'import * as token from "@solana-program/token";\nconst { getTransferCheckedInstruction: transfer } = token;\n',
+    // The namespace handed on: the check can no longer see what is read off it.
+    "src/handed-on.ts": 'import * as token from "@solana-program/token";\nuse(token);\n',
+    "apps/sdp-web/src/pay.tsx":
+      'import { getTransferCheckedInstruction } from "@solana-program/token";\n',
+    // A same-named parameter or local is not the namespace; the namespace's own use still counts.
+    "src/shadowed.ts":
+      'import * as token from "@solana-program/token";\ntoken.TOKEN_PROGRAM_ADDRESS;\nexport function format(token: string) {\n  return token;\n}\n',
+    "src/shadowed-use.ts":
+      'import * as token from "@solana-program/token";\nexport function format(token: string) {\n  return token;\n}\ntoken.getTransferCheckedInstruction;\n',
+    "src/exported.ts": 'import * as token from "@solana-program/token";\nexport { token };\n',
+    "src/exported-renamed.ts":
+      'import * as token from "@solana-program/token";\nexport { token as spl };\n',
+    // An alias is only a name, and a type-only export hands out no value.
+    "src/alias-only.ts":
+      'import * as token from "@solana-program/token";\ndeclare const x: number;\nexport { x as token };\nexport type { token as Types };\n',
+    "src/dynamic.ts":
+      'const { getTransferCheckedInstruction } = await import("@solana-program/token");\n',
+    "src/required.ts": 'const token = require("@solana-program/token-2022");\n',
+    "src/reexported.ts":
+      'export { getTransferCheckedInstruction as transfer } from "@solana-program/token";\n',
+    "src/reexported-all.ts": 'export * from "@solana-program/token-2022";\n',
+    "src/reexported-type.ts": 'export type { Mint } from "@solana-program/token";\n',
+    // Other members, a same-named property and a type read nothing pinned.
+    "src/other-members.ts":
+      'import * as token from "@solana-program/token";\ntoken.TOKEN_PROGRAM_ADDRESS;\nconst x = { token: 1 };\nlet m: typeof token;\n',
+    // A repository method of the same name, and the package's constants: not a builder.
+    "src/repository.ts":
+      'import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";\nrepo.getTransferCheckedInstruction();\n',
+    "src/builder.test.ts": 'import { getTransferInstruction } from "@solana-program/token";\n',
+  };
+  const rootDir = fixture(files);
+  try {
+    const violations = findTokenMovementBuilderViolations({
+      rootDir,
+      files: Object.keys(files),
+      rules: [
+        {
+          id: "transfer",
+          why: "builds a transfer",
+          imports: [
+            {
+              packages: ["@solana-program/token", "@solana-program/token-2022"],
+              names: ["getTransferCheckedInstruction", "getTransferCheckedWithFeeInstruction"],
+            },
+          ],
+          allow: ["src/builder.ts", "src/gone.ts"],
+        },
+      ],
+    });
+    assert.deepEqual(violations, [
+      "src/renamed.ts uses getTransferCheckedInstruction: it builds a transfer (transfer)",
+      "src/namespace.ts uses getTransferCheckedWithFeeInstruction: it builds a transfer (transfer)",
+      "src/keyed.ts uses getTransferCheckedInstruction: it builds a transfer (transfer)",
+      "src/destructured.ts uses getTransferCheckedInstruction: it builds a transfer (transfer)",
+      "src/handed-on.ts uses getTransferCheckedInstruction, getTransferCheckedWithFeeInstruction: it builds a transfer (transfer)",
+      "apps/sdp-web/src/pay.tsx uses getTransferCheckedInstruction: it builds a transfer (transfer)",
+      "src/shadowed-use.ts uses getTransferCheckedInstruction: it builds a transfer (transfer)",
+      "src/exported.ts uses getTransferCheckedInstruction, getTransferCheckedWithFeeInstruction: it builds a transfer (transfer)",
+      "src/exported-renamed.ts uses getTransferCheckedInstruction, getTransferCheckedWithFeeInstruction: it builds a transfer (transfer)",
+      "src/dynamic.ts uses getTransferCheckedInstruction, getTransferCheckedWithFeeInstruction: it builds a transfer (transfer)",
+      "src/required.ts uses getTransferCheckedInstruction, getTransferCheckedWithFeeInstruction: it builds a transfer (transfer)",
+      "src/reexported.ts uses getTransferCheckedInstruction: it builds a transfer (transfer)",
+      "src/reexported-all.ts uses getTransferCheckedInstruction, getTransferCheckedWithFeeInstruction: it builds a transfer (transfer)",
+      "src/gone.ts no longer uses transfer: remove it from the list",
+    ]);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+// biome-ignore-end lint/security/noSecrets: SDK function names, not secrets.

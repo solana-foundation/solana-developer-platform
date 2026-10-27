@@ -959,7 +959,7 @@ describe("Payments routes — recurring", () => {
     );
     await expectTokenRejected(pausedMint);
 
-    // Main refused a scaled UI amount mint, and the builder's row still does until PR 5: balances
+    // Main refused a scaled UI amount mint, and the builder's row still does while display units are deferred: balances
     // show its scaled amount, so a mandate typed from them would pull another.
     const scaledRes = await createRecurring(scaledMint);
     expect(scaledRes.status).toBe(400);
