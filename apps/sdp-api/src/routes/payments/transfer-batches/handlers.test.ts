@@ -1891,21 +1891,24 @@ describe("payment transfer batches", () => {
         counterpartyId,
         walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
       });
-      const send = (idempotencyKey: string) =>
+      const send = (
+        idempotencyKey: string,
+        { amount = "0.1", apiKey = TEST_API_KEY.raw }: { amount?: string; apiKey?: string } = {}
+      ) =>
         app.request(
           "/v1/payments/transfer-batches",
           {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              Authorization: `Bearer ${TEST_API_KEY.raw}`,
+              Authorization: `Bearer ${apiKey}`,
               "Idempotency-Key": idempotencyKey,
             },
             body: JSON.stringify({
               externalId,
               sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
               token: "SOL",
-              recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
+              recipients: [{ counterpartyId, counterpartyAccountId, amount }],
               options: { preflight: false },
             }),
           },
@@ -1924,8 +1927,16 @@ describe("payment transfer batches", () => {
       return required(row).count;
     }
 
-    it("refuses a reused externalId under a new key with the existing batch, signing nothing", async () => {
-      const { send, signingOutcomeMock } = await seedOneRecipientBatch("payroll_reused");
+    function expectNothingSigned(signingOutcomeMock: ReturnType<typeof vi.fn>) {
+      // Answered before any chain read, signer or broadcast.
+      expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
+      expect(getRecentBlockhashMock).not.toHaveBeenCalled();
+      expect(signingOutcomeMock).not.toHaveBeenCalled();
+      expect(sendTransactionMock).not.toHaveBeenCalled();
+    }
+
+    it("answers the same batch resent under a new key with the original, paying no one again", async () => {
+      const { send, signingOutcomeMock } = await seedOneRecipientBatch("payroll_resent");
 
       const first = await send("batch-external-id-first");
       expect(first.status).toBe(200);
@@ -1934,18 +1945,54 @@ describe("payment transfer batches", () => {
 
       const resend = await send("batch-external-id-resend");
 
-      expect(resend.status).toBe(409);
-      expect(await resend.json()).toMatchObject({
+      expect(resend.status).toBe(200);
+      const resendBody = (await resend.json()) as { data: { batch: { id: string } } };
+      expect(resendBody.data.batch.id).toBe(firstBody.data.batch.id);
+      expectNothingSigned(signingOutcomeMock);
+      expect(await countBatches()).toBe(1);
+    });
+
+    it("refuses a different batch reusing an externalId with the existing batch, signing nothing", async () => {
+      const { send, signingOutcomeMock } = await seedOneRecipientBatch("payroll_reused");
+
+      const first = await send("batch-external-id-original");
+      expect(first.status).toBe(200);
+      const firstBody = (await first.json()) as { data: { batch: { id: string } } };
+      vi.clearAllMocks();
+
+      const changed = await send("batch-external-id-changed", { amount: "0.2" });
+
+      expect(changed.status).toBe(409);
+      expect(await changed.json()).toMatchObject({
         error: {
           code: "CONFLICT",
           details: { batchId: firstBody.data.batch.id, externalId: "payroll_reused" },
         },
       });
-      // Refused before any chain read, signer or broadcast.
-      expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
-      expect(getRecentBlockhashMock).not.toHaveBeenCalled();
-      expect(signingOutcomeMock).not.toHaveBeenCalled();
-      expect(sendTransactionMock).not.toHaveBeenCalled();
+      expectNothingSigned(signingOutcomeMock);
+      expect(await countBatches()).toBe(1);
+    });
+
+    it("refuses the same batch from another credential instead of replaying it", async () => {
+      const { send, signingOutcomeMock } = await seedOneRecipientBatch("payroll_other_key");
+      const otherKey = "sk_test_batch_payments_other";
+      await seedApiKeyRow(env, await hashString(otherKey, env.API_KEY_PEPPER), {
+        ...TEST_SEEDED_API_KEY,
+        id: "key_batch_payments_other",
+      });
+
+      const first = await send("batch-external-id-own-key");
+      expect(first.status).toBe(200);
+      const firstBody = (await first.json()) as { data: { batch: { id: string } } };
+      vi.clearAllMocks();
+
+      const other = await send("batch-external-id-other-key", { apiKey: otherKey });
+
+      expect(other.status).toBe(409);
+      expect(await other.json()).toMatchObject({
+        error: { code: "CONFLICT", details: { batchId: firstBody.data.batch.id } },
+      });
+      expectNothingSigned(signingOutcomeMock);
       expect(await countBatches()).toBe(1);
     });
 

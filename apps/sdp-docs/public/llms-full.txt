@@ -2687,7 +2687,10 @@ curl -X POST https://api.solana.com/v1/payments/transfer-batches \
 
 ### One batch per payout run
 
-The batch `externalId` names the payout run, and it is unique per project and source wallet. A second batch with an `externalId` already used on that wallet returns `409 CONFLICT` with the existing batch in `error.details.batchId`, and nothing is sent. This holds under any `Idempotency-Key`, so a worker that restarts with a fresh key cannot pay the run twice.
+The batch `externalId` names the payout run, and it is unique per project and source wallet. Whatever `Idempotency-Key` it carries, a batch with an `externalId` already used on that wallet never pays anyone again:
+
+- The same request, from the same API key, returns the existing batch as it stands. A worker that restarts with a fresh key gets the original run back.
+- Any other request (different recipients, amounts or options, or another API key) returns `409 CONFLICT` with the existing batch in `error.details.batchId`.
 
 `externalId` is optional. A batch without one gets no such guard: only its `Idempotency-Key` stops a resend from paying the same recipients again. Send one for every payout run.
 

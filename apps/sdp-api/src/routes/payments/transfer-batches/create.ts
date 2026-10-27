@@ -52,36 +52,54 @@ async function respondToTransferBatchReplay(
   return success(c, response);
 }
 
-/**
- * A payout run's externalId already names a batch on this source wallet
- * (HOO-2335, SDP-021 SA-2): sending it again under a new Idempotency-Key would
- * pay that batch's recipients twice, so it is refused with the batch's id.
- */
-function externalIdReused(holder: PaymentTransferBatchRow): AppError {
-  return conflict(
-    "A transfer batch with this externalId already exists for this source wallet. Read it with GET /v1/payments/transfer-batches/{batchId} and send only its failed recipients in a new batch with a new externalId.",
-    { batchId: holder.id, externalId: holder.external_id }
-  );
-}
-
 interface BatchWalletScope {
   organizationId: string;
   projectId: string;
   sourceCustodyWalletId: string;
+  /** The credential sending the batch, which a held batch replays only to. */
+  principalId: string;
 }
 
 function findExternalIdHolder(c: AppContext, scope: BatchWalletScope, externalId: string) {
   return getPaymentTransferBatchesRepository(c).findTransferBatchByExternalId({
-    ...scope,
+    organizationId: scope.organizationId,
+    projectId: scope.projectId,
+    sourceCustodyWalletId: scope.sourceCustodyWalletId,
     externalId,
   });
+}
+
+/**
+ * A payout run's externalId already names a batch on this source wallet
+ * (HOO-2335, SDP-021 SA-2), so this request never pays anyone. The same
+ * request from the credential that sent the batch, under a new
+ * Idempotency-Key, is answered with that batch as it stands; a different
+ * request, or another credential, is refused (409) with the batch's id.
+ */
+async function answerHeldExternalId(
+  c: AppContext,
+  holder: PaymentTransferBatchRow,
+  scope: BatchWalletScope
+) {
+  if (
+    holder.initiated_by_key_id === scope.principalId &&
+    holder.idempotency_fingerprint !== null &&
+    idempotencyFingerprintMatches(c, holder.idempotency_fingerprint)
+  ) {
+    return respondToTransferBatchReplay(c, holder, scope.organizationId, scope.projectId);
+  }
+  throw conflict(
+    "A different transfer batch with this externalId already exists for this source wallet. Read it with GET /v1/payments/transfer-batches/{batchId} and send only its failed recipients in a new batch with a new externalId.",
+    { batchId: holder.id, externalId: holder.external_id }
+  );
 }
 
 /**
  * The batch insert lost on a unique index. A concurrent attempt under this
  * request's key (a takeover) wrote its row first and can trip either index:
  * the request answers from that row. A batch of another request that took the
- * externalId after the early check refuses this one (409). Nothing was sent.
+ * externalId after the early check answers as a held externalId. Nothing was
+ * sent.
  */
 async function answerLostBatchInsert(
   c: AppContext,
@@ -112,7 +130,7 @@ async function answerLostBatchInsert(
   }
   if (violation === "external_id" && externalId !== null) {
     const holder = await findExternalIdHolder(c, scope, externalId);
-    if (holder) throw externalIdReused(holder);
+    if (holder) return answerHeldExternalId(c, holder, scope);
   }
   throw error;
 }
@@ -194,9 +212,10 @@ export async function findTransferBatchRecordReplay(
  * The final batch status comes from the locked repository recompute — never
  * from in-memory state — so a reconciliation run that settles chunks during
  * the request cannot be overwritten with a stale status.
- * Replays idempotently by Idempotency-Key + payload fingerprint, and refuses
- * an externalId another batch on the source wallet holds (409) before it
- * reads the chain or loads a signer; the unique index catches a race.
+ * Replays idempotently by Idempotency-Key + payload fingerprint. An
+ * externalId another batch on the source wallet holds replays that batch to
+ * the same request from its credential, or refuses (409), before it reads the
+ * chain or loads a signer; the unique index catches a race.
  *
  * @param c - Request context.
  * @returns JSON batch response with recipients and chunk transfers.
@@ -215,12 +234,13 @@ export async function createTransferBatch(
     organizationId: authorized.scope.auth.organizationId,
     projectId: authorized.projectId,
     sourceCustodyWalletId: authorized.sourceWallet.id,
+    principalId: authorized.scope.auth.id,
   };
   if (externalId !== null) {
     const holder = await findExternalIdHolder(c, walletScope, externalId);
     // A row under this request's own key is a takeover's: the insert answers it.
     if (holder !== null && holder.idempotency_key !== idempotencyKey) {
-      throw externalIdReused(holder);
+      return answerHeldExternalId(c, holder, walletScope);
     }
   }
   const resolved = await resolveBatchMovement(body, authorized);

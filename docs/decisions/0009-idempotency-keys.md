@@ -127,8 +127,8 @@ Neither resumes or re-sends: a recipient with a transfer row is settled from tha
 
 The key dedupes one request; a batch's `externalId` dedupes the payout run (HOO-2335, SDP-021
 SA-2). It is unique per project and source wallet (migration 0184), so a run resent under a new
-key after a partial failure is refused with `409 CONFLICT` and the existing batch's id instead of
-paying its recipients again. The handler checks it before any chain read or signer, and the index
+key never pays its recipients again: the same request from the same credential is answered with
+the existing batch, and any other with `409 CONFLICT` and that batch's id. The handler checks it before any chain read or signer, and the index
 catches a race. `externalId` is optional: a caller who omits it gets no server-side guard against
 paying a run twice beyond the key.
 
