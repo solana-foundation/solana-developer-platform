@@ -402,12 +402,12 @@ function WithdrawalCreatedView({
             {token.toUpperCase()}
           </span>
         </DetailRow>
-        <DetailRow label={t("DashboardEarn.withdraw.destinationLabel")}>
+        <DetailRow label={t("DashboardEarn.withdraw.destinationLabel")} wrap>
           <span className="block max-w-52 truncate" title={withdrawal.destinationAddress}>
             {withdrawal.destinationAddress}
           </span>
         </DetailRow>
-        <DetailRow label={t("DashboardEarn.withdraw.referenceLabel")}>
+        <DetailRow label={t("DashboardEarn.withdraw.referenceLabel")} wrap>
           <span className="block max-w-52 truncate" title={withdrawal.withdrawalRef}>
             {withdrawal.withdrawalRef}
           </span>

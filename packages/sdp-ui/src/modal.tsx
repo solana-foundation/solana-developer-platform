@@ -39,10 +39,10 @@ const sizeClassNames: Record<ModalSize, string> = {
   xl: "max-w-2xl",
 };
 
-const placementClassNames: Record<ModalPlacement, string> = {
+const placementClassNames = {
   center: "items-center",
   top: "items-start pt-[min(12dvh,6rem)]",
-};
+} as const satisfies Record<ModalPlacement, string>;
 
 export function Modal({
   isOpen,

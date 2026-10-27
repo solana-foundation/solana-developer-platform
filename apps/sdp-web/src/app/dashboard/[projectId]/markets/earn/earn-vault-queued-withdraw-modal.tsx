@@ -377,10 +377,10 @@ function QueuedWithdrawalResult({
             {formatTokenValue(request.quotedAssets, request.assetMint, locale)}
           </span>
         </DetailRow>
-        <DetailRow label={t("DashboardEarn.queuedWithdraw.maturity")}>
+        <DetailRow label={t("DashboardEarn.queuedWithdraw.maturity")} wrap>
           {formatEpochSecondsOr(request.maturityTimestamp, locale, t("DashboardEarn.unavailable"))}
         </DetailRow>
-        <DetailRow label={t("DashboardEarn.queuedWithdraw.deadline")}>
+        <DetailRow label={t("DashboardEarn.queuedWithdraw.deadline")} wrap>
           {formatEpochSecondsOr(request.deadlineTimestamp, locale, t("DashboardEarn.unavailable"))}
         </DetailRow>
       </DetailList>
@@ -492,14 +492,14 @@ function QueueReview({
           <DetailRow label={t("DashboardEarn.queuedWithdraw.discount")}>
             {bpsToPercent(preview.discountBps)}%
           </DetailRow>
-          <DetailRow label={t("DashboardEarn.queuedWithdraw.maturity")}>
+          <DetailRow label={t("DashboardEarn.queuedWithdraw.maturity")} wrap>
             {formatEpochSecondsOr(
               preview.maturityTimestamp,
               locale,
               t("DashboardEarn.unavailable")
             )}
           </DetailRow>
-          <DetailRow label={t("DashboardEarn.queuedWithdraw.deadline")}>
+          <DetailRow label={t("DashboardEarn.queuedWithdraw.deadline")} wrap>
             {formatEpochSecondsOr(
               preview.deadlineTimestamp,
               locale,
