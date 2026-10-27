@@ -101,6 +101,28 @@ describe("parseSponsorshipBudgetCommand", () => {
     });
   });
 
+  it("parses a set-project preview that names no version", () => {
+    const flags = Object.fromEntries(
+      Object.entries({ ...SET_PROJECT_FLAGS, mode: "preview" }).filter(
+        ([name]) => name !== "expected-version"
+      )
+    );
+    expect(parseSponsorshipBudgetCommand({ command: "set-project", flags })).toEqual({
+      command: "set-project",
+      environment: "production",
+      organizationId: "org_operator_1",
+      network: "mainnet",
+      mode: "preview",
+      operator: "oncall@example.test",
+      reason: "raise launch limits",
+      enabled: true,
+      expectedVersion: null,
+      perTransactionLamports: 10_000_000,
+      hourlyLamports: 1_000_000_000,
+      dailyLamports: 3_000_000_000,
+    });
+  });
+
   it("parses a sandbox kill onto the devnet budget without a version", () => {
     expect(
       parseSponsorshipBudgetCommand({
