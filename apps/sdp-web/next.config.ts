@@ -35,6 +35,20 @@ const nextConfig: NextConfig = {
         source: "/provider-onboarding/:path*",
         destination: `${docsProxyOrigin}/provider-onboarding/:path*`,
       },
+      // Agents look for llms.txt at the site root; the docs app's canonical copies
+      // live under /docs/ai.
+      {
+        source: "/llms.txt",
+        destination: `${docsProxyOrigin}/docs/ai/llms.txt`,
+      },
+      {
+        source: "/llms-full.txt",
+        destination: `${docsProxyOrigin}/docs/ai/llms-full.txt`,
+      },
+      {
+        source: "/docs.md",
+        destination: `${docsProxyOrigin}/docs.md`,
+      },
       {
         source: "/docs",
         destination: `${docsProxyOrigin}/docs`,

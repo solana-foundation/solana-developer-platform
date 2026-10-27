@@ -103,6 +103,9 @@ function pythonSnippet({ method, url, body }: SnippetRequest): string {
 /**
  * The call written out in each language, the key read from `SDP_API_KEY` so a copied snippet
  * never carries one.
+ *
+ * @param request - The method, full URL and JSON body of the call.
+ * @returns The snippet for each of {@link SNIPPET_LANGUAGES}.
  */
 export function buildSnippets(request: SnippetRequest): Record<SnippetLanguage, string> {
   return {

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { BASE58_ADDRESS_PATTERN } from "@/app/dashboard/[projectId]/markets/base58-address";
 import {
   type KaminoVaultAllocations,
+  type KaminoVaultAllocationsBatch,
   kaminoVaultAllocationsSchema,
 } from "@/app/dashboard/[projectId]/markets/treasury-solutions/kamino-allocations-schema";
 import { createSdpApiClient } from "@/lib/sdp-api";
@@ -27,9 +28,9 @@ import { createSdpApiClient } from "@/lib/sdp-api";
  * module-level maps are a private memoization of an otherwise stateless public
  * read, not an externally visible side effect. Failures are honest and cached
  * NEVER: an upstream outage, a non-2xx, or a payload that does not parse
- * rejects every waiter, and the cell degrades to the same placeholder a
- * non-Kamino row shows. Nothing here logs request internals or upstream
- * payloads.
+ * rejects every waiter, the vault drops out of the batch, and its cell degrades
+ * to the same placeholder a non-Kamino row shows. Nothing here logs request
+ * internals or upstream payloads.
  */
 
 const KAMINO_ALLOCATIONS_BASE = "https://api.kamino.finance/kvaults/vaults";
@@ -74,26 +75,38 @@ async function readKaminoAllocations(vault: string): Promise<KaminoVaultAllocati
 }
 
 /**
- * One vault's allocations, at most one upstream read per TTL window no matter
- * how many concurrent callers arrive: cache hits resolve immediately, misses
- * coalesce on the in-flight read, and a failed read is rejected to every
- * waiter without being cached.
+ * Every requested vault's allocations in one batch, keyed by vault: one
+ * allowlist resolution, then each listed vault through its own TTL cache and
+ * in-flight read, so a batch costs Kamino exactly what one request per vault
+ * did and concurrent tabs still share one upstream read per vault per window.
  *
  * The refusals happen before the cache: junk is never a real entry, and a
  * malformed read must not evict a live one from the bounded map or share an
  * in-flight read with it. A vault that is not a public key, or one the
- * catalogue does not front, is refused without costing Kamino anything.
+ * catalogue does not front, is left out without costing Kamino anything, and
+ * so is a vault whose read failed: a refusal and an outage stay
+ * indistinguishable. A failed catalogue read leaves every vault out, failing
+ * closed without caching the outage.
  */
-export function readVaultAllocations(vault: string): Promise<KaminoVaultAllocations> {
-  if (!BASE58_ADDRESS_PATTERN.test(vault)) {
-    return Promise.reject(new Error("vault must be a Solana public key"));
+export async function readVaultsAllocations(
+  vaults: readonly string[]
+): Promise<KaminoVaultAllocationsBatch> {
+  const candidates = [...new Set(vaults)].filter((vault) => BASE58_ADDRESS_PATTERN.test(vault));
+  if (candidates.length === 0) return { vaults: {} };
+  let allowed: ReadonlySet<string>;
+  try {
+    allowed = await resolveAllowedVaults();
+  } catch {
+    return { vaults: {} };
   }
-  return resolveAllowedVaults().then((allowed) => {
-    if (!allowed.has(vault)) {
-      throw new Error("vault is not fronted by a listed strategy");
-    }
-    return readListedVaultAllocations(vault);
-  });
+  const listed = candidates.filter((vault) => allowed.has(vault));
+  const reads = await Promise.allSettled(listed.map((vault) => readListedVaultAllocations(vault)));
+  const read: Record<string, KaminoVaultAllocations> = {};
+  for (const [index, result] of reads.entries()) {
+    const vault = listed[index];
+    if (vault !== undefined && result.status === "fulfilled") read[vault] = result.value;
+  }
+  return { vaults: read };
 }
 
 async function readListedVaultAllocations(vault: string): Promise<KaminoVaultAllocations> {
@@ -142,7 +155,8 @@ const STRATEGIES_PAGE_SIZE = 100;
 const STRATEGIES_PAGE_LIMIT = 20;
 
 /** Minimal page shape the allowlist actually reads; anything else fails
- * closed into the route's generic 502 instead of narrowing the allowlist. */
+ * closed (every vault left out of the batch, nothing cached) instead of
+ * narrowing the allowlist. */
 const strategiesPageSchema = z.object({
   strategies: z.array(
     z.object({

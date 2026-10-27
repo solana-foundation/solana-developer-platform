@@ -56,8 +56,9 @@ function mergeVary(res: NextResponse, value: string): void {
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // Only handle docs content pages — skip assets, API routes, explicit extensions
-  if (!pathname.startsWith("/docs/") || pathname.match(/\.[a-z]{2,5}$/i)) {
+  // Only handle docs content pages, the home included; skip assets, API routes, explicit extensions
+  const isDocsPage = pathname === "/docs" || pathname.startsWith("/docs/");
+  if (!isDocsPage || pathname.match(/\.[a-z]{2,5}$/i)) {
     return NextResponse.next();
   }
 
@@ -78,10 +79,9 @@ export function middleware(req: NextRequest) {
     });
   }
 
-  // Content negotiation: rewrite to markdown API route
+  // Content negotiation: rewrite to markdown API route (`/docs` itself to its root)
   if (prefersMarkdown(parts)) {
-    const slug = pathname.replace(/^\/docs\//, "");
-    return NextResponse.rewrite(new URL(`/api/docs-md/${slug}`, req.url));
+    return NextResponse.rewrite(new URL(`/api/docs-md${pathname.slice("/docs".length)}`, req.url));
   }
 
   // HTML response: add Vary and Link alternate headers
