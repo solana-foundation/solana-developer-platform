@@ -10,10 +10,8 @@ import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
 import { parseDashboardPathname, projectHref } from "@/lib/dashboard-project-path";
 import { resolveProjectFromList } from "@/lib/dashboard-project-selection";
-import { isDesignModuleOn } from "@/lib/design-modules";
 import { PAYMENTS_DEMO_COOKIE_NAME } from "@/lib/payments-demo/demo-cookie";
-import { loadQuickStartStep } from "@/lib/quick-start-server";
-import { loadQuickStartStatus } from "@/lib/quick-start-server.redesign";
+import { loadQuickStartStatus } from "@/lib/quick-start-server";
 import { listSdpProjects, requestMemberRole } from "@/lib/sdp-api";
 import { getSdpAuth } from "@/lib/sdp-auth";
 import { WORKSPACE_LOADING_PATH } from "@/lib/workspace-loading";
@@ -37,20 +35,15 @@ export default async function ProjectLayout({
   children: ReactNode;
   params: Promise<{ projectId: string }>;
 }) {
-  const [{ projectId }, projects, { orgId, userId }, flags, cookieStore] = await Promise.all([
-    params,
-    listSdpProjects(),
-    getSdpAuth(),
-    getDashboardFlags(),
-    cookies(),
-  ]);
-  // Each design has its own quick start, the new one part of the Overview module; only the one
-  // on screen is read.
-  const overviewNewDesign = isDesignModuleOn(flags, "overview");
-  const [initialQuickStartStatus, initialQuickStartStep] = await Promise.all([
-    overviewNewDesign ? loadQuickStartStatus() : null,
-    overviewNewDesign ? null : loadQuickStartStep(),
-  ]);
+  const [{ projectId }, projects, { orgId, userId }, flags, cookieStore, initialQuickStartStatus] =
+    await Promise.all([
+      params,
+      listSdpProjects(),
+      getSdpAuth(),
+      getDashboardFlags(),
+      cookies(),
+      loadQuickStartStatus(),
+    ]);
   if (projects.some((project) => project.id === projectId)) {
     if (!orgId || !userId) {
       throw new Error("The dashboard layout admits only signed-in members of an organization");
@@ -63,7 +56,6 @@ export default async function ProjectLayout({
         scopeRefreshFallback={<DashboardScopeLoadingScreen />}
         dashboardAccess={dashboardAccess}
         initialQuickStartStatus={initialQuickStartStatus}
-        initialQuickStartStep={initialQuickStartStep}
         flags={flags}
         serverDashboardCacheScope={dashboardCacheScope}
         projects={projects}

@@ -305,6 +305,23 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
       };
     },
 
+    async hasHotPaymentRequests({ environment }) {
+      const row = await db
+        .prepare(
+          `SELECT 1 AS present FROM payment_requests pr
+             JOIN projects p ON p.id = pr.project_id
+            WHERE p.environment = ?
+              AND pr.status = 'awaiting_payment'
+              AND pr.custody_wallet_id IS NOT NULL
+              AND pr.sponsored_tx_last_valid_block_height IS NOT NULL
+              AND (pr.expires_at IS NULL OR pr.expires_at > sdp_iso_now())
+            LIMIT 1`
+        )
+        .bind(environment)
+        .first<{ present: number }>();
+      return row !== null;
+    },
+
     async listHotPaymentRequests({ environment, minLastValidBlockHeight, limit }) {
       const result = await db
         .prepare(
@@ -356,6 +373,23 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
         )
         .all<Record<string, unknown>>();
       return result.results.map(mapPaymentRequestRow);
+    },
+
+    async hasLapsedPaymentRequests({ environment, checkedBefore }) {
+      const row = await db
+        .prepare(
+          `SELECT 1 AS present FROM payment_requests pr
+             JOIN projects p ON p.id = pr.project_id
+            WHERE p.environment = ?
+              AND pr.status = 'awaiting_payment'
+              AND pr.expires_at IS NOT NULL
+              AND pr.expires_at <= sdp_iso_now()
+              AND (pr.last_checked_at IS NULL OR pr.last_checked_at < ?)
+            LIMIT 1`
+        )
+        .bind(environment, checkedBefore)
+        .first<{ present: number }>();
+      return row !== null;
     },
 
     async listLapsedPaymentRequests({

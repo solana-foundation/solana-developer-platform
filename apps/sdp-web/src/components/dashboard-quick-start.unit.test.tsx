@@ -1,340 +1,192 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { SWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import {
-  completeQuickStartStep,
-  dismissQuickStart,
-  isQuickStartDismissed,
+  type QuickStartPrefs,
+  type QuickStartStatus,
   quickStartKey,
-  readQuickStart,
-  setQuickStart,
+  readQuickStartPrefs,
 } from "@/lib/dashboard-quick-start";
-import { resetDashboardNavigation, setDashboardUrl } from "@/test/dashboard-navigation";
-import { PRODUCTION_PROJECT, SANDBOX_PROJECT } from "@/test/projects";
-import { DashboardQuickStart } from "./dashboard-quick-start";
+import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
 
-const workspace = vi.hoisted(() => ({
-  initialQuickStartStep: "api-key" as "api-key" | "wallet" | "done" | null,
-  dashboardCacheScope: { userId: "user_test", orgId: "org_test" },
-  selectedProjectId: "prj_test_sandbox",
-  dashboardAccess: { capabilities: { canManageApiKeys: true, canManageCustody: true } },
-  flags: { custody: true },
-  sdpEnvironment: "sandbox",
+const NOW = new Date("2026-09-25T12:00:00.000Z").getTime();
+const SCOPE = { userId: "user", orgId: "org" };
+const KEY = quickStartKey(SCOPE);
+const mocks = vi.hoisted(() => ({
+  workspace: {
+    sdpEnvironment: "sandbox",
+    dashboardAccess: { capabilities: { canManageApiKeys: true } },
+    dashboardCacheScope: { userId: "user", orgId: "org" },
+    selectedProjectId: "prj_test_sandbox",
+    initialQuickStartStatus: null as unknown,
+  },
 }));
+
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
+// The viewer's workspace is one ambient input per render; everything else here is real.
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
-  useDashboardWorkspace: () => workspace,
+  useDashboardWorkspace: () => mocks.workspace,
+  useOptionalDashboardWorkspace: () => mocks.workspace,
 }));
 
-const key = () => quickStartKey(workspace.dashboardCacheScope);
-const ui = (collapsed: boolean) => (
-  <I18nProvider locale="en" messages={getMessages("en")}>
-    <DashboardQuickStart collapsed={collapsed} />
-  </I18nProvider>
-);
-const settingsUi = () => (
-  <I18nProvider locale="en" messages={getMessages("en")}>
-    <DashboardQuickStart variant="settings" />
-  </I18nProvider>
-);
+const { DashboardQuickStart } = await import("./dashboard-quick-start");
 
-const renderGuide = () => {
-  const view = render(ui(false));
-  const launcher = view.queryByRole("button", { name: /SDP quick start · \d\/3/ });
-  if (launcher) fireEvent.click(launcher);
-  return view;
+const SKIPPED_AN_HOUR_AGO = new Date(NOW - 3_600_000).toISOString();
+const PENDING_STATUS: QuickStartStatus = {
+  custodyProvider: null,
+  apiKeyCount: 0,
+  lastCallAt: null,
 };
-let orgSequence = 0;
+
+/** Sets what the server read and what the browser remembers, before the guide renders. */
+function setup({
+  status = PENDING_STATUS,
+  prefs = { skipped: { custody: SKIPPED_AN_HOUR_AGO } },
+}: {
+  status?: QuickStartStatus;
+  prefs?: Partial<QuickStartPrefs>;
+} = {}) {
+  mocks.workspace.initialQuickStartStatus = status;
+  window.localStorage.setItem(KEY, JSON.stringify(prefs));
+}
+
+function renderQuickStart(variant: "overview" | "sidebar" | "settings", collapsed = false) {
+  return render(
+    <SWRConfig value={{ provider: () => new Map() }}>
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <DashboardQuickStart variant={variant} collapsed={collapsed} />
+      </I18nProvider>
+    </SWRConfig>
+  );
+}
 
 beforeEach(() => {
   resetDashboardNavigation();
-  workspace.initialQuickStartStep = "api-key";
-  workspace.dashboardCacheScope = { userId: "user_test", orgId: `org_${++orgSequence}` };
-  workspace.selectedProjectId = SANDBOX_PROJECT.id;
-  workspace.sdpEnvironment = "sandbox";
-  workspace.flags.custody = true;
-  workspace.dashboardAccess.capabilities.canManageApiKeys = true;
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
+  window.localStorage.clear();
+  mocks.workspace.sdpEnvironment = "sandbox";
+  // The status arrives with the page, so the guide reads nothing on mount.
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}"));
 });
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
-describe("dashboard quick start", () => {
-  it("starts as a sidebar card and opens the guide only when requested", async () => {
-    const view = render(ui(false));
-    expect(view.queryByRole("dialog")).toBeNull();
-    const card = view.getByRole("complementary");
-    expect(card.hasAttribute("data-quick-start-sidebar")).toBe(true);
-    expect(card.className).not.toContain("fixed");
-    const launcher = view.getByRole("button", { name: "SDP quick start · 1/3" });
-    fireEvent.click(launcher);
-    expect(view.getByRole("heading", { name: "Create your API key" })).toBeTruthy();
-    expect(view.queryByRole("button", { name: "Continue later" })).toBeNull();
-    const close = view.getByRole("button", { name: "Dismiss SDP quick start" });
-    fireEvent.click(close);
-    expect(view.getByRole("alertdialog")).toBeTruthy();
-    fireEvent.click(view.getByRole("button", { name: "Keep quick start" }));
-    expect(view.getByRole("heading", { name: "Create your API key" })).toBeTruthy();
-    await waitFor(() => expect(document.activeElement).toBe(close));
-    fireEvent.keyDown(document, { key: "Escape" });
-    expect(view.queryByRole("dialog")).toBeNull();
-    expect(readQuickStart(key())).toBe("api-key");
-    await waitFor(() => expect(document.activeElement).toBe(launcher));
-  });
-
-  it("links to API-key creation without prematurely completing the step", () => {
-    const view = renderGuide();
-    expect(view.getByRole("link", { name: "Create API key" }).getAttribute("href")).toBe(
-      `/dashboard/${SANDBOX_PROJECT.id}/api-keys/new`
-    );
-    expect(view.getByRole("status").textContent).toBe("Step 1 of 3");
-    expect(readQuickStart(key())).toBe("api-key");
-    act(() => completeQuickStartStep(key(), "api-key"));
-    expect(view.getByText("Step 2 of 3 · Optional")).toBeTruthy();
-    expect(view.getByRole("link", { name: "Create wallet" }).getAttribute("href")).toBe(
-      `/dashboard/${SANDBOX_PROJECT.id}/wallets/setup`
-    );
-    act(() => completeQuickStartStep(key(), "wallet"));
-    expect(readQuickStart(key())).toBe("done");
-    expect(view.queryByRole("dialog")).toBeNull();
-    expect(view.queryByRole("complementary")).toBeNull();
-  });
-
-  it("lets an existing API-key holder skip the optional wallet", () => {
-    const view = renderGuide();
-    fireEvent.click(view.getByRole("button", { name: "I already have an API key" }));
-    fireEvent.click(view.getByRole("button", { name: "Skip wallet setup" }));
-    expect(view.getByRole("heading", { name: "Get test USDC" })).toBeTruthy();
-    expect(view.getByText(/Test USDC has no monetary value/)).toBeTruthy();
-    const faucet = view.getByRole("link", { name: "Open Circle faucet" });
-    expect(faucet.getAttribute("href")).toBe("https://faucet.circle.com/");
-    expect(faucet.getAttribute("target")).toBe("_blank");
-    expect(readQuickStart(key())).toBe("faucet");
-    fireEvent.click(view.getByRole("button", { name: "Finish quick start" }));
-    expect(view.queryByRole("dialog")).toBeNull();
-  });
-
-  it("remembers dismissal and does not reopen after unrelated creation", () => {
-    const view = render(ui(false));
-    fireEvent.click(view.getByRole("button", { name: "Dismiss SDP quick start" }));
-    expect(view.getByRole("alertdialog", { name: "Dismiss SDP quick start?" })).toBeTruthy();
-    expect(view.getByText(/You can continue anytime in Settings → Onboarding/)).toBeTruthy();
-    expect(isQuickStartDismissed(key())).toBe(false);
-    fireEvent.click(view.getByRole("button", { name: "Dismiss quick start" }));
-    expect(isQuickStartDismissed(key())).toBe(true);
-    act(() => completeQuickStartStep(key(), "api-key"));
-    expect(readQuickStart(key())).toBe("wallet");
-    view.unmount();
-    expect(render(ui(false)).queryByRole("complementary")).toBeNull();
-  });
-
-  it("keeps the card and its progress when dismissal is canceled", async () => {
-    setQuickStart(key(), "wallet");
-    const view = render(ui(false));
-    const dismiss = view.getByRole("button", { name: "Dismiss SDP quick start" });
-    fireEvent.click(dismiss);
-    fireEvent.click(view.getByRole("button", { name: "Keep quick start" }));
-    expect(view.queryByRole("alertdialog")).toBeNull();
-    expect(view.getByRole("button", { name: "SDP quick start · 2/3" })).toBeTruthy();
-    expect(readQuickStart(key())).toBe("wallet");
-    expect(isQuickStartDismissed(key())).toBe(false);
-    await waitFor(() => expect(document.activeElement).toBe(dismiss));
-  });
-
-  it("resumes a dismissed guide from Settings at the saved step and restores the sidebar", async () => {
-    setQuickStart(key(), "wallet");
-    const view = render(
-      <>
-        {ui(false)}
-        {settingsUi()}
-      </>
-    );
-    fireEvent.click(view.getByRole("button", { name: "Dismiss SDP quick start" }));
-    fireEvent.click(view.getByRole("button", { name: "Dismiss quick start" }));
-    expect(view.queryByRole("complementary")).toBeNull();
-    view.unmount();
-    const restored = render(
-      <>
-        {ui(false)}
-        {settingsUi()}
-      </>
-    );
-    expect(restored.getByRole("heading", { name: "Onboarding" })).toBeTruthy();
-    const resume = restored.getByRole("button", { name: "Continue quick start" });
-    fireEvent.click(resume);
+describe("Overview quick start", () => {
+  it("reads the two steps with their next actions", () => {
+    setup();
+    renderQuickStart("overview");
+    const card = screen.getByRole("region", { name: "Quick start" });
+    expect(within(card).getByText("1 of 2")).toBeTruthy();
     expect(
-      within(restored.getByRole("dialog")).getByRole("heading", { name: "Set up a wallet" })
+      within(card).getByText("Skipped today. Nothing holds funds until a provider is connected.")
     ).toBeTruthy();
-    expect(isQuickStartDismissed(key())).toBe(false);
-    fireEvent.click(restored.getByRole("button", { name: "Dismiss SDP quick start" }));
-    fireEvent.click(restored.getByRole("button", { name: "Dismiss quick start" }));
-    expect(restored.queryByRole("dialog")).toBeNull();
-    expect(restored.queryByRole("complementary")).toBeNull();
-    fireEvent.click(resume);
-    expect(restored.getAllByRole("dialog")).toHaveLength(1);
-    fireEvent.keyDown(document, { key: "Escape" });
-    expect(restored.getByRole("button", { name: "SDP quick start · 2/3" })).toBeTruthy();
-    await waitFor(() => expect(document.activeElement).toBe(resume));
-  });
-
-  it("allows old dismissed previews to restart from Settings", () => {
-    setQuickStart(key(), "done");
-    const view = render(settingsUi());
-    fireEvent.click(view.getByRole("button", { name: "Restart quick start" }));
-    expect(view.getByRole("heading", { name: "Create your API key" })).toBeTruthy();
-    expect(readQuickStart(key())).toBe("api-key");
-  });
-
-  it("keeps completed organization setup, production, and unknown state out of the guide in Settings", () => {
-    workspace.initialQuickStartStep = "done";
-    const view = render(settingsUi());
-    expect(view.getByText("Your workspace is already set up.")).toBeTruthy();
-    expect(view.queryByRole("button", { name: /quick start/ })).toBeNull();
-    workspace.initialQuickStartStep = "api-key";
-    workspace.sdpEnvironment = "production";
-    view.rerender(settingsUi());
-    expect(view.getByText("Switch to Sandbox to use SDP quick start.")).toBeTruthy();
-    expect(view.queryByRole("button", { name: /quick start/ })).toBeNull();
-    workspace.sdpEnvironment = "sandbox";
-    workspace.initialQuickStartStep = null;
-    view.rerender(settingsUi());
-    expect(view.getByText(/Quick start is unavailable right now/)).toBeTruthy();
-    expect(view.queryByRole("button", { name: /quick start/ })).toBeNull();
-  });
-
-  it("keeps dismissal across projects and isolates it between organizations and users", () => {
-    dismissQuickStart(key());
-    const view = render(ui(false));
-    expect(view.queryByRole("complementary")).toBeNull();
-    workspace.selectedProjectId = PRODUCTION_PROJECT.id;
-    setDashboardUrl(`/dashboard/${PRODUCTION_PROJECT.id}`, {});
-    view.rerender(ui(false));
-    expect(view.queryByRole("dialog")).toBeNull();
-    expect(view.queryByRole("complementary")).toBeNull();
-    workspace.dashboardCacheScope.orgId = "another_org";
-    view.rerender(ui(false));
-    expect(view.getByRole("button", { name: "SDP quick start · 1/3" })).toBeTruthy();
-    fireEvent.click(view.getByRole("button", { name: "Dismiss SDP quick start" }));
-    fireEvent.click(view.getByRole("button", { name: "Dismiss quick start" }));
-    workspace.dashboardCacheScope.userId = "another_user";
-    view.rerender(ui(false));
-    expect(view.getByRole("button", { name: "SDP quick start · 1/3" })).toBeTruthy();
-  });
-
-  it("hides in production and for users who cannot create API keys", () => {
-    workspace.sdpEnvironment = "production";
-    const view = render(ui(false));
-    expect(view.queryByRole("complementary")).toBeNull();
-    workspace.sdpEnvironment = "sandbox";
-    workspace.dashboardAccess.capabilities.canManageApiKeys = false;
-    view.rerender(ui(false));
-    expect(view.queryByRole("complementary")).toBeNull();
-  });
-
-  it("does not show the wizard for completed or unknown server setup", () => {
-    workspace.initialQuickStartStep = "done";
-    const view = render(ui(false));
-    expect(view.queryByRole("dialog")).toBeNull();
-    workspace.initialQuickStartStep = null;
-    view.rerender(ui(false));
-    expect(view.queryByRole("dialog")).toBeNull();
-  });
-
-  it("keeps the sidebar card after navigation without advancing on click", () => {
-    const view = renderGuide();
-    fireEvent.click(view.getByRole("link", { name: "Create API key" }));
-    setDashboardUrl(`/dashboard/${SANDBOX_PROJECT.id}/api-keys/new`, {});
-    view.rerender(ui(false));
-    expect(view.queryByRole("dialog")).toBeNull();
-    expect(view.getByRole("complementary").hasAttribute("data-quick-start-sidebar")).toBe(true);
-    expect(readQuickStart(key())).toBe("api-key");
-    view.unmount();
-    const restored = render(ui(false));
-    expect(restored.queryByRole("dialog")).toBeNull();
-    expect(restored.getByRole("button", { name: "SDP quick start · 1/3" })).toBeTruthy();
-  });
-
-  it("returns focus to the sidebar without resetting an in-progress form", async () => {
-    setDashboardUrl(`/dashboard/${SANDBOX_PROJECT.id}/api-keys/new`, {});
-    const view = render(
-      <>
-        <input aria-label="Key name" defaultValue="My integration" />
-        {ui(false)}
-      </>
+    expect(within(card).getByText("Skipped · today")).toBeTruthy();
+    expect(within(card).getByText("Needs a key")).toBeTruthy();
+    expect(within(card).getByRole("link", { name: "Connect" }).getAttribute("href")).toBe(
+      "/dashboard/prj_test_sandbox/integrations?tab=custody"
     );
-    const launcher = view.getByRole("button", { name: "SDP quick start · 1/3" });
-    fireEvent.click(launcher);
-    expect(view.getByRole("dialog")).toBeTruthy();
-    expect(view.queryByRole("link", { name: "Create API key" })).toBeNull();
-    fireEvent.click(view.getByRole("button", { name: "Back to form" }));
-    expect(view.queryByRole("dialog")).toBeNull();
-    expect(view.getByRole("textbox", { name: "Key name" }).getAttribute("value")).toBe(
-      "My integration"
+    expect(within(card).getByRole("link", { name: "Create an API key" }).getAttribute("href")).toBe(
+      "/dashboard/prj_test_sandbox/api-keys/new"
     );
-    await waitFor(() => expect(document.activeElement).toBe(launcher));
   });
 
-  it("can cancel expanded dismissal with a collapsed sidebar and keep saved progress", () => {
-    setQuickStart(key(), "wallet");
-    const view = render(ui(true));
-    const launcher = view.getByRole("button", { name: "SDP quick start · 2/3" });
-    expect(launcher.getAttribute("title")).toBe("SDP quick start · 2/3");
-    fireEvent.click(launcher);
-    expect(view.getByRole("dialog")).toBeTruthy();
-    fireEvent.click(view.getByRole("button", { name: "Dismiss SDP quick start" }));
-    expect(view.getByRole("alertdialog")).toBeTruthy();
-    fireEvent.click(view.getByRole("button", { name: "Keep quick start" }));
-    expect(view.getByRole("heading", { name: "Set up a wallet" })).toBeTruthy();
-    fireEvent.keyDown(document, { key: "Escape" });
-    expect(view.queryByRole("dialog")).toBeNull();
-    expect(view.getByRole("complementary")).toBeTruthy();
-    expect(window.localStorage.getItem(key())).toBe("wallet");
-    view.unmount();
-    const restored = render(ui(true));
-    fireEvent.click(restored.getByRole("button", { name: "SDP quick start · 2/3" }));
-    expect(restored.getByRole("heading", { name: "Set up a wallet" })).toBeTruthy();
-    fireEvent.click(restored.getByRole("button", { name: "Dismiss SDP quick start" }));
-    fireEvent.click(restored.getByRole("button", { name: "Dismiss quick start" }));
-    expect(restored.queryByRole("complementary")).toBeNull();
-    expect(isQuickStartDismissed(key())).toBe(true);
-    expect(readQuickStart(key())).toBe("wallet");
+  it("offers a skip while custody is still open, and remembers it", () => {
+    setup({ prefs: {} });
+    renderQuickStart("overview");
+    fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
+    expect(readQuickStartPrefs(KEY).skipped.custody).toBe(new Date(NOW).toISOString());
   });
 
-  it("keeps the optional step skippable when custody is unavailable", () => {
-    workspace.flags.custody = false;
-    setQuickStart(key(), "wallet");
-    const view = renderGuide();
-    expect(view.queryByRole("link", { name: "Create wallet" })).toBeNull();
-    fireEvent.click(view.getByRole("button", { name: "Skip wallet setup" }));
-    expect(view.getByRole("link", { name: "Open Circle faucet" })).toBeTruthy();
+  it("waits for a call once a key exists", () => {
+    setup({ status: { custodyProvider: null, apiKeyCount: 2, lastCallAt: null } });
+    renderQuickStart("overview");
+    expect(screen.getByText("Waiting for a call")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "View API keys" })).toBeTruthy();
   });
 
-  it("works when browser storage writes fail", () => {
-    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
-      throw new Error("Storage full");
+  it("folds to its header and dismisses", () => {
+    setup();
+    renderQuickStart("overview");
+    fireEvent.click(screen.getByRole("button", { name: "Hide" }));
+    expect(readQuickStartPrefs(KEY).collapsed).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss quick start" }));
+    expect(readQuickStartPrefs(KEY).dismissed).toBe(true);
+  });
+
+  it("renders nothing once the guide is not visible", () => {
+    setup({
+      status: { custodyProvider: "privy", apiKeyCount: 1, lastCallAt: "2026-09-25T10:00:00Z" },
     });
-    const view = renderGuide();
-    fireEvent.click(view.getByRole("button", { name: "I already have an API key" }));
-    expect(view.getByRole("heading", { name: "Set up a wallet" })).toBeTruthy();
-    expect(readQuickStart(key())).toBe("wallet");
-    fireEvent.click(view.getByRole("button", { name: "Dismiss SDP quick start" }));
-    fireEvent.click(view.getByRole("button", { name: "Dismiss quick start" }));
-    expect(view.queryByRole("complementary")).toBeNull();
+    const { container } = renderQuickStart("overview");
+    expect(container.innerHTML).toBe("");
+  });
+});
+
+describe("Sidebar quick start", () => {
+  it("links each step to where it is done", () => {
+    setup();
+    renderQuickStart("sidebar");
+    const card = screen.getByRole("complementary", { name: "Setup" });
+    expect(within(card).getByRole("link", { name: /Connect custody, skipped/ })).toBeTruthy();
+    expect(
+      within(card)
+        .getByRole("link", { name: /Your first call has arrived/ })
+        .getAttribute("href")
+    ).toBe("/dashboard/prj_test_sandbox/api-keys/new");
+    fireEvent.click(within(card).getByRole("button", { name: "Hide" }));
+    expect(readQuickStartPrefs(KEY).sidebarCollapsed).toBe(true);
   });
 
-  it("picks up dismissal from another browser tab", () => {
-    setQuickStart(key(), "wallet");
-    const view = render(ui(false));
-    act(() => {
-      window.localStorage.setItem(`${key()}:dismissed`, "true");
-      window.dispatchEvent(
-        new StorageEvent("storage", { key: `${key()}:dismissed`, newValue: "true" })
-      );
-    });
-    expect(view.queryByRole("complementary")).toBeNull();
+  it("shrinks to one link on the icon rail", () => {
+    setup();
+    renderQuickStart("sidebar", true);
+    expect(screen.getByRole("link", { name: "Setup · 1 of 2" }).getAttribute("href")).toBe(
+      "/dashboard/prj_test_sandbox"
+    );
+  });
+});
+
+describe("Settings quick start", () => {
+  it("brings a dismissed guide back and opens the Overview", () => {
+    setup({ prefs: { skipped: { custody: SKIPPED_AN_HOUR_AGO }, dismissed: true } });
+    renderQuickStart("settings");
+    expect(screen.getByText("1 of 2 steps done")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Show quick start" }));
+    expect(readQuickStartPrefs(KEY).dismissed).toBe(false);
+    expect(dashboardRouter.push).toHaveBeenCalledWith("/dashboard/prj_test_sandbox");
+  });
+
+  it("says the guide is unavailable while the status is unknown, and offers no way in", () => {
+    setup();
+    mocks.workspace.initialQuickStartStatus = null;
+    renderQuickStart("settings");
+    expect(
+      screen.getByText("Quick start is unavailable right now. Refresh the page to try again.")
+    ).toBeTruthy();
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("still brings a dismissed guide back when its status could not be read", () => {
+    setup({ prefs: { dismissed: true } });
+    mocks.workspace.initialQuickStartStatus = null;
+    renderQuickStart("settings");
+    fireEvent.click(screen.getByRole("button", { name: "Show quick start" }));
+    expect(readQuickStartPrefs(KEY).dismissed).toBe(false);
+  });
+
+  it("explains why the guide is unavailable outside Sandbox", () => {
+    mocks.workspace.sdpEnvironment = "production";
+    setup();
+    renderQuickStart("settings");
+    expect(screen.getByText("Switch to Sandbox to use the quick start.")).toBeTruthy();
+    expect(screen.queryByRole("button")).toBeNull();
   });
 });

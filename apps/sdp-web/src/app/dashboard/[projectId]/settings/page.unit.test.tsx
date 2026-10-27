@@ -1,7 +1,7 @@
 import type { OrganizationRole } from "@sdp/types/roles";
 import { Children, isValidElement, type ReactElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DashboardQuickStart } from "@/components/dashboard-quick-start.redesign";
+import { DashboardQuickStart } from "@/components/dashboard-quick-start";
 import * as sdpApi from "@/lib/sdp-api";
 import { PRODUCTION_PROJECT } from "@/test/projects";
 import { setPageRequest } from "@/test/request-project";

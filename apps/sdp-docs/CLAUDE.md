@@ -207,7 +207,7 @@ Gates follow module declarations, never sentences:
 - `check:links` checks the channel in the manifest; CI runs it on `experimental` and `stable`.
 - Committed generated files (`public/llms*.txt`, Postman, `content/docs/meta.json`, `reference/api/index.mdx`, `src/generated/public-surface.json`) are built at `experimental`; the deployment's build regenerates them for its channel.
 
-API reference pages are different: they are generated from the public OpenAPI document, so a family disappears by leaving that document (`EARN_PUBLIC_SURFACE_PUBLISHED` in `apps/sdp-api/src/openapi/spec.ts` is the one such switch) and by dropping its slug from `PUBLIC_TAG_SLUGS` in `scripts/lib/public-openapi.mjs`.
+API reference pages are different: they are generated from the public OpenAPI document, one page per tag, so a family appears and disappears with that document (`EARN_PUBLIC_SURFACE_PUBLISHED` in `apps/sdp-api/src/openapi/spec.ts` is the one such switch). The docs keep no list of families of their own, and an untagged operation fails `generate:api`.
 
 Currently unpublished: the whole Earn family, guide and API reference, until PRO-2038.
 
@@ -230,5 +230,6 @@ When working on design or frontend changes:
 - Reuse existing templates and typography styles from the codebase rather than creating new ones when something suitable already exists.
 - When adding images, download and store a local copy in the project. Never reference external URLs directly.
 - Raw `<img>` srcs (JSX/TSX or inline `<img>` in MDX) must point at `/docs/images/...`, not `/images/...`. Production traffic arrives through sdp-web's `/docs/:path*` proxy, which never forwards root-level `/images` requests; a rewrite in `next.config.mjs` maps `/docs/images/*` back onto `public/images/*`. Markdown-syntax images (`![](/images/...)`) are exempt: fumadocs-mdx compiles them to static imports that already resolve correctly.
+- sdp-web forwards only `/docs`, `/docs/*`, `/docs.md`, `/llms.txt`, `/llms-full.txt`, `/postman/collection.json` and `/provider-onboarding/*` to this app (`apps/sdp-web/next.config.ts`). Any other root-level route here 404s on platform.solana.com until it gets a rewrite there.
 - Use proper image sizes relative to their container — do not use oversized images (e.g., 1024px for a 32px container). Use at most 2x the container size for retina support.
 - Run `npm run build` and check for errors before pushing to staging.

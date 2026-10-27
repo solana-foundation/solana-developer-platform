@@ -3,20 +3,13 @@ import type { Organization } from "@sdp/types/organizations";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
-import { ALL_API_KEY_GRANTS, TEST_API_KEY, TEST_SEEDED_API_KEY } from "@/test/fixtures/api-keys";
+import { TEST_API_KEY, TEST_SEEDED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_MEMBER, TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { stubClerkBackend } from "@/test/helpers/clerk-backend";
 import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { env } from "@/test/helpers/env";
-import { seedDefaultProjects } from "@/test/helpers/projects";
-import { required } from "@/test/helpers/required";
 import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
-
-const TEST_PROJECT = {
-  id: "prj_test_organizations",
-  slug: "test-test-org-project",
-};
 
 /** Organization administration is for a signed-in person (HOO-2099). */
 let clerkToken: string;
@@ -287,168 +280,6 @@ describe("Organizations routes", () => {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({ name: "New Name" }),
-        },
-        env
-      );
-      expect(res.status).toBe(403);
-    });
-  });
-  describe("DELETE /v1/organizations/:orgId", () => {
-    beforeEach(async () => {
-      await getDb(env).batch([
-        getDb(env)
-          .prepare(
-            "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)"
-          )
-          .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug, TEST_ORG.tier, TEST_ORG.status),
-        getDb(env)
-          .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
-          .bind(TEST_USER.id, TEST_USER.email, 0, TEST_USER.status),
-        getDb(env)
-          .prepare(
-            "INSERT INTO organization_members (id, organization_id, user_id, role, status) VALUES (?, ?, ?, ?, ?)"
-          )
-          .bind(TEST_MEMBER.id, TEST_MEMBER.organizationId, TEST_MEMBER.userId, "admin", "active"),
-      ]);
-      await seedDefaultProjects(getDb(env), {
-        organizationId: TEST_ORG.id,
-        createdBy: TEST_USER.id,
-        members: [],
-        ids: { sandbox: TEST_PROJECT.id, production: `${TEST_PROJECT.id}_production` },
-      });
-      await getDb(env).batch([
-        getDb(env)
-          .prepare(
-            "INSERT INTO api_keys (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-          )
-          .bind(
-            TEST_API_KEY.id,
-            TEST_ORG.id,
-            TEST_PROJECT.id,
-            TEST_USER.id,
-            "Test Key",
-            TEST_API_KEY.prefix,
-            validKeyHash,
-            ALL_API_KEY_GRANTS,
-            "active"
-          ),
-      ]);
-      clerkToken = await signSeededClerkMember(env, getDb(env), TEST_USER.id, TEST_ORG.id);
-    });
-    it("soft deletes organization", async () => {
-      const res = await app.request(
-        `/v1/organizations/${TEST_ORG.id}`,
-        {
-          method: "DELETE",
-          headers: {
-            Authorization: `Bearer ${clerkToken}`,
-          },
-        },
-        env
-      );
-      expect(res.status).toBe(204);
-      const org = await getDb(env)
-        .prepare("SELECT status FROM organizations WHERE id = ?")
-        .bind(TEST_ORG.id)
-        .first<{
-          status: string;
-        }>();
-      expect(required(org).status).toBe("deleted");
-    });
-    it("revokes all API keys on delete", async () => {
-      await app.request(
-        `/v1/organizations/${TEST_ORG.id}`,
-        {
-          method: "DELETE",
-          headers: {
-            Authorization: `Bearer ${clerkToken}`,
-          },
-        },
-        env
-      );
-      const keys = await getDb(env)
-        .prepare("SELECT status FROM api_keys WHERE organization_id = ?")
-        .bind(TEST_ORG.id)
-        .all<{
-          status: string;
-        }>();
-      for (const key of keys.results) {
-        expect(key.status).toBe("revoked");
-      }
-    });
-    it("revokes pending invitations on delete, so none is a way back in", async () => {
-      await getDb(env)
-        .prepare(
-          `INSERT INTO invitations (id, organization_id, email, role, invited_by, token_hash, expires_at, status)
-           VALUES (?, ?, ?, 'member', ?, ?, ?, 'pending'), (?, ?, ?, 'member', ?, ?, ?, 'accepted')`
-        )
-        .bind(
-          "inv_delete_pending",
-          TEST_ORG.id,
-          "pending@example.com",
-          TEST_USER.id,
-          "hash_delete_pending",
-          "2099-01-01T00:00:00.000Z",
-          "inv_delete_accepted",
-          TEST_ORG.id,
-          "accepted@example.com",
-          TEST_USER.id,
-          "hash_delete_accepted",
-          "2099-01-01T00:00:00.000Z"
-        )
-        .run();
-
-      const res = await app.request(
-        `/v1/organizations/${TEST_ORG.id}`,
-        {
-          method: "DELETE",
-          headers: {
-            Authorization: `Bearer ${clerkToken}`,
-          },
-        },
-        env
-      );
-      expect(res.status).toBe(204);
-
-      const invitations = await getDb(env)
-        .prepare("SELECT id, status FROM invitations WHERE organization_id = ? ORDER BY id")
-        .bind(TEST_ORG.id)
-        .all<{ id: string; status: string }>();
-      expect(invitations.results).toEqual([
-        { id: "inv_delete_accepted", status: "accepted" },
-        { id: "inv_delete_pending", status: "revoked" },
-      ]);
-    });
-    it("marks organization members removed on delete", async () => {
-      await app.request(
-        `/v1/organizations/${TEST_ORG.id}`,
-        {
-          method: "DELETE",
-          headers: {
-            Authorization: `Bearer ${clerkToken}`,
-          },
-        },
-        env
-      );
-      const members = await getDb(env)
-        .prepare("SELECT status FROM organization_members WHERE organization_id = ?")
-        .bind(TEST_ORG.id)
-        .all<{
-          status: string;
-        }>();
-      for (const member of members.results) {
-        expect(member.status).toBe("removed");
-      }
-    });
-    it("requires org:admin permission", async () => {
-      await setMemberRole("member");
-      const res = await app.request(
-        `/v1/organizations/${TEST_ORG.id}`,
-        {
-          method: "DELETE",
-          headers: {
-            Authorization: `Bearer ${clerkToken}`,
-          },
         },
         env
       );

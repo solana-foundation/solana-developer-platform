@@ -128,6 +128,12 @@ export class KoraAdapter implements FeePaymentPort {
     return this.pinnedFeePayer;
   }
 
+  /** How the next fee-payer read will be served, for adapter-operation telemetry. */
+  feePayerReadSource(): "pinned" | "cache" | "shared" | "network" {
+    if (this.pinnedFeePayer !== null) return "pinned";
+    return feePayerAddresses.source(this.endpointUrl);
+  }
+
   private async readFeePayer(): Promise<Address> {
     const maxRetries = 2;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -305,6 +311,11 @@ function createProcessCache<TValue>(expiresAt: (value: TValue) => number) {
   const entries = new Map<string, { value: TValue; expiresAt: number }>();
   const loads = new Map<string, Promise<TValue>>();
   return {
+    source(key: string): "cache" | "shared" | "network" {
+      const entry = entries.get(key);
+      if (entry && Date.now() < entry.expiresAt) return "cache";
+      return loads.has(key) ? "shared" : "network";
+    },
     get(key: string, load: () => Promise<TValue>): Promise<TValue> {
       const entry = entries.get(key);
       if (entry && Date.now() < entry.expiresAt) return Promise.resolve(entry.value);

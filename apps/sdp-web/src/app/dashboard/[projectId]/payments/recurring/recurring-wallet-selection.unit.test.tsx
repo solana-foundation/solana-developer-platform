@@ -6,18 +6,27 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { SWRConfig } from "swr";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { resetDashboardNavigation, setDashboardUrl } from "@/test/dashboard-navigation";
 import { RecurringPaymentCreateWorkspace } from "./recurring-payment-create-workspace";
 import { RecurringPaymentDetailWorkspace } from "./recurring-payment-detail-workspace";
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
+
+beforeEach(() => {
+  resetDashboardNavigation();
+  setDashboardUrl("/dashboard/prj_test_sandbox/payments/recurring/prp_test", {
+    recurringPaymentId: "prp_test",
+  });
+});
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => ({
     dashboardCacheScope: { orgId: "org_test", userId: "user_test" },
     selectedProjectId: "proj_test",
     sdpEnvironment: "sandbox",
+    dashboardAccess: { capabilities: { canWrite: true } },
     flags: { custody: true },
   }),
   useOptionalDashboardWorkspace: () => null,
@@ -122,7 +131,7 @@ describe("Recurring Payment exact source selection", () => {
       { wrapper }
     );
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Counterparty" }));
+    await user.click(screen.getByRole("button", { name: "Contact" }));
     await user.click(screen.getByRole("button", { name: /Receiver/ }));
     first.unmount();
 
@@ -140,14 +149,12 @@ describe("Recurring Payment exact source selection", () => {
         issuedTokensByMint={{}}
         counterpartyAccounts={[account]}
         counterpartyLabel="Receiver"
-        amountLabel="1 USDC"
         collectionAttempts={[]}
         collectionAttemptsTotal={0}
       />,
       { wrapper }
     );
-    await user.click(screen.getByRole("button", { name: "Actions" }));
-    await user.click(screen.getByRole("menuitem", { name: "Edit payment" }));
+    await user.click(screen.getByRole("button", { name: "Edit" }));
     await user.click(screen.getByRole("button", { name: "Funding wallet" }));
     expect(await screen.findByRole("button", { name: /Other Project/ })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Treasury/ })).toBeNull();
@@ -181,20 +188,24 @@ describe("Recurring Payment exact source selection", () => {
       { wrapper }
     );
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Counterparty" }));
+    await user.click(screen.getByRole("button", { name: "Contact" }));
     await user.click(screen.getByRole("button", { name: /Receiver/ }));
-    await user.click(screen.getByRole("button", { name: "Next" }));
-    await user.click(screen.getByRole("button", { name: "Destination account" }));
-    await user.click(screen.getByRole("button", { name: /Receiving wallet/ }));
-    await user.click(screen.getByRole("button", { name: "Next" }));
-    await user.click(screen.getByRole("button", { name: "Funding wallet" }));
+    // The contact's only Solana address is the destination; no field asks for it.
+    await user.click(screen.getByRole("button", { name: "Source wallet" }));
     await user.click(screen.getByRole("button", { name: /Treasury/ }));
     expect(screen.getByText(/Signing is disabled for this wallet\./)).toBeTruthy();
     await user.type(screen.getByRole("spinbutton", { name: "Amount" }), "1");
-    await user.click(screen.getByRole("button", { name: "Next" }));
-    await user.click(screen.getByRole("button", { name: "Create recurring payment" }));
+    const next = () => screen.getByRole("button", { name: "Continue" });
+    await waitFor(() => expect(next().hasAttribute("disabled")).toBe(false));
+    await user.click(next());
+    await user.click(next());
+    await user.click(screen.getByRole("button", { name: "Create the schedule" }));
     await waitFor(() => expect(writes).toHaveLength(1));
-    expect(writes[0]).toMatchObject({ sourceCustodyWalletId: source.id, amount: "1" });
+    expect(writes[0]).toMatchObject({
+      sourceCustodyWalletId: source.id,
+      counterpartyAccountId: account.id,
+      amount: "1",
+    });
   });
 
   it.each(["current", "replacement"])(
@@ -225,28 +236,27 @@ describe("Recurring Payment exact source selection", () => {
           issuedTokensByMint={{}}
           counterpartyAccounts={[]}
           counterpartyLabel="Receiver"
-          amountLabel="1 USDC"
           collectionAttempts={[]}
           collectionAttemptsTotal={0}
         />,
         { wrapper }
       );
       const user = userEvent.setup();
-      await user.click(screen.getByRole("button", { name: "Actions" }));
-      const edit = screen.getByRole("menuitem", { name: "Edit payment" });
       if (unavailableWallet === "current") {
         // Nothing about an active payment can be saved without its wallet's
-        // signature, so the editor stays shut and the band carries the reason.
-        expect(edit.getAttribute("aria-disabled")).toBe("true");
-        expect(
-          screen.getByText(
-            /You cannot collect, change, or cancel this payment until signing is enabled for Treasury/
-          )
-        ).toBeTruthy();
-        expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+        // signature, so there is no Edit and the band carries the reason.
+        await waitFor(() =>
+          expect(
+            screen.getByText(
+              /You cannot collect, change, or cancel this schedule until signing is enabled for Treasury/
+            )
+          ).toBeTruthy()
+        );
+        expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+        expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull();
         return;
       }
-      await user.click(edit);
+      await user.click(screen.getByRole("button", { name: "Edit" }));
       await user.click(screen.getByRole("button", { name: "Funding wallet" }));
       // A restricted replacement is listed and badged, but not on offer: the
       // click changes nothing and the current wallet stays selected.
@@ -261,4 +271,61 @@ describe("Recurring Payment exact source selection", () => {
       await waitFor(() => expect(writes).toEqual([]));
     }
   );
+
+  it.each([
+    ["holds the schedule's token", MINT, true],
+    ["holds only another token", "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", false],
+  ])("switching to a wallet that %s", async (_case, replacementMint, keepsToken) => {
+    const replacement = {
+      ...source,
+      id: "cwlt_replacement",
+      label: "Replacement",
+      balances: [
+        {
+          token: keepsToken ? "USDC" : "USDT",
+          mint: replacementMint,
+          amount: "10000000",
+          uiAmount: "10",
+          decimals: 6,
+        },
+      ],
+    };
+    const writes: unknown[] = [];
+    vi.stubGlobal("fetch", async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "PATCH") writes.push(JSON.parse(String(init.body)));
+      return Response.json({
+        data: { wallets: [source, replacement], recurringPayment: recurring },
+      });
+    });
+    render(
+      <RecurringPaymentDetailWorkspace
+        recurringPayment={recurring}
+        wallet={source}
+        wallets={[source, replacement]}
+        issuedTokensByMint={{}}
+        counterpartyAccounts={[account]}
+        counterpartyLabel="Receiver"
+        collectionAttempts={[]}
+        collectionAttemptsTotal={0}
+      />,
+      { wrapper }
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    await user.click(screen.getByRole("button", { name: "Funding wallet" }));
+    await user.click(await screen.findByRole("button", { name: /Replacement/ }));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    if (keepsToken) {
+      await waitFor(() => expect(writes).toHaveLength(1));
+      expect(writes[0]).toEqual({ sourceCustodyWalletId: replacement.id });
+      return;
+    }
+    // The old token is not the new wallet's to pay with: the picker clears and the form asks
+    // for one, as its placeholder and its error, instead of saving the pair.
+    expect(screen.getByRole("button", { name: "Token" }).textContent).toContain(
+      "Select a currency."
+    );
+    expect(await screen.findAllByText("Select a currency.")).toHaveLength(2);
+    expect(writes).toEqual([]);
+  });
 });

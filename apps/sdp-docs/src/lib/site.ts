@@ -1,4 +1,9 @@
-import { DEFAULT_SDP_API_URL, DEFAULT_SDP_DOCS_URL, SDP_GITHUB_REPO_URL } from "@sdp/types/site";
+import {
+  DEFAULT_SDP_API_URL,
+  DEFAULT_SDP_DOCS_URL,
+  SDP_AI_GUIDE_DOCS_SLUG,
+  SDP_GITHUB_REPO_URL,
+} from "@sdp/types/site";
 
 export function normalizeDocsPageSlug(pageSlug: string): string {
   return pageSlug.replace(/\/index$/, "");
@@ -15,7 +20,7 @@ export function getDocsPagePath(pageSlug: string): string {
  */
 function buildSiteUrls(docsUrl: string, apiUrl: string) {
   const docsOrigin = new URL(docsUrl).origin;
-  const aiGuidePath = getDocsPagePath("reference/docs-for-ai");
+  const aiGuidePath = getDocsPagePath(SDP_AI_GUIDE_DOCS_SLUG);
   const aiLlmsPath = "/docs/ai/llms.txt";
   const aiLlmsFullPath = "/docs/ai/llms-full.txt";
   return {

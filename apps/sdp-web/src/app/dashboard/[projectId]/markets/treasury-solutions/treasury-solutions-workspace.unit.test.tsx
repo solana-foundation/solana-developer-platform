@@ -4,6 +4,9 @@ import { act, cleanup, render, screen, waitFor, within } from "@testing-library/
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EnglishTestI18n } from "@/app/dashboard/[projectId]/markets/test-i18n";
+import * as kaminoAllocations from "./kamino-allocations";
+import type { KaminoVaultAllocations } from "./kamino-allocations-schema";
+import { TREASURY_WALLETS_BODY } from "./treasury-layout";
 import {
   EarnTransactionModalLoading,
   TreasurySolutionsWorkspace,
@@ -26,6 +29,7 @@ if (!window.matchMedia) {
 
 const mocks = vi.hoisted(() => ({
   canManageCustody: true,
+  canWrite: true,
   environment: "sandbox" as "sandbox" | "production",
   programProvider: "upshift",
   // Every cluster value useEarnStrategies was asked for, across renders.
@@ -175,7 +179,9 @@ const mocks = vi.hoisted(() => ({
     | Array<{ token: string; mint: string; amount: string; uiAmount: string; decimals: number }>
     | undefined,
   // Vault address -> "loading" | "error" | a Kamino allocations payload.
-  allocationsByVault: {} as Record<string, "loading" | "error" | Record<string, unknown>>,
+  allocationsByVault: {} as Record<string, "loading" | "error" | KaminoVaultAllocations>,
+  // Real SWR keeps the last read beside a later error.
+  allocationsFailAfterRead: false,
   allocationsRequests: [] as Array<string | undefined>,
 }));
 
@@ -184,33 +190,10 @@ const SHARE_MINT = "Share1111111111111111111111111111111111111";
 // A share mint known only through the strategy catalogue — no position row.
 const CATALOGUE_SHARE_MINT = "ShareCatalogue11111111111111111111111111111";
 
-vi.mock("./kamino-allocations", () => ({
-  useKaminoVaultAllocations: (vaultAddress?: string, cluster?: "devnet" | "mainnet-beta") => {
-    // Mirrors the hook's contract: a non-mainnet cluster is an unsupported
-    // read — the SWR key stays null, so nothing is requested and no cell ever
-    // sees data for it.
-    if (cluster !== "mainnet-beta") {
-      return { allocations: undefined, error: undefined, isLoading: false };
-    }
-    mocks.allocationsRequests.push(vaultAddress);
-    const state = vaultAddress === undefined ? undefined : mocks.allocationsByVault[vaultAddress];
-    if (state === "loading") {
-      return { allocations: undefined, error: undefined, isLoading: true };
-    }
-    if (state === "error") {
-      return {
-        allocations: undefined,
-        error: new Error("vault allocations unavailable"),
-        isLoading: false,
-      };
-    }
-    return { allocations: state, error: undefined, isLoading: false };
-  },
-}));
-
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => ({ sdpEnvironment: mocks.environment }),
+  useCanWrite: () => mocks.canWrite,
   useOptionalDashboardWorkspace: () => ({
     dashboardAccess: { capabilities: { canManageCustody: mocks.canManageCustody } },
     flags: { custody: true },
@@ -773,6 +756,19 @@ function rerenderWorkspace(view: ReturnType<typeof renderWorkspace>) {
   view.rerender(workspaceElement());
 }
 
+/** The summary's hero figure: what is deposited across open positions. */
+function summaryFigure(): string | undefined {
+  const label = within(document.body).getByRole("heading", { name: "Deposited" });
+  return label.nextElementSibling?.textContent ?? undefined;
+}
+
+/** One custody wallet's tile. */
+function walletTile(walletId: string): HTMLElement {
+  const tile = document.querySelector<HTMLElement>(`[data-treasury-wallet="${walletId}"]`);
+  if (!tile) throw new Error(`Expected the ${walletId} wallet tile`);
+  return tile;
+}
+
 /** The Active positions row for the recorded live position. */
 function livePositionRow(): HTMLTableRowElement {
   const row = screen
@@ -802,6 +798,7 @@ const devnetStrategyRow = (name: string) =>
     .find((row) => row?.textContent?.includes("Devnet"));
 
 beforeEach(() => {
+  mocks.canWrite = true;
   mocks.positionsAfterMovementIds = [];
   mocks.canManageCustody = true;
   mocks.environment = "sandbox";
@@ -839,8 +836,32 @@ beforeEach(() => {
   mocks.walletsEmpty = false;
   mocks.corruptStableShareMint = false;
   mocks.allocationsByVault = {};
+  mocks.allocationsFailAfterRead = false;
   mocks.allocationsRequests = [];
   vi.clearAllMocks();
+  // Mirrors the read's contract: one read for the table's mainnet Kamino vaults,
+  // none at all without one, and a vault whose read failed is absent from it.
+  vi.spyOn(kaminoAllocations, "useKaminoVaultAllocations").mockImplementation((vaults) => {
+    mocks.allocationsRequests.push(...vaults);
+    if (vaults.length === 0) {
+      return { allocationsByVault: undefined, error: undefined, isLoading: false };
+    }
+    if (vaults.some((vault) => mocks.allocationsByVault[vault] === "loading")) {
+      return { allocationsByVault: undefined, error: undefined, isLoading: true };
+    }
+    const allocationsByVault: Record<string, KaminoVaultAllocations> = {};
+    for (const vault of vaults) {
+      const state = mocks.allocationsByVault[vault];
+      if (state !== undefined && state !== "loading" && state !== "error") {
+        allocationsByVault[vault] = state;
+      }
+    }
+    return {
+      allocationsByVault,
+      error: mocks.allocationsFailAfterRead ? new Error("refresh failed") : undefined,
+      isLoading: false,
+    };
+  });
 });
 
 afterEach(() => {
@@ -912,25 +933,27 @@ describe("TreasurySolutionsWorkspace", () => {
       within(activePositionsTable)
         .getAllByRole("columnheader")
         .map((header) => header.textContent)
-    ).toEqual(["Position", "Asset", "Balance", "Wallet", "Status", "Actions"]);
+    ).toEqual(["Position", "Wallet", "Status", "Balance", "Actions"]);
+    // Status reads as words in its tone, not a pill: in its column, and under the balance on a
+    // phone, where the column drops out.
+    const statusWords = within(vaultPositionRow).getAllByText("Active");
+    expect(statusWords).toHaveLength(2);
+    for (const word of statusWords) expect(word.className).toContain("text-success");
     expect(
-      within(vaultPositionRow)
-        .getByText("Active")
-        .closest("[data-variant]")
-        ?.getAttribute("data-variant")
-    ).toBe("success");
+      statusWords.some((word) => word.closest("td")?.querySelector("[data-earn-vault-balance]"))
+    ).toBe(true);
 
     // PRO-1723: the allocation summary totals the float above the tables.
     expect(screen.getByText("Deposited")).toBeTruthy();
     expect(screen.getAllByText("Available cash").length).toBeGreaterThan(0);
-    expect(screen.getByText("Est. APY")).toBeTruthy();
-    expect(screen.getByLabelText("$130.50 in open vault positions")).toBeTruthy();
+    expect(screen.getByText("est. APY")).toBeTruthy();
+    expect(summaryFigure()).toBe("$130.50");
 
     // Vault ownership renders as the wallet's deployed line, never as a
     // receipt-token tile or a raw share count.
     expect(screen.queryByText("kUSDC")).toBeNull();
     expect(screen.queryByText("119.5")).toBeNull();
-    expect(screen.getByText("Deployed")).toBeTruthy();
+    expect(screen.getAllByText("Deployed").length).toBeGreaterThan(0);
     expect(screen.getAllByText("$130.50").length).toBeGreaterThan(0);
     expect(screen.getByText("Retired provider vault")).toBeTruthy();
     expect(screen.queryByText("Exited provider vault")).toBeNull();
@@ -946,6 +969,18 @@ describe("TreasurySolutionsWorkspace", () => {
     const legacyRow = screen.getByText("Legacy treasury program").closest("tr");
     if (!legacyRow) throw new Error("Expected existing legacy program row");
     expect(legacyRow.textContent).toContain("$900.50");
+  });
+
+  it("shows a read-only member every holding and no money action", () => {
+    // A viewer's writes are refused by the API, so no deposit, exit or program withdrawal shows.
+    mocks.canWrite = false;
+    renderWorkspace();
+
+    expect(screen.getAllByText("Steakhouse USDC").length).toBeGreaterThan(0);
+    expect(screen.getByText("Legacy treasury program")).toBeTruthy();
+    expect(summaryFigure()).toBe("$130.50");
+    expect(screen.queryByRole("button", { name: "Deposit" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Withdraw" })).toBeNull();
   });
 
   it("keeps a position its par intermediate still funds and offers only its par redemption", async () => {
@@ -969,13 +1004,47 @@ describe("TreasurySolutionsWorkspace", () => {
       "$2,000.00"
     );
     expect(within(residualRow).queryByRole("button", { name: "Withdraw" })).toBeNull();
-    expect(screen.getByLabelText("$2,130.50 in open vault positions")).toBeTruthy();
+    expect(summaryFigure()).toBe("$2,130.50");
 
     await userEvent
       .setup()
       .click(within(residualRow).getByRole("button", { name: "Redeem wYLDS" }));
     expect(screen.getByRole("dialog").textContent).toBe("Withdraw from Exited provider vault");
     expect(mocks.vaultWithdrawalModal?.parSource).toBe("intermediate");
+  });
+
+  it("holds a par position's note lines while its balance syncs", () => {
+    // A redemption in flight hides the wrapped note; its slot keeps the row's height.
+    mocks.exitedPositionParIntermediate = {
+      mint: "wYLDS111111111111111111111111111111111111111",
+      amount: "2000",
+      withdrawableAmount: "2000",
+      tokenValue: "2000",
+    };
+    mocks.vaultWithdrawals = [
+      {
+        createdAt: "2026-09-01T17:21:00.000Z",
+        failureReason: null,
+        movementId: "earn_vault_withdrawal_par_submitted",
+        positionId: "earn_vault_position_exited",
+        provider: "kamino",
+        status: "submitted",
+      },
+    ];
+    renderWorkspace();
+
+    const residualRow = screen
+      .getAllByText("Exited provider vault")
+      .map((element) => element.closest("tr"))
+      .find((row) => row?.querySelector("[data-earn-vault-balance]"));
+    if (!residualRow) throw new Error("Expected the residual position row");
+    expect(
+      residualRow
+        .querySelector("[data-earn-vault-balance]")
+        ?.getAttribute("data-earn-vault-balance")
+    ).toBe("syncing");
+    expect(residualRow.querySelector("[data-earn-vault-par-intermediate]")).toBeNull();
+    expect(residualRow.querySelector("[data-earn-vault-par-slot]")).not.toBeNull();
   });
 
   it("shows an automatically updating deposit status beside the affected position", async () => {
@@ -1139,9 +1208,7 @@ describe("TreasurySolutionsWorkspace", () => {
     const depositedStatus = within(depositedPositionRow).getByRole("button", {
       name: "Active: This position is active.",
     });
-    expect(depositedStatus.querySelector("[data-variant]")?.getAttribute("data-variant")).toBe(
-      "success"
-    );
+    expect(depositedStatus.querySelector(".text-success")).not.toBeNull();
   });
 
   it("applies the modal's deposit movement update to the matching table row", async () => {
@@ -1218,10 +1285,13 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(updatingBalance?.querySelector("[data-earn-vault-balance-value]")?.textContent).toBe(
       "Updating balance…"
     );
-    expect(updatingBalance?.className).toContain("animate-pulse");
+    expect(updatingBalance?.querySelector(".animate-pulse")).not.toBeNull();
     expect(updatingBalance?.textContent).toContain("Updating balance…");
-    // One read for the submission, one asked for by the commit.
-    expect(mocks.refreshPositions).toHaveBeenCalledTimes(2);
+    // Only the commit asks for a read, floored on the movement: a read at
+    // submission could not carry the moved amount.
+    expect(mocks.refreshPositions).toHaveBeenCalledTimes(1);
+    expect(mocks.refreshPositions).toHaveBeenCalledWith([movementId]);
+    await waitFor(() => expect(mocks.refreshWalletBalances).toHaveBeenCalledTimes(1));
 
     // A read begun before confirmation cannot supply the completed balance.
     mocks.positionsReadStartedAt = 1_000;
@@ -1391,6 +1461,46 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(within(livePositionRow()).getByText("$129.24")).toBeTruthy();
   });
 
+  it("reads balances once per withdrawal, after it confirms, never at submission", async () => {
+    const user = userEvent.setup();
+    const movementId = "earn_vault_withdrawal_single_read";
+    renderWorkspace();
+    await user.click(within(livePositionRow()).getByRole("button", { name: "Withdraw" }));
+    const positionReads = mocks.refreshPositions.mock.calls.length;
+    const walletReads = mocks.refreshWalletBalances.mock.calls.length;
+
+    act(() => {
+      mocks.vaultWithdrawalModal?.onWithdrawn?.(
+        {
+          createdAt: "2026-09-24T12:00:05.000Z",
+          failureReason: null,
+          movementId,
+          positionId: "earn_vault_position_live",
+          status: "requested",
+        },
+        { amount: "6", submittedAt: Date.now() }
+      );
+    });
+    // The chain has not decided yet, so a read now could only return the
+    // pre-exit balance: nothing is read until the movement confirms.
+    expect(mocks.refreshPositions).toHaveBeenCalledTimes(positionReads);
+    expect(mocks.refreshWalletBalances).toHaveBeenCalledTimes(walletReads);
+    expect(syncingBalanceText(livePositionRow())).toBe("Updating balance…");
+
+    act(() => {
+      mocks.vaultWithdrawalModal?.onMovementUpdated?.({
+        createdAt: "2026-09-24T12:00:05.000Z",
+        failureReason: null,
+        movementId,
+        positionId: "earn_vault_position_live",
+        status: "confirmed",
+      });
+    });
+    expect(mocks.refreshPositions).toHaveBeenCalledTimes(positionReads + 1);
+    expect(mocks.refreshPositions).toHaveBeenLastCalledWith([movementId]);
+    await waitFor(() => expect(mocks.refreshWalletBalances).toHaveBeenCalledTimes(walletReads + 1));
+  });
+
   it("keeps amounts updating through overlapping confirmations", async () => {
     const user = userEvent.setup();
     renderWorkspace();
@@ -1484,7 +1594,7 @@ describe("TreasurySolutionsWorkspace", () => {
     const updatingBalance = within(pendingRow).getByText("Updating balance…");
     const updatingBalanceContainer = updatingBalance.closest("[data-earn-vault-balance]");
     expect(updatingBalanceContainer?.getAttribute("data-earn-vault-balance")).toBe("syncing");
-    expect(updatingBalanceContainer?.className).toContain("animate-pulse");
+    expect(updatingBalanceContainer?.querySelector(".animate-pulse")).not.toBeNull();
 
     mocks.positionsEmpty = false;
     mocks.livePositionTokenValue = "10";
@@ -1633,7 +1743,7 @@ describe("TreasurySolutionsWorkspace", () => {
       });
     });
     expect(screen.getAllByRole("status", { name: "Updating balance…" }).length).toBeGreaterThan(1);
-    expect(screen.getByRole("heading", { name: "Operating treasury" })).toBeTruthy();
+    expect(walletTile("cwlt_live").textContent).toContain("Operating treasury");
     expect(mocks.refreshPositions).toHaveBeenCalledTimes(1);
     await act(async () => finishWalletRead?.());
     expect(screen.getAllByRole("status", { name: "Updating balance…" }).length).toBeGreaterThan(1);
@@ -1700,9 +1810,7 @@ describe("TreasurySolutionsWorkspace", () => {
     const withdrawnStatus = within(withdrawnPositionRow).getByRole("button", {
       name: "Active: This position is active.",
     });
-    expect(withdrawnStatus.querySelector("[data-variant]")?.getAttribute("data-variant")).toBe(
-      "success"
-    );
+    expect(withdrawnStatus.querySelector(".text-success")).not.toBeNull();
   });
 
   it("applies the modal's withdrawal movement update to the matching table row", async () => {
@@ -1774,15 +1882,15 @@ describe("TreasurySolutionsWorkspace", () => {
     });
 
     const updatingBalance = within(positionRow).getByText("Updating balance…");
-    expect(updatingBalance.closest("[data-earn-vault-balance]")?.className).toContain(
-      "animate-pulse"
-    );
+    expect(
+      updatingBalance.closest("[data-earn-vault-balance]")?.querySelector(".animate-pulse")
+    ).not.toBeNull();
     expect(
       within(positionRow).getByRole("button", { name: "Active: This position is active." })
     ).toBeTruthy();
   });
 
-  it("renders lean strategy columns with the provider under each position", () => {
+  it("renders lean strategy columns with the provider under each strategy", () => {
     renderWorkspace();
 
     const instantRow = screen
@@ -1790,9 +1898,9 @@ describe("TreasurySolutionsWorkspace", () => {
       .map((element) => element.closest("tr"))
       .find((row) => row?.textContent?.includes("6.2%"));
     if (!instantRow) throw new Error("Expected the instant strategy row");
-    expect(within(instantRow).getByText("Kamino")).toBeTruthy();
+    expect(within(instantRow).getByText("Kamino · Devnet")).toBeTruthy();
     expect(within(instantRow).queryByText("Instant")).toBeNull();
-    expect(within(instantRow).getAllByRole("cell")).toHaveLength(7);
+    expect(within(instantRow).getAllByRole("cell")).toHaveLength(5);
 
     const strategyTable = instantRow.closest("table");
     if (!strategyTable) throw new Error("Expected the available strategies table");
@@ -1800,15 +1908,15 @@ describe("TreasurySolutionsWorkspace", () => {
       within(strategyTable)
         .getAllByRole("columnheader")
         .map((header) => header.textContent)
-    ).toEqual(["Position", "Asset", "Your position", "APY", "TVL", "Information", "Actions"]);
+    ).toEqual(["Strategy", "APY", "TVL", "Your position", "Actions"]);
     expect(within(instantRow).getByText("$12,345,678.90")).toBeTruthy();
 
     const delayedRow = screen.getByText("Veda Treasury Fund").closest("tr");
     if (!delayedRow) throw new Error("Expected the delayed strategy row");
-    expect(within(delayedRow).getByText("Veda")).toBeTruthy();
+    expect(within(delayedRow).getByText("Veda · Devnet")).toBeTruthy();
     expect(within(delayedRow).queryByText("Delayed · 7 days")).toBeNull();
     // No observed APY renders the placeholder, never a fabricated rate.
-    expect(within(delayedRow).getAllByRole("cell")[3]?.textContent).toBe("\u2014");
+    expect(within(delayedRow).getAllByRole("cell")[1]?.textContent).toBe("\u2014");
     expect(delayedRow.textContent).not.toMatch(/\d%/);
   });
 
@@ -1953,7 +2061,7 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(within(mainnetRow).queryByText(/deployed/)).toBeNull();
   });
 
-  it("degrades the Information cell to the placeholder when the allocations read fails", () => {
+  it("adds no allocation detail when the allocations read fails", () => {
     mocks.allocationsByVault.KvaultMainnet111111111111111111111111111111 = "error";
     renderWorkspace();
 
@@ -1962,12 +2070,30 @@ describe("TreasurySolutionsWorkspace", () => {
       .map((element) => element.closest("tr"))
       .find((row) => row?.textContent?.includes("8.1%"));
     if (!mainnetRow) throw new Error("Expected the mainnet mirror strategy row");
-    // Same placeholder as a non-Kamino row — never a partial or stale figure.
-    expect(within(mainnetRow).getAllByRole("cell")[5]?.textContent).toBe("—");
+    // The same detail line as a non-Kamino row: never a partial figure.
+    expect(within(mainnetRow).getByText("Kamino")).toBeTruthy();
     expect(within(mainnetRow).queryByText(/deployed/)).toBeNull();
+    expect(within(mainnetRow).queryByRole("button", { name: /Allocation details/ })).toBeNull();
   });
 
-  it("renders the Information placeholder for devnet Kamino rows without requesting", () => {
+  it("keeps the last allocation disclosure when a later read fails", () => {
+    mocks.allocationsByVault.KvaultMainnet111111111111111111111111111111 = {
+      allocations: [{ reserve: "reserve-1", marketName: "SOL/BTC Market", actualPct: "99.94" }],
+      unallocated: { pct: "0.06" },
+    };
+    mocks.allocationsFailAfterRead = true;
+    renderWorkspace();
+
+    const mainnetRow = screen
+      .getAllByText("Kamino JLP Vault")
+      .map((element) => element.closest("tr"))
+      .find((row) => row?.textContent?.includes("8.1%"));
+    if (!mainnetRow) throw new Error("Expected the mainnet mirror strategy row");
+    // A refresh that failed says nothing new about the vault: the last read still stands.
+    expect(within(mainnetRow).getByRole("button", { name: /99.9% deployed/ })).toBeTruthy();
+  });
+
+  it("adds no allocation detail to devnet Kamino rows and requests none", () => {
     renderWorkspace();
 
     // The devnet shelf's instant row shares the mainnet mirror's name: pick
@@ -1978,27 +2104,27 @@ describe("TreasurySolutionsWorkspace", () => {
       .find((row) => row?.textContent?.includes("6.2%"));
     if (!instantRow) throw new Error("Expected the instant strategy row");
     // Kamino's allocations source is mainnet-only: the devnet vault is an
-    // unsupported read, so it takes the placeholder without a request.
-    expect(within(instantRow).getAllByRole("cell")[5]?.textContent).toBe("—");
-    const informationCell = within(instantRow).getAllByRole("cell")[5];
-    if (!informationCell) throw new Error("Expected the Information cell");
-    expect(within(informationCell).queryByRole("button")).toBeNull();
+    // unsupported read, so its detail line is the provider and network alone.
+    const strategyCell = within(instantRow).getAllByRole("cell")[0];
+    if (!strategyCell) throw new Error("Expected the strategy cell");
+    expect(within(strategyCell).getByText("Kamino · Devnet")).toBeTruthy();
+    expect(within(strategyCell).queryByRole("button")).toBeNull();
     expect(mocks.allocationsRequests).not.toContain("Kvault11111111111111111111111111111111111");
     // The devnet-only vault has no mainnet counterpart: the rough-name
     // intersection hides the whole row, so no cell of it can render at all.
     expect(screen.queryByText("Kamino Vault USDC")).toBeNull();
   });
 
-  it("renders the Information placeholder for a non-Kamino strategy", () => {
+  it("adds no allocation detail to a non-Kamino strategy", () => {
     renderWorkspace();
 
     const delayedRow = screen.getByText("Veda Treasury Fund").closest("tr");
     if (!delayedRow) throw new Error("Expected the delayed strategy row");
-    expect(within(delayedRow).getAllByRole("cell")[5]?.textContent).toBe("—");
+    expect(within(delayedRow).getByText("Veda · Devnet")).toBeTruthy();
     expect(within(delayedRow).queryByRole("button", { name: /deployed/ })).toBeNull();
   });
 
-  it("sorts active balances, strategy APYs, and TVLs while keeping unavailable values last", async () => {
+  it("keeps positions newest first until sorted, and sorts balances, APYs and TVLs with unavailable values last", async () => {
     const user = userEvent.setup();
     renderWorkspace();
 
@@ -2019,17 +2145,25 @@ describe("TreasurySolutionsWorkspace", () => {
         .map((row) => within(row).getAllByRole("cell")[0]?.textContent);
 
     const balanceHeader = within(activeTable).getByRole("columnheader", { name: "Balance" });
+    // The API's order, newest first: a balance that changes under an action never moves its row.
+    expect(balanceHeader.getAttribute("aria-sort")).toBe("none");
+    expect(firstColumn(activeTable)).toEqual([
+      "Steakhouse USDCKamino · USDC",
+      "Retired provider vaultKamino · USDC",
+    ]);
+
+    await user.click(within(activeTable).getByRole("button", { name: "Balance" }));
     expect(balanceHeader.getAttribute("aria-sort")).toBe("descending");
     expect(firstColumn(activeTable)).toEqual([
-      "Steakhouse USDCKamino",
-      "Retired provider vaultKamino",
+      "Steakhouse USDCKamino · USDC",
+      "Retired provider vaultKamino · USDC",
     ]);
 
     await user.click(within(activeTable).getByRole("button", { name: "Balance" }));
     expect(balanceHeader.getAttribute("aria-sort")).toBe("ascending");
     expect(firstColumn(activeTable)).toEqual([
-      "Retired provider vaultKamino",
-      "Steakhouse USDCKamino",
+      "Retired provider vaultKamino · USDC",
+      "Steakhouse USDCKamino · USDC",
     ]);
 
     const apyHeader = within(strategiesTable).getByRole("columnheader", { name: "APY" });
@@ -2040,9 +2174,9 @@ describe("TreasurySolutionsWorkspace", () => {
       "Kamino JLP VaultKamino",
       "Steakhouse USDCKamino",
       "Allez USDCKamino",
-      "Steakhouse USDCDevnetKamino",
-      "Allez USDCDevnetKamino",
-      "Veda Treasury FundDevnetVeda",
+      "Steakhouse USDCKamino · Devnet",
+      "Allez USDCKamino · Devnet",
+      "Veda Treasury FundVeda · Devnet",
     ]);
 
     await user.click(within(strategiesTable).getByRole("button", { name: "APY" }));
@@ -2051,9 +2185,9 @@ describe("TreasurySolutionsWorkspace", () => {
       "Allez USDCKamino",
       "Steakhouse USDCKamino",
       "Kamino JLP VaultKamino",
-      "Allez USDCDevnetKamino",
-      "Steakhouse USDCDevnetKamino",
-      "Veda Treasury FundDevnetVeda",
+      "Allez USDCKamino · Devnet",
+      "Steakhouse USDCKamino · Devnet",
+      "Veda Treasury FundVeda · Devnet",
     ]);
 
     await user.click(within(strategiesTable).getByRole("button", { name: "TVL" }));
@@ -2063,9 +2197,9 @@ describe("TreasurySolutionsWorkspace", () => {
       "Steakhouse USDCKamino",
       "Kamino JLP VaultKamino",
       "Allez USDCKamino",
-      "Allez USDCDevnetKamino",
-      "Steakhouse USDCDevnetKamino",
-      "Veda Treasury FundDevnetVeda",
+      "Allez USDCKamino · Devnet",
+      "Steakhouse USDCKamino · Devnet",
+      "Veda Treasury FundVeda · Devnet",
     ]);
 
     await user.click(within(strategiesTable).getByRole("button", { name: "TVL" }));
@@ -2074,9 +2208,9 @@ describe("TreasurySolutionsWorkspace", () => {
       "Allez USDCKamino",
       "Kamino JLP VaultKamino",
       "Steakhouse USDCKamino",
-      "Steakhouse USDCDevnetKamino",
-      "Allez USDCDevnetKamino",
-      "Veda Treasury FundDevnetVeda",
+      "Steakhouse USDCKamino · Devnet",
+      "Allez USDCKamino · Devnet",
+      "Veda Treasury FundVeda · Devnet",
     ]);
   });
 
@@ -2174,7 +2308,9 @@ describe("TreasurySolutionsWorkspace", () => {
 
     expect(screen.getByLabelText("A wallet balance could not be read")).toBeTruthy();
     expect(screen.getByLabelText("A position value could not be read")).toBeTruthy();
-    expect(screen.getByText("Wallets could not be loaded. Refresh to try again.")).toBeTruthy();
+    const walletsError = screen.getByText("Wallets could not be loaded. Refresh to try again.");
+    // The failed read keeps the tile row's footprint, so the sections under it stay put.
+    expect(walletsError.parentElement?.className).toContain(TREASURY_WALLETS_BODY);
     expect(screen.queryByText("$0.00")).toBeNull();
     expect(screen.queryByText("No active position")).toBeNull();
     // No bar without a share: an empty track would read as 0% deployed.
@@ -2198,13 +2334,14 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(screen.queryByTestId("treasury-allocation-bar")).toBeNull();
   });
 
-  it("renders the Figma summary trio without the legacy allocation bar", () => {
+  it("renders the summary hero and stat line without the legacy allocation bar", () => {
     renderWorkspace();
 
     expect(screen.queryByTestId("treasury-allocation-bar")).toBeNull();
     expect(screen.getByText("Deposited")).toBeTruthy();
     expect(screen.getAllByText("Available cash").length).toBeGreaterThan(0);
-    expect(screen.getByText("Est. APY")).toBeTruthy();
+    expect(screen.getByText("available cash")).toBeTruthy();
+    expect(screen.getByText("est. APY")).toBeTruthy();
   });
 
   it("treats a catalogue row with no share mint as an incomplete vocabulary", () => {
@@ -2324,7 +2461,7 @@ describe("TreasurySolutionsWorkspace", () => {
 
     // Readable zeros are real zeros; only the shares stay unallocated.
     expect(screen.getAllByText("$0.00").length).toBeGreaterThan(0);
-    expect(screen.getByText("Est. APY")).toBeTruthy();
+    expect(screen.getByText("est. APY")).toBeTruthy();
   });
 
   it("reads an unhydratable position as unavailable in the summary, never zero", () => {
@@ -2380,6 +2517,9 @@ describe("TreasurySolutionsWorkspace", () => {
 
     expect(mocks.refreshPositions).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(mocks.refreshWalletBalances).toHaveBeenCalledTimes(1));
+    // A settled request moves holdings and cash only.
+    expect(mocks.refreshStrategies).not.toHaveBeenCalled();
+    expect(mocks.refreshPrograms).not.toHaveBeenCalled();
   });
 
   it("keeps the vault exit verb live in production, where deposits are closed", () => {
@@ -2407,9 +2547,8 @@ describe("TreasurySolutionsWorkspace", () => {
 
     const row = screen.getByText("Veda Treasury Fund").closest("tr");
     if (!row) throw new Error("Expected vault strategy row");
-    expect(
-      (within(row).getByRole("button", { name: "Deposit" }) as HTMLButtonElement).disabled
-    ).toBe(true);
+    // The reason it cannot be funded, as words, never a dead button.
+    expect(within(row).queryByRole("button", { name: "Deposit" })).toBeNull();
     expect(within(row).getByText("Sandbox only")).toBeTruthy();
     expect(screen.getByLabelText(/Rates are provider-reported and variable/)).toBeTruthy();
   });
@@ -2420,10 +2559,10 @@ describe("TreasurySolutionsWorkspace", () => {
 
     const programRow = screen.getByText("Legacy treasury program").closest("tr");
     if (!programRow) throw new Error("Expected existing provider program row");
-    expect(
-      (within(programRow).getByRole("button", { name: "Withdraw" }) as HTMLButtonElement).disabled
-    ).toBe(true);
+    expect(within(programRow).queryByRole("button", { name: "Withdraw" })).toBeNull();
     expect(within(programRow).getByText("Provider withdrawal unavailable")).toBeTruthy();
+    // The status reads in its column, and under the balance on a phone.
+    expect(within(programRow).getAllByText("Ready")).toHaveLength(2);
   });
 
   it("recovers every provider-accepted in-flight withdrawal from the durable ledger", async () => {
@@ -2604,11 +2743,10 @@ describe("TreasurySolutionsWorkspace — combined strategy catalogue (PRO-1742)"
     expect(devnetRow).toBeDefined();
     const mainnetCells = within(mainnetRow as HTMLTableRowElement);
     expect(mainnetCells.getByText("$32,000,000.00")).toBeTruthy();
-    expect(mainnetCells.queryByText("Devnet")).toBeNull();
-    expect(within(devnetRow as HTMLTableRowElement).getByText("Devnet")).toBeTruthy();
-    expect(mainnetCells.getByRole("button", { name: "Deposit" }).hasAttribute("disabled")).toBe(
-      true
-    );
+    expect(mainnetCells.queryByText(/Devnet/)).toBeNull();
+    expect(within(devnetRow as HTMLTableRowElement).getByText("Kamino · Devnet")).toBeTruthy();
+    expect(mainnetCells.queryByRole("button", { name: "Deposit" })).toBeNull();
+    expect(mainnetCells.getByText("Mainnet only")).toBeTruthy();
     expect(
       within(devnetRow as HTMLTableRowElement)
         .getByRole("button", { name: "Deposit" })
@@ -2616,8 +2754,8 @@ describe("TreasurySolutionsWorkspace — combined strategy catalogue (PRO-1742)"
     ).toBe(false);
 
     const reason = "Mainnet vaults are view-only in Sandbox.";
-    const disabledTrigger = mainnetCells.getByRole("note", { name: reason });
-    await user.hover(disabledTrigger);
+    const reasonHint = mainnetCells.getByRole("button", { name: reason });
+    await user.hover(reasonHint);
     expect(await screen.findByText(reason)).toBeTruthy();
   });
 

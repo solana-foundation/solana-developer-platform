@@ -32,3 +32,14 @@ export function isPaymentsPath(pathname: string | null | undefined): boolean {
 export function isDemoSessionCookie(name: string): boolean {
   return name === DEMO_SESSION_COOKIE_PREFIX || name.startsWith(`${DEMO_SESSION_COOKIE_PREFIX}.`);
 }
+
+/**
+ * Every record the demo serves, from the fixtures or made in the demo, has an id with this
+ * prefix, and no real record does.
+ */
+const DEMO_RECORD_ID_PREFIX = "demo_";
+
+/** Whether an id names one of the demo's records rather than a real one. */
+export function isDemoRecordId(id: string): boolean {
+  return id.startsWith(DEMO_RECORD_ID_PREFIX);
+}

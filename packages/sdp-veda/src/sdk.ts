@@ -1,15 +1,36 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { decodeAssetData } from "@sdp/earn/providers/veda/vault-state";
 import { EARN_QUEUED_WITHDRAWAL_MAXIMUM_DEADLINE_SECONDS } from "@sdp/types/earn";
 import { isVedaDepositMint } from "@sdp/types/veda-programs";
-import { type Address, address, type Instruction } from "@solana/kit";
-import { createVedaClient, parseLifecycleEvents, VedaSdkError } from "@vedatech/svm-sdk";
+import {
+  type Address,
+  address,
+  fetchEncodedAccounts,
+  type Instruction,
+  type MaybeEncodedAccount,
+} from "@solana/kit";
+import {
+  createVedaClient,
+  findAllowedUserPda,
+  findAssetDataPda,
+  findExtraAccountMetasPda,
+  findHookConfigPda,
+  findPermissionPda,
+  findQueuePda,
+  findQueueStatePda,
+  findQueueWithdrawAssetPda,
+  findUserWithdrawStatePda,
+  parseLifecycleEvents,
+  VedaSdkError,
+} from "@vedatech/svm-sdk";
+import { z } from "zod";
 import { accountExists, minimumBalanceForRentExemption } from "./accounts";
 import {
   allowedUserAccountForDeposit,
   prefundOwnerRentInstruction,
   VEDA_ALLOWED_USER_ACCOUNT_SIZE,
 } from "./allowed-user";
-import { acceptPositiveAtMintScale, mintDecimals } from "./amounts";
+import { type AcceptedAmount, acceptPositiveAtMintScale, mintDecimals } from "./amounts";
 import { SdpVedaError, vaultUnreadable } from "./errors";
 import { assertPlanTargetsCluster } from "./guards";
 import { readMintDecimals } from "./mint";
@@ -52,13 +73,13 @@ import type {
  *  test — that may import `@vedatech/svm-sdk`.
  * ════════════════════════════════════════════════════════════════════════════
  *
- * The SDK is built against `@solana/kit` **7.0.0**; this repo pins **6.8.0**,
- * and pnpm nests the SDK's own copy, so both live in the tree (alongside the
- * 2.3.0 klend-sdk drags in and a 5.5.1). Every cast below is a STRUCTURAL
- * re-label across that seam, not a coercion: kit's `Instruction` is a plain
- * object with `programAddress`, a numeric `AccountRole` and `Uint8Array` data
- * in both majors, and nothing kit-typed crosses this module's exports — see
- * `./types.ts`.
+ * The SDK is built against `@solana/kit` **7.0.0**; this repo's catalog pins
+ * **7.1.1**, and pnpm nests the SDK's own copy, so both live in the tree
+ * (alongside the 2.3.0 klend-sdk drags in and mosaic-sdk's 6.10.0). Every cast
+ * below is a STRUCTURAL re-label across that seam, not a coercion: kit's
+ * `Instruction` is a plain object with `programAddress`, a numeric
+ * `AccountRole` and `Uint8Array` data in both copies, and nothing kit-typed
+ * crosses this module's exports — see `./types.ts`.
  *
  * Keeping the SDK behind one module is also what keeps it out of `@sdp/earn`,
  * whose catalogue cron runs hourly in both environments and never builds a
@@ -118,10 +139,11 @@ function client(
 }
 
 /**
- * How long a position read trusts its shared SDK client and a vault's static
- * facts (share mint, share decimals, the fronted asset's mint). READS ONLY:
- * builds and quotes never consult these caches. Same window as the deposit
- * compatibility verdict, for the same reason: a URL can be repointed.
+ * How long position reads, deposits, exits and the queue lifecycle trust a
+ * shared SDK client and a vault's static facts (share mint, share decimals,
+ * vault id, the fronted asset's mint and its decimals). Only the deposit
+ * compatibility verdict keeps its own client and cache. Same window as that
+ * verdict, for the same reason: a URL can be repointed.
  */
 export const VEDA_READ_CACHE_TTL_MS = VEDA_COMPATIBILITY_TTL_MS;
 
@@ -132,8 +154,26 @@ interface CachedRead<T> {
 }
 
 interface VaultShareFacts {
-  shareMint: Kit7;
+  shareMint: Address;
   shareDecimals: unknown;
+  /**
+   * Fixed by the vault's address: the SDK refuses a vault state that is not
+   * the program's PDA for its own vault id.
+   */
+  vaultId: bigint;
+}
+
+/** The identity fields of an SDK `getState()` answer, parsed where they cross the seam. */
+const vaultIdentitySchema = z.object({ shareMint: z.string(), vaultId: z.bigint() });
+
+/** A vault's static facts from an SDK `getState()` answer. */
+function vaultShareFactsOf(state: Kit7): VaultShareFacts {
+  const identity = vaultIdentitySchema.parse(state);
+  return {
+    shareMint: address(identity.shareMint),
+    shareDecimals: state.shareDecimals,
+    vaultId: identity.vaultId,
+  };
 }
 
 /**
@@ -145,28 +185,44 @@ interface VaultShareFacts {
  */
 const outsideCallerScopes = AsyncLocalStorage.snapshot();
 
-const readClients = new Map<string, { veda: Kit7; expiresAt: number }>();
-const vaultShareFacts = new Map<string, CachedRead<VaultShareFacts>>();
-const vaultAssetMints = new Map<string, CachedRead<Address>>();
-
-/** Most position-read clients kept at once, one per (cluster, endpoint, deployment). */
-const VEDA_READ_CLIENT_CAPACITY = 32;
-/** Most entries kept in each vault-facts cache, one per (cluster, endpoint, vault). */
-const VEDA_READ_FACTS_CAPACITY = 256;
-
-/** Test seam: forget the shared position-read client and memoised vault facts. */
-export function resetVedaReadCaches(): void {
-  readClients.clear();
-  vaultShareFacts.clear();
-  vaultAssetMints.clear();
+/** A shared SDK client, the RPC handle it reads through and its commitment. */
+interface SharedClient {
+  veda: Kit7;
+  rpc: ReturnType<typeof createVedaReadRpc>;
+  commitment: "confirmed" | "finalized";
+  expiresAt: number;
 }
 
-/** Test seam: how many entries each position-read cache holds. */
-export function vedaReadCacheSizes(): { clients: number; shareFacts: number; assetMints: number } {
+const sharedClients = new Map<string, SharedClient>();
+const vaultShareFacts = new Map<string, CachedRead<VaultShareFacts>>();
+const vaultAssetMints = new Map<string, CachedRead<Address>>();
+const assetMintDecimals = new Map<string, CachedRead<number>>();
+
+/** Most shared clients kept at once, one per (cluster, endpoint, commitment, deployment). */
+const VEDA_READ_CLIENT_CAPACITY = 32;
+/** Most entries kept in each facts cache, one per (cluster, endpoint, vault or mint). */
+const VEDA_READ_FACTS_CAPACITY = 256;
+
+/** Test seam: forget the shared clients and memoised vault and mint facts. */
+export function resetVedaReadCaches(): void {
+  sharedClients.clear();
+  vaultShareFacts.clear();
+  vaultAssetMints.clear();
+  assetMintDecimals.clear();
+}
+
+/** Test seam: how many entries each shared cache holds. */
+export function vedaReadCacheSizes(): {
+  clients: number;
+  shareFacts: number;
+  assetMints: number;
+  mintDecimals: number;
+} {
   return {
-    clients: readClients.size,
+    clients: sharedClients.size,
     shareFacts: vaultShareFacts.size,
     assetMints: vaultAssetMints.size,
+    mintDecimals: assetMintDecimals.size,
   };
 }
 
@@ -195,40 +251,52 @@ function storeBounded<V extends { expiresAt: number | null }>(
 }
 
 /**
- * One SDK client per (cluster, endpoint, deployment) for position reads.
+ * One SDK client per (cluster, endpoint, commitment, deployment) for every
+ * read, quote and build except the deposit compatibility check
+ * (`assertVedaVaultUsable`), which keeps a client of its own.
  *
  * The SDK validates all three programs in its CONSTRUCTOR (six requests) and
- * memoises that verdict per instance, so a client per read paid them on every
- * holding. Sharing one client also shares its de-duplicating transport
- * (`createVedaReadRpc`) across concurrent owners. The SDK keeps a rejected
- * validation forever, so a client whose validation rejects is evicted at once;
- * the reads that observed it fail exactly as they did before.
+ * memoises that verdict per instance, so a client per call paid them every
+ * time. Sharing one client also shares its de-duplicating transport
+ * (`createVedaReadRpc`) across concurrent callers. The commitment is the
+ * client's, fixed at construction, so durable finalized reads get a client of
+ * their own. The SDK keeps a rejected validation forever, so a client whose
+ * validation rejects is evicted at once; the calls that observed it fail
+ * exactly as they did before.
  */
-function readClient(runtime: VedaRuntime, config: VedaClusterConfig): Kit7 {
+function sharedClient(
+  runtime: VedaRuntime,
+  config: VedaClusterConfig,
+  commitment: "confirmed" | "finalized" = "confirmed"
+): SharedClient {
   const key = [
     config.cluster,
     runtime.rpcUrl,
+    commitment,
     config.vaultProgramAddress,
     config.hookProgramAddress,
     config.queueProgramAddress ?? "",
   ].join("\n");
-  const cached = readClients.get(key);
-  if (cached && cached.expiresAt > Date.now()) return cached.veda;
+  const cached = sharedClients.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached;
 
   // The constructor fires the program validations, so it runs unscoped too.
-  const entry = {
-    veda: outsideCallerScopes(() =>
-      client(runtime, config, "confirmed", createVedaReadRpc(runtime.rpcUrl))
-    ),
-    expiresAt: Date.now() + VEDA_READ_CACHE_TTL_MS,
-  };
-  storeBounded(readClients, key, entry, VEDA_READ_CLIENT_CAPACITY);
+  const entry = outsideCallerScopes((): SharedClient => {
+    const rpc = createVedaReadRpc(runtime.rpcUrl);
+    return {
+      veda: client(runtime, config, commitment, rpc),
+      rpc,
+      commitment,
+      expiresAt: Date.now() + VEDA_READ_CACHE_TTL_MS,
+    };
+  });
+  storeBounded(sharedClients, key, entry, VEDA_READ_CLIENT_CAPACITY);
   void Promise.resolve()
     .then(() => entry.veda.validateDeployment())
     .catch(() => {
-      if (readClients.get(key) === entry) readClients.delete(key);
+      if (sharedClients.get(key) === entry) sharedClients.delete(key);
     });
-  return entry.veda;
+  return entry;
 }
 
 function vaultFactsKey(runtime: VedaRuntime, config: VedaClusterConfig, vault: Address): string {
@@ -261,6 +329,44 @@ async function cachedRead<T>(
     if (cache.get(key) === current) cache.delete(key);
     throw cause;
   }
+}
+
+/** The vault's share mint, share decimals and id, read once per cache window. */
+function cachedShareFacts(
+  runtime: VedaRuntime,
+  config: VedaClusterConfig,
+  vaultClient: Kit7,
+  vault: Address
+): Promise<VaultShareFacts> {
+  // No instruction rewrites the share mint after deploy, a mint's decimals
+  // never change, and the vault id is fixed by the vault's address. Position
+  // reads re-check the share mint against the live share account.
+  return cachedRead(vaultShareFacts, vaultFactsKey(runtime, config, vault), async () =>
+    vaultShareFactsOf(await vaultClient.getState())
+  );
+}
+
+/** The asset SDP fronts, resolved by identity (`resolveVaultAssetMint`) once per window. */
+function cachedAssetMint(
+  runtime: VedaRuntime,
+  config: VedaClusterConfig,
+  vaultClient: Kit7,
+  vault: Address
+): Promise<Address> {
+  return cachedRead(vaultAssetMints, vaultFactsKey(runtime, config, vault), () =>
+    resolveVaultAssetMint(config, vaultClient, vault)
+  );
+}
+
+/** A mint's own decimals (`readMintDecimals`), which no instruction can change. */
+function cachedMintDecimals(
+  runtime: VedaRuntime,
+  config: VedaClusterConfig,
+  mint: Address
+): Promise<number> {
+  return cachedRead(assetMintDecimals, [config.cluster, runtime.rpcUrl, mint].join("\n"), () =>
+    readMintDecimals(runtime.rpcUrl, mint)
+  );
 }
 
 async function holdsShareAccount(
@@ -346,8 +452,12 @@ async function validate(
   }
 }
 
+/** What asset resolution reads of the SDK's `listAssets` answer. */
+const vaultAssetsSchema = z.array(z.looseObject({ mint: z.string() }));
+
 /**
- * The single vault asset SDP fronts, resolved by MINT IDENTITY ALONE.
+ * The single vault asset SDP fronts, resolved by MINT IDENTITY ALONE. Every
+ * path takes it from `cachedAssetMint`, so this runs once per cache window.
  *
  * `EarnVaultDepositInput` and `EarnVaultPositionInput` carry no mint — the
  * catalogue row does, and the API compares the plan's/snapshot's identity
@@ -360,7 +470,8 @@ async function validate(
  * gated on it would break the exit-safety rule the moment Veda paused deposits
  * (ADR 0002: reads and money-out never inherit a money-in gate) — precisely
  * when a holder most wants to see their balance. The DEPOSIT path re-checks the
- * flag on the returned asset and refuses with its own typed error.
+ * flag live on the asset's own account (`assetTakesDeposits`) and refuses with
+ * its own typed error.
  *
  * AMBIGUITY IS REFUSED, not resolved. Identity is cluster-exact, so while SDP
  * declares one deposit symbol there can be at most one match; if the symbol
@@ -368,55 +479,88 @@ async function validate(
  * or values the wrong token. Widening `VEDA_DEPOSIT_TOKEN_SYMBOLS` therefore
  * means carrying a mint on the provider contract first; this error says so.
  */
-async function resolveVaultAsset(
-  runtime: VedaRuntime,
-  config: VedaClusterConfig,
-  vaultClient: Kit7,
-  vault: Address
-): Promise<{ mint: Address; decimals: number; allowDeposits: boolean }> {
-  const { mint, allowDeposits } = await resolveVaultAssetMint(config, vaultClient, vault);
-  return {
-    mint,
-    decimals: await readMintDecimals(runtime.rpcUrl, mint),
-    allowDeposits,
-  };
-}
-
-/** `resolveVaultAsset` without the mint's decimals, for position reads. */
 async function resolveVaultAssetMint(
   config: VedaClusterConfig,
   vaultClient: Kit7,
   vault: Address
-): Promise<{ mint: Address; allowDeposits: boolean }> {
-  let assets: { mint: Kit7; allowDeposits: boolean }[];
+): Promise<Address> {
+  let assets: z.infer<typeof vaultAssetsSchema>;
   try {
-    assets = await vaultClient.listAssets();
+    assets = vaultAssetsSchema.parse(await vaultClient.listAssets());
   } catch (cause) {
-    throw vaultUnreadable(String(vault), config.cluster, cause);
+    throw vaultUnreadable(vault, config.cluster, cause);
   }
 
   const candidates = assets
-    .filter((asset) => isVedaDepositMint(String(asset.mint), config.cluster))
-    .sort((left, right) => String(left.mint).localeCompare(String(right.mint)));
+    .filter((asset) => isVedaDepositMint(asset.mint, config.cluster))
+    .sort((left, right) => left.mint.localeCompare(right.mint));
 
   const [only, ...rest] = candidates;
-  if (only === undefined) {
-    throw new SdpVedaError(
-      "UNSUPPORTED_VAULT",
-      `Veda vault ${vault} configures no asset SDP fronts on ${config.cluster}.`
-    );
-  }
+  if (only === undefined) throw noFrontedAsset(config, vault);
   if (rest.length > 0) {
     throw new SdpVedaError(
       "UNSUPPORTED_VAULT",
       `Veda vault ${vault} configures ${candidates.length} assets SDP fronts on ` +
-        `${config.cluster} (${candidates.map((asset) => String(asset.mint)).join(", ")}), ` +
+        `${config.cluster} (${candidates.map((asset) => asset.mint).join(", ")}), ` +
         "and neither a deposit nor a position read can say which one is meant. " +
         "Carry the mint on the provider contract before widening VEDA_DEPOSIT_TOKEN_SYMBOLS."
     );
   }
 
-  return { mint: address(String(only.mint)), allowDeposits: only.allowDeposits };
+  return address(only.mint);
+}
+
+function noFrontedAsset(config: VedaClusterConfig, vault: Address): SdpVedaError {
+  return new SdpVedaError(
+    "UNSUPPORTED_VAULT",
+    `Veda vault ${vault} configures no asset SDP fronts on ${config.cluster}.`
+  );
+}
+
+/**
+ * Whether the vault takes deposits of the asset SDP fronts, read LIVE from its
+ * `AssetData` account on every deposit build. The cached asset mint only says
+ * WHICH asset; the flag is never taken from it.
+ *
+ * The account is in the build's batched read, so this costs no request. It is
+ * decoded with `@sdp/earn`'s layout, the bytes the catalogue reads the same
+ * flag from, which `idl-layout.test.ts` pins to the committed IDL. An account
+ * that is gone or no longer this vault's asset gets the answer a live asset
+ * listing would have given, and the cached mint is dropped.
+ */
+async function assetTakesDeposits(
+  runtime: VedaRuntime,
+  config: VedaClusterConfig,
+  operation: VaultOperation,
+  vault: Address
+): Promise<boolean> {
+  const [assetDataAddress] = await findAssetDataPda(
+    config.vaultProgramAddress,
+    vault,
+    operation.assetMint
+  );
+  let accounts: MaybeEncodedAccount[];
+  try {
+    accounts = await fetchEncodedAccounts(operation.shared.rpc, [assetDataAddress], {
+      commitment: operation.shared.commitment,
+    });
+  } catch (cause) {
+    throw vaultUnreadable(vault, config.cluster, cause);
+  }
+  const [account] = accounts;
+  const asset =
+    account.exists && account.programAddress === config.vaultProgramAddress
+      ? decodeAssetData(account.data)
+      : null;
+  if (
+    asset === null ||
+    asset.vaultId !== operation.facts.vaultId ||
+    asset.assetMint !== operation.assetMint
+  ) {
+    vaultAssetMints.delete(vaultFactsKey(runtime, config, vault));
+    throw noFrontedAsset(config, vault);
+  }
+  return asset.allowDeposits;
 }
 
 /**
@@ -437,29 +581,46 @@ export async function buildVedaDepositPlan(
 ): Promise<VedaInstructionPlan> {
   await assertVedaVaultUsable(runtime, config, input.vault);
 
-  const vaultClient = client(runtime, config).vault(input.vault as Kit7);
-  let state: { shareMint: Kit7; shareDecimals: unknown };
+  // The SDK's build previews, reads its quote context and the holder's
+  // records, and the plan's existence checks read the same records: all from
+  // one held read.
+  const unreadable = (cause: unknown) => vaultUnreadable(input.vault, config.cluster, cause);
+  const operation = await openVaultOperation(runtime, config, input.vault, unreadable);
+  const { vaultClient } = operation;
+  const assetDecimals = await holdWithAssetDecimals(
+    runtime,
+    config,
+    operation,
+    async () =>
+      (
+        await Promise.all([
+          vaultQuoteAccounts(config, operation.facts, input.vault, operation.assetMint),
+          holderAccounts(config, operation.facts, input.vault, input.owner),
+        ])
+      ).flat(),
+    unreadable
+  );
+  let state: VaultShareFacts;
   try {
-    state = await vaultClient.getState();
+    state = vaultShareFactsOf(await vaultClient.getState());
   } catch (cause) {
-    throw vaultUnreadable(String(input.vault), config.cluster, cause);
+    throw unreadable(cause);
   }
 
-  const asset = await resolveVaultAsset(runtime, config, vaultClient, input.vault);
   // The deposit flag is checked HERE, on the money-in path only — never inside
   // asset resolution, which position reads share. `DEPOSIT_REFUSED` is the
   // caller-visible answer (the API maps it to a 400 with this sentence);
   // burying it in UNSUPPORTED_VAULT read as an SDP fault, not a vault state.
-  if (!asset.allowDeposits) {
+  if (!(await assetTakesDeposits(runtime, config, operation, input.vault))) {
     throw new SdpVedaError(
       "DEPOSIT_REFUSED",
-      `Veda vault ${input.vault} currently has deposits disabled for ${asset.mint}.`
+      `Veda vault ${input.vault} currently has deposits disabled for ${operation.assetMint}.`
     );
   }
   // Precision is checked against each MINT, which is why it can only happen
   // after the vault is read: the deposit asset and the share token have
   // independent decimals and neither is knowable at the API boundary.
-  const amount = acceptPositiveAtMintScale("amount", input.amount, asset.decimals);
+  const amount = acceptPositiveAtMintScale("amount", input.amount, assetDecimals);
   const minSharesOut = acceptPositiveAtMintScale(
     "minSharesOut",
     input.minSharesOut,
@@ -469,8 +630,8 @@ export async function buildVedaDepositPlan(
   let plan: { instructions: readonly Kit7[] };
   try {
     plan = await vaultClient.buildDeposit({
-      owner: input.owner as Kit7,
-      asset: { kind: "mint", address: asset.mint as Kit7 },
+      owner: input.owner,
+      asset: { kind: "mint", address: operation.assetMint },
       amount: amount.baseUnits,
       // `minAmountOut`, never `slippageBps`: a bps tolerance would be SDP
       // choosing a floor, and the floor a caller was quoted is the one that
@@ -486,7 +647,7 @@ export async function buildVedaDepositPlan(
   // row: the API compares builder truth with catalogue metadata before
   // signing, and both sides being catalogue-derived would make that
   // comparison vacuous.
-  const shareMint = address(String(state.shareMint));
+  const shareMint = state.shareMint;
 
   // The SDK's order and count preserved exactly — a Veda plan can carry
   // `protectedInstructionGroups` requiring adjacency, and the rent rewrite
@@ -507,7 +668,9 @@ export async function buildVedaDepositPlan(
   // pre-execution residual on `EarnVaultTransactionPlan.createsShareAccount`).
   const shareAta = createdAtaAddressForMint(instructions, shareMint);
   const createsShareAccount =
-    shareAta === undefined ? undefined : !(await accountExists(runtime.rpcUrl, shareAta));
+    shareAta === undefined
+      ? undefined
+      : !(await accountExists(operation.shared.rpc, operation.shared.commitment, shareAta));
 
   // The OTHER rent a first deposit owes, which the ATA swap above cannot
   // reach: the vault program lazily creates the depositor's AllowedUser
@@ -523,7 +686,7 @@ export async function buildVedaDepositPlan(
   if (
     sponsor !== undefined &&
     allowedUser !== undefined &&
-    !(await accountExists(runtime.rpcUrl, allowedUser))
+    !(await accountExists(operation.shared.rpc, operation.shared.commitment, allowedUser))
   ) {
     const rent = await minimumBalanceForRentExemption(
       runtime.rpcUrl,
@@ -538,7 +701,7 @@ export async function buildVedaDepositPlan(
       instructions: finalInstructions,
       lookupTables: [],
       assetIdentity: {
-        depositTokenMint: asset.mint,
+        depositTokenMint: operation.assetMint,
         shareMint,
       },
       accepted: { amount: amount.canonical, minSharesOut: minSharesOut.canonical },
@@ -570,9 +733,16 @@ export async function previewVedaDeposit(
   config: VedaClusterConfig,
   input: VedaDepositQuoteInput
 ): Promise<VedaDepositQuote> {
-  const vaultClient = client(runtime, config).vault(input.vault as Kit7);
-  const asset = await resolveVaultAsset(runtime, config, vaultClient, input.vault);
-  const amount = acceptPositiveAtMintScale("amount", input.amount, asset.decimals);
+  const unreadable = (cause: unknown) => vaultUnreadable(input.vault, config.cluster, cause);
+  const operation = await openVaultOperation(runtime, config, input.vault, unreadable);
+  const assetDecimals = await holdWithAssetDecimals(
+    runtime,
+    config,
+    operation,
+    () => vaultQuoteAccounts(config, operation.facts, input.vault, operation.assetMint),
+    unreadable
+  );
+  const amount = acceptPositiveAtMintScale("amount", input.amount, assetDecimals);
 
   let quote: {
     sharesOut: bigint;
@@ -580,8 +750,8 @@ export async function previewVedaDeposit(
     issues: readonly { code: unknown; message: unknown }[];
   };
   try {
-    quote = await vaultClient.previewDeposit({
-      asset: { kind: "mint", address: asset.mint as Kit7 },
+    quote = await operation.vaultClient.previewDeposit({
+      asset: { kind: "mint", address: operation.assetMint },
       amount: amount.baseUnits,
     });
   } catch (cause) {
@@ -618,37 +788,51 @@ export async function previewVedaDeposit(
  * choose one. The asset resolves exactly as the deposit's does — the vault's
  * own configured assets, cluster-exact, ambiguity refused — and deliberately
  * ignores `allow_deposits`, which gates the other money direction.
+ *
+ * The SDK's route check, preview, quote context and holding read all answer
+ * from one held read.
  */
 export async function buildVedaWithdrawPlan(
   runtime: VedaRuntime,
   config: VedaClusterConfig,
   input: VedaWithdrawInput
 ): Promise<VedaInstructionPlan> {
-  const vaultClient = client(runtime, config).vault(input.vault as Kit7);
-  let state: { shareMint: Kit7; shareDecimals: unknown };
+  const unreadable = (cause: unknown) => vaultUnreadable(input.vault, config.cluster, cause);
+  const operation = await openVaultOperation(runtime, config, input.vault, unreadable);
+  const { vaultClient } = operation;
+  const assetDecimals = await holdWithAssetDecimals(
+    runtime,
+    config,
+    operation,
+    async () =>
+      (
+        await Promise.all([
+          vaultQuoteAccounts(config, operation.facts, input.vault, operation.assetMint),
+          holderAccounts(config, operation.facts, input.vault, input.owner),
+          queueStateAccount(config, operation.facts),
+        ])
+      ).flat(),
+    unreadable
+  );
+  let state: VaultShareFacts;
   try {
-    state = await vaultClient.getState();
+    state = vaultShareFactsOf(await vaultClient.getState());
   } catch (cause) {
-    throw vaultUnreadable(String(input.vault), config.cluster, cause);
+    throw unreadable(cause);
   }
 
-  const asset = await resolveVaultAsset(runtime, config, vaultClient, input.vault);
   const shares = acceptPositiveAtMintScale(
     "shares",
     input.shares,
     shareMintDecimals(state.shareDecimals, input.vault)
   );
-  const minAmountOut = acceptPositiveAtMintScale(
-    "minAmountOut",
-    input.minAmountOut,
-    asset.decimals
-  );
+  const minAmountOut = acceptPositiveAtMintScale("minAmountOut", input.minAmountOut, assetDecimals);
 
   let plan: { instructions: readonly Kit7[] };
   try {
     plan = await vaultClient.buildWithdraw({
-      owner: input.owner as Kit7,
-      asset: asset.mint as Kit7,
+      owner: input.owner,
+      asset: operation.assetMint,
       shares: shares.baseUnits,
       // `minAmountOut`, never `slippageBps` — same rule as the deposit: the
       // floor the caller was quoted is the one that must be encoded.
@@ -677,8 +861,8 @@ export async function buildVedaWithdrawPlan(
       instructions,
       lookupTables: [],
       assetIdentity: {
-        depositTokenMint: asset.mint,
-        shareMint: address(String(state.shareMint)),
+        depositTokenMint: operation.assetMint,
+        shareMint: state.shareMint,
       },
       accepted: { shares: shares.canonical, minAmountOut: minAmountOut.canonical },
     },
@@ -697,15 +881,22 @@ export async function previewVedaWithdraw(
   config: VedaClusterConfig,
   input: VedaWithdrawQuoteInput
 ): Promise<VedaWithdrawQuote> {
-  const vaultClient = client(runtime, config).vault(input.vault as Kit7);
-  let state: { shareMint: Kit7; shareDecimals: unknown };
+  const unreadable = (cause: unknown) => vaultUnreadable(input.vault, config.cluster, cause);
+  const operation = await openVaultOperation(runtime, config, input.vault, unreadable);
+  const assetDecimals = await holdWithAssetDecimals(
+    runtime,
+    config,
+    operation,
+    () => vaultQuoteAccounts(config, operation.facts, input.vault, operation.assetMint),
+    unreadable
+  );
+  let state: VaultShareFacts;
   try {
-    state = await vaultClient.getState();
+    state = vaultShareFactsOf(await operation.vaultClient.getState());
   } catch (cause) {
-    throw vaultUnreadable(String(input.vault), config.cluster, cause);
+    throw unreadable(cause);
   }
 
-  const asset = await resolveVaultAsset(runtime, config, vaultClient, input.vault);
   const shares = acceptPositiveAtMintScale(
     "shares",
     input.shares,
@@ -718,8 +909,8 @@ export async function previewVedaWithdraw(
     issues: readonly { code: unknown; message: unknown }[];
   };
   try {
-    quote = await vaultClient.previewWithdraw({
-      asset: asset.mint as Kit7,
+    quote = await operation.vaultClient.previewWithdraw({
+      asset: operation.assetMint,
       shares: shares.baseUnits,
     });
   } catch (cause) {
@@ -731,9 +922,8 @@ export async function previewVedaWithdraw(
   }
 
   // The mint account's own decimals decide the scale: the floor derived from
-  // `assetsOut` is quantized against `asset.decimals` in the build, so trusting
-  // a different number here would silently rescale it.
-  const assetDecimals = asset.decimals;
+  // `assetsOut` is quantized against these same decimals in the build, so
+  // trusting a different number here would silently rescale it.
   return {
     assetsOut: formatAtomic(quote.assetsOut, assetDecimals),
     assetDecimals,
@@ -744,14 +934,201 @@ export async function previewVedaWithdraw(
   };
 }
 
+/**
+ * Read, in ONE `getMultipleAccounts`, every account an operation's SDK calls
+ * are about to fetch. Inside the operation's `withVedaOperationReads` scope
+ * (`VedaVaultDirectClient` opens it) those calls are then answered from this
+ * read, at its slot, so no account is fetched twice.
+ *
+ * It is a LIVE read: it runs in the caller's scope (read floor and minimum
+ * slot), on the client the SDK reads through, with the SDK's own config. Only
+ * the addresses come from cached facts. An account listed but never read costs
+ * bytes, not a request; one the SDK reads that is not listed (an oracle named
+ * by live asset data) is simply fetched on its own.
+ */
+async function holdAccounts(shared: SharedClient, accounts: readonly Address[]): Promise<void> {
+  await shared.rpc
+    .getMultipleAccounts([...new Set(accounts)], {
+      commitment: shared.commitment,
+      encoding: "base64",
+    })
+    .send();
+}
+
+/** The vault's queue state, which `getWithdrawalOptions` reads to report the queued route. */
+async function queueStateAccount(
+  config: VedaClusterConfig,
+  facts: VaultShareFacts
+): Promise<Address[]> {
+  const queueProgram = config.queueProgramAddress;
+  if (queueProgram === undefined) return [];
+  const [queueState] = await findQueueStatePda(queueProgram, facts.vaultId);
+  return [queueState];
+}
+
+/** The queue state and this asset's queue limits, which every queue route reads. */
+async function queueStateAccounts(
+  config: VedaClusterConfig,
+  facts: VaultShareFacts,
+  assetMint: Address
+): Promise<Address[]> {
+  const queueProgram = config.queueProgramAddress;
+  if (queueProgram === undefined) return [];
+  const [queueState, [withdrawAsset]] = await Promise.all([
+    queueStateAccount(config, facts),
+    findQueueWithdrawAssetPda(queueProgram, facts.vaultId, assetMint),
+  ]);
+  return [...queueState, withdrawAsset];
+}
+
+/**
+ * What the SDK's quote context reads, in every preview and build: the vault,
+ * the asset data and both mints. `getState` reads the vault and the share mint.
+ */
+async function vaultQuoteAccounts(
+  config: VedaClusterConfig,
+  facts: VaultShareFacts,
+  vault: Address,
+  assetMint: Address
+): Promise<Address[]> {
+  const [assetData] = await findAssetDataPda(config.vaultProgramAddress, vault, assetMint);
+  return [vault, assetData, facts.shareMint, assetMint];
+}
+
+/** What a queued-withdrawal quote reads: the quote context and the queue. */
+async function queueQuoteAccounts(
+  config: VedaClusterConfig,
+  facts: VaultShareFacts,
+  vault: Address,
+  assetMint: Address
+): Promise<Address[]> {
+  const [quote, queue] = await Promise.all([
+    vaultQuoteAccounts(config, facts, vault, assetMint),
+    queueStateAccounts(config, facts, assetMint),
+  ]);
+  return [...quote, ...queue];
+}
+
+/**
+ * The queue's share escrow, the permission a vesting vault's queue holds, and
+ * the share mint's transfer-hook accounts: what moving shares into or out of
+ * the queue reads.
+ */
+async function queueEscrowAccounts(
+  config: VedaClusterConfig,
+  facts: VaultShareFacts,
+  vault: Address
+): Promise<Address[]> {
+  const [[extraAccountMetas], [hookConfig]] = await Promise.all([
+    findExtraAccountMetasPda(config.hookProgramAddress, facts.shareMint),
+    findHookConfigPda(config.hookProgramAddress, facts.shareMint),
+  ]);
+  const hook = [facts.shareMint, config.hookProgramAddress, extraAccountMetas, hookConfig];
+  const queueProgram = config.queueProgramAddress;
+  if (queueProgram === undefined) return hook;
+  const [queue] = await findQueuePda(queueProgram, facts.vaultId);
+  const [queueShares, [permission]] = await Promise.all([
+    vedaShareAccountAddress(queue, facts.shareMint),
+    findPermissionPda(config.vaultProgramAddress, vault, queue),
+  ]);
+  return [...hook, queueShares, permission];
+}
+
+/** The holder's share account and allowed-user record, which `getUserPosition` reads. */
+async function holderAccounts(
+  config: VedaClusterConfig,
+  facts: VaultShareFacts,
+  vault: Address,
+  owner: Address
+): Promise<Address[]> {
+  const [shareAccount, [allowedUser]] = await Promise.all([
+    vedaShareAccountAddress(owner, facts.shareMint),
+    findAllowedUserPda(config.vaultProgramAddress, vault, owner),
+  ]);
+  return [shareAccount, allowedUser];
+}
+
+/** The holder's records and queue nonce, which a request reads. */
+async function queueHolderAccounts(
+  config: VedaClusterConfig,
+  facts: VaultShareFacts,
+  vault: Address,
+  owner: Address
+): Promise<Address[]> {
+  const holder = await holderAccounts(config, facts, vault, owner);
+  const queueProgram = config.queueProgramAddress;
+  if (queueProgram === undefined) return holder;
+  const [userWithdrawState] = await findUserWithdrawStatePda(queueProgram, owner);
+  return [...holder, userWithdrawState];
+}
+
+/** One operation's client and the vault's cached facts. */
+interface VaultOperation {
+  shared: SharedClient;
+  vaultClient: Kit7;
+  facts: VaultShareFacts;
+  assetMint: Address;
+}
+
+/**
+ * Open an operation on the shared client: the vault's static facts and the
+ * asset SDP fronts, from the caches (`VEDA_READ_CACHE_TTL_MS`). Started
+ * together, so a cold fill's repeated vault-state read is one request; a facts
+ * failure is reported first, as the sequential reads did.
+ */
+async function openVaultOperation(
+  runtime: VedaRuntime,
+  config: VedaClusterConfig,
+  vault: Address,
+  factsFailure: (cause: unknown) => SdpVedaError
+): Promise<VaultOperation> {
+  const shared = sharedClient(runtime, config);
+  const vaultClient = shared.veda.vault(vault);
+  const [factsRead, mintRead] = await Promise.allSettled([
+    cachedShareFacts(runtime, config, vaultClient, vault),
+    cachedAssetMint(runtime, config, vaultClient, vault),
+  ]);
+  if (factsRead.status === "rejected") throw factsFailure(factsRead.reason);
+  if (mintRead.status === "rejected") throw mintRead.reason;
+  return { shared, vaultClient, facts: factsRead.value, assetMint: mintRead.value };
+}
+
+/**
+ * Hold an operation's accounts (`holdAccounts`) while the fronted asset's
+ * decimals come from their cache, read in the same round on the first call per
+ * window. A failed hold is reported first, where the vault read it replaces
+ * failed first.
+ */
+async function holdWithAssetDecimals(
+  runtime: VedaRuntime,
+  config: VedaClusterConfig,
+  operation: VaultOperation,
+  accounts: () => Promise<Address[]>,
+  holdFailure: (cause: unknown) => SdpVedaError
+): Promise<number> {
+  const [heldRead, decimalsRead] = await Promise.allSettled([
+    accounts().then((list) => holdAccounts(operation.shared, list)),
+    cachedMintDecimals(runtime, config, operation.assetMint),
+  ]);
+  if (heldRead.status === "rejected") throw holdFailure(heldRead.reason);
+  if (decimalsRead.status === "rejected") throw decimalsRead.reason;
+  return decimalsRead.value;
+}
+
 /** Read both Veda exit routes and the SDP-facing asset's queue limits. */
 export async function readVedaWithdrawalOptions(
   runtime: VedaRuntime,
   config: VedaClusterConfig,
   input: VedaWithdrawalOptionsInput
 ): Promise<VedaWithdrawalOptions> {
-  const vaultClient = client(runtime, config).vault(input.vault as Kit7);
-  let state: { shareDecimals: unknown };
+  const failure = (cause: unknown) =>
+    mapVedaSdkError(cause, `Veda could not read withdrawal options for ${input.vault}`);
+  const { shared, vaultClient, facts, assetMint } = await openVaultOperation(
+    runtime,
+    config,
+    input.vault,
+    failure
+  );
   let options: {
     instant: boolean;
     queued: boolean;
@@ -759,13 +1136,15 @@ export async function readVedaWithdrawalOptions(
     queueState: Kit7 | null;
   };
   try {
-    state = await vaultClient.getState();
+    await holdAccounts(shared, [
+      input.vault,
+      ...(await queueStateAccounts(config, facts, assetMint)),
+    ]);
     options = await vaultClient.getWithdrawalOptions();
   } catch (cause) {
-    throw mapVedaSdkError(cause, `Veda could not read withdrawal options for ${input.vault}`);
+    throw failure(cause);
   }
 
-  const asset = await resolveVaultAsset(runtime, config, vaultClient, input.vault);
   let queueAsset: {
     asset: Kit7;
     allowWithdrawals: boolean;
@@ -776,12 +1155,12 @@ export async function readVedaWithdrawalOptions(
     minimumShares: bigint;
   } | null;
   try {
-    queueAsset = await vaultClient.getQueueWithdrawalAsset(asset.mint as Kit7);
+    queueAsset = await vaultClient.getQueueWithdrawalAsset(assetMint);
   } catch (cause) {
     throw mapVedaSdkError(cause, `Veda could not read queue limits for ${input.vault}`);
   }
 
-  const shareDecimals = shareMintDecimals(state.shareDecimals, input.vault);
+  const shareDecimals = shareMintDecimals(facts.shareDecimals, input.vault);
   return {
     instant: options.instant,
     // The SDK's vault-level flag cannot account for this specific asset's
@@ -806,55 +1185,66 @@ export async function readVedaWithdrawalOptions(
   };
 }
 
-/** Preview the discounted assets and exact maturity/deadline of a queue request. */
-export async function previewVedaQueuedWithdrawal(
+/** A queue request's terms, checked against the share mint before any live read. */
+interface QueueTerms {
+  shares: AcceptedAmount;
+  shareDecimals: number;
+  discountBps: number;
+  deadlineSeconds: number;
+}
+
+function queueTerms(facts: VaultShareFacts, input: VedaQueuedWithdrawalQuoteInput): QueueTerms {
+  const shareDecimals = shareMintDecimals(facts.shareDecimals, input.vault);
+  return {
+    shares: acceptPositiveAtMintScale("shares", input.shares, shareDecimals),
+    shareDecimals,
+    discountBps: queueInteger("discountBps", input.discountBps, 65_535),
+    deadlineSeconds: queueInteger("deadlineSeconds", input.deadlineSeconds, 4_294_967_295),
+  };
+}
+
+/** What this module reads of the SDK's `previewRequestWithdrawal` answer. */
+interface QueuedWithdrawalPreview {
+  assetsOut: bigint;
+  discountBps: number;
+  maturityTimestamp: bigint;
+  deadlineTimestamp: bigint;
+  issues: readonly { code: unknown; message: unknown }[];
+}
+
+/** The SDK's request preview, inside an open operation whose accounts are held. */
+async function quoteQueuedWithdrawal(
   runtime: VedaRuntime,
   config: VedaClusterConfig,
-  input: VedaQueuedWithdrawalQuoteInput
+  operation: VaultOperation,
+  vault: Address,
+  terms: QueueTerms
 ): Promise<VedaQueuedWithdrawalQuote> {
-  const vaultClient = client(runtime, config).vault(input.vault as Kit7);
-  let state: { shareDecimals: unknown };
-  try {
-    state = await vaultClient.getState();
-  } catch (cause) {
-    throw vaultUnreadable(String(input.vault), config.cluster, cause);
-  }
-
-  const asset = await resolveVaultAsset(runtime, config, vaultClient, input.vault);
-  const shareDecimals = shareMintDecimals(state.shareDecimals, input.vault);
-  const shares = acceptPositiveAtMintScale("shares", input.shares, shareDecimals);
-  const discountBps = queueInteger("discountBps", input.discountBps, 65_535);
-  const deadlineSeconds = queueInteger("deadlineSeconds", input.deadlineSeconds, 4_294_967_295);
-
-  let quote: {
-    assetsOut: bigint;
-    assetDecimals: unknown;
-    discountBps: number;
-    maturityTimestamp: bigint;
-    deadlineTimestamp: bigint;
-    issues: readonly { code: unknown; message: unknown }[];
-  };
-  try {
-    quote = await vaultClient.previewRequestWithdrawal({
-      asset: asset.mint as Kit7,
-      shares: shares.baseUnits,
-      discountBps,
-      deadlineSeconds,
-    });
-  } catch (cause) {
+  const [decimalsRead, quoteRead] = await Promise.allSettled([
+    cachedMintDecimals(runtime, config, operation.assetMint),
+    operation.vaultClient.previewRequestWithdrawal({
+      asset: operation.assetMint,
+      shares: terms.shares.baseUnits,
+      discountBps: terms.discountBps,
+      deadlineSeconds: terms.deadlineSeconds,
+    }),
+  ]);
+  if (decimalsRead.status === "rejected") throw decimalsRead.reason;
+  if (quoteRead.status === "rejected") {
     throw mapVedaSdkError(
-      cause,
-      `Veda could not quote a queued withdrawal for vault ${input.vault}`,
+      quoteRead.reason,
+      `Veda could not quote a queued withdrawal for vault ${vault}`,
       "WITHDRAW_REFUSED"
     );
   }
-
+  const quote: QueuedWithdrawalPreview = quoteRead.value;
+  const assetDecimals = decimalsRead.value;
   return {
-    assetMint: asset.mint,
-    shares: shares.canonical,
-    shareDecimals,
-    assets: formatAtomic(quote.assetsOut, asset.decimals),
-    assetDecimals: asset.decimals,
+    assetMint: operation.assetMint,
+    shares: terms.shares.canonical,
+    shareDecimals: terms.shareDecimals,
+    assets: formatAtomic(quote.assetsOut, assetDecimals),
+    assetDecimals,
     discountBps: quote.discountBps,
     maturityTimestamp: quote.maturityTimestamp.toString(),
     deadlineTimestamp: quote.deadlineTimestamp.toString(),
@@ -865,47 +1255,62 @@ export async function previewVedaQueuedWithdrawal(
   };
 }
 
+/** Preview the discounted assets and exact maturity/deadline of a queue request. */
+export async function previewVedaQueuedWithdrawal(
+  runtime: VedaRuntime,
+  config: VedaClusterConfig,
+  input: VedaQueuedWithdrawalQuoteInput
+): Promise<VedaQueuedWithdrawalQuote> {
+  const unreadable = (cause: unknown) => vaultUnreadable(input.vault, config.cluster, cause);
+  const operation = await openVaultOperation(runtime, config, input.vault, unreadable);
+  const terms = queueTerms(operation.facts, input);
+  try {
+    await holdAccounts(
+      operation.shared,
+      await queueQuoteAccounts(config, operation.facts, input.vault, operation.assetMint)
+    );
+  } catch (cause) {
+    throw unreadable(cause);
+  }
+  return quoteQueuedWithdrawal(runtime, config, operation, input.vault, terms);
+}
+
 /**
  * Build the holder's queue request. The request PDA is read from the emitted
  * instruction and verified against the expected queue program and owner.
+ *
+ * One operation: the quote that becomes `expectedRequest` and the SDK's build,
+ * which previews, checks the holding and reads the queue's escrow and the share
+ * hook again, all answer from one held read of every account involved.
  */
 export async function buildVedaQueuedWithdrawalRequestPlan(
   runtime: VedaRuntime,
   config: VedaClusterConfig,
   input: VedaQueuedWithdrawalRequestInput
 ): Promise<VedaQueuedWithdrawalRequestPlan> {
-  const quote = await previewVedaQueuedWithdrawal(runtime, config, input);
-  const vaultClient = client(runtime, config).vault(input.vault as Kit7);
-  let state: { shareMint: Kit7; shareDecimals: unknown };
+  const unreadable = (cause: unknown) => vaultUnreadable(input.vault, config.cluster, cause);
+  const operation = await openVaultOperation(runtime, config, input.vault, unreadable);
+  const terms = queueTerms(operation.facts, input);
   try {
-    state = await vaultClient.getState();
+    const accounts = await Promise.all([
+      queueQuoteAccounts(config, operation.facts, input.vault, operation.assetMint),
+      queueEscrowAccounts(config, operation.facts, input.vault),
+      queueHolderAccounts(config, operation.facts, input.vault, input.owner),
+    ]);
+    await holdAccounts(operation.shared, accounts.flat());
   } catch (cause) {
-    throw vaultUnreadable(String(input.vault), config.cluster, cause);
+    throw unreadable(cause);
   }
-
-  const asset = await resolveVaultAsset(runtime, config, vaultClient, input.vault);
-  if (asset.mint !== quote.assetMint) {
-    throw new SdpVedaError(
-      "INCOMPATIBLE_DEPLOYMENT",
-      `Veda vault ${input.vault} changed its SDP-facing asset while a queue request was built.`
-    );
-  }
-  const shares = acceptPositiveAtMintScale(
-    "shares",
-    input.shares,
-    shareMintDecimals(state.shareDecimals, input.vault)
-  );
-  const discountBps = queueInteger("discountBps", input.discountBps, 65_535);
-  const deadlineSeconds = queueInteger("deadlineSeconds", input.deadlineSeconds, 4_294_967_295);
+  const quote = await quoteQueuedWithdrawal(runtime, config, operation, input.vault, terms);
 
   let sdkPlan: { instructions: readonly Kit7[] };
   try {
-    sdkPlan = await vaultClient.buildRequestWithdrawal({
-      owner: input.owner as Kit7,
-      asset: asset.mint as Kit7,
-      shares: shares.baseUnits,
-      discountBps,
-      deadlineSeconds,
+    sdkPlan = await operation.vaultClient.buildRequestWithdrawal({
+      owner: input.owner,
+      asset: operation.assetMint,
+      shares: terms.shares.baseUnits,
+      discountBps: terms.discountBps,
+      deadlineSeconds: terms.deadlineSeconds,
     });
   } catch (cause) {
     throw mapVedaSdkError(
@@ -963,10 +1368,10 @@ export async function buildVedaQueuedWithdrawalRequestPlan(
     instructions,
     lookupTables: [],
     assetIdentity: {
-      depositTokenMint: asset.mint,
-      shareMint: address(String(state.shareMint)),
+      depositTokenMint: operation.assetMint,
+      shareMint: operation.facts.shareMint,
     },
-    accepted: { shares: shares.canonical },
+    accepted: { shares: terms.shares.canonical },
     requestAddress,
     expectedRequest: {
       assetMint: quote.assetMint,
@@ -987,9 +1392,22 @@ export async function buildVedaQueuedWithdrawalCancelPlan(
   config: VedaClusterConfig,
   input: VedaQueuedWithdrawalCancelInput
 ): Promise<VedaInstructionPlan> {
-  const vaultClient = client(runtime, config).vault(input.vault as Kit7);
+  const shared = sharedClient(runtime, config);
+  const vaultClient = shared.veda.vault(input.vault);
+  let facts: VaultShareFacts;
+  try {
+    facts = await cachedShareFacts(runtime, config, vaultClient, input.vault);
+  } catch (cause) {
+    throw vaultUnreadable(input.vault, config.cluster, cause);
+  }
+
   let lookup: Kit7;
   try {
+    await holdAccounts(shared, [
+      input.request,
+      input.vault,
+      ...(await queueEscrowAccounts(config, facts, input.vault)),
+    ]);
     lookup = await vaultClient.getWithdrawalRequest(input.request as Kit7);
   } catch (cause) {
     if (cause instanceof VedaSdkError && cause.code === "ACCOUNT_NOT_FOUND") {
@@ -1008,18 +1426,12 @@ export async function buildVedaQueuedWithdrawalCancelPlan(
     );
   }
 
-  let state: { shareMint: Kit7; shareDecimals: unknown };
-  try {
-    state = await vaultClient.getState();
-  } catch (cause) {
-    throw vaultUnreadable(String(input.vault), config.cluster, cause);
-  }
-  const asset = await resolveVaultAsset(runtime, config, vaultClient, input.vault);
-  if (String(lookup.request.asset) !== String(asset.mint)) {
+  const assetMint = await cachedAssetMint(runtime, config, vaultClient, input.vault);
+  if (String(lookup.request.asset) !== assetMint) {
     throw new SdpVedaError(
       "UNSUPPORTED_VAULT",
       `Veda withdrawal request ${input.request} uses asset ${lookup.request.asset}, ` +
-        `not SDP's ${asset.mint}.`
+        `not SDP's ${assetMint}.`
     );
   }
 
@@ -1050,18 +1462,40 @@ export async function buildVedaQueuedWithdrawalCancelPlan(
       instructions: [...sdkPlan.instructions],
       lookupTables: [],
       assetIdentity: {
-        depositTokenMint: asset.mint,
-        shareMint: address(String(state.shareMint)),
+        depositTokenMint: assetMint,
+        shareMint: facts.shareMint,
       },
       accepted: {
         shares: formatAtomic(
           BigInt(lookup.request.shares),
-          shareMintDecimals(state.shareDecimals, input.vault)
+          shareMintDecimals(facts.shareDecimals, input.vault)
         ),
       },
     },
     config
   );
+}
+
+/** The asset SDP fronts and its decimals, for decimalizing durable request reads. */
+async function requestScales(
+  runtime: VedaRuntime,
+  config: VedaClusterConfig,
+  vaultClient: Kit7,
+  vault: Address
+): Promise<{ facts: VaultShareFacts; assetMint: Address; assetDecimals: number }> {
+  const [factsRead, mintRead] = await Promise.allSettled([
+    cachedShareFacts(runtime, config, vaultClient, vault),
+    cachedAssetMint(runtime, config, vaultClient, vault),
+  ]);
+  if (factsRead.status === "rejected") {
+    throw vaultUnreadable(vault, config.cluster, factsRead.reason);
+  }
+  if (mintRead.status === "rejected") throw mintRead.reason;
+  return {
+    facts: factsRead.value,
+    assetMint: mintRead.value,
+    assetDecimals: await cachedMintDecimals(runtime, config, mintRead.value),
+  };
 }
 
 /** List the still-open requests for this owner and SDP-facing vault asset. */
@@ -1070,20 +1504,23 @@ export async function readVedaQueuedWithdrawalRequests(
   config: VedaClusterConfig,
   input: VedaQueuedWithdrawalRequestsInput
 ): Promise<VedaQueuedWithdrawalRequest[]> {
-  const vaultClient = client(runtime, config, "finalized").vault(input.vault as Kit7);
-  let state: { shareDecimals: unknown };
+  const vaultClient = sharedClient(runtime, config, "finalized").veda.vault(input.vault);
   let requests: readonly Kit7[];
   try {
-    state = await vaultClient.getState();
     requests = await vaultClient.listOpenWithdrawalRequests(input.owner as Kit7);
   } catch (cause) {
     throw mapVedaSdkError(cause, `Veda could not list withdrawal requests for ${input.owner}`);
   }
-  const asset = await resolveVaultAsset(runtime, config, vaultClient, input.vault);
-  const shareDecimals = shareMintDecimals(state.shareDecimals, input.vault);
+  const { facts, assetMint, assetDecimals } = await requestScales(
+    runtime,
+    config,
+    vaultClient,
+    input.vault
+  );
+  const shareDecimals = shareMintDecimals(facts.shareDecimals, input.vault);
   return requests
-    .filter((request) => String(request.asset) === String(asset.mint))
-    .map((request) => queuedRequestView(request, input.vault, shareDecimals, asset.decimals));
+    .filter((request) => String(request.asset) === assetMint)
+    .map((request) => queuedRequestView(request, input.vault, shareDecimals, assetDecimals));
 }
 
 /** Read one request, preserving the SDK's honest closed-or-unknown terminal state. */
@@ -1093,9 +1530,11 @@ export async function readVedaQueuedWithdrawalRequest(
   input: VedaQueuedWithdrawalRequestInputByAddress
 ): Promise<VedaQueuedWithdrawalRequestLookup> {
   // Reconciliation persists these terms and later treats them as immutable.
-  const vaultClient = client(runtime, config, "finalized").vault(input.vault as Kit7);
+  const shared = sharedClient(runtime, config, "finalized");
+  const vaultClient = shared.veda.vault(input.vault);
   let lookup: Kit7;
   try {
+    await holdAccounts(shared, [input.request, input.vault]);
     lookup = await vaultClient.getWithdrawalRequest(input.request as Kit7);
   } catch (cause) {
     throw mapVedaSdkError(cause, `Veda could not read withdrawal request ${input.request}`);
@@ -1104,14 +1543,13 @@ export async function readVedaQueuedWithdrawalRequest(
     return { requestAddress: input.request, status: "closedOrUnknown", request: null };
   }
 
-  let state: { shareDecimals: unknown };
-  try {
-    state = await vaultClient.getState();
-  } catch (cause) {
-    throw vaultUnreadable(String(input.vault), config.cluster, cause);
-  }
-  const asset = await resolveVaultAsset(runtime, config, vaultClient, input.vault);
-  if (String(lookup.request.asset) !== String(asset.mint)) {
+  const { facts, assetMint, assetDecimals } = await requestScales(
+    runtime,
+    config,
+    vaultClient,
+    input.vault
+  );
+  if (String(lookup.request.asset) !== assetMint) {
     throw new SdpVedaError(
       "UNSUPPORTED_VAULT",
       `Veda withdrawal request ${input.request} uses an asset SDP does not front for this vault.`
@@ -1120,8 +1558,8 @@ export async function readVedaQueuedWithdrawalRequest(
   const request = queuedRequestView(
     lookup.request,
     input.vault,
-    shareMintDecimals(state.shareDecimals, input.vault),
-    asset.decimals
+    shareMintDecimals(facts.shareDecimals, input.vault),
+    assetDecimals
   );
   return { requestAddress: input.request, status: request.status, request };
 }
@@ -1266,6 +1704,13 @@ function queueInteger(field: string, value: number, maximum: number): number {
   return value;
 }
 
+/** What a position read uses of the SDK's `getUserPosition` answer. */
+const userPositionSchema = z.looseObject({
+  shareAccount: z.string(),
+  shares: z.bigint(),
+  unlockTimestamp: z.bigint().optional(),
+});
+
 /**
  * One wallet's holding in one vault, read live.
  *
@@ -1281,67 +1726,47 @@ function queueInteger(field: string, value: number, maximum: number): number {
  * on top of a raw exchange rate. That makes it a REDEEMABLE value, which is the
  * conservative one to show a holder.
  *
- * Only the holding and its value are read per call. The vault's static facts
+ * Only the holding and its value are read per call, in one batched read
+ * (`holdAccounts`) that both SDK calls answer from. The vault's static facts
  * (share mint, share decimals, the fronted asset's mint) and the validated SDK
- * client are reused for `VEDA_READ_CACHE_TTL_MS`; see `readClient`.
+ * client are reused for `VEDA_READ_CACHE_TTL_MS`; see `sharedClient`.
  */
 export async function readVedaPosition(
   runtime: VedaRuntime,
   config: VedaClusterConfig,
   input: VedaPositionInput
 ): Promise<VedaPosition> {
-  const vaultClient = readClient(runtime, config).vault(input.vault as Kit7);
-  const factsKey = vaultFactsKey(runtime, config, input.vault);
-
-  // Started together, so the vault-state read each SDK method repeats is one
-  // shared request on a cold cache. Settled in the original order, so the first
-  // failure reported is the one the sequential version reported.
-  const [stateRead, positionRead, assetRead] = await Promise.allSettled([
-    cachedRead(vaultShareFacts, factsKey, async (): Promise<VaultShareFacts> => {
-      // No instruction rewrites the share mint after deploy and a mint's
-      // decimals never change. The live share account below re-checks the mint.
-      const state: VaultShareFacts = await vaultClient.getState();
-      return { shareMint: state.shareMint, shareDecimals: state.shareDecimals };
-    }),
-    vaultClient.getUserPosition(input.owner as Kit7) as Promise<{
-      shareAccount: Kit7;
-      shares: bigint;
-      unlockTimestamp: bigint | undefined;
-    }>,
-    cachedRead(
-      vaultAssetMints,
-      factsKey,
-      async () => (await resolveVaultAssetMint(config, vaultClient, input.vault)).mint
-    ),
-  ]);
-  if (stateRead.status === "rejected") {
-    throw vaultUnreadable(String(input.vault), config.cluster, stateRead.reason);
+  const unreadable = (cause: unknown) => vaultUnreadable(input.vault, config.cluster, cause);
+  const operation = await openVaultOperation(runtime, config, input.vault, unreadable);
+  const { vaultClient } = operation;
+  let position: z.infer<typeof userPositionSchema>;
+  try {
+    const accounts = await Promise.all([
+      vaultQuoteAccounts(config, operation.facts, input.vault, operation.assetMint),
+      holderAccounts(config, operation.facts, input.vault, input.owner),
+    ]);
+    await holdAccounts(operation.shared, accounts.flat());
+    position = userPositionSchema.parse(await vaultClient.getUserPosition(input.owner));
+  } catch (cause) {
+    throw unreadable(cause);
   }
-  if (positionRead.status === "rejected") {
-    throw vaultUnreadable(String(input.vault), config.cluster, positionRead.reason);
-  }
-  if (assetRead.status === "rejected") throw assetRead.reason;
-  const position = positionRead.value;
-  let state = stateRead.value;
+  let state = operation.facts;
   // The SDK derived the share account from LIVE vault state, so a mismatch
   // means the cached share mint is stale: drop it and read the state again.
   if (!(await holdsShareAccount(input.owner, state.shareMint, position.shareAccount))) {
-    vaultShareFacts.delete(factsKey);
+    vaultShareFacts.delete(vaultFactsKey(runtime, config, input.vault));
     try {
-      const fresh: VaultShareFacts = await vaultClient.getState();
-      state = { shareMint: fresh.shareMint, shareDecimals: fresh.shareDecimals };
+      state = vaultShareFactsOf(await vaultClient.getState());
     } catch (cause) {
-      throw vaultUnreadable(String(input.vault), config.cluster, cause);
+      throw unreadable(cause);
     }
     if (!(await holdsShareAccount(input.owner, state.shareMint, position.shareAccount))) {
-      throw vaultUnreadable(
-        String(input.vault),
-        config.cluster,
+      throw unreadable(
         new Error("The holder's share account does not belong to the vault's share mint")
       );
     }
   }
-  const asset = { mint: assetRead.value };
+  const asset = { mint: operation.assetMint };
   const shareDecimals = shareMintDecimals(state.shareDecimals, input.vault);
 
   // The Boring vault share lock covers the WHOLE account until its unlock
@@ -1362,7 +1787,7 @@ export async function readVedaPosition(
     unlockTimestamp: position.unlockTimestamp?.toString() ?? null,
     ...(await valuation(vaultClient, asset, position.shares)),
     tokenMint: asset.mint,
-    shareMint: address(String(state.shareMint)),
+    shareMint: state.shareMint,
   };
 }
 

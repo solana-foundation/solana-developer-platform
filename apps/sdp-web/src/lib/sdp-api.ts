@@ -4,10 +4,12 @@
 import { auth } from "@clerk/nextjs/server";
 import type { ListProjectsResponse, Project } from "@sdp/types/projects";
 import { ORGANIZATION_ROLES, type OrganizationRole } from "@sdp/types/roles";
+import { hashWebTraceId } from "@sdp/types/trace-correlation";
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { cache } from "react";
 import { z } from "zod";
+import type { OnboardingStatusResponse } from "@/app/dashboard/[projectId]/onboarding-status";
 import { readApiErrorMessage } from "./api-error";
 import { projectHref } from "./dashboard-project-path";
 import { type ApiAnswer, apiErrorCode, IDEMPOTENCY_KEY_HEADER } from "./idempotency";
@@ -72,6 +74,14 @@ function roundDuration(durationMs: number): number {
   return Math.round(durationMs * 10) / 10;
 }
 
+function emitApiRequestLog(event: string, payload: Record<string, unknown>): void {
+  try {
+    console.info(JSON.stringify({ event, timestamp: new Date().toISOString(), ...payload }));
+  } catch {
+    // A failed telemetry sink must not change an API request outcome.
+  }
+}
+
 function createTraceRequestId(traceId: string, sequence: number): string {
   const suffix = sequence.toString().padStart(2, "0");
   return `${traceId}:${suffix}`.slice(0, 128);
@@ -98,6 +108,8 @@ function createSdpApiRequest(
     if (options.body !== undefined && options.body !== null) {
       headers.set("Content-Type", "application/json");
     }
+    // The API replaces these IDs; its returned X-Request-ID joins this web log
+    // to the API log, while these server-generated values also reach the gateway.
     headers.set(TRACE_ID_HEADER, traceId);
     headers.set(TRACE_SOURCE_HEADER, source);
     headers.set("X-Request-ID", requestId);
@@ -105,18 +117,40 @@ function createSdpApiRequest(
       headers.set(PROJECT_HEADER_NAME, projectId);
     }
     const method = options.method ?? "GET";
-    const startedAt = performance.now();
-    // The query string is caller-supplied and may carry a pasted credential
-    // (e.g. a playground request); the log keeps the route only while the
-    // upstream request still receives the full path.
-    const loggedPath = path.split("?", 1)[0];
-
-    const send = () =>
-      fetch(url, {
-        ...options,
-        headers,
-        cache: "no-store",
-      });
+    const send = async () => {
+      const webTraceHash = await hashWebTraceId(traceId).catch(() => null);
+      const fields = {
+        traceId,
+        source,
+        requestId,
+        method,
+        web_trace_hash: webTraceHash ?? undefined,
+      };
+      emitApiRequestLog("sdp_web_api_attempt", fields);
+      const startedAt = performance.now();
+      try {
+        const response = await fetch(url, {
+          ...options,
+          headers,
+          cache: "no-store",
+        });
+        emitApiRequestLog("sdp_web_api_request", {
+          ...fields,
+          status: response.status,
+          durationMs: roundDuration(performance.now() - startedAt),
+          upstreamRequestId: response.headers.get("X-Request-ID"),
+          upstreamServerTiming: response.headers.get("Server-Timing"),
+        });
+        return response;
+      } catch (error) {
+        emitApiRequestLog("sdp_web_api_request", {
+          ...fields,
+          outcome: "network_failed",
+          durationMs: roundDuration(performance.now() - startedAt),
+        });
+        throw error;
+      }
+    };
 
     // Payments demo mode answers payment reads and writes itself; nothing about them goes out.
     const demoResponse = await paymentsDemoResponse(method, path, projectId, options.body, send);
@@ -124,25 +158,7 @@ function createSdpApiRequest(
       return demoResponse;
     }
 
-    const response = await send();
-
-    console.info(
-      JSON.stringify({
-        event: "sdp_web_api_request",
-        timestamp: new Date().toISOString(),
-        traceId,
-        source,
-        requestId,
-        method,
-        path: loggedPath,
-        status: response.status,
-        durationMs: roundDuration(performance.now() - startedAt),
-        upstreamRequestId: response.headers.get("X-Request-ID"),
-        upstreamServerTiming: response.headers.get("Server-Timing"),
-      })
-    );
-
-    return response;
+    return send();
   };
 }
 
@@ -301,6 +317,29 @@ const getRequestMemberRole = cache(async (): Promise<OrganizationRole> => {
  */
 export function requestMemberRole(): Promise<OrganizationRole> {
   return getRequestMemberRole();
+}
+
+const getRequestOnboardingStatus = cache(async (): Promise<OnboardingStatusResponse> => {
+  const client = assembleSdpApiClient(
+    createSdpApiRequest(await getRequestClerkToken(), null, {
+      traceId: newWebTraceId(),
+      source: "dashboard.onboarding.status",
+    })
+  );
+  return client.fetch<OnboardingStatusResponse>("/v1/onboarding/status", {
+    signal: AbortSignal.timeout(10_000),
+  });
+});
+
+/**
+ * The organization's onboarding status, read once per request. The layout's quick start and a
+ * page's own gate (Earn's provider access) render in the same request, so they share this one
+ * call. A failure rejects every caller alike, and each decides what unknown means for it.
+ *
+ * @returns The status as the API answers it.
+ */
+export function requestOnboardingStatus(): Promise<OnboardingStatusResponse> {
+  return getRequestOnboardingStatus();
 }
 
 /**

@@ -7,6 +7,7 @@ import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
 import { useState } from "react";
 import { toast } from "sonner";
+import { SOLANA_ADDRESS } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-create-schemas";
 import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
 import {
   getHighRiskProviders,
@@ -17,7 +18,6 @@ import { ComplianceNotEnabledError } from "@/lib/compliance";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { fetchResultAnswer } from "@/lib/idempotency";
 import { useOutcomeUnknownNotice } from "@/lib/use-outcome-unknown";
-import { SOLANA_ADDRESS } from "./counterparty-create-schemas.redesign";
 
 type Phase = "idle" | "screening" | "flagged" | "adding";
 

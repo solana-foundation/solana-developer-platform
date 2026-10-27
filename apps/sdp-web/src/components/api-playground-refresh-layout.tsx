@@ -1,5 +1,6 @@
 "use client";
 
+import { SNIPPET_LANGUAGES, type SnippetLanguage } from "@sdp/api-catalog/snippets";
 import { Button } from "@sdp/ui/button";
 import { Callout } from "@sdp/ui/callout";
 import { InfoHint } from "@sdp/ui/info-hint";
@@ -14,7 +15,6 @@ import type {
   ApiPlaygroundFieldConfig,
   ApiPlaygroundMessage,
 } from "@/components/api-playground-shell";
-import { SNIPPET_LANGUAGES, type SnippetLanguage } from "@/components/api-playground-snippets";
 import { useTranslations } from "@/i18n/provider";
 
 type RequestView = "form" | "raw" | "code";

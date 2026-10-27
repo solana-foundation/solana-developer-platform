@@ -26,7 +26,6 @@ vi.mock("@/flags/release-channel", () => ({
 }));
 vi.mock("@/flags/ramps", () => ({ getOfferedRampProviders: mocks.rampProviders }));
 vi.mock("@/flags", () => ({ paymentsDemoMode: async () => false }));
-vi.mock("@/flags/new-design", () => ({ isNewDesignOn: async () => false }));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/lib/auth-entry", () => ({ getAuthEntryPath: async () => "/sign-in" }));
 vi.mock("@/lib/provider-availability.server", () => ({

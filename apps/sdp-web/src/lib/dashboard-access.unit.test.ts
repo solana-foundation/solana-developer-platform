@@ -6,6 +6,7 @@ describe("resolveDashboardAccess", () => {
     {
       role: "admin",
       capabilities: {
+        canWrite: true,
         canManageApiKeys: true,
         canManageCustody: true,
         canManageOrgSettings: true,
@@ -18,11 +19,25 @@ describe("resolveDashboardAccess", () => {
     {
       role: "member",
       capabilities: {
+        canWrite: true,
         canManageApiKeys: false,
         canManageCustody: false,
         canManageOrgSettings: false,
         canManageTokenAdmin: false,
         canManageTokenWrite: true,
+        canUseWalletSignerCheck: false,
+        canUseWalletFaucet: false,
+      },
+    },
+    {
+      role: "viewer",
+      capabilities: {
+        canWrite: false,
+        canManageApiKeys: false,
+        canManageCustody: false,
+        canManageOrgSettings: false,
+        canManageTokenAdmin: false,
+        canManageTokenWrite: false,
         canUseWalletSignerCheck: false,
         canUseWalletFaucet: false,
       },

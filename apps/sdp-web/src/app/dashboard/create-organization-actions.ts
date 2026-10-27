@@ -12,8 +12,8 @@ const createdOrganizationSchema = z.object({ clerkOrganizationId: z.string() });
 
 /**
  * Creates the signed-in person's organization in SDP (ADR 0012). The session
- * names no organization yet; the caller makes the returned Clerk organization
- * active. Repeating it with the same name finishes or returns the same
+ * names no organization SDP links; the caller makes the returned Clerk
+ * organization active. Repeating it with the same name finishes or returns the same
  * organization, so the form may resubmit after a failure.
  *
  * @param name - The organization's name.

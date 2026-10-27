@@ -10,6 +10,12 @@ import { requiredWellKnownMint } from "@/test/well-known-mints";
 import { RampOpenSale } from "./ramp-open-sale";
 import type { PaymentTransferDetail } from "./transaction-detail.data";
 
+// A member who may write; the read-only cases live with each component's own viewer tests.
+vi.mock("@/contexts/dashboard-workspace-context", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/contexts/dashboard-workspace-context")>()),
+  useCanWrite: () => true,
+}));
+
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 
 const DEVNET_USDC = requiredWellKnownMint("USDC", "devnet");

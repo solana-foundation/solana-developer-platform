@@ -7,7 +7,7 @@ import { enabledTransactionModules } from "@/app/dashboard/[projectId]/payments/
 import {
   parseTransactionFilters,
   toTransactionsApiQuery,
-} from "@/app/dashboard/[projectId]/payments/transactions/transactions-query.redesign";
+} from "@/app/dashboard/[projectId]/payments/transactions/transactions-query";
 import { getDashboardFlags } from "@/flags/dashboard";
 import { toCsv } from "@/lib/csv";
 import { createSdpApiClient } from "@/lib/sdp-api";

@@ -19,9 +19,13 @@ Poll with SWR by passing `refreshInterval` as an inline function each render,
 changes, so with a stable function, data that turns terminal through a
 `mutate` or another hook on the same key still gets one more request. The
 function sees only data SWR fetched, never `fallbackData`: a poll seeded by
-the server reads that seed itself while it gets `undefined`. A poll that never
-stops keeps a plain number, since an inline function restarts the timer on
-every render.
+the server reads that seed itself while it gets `undefined`. An inline
+function restarts the timer on every render, so it suits a short watch that
+stops on its own. A poll that never stops keeps a plain number, and a slow
+poll on a page that re-renders faster than its cadence (a discovery list, a
+live feed with an idle back-off) uses `useCadencedSWR` (`src/lib`), which
+passes SWR a number derived from the last read so only a cadence change
+restarts the timer.
 
 Dashboard pages live under `app/dashboard/[projectId]/`, and the Project comes from the URL alone:
 

@@ -137,7 +137,6 @@ describe("EarnIntegrationGuide", () => {
     renderWithEnglish(
       <EarnIntegrationGuide
         apiBaseUrl="http://127.0.0.1:8787"
-        earnHref="/dashboard/markets/embedded-yield"
         providerAccess={providerAccess}
         strategyId="earn_strategy_live"
       />
@@ -147,14 +146,14 @@ describe("EarnIntegrationGuide", () => {
     expect(screen.getByText("Kamino · Instant liquidity · 6.2% APY")).toBeTruthy();
     expect(screen.getAllByText("Kamino USDC Vault").length).toBeGreaterThan(0);
 
-    // All five concerns stay visible as navigation, while only the active code
+    // All five concerns stay visible as one radio group, while only the active code
     // slice renders. This keeps the whole flow findable without a wizard.
-    const navigationNames = ["Client", "Deposits", "Portfolio", "Withdraw", "Queued withdrawals"];
-    const serverFlow = screen.getByLabelText("Server flow");
-    expect(within(serverFlow).getAllByRole("button")).toHaveLength(5);
+    const navigationNames = ["Client", "Deposits", "Portfolio", "Withdraw", "Queued"];
+    const serverFlow = screen.getByRole("group", { name: "Server flow" });
+    expect(within(serverFlow).getAllByRole("radio")).toHaveLength(5);
     expect(
-      within(serverFlow).getByRole("button", { name: "Client" }).getAttribute("aria-pressed")
-    ).toBe("true");
+      within(serverFlow).getByRole<HTMLInputElement>("radio", { name: "Client" }).checked
+    ).toBe(true);
     expect(screen.getAllByText("embedded-yield.ts")).toHaveLength(1);
     // The key callout names the Earn grants the module needs, including Manage
     // for queued-withdrawal recovery, and links to where keys are made. A
@@ -174,7 +173,7 @@ describe("EarnIntegrationGuide", () => {
     // a B2B2C partner cannot name a custody wallet.
     const snippets: string[] = [];
     for (const navigationName of navigationNames) {
-      await user.click(within(serverFlow).getByRole("button", { name: navigationName }));
+      await user.click(within(serverFlow).getByRole("radio", { name: navigationName }));
       // Two code surfaces: the strategy ID and the one active code slice.
       const figures = screen.getAllByRole("figure");
       expect(figures).toHaveLength(2);
@@ -255,7 +254,6 @@ describe("EarnIntegrationGuide", () => {
     renderWithEnglish(
       <EarnIntegrationGuide
         apiBaseUrl="http://127.0.0.1:8787"
-        earnHref="/dashboard/markets/embedded-yield"
         providerAccess={providerAccess}
         strategyId="earn_strategy_live"
       />
@@ -278,11 +276,7 @@ describe("EarnIntegrationGuide", () => {
   it("lists mainnet strategies disabled in sandbox, with no network toggle", async () => {
     const user = userEvent.setup();
     renderWithEnglish(
-      <EarnIntegrationGuide
-        earnHref="/dashboard/markets/embedded-yield"
-        providerAccess={providerAccess}
-        strategyId={mainnetStrategy.id}
-      />
+      <EarnIntegrationGuide providerAccess={providerAccess} strategyId={mainnetStrategy.id} />
     );
 
     // Sandbox reads both shelves and shows them as one list.
@@ -308,11 +302,7 @@ describe("EarnIntegrationGuide", () => {
   it("keeps loading until the mainnet shelf answers, so a mainnet deep link never flashes as unknown", () => {
     mocks.mainnetLoading = true;
     const { container } = renderWithEnglish(
-      <EarnIntegrationGuide
-        earnHref="/dashboard/markets/embedded-yield"
-        providerAccess={providerAccess}
-        strategyId={mainnetStrategy.id}
-      />
+      <EarnIntegrationGuide providerAccess={providerAccess} strategyId={mainnetStrategy.id} />
     );
 
     expect(container.querySelector('[data-embedded-yield-loading="integrate"]')).toBeTruthy();
@@ -323,7 +313,6 @@ describe("EarnIntegrationGuide", () => {
   it("does not let a mainnet deep link bypass the cluster check even with provider access", () => {
     renderWithEnglish(
       <EarnIntegrationGuide
-        earnHref="/dashboard/markets/embedded-yield"
         providerAccess={{ kamino: { entitled: false, configured: true, enabled: false } }}
         strategyId={mainnetStrategy.id}
       />
@@ -353,12 +342,7 @@ describe("EarnIntegrationGuide", () => {
   });
 
   it("defaults to the first available strategy without a separate selection step", () => {
-    renderWithEnglish(
-      <EarnIntegrationGuide
-        earnHref="/dashboard/markets/embedded-yield"
-        providerAccess={providerAccess}
-      />
-    );
+    renderWithEnglish(<EarnIntegrationGuide providerAccess={providerAccess} />);
 
     expect(screen.getAllByText("Kamino USDC Vault").length).toBeGreaterThan(0);
     expect(screen.getByText("earn_strategy_live")).toBeTruthy();
@@ -367,11 +351,7 @@ describe("EarnIntegrationGuide", () => {
 
   it("keeps the strategy dropdown available when a deep-linked id no longer resolves", () => {
     renderWithEnglish(
-      <EarnIntegrationGuide
-        earnHref="/dashboard/markets/embedded-yield"
-        providerAccess={providerAccess}
-        strategyId="earn_strategy_removed"
-      />
+      <EarnIntegrationGuide providerAccess={providerAccess} strategyId="earn_strategy_removed" />
     );
 
     expect(screen.getByText("Strategy no longer available")).toBeTruthy();
@@ -381,12 +361,7 @@ describe("EarnIntegrationGuide", () => {
 
   it("updates the strategy id and code in place when the dropdown changes", async () => {
     const user = userEvent.setup();
-    renderWithEnglish(
-      <EarnIntegrationGuide
-        earnHref="/dashboard/markets/embedded-yield"
-        providerAccess={providerAccess}
-      />
-    );
+    renderWithEnglish(<EarnIntegrationGuide providerAccess={providerAccess} />);
 
     await user.click(screen.getByRole("combobox", { name: "Select a strategy" }));
     await user.click(await screen.findByRole("option", { name: /Kamino Growth Vault.*8\.1%/ }));
@@ -400,7 +375,6 @@ describe("EarnIntegrationGuide", () => {
     const user = userEvent.setup();
     renderWithEnglish(
       <EarnIntegrationGuide
-        earnHref="/dashboard/markets/embedded-yield"
         providerAccess={{
           ...providerAccess,
           jupiter_lend: { entitled: true, configured: true, enabled: true },
@@ -426,7 +400,6 @@ describe("EarnIntegrationGuide", () => {
     mocks.environment = "production";
     renderWithEnglish(
       <EarnIntegrationGuide
-        earnHref="/dashboard/markets/embedded-yield"
         providerAccess={{
           ...providerAccess,
           veda: { entitled: true, configured: true, enabled: true },
@@ -443,7 +416,6 @@ describe("EarnIntegrationGuide", () => {
   it("names provider setup as the reason an otherwise live strategy cannot be integrated", () => {
     renderWithEnglish(
       <EarnIntegrationGuide
-        earnHref="/dashboard/markets/embedded-yield"
         providerAccess={{ kamino: { entitled: true, configured: false, enabled: false } }}
         strategyId="earn_strategy_live"
       />

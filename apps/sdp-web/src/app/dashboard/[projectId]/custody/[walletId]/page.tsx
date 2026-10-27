@@ -1,5 +1,17 @@
-import { withLegacyDesign } from "@/flags/new-design";
-import { WalletDetailPage as LegacyWalletDetailPage } from "./wallet-detail-page";
-import { WalletDetailPage } from "./wallet-detail-page.redesign";
+import { WalletDetailPage } from "./wallet-detail-page";
 
-export default withLegacyDesign(WalletDetailPage, LegacyWalletDetailPage, "wallets");
+interface WalletDetailRouteProps {
+  params: Promise<{
+    walletId: string;
+  }>;
+}
+
+/**
+ * One wallet's page.
+ *
+ * @param props - The route params, carrying the wallet to read.
+ * @returns The wallet's page.
+ */
+export default async function WalletDetailRoute({ params }: WalletDetailRouteProps) {
+  return WalletDetailPage({ params });
+}

@@ -562,8 +562,12 @@ accuracy:
   count and sequential round trips, and a test pins the count by counting
   requests through a fake transport.
 
-Reference point: Veda position reads went from 22 requests per holding to 10
-cold and 5-6 warm under these rules, with identical values.
+Reference point: Veda's provider paths went from a fresh SDK client per call
+(22 requests per holding, 14-32 per deposit or exit, 22-68 per queue operation)
+to 2 warm per operation (3 for a sponsored first deposit, 4 for a sponsored
+first queue request), with identical values, by reading every account the SDK
+touches in one batch and serving the SDK's own re-reads from it (`@sdp/veda`
+CLAUDE.md, "Every operation reads each account once").
 
 ## Conventions
 

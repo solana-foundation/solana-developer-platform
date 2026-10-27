@@ -1,79 +1,56 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { renderToStaticMarkup } from "react-dom/server";
+import { ThemeScopeProvider } from "@sdp/ui/theme-scope-provider";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  createCustodySetupWalletAction,
-  initializeCustodySetupAction,
-} from "@/app/dashboard/[projectId]/custody/actions";
-import {
-  recheckPrivyCredentialAction,
-  submitPrivyCredentialAction,
-} from "@/app/dashboard/[projectId]/custody/byok-actions";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { availableCustodyProviders } from "@/lib/provider-availability";
 import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
 import { PRODUCTION_PROJECT, SANDBOX_PROJECT } from "@/test/projects";
 import { projectProviderAvailability } from "@/test/provider-availability";
-import { WalletSetupFlow } from "./wallet-setup-flow";
 
-const workspace = vi.hoisted(() => ({ projectId: "project_test" }));
+const mocks = vi.hoisted(() => ({
+  projectId: "prj_test_sandbox",
+  createWallet: vi.fn(async (_formData: FormData) => ({ status: "success" as const })),
+  initialize: vi.fn(async (_formData: FormData) => ({ status: "success" as const })),
+  refreshWalletInventory: vi.fn(),
+}));
 
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => ({
     dashboardCacheScope: { userId: "user_test", orgId: "org_test" },
-    selectedProjectId: workspace.projectId,
+    selectedProjectId: mocks.projectId,
+    projects: [{ id: "prj_test_sandbox", name: "Default Sandbox Project" }],
+    sdpEnvironment: "sandbox",
   }),
 }));
-
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
-
 vi.mock("@/app/dashboard/[projectId]/custody/actions", () => ({
-  createCustodySetupWalletAction: vi.fn(),
-  initializeCustodySetupAction: vi.fn(),
+  createCustodySetupWalletAction: mocks.createWallet,
+  initializeCustodySetupAction: mocks.initialize,
 }));
-
 vi.mock("@/app/dashboard/[projectId]/custody/byok-actions", () => ({
   submitPrivyCredentialAction: vi.fn(),
   recheckPrivyCredentialAction: vi.fn(),
 }));
+vi.mock("@/app/dashboard/[projectId]/custody/use-wallet-inventory-refresh", () => ({
+  useWalletInventoryRefresh: () => mocks.refreshWalletInventory,
+}));
+
+const { WalletSetupFlow } = await import("./wallet-setup-flow");
 
 type FlowProps = Parameters<typeof WalletSetupFlow>[0];
 type ConnectionItem = FlowProps["connections"][number];
-
-beforeEach(() => {
-  vi.mocked(createCustodySetupWalletAction).mockReset();
-  vi.mocked(initializeCustodySetupAction).mockReset();
-  vi.mocked(submitPrivyCredentialAction).mockReset();
-  vi.mocked(recheckPrivyCredentialAction).mockReset();
-});
-
-afterEach(() => {
-  cleanup();
-  resetDashboardNavigation();
-  workspace.projectId = "project_test";
-});
 
 const SANDBOX_AVAILABILITY = availableCustodyProviders(
   projectProviderAvailability({
     project: SANDBOX_PROJECT,
     custody: [
+      { provider: "turnkey", modes: ["managed"] },
+      { provider: "dfns", modes: ["managed"] },
       { provider: "privy", modes: ["managed", "byok"] },
-      { provider: "fireblocks", modes: ["managed"] },
     ],
-    compliance: [],
-    ramps: [],
-    earn: [],
-  })
-);
-
-const SANDBOX_MANAGED_PRIVY_AVAILABILITY = availableCustodyProviders(
-  projectProviderAvailability({
-    project: SANDBOX_PROJECT,
-    custody: [{ provider: "privy", modes: ["managed"] }],
     compliance: [],
     ramps: [],
     earn: [],
@@ -90,467 +67,361 @@ const PRODUCTION_AVAILABILITY = availableCustodyProviders(
   })
 );
 
-const SANDBOX_FLOW: FlowProps = {
-  connectedProviders: ["privy"],
-  custodyAvailability: SANDBOX_AVAILABILITY,
-  environment: "sandbox",
-  initialProvider: null,
-  connections: [],
-};
-
-const PRODUCTION_FLOW: FlowProps = {
-  connectedProviders: [],
-  custodyAvailability: PRODUCTION_AVAILABILITY,
-  environment: "production",
-  initialProvider: null,
-  connections: [],
-};
-
-function renderInteractiveFlow(props: FlowProps) {
+function renderFlow(props: Partial<FlowProps> = {}) {
   return render(
     <I18nProvider locale="en" messages={getMessages("en")}>
-      <WalletSetupFlow {...props} />
+      <ThemeScopeProvider scope="refresh">
+        <WalletSetupFlow
+          connectedProviders={props.connectedProviders ?? ["turnkey"]}
+          custodyAvailability={props.custodyAvailability ?? SANDBOX_AVAILABILITY}
+          environment={props.environment ?? "sandbox"}
+          initialProvider={props.initialProvider ?? null}
+          connections={props.connections ?? []}
+        />
+      </ThemeScopeProvider>
     </I18nProvider>
   );
 }
 
-function submittedWalletForm(): FormData {
-  const call = vi.mocked(createCustodySetupWalletAction).mock.lastCall;
-  if (!call) {
-    throw new Error("Expected a wallet submission");
-  }
-  return call[0];
-}
+beforeEach(() => {
+  resetDashboardNavigation();
+});
 
-function renderFlow(props: FlowProps): string {
-  return renderToStaticMarkup(
-    <I18nProvider locale="en" messages={getMessages("en")}>
-      <WalletSetupFlow {...props} />
-    </I18nProvider>
-  );
-}
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+  mocks.projectId = "prj_test_sandbox";
+});
 
-function detailsSubmitButton(markup: string): string {
-  const match = markup.match(/<button[^>]*form="wallet-details-form"[^>]*>/);
-  if (match === null) {
-    throw new Error("expected a wallet details submit button");
-  }
-  return match[0];
-}
+describe("provider step", () => {
+  it("lists the providers the project can use as radios, connected first", () => {
+    renderFlow({ connectedProviders: ["dfns"] });
 
-function connection(overrides: Partial<ConnectionItem>): ConnectionItem {
-  return {
-    id: "conn-active",
-    provider: "privy",
-    label: "Production signing",
-    status: "active",
-    isRuntimeExecutionAllowed: true,
-    createdAt: "2026-08-10T09:00:00.000Z",
-    activatedAt: "2026-08-10T09:05:00.000Z",
-    lastCheck: null,
-    pendingWalletLabel: null,
-    ...overrides,
-  };
-}
-
-describe("WalletSetupFlow", () => {
-  it("keeps an installed provider on the additional-wallet path without a mode choice", () => {
-    const markup = renderFlow({ ...SANDBOX_FLOW, initialProvider: "privy" });
-
-    expect(markup).toContain("Wallet details");
-    expect(markup).not.toContain("data-privy-byok-form");
-    expect(markup).not.toContain('aria-label="Custody mode"');
-  });
-
-  it("uses the shared top progress and bottom action layout for provider selection", () => {
-    const markup = renderFlow(SANDBOX_FLOW);
-
-    expect(markup.match(/data-wallet-setup-stepper="true"/g)).toHaveLength(1);
-    expect(markup).toContain("Step 1 of 2");
-    expect(markup.match(/data-wallet-setup-scroll-region="true"/g)).toHaveLength(1);
-    expect(markup.match(/data-wallet-setup-actions="true"/g)).toHaveLength(1);
-    expect(markup.indexOf('data-wallet-setup-stepper="true"')).toBeLessThan(
-      markup.indexOf('data-wallet-setup-scroll-region="true"')
+    expect(screen.getByText("Step 1 of 2")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Which provider holds the keys?" })).toBeTruthy();
+    const list = document.querySelector("[data-wallet-provider-list]") as HTMLElement;
+    const names = [...list.querySelectorAll("[data-wallet-provider]")].map((row) =>
+      row.getAttribute("data-wallet-provider")
     );
-    expect(markup.indexOf('data-wallet-setup-scroll-region="true"')).toBeLessThan(
-      markup.indexOf('data-wallet-setup-actions="true"')
-    );
-    expect(markup).not.toContain("bg-white/95");
-    expect(markup).toContain("Cancel");
-    expect(markup).toContain("Next");
-    expect(markup).toContain('id="wallet-provider-form"');
-    expect(markup).toMatch(/<button[^>]*type="submit"[^>]*form="wallet-provider-form"/);
-    expect(markup.match(/aria-pressed="false"/g)).toHaveLength(2);
-    expect(markup).not.toContain("data-wallet-enter-advance");
-  });
-
-  it("keeps wallet details in the same shell with back and create actions", () => {
-    const markup = renderFlow({ ...SANDBOX_FLOW, initialProvider: "privy" });
-
-    expect(markup).toContain("Step 2 of 2");
-    expect(markup).toContain('id="wallet-details-form"');
-    expect(markup).toMatch(/<button[^>]*type="submit"[^>]*form="wallet-details-form"/);
-    expect(markup).toContain("Wallet details");
-    expect(markup).toContain(">Back<");
-    expect(markup).toContain("Create wallet");
-    expect(markup.match(/data-wallet-setup-actions="true"/g)).toHaveLength(1);
-  });
-
-  it("shows only the providers the project can use", () => {
-    const markup = renderFlow({ ...SANDBOX_FLOW, connectedProviders: [] });
-
-    expect(markup.match(/data-provider-selection-card="true"/g)).toHaveLength(2);
-    expect(markup).toContain("Privy");
-    expect(markup).toContain("Fireblocks");
-    for (const label of ["Turnkey", "Anchorage", "IBM Digital Asset Haven", "Local Signer"]) {
-      expect(markup).not.toContain(label);
+    expect(names[0]).toBe("dfns");
+    expect(new Set(names)).toEqual(new Set(["turnkey", "dfns", "privy"]));
+    for (const radio of within(list).getAllByRole("radio")) {
+      expect((radio as HTMLInputElement).disabled).toBe(false);
     }
-    expect(markup).not.toContain('data-provider-selectable="false"');
+    expect(within(list).getAllByText("Active")).toHaveLength(1);
   });
 
-  it("groups the available providers by what they are for", () => {
-    const markup = renderFlow({ ...SANDBOX_FLOW, connectedProviders: [] });
+  it("hides a provider the project cannot use, rather than showing it disabled", () => {
+    renderFlow({ custodyAvailability: PRODUCTION_AVAILABILITY, environment: "production" });
 
-    expect(markup).toMatch(/<h3[^>]*>API<\/h3>/);
-    expect(markup).toMatch(/<h3[^>]*>Institutional<\/h3>/);
-    expect(markup).toContain(
-      "Wallet infrastructure for API-driven product, operations, and automated flows."
-    );
+    const list = document.querySelector("[data-wallet-provider-list]") as HTMLElement;
+    expect(within(list).getAllByRole("radio")).toHaveLength(1);
+    expect(screen.queryByRole("radio", { name: /Turnkey/ })).toBeNull();
+    expect(screen.queryByText("Not ready")).toBeNull();
+    expect(document.querySelector("[data-wallet-provider-setup-list]")).toBeNull();
   });
 
-  it("tells the user to add a wallet when the provider is already set up", async () => {
-    vi.mocked(initializeCustodySetupAction).mockResolvedValue({
-      status: "provider_already_set_up",
-      answer: { status: 409, replayed: false, code: null },
-    });
-    const user = userEvent.setup();
-    renderInteractiveFlow({
-      ...SANDBOX_FLOW,
-      connectedProviders: [],
-      custodyAvailability: SANDBOX_MANAGED_PRIVY_AVAILABILITY,
-      initialProvider: "privy",
-    });
+  it("continues only once a provider is chosen", () => {
+    renderFlow();
+    const continueButton = screen.getByRole("button", { name: "Continue" }) as HTMLButtonElement;
+    expect(continueButton.disabled).toBe(true);
 
-    await user.type(screen.getByLabelText("Wallet label"), "Treasury");
-    await user.click(screen.getByRole("button", { name: "Create wallet" }));
+    fireEvent.click(screen.getByRole("radio", { name: /Turnkey/ }));
+    expect(continueButton.disabled).toBe(false);
+    fireEvent.click(continueButton);
+    expect(screen.getByText("Step 2 of 2")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Wallet details" })).toBeTruthy();
+  });
 
+  it("advances with Enter from the chosen radio without creating anything", () => {
+    renderFlow();
+    const turnkey = screen.getByRole("radio", { name: /Turnkey/ });
+    fireEvent.click(turnkey);
+    fireEvent.keyDown(turnkey, { key: "Enter" });
+    expect(screen.getByText("Step 2 of 2")).toBeTruthy();
+    expect(mocks.createWallet).not.toHaveBeenCalled();
+    expect(mocks.initialize).not.toHaveBeenCalled();
+  });
+
+  it("says so when the project can use no provider, instead of emptying the page", () => {
+    renderFlow({ connectedProviders: [], custodyAvailability: [] });
     expect(
-      await screen.findByText("This provider is already set up. Add a wallet instead.")
+      screen.getByText(
+        "Wallet creation is available after a custody provider is enabled for this organization."
+      )
     ).toBeTruthy();
-    expect(initializeCustodySetupAction).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("radio")).toBeNull();
+  });
+
+  it("leaves for the project's wallet list from Cancel", () => {
+    renderFlow();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(dashboardRouter.push).toHaveBeenCalledWith("/dashboard/prj_test_sandbox/wallets");
+  });
+});
+
+describe("details step", () => {
+  it("states what the wallet is created with and goes back to change the provider", () => {
+    renderFlow({ initialProvider: "turnkey" });
+
+    const createdWith = screen.getByRole("region", { name: "Created with" });
+    expect(within(createdWith).getByText("Turnkey")).toBeTruthy();
+    expect(within(createdWith).getByText("Default Sandbox Project")).toBeTruthy();
+    expect(within(createdWith).getByText("Sandbox · devnet")).toBeTruthy();
+    expect(screen.getByText("Turnkey creates the keys when you confirm.")).toBeTruthy();
+
+    fireEvent.click(within(createdWith).getByRole("button", { name: "Change" }));
+    expect(screen.getByText("Step 1 of 2")).toBeTruthy();
+    expect((screen.getByRole("radio", { name: /Turnkey/ }) as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("creates an additional wallet with its label and purpose, then returns to the list", async () => {
+    renderFlow({ initialProvider: "turnkey" });
+    const create = screen.getByRole("button", { name: "Create wallet" }) as HTMLButtonElement;
+    expect(create.disabled).toBe(true);
+
+    fireEvent.change(screen.getByLabelText("Wallet label"), {
+      target: { value: "Settlement wallet" },
+    });
+    expect(create.disabled).toBe(false);
+    await act(async () => {
+      fireEvent.click(create);
+    });
+
+    const formData = mocks.createWallet.mock.calls[0]?.[0] as FormData;
+    expect(formData.get("provider")).toBe("turnkey");
+    expect(formData.get("label")).toBe("Settlement wallet");
+    expect(formData.get("purpose")).toBe("transfer");
+    expect(dashboardRouter.push).toHaveBeenCalledWith("/dashboard/prj_test_sandbox/wallets");
+  });
+
+  it("fixes the first wallet on a provider as a transfer wallet", async () => {
+    renderFlow({ connectedProviders: [], initialProvider: "turnkey" });
+    expect(screen.getByRole("button", { name: /first wallet is a transfer wallet/ })).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText("Wallet label"), { target: { value: "Treasury" } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Create wallet" }));
+    });
+    const formData = mocks.initialize.mock.calls[0]?.[0] as FormData;
+    expect(formData.get("walletLabel")).toBe("Treasury");
+    expect(formData.get("purpose")).toBeNull();
+  });
+
+  it("shows the API's refusal and stays on the step", async () => {
+    mocks.createWallet.mockResolvedValueOnce({
+      status: "error",
+      message: "Provider rejected the request",
+    } as never);
+    renderFlow({ initialProvider: "turnkey" });
+    fireEvent.change(screen.getByLabelText("Wallet label"), { target: { value: "Ops" } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Create wallet" }));
+    });
+    expect(screen.getByRole("alert").textContent).toBe("Provider rejected the request");
+    expect(dashboardRouter.push).not.toHaveBeenCalled();
+  });
+
+  // Jina (#2333): an uncertain or refused setup left the wallet inventory as it
+  // was, so a wallet an earlier attempt created did not show up before a retry.
+  it("refreshes the wallet inventory after an uncertain or refused setup and points to the list", async () => {
+    mocks.initialize.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    renderFlow({ connectedProviders: [], initialProvider: "turnkey" });
+    fireEvent.change(screen.getByLabelText("Wallet label"), { target: { value: "Unsure" } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Create wallet" }));
+    });
+    expect(mocks.refreshWalletInventory).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("alert").textContent).toMatch(/Check your wallet list first/);
+
+    mocks.initialize.mockResolvedValueOnce({
+      status: "error",
+      message: "Provider rejected the request",
+    } as never);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Create wallet" }));
+    });
+    expect(mocks.refreshWalletInventory).toHaveBeenCalledTimes(2);
     expect(dashboardRouter.push).not.toHaveBeenCalled();
   });
 
   it("keeps the form and the key when the answer is lost, so Create wallet again resends the same key", async () => {
-    vi.mocked(initializeCustodySetupAction)
-      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
-      .mockResolvedValueOnce({ status: "success" });
-    const user = userEvent.setup();
-    renderInteractiveFlow({
-      ...SANDBOX_FLOW,
-      connectedProviders: [],
-      custodyAvailability: SANDBOX_MANAGED_PRIVY_AVAILABILITY,
-      initialProvider: "privy",
+    mocks.initialize.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    renderFlow({ connectedProviders: [], initialProvider: "turnkey" });
+    fireEvent.change(screen.getByLabelText("Wallet label"), {
+      target: { value: "Lost answer treasury" },
     });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Create wallet" }));
+    });
+    expect(screen.getByRole("alert").textContent).toMatch(
+      /couldn't confirm whether the wallet was created/
+    );
+    expect(dashboardRouter.push).not.toHaveBeenCalled();
 
-    await user.type(screen.getByLabelText("Wallet label"), "Lost answer treasury");
-    await user.click(screen.getByRole("button", { name: "Create wallet" }));
-    expect(await screen.findByText(/couldn't confirm whether the wallet was created/)).toBeTruthy();
-
-    await user.click(screen.getByRole("button", { name: "Create wallet" }));
-    await waitFor(() => expect(dashboardRouter.push).toHaveBeenCalled());
-
-    const [first, retry] = vi.mocked(initializeCustodySetupAction).mock.calls.map(([form]) => form);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Create wallet" }));
+    });
+    const [first, retry] = mocks.initialize.mock.calls.map(([form]) => form);
     expect(first?.get("idempotencyKey")).toEqual(expect.any(String));
     expect(retry?.get("idempotencyKey")).toBe(first?.get("idempotencyKey"));
-    expect(createCustodySetupWalletAction).not.toHaveBeenCalled();
+    expect(mocks.createWallet).not.toHaveBeenCalled();
+    expect(dashboardRouter.push).toHaveBeenCalledWith("/dashboard/prj_test_sandbox/wallets");
   });
 
   it("gives the same setup in another project its own key, so it never settles this one's", async () => {
-    vi.mocked(initializeCustodySetupAction).mockRejectedValue(new TypeError("Failed to fetch"));
-    const user = userEvent.setup();
+    mocks.initialize.mockRejectedValueOnce(new TypeError("Failed to fetch"));
     const submit = async () => {
-      renderInteractiveFlow({
-        ...SANDBOX_FLOW,
-        connectedProviders: [],
-        custodyAvailability: SANDBOX_MANAGED_PRIVY_AVAILABILITY,
-        initialProvider: "privy",
+      renderFlow({ connectedProviders: [], initialProvider: "turnkey" });
+      fireEvent.change(screen.getByLabelText("Wallet label"), {
+        target: { value: "Per-project treasury" },
       });
-      await user.type(screen.getByLabelText("Wallet label"), "Per-project treasury");
-      await user.click(screen.getByRole("button", { name: "Create wallet" }));
-      expect(
-        await screen.findByText(/couldn't confirm whether the wallet was created/)
-      ).toBeTruthy();
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Create wallet" }));
+      });
       cleanup();
     };
 
     await submit();
-    workspace.projectId = "project_other";
+    mocks.projectId = "prj_test_other";
     await submit();
 
-    const [inFirst, inOther] = vi
-      .mocked(initializeCustodySetupAction)
-      .mock.calls.map(([form]) => form);
-    expect(inFirst?.get("idempotencyKey")).toEqual(expect.any(String));
-    expect(inOther?.get("idempotencyKey")).not.toBe(inFirst?.get("idempotencyKey"));
+    const [inSandbox, inOther] = mocks.initialize.mock.calls.map(([form]) => form);
+    expect(inSandbox?.get("idempotencyKey")).toEqual(expect.any(String));
+    expect(inOther?.get("idempotencyKey")).not.toBe(inSandbox?.get("idempotencyKey"));
   });
 
-  it("explains why nothing can be selected when the project can use no provider", () => {
-    const markup = renderFlow({ ...SANDBOX_FLOW, connectedProviders: [], custodyAvailability: [] });
-
-    expect(markup).toContain(
-      "Wallet creation is available after a custody provider is enabled for this organization."
+  it("points to adding a wallet when the provider was set up in the meantime", async () => {
+    mocks.initialize.mockResolvedValueOnce({ status: "provider_already_set_up" } as never);
+    renderFlow({ connectedProviders: [], initialProvider: "turnkey" });
+    fireEvent.change(screen.getByLabelText("Wallet label"), { target: { value: "Ops" } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Create wallet" }));
+    });
+    expect(screen.getByRole("alert").textContent).toBe(
+      "This provider is already set up. Add a wallet instead."
     );
-    expect(markup).not.toContain("data-provider-selection-card");
-    expect(markup).not.toContain("<h3");
+    expect(dashboardRouter.refresh).toHaveBeenCalled();
+    expect(dashboardRouter.push).not.toHaveBeenCalled();
+  });
+
+  it("names the production environment on a production project", () => {
+    renderFlow({
+      connectedProviders: [],
+      custodyAvailability: SANDBOX_AVAILABILITY,
+      environment: "production",
+      initialProvider: "turnkey",
+    });
+    expect(screen.getByText(/^Production/)).toBeTruthy();
   });
 });
 
-describe("WalletSetupFlow custody mode", () => {
-  it("offers only Privy in Production", () => {
-    const markup = renderFlow(PRODUCTION_FLOW);
+describe("custody modes", () => {
+  it("asks how a provider offered both ways is set up, and shows nothing else until it is chosen", () => {
+    renderFlow({ connectedProviders: [], initialProvider: "privy" });
 
-    expect(markup.match(/data-provider-selection-card="true"/g)).toHaveLength(1);
-    expect(markup).toContain("Privy");
-    expect(markup).not.toContain("Fireblocks");
+    expect(screen.getByLabelText("Custody mode")).toBeTruthy();
+    expect(document.getElementById("wallet-details-form")).toBeNull();
+    expect(document.querySelector("[data-privy-byok-form]")).toBeNull();
   });
 
-  it("sends Privy straight to provider details in Production, with no Managed option", () => {
-    const markup = renderFlow({ ...PRODUCTION_FLOW, initialProvider: "privy" });
-
-    expect(markup).toContain("Provider details");
-    expect(markup).toContain("data-privy-byok-form");
-    expect(markup).toMatch(/type="password"/);
-    expect(markup).not.toContain('aria-label="Custody mode"');
-    expect(markup).not.toContain(">Managed<");
-    expect(markup).not.toContain('id="wallet-label"');
-    expect(markup).not.toContain("Wallet label");
-    expect(markup).not.toContain("Create wallet");
-  });
-
-  it("labels a Production wallet's environment as Production", () => {
-    const markup = renderFlow({
-      ...PRODUCTION_FLOW,
-      initialProvider: "privy",
-      connections: [connection({})],
-    });
-
-    expect(markup).toContain("Wallet details");
-    expect(markup).toContain(">Production<");
-    expect(markup).not.toContain(">Sandbox<");
-  });
-
-  it("asks a Sandbox project to choose a mode for a provider offering both, with nothing preselected", () => {
-    const markup = renderFlow({
-      ...SANDBOX_FLOW,
+  it("sends a provider offered only as BYOK straight to its credential form", () => {
+    renderFlow({
       connectedProviders: [],
+      custodyAvailability: PRODUCTION_AVAILABILITY,
+      environment: "production",
       initialProvider: "privy",
     });
-
-    expect(markup).toContain('aria-label="Custody mode"');
-    expect(markup).toContain("Choose a custody mode");
-    expect(markup).not.toContain("data-privy-byok-form");
-    expect(markup).not.toContain('id="wallet-label"');
+    expect(screen.getByRole("heading", { name: "Provider details" })).toBeTruthy();
+    expect(document.querySelector("[data-privy-byok-form]")).toBeTruthy();
+    expect(screen.queryByLabelText("Custody mode")).toBeNull();
+    // The credential form owns its submit; the footer offers no second one.
+    expect(screen.queryByRole("button", { name: "Create wallet" })).toBeNull();
   });
 
-  it("blocks submitting until a mode is chosen", () => {
-    const markup = renderFlow({
-      ...SANDBOX_FLOW,
-      connectedProviders: [],
-      initialProvider: "privy",
-    });
-
-    expect(markup).not.toContain('id="wallet-details-form"');
-    expect(detailsSubmitButton(markup)).toContain('disabled=""');
-  });
-
-  it("skips the mode choice for a provider offering one mode", () => {
-    const markup = renderFlow({
-      ...SANDBOX_FLOW,
-      connectedProviders: [],
-      initialProvider: "fireblocks",
-    });
-
-    expect(markup).not.toContain('aria-label="Custody mode"');
-    expect(markup).not.toContain("data-privy-byok-form");
-    expect(markup).toContain('id="wallet-details-form"');
-    expect(markup).toContain(">Sandbox<");
-    expect(detailsSubmitButton(markup)).not.toContain('disabled=""');
-  });
-
-  it("holds the mode choice and Back while a BYOK re-check is in flight", async () => {
-    const refusal = {
-      status: "refused",
-      message: "Install checks are not enabled for this organization",
-      connectionId: "conn_refused",
-    } as const;
-    vi.mocked(submitPrivyCredentialAction).mockResolvedValue(refusal);
-    const recheck = Promise.withResolvers<typeof refusal>();
-    vi.mocked(recheckPrivyCredentialAction).mockReturnValue(recheck.promise);
-    const user = userEvent.setup();
-    renderInteractiveFlow({ ...SANDBOX_FLOW, connectedProviders: [], initialProvider: "privy" });
-
-    await user.click(screen.getByRole("combobox", { name: "Custody mode" }));
-    await user.click(await screen.findByRole("option", { name: "Bring your own credentials" }));
-    await user.type(screen.getByLabelText("Privy app ID"), "app_test");
-    await user.type(screen.getByLabelText("Privy app secret"), "secret_test");
-    await user.click(screen.getByRole("button", { name: "Connect and verify" }));
-    await user.click(await screen.findByRole("button", { name: "Check again" }));
-
-    expect(recheckPrivyCredentialAction).toHaveBeenCalledWith("conn_refused");
-    expect(screen.getByRole("combobox", { name: "Custody mode" })).toHaveProperty("disabled", true);
-    expect(screen.getByRole("button", { name: "Back" })).toHaveProperty("disabled", true);
-
-    recheck.resolve(refusal);
-
-    await waitFor(() =>
-      expect(screen.getByRole("combobox", { name: "Custody mode" })).toHaveProperty(
-        "disabled",
-        false
-      )
-    );
-    expect(screen.getByRole("button", { name: "Back" })).toHaveProperty("disabled", false);
+  it("sets a Managed-only provider up with the wallet details", () => {
+    renderFlow({ connectedProviders: [], initialProvider: "turnkey" });
+    expect(screen.getByRole("heading", { name: "Wallet details" })).toBeTruthy();
+    expect(screen.queryByLabelText("Custody mode")).toBeNull();
   });
 });
 
-describe("WalletSetupFlow connection picker", () => {
-  function renderInstalledPrivy(
-    props: Pick<FlowProps, "connections" | "connectedProviders">
-  ): string {
-    return renderFlow({ ...SANDBOX_FLOW, ...props, initialProvider: "privy" });
+describe("connection picker", () => {
+  function connection(overrides: Partial<ConnectionItem> = {}): ConnectionItem {
+    return {
+      id: "conn-active",
+      provider: "privy",
+      label: "Production signing",
+      status: "active",
+      isRuntimeExecutionAllowed: true,
+      defaultCustodyWalletId: null,
+      createdAt: "2026-08-10T09:00:00.000Z",
+      activatedAt: "2026-08-10T09:05:00.000Z",
+      lastCheck: null,
+      pendingWalletLabel: null,
+      ...overrides,
+    } as ConnectionItem;
   }
 
-  it("offers the account picker once the project has a usable connection", () => {
-    const markup = renderInstalledPrivy({
-      connections: [connection({})],
+  const pickerField = () => document.querySelector('input[name="walletTarget"]');
+
+  it("offers the connection once the project has a usable one, with nothing preselected", () => {
+    renderFlow({
+      initialProvider: "privy",
       connectedProviders: ["privy"],
+      connections: [connection()],
     });
-
-    expect(markup).toContain("The wallet is created in this account");
-    expect(markup).toContain('name="walletTarget"');
+    expect(screen.getByText("Account")).toBeTruthy();
+    expect((pickerField() as HTMLInputElement | null)?.value ?? "").toBe("");
   });
 
-  it("preselects no account, even when only one is selectable", () => {
-    const markup = renderInstalledPrivy({
-      connections: [connection({ id: "conn-only" })],
-      connectedProviders: [],
-    });
-
-    expect(markup).toContain('name="walletTarget"');
-    expect(markup).not.toContain("conn-only");
-  });
-
-  function renderInteractiveInstalledPrivy() {
-    return renderInteractiveFlow({
-      ...SANDBOX_FLOW,
+  it("asks where the wallet lives instead of picking a default, and sends nothing until it does", async () => {
+    renderFlow({
       initialProvider: "privy",
-      connections: [connection({})],
+      connectedProviders: ["privy"],
+      connections: [connection()],
     });
-  }
-
-  it("refuses to submit until the user picks the account", async () => {
-    const user = userEvent.setup();
-    renderInteractiveInstalledPrivy();
-
-    await user.type(screen.getByLabelText("Wallet label"), "Treasury");
-    await user.click(screen.getByRole("button", { name: "Create wallet" }));
-
-    expect(await screen.findByText("Choose the account the wallet is created in.")).toBeTruthy();
-    expect(createCustodySetupWalletAction).not.toHaveBeenCalled();
-  });
-
-  it("names the provider and no connection when Managed is picked", async () => {
-    vi.mocked(createCustodySetupWalletAction).mockResolvedValue({ status: "success" });
-    const user = userEvent.setup();
-    renderInteractiveInstalledPrivy();
-
-    await user.type(screen.getByLabelText("Wallet label"), "Treasury");
-    await user.click(screen.getByRole("combobox", { name: "Account" }));
-    await user.click(await screen.findByRole("option", { name: "Managed by SDP" }));
-    await user.click(screen.getByRole("button", { name: "Create wallet" }));
-
-    await waitFor(() => expect(createCustodySetupWalletAction).toHaveBeenCalledTimes(1));
-    const formData = submittedWalletForm();
-    expect(formData.get("provider")).toBe("privy");
-    expect(formData.get("connectionId")).toBeNull();
-  });
-
-  it("names the picked connection", async () => {
-    vi.mocked(createCustodySetupWalletAction).mockResolvedValue({ status: "success" });
-    const user = userEvent.setup();
-    renderInteractiveInstalledPrivy();
-
-    await user.type(screen.getByLabelText("Wallet label"), "Treasury");
-    await user.click(screen.getByRole("combobox", { name: "Account" }));
-    await user.click(await screen.findByRole("option", { name: "Production signing" }));
-    await user.click(screen.getByRole("button", { name: "Create wallet" }));
-
-    await waitFor(() => expect(createCustodySetupWalletAction).toHaveBeenCalledTimes(1));
-    expect(submittedWalletForm().get("connectionId")).toBe("conn-active");
+    fireEvent.change(screen.getByLabelText("Wallet label"), { target: { value: "Ops" } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Create wallet" }));
+    });
+    expect(screen.getByRole("alert").textContent).toBe(
+      "Choose the account the wallet is created in."
+    );
+    expect(mocks.createWallet).not.toHaveBeenCalled();
   });
 
   it("stays out of the way when nothing is selectable", () => {
-    const markup = renderInstalledPrivy({
-      connections: [connection({ status: "pending" })],
+    renderFlow({
+      initialProvider: "privy",
       connectedProviders: ["privy"],
-    });
-
-    expect(markup).not.toContain("The wallet is created in this account");
-    expect(markup).toContain("Wallet details");
-  });
-
-  it("stays out of the way when the project has no connections at all", () => {
-    const markup = renderInstalledPrivy({ connections: [], connectedProviders: ["privy"] });
-
-    expect(markup).not.toContain("The wallet is created in this account");
-  });
-
-  it("offers an active connection when there is no managed config", () => {
-    const markup = renderInstalledPrivy({
-      connections: [connection({})],
-      connectedProviders: [],
-    });
-
-    expect(markup).toContain("Wallet details");
-    expect(markup).toContain('name="walletTarget"');
-    expect(markup).toContain('name="label"');
-    expect(markup).not.toContain('aria-label="Custody mode"');
-    expect(markup).not.toContain("data-privy-byok-form");
-    expect(markup).not.toMatch(/type="password"/);
-  });
-
-  it("keeps the credential form while the only connection is not active yet", () => {
-    const markup = renderFlow({
-      ...PRODUCTION_FLOW,
-      initialProvider: "privy",
       connections: [connection({ status: "pending" })],
     });
-
-    expect(markup).toContain("data-privy-byok-form");
-    expect(markup).not.toContain('name="walletTarget"');
+    expect(pickerField()).toBeNull();
+    expect(screen.getByRole("heading", { name: "Wallet details" })).toBeTruthy();
   });
 
-  it("offers no connections for a provider whose modes leave out byok", () => {
-    const markup = renderFlow({
-      ...SANDBOX_FLOW,
-      custodyAvailability: SANDBOX_MANAGED_PRIVY_AVAILABILITY,
+  // A BYOK-only project has no Managed config, so nothing is connected; the active connection
+  // alone must mark the provider installed.
+  it("offers an active connection when the provider has no Managed config", () => {
+    renderFlow({
       initialProvider: "privy",
-      connections: [connection({})],
+      connectedProviders: [],
+      custodyAvailability: PRODUCTION_AVAILABILITY,
+      environment: "production",
+      connections: [connection()],
     });
-
-    expect(markup).toContain("Wallet details");
-    expect(markup).not.toContain("The wallet is created in this account");
-    expect(markup).not.toContain('name="walletTarget"');
+    expect(pickerField()).toBeTruthy();
+    expect(document.querySelector("[data-privy-byok-form]")).toBeNull();
   });
 
+  // Connections belong to one provider; switching on step 1 must not carry them over.
   it("ignores connections belonging to another provider", () => {
-    const markup = renderFlow({
-      ...SANDBOX_FLOW,
-      connectedProviders: ["fireblocks"],
-      initialProvider: "fireblocks",
-      connections: [connection({})],
+    renderFlow({
+      connectedProviders: ["turnkey"],
+      initialProvider: "turnkey",
+      connections: [connection()],
     });
-
-    expect(markup).not.toContain("The wallet is created in this account");
+    expect(pickerField()).toBeNull();
   });
 });

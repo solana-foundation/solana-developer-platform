@@ -8,15 +8,13 @@ import {
   fetchPaymentsWallets,
 } from "@/app/dashboard/[projectId]/payments/payments-page.data";
 import { issuance } from "@/flags";
-import { withLegacyDesign } from "@/flags/new-design";
 import { isModuleInDeploymentReleaseChannel } from "@/flags/release-channel";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
-import { CurrentDashboardPage as RedesignCurrentDashboardPage } from "./page.redesign";
 
-async function DashboardPage() {
+export default async function DashboardPage() {
   const [t, { userId, orgId }, custodyEnabled, issuanceEnabled] = await Promise.all([
     getTranslations(),
     auth(),
@@ -96,5 +94,3 @@ async function DashboardPage() {
     throw error;
   }
 }
-
-export default withLegacyDesign(RedesignCurrentDashboardPage, DashboardPage, "overview");

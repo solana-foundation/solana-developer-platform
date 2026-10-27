@@ -17,16 +17,14 @@ function declarationsBySelector(): Map<string, string[]> {
   return blocks;
 }
 
-const PALETTE_SCOPE = ":root:has(main[data-sdp-new-design])";
+const PALETTE_SCOPE = ":root:has(main[data-sdp-dashboard-shell])";
 const SHAPE_SCOPE = '[data-sdp-theme="refresh"]';
-// Component shapes the refresh design changes. Under NEW DESIGN every page takes the palette, but
-// only a refresh subtree takes these; pages that aren't redesigned keep their own.
 const SHAPE_TOKEN = /^--(button-radius|input-|tab-|table-|select-|tooltip-|text-button)/;
 
 describe("sdp-theme.css", () => {
   const blocks = declarationsBySelector();
 
-  it("gives the whole document the refresh text and button colours under NEW DESIGN", () => {
+  it("gives the whole document the refresh text and button colours under the dashboard shell", () => {
     expect(blocks.get(PALETTE_SCOPE)).toEqual(
       expect.arrayContaining(["--text-extra-high", "--button-primary-bg", "--border-light"])
     );

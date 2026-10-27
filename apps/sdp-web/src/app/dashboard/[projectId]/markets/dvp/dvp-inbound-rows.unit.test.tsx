@@ -16,6 +16,12 @@ import { EnglishTestI18n } from "@/app/dashboard/[projectId]/markets/test-i18n";
 import { InboundRows } from "./dvp-inbound-rows";
 import type { DvpInboundLeg, DvpInboundTrade } from "./dvp-trades.data";
 
+// A member who may write; the read-only cases live with each component's own viewer tests.
+vi.mock("@/contexts/dashboard-workspace-context", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/contexts/dashboard-workspace-context")>()),
+  useCanWrite: () => true,
+}));
+
 // Each row owns a funding action, which reaches for the router on mount.
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 // The fund action links its transaction on the project's cluster, read from the dashboard.

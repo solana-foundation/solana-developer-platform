@@ -1,0 +1,22 @@
+{
+  "name": "@sdp/api-catalog",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./snippets": {
+      "types": "./src/snippets.ts",
+      "import": "./src/snippets.ts",
+      "default": "./src/snippets.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "biome check src/"
+  },
+  "devDependencies": {
+    "typescript": "6.0.3",
+    "vitest": "4.1.12"
+  }
+}
