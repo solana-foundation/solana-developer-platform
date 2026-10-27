@@ -1,5 +1,6 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
 import * as solanaRpc from "@sdp/rpc/solana";
+import { NATIVE_ASSET } from "@sdp/solana/asset-ref";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
@@ -10,12 +11,13 @@ import {
 import { badRequest } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import * as moneyPathEvents from "@/runtime/money-path-events";
-import * as paymentAmounts from "@/services/payments/token-amount";
+import * as readTerms from "@/services/token-movement/read-terms";
 import { TEST_CUSTODY_PUBLIC_KEY } from "@/test/fixtures/custody";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { type ClusterRpcStub, installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { testExpectation } from "@/test/helpers/token-movement";
 import { seedTestDatabase } from "@/test/mocks/db";
 import {
   expirePaymentRequests,
@@ -57,9 +59,23 @@ async function createRequest(params: { token: string; expiresAt: string | null }
     destinationAddress: TEST_CUSTODY_PUBLIC_KEY,
     token: params.token,
     amount: "1.5",
+    expectation: testExpectation(NATIVE_ASSET, "1.5", 9),
     expiresAt: params.expiresAt,
     createdBy: TEST_USER.id,
   });
+}
+
+/** A request written before expectations (migration 0186): its check reads the mint. */
+async function createLegacyRequest(params: { token: string; expiresAt: string | null }) {
+  const request = await createRequest(params);
+  await updateRow(request.id, {
+    asset_kind: null,
+    mint: null,
+    token_program: null,
+    decimals: null,
+    expected_credit: null,
+  });
+  return request;
 }
 
 async function getRow(requestId: string) {
@@ -281,10 +297,10 @@ describe("reconcilePaymentRequests", () => {
 
   it("does not mark a request verified when its check never read the chain", async () => {
     const signatures = vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);
-    vi.spyOn(paymentAmounts, "loadPaymentMint").mockRejectedValue(
+    vi.spyOn(readTerms, "readTokenTerms").mockRejectedValue(
       badRequest("Token mint account does not exist")
     );
-    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+    const request = await createLegacyRequest({ token: SOL_MINT, expiresAt: null });
 
     await onSandbox(() => reconcilePaymentRequests(env));
 
@@ -298,10 +314,10 @@ describe("reconcilePaymentRequests", () => {
   it("keeps a request blocked by its mint out of the backlog", async () => {
     const log = vi.spyOn(moneyPathEvents, "logEvent");
     vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);
-    vi.spyOn(paymentAmounts, "loadPaymentMint").mockRejectedValue(
+    vi.spyOn(readTerms, "readTokenTerms").mockRejectedValue(
       badRequest("Token mint account does not exist")
     );
-    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+    const request = await createLegacyRequest({ token: SOL_MINT, expiresAt: null });
     await updateRow(request.id, { created_at: PAST, last_checked_at: PAST });
 
     await onSandbox(() => reconcilePaymentRequests(env));

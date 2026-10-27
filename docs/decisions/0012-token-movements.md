@@ -133,6 +133,39 @@ them in one place, not adding special cases to every flow.
   refuses a non-transferable mint. `support` still refuses interest-bearing and scaled mints:
   balances and the dashboard show their display amount until PR 5, so a user would type one
   amount and move another. /pay keeps the stopgap until PR 3, recurring until PR 3.
+- **Payment requests (PR 3).** A request stores its expectation, the credit in base units with
+  the asset and decimals read at creation (migration 0186); an amount with more decimals than the
+  mint, or a mint the builder refuses, is a 400 then. /pay quotes that credit under the terms it
+  reads and builds with `buildTokenMovement`; the Solana Pay reference is the transfer
+  instruction's last account, after any hook accounts. Each claim window records its issued
+  transaction and quote (`payment_request_transactions`); the sponsor signs first, so its
+  signature is the transaction id. Main's settlement stays (#2515): the reconcile crons scan the
+  reference from a persisted cursor and settle on a finalized transaction, `paid_late` by block
+  time. A scanned signature that is one of the request's open windows settles on that window's
+  quote when it delivers the expectation, with no `getTransaction`, and its leg is verified by
+  construction: `validatePaymentRequestTransfer` knows neither `TransferCheckedWithFee` nor hook
+  accounts before the reference. Every other signature goes through that validator, against the
+  stored expectation. Settlement closes the paying window `landed`. /pay issues no new window
+  while a signed one can still land: it closes the ones that failed at confirmed or above, or
+  have no record past their blockhash's last valid block height (the `readSavedSend` rule), and
+  answers 429 while any other stays open. /pay leaves `loadPaymentMint`; a scaled or
+  interest-bearing mint is still refused, at creation and at /pay, since the builder refuses it
+  until PR 5.
+- **Recurring mandates (PR 3).** A recurring payment and its plan store the mandate once: the
+  debit in base units, the decimals and the fee tolerance (`maxFeePerPull`, the larger of the
+  current and next epoch's fee for the debit; migration 0187). Each pull reads the terms once
+  before its claim; a paused mint, a fee above the tolerance or a destination that requires memos
+  holds it as a `failed` attempt with `holdReason`, the period still due. A pull the cron finds
+  still held once its period has ended skips the period, as the subscriptions program forfeits an
+  elapsed period's allowance. Activation refuses a memo-required destination. A pull's leg is
+  `verified_by` the chain (migration 0188): its observed debit is the instruction's amount and its
+  credit the destination's raw balance delta, read from the `getTransaction` the collection proof
+  already makes. It is verified when that debit is the quote's and the fee is within the
+  tolerance, which a pull landing in the next epoch may pay instead of the quote's fee. Create,
+  plan create and an update that changes the token or amount make the mandate before any row (the
+  precision check `loadPaymentMint` made); token admission stays start admission, so cancel and
+  recovery never ask it. Interest-bearing and scaled mints are still refused until PR 5: the
+  recurring row takes the builder's refusals.
 - **Mint watch.** `pnpm check:well-known-mints` decodes every catalogue mint with the same
   decoder, prints its extension state, and fails when a 1 000-token transfer would pay a fee
   under the current or the newer fee entry (bps alone is not the signal, since `maximumFee` is
@@ -158,7 +191,7 @@ Each PR ships alone.
 2. **Ledger and builder:** the `token_movement_legs` schema, the builder, transfers, batches and
    off-ramp funding on it, and the API amount shape (`amountBasis`, `amounts`,
    `amountVerification`).
-3. **Payment requests and recurring:** requests settle on the signatures SDP issued; recurring
+3. **Payment requests and recurring:** requests expect a credit and settle /pay windows on their quote; recurring
    moves to debit mandates with a fee tolerance and pre-pull holds.
 4. **Adapters:** issuance, the DvP, Private Channels and Earn refusal rows, the capability table
    with its Kora CI test, observed inbound transfers, on-ramp.

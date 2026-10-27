@@ -39,7 +39,8 @@ import {
   type MaybeEncodedAccount,
 } from "@solana/kit";
 import { SYSVAR_CLOCK_ADDRESS } from "@solana/sysvars";
-import { findAssociatedTokenPda } from "@solana-program/token-2022";
+import { SYSTEM_PROGRAM_ADDRESS } from "@solana-program/system";
+import { decodeToken, findAssociatedTokenPda } from "@solana-program/token-2022";
 import { badRequest } from "@/lib/errors";
 
 /** `getMultipleAccounts` takes at most this many addresses. */
@@ -168,4 +169,51 @@ export async function readTokenTerms(asset: AssetRequest): Promise<TokenTerms> {
     return NATIVE_TOKEN_TERMS;
   }
   return (await readMintMovementAccounts(asset, [])).terms;
+}
+
+/**
+ * The terms of the mint a movement names and the token account it pays, as the
+ * caller names that account (not derived from an owner). An account that does
+ * not exist yet, or holds only lamports, reads as missing.
+ *
+ * RPC budget: one `getMultipleAccounts` for the mint, the Clock and the account.
+ *
+ * @throws AppError (400) when the mint is unreadable (see
+ * {@link readMintMovementAccounts}) or the account is not a token account of
+ * the mint under the mint's program.
+ */
+export async function readMintMovementAccountAt(
+  asset: Exclude<AssetRequest, { kind: "native" }>,
+  tokenAccount: Address
+): Promise<{ terms: MintTokenTerms; receiver: DestinationTokenAccount }> {
+  const [mint, clock, account] = await readAccounts([
+    asset.mint,
+    SYSVAR_CLOCK_ADDRESS,
+    tokenAccount,
+  ]);
+  const terms = decodeTerms(asset, mint, clock);
+  if (account === undefined) {
+    throw new Error(`No account was read for ${tokenAccount}`);
+  }
+  const unopened =
+    !account.exists ||
+    (account.programAddress === SYSTEM_PROGRAM_ADDRESS && account.data.length === 0);
+  if (unopened) {
+    return {
+      terms,
+      receiver: decodeDestinationTokenAccount(terms, tokenAccount, tokenAccount, account),
+    };
+  }
+  const refusal = `${tokenAccount} is not a token account of this mint`;
+  if (account.programAddress !== SPL_TOKEN_PROGRAMS[terms.asset.program]) {
+    throw badRequest(refusal);
+  }
+  const { data } = decodeToken(account);
+  if (data.mint !== terms.asset.mint) {
+    throw badRequest(refusal);
+  }
+  return {
+    terms,
+    receiver: decodeDestinationTokenAccount(terms, data.owner, tokenAccount, account),
+  };
 }

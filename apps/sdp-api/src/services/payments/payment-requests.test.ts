@@ -1,6 +1,8 @@
+import { createClusterRpc } from "@sdp/rpc/factory";
 import { runInClusterScope } from "@sdp/rpc/scope";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { formatDecimalAmount } from "@sdp/solana/amount";
+import { NATIVE_ASSET } from "@sdp/solana/asset-ref";
 import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import {
   AccountRole,
@@ -34,6 +36,7 @@ import {
   getTransferCheckedInstruction,
   TOKEN_PROGRAM_ADDRESS,
 } from "@solana-program/token";
+import { TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import {
   afterEach,
   beforeAll,
@@ -54,20 +57,34 @@ import * as repositoryFactory from "@/db/repositories/repository-factory";
 import {
   createPaymentRequestsRepository,
   createPaymentsRepository,
+  createSystemPaymentRequestsRepository,
 } from "@/db/repositories/repository-factory";
+import { recordedLegQuote } from "@/db/repositories/token-movement-legs.repository";
 import { badRequest } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { rootLogger } from "@/runtime/logger";
 import * as moneyPathEvents from "@/runtime/money-path-events";
-import * as paymentAmounts from "@/services/payments/token-amount";
+import * as readTerms from "@/services/token-movement/read-terms";
 import { TEST_CUSTODY_PUBLIC_KEY } from "@/test/fixtures/custody";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
-import { installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
+import {
+  epochInfoResult,
+  installClusterRpcResponder,
+  type StubSignatureStatus,
+  signatureStatusesRead,
+  signatureStatusesReplyAt,
+} from "@/test/helpers/cluster-rpc";
 import { seedProjectCryptoWalletCounterparty } from "@/test/helpers/counterparties";
 import { env } from "@/test/helpers/env";
 import { syntheticAddress } from "@/test/helpers/parsed-transactions";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import {
+  answerMovementAccounts,
+  mintRpcAccount,
+  nativeQuote,
+  testExpectation,
+} from "@/test/helpers/token-movement";
 import { seedTestDatabase } from "@/test/mocks/db";
 import * as paymentRequestTransfer from "./payment-request-transfer";
 import * as paymentRequests from "./payment-requests";
@@ -216,9 +233,36 @@ async function createRequestFor(params: {
     destinationAddress: TEST_CUSTODY_PUBLIC_KEY,
     token: params.token,
     amount: params.amount,
+    expectation:
+      params.token === SOL_MINT
+        ? testExpectation(NATIVE_ASSET, params.amount, 9)
+        : testExpectation(
+            { kind: "token", mint: address(params.token), program: "spl-token" },
+            params.amount,
+            6
+          ),
     expiresAt: params.expiresAt,
     createdBy: TEST_USER.id,
   });
+}
+
+/** A request written before expectations (migration 0186): settlement reads its mint. */
+async function createLegacyRequest(params: {
+  token: string;
+  amount: string;
+  expiresAt: string | null;
+}) {
+  const created = await createRequestFor({ ...params, amount: "1" });
+  await getDb(env)
+    .prepare(
+      `UPDATE payment_requests
+          SET amount = ?, asset_kind = NULL, mint = NULL, token_program = NULL,
+              decimals = NULL, expected_credit = NULL
+        WHERE id = ?`
+    )
+    .bind(params.amount, created.id)
+    .run();
+  return readStored(created.id);
 }
 
 function onSandbox<T>(fn: () => Promise<T>) {
@@ -840,11 +884,11 @@ describe("verified check stamp", () => {
     expect(check).toEqual({ row: request, outcome: { kind: "read" } });
   });
 
-  it("expires a lapsed request whose mint is no longer admitted without claiming a chain read", async () => {
-    vi.spyOn(paymentAmounts, "loadPaymentMint").mockRejectedValue(
+  it("expires a lapsed legacy request whose mint is no longer admitted without claiming a chain read", async () => {
+    vi.spyOn(readTerms, "readTokenTerms").mockRejectedValue(
       badRequest("Token mint account does not exist")
     );
-    const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
+    const request = await createLegacyRequest({ token: SOL_MINT, amount: "1.5", expiresAt: PAST });
 
     const check = await onSandbox(() => paymentRequests.closeLapsedPaymentRequest(env, request));
 
@@ -909,8 +953,10 @@ async function exactTransferResponse(params: {
   rawAmount: bigint;
   reference: Address;
   lookupTable: Address | null;
+  /** The mint's token program; the classic program when omitted. */
+  tokenProgram?: Address;
 }): Promise<Awaited<ReturnType<typeof paymentRequestTransfer.validatePaymentRequestTransfer>>> {
-  const { token, rawAmount, reference, lookupTable } = params;
+  const { token, rawAmount, reference, lookupTable, tokenProgram = TOKEN_PROGRAM_ADDRESS } = params;
   const owner = address(TEST_CUSTODY_PUBLIC_KEY);
   const source = createNoopSigner(syntheticAddress(332));
   const destination =
@@ -920,20 +966,23 @@ async function exactTransferResponse(params: {
           await findAssociatedTokenPda({
             owner,
             mint: address(token),
-            tokenProgram: TOKEN_PROGRAM_ADDRESS,
+            tokenProgram,
           })
         )[0];
   const instruction =
     token === SOL_MINT
       ? getTransferSolInstruction({ source, destination, amount: rawAmount })
-      : getTransferCheckedInstruction({
-          source: syntheticAddress(333),
-          mint: address(token),
-          destination,
-          authority: source,
-          amount: rawAmount,
-          decimals: 6,
-        });
+      : getTransferCheckedInstruction(
+          {
+            source: syntheticAddress(333),
+            mint: address(token),
+            destination,
+            authority: source,
+            amount: rawAmount,
+            decimals: 6,
+          },
+          { programAddress: tokenProgram }
+        );
   const referenced = {
     ...instruction,
     accounts: [...instruction.accounts, { address: reference, role: AccountRole.READONLY }],
@@ -966,7 +1015,7 @@ async function exactTransferResponse(params: {
     accountIndex,
     mint: address(token),
     owner,
-    programId: TOKEN_PROGRAM_ADDRESS,
+    programId: tokenProgram,
     uiTokenAmount: {
       amount: stringifiedBigInt(amount.toString()),
       decimals: 6,
@@ -1019,6 +1068,7 @@ describe("exact transfer validation", () => {
       amount: "1.0000001",
       received: 1_000_000n,
       status: "awaiting_payment",
+      legacy: true,
     },
     {
       label: "exact SPL above 2^53",
@@ -1041,25 +1091,71 @@ describe("exact transfer validation", () => {
       received: 1_499_999_999n,
       status: "awaiting_payment",
     },
-  ])("checks $label with real transfer validation", async ({ token, amount, received, status }) => {
-    const request = await createRequestFor({ token, amount, expiresAt: null });
+  ])(
+    "checks $label with real transfer validation",
+    async ({ token, amount, received, status, legacy }) => {
+      answerMovementAccounts(
+        rpc,
+        new Map([[token, mintRpcAccount("spl-token", { decimals: 6, extensions: null })]])
+      );
+      const request = legacy
+        ? await createLegacyRequest({ token, amount, expiresAt: null })
+        : await createRequestFor({ token, amount, expiresAt: null });
+      mockExactCandidate();
+      rpc.answer(
+        "getTransaction",
+        asRpcJson(
+          await exactTransferResponse({
+            token,
+            rawAmount: received,
+            reference: address(request.reference),
+            lookupTable: null,
+          })
+        )
+      );
+
+      const settled = await onSandbox(() => checkAwaitingPaymentRequest(env, request));
+
+      expect(settled.status).toBe(status);
+      expect(await listInboundTransfers()).toHaveLength(status === "paid" ? 1 : 0);
+    }
+  );
+
+  it("settles a legacy request's landed payment although its mint has paused since", async () => {
+    const pyusd = WELL_KNOWN_TOKENS.PYUSD.mints.devnet.address;
+    answerMovementAccounts(
+      rpc,
+      new Map([
+        [
+          pyusd,
+          mintRpcAccount("token-2022", {
+            decimals: 6,
+            extensions: [
+              { __kind: "PausableConfig", authority: syntheticAddress(334), paused: true },
+            ],
+          }),
+        ],
+      ])
+    );
+    const request = await createLegacyRequest({ token: pyusd, amount: "1", expiresAt: null });
     mockExactCandidate();
     rpc.answer(
       "getTransaction",
       asRpcJson(
         await exactTransferResponse({
-          token,
-          rawAmount: received,
+          token: pyusd,
+          rawAmount: 1_000_000n,
           reference: address(request.reference),
           lookupTable: null,
+          tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
         })
       )
     );
 
     const settled = await onSandbox(() => checkAwaitingPaymentRequest(env, request));
 
-    expect(settled.status).toBe(status);
-    expect(await listInboundTransfers()).toHaveLength(status === "paid" ? 1 : 0);
+    expect(settled.status).toBe("paid");
+    expect(await listInboundTransfers()).toHaveLength(1);
   });
 
   it("reads each candidate's transaction once", async () => {
@@ -1224,8 +1320,12 @@ describe("exact transfer validation", () => {
   ])("skips a request whose legacy mint is no longer admitted: %s", async (message) => {
     const warn = vi.spyOn(rootLogger, "warn").mockImplementation(() => {});
     const invalidMint = syntheticAddress(501);
-    vi.spyOn(paymentAmounts, "loadPaymentMint").mockRejectedValue(badRequest(message));
-    const request = await createRequest({ token: invalidMint, expiresAt: null });
+    vi.spyOn(readTerms, "readTokenTerms").mockRejectedValue(badRequest(message));
+    const request = await createLegacyRequest({
+      token: invalidMint,
+      amount: "1.5",
+      expiresAt: null,
+    });
     mockSettlementSucceeds(null);
 
     const unchanged = await onSandbox(() => checkAwaitingPaymentRequest(env, request));
@@ -2156,5 +2256,141 @@ describe("signature scan cursor", () => {
         signature_scan_before: null,
       });
     });
+  });
+});
+
+describe("issued /pay windows (ADR 0012)", () => {
+  const rpc = installSettlementHooks();
+  const PAYER = TEST_SOLANA_ADDRESSES.wallet2;
+
+  /** A window /pay issued for the request, moving `credit` SOL, signed by the sponsor. */
+  async function issueWindow(
+    request: PaymentRequestRow,
+    seed: number,
+    options: { credit: string; lastValidBlockHeight: bigint }
+  ): Promise<Signature> {
+    const repository = createSystemPaymentRequestsRepository(env);
+    const unsigned = `dW5zaWduZWQ${seed}`;
+    expect(
+      await repository.claimSponsoredTransactionWindow({
+        requestId: request.id,
+        account: PAYER,
+        unsignedTransaction: unsigned,
+        lastValidBlockHeight: options.lastValidBlockHeight,
+        currentBlockHeight: options.lastValidBlockHeight * 10n,
+        quote: recordedLegQuote(nativeQuote(options.credit, "credit")),
+      })
+    ).toBe(true);
+    const issued = signature(getBase58Decoder().decode(new Uint8Array(64).fill(seed)));
+    expect(
+      await repository.storeSponsoredTransactionSignature({
+        requestId: request.id,
+        account: PAYER,
+        unsignedTransaction: unsigned,
+        signedTransaction: `c2lnbmVk${seed}`,
+        signature: issued,
+      })
+    ).toBe(true);
+    return issued;
+  }
+
+  async function windowOutcome(issued: Signature) {
+    return getDb(env)
+      .prepare("SELECT outcome, landed_slot FROM payment_request_transactions WHERE signature = ?")
+      .bind(issued)
+      .first();
+  }
+
+  /** Answers each raw status read with `verdict`, from a node at `contextSlot`. */
+  function answerStatuses(verdict: StubSignatureStatus | null, contextSlot = 1) {
+    rpc.respond("getSignatureStatuses", (request) =>
+      signatureStatusesReplyAt(
+        contextSlot,
+        signatureStatusesRead(request).signatures.map(() => verdict)
+      )
+    );
+  }
+
+  function closeOnSandbox(row: PaymentRequestRow) {
+    return onSandbox(() =>
+      paymentRequests.closeIssuedWindowsThatCannotLand(env, createClusterRpc(), row)
+    );
+  }
+
+  it("settles on a window's quote with no transaction read, and closes the window landed", async () => {
+    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+    const issued = await issueWindow(request, 1, { credit: "1.5", lastValidBlockHeight: 1_000n });
+    mockSignatures(signatureInfo(issued, { blockTime: null, err: null }));
+    mockStatus(FINALIZED);
+
+    const settled = await checkOnSandbox(request);
+
+    expect(settled.status).toBe("paid");
+    expect(validateTransferSpy).not.toHaveBeenCalled();
+    expect(await windowOutcome(issued)).toEqual({ outcome: "landed", landed_slot: "1" });
+    const leg = await getDb(env)
+      .prepare(
+        "SELECT quoted_credit, verified_by, verification_state FROM token_movement_legs WHERE payment_transfer_id = ?"
+      )
+      .bind(settled.fulfilled_by_transfer_id)
+      .first();
+    expect(leg).toEqual({
+      quoted_credit: "1500000000",
+      verified_by: "construction",
+      verification_state: "verified",
+    });
+  });
+
+  it("settles nothing on a window whose quote does not deliver the request's credit", async () => {
+    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+    const issued = await issueWindow(request, 1, { credit: "1.4", lastValidBlockHeight: 1_000n });
+    mockSignatures(signatureInfo(issued, { blockTime: null, err: null }));
+    mockStatus(FINALIZED);
+
+    expect((await checkOnSandbox(request)).status).toBe("awaiting_payment");
+    expect(validateTransferSpy).not.toHaveBeenCalled();
+    expect(await listInboundTransfers()).toHaveLength(0);
+  });
+
+  it("keeps a processed failure open, which its fork can still undo, and closes a confirmed one", async () => {
+    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+    const issued = await issueWindow(request, 1, { credit: "1.5", lastValidBlockHeight: 1_000n });
+    const failure = { InstructionError: [0, "Custom"] } as const;
+
+    answerStatuses({ slot: 77, confirmations: 1, confirmationStatus: "processed", err: failure });
+    expect(await closeOnSandbox(request)).toHaveLength(1);
+    expect(await windowOutcome(issued)).toEqual({ outcome: "open", landed_slot: null });
+
+    answerStatuses({ slot: 77, confirmations: 5, confirmationStatus: "confirmed", err: failure });
+    expect(await closeOnSandbox(request)).toEqual([]);
+    expect(await windowOutcome(issued)).toEqual({ outcome: "failed", landed_slot: "77" });
+  });
+
+  it("lapses an old window past its blockhash's expiry only on a node that saw the tip", async () => {
+    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+    const issued = await issueWindow(request, 1, { credit: "1.5", lastValidBlockHeight: 1_000n });
+    await getDb(env)
+      .prepare("UPDATE payment_request_transactions SET created_at = ? WHERE signature = ?")
+      .bind(new Date(Date.now() - 5 * 60_000).toISOString(), issued)
+      .run();
+    rpc.answer("getEpochInfo", epochInfoResult({ absoluteSlot: 5_000, blockHeight: 1_001 }));
+
+    answerStatuses(null, 4_999);
+    expect(await closeOnSandbox(request)).toHaveLength(1);
+    expect(await windowOutcome(issued)).toEqual({ outcome: "open", landed_slot: null });
+
+    answerStatuses(null, 5_000);
+    expect(await closeOnSandbox(request)).toEqual([]);
+    expect(await windowOutcome(issued)).toEqual({ outcome: "lapsed", landed_slot: null });
+  });
+
+  it("keeps a young window open with no chain tip read", async () => {
+    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+    const issued = await issueWindow(request, 1, { credit: "1.5", lastValidBlockHeight: 1_000n });
+    answerStatuses(null);
+
+    expect(await closeOnSandbox(request)).toHaveLength(1);
+    expect(await windowOutcome(issued)).toEqual({ outcome: "open", landed_slot: null });
+    expect(rpc.calls.map((call) => call.method)).not.toContain("getEpochInfo");
   });
 });

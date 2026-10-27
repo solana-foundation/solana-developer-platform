@@ -7,6 +7,7 @@
  * value a scaled or interest-bearing mint shows.
  */
 
+import { z } from "zod";
 import type {
   PaymentTransferStatus,
   RampTransferTransitionId,
@@ -35,6 +36,26 @@ export type TokenMovementLegStatus = (typeof TOKEN_MOVEMENT_LEG_STATUSES)[number
 export const DEFAULT_TOKEN_MOVEMENT_BASIS = "debit" satisfies TokenMovementBasis;
 
 /**
+ * Why SDP will not make a movement now (`@sdp/solana/token-movement`). A
+ * builder path refuses it with a 400; a recurring pull is held with it, and
+ * the collection attempt reports it.
+ */
+export const TOKEN_MOVEMENT_REFUSAL_REASONS = [
+  "non_transferable",
+  "paused",
+  "default_frozen",
+  "hook_unresolved",
+  "memo_required",
+  "nothing_credited",
+  /** Wallets show a scaled or interest-bearing amount: Payments refuses the mint until PR 5. */
+  "scaled_display",
+  /** A recurring pull's transfer fee is above the fee tolerance its mandate recorded. */
+  "fee_above_tolerance",
+] as const;
+
+export type TokenMovementRefusalReason = (typeof TOKEN_MOVEMENT_REFUSAL_REASONS)[number];
+
+/**
  * Whether SDP has checked what a movement moved against its quote. It is
  * separate from the transfer status, which never changes for it.
  */
@@ -57,11 +78,15 @@ export const AMOUNT_VERIFICATION_REASONS = [
   "movement_not_executed",
   /**
    * A movement SDP did not build itself (a program's CPI pull) landed, and the
-   * chain shows it moved exactly the quote: the instruction's debit, and the
-   * destination's raw token-balance delta as the credit.
+   * chain shows it moved the quote's debit (the instruction's amount) with a
+   * fee within the mandate's tolerance (the debit less the destination's raw
+   * token-balance delta).
    */
   "chain_delta_matched",
-  /** The chain shows the movement moved other amounts than the quote, or none SDP can read. */
+  /**
+   * The chain shows the movement moved another debit, paid a fee above the
+   * tolerance, or moved nothing SDP can read.
+   */
   "chain_delta_mismatch",
 ] as const;
 
@@ -112,7 +137,8 @@ const BUILT_TRANSFER_LANDED = {
   reason: "sdp_built_transfer_landed",
 } as const satisfies AmountVerificationVerdict;
 
-const MOVEMENT_NOT_EXECUTED = {
+/** The verdict on a movement that failed, or was released, before it moved anything. */
+export const MOVEMENT_NOT_EXECUTED = {
   state: "not_required",
   reason: "movement_not_executed",
 } as const satisfies AmountVerificationVerdict;
@@ -164,6 +190,58 @@ export function builtOfframpDepositVerdict(
     BUILT_OFFRAMP_DEPOSIT_VERDICTS;
   return verdicts[transition] ?? null;
 }
+
+/**
+ * How a leg is verified: `construction` for a top-level transfer SDP built
+ * and signed, verified once it lands; `chain` for a movement a program makes
+ * (a CPI pull), verified from the landed transaction.
+ */
+export const LEG_VERIFIERS = ["construction", "chain"] as const;
+
+export type LegVerifier = (typeof LEG_VERIFIERS)[number];
+
+/**
+ * The verdict on a chain-verified leg whose landed transaction moved its
+ * quote's debit, its fee within the tolerance.
+ */
+export const CHAIN_DELTA_MATCHED = {
+  state: "verified",
+  reason: "chain_delta_matched",
+} as const satisfies AmountVerificationVerdict;
+
+/** The verdict on a chain-verified leg whose landed transaction shows other amounts or none. */
+export const CHAIN_DELTA_MISMATCH = {
+  state: "mismatch",
+  reason: "chain_delta_mismatch",
+} as const satisfies AmountVerificationVerdict;
+
+/**
+ * The verdict the chain gives a leg it verifies: matched when the landed
+ * transaction moved the quote's debit with a fee within the tolerance.
+ */
+export function chainDeltaVerdict(matched: boolean): AmountVerificationVerdict {
+  return matched ? CHAIN_DELTA_MATCHED : CHAIN_DELTA_MISMATCH;
+}
+
+/**
+ * What an expectation or a mandate fixes before any movement exists, in token
+ * units. A payment request fixes the credit its payment must deliver; the
+ * payer's debit and the fee are quoted when the payment is built. A recurring
+ * mandate fixes the debit of each pull; the fee, and so the credit, depend on
+ * the epoch the pull runs in, up to `maxFeePerPull`.
+ */
+export const tokenMovementExpectationSchema = z.discriminatedUnion("basis", [
+  z.object({ basis: z.literal("credit"), credit: z.string(), decimals: z.number().int() }),
+  z.object({
+    basis: z.literal("debit"),
+    debit: z.string(),
+    decimals: z.number().int(),
+    /** The largest transfer fee one pull may pay; a pull that would pay more is held. */
+    maxFeePerPull: z.string(),
+  }),
+]);
+
+export type TokenMovementExpectation = z.infer<typeof tokenMovementExpectationSchema>;
 
 /**
  * What a movement moves, in token units. `debit = credit + fee`; the fee is

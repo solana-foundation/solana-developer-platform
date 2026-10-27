@@ -9,6 +9,7 @@ import type {
   PaymentRecurringPaymentUpdateAttemptStage,
   RecurringPaymentStatusWithRecoverableCollection,
 } from "@sdp/types/payments";
+import type { RecurringMandate } from "./recurring-mandate";
 
 export interface PaymentRecurringPaymentRow {
   id: string;
@@ -23,6 +24,8 @@ export interface PaymentRecurringPaymentRow {
   destination_token_account: string | null;
   token: string;
   amount: string;
+  /** The mandate in base units (migration 0187); null for a row written before mandates. */
+  mandate: RecurringMandate | null;
   period_hours: number;
   first_collection_at: string | null;
   next_collection_due_at: string | null;
@@ -162,7 +165,9 @@ export interface CreatePaymentRecurringPaymentInput {
   counterpartyAccountId: string;
   destinationAddress: string;
   token: string;
+  /** The mandate's debit in token units. */
   amount: string;
+  mandate: RecurringMandate;
   periodHours: number;
   firstCollectionAt: string | null;
   metadataUri: string | null;
@@ -186,7 +191,9 @@ export interface UpdatePaymentRecurringPaymentInput {
   destinationAddress?: string;
   destinationTokenAccount?: string | null;
   token?: string;
+  /** A new token or amount comes with its mandate, written together. */
   amount?: string;
+  mandate?: RecurringMandate;
   periodHours?: number;
   firstCollectionAt?: string | null;
   nextCollectionDueAt?: string | null;

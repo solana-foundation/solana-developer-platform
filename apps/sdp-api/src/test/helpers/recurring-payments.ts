@@ -16,12 +16,13 @@ import {
   paymentRecurringPaymentResponseSchema,
 } from "@/openapi/schemas/payments";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
-import { installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
+import { installClusterRpcResponder, type JsonRpcResult } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import {
   createKoraAdapterMock,
   createOrgSignerForCustodyWalletMock,
   DEVNET_USDC_MINT,
+  MAINNET_USDC_MINT,
   seedCounterparty,
   sendTransactionMock,
   TEST_CUSTODY_WALLET_ID,
@@ -32,8 +33,52 @@ import {
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
-import { mintAccountInfoResult } from "@/test/helpers/token-mints";
 import { withIdempotencyKeys } from "./idempotency-keys";
+import {
+  answerMovementAccounts,
+  associatedTokenAccount,
+  mintRpcAccount,
+  tokenRpcAccount,
+} from "./token-movement";
+
+/**
+ * The accounts a recurring terms read sees for `mints`: each as a classic
+ * 6-decimal mint, and every owner's existing token account of each.
+ *
+ * @param mints - The mints the read may ask for.
+ * @param owners - The wallets with a token account of each mint.
+ */
+async function classicMintAccounts(
+  mints: readonly string[],
+  owners: readonly string[]
+): Promise<Map<string, JsonRpcResult>> {
+  const accounts = new Map<string, JsonRpcResult>();
+  for (const mint of mints) {
+    accounts.set(mint, mintRpcAccount("spl-token", { decimals: 6, extensions: null }));
+    for (const owner of owners) {
+      accounts.set(
+        await associatedTokenAccount("spl-token", mint, owner),
+        tokenRpcAccount("spl-token", { mint, owner, amount: 1_000_000_000n, extensions: null })
+      );
+    }
+  }
+  return accounts;
+}
+
+/**
+ * The accounts a recurring terms read sees: the mints recurring tests pay in,
+ * as a classic 6-decimal mint, and every test wallet's existing token account
+ * of each (the source's included), as the stubbed `getAccountInfo` answered
+ * before mandates. The read that makes a mandate, activates it and decides
+ * each pull answers with them.
+ *
+ * @param owners - The wallets with a token account of each mint.
+ */
+export function recurringMintAccounts(
+  owners: readonly string[]
+): Promise<Map<string, JsonRpcResult>> {
+  return classicMintAccounts([DEVNET_USDC_MINT, MAINNET_USDC_MINT], owners);
+}
 
 // Every mutation carries a fresh key unless a test sets its own (HOO-1918).
 const app = withIdempotencyKeys(baseApp);
@@ -63,7 +108,8 @@ export function installRecurringExecutionHooks() {
     sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
-    rpc.answer("getAccountInfo", mintAccountInfoResult({ decimals: 6, extensions: null }));
+    // Mandates are made, and pulls decided, from the mint's terms (ADR 0012).
+    answerMovementAccounts(rpc, await recurringMintAccounts(owners()));
     signAsFeePayerMock = vi
       .fn<(transaction: Uint8Array) => Promise<Uint8Array>>()
       .mockImplementation(async (transaction) => fullySignTestTransaction(transaction));
@@ -76,10 +122,23 @@ export function installRecurringExecutionHooks() {
     );
   });
 
+  /** Every wallet the hooks give a token account: the source and each test wallet. */
+  const owners = () => [sourceSigner.address, ...Object.values(TEST_SOLANA_ADDRESSES)];
+
   return {
     rpc,
     sourceSigner: () => sourceSigner,
     signAsFeePayerMock: () => signAsFeePayerMock,
+    /** Answers terms reads for tokens issued in the project too, beside the catalogue mints. */
+    answerIssuedMints: async (mints: readonly string[]) => {
+      answerMovementAccounts(
+        rpc,
+        new Map([
+          ...(await recurringMintAccounts(owners())),
+          ...(await classicMintAccounts(mints, owners())),
+        ])
+      );
+    },
   };
 }
 

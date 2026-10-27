@@ -2,6 +2,7 @@ import {
   IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
   RECURRING_PAYMENT_STATUSES_CLAIMING_AUTHORITY,
 } from "@sdp/types/payments";
+import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { refuseWhileSubscriptionAuthorityRevokes } from "@/services/payments/recurring-payments/shared";
@@ -22,7 +23,8 @@ import {
 const WALLET = "Sender111111111111111111111111111111111";
 const AUTHORITY = "Authority1111111111111111111111111111111";
 const OTHER_AUTHORITY = "Authority2222222222222222222222222222222";
-const MINT = "Mint111111111111111111111111111111111111";
+/** A mint address: a schedule's mandate names its mint, and the mint is the schedule's token. */
+const MINT = WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"].address;
 const NOW = "2026-10-21T12:00:00.000Z";
 const RETRY_FAILED_BEFORE = "2026-10-21T06:00:00.000Z";
 /** Past a period-24 subscription's 24h period plus the 1h margin. */

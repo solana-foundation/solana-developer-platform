@@ -9,6 +9,7 @@ import { seedUnreadPrivyWallet } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { seedRecurringDatabaseTenant, testSignature } from "@/test/helpers/recurring-payments";
 import { required } from "@/test/helpers/required";
+import { testMandate } from "@/test/helpers/token-movement";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { createPostgresCounterpartiesRepository } from "./counterparty.repository.postgres";
 import { createPostgresCounterpartyAccountsRepository } from "./counterparty-account.repository.postgres";
@@ -24,6 +25,9 @@ const TEST_CUSTODY_WALLET_ID = "cwlt_recurring_payments_repo_test";
 const TEST_SIBLING_CUSTODY_WALLET_ID = "cwlt_recurring_payments_repo_sibling";
 const TEST_PROVIDER_WALLET_ID = "wallet_recurring_payments_repo_test";
 const TEST_SOURCE_ADDRESS = "Sender111111111111111111111111111111111";
+
+/** A real mint address: a mandate names its mint, and the row's token is that mint. */
+const REPO_TEST_MINT = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
 
 describe("PaymentRecurringPaymentsRepository (postgres)", () => {
   let repo: PaymentRecurringPaymentsRepository;
@@ -128,8 +132,9 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
       counterpartyId: counterparty.id,
       counterpartyAccountId: account.id,
       destinationAddress: "Destination111111111111111111111111111111",
-      token: "USDC",
+      token: REPO_TEST_MINT,
       amount: "10.00",
+      mandate: testMandate(REPO_TEST_MINT, "10.00", 6),
       periodHours: 24,
       firstCollectionAt: null,
       metadataUri: null,
@@ -147,6 +152,7 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
       amount: "20.00",
+      mandate: testMandate(REPO_TEST_MINT, "20.00", 6),
       expectedStatus: "pending_activation",
       expectedUpdatedAt: "2026-06-29T11:59:59.000Z",
       updatedAt: "2026-06-29T12:01:00.000Z",
@@ -159,6 +165,7 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
       amount: "20.00",
+      mandate: testMandate(REPO_TEST_MINT, "20.00", 6),
       expectedStatus: "pending_activation",
       expectedUpdatedAt: created.updated_at,
       updatedAt: "2026-06-29T12:01:00.000Z",
@@ -182,8 +189,9 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
       counterpartyId: counterparty.id,
       counterpartyAccountId: account.id,
       destinationAddress: "Destination111111111111111111111111111111",
-      token: "USDC",
+      token: REPO_TEST_MINT,
       amount: "10.00",
+      mandate: testMandate(REPO_TEST_MINT, "10.00", 6),
       periodHours: 24,
       firstCollectionAt: null,
       metadataUri: null,
@@ -239,8 +247,9 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
         counterpartyId: counterparty.id,
         counterpartyAccountId: account.id,
         destinationAddress: "Destination111111111111111111111111111111",
-        token: "USDC",
+        token: REPO_TEST_MINT,
         amount: "10.00",
+        mandate: testMandate(REPO_TEST_MINT, "10.00", 6),
         periodHours: 24,
         firstCollectionAt: null,
         metadataUri: null,
@@ -429,6 +438,7 @@ describe("PaymentRecurringPaymentsRepository collection job reads (postgres)", (
         ownerAddress: TEST_SOURCE_ADDRESS,
         token: usdcMint(environment),
         amount: "10.00",
+        mandate: testMandate(usdcMint(environment), "10.00", 6),
         periodHours: 24,
         programPlanId: "1",
         planPda: null,
@@ -471,6 +481,7 @@ describe("PaymentRecurringPaymentsRepository collection job reads (postgres)", (
         destinationAddress: "Destination111111111111111111111111111111",
         token: usdcMint(environment),
         amount: "10.00",
+        mandate: testMandate(usdcMint(environment), "10.00", 6),
         periodHours: 24,
         firstCollectionAt: null,
         metadataUri: null,

@@ -5,8 +5,31 @@ import {
   RECURRING_PAYMENT_OPERATION_STALE_AFTER_MS,
 } from "@sdp/payments/recurring-payment-lifecycle";
 import { createClusterRpc } from "@sdp/rpc/factory";
-import { getTransaction, type ParsedInstruction, type SolanaRpc } from "@sdp/rpc/solana";
+import {
+  getTransaction,
+  type ParsedInstruction,
+  type ParsedTransaction,
+  type SolanaRpc,
+  tokenBalanceDelta,
+} from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
+import { AmountError } from "@sdp/solana/amount";
+import { type MovementQuote, quoteMovement } from "@sdp/solana/movement-quote";
+import {
+  type BaseUnits,
+  baseUnits,
+  parseTokenAmount,
+  toBaseUnits,
+  toTokenAmount,
+} from "@sdp/solana/token-amount";
+import {
+  type DestinationTokenAccount,
+  recurringPullSupport,
+  TOKEN_MOVEMENT_REFUSALS,
+  TokenMovementError,
+  type TokenMovementRefusal,
+} from "@sdp/solana/token-movement";
+import type { MintTokenTerms } from "@sdp/solana/token-terms";
 import {
   COLLECTION_ATTEMPT_STATUSES_BLOCKING_NEW_CYCLE,
   COLLECTION_ATTEMPT_STATUSES_WITH_SUBMITTED_TRANSFER,
@@ -18,6 +41,8 @@ import {
   type PaymentSubscriptionCollectionAttemptMetadata,
   RECURRING_PAYMENT_COLLECTION_CONFIG,
 } from "@sdp/types/payments";
+import { BUILT_MOVEMENT_VERDICTS } from "@sdp/types/token-movements";
+import { SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
 import {
   AccountRole,
   type Address,
@@ -46,6 +71,7 @@ import type {
 import { createPostgresPaymentRecurringPaymentsRepository } from "@/db/repositories/payment-recurring-payments.repository.postgres";
 import type {
   PaymentSubscriptionCollectionAttemptRow,
+  PaymentSubscriptionPlanRow,
   PaymentSubscriptionRow,
   PaymentSubscriptionsRepository,
 } from "@/db/repositories/payment-subscriptions.repository";
@@ -55,11 +81,17 @@ import {
   type PaymentTransferRow,
 } from "@/db/repositories/payments.repository";
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
+import type { RecurringMandate } from "@/db/repositories/recurring-mandate";
 import {
   createPaymentRecurringPaymentsRepository,
   createPaymentSubscriptionsRepository,
   createPaymentsRepository,
 } from "@/db/repositories/repository-factory";
+import {
+  createPostgresTokenMovementLegsRepository,
+  type LegAmounts,
+  ownWalletAmount,
+} from "@/db/repositories/token-movement-legs.repository";
 import {
   AppError,
   badRequest,
@@ -69,14 +101,11 @@ import {
   solanaRpcError,
   transactionFailed,
 } from "@/lib/errors";
-import type { MoneyMovementRefusedError } from "@/lib/money-admission";
 import { createTenantScope } from "@/lib/tenant-scope";
-import { resolveSourceTokenAccountOrAta } from "@/routes/payments/token-accounts";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
 import { createSigningService } from "@/services/domain/signing.service";
 import type { TransferSignedSubmissionStore } from "@/services/payments/signed-submission";
-import { loadPaymentMint, loadPaymentMintFacts } from "@/services/payments/token-amount";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
   createSponsorshipFeePayment,
@@ -85,6 +114,7 @@ import {
 import { isDefiniteSubmissionError } from "@/services/sponsorship-submission";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
+import { mandateProgramAccounts, readRecurringTerms, rowMandate } from "./mandate";
 import {
   assertRecurringPaymentSourceWallet,
   canonicalAttemptSignature,
@@ -101,6 +131,14 @@ interface VerifiedRecurringPaymentCollection {
   destinationTokenAccount: Address;
   signature: Signature;
   transferId: string;
+  /**
+   * What the landed pull moved (ADR 0012): the instruction's debit, and the
+   * destination's raw token-balance delta as the credit; null when the
+   * transaction shows no delta SDP can read.
+   */
+  observed: LegAmounts | null;
+  /** The mandate's fee tolerance, which the observed fee is held to. */
+  maxFeePerPull: BaseUnits;
 }
 
 interface RecurringPaymentCollectionResult {
@@ -191,8 +229,10 @@ function retryCollectionMetadata(input: {
   transferId: string | null;
   error: string;
   retryAfterAt: string;
+  /** Why the pull was held before it was signed; null for any other failure. */
+  holdReason: TokenMovementRefusal | null;
 }): PaymentSubscriptionCollectionAttemptMetadata {
-  return {
+  const metadata: PaymentSubscriptionCollectionAttemptMetadata = {
     source: "retry",
     recurringPaymentId: input.metadata.recurringPaymentId,
     initiatedByKeyId: input.metadata.initiatedByKeyId,
@@ -201,6 +241,10 @@ function retryCollectionMetadata(input: {
     error: input.error,
     retryAfterAt: input.retryAfterAt,
   };
+  if (input.holdReason !== null) {
+    metadata.holdReason = input.holdReason;
+  }
+  return metadata;
 }
 
 function linkedTransferCollectionMetadata(input: {
@@ -303,19 +347,92 @@ function createRecurringCollectionSignedSubmissionStore(input: {
   };
 }
 
+/** The destination owner's associated token account under the mandate's mint and program. */
 async function resolveDestinationTokenAccount(input: {
   destinationAddress: string;
-  token: string;
+  mandate: RecurringMandate;
 }): Promise<Address> {
   const destinationOwner = assertValidAddress(input.destinationAddress, "destinationAddress");
-  const mint = assertValidAddress(input.token, "token");
-  const { tokenProgram } = await loadPaymentMintFacts(mint);
+  const { mint, tokenProgram } = mandateProgramAccounts(input.mandate);
   const [receiverAta] = await findAssociatedTokenPda({
     owner: destinationOwner,
     tokenProgram,
     mint,
   });
   return receiverAta;
+}
+
+/**
+ * The trailing hook accounts of a pull, resolved the way the subscriptions
+ * program orders them (its own `resolveTransferHookAccounts`: the hook
+ * program, its validation account, then the extra accounts). The hook program
+ * comes from the terms read for the pull: a mint without one needs no read,
+ * and a pull whose resolution names another program is refused, since the
+ * mint changed between the reads.
+ *
+ * RPC budget: none for a mint without a hook program; otherwise the SDK's
+ * mint read, validation account read and one read per extra account whose
+ * address comes from account data.
+ */
+async function recurringHookAccounts(
+  rpc: SolanaRpc,
+  terms: MintTokenTerms,
+  transfer: { amount: BaseUnits; authority: Address; destination: Address; source: Address }
+): Promise<subscriptionsProgram.TransferHookAccount[]> {
+  if (terms.transferHookProgram === null) {
+    return [];
+  }
+  const accounts = await subscriptionsProgram.resolveTransferHookAccounts(rpc, {
+    ...transfer,
+    mint: terms.asset.mint,
+    tokenProgram: address(SPL_TOKEN_PROGRAMS[terms.asset.program]),
+  });
+  if (accounts[0]?.address !== terms.transferHookProgram) {
+    throw new TokenMovementError(
+      TOKEN_MOVEMENT_REFUSALS.hookUnresolved,
+      "This token's transfer hook changed while the recurring payment collection was built; retry"
+    );
+  }
+  return accounts;
+}
+
+/**
+ * What a landed pull moved: the instruction's debit, and the destination
+ * owner's raw token-balance delta of the mint as the credit
+ * (`pre/postTokenBalances[].uiTokenAmount.amount`). The fee is the rest,
+ * withheld in the destination.
+ *
+ * @returns The amounts, or null when the transaction shows no delta for the
+ *   destination, or one that is not a credit of at most the debit.
+ */
+function observedPull(
+  transaction: ParsedTransaction,
+  pull: { debit: BaseUnits; mint: Address; destinationOwner: string }
+): LegAmounts | null {
+  const delta = tokenBalanceDelta(transaction, {
+    mint: pull.mint,
+    owner: pull.destinationOwner,
+  });
+  if (delta === null || delta.baseUnits < 0n || delta.baseUnits > pull.debit) {
+    return null;
+  }
+  const credit = baseUnits(delta.baseUnits);
+  return { debit: pull.debit, fee: baseUnits(pull.debit - credit), credit };
+}
+
+/** Whether a stored amount text is the mandate's debit, at the mandate's decimals. */
+function isMandateDebit(amount: string | null, mandate: RecurringMandate): boolean {
+  if (amount === null) {
+    return false;
+  }
+  try {
+    return toBaseUnits(parseTokenAmount(amount, mandate.decimals)) === mandate.debit;
+  } catch (error) {
+    if (error instanceof AmountError) {
+      return false;
+    }
+    throw error;
+  }
 }
 
 /**
@@ -344,10 +461,16 @@ function subscriptionsInstructionFromRpc(parsed: ParsedInstruction): Instruction
   };
 }
 
+/**
+ * Whether a landed subscriptions-program instruction is the expected pull. A
+ * pull with no trailing accounts matches only a mint with no hook at
+ * execution (Token-2022 refuses a hooked transfer without them, and the pull
+ * succeeded), so its hook accounts are resolved only when it carries some.
+ */
 async function matchesRecurringTransferInstruction(input: {
   rpc: SolanaRpc;
   instruction: Instruction;
-  amountBaseUnits: bigint;
+  amountBaseUnits: BaseUnits;
   sourceAddress: string;
   subscriberTokenAccount: string;
   subscriptionAuthorityAddress: string;
@@ -372,15 +495,24 @@ async function matchesRecurringTransferInstruction(input: {
 
   try {
     const parsed = subscriptionsProgram.parseTransferSubscriptionInstruction(instruction);
-    const transferHookAccounts = await subscriptionsProgram.resolveTransferHookAccounts(input.rpc, {
-      amount: input.amountBaseUnits,
-      authority: assertValidAddress(input.subscriptionAuthorityAddress, "subscriptionAuthority"),
-      destination: assertValidAddress(input.destinationTokenAccount, "destinationTokenAccount"),
-      mint: assertValidAddress(input.token, "token"),
-      source: assertValidAddress(input.subscriberTokenAccount, "subscriberTokenAccount"),
-      tokenProgram: assertValidAddress(input.tokenProgram, "tokenProgram"),
-    });
     const trailingAccounts = instruction.accounts.slice(10);
+    const transferHookAccounts =
+      trailingAccounts.length === 0
+        ? []
+        : await subscriptionsProgram.resolveTransferHookAccounts(input.rpc, {
+            amount: input.amountBaseUnits,
+            authority: assertValidAddress(
+              input.subscriptionAuthorityAddress,
+              "subscriptionAuthority"
+            ),
+            destination: assertValidAddress(
+              input.destinationTokenAccount,
+              "destinationTokenAccount"
+            ),
+            mint: assertValidAddress(input.token, "token"),
+            source: assertValidAddress(input.subscriberTokenAccount, "subscriberTokenAccount"),
+            tokenProgram: assertValidAddress(input.tokenProgram, "tokenProgram"),
+          });
     const hookAccountsMatch =
       trailingAccounts.length === transferHookAccounts.length &&
       transferHookAccounts.every((account, index) => {
@@ -408,6 +540,15 @@ async function matchesRecurringTransferInstruction(input: {
   }
 }
 
+/**
+ * Proves a landed collection is the expected pull, and reads what it moved.
+ *
+ * RPC budget (before → now): the mint's owner read, `getTokenSupply`, one
+ * `getTransaction` and the SDK's mint read for a Token-2022 mint → the one
+ * `getTransaction`, whose token balances also give the observed credit; the
+ * mandate's stored base units need no read. A pull that carried hook accounts
+ * still resolves them to compare.
+ */
 async function verifyRecurringPaymentCollection(input: {
   recurringPayment: PaymentRecurringPaymentRow;
   subscription: PaymentSubscriptionRow;
@@ -416,6 +557,7 @@ async function verifyRecurringPaymentCollection(input: {
   signature: Signature;
   dueAt: string;
   destinationTokenAccount: Address;
+  mandate: RecurringMandate;
 }): Promise<VerifiedRecurringPaymentCollection> {
   const proofMismatch = (
     reason:
@@ -448,7 +590,7 @@ async function verifyRecurringPaymentCollection(input: {
     input.attempt.transfer_id === input.transfer.id &&
     input.attempt.due_at === input.dueAt &&
     input.attempt.token === input.recurringPayment.token &&
-    input.attempt.amount === input.recurringPayment.amount &&
+    isMandateDebit(input.attempt.amount, input.mandate) &&
     attemptMetadata.recurringPaymentId === input.recurringPayment.id &&
     (input.transfer.custody_wallet_id === null ||
       input.transfer.custody_wallet_id === input.recurringPayment.source_custody_wallet_id) &&
@@ -457,7 +599,7 @@ async function verifyRecurringPaymentCollection(input: {
     input.transfer.source_address === input.recurringPayment.source_address &&
     input.transfer.destination_address === input.recurringPayment.destination_address &&
     input.transfer.token === input.recurringPayment.token &&
-    input.transfer.amount === input.recurringPayment.amount &&
+    isMandateDebit(input.transfer.amount, input.mandate) &&
     input.transfer.type === "transfer" &&
     input.transfer.direction === "outbound" &&
     providerEvidenceMatches &&
@@ -488,9 +630,8 @@ async function verifyRecurringPaymentCollection(input: {
   const subscriberTokenAccount = input.subscription.subscriber_token_account;
 
   const rpc = createClusterRpc();
-  const mint = assertValidAddress(input.recurringPayment.token, "token");
-  const { tokenProgram, toBaseUnits } = await loadPaymentMintFacts(mint);
-  const amountBaseUnits = toBaseUnits(input.recurringPayment.amount);
+  const { mint, tokenProgram } = mandateProgramAccounts(input.mandate);
+  const amountBaseUnits = input.mandate.debit;
   const confirmedTransaction = await getTransaction(rpc, input.signature);
   if (!confirmedTransaction) {
     throw solanaRpcError(
@@ -539,6 +680,13 @@ async function verifyRecurringPaymentCollection(input: {
     destinationTokenAccount: input.destinationTokenAccount,
     signature: input.signature,
     transferId: input.transfer.id,
+    // The matched instruction's amount: the proof above requires it to be the mandate's debit.
+    observed: observedPull(confirmedTransaction, {
+      debit: amountBaseUnits,
+      mint,
+      destinationOwner: input.recurringPayment.destination_address,
+    }),
+    maxFeePerPull: input.mandate.maxFeePerPull,
   };
 }
 
@@ -678,9 +826,11 @@ async function hasRecentCollectionFailure(
 /**
  * Claims a due period for a collection: under the lock collectors take before
  * they sign, one transaction writes the attempt (carrying the request's
- * Idempotency-Key, HOO-1918) and the transfer it will submit, linked. Every
- * keyed attempt therefore has a transfer, and a same-key retry is answered
- * from them. Returns null when the cycle moved on or another attempt holds it.
+ * Idempotency-Key, HOO-1918), the transfer it will submit, linked, and the
+ * transfer's leg with the pull's quote (ADR 0012), verified from the chain
+ * once the pull lands. Every keyed attempt therefore has a transfer, and a
+ * same-key retry is answered from them. Returns null when the cycle moved on
+ * or another attempt holds it.
  */
 async function claimCollectionUnderRecurringLock(input: {
   env: Env;
@@ -688,6 +838,8 @@ async function claimCollectionUnderRecurringLock(input: {
   projectId: string;
   sourceWallet: CustodyWallet;
   recurringPayment: RecurringPaymentCollectionCycleRow;
+  /** The pull's debit quote under the terms read before the claim. */
+  quote: MovementQuote;
   attemptedAt: string;
   metadata: PaymentSubscriptionCollectionAttemptMetadata;
   enforceCooldown: boolean;
@@ -705,6 +857,7 @@ async function claimCollectionUnderRecurringLock(input: {
     if (input.enforceCooldown && (await hasRecentCollectionFailure(subscriptionsRepo, input))) {
       return null;
     }
+    const amount = ownWalletAmount(input.quote);
     const claimed = await subscriptionsRepo.createCollectionAttempt({
       id: `psca_${crypto.randomUUID()}`,
       organizationId: input.organizationId,
@@ -712,7 +865,7 @@ async function claimCollectionUnderRecurringLock(input: {
       subscriptionId: recurringPayment.subscription_id,
       transferId: null,
       token: recurringPayment.token,
-      amount: recurringPayment.amount,
+      amount,
       dueAt: recurringPayment.next_collection_due_at,
       attemptedAt: input.attemptedAt,
       status: "processing",
@@ -736,7 +889,7 @@ async function claimCollectionUnderRecurringLock(input: {
       sourceAddress: input.sourceWallet.publicKey,
       destinationAddress: recurringPayment.destination_address,
       token: recurringPayment.token,
-      amount: recurringPayment.amount,
+      amount,
       memo: null,
       type: "transfer",
       direction: "outbound",
@@ -759,6 +912,10 @@ async function claimCollectionUnderRecurringLock(input: {
     if (!transfer) {
       throw internalError("Failed to create collection transfer");
     }
+    await createPostgresTokenMovementLegsRepository(tx, createTenantScope(input)).insertChainLeg({
+      owner: { kind: "transfer", transferId: transfer.id },
+      quote: input.quote,
+    });
     const attempt = await subscriptionsRepo.updateCollectionAttempt({
       attemptId: claimed.id,
       organizationId: input.organizationId,
@@ -777,10 +934,12 @@ async function claimCollectionUnderRecurringLock(input: {
 /**
  * Skips a due collection period that money admission refused (HOO-1955): the
  * organization is deleted or suspended, or its production project lost the
- * entitlement. In one transaction, under the lock collectors take before they
- * sign, it records a `skipped` attempt (shown in the collection history with
- * the reason) and moves the due date to the first boundary after `now`. The
- * job stops selecting the row, and nothing is caught up after re-entitlement.
+ * entitlement; or a pull still held when its period ended (ADR 0012), whose
+ * allowance the subscriptions program forfeits. In one transaction, under the
+ * lock collectors take before they sign, it records a `skipped` attempt (shown
+ * in the collection history with the reason) and moves the due date to the
+ * first boundary after `now`. The job stops selecting the row, and nothing is
+ * caught up after re-entitlement.
  *
  * Returns false and changes nothing when the cycle moved on or an attempt
  * already holds it; an in-flight collection finishes through recovery.
@@ -790,7 +949,8 @@ export async function skipRefusedRecurringCollectionPeriod(input: {
   organizationId: string;
   projectId: string;
   recurringPayment: RecurringPaymentCollectionCycleRow;
-  refusal: MoneyMovementRefusedError;
+  /** Why the period is skipped: the admission refusal, or the pull's hold. */
+  refusal: { message: string };
   now: Date;
 }): Promise<boolean> {
   const { recurringPayment } = input;
@@ -879,8 +1039,76 @@ export async function journalAutomatedCollectionFailure(input: {
       }),
       transferId: null,
       ...collectionRetryMetadata(input.error),
+      holdReason: null,
     }),
     enforceCooldown: true,
+  });
+}
+
+/**
+ * Records a pull held before it was signed (ADR 0012): a `failed` attempt
+ * with its hold reason and retry time, under the lock collectors take, and no
+ * transfer. The period stays due, and the next run past the retry time reads
+ * the token's terms again, until the period ends and the cron skips it. The
+ * cron honours the retry time as a cooldown; a manual collect may ask again at
+ * once.
+ */
+async function journalHeldCollection(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  recurringPayment: RecurringPaymentCollectionCycleRow;
+  source: RecurringCollectionSource;
+  initiatedByKeyId: string | null;
+  hold: { refusal: TokenMovementRefusal; message: string };
+}): Promise<void> {
+  const attemptedAt = new Date().toISOString();
+  const error = new Error(input.hold.message);
+  await createCollectionAttemptUnderRecurringLock({
+    ...input,
+    attemptedAt,
+    status: "failed",
+    error: input.hold.message,
+    metadata: retryCollectionMetadata({
+      metadata: initialCollectionMetadata({
+        recurringPaymentId: input.recurringPayment.id,
+        source: input.source,
+        initiatedByKeyId: input.initiatedByKeyId,
+      }),
+      transferId: null,
+      error: input.hold.message,
+      retryAfterAt: collectionRetryMetadata(error).retryAfterAt,
+      holdReason: input.hold.refusal,
+    }),
+    enforceCooldown: input.source === "automated",
+  });
+}
+
+/**
+ * Settles the leg of a pull whose transfer the failure write just failed: it
+ * moved nothing, so its leg needs no check against the chain. A transfer the
+ * write did not fail (it confirmed meanwhile) keeps its leg pending.
+ */
+async function settleUnmovedPullLeg(
+  tx: DatabaseExecutor,
+  input: {
+    organizationId: string;
+    projectId: string;
+    transferId: string;
+    failed: boolean;
+    failedAt: string;
+  }
+): Promise<void> {
+  if (!input.failed) {
+    return;
+  }
+  await createPostgresTokenMovementLegsRepository(
+    tx,
+    createTenantScope(input)
+  ).settlePendingTransferLeg({
+    transferId: input.transferId,
+    verdict: BUILT_MOVEMENT_VERDICTS.failed,
+    updatedAt: input.failedAt,
   });
 }
 
@@ -907,6 +1135,7 @@ async function markRecurringPaymentCollectionFailedAtomically(input: {
     metadata: input.attempt.metadata,
     transferId: input.transfer?.id ?? null,
     ...collectionRetryMetadata(input.error),
+    holdReason: null,
   });
 
   await getDb(input.env).transaction(async (tx) => {
@@ -935,6 +1164,12 @@ async function markRecurringPaymentCollectionFailedAtomically(input: {
           input.projectId
         )
         .run();
+      await settleUnmovedPullLeg(tx, {
+        ...input,
+        transferId: input.transfer.id,
+        failed: transferRows > 0,
+        failedAt,
+      });
       if (transferRows === 0) {
         const currentTransfer = await tx
           .prepare(
@@ -1038,13 +1273,33 @@ async function finalizeRecurringPaymentCollection(input: {
   return getDb(input.env).transaction(async (tx) => {
     const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
     const subscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
-    const paymentsRepo = createPostgresPaymentsRepository(
-      tx,
-      createTenantScope({
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-      })
-    );
+    const tenant = createTenantScope({
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+    });
+    const paymentsRepo = createPostgresPaymentsRepository(tx, tenant);
+
+    // The pull is a CPI the program made, so its leg is verified from what the landed
+    // transaction moved, not by construction.
+    const leg = await createPostgresTokenMovementLegsRepository(tx, tenant).recordChainVerdict({
+      transferId: input.transfer.id,
+      observed: input.proof.observed,
+      maxFee: input.proof.maxFeePerPull,
+      updatedAt: finalizedAt,
+    });
+    if (leg !== null && leg.verification.state === "mismatch") {
+      logEvent("error", {
+        event: "sdp_api_recurring_payment_collection_amount_mismatch",
+        organization_id: input.organizationId,
+        project_id: input.projectId,
+        recurring_payment_id: input.recurringPayment.id,
+        transfer_id: input.transfer.id,
+        signature: input.proof.signature,
+        quoted_debit: leg.quoted.debit.toString(),
+        quoted_credit: leg.quoted.credit.toString(),
+        observed_credit: leg.observed === null ? null : leg.observed.credit.toString(),
+      });
+    }
 
     const expectedTransferStatus = input.transfer.status;
     const updatedTransfer = await paymentsRepo.updateTransfer({
@@ -1302,6 +1557,21 @@ async function handleRecurringPaymentCollectionError(input: {
   throw input.error;
 }
 
+/**
+ * The mandate a pull is made under: the plan's, which is the one on chain,
+ * else the payment's (a plan written before mandates has none); null when
+ * neither row has one.
+ */
+function storedPullMandate(
+  plan: Pick<PaymentSubscriptionPlanRow, "mandate"> | null,
+  recurringPayment: Pick<PaymentRecurringPaymentRow, "mandate">
+): RecurringMandate | null {
+  if (plan !== null && plan.mandate !== null) {
+    return plan.mandate;
+  }
+  return recurringPayment.mandate;
+}
+
 async function recoverRecurringPaymentCollection(input: {
   env: Env;
   recurringRepo: PaymentRecurringPaymentsRepository;
@@ -1458,6 +1728,25 @@ async function recoverRecurringPaymentCollection(input: {
         organizationId: input.organizationId,
         projectId: input.projectId,
       })) ?? input.subscription;
+    // The mandate the pull was made under needs no read: the plan's, or the
+    // payment's. Only when neither row has one does recovery read the terms,
+    // once, as the mint's owner and supply reads did before.
+    const plan =
+      currentRecurringPayment.plan_id === null
+        ? null
+        : await input.subscriptionsRepo.getPlanById({
+            planId: currentRecurringPayment.plan_id,
+            organizationId: input.organizationId,
+            projectId: input.projectId,
+          });
+    const stored = storedPullMandate(plan, currentRecurringPayment);
+    const mandate =
+      stored === null
+        ? rowMandate(
+            currentRecurringPayment,
+            (await readRecurringTerms(currentRecurringPayment.token, null, [])).terms
+          )
+        : stored;
     const destinationTokenAccount = currentRecurringPayment.destination_token_account
       ? assertValidAddress(
           currentRecurringPayment.destination_token_account,
@@ -1465,7 +1754,7 @@ async function recoverRecurringPaymentCollection(input: {
         )
       : await resolveDestinationTokenAccount({
           destinationAddress: currentRecurringPayment.destination_address,
-          token: currentRecurringPayment.token,
+          mandate,
         });
     const proof = await verifyRecurringPaymentCollection({
       recurringPayment: currentRecurringPayment,
@@ -1475,6 +1764,7 @@ async function recoverRecurringPaymentCollection(input: {
       signature: recoveredSignature,
       dueAt: input.dueAt,
       destinationTokenAccount,
+      mandate,
     });
 
     return finalizeRecurringPaymentCollection({
@@ -1563,6 +1853,136 @@ export async function recoverOrBlockLifecycleCollection(input: {
   }
 
   return { recurringPayment: input.recurringPayment, subscription };
+}
+
+/**
+ * A pull held before it was signed: the token's terms refused it at this read
+ * (ADR 0012). It answers 409 with the hold `reason`; it is no failure of SDP.
+ */
+class RecurringPullHeldError extends AppError {
+  constructor(message: string, reason: TokenMovementRefusal) {
+    super("CONFLICT", `Recurring payment collection is held: ${message}`, { reason });
+    this.name = "RecurringPullHeldError";
+  }
+}
+
+/** A pull SDP will make: its terms, the destination's account, the mandate and the quote. */
+interface RecurringPull {
+  terms: MintTokenTerms;
+  destination: DestinationTokenAccount;
+  mandate: RecurringMandate;
+  quote: MovementQuote;
+}
+
+/**
+ * Decides a due pull before anything is claimed (ADR 0012): one terms read,
+ * with the destination's token account, then the recurring capability rule.
+ * A paused mint, a fee above the mandate's tolerance or a destination that
+ * requires memos holds the pull: a `failed` attempt with its hold reason and
+ * retry time, no transfer, and the period still due. A cron run that finds the
+ * pull still held once its period has ended skips the period instead, as the
+ * subscriptions program forfeits its allowance. A cron run during a failure's
+ * retry window reads nothing.
+ *
+ * RPC budget: one `getMultipleAccounts`.
+ *
+ * @throws AppError `CONFLICT` with the hold `reason` when the pull is held, or
+ *   while the cron's retry window after a failure is open.
+ */
+async function decideRecurringPull(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  recurringPayment: CollectibleRecurringPaymentRow;
+  plan: PaymentSubscriptionPlanRow;
+  subscriptionsRepo: PaymentSubscriptionsRepository;
+  source: RecurringCollectionSource;
+  initiatedByKeyId: string | null;
+  attemptedAt: string;
+}): Promise<RecurringPull> {
+  const { recurringPayment } = input;
+  if (
+    input.source === "automated" &&
+    (await hasRecentCollectionFailure(input.subscriptionsRepo, input))
+  ) {
+    throw conflict("Recurring payment collection is already processing");
+  }
+  // For a payment written before mandates too, its amount at the decimals read now (`rowMandate`).
+  const stored = storedPullMandate(input.plan, recurringPayment);
+  let terms: MintTokenTerms;
+  let destination: DestinationTokenAccount | undefined;
+  let mandate: RecurringMandate;
+  try {
+    const read = await readRecurringTerms(recurringPayment.token, stored, [
+      assertValidAddress(recurringPayment.destination_address, "destinationAddress"),
+    ]);
+    terms = read.terms;
+    [destination] = read.destinations;
+    mandate = rowMandate(
+      { token: recurringPayment.token, amount: recurringPayment.amount, mandate: stored },
+      terms
+    );
+  } catch (error) {
+    if (error instanceof AppError && input.source === "automated") {
+      await journalAutomatedCollectionFailure({
+        env: input.env,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        recurringPayment,
+        initiatedByKeyId: input.initiatedByKeyId,
+        error,
+      });
+    }
+    throw error;
+  }
+  if (destination === undefined) {
+    throw internalError("The recurring terms read returned no destination token account");
+  }
+  const decision = recurringPullSupport(terms, mandate, destination);
+  if (!decision.supported) {
+    const periodEndsAt = nextRecurringPaymentCollectionDueAt(
+      recurringPayment.next_collection_due_at,
+      recurringPayment.period_hours
+    );
+    if (
+      input.source === "automated" &&
+      new Date(input.attemptedAt).getTime() >= new Date(periodEndsAt).getTime()
+    ) {
+      await skipRefusedRecurringCollectionPeriod({
+        env: input.env,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        recurringPayment,
+        refusal: decision,
+        now: new Date(input.attemptedAt),
+      });
+    } else {
+      await journalHeldCollection({
+        env: input.env,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        recurringPayment,
+        source: input.source,
+        initiatedByKeyId: input.initiatedByKeyId,
+        hold: { refusal: decision.refusal, message: decision.message },
+      });
+    }
+    logEvent("warn", {
+      event: "sdp_api_recurring_payment_collection_held",
+      reason: decision.refusal,
+      organization_id: input.organizationId,
+      project_id: input.projectId,
+      recurring_payment_id: recurringPayment.id,
+      collection_source: input.source,
+    });
+    throw new RecurringPullHeldError(decision.message, decision.refusal);
+  }
+  const quote = quoteMovement(terms, {
+    asset: terms.asset,
+    amount: toTokenAmount(mandate.debit, mandate.decimals),
+    basis: "debit",
+  });
+  return { terms, destination, mandate, quote };
 }
 
 export async function collectRecurringPayment(input: {
@@ -1681,12 +2101,25 @@ export async function collectRecurringPayment(input: {
       throw badRequest("Subscription must be active before collection");
     }
 
+    const pull = await decideRecurringPull({
+      env: input.env,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPayment,
+      plan,
+      subscriptionsRepo,
+      source: input.collectionSource,
+      initiatedByKeyId: input.initiatedByKeyId,
+      attemptedAt: nowIso,
+    });
+
     const linkedCollection = await claimCollectionUnderRecurringLock({
       env: input.env,
       organizationId: input.organizationId,
       projectId: input.projectId,
       sourceWallet: input.sourceWallet,
       recurringPayment,
+      quote: pull.quote,
       attemptedAt: nowIso,
       metadata: initialCollectionMetadata({
         recurringPaymentId: input.recurringPayment.id,
@@ -1730,7 +2163,7 @@ export async function collectRecurringPayment(input: {
       input.recurringPayment.destination_address,
       "destinationAddress"
     );
-    const mint = assertValidAddress(input.recurringPayment.token, "token");
+    const { mint, tokenProgram } = mandateProgramAccounts(pull.mandate);
     const sourceSigner = await createOrgSignerForCustodyWallet(
       input.env,
       input.organizationId,
@@ -1742,16 +2175,14 @@ export async function collectRecurringPayment(input: {
       throw badRequest("Resolved signing wallet does not match source wallet");
     }
 
-    const paymentMint = await loadPaymentMint(mint);
-    const { tokenProgram } = paymentMint;
-    const sourceTokenAccount = await resolveSourceTokenAccountOrAta(sourceOwner, mint, paymentMint);
-    const amountBaseUnits = paymentMint.toBaseUnits(input.recurringPayment.amount);
-    if (amountBaseUnits <= 0n) {
-      throw badRequest("Subscription amount must be greater than zero");
-    }
-
-    const [receiverAta] = await findAssociatedTokenPda({
-      owner: destinationOwner,
+    // The stored mandate's base units, never the amount text parsed again (ADR 0012). RPC
+    // budget (before → now): the mint's owner, the source token account and `getTokenSupply`
+    // (and the SDK's mint read for a Token-2022 mint) → the one terms read before the claim,
+    // which carried the destination's token account; the source account is derived.
+    const amountBaseUnits = pull.mandate.debit;
+    const receiverAta = pull.destination.tokenAccount;
+    const [sourceTokenAccount] = await findAssociatedTokenPda({
+      owner: sourceOwner,
       tokenProgram,
       mint,
     });
@@ -1764,13 +2195,11 @@ export async function collectRecurringPayment(input: {
       tokenMint: mint,
       user: sourceOwner,
     });
-    const transferHookAccounts = await subscriptionsProgram.resolveTransferHookAccounts(rpc, {
+    const transferHookAccounts = await recurringHookAccounts(rpc, pull.terms, {
       amount: amountBaseUnits,
       authority: subscriptionAuthority,
       destination: receiverAta,
-      mint,
-      source: sourceTokenAccount.tokenAccount,
-      tokenProgram,
+      source: sourceTokenAccount,
     });
     const feePayment = createSponsorshipFeePayment(
       input.env,
@@ -1874,6 +2303,7 @@ export async function collectRecurringPayment(input: {
       signature,
       dueAt,
       destinationTokenAccount: receiverAta,
+      mandate: pull.mandate,
     });
 
     return finalizeRecurringPaymentCollection({
@@ -1888,17 +2318,20 @@ export async function collectRecurringPayment(input: {
     });
   } catch (error) {
     if (!(error instanceof Error)) throw error;
-    getLogger().error(
-      {
-        err: error,
-        organization_id: input.organizationId,
-        project_id: input.projectId,
-        recurring_payment_id: input.recurringPayment.id,
-        attempt_id: attempt?.id ?? null,
-        transfer_id: transfer?.id ?? null,
-      },
-      "Recurring payment collection failed"
-    );
+    // A held pull is logged where it is decided.
+    if (!(error instanceof RecurringPullHeldError)) {
+      getLogger().error(
+        {
+          err: error,
+          organization_id: input.organizationId,
+          project_id: input.projectId,
+          recurring_payment_id: input.recurringPayment.id,
+          attempt_id: attempt?.id ?? null,
+          transfer_id: transfer?.id ?? null,
+        },
+        "Recurring payment collection failed"
+      );
+    }
     return handleRecurringPaymentCollectionError({
       env: input.env,
       subscriptionsRepo,

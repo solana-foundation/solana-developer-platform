@@ -8,6 +8,7 @@ import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { seedRecurringDatabaseTenant } from "@/test/helpers/recurring-payments";
 import { required } from "@/test/helpers/required";
+import { testMandate } from "@/test/helpers/token-movement";
 
 /**
  * Seeds for the Subscriptions authority cleanup (HOO-2210): a project with one custody wallet, and
@@ -105,6 +106,7 @@ export async function seedAuthoritySubscription(
       ownerAddress: tenant.walletAddress,
       token: input.tokenMint,
       amount: "1",
+      mandate: testMandate(input.tokenMint, "1", 6),
       periodHours: 24,
       programPlanId: String(sequence),
       planPda: null,
@@ -160,6 +162,7 @@ export async function seedAuthoritySubscription(
       destinationAddress: "Destination111111111111111111111111111111",
       token: input.tokenMint,
       amount: "1",
+      mandate: testMandate(input.tokenMint, "1", 6),
       periodHours: 24,
       firstCollectionAt: null,
       metadataUri: null,

@@ -6,7 +6,8 @@ import { createTenantScope } from "@/lib/tenant-scope";
 import { resolveSolanaCounterpartyAccount } from "@/services/payments/counterparty-account-resolution";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
-import { assertRecurringPaymentTerms } from "./shared";
+import { createRecurringMandate, readRecurringTerms } from "./mandate";
+import { assertRecurringPaymentTokenAdmitted, resolveRecurringPaymentTokenMint } from "./shared";
 
 /** A create request's Idempotency-Key and the fingerprint of the schedule it creates. */
 export interface RecurringPaymentIdempotency {
@@ -30,14 +31,21 @@ export async function createRecurringPayment(input: {
   /** Recorded on the row, the schedule's recovery point (HOO-1918, migration 0134). */
   idempotency: RecurringPaymentIdempotency | null;
 }): Promise<PaymentRecurringPaymentRow> {
-  const [tokenMint, destination] = await Promise.all([
-    assertRecurringPaymentTerms({
-      token: input.token,
-      amount: input.amount,
+  // The mandate is made once, here, in base units under the terms read now (ADR 0012). RPC
+  // budget: none before → one terms read, after the token is admitted.
+  const resolveMandate = async () => {
+    const tokenMint = resolveRecurringPaymentTokenMint(input.token);
+    await assertRecurringPaymentTokenAdmitted({
+      mint: tokenMint,
       organizationId: input.organizationId,
       projectId: input.projectId,
       env: input.env,
-    }),
+    });
+    const { terms } = await readRecurringTerms(tokenMint, null, []);
+    return { tokenMint, mandate: createRecurringMandate(terms, input.amount) };
+  };
+  const [{ tokenMint, mandate }, destination] = await Promise.all([
+    resolveMandate(),
     resolveSolanaCounterpartyAccount({
       env: input.env,
       organizationId: input.organizationId,
@@ -67,6 +75,7 @@ export async function createRecurringPayment(input: {
       destinationAddress: destination.destinationAddress,
       token: tokenMint,
       amount: input.amount,
+      mandate,
       periodHours: input.periodHours,
       firstCollectionAt: input.firstCollectionAt,
       metadataUri: input.metadataUri,

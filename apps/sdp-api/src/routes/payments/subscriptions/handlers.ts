@@ -1,6 +1,7 @@
 import type { CounterpartyRow } from "@sdp/payments/counterparty";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { assertValidAddress } from "@sdp/solana/address";
+import { recurringPullSupport } from "@sdp/solana/token-movement";
 import type {
   ListPaymentSubscriptionCollectionAttemptsResponse,
   ListPaymentSubscriptionsResponse,
@@ -36,6 +37,11 @@ import { type AppContext, getPaymentSubscriptionsRepository } from "@/routes/pay
 import { mapCollectionAttemptRow } from "@/routes/payments/mappers";
 import { resolveScope, resolveWallet } from "@/routes/payments/wallets";
 import { parseI64String, parseU64String } from "@/services/payment-operation.service";
+import {
+  mandateProgramAccounts,
+  readRecurringReceiver,
+  rowMandate,
+} from "@/services/payments/recurring-payments/mandate";
 import {
   assertSubscriptionTokenMint,
   buildPreparedSubscriptionTransaction,
@@ -435,14 +441,27 @@ export const prepareSubscriptionCollection = async (
   const scope = await resolveScope(c);
   const callerWallet = resolveWallet(scope.wallets, plan.puller_wallet_id ?? plan.owner_wallet_id);
 
-  const { amountBaseUnits, mint, tokenProgram } = await resolvePlanRuntime(plan);
+  // The program does not enforce the mandate's fee tolerance, so a new pull is checked against
+  // today's terms and the account it pays, as the collection job does. RPC budget: one
+  // `getMultipleAccounts` for the mint, the Clock and the receiver (none before).
+  assertSubscriptionTokenMint(plan.token);
+  const receiverAta = assertValidAddress(body.receiverTokenAccount, "receiverTokenAccount");
+  const { terms, receiver } = await readRecurringReceiver(plan.token, plan.mandate, receiverAta);
+  const mandate = rowMandate(plan, terms);
+  const decision = recurringPullSupport(terms, mandate, receiver);
+  if (!decision.supported) {
+    throw new AppError("CONFLICT", `Collection is held: ${decision.message}`, {
+      reason: decision.refusal,
+    });
+  }
+  const { mint, tokenProgram } = mandateProgramAccounts(mandate);
+  const amountBaseUnits = mandate.debit;
   const { planPda } = await derivePlanAddresses(plan);
   const subscriber = assertValidAddress(subscription.subscriber_address, "subscriberAddress");
   const [derivedSubscriptionPda] = await findSubscriptionDelegationPda({ planPda, subscriber });
   const subscriptionPda = subscription.subscription_pda
     ? assertValidAddress(subscription.subscription_pda, "subscriptionPda")
     : derivedSubscriptionPda;
-  const receiverAta = assertValidAddress(body.receiverTokenAccount, "receiverTokenAccount");
   const caller = assertValidAddress(callerWallet.publicKey, "caller");
   const instruction = await getTransferSubscriptionOverlayInstructionAsync({
     amount: amountBaseUnits,

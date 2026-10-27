@@ -7,6 +7,10 @@ import {
   type AmountVerificationReason,
   type AmountVerificationState,
   type AmountVerificationVerdict,
+  CHAIN_DELTA_MATCHED,
+  CHAIN_DELTA_MISMATCH,
+  LEG_VERIFIERS,
+  type LegVerifier,
   TOKEN_MOVEMENT_BASES,
   type TokenMovementBasis,
 } from "@sdp/types/token-movements";
@@ -18,14 +22,18 @@ import { buildInClause } from "@/db/postgres-utils";
 import { assertTenantClaim, type TenantScope } from "@/lib/tenant-scope";
 
 /**
- * Token movement legs (ADR 0012, migration 0185): what each movement SDP
- * builds moves, in base units, one row per (movement, destination). This is
- * the only writer. Rows written before quotes have no leg (legacy = no leg).
+ * Token movement legs (ADR 0012, migrations 0185 and 0188): what each movement
+ * SDP builds moves, in base units, one row per (movement, destination). This
+ * is the only writer. Rows written before quotes have no leg (legacy = no leg).
  *
  * A leg's quote is immutable once its movement has a saved signature: the
  * upsert below refuses it in its predicate, and a trigger refuses it for any
  * writer. Verdicts are written by the statements that settle the movement
- * (`legVerdictStatement`), so a transfer and its legs settle together.
+ * (`legVerdictStatement`), so a transfer and its legs settle together. A leg
+ * `verified_by` the chain (a recurring pull, made by the subscriptions program
+ * through CPI) gets its verdict and observed amounts from the landed
+ * transaction instead (`recordChainVerdict`); a confirmation never marks it
+ * verified by construction.
  */
 
 /** The row a leg belongs to. */
@@ -57,6 +65,7 @@ export interface TokenMovementLeg {
   asOf: Readonly<{ slot: Slot; unixTimestamp: UnixTimestamp }> | null;
   /** What the chain shows the movement moved, once checked. */
   observed: LegAmounts | null;
+  verifiedBy: LegVerifier;
   verification: Readonly<{
     state: AmountVerificationState;
     reason: AmountVerificationReason | null;
@@ -101,7 +110,23 @@ export interface NewTokenMovementLeg {
   quote: MovementQuote;
 }
 
+/**
+ * A quote as the ledger stores it, without an owner: what a leg records. A
+ * table that keeps a quote for a leg written later (a payment request's
+ * issued transaction) stores these columns under the same names.
+ */
+export type RecordedLegQuote = Pick<
+  TokenMovementLeg,
+  "asset" | "decimals" | "basis" | "quoted" | "feeEpoch" | "asOf"
+>;
+
 const LEG_PENDING_STATE = "pending" satisfies AmountVerificationState;
+
+const NOT_EXECUTED_STATE = "not_required" satisfies AmountVerificationState;
+
+const LEG_BY_CONSTRUCTION = "construction" satisfies LegVerifier;
+
+const LEG_FROM_CHAIN = "chain" satisfies LegVerifier;
 
 const legRowSchema = z.object({
   id: z.string(),
@@ -123,6 +148,7 @@ const legRowSchema = z.object({
   observed_debit: z.string().nullable(),
   observed_fee: z.string().nullable(),
   observed_credit: z.string().nullable(),
+  verified_by: z.enum(LEG_VERIFIERS),
   verification_state: z.enum(AMOUNT_VERIFICATION_STATES),
   verification_reason: z.enum(AMOUNT_VERIFICATION_REASONS).nullable(),
   created_at: z.string(),
@@ -130,6 +156,23 @@ const legRowSchema = z.object({
 });
 
 type LegRow = z.infer<typeof legRowSchema>;
+
+/** The recorded-quote columns of a row, under the leg's column names. */
+const recordedQuoteRowSchema = legRowSchema.pick({
+  asset_kind: true,
+  mint: true,
+  token_program: true,
+  decimals: true,
+  basis: true,
+  quoted_debit: true,
+  quoted_fee: true,
+  quoted_credit: true,
+  fee_epoch: true,
+  as_of_slot: true,
+  as_of_unix_timestamp: true,
+});
+
+type RecordedQuoteRow = z.infer<typeof recordedQuoteRowSchema>;
 
 /** A sum of non-negative whole numbers, as `sum(...)::text` returns it. */
 const wholeNumberSchema = z.string().regex(/^(0|[1-9][0-9]*)$/);
@@ -145,12 +188,12 @@ const batchTotalsRowSchema = z.object({
   credit: wholeNumberSchema,
 });
 
-function legAsset(row: LegRow): AssetRef {
+function recordedAsset(row: RecordedQuoteRow): AssetRef {
   if (row.asset_kind === "native") {
     return { kind: "native" };
   }
   if (row.mint === null || row.token_program === null) {
-    throw new Error(`Token movement leg ${row.id} names no mint`);
+    throw new Error("A recorded token movement quote names no mint");
   }
   return { kind: "token", mint: address(row.mint), program: row.token_program };
 }
@@ -183,15 +226,9 @@ function observedAmounts(row: LegRow): LegAmounts | null {
   return amounts(debit, fee, credit);
 }
 
-/** Parses a `token_movement_legs` row: the database is a trust boundary too. */
-export function parseTokenMovementLegRow(raw: Record<string, unknown>): TokenMovementLeg {
-  const row = legRowSchema.parse(raw);
+function recordedQuoteOf(row: RecordedQuoteRow): RecordedLegQuote {
   return {
-    id: row.id,
-    organizationId: row.organization_id,
-    projectId: row.project_id,
-    owner: legOwner(row),
-    asset: legAsset(row),
+    asset: recordedAsset(row),
     decimals: row.decimals,
     basis: row.basis,
     quoted: amounts(row.quoted_debit, row.quoted_fee, row.quoted_credit),
@@ -203,7 +240,28 @@ export function parseTokenMovementLegRow(raw: Record<string, unknown>): TokenMov
             slot: BigInt(row.as_of_slot),
             unixTimestamp: unixTimestamp(BigInt(row.as_of_unix_timestamp)),
           },
+  };
+}
+
+/**
+ * Parses the recorded-quote columns of a row that stores them under the leg's
+ * column names (`RECORDED_QUOTE_COLUMNS`).
+ */
+export function parseRecordedLegQuote(raw: Record<string, unknown>): RecordedLegQuote {
+  return recordedQuoteOf(recordedQuoteRowSchema.parse(raw));
+}
+
+/** Parses a `token_movement_legs` row: the database is a trust boundary too. */
+export function parseTokenMovementLegRow(raw: Record<string, unknown>): TokenMovementLeg {
+  const row = legRowSchema.parse(raw);
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    projectId: row.project_id,
+    owner: legOwner(row),
+    ...recordedQuoteOf(row),
     observed: observedAmounts(row),
+    verifiedBy: row.verified_by,
     verification: { state: row.verification_state, reason: row.verification_reason },
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -219,48 +277,82 @@ export function ownWalletAmount(quote: MovementQuote): string {
   return toTokenAmount(quote.debit, quote.decimals).value;
 }
 
-const LEG_COLUMNS = `id, organization_id, project_id, payment_transfer_id,
-  payment_transfer_recipient_id, asset_kind, mint, token_program, decimals, basis,
+/** A quote as a leg records it. */
+export function recordedLegQuote(quote: MovementQuote): RecordedLegQuote {
+  return {
+    asset: quote.intent.asset,
+    decimals: quote.decimals,
+    basis: quote.intent.basis,
+    quoted: { debit: quote.debit, fee: quote.fee, credit: quote.credit },
+    feeEpoch: quote.feeEpoch,
+    asOf:
+      quote.asOf === null
+        ? null
+        : { slot: quote.asOf.slot, unixTimestamp: quote.asOf.unixTimestamp },
+  };
+}
+
+/** The recorded-quote columns, in the order `recordedQuoteValues` binds them. */
+export const RECORDED_QUOTE_COLUMNS = `asset_kind, mint, token_program, decimals, basis,
   quoted_debit, quoted_fee, quoted_credit, fee_epoch, as_of_slot, as_of_unix_timestamp`;
 
-const LEG_VALUES =
-  "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::numeric, ?::numeric, ?::numeric, ?::numeric, ?::numeric, ?)";
-
-function generateTokenMovementLegId(): string {
-  return `tml_${crypto.randomUUID()}`;
-}
+/** Placeholders for `RECORDED_QUOTE_COLUMNS`. */
+export const RECORDED_QUOTE_VALUES =
+  "?, ?, ?, ?, ?, ?::numeric, ?::numeric, ?::numeric, ?::numeric, ?::numeric, ?";
 
 /** A value a leg statement binds: text (base units travel as decimal text), a number or NULL. */
 export type LegBinding = string | number | null;
 
-/** One leg's values, in `LEG_COLUMNS` order. */
-function legValues(tenant: TenantScope, id: string, leg: NewTokenMovementLeg): LegBinding[] {
-  const { quote, owner } = leg;
-  const asset = quote.intent.asset;
+/** A recorded quote's values, in `RECORDED_QUOTE_COLUMNS` order. */
+export function recordedQuoteValues(quote: RecordedLegQuote): LegBinding[] {
+  const { asset } = quote;
   return [
-    id,
-    tenant.organizationId,
-    tenant.projectId,
-    owner.kind === "transfer" ? owner.transferId : null,
-    owner.kind === "batch_recipient" ? owner.recipientId : null,
     asset.kind,
     asset.kind === "token" ? asset.mint : null,
     asset.kind === "token" ? asset.program : null,
     quote.decimals,
-    quote.intent.basis,
-    quote.debit.toString(),
-    quote.fee.toString(),
-    quote.credit.toString(),
+    quote.basis,
+    quote.quoted.debit.toString(),
+    quote.quoted.fee.toString(),
+    quote.quoted.credit.toString(),
     quote.feeEpoch === null ? null : quote.feeEpoch.toString(),
     quote.asOf === null ? null : quote.asOf.slot.toString(),
     quote.asOf === null ? null : Number(quote.asOf.unixTimestamp),
   ];
 }
 
+const LEG_COLUMNS = `id, organization_id, project_id, payment_transfer_id,
+  payment_transfer_recipient_id, ${RECORDED_QUOTE_COLUMNS}`;
+
+const LEG_VALUES = `(?, ?, ?, ?, ?, ${RECORDED_QUOTE_VALUES})`;
+
+function generateTokenMovementLegId(): string {
+  return `tml_${crypto.randomUUID()}`;
+}
+
+/** One leg's values, in `LEG_COLUMNS` order. */
+function legValues(
+  tenant: TenantScope,
+  id: string,
+  owner: TokenMovementLegOwner,
+  quote: RecordedLegQuote
+): LegBinding[] {
+  return [
+    id,
+    tenant.organizationId,
+    tenant.projectId,
+    owner.kind === "transfer" ? owner.transferId : null,
+    owner.kind === "batch_recipient" ? owner.recipientId : null,
+    ...recordedQuoteValues(quote),
+  ];
+}
+
 /**
  * A data-modifying CTE that writes a chain verdict on the pending legs a
  * settling statement's rows own, so the movement and its legs settle in one
- * statement. Bind its values after the statement's own, in text order.
+ * statement. Bind its values after the statement's own, in text order. A
+ * landed verdict is a verdict by construction, so it skips legs verified from
+ * the chain; a movement that never executed settles every leg it owns.
  *
  * @param params.source - The CTE or table alias whose rows own the legs.
  * @param params.ownerColumn - The leg column that names those rows.
@@ -279,8 +371,17 @@ export function legVerdictStatement(params: {
        WHERE leg.${params.ownerColumn} = owner_row.id
          AND leg.organization_id = owner_row.organization_id
          AND leg.verification_state = ?
+         AND (leg.verified_by = ? OR ?::text = ?)
     )`,
-    values: [params.verdict.state, params.verdict.reason, params.updatedAt, LEG_PENDING_STATE],
+    values: [
+      params.verdict.state,
+      params.verdict.reason,
+      params.updatedAt,
+      LEG_PENDING_STATE,
+      LEG_BY_CONSTRUCTION,
+      params.verdict.state,
+      NOT_EXECUTED_STATE,
+    ],
   };
 }
 
@@ -312,7 +413,9 @@ export function createPostgresTokenMovementLegsRepository(
         return [];
       }
       const ids = legs.map(() => generateTokenMovementLegId());
-      const values = legs.flatMap((leg, index) => legValues(tenant, ids[index], leg));
+      const values = legs.flatMap((leg, index) =>
+        legValues(tenant, ids[index], leg.owner, recordedLegQuote(leg.quote))
+      );
       const rows = await db.queryMany(
         `INSERT INTO token_movement_legs (${LEG_COLUMNS})
          VALUES ${legs.map(() => LEG_VALUES).join(", ")}
@@ -330,6 +433,171 @@ export function createPostgresTokenMovementLegsRepository(
         }
         return assertOwnRow(leg);
       });
+    },
+
+    /**
+     * Records the leg of a transfer that has already settled, with its
+     * verdict: a payment request's payment, built and signed by SDP, is
+     * recorded once its signature lands, from the quote its issued
+     * transaction kept.
+     *
+     * @returns The leg.
+     */
+    async insertSettledTransferLeg(input: {
+      transferId: string;
+      quote: RecordedLegQuote;
+      verdict: AmountVerificationVerdict;
+    }): Promise<TokenMovementLeg> {
+      const row = await db.queryOne(
+        `INSERT INTO token_movement_legs (${LEG_COLUMNS}, verification_state, verification_reason)
+         VALUES (?, ?, ?, ?, ?, ${RECORDED_QUOTE_VALUES}, ?, ?)
+         RETURNING *`,
+        [
+          ...legValues(
+            tenant,
+            generateTokenMovementLegId(),
+            { kind: "transfer", transferId: input.transferId },
+            input.quote
+          ),
+          input.verdict.state,
+          input.verdict.reason,
+        ]
+      );
+      if (row === null) {
+        throw new Error("token_movement_legs INSERT returned no row");
+      }
+      return assertOwnRow(parseTokenMovementLegRow(row));
+    },
+
+    /**
+     * Records the pending leg of a transfer a program makes through CPI (a
+     * recurring pull), verified later from the landed transaction by
+     * `recordChainVerdict`. Write it with the transfer row, in one transaction.
+     *
+     * @returns The leg.
+     */
+    async insertChainLeg(leg: {
+      owner: Extract<TokenMovementLegOwner, { kind: "transfer" }>;
+      quote: MovementQuote;
+    }): Promise<TokenMovementLeg> {
+      const row = await db.queryOne(
+        `INSERT INTO token_movement_legs (${LEG_COLUMNS}, verified_by)
+         VALUES (?, ?, ?, ?, ?, ${RECORDED_QUOTE_VALUES}, ?)
+         RETURNING *`,
+        [
+          ...legValues(
+            tenant,
+            generateTokenMovementLegId(),
+            leg.owner,
+            recordedLegQuote(leg.quote)
+          ),
+          LEG_FROM_CHAIN,
+        ]
+      );
+      if (row === null) {
+        throw new Error("token_movement_legs INSERT returned no row");
+      }
+      return assertOwnRow(parseTokenMovementLegRow(row));
+    },
+
+    /**
+     * Writes what the landed transaction shows a chain-verified transfer
+     * moved, and the verdict that follows from it: `verified` when the
+     * observed debit is the quote's and the observed fee is at most `maxFee`,
+     * `mismatch` otherwise or when the transaction shows none SDP can read.
+     * The fee is held to the tolerance, not the quote's fee: a pull that lands
+     * in the next epoch pays that epoch's fee, which the tolerance allows. The
+     * chain is the authority for such a leg, so this replaces any earlier
+     * verdict.
+     *
+     * @param input.observed - The amounts the transaction shows; null when it
+     * shows none SDP can read.
+     * @param input.maxFee - The largest fee the movement may pay: the
+     * recurring mandate's tolerance, the rule a pull is held by.
+     * @returns The leg, or null when the transfer has no chain-verified leg
+     * (a pull recorded before legs).
+     */
+    async recordChainVerdict(input: {
+      transferId: string;
+      observed: LegAmounts | null;
+      maxFee: BaseUnits;
+      updatedAt: string;
+    }): Promise<TokenMovementLeg | null> {
+      const { observed } = input;
+      const debit = observed === null ? null : observed.debit.toString();
+      const fee = observed === null ? null : observed.fee.toString();
+      const credit = observed === null ? null : observed.credit.toString();
+      const feeWithinTolerance = observed !== null && observed.fee <= input.maxFee;
+      const row = await db.queryOne(
+        `UPDATE token_movement_legs
+            SET observed_debit = ?::numeric,
+                observed_fee = ?::numeric,
+                observed_credit = ?::numeric,
+                verification_state = CASE WHEN matched.quote THEN ?::text ELSE ?::text END,
+                verification_reason = CASE WHEN matched.quote THEN ?::text ELSE ?::text END,
+                updated_at = ?
+           FROM (
+             SELECT leg.id,
+                    COALESCE(leg.quoted_debit = ?::numeric AND ?::boolean, false) AS quote
+               FROM token_movement_legs leg
+              WHERE leg.organization_id = ?
+                AND leg.project_id = ?
+                AND leg.payment_transfer_id = ?
+                AND leg.verified_by = ?
+                AND leg.status <> 'archived'
+           ) matched
+          WHERE token_movement_legs.id = matched.id
+          RETURNING token_movement_legs.*`,
+        [
+          debit,
+          fee,
+          credit,
+          CHAIN_DELTA_MATCHED.state,
+          CHAIN_DELTA_MISMATCH.state,
+          CHAIN_DELTA_MATCHED.reason,
+          CHAIN_DELTA_MISMATCH.reason,
+          input.updatedAt,
+          debit,
+          feeWithinTolerance,
+          tenant.organizationId,
+          projectId,
+          input.transferId,
+          LEG_FROM_CHAIN,
+        ]
+      );
+      return row === null ? null : assertOwnRow(parseTokenMovementLegRow(row));
+    },
+
+    /**
+     * Writes a verdict on a transfer's pending leg, for a settling statement
+     * that cannot carry `legVerdictStatement` (a raw failure write).
+     *
+     * @returns Whether a pending leg took the verdict.
+     */
+    async settlePendingTransferLeg(input: {
+      transferId: string;
+      verdict: AmountVerificationVerdict;
+      updatedAt: string;
+    }): Promise<boolean> {
+      const changed = await db.execute(
+        `UPDATE token_movement_legs
+            SET verification_state = ?, verification_reason = ?, updated_at = ?
+          WHERE organization_id = ?
+            AND project_id = ?
+            AND payment_transfer_id = ?
+            AND verification_state = ?
+            AND status <> 'archived'`,
+        [
+          input.verdict.state,
+          input.verdict.reason,
+          input.updatedAt,
+          tenant.organizationId,
+          projectId,
+          input.transferId,
+          LEG_PENDING_STATE,
+        ]
+      );
+      return changed > 0;
     },
 
     /**
@@ -367,7 +635,15 @@ export function createPostgresTokenMovementLegsRepository(
                  AND movement.signature IS NOT NULL
             )
          RETURNING *`,
-        [...legValues(tenant, generateTokenMovementLegId(), leg), LEG_PENDING_STATE]
+        [
+          ...legValues(
+            tenant,
+            generateTokenMovementLegId(),
+            leg.owner,
+            recordedLegQuote(leg.quote)
+          ),
+          LEG_PENDING_STATE,
+        ]
       );
       return row === null ? null : assertOwnRow(parseTokenMovementLegRow(row));
     },

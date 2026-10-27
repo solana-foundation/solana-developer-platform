@@ -1,9 +1,9 @@
 /**
- * Payments token movements (ADR 0012): every Payments transfer, batch and
- * off-ramp deposit is planned here before anything is recorded, and built
- * through `buildTokenMovement` (`@sdp/solana/token-movement`), the only
- * constructor of token transfer instructions, once a signer and a fee payer
- * exist.
+ * Payments token movements (ADR 0012): every Payments transfer, batch,
+ * off-ramp deposit and /pay payment is planned here before anything is
+ * recorded, and built through `buildTokenMovement`
+ * (`@sdp/solana/token-movement`), the only constructor of token transfer
+ * instructions, once a signer and a fee payer exist.
  *
  * Planning reads the terms, the destination token accounts and the source,
  * asks the capability decision, quotes each destination and resolves hook
@@ -207,6 +207,31 @@ export async function planTokenMovement(input: {
     return { quote, accounts };
   });
   return { terms, source, legs, memo: input.memo };
+}
+
+/**
+ * The instructions of a planned /pay leg. The payer signs client-side, so it
+ * is a noop signer here; the sponsor pays a missing destination token
+ * account's rent. The Solana Pay `reference` is a read-only account on the
+ * transfer instruction, last, after any hook accounts: the hook's accounts
+ * keep the order its validation account defines, and a Solana Pay wallet
+ * needs only the key present in the transaction. Settlement never searches by
+ * it; it reads the signatures SDP issued.
+ */
+export function buildPlannedPaymentRequestLeg(
+  plan: PlannedTokenMovement,
+  leg: PlannedLeg,
+  ctx: { payer: Address; feePayer: Address; reference: Address }
+): Instruction[] {
+  return refusedAsBadRequest(() =>
+    buildTokenMovement(plan.terms, leg.quote, {
+      authority: createNoopSigner(ctx.payer),
+      rentPayer: createNoopSigner(ctx.feePayer),
+      accounts: leg.accounts,
+      memo: plan.memo,
+      reference: ctx.reference,
+    })
+  );
 }
 
 /**

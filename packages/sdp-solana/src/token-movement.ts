@@ -18,6 +18,7 @@
  * client. Everything else is pure and client-safe.
  */
 
+import type { TokenMovementRefusalReason } from "@sdp/types/token-movements";
 import { MEMO_PROGRAM_ADDRESS } from "@sdp/types/well-known-programs";
 import { SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
 import {
@@ -51,16 +52,22 @@ import {
 } from "@solana-program/token-2022";
 import { isSameAsset } from "./asset-ref";
 import type { MovementQuote } from "./movement-quote";
-import type { BaseUnits } from "./token-amount";
-import type { MintTokenTerms, TokenTerms } from "./token-terms";
+import { type BaseUnits, toTokenAmount } from "./token-amount";
+import { feeFor, type MintTokenTerms, type TokenTerms } from "./token-terms";
 
 /**
  * The paths a movement takes, each with its own capability row. PR 4 adds
- * the registered adapters (recurring, issuance, DvP, Private Channels, Earn).
+ * the other registered adapters (issuance, DvP, Private Channels, Earn).
  */
 export const TOKEN_MOVEMENT_PATHS = [
-  /** Instructions built here: Payments transfers, batches and off-ramp funding. */
+  /** Instructions built here: Payments transfers, batches, off-ramp funding and /pay. */
   "builder",
+  /**
+   * A recurring pull: the subscriptions program moves the mandate's debit with
+   * a plain `TransferChecked` through CPI, so no fee guard is on chain and the
+   * destination cannot get a memo first.
+   */
+  "recurring",
 ] as const;
 
 export type TokenMovementPath = (typeof TOKEN_MOVEMENT_PATHS)[number];
@@ -73,7 +80,8 @@ export const TOKEN_MOVEMENT_REFUSALS = {
   memoRequired: "memo_required",
   nothingCredited: "nothing_credited",
   scaledDisplay: "scaled_display",
-} as const satisfies Record<string, string>;
+  feeAboveTolerance: "fee_above_tolerance",
+} as const satisfies Record<string, TokenMovementRefusalReason>;
 
 export type TokenMovementRefusal =
   (typeof TOKEN_MOVEMENT_REFUSALS)[keyof typeof TOKEN_MOVEMENT_REFUSALS];
@@ -89,15 +97,29 @@ export class TokenMovementError extends Error {
   }
 }
 
-/** Whether a path can move a token under its terms, and why not. */
+/**
+ * Whether a path can move a token under its terms, and why not. A `hold`
+ * may pass later without anything SDP stores changing (a paused mint can be
+ * unpaused), so a path that can wait, a recurring pull, waits instead of
+ * failing; a `refuse` cannot.
+ */
 export type TokenMovementSupport =
   | Readonly<{ supported: true }>
-  | Readonly<{ supported: false; refusal: TokenMovementRefusal; message: string }>;
+  | Readonly<{
+      supported: false;
+      refusal: TokenMovementRefusal;
+      message: string;
+      disposition: "refuse" | "hold";
+    }>;
 
 const SUPPORTED: TokenMovementSupport = { supported: true };
 
 function refused(refusal: TokenMovementRefusal, message: string): TokenMovementSupport {
-  return { supported: false, refusal, message };
+  return { supported: false, refusal, message, disposition: "refuse" };
+}
+
+function held(refusal: TokenMovementRefusal, message: string): TokenMovementSupport {
+  return { supported: false, refusal, message, disposition: "hold" };
 }
 
 /**
@@ -138,6 +160,22 @@ function builderSupport(terms: TokenTerms): TokenMovementSupport {
 }
 
 /**
+ * The recurring row: what the builder refuses, except a paused mint, which
+ * holds the pull until it is unpaused. A transfer fee and a hook move (the
+ * mandate's fee tolerance is checked per pull, by {@link recurringPullSupport});
+ * a display rule is refused, as the builder refuses it until PR 5.
+ */
+function recurringSupport(terms: TokenTerms): TokenMovementSupport {
+  if (terms.paused) {
+    return held(
+      TOKEN_MOVEMENT_REFUSALS.paused,
+      "This token is paused: its mint refuses every transfer until it is unpaused"
+    );
+  }
+  return builderSupport(terms);
+}
+
+/**
  * The capability decision for moving a token under `terms` on `path`. Every
  * path asks it before it reads or builds anything else.
  */
@@ -145,6 +183,8 @@ export function support(terms: TokenTerms, path: TokenMovementPath): TokenMoveme
   switch (path) {
     case "builder":
       return builderSupport(terms);
+    case "recurring":
+      return recurringSupport(terms);
     default: {
       const exhaustive: never = path;
       throw new Error(`Unknown token movement path: ${String(exhaustive)}`);
@@ -233,6 +273,72 @@ export function decodeDestinationTokenAccount(
     (extension) => isExtension("MemoTransfer", extension) && extension.requireIncomingTransferMemos
   );
   return { owner, tokenAccount, exists: true, requiresMemo };
+}
+
+/** What one recurring pull moves under its mandate, in base units. */
+export type RecurringPull = Readonly<{
+  /** The mandate's debit: what the subscriptions program pulls. */
+  debit: BaseUnits;
+  /** The fee tolerance the mandate recorded: the largest fee one pull may pay. */
+  maxFeePerPull: BaseUnits;
+}>;
+
+/**
+ * The transfer fee one recurring pull of `debit` may pay under `terms`: the
+ * larger of the read's epoch fee and the next epoch's. A fee change takes
+ * effect at an epoch boundary, and a pull read at the end of an epoch may
+ * land in the next one, where the program's `TransferChecked` withholds the
+ * new fee with no guard.
+ */
+export function recurringPullFee(terms: MintTokenTerms, debit: BaseUnits): BaseUnits {
+  const { epoch } = terms.readAt;
+  const current = feeFor(terms, debit, epoch);
+  const next = feeFor(terms, debit, epoch + 1n);
+  return next > current ? next : current;
+}
+
+/**
+ * The decision for one recurring pull under `terms`: the recurring row, then
+ * the destination and the fee. Every outcome but a non-transferable or
+ * frozen-by-default mint is a hold, which can pass on a later read.
+ *
+ * - A destination that requires memos holds the pull: a CPI cannot put a memo
+ *   first.
+ * - A fee ({@link recurringPullFee}) above the mandate's tolerance holds it.
+ * - A fee that takes the whole debit holds it.
+ *
+ * @param destination - The destination token account, as the pull's read saw it.
+ */
+export function recurringPullSupport(
+  terms: MintTokenTerms,
+  pull: RecurringPull,
+  destination: DestinationTokenAccount
+): TokenMovementSupport {
+  const decision = support(terms, "recurring");
+  if (!decision.supported) {
+    return decision;
+  }
+  if (destination.requiresMemo) {
+    return held(
+      TOKEN_MOVEMENT_REFUSALS.memoRequired,
+      `The destination token account ${destination.tokenAccount} requires a memo on incoming transfers, which a recurring pull cannot send`
+    );
+  }
+  const fee = recurringPullFee(terms, pull.debit);
+  if (fee > pull.maxFeePerPull) {
+    const units = (amount: BaseUnits) => toTokenAmount(amount, terms.decimals).value;
+    return held(
+      TOKEN_MOVEMENT_REFUSALS.feeAboveTolerance,
+      `This token's transfer fee on one pull is ${units(fee)}, above the ${units(pull.maxFeePerPull)} the recurring payment tolerates`
+    );
+  }
+  if (fee === pull.debit) {
+    return held(
+      TOKEN_MOVEMENT_REFUSALS.nothingCredited,
+      "The transfer fee takes the whole pull: the destination would receive nothing"
+    );
+  }
+  return SUPPORTED;
 }
 
 /** A transfer's base accounts and amount, as its hook's `Execute` sees them. */
