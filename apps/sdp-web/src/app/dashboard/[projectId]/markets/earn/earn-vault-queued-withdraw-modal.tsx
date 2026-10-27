@@ -372,15 +372,15 @@ function QueuedWithdrawalResult({
       <p className="mt-2 text-body text-secondary">{t(presentation.bodyKey)}</p>
 
       <DetailList className="mt-5" variant="summary">
-        <DetailRow label={t("DashboardEarn.queuedWithdraw.quotedAmount")} wrap>
+        <DetailRow fit="figure" label={t("DashboardEarn.queuedWithdraw.quotedAmount")}>
           <span className="tabular-nums">
             {formatTokenValue(request.quotedAssets, request.assetMint, locale)}
           </span>
         </DetailRow>
-        <DetailRow label={t("DashboardEarn.queuedWithdraw.maturity")} wrap>
+        <DetailRow fit="wrap" label={t("DashboardEarn.queuedWithdraw.maturity")}>
           {formatEpochSecondsOr(request.maturityTimestamp, locale, t("DashboardEarn.unavailable"))}
         </DetailRow>
-        <DetailRow label={t("DashboardEarn.queuedWithdraw.deadline")} wrap>
+        <DetailRow fit="wrap" label={t("DashboardEarn.queuedWithdraw.deadline")}>
           {formatEpochSecondsOr(request.deadlineTimestamp, locale, t("DashboardEarn.unavailable"))}
         </DetailRow>
       </DetailList>
@@ -484,22 +484,22 @@ function QueueReview({
         </div>
       ) : preview ? (
         <DetailList className="mt-5" variant="summary">
-          <DetailRow label={t("DashboardEarn.queuedWithdraw.expectedAmount")} wrap>
+          <DetailRow fit="figure" label={t("DashboardEarn.queuedWithdraw.expectedAmount")}>
             <span className="tabular-nums">
               {formatTokenValue(preview.assets, position.tokenMint, locale)}
             </span>
           </DetailRow>
-          <DetailRow label={t("DashboardEarn.queuedWithdraw.discount")} wrap>
+          <DetailRow fit="figure" label={t("DashboardEarn.queuedWithdraw.discount")}>
             {bpsToPercent(preview.discountBps)}%
           </DetailRow>
-          <DetailRow label={t("DashboardEarn.queuedWithdraw.maturity")} wrap>
+          <DetailRow fit="wrap" label={t("DashboardEarn.queuedWithdraw.maturity")}>
             {formatEpochSecondsOr(
               preview.maturityTimestamp,
               locale,
               t("DashboardEarn.unavailable")
             )}
           </DetailRow>
-          <DetailRow label={t("DashboardEarn.queuedWithdraw.deadline")} wrap>
+          <DetailRow fit="wrap" label={t("DashboardEarn.queuedWithdraw.deadline")}>
             {formatEpochSecondsOr(
               preview.deadlineTimestamp,
               locale,

@@ -367,13 +367,13 @@ function ParRedemptionResultDetails({
   const locale = useLocale();
   return (
     <DetailList className="mt-5" variant="summary">
-      <DetailRow label={t("DashboardEarn.parRedemption.quotedAmount")} wrap>
+      <DetailRow fit="figure" label={t("DashboardEarn.parRedemption.quotedAmount")}>
         <span className="tabular-nums">
           {formatTokenValue(request.quotedAssets, request.assetMint, locale)}
         </span>
       </DetailRow>
       {request.intermediateAmount && request.intermediateMint ? (
-        <DetailRow label={t("DashboardEarn.parRedemption.intermediateAmount")} wrap>
+        <DetailRow fit="figure" label={t("DashboardEarn.parRedemption.intermediateAmount")}>
           <span className="tabular-nums">
             {formatTokenValue(request.intermediateAmount, request.intermediateMint, locale)}
           </span>
@@ -595,12 +595,12 @@ function ParRedemptionReview({
         </div>
       ) : preview ? (
         <DetailList className="mt-5" variant="summary">
-          <DetailRow label={t("DashboardEarn.parRedemption.expectedAmount")} wrap>
+          <DetailRow fit="figure" label={t("DashboardEarn.parRedemption.expectedAmount")}>
             <span className="tabular-nums">
               {formatTokenValue(preview.assets, preview.assetMint, locale)}
             </span>
           </DetailRow>
-          <DetailRow label={t("DashboardEarn.parRedemption.intermediateAmount")} wrap>
+          <DetailRow fit="figure" label={t("DashboardEarn.parRedemption.intermediateAmount")}>
             <span className="tabular-nums">
               {formatTokenValue(preview.intermediateAmount, preview.intermediateMint, locale)}
             </span>

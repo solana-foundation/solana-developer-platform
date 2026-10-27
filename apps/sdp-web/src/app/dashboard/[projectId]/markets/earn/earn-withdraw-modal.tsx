@@ -349,10 +349,10 @@ function WithdrawPreviewPanel({
       {preview.phase === "ready" ? (
         <>
           <DetailList className="mt-1" variant="summary">
-            <DetailRow label={t("DashboardEarn.withdraw.previewFee")} wrap>
+            <DetailRow fit="figure" label={t("DashboardEarn.withdraw.previewFee")}>
               <span className="tabular-nums">{formatUsd(preview.preview.feeUsd, locale)}</span>
             </DetailRow>
-            <DetailRow label={t("DashboardEarn.withdraw.previewTotalAfter")} wrap>
+            <DetailRow fit="figure" label={t("DashboardEarn.withdraw.previewTotalAfter")}>
               <span className="tabular-nums">
                 {formatUsd(preview.preview.totalUsdAfterWithdrawal, locale)}
               </span>
@@ -396,18 +396,18 @@ function WithdrawalCreatedView({
       </p>
 
       <DetailList className="mt-5" variant="summary">
-        <DetailRow label={t("DashboardEarn.withdraw.amountLabel")} wrap>
+        <DetailRow fit="figure" label={t("DashboardEarn.withdraw.amountLabel")}>
           <span className="tabular-nums">
             {formatUsd(withdrawal.amountRequestedUsd ?? fallbackAmountUsd, locale)} ·{" "}
             {token.toUpperCase()}
           </span>
         </DetailRow>
-        <DetailRow label={t("DashboardEarn.withdraw.destinationLabel")} wrap>
+        <DetailRow fit="wrap" label={t("DashboardEarn.withdraw.destinationLabel")}>
           <span className="block max-w-52 truncate" title={withdrawal.destinationAddress}>
             {withdrawal.destinationAddress}
           </span>
         </DetailRow>
-        <DetailRow label={t("DashboardEarn.withdraw.referenceLabel")} wrap>
+        <DetailRow fit="wrap" label={t("DashboardEarn.withdraw.referenceLabel")}>
           <span className="block max-w-52 truncate" title={withdrawal.withdrawalRef}>
             {withdrawal.withdrawalRef}
           </span>
