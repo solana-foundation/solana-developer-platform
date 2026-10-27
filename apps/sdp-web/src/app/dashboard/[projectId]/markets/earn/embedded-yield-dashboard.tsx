@@ -44,7 +44,6 @@ import {
 } from "./earn-format";
 import {
   earnMintAsset,
-  earnStrategyAsset,
   earnStrategyReferenceKey,
   sumDecimalStrings,
 } from "./earn-market-presentation";
@@ -89,6 +88,13 @@ type PortfolioLiveValue =
   | { kind: "withheld" }
   | { kind: "not_dollar" };
 
+/** Why the hero shows no figure, for each answer `portfolioLiveValue` gives. */
+const LIVE_VALUE_HINTS = {
+  value: undefined,
+  withheld: "DashboardMarkets.earnProgram.liveValueWithheld",
+  not_dollar: "DashboardMarkets.earnProgram.liveValueNotDollar",
+} as const satisfies Record<PortfolioLiveValue["kind"], MessageKey | undefined>;
+
 function portfolioLiveValue(summary: EarnExternalWalletPositionSummary): PortfolioLiveValue {
   if (summary.unavailablePositionCount > 0) return { kind: "withheld" };
   const values: string[] = [];
@@ -105,7 +111,8 @@ function formatLatestDepositDate(
   positions: readonly EarnExternalWalletPosition[] | undefined,
   locale: string
 ): string {
-  const latest = (positions ?? []).reduce<number | undefined>((current, position) => {
+  if (positions === undefined) return "—";
+  const latest = positions.reduce<number | undefined>((current, position) => {
     const createdAt = Date.parse(position.createdAt);
     if (!Number.isFinite(createdAt)) return current;
     return current === undefined || createdAt > current ? createdAt : current;
@@ -120,6 +127,7 @@ function PortfolioSummary({ summary }: { summary: EarnExternalWalletPositionSumm
   const locale = useLocale();
   const countFormat = useMemo(() => new Intl.NumberFormat(locale), [locale]);
   const liveValue = portfolioLiveValue(summary);
+  const hintKey = LIVE_VALUE_HINTS[liveValue.kind];
   const counts = [
     { id: "wallets", count: summary.walletCount },
     { id: "positions", count: summary.positionCount },
@@ -129,13 +137,7 @@ function PortfolioSummary({ summary }: { summary: EarnExternalWalletPositionSumm
   return (
     <EarnSummary
       figure={liveValue.kind === "value" ? formatUsd(liveValue.value, locale) : "—"}
-      hint={
-        liveValue.kind === "withheld"
-          ? t("DashboardMarkets.earnProgram.liveValueWithheld")
-          : liveValue.kind === "not_dollar"
-            ? t("DashboardMarkets.earnProgram.liveValueNotDollar")
-            : undefined
-      }
+      hint={hintKey === undefined ? undefined : t(hintKey)}
       label={t("DashboardMarkets.earnProgram.liveValue")}
       stats={counts.map(({ count, id }) => ({
         id,
@@ -273,9 +275,11 @@ function StrategyWalletDetails({
   strategy: EarnExternalWalletStrategyTotal;
 }) {
   const t = useTranslations();
+  // Absent when the summary could not hydrate this strategy's wallets.
   const positions = useMemo(
     () =>
-      [...(strategy.positions ?? [])].sort((left, right) =>
+      strategy.positions &&
+      [...strategy.positions].sort((left, right) =>
         left.ownerAddress.localeCompare(right.ownerAddress)
       ),
     [strategy.positions]
@@ -286,7 +290,7 @@ function StrategyWalletDetails({
   return (
     <div className="pt-1 pb-2">
       <section aria-label={strategy.label} className="rounded-card bg-surface-tile py-1 text-meta">
-        {strategy.positions ? (
+        {positions ? (
           positions.map((position) => (
             <CustomerWallet cluster={cluster} key={position.id} position={position} />
           ))
@@ -320,13 +324,9 @@ function StrategyRows({
     strategy.provider,
     strategy.providerReference
   ).replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+  // The row's mark is its first deposit token's; a strategy with no token totals shows none.
   const firstMint = strategy.totalsByToken[0]?.tokenMint;
-  const asset =
-    firstMint !== undefined
-      ? earnMintAsset(firstMint)
-      : definition
-        ? earnStrategyAsset(definition)
-        : undefined;
+  const asset = firstMint === undefined ? undefined : earnMintAsset(firstMint);
   const details = <StrategyWalletDetails cluster={cluster} strategy={strategy} />;
   const liquidity = definition ? earnStrategyLiquidityLabel(definition, t) : undefined;
   // Its provider and assets, then how fast money comes out.
@@ -344,7 +344,7 @@ function StrategyRows({
         aria-label={t("DashboardMarkets.earnProgram.viewCustomerWallets", {
           strategy: strategy.label,
         })}
-        className="cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-border-strong"
+        className="cursor-pointer focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-border-strong"
         onClick={onToggle}
         onKeyDown={(event) => {
           if (event.key === "Enter" || event.key === " ") {
