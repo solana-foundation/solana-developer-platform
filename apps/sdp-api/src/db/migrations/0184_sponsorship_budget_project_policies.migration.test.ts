@@ -86,9 +86,13 @@ describe("0184 per-project sponsorship budgets keyed by environment", () => {
     await client.query(migrationSql);
 
     const projectPolicies = await client.query(
-      `SELECT pp.project_id, pp.enabled, pp.per_transaction_lamports, pp.hourly_lamports,
-              pp.daily_lamports, pp.version, pp.updated_by, pp.update_reason,
-              r.version AS revision_version
+      `SELECT pp.project_id, pp.enabled,
+              pp.per_transaction_lamports::text AS per_transaction_lamports,
+              pp.hourly_lamports::text AS hourly_lamports,
+              pp.daily_lamports::text AS daily_lamports,
+              pp.version::text AS version,
+              pp.updated_by, pp.update_reason,
+              r.version::text AS revision_version
          FROM sponsorship_budget_project_policies pp
          JOIN sponsorship_budget_project_policy_revisions r ON r.policy_id = pp.id
         ORDER BY pp.project_id`
@@ -118,7 +122,9 @@ describe("0184 per-project sponsorship budgets keyed by environment", () => {
       },
     ]);
     const globalPolicies = await client.query(
-      "SELECT environment, enabled, hourly_lamports FROM sponsorship_budget_policies ORDER BY environment"
+      `SELECT environment, enabled, hourly_lamports::text AS hourly_lamports
+         FROM sponsorship_budget_policies
+        ORDER BY environment`
     );
     expect(globalPolicies.rows).toEqual([
       { environment: "production", enabled: false, hourly_lamports: "500000000" },
