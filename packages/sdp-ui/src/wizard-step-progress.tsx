@@ -57,9 +57,10 @@ export function WizardStepProgress({
         role="status"
         aria-live="polite"
       >
-        {/* A step change announces where the reader now is, as well as how far along. */}
+        {/* A step change announces where the reader now is, as well as how far along. The
+            label keeps its own element, so it still matches as "Step x of y" alone. */}
         {stepName === undefined ? null : <span className="sr-only">{`${stepName}, `}</span>}
-        {progressLabel}
+        <span>{progressLabel}</span>
       </span>
       <div
         className="hidden h-1 overflow-hidden rounded-full bg-fill-strong refresh:col-span-2 refresh:block"
