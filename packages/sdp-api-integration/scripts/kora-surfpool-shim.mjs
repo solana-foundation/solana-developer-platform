@@ -222,7 +222,7 @@ function getConfig() {
           allow_thaw_account: false,
         },
       },
-      max_allowed_lamports: 10_000_000,
+      max_allowed_lamports: 9_900_000,
       max_signatures: 10,
       price: { type: "free" },
       price_source: "Mock",
