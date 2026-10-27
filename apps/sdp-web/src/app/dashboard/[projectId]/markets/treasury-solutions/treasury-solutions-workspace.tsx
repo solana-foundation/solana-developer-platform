@@ -651,13 +651,13 @@ export function TreasurySolutionsWorkspace({
       <TreasuryWorkspaceContent
         activeWallets={activeWallets}
         allocation={allocation}
-        catalogueError={catalogueError}
+        catalogueFailed={Boolean(catalogueError)}
         catalogueLoading={catalogueLoading && catalogueStrategies === undefined}
         catalogueStrategies={catalogueStrategies}
-        devnetCatalogueError={devnetCatalogueError}
+        devnetCatalogueFailed={Boolean(devnetCatalogueError)}
         devnetCatalogueLoading={devnetCatalogueLoading}
         environment={sdpEnvironment}
-        mainnetCatalogueError={mainnetCatalogueError}
+        mainnetCatalogueFailed={Boolean(mainnetCatalogueError)}
         mainnetCatalogueLoading={mainnetCatalogueLoading}
         onDeposit={setDepositStrategy}
         onRefresh={refreshTreasury}
@@ -665,7 +665,7 @@ export function TreasurySolutionsWorkspace({
         onWithdrawProgram={setWithdrawProgram}
         portfolioApy={portfolioApy}
         positions={positions}
-        positionsError={positionsError}
+        positionsFailed={Boolean(positionsError)}
         positionsLoading={positionsLoading}
         balanceOf={balanceOf}
         programs={programs}
@@ -676,7 +676,7 @@ export function TreasurySolutionsWorkspace({
         balancesRefreshing={balancesRefreshing}
         vaultDeposits={vaultDepositWatches}
         vaultWithdrawals={vaultWithdrawalWatches}
-        walletsError={walletsError}
+        walletsFailed={Boolean(walletsError)}
         walletsLoading={walletsLoading}
       />
 

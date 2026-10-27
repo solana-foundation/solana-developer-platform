@@ -524,13 +524,13 @@ function TreasuryWalletTile({
 
 function TreasuryWallets({
   allocation,
-  error,
+  failed,
   isLoading,
   refreshing,
   wallets,
 }: {
   allocation: TreasuryAllocation;
-  error: unknown;
+  failed: boolean;
   isLoading: boolean;
   refreshing: boolean;
   wallets: readonly EarnFundingWallet[];
@@ -545,7 +545,7 @@ function TreasuryWallets({
   let body: ReactNode;
   if (isLoading) {
     body = <TreasuryWalletTilesSkeleton />;
-  } else if (error) {
+  } else if (failed) {
     body = (
       <p className="text-body text-secondary">{t("DashboardMarkets.treasury.walletsError")}</p>
     );
@@ -581,7 +581,7 @@ function TreasuryWallets({
   }
 
   // A failed or empty read sits in the middle of the tile row it replaces.
-  const centered = !isLoading && (Boolean(error) || wallets.length === 0);
+  const centered = !isLoading && (failed || wallets.length === 0);
   return (
     <RecordBlock
       aside={
@@ -751,7 +751,7 @@ function TreasuryPositionActions({
 function TreasuryPositions({
   balanceOf,
   deposits,
-  error,
+  failed,
   isLoading,
   onWithdraw,
   positions,
@@ -761,7 +761,7 @@ function TreasuryPositions({
 }: {
   balanceOf: (position: EarnVaultPosition) => TreasuryPositionBalance;
   deposits: readonly TrackedVaultDeposit[];
-  error: unknown;
+  failed: boolean;
   isLoading: boolean;
   onWithdraw: (position: EarnVaultPosition, parSource?: EarnVaultParRedemptionSource) => void;
   positions: readonly EarnVaultPosition[] | undefined;
@@ -801,7 +801,7 @@ function TreasuryPositions({
   let body: ReactNode;
   if (isLoading) {
     body = <EarnTableSkeleton columns={TREASURY_POSITION_COLUMNS} rows={2} />;
-  } else if (error && activePositions.length === 0) {
+  } else if (failed && activePositions.length === 0) {
     body = (
       <ListEmptyState
         description={t("DashboardMarkets.treasury.vaultPositionsErrorDescription")}
@@ -1252,12 +1252,12 @@ function CatalogueShelfError({ shelf }: { shelf: CatalogueShelf }) {
 }
 
 interface TreasuryStrategiesProps {
-  devnetError: unknown;
+  devnetFailed: boolean;
   devnetLoading: boolean;
   environment: SdpEnvironment;
-  error: unknown;
+  failed: boolean;
   isLoading: boolean;
-  mainnetError: unknown;
+  mainnetFailed: boolean;
   mainnetLoading: boolean;
   onDeposit: (strategy: EarnStrategy) => void;
   onRefresh: () => void;
@@ -1268,12 +1268,12 @@ interface TreasuryStrategiesProps {
 }
 
 function TreasuryStrategies({
-  devnetError,
+  devnetFailed,
   devnetLoading,
   environment,
-  error,
+  failed,
   isLoading,
-  mainnetError,
+  mainnetFailed,
   mainnetLoading,
   onDeposit,
   onRefresh,
@@ -1287,7 +1287,7 @@ function TreasuryStrategies({
     isVaultDirectDepositEnabled(environment, provider)
   );
   const availableStrategies = strategies ?? [];
-  const hasRows = !isLoading && !error && availableStrategies.length > 0;
+  const hasRows = !isLoading && !failed && availableStrategies.length > 0;
   const shelfLoading = hasRows && (mainnetLoading || devnetLoading);
   const shelfLoadingLabel = mainnetLoading
     ? t("DashboardMarkets.treasury.mainnetStrategiesLoading")
@@ -1296,7 +1296,7 @@ function TreasuryStrategies({
   let body: ReactNode;
   if (isLoading) {
     body = <EarnTableSkeleton columns={TREASURY_STRATEGY_COLUMNS} rows={4} />;
-  } else if (error) {
+  } else if (failed) {
     body = (
       <ListEmptyState
         description={t("DashboardMarkets.treasury.strategiesErrorDescription")}
@@ -1313,8 +1313,8 @@ function TreasuryStrategies({
   } else {
     body = (
       <>
-        {mainnetError ? <CatalogueShelfError shelf="mainnet" /> : null}
-        {devnetError ? <CatalogueShelfError shelf="devnet" /> : null}
+        {mainnetFailed ? <CatalogueShelfError shelf="mainnet" /> : null}
+        {devnetFailed ? <CatalogueShelfError shelf="devnet" /> : null}
         <StrategyTable
           environment={environment}
           onDeposit={onDeposit}
@@ -1506,13 +1506,13 @@ function TreasuryPrograms({
 export interface TreasuryWorkspaceContentProps {
   activeWallets: readonly EarnFundingWallet[];
   allocation: TreasuryAllocation;
-  catalogueError: unknown;
+  catalogueFailed: boolean;
   catalogueLoading: boolean;
   catalogueStrategies: readonly EarnStrategy[] | undefined;
-  devnetCatalogueError: unknown;
+  devnetCatalogueFailed: boolean;
   devnetCatalogueLoading: boolean;
   environment: SdpEnvironment;
-  mainnetCatalogueError: unknown;
+  mainnetCatalogueFailed: boolean;
   mainnetCatalogueLoading: boolean;
   onDeposit: (strategy: EarnStrategy) => void;
   onRefresh: () => void;
@@ -1523,7 +1523,7 @@ export interface TreasuryWorkspaceContentProps {
   onWithdrawProgram: (program: EarnProgram) => void;
   portfolioApy: string | undefined;
   positions: readonly EarnVaultPosition[] | undefined;
-  positionsError: unknown;
+  positionsFailed: boolean;
   positionsLoading: boolean;
   balanceOf: (position: EarnVaultPosition) => TreasuryPositionBalance;
   programs: readonly EarnProgram[];
@@ -1534,7 +1534,7 @@ export interface TreasuryWorkspaceContentProps {
   balancesRefreshing: boolean;
   vaultDeposits: readonly TrackedVaultDeposit[];
   vaultWithdrawals: readonly TrackedVaultWithdrawal[];
-  walletsError: unknown;
+  walletsFailed: boolean;
   walletsLoading: boolean;
 }
 
@@ -1546,13 +1546,13 @@ export interface TreasuryWorkspaceContentProps {
 export function TreasuryWorkspaceContent({
   activeWallets,
   allocation,
-  catalogueError,
+  catalogueFailed,
   catalogueLoading,
   catalogueStrategies,
-  devnetCatalogueError,
+  devnetCatalogueFailed,
   devnetCatalogueLoading,
   environment,
-  mainnetCatalogueError,
+  mainnetCatalogueFailed,
   mainnetCatalogueLoading,
   onDeposit,
   onRefresh,
@@ -1560,7 +1560,7 @@ export function TreasuryWorkspaceContent({
   onWithdrawProgram,
   portfolioApy,
   positions,
-  positionsError,
+  positionsFailed,
   positionsLoading,
   balanceOf,
   programs,
@@ -1571,7 +1571,7 @@ export function TreasuryWorkspaceContent({
   balancesRefreshing,
   vaultDeposits,
   vaultWithdrawals,
-  walletsError,
+  walletsFailed,
   walletsLoading,
 }: TreasuryWorkspaceContentProps) {
   return (
@@ -1584,7 +1584,7 @@ export function TreasuryWorkspaceContent({
       />
       <TreasuryWallets
         allocation={allocation}
-        error={walletsError}
+        failed={walletsFailed}
         isLoading={walletsLoading}
         refreshing={balancesRefreshing}
         wallets={activeWallets}
@@ -1592,7 +1592,7 @@ export function TreasuryWorkspaceContent({
       <TreasuryPositions
         balanceOf={balanceOf}
         deposits={vaultDeposits}
-        error={positionsError}
+        failed={positionsFailed}
         isLoading={positionsLoading}
         onWithdraw={onWithdrawPosition}
         positions={positions}
@@ -1602,16 +1602,16 @@ export function TreasuryWorkspaceContent({
       />
       <EarnVaultWithdrawalRequestsCard onChanged={onRefresh} />
       <TreasuryStrategies
-        devnetError={devnetCatalogueError}
+        devnetFailed={devnetCatalogueFailed}
         devnetLoading={devnetCatalogueLoading}
         environment={environment}
-        error={catalogueError}
+        failed={catalogueFailed}
         isLoading={catalogueLoading}
-        mainnetError={mainnetCatalogueError}
+        mainnetFailed={mainnetCatalogueFailed}
         mainnetLoading={mainnetCatalogueLoading}
         onDeposit={onDeposit}
         onRefresh={onRefresh}
-        positions={positionsError ? undefined : positions}
+        positions={positionsFailed ? undefined : positions}
         providerAccess={providerAccess}
         strategies={catalogueStrategies}
         unrecordedShareMints={allocation.unrecordedShareMints}
