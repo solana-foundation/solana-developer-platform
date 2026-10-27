@@ -327,7 +327,7 @@ describe("EarnVaultDepositModal", () => {
     render(<EarnVaultDepositModal projectId={PROJECT_ID} strategy={strategy} onClose={vi.fn()} />);
 
     await screen.findByRole("dialog", { name: "Deposit into Institutional USDC Vault" });
-    expect(flowProgress()).toEqual({ step: "Details", label: "Step 1 of 4" });
+    expect(flowProgress()).toEqual({ step: "Details", label: "Details, Step 1 of 4" });
     expect(
       screen.queryByText("Choose the custody wallet that will sign and own the vault shares.")
     ).toBeNull();
@@ -359,7 +359,7 @@ describe("EarnVaultDepositModal", () => {
     expect(screen.getByText("$1.25")).toBeTruthy();
     expect(screen.getByText("Treasury wallet")).toBeTruthy();
     expect(screen.queryByText("Swap required before deposit")).toBeNull();
-    expect(flowProgress()).toEqual({ step: "Review", label: "Step 2 of 4" });
+    expect(flowProgress()).toEqual({ step: "Review", label: "Review, Step 2 of 4" });
     expect(screen.getByRole("button", { name: "Confirm deposit" })).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "Back" }));
@@ -377,7 +377,7 @@ describe("EarnVaultDepositModal", () => {
 
     await user.clear(screen.getByLabelText("Amount"));
     await user.type(screen.getByLabelText("Amount"), "1.25{Enter}");
-    expect(flowProgress()).toEqual({ step: "Review", label: "Step 2 of 4" });
+    expect(flowProgress()).toEqual({ step: "Review", label: "Review, Step 2 of 4" });
 
     // The review moves money, so only its button confirms.
     await user.keyboard("{Enter}");
@@ -620,7 +620,7 @@ describe("EarnVaultDepositModal", () => {
         const confirmation = document.querySelector('[data-earn-outcome="success"]');
         expect(confirmation).toBeTruthy();
         expect(confirmation?.className).toContain("mx-auto");
-        expect(flowProgress()).toEqual({ step: "Complete", label: "Step 4 of 4" });
+        expect(flowProgress()).toEqual({ step: "Complete", label: "Complete, Step 4 of 4" });
       }
       const transaction = screen.getByRole("link", { name: /5R3h9G/ });
       expect(transaction.getAttribute("href")).toBe(
@@ -658,7 +658,10 @@ describe("EarnVaultDepositModal", () => {
     expect(screen.getByText(/this is not a completed position yet/)).toBeTruthy();
     expect(screen.queryByText("Active")).toBeNull();
     // The provider still has to deliver shares, so the flow stops short of Complete.
-    expect(flowProgress()).toEqual({ step: "Provider settlement", label: "Step 4 of 5" });
+    expect(flowProgress()).toEqual({
+      step: "Provider settlement",
+      label: "Provider settlement, Step 4 of 5",
+    });
     expect(onDeposited).toHaveBeenCalledWith(deposit, {
       amount: "1",
       custodyWalletId: "wallet_1",

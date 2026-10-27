@@ -10,8 +10,8 @@ interface WizardStepProgressProps extends Omit<ComponentPropsWithoutRef<"div">, 
 /**
  * Where a wizard is. Base surfaces draw one pill per step beside "Step x of y"; a refresh
  * surface names the current step, puts "Step x of y" opposite it and fills a continuous bar
- * underneath. CSS picks the layout, so this stays usable from server components. Only
- * "Step x of y" is the live region; the step name and the drawing are visual.
+ * underneath. CSS picks the layout, so this stays usable from server components. The live
+ * region reads the step's name with "Step x of y"; the drawn name and the drawing are visual.
  */
 export function WizardStepProgress({
   className,
@@ -21,6 +21,7 @@ export function WizardStepProgress({
   ...props
 }: WizardStepProgressProps) {
   const filled = steps.length === 0 ? 0 : ((currentStep + 1) / steps.length) * 100;
+  const stepName = steps[currentStep];
   return (
     <div
       {...props}
@@ -49,13 +50,15 @@ export function WizardStepProgress({
         className="hidden truncate text-body font-medium text-primary refresh:block"
         aria-hidden="true"
       >
-        {steps[currentStep]}
+        {stepName}
       </span>
       <span
         className="text-xs text-muted refresh:text-meta refresh:text-tertiary"
         role="status"
         aria-live="polite"
       >
+        {/* A step change announces where the reader now is, as well as how far along. */}
+        {stepName === undefined ? null : <span className="sr-only">{`${stepName}, `}</span>}
         {progressLabel}
       </span>
       <div
