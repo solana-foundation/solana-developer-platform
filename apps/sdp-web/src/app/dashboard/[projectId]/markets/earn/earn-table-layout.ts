@@ -8,14 +8,14 @@ import type { EMBEDDED_YIELD_STRATEGY_COLUMNS } from "./embedded-yield-layout";
  * reference proxies instead.
  *
  * Each table lays out by its own columns, by id, as fixed-layout widths that sum to 100% at each
- * width. Columns that do not fit a phone drop out below `@2xl` (the work area's container query,
- * a 624px column), so a row's action is always on screen without scrolling the table sideways.
+ * width. Columns that do not fit a phone drop out below `@2xl` (a 672px work area), so a row's
+ * action is always on screen without scrolling the table sideways.
  */
 
 /** Any Earn table's columns: Treasury's tables and Embedded Yield's. */
 export type EarnTableColumns = TreasuryTableColumns | typeof EMBEDDED_YIELD_STRATEGY_COLUMNS;
 
-/** Hidden until the column is 624px wide. */
+/** Hidden until the work area is 672px wide (`@2xl`). */
 export const EARN_WIDE_ONLY_COLUMN = "hidden @2xl:table-cell";
 
 /** A table set on the page: the design's 12px bleed, so cell text lines up with the title. */

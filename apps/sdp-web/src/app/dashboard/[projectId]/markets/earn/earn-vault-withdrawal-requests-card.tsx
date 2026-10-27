@@ -101,7 +101,7 @@ function WithdrawalRequestItem({
   // A ruled row as the design lists activity: the vault and its status over what the request
   // will pay, and the one way out of it at the end.
   return (
-    <li className="grid gap-3 border-b border-border-subtle py-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center md:gap-6">
+    <li className="grid gap-3 border-b border-border-subtle py-3 last:border-b-0 md:grid-cols-[minmax(0,1fr)_auto] md:items-center md:gap-6">
       <div className="min-w-0">
         <p className="flex min-w-0 items-center gap-2 text-body">
           <span className="truncate font-medium text-primary">
@@ -211,7 +211,7 @@ export function EarnVaultWithdrawalRequestsCard({ onChanged }: { onChanged?: () 
           {t("DashboardEarn.queuedWithdraw.activeError")}
         </Callout>
       ) : (
-        <ul className="border-t border-border-subtle">
+        <ul>
           {(withdrawalRequests ?? []).map((serverRequest) => {
             const request = freshestRequest(
               serverRequest,
