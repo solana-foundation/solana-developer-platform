@@ -1313,6 +1313,93 @@ interface TreasuryStrategiesProps {
   unrecordedShareMints: ReadonlySet<string> | undefined;
 }
 
+/** The shelf's rows, or what stands in for them while they load, fail or come back empty. */
+function StrategiesBody({
+  devnetFailed,
+  environment,
+  failed,
+  isLoading,
+  mainnetFailed,
+  onDeposit,
+  positions,
+  providerAccess,
+  strategies,
+  unrecordedShareMints,
+}: Omit<TreasuryStrategiesProps, "devnetLoading" | "mainnetLoading" | "onRefresh">) {
+  const t = useTranslations();
+  if (isLoading) return <TreasuryTableSkeleton columns={TREASURY_STRATEGY_COLUMNS} rows={4} />;
+  if (failed) {
+    return (
+      <ListEmptyState
+        description={t("DashboardMarkets.treasury.strategiesErrorDescription")}
+        message={t("DashboardMarkets.treasury.strategiesErrorTitle")}
+      />
+    );
+  }
+  if (strategies === undefined || strategies.length === 0) {
+    return (
+      <ListEmptyState
+        description={t("DashboardMarkets.treasury.strategiesEmptyDescription")}
+        message={t("DashboardMarkets.treasury.strategiesEmptyTitle")}
+      />
+    );
+  }
+  return (
+    <>
+      {mainnetFailed ? <CatalogueShelfError shelf="mainnet" /> : null}
+      {devnetFailed ? <CatalogueShelfError shelf="devnet" /> : null}
+      <StrategyTable
+        environment={environment}
+        onDeposit={onDeposit}
+        positions={positions}
+        providerAccess={providerAccess}
+        strategies={strategies}
+        unrecordedShareMints={unrecordedShareMints}
+      />
+    </>
+  );
+}
+
+/** The shelf's refresh, and while a second shelf still loads, a quiet status naming which. */
+function StrategiesRefresh({
+  mainnetLoading,
+  onRefresh,
+  shelfLoading,
+}: {
+  mainnetLoading: boolean;
+  onRefresh: () => void;
+  shelfLoading: boolean;
+}) {
+  const t = useTranslations();
+  return (
+    <>
+      {shelfLoading ? (
+        <span className="sr-only" role="status">
+          {t(
+            mainnetLoading
+              ? "DashboardMarkets.treasury.mainnetStrategiesLoading"
+              : "DashboardMarkets.treasury.devnetStrategiesLoading"
+          )}
+        </span>
+      ) : null}
+      <Button
+        iconLeft={
+          <RefreshCwIcon
+            aria-hidden="true"
+            className={cn("size-4", shelfLoading && "motion-safe:animate-spin")}
+          />
+        }
+        onClick={onRefresh}
+        size="sm"
+        type="button"
+        variant="ghost"
+      >
+        {t("DashboardMarkets.treasury.refresh")}
+      </Button>
+    </>
+  );
+}
+
 function TreasuryStrategies({
   devnetFailed,
   devnetLoading,
@@ -1332,77 +1419,34 @@ function TreasuryStrategies({
   const depositsEnabled = SURFACED_VAULT_DIRECT_EARN_PROVIDERS.some((provider) =>
     isVaultDirectDepositEnabled(environment, provider)
   );
-  const availableStrategies = strategies ?? [];
-  const hasRows = !isLoading && !failed && availableStrategies.length > 0;
-  const shelfLoading = hasRows && (mainnetLoading || devnetLoading);
-  const shelfLoadingLabel = mainnetLoading
-    ? t("DashboardMarkets.treasury.mainnetStrategiesLoading")
-    : t("DashboardMarkets.treasury.devnetStrategiesLoading");
-
-  let body: ReactNode;
-  if (isLoading) {
-    body = <TreasuryTableSkeleton columns={TREASURY_STRATEGY_COLUMNS} rows={4} />;
-  } else if (failed) {
-    body = (
-      <ListEmptyState
-        description={t("DashboardMarkets.treasury.strategiesErrorDescription")}
-        message={t("DashboardMarkets.treasury.strategiesErrorTitle")}
-      />
-    );
-  } else if (availableStrategies.length === 0) {
-    body = (
-      <ListEmptyState
-        description={t("DashboardMarkets.treasury.strategiesEmptyDescription")}
-        message={t("DashboardMarkets.treasury.strategiesEmptyTitle")}
-      />
-    );
-  } else {
-    body = (
-      <>
-        {mainnetFailed ? <CatalogueShelfError shelf="mainnet" /> : null}
-        {devnetFailed ? <CatalogueShelfError shelf="devnet" /> : null}
-        <StrategyTable
-          environment={environment}
-          onDeposit={onDeposit}
-          positions={positions}
-          providerAccess={providerAccess}
-          strategies={availableStrategies}
-          unrecordedShareMints={unrecordedShareMints}
-        />
-      </>
-    );
-  }
+  const hasRows = !isLoading && !failed && strategies !== undefined && strategies.length > 0;
 
   return (
     <RecordBlock
       aside={
-        <>
-          {shelfLoading ? (
-            <span className="sr-only" role="status">
-              {shelfLoadingLabel}
-            </span>
-          ) : null}
-          <Button
-            iconLeft={
-              <RefreshCwIcon
-                aria-hidden="true"
-                className={cn("size-4", shelfLoading && "motion-safe:animate-spin")}
-              />
-            }
-            onClick={onRefresh}
-            size="sm"
-            type="button"
-            variant="ghost"
-          >
-            {t("DashboardMarkets.treasury.refresh")}
-          </Button>
-        </>
+        <StrategiesRefresh
+          mainnetLoading={mainnetLoading}
+          onRefresh={onRefresh}
+          shelfLoading={hasRows && (mainnetLoading || devnetLoading)}
+        />
       }
       hint={t(treasuryStrategiesDisclosureKey(depositsEnabled, providerAccess))}
       title={t("DashboardMarkets.treasury.strategiesTitle")}
     >
+      {/* A failed or empty shelf sits in the middle of the four rows it replaces. */}
       <div className={cn(TREASURY_STRATEGIES_BODY, !isLoading && !hasRows && "justify-center")}>
-        {body}
+        <StrategiesBody
+          devnetFailed={devnetFailed}
+          environment={environment}
+          failed={failed}
+          isLoading={isLoading}
+          mainnetFailed={mainnetFailed}
+          onDeposit={onDeposit}
+          positions={positions}
+          providerAccess={providerAccess}
+          strategies={strategies}
+          unrecordedShareMints={unrecordedShareMints}
+        />
       </div>
     </RecordBlock>
   );
