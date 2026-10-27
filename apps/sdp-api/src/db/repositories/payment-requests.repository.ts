@@ -30,7 +30,7 @@ export async function generatePaymentRequestReference(): Promise<string> {
 }
 
 /**
- * What a request's payment must deliver (ADR 0012, migration 0184): the credit
+ * What a request's payment must deliver (ADR 0012, migration 0186): the credit
  * in base units, with the asset and the decimals its terms had at creation.
  */
 export type PaymentRequestExpectation = Readonly<{

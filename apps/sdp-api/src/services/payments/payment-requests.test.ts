@@ -246,7 +246,7 @@ async function createRequestFor(params: {
   });
 }
 
-/** A request written before expectations (migration 0184): settlement reads its mint. */
+/** A request written before expectations (migration 0186): settlement reads its mint. */
 async function createLegacyRequest(params: {
   token: string;
   amount: string;

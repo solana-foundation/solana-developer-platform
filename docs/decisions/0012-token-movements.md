@@ -134,7 +134,7 @@ them in one place, not adding special cases to every flow.
   balances and the dashboard show their display amount until PR 5, so a user would type one
   amount and move another. /pay keeps the stopgap until PR 3, recurring until PR 3.
 - **Payment requests (PR 3).** A request stores its expectation, the credit in base units with
-  the asset and decimals read at creation (migration 0184); an amount with more decimals than the
+  the asset and decimals read at creation (migration 0186); an amount with more decimals than the
   mint, or a mint the builder refuses, is a 400 then. /pay quotes that credit under the terms it
   reads and builds with `buildTokenMovement`; the Solana Pay reference is the transfer
   instruction's last account, after any hook accounts. Each claim window records its issued
@@ -153,12 +153,12 @@ them in one place, not adding special cases to every flow.
   until PR 5.
 - **Recurring mandates (PR 3).** A recurring payment and its plan store the mandate once: the
   debit in base units, the decimals and the fee tolerance (`maxFeePerPull`, the larger of the
-  current and next epoch's fee for the debit; migration 0185). Each pull reads the terms once
+  current and next epoch's fee for the debit; migration 0187). Each pull reads the terms once
   before its claim; a paused mint, a fee above the tolerance or a destination that requires memos
   holds it as a `failed` attempt with `holdReason`, the period still due. A pull the cron finds
   still held once its period has ended skips the period, as the subscriptions program forfeits an
   elapsed period's allowance. Activation refuses a memo-required destination. A pull's leg is
-  `verified_by` the chain (migration 0186): its observed debit is the instruction's amount and its
+  `verified_by` the chain (migration 0188): its observed debit is the instruction's amount and its
   credit the destination's raw balance delta, read from the `getTransaction` the collection proof
   already makes. It is verified when that debit is the quote's and the fee is within the
   tolerance, which a pull landing in the next epoch may pay instead of the quote's fee. Create,

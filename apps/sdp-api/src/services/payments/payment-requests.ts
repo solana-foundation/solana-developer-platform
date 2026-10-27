@@ -194,7 +194,7 @@ export interface PaymentRequestPayment {
 
 /**
  * What /pay moves for a request. A request recorded before expectations
- * (migration 0184, or by the previous revision during the deploy) is paid as
+ * (migration 0186, or by the previous revision during the deploy) is paid as
  * before: its amount at the decimals /pay reads.
  */
 export function paymentRequestPayment(row: PaymentRequestRow): PaymentRequestPayment {

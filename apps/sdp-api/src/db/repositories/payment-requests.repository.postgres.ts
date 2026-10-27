@@ -37,7 +37,7 @@ import {
 } from "./token-movement-legs.repository";
 
 /**
- * The expectation columns (migration 0184), one variant per asset: all null on
+ * The expectation columns (migration 0186), one variant per asset: all null on
  * a request written before expectations, native SOL at 9 decimals with no
  * mint, or a token naming its mint and program.
  */
