@@ -96,11 +96,12 @@ batching, quota enforcement, configuration and provider telemetry are local
 implementation work. Before production rollout, verify Secret Manager mounts
 and stage wallet coverage using the new revision.
 
-Main pushes auto-deploy the API. Keep its PR in draft until Tokens mounts are
-applied and verified in every target environment. The companion infra PR also
-auto-publishes Grafana on merge without a reviewer gate, so land the secret
-preparation separately, then deploy API telemetry before that observability
-rollout. See its inventory for the required order.
+Main pushes auto-deploy the API. Merge its PR only after Tokens mounts are
+applied and verified in every target environment. Infra #292 now contains
+credential preparation; stage Kora metrics, operational alerts, and dashboards
+follow as separate stacked PRs. Deploy API telemetry before the new operational
+alerts and API/RPC dashboards, which publish to Grafana when merged. Follow
+infra's `docs/runbooks/tokens-pricing-rollout.md` for the release order.
 
 The ticket's future money-decision requirements remain prerequisites for any
 new valuation-based money path: executable/fresh quotes, independent sources,
