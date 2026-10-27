@@ -11,6 +11,7 @@ import {
 import {
   type CreateTransferBatchResult,
   createTransferBatch,
+  retryTransferBatch,
   TransferBatchRequestError,
   type Translate,
 } from "./payments-workspace.data";
@@ -26,6 +27,17 @@ import {
  */
 
 const store = createIdempotencyKeyStore("sdp:payments:transfer-batch:idempotency:v1");
+const retryStore = createIdempotencyKeyStore("sdp:payments:transfer-batch-retry:idempotency:v1");
+
+/**
+ * A batch that ends partially failed keeps its key (APE-462): sending the same
+ * batch again is answered with this one instead of paying the recipients who
+ * were paid. Its failed recipients are finished with a retry
+ * ({@link retryTransferBatchUnderKey}).
+ */
+function batchKeepsKey(status: string): boolean {
+  return status === "partially_failed";
+}
 
 /** @internal Test-only: clear the module-scope tiers so specs are order-independent. */
 export function resetTransferBatchIdempotencyStateForTests(): void {
@@ -139,7 +151,9 @@ export async function sendTransferBatchUnderKey(
   }
   // The batch row exists, so once it is final the key is spent and the next
   // identical batch is a new intent. While it is still processing the key is
-  // kept, so that send is answered by the replay (APE-461).
+  // kept, so that send is answered by the replay (APE-461); a partially failed
+  // batch keeps it for good (APE-462).
+  if (batchKeepsKey(result.batch.status)) return result;
   const settled = settleMoneyIdempotencyKey(store, fingerprint, key, {
     status: 200,
     replayed: false,
@@ -149,9 +163,58 @@ export async function sendTransferBatchUnderKey(
   // A replay repeats the first answer verbatim, so only a read of the batch's
   // current state can show it final and settle the key.
   if (!settled) {
-    settleWhenMovementFinal(MOVEMENT_READ_PATHS.batch(result.batch.id), () =>
-      store.release(fingerprint, key)
-    );
+    settleWhenMovementFinal(MOVEMENT_READ_PATHS.batch(result.batch.id), (status) => {
+      if (!batchKeepsKey(status)) store.release(fingerprint, key);
+    });
   }
   return result;
+}
+
+/** What makes two retry presses the SAME retry: the batch, and the recipients it found failed. */
+export function transferBatchRetryFingerprint(
+  batchId: string,
+  failedRecipientIds: readonly string[]
+): string {
+  return JSON.stringify([batchId, [...failedRecipientIds].sort()]);
+}
+
+/**
+ * Retries a batch's failed recipients under a key kept per batch and failed
+ * set, so a double press, a timeout or a reload is answered by the first
+ * retry instead of sending again. Unlike a send, a recorded answer retires the
+ * key at once, even while the resent recipients are processing: the API only
+ * ever sends recipients that are failed when it runs, so a later retry under
+ * a new key cannot pay anyone twice. An uncertain answer keeps the key, as
+ * for a send.
+ *
+ * @param result - The batch as the dashboard last saw it.
+ * @param t - Translator, for the API's refusal message.
+ * @returns The batch after the retry.
+ */
+export async function retryTransferBatchUnderKey(
+  result: CreateTransferBatchResult,
+  t: Translate
+): Promise<CreateTransferBatchResult> {
+  const fingerprint = transferBatchRetryFingerprint(
+    result.batch.id,
+    result.recipients
+      .filter((recipient) => recipient.status === "failed")
+      .map((recipient) => recipient.id)
+  );
+  const { key, persisted } = retryStore.claim(fingerprint);
+  try {
+    const retried = await retryTransferBatch(result.batch.id, t, { value: key, persisted });
+    retryStore.release(fingerprint, key);
+    return retried;
+  } catch (error) {
+    if (error instanceof TransferBatchRequestError) {
+      const answer = { status: error.status, replayed: error.replayed, code: error.code };
+      settleMoneyIdempotencyKey(retryStore, fingerprint, key, answer);
+      const uncertain = uncertainMoneyAnswerMessage(answer);
+      if (uncertain !== null) {
+        throw new TransferBatchRequestError(t(uncertain), error.status, error.replayed, error.code);
+      }
+    }
+    throw error;
+  }
 }

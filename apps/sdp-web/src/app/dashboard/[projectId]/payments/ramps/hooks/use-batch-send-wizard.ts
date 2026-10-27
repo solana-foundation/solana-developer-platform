@@ -33,6 +33,7 @@ import {
 import { walletBalanceAssetOptions } from "@/app/dashboard/[projectId]/payments/ramps/wallet-options";
 import {
   canonicalTransferBatchRequest,
+  retryTransferBatchUnderKey,
   sendTransferBatchUnderKey,
 } from "@/app/dashboard/[projectId]/payments/transfer-batch-idempotency";
 import type { MessageKey } from "@/i18n/messages";
@@ -265,6 +266,7 @@ export function useBatchSendWizard({
   const { entries, setEntries, setRecipientAmount, toggleRecipient, setManySelected } =
     useBatchRecipientEntries();
   const [submitting, setSubmitting] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const [batchResult, setBatchResult] = useState<CreateTransferBatchResult | null>(null);
 
   const { liveWallets, walletsLoading, liveWalletsError } = usePaymentsActionWallets(
@@ -493,6 +495,41 @@ export function useBatchSendWizard({
     }
   };
 
+  const failedRecipientCount =
+    batchResult?.recipients.filter((recipient) => recipient.status === "failed").length ?? 0;
+
+  // Sends only the recipients the API still finds failed (HOO-2343); the rest
+  // of the batch is never sent again.
+  const retryFailedRecipients = async () => {
+    if (batchResult === null || failedRecipientCount === 0 || retrying) {
+      return;
+    }
+    setRetrying(true);
+    const toastId = toast.loading(t("DashboardPayments.batchSend.retryingFailedRecipients"), {
+      position: "bottom-right",
+    });
+    try {
+      const result = await retryTransferBatchUnderKey(batchResult, t);
+      setBatchResult(result);
+      toast.success(t("DashboardPayments.batchSend.retrySubmitted"), {
+        id: toastId,
+        description: t("Shared.idempotency.processingCheckStatus"),
+        position: "bottom-right",
+      });
+    } catch (error) {
+      toast.error(t("DashboardPayments.batchSend.retryRequestFailed"), {
+        id: toastId,
+        description:
+          error instanceof Error
+            ? error.message
+            : t("DashboardPayments.batchSend.retryRequestFailed"),
+        position: "bottom-right",
+      });
+    } finally {
+      setRetrying(false);
+    }
+  };
+
   const handlePrimary = async () => {
     if (!canProceed) {
       return;
@@ -566,6 +603,9 @@ export function useBatchSendWizard({
     estimateError: estimateErrorMessage(estimateError, t),
     submitting,
     batchResult,
+    failedRecipientCount,
+    retrying,
+    retryFailedRecipients,
     handlePrimary,
     handleSecondary,
     handleBack,

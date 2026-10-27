@@ -490,12 +490,12 @@ export function resetMovementWatchesForTests(): void {
  * stays kept; the next send under it starts a new watch. One watch per path.
  *
  * @param readPath - The movement's GET path ({@link MOVEMENT_READ_PATHS}).
- * @param settle - Retires the kept key.
+ * @param settle - Retires the kept key; it is given the final status.
  * @param statusOf - Reads the movement's status from the GET body.
  */
 export function settleWhenMovementFinal(
   readPath: string,
-  settle: () => void,
+  settle: (status: MoneyMovementStatus) => void,
   statusOf: (json: unknown) => MoneyMovementStatus | null = movementStatusOf
 ): void {
   if (watchedMovements.has(readPath)) return;
@@ -508,7 +508,7 @@ export function settleWhenMovementFinal(
       const status = response.ok ? statusOf(await response.json()) : null;
       if (status !== null && !isMovementInFlight(status)) {
         watchedMovements.delete(readPath);
-        settle();
+        settle(status);
         return;
       }
     } catch {

@@ -792,6 +792,14 @@ function BatchResultView({ wizard }: { wizard: BatchSendWizard }) {
             transactions: batchResult.batch.transactionCount,
           })}
         </p>
+        {wizard.failedRecipientCount > 0 ? (
+          <p className="text-sm text-tertiary">
+            {t("DashboardPayments.batchSend.failedRecipientsNote", {
+              failed: wizard.failedRecipientCount,
+              count: batchResult.batch.recipientCount,
+            })}
+          </p>
+        ) : null}
       </div>
       <div className="flex flex-col gap-0.5">
         {batchResult.recipients.map((recipient) => {

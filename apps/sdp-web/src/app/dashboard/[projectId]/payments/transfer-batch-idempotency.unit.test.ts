@@ -9,6 +9,7 @@ import {
   claimTransferBatchIdempotencyKey,
   releaseTransferBatchIdempotencyKey,
   resetTransferBatchIdempotencyStateForTests,
+  retryTransferBatchUnderKey,
   sendTransferBatchUnderKey,
   transferBatchRequestFingerprint,
 } from "./transfer-batch-idempotency";
@@ -292,6 +293,106 @@ describe("sendTransferBatchUnderKey", () => {
     const keys = sentKeys(fetchMock);
     expect(keys).toHaveLength(3);
     expect(new Set(keys).size).toBe(1);
+  });
+});
+
+describe("partially failed batches (APE-462)", () => {
+  const answer = (status: string, replayed = false) =>
+    Response.json(
+      { data: { batch: { id: "batch_1", status }, recipients: [], transfers: [] } },
+      replayed ? { headers: { "Idempotent-Replayed": "true" } } : undefined
+    );
+  const postedKeys = (fetchMock: ReturnType<typeof vi.fn<typeof fetch>>) =>
+    fetchMock.mock.calls
+      .filter(([, init]) => init?.method === "POST")
+      .map(([, init]) => new Headers(init?.headers).get("Idempotency-Key"));
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  // Sending the same batch again must replay it, not pay the recipients who were paid.
+  it("keeps the key of a batch answered partially failed", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => answer("partially_failed"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendTransferBatchUnderKey(batchRequest(), t);
+    await sendTransferBatchUnderKey(batchRequest(), t);
+
+    const [first, again] = postedKeys(fetchMock);
+    expect(again).toBe(first);
+  });
+
+  it("keeps the key when a GET shows the processing batch ended partially failed", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn<typeof fetch>(async (_input, init) =>
+      init?.method === "GET" ? answer("partially_failed") : answer("processing")
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendTransferBatchUnderKey(batchRequest(), t);
+    await vi.advanceTimersByTimeAsync(MOVEMENT_POLL_INTERVAL_MS);
+    await sendTransferBatchUnderKey(batchRequest(), t);
+
+    const [first, again] = postedKeys(fetchMock);
+    expect(again).toBe(first);
+  });
+});
+
+describe("retryTransferBatchUnderKey", () => {
+  const seen = {
+    batch: { id: "batch_1", status: "partially_failed" },
+    recipients: [
+      { id: "xrec_1", status: "confirmed" },
+      { id: "xrec_2", status: "failed" },
+    ],
+    transfers: [],
+  } as unknown as Parameters<typeof retryTransferBatchUnderKey>[0];
+  const retried = () =>
+    Response.json({
+      data: { batch: { id: "batch_1", status: "processing" }, recipients: [], transfers: [] },
+    });
+  const keys = (fetchMock: ReturnType<typeof vi.fn<typeof fetch>>) =>
+    fetchMock.mock.calls.map(([, init]) => new Headers(init?.headers).get("Idempotency-Key"));
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("posts the batch's retry, and a recorded answer retires the key at once", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => retried());
+    vi.stubGlobal("fetch", fetchMock);
+
+    await retryTransferBatchUnderKey(seen, t);
+    await retryTransferBatchUnderKey(seen, t);
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "/api/dashboard/payments/transfers/batch/batch_1/retry"
+    );
+    const [first, next] = keys(fetchMock);
+    expect(first).toMatch(/^[0-9a-f-]{36}$/);
+    // Safe: the API only sends recipients still failed when it runs.
+    expect(next).not.toBe(first);
+  });
+
+  it("keeps the key on an unknown outcome, so the next press is answered under it", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>(async () => retried())
+      .mockResolvedValueOnce(
+        Response.json(
+          { error: { code: "IDEMPOTENCY_KEY_OUTCOME_UNKNOWN", message: "use a new key" } },
+          { status: 409 }
+        )
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(retryTransferBatchUnderKey(seen, t)).rejects.toThrow(
+      "Shared.idempotency.outcomeUnknownCheckList"
+    );
+    await retryTransferBatchUnderKey(seen, t);
+
+    const [unknown, next] = keys(fetchMock);
+    expect(next).toBe(unknown);
   });
 });
 
