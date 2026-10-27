@@ -155,7 +155,8 @@ const STRATEGIES_PAGE_SIZE = 100;
 const STRATEGIES_PAGE_LIMIT = 20;
 
 /** Minimal page shape the allowlist actually reads; anything else fails
- * closed into the route's generic 502 instead of narrowing the allowlist. */
+ * closed (every vault left out of the batch, nothing cached) instead of
+ * narrowing the allowlist. */
 const strategiesPageSchema = z.object({
   strategies: z.array(
     z.object({
