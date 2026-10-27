@@ -681,7 +681,9 @@ browser pass on `/dashboard/markets/embedded-yield` and
   after `.whitespace-normal`), and under `table-fixed` the still-unwrapped text
   overflows into the next column. Declare wrapping and clamping on the child
   spans, where nothing competes. Long text wraps inside a bounded clamp or truncates with
-  a `title` carrying the full string; numbers never truncate.
+  a `title` carrying the full string; numbers never truncate. In a dialog's
+  `DetailRow`, an amount takes `fit="figure"` (whole on one line, its label
+  wraps) and a name `fit="wrap"`.
 - Provider-unconfigured (503) must degrade to a quiet notice, never crash. Note
   the asymmetry: the money-in writes answer 403 even for *missing credentials*,
   so read `error.code`, not just the status, before labelling a failure.

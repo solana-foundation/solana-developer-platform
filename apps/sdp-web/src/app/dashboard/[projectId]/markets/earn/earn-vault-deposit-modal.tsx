@@ -162,12 +162,12 @@ function DepositQuoteSummaryRows({
   return (
     <>
       {quote.kind === "quoted" && quote.preview.blockingIssues.length === 0 ? (
-        <DetailRow label={t("DashboardEarn.deposit.vaultExpectedShares")} wrap>
+        <DetailRow fit="figure" label={t("DashboardEarn.deposit.vaultExpectedShares")}>
           <span className="tabular-nums">{quote.preview.sharesOut}</span>
         </DetailRow>
       ) : null}
       {minSharesOut !== undefined ? (
-        <DetailRow label={t("DashboardEarn.deposit.vaultMinShares")} wrap>
+        <DetailRow fit="figure" label={t("DashboardEarn.deposit.vaultMinShares")}>
           <span className="tabular-nums">{minSharesOut}</span>
         </DetailRow>
       ) : null}
@@ -567,15 +567,15 @@ function DepositResult({
       <p className="mt-2 text-body text-secondary">{copy.body}</p>
 
       <DetailList className="mt-5" variant="summary">
-        <DetailRow label={t("DashboardEarn.deposit.vaultStrategy")} wrap>
+        <DetailRow fit="wrap" label={t("DashboardEarn.deposit.vaultStrategy")}>
           {deposit.strategy.name}
         </DetailRow>
-        <DetailRow label={t("DashboardEarn.withdraw.amountLabel")} wrap>
+        <DetailRow fit="figure" label={t("DashboardEarn.withdraw.amountLabel")}>
           <span className="tabular-nums">
             {formatTokenValue(outcome.amount, fundingMint, locale)}
           </span>
         </DetailRow>
-        <DetailRow label={t("DashboardEarn.deposit.vaultFrom")} wrap>
+        <DetailRow fit="wrap" label={t("DashboardEarn.deposit.vaultFrom")}>
           {outcome.walletName}
         </DetailRow>
         <DetailRow label={t("DashboardEarn.deposit.vaultTransaction")}>
@@ -736,7 +736,7 @@ function DepositSwapSummaryRow({
 }) {
   if (!active) return null;
   return (
-    <DetailRow label={label} wrap>
+    <DetailRow fit="figure" label={label}>
       {value}
     </DetailRow>
   );
@@ -794,20 +794,20 @@ function DepositReviewDetails({
 
   return (
     <DetailList className="mt-5" variant="summary">
-      <DetailRow label={t("DashboardEarn.deposit.vaultAmount")} wrap>
+      <DetailRow fit="figure" label={t("DashboardEarn.deposit.vaultAmount")}>
         <span className="tabular-nums">{formatTokenValue(amount, fundingMint, locale)}</span>
       </DetailRow>
       {selectedWallet ? (
-        <DetailRow label={t("DashboardEarn.deposit.vaultFrom")} wrap>
+        <DetailRow fit="wrap" label={t("DashboardEarn.deposit.vaultFrom")}>
           {walletDisplayName(selectedWallet, t("DashboardEarn.deposit.walletUnnamed"))}
         </DetailRow>
       ) : null}
       <DetailRow label={t("DashboardEarn.deposit.vaultPayWith")}>{fundingSymbol}</DetailRow>
-      <DetailRow label={t("DashboardEarn.deposit.vaultStrategy")} wrap>
+      <DetailRow fit="wrap" label={t("DashboardEarn.deposit.vaultStrategy")}>
         {strategyName}
       </DetailRow>
       {backing ? (
-        <DetailRow label={t("DashboardEarn.deposit.vaultBacking")} wrap>
+        <DetailRow fit="wrap" label={t("DashboardEarn.deposit.vaultBacking")}>
           {backing}
         </DetailRow>
       ) : null}

@@ -357,7 +357,7 @@ function WithdrawalResult({
       <p className="mt-2 text-body text-secondary">{copy.body}</p>
 
       <DetailList className="mt-5" variant="summary">
-        <DetailRow label={t("DashboardEarn.deposit.vaultStrategy")} wrap>
+        <DetailRow fit="wrap" label={t("DashboardEarn.deposit.vaultStrategy")}>
           {positionName}
         </DetailRow>
         <DetailRow
@@ -366,7 +366,7 @@ function WithdrawalResult({
               ? "DashboardEarn.vaultWithdraw.sharesLabel"
               : "DashboardEarn.vaultWithdraw.amountLabel"
           )}
-          wrap
+          fit="figure"
         >
           <span className="tabular-nums">
             {settlement === "provider_order"
@@ -555,7 +555,7 @@ function ProviderOrderReviewRows({ amount }: { amount: string }) {
   const t = useTranslations();
 
   return (
-    <DetailRow label={t("DashboardEarn.vaultWithdraw.sharesLabel")} wrap>
+    <DetailRow fit="figure" label={t("DashboardEarn.vaultWithdraw.sharesLabel")}>
       <span className="tabular-nums">{amount}</span>
     </DetailRow>
   );
@@ -579,19 +579,19 @@ function AtomicReviewRows({
 
   return (
     <>
-      <DetailRow label={t("DashboardEarn.vaultWithdraw.amountLabel")} wrap>
+      <DetailRow fit="figure" label={t("DashboardEarn.vaultWithdraw.amountLabel")}>
         <span className="tabular-nums">{formatTokenValue(amount, tokenMint, locale)}</span>
       </DetailRow>
       <DetailRow label={t("DashboardEarn.vaultWithdraw.receiveAs")}>{assetSymbol}</DetailRow>
       {quote.kind === "quoted" && quote.preview.blockingIssues.length === 0 ? (
-        <DetailRow label={t("DashboardEarn.vaultWithdraw.expectedAmount")} wrap>
+        <DetailRow fit="figure" label={t("DashboardEarn.vaultWithdraw.expectedAmount")}>
           <span className="tabular-nums">
             {formatTokenValue(quote.preview.assetsOut, tokenMint, locale)}
           </span>
         </DetailRow>
       ) : null}
       {minAmountOut !== undefined ? (
-        <DetailRow label={t("DashboardEarn.vaultWithdraw.minAmount")} wrap>
+        <DetailRow fit="figure" label={t("DashboardEarn.vaultWithdraw.minAmount")}>
           <span className="tabular-nums">{formatTokenValue(minAmountOut, tokenMint, locale)}</span>
         </DetailRow>
       ) : null}
@@ -654,7 +654,7 @@ function WithdrawalReviewStep(props: WithdrawalReviewStepProps) {
   return (
     <>
       <DetailList className="mt-5" variant="summary">
-        <DetailRow label={t("DashboardEarn.deposit.vaultStrategy")} wrap>
+        <DetailRow fit="wrap" label={t("DashboardEarn.deposit.vaultStrategy")}>
           {positionDisplayName(position)}
         </DetailRow>
         <ReviewAmountRows

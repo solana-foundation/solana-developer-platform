@@ -1051,7 +1051,8 @@ describe("slippage-floored providers", () => {
   });
 
   it("keeps the review's share figures whole instead of clipping their digits", async () => {
-    // A long decimal reads in full right before confirm; it wraps, never ends in an ellipsis.
+    // A long decimal reads in full and on one line right before confirm: no ellipsis, no digit
+    // pushed onto the next line.
     primeQuote("123456789.123456");
     render(
       <EarnVaultDepositModal projectId={PROJECT_ID} strategy={flooredStrategy} onClose={vi.fn()} />
@@ -1068,6 +1069,7 @@ describe("slippage-floored providers", () => {
       const value = screen.getByText(label).closest("dt")?.nextElementSibling;
       expect(value?.tagName).toBe("DD");
       expect(value?.className).not.toContain("truncate");
+      expect(value?.className).toContain("whitespace-nowrap");
     }
   });
 
