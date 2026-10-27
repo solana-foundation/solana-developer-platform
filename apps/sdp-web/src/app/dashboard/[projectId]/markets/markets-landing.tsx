@@ -38,8 +38,10 @@ function MarketsPathGroup({
  * is on: the same check its segment layout 404s on.
  */
 export async function MarketsLanding() {
-  const [t, earnEnabled, dvpEnabled] = await Promise.all([getTranslations(), earn(), dvp()]);
-  const [treasuryHref, earnProgramHref, dvpHref] = await Promise.all([
+  const [t, earnEnabled, dvpEnabled, treasuryHref, earnProgramHref, dvpHref] = await Promise.all([
+    getTranslations(),
+    earn(),
+    dvp(),
     requestProjectHref(DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions),
     requestProjectHref(DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram),
     requestProjectHref(DASHBOARD_MARKETS_SUBNAV_HREFS.dvp),
