@@ -481,8 +481,16 @@ export class SponsorshipBudgetRedis {
     return `__reservation:${input.reservationId}:${input.attempt}`;
   }
 
+  /**
+   * The control entry for one policy row. Keyed by the row's id, not the
+   * project, so a recreated project row (version 1 again) gets a fresh entry
+   * instead of losing every forward-only sync to the old row's higher version.
+   *
+   * @param policy - The policy.
+   * @returns The field in the environment's control hash.
+   */
   private controlField(policy: SponsorshipBudgetPolicy): string {
-    return policy.scopeType === "global" ? "global:default" : `project:${policy.projectId}`;
+    return `${policy.scopeType}:${policy.id}`;
   }
 
   private ttlUntilNextHour(): number {
