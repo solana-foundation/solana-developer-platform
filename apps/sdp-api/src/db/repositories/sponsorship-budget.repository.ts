@@ -150,7 +150,7 @@ export class SponsorshipBudgetRepository {
   async listPolicies(network?: SponsorshipNetwork): Promise<SponsorshipBudgetPolicy[]> {
     const rows = await this.db.queryMany<PolicyRow>(
       `SELECT * FROM sponsorship_budget_policies
-       WHERE (?::text IS NULL OR network = ?) AND scope_type <> 'organization'
+       WHERE (?::text IS NULL OR network = ?)
        ORDER BY network, CASE scope_type WHEN 'global' THEN 0 ELSE 1 END, scope_id NULLS FIRST`,
       [network ?? null, network ?? null]
     );
