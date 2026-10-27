@@ -1,6 +1,5 @@
 const TRACE_ID_HEADER = "X-SDP-Trace-ID";
 const TRACE_SOURCE_HEADER = "X-SDP-Trace-Source";
-const TRACE_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
 
 export interface TraceContext {
   traceId: string;
@@ -14,24 +13,6 @@ interface TimedTraceStep {
 
 function roundDuration(durationMs: number): number {
   return Math.round(durationMs * 10) / 10;
-}
-
-function normalizeTraceHeader(value: string | null): string | null {
-  if (!value) {
-    return null;
-  }
-
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return null;
-  }
-
-  const candidate = trimmed.slice(0, 128);
-  if (!TRACE_ID_PATTERN.test(candidate)) {
-    return null;
-  }
-
-  return candidate;
 }
 
 function emitTraceLog(event: string, payload: Record<string, unknown>): void {
@@ -51,11 +32,10 @@ export function getTraceHeaders(context: TraceContext): Record<string, string> {
   };
 }
 
-export function resolveTraceContext(source: string, request?: Request): TraceContext {
-  const incomingTraceId = normalizeTraceHeader(request?.headers.get(TRACE_ID_HEADER) ?? null);
-
+export function resolveTraceContext(source: string, _request?: Request): TraceContext {
   return {
-    traceId: incomingTraceId ?? `web_${crypto.randomUUID().replaceAll("-", "")}`,
+    // A caller-controlled header must not become a log correlation key.
+    traceId: `web_${crypto.randomUUID().replaceAll("-", "")}`,
     source,
   };
 }

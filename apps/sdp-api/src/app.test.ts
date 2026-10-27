@@ -216,6 +216,32 @@ describe("createApp plugin registration", () => {
   });
 });
 
+describe("createApp route log privacy", () => {
+  it("keeps unmatched and dynamic path secrets out of timing and error logs", async () => {
+    const info = vi.spyOn(rootLogger, "info").mockImplementation(() => undefined);
+    const error = vi.spyOn(rootLogger, "error").mockImplementation(() => undefined);
+    try {
+      const app = createApp({ rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY });
+      app.get("/health/fail/:secret", () => {
+        throw new Error("test trigger");
+      });
+      const unmatched = "/health/sk_path_secret?api_key=sk_query_secret";
+      const failed = "/health/fail/sk_path_secret?api_key=sk_query_secret";
+
+      expect((await app.request(unmatched, {}, baseEnv)).status).toBe(404);
+      expect((await app.request(failed, {}, baseEnv)).status).toBe(500);
+
+      const logged = JSON.stringify([info.mock.calls, error.mock.calls]);
+      expect(logged).not.toContain("sk_path_secret");
+      expect(logged).not.toContain("sk_query_secret");
+      expect(error).toHaveBeenCalled();
+    } finally {
+      info.mockRestore();
+      error.mockRestore();
+    }
+  });
+});
+
 describe("createApp onError", () => {
   beforeEach(async () => {
     // These requests are anonymous, so they share the per-IP anonymous window

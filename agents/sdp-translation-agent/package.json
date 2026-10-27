@@ -19,5 +19,10 @@
   },
   "engines": {
     "node": "24.x"
+  },
+  "pnpm": {
+    "overrides": {
+      "zod": "4.6.6"
+    }
   }
 }

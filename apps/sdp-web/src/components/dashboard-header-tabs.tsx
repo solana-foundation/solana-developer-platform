@@ -11,6 +11,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { DashboardHeaderTabsTrailingContext } from "@/components/dashboard-header-tabs-trailing-context";
+import type { DashboardCapabilities } from "@/lib/dashboard-access";
 import {
   selectActiveDashboardTab,
   useDashboardTab,
@@ -18,8 +19,11 @@ import {
 } from "@/lib/dashboard-url-state";
 
 export interface DashboardHeaderTabsConfig {
-  /** Tab options in display order; the first tab is the default (no `?tab=` param). */
-  tabs: readonly { id: string; label: string }[];
+  /**
+   * Tab options in display order; the first tab is the default (no `?tab=` param). A tab naming
+   * a capability is left out for a member without it, as a header action is.
+   */
+  tabs: readonly { id: string; label: string; capability?: keyof DashboardCapabilities }[];
   /**
    * Hide the tab list on mobile viewports and snap back to the default tab.
    * Used by the Overview / API Playground pair, where the playground is

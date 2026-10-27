@@ -91,6 +91,7 @@ import { EarnVaultWithdrawalRequestsCard } from "@/app/dashboard/[projectId]/mar
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { TokenMark } from "@/components/token-mark";
 import {
+  useCanWrite,
   useDashboardWorkspace,
   useOptionalDashboardWorkspace,
 } from "@/contexts/dashboard-workspace-context";
@@ -880,7 +881,9 @@ function StrategyDepositAction({
   strategy: EarnStrategy;
 }) {
   const t = useTranslations();
+  const canWrite = useCanWrite();
   const canDeposit = availability === "available" && !sandboxMainnet;
+  if (!canWrite) return null;
   const button = (
     <Button
       className={sandboxMainnet ? "pointer-events-none" : undefined}
@@ -1303,6 +1306,7 @@ function TreasuryPositionActions({
   position: EarnVaultPosition;
 }) {
   const t = useTranslations();
+  const canWrite = useCanWrite();
   // The exit routes (PRO-1702). Deliberately NOT gated on availability,
   // surfacing, or environment: money out beats money off (ADR 0002), so the
   // verbs stay live wherever a position exists. A provider whose exit SDP
@@ -1315,6 +1319,7 @@ function TreasuryPositionActions({
     position.shares === undefined || !isEarnVaultHoldingEmpty({ shares: position.shares });
   const redeemable = position.parIntermediate?.withdrawableAmount;
   const holdsIntermediate = redeemable !== undefined && isPositiveDecimal(redeemable);
+  if (!canWrite) return null;
   return (
     <div className="flex justify-end gap-2">
       {holdsIntermediate ? (
@@ -1359,6 +1364,7 @@ function ExistingProgramsCard({
 }) {
   const t = useTranslations();
   const locale = useLocale();
+  const canWrite = useCanWrite();
   if (programs.length === 0) return null;
 
   return (
@@ -1406,27 +1412,29 @@ function ExistingProgramsCard({
                       </Badge>
                     </TableCell>
                     <TableCell align="right">
-                      <div className="flex flex-col items-end gap-1.5">
-                        {/* An open provider id may outlive its runtime capability.
+                      {canWrite ? (
+                        <div className="flex flex-col items-end gap-1.5">
+                          {/* An open provider id may outlive its runtime capability.
                             Never open a provider-specific withdrawal form unless
                             the shared contract declares a Solana payout lane. */}
-                        <Button
-                          data-earn-withdraw-focus-fallback={program.id}
-                          disabled={program.wallet.status === "creating" || !withdrawalAvailable}
-                          iconLeft={<ArrowUpRightIcon />}
-                          onClick={() => onWithdraw(program)}
-                          size="sm"
-                          type="button"
-                          variant="secondary"
-                        >
-                          {t("DashboardMarkets.treasury.withdraw")}
-                        </Button>
-                        {!withdrawalAvailable ? (
-                          <span className="text-[11px] leading-4 text-tertiary">
-                            {t("DashboardMarkets.treasury.providerWithdrawalUnavailable")}
-                          </span>
-                        ) : null}
-                      </div>
+                          <Button
+                            data-earn-withdraw-focus-fallback={program.id}
+                            disabled={program.wallet.status === "creating" || !withdrawalAvailable}
+                            iconLeft={<ArrowUpRightIcon />}
+                            onClick={() => onWithdraw(program)}
+                            size="sm"
+                            type="button"
+                            variant="secondary"
+                          >
+                            {t("DashboardMarkets.treasury.withdraw")}
+                          </Button>
+                          {!withdrawalAvailable ? (
+                            <span className="text-[11px] leading-4 text-tertiary">
+                              {t("DashboardMarkets.treasury.providerWithdrawalUnavailable")}
+                            </span>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </TableCell>
                   </TableRow>
                 );

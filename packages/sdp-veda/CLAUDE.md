@@ -232,37 +232,82 @@ publishes no vault discovery and there is nothing to discover: unlike Kamino's
 permissionless registry, a Veda vault reaches SDP only by being named in
 `VEDA_DEPLOYMENTS`.
 
-## Position reads reuse what does not change
+## Position reads and the queue lifecycle reuse what does not change
 
 The SDK validates all three programs in its constructor, re-reads vault state
 inside every public method and follows every `getMultipleAccounts` with a
-`getBlockTime`, so a client per read cost 22 requests per holding.
-`readVedaPosition` therefore keeps one SDK client per (cluster, endpoint,
-deployment), and the vault's share mint, share decimals and fronted asset mint
-per (cluster, endpoint, vault), for `VEDA_READ_CACHE_TTL_MS`. Each store first
-drops expired entries and caps the caches at 32 clients and 256 facts, so new
-endpoints and vaults never grow them unbounded. Failures are never
+`getBlockTime`, so a client per call cost 22 requests per holding and 24 per
+withdrawal-options read. `readVedaPosition` and every queue-lifecycle function
+therefore share one SDK client per (cluster, endpoint, commitment, deployment)
+(`sharedClient`; the finalized request reads get their own), and the vault's
+share mint, share decimals, vault id and fronted asset mint per (cluster,
+endpoint, vault), plus that mint's decimals, for `VEDA_READ_CACHE_TTL_MS`. Each
+store first drops expired entries and caps the caches at 32 clients and 256
+facts, so new endpoints and vaults never grow them unbounded. Failures are never
 cached, and a client whose program validation rejects is evicted at once: the
 SDK would otherwise keep that rejection for the client's lifetime. An asset
-removed from a vault is therefore noticed up to one TTL late on reads only,
-with the value unavailable meanwhile. The cached share mint is re-checked on
-every read, at no RPC cost, against the share account the SDK derives from live
-vault state; a mismatch drops the cached facts and re-reads the state.
+removed from a vault is therefore noticed up to one TTL late: reads show the
+value unavailable, and the queue's live asset-data reads fail the operation,
+meanwhile. The cached share mint is re-checked on every position read, at no
+RPC cost, against the share account the SDK derives from live vault state; a
+mismatch drops the cached facts and re-reads the state. The vault id cannot
+drift: the SDK refuses a vault state that is not the program's PDA for its own
+id.
 
 That client's transport (`createVedaReadRpc`) shares identical in-flight reads
 (joined only after the caller's read floor and under 2 s after the send, so a
 stalled request never captures later reads) and reuses a slot's block time. It
-shares only the methods a position read
-sends (`getMultipleAccounts`, `getAccountInfo`, `getProgramAccounts`,
-`getBlockTime`); a send, a simulation or a blockhash always goes out on its own.
+shares only the methods the SDK's reads send (`getMultipleAccounts`,
+`getAccountInfo`, `getProgramAccounts`, `getBlockTime`); a send, a simulation
+or a blockhash always goes out on its own, which is what lets queue builds use
+it too.
 It sits BELOW `withRpcReadContext`, so a minimum-slot read never shares a
 request with an unscoped one. The shared fills (client construction, static
 facts) run outside every caller's `withMinimumRpcSlot` scope: they are static,
 and one scoped caller's slot lag must not fail an unscoped caller that joined
 the same fill. The holding and its value stay live, in the caller's scope, on
 every read (devnet: 22 requests became 10 cold and 5 warm, 6 when the read
-straddles a slot). Builds, quotes and
-queue reads keep a fresh `client()` per call.
+straddles a slot). Deposit and instant-exit builds and quotes still keep a
+fresh `client()` per call.
+
+## The queue lifecycle reads each account once per operation
+
+Every `VedaVaultDirectClient` operation attempt runs in one scope
+(`withRuntime` opens `withVedaOperationReads`, `rpc.ts`). Each queue function
+(options, preview, request build, cancel build, the request read) first reads
+every account its SDK calls will fetch in ONE `getMultipleAccounts`
+(`holdAccounts`), naming them from the cached facts with the SDK's exported PDA
+helpers, then runs the SDK calls. Inside the scope the transport answers a
+`getMultipleAccounts` from an answer the operation already holds when that
+answer covers every address, under the same config, at a slot no older than the
+request's `minContextSlot`: exactly what the narrower request would have
+returned at that slot, and the one consistent snapshot the SDK's own
+`minContextSlot: preflight.slot` re-read asks for. Before this, one request
+build fetched the vault state 15 times. Requests and answers are parsed with
+zod before anything is held, and the SDK's `getState` identity (share mint,
+vault id) where it crosses into the cached facts.
+
+Live still means live. The batched read runs in the caller's scope (read floor,
+minimum slot) on every call, and held answers die with the operation, so nothing
+value-bearing outlives it. Only plain `getMultipleAccounts` is held or served,
+never a slice, an error or another method. A build's own quote runs inside the
+build's operation and shares its read, and the API's failover re-attempt opens a
+fresh scope. A function called outside the client (the Surfpool proof) has no
+scope, so nothing is served and its batch is one extra request. An account the
+SDK reads that the batch did not name (an oracle feed taken from live asset
+data) is fetched on its own: an SDK upgrade that reads something new costs
+requests, never correctness, and `sdk-rpc-budget.test.ts` shows it as a second
+account list.
+
+Devnet, 2026-10-26, warm, before → after: withdrawal options 24 → 2, queued
+preview 22 → 2 (3 on the first, which reads the mint's decimals), request build
+66 → 2, sponsored first request 68 → 4 (two live rent minima), request read
+20 → 2, and a cancel build the SDK refused at its deadline check, after its
+reads, 26 → 2. Every call is two round trips, the batch and then its slot's
+block time, and three for a sponsored first request, whose rent minima follow
+the plan. A cold options read (first per endpoint and TTL) costs 8: the
+program validations, the facts fill and the asset listing come first by
+necessity.
 
 ## Compliance approvals are not implemented
 
@@ -305,11 +350,15 @@ the committed IDLs against the SDK's shipped copies AND their recorded SHA-256s.
 Veda ABI change would otherwise become a silently wrong share mint on a
 customer's row. If Veda changes the ABI, this fails on the next `pnpm install`.
 
-`sdk-rpc-budget.test.ts` pins a position read's requests and round trips
-through the real SDK, over devnet accounts recorded in
-`src/fixtures/devnet-position-read.json`: one holder 10 cold and 5 warm, two
-concurrent holders 11 and 6, each phase at one slot. A change that adds a
-request fails it; change the pinned counts only with the before/after stated.
+`sdk-rpc-budget.test.ts` pins requests, round trips and account lists through
+the real SDK over devnet accounts recorded in `src/fixtures/`, each phase at its
+own slot, with outputs equal to what the pre-change code returned from the same
+bytes. `devnet-position-read.json`: one holder 10 cold and 5 warm, two
+concurrent holders 11 and 6. `devnet-queued-withdrawal.json` (absent accounts
+recorded as `null`): options 8 cold and 2 warm, preview 3 then 2, request build
+2, sponsored first request 4, finalized request read 9 cold and 2 warm. A
+change that adds a request fails it; change the pinned counts only with the
+before/after stated.
 
 `sdk.smoke.test.ts` is an env-gated live-RPC diagnostic, skipped when unset. It takes its deployment from the environment
 (rather than `VEDA_DEPLOYMENTS`) so it can exercise a candidate deployment

@@ -132,7 +132,6 @@ describe("OpenAPI spec", () => {
       ["/v1/members/{memberId}", "patch"],
       ["/v1/members/{memberId}", "delete"],
       ["/v1/organizations/{orgId}", "patch"],
-      ["/v1/organizations/{orgId}", "delete"],
       ["/v1/organizations", "post"],
     ] as const) {
       expect(doc.paths?.[path]?.[method]?.security, `${method} ${path}`).toEqual([

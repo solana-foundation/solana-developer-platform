@@ -1,5 +1,6 @@
 import { withRpcReadContext } from "@sdp/rpc/read-context";
 import { withReadSocketRetry } from "@sdp/rpc/socket-retry";
+import { markRpcAttemptDeadline } from "@sdp/rpc/telemetry";
 import type { Address } from "@solana/kit";
 import {
   createDefaultRpcTransport,
@@ -32,11 +33,12 @@ function withTimeout(transport: RpcTransport, timeoutMs: number): RpcTransport {
   const scopedTransport = withRpcReadContext(transport);
   return async <TResponse>(config: Parameters<RpcTransport>[0]) => {
     const controller = new AbortController();
+    const deadlineSignal = markRpcAttemptDeadline(controller.signal);
     const deadlineReason = new Error("WisdomTree RPC deadline elapsed");
     const timer = setTimeout(() => controller.abort(deadlineReason), timeoutMs);
     const signal = config.signal
-      ? AbortSignal.any([config.signal, controller.signal])
-      : controller.signal;
+      ? AbortSignal.any([config.signal, deadlineSignal])
+      : deadlineSignal;
     try {
       return await scopedTransport<TResponse>({ ...config, signal });
     } catch (cause) {
@@ -57,7 +59,7 @@ export function createWisdomTreeChainReader(
   // A read whose pooled socket died is re-sent below the read context, so a
   // minimum-slot scope only sees the attempt that answered.
   const rpc = createSolanaRpcFromTransport(
-    withTimeout(withReadSocketRetry(createDefaultRpcTransport({ url: rpcUrl })), timeoutMs)
+    withTimeout(withReadSocketRetry(createDefaultRpcTransport({ url: rpcUrl }), rpcUrl), timeoutMs)
   );
   return {
     async getAccount(accountAddress) {

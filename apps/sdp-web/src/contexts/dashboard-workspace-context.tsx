@@ -238,3 +238,12 @@ export function useDashboardWorkspace() {
 export function useOptionalDashboardWorkspace() {
   return useContext(DashboardWorkspaceContext);
 }
+
+/**
+ * Whether the member may change anything: false for a read-only member, whose
+ * page hides every control that writes. Needs the workspace, so a component
+ * rendered outside one fails rather than showing writes.
+ */
+export function useCanWrite(): boolean {
+  return useDashboardWorkspace().dashboardAccess.capabilities.canWrite;
+}

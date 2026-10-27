@@ -13,7 +13,8 @@ import {
 import { shortenAddress } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-view-data";
 import { WalletsTable } from "@/app/dashboard/[projectId]/integrations/private-channels/wallets/wallets-table";
 import { getTranslations } from "@/i18n/server";
-import { createSdpApiClient } from "@/lib/sdp-api";
+import { resolveDashboardAccess } from "@/lib/dashboard-access";
+import { createSdpApiClient, requestMemberRole } from "@/lib/sdp-api";
 import { ChannelActionsMenu } from "./channel-actions-menu";
 
 type Translate = Awaited<ReturnType<typeof getTranslations>>;
@@ -89,11 +90,14 @@ export default async function PrivateChannelDetailPage({
 }) {
   await requirePrivateChannelsAccess();
 
-  const [{ instanceId, channelId }, t, client] = await Promise.all([
+  const [{ instanceId, channelId }, t, client, memberRole] = await Promise.all([
     params,
     getTranslations(),
     createSdpApiClient(),
+    requestMemberRole(),
   ]);
+  // Every item in the actions menu changes the connection, so a read-only member gets none.
+  const { canWrite } = resolveDashboardAccess(memberRole).capabilities;
   const result = await loadPrivateChannelDetail(instanceId, channelId, t, client);
   if (!result.ok) return <PrivateChannelsLoadError message={result.error} />;
 
@@ -129,12 +133,14 @@ export default async function PrivateChannelDetailPage({
               {channel.description || t("DashboardPrivateChannels.channelDetail.description")}
             </p>
           </div>
-          <ChannelActionsMenu
-            instance={activeInstance}
-            enrollTriggerId={enrollWalletTriggerId}
-            canEnrollWallet={canEnrollWallet}
-            enrollDisabledReason={enrollDisabledReason}
-          />
+          {canWrite ? (
+            <ChannelActionsMenu
+              instance={activeInstance}
+              enrollTriggerId={enrollWalletTriggerId}
+              canEnrollWallet={canEnrollWallet}
+              enrollDisabledReason={enrollDisabledReason}
+            />
+          ) : null}
         </div>
 
         <dl className="grid gap-px border-border-default border-t bg-border-default sm:grid-cols-2 lg:grid-cols-4">
@@ -181,6 +187,7 @@ export default async function PrivateChannelDetailPage({
         loadError={loadWalletsError}
         showBalance={false}
         enrollTriggerId={enrollWalletTriggerId}
+        canWrite={canWrite}
       />
 
       <ChannelTokensPanel channelName={channel.name} tokens={tokens} loadError={loadTokensError} />

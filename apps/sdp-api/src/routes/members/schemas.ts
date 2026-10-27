@@ -3,7 +3,7 @@ import { z } from "zod";
 
 export const inviteSchema = z.object({
   email: z.string().email(),
-  role: z.enum(["admin", "member"]),
+  role: z.enum(ORGANIZATION_ROLES),
 });
 
 export const updateMemberRoleSchema = z.object({

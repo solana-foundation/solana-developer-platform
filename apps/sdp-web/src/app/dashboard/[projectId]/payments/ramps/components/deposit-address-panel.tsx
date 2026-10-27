@@ -37,6 +37,7 @@ import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments
 import { DepositAddressSkeleton } from "@/app/dashboard/[projectId]/payments/payments-route-skeletons";
 import { fetchTransfers } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import { usePaymentsActionWallets } from "@/app/dashboard/[projectId]/payments/ramps/hooks/use-payments-action-wallets";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 
@@ -406,6 +407,8 @@ export function DepositAddressPanel({
   issuedTokenSymbolsByMint: Record<string, string>;
 }) {
   const t = useTranslations();
+  // Wallet setup is for custody managers; anyone else gets the empty state alone.
+  const canManageCustody = useDashboardWorkspace().dashboardAccess.capabilities.canManageCustody;
   const locale = useLocale();
   const cluster = useSolanaCluster();
   const { liveWallets, walletsLoading, liveWalletsError } = usePaymentsActionWallets(
@@ -443,12 +446,14 @@ export function DepositAddressPanel({
         message={t("DashboardPayments.depositAddress.noWalletTitle")}
         description={t("DashboardPayments.depositAddress.noWalletDescription")}
         action={
-          <Button asChild>
-            <Link href="/dashboard/wallets/setup">
-              <PlusIcon className="size-4" aria-hidden="true" />
-              {t("DashboardPayments.depositAddress.createWallet")}
-            </Link>
-          </Button>
+          canManageCustody ? (
+            <Button asChild>
+              <Link href="/dashboard/wallets/setup">
+                <PlusIcon className="size-4" aria-hidden="true" />
+                {t("DashboardPayments.depositAddress.createWallet")}
+              </Link>
+            </Button>
+          ) : undefined
         }
       />
     );

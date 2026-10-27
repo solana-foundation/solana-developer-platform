@@ -563,7 +563,11 @@ accuracy:
   requests through a fake transport.
 
 Reference point: Veda position reads went from 22 requests per holding to 10
-cold and 5-6 warm under these rules, with identical values.
+cold and 5-6 warm under these rules, with identical values. Its queued-withdrawal
+paths went from 22-68 requests per operation to 2 warm (4 for a sponsored first
+request), by reading every account the SDK touches in one batch and serving the
+SDK's own re-reads from it (`@sdp/veda` CLAUDE.md, "The queue lifecycle reads
+each account once per operation").
 
 ## Conventions
 

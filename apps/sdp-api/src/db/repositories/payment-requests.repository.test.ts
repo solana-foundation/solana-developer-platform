@@ -701,6 +701,51 @@ describe("PaymentRequestsRepository (postgres)", () => {
       expect(rows.map((row) => row.id)).not.toContain(noClaim.id);
     });
 
+    it("probes for an open sponsored window in one environment only", async () => {
+      const systemRepo = createSystemPaymentRequestsRepository(env);
+      const request = await repo.createPaymentRequest(
+        createInput({ token: SOL_MINT, expiresAt: null })
+      );
+      // Awaiting without a window: the hot lane has no height to compare.
+      expect(await systemRepo.hasHotPaymentRequests({ environment: "sandbox" })).toBe(false);
+
+      // Any window counts, live or not: the lane's height bound decides that.
+      await claimWindow(request.id, "10");
+      expect(await systemRepo.hasHotPaymentRequests({ environment: "sandbox" })).toBe(true);
+      expect(await systemRepo.hasHotPaymentRequests({ environment: "production" })).toBe(false);
+
+      // An expired request belongs to the expiry lane.
+      await updateRow(request.id, { expires_at: "2020-01-01T00:00:00.000Z" });
+      expect(await systemRepo.hasHotPaymentRequests({ environment: "sandbox" })).toBe(false);
+    });
+
+    it("probes for a lapsed request due for its expiry check in one environment only", async () => {
+      const systemRepo = createSystemPaymentRequestsRepository(env);
+      const checkedBefore = ago(45 * SECOND);
+      await repo.createPaymentRequest(
+        createInput({ token: SOL_MINT, expiresAt: "2099-01-01T00:00:00.000Z" })
+      );
+      expect(
+        await systemRepo.hasLapsedPaymentRequests({ environment: "sandbox", checkedBefore })
+      ).toBe(false);
+
+      const lapsed = await repo.createPaymentRequest(
+        createInput({ token: SOL_MINT, expiresAt: "2020-01-01T00:00:00.000Z" })
+      );
+      expect(
+        await systemRepo.hasLapsedPaymentRequests({ environment: "sandbox", checkedBefore })
+      ).toBe(true);
+      expect(
+        await systemRepo.hasLapsedPaymentRequests({ environment: "production", checkedBefore })
+      ).toBe(false);
+
+      // A lapse checked since the cutoff waits for its next turn, as the list does.
+      await updateRow(lapsed.id, { last_checked_at: ago(SECOND) });
+      expect(
+        await systemRepo.hasLapsedPaymentRequests({ environment: "sandbox", checkedBefore })
+      ).toBe(false);
+    });
+
     it("lists unexpired awaiting requests not checked since the cutoff, never-checked first", async () => {
       const never = await repo.createPaymentRequest(
         createInput({ token: SOL_MINT, expiresAt: null })

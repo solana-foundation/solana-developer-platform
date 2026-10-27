@@ -1,3 +1,4 @@
+import type { OrganizationRole } from "@sdp/types/roles";
 import { Badge } from "@sdp/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@sdp/ui/card";
 import { cn } from "@sdp/ui/cn";
@@ -22,8 +23,19 @@ function formatJoined(value: string): string {
   return date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
-function roleLabel(role: string, t: Translate): string {
-  return role === "admin" ? t("Shared.members.roleAdmin") : t("Shared.members.roleMember");
+function roleLabel(role: OrganizationRole, t: Translate): string {
+  switch (role) {
+    case "admin":
+      return t("Shared.members.roleAdmin");
+    case "member":
+      return t("Shared.members.roleMember");
+    case "viewer":
+      return t("Shared.members.roleViewer");
+    default: {
+      const exhaustive: never = role;
+      throw new Error(`Unhandled organization role: ${JSON.stringify(exhaustive)}`);
+    }
+  }
 }
 
 export async function MembersSection({ page }: { page: number }) {

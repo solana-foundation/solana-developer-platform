@@ -279,12 +279,45 @@ describe("POST /v1/organizations", () => {
     expect(await getDb(env).queryMany("SELECT id FROM organizations")).toEqual([]);
   });
 
-  it("refuses a session naming an organization and a request with none, reaching Clerk for neither", async () => {
+  it("creates the organization for a session whose active Clerk organization SDP never linked", async () => {
+    clerk.answer(FIRST_SIGN_IN, CLERK_ORGANIZATION, membershipsPage(0), MEMBERSHIP_CREATED);
+    const unlinked = await signTestClerkJwt({
+      clerkUserId: CLERK_USER_ID,
+      clerkOrgId: "org_clerk_unlinked",
+      orgRole: "admin",
+      orgSlug: "unlinked",
+      email: EMAIL,
+      expiresInSeconds: 300,
+    });
+
+    const response = await postOrganization(clerkHeadersWithoutProject(unlinked), NAME);
+    const created = await createdRow();
+
+    expect(response.status).toBe(201);
+    expect(await response.json()).toEqual(createdResponse(created.id));
+    expect(await storedState(created.id)).toEqual(activeState(created));
+  });
+
+  it("refuses a session naming an organization SDP links and a request with none, reaching Clerk for neither", async () => {
+    const db = getDb(env);
+    await db.batch([
+      db
+        .prepare(
+          `INSERT INTO organizations (id, name, slug, status) VALUES ('org_linked', 'Linked', 'linked', 'active')`
+        )
+        .bind(),
+      db
+        .prepare(
+          `INSERT INTO auth_organization_identities (id, provider, provider_org_id, organization_id, slug)
+           VALUES ('aoi_linked', 'clerk', 'org_clerk_already_active', 'org_linked', 'linked')`
+        )
+        .bind(),
+    ]);
     const withOrganization = await signTestClerkJwt({
       clerkUserId: CLERK_USER_ID,
       clerkOrgId: "org_clerk_already_active",
       orgRole: "member",
-      orgSlug: "already-active",
+      orgSlug: "linked",
       email: EMAIL,
       expiresInSeconds: 300,
     });
@@ -298,6 +331,7 @@ describe("POST /v1/organizations", () => {
     });
     expect(anonymous.status).toBe(401);
     expect(clerk.requests).toEqual([]);
-    expect(await getDb(env).queryMany("SELECT id FROM organizations")).toEqual([]);
+    expect(await db.queryMany("SELECT id FROM organizations")).toEqual([{ id: "org_linked" }]);
+    expect(await db.queryMany("SELECT id FROM users")).toEqual([]);
   });
 });
