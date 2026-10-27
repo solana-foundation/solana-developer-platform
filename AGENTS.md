@@ -10,6 +10,7 @@ This file is the canonical agent guide for this repository.
 - `packages/sdp-types`: shared runtime types and shared product constants
 - `packages/sdp-design-tokens`: shared design tokens (CSS custom properties, Tailwind theme mapping) and the `refresh` theme scope; see its README
 - `packages/sdp-ui`: the dashboard's UI primitives (`@sdp/ui`) over `@solana/design-system` and the design tokens; `apps/sdp-web/src/components/ui/*` re-exports them; see its README
+- `packages/sdp-api-catalog`: what the dashboard and the docs share about the public API (`@sdp/api-catalog`), today the request snippets; see its README
 
 ## Source of truth
 

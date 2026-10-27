@@ -1,6 +1,6 @@
-import type { Address } from "@solana/kit";
+import { type Address, fetchEncodedAccounts } from "@solana/kit";
 import { SdpVedaError } from "./errors";
-import { createVedaRpc } from "./rpc";
+import { type createVedaReadRpc, createVedaRpc } from "./rpc";
 
 /**
  * Whether an account currently exists on chain.
@@ -8,19 +8,22 @@ import { createVedaRpc } from "./rpc";
  * Exists for `createsShareAccount`: the plan always carries an IDEMPOTENT
  * create, so only a chain read can say whether rent will actually be charged
  * (see `EarnVaultTransactionPlan.createsShareAccount` in `@sdp/earn` for the
- * contract and its known pre-execution residual). Zero-length data slice: the
- * question is existence, not content.
+ * contract and its known pre-execution residual).
+ *
+ * Read through the operation's client with the SDK's own config, so an
+ * account the operation's batched read already holds costs no request.
  *
  * Outside `./sdk.ts` because it needs no Veda SDK — just this repo's kit —
  * matching `./mint.ts`.
  */
-export async function accountExists(rpcUrl: string, account: Address): Promise<boolean> {
-  const rpc = createVedaRpc(rpcUrl);
+export async function accountExists(
+  rpc: ReturnType<typeof createVedaReadRpc>,
+  commitment: "confirmed" | "finalized",
+  account: Address
+): Promise<boolean> {
   try {
-    const result = await rpc
-      .getAccountInfo(account, { encoding: "base64", dataSlice: { offset: 0, length: 0 } })
-      .send();
-    return result?.value != null;
+    const [found] = await fetchEncodedAccounts(rpc, [account], { commitment });
+    return found.exists;
   } catch (cause) {
     throw new SdpVedaError("VAULT_UNREADABLE", `Veda could not read the account ${account}`, {
       cause,

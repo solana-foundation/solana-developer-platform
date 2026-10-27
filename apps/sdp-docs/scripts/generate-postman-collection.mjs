@@ -2,11 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { NON_FINAL_MONEY_MOVEMENT_STATUSES } from "@sdp/types/payments";
-import {
-  getPrimaryTagName,
-  isPublicOperation,
-  POSTMAN_COLLECTION_FILENAME,
-} from "./lib/public-openapi.mjs";
+import { getOperationFamily, POSTMAN_COLLECTION_FILENAME } from "./lib/public-openapi.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -354,14 +350,11 @@ function toPostmanCollection(spec) {
 
     for (const method of HTTP_METHODS) {
       const operation = pathItem[method];
-      if (!operation || typeof operation !== "object" || !isPublicOperation(operation)) {
+      if (!operation || typeof operation !== "object") {
         continue;
       }
 
-      const tagName = getPrimaryTagName(operation);
-      if (!tagName) {
-        continue;
-      }
+      const tagName = getOperationFamily(operation, `${method.toUpperCase()} ${routePath}`);
 
       if (!folders.has(tagName)) {
         folders.set(tagName, []);
