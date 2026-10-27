@@ -31,6 +31,8 @@ function mapRow(row: Record<string, unknown>): PrivateChannelWithdrawalRow {
     project_id: row.project_id as string,
     instance_id: row.instance_id as string,
     wallet_id: row.wallet_id as string,
+    // SAFETY: The additive migration defines this persisted column as nullable TEXT.
+    custody_wallet_id: (row.custody_wallet_id ?? null) as string | null,
     owner: row.owner as string,
     destination: row.destination as string,
     mint: row.mint as string,
@@ -68,11 +70,11 @@ export function createPostgresPrivateChannelWithdrawalRepository(
                   FOR NO KEY UPDATE
              )
              INSERT INTO private_channel_withdrawals (
-               id, organization_id, project_id, instance_id, wallet_id,
+               id, organization_id, project_id, instance_id, wallet_id, custody_wallet_id,
                owner, destination, mint, amount, context,
                idempotency_key, idempotency_fingerprint
              )
-             SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?
+             SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?
                FROM admitting_instance
           RETURNING *`
         )
@@ -83,6 +85,7 @@ export function createPostgresPrivateChannelWithdrawalRepository(
           input.projectId,
           input.instanceId,
           input.walletId,
+          input.custodyWalletId,
           input.owner,
           input.destination,
           input.mint,

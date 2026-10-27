@@ -35,7 +35,7 @@ export async function emitWithdrawalEvent(
     status,
     payload: {
       withdrawalId: withdrawal.id,
-      senderWalletId: withdrawal.wallet_id,
+      custodyWalletId: withdrawal.custody_wallet_id ?? null,
       sender: withdrawal.owner,
       recipient: withdrawal.destination,
       amount: withdrawal.amount,

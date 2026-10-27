@@ -2,7 +2,7 @@ import { mapPrivateChannelInstanceRow } from "@/db/repositories/private-channel-
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
-import { resolveScope, resolveWalletAddress } from "@/routes/payments/wallets";
+import { resolveScope } from "@/routes/payments/wallets";
 import {
   type AppContext,
   getPrivateChannelInstanceRepository,
@@ -12,10 +12,11 @@ import { balanceQuerySchema } from "@/routes/private-channels/schemas";
 import { resolveGatewayAuth } from "@/services/private-channels/auth/gateway-auth";
 import { getChannelBalance } from "@/services/private-channels/balance";
 import { mapPrivateChannelError } from "@/services/private-channels/errors";
+import { resolvePrivateChannelWalletAddress } from "@/services/private-channels/wallet-access";
 
 /**
  * GET /balance — read an owner's channel token balance through the gateway.
- * `owner` accepts a `walletId`, a wallet public key, or a raw Solana address
+ * `owner` accepts an internal SDP wallet ID, a wallet public key, or a raw Solana address
  * (resolved via the shared wallet helpers); `mint` defaults to the instance
  * cluster's USDC mint. The connection is the project's ACTIVE persisted instance.
  * Feature-gated (router middleware) + `private_channels.read`.
@@ -53,7 +54,7 @@ export async function getPrivateChannelBalance(c: AppContext) {
     const instance = mapPrivateChannelInstanceRow(row);
 
     const { wallets } = await resolveScope(c);
-    const owner = resolveWalletAddress(wallets, parsed.data.owner, "owner");
+    const owner = resolvePrivateChannelWalletAddress(wallets, parsed.data.owner, "owner");
 
     // Auth-enabled instances JWT-gate balance reads; mint the caller's SPC session.
     const gatewayAuth = await resolveGatewayAuth(c.env, {

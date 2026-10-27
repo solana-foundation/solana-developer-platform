@@ -44,7 +44,8 @@ describe("Private Channel transfer OpenAPI", () => {
     // not something a caller may skip.
     expect(idempotencyKey).toMatchObject({ in: "header", required: true });
     expect(operation?.responses).toHaveProperty("409");
-    expect(serializedBody).toContain('"walletId"');
+    expect(serializedBody).toContain('"custodyWalletId"');
+    expect(serializedBody).not.toContain('"walletId"');
     expect(serializedBody).toContain('"recipientVerifiedWalletId"');
     expect(serializedBody).toContain('"amount"');
     expect(serializedBody).not.toContain('"recipientAddress"');

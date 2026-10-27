@@ -11,6 +11,7 @@ export interface PrivateChannelVerifiedWalletRow {
   user_id: string;
   instance_id: string;
   wallet_id: string;
+  custody_wallet_id: string | null;
   pubkey: string;
   verified_at: string;
   created_at: string;
@@ -39,6 +40,7 @@ export interface UpsertVerifiedWalletInput extends VerifiedWalletScope {
   userId: string;
   instanceId: string;
   walletId: string;
+  custodyWalletId?: string | null;
   pubkey: string;
 }
 
@@ -110,6 +112,8 @@ export function mapPrivateChannelVerifiedWalletRow(
     user_id: row.user_id as string,
     instance_id: row.instance_id as string,
     wallet_id: row.wallet_id as string,
+    // SAFETY: The additive migration defines this persisted column as nullable TEXT.
+    custody_wallet_id: (row.custody_wallet_id ?? null) as string | null,
     pubkey: row.pubkey as string,
     verified_at: row.verified_at as string,
     created_at: row.created_at as string,

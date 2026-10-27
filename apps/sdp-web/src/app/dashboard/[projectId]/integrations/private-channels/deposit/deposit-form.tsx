@@ -170,7 +170,7 @@ export function DepositForm({
     // original deposit instead of making a second one, while editing any field
     // mints a new key because it is a different deposit.
     const requestPayload = {
-      walletId,
+      custodyWalletId: walletId,
       amount: amount.trim(),
       mint: selectedToken?.mint,
       recipient: recipient.trim() || undefined,
@@ -221,7 +221,7 @@ export function DepositForm({
           value={walletId}
         >
           {wallets.map((wallet) => (
-            <SelectItem key={wallet.walletId} value={wallet.walletId}>
+            <SelectItem key={wallet.id} value={wallet.id}>
               {walletLabel(wallet)}
             </SelectItem>
           ))}

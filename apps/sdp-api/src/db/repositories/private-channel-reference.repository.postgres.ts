@@ -99,10 +99,10 @@ export function createPostgresPrivateChannelReferenceRepository(
       if (walletScope.scope === "all") {
         branches.push({
           sql: `SELECT 'wallet' AS kind, k.key AS key,
-                       COALESCE(NULLIF(w.label, ''), w.wallet_id) AS name
+                       COALESCE(NULLIF(w.label, ''), w.id) AS name
                   FROM custody_wallets w
                   JOIN custody_configs cc ON cc.id = w.custody_config_id
-                  CROSS JOIN unnest(ARRAY[w.public_key, w.wallet_id]) AS k(key)
+                  CROSS JOIN unnest(ARRAY[w.public_key, w.id]) AS k(key)
                  WHERE cc.organization_id = ?
                    AND cc.project_id = ?`,
           binds: [organizationId, projectId],

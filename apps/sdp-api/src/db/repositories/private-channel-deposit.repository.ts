@@ -14,6 +14,7 @@ export interface PrivateChannelDepositRow {
   project_id: string;
   instance_id: string;
   wallet_id: string;
+  custody_wallet_id: string | null;
   depositor: string;
   recipient: string;
   mint: string;
@@ -40,6 +41,7 @@ export interface DepositProjectScope {
 export interface CreateDepositInput extends DepositProjectScope {
   instanceId: string;
   walletId: string;
+  custodyWalletId: string;
   depositor: string;
   recipient: string;
   mint: string;
@@ -115,7 +117,7 @@ export function mapPrivateChannelDepositRow(row: PrivateChannelDepositRow): Priv
     instanceId: row.instance_id,
     organizationId: row.organization_id,
     projectId: row.project_id,
-    walletId: row.wallet_id,
+    custodyWalletId: row.custody_wallet_id ?? null,
     depositor: row.depositor,
     recipient: row.recipient,
     mint: row.mint,

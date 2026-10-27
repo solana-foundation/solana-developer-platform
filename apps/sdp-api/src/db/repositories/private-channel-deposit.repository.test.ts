@@ -34,6 +34,7 @@ function makeInput(overrides: Partial<CreateDepositInput> = {}): CreateDepositIn
     projectId: TEST_PROJECT_ID,
     instanceId: TEST_INSTANCE_ID,
     walletId: "wal_pcd_1",
+    custodyWalletId: "cw_repo_source",
     depositor: "DepositorAddr1111111111111111111111111111",
     recipient: RECIPIENT,
     mint: MINT,
@@ -105,6 +106,7 @@ describe("PrivateChannelDepositRepository (postgres)", () => {
     expect(row).not.toBeNull();
     expect(row?.id).toMatch(/^dep_/);
     expect(row?.status).toBe("pending");
+    expect(row?.custody_wallet_id).toBe("cw_repo_source");
     expect(row?.signature).toBeNull();
     expect(row?.settlement_ref).toBeNull();
     expect(row?.recipient).toBe(RECIPIENT);

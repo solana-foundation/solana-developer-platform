@@ -31,6 +31,8 @@ function mapRow(row: Record<string, unknown>): PrivateChannelDepositRow {
     project_id: row.project_id as string,
     instance_id: row.instance_id as string,
     wallet_id: row.wallet_id as string,
+    // SAFETY: The additive migration defines this persisted column as nullable TEXT.
+    custody_wallet_id: (row.custody_wallet_id ?? null) as string | null,
     depositor: row.depositor as string,
     recipient: row.recipient as string,
     mint: row.mint as string,
@@ -68,11 +70,11 @@ export function createPostgresPrivateChannelDepositRepository(
                   FOR NO KEY UPDATE
              )
              INSERT INTO private_channel_deposits (
-               id, organization_id, project_id, instance_id, wallet_id,
+               id, organization_id, project_id, instance_id, wallet_id, custody_wallet_id,
                depositor, recipient, mint, amount, context,
                idempotency_key, idempotency_fingerprint
              )
-             SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?
+             SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?
                FROM admitting_instance
           RETURNING *`
         )
@@ -83,6 +85,7 @@ export function createPostgresPrivateChannelDepositRepository(
           input.projectId,
           input.instanceId,
           input.walletId,
+          input.custodyWalletId,
           input.depositor,
           input.recipient,
           input.mint,

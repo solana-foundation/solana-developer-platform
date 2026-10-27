@@ -47,6 +47,7 @@ function makeInput(
     senderPrivateChannelUserId: SENDER_PC_USER_ID,
     recipientPrivateChannelUserId: RECIPIENT_PC_USER_ID,
     senderWalletId: "wal_pct_sender",
+    custodyWalletId: "cw_repo_source",
     recipientVerifiedWalletId: RECIPIENT_WALLET_A_ID,
     sender: SENDER,
     recipient: RECIPIENT,
@@ -252,6 +253,7 @@ describe("PrivateChannelTransferRepository (postgres)", () => {
 
     expect(row.id).toMatch(/^pct_/);
     expect(row.status).toBe("pending");
+    expect(row.custody_wallet_id).toBe("cw_repo_source");
     expect(row.signature).toBeNull();
     expect(row.failure_reason).toBeNull();
     expect(row.sender_wallet_id).toBe("wal_pct_sender");
@@ -271,7 +273,7 @@ describe("PrivateChannelTransferRepository (postgres)", () => {
       projectId: TEST_PROJECT_ID,
       instanceId: TEST_INSTANCE_ID,
       channelId: CHANNEL_A_ID,
-      walletId: "wal_pct_sender",
+      custodyWalletId: "cw_repo_source",
       sender: SENDER,
       recipient: RECIPIENT,
       mint: MINT,

@@ -217,7 +217,7 @@ export function EventDetail({
         },
         gatewayUrl
       ),
-      ...referenceFields(names, summary.ids.walletId, {
+      ...referenceFields(names, summary.ids.custodyWalletId, {
         key: "wallet-id",
         name: t("DashboardPrivateChannels.events.fieldWalletName"),
         reference: t("DashboardPrivateChannels.events.fieldWalletId"),

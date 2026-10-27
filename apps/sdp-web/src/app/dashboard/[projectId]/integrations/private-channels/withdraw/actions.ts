@@ -17,7 +17,7 @@ import {
 } from "@/lib/sdp-api";
 
 export interface CreateWithdrawalInput {
-  walletId: string;
+  custodyWalletId: string;
   amount: string;
   /** Selected token mint; forwarded as-is for the API to validate. */
   mint?: string;
@@ -46,7 +46,7 @@ export type CreateWithdrawalResult =
 export async function createWithdrawalAction(
   input: CreateWithdrawalInput
 ): Promise<CreateWithdrawalResult> {
-  if (!input.walletId) {
+  if (!input.custodyWalletId) {
     return {
       ok: false,
       kind: "validation",
@@ -63,7 +63,7 @@ export async function createWithdrawalAction(
     const withdrawal = await createPrivateChannelWithdrawal(
       client,
       {
-        walletId: input.walletId,
+        custodyWalletId: input.custodyWalletId,
         amount: input.amount,
         ...(input.mint ? { mint: input.mint } : {}),
         ...(input.destination ? { destination: input.destination } : {}),

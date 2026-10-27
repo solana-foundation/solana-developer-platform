@@ -272,7 +272,7 @@ export interface PrivateChannelDeposit {
   organizationId: string;
   projectId: string;
   /** Custody wallet the deposit is signed from. */
-  walletId: string;
+  custodyWalletId: string | null;
   /** Resolved depositor address (the custody wallet's public key). */
   depositor: string;
   /** Resolved recipient address credited in the channel (defaults to the depositor). */
@@ -306,7 +306,7 @@ export interface PrivateChannelWithdrawal {
   organizationId: string;
   projectId: string;
   /** Custody wallet the withdrawal (burn) is signed from. */
-  walletId: string;
+  custodyWalletId: string | null;
   /** Channel-chain address whose token balance is burned. */
   owner: string;
   /** Devnet address that receives the operator's real-USDC release. */
@@ -364,7 +364,7 @@ export interface PrivateChannelTransfer {
   instanceId: string;
   channelId: string;
   /** SDP custody wallet used to sign the transfer. */
-  walletId: string;
+  custodyWalletId: string | null;
   sender: string;
   recipient: string;
   mint: string;
@@ -425,8 +425,8 @@ export interface PrivateChannelBalance {
  */
 export interface PrivateChannelVerifiedWalletDto {
   id: string;
-  /** SDP managed custody wallet id (the `walletId` from GET /v1/wallets). */
-  walletId: string;
+  /** Internal SDP wallet ID; null when the historical relationship is unproved. */
+  custodyWalletId: string | null;
   /** The verified Solana pubkey (base58). */
   pubkey: string;
   verifiedAt: string;
@@ -599,8 +599,7 @@ export const PRIVATE_CHANNEL_EVENT_DISPLAY_PAYLOAD_KEYS = [
   "depositId",
   "withdrawalId",
   "transferId",
-  "walletId",
-  "senderWalletId",
+  "custodyWalletId",
   "privateChannelUserId",
   "targetUserId",
   "membershipId",

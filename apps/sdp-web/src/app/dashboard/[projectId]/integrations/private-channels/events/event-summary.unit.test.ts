@@ -81,7 +81,7 @@ describe("summarizePrivateChannelEvent", () => {
     const wallet = summarizePrivateChannelEvent({
       family: PRIVATE_CHANNEL_EVENT_FAMILIES.MEMBER,
       type: PRIVATE_CHANNEL_EVENT_TYPES.MEMBER_WALLET_VERIFIED,
-      payload: { walletId: "wallet_1", pubkey: RECIPIENT },
+      payload: { custodyWalletId: "custody_1", pubkey: RECIPIENT },
     });
     const channel = summarizePrivateChannelEvent({
       family: PRIVATE_CHANNEL_EVENT_FAMILIES.LIFECYCLE,
@@ -92,7 +92,7 @@ describe("summarizePrivateChannelEvent", () => {
     expect(wallet).toEqual({
       kind: "wallet",
       pubkey: RECIPIENT,
-      ids: { walletId: "wallet_1" },
+      ids: { custodyWalletId: "custody_1" },
     });
     expect(channel).toEqual({
       kind: "channel",

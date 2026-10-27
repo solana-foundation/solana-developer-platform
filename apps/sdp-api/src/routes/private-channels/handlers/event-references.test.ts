@@ -216,7 +216,8 @@ describe("Private Channels event references handler", () => {
     };
     expect(body.data.references[CHANNEL_ID]).toBe("Treasury");
     expect(body.data.references[PUBLIC_KEY]).toBe("Treasury Wallet");
-    expect(body.data.references[WALLET_ID]).toBe("Treasury Wallet");
+    expect(body.data.references[CUSTODY_WALLET_ROW_ID]).toBe("Treasury Wallet");
+    expect(body.data.references[WALLET_ID]).toBeUndefined();
     expect(body.data.references[PRIVATE_CHANNEL_USER_ID]).toBe("Ada Lovelace");
     expect(body.data.references[USER_ID]).toBe("Ada Lovelace");
     expect(body.data.references[ISSUED_TOKEN_MINT]).toBe("RFS");
@@ -256,7 +257,8 @@ describe("Private Channels event references handler", () => {
       data: PrivateChannelEventReferencesEnvelope;
     };
     expect(body.data.references[PUBLIC_KEY]).toBe("Treasury Wallet");
-    expect(body.data.references[WALLET_ID]).toBe("Treasury Wallet");
+    expect(body.data.references[CUSTODY_WALLET_ROW_ID]).toBe("Treasury Wallet");
+    expect(body.data.references[WALLET_ID]).toBeUndefined();
     expect(body.data.references[OTHER_PUBLIC_KEY]).toBeDefined();
   });
 });
