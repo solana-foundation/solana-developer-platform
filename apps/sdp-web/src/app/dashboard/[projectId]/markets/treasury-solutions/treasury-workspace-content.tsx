@@ -665,13 +665,38 @@ function TreasuryPositionBalanceCell({
   const t = useTranslations();
   const locale = useLocale();
   const syncingLabel = t("DashboardMarkets.treasury.positionBalanceSyncing");
-  const stale = lastVerifiedAt !== undefined;
-  const parIntermediateNote =
-    parIntermediate !== undefined && !stale && !syncing
-      ? t("DashboardEarn.parRedemption.positionIntermediate", {
+  // One line under the balance qualifies it: a stale read, the par intermediate it includes, or,
+  // on a phone, where the status column drops out, the position's status. A note never shows
+  // while a movement is unconfirmed, so a position that has one reads Active.
+  let note: ReactNode;
+  if (lastVerifiedAt !== undefined) {
+    note = (
+      <span
+        className="block truncate text-tertiary"
+        title={new Date(lastVerifiedAt).toLocaleString(locale, VERIFIED_AT_FORMAT)}
+      >
+        {t("DashboardMarkets.treasury.positionBalanceLastVerified")}
+      </span>
+    );
+  } else if (parIntermediate !== undefined && !syncing) {
+    // Wraps rather than truncates, so the amount reads whole.
+    note = (
+      <span
+        className="block whitespace-normal text-pretty text-tertiary"
+        data-earn-vault-par-intermediate
+      >
+        {t("DashboardEarn.parRedemption.positionIntermediate", {
           amount: formatProviderAmount(parIntermediate.amount, locale),
-        })
-      : undefined;
+        })}
+      </span>
+    );
+  } else {
+    note = (
+      <StatusText className="block truncate @2xl:hidden" tone={POSITION_STATUS_TONE[status]}>
+        {earnVaultPositionStatusLabels(status, t).label}
+      </StatusText>
+    );
+  }
   return (
     <TableCell
       className={cn(
@@ -696,30 +721,15 @@ function TreasuryPositionBalanceCell({
           )}
         </div>
       </div>
-      {stale ? (
-        <span
-          className="block truncate text-tertiary"
-          title={new Date(lastVerifiedAt).toLocaleString(locale, VERIFIED_AT_FORMAT)}
-        >
-          {t("DashboardMarkets.treasury.positionBalanceLastVerified")}
-        </span>
-      ) : null}
-      {parIntermediateNote === undefined ? null : (
-        <span
-          className="block truncate text-tertiary"
-          data-earn-vault-par-intermediate
-          title={parIntermediateNote}
-        >
-          {parIntermediateNote}
-        </span>
-      )}
-      {/* On a phone the status column drops out and its word reads here, so the row keeps two
-          lines. A balance note takes the line instead: a note never shows while a movement is
-          unconfirmed, so its position reads Active. */}
-      {stale || parIntermediateNote !== undefined ? null : (
-        <StatusText className="block truncate @2xl:hidden" tone={POSITION_STATUS_TONE[status]}>
-          {earnVaultPositionStatusLabels(status, t).label}
-        </StatusText>
+      {parIntermediate === undefined ? (
+        note
+      ) : (
+        // The par note wraps to three lines at most (its amount never breaks), and the cell
+        // keeps them whatever the read shows, so the note can give way to a sync or a stale
+        // read without moving the rows below.
+        <div className="min-h-15" data-earn-vault-par-slot>
+          {note}
+        </div>
       )}
     </TableCell>
   );
