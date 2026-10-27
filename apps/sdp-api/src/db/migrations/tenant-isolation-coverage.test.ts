@@ -17,7 +17,7 @@ const SHARED_TABLES: Record<string, string> = {
   auth_user_identities: "global Clerk identity map keyed by user",
   allowlist: "platform-operator allowlist, deliberately cross-tenant",
   earn_strategies: "shared yield catalog partitioned by environment",
-  sponsorship_reconciliation_state: "singleton per-network failure counter",
+  sponsorship_reconciliation_state: "singleton per-environment failure counter",
   private_channel_settlement_observations:
     "on-chain oracle observations, deliberately unlinked from tenant intents",
   earn_execution_models: "shared movement vocabulary (0062_earn_movements)",

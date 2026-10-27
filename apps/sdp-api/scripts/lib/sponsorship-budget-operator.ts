@@ -1,10 +1,5 @@
-import { SDP_ENVIRONMENTS } from "@sdp/types/api-keys";
-import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
+import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types/api-keys";
 import { z } from "zod";
-import {
-  type SponsorshipNetwork,
-  sponsorshipNetworkForCluster,
-} from "@/db/repositories/sponsorship-budget.repository";
 
 const MAX_REDIS_LUA_SAFE_LAMPORTS = BigInt(Number.MAX_SAFE_INTEGER);
 const CANONICAL_NON_NEGATIVE_INTEGER = /^(0|[1-9][0-9]*)$/;
@@ -62,7 +57,6 @@ export function toRedisLuaSafePolicyLimits(limits: SponsorshipPolicyLimitsBigInt
 export const SPONSORSHIP_BUDGET_COMMANDS = [
   "status",
   "set-project",
-  "set-project-default",
   "set-global",
   "kill",
   "resume",
@@ -88,10 +82,11 @@ const writeFlagsSchema = z.strictObject({
 });
 
 const expectedVersionSchema = z
-  .string({ error: "--expected-version is required (0 when the policy does not exist yet)" })
+  .string()
   .regex(CANONICAL_NON_NEGATIVE_INTEGER, "--expected-version must be a non-negative integer")
   .transform(Number)
-  .pipe(z.number().int().max(Number.MAX_SAFE_INTEGER));
+  .pipe(z.number().int().max(Number.MAX_SAFE_INTEGER))
+  .optional();
 
 const policyWriteFlagsSchema = writeFlagsSchema.extend({
   "per-tx-lamports": z.string().optional(),
@@ -114,7 +109,6 @@ const sponsorshipBudgetCommandSchema = z.discriminatedUnion(
       command: z.literal("set-project"),
       "organization-id": requiredText("organization-id"),
     }),
-    policyWriteFlagsSchema.extend({ command: z.literal("set-project-default") }),
     policyWriteFlagsSchema.extend({ command: z.literal("set-global") }),
     writeFlagsSchema.extend({ command: z.literal("kill") }),
     writeFlagsSchema.extend({
@@ -125,57 +119,78 @@ const sponsorshipBudgetCommandSchema = z.discriminatedUnion(
   { error: `Usage: sponsorship:budget <${SPONSORSHIP_BUDGET_COMMANDS.join("|")}> [flags]` }
 );
 
+/**
+ * The policy version a write is bound to. An apply always names the version the
+ * operator (or the workflow's preview) read; a preview may omit it and reports
+ * the current version instead.
+ */
+export type SponsorshipWriteVersion =
+  | { mode: "preview"; expectedVersion: number | null }
+  | { mode: "apply"; expectedVersion: number };
+
 export interface SponsorshipPolicyWrite {
   enabled: boolean;
-  expectedVersion: number;
   perTransactionLamports: number;
   hourlyLamports: number;
   dailyLamports: number;
 }
 
 interface SponsorshipOperatorAttribution {
-  network: SponsorshipNetwork;
-  mode: SponsorshipBudgetWriteMode;
+  environment: SdpEnvironment;
   operator: string;
   reason: string;
 }
 
 export type SponsorshipBudgetCommand =
-  | { command: "status"; network: SponsorshipNetwork }
+  | { command: "status"; environment: SdpEnvironment }
   | ({
       command: "set-project";
-      environment: (typeof SDP_ENVIRONMENTS)[number];
       organizationId: string;
     } & SponsorshipOperatorAttribution &
-      SponsorshipPolicyWrite)
-  | ({ command: "set-project-default" | "set-global" } & SponsorshipOperatorAttribution &
-      SponsorshipPolicyWrite)
-  | ({ command: "kill" } & SponsorshipOperatorAttribution)
-  | ({ command: "resume"; expectedVersion: number } & SponsorshipOperatorAttribution);
+      SponsorshipPolicyWrite &
+      SponsorshipWriteVersion)
+  | ({ command: "set-global" } & SponsorshipOperatorAttribution &
+      SponsorshipPolicyWrite &
+      SponsorshipWriteVersion)
+  | ({ command: "kill" } & SponsorshipOperatorAttribution &
+      ({ mode: "preview" } | { mode: "apply" }))
+  | ({ command: "resume" } & SponsorshipOperatorAttribution & SponsorshipWriteVersion);
 
 /**
- * The budget network an SDP environment's projects draw sponsorship from.
+ * Bind a write to the version it was computed from. An apply without one is
+ * refused: it could overwrite a change (a breaker trip in particular) that its
+ * operator never saw.
  *
- * @param environment - The SDP environment the operator named.
- * @returns The budget network of that environment's cluster.
+ * @param mode - Whether the write previews or applies.
+ * @param expectedVersion - The version given with `--expected-version`, if any.
+ * @returns The mode and version, with the version required for an apply.
  */
-export function sponsorshipNetworkForEnvironment(
-  environment: (typeof SDP_ENVIRONMENTS)[number]
-): SponsorshipNetwork {
-  return sponsorshipNetworkForCluster(CLUSTER_BY_SDP_ENVIRONMENT[environment]);
+function writeVersion(
+  mode: SponsorshipBudgetWriteMode,
+  expectedVersion: number | undefined
+): SponsorshipWriteVersion {
+  if (mode === "preview") {
+    return { mode, expectedVersion: expectedVersion === undefined ? null : expectedVersion };
+  }
+  if (expectedVersion === undefined) {
+    throw new Error(
+      "--expected-version is required with --mode apply (0 when the policy does not exist yet)"
+    );
+  }
+  return { mode, expectedVersion };
 }
 
 /**
  * Parse the operator CLI's command and flags. Every write names its environment,
- * mode, operator and reason; every write that can enable sponsorship also names the
- * policy version the operator read, so it refuses to overwrite a change it did
+ * mode, operator and reason; every apply that can enable sponsorship also names the
+ * policy version its preview read, so it refuses to overwrite a change it did
  * not see (a breaker trip in particular). `kill` takes no version: disabling is
  * always safe to apply over a concurrent change.
  *
  * @param input - The positional command and the `--flag value` pairs.
  * @param input.command - The positional command, or undefined when none was given.
  * @param input.flags - Flag values keyed by flag name without the leading dashes.
- * @returns The validated command with its environment resolved to a budget network.
+ * @returns The validated command.
  */
 export function parseSponsorshipBudgetCommand(input: {
   command: string | undefined;
@@ -189,14 +204,14 @@ export function parseSponsorshipBudgetCommand(input: {
     throw new Error(parsed.error.issues.map((issue) => issue.message).join("; "));
   }
   const args = parsed.data;
-  const network = sponsorshipNetworkForEnvironment(args.environment);
+  const environment = args.environment;
   switch (args.command) {
     case "status":
-      return { command: "status", network };
+      return { command: "status", environment };
     case "kill":
       return {
         command: "kill",
-        network,
+        environment,
         mode: args.mode,
         operator: args.operator,
         reason: args.reason,
@@ -204,22 +219,19 @@ export function parseSponsorshipBudgetCommand(input: {
     case "resume":
       return {
         command: "resume",
-        network,
-        mode: args.mode,
+        environment,
         operator: args.operator,
         reason: args.reason,
-        expectedVersion: args["expected-version"],
+        ...writeVersion(args.mode, args["expected-version"]),
       };
     case "set-project":
-    case "set-project-default":
     case "set-global": {
       const write = {
-        network,
-        mode: args.mode,
+        environment,
         operator: args.operator,
         reason: args.reason,
         enabled: args.enabled === "true",
-        expectedVersion: args["expected-version"],
+        ...writeVersion(args.mode, args["expected-version"]),
         ...toRedisLuaSafePolicyLimits(
           parseSponsorshipPolicyLimits({
             perTransactionLamports: args["per-tx-lamports"],
@@ -232,7 +244,6 @@ export function parseSponsorshipBudgetCommand(input: {
         ? {
             ...write,
             command: "set-project",
-            environment: args.environment,
             organizationId: args["organization-id"],
           }
         : { ...write, command: args.command };

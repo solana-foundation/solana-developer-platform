@@ -16,7 +16,10 @@ import {
 } from "@/db/identity";
 import { runWithOperatorDatabaseAccess } from "@/db/operator-access";
 import { createCounterpartiesRepository } from "@/db/repositories/repository-factory";
-import { SponsorshipBudgetRepository } from "@/db/repositories/sponsorship-budget.repository";
+import {
+  SponsorshipBudgetRepository,
+  SponsorshipProjectPolicyMissingError,
+} from "@/db/repositories/sponsorship-budget.repository";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -26,6 +29,7 @@ const ORG_A = "org_tenant_isolation_a";
 const ORG_B = "org_tenant_isolation_b";
 const PROJECT_A = "prj_tenant_isolation_a";
 const PROJECT_B = "prj_tenant_isolation_b";
+const ORG_C = "org_tenant_isolation_c";
 const USER_ID = "usr_tenant_isolation";
 const COUNTERPARTY_A = "ctp_tenant_isolation_a";
 const COUNTERPARTY_B = "ctp_tenant_isolation_b";
@@ -201,19 +205,95 @@ describe("database-enforced tenant isolation", () => {
     ).resolves.toBe(0);
   });
 
-  it("keeps the NULL-scoped sponsorship defaults resolvable under a tenant identity", async () => {
-    // Sponsorship admission runs in the request path and resolves the full
-    // policy hierarchy — global and the project default (scope_id IS NULL) —
-    // and trips the breaker when either level is missing. The
-    // platform defaults carry no tenant data, so the SELECT policy must keep
-    // them visible to every tenant.
+  it.each([
+    { environment: "sandbox", hourlyLamports: 1_000_000_000, dailyLamports: 3_000_000_000 },
+    { environment: "production", hourlyLamports: 100_000_000, dailyLamports: 250_000_000 },
+  ] as const)(
+    "gives a $environment project a tenant creates its starting sponsorship budget",
+    async ({ environment, hourlyLamports, dailyLamports }) => {
+      await getDb(env).execute(
+        `INSERT INTO organizations (id, name, slug, tier, status)
+         VALUES (?, 'Tenant isolation C', 'tenant-isolation-c', 'individual', 'active')`,
+        [ORG_C]
+      );
+      const projectId = `prj_tenant_isolation_c_${environment}`;
+
+      const policy = await runWithTenantDatabaseIdentity({ organizationId: ORG_C }, async () => {
+        await getDb(env).execute(
+          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+           VALUES (?, ?, 'Tenant isolation C', ?, ?, 'active', ?)`,
+          [projectId, ORG_C, `tenant-isolation-c-${environment}`, environment, USER_ID]
+        );
+        return new SponsorshipBudgetRepository(getDb(env)).getProjectPolicy({
+          environment,
+          projectId,
+        });
+      });
+
+      expect(policy).toMatchObject({
+        scopeType: "project",
+        projectId,
+        environment,
+        enabled: true,
+        perTransactionLamports: 10_000_000,
+        hourlyLamports,
+        dailyLamports,
+        version: 1,
+        updatedBy: "system:project-created",
+      });
+      const revisions = await runWithSystemDatabaseIdentity("test", () =>
+        getDb(env).queryMany<{ version: number; changed_by: string }>(
+          "SELECT version, changed_by FROM sponsorship_budget_project_policy_revisions WHERE project_id = ?",
+          [projectId]
+        )
+      );
+      expect(revisions).toEqual([{ version: 1, changed_by: "system:project-created" }]);
+    }
+  );
+
+  it("lets a tenant read only its own projects' sponsorship budgets and write none", async () => {
+    const repository = new SponsorshipBudgetRepository(getDb(env));
     const policies = await runWithTenantDatabaseIdentity({ organizationId: ORG_A }, () =>
-      new SponsorshipBudgetRepository(getDb(env)).resolvePolicies({
-        network: "devnet",
-        projectId: PROJECT_A,
-      })
+      repository.resolvePolicies({ environment: "sandbox", projectId: PROJECT_A })
     );
-    expect(policies.map((policy) => policy.scopeType).sort()).toEqual(["global", "project"]);
+    expect(policies.map((policy) => policy.scopeType)).toEqual(["global", "project"]);
+    await expect(
+      runWithTenantDatabaseIdentity({ organizationId: ORG_A }, () =>
+        repository.resolvePolicies({ environment: "sandbox", projectId: PROJECT_B })
+      )
+    ).rejects.toBeInstanceOf(SponsorshipProjectPolicyMissingError);
+
+    const raised = await runWithTenantDatabaseIdentity({ organizationId: ORG_A }, () =>
+      getDb(env).execute(
+        "UPDATE sponsorship_budget_project_policies SET hourly_lamports = daily_lamports WHERE project_id = ?",
+        [PROJECT_A]
+      )
+    );
+    expect(raised).toBe(0);
+    await expect(
+      runWithTenantDatabaseIdentity({ organizationId: ORG_A }, () =>
+        getDb(env).execute(
+          `INSERT INTO sponsorship_budget_project_policies (
+             id, project_id, enabled, per_transaction_lamports, hourly_lamports, daily_lamports,
+             version, updated_by, update_reason
+           ) VALUES ('sbpp_tenant_forged', ?, TRUE, 1, 1, 1, 1, 'tenant', 'forged')`,
+          [PROJECT_A]
+        )
+      )
+    ).rejects.toThrow(/row-level security/);
+    await expect(
+      runWithTenantDatabaseIdentity({ organizationId: ORG_A }, () =>
+        getDb(env).execute(
+          `INSERT INTO sponsorship_budget_project_policy_revisions (
+             id, policy_id, project_id, enabled, per_transaction_lamports, hourly_lamports,
+             daily_lamports, version, changed_by, change_reason
+           )
+           SELECT 'sbppr_tenant_forged', id, project_id, TRUE, 1, 1, 1, 2, 'tenant', 'forged'
+             FROM sponsorship_budget_project_policies WHERE project_id = ?`,
+          [PROJECT_A]
+        )
+      )
+    ).rejects.toThrow(/row-level security/);
   });
 
   it("keeps explicit cross-tenant access for the system identity", async () => {

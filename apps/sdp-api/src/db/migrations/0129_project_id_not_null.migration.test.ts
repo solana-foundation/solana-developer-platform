@@ -98,10 +98,10 @@ async function seedReservation(reservation: {
 }): Promise<void> {
   await client.query(
     `INSERT INTO sponsorship_budget_reservations (
-       id, network, product_environment, organization_id, project_id, actor_type, actor_id,
+       id, environment, organization_id, project_id, actor_type, actor_id,
        transaction_digest, fee_payer, provider_config_fingerprint, recent_blockhash,
        reserved_lamports, hour_bucket, day_bucket, policy_versions, status
-     ) VALUES ($1, 'devnet', 'sandbox', $2, $3, 'api_key', 'key_0129', $1, 'fee_payer_0129',
+     ) VALUES ($1, 'sandbox', $2, $3, 'api_key', 'key_0129', $1, 'fee_payer_0129',
                'fingerprint_0129', 'blockhash_0129', 5000, '2026-01-01T00', '2026-01-01',
                '{}', 'reserved')`,
     [reservation.id, reservation.organizationId, reservation.projectId]

@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { Redis } from "ioredis";
 import type {
   SponsorshipBudgetPolicy,
   SponsorshipBudgetScopeType,
   SponsorshipBudgetUsage,
   SponsorshipLiveWindowReservation,
-  SponsorshipNetwork,
 } from "@/db/repositories/sponsorship-budget.repository";
 import type { Env } from "@/types/env";
 import { getRedisClient } from "./kv-redis";
@@ -254,7 +254,7 @@ const SCRIPT_SHA = {
 };
 
 export interface BudgetAdmissionInput {
-  network: SponsorshipNetwork;
+  environment: SdpEnvironment;
   organizationId: string;
   projectId: string;
   hourBucket: string;
@@ -284,7 +284,7 @@ export class SponsorshipBudgetRedis {
     const hourUsage = [input.usage.hour.global, input.usage.hour.project];
     const dayUsage = [input.usage.day.global, input.usage.day.project];
     const liveReservations = input.liveReservations ?? { hour: [], day: [] };
-    const prefix = `sdp:sponsorship:{${input.network}}`;
+    const prefix = `sdp:sponsorship:{${input.environment}}`;
     const reservationMarkerArgs = (reservations: SponsorshipLiveWindowReservation[]) =>
       reservations.flatMap((reservation) => {
         const scopeFields = this.fields(reservation.projectId);
@@ -344,7 +344,7 @@ export class SponsorshipBudgetRedis {
     if (result[0] === -3) {
       logEvent("warn", {
         event: "sdp_api_sponsorship_stale_policy",
-        network: input.network,
+        environment: input.environment,
         scope_type: scopeType,
         organization_id: input.organizationId,
         project_id: input.projectId,
@@ -354,7 +354,7 @@ export class SponsorshipBudgetRedis {
     const policy = policyByScope.get(scopeType);
     logEvent("warn", {
       event: "sdp_api_sponsorship_denied",
-      network: input.network,
+      environment: input.environment,
       scope_type: scopeType,
       organization_id: input.organizationId,
       project_id: input.projectId,
@@ -389,7 +389,7 @@ export class SponsorshipBudgetRedis {
 
   async syncPolicy(policy: SponsorshipBudgetPolicy): Promise<void> {
     const client = await this.getClient();
-    const controlKey = `sdp:sponsorship:{${policy.network}}:control`;
+    const controlKey = `sdp:sponsorship:{${policy.environment}}:control`;
     await this.runScript(
       client,
       "syncControl",
@@ -404,7 +404,7 @@ export class SponsorshipBudgetRedis {
   ): Promise<{ version: number; enabled: boolean } | null> {
     const client = await this.getClient();
     const value = await client.hget(
-      `sdp:sponsorship:{${policy.network}}:control`,
+      `sdp:sponsorship:{${policy.environment}}:control`,
       this.controlField(policy)
     );
     if (!value) return null;
@@ -417,7 +417,7 @@ export class SponsorshipBudgetRedis {
   }
 
   async settle(input: {
-    network: SponsorshipNetwork;
+    environment: SdpEnvironment;
     projectId: string;
     hourBucket: string;
     dayBucket: string;
@@ -461,13 +461,13 @@ export class SponsorshipBudgetRedis {
   }
 
   private keys(input: {
-    network: SponsorshipNetwork;
+    environment: SdpEnvironment;
     hourBucket: string;
     dayBucket: string;
     reservationId: string;
     attempt: number;
   }) {
-    const prefix = `sdp:sponsorship:{${input.network}}`;
+    const prefix = `sdp:sponsorship:{${input.environment}}`;
     return {
       hour: `${prefix}:hour:${input.hourBucket}`,
       day: `${prefix}:day:${input.dayBucket}`,
@@ -482,7 +482,7 @@ export class SponsorshipBudgetRedis {
   }
 
   private controlField(policy: SponsorshipBudgetPolicy): string {
-    return `${policy.scopeType}:${policy.scopeId ?? "default"}`;
+    return policy.scopeType === "global" ? "global:default" : `project:${policy.projectId}`;
   }
 
   private ttlUntilNextHour(): number {

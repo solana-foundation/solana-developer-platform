@@ -5,16 +5,14 @@ import {
 } from "@sdp/fee-payment/chain-reads";
 import type { SponsorshipProviderConfiguration } from "@sdp/fee-payment/port";
 import { currentClusterScope } from "@sdp/rpc/scope";
-import type { SolanaCluster } from "@sdp/types/well-known-tokens";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { address, assertIsAddress, assertIsSignature } from "@solana/kit";
 import { getDb } from "@/db/client";
 import {
   SPONSORSHIP_BREAKER_OPERATOR,
   type SponsorshipBudgetPolicy,
   SponsorshipBudgetRepository,
-  type SponsorshipNetwork,
   type SponsorshipReconciliationReservation,
-  sponsorshipNetworkForCluster,
 } from "@/db/repositories/sponsorship-budget.repository";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
@@ -81,33 +79,33 @@ export interface SponsorshipReconciliationDependencies {
 }
 
 /**
- * Reconcile the open cluster scope's network. Registered once per Environment (a `cluster` Cron
+ * Reconcile the open cluster scope's environment. Registered once per Environment (a `cluster` Cron
  * Definition): one process can sponsor on both clusters (Earn movements pick the paymaster by
- * cluster), and each network has its own reservations, policies, breaker and Kora, so each
+ * cluster), and each environment has its own reservations, policies, breaker and Kora, so each
  * registration is its own pass against its own RPC and its own provider configuration.
  *
- * A network is never skipped for lacking a paymaster NOW: reservations outlive
+ * An environment is never skipped for lacking a paymaster NOW: reservations outlive
  * configuration. If a cluster's Kora is unwired after transactions reserved
  * against it, those reservations still need settling and a recoverable breaker
  * still needs resetting, so the pass runs, cannot read the provider
  * configuration, and reports that as a failed pass (tripping the breaker after
  * the usual consecutive failures) rather than leaving budget locked in
- * silence. A network with nothing outstanding costs one candidates query.
+ * silence. An environment with nothing outstanding costs one candidates query.
  *
  * @param env - Process environment.
  * @param dependencies - Test seams for the repository, Redis, chain reads and clock.
- * @returns Resolves once the scope's network has been reconciled.
+ * @returns Resolves once the scope's environment has been reconciled.
  */
 export async function reconcileSponsorshipBudgets(
   env: Env,
   dependencies: SponsorshipReconciliationDependencies = {}
 ): Promise<void> {
-  await reconcileSponsorshipNetwork(env, currentClusterScope().cluster, dependencies);
+  await reconcileSponsorshipEnvironment(env, currentClusterScope().environment, dependencies);
 }
 
-async function reconcileSponsorshipNetwork(
+async function reconcileSponsorshipEnvironment(
   env: Env,
-  cluster: SolanaCluster,
+  environment: SdpEnvironment,
   dependencies: SponsorshipReconciliationDependencies
 ): Promise<void> {
   const repository = dependencies.repository ?? new SponsorshipBudgetRepository(getDb(env));
@@ -119,7 +117,7 @@ async function reconcileSponsorshipNetwork(
   // is past its stored last valid block height and its signature is absent from history. Every
   // difference that proof cannot settle (slot lag, an early "not found") still resolves toward
   // charged_unknown, which over-counts and never refunds a transaction that landed. Each read
-  // resolves the endpoint when called, so a network with nothing outstanding needs none.
+  // resolves the endpoint when called, so an environment with nothing outstanding needs none.
   const getTransaction = dependencies.getTransaction ?? getSponsoredTransaction;
   const finalizedHeight = dependencies.finalizedHeight ?? sponsoredFinalizedHeight;
   const getSignatureStatus = dependencies.getSignatureStatus ?? getSponsoredSignatureStatus;
@@ -127,9 +125,8 @@ async function reconcileSponsorshipNetwork(
   const sleep =
     dependencies.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
   const updatedBefore = new Date(now.getTime() - RECONCILIATION_DELAY_MS).toISOString();
-  const network = sponsorshipNetworkForCluster(cluster);
   const reservations = await repository.listReconciliationCandidates(
-    network,
+    environment,
     updatedBefore,
     RECONCILIATION_BATCH_SIZE
   );
@@ -143,13 +140,13 @@ async function reconcileSponsorshipNetwork(
     released: 0,
   };
 
-  const globalPolicy = await repository.getGlobalPolicy(network);
+  const globalPolicy = await repository.getGlobalPolicy(environment);
   const recoverableTrip = isRecoverableBreakerTrip(globalPolicy);
 
   if (reservations.length === 0 && !recoverableTrip) {
     logEvent("info", {
       event: "sdp_api_sponsorship_reconciliation_tick",
-      network,
+      environment,
       candidates: 0,
       failed: 0,
       batch_saturated: false,
@@ -168,22 +165,22 @@ async function reconcileSponsorshipNetwork(
     // With no live reservations there is nothing the breaker protects; the
     // already-tripped policy stays down and the next tick probes again.
     if (reservations.length > 0) {
-      await handleProviderConfigFailure(repository, budgetRedis, network);
+      await handleProviderConfigFailure(repository, budgetRedis, environment);
     }
     throw new Error("Kora security configuration is unavailable", { cause: error });
   }
-  await repository.resetProviderConfigFailures(network);
+  await repository.resetProviderConfigFailures(environment);
 
   if (recoverableTrip) {
     const resumed = await repository.resumeGlobalBreaker(
-      network,
+      environment,
       KORA_CONFIG_UNAVAILABLE_BREAKER_REASON,
       BREAKER_RECOVERY_REASON
     );
     if (resumed) {
       logEvent("warn", {
         event: "sdp_api_sponsorship_breaker_recovered",
-        network,
+        environment,
         source: "reconciliation",
       });
       // A failed sync is repaired by the next admission: reserve() re-syncs
@@ -195,7 +192,7 @@ async function reconcileSponsorshipNetwork(
   if (reservations.length === 0) {
     logEvent("info", {
       event: "sdp_api_sponsorship_reconciliation_tick",
-      network,
+      environment,
       candidates: 0,
       failed: 0,
       batch_saturated: false,
@@ -215,7 +212,7 @@ async function reconcileSponsorshipNetwork(
         await tripBreaker(
           repository,
           budgetRedis,
-          reservation.network,
+          reservation.environment,
           "Kora signer or security configuration changed during sponsorship reconciliation"
         );
         throw new Error("Kora signer or security configuration does not match the reservation");
@@ -233,7 +230,11 @@ async function reconcileSponsorshipNetwork(
       const failure = error instanceof Error ? error : new Error(String(error));
       failures.push(failure);
       getLogger().error(
-        { reservation_id: reservation.id, network: reservation.network, error: failure.message },
+        {
+          reservation_id: reservation.id,
+          environment: reservation.environment,
+          error: failure.message,
+        },
         "sponsorship reconciliation failed"
       );
     }
@@ -241,7 +242,7 @@ async function reconcileSponsorshipNetwork(
 
   logEvent("info", {
     event: "sdp_api_sponsorship_reconciliation_tick",
-    network,
+    environment,
     candidates: reservations.length,
     failed: failures.length,
     batch_saturated: reservations.length === RECONCILIATION_BATCH_SIZE,
@@ -292,7 +293,7 @@ async function reconcileReservation(input: {
     if (transactionFeePayer !== reservation.feePayer) {
       logEvent("error", {
         event: "sdp_api_sponsorship_settlement_fee_payer_mismatch",
-        network: reservation.network,
+        environment: reservation.environment,
         reservation_id: reservation.id,
         signature: reservation.signature,
         reserved_fee_payer: reservation.feePayer,
@@ -313,7 +314,7 @@ async function reconcileReservation(input: {
       await tripBreaker(
         repository,
         budgetRedis,
-        reservation.network,
+        reservation.environment,
         `Actual sponsorship spend ${actualLamports} exceeded reservation ${reservation.reservedLamports}`
       );
     }
@@ -415,7 +416,7 @@ async function syncRedisSettlement(
 ): Promise<void> {
   try {
     await budgetRedis.settle({
-      network: reservation.network,
+      environment: reservation.environment,
       projectId: reservation.projectId,
       hourBucket: reservation.hourBucket,
       dayBucket: reservation.dayBucket,
@@ -431,7 +432,7 @@ async function syncRedisSettlement(
     await tripBreaker(
       repository,
       budgetRedis,
-      reservation.network,
+      reservation.environment,
       "Redis settlement failed after durable ledger settlement"
     );
     throw error;
@@ -471,18 +472,24 @@ async function readProviderConfiguration(
 async function handleProviderConfigFailure(
   repository: ReconciliationRepository,
   budgetRedis: ReconciliationRedis,
-  network: SponsorshipNetwork
+  environment: SdpEnvironment
 ): Promise<void> {
-  const consecutiveFailures = await repository.recordProviderConfigFailure(network);
+  const consecutiveFailures = await repository.recordProviderConfigFailure(environment);
   if (consecutiveFailures >= CONSECUTIVE_CONFIG_FAILURES_BEFORE_TRIP) {
-    await tripBreaker(repository, budgetRedis, network, KORA_CONFIG_UNAVAILABLE_BREAKER_REASON, {
-      recoverable: true,
-    });
+    await tripBreaker(
+      repository,
+      budgetRedis,
+      environment,
+      KORA_CONFIG_UNAVAILABLE_BREAKER_REASON,
+      {
+        recoverable: true,
+      }
+    );
     return;
   }
   logEvent("warn", {
     event: "sdp_api_sponsorship_config_read_failed",
-    network,
+    environment,
     consecutive_failures: consecutiveFailures,
     trip_threshold: CONSECUTIVE_CONFIG_FAILURES_BEFORE_TRIP,
   });
@@ -491,14 +498,14 @@ async function handleProviderConfigFailure(
 async function tripBreaker(
   repository: ReconciliationRepository,
   budgetRedis: ReconciliationRedis,
-  network: SponsorshipNetwork,
+  environment: SdpEnvironment,
   reason: string,
   options: { recoverable?: boolean } = {}
 ): Promise<void> {
-  const policy = await repository.tripGlobalBreaker(network, reason, options);
+  const policy = await repository.tripGlobalBreaker(environment, reason, options);
   logEvent("error", {
     event: "sdp_api_sponsorship_breaker_tripped",
-    network,
+    environment,
     reason,
     already_tripped: policy === null,
     source: "reconciliation",
@@ -528,6 +535,6 @@ async function persistAmbiguousCharge(input: {
   if (concurrentlyResolved) {
     return;
   }
-  await tripBreaker(repository, budgetRedis, reservation.network, input.breakerReason);
+  await tripBreaker(repository, budgetRedis, reservation.environment, input.breakerReason);
   throw new Error(input.lostTransitionError);
 }

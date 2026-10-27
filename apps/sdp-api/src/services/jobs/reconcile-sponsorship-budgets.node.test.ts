@@ -94,7 +94,7 @@ function reservation(
     reservedLamports: 5,
     actualLamports: null,
     attempt: 1,
-    network: "devnet",
+    environment: "sandbox",
     projectId: "project_1",
     feePayer: PROVIDER_CONFIGURATION.signerAddress,
     providerConfigFingerprint: sponsorshipProviderConfigFingerprint(PROVIDER_CONFIGURATION),
@@ -110,10 +110,10 @@ function reservation(
 
 function harness(candidate: SponsorshipReconciliationReservation) {
   const breakerPolicy = {
-    id: "global",
-    network: "devnet" as const,
+    id: "sandbox",
+    environment: "sandbox" as const,
     scopeType: "global" as const,
-    scopeId: null,
+    projectId: null,
     enabled: false,
     perTransactionLamports: 10,
     hourlyLamports: 100,
@@ -124,8 +124,8 @@ function harness(candidate: SponsorshipReconciliationReservation) {
     updatedAt: "2026-08-03T10:00:00.000Z",
   };
   const repository = {
-    listReconciliationCandidates: vi.fn(async (network: string) =>
-      network === candidate.network ? [candidate] : []
+    listReconciliationCandidates: vi.fn(async (environment: string) =>
+      environment === candidate.environment ? [candidate] : []
     ),
     recordReconciliationMiss: vi.fn().mockResolvedValue(true),
     settleReservation: vi.fn().mockResolvedValue(true),
@@ -208,19 +208,19 @@ describe("reconcileSponsorshipBudgets", () => {
     expect(repository.settleReservation).not.toHaveBeenCalled();
   });
 
-  it("reconciles only the cluster scope's network", async () => {
+  it("reconciles only the cluster scope's environment", async () => {
     const { repository, run } = harness(reservation());
-    repository.listReconciliationCandidates.mockImplementation(async (network: string) =>
-      network === "mainnet"
-        ? [reservation({ id: "reservation_mainnet", network: "mainnet" })]
+    repository.listReconciliationCandidates.mockImplementation(async (environment: string) =>
+      environment === "production"
+        ? [reservation({ id: "reservation_production", environment: "production" })]
         : [reservation()]
     );
 
     await expect(run()).resolves.toBeUndefined();
 
-    expect(repository.listReconciliationCandidates.mock.calls.map(([network]) => network)).toEqual([
-      "devnet",
-    ]);
+    expect(
+      repository.listReconciliationCandidates.mock.calls.map(([environment]) => environment)
+    ).toEqual(["sandbox"]);
     expect(repository.settleReservation).toHaveBeenCalledExactlyOnceWith(
       "reservation_1",
       1,
@@ -230,9 +230,9 @@ describe("reconcileSponsorshipBudgets", () => {
     );
   });
 
-  it("reports a network with outstanding reservations but no readable paymaster as a failed pass", async () => {
+  it("reports an environment with outstanding reservations but no readable paymaster as a failed pass", async () => {
     const { repository, budgetRedis, getTransaction, finalizedHeight } = harness(
-      reservation({ id: "reservation_mainnet", network: "mainnet" })
+      reservation({ id: "reservation_production", environment: "production" })
     );
     const getProviderConfiguration = vi
       .fn()
@@ -252,7 +252,7 @@ describe("reconcileSponsorshipBudgets", () => {
       )
     ).rejects.toThrow("Kora security configuration is unavailable");
 
-    expect(repository.recordProviderConfigFailure).toHaveBeenCalledWith("mainnet");
+    expect(repository.recordProviderConfigFailure).toHaveBeenCalledWith("production");
     expect(repository.settleReservation).not.toHaveBeenCalled();
   });
 
@@ -306,7 +306,7 @@ describe("reconcileSponsorshipBudgets", () => {
     });
     await run();
     expect(repository.tripGlobalBreaker).toHaveBeenCalledWith(
-      "devnet",
+      "sandbox",
       expect.stringContaining("exceeded reservation"),
       {}
     );
@@ -410,7 +410,7 @@ describe("reconcileSponsorshipBudgets", () => {
     await expect(run()).resolves.toBeUndefined();
 
     expect(repository.listReconciliationCandidates).toHaveBeenCalledWith(
-      "devnet",
+      "sandbox",
       "2026-08-03T10:03:00.000Z",
       250
     );
@@ -545,7 +545,7 @@ describe("reconcileSponsorshipBudgets", () => {
       const { repository, budgetRedis, getTransaction, run } = harness(reservation(override));
       await expect(run()).rejects.toThrow("failed reconciliation");
       expect(repository.tripGlobalBreaker).toHaveBeenCalledWith(
-        "devnet",
+        "sandbox",
         expect.stringContaining("configuration changed"),
         {}
       );
@@ -574,7 +574,7 @@ describe("reconcileSponsorshipBudgets", () => {
     ).rejects.toThrow("configuration is unavailable");
     expect(getProviderConfiguration).toHaveBeenCalledTimes(3);
     expect(sleep).toHaveBeenCalledTimes(2);
-    expect(repository.recordProviderConfigFailure).toHaveBeenCalledWith("devnet");
+    expect(repository.recordProviderConfigFailure).toHaveBeenCalledWith("sandbox");
     expect(repository.tripGlobalBreaker).not.toHaveBeenCalled();
     expect(logEvent).toHaveBeenCalledWith(
       "warn",
@@ -604,7 +604,7 @@ describe("reconcileSponsorshipBudgets", () => {
       )
     ).rejects.toThrow("configuration is unavailable");
     expect(repository.tripGlobalBreaker).toHaveBeenCalledWith(
-      "devnet",
+      "sandbox",
       expect.stringContaining("unavailable"),
       { recoverable: true }
     );
@@ -614,7 +614,7 @@ describe("reconcileSponsorshipBudgets", () => {
   it("resets the consecutive failure counter on a successful config read", async () => {
     const { repository, run } = harness(reservation());
     await expect(run()).resolves.toBeUndefined();
-    expect(repository.resetProviderConfigFailures).toHaveBeenCalledWith("devnet");
+    expect(repository.resetProviderConfigFailures).toHaveBeenCalledWith("sandbox");
     expect(repository.recordProviderConfigFailure).not.toHaveBeenCalled();
   });
 
@@ -671,7 +671,7 @@ describe("reconcileSponsorshipBudgets", () => {
 
     expect(repository.getReservation).toHaveBeenCalledWith("reservation_1");
     expect(repository.tripGlobalBreaker).toHaveBeenCalledWith(
-      "devnet",
+      "sandbox",
       expect.stringContaining("lost its durable transition"),
       {}
     );
@@ -680,7 +680,7 @@ describe("reconcileSponsorshipBudgets", () => {
       "error",
       expect.objectContaining({
         event: "sdp_api_sponsorship_breaker_tripped",
-        network: "devnet",
+        environment: "sandbox",
         source: "reconciliation",
       })
     );
@@ -697,7 +697,7 @@ describe("reconcileSponsorshipBudgets", () => {
       "info",
       expect.objectContaining({
         event: "sdp_api_sponsorship_reconciliation_tick",
-        network: "devnet",
+        environment: "sandbox",
         candidates: 0,
         failed: 0,
       })
@@ -733,10 +733,10 @@ describe("reconcileSponsorshipBudgets", () => {
 
   function trippedPolicy(overrides: Partial<Record<string, unknown>> = {}) {
     return {
-      id: "global",
-      network: "devnet" as const,
+      id: "sandbox",
+      environment: "sandbox" as const,
       scopeType: "global" as const,
-      scopeId: null,
+      projectId: null,
       enabled: false,
       perTransactionLamports: 10,
       hourlyLamports: 100,
@@ -759,7 +759,7 @@ describe("reconcileSponsorshipBudgets", () => {
     await expect(run()).resolves.toBeUndefined();
 
     expect(repository.resumeGlobalBreaker).toHaveBeenCalledWith(
-      "devnet",
+      "sandbox",
       KORA_CONFIG_UNAVAILABLE_BREAKER_REASON,
       expect.stringContaining("readable again")
     );

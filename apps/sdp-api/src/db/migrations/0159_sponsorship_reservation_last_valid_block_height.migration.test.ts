@@ -41,10 +41,10 @@ describe("0159 sponsorship reservation last valid block height", () => {
     const tenant = await seedOrgProject(client, "0159");
     await client.query(
       `INSERT INTO sponsorship_budget_reservations (
-         id, network, product_environment, organization_id, project_id, actor_type, actor_id,
+         id, environment, organization_id, project_id, actor_type, actor_id,
          transaction_digest, fee_payer, provider_config_fingerprint, recent_blockhash,
          reserved_lamports, hour_bucket, day_bucket, policy_versions, status
-       ) VALUES ('sbr_0159', 'devnet', 'sandbox', $1, $2, 'api_key', 'key_0159', 'digest_0159',
+       ) VALUES ('sbr_0159', 'sandbox', $1, $2, 'api_key', 'key_0159', 'digest_0159',
                  'fee_payer_0159', 'config_0159', 'blockhash_0159', 5,
                  '2026-08-03T10:00:00.000Z', '2026-08-03T00:00:00.000Z', '{}', 'submitted')`,
       [tenant.organizationId, tenant.projectId]

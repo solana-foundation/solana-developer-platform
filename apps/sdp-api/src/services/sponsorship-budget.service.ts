@@ -6,6 +6,7 @@ import {
   type SponsorshipProviderConfiguration,
 } from "@sdp/fee-payment/port";
 import { type ClusterScope, currentClusterScope } from "@sdp/rpc/scope";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import {
   type Address,
   assertIsFullySignedTransaction,
@@ -23,10 +24,9 @@ import {
   type SignaturePersistResult,
   type SponsorshipBudgetPolicy,
   SponsorshipBudgetRepository,
-  type SponsorshipNetwork,
+  SponsorshipProjectPolicyMissingError,
   type SponsorshipReservation,
   type SponsorshipReservationStatus,
-  sponsorshipNetworkForCluster,
 } from "@/db/repositories/sponsorship-budget.repository";
 import { describeError, logEvent } from "@/runtime/money-path-events";
 import { SponsorshipBudgetRedis } from "@/runtime/sponsorship-budget-redis";
@@ -101,7 +101,7 @@ type DurableAdmission =
   | { kind: "in_progress" };
 type AdmissionContext = {
   id: string;
-  network: SponsorshipNetwork;
+  environment: SdpEnvironment;
   decoded: Transaction;
   amount: number;
   transactionDigest: string;
@@ -190,9 +190,8 @@ export function sponsorshipProviderConfigFingerprint(
 
 export class BudgetedFeePayment implements SponsorshipFeePayment {
   readonly providerId: string;
-  /** The open scope's environment and its cluster's budget network, read once at construction. */
+  /** The open scope's environment, which keys every budget it is admitted against; read once at construction. */
   private readonly environment: ClusterScope["environment"];
-  private readonly network: SponsorshipNetwork;
   private readonly repository: BudgetRepository;
   private readonly budgetRedis: BudgetRedis;
   private readonly priceTransaction: typeof priceSponsoredTransaction;
@@ -205,9 +204,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     dependencies: BudgetedFeePaymentDependencies = {}
   ) {
     this.providerId = provider.providerId;
-    const { environment, cluster } = currentClusterScope();
-    this.environment = environment;
-    this.network = sponsorshipNetworkForCluster(cluster);
+    this.environment = currentClusterScope().environment;
     this.repository = dependencies.repository ?? new SponsorshipBudgetRepository(getDb(env));
     this.budgetRedis = dependencies.budgetRedis ?? new SponsorshipBudgetRedis(env);
     this.priceTransaction = dependencies.priceTransaction ?? priceSponsoredTransaction;
@@ -235,7 +232,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     } catch (error) {
       if (error instanceof SponsorResponseUndecodableError) {
         return this.accountingUnavailable(
-          this.network,
+          this.environment,
           "Signed sponsorship result could not be reconstructed",
           "Sponsor response bytes were undecodable",
           error
@@ -324,7 +321,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
       );
     } catch (error) {
       return this.accountingUnavailable(
-        this.network,
+        this.environment,
         "Signed sponsorship outcome could not be persisted",
         "Signed sponsorship persistence failed",
         error
@@ -344,7 +341,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
       ]))
     ) {
       return this.accountingUnavailable(
-        this.network,
+        this.environment,
         "Signed sponsorship outcome could not be persisted",
         "Signed sponsorship outcome lost its durable state transition"
       );
@@ -380,7 +377,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     try {
       // Before anything is persisted: a refusal here must not leave a saved signature behind on
       // the caller's row, which only a definite send refusal clears.
-      const policies = await this.resolveEnabledPolicies(this.network);
+      const policies = await this.resolveEnabledPolicies(this.environment);
       if (policies.some((policy) => !policy.enabled)) {
         throw new FeePaymentError(
           "Sponsorship is disabled for this scope",
@@ -422,7 +419,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
         // the answer so the payment row fails instead of staying processing.
         logEvent("error", {
           event: "sdp_api_sponsorship_unstarted_release_failed",
-          network: this.network,
+          environment: this.environment,
           organization_id: this.scope.organizationId,
           project_id: this.scope.projectId,
           reservation_id: reservation.id,
@@ -441,7 +438,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
       );
     } catch (error) {
       return this.accountingUnavailable(
-        this.network,
+        this.environment,
         "Owned submission accounting could not be persisted",
         "Owned submission accounting persistence failed",
         error,
@@ -453,7 +450,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
       !(await this.durablyAdvanced(reservation, ["submitted", "committed", "charged_unknown"]))
     ) {
       return this.accountingUnavailable(
-        this.network,
+        this.environment,
         "Owned submission accounting could not be persisted",
         "Owned submission accounting lost its durable state transition",
         undefined,
@@ -483,7 +480,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
   }
 
   private async prepareAdmission(transaction: Uint8Array): Promise<AdmissionContext> {
-    const network = this.network;
+    const environment = this.environment;
     let providerConfig: Awaited<ReturnType<FeePaymentPort["getSponsorshipConfiguration"]>>;
     let price: Awaited<ReturnType<typeof priceSponsoredTransaction>>;
     try {
@@ -516,8 +513,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     const id = `sbr_${createHash("sha256")
       .update(
         JSON.stringify({
-          network,
-          productEnvironment: this.environment,
+          environment,
           organizationId: this.scope.organizationId,
           projectId: this.scope.projectId,
           actor: this.scope.actor,
@@ -529,7 +525,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     const buckets = utcBuckets(this.now());
     return {
       id,
-      network,
+      environment,
       decoded: decodedTransaction,
       amount,
       transactionDigest,
@@ -567,17 +563,29 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
   }
 
   private async resolveEnabledPolicies(
-    network: SponsorshipNetwork
+    environment: SdpEnvironment
   ): Promise<SponsorshipBudgetPolicy[]> {
     let policies: SponsorshipBudgetPolicy[];
     try {
       policies = await this.repository.resolvePolicies({
-        network,
+        environment,
         projectId: this.scope.projectId,
       });
     } catch (error) {
+      if (error instanceof SponsorshipProjectPolicyMissingError) {
+        logEvent("error", {
+          event: "sdp_api_sponsorship_project_policy_missing",
+          environment,
+          organization_id: this.scope.organizationId,
+          project_id: this.scope.projectId,
+        });
+        throw new FeePaymentError(
+          "Sponsorship is not configured for this project",
+          "PROVIDER_NOT_AVAILABLE"
+        );
+      }
       return this.accountingUnavailable(
-        network,
+        environment,
         "Sponsorship policy resolution is unavailable",
         "Policy resolution failed",
         error
@@ -609,7 +617,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
   ): Promise<AdmissionResult> {
     let durable: DurableAdmission | null = null;
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      const policies = await this.resolveEnabledPolicies(context.network);
+      const policies = await this.resolveEnabledPolicies(context.environment);
       await this.assertSponsorshipEnabled(context, policies, durable, reservationAttempt);
       if (!durable) {
         durable = await this.persistReservationDurable(context, policies, reservationAttempt);
@@ -667,7 +675,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
   ): Promise<Awaited<ReturnType<SponsorshipBudgetRedis["reserve"]>>> {
     try {
       const { usage, liveReservations } = await this.repository.loadWindowAdmissionSnapshot({
-        network: context.network,
+        environment: context.environment,
         organizationId: this.scope.organizationId,
         projectId: this.scope.projectId,
         hourBucket: context.hourBucket,
@@ -675,7 +683,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
         excludeReservationId: context.id,
       });
       return await this.budgetRedis.reserve({
-        network: context.network,
+        environment: context.environment,
         organizationId: this.scope.organizationId,
         projectId: this.scope.projectId,
         hourBucket: context.hourBucket,
@@ -689,7 +697,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
       });
     } catch (error) {
       return this.accountingUnavailable(
-        context.network,
+        context.environment,
         "Sponsorship budget admission is unavailable",
         "Budget reconstruction or Redis admission failed",
         error
@@ -705,8 +713,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     const cancel = this.cancelInput(context, attempt);
     const reservationInput: CreateSponsorshipReservationInput = {
       id: context.id,
-      network: context.network,
-      productEnvironment: this.environment,
+      environment: context.environment,
       organizationId: this.scope.organizationId,
       projectId: this.scope.projectId,
       actorType: this.scope.actor.type,
@@ -770,7 +777,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
         throw error;
       }
       return this.accountingUnavailable(
-        context.network,
+        context.environment,
         "Sponsorship reservation persistence is unavailable",
         "Durable reservation persistence failed",
         error
@@ -788,7 +795,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
       await this.repository.markRedisSettled(context.id, attempt);
     } catch (error) {
       return this.accountingUnavailable(
-        context.network,
+        context.environment,
         "Sponsorship reservation release is unavailable",
         "Durable reservation release failed",
         error
@@ -801,7 +808,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
       return await this.repository.getReservation(context.id);
     } catch (error) {
       return this.accountingUnavailable(
-        context.network,
+        context.environment,
         "Sponsorship reservation state is unavailable",
         "Durable reservation read failed",
         error
@@ -811,7 +818,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
 
   private cancelInput(context: AdmissionContext, attempt: number): AdmissionCancel {
     return {
-      network: context.network,
+      environment: context.environment,
       organizationId: this.scope.organizationId,
       projectId: this.scope.projectId,
       hourBucket: context.hourBucket,
@@ -829,11 +836,11 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     };
   }
 
-  private async tripBreaker(network: SponsorshipNetwork, reason: string): Promise<void> {
-    const policy = await this.repository.tripGlobalBreaker(network, reason);
+  private async tripBreaker(environment: SdpEnvironment, reason: string): Promise<void> {
+    const policy = await this.repository.tripGlobalBreaker(environment, reason);
     logEvent("error", {
       event: "sdp_api_sponsorship_breaker_tripped",
-      network,
+      environment,
       reason,
       already_tripped: policy === null,
       organization_id: this.scope.organizationId,
@@ -858,7 +865,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
   }
 
   private async accountingUnavailable(
-    network: SponsorshipNetwork,
+    environment: SdpEnvironment,
     message: string,
     breakerReason: string,
     error?: unknown,
@@ -869,7 +876,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
   ): Promise<never> {
     logEvent("error", {
       event: "sdp_api_sponsorship_accounting_unavailable",
-      network,
+      environment,
       reason: breakerReason,
       organization_id: this.scope.organizationId,
       project_id: this.scope.projectId,
@@ -879,7 +886,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
       ...(error === undefined ? {} : describeError(error)),
     });
     try {
-      await this.tripBreaker(network, breakerReason);
+      await this.tripBreaker(environment, breakerReason);
     } catch {
       // The original accounting outage remains the primary failure. Admission
       // still fails closed even when the breaker cannot be synchronized.
@@ -902,14 +909,14 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
       if (persisted) return;
     } catch (persistenceError) {
       return this.accountingUnavailable(
-        this.network,
+        this.environment,
         "Ambiguous sponsorship outcome could not be persisted",
         "Failed to persist ambiguous Kora outcome",
         persistenceError
       );
     }
     return this.accountingUnavailable(
-      this.network,
+      this.environment,
       "Ambiguous sponsorship outcome could not be persisted",
       "Ambiguous sponsorship state transition was lost"
     );
@@ -944,7 +951,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
           : await this.repository.markReleased(reservation.id, reservation.attempt, reason);
     } catch (releaseError) {
       return this.accountingUnavailable(
-        this.network,
+        this.environment,
         "Sponsorship release state is unavailable",
         "Deterministic release persistence failed",
         releaseError
@@ -952,7 +959,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     }
     if (!released || !reservation.settlement) {
       await this.tripBreaker(
-        this.network,
+        this.environment,
         "Deterministic release lost its durable ownership transition"
       );
       throw new FeePaymentError(
@@ -970,7 +977,7 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
       if (!persisted) throw new Error("Released reservation lost its Redis settlement ownership");
     } catch (compensationError) {
       return this.accountingUnavailable(
-        this.network,
+        this.environment,
         "Sponsorship release accounting is unavailable",
         "Redis release invariant failed",
         compensationError

@@ -82,14 +82,13 @@ describe("sponsorship budget operator validation", () => {
 });
 
 describe("parseSponsorshipBudgetCommand", () => {
-  it("parses a production set-project apply onto the mainnet budget", () => {
+  it("parses a production set-project apply", () => {
     expect(
       parseSponsorshipBudgetCommand({ command: "set-project", flags: SET_PROJECT_FLAGS })
     ).toEqual({
       command: "set-project",
       environment: "production",
       organizationId: "org_operator_1",
-      network: "mainnet",
       mode: "apply",
       operator: "oncall@example.test",
       reason: "raise launch limits",
@@ -101,7 +100,28 @@ describe("parseSponsorshipBudgetCommand", () => {
     });
   });
 
-  it("parses a sandbox kill onto the devnet budget without a version", () => {
+  it("parses a set-project preview that names no version", () => {
+    const flags = Object.fromEntries(
+      Object.entries({ ...SET_PROJECT_FLAGS, mode: "preview" }).filter(
+        ([name]) => name !== "expected-version"
+      )
+    );
+    expect(parseSponsorshipBudgetCommand({ command: "set-project", flags })).toEqual({
+      command: "set-project",
+      environment: "production",
+      organizationId: "org_operator_1",
+      mode: "preview",
+      operator: "oncall@example.test",
+      reason: "raise launch limits",
+      enabled: true,
+      expectedVersion: null,
+      perTransactionLamports: 10_000_000,
+      hourlyLamports: 1_000_000_000,
+      dailyLamports: 3_000_000_000,
+    });
+  });
+
+  it("parses a sandbox kill without a version", () => {
     expect(
       parseSponsorshipBudgetCommand({
         command: "kill",
@@ -114,7 +134,7 @@ describe("parseSponsorshipBudgetCommand", () => {
       })
     ).toEqual({
       command: "kill",
-      network: "devnet",
+      environment: "sandbox",
       mode: "preview",
       operator: "oncall@example.test",
       reason: "incident",

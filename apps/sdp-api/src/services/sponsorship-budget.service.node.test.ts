@@ -12,7 +12,10 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { SponsorshipBudgetPolicy } from "@/db/repositories/sponsorship-budget.repository";
+import {
+  type SponsorshipBudgetPolicy,
+  SponsorshipProjectPolicyMissingError,
+} from "@/db/repositories/sponsorship-budget.repository";
 import { type MoneyAdmissionFacts, MoneyMovementRefusedError } from "@/lib/money-admission";
 import { admittedMoneyFacts } from "@/test/helpers/money-admission";
 import {
@@ -76,11 +79,9 @@ function policy(
   scopeType: SponsorshipBudgetPolicy["scopeType"],
   enabled = true
 ): SponsorshipBudgetPolicy {
-  return {
+  const fields = {
     id: `policy_${scopeType}`,
-    network: "devnet",
-    scopeType,
-    scopeId: null,
+    environment: "sandbox" as const,
     enabled,
     perTransactionLamports: 10_000_000,
     hourlyLamports: 1_000_000_000,
@@ -90,6 +91,9 @@ function policy(
     updateReason: "test",
     updatedAt: new Date(0).toISOString(),
   };
+  return scopeType === "global"
+    ? { ...fields, scopeType, projectId: null }
+    : { ...fields, scopeType, projectId: SCOPE.projectId };
 }
 
 function harnessParts() {
@@ -193,21 +197,62 @@ describe("BudgetedFeePayment", () => {
     expect(created).toBeLessThan(reserved);
   });
 
-  it("charges a production project's mainnet network, not the process default", async () => {
+  it("keys a production project's budget by the scope's environment, not the process default", async () => {
     const { feePayment, repository } = harnessIn("production", SCOPE);
     readMoneyAdmissionFacts.mockResolvedValue(ACTIVE_ENTITLED_PRODUCTION);
     repository.resolvePolicies.mockResolvedValue([
-      { ...policy("global"), network: "mainnet" },
-      { ...policy("project"), network: "mainnet" },
+      { ...policy("global"), environment: "production" },
+      { ...policy("project"), environment: "production" },
     ]);
 
     await expect(feePayment.signAsFeePayer(buildTransaction())).resolves.toBeInstanceOf(Uint8Array);
 
-    expect(repository.resolvePolicies.mock.calls[0]?.[0]).toMatchObject({ network: "mainnet" });
-    expect(repository.createReservation.mock.calls[0]?.[0]).toMatchObject({
-      network: "mainnet",
-      productEnvironment: "production",
+    expect(repository.resolvePolicies).toHaveBeenCalledWith({
+      environment: "production",
+      projectId: SCOPE.projectId,
     });
+    expect(repository.createReservation).toHaveBeenCalledWith(
+      expect.objectContaining({ environment: "production" })
+    );
+  });
+
+  it("refuses a project without a budget policy without tripping the environment's breaker", async () => {
+    const { feePayment, provider, repository, budgetRedis } = harness();
+    repository.resolvePolicies.mockRejectedValue(
+      new SponsorshipProjectPolicyMissingError(SCOPE.projectId)
+    );
+
+    await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toMatchObject({
+      code: "PROVIDER_NOT_AVAILABLE",
+      message: "Sponsorship is not configured for this project",
+    });
+
+    expect(repository.tripGlobalBreaker).not.toHaveBeenCalled();
+    expect(repository.createReservation).not.toHaveBeenCalled();
+    expect(budgetRedis.reserve).not.toHaveBeenCalled();
+    expect(provider.signAsFeePayer).not.toHaveBeenCalled();
+    expect(logEvent).toHaveBeenCalledWith("error", {
+      event: "sdp_api_sponsorship_project_policy_missing",
+      environment: "sandbox",
+      organization_id: SCOPE.organizationId,
+      project_id: SCOPE.projectId,
+    });
+  });
+
+  it("trips the environment's breaker when policy resolution fails for any other reason", async () => {
+    const { feePayment, provider, repository } = harness();
+    repository.resolvePolicies.mockRejectedValue(new Error("postgres unavailable"));
+
+    await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toMatchObject({
+      code: "PROVIDER_NOT_AVAILABLE",
+      message: "Sponsorship policy resolution is unavailable",
+    });
+
+    expect(repository.tripGlobalBreaker).toHaveBeenCalledWith(
+      "sandbox",
+      "Policy resolution failed"
+    );
+    expect(provider.signAsFeePayer).not.toHaveBeenCalled();
   });
 
   it("excludes the current reservation from the reconstruction snapshot", async () => {
@@ -601,7 +646,7 @@ describe("BudgetedFeePayment", () => {
     expect(repository.markReleased).not.toHaveBeenCalled();
     expect(budgetRedis.settle).not.toHaveBeenCalled();
     expect(repository.tripGlobalBreaker).toHaveBeenCalledWith(
-      "devnet",
+      "sandbox",
       "Owned submission accounting persistence failed"
     );
   });
@@ -620,7 +665,7 @@ describe("BudgetedFeePayment", () => {
     ).rejects.toMatchObject({ code: "PROVIDER_NOT_AVAILABLE" });
 
     expect(repository.tripGlobalBreaker).toHaveBeenCalledWith(
-      "devnet",
+      "sandbox",
       "Owned submission accounting lost its durable state transition"
     );
     expect(repository.markReleased).not.toHaveBeenCalled();
@@ -699,7 +744,7 @@ describe("BudgetedFeePayment", () => {
       "error",
       expect.objectContaining({
         event: "sdp_api_sponsorship_accounting_unavailable",
-        network: "devnet",
+        environment: "sandbox",
         organization_id: "org_1",
         error_name: "Error",
       })
@@ -708,7 +753,7 @@ describe("BudgetedFeePayment", () => {
       "error",
       expect.objectContaining({
         event: "sdp_api_sponsorship_breaker_tripped",
-        network: "devnet",
+        environment: "sandbox",
         reason: "Signed sponsorship persistence failed",
       })
     );
@@ -739,7 +784,7 @@ describe("BudgetedFeePayment", () => {
     });
 
     expect(repository.tripGlobalBreaker).toHaveBeenCalledWith(
-      "devnet",
+      "sandbox",
       "Signed sponsorship outcome lost its durable state transition"
     );
     expect(budgetRedis.settle).not.toHaveBeenCalled();
@@ -973,7 +1018,7 @@ describe("BudgetedFeePayment", () => {
       code: "PROVIDER_NOT_AVAILABLE",
     });
     expect(repository.tripGlobalBreaker).toHaveBeenCalledWith(
-      "devnet",
+      "sandbox",
       "Budget reconstruction or Redis admission failed"
     );
     expect(provider.signAsFeePayer).not.toHaveBeenCalled();

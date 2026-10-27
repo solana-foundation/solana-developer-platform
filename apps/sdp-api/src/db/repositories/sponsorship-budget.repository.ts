@@ -1,16 +1,9 @@
 import { randomUUID } from "node:crypto";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { DatabaseClient as AppDb, DatabaseExecutor } from "@/db/client";
 
 export const SPONSORSHIP_BREAKER_OPERATOR = "system:sponsorship-breaker";
 
-export type SponsorshipNetwork = "devnet" | "mainnet";
-
-/** The budget network a Solana cluster draws from. The ONE mapping; do not re-derive it. */
-export function sponsorshipNetworkForCluster(
-  cluster: "devnet" | "mainnet-beta"
-): SponsorshipNetwork {
-  return cluster === "mainnet-beta" ? "mainnet" : "devnet";
-}
 export type SponsorshipBudgetScopeType = "global" | "project";
 export type SponsorshipReservationStatus =
   | "reserved"
@@ -20,11 +13,10 @@ export type SponsorshipReservationStatus =
   | "released"
   | "charged_unknown";
 
-export interface SponsorshipBudgetPolicy {
+interface SponsorshipBudgetPolicyFields {
+  /** The project policy's row id, or the environment itself for a global row (its key). */
   id: string;
-  network: SponsorshipNetwork;
-  scopeType: SponsorshipBudgetScopeType;
-  scopeId: string | null;
+  environment: SdpEnvironment;
   enabled: boolean;
   perTransactionLamports: number;
   hourlyLamports: number;
@@ -35,6 +27,34 @@ export interface SponsorshipBudgetPolicy {
   updatedAt: string;
 }
 
+/**
+ * An environment's cap (the global row, which also carries the breaker) or one
+ * project's cap. A project's environment is its environment's.
+ */
+export type SponsorshipBudgetPolicy =
+  | (SponsorshipBudgetPolicyFields & { scopeType: "global"; projectId: null })
+  | (SponsorshipBudgetPolicyFields & { scopeType: "project"; projectId: string });
+
+/**
+ * A project with no budget policy. The project-creation trigger writes one for
+ * every project, so this is a broken invariant on that one project: its
+ * sponsorship refuses, and the environment keeps sponsoring everyone else.
+ */
+export class SponsorshipProjectPolicyMissingError extends Error {
+  constructor(readonly projectId: string) {
+    super(`Project ${projectId} has no sponsorship budget policy`);
+    this.name = "SponsorshipProjectPolicyMissingError";
+  }
+}
+
+/** The limits an operator writes to a policy. */
+export interface SponsorshipPolicyLimits {
+  enabled: boolean;
+  perTransactionLamports: number;
+  hourlyLamports: number;
+  dailyLamports: number;
+}
+
 export interface SponsorshipBudgetUsage {
   global: number;
   project: number;
@@ -42,8 +62,7 @@ export interface SponsorshipBudgetUsage {
 
 export interface CreateSponsorshipReservationInput {
   id: string;
-  network: SponsorshipNetwork;
-  productEnvironment: "sandbox" | "production";
+  environment: SdpEnvironment;
   organizationId: string;
   projectId: string;
   actorType: string;
@@ -85,7 +104,7 @@ export interface SponsorshipLiveWindowReservation {
 }
 
 export interface SponsorshipReconciliationReservation extends SponsorshipReservation {
-  network: SponsorshipNetwork;
+  environment: SdpEnvironment;
   projectId: string;
   feePayer: string;
   providerConfigFingerprint: string;
@@ -98,11 +117,8 @@ export interface SponsorshipReconciliationReservation extends SponsorshipReserva
   redisSettledAt: string | null;
 }
 
-type PolicyRow = {
+type PolicyLimitsRow = {
   id: string;
-  network: SponsorshipNetwork;
-  scope_type: SponsorshipBudgetScopeType;
-  scope_id: string | null;
   enabled: boolean;
   per_transaction_lamports: number;
   hourly_lamports: number;
@@ -113,17 +129,23 @@ type PolicyRow = {
   updated_at: string;
 };
 
-/** A new policy row id. */
-function sponsorshipPolicyId(): string {
-  return `sbp_${randomUUID()}`;
+type GlobalPolicyRow = Omit<PolicyLimitsRow, "id"> & { environment: SdpEnvironment };
+
+type ProjectPolicyRow = PolicyLimitsRow & { project_id: string; environment: SdpEnvironment };
+
+const PROJECT_POLICY_COLUMNS = `pp.id, pp.project_id, pp.enabled, pp.per_transaction_lamports,
+  pp.hourly_lamports, pp.daily_lamports, pp.version, pp.updated_by, pp.update_reason,
+  pp.updated_at, p.environment`;
+
+/** A new project policy row id. */
+function projectPolicyId(): string {
+  return `sbpp_${randomUUID()}`;
 }
 
-function mapPolicy(row: PolicyRow): SponsorshipBudgetPolicy {
+function mapLimits(
+  row: Omit<PolicyLimitsRow, "id">
+): Omit<SponsorshipBudgetPolicyFields, "id" | "environment"> {
   return {
-    id: row.id,
-    network: row.network,
-    scopeType: row.scope_type,
-    scopeId: row.scope_id,
     enabled: row.enabled,
     perTransactionLamports: row.per_transaction_lamports,
     hourlyLamports: row.hourly_lamports,
@@ -135,102 +157,153 @@ function mapPolicy(row: PolicyRow): SponsorshipBudgetPolicy {
   };
 }
 
+function mapGlobalPolicy(row: GlobalPolicyRow): SponsorshipBudgetPolicy {
+  return {
+    ...mapLimits(row),
+    id: row.environment,
+    environment: row.environment,
+    scopeType: "global",
+    projectId: null,
+  };
+}
+
+function mapProjectPolicy(row: ProjectPolicyRow): SponsorshipBudgetPolicy {
+  return {
+    ...mapLimits(row),
+    id: row.id,
+    environment: row.environment,
+    scopeType: "project",
+    projectId: row.project_id,
+  };
+}
+
 export class SponsorshipBudgetRepository {
   constructor(private readonly db: AppDb) {}
 
-  async getGlobalPolicy(network: SponsorshipNetwork): Promise<SponsorshipBudgetPolicy | null> {
-    const row = await this.db.queryOne<PolicyRow>(
-      `SELECT * FROM sponsorship_budget_policies
-       WHERE network = ? AND scope_type = 'global' AND scope_id IS NULL`,
-      [network]
+  async getGlobalPolicy(environment: SdpEnvironment): Promise<SponsorshipBudgetPolicy | null> {
+    const row = await this.db.queryOne<GlobalPolicyRow>(
+      "SELECT * FROM sponsorship_budget_policies WHERE environment = ?",
+      [environment]
     );
-    return row ? mapPolicy(row) : null;
-  }
-
-  async listPolicies(network?: SponsorshipNetwork): Promise<SponsorshipBudgetPolicy[]> {
-    const rows = await this.db.queryMany<PolicyRow>(
-      `SELECT * FROM sponsorship_budget_policies
-       WHERE (?::text IS NULL OR network = ?)
-       ORDER BY network, CASE scope_type WHEN 'global' THEN 0 ELSE 1 END, scope_id NULLS FIRST`,
-      [network ?? null, network ?? null]
-    );
-    return rows.map(mapPolicy);
-  }
-
-  async resolvePolicies(input: {
-    network: SponsorshipNetwork;
-    projectId: string;
-  }): Promise<SponsorshipBudgetPolicy[]> {
-    const rows = await this.db.queryMany<PolicyRow>(
-      `SELECT DISTINCT ON (scope_type) *
-       FROM sponsorship_budget_policies
-       WHERE network = ?
-         AND (
-           (scope_type = 'global' AND scope_id IS NULL) OR
-           (scope_type = 'project' AND (scope_id = ? OR scope_id IS NULL))
-         )
-       ORDER BY scope_type, (scope_id IS NOT NULL) DESC`,
-      [input.network, input.projectId]
-    );
-    const policies = rows.map(mapPolicy);
-    const requiredScopes: SponsorshipBudgetScopeType[] = ["global", "project"];
-    if (requiredScopes.some((scopeType) => !policies.some((row) => row.scopeType === scopeType))) {
-      throw new Error("Sponsorship budget policy hierarchy is incomplete");
-    }
-    return requiredScopes.map((scopeType) => {
-      const policy = policies.find((row) => row.scopeType === scopeType);
-      if (!policy) throw new Error(`Missing ${scopeType} sponsorship policy`);
-      return policy;
-    });
+    return row ? mapGlobalPolicy(row) : null;
   }
 
   /**
-   * Write an operator's policy change as a compare-and-set on the version the
-   * operator read. Version 0 means the policy must not exist yet; a concurrent
-   * create of the same scope loses on the scope's unique index instead of
-   * raising. A breaker trip bumps the version, so a write computed before the
-   * trip refuses rather than silently resuming sponsorship.
+   * An environment's global policy and the policy of every project in its environment.
    *
-   * @param input - The policy scope, its new limits, and the operator's attribution.
-   * @param input.network - The budget network the policy governs.
-   * @param input.scopeType - The policy level.
-   * @param input.scopeId - The project id, or null for the global row or the project default.
-   * @param input.enabled - Whether the policy admits sponsorship.
-   * @param input.perTransactionLamports - The per-transaction lamport ceiling.
-   * @param input.hourlyLamports - The hourly lamport ceiling.
-   * @param input.dailyLamports - The daily lamport ceiling.
+   * @param environment - The SDP environment.
+   * @returns The global policy first, then each project's, by project id.
+   */
+  async listPolicies(environment: SdpEnvironment): Promise<SponsorshipBudgetPolicy[]> {
+    const global = await this.getGlobalPolicy(environment);
+    const rows = await this.db.queryMany<ProjectPolicyRow>(
+      `SELECT ${PROJECT_POLICY_COLUMNS}
+       FROM sponsorship_budget_project_policies pp
+       JOIN projects p ON p.id = pp.project_id
+       WHERE p.environment = ?
+       ORDER BY pp.project_id`,
+      [environment]
+    );
+    return [...(global ? [global] : []), ...rows.map(mapProjectPolicy)];
+  }
+
+  /**
+   * Active projects in an environment with no budget policy. The
+   * project-creation trigger writes one for every project, so a non-empty
+   * answer is a broken invariant (and those projects' sponsorship refuses).
+   *
+   * @param environment - The SDP environment.
+   * @returns The ids of the active projects that have no policy.
+   */
+  async listProjectsWithoutPolicy(environment: SdpEnvironment): Promise<string[]> {
+    const rows = await this.db.queryMany<{ id: string }>(
+      `SELECT p.id
+       FROM projects p
+       LEFT JOIN sponsorship_budget_project_policies pp ON pp.project_id = p.id
+       WHERE p.environment = ? AND p.status = 'active' AND pp.id IS NULL
+       ORDER BY p.id`,
+      [environment]
+    );
+    return rows.map((row) => row.id);
+  }
+
+  /**
+   * One project's policy, provided the project is in the environment's environment.
+   *
+   * @param input - The environment and project.
+   * @param input.environment - The SDP environment the project must belong to.
+   * @param input.projectId - The project.
+   * @param executor - The client to read through.
+   * @returns The project's policy, or null when it has none on that environment.
+   */
+  async getProjectPolicy(
+    input: { environment: SdpEnvironment; projectId: string },
+    executor: DatabaseExecutor = this.db
+  ): Promise<SponsorshipBudgetPolicy | null> {
+    const row = await executor.queryOne<ProjectPolicyRow>(
+      `SELECT ${PROJECT_POLICY_COLUMNS}
+       FROM sponsorship_budget_project_policies pp
+       JOIN projects p ON p.id = pp.project_id
+       WHERE pp.project_id = ? AND p.environment = ?`,
+      [input.projectId, input.environment]
+    );
+    return row ? mapProjectPolicy(row) : null;
+  }
+
+  /**
+   * The global and project policies a sponsorship is admitted against.
+   *
+   * @param input - The environment and project.
+   * @param input.environment - The SDP environment.
+   * @param input.projectId - The sponsoring project.
+   * @returns The global policy, then the project's.
+   * @throws SponsorshipProjectPolicyMissingError when the project has no policy on the environment.
+   */
+  async resolvePolicies(input: {
+    environment: SdpEnvironment;
+    projectId: string;
+  }): Promise<[SponsorshipBudgetPolicy, SponsorshipBudgetPolicy]> {
+    const global = await this.getGlobalPolicy(input.environment);
+    if (!global)
+      throw new Error(`Sponsorship budget ${input.environment} global policy is missing`);
+    const project = await this.getProjectPolicy(input);
+    if (!project) throw new SponsorshipProjectPolicyMissingError(input.projectId);
+    return [global, project];
+  }
+
+  /**
+   * Write an environment's global policy as a compare-and-set on the version the
+   * operator read. Version 0 means it must not exist yet. A breaker trip bumps
+   * the version, so a write computed before the trip refuses rather than
+   * silently resuming sponsorship.
+   *
+   * @param input - The environment, its new limits, the version read, and the attribution.
+   * @param input.environment - The SDP environment.
    * @param input.expectedVersion - The version the operator read; 0 when the policy does not exist.
    * @param input.operator - Who made the change.
    * @param input.reason - Why the change was made.
    * @returns The written policy, or null when its version no longer matches.
    */
-  async writePolicyAtVersion(input: {
-    network: SponsorshipNetwork;
-    scopeType: SponsorshipBudgetScopeType;
-    scopeId: string | null;
-    enabled: boolean;
-    perTransactionLamports: number;
-    hourlyLamports: number;
-    dailyLamports: number;
-    expectedVersion: number;
-    operator: string;
-    reason: string;
-  }): Promise<SponsorshipBudgetPolicy | null> {
+  async writeGlobalPolicyAtVersion(
+    input: SponsorshipPolicyLimits & {
+      environment: SdpEnvironment;
+      expectedVersion: number;
+      operator: string;
+      reason: string;
+    }
+  ): Promise<SponsorshipBudgetPolicy | null> {
     return this.db.transaction(async (tx) => {
       const row =
         input.expectedVersion === 0
-          ? await tx.queryOne<PolicyRow>(
+          ? await tx.queryOne<GlobalPolicyRow>(
               `INSERT INTO sponsorship_budget_policies (
-                 id, network, scope_type, scope_id, enabled, per_transaction_lamports,
-                 hourly_lamports, daily_lamports, version, updated_by, update_reason
-               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
-               ON CONFLICT (network, scope_type, (COALESCE(scope_id, ''))) DO NOTHING
+                 environment, enabled, per_transaction_lamports, hourly_lamports,
+                 daily_lamports, version, updated_by, update_reason
+               ) VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+               ON CONFLICT (environment) DO NOTHING
                RETURNING *`,
               [
-                sponsorshipPolicyId(),
-                input.network,
-                input.scopeType,
-                input.scopeId,
+                input.environment,
                 input.enabled,
                 input.perTransactionLamports,
                 input.hourlyLamports,
@@ -239,13 +312,12 @@ export class SponsorshipBudgetRepository {
                 input.reason,
               ]
             )
-          : await tx.queryOne<PolicyRow>(
+          : await tx.queryOne<GlobalPolicyRow>(
               `UPDATE sponsorship_budget_policies SET
                  enabled = ?, per_transaction_lamports = ?, hourly_lamports = ?,
                  daily_lamports = ?, version = version + 1, updated_by = ?,
                  update_reason = ?, updated_at = sdp_iso_now()
-               WHERE network = ? AND scope_type = ? AND scope_id IS NOT DISTINCT FROM ?
-                 AND version = ?
+               WHERE environment = ? AND version = ?
                RETURNING *`,
               [
                 input.enabled,
@@ -254,64 +326,130 @@ export class SponsorshipBudgetRepository {
                 input.dailyLamports,
                 input.operator,
                 input.reason,
-                input.network,
-                input.scopeType,
-                input.scopeId,
+                input.environment,
                 input.expectedVersion,
               ]
             );
       if (!row) return null;
-      await this.insertRevision(tx, row, input.operator, input.reason);
-      return mapPolicy(row);
+      await this.insertGlobalRevision(tx, row, input.operator, input.reason);
+      return mapGlobalPolicy(row);
     });
   }
 
   /**
-   * Resume a network's global policy as a compare-and-set on the version the
+   * Write one project's policy as a compare-and-set on the version the
+   * operator read. Every project gets a policy when it is created, so version 0
+   * only repairs a project that lost its row.
+   *
+   * @param input - The project, its new limits, the version read, and the attribution.
+   * @param input.projectId - The project.
+   * @param input.expectedVersion - The version the operator read; 0 when the policy does not exist.
+   * @param input.operator - Who made the change.
+   * @param input.reason - Why the change was made.
+   * @returns The written policy, or null when its version no longer matches.
+   */
+  async writeProjectPolicyAtVersion(
+    input: SponsorshipPolicyLimits & {
+      projectId: string;
+      expectedVersion: number;
+      operator: string;
+      reason: string;
+    }
+  ): Promise<SponsorshipBudgetPolicy | null> {
+    return this.db.transaction(async (tx) => {
+      const project = await tx.queryOne<{ environment: SdpEnvironment }>(
+        "SELECT environment FROM projects WHERE id = ?",
+        [input.projectId]
+      );
+      if (!project) throw new Error(`Project ${input.projectId} does not exist`);
+      const row =
+        input.expectedVersion === 0
+          ? await tx.queryOne<PolicyLimitsRow & { project_id: string }>(
+              `INSERT INTO sponsorship_budget_project_policies (
+                 id, project_id, enabled, per_transaction_lamports, hourly_lamports,
+                 daily_lamports, version, updated_by, update_reason
+               ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+               ON CONFLICT (project_id) DO NOTHING
+               RETURNING *`,
+              [
+                projectPolicyId(),
+                input.projectId,
+                input.enabled,
+                input.perTransactionLamports,
+                input.hourlyLamports,
+                input.dailyLamports,
+                input.operator,
+                input.reason,
+              ]
+            )
+          : await tx.queryOne<PolicyLimitsRow & { project_id: string }>(
+              `UPDATE sponsorship_budget_project_policies SET
+                 enabled = ?, per_transaction_lamports = ?, hourly_lamports = ?,
+                 daily_lamports = ?, version = version + 1, updated_by = ?,
+                 update_reason = ?, updated_at = sdp_iso_now()
+               WHERE project_id = ? AND version = ?
+               RETURNING *`,
+              [
+                input.enabled,
+                input.perTransactionLamports,
+                input.hourlyLamports,
+                input.dailyLamports,
+                input.operator,
+                input.reason,
+                input.projectId,
+                input.expectedVersion,
+              ]
+            );
+      if (!row) return null;
+      await this.insertProjectRevision(tx, row, input.operator, input.reason);
+      return mapProjectPolicy({ ...row, environment: project.environment });
+    });
+  }
+
+  /**
+   * Resume an environment's global policy as a compare-and-set on the version the
    * operator read, whatever disabled it: an operator may resume an integrity
    * trip, which the breaker's own recovery (`resumeGlobalBreaker`) refuses.
    *
-   * @param input - The network, the version the operator read, and the attribution.
-   * @param input.network - The budget network to resume.
+   * @param input - The environment, the version the operator read, and the attribution.
+   * @param input.environment - The SDP environment to resume.
    * @param input.expectedVersion - The global policy version the operator read.
    * @param input.operator - Who resumed sponsorship.
    * @param input.reason - Why sponsorship was resumed.
    * @returns The resumed policy, or null when it is enabled or its version moved.
    */
   async resumeGlobalPolicyAtVersion(input: {
-    network: SponsorshipNetwork;
+    environment: SdpEnvironment;
     expectedVersion: number;
     operator: string;
     reason: string;
   }): Promise<SponsorshipBudgetPolicy | null> {
     return this.db.transaction(async (tx) => {
-      const row = await tx.queryOne<PolicyRow>(
+      const row = await tx.queryOne<GlobalPolicyRow>(
         `UPDATE sponsorship_budget_policies
            SET enabled = TRUE, version = version + 1, updated_by = ?, update_reason = ?, updated_at = sdp_iso_now()
-         WHERE network = ? AND scope_type = 'global' AND scope_id IS NULL
-           AND enabled = FALSE AND version = ?
+         WHERE environment = ? AND enabled = FALSE AND version = ?
          RETURNING *`,
-        [input.operator, input.reason, input.network, input.expectedVersion]
+        [input.operator, input.reason, input.environment, input.expectedVersion]
       );
       if (!row) return null;
-      await this.insertRevision(tx, row, input.operator, input.reason);
-      return mapPolicy(row);
+      await this.insertGlobalRevision(tx, row, input.operator, input.reason);
+      return mapGlobalPolicy(row);
     });
   }
 
   async createReservation(input: CreateSponsorshipReservationInput): Promise<boolean> {
     const inserted = await this.db.execute(
       `INSERT INTO sponsorship_budget_reservations (
-         id, network, product_environment, organization_id, project_id, actor_type, actor_id,
+         id, environment, organization_id, project_id, actor_type, actor_id,
          transaction_digest, fee_payer, provider_config_fingerprint, recent_blockhash,
          last_valid_block_height, reserved_lamports, hour_bucket, day_bucket, policy_versions,
          status
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'reserved')
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'reserved')
        ON CONFLICT (id) DO NOTHING`,
       [
         input.id,
-        input.network,
-        input.productEnvironment,
+        input.environment,
         input.organizationId,
         input.projectId,
         input.actorType,
@@ -387,10 +525,8 @@ export class SponsorshipBudgetRepository {
     return updated?.attempt ?? null;
   }
 
-  async setPolicyEnabled(input: {
-    network: SponsorshipNetwork;
-    scopeType: SponsorshipBudgetScopeType;
-    scopeId: string | null;
+  async setGlobalPolicyEnabled(input: {
+    environment: SdpEnvironment;
     enabled: boolean;
     operator: string;
     reason: string;
@@ -405,10 +541,10 @@ export class SponsorshipBudgetRepository {
       // The recoverable config-unavailability trip opts out of the overwrite:
       // it must never downgrade a stronger disable to auto-recoverable.
       // Identical repeated disables stay no-ops.
-      const row = await tx.queryOne<PolicyRow>(
+      const row = await tx.queryOne<GlobalPolicyRow>(
         `UPDATE sponsorship_budget_policies
            SET enabled = ?, version = version + 1, updated_by = ?, update_reason = ?, updated_at = sdp_iso_now()
-         WHERE network = ? AND scope_type = ? AND scope_id IS NOT DISTINCT FROM ?
+         WHERE environment = ?
            AND (enabled <> ?
                 OR (? = TRUE AND ? = FALSE AND (updated_by <> ? OR update_reason <> ?)))
          RETURNING *`,
@@ -416,9 +552,7 @@ export class SponsorshipBudgetRepository {
           input.enabled,
           input.operator,
           input.reason,
-          input.network,
-          input.scopeType,
-          input.scopeId,
+          input.environment,
           input.enabled,
           overwriteDisabledProvenance,
           input.enabled,
@@ -427,20 +561,20 @@ export class SponsorshipBudgetRepository {
         ]
       );
       if (!row) return null;
-      await this.insertRevision(tx, row, input.operator, input.reason);
-      return mapPolicy(row);
+      await this.insertGlobalRevision(tx, row, input.operator, input.reason);
+      return mapGlobalPolicy(row);
     });
   }
 
-  async recordProviderConfigFailure(network: SponsorshipNetwork): Promise<number> {
+  async recordProviderConfigFailure(environment: SdpEnvironment): Promise<number> {
     const row = await this.db.queryOne<{ consecutive_config_failures: number | string }>(
-      `INSERT INTO sponsorship_reconciliation_state (network, consecutive_config_failures)
+      `INSERT INTO sponsorship_reconciliation_state (environment, consecutive_config_failures)
        VALUES (?, 1)
-       ON CONFLICT (network) DO UPDATE
+       ON CONFLICT (environment) DO UPDATE
          SET consecutive_config_failures = sponsorship_reconciliation_state.consecutive_config_failures + 1,
              updated_at = sdp_iso_now()
        RETURNING consecutive_config_failures`,
-      [network]
+      [environment]
     );
     if (!row) {
       throw new Error("Provider config failure counter did not persist");
@@ -448,24 +582,22 @@ export class SponsorshipBudgetRepository {
     return Number(row.consecutive_config_failures);
   }
 
-  async resetProviderConfigFailures(network: SponsorshipNetwork): Promise<void> {
+  async resetProviderConfigFailures(environment: SdpEnvironment): Promise<void> {
     await this.db.execute(
       `UPDATE sponsorship_reconciliation_state
          SET consecutive_config_failures = 0, updated_at = sdp_iso_now()
-       WHERE network = ? AND consecutive_config_failures > 0`,
-      [network]
+       WHERE environment = ? AND consecutive_config_failures > 0`,
+      [environment]
     );
   }
 
   async tripGlobalBreaker(
-    network: SponsorshipNetwork,
+    environment: SdpEnvironment,
     reason: string,
     options: { recoverable?: boolean } = {}
   ): Promise<SponsorshipBudgetPolicy | null> {
-    return this.setPolicyEnabled({
-      network,
-      scopeType: "global",
-      scopeId: null,
+    return this.setGlobalPolicyEnabled({
+      environment,
       enabled: false,
       operator: SPONSORSHIP_BREAKER_OPERATOR,
       reason,
@@ -474,7 +606,7 @@ export class SponsorshipBudgetRepository {
   }
 
   async resumeGlobalBreaker(
-    network: SponsorshipNetwork,
+    environment: SdpEnvironment,
     expectedTripReason: string,
     reason: string
   ): Promise<SponsorshipBudgetPolicy | null> {
@@ -482,23 +614,22 @@ export class SponsorshipBudgetRepository {
       // Compare-and-set on the trip provenance: an operator kill or integrity
       // trip that lands after the recovery decision changes updated_by or
       // update_reason and must not be overwritten by a stale resume.
-      const row = await tx.queryOne<PolicyRow>(
+      const row = await tx.queryOne<GlobalPolicyRow>(
         `UPDATE sponsorship_budget_policies
            SET enabled = TRUE, version = version + 1, updated_by = ?, update_reason = ?, updated_at = sdp_iso_now()
-         WHERE network = ? AND scope_type = 'global' AND scope_id IS NULL
-           AND enabled = FALSE AND updated_by = ? AND update_reason = ?
+         WHERE environment = ? AND enabled = FALSE AND updated_by = ? AND update_reason = ?
          RETURNING *`,
         [
           SPONSORSHIP_BREAKER_OPERATOR,
           reason,
-          network,
+          environment,
           SPONSORSHIP_BREAKER_OPERATOR,
           expectedTripReason,
         ]
       );
       if (!row) return null;
-      await this.insertRevision(tx, row, SPONSORSHIP_BREAKER_OPERATOR, reason);
-      return mapPolicy(row);
+      await this.insertGlobalRevision(tx, row, SPONSORSHIP_BREAKER_OPERATOR, reason);
+      return mapGlobalPolicy(row);
     });
   }
 
@@ -566,7 +697,7 @@ export class SponsorshipBudgetRepository {
 
   async getWindowUsage(
     input: {
-      network: SponsorshipNetwork;
+      environment: SdpEnvironment;
       organizationId: string;
       projectId: string;
       hourBucket: string;
@@ -584,7 +715,7 @@ export class SponsorshipBudgetRepository {
       input.dayBucket,
       input.organizationId,
       input.projectId,
-      input.network,
+      input.environment,
       input.hourBucket,
       input.dayBucket,
     ];
@@ -596,7 +727,7 @@ export class SponsorshipBudgetRepository {
          COALESCE(SUM(CASE WHEN day_bucket = ? THEN COALESCE(actual_lamports, reserved_lamports) ELSE 0 END), 0)::bigint AS global_day,
          COALESCE(SUM(CASE WHEN day_bucket = ? AND organization_id = ? AND project_id = ? THEN COALESCE(actual_lamports, reserved_lamports) ELSE 0 END), 0)::bigint AS project_day
        FROM sponsorship_budget_reservations
-       WHERE network = ? AND status <> 'released' AND (hour_bucket = ? OR day_bucket = ?)${
+       WHERE environment = ? AND status <> 'released' AND (hour_bucket = ? OR day_bucket = ?)${
          excludeReservationId ? " AND id <> ?" : ""
        }`,
       params
@@ -615,7 +746,7 @@ export class SponsorshipBudgetRepository {
 
   async listLiveWindowReservations(
     input: {
-      network: SponsorshipNetwork;
+      environment: SdpEnvironment;
       hourBucket: string;
       dayBucket: string;
     },
@@ -625,7 +756,7 @@ export class SponsorshipBudgetRepository {
     hour: SponsorshipLiveWindowReservation[];
     day: SponsorshipLiveWindowReservation[];
   }> {
-    const params: string[] = [input.network, input.hourBucket, input.dayBucket];
+    const params: string[] = [input.environment, input.hourBucket, input.dayBucket];
     if (excludeReservationId) params.push(excludeReservationId);
     const rows = await executor.queryMany<{
       id: string;
@@ -637,7 +768,7 @@ export class SponsorshipBudgetRepository {
     }>(
       `SELECT id, attempt, reserved_lamports, project_id, hour_bucket, day_bucket
        FROM sponsorship_budget_reservations
-       WHERE network = ? AND status IN ('reserved', 'signed', 'submitted')
+       WHERE environment = ? AND status IN ('reserved', 'signed', 'submitted')
          AND (hour_bucket = ? OR day_bucket = ?)${excludeReservationId ? " AND id <> ?" : ""}`,
       params
     );
@@ -661,7 +792,7 @@ export class SponsorshipBudgetRepository {
   }
 
   async loadWindowAdmissionSnapshot(input: {
-    network: SponsorshipNetwork;
+    environment: SdpEnvironment;
     organizationId: string;
     projectId: string;
     hourBucket: string;
@@ -678,7 +809,11 @@ export class SponsorshipBudgetRepository {
       await tx.queryMany("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ");
       const usage = await this.getWindowUsage(input, tx, input.excludeReservationId);
       const liveReservations = await this.listLiveWindowReservations(
-        { network: input.network, hourBucket: input.hourBucket, dayBucket: input.dayBucket },
+        {
+          environment: input.environment,
+          hourBucket: input.hourBucket,
+          dayBucket: input.dayBucket,
+        },
         tx,
         input.excludeReservationId
       );
@@ -687,7 +822,7 @@ export class SponsorshipBudgetRepository {
   }
 
   async listReconciliationCandidates(
-    network: SponsorshipNetwork,
+    environment: SdpEnvironment,
     updatedBefore: string,
     limit = 250
   ): Promise<SponsorshipReconciliationReservation[]> {
@@ -699,7 +834,7 @@ export class SponsorshipBudgetRepository {
       reserved_lamports: number;
       actual_lamports: number | null;
       attempt: number;
-      network: SponsorshipNetwork;
+      environment: SdpEnvironment;
       project_id: string;
       fee_payer: string;
       provider_config_fingerprint: string;
@@ -711,18 +846,18 @@ export class SponsorshipBudgetRepository {
       redis_settled_at: string | null;
     }>(
       `SELECT id, status, signature, signed_transaction, reserved_lamports, actual_lamports,
-              attempt, network,
+              attempt, environment,
               project_id, fee_payer, provider_config_fingerprint,
               last_valid_block_height, hour_bucket, day_bucket,
               miss_count, updated_at, redis_settled_at
        FROM sponsorship_budget_reservations
-       WHERE network = ? AND (
+       WHERE environment = ? AND (
          (status IN ('reserved', 'signed', 'submitted') AND updated_at <= ?)
          OR (status IN ('committed', 'released') AND redis_settled_at IS NULL)
        )
        ORDER BY updated_at, id
        LIMIT ?`,
-      [network, updatedBefore, limit]
+      [environment, updatedBefore, limit]
     );
     return rows.map((row) => ({
       id: row.id,
@@ -732,7 +867,7 @@ export class SponsorshipBudgetRepository {
       reservedLamports: row.reserved_lamports,
       actualLamports: row.actual_lamports,
       attempt: row.attempt,
-      network: row.network,
+      environment: row.environment,
       projectId: row.project_id,
       feePayer: row.fee_payer,
       providerConfigFingerprint: row.provider_config_fingerprint,
@@ -791,23 +926,46 @@ export class SponsorshipBudgetRepository {
     );
   }
 
-  private async insertRevision(
+  private async insertGlobalRevision(
     tx: DatabaseExecutor,
-    row: PolicyRow,
+    row: GlobalPolicyRow,
     operator: string,
     reason: string
   ): Promise<void> {
     await tx.execute(
       `INSERT INTO sponsorship_budget_policy_revisions (
-         id, policy_id, network, scope_type, scope_id, enabled, per_transaction_lamports,
+         id, environment, enabled, per_transaction_lamports,
          hourly_lamports, daily_lamports, version, changed_by, change_reason
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         `sbpr_${randomUUID()}`,
+        row.environment,
+        row.enabled,
+        row.per_transaction_lamports,
+        row.hourly_lamports,
+        row.daily_lamports,
+        row.version,
+        operator,
+        reason,
+      ]
+    );
+  }
+
+  private async insertProjectRevision(
+    tx: DatabaseExecutor,
+    row: PolicyLimitsRow & { project_id: string },
+    operator: string,
+    reason: string
+  ): Promise<void> {
+    await tx.execute(
+      `INSERT INTO sponsorship_budget_project_policy_revisions (
+         id, policy_id, project_id, enabled, per_transaction_lamports,
+         hourly_lamports, daily_lamports, version, changed_by, change_reason
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        `sbppr_${randomUUID()}`,
         row.id,
-        row.network,
-        row.scope_type,
-        row.scope_id,
+        row.project_id,
         row.enabled,
         row.per_transaction_lamports,
         row.hourly_lamports,

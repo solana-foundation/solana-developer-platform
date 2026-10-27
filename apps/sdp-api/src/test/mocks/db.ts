@@ -42,6 +42,8 @@ const POSTGRES_TEST_TABLES = [
   "sponsorship_budget_policy_revisions",
   "sponsorship_budget_reservations",
   "sponsorship_budget_policies",
+  "sponsorship_budget_project_policy_revisions",
+  "sponsorship_budget_project_policies",
   "earn_provider_wallets",
   "earn_strategies",
   "api_key_signing_wallets",
@@ -108,24 +110,19 @@ async function seedSponsorshipBudgetPolicies(env: Env): Promise<void> {
   const db = getDb(env);
   await db.execute(
     `INSERT INTO sponsorship_budget_policies (
-       id, network, scope_type, scope_id, enabled,
-       per_transaction_lamports, hourly_lamports, daily_lamports,
+       environment, enabled, per_transaction_lamports, hourly_lamports, daily_lamports,
        version, updated_by, update_reason
      ) VALUES
-       ('sbp_devnet_global', 'devnet', 'global', NULL, TRUE, 10000000, 2000000000, 10000000000, 1, 'test-seed', 'Reset devnet sponsorship controls'),
-       ('sbp_devnet_project_default', 'devnet', 'project', NULL, TRUE, 10000000, 1000000000, 3000000000, 1, 'test-seed', 'Reset devnet project default'),
-       ('sbp_mainnet_global', 'mainnet', 'global', NULL, FALSE, 10000000, 500000000, 1000000000, 1, 'test-seed', 'Reset mainnet sponsorship controls'),
-       ('sbp_mainnet_project_default', 'mainnet', 'project', NULL, TRUE, 10000000, 100000000, 250000000, 1, 'test-seed', 'Reset mainnet project default')`
+       ('sandbox', TRUE, 10000000, 2000000000, 10000000000, 1, 'test-seed', 'Reset sandbox sponsorship controls'),
+       ('production', FALSE, 10000000, 500000000, 1000000000, 1, 'test-seed', 'Reset production sponsorship controls')`
   );
   await db.execute(
     `INSERT INTO sponsorship_budget_policy_revisions (
-       id, policy_id, network, scope_type, scope_id, enabled,
-       per_transaction_lamports, hourly_lamports, daily_lamports,
+       id, environment, enabled, per_transaction_lamports, hourly_lamports, daily_lamports,
        version, changed_by, change_reason
      )
-     SELECT 'sbpr_' || id || '_1', id, network, scope_type, scope_id, enabled,
-            per_transaction_lamports, hourly_lamports, daily_lamports,
-            version, updated_by, update_reason
+     SELECT 'sbpr_' || environment || '_1', environment, enabled, per_transaction_lamports,
+            hourly_lamports, daily_lamports, version, updated_by, update_reason
      FROM sponsorship_budget_policies`
   );
 }

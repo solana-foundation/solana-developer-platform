@@ -3,11 +3,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it } from "vitest";
-import type {
-  SponsorshipBudgetScopeType,
-  SponsorshipNetwork,
-} from "@/db/repositories/sponsorship-budget.repository";
+import type { SponsorshipBudgetScopeType } from "@/db/repositories/sponsorship-budget.repository";
 import { adminDatabaseUrl } from "@/test/helpers/env";
+
+type SponsorshipNetwork = "devnet" | "mainnet";
 
 type PolicyRow = {
   id: string;
@@ -65,7 +64,7 @@ beforeEach(async () => {
   await client.query(`CREATE TEMP TABLE sponsorship_budget_policies (
     id TEXT PRIMARY KEY,
     network TEXT NOT NULL CHECK (network IN ('devnet', 'mainnet')),
-    scope_type TEXT NOT NULL CHECK (scope_type IN ('global', 'organization', 'project')),
+    scope_type TEXT NOT NULL CHECK (scope_type IN ('global', 'project')),
     scope_id TEXT,
     enabled BOOLEAN NOT NULL DEFAULT TRUE,
     per_transaction_lamports BIGINT NOT NULL,

@@ -130,34 +130,31 @@ describe("Kora Fee Payment (Live Smoke)", () => {
     assertKoraLiveSmokeEnvConfigured();
     await initIntegrationApiSuite();
     const repository = new SponsorshipBudgetRepository(getDb(env));
-    for (const policy of [
-      {
-        scopeType: "global" as const,
-        scopeId: null,
+    const liveSmokeWrite = {
+      enabled: true,
+      perTransactionLamports: KORA_LIVE_SMOKE_PER_TRANSACTION_LAMPORTS,
+      expectedVersion: 1,
+      operator: KORA_LIVE_SMOKE_POLICY_OPERATOR,
+      reason: KORA_LIVE_SMOKE_POLICY_REASON,
+    };
+    expect(
+      await repository.writeGlobalPolicyAtVersion({
+        ...liveSmokeWrite,
+        environment: "sandbox",
         hourlyLamports: 2_000_000_000,
         dailyLamports: 10_000_000_000,
-        expectedVersion: 1,
-      },
-      {
-        scopeType: "project" as const,
-        scopeId: TEST_PROJECT.id,
+      })
+    ).not.toBeNull();
+    expect(
+      await repository.writeProjectPolicyAtVersion({
+        ...liveSmokeWrite,
+        projectId: TEST_PROJECT.id,
         hourlyLamports: 1_000_000_000,
         dailyLamports: 3_000_000_000,
-        expectedVersion: 0,
-      },
-    ]) {
-      const written = await repository.writePolicyAtVersion({
-        network: "devnet",
-        ...policy,
-        enabled: true,
-        perTransactionLamports: KORA_LIVE_SMOKE_PER_TRANSACTION_LAMPORTS,
-        operator: KORA_LIVE_SMOKE_POLICY_OPERATOR,
-        reason: KORA_LIVE_SMOKE_POLICY_REASON,
-      });
-      expect(written).not.toBeNull();
-    }
+      })
+    ).not.toBeNull();
     liveSmokePolicies = await repository.resolvePolicies({
-      network: "devnet",
+      environment: "sandbox",
       projectId: TEST_PROJECT.id,
     });
     await createSigningService(env).initializePrivySigning(TEST_ORG.id, TEST_PROJECT.id, {

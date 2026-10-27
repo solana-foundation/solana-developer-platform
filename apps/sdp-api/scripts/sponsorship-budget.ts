@@ -1,4 +1,5 @@
 import { parseArgs } from "node:util";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { Project } from "@sdp/types/projects";
 import { z } from "zod";
 import { closeDatabasePools, type DatabaseClient, getDb } from "@/db/client";
@@ -6,8 +7,6 @@ import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import {
   type SponsorshipBudgetPolicy,
   SponsorshipBudgetRepository,
-  type SponsorshipBudgetScopeType,
-  type SponsorshipNetwork,
 } from "@/db/repositories/sponsorship-budget.repository";
 import { getProcessEnv } from "@/lib/runtime-env";
 import { closeAllRedisClients } from "@/runtime/kv-redis";
@@ -47,13 +46,14 @@ interface ProjectSummary {
   status: string;
 }
 
-interface PolicyTarget {
-  network: SponsorshipNetwork;
-  scopeType: SponsorshipBudgetScopeType;
-  scopeId: string | null;
-  organization: OrganizationSummary | null;
-  project: ProjectSummary | null;
-}
+type PolicyTarget =
+  | { scopeType: "global"; environment: SdpEnvironment; organization: null; project: null }
+  | {
+      scopeType: "project";
+      environment: SdpEnvironment;
+      organization: OrganizationSummary;
+      project: ProjectSummary;
+    };
 
 interface ProposedPolicy {
   enabled: boolean;
@@ -69,18 +69,18 @@ interface PolicyChangePlan {
   reason: string;
   target: PolicyTarget;
   current: SponsorshipBudgetPolicy | null;
-  inheritedDefault: SponsorshipBudgetPolicy | null;
   proposed: ProposedPolicy;
   expectedVersion: number | null;
+  currentVersion: number;
   result: SponsorshipBudgetPolicy | null;
 }
 
-interface SponsorshipPolicyStatus extends SponsorshipBudgetPolicy {
+type SponsorshipPolicyStatus = SponsorshipBudgetPolicy & {
   organization: OrganizationSummary | null;
   project: ProjectSummary | null;
   redisControl: { version: number; enabled: boolean } | null;
   inSync: boolean;
-}
+};
 
 /**
  * Read the positional command and every `--flag value` pair, refusing unknown flags.
@@ -157,21 +157,22 @@ async function syncCommitted(
 }
 
 /**
- * Find the policy row a target names, if it exists.
+ * Read the policy a target names as it stands now.
  *
- * @param policies - The network's policies.
- * @param scopeType - The policy level.
- * @param scopeId - The project id, or null for the global row or the project default.
- * @returns The matching policy, or null.
+ * @param repository - The budget repository.
+ * @param target - The environment row or the project row.
+ * @returns The policy, or null when it does not exist.
  */
-function findPolicy(
-  policies: SponsorshipBudgetPolicy[],
-  scopeType: SponsorshipBudgetScopeType,
-  scopeId: string | null
-): SponsorshipBudgetPolicy | null {
-  return (
-    policies.find((policy) => policy.scopeType === scopeType && policy.scopeId === scopeId) ?? null
-  );
+async function currentPolicy(
+  repository: SponsorshipBudgetRepository,
+  target: PolicyTarget
+): Promise<SponsorshipBudgetPolicy | null> {
+  return target.scopeType === "global"
+    ? repository.getGlobalPolicy(target.environment)
+    : repository.getProjectPolicy({
+        environment: target.environment,
+        projectId: target.project.id,
+      });
 }
 
 /**
@@ -188,7 +189,7 @@ function describeVersion(policy: SponsorshipBudgetPolicy | null): string {
 
 /**
  * Resolve where a write lands: the organization and its active project in the
- * environment for `set-project`, or the network-wide row otherwise.
+ * environment for `set-project`, or the global row otherwise.
  *
  * @param db - The database client.
  * @param projects - The project service.
@@ -213,28 +214,18 @@ async function resolveTarget(
         );
       }
       return {
-        network: command.network,
+        environment: command.environment,
         scopeType: "project",
-        scopeId: project.id,
         organization,
         project: projectSummary(project),
       };
     }
-    case "set-project-default":
-      return {
-        network: command.network,
-        scopeType: "project",
-        scopeId: null,
-        organization: null,
-        project: null,
-      };
     case "set-global":
     case "kill":
     case "resume":
       return {
-        network: command.network,
+        environment: command.environment,
         scopeType: "global",
-        scopeId: null,
         organization: null,
         project: null,
       };
@@ -258,7 +249,6 @@ function proposedPolicy(
 ): ProposedPolicy {
   switch (command.command) {
     case "set-project":
-    case "set-project-default":
     case "set-global":
       return {
         enabled: command.enabled,
@@ -295,48 +285,42 @@ function proposedPolicy(
 async function applyChange(
   repository: SponsorshipBudgetRepository,
   redis: SponsorshipBudgetRedis,
-  command: Exclude<SponsorshipBudgetCommand, { command: "status" }>,
+  command: Extract<SponsorshipBudgetCommand, { mode: "apply" }>,
   target: PolicyTarget
 ): Promise<SponsorshipBudgetPolicy> {
   switch (command.command) {
     case "set-project":
-    case "set-project-default":
     case "set-global": {
-      const policy = await repository.writePolicyAtVersion({
-        ...command,
-        scopeType: target.scopeType,
-        scopeId: target.scopeId,
-      });
+      const policy =
+        target.scopeType === "project"
+          ? await repository.writeProjectPolicyAtVersion({
+              ...command,
+              projectId: target.project.id,
+            })
+          : await repository.writeGlobalPolicyAtVersion(command);
       if (!policy) {
-        const current = findPolicy(
-          await repository.listPolicies(target.network),
-          target.scopeType,
-          target.scopeId
-        );
         throw new Error(
-          `Refused: expected version ${command.expectedVersion}, found ${describeVersion(current)}. Run status and retry.`
+          `Refused: expected version ${command.expectedVersion}, found ${describeVersion(await currentPolicy(repository, target))}. Run status and retry.`
         );
       }
       return syncCommitted(redis, policy);
     }
     case "kill": {
-      const policy = await repository.setPolicyEnabled({
-        network: command.network,
-        scopeType: "global",
-        scopeId: null,
+      const policy = await repository.setGlobalPolicyEnabled({
+        environment: command.environment,
         enabled: false,
         operator: command.operator,
         reason: command.reason,
       });
       if (policy) return syncCommitted(redis, policy);
-      const current = await repository.getGlobalPolicy(command.network);
-      if (!current) throw new Error(`No global ${command.network} policy exists`);
+      const current = await repository.getGlobalPolicy(command.environment);
+      if (!current) throw new Error(`No global ${command.environment} policy exists`);
       return current;
     }
     case "resume": {
       const policy = await repository.resumeGlobalPolicyAtVersion(command);
       if (!policy) {
-        const current = await repository.getGlobalPolicy(command.network);
+        const current = await repository.getGlobalPolicy(command.environment);
         throw new Error(
           `Refused: resume expected a disabled global policy at version ${command.expectedVersion}, found ${describeVersion(current)}. Run status and retry.`
         );
@@ -368,12 +352,7 @@ async function planAndApply(
   command: Exclude<SponsorshipBudgetCommand, { command: "status" }>
 ): Promise<PolicyChangePlan> {
   const target = await resolveTarget(db, new ProjectService(db), command);
-  const policies = await repository.listPolicies(target.network);
-  const current = findPolicy(policies, target.scopeType, target.scopeId);
-  const inheritedDefault =
-    current === null && target.scopeType === "project" && target.scopeId !== null
-      ? findPolicy(policies, "project", null)
-      : null;
+  const current = await currentPolicy(repository, target);
   const expectedVersion = command.command === "kill" ? null : command.expectedVersion;
   if (expectedVersion !== null && (current === null ? 0 : current.version) !== expectedVersion) {
     throw new Error(
@@ -387,9 +366,9 @@ async function planAndApply(
     reason: command.reason,
     target,
     current,
-    inheritedDefault,
     proposed: proposedPolicy(command, current),
     expectedVersion,
+    currentVersion: current === null ? 0 : current.version,
     result: null,
   };
   if (command.mode === "preview") return plan;
@@ -397,7 +376,7 @@ async function planAndApply(
 }
 
 /**
- * List a network's policies with the organization and project each override
+ * List an environment's policies with the organization and project each override
  * caps. Each policy is first mirrored into Redis (forward-only by version, as
  * admission does), so `inSync` false means Redis holds a newer version than
  * Postgres, never merely a row no sponsorship has touched yet.
@@ -405,22 +384,23 @@ async function planAndApply(
  * @param db - The database client.
  * @param repository - The budget repository.
  * @param redis - The budget's Redis store.
- * @param network - The budget network.
- * @returns Every policy on the network, global first.
+ * @param environment - The SDP environment.
+ * @returns Every policy on the environment, global first.
  */
 async function status(
   db: DatabaseClient,
   repository: SponsorshipBudgetRepository,
   redis: SponsorshipBudgetRedis,
-  network: SponsorshipNetwork
+  environment: SdpEnvironment
 ): Promise<SponsorshipPolicyStatus[]> {
   const projects = new ProjectService(db);
   return Promise.all(
-    (await repository.listPolicies(network)).map(
+    (await repository.listPolicies(environment)).map(
       async (policy): Promise<SponsorshipPolicyStatus> => {
         await redis.syncPolicy(policy);
         const control = await redis.getPolicyControl(policy);
-        const project = policy.scopeId === null ? null : await projects.getProject(policy.scopeId);
+        const project =
+          policy.scopeType === "global" ? null : await projects.getProject(policy.projectId);
         return {
           ...policy,
           organization:
@@ -442,9 +422,12 @@ runWithSystemDatabaseIdentity("script:sponsorship-budget", async () => {
   const repository = new SponsorshipBudgetRepository(db);
   const redis = new SponsorshipBudgetRedis(env);
   if (command.command === "status") {
-    const statuses = await status(db, repository, redis, command.network);
-    console.log(JSON.stringify(statuses));
-    if (statuses.some((policy) => !policy.inSync)) process.exitCode = 2;
+    const policies = await status(db, repository, redis, command.environment);
+    const projectsWithoutPolicy = await repository.listProjectsWithoutPolicy(command.environment);
+    console.log(JSON.stringify({ policies, projectsWithoutPolicy }));
+    if (projectsWithoutPolicy.length > 0 || policies.some((policy) => !policy.inSync)) {
+      process.exitCode = 2;
+    }
     return;
   }
   console.log(JSON.stringify(await planAndApply(db, repository, redis, command)));

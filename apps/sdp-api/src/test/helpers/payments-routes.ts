@@ -343,16 +343,14 @@ export async function seedProductionPrivyWallet(wallet: {
 }
 
 /**
- * Enable the mainnet global sponsorship policy as an operator would; the seed ships it disabled
+ * Enable the production global sponsorship policy as an operator would; the seed ships it disabled
  * pending approval, so a Production project's sponsored movement needs this first.
  *
  * @returns Resolves once the policy is enabled at a new version.
  */
 export async function enableMainnetSponsorship(): Promise<void> {
-  await new SponsorshipBudgetRepository(getDb(env)).setPolicyEnabled({
-    network: "mainnet",
-    scopeType: "global",
-    scopeId: null,
+  await new SponsorshipBudgetRepository(getDb(env)).setGlobalPolicyEnabled({
+    environment: "production",
     enabled: true,
     operator: "operator:payments-test",
     reason: "Approve mainnet sponsorship for the Production project",

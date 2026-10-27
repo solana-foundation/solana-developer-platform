@@ -27,11 +27,9 @@ function policy(
   enabled = true,
   limit = 10
 ): SponsorshipBudgetPolicy {
-  return {
+  const fields = {
     id: `policy_${scopeType}`,
-    network: "devnet",
-    scopeType,
-    scopeId: null,
+    environment: "sandbox" as const,
     enabled,
     perTransactionLamports: limit,
     hourlyLamports: limit,
@@ -41,6 +39,9 @@ function policy(
     updateReason: "test",
     updatedAt: new Date(0).toISOString(),
   };
+  return scopeType === "global"
+    ? { ...fields, scopeType, projectId: null }
+    : { ...fields, scopeType, projectId: PROJECT_ID };
 }
 
 describe("SponsorshipBudgetRedis", () => {
@@ -68,7 +69,7 @@ describe("SponsorshipBudgetRedis", () => {
       { ...policy("project", 1, true, 1000), hourlyLamports: 5 },
     ];
     const window = {
-      network: "devnet" as const,
+      environment: "sandbox" as const,
       organizationId: "org_1",
       projectId: PROJECT_ID,
       hourBucket: "2026-08-03T10:00:00.000Z",
@@ -99,7 +100,7 @@ describe("SponsorshipBudgetRedis", () => {
       "warn",
       expect.objectContaining({
         event: "sdp_api_sponsorship_denied",
-        network: "devnet",
+        environment: "sandbox",
         scope_type: "project",
         organization_id: "org_1",
         project_id: PROJECT_ID,
@@ -116,7 +117,7 @@ describe("SponsorshipBudgetRedis", () => {
     const attempts = await Promise.all(
       Array.from({ length: 10 }, (_, index) =>
         budget.reserve({
-          network: "devnet",
+          environment: "sandbox",
           organizationId: "org_1",
           projectId: PROJECT_ID,
           hourBucket: "2026-08-03T10:00:00.000Z",
@@ -130,7 +131,7 @@ describe("SponsorshipBudgetRedis", () => {
       )
     );
     expect(attempts.filter((result) => result === "admitted")).toHaveLength(3);
-    const hour = await raw.hgetall("sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z");
+    const hour = await raw.hgetall("sdp:sponsorship:{sandbox}:hour:2026-08-03T10:00:00.000Z");
     expect(hour.global).toBe("3");
     expect(hour[`project:${PROJECT_ID}`]).toBe("3");
   });
@@ -139,7 +140,7 @@ describe("SponsorshipBudgetRedis", () => {
     const policies = [policy("global", 1, true, 100), policy("project", 1, true, 10)];
     await expect(
       budget.reserve({
-        network: "devnet",
+        environment: "sandbox",
         organizationId: "org_1",
         projectId: PROJECT_ID,
         hourBucket: "2026-08-03T10:00:00.000Z",
@@ -153,7 +154,7 @@ describe("SponsorshipBudgetRedis", () => {
     ).resolves.toBe("admitted");
     await expect(
       budget.reserve({
-        network: "devnet",
+        environment: "sandbox",
         organizationId: "org_2",
         projectId: "project_2",
         hourBucket: "2026-08-03T10:00:00.000Z",
@@ -169,14 +170,14 @@ describe("SponsorshipBudgetRedis", () => {
       })
     ).resolves.toBe("denied");
     expect(
-      await raw.hget("sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z", "project:project_2")
+      await raw.hget("sdp:sponsorship:{sandbox}:hour:2026-08-03T10:00:00.000Z", "project:project_2")
     ).toBe("7");
   });
 
   it("rejects a stale policy version without incrementing counters", async () => {
     await budget.syncPolicy(policy("global", 2));
     const result = await budget.reserve({
-      network: "devnet",
+      environment: "sandbox",
       organizationId: "org_1",
       projectId: PROJECT_ID,
       hourBucket: "2026-08-03T10:00:00.000Z",
@@ -188,14 +189,14 @@ describe("SponsorshipBudgetRedis", () => {
       usage: EMPTY_USAGE,
     });
     expect(result).toBe("stale_policy");
-    expect(await raw.hget("sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z", "global")).toBe(
-      "0"
-    );
+    expect(
+      await raw.hget("sdp:sponsorship:{sandbox}:hour:2026-08-03T10:00:00.000Z", "global")
+    ).toBe("0");
   });
 
   it("does not let a Redis-only duplicate bypass a later kill", async () => {
     const input = {
-      network: "devnet" as const,
+      environment: "sandbox" as const,
       organizationId: "org_1",
       projectId: PROJECT_ID,
       hourBucket: "2026-08-03T10:00:00.000Z",
@@ -224,7 +225,7 @@ describe("SponsorshipBudgetRedis", () => {
     { actualLamports: 7, label: "over-reservation" },
   ])("settles $label exactly once across retries", async ({ actualLamports }) => {
     const input = {
-      network: "devnet" as const,
+      environment: "sandbox" as const,
       organizationId: "org_1",
       projectId: PROJECT_ID,
       hourBucket: "2026-08-03T10:00:00.000Z",
@@ -237,7 +238,7 @@ describe("SponsorshipBudgetRedis", () => {
     };
     await expect(budget.reserve(input)).resolves.toBe("admitted");
     const settlement = {
-      network: input.network,
+      environment: input.environment,
       projectId: input.projectId,
       hourBucket: input.hourBucket,
       dayBucket: input.dayBucket,
@@ -248,14 +249,14 @@ describe("SponsorshipBudgetRedis", () => {
     };
     await budget.settle(settlement);
     await budget.settle(settlement);
-    expect(await raw.hget("sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z", "global")).toBe(
-      String(actualLamports)
-    );
+    expect(
+      await raw.hget("sdp:sponsorship:{sandbox}:hour:2026-08-03T10:00:00.000Z", "global")
+    ).toBe(String(actualLamports));
   });
 
   it("rejects cancel and settlement from an attempt that does not own the reservation", async () => {
     const input = {
-      network: "devnet" as const,
+      environment: "sandbox" as const,
       organizationId: "org_1",
       projectId: PROJECT_ID,
       hourBucket: "2026-08-03T10:00:00.000Z",
@@ -269,7 +270,7 @@ describe("SponsorshipBudgetRedis", () => {
     await expect(budget.reserve(input)).resolves.toBe("admitted");
 
     await budget.cancel({
-      network: input.network,
+      environment: input.environment,
       organizationId: input.organizationId,
       projectId: input.projectId,
       hourBucket: input.hourBucket,
@@ -279,7 +280,7 @@ describe("SponsorshipBudgetRedis", () => {
     });
     await expect(
       budget.settle({
-        network: input.network,
+        environment: input.environment,
         projectId: input.projectId,
         hourBucket: input.hourBucket,
         dayBucket: input.dayBucket,
@@ -290,14 +291,14 @@ describe("SponsorshipBudgetRedis", () => {
       })
     ).rejects.toThrow("counter invariant");
 
-    expect(await raw.hget("sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z", "global")).toBe(
-      "5"
-    );
+    expect(
+      await raw.hget("sdp:sponsorship:{sandbox}:hour:2026-08-03T10:00:00.000Z", "global")
+    ).toBe("5");
   });
 
   it("cancels a missing standalone reservation without touching an equal concurrent marker", async () => {
     const input = {
-      network: "devnet" as const,
+      environment: "sandbox" as const,
       organizationId: "org_1",
       projectId: PROJECT_ID,
       hourBucket: "2026-08-03T10:00:00.000Z",
@@ -309,13 +310,13 @@ describe("SponsorshipBudgetRedis", () => {
       usage: EMPTY_USAGE,
     };
     await expect(budget.reserve(input)).resolves.toBe("admitted");
-    await raw.del("sdp:sponsorship:{devnet}:reservation:reservation_cancel_missing:1");
+    await raw.del("sdp:sponsorship:{sandbox}:reservation:reservation_cancel_missing:1");
     await expect(
       budget.reserve({ ...input, reservationId: "reservation_cancel_concurrent" })
     ).resolves.toBe("admitted");
 
     await budget.cancel({
-      network: input.network,
+      environment: input.environment,
       organizationId: input.organizationId,
       projectId: input.projectId,
       hourBucket: input.hourBucket,
@@ -324,18 +325,18 @@ describe("SponsorshipBudgetRedis", () => {
       attempt: input.attempt,
     });
 
-    const hourKey = "sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z";
+    const hourKey = "sdp:sponsorship:{sandbox}:hour:2026-08-03T10:00:00.000Z";
     expect(await raw.hget(hourKey, "global")).toBe("5");
     expect(await raw.hget(hourKey, "__reservation:reservation_cancel_missing:1")).toBeNull();
     expect(await raw.hget(hourKey, "__reservation:reservation_cancel_concurrent:1")).toBe("5");
     expect(
-      await raw.get("sdp:sponsorship:{devnet}:reservation:reservation_cancel_concurrent:1")
+      await raw.get("sdp:sponsorship:{sandbox}:reservation:reservation_cancel_concurrent:1")
     ).toBe("5");
   });
 
   it("recovers a durably-authorized settlement after its Redis reservation expires", async () => {
     const input = {
-      network: "devnet" as const,
+      environment: "sandbox" as const,
       organizationId: "org_1",
       projectId: PROJECT_ID,
       hourBucket: "2026-08-03T10:00:00.000Z",
@@ -347,11 +348,11 @@ describe("SponsorshipBudgetRedis", () => {
       usage: EMPTY_USAGE,
     };
     await expect(budget.reserve(input)).resolves.toBe("admitted");
-    const reservationKey = "sdp:sponsorship:{devnet}:reservation:reservation_expired:1";
-    const settlementKey = "sdp:sponsorship:{devnet}:settlement:reservation_expired:1";
+    const reservationKey = "sdp:sponsorship:{sandbox}:reservation:reservation_expired:1";
+    const settlementKey = "sdp:sponsorship:{sandbox}:settlement:reservation_expired:1";
     await raw.del(reservationKey);
     const settlement = {
-      network: input.network,
+      environment: input.environment,
       projectId: input.projectId,
       hourBucket: input.hourBucket,
       dayBucket: input.dayBucket,
@@ -368,12 +369,12 @@ describe("SponsorshipBudgetRedis", () => {
     await expect(budget.settle({ ...settlement, detectMissingReservation: true })).resolves.toBe(0);
 
     expect(await raw.get(settlementKey)).toBe("2");
-    expect(await raw.hget("sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z", "global")).toBe(
-      "2"
-    );
+    expect(
+      await raw.hget("sdp:sponsorship:{sandbox}:hour:2026-08-03T10:00:00.000Z", "global")
+    ).toBe("2");
     expect(
       await raw.hget(
-        "sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z",
+        "sdp:sponsorship:{sandbox}:hour:2026-08-03T10:00:00.000Z",
         "__reservation:reservation_expired:1"
       )
     ).toBeNull();
@@ -381,7 +382,7 @@ describe("SponsorshipBudgetRedis", () => {
 
   it("recovers only the missing attempt without erasing a concurrent reservation", async () => {
     const input = {
-      network: "devnet" as const,
+      environment: "sandbox" as const,
       organizationId: "org_1",
       projectId: PROJECT_ID,
       hourBucket: "2026-08-03T10:00:00.000Z",
@@ -393,14 +394,14 @@ describe("SponsorshipBudgetRedis", () => {
       usage: EMPTY_USAGE,
     };
     await expect(budget.reserve(input)).resolves.toBe("admitted");
-    await raw.del("sdp:sponsorship:{devnet}:reservation:reservation_missing:1");
+    await raw.del("sdp:sponsorship:{sandbox}:reservation:reservation_missing:1");
     await expect(
       budget.reserve({ ...input, reservationId: "reservation_concurrent", amount: 3 })
     ).resolves.toBe("admitted");
 
     await expect(
       budget.settle({
-        network: input.network,
+        environment: input.environment,
         projectId: input.projectId,
         hourBucket: input.hourBucket,
         dayBucket: input.dayBucket,
@@ -412,19 +413,19 @@ describe("SponsorshipBudgetRedis", () => {
       })
     ).resolves.toBe(-3);
 
-    const hourKey = "sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z";
+    const hourKey = "sdp:sponsorship:{sandbox}:hour:2026-08-03T10:00:00.000Z";
     expect(await raw.hget(hourKey, "global")).toBe("5");
     expect(await raw.hget(hourKey, `project:${PROJECT_ID}`)).toBe("5");
     expect(await raw.hget(hourKey, "__reservation:reservation_missing:1")).toBeNull();
     expect(await raw.hget(hourKey, "__reservation:reservation_concurrent:1")).toBe("3");
-    expect(await raw.get("sdp:sponsorship:{devnet}:reservation:reservation_concurrent:1")).toBe(
+    expect(await raw.get("sdp:sponsorship:{sandbox}:reservation:reservation_concurrent:1")).toBe(
       "3"
     );
   });
 
   it("does not re-apply a recovered settlement to counters rebuilt from durable usage", async () => {
     const input = {
-      network: "devnet" as const,
+      environment: "sandbox" as const,
       organizationId: "org_1",
       projectId: PROJECT_ID,
       hourBucket: "2026-08-03T10:00:00.000Z",
@@ -436,9 +437,9 @@ describe("SponsorshipBudgetRedis", () => {
       usage: EMPTY_USAGE,
     };
     await expect(budget.reserve(input)).resolves.toBe("admitted");
-    const hourKey = "sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z";
-    const dayKey = "sdp:sponsorship:{devnet}:day:2026-08-03T00:00:00.000Z";
-    await raw.del("sdp:sponsorship:{devnet}:reservation:reservation_rebuilt:1", hourKey, dayKey);
+    const hourKey = "sdp:sponsorship:{sandbox}:hour:2026-08-03T10:00:00.000Z";
+    const dayKey = "sdp:sponsorship:{sandbox}:day:2026-08-03T00:00:00.000Z";
+    await raw.del("sdp:sponsorship:{sandbox}:reservation:reservation_rebuilt:1", hourKey, dayKey);
     const rebuiltUsage = {
       hour: { global: 2, project: 2 },
       day: { global: 2, project: 2 },
@@ -454,7 +455,7 @@ describe("SponsorshipBudgetRedis", () => {
 
     await expect(
       budget.settle({
-        network: input.network,
+        environment: input.environment,
         projectId: input.projectId,
         hourBucket: input.hourBucket,
         dayBucket: input.dayBucket,
@@ -474,15 +475,15 @@ describe("SponsorshipBudgetRedis", () => {
 
   it("restores a live reservation marker so partial reconstruction settles both counters consistently", async () => {
     const base = {
-      network: "devnet" as const,
+      environment: "sandbox" as const,
       organizationId: "org_1",
       projectId: PROJECT_ID,
       hourBucket: "2026-08-03T10:00:00.000Z",
       dayBucket: "2026-08-03T00:00:00.000Z",
       policies: [policy("global", 1, true, 20), policy("project", 1, true, 20)],
     };
-    const hourKey = "sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z";
-    const dayKey = "sdp:sponsorship:{devnet}:day:2026-08-03T00:00:00.000Z";
+    const hourKey = "sdp:sponsorship:{sandbox}:hour:2026-08-03T10:00:00.000Z";
+    const dayKey = "sdp:sponsorship:{sandbox}:day:2026-08-03T00:00:00.000Z";
 
     await expect(
       budget.reserve({
@@ -495,7 +496,7 @@ describe("SponsorshipBudgetRedis", () => {
       })
     ).resolves.toBe("admitted");
 
-    await raw.del(hourKey, "sdp:sponsorship:{devnet}:reservation:reservation_partial:1");
+    await raw.del(hourKey, "sdp:sponsorship:{sandbox}:reservation:reservation_partial:1");
 
     await expect(
       budget.reserve({
@@ -534,7 +535,7 @@ describe("SponsorshipBudgetRedis", () => {
 
     await expect(
       budget.settle({
-        network: base.network,
+        environment: base.environment,
         projectId: base.projectId,
         hourBucket: base.hourBucket,
         dayBucket: base.dayBucket,
@@ -555,12 +556,12 @@ describe("SponsorshipBudgetRedis", () => {
   it("settles a reservation whose scope field a cross-tenant rebuild never initialized", async () => {
     const hourBucket = "2026-08-03T10:00:00.000Z";
     const dayBucket = "2026-08-03T00:00:00.000Z";
-    const hourKey = "sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z";
+    const hourKey = "sdp:sponsorship:{sandbox}:hour:2026-08-03T10:00:00.000Z";
     const policies = [policy("global", 1, true, 20), policy("project", 1, true, 20)];
 
     await expect(
       budget.reserve({
-        network: "devnet",
+        environment: "sandbox",
         organizationId: "org_b",
         projectId: "project_b",
         hourBucket,
@@ -574,12 +575,12 @@ describe("SponsorshipBudgetRedis", () => {
       })
     ).resolves.toBe("admitted");
 
-    await raw.del(hourKey, "sdp:sponsorship:{devnet}:day:2026-08-03T00:00:00.000Z");
-    await raw.del("sdp:sponsorship:{devnet}:reservation:res_b:1");
+    await raw.del(hourKey, "sdp:sponsorship:{sandbox}:day:2026-08-03T00:00:00.000Z");
+    await raw.del("sdp:sponsorship:{sandbox}:reservation:res_b:1");
 
     await expect(
       budget.reserve({
-        network: "devnet",
+        environment: "sandbox",
         organizationId: "org_a",
         projectId: "project_a",
         hourBucket,
@@ -619,7 +620,7 @@ describe("SponsorshipBudgetRedis", () => {
 
     await expect(
       budget.settle({
-        network: "devnet",
+        environment: "sandbox",
         projectId: "project_b",
         hourBucket,
         dayBucket,
@@ -636,8 +637,8 @@ describe("SponsorshipBudgetRedis", () => {
   });
 
   it("does not re-count a reservation of the previous ownership format on retry", async () => {
-    const hourKey = "sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z";
-    const dayKey = "sdp:sponsorship:{devnet}:day:2026-08-03T00:00:00.000Z";
+    const hourKey = "sdp:sponsorship:{sandbox}:hour:2026-08-03T10:00:00.000Z";
+    const dayKey = "sdp:sponsorship:{sandbox}:day:2026-08-03T00:00:00.000Z";
     for (const key of [hourKey, dayKey]) {
       await raw.hset(
         key,
@@ -656,7 +657,7 @@ describe("SponsorshipBudgetRedis", () => {
 
     await expect(
       budget.reserve({
-        network: "devnet",
+        environment: "sandbox",
         organizationId: "org_1",
         projectId: PROJECT_ID,
         hourBucket: "2026-08-03T10:00:00.000Z",
@@ -679,8 +680,8 @@ describe("SponsorshipBudgetRedis", () => {
   });
 
   it("settles a reservation left behind by the previous ownership format", async () => {
-    const hourKey = "sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z";
-    const dayKey = "sdp:sponsorship:{devnet}:day:2026-08-03T00:00:00.000Z";
+    const hourKey = "sdp:sponsorship:{sandbox}:hour:2026-08-03T10:00:00.000Z";
+    const dayKey = "sdp:sponsorship:{sandbox}:day:2026-08-03T00:00:00.000Z";
     for (const key of [hourKey, dayKey]) {
       await raw.hset(
         key,
@@ -699,7 +700,7 @@ describe("SponsorshipBudgetRedis", () => {
 
     await expect(
       budget.settle({
-        network: "devnet",
+        environment: "sandbox",
         projectId: PROJECT_ID,
         hourBucket: "2026-08-03T10:00:00.000Z",
         dayBucket: "2026-08-03T00:00:00.000Z",
@@ -718,8 +719,8 @@ describe("SponsorshipBudgetRedis", () => {
   });
 
   it("cancels a reservation left behind by the previous ownership format", async () => {
-    const hourKey = "sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z";
-    const dayKey = "sdp:sponsorship:{devnet}:day:2026-08-03T00:00:00.000Z";
+    const hourKey = "sdp:sponsorship:{sandbox}:hour:2026-08-03T10:00:00.000Z";
+    const dayKey = "sdp:sponsorship:{sandbox}:day:2026-08-03T00:00:00.000Z";
     for (const key of [hourKey, dayKey]) {
       await raw.hset(
         key,
@@ -737,7 +738,7 @@ describe("SponsorshipBudgetRedis", () => {
     }
 
     await budget.cancel({
-      network: "devnet",
+      environment: "sandbox",
       organizationId: "org_1",
       projectId: PROJECT_ID,
       hourBucket: "2026-08-03T10:00:00.000Z",
@@ -752,10 +753,10 @@ describe("SponsorshipBudgetRedis", () => {
   });
 
   it("counts a tenant once when its field is seeded into an already warm window", async () => {
-    const hourKey = "sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z";
+    const hourKey = "sdp:sponsorship:{sandbox}:hour:2026-08-03T10:00:00.000Z";
     const policies = [policy("global", 1, true, 1000), policy("project", 1, true, 1000)];
     const window = {
-      network: "devnet" as const,
+      environment: "sandbox" as const,
       hourBucket: "2026-08-03T10:00:00.000Z",
       dayBucket: "2026-08-03T00:00:00.000Z",
       policies,
@@ -822,11 +823,11 @@ describe("SponsorshipBudgetRedis", () => {
   });
 
   it("denies an adopted reservation that exceeds the per-transaction limit", async () => {
-    const hourKey = "sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z";
+    const hourKey = "sdp:sponsorship:{sandbox}:hour:2026-08-03T10:00:00.000Z";
 
     await expect(
       budget.reserve({
-        network: "devnet",
+        environment: "sandbox",
         organizationId: "org_1",
         projectId: PROJECT_ID,
         hourBucket: "2026-08-03T10:00:00.000Z",
@@ -860,14 +861,14 @@ describe("SponsorshipBudgetRedis", () => {
       })
     ).resolves.toBe("denied");
 
-    expect(await raw.get("sdp:sponsorship:{devnet}:reservation:res_self:1")).toBeNull();
+    expect(await raw.get("sdp:sponsorship:{sandbox}:reservation:res_self:1")).toBeNull();
     expect(await raw.hget(hourKey, "global")).toBe("11");
   });
 
   it("denies an adopted reservation once the seeded window already exceeds its limit", async () => {
     await expect(
       budget.reserve({
-        network: "devnet",
+        environment: "sandbox",
         organizationId: "org_1",
         projectId: PROJECT_ID,
         hourBucket: "2026-08-03T10:00:00.000Z",
@@ -904,15 +905,15 @@ describe("SponsorshipBudgetRedis", () => {
 
   it("adopts a reconstruction-seeded reservation instead of double-counting its own reserve", async () => {
     const base = {
-      network: "devnet" as const,
+      environment: "sandbox" as const,
       organizationId: "org_1",
       projectId: PROJECT_ID,
       hourBucket: "2026-08-03T10:00:00.000Z",
       dayBucket: "2026-08-03T00:00:00.000Z",
       policies: [policy("global", 1, true, 100), policy("project", 1, true, 100)],
     };
-    const hourKey = "sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z";
-    const dayKey = "sdp:sponsorship:{devnet}:day:2026-08-03T00:00:00.000Z";
+    const hourKey = "sdp:sponsorship:{sandbox}:hour:2026-08-03T10:00:00.000Z";
+    const dayKey = "sdp:sponsorship:{sandbox}:day:2026-08-03T00:00:00.000Z";
 
     await expect(
       budget.reserve({
@@ -964,12 +965,12 @@ describe("SponsorshipBudgetRedis", () => {
 
     expect(await raw.hget(hourKey, "global")).toBe("13");
     expect(await raw.hget(dayKey, "global")).toBe("13");
-    expect(await raw.get("sdp:sponsorship:{devnet}:reservation:reservation_b:1")).toBe("8");
+    expect(await raw.get("sdp:sponsorship:{sandbox}:reservation:reservation_b:1")).toBe("8");
   });
 
   it("fills the missing counter when only one window was seeded during adoption", async () => {
-    const hourKey = "sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z";
-    const dayKey = "sdp:sponsorship:{devnet}:day:2026-08-03T00:00:00.000Z";
+    const hourKey = "sdp:sponsorship:{sandbox}:hour:2026-08-03T10:00:00.000Z";
+    const dayKey = "sdp:sponsorship:{sandbox}:day:2026-08-03T00:00:00.000Z";
     await raw.hset(
       dayKey,
       "global",
@@ -984,7 +985,7 @@ describe("SponsorshipBudgetRedis", () => {
 
     await expect(
       budget.reserve({
-        network: "devnet",
+        environment: "sandbox",
         organizationId: "org_1",
         projectId: PROJECT_ID,
         hourBucket: "2026-08-03T10:00:00.000Z",
@@ -1025,7 +1026,7 @@ describe("SponsorshipBudgetRedis", () => {
   });
 
   it("enforces the daily limit on the window it must fill during adoption", async () => {
-    const dayKey = "sdp:sponsorship:{devnet}:day:2026-08-03T00:00:00.000Z";
+    const dayKey = "sdp:sponsorship:{sandbox}:day:2026-08-03T00:00:00.000Z";
     await raw.hset(
       dayKey,
       "global",
@@ -1040,7 +1041,7 @@ describe("SponsorshipBudgetRedis", () => {
 
     await expect(
       budget.reserve({
-        network: "devnet",
+        environment: "sandbox",
         organizationId: "org_1",
         projectId: PROJECT_ID,
         hourBucket: "2026-08-03T10:00:00.000Z",
@@ -1076,17 +1077,17 @@ describe("SponsorshipBudgetRedis", () => {
 
     expect(await raw.hget(dayKey, "global")).toBe("98");
     expect(await raw.hget(dayKey, "__reservation:res_a:1")).toBeNull();
-    expect(await raw.get("sdp:sponsorship:{devnet}:reservation:res_a:1")).toBeNull();
+    expect(await raw.get("sdp:sponsorship:{sandbox}:reservation:res_a:1")).toBeNull();
   });
 
   it("corrects a reservation that settled between the snapshot and reconstruction", async () => {
-    const hourKey = "sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z";
-    const dayKey = "sdp:sponsorship:{devnet}:day:2026-08-03T00:00:00.000Z";
-    await raw.set("sdp:sponsorship:{devnet}:settlement:res_c:1", "2");
+    const hourKey = "sdp:sponsorship:{sandbox}:hour:2026-08-03T10:00:00.000Z";
+    const dayKey = "sdp:sponsorship:{sandbox}:day:2026-08-03T00:00:00.000Z";
+    await raw.set("sdp:sponsorship:{sandbox}:settlement:res_c:1", "2");
 
     await expect(
       budget.reserve({
-        network: "devnet",
+        environment: "sandbox",
         organizationId: "org_1",
         projectId: PROJECT_ID,
         hourBucket: "2026-08-03T10:00:00.000Z",
@@ -1127,12 +1128,12 @@ describe("SponsorshipBudgetRedis", () => {
   });
 
   it("corrects a cross-tenant reservation that settled mid-snapshot without initializing its scope", async () => {
-    const hourKey = "sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z";
-    await raw.set("sdp:sponsorship:{devnet}:settlement:res_b:1", "2");
+    const hourKey = "sdp:sponsorship:{sandbox}:hour:2026-08-03T10:00:00.000Z";
+    await raw.set("sdp:sponsorship:{sandbox}:settlement:res_b:1", "2");
 
     await expect(
       budget.reserve({
-        network: "devnet",
+        environment: "sandbox",
         organizationId: "org_a",
         projectId: "project_a",
         hourBucket: "2026-08-03T10:00:00.000Z",
@@ -1174,7 +1175,7 @@ describe("SponsorshipBudgetRedis", () => {
 
   it("rejects settlement when an existing reservation has the wrong amount", async () => {
     const input = {
-      network: "devnet" as const,
+      environment: "sandbox" as const,
       organizationId: "org_1",
       projectId: PROJECT_ID,
       hourBucket: "2026-08-03T10:00:00.000Z",
@@ -1186,11 +1187,11 @@ describe("SponsorshipBudgetRedis", () => {
       usage: EMPTY_USAGE,
     };
     await expect(budget.reserve(input)).resolves.toBe("admitted");
-    await raw.set("sdp:sponsorship:{devnet}:reservation:reservation_mismatch:1", "4");
+    await raw.set("sdp:sponsorship:{sandbox}:reservation:reservation_mismatch:1", "4");
 
     await expect(
       budget.settle({
-        network: input.network,
+        environment: input.environment,
         projectId: input.projectId,
         hourBucket: input.hourBucket,
         dayBucket: input.dayBucket,
@@ -1205,7 +1206,7 @@ describe("SponsorshipBudgetRedis", () => {
 
   it("keeps stale callbacks from undoing a newer retry attempt", async () => {
     const input = {
-      network: "devnet" as const,
+      environment: "sandbox" as const,
       organizationId: "org_1",
       projectId: PROJECT_ID,
       hourBucket: "2026-08-03T10:00:00.000Z",
@@ -1218,7 +1219,7 @@ describe("SponsorshipBudgetRedis", () => {
     };
     await budget.reserve(input);
     await budget.settle({
-      network: input.network,
+      environment: input.environment,
       projectId: input.projectId,
       hourBucket: input.hourBucket,
       dayBucket: input.dayBucket,
@@ -1230,7 +1231,7 @@ describe("SponsorshipBudgetRedis", () => {
     await expect(budget.reserve({ ...input, attempt: 2 })).resolves.toBe("admitted");
 
     await budget.cancel({
-      network: input.network,
+      environment: input.environment,
       organizationId: input.organizationId,
       projectId: input.projectId,
       hourBucket: input.hourBucket,
@@ -1239,7 +1240,7 @@ describe("SponsorshipBudgetRedis", () => {
       attempt: 1,
     });
     await budget.settle({
-      network: input.network,
+      environment: input.environment,
       projectId: input.projectId,
       hourBucket: input.hourBucket,
       dayBucket: input.dayBucket,
@@ -1249,8 +1250,8 @@ describe("SponsorshipBudgetRedis", () => {
       actualLamports: 0,
     });
 
-    expect(await raw.hget("sdp:sponsorship:{devnet}:hour:2026-08-03T10:00:00.000Z", "global")).toBe(
-      "5"
-    );
+    expect(
+      await raw.hget("sdp:sponsorship:{sandbox}:hour:2026-08-03T10:00:00.000Z", "global")
+    ).toBe("5");
   });
 });
