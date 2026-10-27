@@ -15,7 +15,7 @@ import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
 import { Modal } from "@sdp/ui/modal";
 import { ChevronDownIcon, Loader2Icon } from "lucide-react";
-import { type ChangeEvent, useEffect, useMemo, useState } from "react";
+import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useSWRConfig } from "swr";
 import { EarnFlowStepper } from "@/app/dashboard/[projectId]/markets/earn/earn-flow-stepper";
 import { EarnFlowTransition } from "@/app/dashboard/[projectId]/markets/earn/earn-flow-transition";
@@ -225,12 +225,18 @@ function useQueuedWithdrawalSubmission(options: {
   const { mutate } = useSWRConfig();
   const [submitting, setSubmitting] = useState(false);
   const [outcome, setOutcome] = useState<EarnVaultQueuedWithdrawalOutcome | null>(null);
+  // Same lock the vault modals use: a ref read BEFORE the first await, so a
+  // second click that lands before the re-render commits cannot re-enter with
+  // the stale `submitting === false` closure and send a second request.
+  const submittingRef = useRef(false);
 
   async function submit(
     previewInput: EarnVaultQueuedWithdrawalTermsRequest | null,
     preview: EarnVaultQueuedWithdrawalPreview | null
   ) {
+    if (submittingRef.current) return;
     if (!previewInput || !preview || preview.blockingIssues.length > 0) return;
+    submittingRef.current = true;
     setSubmitting(true);
     const finishSubmission = options.onSubmissionStart?.(options.custodyWalletId);
     options.setError(null);
@@ -267,6 +273,7 @@ function useQueuedWithdrawalSubmission(options: {
       }
     } finally {
       finishSubmission?.();
+      submittingRef.current = false;
       setSubmitting(false);
     }
   }

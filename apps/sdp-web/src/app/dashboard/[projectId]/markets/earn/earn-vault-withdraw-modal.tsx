@@ -291,6 +291,17 @@ function withdrawalResultCopy(
         status: t("DashboardEarn.vaultWithdraw.finalizedStatus"),
         statusVariant: "success",
       };
+    case "failed":
+      // Reached only through an observed merge (a failed answer to the POST
+      // itself resolves to a submit error above): the withdrawal did not
+      // deliver, and the receipt must say so in the movement's own words.
+      return {
+        title: t("DashboardEarn.vaultWithdraw.failedTitle"),
+        body: t("DashboardEarn.vaultWithdraw.failedBody"),
+        note: t("DashboardEarn.vaultWithdraw.failedNote"),
+        status: t("DashboardEarn.vaultWithdraw.failedStatus"),
+        statusVariant: "danger",
+      };
     default:
       return {
         title: t("DashboardEarn.vaultWithdraw.submittedTitle"),
@@ -324,8 +335,12 @@ function WithdrawalResult({
 
   const { movement: withdrawal } = outcome;
   const copy = withdrawalResultCopy(outcome, t, settlement);
+  // A failed movement never borrows the position's shared status: the ui-state
+  // table answers "is the position still active?" (yes — the exit did not
+  // happen), which would paste a green Active badge over the failure copy.
+  // The movement's own danger badge and copy below stand alone instead.
   const sharedStatus =
-    settlement === "provider_order"
+    settlement === "provider_order" || withdrawal.status === "failed"
       ? null
       : earnVaultPositionStatusLabels(
           earnVaultWithdrawalUiState(withdrawal.status).positionStatus,

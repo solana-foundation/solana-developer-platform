@@ -6,7 +6,7 @@ import type {
   EarnVaultQueuedWithdrawalTerms,
   EarnVaultWithdrawalRequestRecord,
 } from "@sdp/types/earn";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EnglishTestI18n } from "@/app/dashboard/[projectId]/markets/test-i18n";
 import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
@@ -294,6 +294,58 @@ describe("EarnVaultQueuedWithdrawModal", () => {
     fireEvent.click(screen.getByRole("button", { name: "Request withdrawal" }));
     await waitFor(() => expect(mocks.createRequest).toHaveBeenCalledTimes(2));
     expect(mocks.createRequest.mock.calls.map((call) => call[1])).toEqual([FIRST_KEY, FIRST_KEY]);
+  });
+
+  /**
+   * The pre-await ref lock exists because a second click that lands before the
+   * re-render commits re-enters `submit` with the stale
+   * `submitting === false` closure — the state guard alone cannot stop it,
+   * and each entry sends its own request. Replayed as two clicks in one task,
+   * before any React flush: exactly one request may leave, and the lock must
+   * RELEASE afterwards so a legitimate retry still reaches the API.
+   */
+  it("sends one request for a double submit and still allows a later retry", async () => {
+    let resolveCreate: (result: {
+      ok: false;
+      error: string;
+      status: number | null;
+      body: null;
+    }) => void = () => {};
+    // The first confirm hangs on a deferred refusal, holding the in-flight
+    // window open so both clicks land inside it.
+    mocks.createRequest.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveCreate = resolve;
+        })
+    );
+    mocks.createRequest.mockResolvedValue({
+      ok: false,
+      error: "queue refused",
+      status: 400,
+      body: null,
+    });
+    renderModal();
+    await openReview();
+
+    act(() => {
+      const click = () =>
+        screen
+          .getByRole("button", { name: "Request withdrawal" })
+          .dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      click();
+      click();
+    });
+
+    // One intended withdrawal request: the second entry died on the ref.
+    expect(mocks.createRequest).toHaveBeenCalledTimes(1);
+
+    resolveCreate({ ok: false, error: "queue refused", status: 400, body: null });
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("queue refused"));
+
+    // The failed attempt released the lock, so a retry really re-arms.
+    fireEvent.click(screen.getByRole("button", { name: "Request withdrawal" }));
+    await waitFor(() => expect(mocks.createRequest).toHaveBeenCalledTimes(2));
   });
 
   it("refuses a deadline above the provider maximum before previewing", () => {

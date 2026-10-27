@@ -6,7 +6,7 @@ import type {
   EarnVaultPosition,
   EarnVaultWithdrawalRequestRecord,
 } from "@sdp/types/earn";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
@@ -206,6 +206,56 @@ describe("EarnVaultParRedemptionModal", () => {
     );
     expect(onRequested).toHaveBeenCalledWith(request());
     expect(await screen.findByText("Awaiting operator")).toBeTruthy();
+  });
+
+  /**
+   * The same pre-await ref lock the queued modal has: a second click that
+   * lands before the re-render commits must die on the ref, and the lock must
+   * RELEASE afterwards so a legitimate retry still reaches the API.
+   */
+  it("sends one request for a double submit and still allows a later retry", async () => {
+    let resolveCreate: (result: {
+      ok: false;
+      error: string;
+      status: number | null;
+      body: null;
+    }) => void = () => {};
+    mocks.createRequest.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveCreate = resolve;
+        })
+    );
+    mocks.createRequest.mockResolvedValue({
+      ok: false,
+      error: "operator refused",
+      status: 400,
+      body: null,
+    });
+    renderModal();
+
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "2500" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await screen.findByRole("button", { name: "Request par redemption" });
+
+    act(() => {
+      const click = () =>
+        screen
+          .getByRole("button", { name: "Request par redemption" })
+          .dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      click();
+      click();
+    });
+
+    // One intended redemption request: the second entry died on the ref.
+    expect(mocks.createRequest).toHaveBeenCalledTimes(1);
+
+    resolveCreate({ ok: false, error: "operator refused", status: 400, body: null });
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("operator refused"));
+
+    // The failed attempt released the lock, so a retry really re-arms.
+    fireEvent.click(screen.getByRole("button", { name: "Request par redemption" }));
+    await waitFor(() => expect(mocks.createRequest).toHaveBeenCalledTimes(2));
   });
 
   it("redeems a position's held wYLDS without asking for shares", async () => {

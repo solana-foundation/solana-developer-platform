@@ -79,7 +79,10 @@ function renderModal(
 beforeEach(() => {
   sessionStorage.clear();
   resetIdempotencyKeyStoresForTests();
-  vi.clearAllMocks();
+  // Reset, not just clear: an observed-outcome stub set in one test must
+  // never leak into the next — a leaked failed record would turn a later
+  // test's successful submission into a failure receipt.
+  vi.resetAllMocks();
   // Kamino declares no exit floor policy, so most tests never quote; the veda
   // suite overrides this with a real quote.
   mocks.fetchEarnVaultWithdrawalPreview.mockResolvedValue({ kind: "unavailable" });
@@ -386,6 +389,36 @@ describe("EarnVaultWithdrawModal", () => {
     expect(screen.getByText("Failed")).toBeTruthy();
     expect(screen.getByText(/No provider payout was recorded/)).toBeTruthy();
     expect(screen.queryByText("Awaiting provider settlement")).toBeNull();
+  });
+
+  it("renders an observed atomic withdrawal failure as failed, not active", async () => {
+    // The atomic path is the mainstream one — every provider but WisdomTree —
+    // and the shared position status maps a failed movement to "active" (the
+    // position itself survives). The receipt must not paste that green Active
+    // badge over the failure copy, nor show a success mark.
+    const requested = withdrawal("requested");
+    mocks.createEarnVaultWithdrawal.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { kind: "submitted", withdrawal: requested },
+    });
+    mocks.useEarnVaultWithdrawalOutcome.mockReturnValue({
+      ...requested,
+      status: "failed",
+      failureReason: "Transaction rejected",
+    });
+    renderModal();
+
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "6" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm withdrawal" }));
+
+    expect(await screen.findByText("Withdrawal failed")).toBeTruthy();
+    expect(screen.getByText("Failed")).toBeTruthy();
+    expect(screen.getByText(/No proceeds were delivered/)).toBeTruthy();
+    expect(screen.queryByText("Active")).toBeNull();
+    expect(screen.queryByText("Withdrawal submitted")).toBeNull();
+    expect(document.querySelector('[data-earn-outcome="success"]')).toBeNull();
   });
 });
 

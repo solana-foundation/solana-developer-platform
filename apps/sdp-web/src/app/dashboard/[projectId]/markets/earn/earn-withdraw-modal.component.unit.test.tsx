@@ -4,6 +4,7 @@ import type { EarnPortfolioWithdrawal } from "@sdp/types/earn";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EnglishTestI18n } from "@/app/dashboard/[projectId]/markets/test-i18n";
+import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
 import { EarnWithdrawModal } from "./earn-withdraw-modal";
 
 const mocks = vi.hoisted(() => ({
@@ -39,7 +40,7 @@ function withdrawal(status: EarnPortfolioWithdrawal["status"]): EarnPortfolioWit
 
 function renderModal() {
   const onWithdrawalCreated = vi.fn();
-  render(
+  const rendered = render(
     <EnglishTestI18n>
       <EarnWithdrawModal
         programId="earn_program_1"
@@ -49,7 +50,7 @@ function renderModal() {
       />
     </EnglishTestI18n>
   );
-  return { onWithdrawalCreated };
+  return { onWithdrawalCreated, rendered };
 }
 
 function fillForm() {
@@ -61,6 +62,10 @@ function fillForm() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // The durable request-id store is what carries an id across retries now, so
+  // every test starts with an empty store and a clean scope.
+  sessionStorage.clear();
+  resetIdempotencyKeyStoresForTests();
   // The on-open liquidity read and the debounced amount preview both answer
   // with the lane's ceiling; a valid-shaped amount stays valid while they run.
   mocks.previewEarnWithdrawal.mockResolvedValue({
@@ -131,5 +136,84 @@ describe("EarnWithdrawModal submit lock", () => {
     await screen.findByText("Withdrawal submitted");
     expect(mocks.createEarnWithdrawal).toHaveBeenCalledTimes(2);
     expect(onWithdrawalCreated).toHaveBeenCalledWith("wref_1");
+  });
+});
+
+describe("EarnWithdrawModal request-id durability", () => {
+  /**
+   * The request id identifies ONE intended withdrawal, and a 5xx answer is
+   * ambiguous: the provider may already have recorded the payout. The id
+   * therefore has to outlive the modal AND the page — a ref cannot, which is
+   * what let a reload turn one ambiguous failure into a second withdrawal.
+   */
+  it("re-claims the same requestId across a remount, so a reload cannot pay twice", async () => {
+    mocks.createEarnWithdrawal
+      // First attempt: an ambiguous failure — the answer never landed.
+      .mockResolvedValueOnce({
+        ok: false,
+        error: "upstream unavailable",
+        status: 500,
+        body: null,
+      })
+      // The re-entry after the reload succeeds once the same id replays.
+      .mockResolvedValue({
+        ok: true,
+        status: 200,
+        data: { data: { withdrawal: withdrawal("processing") } },
+      });
+
+    const first = renderModal();
+    fillForm();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm withdrawal" }));
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(mocks.createEarnWithdrawal).toHaveBeenCalledTimes(1);
+    first.rendered.unmount();
+
+    // A fresh mount of the same intent — everything a reload leaves behind.
+    renderModal();
+    fillForm();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm withdrawal" }));
+    await screen.findByText("Withdrawal submitted");
+
+    expect(mocks.createEarnWithdrawal).toHaveBeenCalledTimes(2);
+    expect(mocks.createEarnWithdrawal.mock.calls[1][1].requestId).toBe(
+      mocks.createEarnWithdrawal.mock.calls[0][1].requestId
+    );
+  });
+
+  it("mints a fresh requestId when the intended withdrawal changes", async () => {
+    mocks.createEarnWithdrawal
+      .mockResolvedValueOnce({
+        ok: false,
+        error: "upstream unavailable",
+        status: 500,
+        body: null,
+      })
+      .mockResolvedValue({
+        ok: true,
+        status: 200,
+        data: { data: { withdrawal: withdrawal("processing") } },
+      });
+    renderModal();
+
+    fillForm();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm withdrawal" }));
+    expect(await screen.findByRole("alert")).toBeTruthy();
+
+    // A corrected destination is a DIFFERENT withdrawal — it must never be
+    // answered under the failed attempt's id.
+    fireEvent.change(screen.getByLabelText("Destination address"), {
+      target: { value: "3wbKP5UGLT7gAZBAsLjvPC1NbfnWKtT3Dq7cniMWkzfU" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm withdrawal" }));
+    await screen.findByText("Withdrawal submitted");
+
+    expect(mocks.createEarnWithdrawal).toHaveBeenCalledTimes(2);
+    expect(mocks.createEarnWithdrawal.mock.calls[1][1].requestId).not.toBe(
+      mocks.createEarnWithdrawal.mock.calls[0][1].requestId
+    );
+    expect(mocks.createEarnWithdrawal.mock.calls[1][1].destinationAddress).toBe(
+      "3wbKP5UGLT7gAZBAsLjvPC1NbfnWKtT3Dq7cniMWkzfU"
+    );
   });
 });

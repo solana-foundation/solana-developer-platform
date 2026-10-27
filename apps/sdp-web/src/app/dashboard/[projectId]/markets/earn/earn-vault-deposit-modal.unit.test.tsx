@@ -666,6 +666,35 @@ describe("EarnVaultDepositModal", () => {
     expect(screen.queryByText("Processing at the provider")).toBeNull();
   });
 
+  it("renders an atomic deposit that fails after submission as failed, not active", async () => {
+    // The atomic path is the mainstream one: every provider but WisdomTree
+    // settles atomically, and the shared position status maps a failed
+    // movement to "active" (the position itself is still there). The receipt
+    // must not paste that green Active badge over the failure copy.
+    mocks.createEarnVaultDeposit.mockResolvedValue({
+      ok: true,
+      status: 201,
+      data: { kind: "submitted", deposit: vaultDeposit("submitted") },
+    });
+    mocks.useEarnVaultDepositOutcome.mockReturnValue(vaultDeposit("failed"));
+
+    render(
+      <EarnVaultDepositModal
+        projectId={PROJECT_ID}
+        strategy={strategy}
+        onClose={vi.fn()}
+        onDeposited={vi.fn()}
+      />
+    );
+    await enterDepositAmount();
+
+    expect(await screen.findByText("Deposit failed")).toBeTruthy();
+    expect(screen.getByText("Failed")).toBeTruthy();
+    expect(screen.getByText(/No position balance was credited/)).toBeTruthy();
+    expect(screen.queryByText("Active")).toBeNull();
+    expect(document.querySelector('[data-earn-outcome="success"]')).toBeNull();
+  });
+
   it("keeps a failed deposit on the form and reports the provider reason", async () => {
     const onDeposited = vi.fn();
     mocks.createEarnVaultDeposit.mockResolvedValue({

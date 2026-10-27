@@ -533,8 +533,13 @@ function DepositResult({
 
   const { movement: deposit } = outcome;
   const copy = depositMovementCopy(outcome, t);
+  // A failed movement never borrows the position's shared status: the ui-state
+  // table answers "is the position still active?" (yes — the deposit did not
+  // credit), which would paste a green Active badge over the failure copy. The
+  // movement's own danger badge and copy above stand alone instead.
   const sharedStatus =
-    earnProviderDepositSettlement(deposit.strategy.provider) === "provider_order"
+    earnProviderDepositSettlement(deposit.strategy.provider) === "provider_order" ||
+    deposit.status === "failed"
       ? null
       : earnVaultPositionStatusLabels(earnVaultDepositUiState(deposit.status).positionStatus, t);
   const status = sharedStatus?.label ?? copy.status;

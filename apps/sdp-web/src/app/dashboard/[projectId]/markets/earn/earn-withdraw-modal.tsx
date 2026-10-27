@@ -19,10 +19,13 @@ import { type ChangeEvent, useCallback, useEffect, useRef, useState } from "reac
 import { BASE58_ADDRESS_PATTERN } from "@/app/dashboard/[projectId]/markets/base58-address";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { fetchResultAnswer, uncertainMoneyAnswerMessage } from "@/lib/idempotency";
+import { settleMoneyIdempotencyKey } from "@/lib/idempotency-key-store";
 import { useModalFocus } from "@/lib/use-modal-focus";
 import { compareUnsignedDecimals, isPositiveDecimal, parseUnsignedDecimal } from "./earn-decimal";
 import { formatDurationRange, formatUsd, isoDurationDays } from "./earn-format";
 import { createEarnWithdrawal, previewEarnWithdrawal } from "./earn-program-data";
+import { programWithdrawalRequestIdStore } from "./earn-program-withdraw-tracking";
 
 export function isPositiveUsdAmount(value: string): boolean {
   const amount = parseUnsignedDecimal(value, { trim: false });
@@ -49,43 +52,15 @@ export function withdrawalRequestSignature(
 }
 
 /**
- * The idempotency key identifies ONE intended withdrawal, so it is bound to
- * the parameters that define it. Retrying an unchanged confirm reuses the key
- * (the provider collapses the duplicate instead of paying twice); changing the
- * amount, token, or destination after a failed attempt mints a new key, so a
- * corrected withdrawal can never be answered with the cached result of the
- * one the user just fixed — which would settle funds to the old address while
- * reporting success. "Changing the amount" means its VALUE: the signature is
- * canonical (see `withdrawalRequestSignature`), so re-spelling the same value
- * after an ambiguous failure replays the original key instead of paying twice.
- *
- * A ref, not `useMemo`: React may discard a memo cache and recompute, which
- * would hand the same parameters a fresh key and reintroduce the
- * double-withdraw risk on retry.
- *
- * `programId` is part of the signature because one modal instance can be
- * re-pointed at another program without unmounting. Without it, a key minted
- * for a withdrawal from program A would be carried into an identical-looking
- * withdrawal from program B.
+ * The request id identifies ONE intended withdrawal, so it is bound to the
+ * parameters that define it — see `withdrawalRequestSignature`, whose
+ * canonical-amount rule and `programId` component answer for the same
+ * properties in the durable store. It is claimed at submit time from
+ * `programWithdrawalRequestIdStore`, not held in a React ref: a ref dies with
+ * the modal and with the tab's page load, so an ambiguous failure (a lost
+ * answer, a 5xx) followed by a re-entry — even after a reload — would mint a
+ * fresh id and send the same withdrawal a second time.
  */
-function useWithdrawalRequestId(
-  programId: string,
-  amountUsd: string,
-  token: EarnPortfolioToken | undefined,
-  destinationAddress: string
-): string {
-  const requestSignature = withdrawalRequestSignature(
-    programId,
-    amountUsd,
-    token,
-    destinationAddress
-  );
-  const requestRef = useRef<{ signature: string; id: string } | null>(null);
-  if (requestRef.current?.signature !== requestSignature) {
-    requestRef.current = { signature: requestSignature, id: crypto.randomUUID() };
-  }
-  return requestRef.current.id;
-}
 
 const PREVIEW_DEBOUNCE_MS = 400;
 
@@ -606,8 +581,6 @@ export function EarnWithdrawModal({
   const destination = destinationInput.trim();
   const destinationValid = BASE58_ADDRESS_PATTERN.test(destination);
 
-  const requestId = useWithdrawalRequestId(programId, amount, token, destination);
-
   useEffect(() => {
     if (submitting) contentRef.current?.focus();
   }, [submitting, contentRef]);
@@ -736,15 +709,46 @@ export function EarnWithdrawModal({
     submittingRef.current = true;
     setSubmitting(true);
     setSubmitError(null);
+    // Claimed HERE, from the durable store — not at render, not from a ref.
+    // An unchanged confirm (the same program, canonical amount, token and
+    // destination) re-claims the SAME id after an ambiguous failure, a lost
+    // answer, or a reload that discarded this modal entirely, so the provider
+    // collapses the duplicate instead of paying twice; a corrected withdrawal
+    // mints a fresh id, so it can never be answered with the cached result of
+    // the one the user just fixed. An id the browser could not persist would
+    // die with the tab like the ref once did, so a money route must not send
+    // under one.
+    const signature = withdrawalRequestSignature(programId, amount, token, destination);
+    const { key: requestId, persisted } = programWithdrawalRequestIdStore.claim(signature);
+    if (!persisted) {
+      submittingRef.current = false;
+      setSubmitting(false);
+      setSubmitError(t("DashboardEarn.intentStorageUnavailable"));
+      return;
+    }
     const result = await createEarnWithdrawal(programId, {
       requestId,
       amountUsd: amount,
       token,
       destinationAddress: destination,
     });
+    // Id bookkeeping FIRST and unconditionally: the store outlives the
+    // component, so an unmount mid-flight must not skip recording the answer.
+    // A money movement: an unknown outcome or a reused id keeps it
+    // (`moneyAnswerRetiresKey`).
+    const answer = fetchResultAnswer(result);
+    settleMoneyIdempotencyKey(programWithdrawalRequestIdStore, signature, requestId, answer);
     submittingRef.current = false;
     setSubmitting(false);
     if (!result.ok) {
+      // An outcome the API could not record (or a reused id) is not a plain
+      // refusal: the earlier attempt may have run, so the reader is sent to
+      // check the list instead of offered a confirm that could pay twice.
+      const uncertain = uncertainMoneyAnswerMessage(answer);
+      if (uncertain !== null) {
+        setSubmitError(t(uncertain));
+        return;
+      }
       // A create can still lose a race with a rebalance between preview and
       // confirm. When the refusal names the lane ceiling, answer with SDP copy
       // carrying that number and correct the available line — echoing the
