@@ -93,15 +93,21 @@ import {
   kaminoMarketLabel,
 } from "./kamino-allocations-format";
 import type { KaminoVaultAllocations } from "./kamino-allocations-schema";
-import { isOpenVaultPosition, type TreasuryAllocation } from "./treasury-allocation";
+import {
+  isOpenVaultPosition,
+  type TreasuryAllocation,
+  type WalletDeploymentDisplay,
+} from "./treasury-allocation";
 import {
   TREASURY_POSITION_COLUMNS,
   TREASURY_POSITIONS_BODY,
   TREASURY_PROGRAM_COLUMNS,
+  TREASURY_STRATEGIES_BODY,
   TREASURY_STRATEGY_COLUMNS,
   TREASURY_TABLE,
   TREASURY_TABLE_FRAME,
   TREASURY_WALLET_GRID,
+  TREASURY_WALLETS_BODY,
 } from "./treasury-layout";
 import type { TrackedVaultDeposit, TrackedVaultWithdrawal } from "./treasury-solutions-workspace";
 import { vaultActivities } from "./treasury-vault-balance";
@@ -250,6 +256,16 @@ function treasuryStrategiesDisclosureKey(
   if (providerAccess === null) return "DashboardMarkets.treasury.accessDisclosure" as const;
   if (depositsEnabled) return "DashboardMarkets.treasury.rateDisclosure" as const;
   return "DashboardMarkets.treasury.productionDisclosure" as const;
+}
+
+/** Where a position's balance read stands, for tests and tooling reading the row. */
+function balanceReadState(
+  syncing: boolean,
+  lastVerifiedAt: number | undefined
+): "syncing" | "stale" | "live" {
+  if (syncing) return "syncing";
+  if (lastVerifiedAt !== undefined) return "stale";
+  return "live";
 }
 
 /**
@@ -425,6 +441,35 @@ function TreasurySummary({
   );
 }
 
+/** What a wallet has deployed: its open positions' value, zero when it holds none. */
+function WalletDeployedFigure({
+  deployment,
+  refreshing,
+}: {
+  deployment: WalletDeploymentDisplay;
+  refreshing: boolean;
+}) {
+  const t = useTranslations();
+  const locale = useLocale();
+  if (refreshing) return <BalanceRefreshing className="h-3.5 w-14" />;
+  switch (deployment.kind) {
+    case "value":
+      return formatUsd(deployment.value, locale);
+    case "none":
+      return formatUsd("0", locale);
+    case "unavailable":
+      return (
+        <span className="truncate text-tertiary">
+          {t("DashboardMarkets.treasury.positionValueUnavailable")}
+        </span>
+      );
+    default: {
+      const unhandled: never = deployment;
+      return unhandled;
+    }
+  }
+}
+
 /** A tile's figure: a 13px caption over its 14px value. */
 function TreasuryTileFigure({ children, label }: { children: ReactNode; label: ReactNode }) {
   return (
@@ -516,17 +561,7 @@ function TreasuryWalletTile({
           )}
         </TreasuryTileFigure>
         <TreasuryTileFigure label={t("DashboardMarkets.treasury.walletDeployed")}>
-          {refreshing ? (
-            <BalanceRefreshing className="h-3.5 w-14" />
-          ) : deployment.kind === "value" ? (
-            formatUsd(deployment.value, locale)
-          ) : deployment.kind === "none" ? (
-            formatUsd("0", locale)
-          ) : (
-            <span className="truncate text-tertiary">
-              {t("DashboardMarkets.treasury.positionValueUnavailable")}
-            </span>
-          )}
+          <WalletDeployedFigure deployment={deployment} refreshing={refreshing} />
         </TreasuryTileFigure>
       </dl>
     </article>
@@ -552,6 +587,47 @@ function TreasuryWallets({
   const custodyEnabled = workspace?.flags.custody ?? true;
   const canManageCustody = workspace?.dashboardAccess.capabilities.canManageCustody ?? true;
   if (!custodyEnabled) return null;
+
+  let body: ReactNode;
+  if (isLoading) {
+    body = <TreasuryWalletTilesSkeleton />;
+  } else if (error) {
+    body = (
+      <p className="text-body text-secondary">{t("DashboardMarkets.treasury.walletsError")}</p>
+    );
+  } else if (wallets.length === 0) {
+    body = (
+      <ListEmptyState
+        action={
+          canManageCustody ? (
+            <Button asChild variant="outline">
+              <Link href={href(`${DASHBOARD_SIDE_NAV_HREFS.wallets}/setup`)}>
+                {t("DashboardCustody.createWallet")}
+              </Link>
+            </Button>
+          ) : undefined
+        }
+        description={t("DashboardMarkets.treasury.walletsEmptyDescription")}
+        message={t("DashboardMarkets.treasury.walletsEmptyTitle")}
+      />
+    );
+  } else {
+    body = (
+      <div className={TREASURY_WALLET_GRID}>
+        {wallets.map((wallet) => (
+          <TreasuryWalletTile
+            allocation={allocation}
+            key={wallet.id}
+            refreshing={refreshing}
+            wallet={wallet}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  // A failed or empty read sits in the middle of the tile row it replaces.
+  const centered = !isLoading && (Boolean(error) || wallets.length === 0);
   return (
     <RecordBlock
       aside={
@@ -565,36 +641,7 @@ function TreasuryWallets({
       }
       title={t("DashboardMarkets.treasury.connectedWallets")}
     >
-      {isLoading ? (
-        <TreasuryWalletTilesSkeleton />
-      ) : error ? (
-        <p className="text-body text-secondary">{t("DashboardMarkets.treasury.walletsError")}</p>
-      ) : wallets.length === 0 ? (
-        <ListEmptyState
-          action={
-            canManageCustody ? (
-              <Button asChild variant="outline">
-                <Link href={href(`${DASHBOARD_SIDE_NAV_HREFS.wallets}/setup`)}>
-                  {t("DashboardCustody.createWallet")}
-                </Link>
-              </Button>
-            ) : undefined
-          }
-          description={t("DashboardMarkets.treasury.walletsEmptyDescription")}
-          message={t("DashboardMarkets.treasury.walletsEmptyTitle")}
-        />
-      ) : (
-        <div className={TREASURY_WALLET_GRID}>
-          {wallets.map((wallet) => (
-            <TreasuryWalletTile
-              allocation={allocation}
-              key={wallet.id}
-              refreshing={refreshing}
-              wallet={wallet}
-            />
-          ))}
-        </div>
-      )}
+      <div className={cn(TREASURY_WALLETS_BODY, centered && "justify-center")}>{body}</div>
     </RecordBlock>
   );
 }
@@ -664,9 +711,7 @@ function TreasuryPositionBalanceCell({
     >
       <div
         className="flex h-5 items-center justify-end"
-        data-earn-vault-balance={
-          syncing ? "syncing" : lastVerifiedAt !== undefined ? "stale" : "live"
-        }
+        data-earn-vault-balance={balanceReadState(syncing, lastVerifiedAt)}
         title={syncing ? syncingLabel : undefined}
       >
         <div data-earn-vault-balance-value>
@@ -1356,7 +1401,9 @@ function TreasuryStrategies({
       hint={t(treasuryStrategiesDisclosureKey(depositsEnabled, providerAccess))}
       title={t("DashboardMarkets.treasury.strategiesTitle")}
     >
-      {body}
+      <div className={cn(TREASURY_STRATEGIES_BODY, !isLoading && !hasRows && "justify-center")}>
+        {body}
+      </div>
     </RecordBlock>
   );
 }

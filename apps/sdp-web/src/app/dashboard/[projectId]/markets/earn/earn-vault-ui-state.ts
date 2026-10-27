@@ -79,7 +79,7 @@ export function vaultOutcomeTone(statusVariant: BadgeVariant): "info" | "success
   return "info";
 }
 
-const STATUS_TEXT_TONE: Readonly<Record<BadgeVariant, StatusTone>> = {
+const STATUS_TEXT_TONE = {
   default: "progress",
   primary: "progress",
   info: "progress",
@@ -87,7 +87,7 @@ const STATUS_TEXT_TONE: Readonly<Record<BadgeVariant, StatusTone>> = {
   warning: "attention",
   danger: "critical",
   outline: "neutral",
-};
+} as const satisfies Record<BadgeVariant, StatusTone>;
 
 /**
  * A status badge's variant as the refresh design's status text tone, so a list that sets
