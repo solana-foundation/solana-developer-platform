@@ -6,17 +6,18 @@
  * Each table is its columns in order, by id, as fixed-layout widths that sum to 100% at each
  * width. Columns that do not fit a phone drop out below `@2xl` (the work area's container query,
  * a 624px column), so a row's action is always on screen without scrolling the table sideways.
+ * A dropped status reads under the row's balance instead.
  */
 
 /** Hidden until the column is 624px wide. */
 const WIDE_ONLY = "hidden @2xl:table-cell";
 
 export const TREASURY_POSITION_COLUMNS = {
-  position: "w-[44%] @2xl:w-[34%]",
+  position: "w-[46%] @2xl:w-[34%]",
   wallet: `${WIDE_ONLY} @2xl:w-[20%]`,
-  status: "w-[18%] @2xl:w-[14%]",
-  balance: "w-[18%] text-right @2xl:w-[14%]",
-  actions: "w-[20%] text-right @2xl:w-[18%]",
+  status: `${WIDE_ONLY} @2xl:w-[14%]`,
+  balance: "w-[26%] text-right @2xl:w-[14%]",
+  actions: "w-[28%] text-right @2xl:w-[18%]",
 } as const;
 
 export const TREASURY_STRATEGY_COLUMNS = {
@@ -28,10 +29,10 @@ export const TREASURY_STRATEGY_COLUMNS = {
 } as const;
 
 export const TREASURY_PROGRAM_COLUMNS = {
-  program: "w-[44%] @2xl:w-[40%]",
-  status: "w-[18%]",
-  balance: "w-[18%] text-right @2xl:w-[20%]",
-  actions: "w-[20%] text-right @2xl:w-[22%]",
+  program: "w-[46%] @2xl:w-[40%]",
+  status: `${WIDE_ONLY} @2xl:w-[18%]`,
+  balance: "w-[26%] text-right @2xl:w-[20%]",
+  actions: "w-[28%] text-right @2xl:w-[22%]",
 } as const;
 
 /**

@@ -672,7 +672,8 @@ browser pass on `/dashboard/markets/embedded-yield` and
   `treasury-solutions/treasury-layout.ts` (column widths, the positions body's
   two-row floor) and `markets-route-skeletons.tsx`, and sections that most
   treasuries never show (queued requests, custodial programs) render nothing
-  until they have rows. A table's columns drop below `@2xl`, never its action.
+  until they have rows. A table's columns drop below `@2xl`, never its action;
+  a dropped status reads under the row's balance.
 - **Nothing may overlap — provider and fund names run long.**
   `@solana/design-system`'s `cn` is a plain string join — **no tailwind-merge**.
   A class handed to `Table*` that conflicts with one of its own base classes
