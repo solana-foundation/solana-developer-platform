@@ -129,7 +129,7 @@ live Grafana, stage scrape, Kora ingress and Sentry verification requirements.
   copy; checked-in provider versions and lockfiles were unchanged.
 
 The full local workspace suite passed all 26 test tasks using CI's Node
-24.22.1 with caching disabled: all 8,200 API tests, 3,377 web tests, 192 RPC
+24.22.1 with caching disabled: all 8,200 API tests, 3,384 web tests, 192 RPC
 tests, and the other 23 workspace tasks passed. Ten opt-in live tests retained
 their existing skips. All 245 root script tests passed. Workspace typechecking
 passed all 28 tasks.

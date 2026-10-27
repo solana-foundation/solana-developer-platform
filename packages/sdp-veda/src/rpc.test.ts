@@ -6,6 +6,7 @@ import {
   createVedaRpc,
   VEDA_BLOCK_TIME_TTL_MS,
   VEDA_SHARED_READ_JOIN_WINDOW_MS,
+  withVedaOperationReads,
   withVedaReadDeduplication,
   withVedaRpcTimeout,
 } from "./rpc";
@@ -288,6 +289,194 @@ describe("withVedaReadDeduplication", () => {
     }
     await expect(scoped).resolves.toBeDefined();
     await expect(unscoped).resolves.toBeDefined();
+  });
+});
+
+describe("withVedaOperationReads", () => {
+  const A = "11111111111111111111111111111111";
+  const B = "SysvarRent111111111111111111111111111111111";
+  const C = "SysvarC1ock11111111111111111111111111111111";
+  const config = { commitment: "confirmed", encoding: "base64" };
+  const accounts = (keys: string[], extra: Record<string, unknown> = {}) =>
+    request("getMultipleAccounts", [keys, { ...config, ...extra }]);
+  const answer = (slot: bigint, value: unknown[]) => ({
+    jsonrpc: "2.0",
+    id: "held",
+    result: { context: { slot }, value },
+  });
+
+  /** Send `keys`, answer it at `slot` with `value`, and wait for the caller to see it. */
+  async function hold(
+    read: RpcTransport,
+    sent: SentRequest[],
+    keys: string[],
+    slot: bigint,
+    value: unknown[],
+    extra: Record<string, unknown> = {}
+  ) {
+    const pending = read(accounts(keys, extra));
+    sent.at(-1)?.resolve(answer(slot, value));
+    await pending;
+  }
+
+  it("answers an account read the operation already holds, in the order asked", async () => {
+    const { sent, transport } = fakeTransport();
+    const read = withVedaReadDeduplication(transport);
+
+    await withVedaOperationReads(async () => {
+      await hold(read, sent, [A, B, C], 9n, ["a", null, "c"]);
+      await expect(read(accounts([C, A]))).resolves.toEqual(answer(9n, ["c", "a"]));
+      // The SDK's own re-read at the slot it already observed, a bigint as it sends it.
+      await expect(read(accounts([B], { minContextSlot: 9n }))).resolves.toEqual(
+        answer(9n, [null])
+      );
+    });
+
+    expect(sent).toHaveLength(1);
+  });
+
+  it("holds nothing outside an operation, and nothing from another operation", async () => {
+    const { sent, transport } = fakeTransport();
+    const read = withVedaReadDeduplication(transport);
+
+    await hold(read, sent, [A, B], 9n, ["a", "b"]);
+    await hold(read, sent, [A], 9n, ["a"]);
+    expect(sent).toHaveLength(2);
+
+    await withVedaOperationReads(() => hold(read, sent, [A, B], 9n, ["a", "b"]));
+    await withVedaOperationReads(() => hold(read, sent, [A], 9n, ["a"]));
+    expect(sent).toHaveLength(4);
+  });
+
+  it("reads again for another config, an older slot, a slice or an account it lacks", async () => {
+    const { sent, transport } = fakeTransport();
+    const read = withVedaReadDeduplication(transport);
+
+    await withVedaOperationReads(async () => {
+      await hold(read, sent, [A, B], 9n, ["a", "b"]);
+      void read(request("getMultipleAccounts", [[A], { encoding: "base64" }]));
+      void read(accounts([A], { minContextSlot: 10 }));
+      void read(accounts([A], { dataSlice: { offset: 0, length: 0 } }));
+      void read(accounts([A, C]));
+      void read(request("getAccountInfo", [A, config]));
+    });
+
+    expect(sent).toHaveLength(6);
+  });
+
+  it("never holds an error, a malformed answer or a slice", async () => {
+    const { sent, transport } = fakeTransport();
+    const read = withVedaReadDeduplication(transport);
+    const slice = { dataSlice: { offset: 0, length: 0 } };
+
+    await withVedaOperationReads(async () => {
+      const failed = read(accounts([A]));
+      sent[0]?.resolve({ jsonrpc: "2.0", error: { code: -32005, message: "behind" } });
+      await failed;
+      const short = read(accounts([B]));
+      sent[1]?.resolve(answer(9n, []));
+      await short;
+      const sliced = read(accounts([C], slice));
+      sent[2]?.resolve(answer(9n, ["c"]));
+      await sliced;
+
+      void read(accounts([A]));
+      void read(accounts([B]));
+      void read(accounts([C], slice));
+    });
+
+    expect(sent).toHaveLength(6);
+  });
+
+  it("serves the newest slot that covers the read", async () => {
+    const { sent, transport } = fakeTransport();
+    const read = withVedaReadDeduplication(transport);
+
+    await withVedaOperationReads(async () => {
+      await hold(read, sent, [A, B], 12n, ["a12", "b12"]);
+      await hold(read, sent, [A, C], 9n, ["a9", "c9"]);
+      await expect(read(accounts([A]))).resolves.toEqual(answer(12n, ["a12"]));
+    });
+
+    expect(sent).toHaveLength(2);
+  });
+
+  it("never serves an answer sent at or before the caller's read floor", async () => {
+    const { sent, transport } = fakeTransport();
+    const read = withVedaReadDeduplication(transport);
+
+    await withVedaOperationReads(async () => {
+      await hold(read, sent, [A, B], 9n, ["a", "b"]);
+      void withReadFloor(readStamp(), () => read(accounts([A])));
+    });
+
+    expect(sent).toHaveLength(2);
+  });
+
+  it("joins the operation already open", async () => {
+    const { sent, transport } = fakeTransport();
+    const read = withVedaReadDeduplication(transport);
+
+    await withVedaOperationReads(async () => {
+      await hold(read, sent, [A, B], 9n, ["a", "b"]);
+      await withVedaOperationReads(async () => {
+        await expect(read(accounts([B]))).resolves.toEqual(answer(9n, ["b"]));
+      });
+    });
+
+    expect(sent).toHaveLength(1);
+  });
+
+  it("rejects a held read for a caller that already gave up", async () => {
+    const { sent, transport } = fakeTransport();
+    const read = withVedaReadDeduplication(transport);
+    const leaving = new AbortController();
+    const reason = new Error("caller gave up");
+    leaving.abort(reason);
+
+    await withVedaOperationReads(async () => {
+      await hold(read, sent, [A], 9n, ["a"]);
+      await expect(
+        read(request("getMultipleAccounts", [[A], config], leaving.signal))
+      ).rejects.toBe(reason);
+    });
+  });
+
+  it("serves a scoped read only from an answer at or after its minimum slot", async () => {
+    const { sent, transport } = fakeTransport();
+    const read = withVedaRpcTimeout(withVedaReadDeduplication(transport));
+
+    await withVedaOperationReads(async () => {
+      await hold(read, sent, [A, B], 90n, ["a", "b"]);
+      // The scope asks for slot 100, which the held slot-90 answer predates.
+      const scoped = withMinimumRpcSlot(100, async () => {
+        const first = read(accounts([A, B]));
+        await laterTask();
+        sent.at(-1)?.resolve(answer(150n, ["a", "b"]));
+        await first;
+        return read(accounts([B]));
+      });
+      await expect(scoped).resolves.toEqual(answer(150n, ["b"]));
+    });
+
+    expect(sent).toHaveLength(2);
+    expect(sent[1]?.payload.params[1]).toEqual({ ...config, minContextSlot: 100 });
+  });
+
+  it("keeps a bounded number of answers", async () => {
+    const { sent, transport } = fakeTransport();
+    const read = withVedaReadDeduplication(transport);
+
+    await withVedaOperationReads(async () => {
+      await hold(read, sent, [A, B], 1n, ["a", "b"]);
+      // Each asks for a slot no held answer reaches, so each is sent and held.
+      for (let slot = 2; slot <= 17; slot += 1) {
+        await hold(read, sent, [C], BigInt(slot), ["c"], { minContextSlot: slot });
+      }
+      void read(accounts([A]));
+    });
+
+    expect(sent).toHaveLength(18);
   });
 });
 
