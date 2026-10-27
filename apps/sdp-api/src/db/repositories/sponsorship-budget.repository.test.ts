@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
 import {
   type CreateSponsorshipReservationInput,
@@ -65,38 +66,161 @@ describe("SponsorshipBudgetRepository", () => {
       ids: { sandbox: "project_1", production: "project_1_production" },
     });
     await insertPolicy({ id: "global", scopeType: "global", scopeId: null });
-    await insertPolicy({ id: "org_default", scopeType: "organization", scopeId: null });
     await insertPolicy({ id: "project_default", scopeType: "project", scopeId: null });
   });
 
-  it("prefers exact tenant policies and falls back independently at each scope", async () => {
+  it("resolves the exact project policy over its default and ignores organization rows", async () => {
+    await insertPolicy({ id: "project_exact", scopeType: "project", scopeId: "project_1" });
     await insertPolicy({
       id: "org_exact",
       scopeType: "organization",
       scopeId: "org_1",
       hourly: 50,
     });
-    const policies = await new SponsorshipBudgetRepository(getDb(env)).resolvePolicies({
+    const repository = new SponsorshipBudgetRepository(getDb(env));
+
+    const policies = await repository.resolvePolicies({
       network: "devnet",
-      organizationId: "org_1",
       projectId: "project_1",
     });
-    expect(policies.map((policy) => policy.id)).toEqual(["global", "org_exact", "project_default"]);
+    expect(policies.map((policy) => policy.id)).toEqual(["global", "project_exact"]);
+    expect((await repository.listPolicies("devnet")).map((policy) => policy.id)).toEqual([
+      "global",
+      "project_default",
+      "project_exact",
+    ]);
+  });
+
+  it("creates a policy at version 0 exactly once under concurrent writers", async () => {
+    const repository = new SponsorshipBudgetRepository(getDb(env));
+    const create = {
+      network: "devnet" as const,
+      scopeType: "project" as const,
+      scopeId: "project_1",
+      enabled: true,
+      perTransactionLamports: 10,
+      hourlyLamports: 100,
+      dailyLamports: 1000,
+      expectedVersion: 0,
+      operator: "operator:oncall",
+      reason: "launch limits",
+    };
+
+    const results = await Promise.all([
+      repository.writePolicyAtVersion(create),
+      repository.writePolicyAtVersion(create),
+    ]);
+
+    const created = results.filter((result) => result !== null);
+    expect(created).toHaveLength(1);
+    const winner = required(created[0]);
+    expect(winner).toMatchObject({ scopeId: "project_1", version: 1 });
+    expect(
+      await getDb(env).queryMany<{ version: number }>(
+        "SELECT version FROM sponsorship_budget_policy_revisions WHERE policy_id = ?",
+        [winner.id]
+      )
+    ).toEqual([{ version: 1 }]);
+  });
+
+  it("refuses a version-0 create over an existing NULL-scope default", async () => {
+    const repository = new SponsorshipBudgetRepository(getDb(env));
+
+    await expect(
+      repository.writePolicyAtVersion({
+        network: "devnet",
+        scopeType: "project",
+        scopeId: null,
+        enabled: true,
+        perTransactionLamports: 10,
+        hourlyLamports: 500,
+        dailyLamports: 1000,
+        expectedVersion: 0,
+        operator: "operator:oncall",
+        reason: "raise defaults",
+      })
+    ).resolves.toBeNull();
+
+    const policies = await repository.listPolicies("devnet");
+    expect(policies.find((policy) => policy.id === "project_default")).toMatchObject({
+      hourlyLamports: 100,
+      version: 1,
+    });
+    expect(
+      await getDb(env).queryOne<{ count: number }>(
+        "SELECT COUNT(*)::int AS count FROM sponsorship_budget_policy_revisions"
+      )
+    ).toEqual({ count: 0 });
+  });
+
+  it("refuses a write computed before a breaker trip moved the version", async () => {
+    const repository = new SponsorshipBudgetRepository(getDb(env));
+    await repository.tripGlobalBreaker("devnet", "overspend detected");
+
+    await expect(
+      repository.writePolicyAtVersion({
+        network: "devnet",
+        scopeType: "global",
+        scopeId: null,
+        enabled: true,
+        perTransactionLamports: 10,
+        hourlyLamports: 100,
+        dailyLamports: 1000,
+        expectedVersion: 1,
+        operator: "operator:oncall",
+        reason: "raise limits",
+      })
+    ).resolves.toBeNull();
+
+    expect(await repository.getGlobalPolicy("devnet")).toMatchObject({
+      enabled: false,
+      version: 2,
+      updateReason: "overspend detected",
+    });
+  });
+
+  it("resumes an integrity-tripped global policy only at the version the operator read", async () => {
+    const repository = new SponsorshipBudgetRepository(getDb(env));
+    const tripped = required(await repository.tripGlobalBreaker("devnet", "overspend detected"));
+    const resume = {
+      network: "devnet" as const,
+      operator: "operator:oncall",
+      reason: "overspend investigated",
+    };
+
+    await expect(
+      repository.resumeGlobalPolicyAtVersion({ ...resume, expectedVersion: tripped.version - 1 })
+    ).resolves.toBeNull();
+    const resumed = await repository.resumeGlobalPolicyAtVersion({
+      ...resume,
+      expectedVersion: tripped.version,
+    });
+    expect(resumed).toMatchObject({
+      enabled: true,
+      version: tripped.version + 1,
+      updatedBy: "operator:oncall",
+    });
+    await expect(
+      repository.resumeGlobalPolicyAtVersion({ ...resume, expectedVersion: tripped.version + 1 })
+    ).resolves.toBeNull();
   });
 
   it("toggles enabled without clobbering a concurrently-updated limit", async () => {
     const repository = new SponsorshipBudgetRepository(getDb(env));
-    const updated = await repository.upsertPolicy({
-      network: "devnet",
-      scopeType: "global",
-      scopeId: null,
-      enabled: true,
-      perTransactionLamports: 111,
-      hourlyLamports: 222,
-      dailyLamports: 333,
-      operator: "operator",
-      reason: "raise limits",
-    });
+    const updated = required(
+      await repository.writePolicyAtVersion({
+        network: "devnet",
+        scopeType: "global",
+        scopeId: null,
+        enabled: true,
+        perTransactionLamports: 111,
+        hourlyLamports: 222,
+        dailyLamports: 333,
+        expectedVersion: 1,
+        operator: "operator",
+        reason: "raise limits",
+      })
+    );
 
     const disabled = await repository.setPolicyEnabled({
       network: "devnet",
@@ -255,17 +379,20 @@ describe("SponsorshipBudgetRepository", () => {
 
   it("writes an audited revision for each policy change and prevents mutation", async () => {
     const repository = new SponsorshipBudgetRepository(getDb(env));
-    const changed = await repository.upsertPolicy({
-      network: "devnet",
-      scopeType: "global",
-      scopeId: null,
-      enabled: false,
-      perTransactionLamports: 10,
-      hourlyLamports: 100,
-      dailyLamports: 1000,
-      operator: "operator@example.com",
-      reason: "incident kill switch",
-    });
+    const changed = required(
+      await repository.writePolicyAtVersion({
+        network: "devnet",
+        scopeType: "global",
+        scopeId: null,
+        enabled: false,
+        perTransactionLamports: 10,
+        hourlyLamports: 100,
+        dailyLamports: 1000,
+        expectedVersion: 1,
+        operator: "operator@example.com",
+        reason: "incident kill switch",
+      })
+    );
     expect(changed.version).toBe(2);
     const revision = await getDb(env).queryOne<{
       version: number;
@@ -317,17 +444,15 @@ describe("SponsorshipBudgetRepository", () => {
     const policies = await repository.listPolicies();
     expect(policies.map((entry) => entry.id)).toEqual([
       "sbp_devnet_global",
-      "sbp_devnet_org_default",
       "sbp_devnet_project_default",
       "sbp_mainnet_global",
-      "sbp_mainnet_org_default",
       "sbp_mainnet_project_default",
     ]);
     expect(
       await getDb(env).queryOne<{ count: number }>(
         "SELECT COUNT(*)::int AS count FROM sponsorship_budget_policy_revisions"
       )
-    ).toEqual({ count: 6 });
+    ).toEqual({ count: 4 });
   });
 
   it("returns window usage sums as JavaScript numbers, not NUMERIC strings", async () => {
@@ -342,8 +467,8 @@ describe("SponsorshipBudgetRepository", () => {
       dayBucket: input.dayBucket,
     });
     expect(usage).toEqual({
-      hour: { global: 5, organization: 5, project: 5 },
-      day: { global: 5, organization: 5, project: 5 },
+      hour: { global: 5, project: 5 },
+      day: { global: 5, project: 5 },
     });
   });
 
@@ -364,8 +489,8 @@ describe("SponsorshipBudgetRepository", () => {
     });
 
     expect(snapshot.usage).toEqual({
-      hour: { global: 5, organization: 5, project: 5 },
-      day: { global: 5, organization: 5, project: 5 },
+      hour: { global: 5, project: 5 },
+      day: { global: 5, project: 5 },
     });
     expect(snapshot.liveReservations.hour.map((reservation) => reservation.id)).toEqual([
       "reservation_other",

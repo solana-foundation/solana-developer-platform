@@ -203,22 +203,17 @@ describe("database-enforced tenant isolation", () => {
 
   it("keeps the NULL-scoped sponsorship defaults resolvable under a tenant identity", async () => {
     // Sponsorship admission runs in the request path and resolves the full
-    // policy hierarchy — global, organization default (scope_id IS NULL),
-    // project default — and trips the breaker when any level is missing. The
+    // policy hierarchy — global and the project default (scope_id IS NULL) —
+    // and trips the breaker when either level is missing. The
     // platform defaults carry no tenant data, so the SELECT policy must keep
     // them visible to every tenant.
     const policies = await runWithTenantDatabaseIdentity({ organizationId: ORG_A }, () =>
       new SponsorshipBudgetRepository(getDb(env)).resolvePolicies({
         network: "devnet",
-        organizationId: ORG_A,
         projectId: PROJECT_A,
       })
     );
-    expect(policies.map((policy) => policy.scopeType).sort()).toEqual([
-      "global",
-      "organization",
-      "project",
-    ]);
+    expect(policies.map((policy) => policy.scopeType).sort()).toEqual(["global", "project"]);
   });
 
   it("keeps explicit cross-tenant access for the system identity", async () => {

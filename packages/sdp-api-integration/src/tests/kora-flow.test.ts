@@ -136,21 +136,17 @@ describe("Kora Fee Payment (Live Smoke)", () => {
         scopeId: null,
         hourlyLamports: 2_000_000_000,
         dailyLamports: 10_000_000_000,
-      },
-      {
-        scopeType: "organization" as const,
-        scopeId: TEST_ORG.id,
-        hourlyLamports: 1_000_000_000,
-        dailyLamports: 5_000_000_000,
+        expectedVersion: 1,
       },
       {
         scopeType: "project" as const,
         scopeId: TEST_PROJECT.id,
         hourlyLamports: 1_000_000_000,
         dailyLamports: 3_000_000_000,
+        expectedVersion: 0,
       },
     ]) {
-      await repository.upsertPolicy({
+      const written = await repository.writePolicyAtVersion({
         network: "devnet",
         ...policy,
         enabled: true,
@@ -158,10 +154,10 @@ describe("Kora Fee Payment (Live Smoke)", () => {
         operator: KORA_LIVE_SMOKE_POLICY_OPERATOR,
         reason: KORA_LIVE_SMOKE_POLICY_REASON,
       });
+      expect(written).not.toBeNull();
     }
     liveSmokePolicies = await repository.resolvePolicies({
       network: "devnet",
-      organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT.id,
     });
     await createSigningService(env).initializePrivySigning(TEST_ORG.id, TEST_PROJECT.id, {
@@ -174,11 +170,7 @@ describe("Kora Fee Payment (Live Smoke)", () => {
   });
 
   it("uses audited budget overrides for every live-smoke scope", () => {
-    expect(liveSmokePolicies.map((policy) => policy.scopeType)).toEqual([
-      "global",
-      "organization",
-      "project",
-    ]);
+    expect(liveSmokePolicies.map((policy) => policy.scopeType)).toEqual(["global", "project"]);
     for (const policy of liveSmokePolicies) {
       expect(policy.perTransactionLamports).toBe(KORA_LIVE_SMOKE_PER_TRANSACTION_LAMPORTS);
       expect(policy.updatedBy).toBe(KORA_LIVE_SMOKE_POLICY_OPERATOR);

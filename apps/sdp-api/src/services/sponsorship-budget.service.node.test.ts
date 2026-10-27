@@ -94,13 +94,11 @@ function policy(
 
 function harnessParts() {
   const repository = {
-    resolvePolicies: vi
-      .fn()
-      .mockResolvedValue([policy("global"), policy("organization"), policy("project")]),
+    resolvePolicies: vi.fn().mockResolvedValue([policy("global"), policy("project")]),
     loadWindowAdmissionSnapshot: vi.fn().mockResolvedValue({
       usage: {
-        hour: { global: 0, organization: 0, project: 0 },
-        day: { global: 0, organization: 0, project: 0 },
+        hour: { global: 0, project: 0 },
+        day: { global: 0, project: 0 },
       },
       liveReservations: { hour: [], day: [] },
     }),
@@ -200,7 +198,6 @@ describe("BudgetedFeePayment", () => {
     readMoneyAdmissionFacts.mockResolvedValue(ACTIVE_ENTITLED_PRODUCTION);
     repository.resolvePolicies.mockResolvedValue([
       { ...policy("global"), network: "mainnet" },
-      { ...policy("organization"), network: "mainnet" },
       { ...policy("project"), network: "mainnet" },
     ]);
 
@@ -226,7 +223,6 @@ describe("BudgetedFeePayment", () => {
     const { feePayment, provider, repository, budgetRedis } = harness();
     repository.resolvePolicies.mockResolvedValueOnce([
       { ...policy("global"), perTransactionLamports: 1 },
-      { ...policy("organization"), perTransactionLamports: 1 },
       { ...policy("project"), perTransactionLamports: 1 },
     ]);
     budgetRedis.reserve.mockResolvedValueOnce("denied");
@@ -256,7 +252,6 @@ describe("BudgetedFeePayment", () => {
     });
     repository.resolvePolicies.mockResolvedValueOnce([
       { ...policy("global"), perTransactionLamports: 1_000_000 },
-      { ...policy("organization"), perTransactionLamports: 1_000_000 },
       { ...policy("project"), perTransactionLamports: 1_000_000 },
     ]);
     budgetRedis.reserve.mockImplementationOnce(async (input) =>
@@ -315,8 +310,8 @@ describe("BudgetedFeePayment", () => {
     const { feePayment, provider, repository, budgetRedis } = harness();
     budgetRedis.reserve.mockResolvedValueOnce("stale_policy");
     repository.resolvePolicies
-      .mockResolvedValueOnce([policy("global"), policy("organization"), policy("project")])
-      .mockResolvedValue([policy("global", false), policy("organization"), policy("project")]);
+      .mockResolvedValueOnce([policy("global"), policy("project")])
+      .mockResolvedValue([policy("global", false), policy("project")]);
 
     await expect(feePayment.signAsFeePayer(buildTransaction())).rejects.toMatchObject({
       code: "PROVIDER_NOT_AVAILABLE",
@@ -467,8 +462,8 @@ describe("BudgetedFeePayment", () => {
   it("releases an owned submission killed after signing before anything is persisted", async () => {
     const { feePayment, repository, budgetRedis } = harness();
     repository.resolvePolicies
-      .mockResolvedValueOnce([policy("global"), policy("organization"), policy("project")])
-      .mockResolvedValueOnce([policy("global", false), policy("organization"), policy("project")]);
+      .mockResolvedValueOnce([policy("global"), policy("project")])
+      .mockResolvedValueOnce([policy("global", false), policy("project")]);
     const lifecycle = {
       persistSigned: vi.fn().mockResolvedValue(undefined),
       markStarted: vi.fn(),

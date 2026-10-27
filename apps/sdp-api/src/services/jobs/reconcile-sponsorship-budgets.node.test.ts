@@ -95,7 +95,6 @@ function reservation(
     actualLamports: null,
     attempt: 1,
     network: "devnet",
-    organizationId: "org_1",
     projectId: "project_1",
     feePayer: PROVIDER_CONFIGURATION.signerAddress,
     providerConfigFingerprint: sponsorshipProviderConfigFingerprint(PROVIDER_CONFIGURATION),
