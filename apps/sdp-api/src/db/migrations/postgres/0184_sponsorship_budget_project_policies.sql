@@ -1,5 +1,5 @@
 -- sdp:migration-compat: breaking
--- Sponsorship budgets become two tables: one network cap per network
+-- Sponsorship budgets become two tables: one cap per environment
 -- (sponsorship_budget_policies, the global row and the breaker) and one cap per
 -- project (sponsorship_budget_project_policies). A project is one organization's
 -- one environment, so its row is the per-tenant cap; the organization scope and
@@ -7,9 +7,14 @@
 -- trigger on projects writes it, at the starting limits below, in the same
 -- transaction that creates the project.
 --
--- Breaking: an API revision that reads scope_type or scope_id fails its budget
--- queries. Deploy only with the API that reads these tables, and never roll back
--- past it.
+-- Breaking, deliberately in one step. Every earlier API revision, the one
+-- serving while this runs included, reads scope_type, scope_id and network, so
+-- sponsorship refuses from this migration until the new revision takes
+-- traffic, and the organization and project revision history is deleted.
+-- That trade holds only because SDP has no users, no mainnet sponsorship has
+-- ever run, and the production database is reset before launch. It is not a
+-- precedent: after launch, a rename like this ships expand/contract. Never
+-- roll back past this migration.
 --
 -- sdp:migration-locks: blocking
 -- The revisions foreign key validates without NOT VALID and the two reservation
