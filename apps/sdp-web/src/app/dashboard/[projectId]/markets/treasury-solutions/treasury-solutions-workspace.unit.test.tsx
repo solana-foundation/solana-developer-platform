@@ -1016,6 +1016,40 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(mocks.vaultWithdrawalModal?.parSource).toBe("intermediate");
   });
 
+  it("holds a par position's note lines while its balance syncs", () => {
+    // A redemption in flight hides the wrapped note; its slot keeps the row's height.
+    mocks.exitedPositionParIntermediate = {
+      mint: "wYLDS111111111111111111111111111111111111111",
+      amount: "2000",
+      withdrawableAmount: "2000",
+      tokenValue: "2000",
+    };
+    mocks.vaultWithdrawals = [
+      {
+        createdAt: "2026-09-01T17:21:00.000Z",
+        failureReason: null,
+        movementId: "earn_vault_withdrawal_par_submitted",
+        positionId: "earn_vault_position_exited",
+        provider: "kamino",
+        status: "submitted",
+      },
+    ];
+    renderWorkspace();
+
+    const residualRow = screen
+      .getAllByText("Exited provider vault")
+      .map((element) => element.closest("tr"))
+      .find((row) => row?.querySelector("[data-earn-vault-balance]"));
+    if (!residualRow) throw new Error("Expected the residual position row");
+    expect(
+      residualRow
+        .querySelector("[data-earn-vault-balance]")
+        ?.getAttribute("data-earn-vault-balance")
+    ).toBe("syncing");
+    expect(residualRow.querySelector("[data-earn-vault-par-intermediate]")).toBeNull();
+    expect(residualRow.querySelector("[data-earn-vault-par-slot]")).not.toBeNull();
+  });
+
   it("shows an automatically updating deposit status beside the affected position", async () => {
     const user = userEvent.setup();
     mocks.vaultDeposits = [
