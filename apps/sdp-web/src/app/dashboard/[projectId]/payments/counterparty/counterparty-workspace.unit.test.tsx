@@ -1,9 +1,11 @@
 import type { Counterparty } from "@sdp/types/counterparties";
 import type { CounterpartyAccountSummary } from "@sdp/types/payments";
+import type { OrganizationRole } from "@sdp/types/roles";
 import { act, type ReactNode } from "react";
 import type { Root } from "react-dom/client";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { builtinEnvironments, type EnvironmentReturn } from "vitest/environments";
+import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { filterDirectory } from "./counterparty-directory-filter";
 import { CounterpartyWorkspace } from "./counterparty-workspace";
 
@@ -13,6 +15,15 @@ vi.mock("@/i18n/provider", () => ({
 }));
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
+
+const access = vi.hoisted((): { role: OrganizationRole } => ({ role: "member" }));
+vi.mock("@/contexts/dashboard-workspace-context", async () => {
+  const { resolveDashboardAccess: resolve } = await import("@/lib/dashboard-access");
+  return {
+    useOptionalDashboardWorkspace: () => ({ dashboardAccess: resolve(access.role) }),
+    useCanWrite: () => resolve(access.role).capabilities.canWrite,
+  };
+});
 
 vi.mock("next/link", () => ({
   default: ({ children, href }: { children: ReactNode; href: string }) => (
@@ -161,5 +172,51 @@ describe("CounterpartyWorkspace address filter", () => {
     const names = visibleNames();
     expect(names).toHaveLength(2);
     expect(names.some((name) => name.includes("No Wallet"))).toBe(true);
+  });
+});
+
+describe("CounterpartyWorkspace for a read-only member", () => {
+  let environment: EnvironmentReturn;
+  let root: Root;
+  let container: HTMLDivElement;
+
+  beforeAll(async () => {
+    environment = await builtinEnvironments.jsdom.setup(globalThis, {
+      jsdom: { url: "http://localhost" },
+    });
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  });
+  afterEach(async () => {
+    access.role = "member";
+    if (root !== undefined) await act(async () => root.unmount());
+    container?.remove();
+  });
+  afterAll(async () => {
+    vi.unstubAllGlobals();
+    await environment.teardown(globalThis);
+  });
+
+  async function renderEmptyDirectory(role: OrganizationRole) {
+    access.role = role;
+    container = document.createElement("div");
+    document.body.append(container);
+    const { createRoot } = await import("react-dom/client");
+    root = createRoot(container);
+    await act(async () =>
+      root.render(<CounterpartyWorkspace counterparties={[]} total={0} accounts={[]} />)
+    );
+  }
+
+  it("offers a member the first contact from the empty directory", async () => {
+    await renderEmptyDirectory("member");
+    expect(container.querySelector('a[href$="/payments/counterparty/create"]')).not.toBeNull();
+  });
+
+  it("offers a viewer no contact to add", async () => {
+    expect(resolveDashboardAccess("viewer").capabilities.canWrite).toBe(false);
+    await renderEmptyDirectory("viewer");
+    expect(container.textContent).toContain("DashboardPayments.counterparty.noContacts");
+    expect(container.querySelector('a[href$="/payments/counterparty/create"]')).toBeNull();
+    expect(container.textContent).not.toContain("DashboardPayments.counterparty.addContact");
   });
 });

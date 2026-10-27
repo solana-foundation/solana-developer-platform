@@ -106,8 +106,15 @@ export function withSubnavToggled(
   return { ...current, [key]: !current[key] };
 }
 
-export function getPaymentsActions(t: ReturnType<typeof useTranslations>): SubNavItem[] {
-  return [
+/**
+ * Payments sub-destinations. Pay only starts a payment, so a member who cannot write (a
+ * read-only `viewer`) is not offered it; Deposit stays, since its address tab only reads.
+ */
+export function getPaymentsActions(
+  t: ReturnType<typeof useTranslations>,
+  canWrite: boolean
+): SubNavItem[] {
+  const actions: SubNavItem[] = [
     {
       label: t("Shared.dashboardShell.transactions"),
       href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.transactions,
@@ -139,6 +146,9 @@ export function getPaymentsActions(t: ReturnType<typeof useTranslations>): SubNa
       icon: RepeatIcon,
     },
   ];
+  return canWrite
+    ? actions
+    : actions.filter((action) => action.href !== DASHBOARD_PAYMENTS_SUBNAV_HREFS.pay);
 }
 
 /**
@@ -242,6 +252,8 @@ export function getNavSections(
     marketsEnabled: boolean;
     paymentsEnabled: boolean;
     privateChannelsEnabled: boolean;
+    /** False for a read-only member: sub-destinations that only write are left out. */
+    canWrite: boolean;
     /** Wallets pinned from the Wallets page, listed under Wallets in the order they were pinned. */
     walletFavorites?: SubNavItem[];
     rampsEnabled: boolean;
@@ -291,7 +303,7 @@ export function getNavSections(
                 label: t("Shared.dashboardShell.payments"),
                 href: DASHBOARD_SIDE_NAV_HREFS.payments,
                 icon: ArrowLeftRightIcon,
-                children: getPaymentsActions(t),
+                children: getPaymentsActions(t, options.canWrite),
                 subnavKey: "payments" as const,
               },
             ]

@@ -42,6 +42,7 @@ function navOptions(overrides: Partial<Parameters<typeof getNavSections>[1]>) {
     paymentsEnabled: true,
     privateChannelsEnabled: false,
     rampsEnabled: true,
+    canWrite: true,
     ...overrides,
   };
 }
@@ -156,6 +157,19 @@ describe("Payments dashboard navigation", () => {
 
     expect(findPaymentsItem(options)).toBeUndefined();
     expect(JSON.stringify(getNavSections(t, options))).not.toContain("dashboardShell.payments");
+  });
+});
+
+describe("Payments navigation for a read-only member", () => {
+  it("leaves out Pay and keeps Deposit", () => {
+    const hrefs = (canWrite: boolean) =>
+      findManageItem(navOptions({ canWrite }), "Shared.dashboardShell.payments")?.children?.map(
+        (child) => child.href
+      );
+
+    expect(hrefs(true)).toContain("/dashboard/payments/pay");
+    expect(hrefs(false)).not.toContain("/dashboard/payments/pay");
+    expect(hrefs(false)).toContain("/dashboard/payments/deposit");
   });
 });
 

@@ -10,12 +10,7 @@ import { publicRoute, requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import { createOrganization } from "./create";
-import {
-  deleteOrganization,
-  getOrganization,
-  getOrganizationProviderAccess,
-  updateOrganization,
-} from "./handlers";
+import { getOrganization, getOrganizationProviderAccess, updateOrganization } from "./handlers";
 import { createOrganizationSchema, updateOrgSchema } from "./schemas";
 
 export const organizations = new Hono<{ Bindings: Env }>();
@@ -41,18 +36,12 @@ organizations.get(
   requireAction("organizations.read"),
   getOrganizationProviderAccess
 );
-// Organization administration (settings, including the IP allowlist, and
-// deletion) is for a signed-in person only, never an API key (HOO-2099).
+// Organization administration (settings, including the IP allowlist) is for a
+// signed-in person only, never an API key (HOO-2099).
 organizations.patch(
   "/:orgId",
   requireHumanSession(),
   requireAction("organizations.manage"),
   validateBody(updateOrgSchema),
   updateOrganization
-);
-organizations.delete(
-  "/:orgId",
-  requireHumanSession(),
-  requireAction("organizations.manage"),
-  deleteOrganization
 );

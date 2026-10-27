@@ -14,6 +14,7 @@ import {
   fetchAllCounterparties,
   fetchCounterpartyAccounts,
 } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
+import { useCanWrite } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import {
   replaceDashboardSearchParams,
@@ -220,6 +221,8 @@ function PayFlow({
 function DepositFlow({ tab, method, railProps, contact, fiatEnabled }: FlowProps) {
   const t = useTranslations();
   const href = useProjectHref();
+  // A read-only member has only the address tab; a provider deposit starts an on-ramp.
+  const canWrite = useCanWrite();
   // A tab without a wizard frame lays out the same column the frame does: the shell's gutter,
   // 36px under the tabs (32px on a phone), the flow's width, and its own scrolling when it
   // outgrows the viewport.
@@ -228,7 +231,7 @@ function DepositFlow({ tab, method, railProps, contact, fiatEnabled }: FlowProps
       <div className="mx-auto w-full max-w-flow">{children}</div>
     </div>
   );
-  if (tab === "provider" && !fiatEnabled) {
+  if (canWrite && tab === "provider" && !fiatEnabled) {
     return tabColumn(
       <div className="space-y-2">
         <p className="text-body text-primary">{t("DashboardPayments.depositMethod.noProvider")}</p>
@@ -241,7 +244,7 @@ function DepositFlow({ tab, method, railProps, contact, fiatEnabled }: FlowProps
       </div>
     );
   }
-  if (method === "onchain") {
+  if (!canWrite || method === "onchain") {
     // The address tab needs no contact: anyone can send to a wallet address.
     return tabColumn(
       <DepositAddressPanel

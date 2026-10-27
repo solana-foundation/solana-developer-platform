@@ -1,4 +1,10 @@
 import { withMinimumRpcSlot } from "@sdp/rpc/read-context";
+import {
+  pinRpcTelemetryEndpoint,
+  type RpcTelemetryEvent,
+  runWithPinnedRpcTelemetry,
+  setRpcTelemetrySink,
+} from "@sdp/rpc/telemetry";
 import { SPL_TOKEN_PROGRAMS, wellKnownMint } from "@sdp/types/well-known-tokens";
 import {
   WISDOMTREE_FUNDS,
@@ -95,10 +101,40 @@ function fundAccount(owner: string): Uint8Array {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
+  setRpcTelemetrySink(null);
 });
 
 describe("createWisdomTreeChainReader", () => {
+  it("records its deadline as a provider failure", async () => {
+    vi.useFakeTimers();
+    const events: RpcTelemetryEvent[] = [];
+    setRpcTelemetrySink((event) => events.push(event));
+    const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      const signal = init?.signal;
+      if (!signal) throw new Error("Expected a transport signal");
+      signal.throwIfAborted();
+      return new Promise<Response>((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = runWithPinnedRpcTelemetry(() => {
+      pinRpcTelemetryEndpoint("devnet", RPC_URL);
+      return createWisdomTreeChainReader(RPC_URL, 25).getAccount(address(OWNER));
+    });
+    const rejected = expect(result).rejects.toThrow("WisdomTree RPC request timed out after 25ms");
+    await vi.advanceTimersByTimeAsync(25);
+    await rejected;
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(events.map((event) => [event.method, event.outcome])).toEqual([
+      ["getAccountInfo", "failed"],
+    ]);
+  });
+
   it("reads several accounts in one getMultipleAccounts, in the order asked", async () => {
     const fetchMock = stubChain({ [OWNER]: { owner: TOKEN_2022, data: Uint8Array.from([1, 2]) } });
     await expect(

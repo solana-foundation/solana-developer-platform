@@ -90,9 +90,15 @@ Per-balance fields:
 
 ## Pricing freshness
 
-When USD valuation is populated, the price comes from SDP's configured price source and reflects the most recent quote available. The cadence and source depend on deployment configuration — do not rely on `usdValue` for downstream balance-sheet decisions without confirming the price source's freshness with your operations team. When in doubt, treat `amount` / `uiAmount` as authoritative and convert with your own price feed.
+`usdPrice` is a display estimate from Tokens.xyz. SDP caches successful
+snapshots for up to 60 seconds. Some source snapshots refresh hourly; SDP
+omits snapshots older than two hours or without a timestamp. The snapshot
+timestamp does not prove when its underlying price was observed.
 
-If no price source is configured, the `usdPrice` and `usdValue` fields are absent rather than zero — the omission signals "unknown," not "$0.00," so downstream consumers can decide how to handle the gap.
+Use an executable quote for a trade and an independently verified valuation
+for accounting. The on-chain `amount` and `uiAmount` remain the balance values.
+When pricing is unavailable, `usdPrice` and `usdValue` are absent. The omission
+means "unknown," not "$0.00."
 
 ## Comparison to on-chain RPC
 

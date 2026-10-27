@@ -678,6 +678,7 @@ export function RecurringPaymentDetailWorkspace({
   const [actionError, setActionError] = useState<DetailActionError | null>(null);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const canWrite = useDashboardWorkspace().dashboardAccess.capabilities.canWrite;
   const { liveWallets, liveWalletsError } = usePaymentsActionWallets(wallets, null);
   const liveSourceWallet = liveWallets.find(
     (entry) => entry.id === recurringPayment.sourceCustodyWalletId
@@ -712,13 +713,16 @@ export function RecurringPaymentDetailWorkspace({
   const scheduleLabel = formatPeriodHours(recurringPayment.periodHours, t);
   const lastRunFailed =
     status === "active" && latestAttempt(collectionAttempts)?.status === "failed";
-  const actions = footerActions({
-    recurringPayment,
-    dueNow: status === "active" && isDueNow(recurringPayment.nextCollectionDueAt),
-    lastRunFailed,
-    actionError,
-    t,
-  });
+  // Every footer action (collect, pause, resume, cancel) changes the schedule.
+  const actions = canWrite
+    ? footerActions({
+        recurringPayment,
+        dueNow: status === "active" && isDueNow(recurringPayment.nextCollectionDueAt),
+        lastRunFailed,
+        actionError,
+        t,
+      })
+    : [];
 
   const submitAction = async (action: RecurringPaymentAction) => {
     if (action === "cancel" ? cancelDisabled : signingActionsDisabled) {
@@ -766,7 +770,7 @@ export function RecurringPaymentDetailWorkspace({
         })
       : null) ??
     statusBand({ recurringPayment, lastRunFailed, scheduleLabel, locale, t });
-  const canEdit = isEditable && !controlsDisabled && !editing;
+  const canEdit = canWrite && isEditable && !controlsDisabled && !editing;
 
   return (
     <DashboardWorkspaceOverviewPanel>

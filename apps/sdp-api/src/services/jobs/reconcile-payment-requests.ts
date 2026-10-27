@@ -42,12 +42,18 @@ interface LaneRun {
 
 export async function reconcileHotPaymentRequests(env: Env): Promise<void> {
   const { environment } = currentClusterScope();
-  const blockHeight = await createClusterRpc().getBlockHeight({ commitment: "confirmed" }).send();
-  const rows = await createSystemPaymentRequestsRepository(env).listHotPaymentRequests({
-    environment,
-    minLastValidBlockHeight: blockHeight - HOT_LANE_BLOCK_MARGIN,
-    limit: HOT_BATCH_SIZE,
-  });
+  const repo = createSystemPaymentRequestsRepository(env);
+  let rows: PaymentRequestRow[] = [];
+  // The block height only bounds a live sponsored window, so with no window open the cluster
+  // is not asked at all: this lane runs every 30 s in every environment.
+  if (await repo.hasHotPaymentRequests({ environment })) {
+    const blockHeight = await createClusterRpc().getBlockHeight({ commitment: "confirmed" }).send();
+    rows = await repo.listHotPaymentRequests({
+      environment,
+      minLastValidBlockHeight: blockHeight - HOT_LANE_BLOCK_MARGIN,
+      limit: HOT_BATCH_SIZE,
+    });
+  }
   throwIfEveryCheckFailed(await checkEach(env, rows, checkAwaitingPaymentRequest, "hot"));
 }
 
@@ -76,7 +82,6 @@ export async function reconcilePaymentRequests(env: Env): Promise<void> {
 export async function expirePaymentRequests(env: Env): Promise<void> {
   const { environment } = currentClusterScope();
   const repo = createSystemPaymentRequestsRepository(env);
-  const blockHeight = await createClusterRpc().getBlockHeight({ commitment: "confirmed" }).send();
   const staleLapsed = await repo.countStaleLapsedPaymentRequests({
     environment,
     checkedBefore: new Date(Date.now() - EXPIRY_STALE_AFTER_MS).toISOString(),
@@ -84,12 +89,19 @@ export async function expirePaymentRequests(env: Env): Promise<void> {
   if (staleLapsed > 0) {
     logEvent("warn", { event: "payment_requests.expiry_backlog", environment, stale: staleLapsed });
   }
-  const lapsed = await repo.listLapsedPaymentRequests({
-    environment,
-    checkedBefore: new Date(Date.now() - EXPIRY_MIN_RECHECK_MS).toISOString(),
-    liveClaimMinLastValidBlockHeight: blockHeight - HOT_LANE_BLOCK_MARGIN,
-    limit: EXPIRY_BATCH_SIZE,
-  });
+  const checkedBefore = new Date(Date.now() - EXPIRY_MIN_RECHECK_MS).toISOString();
+  let lapsed: PaymentRequestRow[] = [];
+  // As in the hot lane, the height only holds back a request whose sponsored transaction can
+  // still land: with nothing lapsed, the cluster is not asked.
+  if (await repo.hasLapsedPaymentRequests({ environment, checkedBefore })) {
+    const blockHeight = await createClusterRpc().getBlockHeight({ commitment: "confirmed" }).send();
+    lapsed = await repo.listLapsedPaymentRequests({
+      environment,
+      checkedBefore,
+      liveClaimMinLastValidBlockHeight: blockHeight - HOT_LANE_BLOCK_MARGIN,
+      limit: EXPIRY_BATCH_SIZE,
+    });
+  }
   const expiry = await checkEach(env, lapsed, closeLapsedPaymentRequest, "expiry");
 
   const now = Date.now();

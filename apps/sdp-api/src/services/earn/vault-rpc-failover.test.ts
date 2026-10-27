@@ -1,4 +1,5 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
+import { type RpcTelemetryEvent, setRpcTelemetrySink } from "@sdp/rpc/telemetry";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -49,6 +50,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  setRpcTelemetrySink(null);
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -66,6 +68,8 @@ function fanOutFailure(...causes: Error[]): Error {
 
 describe("Earn RPC fallback", () => {
   it("retries a nested provider transport failure on a separately proven endpoint", async () => {
+    const events: RpcTelemetryEvent[] = [];
+    setRpcTelemetrySink((event) => events.push(event));
     const rpc = failoverIn("sandbox");
     const visited: string[] = [];
     const result = await rpc.run("Read vault", async () => {
@@ -78,6 +82,15 @@ describe("Earn RPC fallback", () => {
     expect(result).toBe("verified vault state");
     expect(visited).toEqual([primary, fallback]);
     expect(probedUrls).toEqual([primary, fallback]);
+    expect(events.filter((event) => event.event === "sdp_rpc_failover")).toEqual([
+      {
+        event: "sdp_rpc_failover",
+        surface: "earn_pinned",
+        provider: "helius",
+        cluster: "devnet",
+        method: "provider_operation",
+      },
+    ]);
   });
 
   it("fails over past a primary whose genesis probe answers node-unhealthy", async () => {

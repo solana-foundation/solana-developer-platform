@@ -44,6 +44,11 @@
       "import": "./src/socket-retry.ts",
       "default": "./src/socket-retry.ts"
     },
+    "./telemetry": {
+      "types": "./src/telemetry.ts",
+      "import": "./src/telemetry.ts",
+      "default": "./src/telemetry.ts"
+    },
     "./solana": {
       "types": "./src/solana.ts",
       "import": "./src/solana.ts",
@@ -72,7 +77,8 @@
   },
   "dependencies": {
     "@sdp/types": "workspace:*",
-    "@solana/kit": "catalog:"
+    "@solana/kit": "catalog:",
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "tsx": "4.23.15"

@@ -25,6 +25,7 @@ import {
 import { PAYMENTS_TABLE_CELL } from "@/app/dashboard/[projectId]/payments/payments-table";
 import { PaymentsTableHeader } from "@/app/dashboard/[projectId]/payments/payments-table-header";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
+import { ReadOnlyEmptyNote } from "@/components/read-only-empty-note";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
@@ -86,7 +87,8 @@ function PaymentRequestsTable({
   locale: string;
   amountLabel: (request: PaymentRequest) => string;
   onSelect: (request: PaymentRequest) => void;
-  onCopyLink: (request: PaymentRequest) => void;
+  /** Null for a read-only member: the link read needs a role that manages payment requests. */
+  onCopyLink: ((request: PaymentRequest) => void) | null;
 }) {
   const t = useTranslations();
   return (
@@ -102,11 +104,15 @@ function PaymentRequestsTable({
             },
             { id: "to", label: t("DashboardPayments.requests.to") },
             { id: "created", label: t("DashboardPayments.recurring.created") },
-            {
-              id: "copy",
-              label: <span className="sr-only">{t("Shared.SharedComponents.copyLink")}</span>,
-              className: "w-px",
-            },
+            ...(onCopyLink
+              ? [
+                  {
+                    id: "copy",
+                    label: <span className="sr-only">{t("Shared.SharedComponents.copyLink")}</span>,
+                    className: "w-px",
+                  },
+                ]
+              : []),
           ]}
         />
         <TableBody>
@@ -145,21 +151,23 @@ function PaymentRequestsTable({
               >
                 {formatDateTime(request.createdAt, locale)}
               </TableCell>
-              <TableCell className="text-right whitespace-nowrap">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="xs"
-                  iconLeft={<CopyIcon />}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onCopyLink(request);
-                  }}
-                  onKeyDown={(event) => event.stopPropagation()}
-                >
-                  {t("Shared.SharedComponents.copyLink")}
-                </Button>
-              </TableCell>
+              {onCopyLink ? (
+                <TableCell className="text-right whitespace-nowrap">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    iconLeft={<CopyIcon />}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onCopyLink(request);
+                    }}
+                    onKeyDown={(event) => event.stopPropagation()}
+                  >
+                    {t("Shared.SharedComponents.copyLink")}
+                  </Button>
+                </TableCell>
+              ) : null}
             </TableRow>
           ))}
         </TableBody>
@@ -391,6 +399,7 @@ export function PaymentRequestsWorkspace({
   const amountLabel = usePaymentRequestAmountLabel();
   const router = useRouter();
   const projectHref = useProjectHref();
+  const canWrite = useDashboardWorkspace().dashboardAccess.capabilities.canWrite;
   const [isPending, startTransition] = useTransition();
   // TODO(api): send the search to GET /v1/payments/requests once it can search. The API lists
   // requests only by page and stored status, so until then the search matches the page the list
@@ -448,15 +457,19 @@ export function PaymentRequestsWorkspace({
         </p>
       ) : listIsEmpty ? (
         <ListEmptyState
-          hidesPageAction
+          hidesPageAction={canWrite}
           message={t("DashboardPayments.requests.emptyTitle")}
           description={t("DashboardPayments.requests.emptyDescription")}
           action={
-            <Button asChild size="sm">
-              <Link href={projectHref(PAYMENT_REQUEST_NEW_HREF)}>
-                {t("DashboardPayments.requests.newRequest")}
-              </Link>
-            </Button>
+            canWrite ? (
+              <Button asChild size="sm">
+                <Link href={projectHref(PAYMENT_REQUEST_NEW_HREF)}>
+                  {t("DashboardPayments.requests.newRequest")}
+                </Link>
+              </Button>
+            ) : (
+              <ReadOnlyEmptyNote />
+            )
           }
         />
       ) : (
@@ -489,7 +502,7 @@ export function PaymentRequestsWorkspace({
               locale={locale}
               amountLabel={amountLabel}
               onSelect={(request) => router.push(projectHref(paymentRequestHref(request.id)))}
-              onCopyLink={copyLink}
+              onCopyLink={canWrite ? copyLink : null}
             />
           )}
           <PaymentRequestsPagination

@@ -4,6 +4,8 @@ import { fetchPaymentsWallets } from "@/app/dashboard/[projectId]/payments/payme
 import { PaymentRequestCreateWorkspace } from "@/app/dashboard/[projectId]/payments/requests/payment-request-create-workspace";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
+import { PAYMENT_REQUESTS_HREF } from "@/lib/payments-routes";
+import { redirectUnlessCanWrite } from "@/lib/require-write-access";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +17,7 @@ export default async function PaymentRequestCreatePage() {
   if (!orgId) {
     redirect("/dashboard");
   }
+  await redirectUnlessCanWrite(PAYMENT_REQUESTS_HREF);
 
   return withDashboardPageTrace(
     "dashboard.payment-requests.create.page",

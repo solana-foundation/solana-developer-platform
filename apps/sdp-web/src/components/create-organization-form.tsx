@@ -24,8 +24,9 @@ export function CreateOrganizationForm() {
 
   const submit = () => {
     startTransition(async () => {
-      // SDP creates an organization only for a session that names none: a
-      // person refused by their active organization leaves it first.
+      // SDP refuses a session whose active organization it links. Clearing it
+      // is best effort: with personal accounts off, Clerk keeps an
+      // organization active, and the API allows one SDP never linked.
       if (clerk.organization) {
         await clerk.setActive({ organization: null });
       }

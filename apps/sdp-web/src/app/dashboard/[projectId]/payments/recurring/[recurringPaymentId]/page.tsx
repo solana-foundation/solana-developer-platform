@@ -3,13 +3,14 @@ import type {
   CounterpartyAccount,
   ListCounterpartyAccountsResponse,
 } from "@sdp/types/counterparties";
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { z } from "zod";
 import { fetchCounterparty } from "@/app/dashboard/[projectId]/payments/counterparty/counterparty-page.data";
 import {
   fetchPaymentsIssuedTokenSymbols,
   fetchPaymentsWallets,
 } from "@/app/dashboard/[projectId]/payments/payments-page.data";
+import { recurringPaymentReadFailureOutcome } from "@/app/dashboard/[projectId]/payments/recurring/recurring-payment-detail-state";
 import { RecurringPaymentDetailWorkspace } from "@/app/dashboard/[projectId]/payments/recurring/recurring-payment-detail-workspace";
 import {
   fetchRecurringPaymentById,
@@ -18,7 +19,8 @@ import {
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
-import type { SdpApiClient } from "@/lib/sdp-api";
+import { PAYMENT_RECURRING_HREF } from "@/lib/payments-routes";
+import { requestProjectHref, type SdpApiClient } from "@/lib/sdp-api";
 
 export const dynamic = "force-dynamic";
 
@@ -117,7 +119,22 @@ export default async function RecurringPaymentDetailRoute({
       });
 
       if (!recurringPaymentResult.ok) {
-        throw new Error(recurringPaymentResult.error);
+        const outcome = recurringPaymentReadFailureOutcome(
+          recurringPaymentId,
+          recurringPaymentResult.status
+        );
+        switch (outcome) {
+          case "list":
+            return redirect(await requestProjectHref(PAYMENT_RECURRING_HREF));
+          case "not_found":
+            return notFound();
+          case "failed":
+            throw new Error(recurringPaymentResult.error);
+          default: {
+            const unhandled: never = outcome;
+            throw new Error(`Unhandled recurring payment read outcome: ${unhandled}`);
+          }
+        }
       }
       const recurringPaymentResultData = recurringPaymentResult.data;
       const sourceCustodyWalletId = recurringPaymentResultData.sourceCustodyWalletId;
