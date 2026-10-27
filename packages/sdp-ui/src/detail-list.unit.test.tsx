@@ -31,6 +31,20 @@ describe("DetailList", () => {
     expect(markup).toMatch(/<dd class="[^"]*min-w-0 truncate[^"]*">/);
   });
 
+  it("wraps a value the reader must see whole, and keeps the label's width", () => {
+    const markup = renderToStaticMarkup(
+      <DetailList variant="summary">
+        <DetailRow label="Strategy" wrap>
+          Steakhouse USDC Prime Treasury Vault
+        </DetailRow>
+      </DetailList>
+    );
+
+    expect(markup).toMatch(/<dt class="[^"]*shrink-0[^"]*">/);
+    expect(markup).toMatch(/<dd class="[^"]*break-words[^"]*">/);
+    expect(markup).not.toContain("truncate");
+  });
+
   it("passes the caller's classes to the list", () => {
     const markup = renderToStaticMarkup(
       <DetailList className="mt-6">

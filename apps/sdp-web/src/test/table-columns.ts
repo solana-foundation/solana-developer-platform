@@ -1,3 +1,5 @@
+import type { EarnTableColumns } from "@/app/dashboard/[projectId]/markets/earn/earn-table-layout";
+
 function percent(token: string | undefined): number | undefined {
   const match = token?.match(/w-\[(\d+)%\]$/);
   return match ? Number(match[1]) : undefined;
@@ -20,7 +22,7 @@ export function tableColumnShares(className: string): { phone: number; wide: num
 }
 
 /** How much of the table its columns fill on a phone and from `@2xl`, in percent. */
-export function tableColumnTotals(columns: Readonly<Record<string, string>>): {
+export function tableColumnTotals(columns: EarnTableColumns): {
   phone: number;
   wide: number;
 } {

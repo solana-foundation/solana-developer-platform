@@ -4,6 +4,7 @@ import { act, cleanup, render, screen, waitFor, within } from "@testing-library/
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EnglishTestI18n } from "@/app/dashboard/[projectId]/markets/test-i18n";
+import { TREASURY_WALLETS_BODY } from "./treasury-layout";
 import {
   EarnTransactionModalLoading,
   TreasurySolutionsWorkspace,
@@ -2227,7 +2228,9 @@ describe("TreasurySolutionsWorkspace", () => {
 
     expect(screen.getByLabelText("A wallet balance could not be read")).toBeTruthy();
     expect(screen.getByLabelText("A position value could not be read")).toBeTruthy();
-    expect(screen.getByText("Wallets could not be loaded. Refresh to try again.")).toBeTruthy();
+    const walletsError = screen.getByText("Wallets could not be loaded. Refresh to try again.");
+    // The failed read keeps the tile row's footprint, so the sections under it stay put.
+    expect(walletsError.parentElement?.className).toContain(TREASURY_WALLETS_BODY);
     expect(screen.queryByText("$0.00")).toBeNull();
     expect(screen.queryByText("No active position")).toBeNull();
     // No bar without a share: an empty track would read as 0% deployed.

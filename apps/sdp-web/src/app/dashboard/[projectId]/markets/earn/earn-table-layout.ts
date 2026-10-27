@@ -1,3 +1,6 @@
+import type { TreasuryTableColumns } from "@/app/dashboard/[projectId]/markets/treasury-solutions/treasury-layout";
+import type { EMBEDDED_YIELD_STRATEGY_COLUMNS } from "./embedded-yield-layout";
+
 /**
  * What Earn's tables share on the refresh design, Treasury's and Embedded Yield's alike: the
  * frame each page and its route skeleton set them in. No "use client" directive: the
@@ -8,6 +11,9 @@
  * width. Columns that do not fit a phone drop out below `@2xl` (the work area's container query,
  * a 624px column), so a row's action is always on screen without scrolling the table sideways.
  */
+
+/** Any Earn table's columns: Treasury's tables and Embedded Yield's. */
+export type EarnTableColumns = TreasuryTableColumns | typeof EMBEDDED_YIELD_STRATEGY_COLUMNS;
 
 /** Hidden until the column is 624px wide. */
 export const EARN_WIDE_ONLY_COLUMN = "hidden @2xl:table-cell";

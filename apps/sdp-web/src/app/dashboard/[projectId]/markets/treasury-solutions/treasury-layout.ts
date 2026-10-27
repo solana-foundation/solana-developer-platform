@@ -35,6 +35,24 @@ export const TREASURY_PROGRAM_COLUMNS = {
  */
 export const TREASURY_WALLET_GRID = "grid min-w-0 gap-5 @xl:grid-cols-2";
 
+/** Any Treasury table's columns, as the route skeleton draws them. */
+export type TreasuryTableColumns =
+  | typeof TREASURY_POSITION_COLUMNS
+  | typeof TREASURY_STRATEGY_COLUMNS
+  | typeof TREASURY_PROGRAM_COLUMNS;
+
+/**
+ * The wallets body keeps one tile row's height in every state (a tile is 137px), so a load that
+ * ends in an error moves nothing under it.
+ */
+export const TREASURY_WALLETS_BODY = "flex min-h-[8.5625rem] min-w-0 flex-col";
+
+/**
+ * The strategies body keeps the four-row table's height in every state (a 30px head over four
+ * 65px rows), as the positions body keeps its two.
+ */
+export const TREASURY_STRATEGIES_BODY = "flex min-h-[18.125rem] min-w-0 flex-col gap-4";
+
 /**
  * The positions body keeps the two-row table's height in every state (a 30px head over two
  * 65px rows), so the loading rows, an empty list and a short one share a footprint and the

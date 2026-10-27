@@ -52,10 +52,14 @@ const DESCRIBED_SOURCE_LABELS = new Map<string, MessageKey>([
  * Underlying sources a provider reports by id rather than by name (Kamino's lending protocol
  * is `klend`). The names are brands, so they read the same in every locale.
  */
-const BRANDED_SOURCE_LABELS = new Map<string, string>([
-  ["klend", "Kamino Lend"],
-  ["ondo-usdy", "Ondo USDY"],
-]);
+const BRANDED_SOURCE_LABELS = {
+  klend: "Kamino Lend",
+  "ondo-usdy": "Ondo USDY",
+} as const satisfies Record<string, string>;
+
+function isBrandedSource(source: string): source is keyof typeof BRANDED_SOURCE_LABELS {
+  return Object.hasOwn(BRANDED_SOURCE_LABELS, source);
+}
 
 /** Display label for the protocol or fund the strategy sits on. */
 export function strategySourceLabel(
@@ -66,5 +70,5 @@ export function strategySourceLabel(
   if (!source) return undefined;
   const described = DESCRIBED_SOURCE_LABELS.get(source);
   if (described) return t(described);
-  return BRANDED_SOURCE_LABELS.get(source) ?? earnCuratorLabel(source);
+  return isBrandedSource(source) ? BRANDED_SOURCE_LABELS[source] : earnCuratorLabel(source);
 }

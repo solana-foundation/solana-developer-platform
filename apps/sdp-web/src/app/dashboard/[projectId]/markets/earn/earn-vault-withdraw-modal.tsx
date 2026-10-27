@@ -357,7 +357,9 @@ function WithdrawalResult({
       <p className="mt-2 text-body text-secondary">{copy.body}</p>
 
       <DetailList className="mt-5" variant="summary">
-        <DetailRow label={t("DashboardEarn.deposit.vaultStrategy")}>{positionName}</DetailRow>
+        <DetailRow label={t("DashboardEarn.deposit.vaultStrategy")} wrap>
+          {positionName}
+        </DetailRow>
         <DetailRow
           label={t(
             settlement === "provider_order"
@@ -651,7 +653,7 @@ function WithdrawalReviewStep(props: WithdrawalReviewStepProps) {
   return (
     <>
       <DetailList className="mt-5" variant="summary">
-        <DetailRow label={t("DashboardEarn.deposit.vaultStrategy")}>
+        <DetailRow label={t("DashboardEarn.deposit.vaultStrategy")} wrap>
           {positionDisplayName(position)}
         </DetailRow>
         <ReviewAmountRows

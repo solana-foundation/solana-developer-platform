@@ -13,13 +13,15 @@ import {
 } from "@/components/dashboard-workspace-panel";
 import { RecordStack } from "@/components/refresh-record";
 import type { DashboardFlags } from "@/flags/dashboard";
-import { EARN_TABLE, EARN_TABLE_FRAME } from "./earn/earn-table-layout";
+import { EARN_TABLE, EARN_TABLE_FRAME, type EarnTableColumns } from "./earn/earn-table-layout";
 import { EMBEDDED_YIELD_STRATEGY_COLUMNS } from "./earn/embedded-yield-layout";
 import {
   TREASURY_POSITION_COLUMNS,
   TREASURY_POSITIONS_BODY,
+  TREASURY_STRATEGIES_BODY,
   TREASURY_STRATEGY_COLUMNS,
   TREASURY_WALLET_GRID,
+  TREASURY_WALLETS_BODY,
 } from "./treasury-solutions/treasury-layout";
 
 const TREASURY_TILE_FIGURE_SKELETON_IDS = ["cash", "deployed"];
@@ -133,13 +135,7 @@ export function TreasuryWalletTilesSkeleton() {
  * An Earn table while it loads, in the same table, columns and type the rows render into: the
  * first cell's two 20px lines, every other cell's one.
  */
-export function EarnTableSkeleton({
-  columns,
-  rows,
-}: {
-  columns: Readonly<Record<string, string>>;
-  rows: number;
-}) {
+export function EarnTableSkeleton({ columns, rows }: { columns: EarnTableColumns; rows: number }) {
   const entries = Object.entries(columns);
   // Each block sits where its column sets its text: numbers and actions at the right.
   const lineClass = (className: string) =>
@@ -199,7 +195,9 @@ export function TreasurySolutionsSkeleton() {
       <RecordStack>
         <EarnSummarySkeleton />
         <EarnSectionSkeleton>
-          <TreasuryWalletTilesSkeleton />
+          <div className={TREASURY_WALLETS_BODY}>
+            <TreasuryWalletTilesSkeleton />
+          </div>
         </EarnSectionSkeleton>
         <EarnSectionSkeleton>
           <div className={TREASURY_POSITIONS_BODY}>
@@ -207,7 +205,9 @@ export function TreasurySolutionsSkeleton() {
           </div>
         </EarnSectionSkeleton>
         <EarnSectionSkeleton>
-          <EarnTableSkeleton columns={TREASURY_STRATEGY_COLUMNS} rows={4} />
+          <div className={TREASURY_STRATEGIES_BODY}>
+            <EarnTableSkeleton columns={TREASURY_STRATEGY_COLUMNS} rows={4} />
+          </div>
         </EarnSectionSkeleton>
       </RecordStack>
     </DashboardWorkspaceOverviewPanel>
