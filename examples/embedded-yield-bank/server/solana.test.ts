@@ -73,13 +73,17 @@ describe("Northstar transaction signing", () => {
 });
 
 describe("Northstar RPC cluster guard", () => {
+  // The chain's own genesis hashes, independent of the implementation's table.
+  const DEVNET_GENESIS = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";
+  const MAINNET_BETA_GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
+
   it("accepts the configured cluster and rejects a mismatch", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () =>
       Response.json({
         jsonrpc: "2.0",
         id: "test",
-        result: "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+        result: DEVNET_GENESIS,
       });
 
     try {
@@ -89,6 +93,33 @@ describe("Northstar RPC cluster guard", () => {
       await expect(
         assertRpcCluster("https://wrong.example.test", "mainnet-beta")
       ).rejects.toThrow("does not serve mainnet-beta");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("accepts an endpoint that really serves mainnet-beta, proving each URL once", async () => {
+    const originalFetch = globalThis.fetch;
+    let calls = 0;
+    globalThis.fetch = async () => {
+      calls += 1;
+      return Response.json({
+        jsonrpc: "2.0",
+        id: "test",
+        result: MAINNET_BETA_GENESIS,
+      });
+    };
+
+    try {
+      const rpcUrl = "https://mainnet.example.test";
+      await expect(
+        assertRpcCluster(rpcUrl, "mainnet-beta")
+      ).resolves.toBeUndefined();
+      await expect(
+        assertRpcCluster(rpcUrl, "mainnet-beta")
+      ).resolves.toBeUndefined();
+      // The verified answer is remembered per URL: the second call probes nothing.
+      expect(calls).toBe(1);
     } finally {
       globalThis.fetch = originalFetch;
     }

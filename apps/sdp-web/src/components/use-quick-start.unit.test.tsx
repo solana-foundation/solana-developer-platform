@@ -137,9 +137,13 @@ describe("useQuickStart", () => {
     await waitFor(() => expect(statusReads(spy)).toBeGreaterThan(0));
     expect(result.current.status).toEqual(STATUS);
 
+    // The kept status only means something once the second re-read ran: wait
+    // for the reads it sends, then assert the unknown answer kept the status.
+    const readsBeforeSecond = statusReads(spy);
     answer({ status: null });
     act(() => invalidateQuickStartStatus());
-    await waitFor(() => expect(result.current.status).toEqual(STATUS));
+    await waitFor(() => expect(statusReads(spy)).toBeGreaterThan(readsBeforeSecond));
+    expect(result.current.status).toEqual(STATUS);
   });
 
   it("recovers when the server's first read failed, once the status can be read again", async () => {
