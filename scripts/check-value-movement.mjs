@@ -33,6 +33,14 @@
  * identity the waists check a signature against. Only the entry points that
  * authenticated it set it, so no handler can name a more privileged one.
  *
+ * It also bans casts to the token-movement amount types (ADR 0012, token
+ * movements): `BaseUnits`, `TokenAmount`, `MovementQuote`, `MovementIntent`
+ * and `AssetRef`. Their constructors check the u64 range, the
+ * mint's scale and `debit = credit + fee`; an `as` or `<T>` assertion skips
+ * them, and so does an `as never` or `as any` that lands in one. Only each
+ * type's defining module may assert it, and tests are free.
+ * This part scans the API, the dashboard and every package.
+ *
  * Adding a file to any list below is a security-reviewed change.
  */
 
@@ -202,6 +210,53 @@ export const CAPABILITIES = [
     ],
   },
 ];
+
+const SOLANA = "packages/sdp-solana/src";
+
+/**
+ * @typedef {{ file: string, name: string }} BrandedType
+ */
+
+/**
+ * The token-movement types no code outside `file` may assert (ADR 0012).
+ *
+ * @type {BrandedType[]}
+ */
+export const BRANDED_TYPES = [
+  { file: `${SOLANA}/token-amount.ts`, name: "BaseUnits" },
+  { file: `${SOLANA}/token-amount.ts`, name: "TokenAmount" },
+  { file: `${SOLANA}/movement-quote.ts`, name: "MovementQuote" },
+  { file: `${SOLANA}/movement-quote.ts`, name: "MovementIntent" },
+  { file: `${SOLANA}/asset-ref.ts`, name: "AssetRef" },
+];
+
+/** A tsconfig's root files and compiler options. */
+function parseTsconfig(tsconfig) {
+  const configFile = ts.readConfigFile(tsconfig, ts.sys.readFile);
+  if (configFile.error) {
+    throw new Error(ts.flattenDiagnosticMessageText(configFile.error.messageText, "\n"));
+  }
+  return ts.parseJsonConfigFileContent(configFile.config, ts.sys, path.dirname(tsconfig));
+}
+
+/**
+ * The last program built and its tsconfig. Both checks start from the API's
+ * program, so it is built once; holding every program at once would pass the
+ * default heap.
+ */
+let lastProgram = { tsconfig: undefined, program: undefined };
+
+/** The TypeScript program a tsconfig describes. */
+function programFor(tsconfig) {
+  if (lastProgram.tsconfig !== tsconfig) {
+    const parsed = parseTsconfig(tsconfig);
+    lastProgram = {
+      tsconfig,
+      program: ts.createProgram({ rootNames: parsed.fileNames, options: parsed.options }),
+    };
+  }
+  return lastProgram.program;
+}
 
 /** Test files and the API's own test-support tree; nothing else is exempt. */
 function isTestFile(relativePath) {
@@ -459,12 +514,7 @@ export function findValueMovementViolations({ rootDir, tsconfig, capabilities, s
   for (const [name, value] of Object.entries({ rootDir, tsconfig, capabilities, scanRoots })) {
     if (value === undefined) throw new Error(`findValueMovementViolations needs ${name}`);
   }
-  const configFile = ts.readConfigFile(tsconfig, ts.sys.readFile);
-  if (configFile.error) {
-    throw new Error(ts.flattenDiagnosticMessageText(configFile.error.messageText, "\n"));
-  }
-  const parsed = ts.parseJsonConfigFileContent(configFile.config, ts.sys, path.dirname(tsconfig));
-  const program = ts.createProgram({ rootNames: parsed.fileNames, options: parsed.options });
+  const program = programFor(tsconfig);
   const checker = program.getTypeChecker();
 
   const targets = new Map();
@@ -629,6 +679,226 @@ export function findValueMovementViolations({ rootDir, tsconfig, capabilities, s
   return violations;
 }
 
+/** The repo-relative path of a program source file, with forward slashes. */
+function repoPath(rootDir, fileName) {
+  return path.relative(rootDir, fileName).split(path.sep).join("/");
+}
+
+/** The type symbol a type node names, through import aliases; undefined for anything else. */
+function namedTypeSymbol(checker, node) {
+  let named;
+  if (ts.isTypeReferenceNode(node)) {
+    named = ts.isQualifiedName(node.typeName) ? node.typeName.right : node.typeName;
+  } else if (ts.isExpressionWithTypeArguments(node)) {
+    // An `extends` or `implements` clause names its type as an expression.
+    named = ts.isPropertyAccessExpression(node.expression) ? node.expression.name : node.expression;
+  } else if (ts.isImportTypeNode(node) || ts.isTypeQueryNode(node)) {
+    return checker.getTypeFromTypeNode(node).aliasSymbol;
+  } else {
+    return undefined;
+  }
+  const symbol = checker.getSymbolAtLocation(named);
+  return symbol && symbol.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(symbol) : symbol;
+}
+
+/**
+ * The nodes a named type is made of: an alias's type, an interface's heritage
+ * and members, and a class's heritage and member types (not its code).
+ * Declaration files cannot name a brand they do not import, so they are skipped.
+ */
+function typeDeclarationParts(symbol) {
+  const parts = [];
+  for (const declaration of symbol.declarations ?? []) {
+    const inSource = !declaration.getSourceFile().isDeclarationFile;
+    if (ts.isTypeAliasDeclaration(declaration)) {
+      parts.push(declaration.type);
+    } else if (inSource && ts.isInterfaceDeclaration(declaration)) {
+      parts.push(declaration);
+    } else if (inSource && ts.isClassDeclaration(declaration)) {
+      parts.push(...(declaration.heritageClauses ?? []));
+      for (const member of declaration.members) {
+        if (member.type) parts.push(member.type);
+      }
+    }
+  }
+  return parts;
+}
+
+/**
+ * The branded type a type node names, directly or through a local type alias,
+ * a type argument, a union or an object member; or undefined.
+ */
+function brandedTypeIn(checker, typeNode, targets) {
+  const seen = new Set();
+  const visit = (node) => {
+    const symbol = namedTypeSymbol(checker, node);
+    if (symbol && targets.has(symbol)) return targets.get(symbol);
+    if (symbol && !seen.has(symbol)) {
+      seen.add(symbol);
+      for (const part of typeDeclarationParts(symbol)) {
+        const found = ts.isTypeNode(part) ? visit(part) : ts.forEachChild(part, visit);
+        if (found) return found;
+      }
+    }
+    return ts.forEachChild(node, visit);
+  };
+  return visit(typeNode);
+}
+
+/** How deep the check looks into a type's elements and fields for a branded type. */
+const CONTAINER_DEPTH = 3;
+
+/**
+ * The branded type a resolved type is, one member of the union it is, or holds
+ * in an element, a type argument or a field (`TokenAmount[]`, `Promise<Quote>`,
+ * `{ amount: TokenAmount }`); or undefined. It catches what no type node names,
+ * such as `ReturnType<typeof f>`, and a cast of the whole container.
+ */
+function brandedTypeOf(checker, type, targets, depth = 0, seen = new Set()) {
+  if (seen.has(type)) return undefined;
+  seen.add(type);
+  const members = type.isUnion() ? type.types : [];
+  for (const candidate of [type, ...members]) {
+    const brandedType = targets.get(candidate.aliasSymbol) ?? targets.get(candidate.symbol);
+    if (brandedType) return brandedType;
+  }
+  if (depth >= CONTAINER_DEPTH) return undefined;
+  for (const candidate of members.length > 0 ? members : [type]) {
+    for (const part of containedTypes(checker, candidate)) {
+      const brandedType = brandedTypeOf(checker, part, targets, depth + 1, seen);
+      if (brandedType) return brandedType;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * What a type holds: a generic type's arguments (arrays, tuples, `Promise`,
+ * `Map`), or an object's fields and index signatures. A function holds none.
+ */
+function containedTypes(checker, type) {
+  if (!(type.flags & ts.TypeFlags.Object) || type.getCallSignatures().length > 0) return [];
+  if (type.objectFlags & ts.ObjectFlags.Reference && checker.getTypeArguments(type).length > 0) {
+    return checker.getTypeArguments(type);
+  }
+  return [
+    ...checker.getIndexInfosOfType(type).map((info) => info.type),
+    ...type.getProperties().map((property) => checker.getTypeOfSymbol(property)),
+  ];
+}
+
+/**
+ * The branded types a program loads, by their type symbol. A program that does
+ * not load a branded type's file cannot name the type.
+ */
+function brandedTargets(program, rootDir, brandedTypes) {
+  const checker = program.getTypeChecker();
+  const targets = new Map();
+  for (const brandedType of brandedTypes) {
+    const source = program.getSourceFile(path.join(rootDir, brandedType.file));
+    if (!source) continue;
+    const moduleSymbol = checker.getSymbolAtLocation(source);
+    const exported = moduleSymbol
+      ? checker.getExportsOfModule(moduleSymbol).find((s) => s.name === brandedType.name)
+      : undefined;
+    if (!exported || !(exported.flags & ts.SymbolFlags.Type)) {
+      throw new Error(`${brandedType.file} does not export the type ${brandedType.name}`);
+    }
+    targets.set(exported, brandedType);
+  }
+  return targets;
+}
+
+/** Every assertion in one file to a branded type the file does not define. */
+function brandedCastsIn(checker, source, relativePath, targets) {
+  const violations = [];
+  const visit = (node) => {
+    const assertion = ts.isAsExpression(node) || ts.isTypeAssertionExpression(node);
+    if (assertion && !ts.isConstTypeReference(node.type)) {
+      const asserted = checker.getTypeFromTypeNode(node.type);
+      // `as never` and `as any` fit every type, so the forged type is the one the value lands in.
+      const landsIn =
+        asserted.flags & (ts.TypeFlags.Any | ts.TypeFlags.Never)
+          ? checker.getContextualType(node)
+          : undefined;
+      const brandedType =
+        brandedTypeIn(checker, node.type, targets) ??
+        brandedTypeOf(checker, asserted, targets) ??
+        (landsIn ? brandedTypeOf(checker, landsIn, targets) : undefined);
+      if (brandedType && brandedType.file !== relativePath) {
+        const { line } = source.getLineAndCharacterOfPosition(node.getStart(source));
+        violations.push(
+          `${relativePath}:${line + 1}: asserts ${brandedType.name} (${node.type.getText(source)}). Make it through ${brandedType.file}, never a cast: a cast skips its checks (ADR 0012).`
+        );
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return violations;
+}
+
+/**
+ * Finds every `as T` and `<T>` assertion to a branded type, and every
+ * `as never` or `as any` that lands in one, outside the type's defining file
+ * and tests. Each tsconfig is its own program; a file two programs load is
+ * checked once.
+ *
+ * @param {{ rootDir: string, tsconfigs: string[], brandedTypes: BrandedType[], scanRoots: string[] }} options
+ */
+export function findBrandedCastViolations({ rootDir, tsconfigs, brandedTypes, scanRoots }) {
+  for (const [name, value] of Object.entries({ rootDir, tsconfigs, brandedTypes, scanRoots })) {
+    if (value === undefined) throw new Error(`findBrandedCastViolations needs ${name}`);
+  }
+  const violations = [];
+  const scanned = new Set();
+  const declared = new Set();
+  const unscanned = (relativePath) =>
+    !relativePath.startsWith("..") &&
+    !relativePath.includes("node_modules/") &&
+    scanRoots.some((scanRoot) => relativePath.startsWith(scanRoot)) &&
+    !isTestFile(relativePath) &&
+    !scanned.has(relativePath);
+  for (const tsconfig of tsconfigs) {
+    // A workspace whose every file an earlier program checked needs no program.
+    const rootFiles = parseTsconfig(tsconfig).fileNames.map((name) => repoPath(rootDir, name));
+    if (!rootFiles.some(unscanned)) continue;
+    const program = programFor(tsconfig);
+    const targets = brandedTargets(program, rootDir, brandedTypes);
+    if (targets.size === 0) continue;
+    for (const brandedType of targets.values()) declared.add(brandedType);
+    for (const source of program.getSourceFiles()) {
+      const relativePath = repoPath(rootDir, source.fileName);
+      if (source.isDeclarationFile || !unscanned(relativePath)) continue;
+      scanned.add(relativePath);
+      violations.push(...brandedCastsIn(program.getTypeChecker(), source, relativePath, targets));
+    }
+  }
+  for (const brandedType of brandedTypes) {
+    if (!declared.has(brandedType)) {
+      throw new Error(`No program loads ${brandedType.file}, so ${brandedType.name} is unchecked`);
+    }
+  }
+  return violations;
+}
+
+/**
+ * The tsconfig of every workspace the cast ban scans: the API, the dashboard,
+ * and each package with a tsconfig. Packages the API or the dashboard load
+ * are scanned once, in the first program that loads them.
+ */
+function castScanTsconfigs(rootDir) {
+  const packages = readdirSync(path.join(rootDir, "packages"))
+    .map((name) => path.join(rootDir, "packages", name, "tsconfig.json"))
+    .filter((tsconfig) => existsSync(tsconfig))
+    .sort();
+  return [
+    path.join(rootDir, "apps/sdp-api/tsconfig.json"),
+    path.join(rootDir, "apps/sdp-web/tsconfig.json"),
+    ...packages,
+  ];
+}
+
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
 if (isMain) {
   const rootDir = REPO_ROOT;
@@ -645,9 +915,21 @@ if (isMain) {
     // ones gets no more room than API code.
     scanRoots: [`${API}/`, "packages/"],
   });
+  const castViolations = findBrandedCastViolations({
+    rootDir,
+    tsconfigs: castScanTsconfigs(rootDir),
+    brandedTypes: BRANDED_TYPES,
+    scanRoots: [`${API}/`, "apps/sdp-web/", "packages/"],
+  });
   if (violations.length > 0) {
     console.error("Value movement check failed (HOO-1955):");
     for (const violation of violations) console.error(`  ${violation}`);
+  }
+  if (castViolations.length > 0) {
+    console.error("Token amount cast check failed (ADR 0012):");
+    for (const violation of castViolations) console.error(`  ${violation}`);
+  }
+  if (violations.length > 0 || castViolations.length > 0) {
     process.exit(1);
   }
   console.log("Value movement check passed.");
