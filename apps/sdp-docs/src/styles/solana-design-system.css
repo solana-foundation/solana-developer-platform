@@ -112,13 +112,13 @@
 .prose li code,
 .prose td code,
 .prose th code {
-  background-color: var(--launch-inline-code-bg) !important;
-  color: var(--launch-inline-code-text) !important;
+  background-color: var(--wash-strong) !important;
+  color: var(--ink) !important;
   padding: 0.125rem 0.375rem !important;
   border-radius: 0.375rem !important;
   font-size: 0.75rem !important; /* text-xs */
-  border: 1px solid var(--launch-inline-code-border) !important;
-  font-family: var(--font-berkeley-mono), ui-monospace, monospace !important;
+  border: 1px solid var(--rule) !important;
+  font-family: var(--font-mono) !important;
 }
 
 /* Ensure code blocks stay clean - NO background or styling */
@@ -634,9 +634,6 @@ body {
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
   --font-sans: var(--font-sans);
-  --font-abc-diatype: var(--font-abc-diatype), system-ui, sans-serif;
-  --font-berkeley-mono: var(--font-berkeley-mono), ui-monospace, monospace;
-  --font-inter: var(--font-sans);
 }
 
 .dark {
@@ -925,35 +922,6 @@ body {
 
 .group:hover .product-card-diagonal::before {
   opacity: 1;
-}
-
-/* ABC Diatype font utilities */
-.font-diatype {
-  font-family: var(--font-abc-diatype);
-}
-
-.font-diatype-mono {
-  font-family: var(--font-berkeley-mono);
-}
-
-.font-berkeley-mono {
-  font-family: var(--font-berkeley-mono);
-  font-weight: 400;
-}
-
-.font-diatype-regular {
-  font-family: var(--font-abc-diatype);
-  font-weight: 400;
-}
-
-.font-diatype-medium {
-  font-family: var(--font-abc-diatype);
-  font-weight: 500;
-}
-
-.font-diatype-bold {
-  font-family: var(--font-abc-diatype);
-  font-weight: 700;
 }
 
 /* Inter Variable font utilities */
