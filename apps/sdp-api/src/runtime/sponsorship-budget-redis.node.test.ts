@@ -218,6 +218,21 @@ describe("SponsorshipBudgetRedis", () => {
     ).resolves.toBe("stale_policy");
   });
 
+  it("gives a recreated project policy row its own control entry", async () => {
+    const deleted = { ...policy("project", 3), id: "policy_project_deleted" };
+    const recreated = { ...policy("project", 1), id: "policy_project_recreated" };
+    await budget.syncPolicy(deleted);
+    await budget.syncPolicy(recreated);
+    await expect(budget.getPolicyControl(recreated)).resolves.toEqual({
+      version: 1,
+      enabled: true,
+    });
+    await expect(budget.getPolicyControl(deleted)).resolves.toEqual({
+      version: 3,
+      enabled: true,
+    });
+  });
+
   it.each([
     { actualLamports: 2, label: "refund" },
     { actualLamports: 3, label: "two-lamport refund" },
