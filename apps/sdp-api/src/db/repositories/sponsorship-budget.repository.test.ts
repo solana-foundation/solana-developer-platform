@@ -9,20 +9,20 @@ import { seedTestDatabase } from "@/test/mocks/db";
 import {
   type CreateSponsorshipReservationInput,
   SponsorshipBudgetRepository,
+  type SponsorshipBudgetScopeType,
 } from "./sponsorship-budget.repository";
 
 async function insertPolicy(input: {
   id: string;
-  scopeType: "global" | "organization" | "project";
+  scopeType: SponsorshipBudgetScopeType;
   scopeId: string | null;
-  hourly?: number;
 }) {
   await getDb(env).execute(
     `INSERT INTO sponsorship_budget_policies (
        id, network, scope_type, scope_id, enabled, per_transaction_lamports,
        hourly_lamports, daily_lamports, version, updated_by, update_reason
-     ) VALUES (?, 'devnet', ?, ?, TRUE, 10, ?, 1000, 1, 'test', 'seed')`,
-    [input.id, input.scopeType, input.scopeId, input.hourly ?? 100]
+     ) VALUES (?, 'devnet', ?, ?, TRUE, 10, 100, 1000, 1, 'test', 'seed')`,
+    [input.id, input.scopeType, input.scopeId]
   );
 }
 
@@ -69,14 +69,8 @@ describe("SponsorshipBudgetRepository", () => {
     await insertPolicy({ id: "project_default", scopeType: "project", scopeId: null });
   });
 
-  it("resolves the exact project policy over its default and ignores organization rows", async () => {
+  it("resolves the exact project policy over its default", async () => {
     await insertPolicy({ id: "project_exact", scopeType: "project", scopeId: "project_1" });
-    await insertPolicy({
-      id: "org_exact",
-      scopeType: "organization",
-      scopeId: "org_1",
-      hourly: 50,
-    });
     const repository = new SponsorshipBudgetRepository(getDb(env));
 
     const policies = await repository.resolvePolicies({
