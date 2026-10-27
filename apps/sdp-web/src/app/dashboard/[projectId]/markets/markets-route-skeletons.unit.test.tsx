@@ -147,7 +147,7 @@ describe("DvP route skeletons", () => {
       const html = renderToStaticMarkup(<MarketsLandingSkeleton {...modules} />);
       expect(occurrences(html, "<section")).toBe(groups);
       // The ActionTile's 120px height and its control corners.
-      expect(html.match(/h-\[120px\] w-full rounded-control/g)).toHaveLength(tiles);
+      expect(html.match(/h-30 w-full rounded-control/g)).toHaveLength(tiles);
     }
   );
 });
