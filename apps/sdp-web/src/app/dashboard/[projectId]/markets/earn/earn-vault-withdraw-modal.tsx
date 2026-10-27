@@ -366,6 +366,7 @@ function WithdrawalResult({
               ? "DashboardEarn.vaultWithdraw.sharesLabel"
               : "DashboardEarn.vaultWithdraw.amountLabel"
           )}
+          wrap
         >
           <span className="tabular-nums">
             {settlement === "provider_order"
@@ -554,7 +555,7 @@ function ProviderOrderReviewRows({ amount }: { amount: string }) {
   const t = useTranslations();
 
   return (
-    <DetailRow label={t("DashboardEarn.vaultWithdraw.sharesLabel")}>
+    <DetailRow label={t("DashboardEarn.vaultWithdraw.sharesLabel")} wrap>
       <span className="tabular-nums">{amount}</span>
     </DetailRow>
   );
@@ -578,19 +579,19 @@ function AtomicReviewRows({
 
   return (
     <>
-      <DetailRow label={t("DashboardEarn.vaultWithdraw.amountLabel")}>
+      <DetailRow label={t("DashboardEarn.vaultWithdraw.amountLabel")} wrap>
         <span className="tabular-nums">{formatTokenValue(amount, tokenMint, locale)}</span>
       </DetailRow>
       <DetailRow label={t("DashboardEarn.vaultWithdraw.receiveAs")}>{assetSymbol}</DetailRow>
       {quote.kind === "quoted" && quote.preview.blockingIssues.length === 0 ? (
-        <DetailRow label={t("DashboardEarn.vaultWithdraw.expectedAmount")}>
+        <DetailRow label={t("DashboardEarn.vaultWithdraw.expectedAmount")} wrap>
           <span className="tabular-nums">
             {formatTokenValue(quote.preview.assetsOut, tokenMint, locale)}
           </span>
         </DetailRow>
       ) : null}
       {minAmountOut !== undefined ? (
-        <DetailRow label={t("DashboardEarn.vaultWithdraw.minAmount")}>
+        <DetailRow label={t("DashboardEarn.vaultWithdraw.minAmount")} wrap>
           <span className="tabular-nums">{formatTokenValue(minAmountOut, tokenMint, locale)}</span>
         </DetailRow>
       ) : null}

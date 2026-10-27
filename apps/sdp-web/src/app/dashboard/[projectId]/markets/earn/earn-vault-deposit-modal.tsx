@@ -162,12 +162,12 @@ function DepositQuoteSummaryRows({
   return (
     <>
       {quote.kind === "quoted" && quote.preview.blockingIssues.length === 0 ? (
-        <DetailRow label={t("DashboardEarn.deposit.vaultExpectedShares")}>
+        <DetailRow label={t("DashboardEarn.deposit.vaultExpectedShares")} wrap>
           <span className="tabular-nums">{quote.preview.sharesOut}</span>
         </DetailRow>
       ) : null}
       {minSharesOut !== undefined ? (
-        <DetailRow label={t("DashboardEarn.deposit.vaultMinShares")}>
+        <DetailRow label={t("DashboardEarn.deposit.vaultMinShares")} wrap>
           <span className="tabular-nums">{minSharesOut}</span>
         </DetailRow>
       ) : null}
@@ -570,7 +570,7 @@ function DepositResult({
         <DetailRow label={t("DashboardEarn.deposit.vaultStrategy")} wrap>
           {deposit.strategy.name}
         </DetailRow>
-        <DetailRow label={t("DashboardEarn.withdraw.amountLabel")}>
+        <DetailRow label={t("DashboardEarn.withdraw.amountLabel")} wrap>
           <span className="tabular-nums">
             {formatTokenValue(outcome.amount, fundingMint, locale)}
           </span>
@@ -735,7 +735,11 @@ function DepositSwapSummaryRow({
   value: string;
 }) {
   if (!active) return null;
-  return <DetailRow label={label}>{value}</DetailRow>;
+  return (
+    <DetailRow label={label} wrap>
+      {value}
+    </DetailRow>
+  );
 }
 
 function DepositSwapReviewNotice({
@@ -790,7 +794,7 @@ function DepositReviewDetails({
 
   return (
     <DetailList className="mt-5" variant="summary">
-      <DetailRow label={t("DashboardEarn.deposit.vaultAmount")}>
+      <DetailRow label={t("DashboardEarn.deposit.vaultAmount")} wrap>
         <span className="tabular-nums">{formatTokenValue(amount, fundingMint, locale)}</span>
       </DetailRow>
       {selectedWallet ? (
