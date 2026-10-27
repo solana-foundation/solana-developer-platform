@@ -3,21 +3,26 @@
 import { useEffect, useState } from "react";
 
 /**
- * Shared Shiki highlighting for every dashboard code surface (API playground,
- * Earn integration screen). Extracted from the playground shell verbatim so
- * there is exactly ONE copy of the css-variables theme — the palette itself
- * lives in @solana/design-system/styles as --shiki-* custom properties, which
- * is what keeps highlighted markup following the root .dark class without
- * re-highlighting.
+ * Shared Shiki highlighting for every SDP code surface (the dashboard's API
+ * playground and Earn integration screen), so there is exactly ONE copy of the
+ * css-variables theme. The palette itself lives in @solana/design-system/styles
+ * as --shiki-* custom properties, which is what keeps highlighted markup
+ * following the root .dark class without re-highlighting.
  */
 
 export type HighlightLanguage = "javascript" | "json" | "typescript";
 
+/**
+ * Whether `value` names a language this module highlights.
+ *
+ * @param value - A language name, such as a code fence's.
+ * @returns `true` when `value` is a {@link HighlightLanguage}.
+ */
 export function isHighlightLanguage(value: string): value is HighlightLanguage {
   return value === "javascript" || value === "json" || value === "typescript";
 }
 
-// @solana/design-system/styles (imported by globals.css) owns the complete
+// @solana/design-system/styles (imported by the host app's stylesheet) owns the complete
 // light/dark --code-block-* and --shiki-token-* palette. Keep this Shiki theme
 // variable-based so the highlighted markup follows the root .dark class
 // without re-highlighting or duplicating the package palette here.
@@ -121,6 +126,10 @@ function getShikiModule() {
   return shikiModulePromise;
 }
 
+/**
+ * `content` highlighted with the css-variables theme. Shiki loads on first use, and the
+ * plain text shows until it has, so a slow or failed load never leaves the block empty.
+ */
 export function HighlightedCode({
   content,
   language,
