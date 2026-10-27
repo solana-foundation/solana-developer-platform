@@ -227,17 +227,16 @@ function CustomerWallet({
             <ExternalLinkIcon aria-hidden="true" className="size-3.5" />
           </a>
         </div>
-        <p className="flex min-w-0 gap-1 text-tertiary">
-          <span className="shrink-0">{t("DashboardMarkets.earnProgram.availableShares")}</span>
-          <span className="shrink-0 tabular-nums">
+        {/* Wraps rather than truncates: on a phone a long share count would run into the value. */}
+        <p className="flex min-w-0 flex-wrap gap-x-1 text-tertiary">
+          <span>{t("DashboardMarkets.earnProgram.availableShares")}</span>
+          <span className="tabular-nums">
             {shares ?? t("DashboardMarkets.earnProgram.valueUnavailable")}
           </span>
           {locked ? (
             <>
               <span aria-hidden="true">·</span>
-              <span className="truncate">
-                {t("DashboardMarkets.earnProgram.sharesUnlockAt", { time: unlockTime })}
-              </span>
+              <span>{t("DashboardMarkets.earnProgram.sharesUnlockAt", { time: unlockTime })}</span>
             </>
           ) : null}
         </p>

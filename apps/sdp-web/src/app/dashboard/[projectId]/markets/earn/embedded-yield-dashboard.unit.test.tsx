@@ -5,6 +5,7 @@ import type {
   EarnExternalWalletPositionSummary,
   EarnStrategy,
 } from "@sdp/types/earn";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EnglishTestI18n } from "@/app/dashboard/[projectId]/markets/test-i18n";
@@ -401,7 +402,6 @@ describe("EmbeddedYieldDashboard", () => {
   });
 
   it("withholds the live value when an asset is not a dollar stablecoin", () => {
-    const SOL = "So11111111111111111111111111111111111111112";
     mocks.summary = {
       walletCount: 2,
       positionCount: 2,
@@ -415,7 +415,7 @@ describe("EmbeddedYieldDashboard", () => {
           tokenValue: "10",
         },
         {
-          tokenMint: SOL,
+          tokenMint: SOL_MINT,
           walletCount: 1,
           positionCount: 1,
           unavailablePositionCount: 0,
