@@ -3,6 +3,7 @@
 import type { CustodyWalletSummary } from "@sdp/types/custody";
 import { Button } from "@sdp/ui/button";
 import { cn } from "@sdp/ui/cn";
+import { ListEmptyState } from "@sdp/ui/list-empty-state";
 import { SearchInput } from "@sdp/ui/search-input";
 import { SegmentedControl } from "@sdp/ui/segmented-control";
 import { TableCell } from "@sdp/ui/table";
@@ -30,6 +31,7 @@ import {
 import { DashboardHeaderTabsTrailing } from "@/components/dashboard-header-tabs";
 import { useWalletFavorites } from "@/components/use-wallet-favorites";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { DASHBOARD_SIDE_NAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { useDashboardTab, useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useDebounce } from "@/lib/use-debounce";
@@ -420,19 +422,32 @@ function EmptyWallets({
   configsError: string | null;
 }) {
   const t = useTranslations();
+  const projectHref = useProjectHref();
   return (
-    <div className="max-w-md" data-wallets-empty>
-      <h2 className="text-subheading font-medium text-primary">
-        {canManageCustody
-          ? t("DashboardCustody.createFirstWallet")
-          : t("DashboardCustody.noWalletsAvailable")}
-      </h2>
-      <p className="mt-2 text-body text-secondary">
-        {canManageCustody
-          ? t("DashboardCustody.createWalletDescription")
-          : t("DashboardCustody.walletCreationLimited")}
-      </p>
-      {configsError ? <p className="mt-3 text-body text-error">{configsError}</p> : null}
+    <div className="contents" data-wallets-empty>
+      {configsError ? <p className="text-body text-error">{configsError}</p> : null}
+      <ListEmptyState
+        message={
+          canManageCustody
+            ? t("DashboardCustody.createFirstWallet")
+            : t("DashboardCustody.noWalletsAvailable")
+        }
+        description={
+          canManageCustody
+            ? t("DashboardCustody.createWalletDescription")
+            : t("DashboardCustody.walletCreationLimited")
+        }
+        hidesPageAction={canManageCustody}
+        action={
+          canManageCustody ? (
+            <Button asChild>
+              <Link href={projectHref(`${DASHBOARD_SIDE_NAV_HREFS.wallets}/setup`)}>
+                {t("DashboardCustody.createWallet")}
+              </Link>
+            </Button>
+          ) : undefined
+        }
+      />
     </div>
   );
 }
