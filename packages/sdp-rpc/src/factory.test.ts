@@ -442,6 +442,8 @@ describe("createClusterRpc", () => {
     const rpc = runInClusterScope(SANDBOX, createClusterRpc);
     const caller = new AbortController();
     const callerDeadline = new Error("caller deadline passed");
+    const events: RpcTelemetryEvent[] = [];
+    setRpcTelemetrySink((event) => events.push(event));
 
     const abortedOutcome = rpc
       .getSlot()
@@ -468,6 +470,10 @@ describe("createClusterRpc", () => {
     held.releaseProbe();
     assert.equal(await read, BigInt(SLOT));
     assert.deepEqual(held.calls, [genesisProbe(url), { url, method: "getBlockHeight" }]);
+    assert.deepEqual(
+      events.map((event) => event.outcome),
+      ["aborted", "succeeded"]
+    );
   });
 
   it("shares one genesis probe between concurrent first requests to an endpoint", async () => {
@@ -548,6 +554,8 @@ describe("createClusterRpc", () => {
     });
     const stall = stubStalledDevnetRead(stalled);
     const caller = new AbortController();
+    const events: RpcTelemetryEvent[] = [];
+    setRpcTelemetrySink((event) => events.push(event));
 
     const slot = runInClusterScope(SANDBOX, createClusterRpc)
       .getSlot()
@@ -556,6 +564,10 @@ describe("createClusterRpc", () => {
     mock.timers.tick(DEFAULT_RPC_REQUEST_TIMEOUT_MS);
 
     assert.equal(await slot, BigInt(SLOT));
+    assert.deepEqual(
+      events.filter((event) => event.event === "sdp_rpc_attempt").map((event) => event.outcome),
+      ["failed", "succeeded"]
+    );
     assert.deepEqual(stall.calls, [
       genesisProbe(stalled),
       slotRead(stalled),
@@ -784,6 +796,8 @@ describe("createClusterRpc", () => {
     });
     const stall = stubStalledDevnetRead(stalled);
     const caller = new AbortController();
+    const events: RpcTelemetryEvent[] = [];
+    setRpcTelemetrySink((event) => events.push(event));
     const callerTimeout = new DOMException(
       "The operation was aborted due to timeout",
       "TimeoutError"
@@ -798,6 +812,10 @@ describe("createClusterRpc", () => {
     await assert.rejects(slot, (error: unknown) => error === callerTimeout);
     await nextTurn();
     assert.deepEqual(stall.calls, [genesisProbe(stalled), slotRead(stalled)]);
+    assert.deepEqual(
+      events.map((event) => [event.event, event.outcome, event.sample_weight]),
+      [["sdp_rpc_attempt", "aborted", 1]]
+    );
   });
 
   it("never fails sendTransaction over to another endpoint", async () => {
@@ -896,6 +914,8 @@ describe("createClusterRpc with a deadline", () => {
       SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: healthy,
     });
     const stall = stubStalledDevnetRead(stalled);
+    const events: RpcTelemetryEvent[] = [];
+    setRpcTelemetrySink((event) => events.push(event));
 
     const slot = runInClusterScope(SANDBOX, () =>
       createClusterRpc({ timeoutMs: 2_000 }).getSlot().send()
@@ -905,6 +925,10 @@ describe("createClusterRpc with a deadline", () => {
 
     await assert.rejects(slot, { name: "RpcTimeoutError" });
     assert.deepEqual(stall.calls, [genesisProbe(stalled), slotRead(stalled)]);
+    assert.deepEqual(
+      events.map((event) => event.outcome),
+      ["aborted"]
+    );
   });
 });
 

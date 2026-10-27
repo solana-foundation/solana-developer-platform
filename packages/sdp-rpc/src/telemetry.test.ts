@@ -127,6 +127,96 @@ describe("RPC telemetry", () => {
     );
   });
 
+  const payload = { jsonrpc: "2.0", id: 1, method: "getSlot", params: [] };
+  const callers = [
+    {
+      name: "Kit",
+      send: (signal: AbortSignal) =>
+        withReadSocketRetry(
+          createDefaultRpcTransport({ url: endpointUrl }),
+          endpointUrl
+        )({
+          payload,
+          signal,
+        }),
+    },
+    {
+      name: "fetch init",
+      send: (signal: AbortSignal) =>
+        fetchWithReadSocketRetry(endpointUrl, {
+          method: "POST",
+          body: JSON.stringify(payload),
+          signal,
+        }),
+    },
+    {
+      name: "fetch Request",
+      send: (signal: AbortSignal) =>
+        fetchWithReadSocketRetry(
+          new Request(endpointUrl, {
+            method: "POST",
+            body: JSON.stringify(payload),
+            signal,
+          })
+        ),
+    },
+  ];
+
+  for (const { name, send } of callers) {
+    for (const reasonName of ["AbortError", "TimeoutError"]) {
+      it(`records ${name} caller ${reasonName} separately from provider failures`, async () => {
+        process.env[envKey] = endpointUrl;
+        const caller = new AbortController();
+        const reason = new DOMException("caller stopped waiting", reasonName);
+        const events: RpcTelemetryEvent[] = [];
+        setRpcTelemetrySink((event) => events.push(event));
+        let calls = 0;
+        globalThis.fetch = async () => {
+          calls += 1;
+          caller.abort(reason);
+          throw reason;
+        };
+
+        await runWithPinnedRpcTelemetry(async () => {
+          pinRpcTelemetryEndpoint("devnet", endpointUrl);
+          await assert.rejects(send(caller.signal), (error: unknown) => error === reason);
+        });
+
+        assert.equal(calls, 1);
+        assert.deepEqual(
+          events.map((event) => [event.outcome, event.sample_weight]),
+          [["aborted", 1]]
+        );
+      });
+    }
+  }
+
+  it("uses an init signal override when the Request's signal was aborted", async () => {
+    process.env[envKey] = endpointUrl;
+    const caller = new AbortController();
+    caller.abort();
+    const request = new Request(endpointUrl, { signal: caller.signal });
+    const events: RpcTelemetryEvent[] = [];
+    setRpcTelemetrySink((event) => events.push(event));
+    const failure = new DOMException("transport stopped", "AbortError");
+    globalThis.fetch = async () => {
+      throw failure;
+    };
+
+    await runWithPinnedRpcTelemetry(async () => {
+      pinRpcTelemetryEndpoint("devnet", endpointUrl);
+      await assert.rejects(
+        fetchWithReadSocketRetry(request, { signal: null }),
+        (error: unknown) => error === failure
+      );
+    });
+
+    assert.deepEqual(
+      events.map((event) => event.outcome),
+      ["failed"]
+    );
+  });
+
   it("classifies a 200 JSON-RPC error without consuming the caller's response", async () => {
     process.env[envKey] = endpointUrl;
     const body = { jsonrpc: "2.0", id: 1, error: { code: -32005, message: "rate limited" } };

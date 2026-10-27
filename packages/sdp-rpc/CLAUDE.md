@@ -73,6 +73,10 @@ method; they never include endpoint URLs or request payloads.
   those and genesis-proof attempts from successful latency percentiles.
 - Kit and fetch responses use the same Zod envelope parser and outcome
   classifier. Results stay opaque; the caller receives the original response.
+- Caller cancellations and caller deadlines use `outcome: aborted`, retained
+  without sampling. Provider failure rates count `failed` against
+  `succeeded|failed`; they exclude cancellations and unverified responses.
+  Managed endpoint timeouts remain failures and retain their existing failover.
 
 Telemetry adds no RPC calls and preserves provider request budgets.
 

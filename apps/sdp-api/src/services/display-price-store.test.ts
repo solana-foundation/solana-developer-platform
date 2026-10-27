@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import Redis from "ioredis";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { env } from "@/test/helpers/env";
 import { required } from "@/test/helpers/required";
+import { clearDisplayPriceCacheForTests, fetchDisplayUsdPrices } from "./display-price.service";
 import { createDisplayPriceStore, RedisDisplayPriceStore } from "./display-price-store";
-import type { DisplayPrice } from "./tokens-xyz-price-client";
+import type { DisplayPrice, DisplayPriceAnswer } from "./tokens-xyz-price-client";
 
 describe("shared Tokens price coordination", () => {
   let first: Redis;
@@ -20,6 +22,10 @@ describe("shared Tokens price coordination", () => {
   afterAll(async () => {
     await Promise.all([first.quit(), second.quit()]);
   });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    clearDisplayPriceCacheForTests();
+  });
   beforeEach(() => {
     prefix = `test:tokens:{${randomUUID()}}`;
     store = new RedisDisplayPriceStore(Promise.resolve(first), prefix);
@@ -27,7 +33,12 @@ describe("shared Tokens price coordination", () => {
   });
 
   function price(usdPrice: number): DisplayPrice {
-    return { usdPrice, snapshotFetchedAt: Date.now(), expiresAt: Date.now() + 60_000 };
+    return {
+      kind: "priced",
+      usdPrice,
+      snapshotFetchedAt: Date.now(),
+      expiresAt: Date.now() + 60_000,
+    };
   }
 
   async function serverNow(): Promise<number> {
@@ -84,6 +95,42 @@ describe("shared Tokens price coordination", () => {
     await store.lookup(["A"], "one");
     await store.complete(["A"], "one", new Map());
     expect((await replica.lookup(["A"], "two")).claimed).toEqual(["A"]);
+  });
+
+  it("shares confirmed absences across replicas with the same bounded TTL as prices", async () => {
+    await store.lookup(["A", "B"], "one");
+    const answer = new Map<string, DisplayPriceAnswer>([
+      ["A", { kind: "missing", expiresAt: Date.now() + 60_000 }],
+      ["B", price(2)],
+    ]);
+    await store.complete(["A", "B"], "one", answer);
+
+    const read = await replica.lookup(["A", "B"], "two");
+    expect(read.prices).toEqual(answer);
+    expect(read.claimed).toEqual([]);
+    expect(read.pending).toEqual([]);
+    expect(await first.pttl(`${prefix}:price:A`)).toBeGreaterThan(59_000);
+    expect(await first.pttl(`${prefix}:price:A`)).toBeLessThanOrEqual(60_000);
+  });
+
+  it("reuses confirmed absences from Redis after the process cache is cleared", async () => {
+    const mint = randomUUID();
+    const priceEnv = { ...env, TOKENS_XYZ_API_KEY: `test-tokens-${randomUUID()}` };
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () =>
+        Response.json([{ address: mint, hasMarket: false, token: null }])
+      );
+    const lookup = () =>
+      runInClusterScope({ projectId: null, environment: "production" }, () =>
+        fetchDisplayUsdPrices(priceEnv, [mint])
+      );
+
+    expect(await lookup()).toEqual(new Map());
+    clearDisplayPriceCacheForTests();
+    const results = await Promise.all(Array.from({ length: 100 }, lookup));
+    expect(results.every((result) => result.size === 0)).toBe(true);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
   it("does not let an old owner overwrite a successor or remove its lease", async () => {

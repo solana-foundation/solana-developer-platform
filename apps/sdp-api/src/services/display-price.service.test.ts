@@ -67,7 +67,12 @@ describe("Tokens display prices", () => {
   });
 
   it("waits for a different replica's result without sending a duplicate request", async () => {
-    const value = { usdPrice: 2, snapshotFetchedAt: Date.now(), expiresAt: Date.now() + 60_000 };
+    const value: DisplayPrice = {
+      kind: "priced",
+      usdPrice: 2,
+      snapshotFetchedAt: Date.now(),
+      expiresAt: Date.now() + 60_000,
+    };
     store.lookup
       .mockResolvedValueOnce({ prices: new Map(), claimed: [], pending: ["A"] })
       .mockResolvedValueOnce({ prices: new Map([["A", value]]), claimed: [], pending: [] });
@@ -134,7 +139,7 @@ describe("Tokens display prices", () => {
     });
   });
 
-  it("keeps unsupported and missing mints unpriced and asks for them again", async () => {
+  it("caches confirmed absences while retrying omitted mints", async () => {
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(
@@ -146,17 +151,69 @@ describe("Tokens display prices", () => {
     expect(await prices(["A", "B", "C"])).toEqual(
       new Map([
         ["A", 2],
-        ["B", 3],
         ["C", 4],
       ])
     );
-    expect(requestedMints(required(fetchSpy.mock.calls[1])[1])).toEqual(["B", "C"]);
+    expect(requestedMints(required(fetchSpy.mock.calls[1])[1])).toEqual(["C"]);
+  });
+
+  it.each([
+    { name: "no market", hasMarket: false, token: tokensPriceRow("A", 2).token },
+    { name: "null token", hasMarket: true, token: null },
+    { name: "no market and null token", hasMarket: false, token: null },
+  ])("caches $name for 60 seconds across repeated wallet reads", async ({ hasMarket, token }) => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json([{ address: "A", hasMarket, token }]))
+      .mockImplementation(async () => Response.json([tokensPriceRow("A", 3)]));
+    const log = vi.spyOn(moneyPathEvents, "logEvent").mockImplementation(() => undefined);
+
+    expect(await prices(["A"])).toEqual(new Map());
+    const repeated = await Promise.all(Array.from({ length: 100 }, () => prices(["A"])));
+    expect(repeated.every((result) => result.size === 0)).toBe(true);
+    vi.advanceTimersByTime(59_999);
+    expect(await prices(["A"])).toEqual(new Map());
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(store.admitRequest).toHaveBeenCalledTimes(1);
+    expect(log).toHaveBeenCalledWith(
+      "info",
+      expect.objectContaining({
+        event: "sdp_api_vendor_call",
+        priced_count: 0,
+        unpriced_count: 1,
+        confirmed_missing_count: 1,
+      })
+    );
+    vi.advanceTimersByTime(1);
+    expect(await prices(["A"])).toEqual(new Map([["A", 3]]));
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves a shared confirmed absence's original expiry in the local cache", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    store.lookup.mockResolvedValueOnce({
+      prices: new Map([["A", { kind: "missing", expiresAt: Date.now() + 1_000 }]]),
+      claimed: [],
+      pending: [],
+    });
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => Response.json([tokensPriceRow("A", 2)]));
+
+    expect(await prices(["A"])).toEqual(new Map());
+    vi.advanceTimersByTime(999);
+    expect(await prices(["A"])).toEqual(new Map());
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(store.lookup).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(1);
+    expect(await prices(["A"])).toEqual(new Map([["A", 2]]));
   });
 
   it.each([0, -1, "1.5", null, Number.NaN, Number.POSITIVE_INFINITY])(
     "rejects an invalid price (%s) without discarding other mints",
     async (price) => {
-      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
         Response.json([
           {
             address: "A",
@@ -167,6 +224,13 @@ describe("Tokens display prices", () => {
         ])
       );
       expect(await prices(["A", "B"])).toEqual(new Map([["B", 2]]));
+      fetchSpy.mockResolvedValueOnce(Response.json([tokensPriceRow("A", 3)]));
+      expect(await prices(["A", "B"])).toEqual(
+        new Map([
+          ["A", 3],
+          ["B", 2],
+        ])
+      );
     }
   );
 
@@ -182,6 +246,27 @@ describe("Tokens display prices", () => {
     );
     expect(await prices(["A", "C", "D"])).toEqual(new Map([["D", 4]]));
   });
+
+  it.each(["price first", "missing first", "both missing"] as const)(
+    "does not cache duplicate confirmed absences (%s)",
+    async (order) => {
+      const missing = { address: "A", hasMarket: false, token: null };
+      const positive = tokensPriceRow("A", 2);
+      const rows = {
+        "price first": [positive, missing],
+        "missing first": [missing, positive],
+        "both missing": [missing, missing],
+      };
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(Response.json(rows[order]))
+        .mockResolvedValueOnce(Response.json([positive]));
+
+      expect(await prices(["A"])).toEqual(new Map());
+      expect(await prices(["A"])).toEqual(new Map([["A", 2]]));
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    }
+  );
 
   it("rejects snapshots with missing, old or future timestamps", async () => {
     const now = Date.now();
@@ -279,25 +364,34 @@ describe("Tokens display prices", () => {
     expect(peak).toBe(2);
   });
 
-  it("backs off across lookups after 429 without caching failed mints", async () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.spyOn(Math, "random").mockReturnValue(0);
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(new Response(null, { status: 429 }));
-    expect(await prices(["A"])).toEqual(new Map());
-    expect(store.backOff).toHaveBeenCalled();
-    store.admitRequest.mockResolvedValue(false);
-    expect(await prices(["A"])).toEqual(new Map());
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    store.admitRequest.mockResolvedValue(true);
-    fetchSpy.mockResolvedValue(Response.json([tokensPriceRow("A", 2)]));
-    expect(await prices(["A"])).toEqual(new Map([["A", 2]]));
-  });
+  it.each([401, 403, 429])(
+    "backs off across lookups after HTTP %i without caching failures",
+    async (status) => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.spyOn(Math, "random").mockReturnValue(0);
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(new Response(null, { status }));
+      expect(await prices(["A"])).toEqual(new Map());
+      expect(store.backOff).toHaveBeenCalled();
+      expect(store.complete.mock.calls[0]?.[2].size).toBe(0);
+      store.admitRequest.mockResolvedValue(false);
+      expect(await prices(["A"])).toEqual(new Map());
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      store.admitRequest.mockResolvedValue(true);
+      fetchSpy.mockResolvedValue(Response.json([tokensPriceRow("A", 2)]));
+      expect(await prices(["A"])).toEqual(new Map([["A", 2]]));
+    }
+  );
 
   function cacheLaterBatch() {
     const cachedMint = "Mint1000";
-    const value = { usdPrice: 7, snapshotFetchedAt: Date.now(), expiresAt: Date.now() + 60_000 };
+    const value: DisplayPrice = {
+      kind: "priced",
+      usdPrice: 7,
+      snapshotFetchedAt: Date.now(),
+      expiresAt: Date.now() + 60_000,
+    };
     store.lookup.mockImplementation(async (mints, owner) => ({
       prices: new Map(mints.includes(cachedMint) ? [[cachedMint, value]] : []),
       claimed: owner ? mints.filter((mint) => mint !== cachedMint) : [],

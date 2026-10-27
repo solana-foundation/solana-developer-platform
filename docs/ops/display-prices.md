@@ -11,20 +11,25 @@ are cached upstream for 60 seconds.
 [Thread](https://solana-foundation.slack.com/archives/C0A8Q74B9KP/p1793037737960899).
 
 - Batch up to 250 distinct mints per request, previously 50 with Jupiter.
-- Cache successful values for 60 seconds in Redis and in each process.
+- Cache prices and confirmed no-market answers for 60 seconds in Redis and
+  in each process. `hasMarket: false` or `token: null` confirms an absence;
+  these entries never become numeric prices, including zero.
   Importing a shared value preserves its original expiry. Local mint caches
   retain at most 10,000 entries, evict the least recently used, and sweep
   expired entries at most once per TTL rather than on every cache miss.
 - Claim each missing mint with a seven-second Redis lease. Other replicas wait
   for the owner's result; an expired owner cannot overwrite a new owner's
-  value or release its lease. Failed and missing prices are never cached.
+  value or release its lease. Omitted, malformed, stale and failed answers
+  are never cached. Polling a confirmed unpriceable mint uses one upstream
+  request per 60 seconds across replicas, previously one per balance read.
 - Reserve each HTTP attempt atomically in Redis, using Redis time and exact
   rolling windows: at most 320 requests per 10 seconds and 800 per minute.
   The 20% headroom covers traffic outside the service and timing variation.
 - Limit sockets to two per process. Queued work shares a four-second lookup
   deadline. Redis commands and connection establishment have 250 ms timeouts;
   lease cleanup is awaited and can extend completion by one command timeout.
-- On 429, pause requests across that key's replicas for 60 seconds plus jitter.
+- On 401, 403 or 429, pause requests across that key's replicas for 60 seconds
+  plus jitter. A rotated key has its own namespace and can recover immediately.
   If coordination fails or the quota is exhausted, keep valid cached prices
   and leave other balances unpriced. There is no uncoordinated retry.
   Quota and credential refusals stop upstream work while later batches can
@@ -124,10 +129,10 @@ live Grafana, stage scrape, Kora ingress and Sentry verification requirements.
   copy; checked-in provider versions and lockfiles were unchanged.
 
 The full local workspace suite passed all 26 test tasks using CI's Node
-24.22.1 with caching disabled: all 8,189 API tests, 3,377 web tests, and the
-other 24 workspace tasks passed. Ten opt-in live tests retained their existing
-skips. All 245 root script tests passed. Workspace typechecking passed all
-28 tasks.
+24.22.1 with caching disabled: all 8,200 API tests, 3,377 web tests, 192 RPC
+tests, and the other 23 workspace tasks passed. Ten opt-in live tests retained
+their existing skips. All 245 root script tests passed. Workspace typechecking
+passed all 28 tasks.
 
 Full Biome reported 26 SVG title errors in files unchanged from main. Local
 integration setup stopped on an existing

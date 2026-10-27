@@ -15,11 +15,34 @@ const MARKET_SNAPSHOTS_URL = "https://api.tokens.xyz/v1/assets/market-snapshots"
 const VENDOR = "tokens-xyz";
 const OPERATION = "market-snapshots";
 
-/** A display estimate with separate upstream snapshot and local cache expiry. */
-export interface DisplayPrice {
-  readonly usdPrice: number;
-  readonly snapshotFetchedAt: number;
-  readonly expiresAt: number;
+/** A confirmed absence is cacheable; a failed or omitted answer is not. */
+export const displayPriceAnswerSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("priced"),
+    usdPrice: z.number().finite().positive(),
+    snapshotFetchedAt: z.number().finite(),
+    expiresAt: z.number().finite(),
+  }),
+  z.object({ kind: z.literal("missing"), expiresAt: z.number().finite() }),
+]);
+export type DisplayPriceAnswer = z.infer<typeof displayPriceAnswerSchema>;
+export type DisplayPrice = Extract<DisplayPriceAnswer, { kind: "priced" }>;
+
+/** Aggregate coverage without treating confirmed missing prices as estimates. */
+export function displayPriceCoverage(
+  prices: ReadonlyMap<string, DisplayPriceAnswer>,
+  requestedCount: number
+) {
+  let confirmedMissing = 0;
+  for (const price of prices.values()) {
+    if (price.kind === "missing") confirmedMissing += 1;
+  }
+  const priced = prices.size - confirmedMissing;
+  return {
+    priced_count: priced,
+    unpriced_count: requestedCount - priced,
+    confirmed_missing_count: confirmedMissing,
+  };
 }
 
 const snapshotBodySchema = z.array(z.unknown()).max(MAX_MINTS_PER_REQUEST);
@@ -44,7 +67,7 @@ function parseSnapshots(body: unknown, mints: string[]) {
   const rows = snapshotBodySchema.parse(body);
   const requested = new Set(mints);
   const seen = new Set<string>();
-  const prices = new Map<string, DisplayPrice>();
+  const prices = new Map<string, DisplayPriceAnswer>();
   const now = Date.now();
   let invalidRows = 0;
   let staleRows = 0;
@@ -64,7 +87,10 @@ function parseSnapshots(body: unknown, mints: string[]) {
       continue;
     }
     seen.add(address);
-    if (!hasMarket || token === null) continue;
+    if (!hasMarket || token === null) {
+      prices.set(address, { kind: "missing", expiresAt: now + PRICE_CACHE_TTL_MS });
+      continue;
+    }
     const parsedToken = snapshotTokenSchema.safeParse(token);
     if (!parsedToken.success || parsedToken.data.address !== address) {
       invalidRows += 1;
@@ -81,20 +107,21 @@ function parseSnapshots(body: unknown, mints: string[]) {
     }
     maxSnapshotAgeMs = Math.max(maxSnapshotAgeMs, now - lastFetchedAt);
     prices.set(address, {
+      kind: "priced",
       usdPrice: price,
       snapshotFetchedAt: lastFetchedAt,
       expiresAt: now + PRICE_CACHE_TTL_MS,
     });
   }
+  const coverage = displayPriceCoverage(prices, mints.length);
   return {
     prices,
     details: {
-      priced_count: prices.size,
-      unpriced_count: mints.length - prices.size,
+      ...coverage,
       invalid_row_count: invalidRows,
       stale_row_count: staleRows,
       unknown_age_row_count: unknownAgeRows,
-      max_snapshot_age_ms: prices.size > 0 ? maxSnapshotAgeMs : undefined,
+      max_snapshot_age_ms: coverage.priced_count > 0 ? maxSnapshotAgeMs : undefined,
     },
   };
 }
@@ -105,7 +132,7 @@ export async function fetchTokensPriceBatch(
   mints: string[],
   signal: AbortSignal
 ): Promise<{
-  prices: Map<string, DisplayPrice>;
+  prices: Map<string, DisplayPriceAnswer>;
   status: "ok" | "failed" | "rate_limited" | "unauthorized";
 }> {
   let httpStatus: number | undefined;
@@ -139,7 +166,7 @@ export async function fetchTokensPriceBatch(
       http_status: httpStatus,
       requested_count: mints.length,
     });
-    const prices = new Map<string, DisplayPrice>();
+    const prices = new Map<string, DisplayPriceAnswer>();
     switch (httpStatus) {
       case 429:
         return { prices, status: "rate_limited" };

@@ -2,7 +2,11 @@ import { createHmac, randomUUID } from "node:crypto";
 import type { Redis } from "ioredis";
 import { z } from "zod";
 import { getDisplayPriceRedisClient } from "@/runtime/kv-redis";
-import { type DisplayPrice, PRICE_CACHE_TTL_MS } from "@/services/tokens-xyz-price-client";
+import {
+  type DisplayPriceAnswer,
+  displayPriceAnswerSchema,
+  PRICE_CACHE_TTL_MS,
+} from "@/services/tokens-xyz-price-client";
 import type { Env } from "@/types/env";
 
 // The provider allows 400/10s and 1,000/60s per key. Keep 20% headroom.
@@ -20,8 +24,8 @@ redis.call('PEXPIRE', KEYS[1], 61000)
 return 1
 `;
 
-// A cache read and ownership claim share one atomic operation. Empty/failed
-// prices are never stored; concurrent readers wait on the short lease.
+// A cache read and ownership claim share one atomic operation. Confirmed
+// absences are cached too; failures only release the short lease.
 const LOOKUP = `
 local out = {}
 for i = 1, #KEYS, 2 do
@@ -52,18 +56,13 @@ end
 return 1
 `;
 
-const cachedPriceSchema = z.object({
-  usdPrice: z.number().finite().positive(),
-  snapshotFetchedAt: z.number().finite(),
-  expiresAt: z.number().finite(),
-});
 const lookupResultSchema = z.array(
   z.tuple([z.enum(["cached", "claimed", "pending", "missing"]), z.string()])
 );
 
 /** Cached values, owned misses, and misses another replica is already fetching. */
 export interface DisplayPriceClaim {
-  readonly prices: Map<string, DisplayPrice>;
+  readonly prices: Map<string, DisplayPriceAnswer>;
   readonly claimed: string[];
   readonly pending: string[];
 }
@@ -76,7 +75,7 @@ export interface DisplayPriceStore {
   complete(
     mints: string[],
     owner: string,
-    prices: ReadonlyMap<string, DisplayPrice>
+    prices: ReadonlyMap<string, DisplayPriceAnswer>
   ): Promise<void>;
 }
 
@@ -108,7 +107,7 @@ export class RedisDisplayPriceStore implements DisplayPriceStore {
       if (mint === undefined) throw new Error("Missing price lookup mint");
       const [state, raw] = row;
       if (state === "cached") {
-        const price = cachedPriceSchema.parse(JSON.parse(raw));
+        const price = displayPriceAnswerSchema.parse(JSON.parse(raw));
         if (price.expiresAt > Date.now()) result.prices.set(mint, price);
       } else if (state === "claimed") {
         result.claimed.push(mint);
@@ -133,7 +132,7 @@ export class RedisDisplayPriceStore implements DisplayPriceStore {
     );
   }
 
-  /** A 429 has no Retry-After. Pause the whole fleet for a sustained window plus jitter. */
+  /** Pause rejected credentials and 429s for a sustained window plus jitter. */
   async backOff(): Promise<void> {
     const client = await this.client;
     await client.set(
@@ -144,11 +143,11 @@ export class RedisDisplayPriceStore implements DisplayPriceStore {
     );
   }
 
-  /** Publishes successful values and releases only this lookup's leases. */
+  /** Publishes confirmed answers and releases only this lookup's leases. */
   async complete(
     mints: string[],
     owner: string,
-    prices: ReadonlyMap<string, DisplayPrice>
+    prices: ReadonlyMap<string, DisplayPriceAnswer>
   ): Promise<void> {
     const client = await this.client;
     const keys = this.mintKeys(mints);

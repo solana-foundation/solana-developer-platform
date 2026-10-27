@@ -23,7 +23,12 @@ import { MANAGED_RPC_ENV_KEYS } from "./managed-rpc-env-keys";
 import { currentClusterScope } from "./scope";
 import { withReadSocketRetry } from "./socket-retry";
 import { DEFAULT_RPC_REQUEST_TIMEOUT_MS, type SolanaRpc } from "./solana";
-import { emitRpcTelemetry, rpcProviderForEndpoint } from "./telemetry";
+import {
+  emitRpcTelemetry,
+  type RpcTelemetryEvent,
+  rpcFailureOutcome,
+  rpcProviderForEndpoint,
+} from "./telemetry";
 import { isTransientRpcError } from "./transient";
 
 /** How long a genesis match is trusted before re-probing: the node behind a URL can be repointed. */
@@ -324,23 +329,33 @@ interface RpcEndpoint {
 
 function emitAttemptTelemetry<TResponse>(
   endpoint: RpcEndpoint,
-  method: string,
+  rpcRequest: Parameters<RpcTransport>[0],
   outcome: AttemptOutcome<TResponse>,
   verdict: AttemptVerdict,
   hasNext: boolean,
   startedAt: number,
   genesisProbeRequired: boolean
 ): void {
+  let telemetryOutcome: RpcTelemetryEvent["outcome"];
+  if (outcome.ok) {
+    telemetryOutcome = servedJsonRpcError(outcome.response) === null ? "succeeded" : "failed";
+  } else {
+    telemetryOutcome = rpcFailureOutcome(rpcRequest.signal);
+  }
   const statusCode =
     !outcome.ok && isSolanaError(outcome.cause, SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR)
       ? outcome.cause.context.statusCode
       : undefined;
-  const common = { provider: endpoint.provider, cluster: endpoint.cluster, method };
+  const common = {
+    provider: endpoint.provider,
+    cluster: endpoint.cluster,
+    method: isJsonRpcPayload(rpcRequest.payload) ? rpcRequest.payload.method : "batch",
+  };
   emitRpcTelemetry({
     event: "sdp_rpc_attempt",
     surface: "managed_pool",
     ...common,
-    outcome: outcome.ok && servedJsonRpcError(outcome.response) === null ? "succeeded" : "failed",
+    outcome: telemetryOutcome,
     status_code: statusCode,
     duration_ms: performance.now() - startedAt,
     genesis_probe_required: genesisProbeRequired,
@@ -373,7 +388,6 @@ function createPoolTransport(endpoints: readonly RpcEndpoint[]) {
     for (let attempt = 0; ; attempt += 1) {
       const endpointIndex = attemptOrder[attempt];
       const endpoint = endpoints[endpointIndex];
-      const method = isJsonRpcPayload(rpcRequest.payload) ? rpcRequest.payload.method : "batch";
       const genesisProbeRequired =
         (genesisProofExpiry.get(endpoint.genesisProofKey) ?? 0) <= Date.now();
       const startedAt = performance.now();
@@ -382,7 +396,7 @@ function createPoolTransport(endpoints: readonly RpcEndpoint[]) {
       const isLastEndpoint = attempt === attemptOrder.length - 1;
       emitAttemptTelemetry(
         endpoint,
-        method,
+        rpcRequest,
         outcome,
         verdict,
         !isLastEndpoint,

@@ -16,7 +16,7 @@ export interface RpcTelemetryEvent {
   provider: string;
   cluster: SolanaCluster;
   method: string;
-  outcome?: "succeeded" | "failed" | "http_success_unverified";
+  outcome?: "succeeded" | "failed" | "aborted" | "http_success_unverified";
   status_code?: number;
   duration_ms?: number;
   sample_weight?: number;
@@ -165,6 +165,11 @@ function httpStatusOf(error: unknown): number | undefined {
     : undefined;
 }
 
+/** A caller's cancellation or deadline is separate from a provider failure. */
+export function rpcFailureOutcome(signal: AbortSignal | null | undefined): "aborted" | "failed" {
+  return signal?.aborted ? "aborted" : "failed";
+}
+
 function emitPinnedAttempt(
   endpoint: { provider: string; cluster: SolanaCluster },
   method: string,
@@ -270,7 +275,13 @@ export function withPinnedRpcTelemetry(transport: RpcTransport, endpointUrl: str
       );
       return response;
     } catch (error) {
-      emitPinnedAttempt(endpoint, method, "failed", startedAt, httpStatusOf(error));
+      emitPinnedAttempt(
+        endpoint,
+        method,
+        rpcFailureOutcome(request.signal),
+        startedAt,
+        httpStatusOf(error)
+      );
       throw error;
     }
   };
@@ -306,7 +317,9 @@ export async function fetchWithPinnedRpcTelemetry(
     }
     return response;
   } catch (error) {
-    emitPinnedAttempt(endpoint, method, "failed", startedAt, httpStatusOf(error));
+    const signal =
+      init?.signal === undefined && input instanceof Request ? input.signal : init?.signal;
+    emitPinnedAttempt(endpoint, method, rpcFailureOutcome(signal), startedAt, httpStatusOf(error));
     throw error;
   }
 }

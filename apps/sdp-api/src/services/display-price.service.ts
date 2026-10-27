@@ -5,7 +5,8 @@ import { logEvent } from "@/runtime/money-path-events";
 import { createDisplayPriceStore } from "@/services/display-price-store";
 import { createMintLookupCache } from "@/services/mint-lookup-cache";
 import {
-  type DisplayPrice,
+  type DisplayPriceAnswer,
+  displayPriceCoverage,
   fetchTokensPriceBatch,
   MAX_MINTS_PER_REQUEST,
   PRICE_CACHE_TTL_MS,
@@ -15,7 +16,7 @@ import type { Env } from "@/types/env";
 
 const LOOKUP_BUDGET_MS = 4_000;
 const MAX_REQUESTS_IN_FLIGHT = 2;
-const priceCache = createMintLookupCache<DisplayPrice>(PRICE_CACHE_TTL_MS, {
+const priceCache = createMintLookupCache<DisplayPriceAnswer>(PRICE_CACHE_TTL_MS, {
   expiresAtOf: (price) => price.expiresAt,
 });
 let activeRequests = 0;
@@ -54,11 +55,11 @@ async function fetchMissingPrices(
   env: Env,
   apiKey: string,
   mints: string[]
-): Promise<Map<string, DisplayPrice>> {
+): Promise<Map<string, DisplayPriceAnswer>> {
   const startedAt = Date.now();
   const signal = AbortSignal.timeout(LOOKUP_BUDGET_MS);
   const owner = randomUUID();
-  const prices = new Map<string, DisplayPrice>();
+  const prices = new Map<string, DisplayPriceAnswer>();
   let cursor = 0;
   let stopUpstream = false;
   let storeUnavailable = false;
@@ -70,7 +71,7 @@ async function fetchMissingPrices(
       const claim = await store.lookup(batch, stopUpstream ? null : owner);
       for (const [mint, price] of claim.prices) prices.set(mint, price);
       if (claim.claimed.length > 0) {
-        const fetched = new Map<string, DisplayPrice>();
+        const fetched = new Map<string, DisplayPriceAnswer>();
         let release: (() => void) | undefined;
         try {
           release = await acquireRequestSlot(signal);
@@ -85,11 +86,9 @@ async function fetchMissingPrices(
             }
             switch (result.status) {
               case "rate_limited":
-                stopUpstream = true;
-                await store.backOff();
-                break;
               case "unauthorized":
                 stopUpstream = true;
+                await store.backOff();
                 break;
               case "ok":
               case "failed":
@@ -154,8 +153,7 @@ async function fetchMissingPrices(
     event: "sdp_api_display_price_lookup",
     vendor: "tokens-xyz",
     requested_count: mints.length,
-    priced_count: prices.size,
-    unpriced_count: mints.length - prices.size,
+    ...displayPriceCoverage(prices, mints.length),
     budget_refused: budgetRefused,
     deadline_exceeded: signal.aborted,
     duration_ms: Date.now() - startedAt,
@@ -166,9 +164,9 @@ async function fetchMissingPrices(
 /**
  * Display-only USD estimates from Tokens.xyz, keyed by mainnet mint.
  *
- * Successful values are cached for 60 seconds locally and across replicas.
+ * Prices and confirmed absences are cached for 60 seconds across replicas.
  * Shared mint leases collapse concurrent misses; a shared per-key quota bounds
- * upstream traffic. Missing/failed values stay unpriced and are never cached.
+ * upstream traffic. Omitted, invalid and failed answers are never cached.
  * These estimates must never price a transfer, executable quote or token fee.
  *
  * @param env - API environment with a Tokens server credential and shared Redis.
@@ -198,7 +196,11 @@ export async function fetchDisplayUsdPrices(
   const prices = new Map<string, number>();
   const now = Date.now();
   for (const [mint, price] of snapshots) {
-    if (price.expiresAt > now && snapshotAgeIsAllowed(price.snapshotFetchedAt, now)) {
+    if (
+      price.kind === "priced" &&
+      price.expiresAt > now &&
+      snapshotAgeIsAllowed(price.snapshotFetchedAt, now)
+    ) {
       prices.set(mint, price.usdPrice);
     }
   }
