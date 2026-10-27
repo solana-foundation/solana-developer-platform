@@ -10,14 +10,10 @@
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
-import { toast } from "sonner";
 import { z } from "zod";
-import {
-  DVP_TOAST_POSITION,
-  dvpToastAction,
-} from "@/app/dashboard/[projectId]/markets/dvp/dvp-action-toast";
+import { dvpSuccessToast } from "@/app/dashboard/[projectId]/markets/dvp/dvp-action-toast";
 import { freshDvpIdempotencyKey } from "@/app/dashboard/[projectId]/markets/dvp/dvp-idempotency-key";
-import { dvpErrorEnvelopeSchema } from "@/app/dashboard/[projectId]/markets/dvp/dvp-trade";
+import { readDvpErrorEnvelope } from "@/app/dashboard/[projectId]/markets/dvp/dvp-trade";
 import { useTranslations } from "@/i18n/provider";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
@@ -126,10 +122,10 @@ export function useDvpCreateSubmit(cluster: SolanaCluster): DvpCreateSubmit {
       // Status before body. A non-2xx response carries an error envelope, not
       // a trade, and reading it as one would navigate to `undefined`.
       if (!response.ok) {
-        const failure = dvpErrorEnvelopeSchema.safeParse(await response.json().catch(() => null));
+        const failure = readDvpErrorEnvelope(await response.json().catch(() => null));
         setError(
-          failure.success
-            ? failure.data.error.message
+          failure
+            ? failure.message
             : t("DashboardMarkets.dvp.actionFailed", { status: String(response.status) })
         );
         return;
@@ -150,10 +146,7 @@ export function useDvpCreateSubmit(cluster: SolanaCluster): DvpCreateSubmit {
       // reason it opened already stated. Creating publishes two escrow
       // addresses and costs rent; arriving on a new page with no acknowledgement
       // leaves somebody guessing whether they just did that twice.
-      toast.success(t("DashboardMarkets.dvp.toastCreated"), {
-        ...DVP_TOAST_POSITION,
-        action: dvpToastAction(t, createSignature, cluster),
-      });
+      dvpSuccessToast(t, t("DashboardMarkets.dvp.toastCreated"), createSignature, cluster);
       router.push(href(`${DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}/${createdId}`));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Create failed.");

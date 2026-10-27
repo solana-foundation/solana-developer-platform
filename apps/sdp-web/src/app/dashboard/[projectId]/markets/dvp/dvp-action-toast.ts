@@ -1,4 +1,5 @@
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
+import { toast } from "sonner";
 import type { useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
 
@@ -25,4 +26,21 @@ export function dvpToastAction(
     label: t("DashboardMarkets.dvp.viewTransaction"),
     onClick: () => window.open(explorerTxUrl(signature, cluster), "_blank", "noopener,noreferrer"),
   };
+}
+
+/**
+ * The success toast every DvP action lands: the shared corner position and the
+ * transaction action, so a confirmation reads the same everywhere the product
+ * says a thing was done.
+ */
+export function dvpSuccessToast(
+  t: ReturnType<typeof useTranslations>,
+  message: string,
+  signature: string | null,
+  cluster: SolanaCluster
+): void {
+  toast.success(message, {
+    ...DVP_TOAST_POSITION,
+    action: dvpToastAction(t, signature, cluster),
+  });
 }

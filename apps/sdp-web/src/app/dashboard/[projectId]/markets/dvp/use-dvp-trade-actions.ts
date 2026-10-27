@@ -29,9 +29,9 @@ import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
 import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
-import { DVP_TOAST_POSITION, dvpToastAction } from "./dvp-action-toast";
+import { DVP_TOAST_POSITION, dvpSuccessToast } from "./dvp-action-toast";
 import { freshDvpIdempotencyKey } from "./dvp-idempotency-key";
-import { dvpErrorEnvelopeSchema } from "./dvp-trade";
+import { readDvpErrorEnvelope } from "./dvp-trade";
 
 export type DvpTradeActionName = "settle" | "cancel" | "fund" | "reclaim";
 
@@ -206,21 +206,20 @@ export function useDvpTradeActions(tradeId: string, cluster: SolanaCluster): Dvp
 
   /** Plain copy for a refusal the dashboard can name, else the API's own message. */
   function refusalMessage(body: unknown, status: number, symbol: string | null): string {
-    const envelope = dvpErrorEnvelopeSchema.safeParse(body);
-    if (!envelope.success) {
+    const failure = readDvpErrorEnvelope(body);
+    if (!failure) {
       return t("DashboardMarkets.dvp.actionFailed", { status: String(status) });
     }
-    const reasonCode = envelope.data.error.details?.reason;
-    const legReason = legRefusalReasonSchema.safeParse(reasonCode);
+    const legReason = legRefusalReasonSchema.safeParse(failure.reason);
     if (legReason.success) {
       const copy = LEG_REFUSAL_MESSAGE[legReason.data];
       return symbol === null ? t(copy.withoutSymbol) : t(copy.withSymbol, { symbol });
     }
-    const closeReason = closeRefusalReasonSchema.safeParse(reasonCode);
+    const closeReason = closeRefusalReasonSchema.safeParse(failure.reason);
     if (closeReason.success) {
       return t(CLOSE_REFUSAL_MESSAGE[closeReason.data]);
     }
-    return envelope.data.error.message;
+    return failure.message;
   }
 
   async function act(...call: DvpTradeActionCall) {
@@ -263,10 +262,7 @@ export function useDvpTradeActions(tradeId: string, cluster: SolanaCluster): Dvp
       // succeed and then say nothing, leaving the page to catch up on the
       // reconciler's next sweep. A refresh is not an answer. A close that went
       // out but has not confirmed says sent, not done.
-      toast.success(t(success.message), {
-        ...DVP_TOAST_POSITION,
-        action: dvpToastAction(t, success.signature, cluster),
-      });
+      dvpSuccessToast(t, t(success.message), success.signature, cluster);
       router.refresh();
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "Request failed.";

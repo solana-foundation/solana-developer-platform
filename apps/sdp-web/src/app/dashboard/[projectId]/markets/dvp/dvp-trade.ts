@@ -54,6 +54,21 @@ export const dvpErrorEnvelopeSchema = z.object({
   }),
 });
 
+/**
+ * The one read of a DvP refusal body: `null` when the body is not the error
+ * envelope — a proxy's error page reads as null, and every caller tolerates a
+ * body that fails to parse as JSON — else the message and, when the refusal is
+ * a structured one, its reason code. Every DvP action hook reads refusals
+ * through this so a body-shape change lands once.
+ */
+export function readDvpErrorEnvelope(
+  body: unknown
+): { message: string; reason: string | undefined } | null {
+  const envelope = dvpErrorEnvelopeSchema.safeParse(body);
+  if (!envelope.success) return null;
+  return { message: envelope.data.error.message, reason: envelope.data.error.details?.reason };
+}
+
 /** One side of a trade as the API resolves it for the caller. */
 export interface DvpPartyRef {
   address: string;

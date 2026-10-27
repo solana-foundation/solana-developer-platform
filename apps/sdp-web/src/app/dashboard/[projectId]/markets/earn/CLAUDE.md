@@ -335,6 +335,16 @@ nothing else; the program create still sends the body `requestId` form.
   strike and provider settlement. A held par intermediate opens straight into
   the par route over it (`parSource: "intermediate"`, Treasury's "Redeem
   wYLDS"), since no other exit can redeem it.
+- `earn-vault-async-withdrawal-flow.ts` — the queued-withdraw and par-redemption
+  modals' shared machinery, one copy on purpose (same reasoning as the
+  slippage floor): the step helpers, `freshCancelRecord` (a confirmed cancel
+  wins only until a poll reports a record at least as fresh — compared as
+  instants, since mixed fractional-seconds ISO formatting could order two
+  strings against their true order), the preview/submission hooks and the
+  settled-request view (cancel shows whenever the request is cancelable —
+  queued by default, par per its terms). Per-flow copy stays in each modal
+  (`parRedemptionSteps`); `earn-preview-blocking-issues.tsx` is the one
+  preview-blocking warning box both render.
 - `earn-vault-withdrawal-requests-card.tsx` — durable queued-request recovery.
   Its discovery read asks the server for `settled=false`, then polls request
   detail through terminal state. An expired request exposes an idempotent cancel
