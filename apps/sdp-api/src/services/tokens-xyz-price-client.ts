@@ -63,8 +63,7 @@ export function snapshotAgeIsAllowed(fetchedAt: number, now: number): boolean {
   return ageMs >= -MAX_CLOCK_SKEW_MS && ageMs <= MAX_SNAPSHOT_AGE_MS;
 }
 
-function parseSnapshots(body: unknown, mints: string[]) {
-  const rows = snapshotBodySchema.parse(body);
+function parseSnapshots(rows: z.infer<typeof snapshotBodySchema>, mints: string[]) {
   const requested = new Set(mints);
   const seen = new Set<string>();
   const prices = new Map<string, DisplayPriceAnswer>();
@@ -151,8 +150,10 @@ export async function fetchTokensPriceBatch(
       await response.body?.cancel();
       throw new Error("Tokens market snapshots request failed");
     }
-    const body: unknown = JSON.parse(await readProviderBody(response, MAX_RESPONSE_BYTES));
-    const { prices, details } = parseSnapshots(body, mints);
+    const rows = snapshotBodySchema.parse(
+      JSON.parse(await readProviderBody(response, MAX_RESPONSE_BYTES))
+    );
+    const { prices, details } = parseSnapshots(rows, mints);
     logVendorCallSuccess(VENDOR, OPERATION, startedAt, {
       boundary: "upstream_http",
       http_status: response.status,

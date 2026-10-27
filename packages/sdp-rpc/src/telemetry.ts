@@ -106,10 +106,6 @@ function pinnedEndpoint(endpointUrl: string): { provider: string; cluster: Solan
   return { provider: scope.provider, cluster: scope.cluster };
 }
 
-function rpcMethod(payload: unknown): string {
-  return isJsonRpcPayload(payload) ? payload.method : "batch";
-}
-
 // Inspect only the envelope. RPC result payloads stay opaque to telemetry.
 const rpcEnvelopeStateSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("error") }),
@@ -159,9 +155,9 @@ function pinnedResponseOutcome(
   return outcome;
 }
 
-function httpStatusOf(error: unknown): number | undefined {
-  return isSolanaError(error, SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR)
-    ? error.context.statusCode
+function httpStatusOf(cause: unknown): number | undefined {
+  return isSolanaError(cause, SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR)
+    ? cause.context.statusCode
     : undefined;
 }
 
@@ -281,7 +277,7 @@ export function withPinnedRpcTelemetry(transport: RpcTransport, endpointUrl: str
   return async <TResponse>(request: Parameters<RpcTransport>[0]) => {
     const endpoint = pinnedEndpoint(endpointUrl);
     if (!endpoint) return transport<TResponse>(request);
-    const method = rpcMethod(request.payload);
+    const method = isJsonRpcPayload(request.payload) ? request.payload.method : "batch";
     const startedAt = performance.now();
     try {
       const response = await transport<TResponse>(request);
@@ -322,7 +318,7 @@ export async function fetchWithPinnedRpcTelemetry(
       payload = null;
     }
   }
-  const method = rpcMethod(payload);
+  const method = isJsonRpcPayload(payload) ? payload.method : "batch";
   const startedAt = performance.now();
   try {
     const response = await fetch(input, init);
