@@ -434,6 +434,7 @@ async function status(
   );
 }
 
+/** Output is one JSON line on stdout, so a Cloud Run execution logs it as one entry. */
 runWithSystemDatabaseIdentity("script:sponsorship-budget", async () => {
   const command = parseSponsorshipBudgetCommand(readCommandLine());
   const env = getProcessEnv();
@@ -442,11 +443,11 @@ runWithSystemDatabaseIdentity("script:sponsorship-budget", async () => {
   const redis = new SponsorshipBudgetRedis(env);
   if (command.command === "status") {
     const statuses = await status(db, repository, redis, command.network);
-    console.log(JSON.stringify(statuses, null, 2));
+    console.log(JSON.stringify(statuses));
     if (statuses.some((policy) => !policy.inSync)) process.exitCode = 2;
     return;
   }
-  console.log(JSON.stringify(await planAndApply(db, repository, redis, command), null, 2));
+  console.log(JSON.stringify(await planAndApply(db, repository, redis, command)));
 })
   .catch((error) => {
     console.error(error instanceof Error ? error.message : error);
