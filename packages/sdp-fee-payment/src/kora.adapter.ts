@@ -442,6 +442,12 @@ function mapKoraErrorCode(code: number): import("./port").FeePaymentErrorCode {
     case -32002: // UnsupportedFeeToken
     case -32004: // InvalidRequest
     case -32032: // Unauthorized
+    // SerializationError: Kora could not parse the transaction or its simulated
+    // inner instructions. Observed for an inner Token-2022 TransferChecked that
+    // carries transfer-hook accounts ("Missing field 'authority'", Veda queued
+    // withdrawals), where every retry is refused, so it is treated as a verdict
+    // on these bytes. Nothing was signed either way.
+    case -32092:
       return "PROVIDER_REJECTED";
     case -32600: // JSON-RPC invalid request
     case -32602: // JSON-RPC invalid params
@@ -453,6 +459,13 @@ function mapKoraErrorCode(code: number): import("./port").FeePaymentErrorCode {
     case -32030: // RateLimitExceeded
     case -32031: // UsageLimitExceeded
       return "RATE_LIMITED";
+    // ConfigError: this Kora deployment cannot serve the request until its
+    // configuration changes. An outage, not a verdict on these bytes, so it
+    // stays on the provider-unavailable path operators alert on.
+    case -32091:
+      return "PROVIDER_NOT_AVAILABLE";
+    // Includes -32090 InternalServerError and -32093 RpcError (Kora's own
+    // upstream read): transient, so a retry may succeed.
     default:
       return "NETWORK_ERROR";
   }

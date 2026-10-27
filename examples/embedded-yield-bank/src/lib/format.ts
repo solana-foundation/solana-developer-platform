@@ -5,6 +5,25 @@ export function currencyPrefix(symbol: string): string {
   return USD_STABLECOINS.has(symbol) ? "$" : "";
 }
 
+/** The unsigned digits a money figure renders with: sub-cent values get four places. */
+function displayDigits(magnitude: number): string {
+  return new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: magnitude > 0 && magnitude < 0.01 ? 4 : 2,
+  }).format(magnitude);
+}
+
+/**
+ * Whether a figure renders as zero, so it may carry no sign: a vault's
+ * rounding leaves earnings like -0.000002 that must not read as a loss.
+ */
+export function roundsToZero(value: string): boolean {
+  const amount = Number(value);
+  return (
+    Number.isFinite(amount) && !/[1-9]/.test(displayDigits(Math.abs(amount)))
+  );
+}
+
 /**
  * Bank-style money. Dollar stablecoins render as dollars; anything else keeps
  * its ticker so the number is never misread.
@@ -16,12 +35,14 @@ export function formatAmount(
 ): string {
   const amount = Number(value);
   if (!Number.isFinite(amount)) return "—";
-  const magnitude = Math.abs(amount);
-  const digits = new Intl.NumberFormat("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: magnitude > 0 && magnitude < 0.01 ? 4 : 2,
-  }).format(magnitude);
-  const sign = amount < 0 ? "-" : options?.signed && amount > 0 ? "+" : "";
+  const digits = displayDigits(Math.abs(amount));
+  const sign = roundsToZero(value)
+    ? ""
+    : amount < 0
+      ? "-"
+      : options?.signed && amount > 0
+        ? "+"
+        : "";
   return USD_STABLECOINS.has(symbol)
     ? `${sign}$${digits}`
     : `${sign}${digits} ${symbol}`;

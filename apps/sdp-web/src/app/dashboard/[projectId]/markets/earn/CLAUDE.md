@@ -193,10 +193,12 @@ nothing else; the program create still sends the body `requestId` form.
   withdraw, queued withdraw).
   "Copy all code" copies the whole module (`buildEarnServerIntegration`), not
   just the active tab. The snippets remain server-only and the page says so in
-  an info callout that links to the API keys page (a Developer key includes
-  earn:read and earn:write), because the module they document carries a secret
-  API key. The module needs only the strategy id and that key: no strategy
-  object, no `sourceTokenMint` on a direct deposit.
+  an info callout that links to the API keys page, because the module they
+  document carries a secret API key. Keys hold explicit grants, not roles: the
+  module needs Earn Read and Execute, plus Manage, which the queued-withdrawal
+  cancellation build (`withdrawal-request-cancel-transactions`) requires. The
+  module needs only the strategy id and that key: no strategy object, no
+  `sourceTokenMint` on a direct deposit.
 - `earn-integration-snippets.ts` — the snippet source,
   `buildEarnIntegrationSections(strategy)` (+ `buildEarnServerIntegration`,
   the sections joined). Pure string building so the exact wire contract is

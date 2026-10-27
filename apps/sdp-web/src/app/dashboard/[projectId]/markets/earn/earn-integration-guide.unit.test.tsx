@@ -156,14 +156,15 @@ describe("EarnIntegrationGuide", () => {
       within(serverFlow).getByRole("button", { name: "Client" }).getAttribute("aria-pressed")
     ).toBe("true");
     expect(screen.getAllByText("embedded-yield.ts")).toHaveLength(1);
-    // The key callout says which key, says it covers Earn, and links to where it
-    // is made. A warning with no way to act on it is not guidance.
+    // The key callout names the Earn grants the module needs, including Manage
+    // for queued-withdrawal recovery, and links to where keys are made. A
+    // warning with no way to act on it is not guidance.
     expect(
       screen.getByText(
-        /for this project \(it includes earn:read and earn:write\)\. Keep it on your server, never in the client\./
+        /for this project with Earn Read, Execute and Manage \(Manage recovers queued withdrawals\)\. Keep it on your server, never in the client\./
       )
     ).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Developer API key" }).getAttribute("href")).toBe(
+    expect(screen.getByRole("link", { name: "API key" }).getAttribute("href")).toBe(
       "/dashboard/prj_test_sandbox/api-keys"
     );
 

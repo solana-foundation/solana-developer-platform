@@ -224,7 +224,8 @@ describe("EarnVaultQueuedWithdrawModal", () => {
 
     const settings = screen.getByText("Payout and timing").closest("details");
     expect(settings?.open).toBe(false);
-    expect(screen.getByText("0.25% less · 6 minutes to complete")).toBeTruthy();
+    // The summary names maturity (60 s), not the 6-minute solver window after it.
+    expect(screen.getByText("0.25% less · paid after about 1 minute")).toBeTruthy();
     fireEvent.click(screen.getByText("Payout and timing"));
     expect(settings?.open).toBe(true);
     expect((screen.getByLabelText("Accept less (%)") as HTMLInputElement).value).toBe("0.25");

@@ -51,7 +51,7 @@ import {
 } from "./earn-vault-slippage";
 import { VaultQuoteNotices, VaultSlippageSection } from "./earn-vault-slippage-section";
 import {
-  earnVaultPositionStatusLabels,
+  earnVaultWithdrawalPositionStatusLabels,
   earnVaultWithdrawalUiState,
   vaultOutcomeTone,
 } from "./earn-vault-ui-state";
@@ -327,10 +327,7 @@ function WithdrawalResult({
   const sharedStatus =
     settlement === "provider_order"
       ? null
-      : earnVaultPositionStatusLabels(
-          earnVaultWithdrawalUiState(withdrawal.status).positionStatus,
-          t
-        );
+      : earnVaultWithdrawalPositionStatusLabels(withdrawal, position.shares, t);
   const status = sharedStatus?.label ?? copy.status;
   const statusVariant: BadgeVariant = sharedStatus?.variant ?? copy.statusVariant;
   const processing = withdrawal.status === "requested" || withdrawal.status === "submitted";

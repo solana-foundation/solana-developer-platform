@@ -430,6 +430,62 @@ describe("external-wallet position reads", () => {
     );
   });
 
+  it("summary counts no holding the live read proves empty, such as a deposit that has not landed", async () => {
+    // seedPosition leaves a `requested` deposit, so close-out keeps OWNER_A's
+    // zero-share holdings open; they must not read as live $0 positions.
+    await seedPosition({
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdc",
+      tokenMint: USDC,
+      label: "USDC vault",
+    });
+    await seedPosition({
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdt",
+      tokenMint: USDT,
+      label: "USDT vault",
+    });
+    await seedPosition({
+      ownerAddress: OWNER_B,
+      vaultAddress: "vault-usdc",
+      tokenMint: USDC,
+      label: "USDC vault",
+    });
+    readVaultPositions.mockImplementation(
+      async (_ctx: unknown, input: { owner: string; providerReferences: string[] }) =>
+        input.providerReferences.map((providerReference) => ({
+          providerReference,
+          owner: input.owner,
+          cluster: "devnet",
+          shares: input.owner === OWNER_A ? "0" : "1",
+          withdrawableShares: input.owner === OWNER_A ? "0" : "1",
+          tokenValue: input.owner === OWNER_A ? "0" : "20.2",
+          tokenMint: providerReference === "vault-usdt" ? USDT : USDC,
+          shareMint: SHARE,
+        }))
+    );
+
+    const response = await get(
+      "/v1/earn/external-wallet/positions/summary?includeOwnerAddresses=true&includePositions=true"
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { data: EarnExternalWalletPositionSummaryResponse };
+
+    expect(body.data.summary).toMatchObject({
+      walletCount: 1,
+      positionCount: 1,
+      unavailablePositionCount: 0,
+      totalsByToken: [{ tokenMint: USDC, walletCount: 1, positionCount: 1, tokenValue: "20.2" }],
+      totalsByStrategy: [
+        { label: "USDC vault", ownerAddresses: [OWNER_B], walletCount: 1, positionCount: 1 },
+      ],
+    });
+    expect(body.data.summary.totalsByStrategy).toHaveLength(1);
+    expect(body.data.summary.totalsByStrategy[0]?.positions).toEqual([
+      expect.objectContaining({ ownerAddress: OWNER_B, tokenValue: "20.2" }),
+    ]);
+  });
+
   it("coalesces concurrent project-wide live portfolio reads", async () => {
     const projectScopeReads = vi.spyOn(auth, "requireProjectId");
     await seedPosition({

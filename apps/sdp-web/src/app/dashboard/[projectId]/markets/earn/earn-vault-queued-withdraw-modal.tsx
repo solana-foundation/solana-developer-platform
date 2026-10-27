@@ -662,6 +662,10 @@ function QueueDetails({
                 {termsValid
                   ? t("DashboardEarn.queuedWithdraw.settingsSummary", {
                       discount: bpsToPercent(discountBps),
+                      // Localized catalogs keep `{duration}` until they re-translate.
+                      maturity:
+                        formatDurationSeconds(terms.secondsToMaturity, locale) ??
+                        t("DashboardEarn.unavailable"),
                       duration:
                         formatDurationSeconds(deadlineSeconds, locale) ??
                         t("DashboardEarn.unavailable"),

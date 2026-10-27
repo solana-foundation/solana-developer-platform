@@ -213,6 +213,12 @@ describe("KoraAdapter sign refusals", () => {
   it("maps each Kora refusal of a sign to its FeePaymentError code", async () => {
     const refusals: Array<[Error, FeePaymentErrorCode]> = [
       [new Error("RPC Error -32090: server exploded"), "NETWORK_ERROR"],
+      [new Error("Kora Error -32091: Config error: fee payer policy"), "PROVIDER_NOT_AVAILABLE"],
+      [
+        new Error("Kora Error -32092: Serialization error: Missing field 'authority'"),
+        "PROVIDER_REJECTED",
+      ],
+      [new Error("Kora Error -32093: RPC error: connection reset"), "NETWORK_ERROR"],
       [new Error("RPC Error -32000: Invalid transaction: simulation failed"), "PROVIDER_REJECTED"],
       [
         new Error("Kora Error -32001: Validation error: mutable mint authority"),

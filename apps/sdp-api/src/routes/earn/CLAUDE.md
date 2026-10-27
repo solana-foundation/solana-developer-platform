@@ -1346,6 +1346,13 @@ dashboard BFF (`sdp-web` `.../positions/summary/route.ts`) is the one caller
 that opts in, pinned by its unit test. Partner docs steer analytics keys to the
 default shape and detailed surfaces to the explicit opt-in.
 
+Every count and total in the summary skips a holding whose live read is
+exactly empty (`isEarnVaultHoldingEmpty`): a deposit that has not landed, or an
+exit whose close-out waits on an unsettled movement, holds nothing and must
+not read as a live $0 position. An unreadable holding still counts, as
+unavailable, never as zero. The per-owner positions read still returns such a
+holding, so a partner's customer view can show it pending.
+
 Simultaneous summary calls for the same organization, project and environment
 share only their in-flight DB scan and live hydration. This is not a cache: the
 entry is removed on settlement, and each caller applies its own detail/owner
