@@ -12,7 +12,7 @@ describe("WizardStepProgress", () => {
     );
 
     expect(markup).toMatch(
-      /<span[^>]*role="status"[^>]*><span class="sr-only">Review, <\/span>Step 2 of 4<\/span>/
+      /<span[^>]*role="status"[^>]*><span class="sr-only">Review, <\/span><span>Step 2 of 4<\/span><\/span>/
     );
   });
 
@@ -21,6 +21,6 @@ describe("WizardStepProgress", () => {
       <WizardStepProgress currentStep={4} progressLabel="Step 5 of 4" steps={STEPS} />
     );
 
-    expect(markup).toMatch(/<span[^>]*role="status"[^>]*>Step 5 of 4<\/span>/);
+    expect(markup).toMatch(/<span[^>]*role="status"[^>]*><span>Step 5 of 4<\/span><\/span>/);
   });
 });
