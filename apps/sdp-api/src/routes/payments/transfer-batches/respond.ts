@@ -2,7 +2,6 @@ import type {
   PaymentTransferBatchRow,
   PaymentTransferRecipientRow,
 } from "@/db/repositories/payment-transfer-batches.repository";
-import type { PaymentTransferRow as TransferRow } from "@/db/repositories/payments.repository";
 import { AppError } from "@/lib/errors";
 import {
   type AppContext,
@@ -60,18 +59,6 @@ function mapRecipientRow(row: PaymentTransferRecipientRow) {
 }
 
 /**
- * Maps a chunk transfer for a batch response. The signed transaction bytes
- * stay server-side; readers get the signature.
- *
- * @param row - Chunk transfer row.
- * @returns The transfer without `serializedTx`.
- */
-function mapBatchTransferRow(row: TransferRow) {
-  const { serializedTx: _serializedTx, ...transfer } = mapTransferRow(row);
-  return transfer;
-}
-
-/**
  * Assembles the full batch response — batch, recipients, and chunk transfers
  * — using one batched transfer lookup.
  *
@@ -113,6 +100,6 @@ export async function buildTransferBatchResponse(
   return {
     batch: mapBatchRow(batch),
     recipients: recipients.rows.map(mapRecipientRow),
-    transfers: transferRows.map(mapBatchTransferRow),
+    transfers: transferRows.map(mapTransferRow),
   };
 }

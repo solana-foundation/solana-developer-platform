@@ -667,7 +667,13 @@ describe("payment transfer batches", () => {
           transactionCount: number;
         };
         recipients: Array<{ status: string; transferId: string | null }>;
-        transfers: Array<{ id: string; type: string; status: string; signature: string | null }>;
+        transfers: Array<{
+          id: string;
+          type: string;
+          status: string;
+          signature: string | null;
+          serializedTx: string | null;
+        }>;
       };
     };
     expect(body.data.batch).toMatchObject({
@@ -686,7 +692,7 @@ describe("payment transfer batches", () => {
     );
     expect(body.data.transfers.every((transfer) => transfer.type === "transfer_batch")).toBe(true);
     expect(body.data.transfers.every((transfer) => transfer.status === "processing")).toBe(true);
-    expect(body.data.transfers.every((transfer) => !("serializedTx" in transfer))).toBe(true);
+    expect(body.data.transfers.every((transfer) => transfer.serializedTx === null)).toBe(true);
     expect(signingOutcomeMock).toHaveBeenCalledTimes(2);
     expect(confirmTransactionMock).not.toHaveBeenCalled();
 
@@ -782,14 +788,12 @@ describe("payment transfer batches", () => {
       env
     );
     expect(detailRes.status).toBe(200);
-    // `serializedTx: z.never()` fails the parse if a chunk carries signed bytes (HOO-2344).
+    // A chunk's signed bytes stay server-side; readers get the signature (HOO-2344).
     const detailBody = z
       .object({
         data: z.object({
           recipients: z.array(z.unknown()),
-          transfers: z.array(
-            z.object({ signature: z.string().min(1), serializedTx: z.never().optional() })
-          ),
+          transfers: z.array(z.object({ signature: z.string().min(1), serializedTx: z.null() })),
         }),
       })
       .parse(await detailRes.json());

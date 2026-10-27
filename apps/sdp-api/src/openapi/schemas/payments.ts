@@ -1635,13 +1635,9 @@ export const transferBatchResponseSchema = z
     recipients: z.array(transferBatchRecipientSchema).optional().openapi({
       description: "Recipient rows for the batch, included on detail responses.",
     }),
-    transfers: z
-      .array(transferSchema.omit({ serializedTx: true }))
-      .optional()
-      .openapi({
-        description:
-          "Payment transfer chunk records associated with this batch. Carry the signature, never the signed transaction bytes.",
-      }),
+    transfers: z.array(transferSchema).optional().openapi({
+      description: "Payment transfer chunk records associated with this batch.",
+    }),
   })
   .openapi({ description: "Transfer batch response payload." });
 
