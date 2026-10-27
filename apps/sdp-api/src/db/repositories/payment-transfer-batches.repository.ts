@@ -253,6 +253,13 @@ export interface PaymentTransferBatchesRepository {
     projectId: string;
     idempotencyKey: string;
   }): Promise<PaymentTransferBatchRow | null>;
+  /** The batch holding a payout run's externalId on one source wallet (HOO-2335). */
+  findTransferBatchByExternalId(input: {
+    organizationId: string;
+    projectId: string;
+    sourceCustodyWalletId: string;
+    externalId: string;
+  }): Promise<PaymentTransferBatchRow | null>;
   upsertTransferBatch(input: UpsertPaymentTransferBatchInput): Promise<PaymentTransferBatchRow>;
   updateTransferBatch(
     input: UpdatePaymentTransferBatchInput

@@ -454,7 +454,8 @@ export const createTransferBatchRequestSchema = createTransferBatchSchemaBase
       example: "prj_example",
     }),
     externalId: withOpenApi(createTransferBatchSchemaBase.shape.externalId, {
-      description: "Caller-provided batch correlation ID. Not used as an idempotency key.",
+      description:
+        "Your ID for this payout run, unique per project and source wallet. A second batch with the same `externalId` on the same wallet returns `409 CONFLICT` with the existing batch's `batchId` in `error.details`, and pays nothing. Optional, but without it nothing on the server stops a resend under a new Idempotency-Key from paying the same recipients twice. It does not replace the Idempotency-Key.",
       example: "payroll_2026_06_30",
     }),
     sourceCustodyWalletId: withOpenApi(createTransferBatchSchemaBase.shape.sourceCustodyWalletId, {

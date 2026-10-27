@@ -223,7 +223,9 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Create transfer batch",
     operationId: "createPaymentTransferBatch",
     description:
-      "Executes an outbound transfer batch from one exact SDP Wallet ID, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records. Requires an Idempotency-Key: a retry with the same key and request returns the original batch without another on-chain submission. Recipient order does not change the request.",
+      "Executes an outbound transfer batch from one exact SDP Wallet ID, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records. Requires an Idempotency-Key: a retry with the same key and request returns the original batch without another on-chain submission. Recipient order does not change the request. " +
+      "An `externalId` already used by a batch on the same project and source wallet returns `409 CONFLICT` with that batch's `batchId` in `error.details`; nothing is sent. " +
+      "To recover from a partial failure, read the batch with `GET /v1/payments/transfer-batches/{batchId}` and send only its `failed` recipients in a new batch, with a new `externalId` and a new Idempotency-Key. Never resend a recipient still `pending` or `processing`: its transfer may still land.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: movementKeyHeaders,

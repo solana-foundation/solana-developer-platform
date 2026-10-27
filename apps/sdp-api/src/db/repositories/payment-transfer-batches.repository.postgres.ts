@@ -1,4 +1,5 @@
 import type { DatabaseClient as AppDb, DatabaseExecutor } from "@/db/client";
+import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import { internalError } from "@/lib/errors";
 import { parseNullableCustodyWalletId } from "./payment-execution-identity";
 import {
@@ -27,6 +28,25 @@ import {
   type UpsertPaymentTransferBatchInput,
   type UpsertPaymentTransferRecipientInput,
 } from "./payment-transfer-batches.repository";
+
+/**
+ * Which unique index a batch insert lost on: its Idempotency-Key (migration
+ * 0026) or its payout run's externalId on the source wallet (0184). Null for
+ * any other error.
+ */
+export function transferBatchUniqueViolation(
+  error: unknown
+): "idempotency_key" | "external_id" | null {
+  if (!isPostgresUniqueViolation(error)) return null;
+  switch ((error as { constraint?: string }).constraint) {
+    case "idx_payment_transfer_batches_org_project_idempotency_key":
+      return "idempotency_key";
+    case "idx_payment_transfer_batches_project_wallet_external_id":
+      return "external_id";
+    default:
+      return null;
+  }
+}
 
 function mapPaymentTransferBatchRow(row: Record<string, unknown>): PaymentTransferBatchRow {
   return {
@@ -266,6 +286,26 @@ export function createPostgresPaymentTransferBatchesRepository(
              AND idempotency_key = ?`
         )
         .bind(organizationId, projectId, idempotencyKey)
+        .first<Record<string, unknown>>();
+
+      return row ? mapPaymentTransferBatchRow(row) : null;
+    },
+
+    async findTransferBatchByExternalId({
+      organizationId,
+      projectId,
+      sourceCustodyWalletId,
+      externalId,
+    }) {
+      const row = await db
+        .prepare(
+          `SELECT * FROM payment_transfer_batches
+           WHERE organization_id = ?
+             AND project_id = ?
+             AND source_custody_wallet_id = ?
+             AND external_id = ?`
+        )
+        .bind(organizationId, projectId, sourceCustodyWalletId, externalId)
         .first<Record<string, unknown>>();
 
       return row ? mapPaymentTransferBatchRow(row) : null;

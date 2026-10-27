@@ -1879,6 +1879,135 @@ describe("payment transfer batches", () => {
     expect(count).toEqual({ count: 2 });
   });
 
+  describe("batch externalId (HOO-2335)", () => {
+    async function seedOneRecipientBatch(externalId: string) {
+      const sourceSigner = await generateKeyPairSigner();
+      await updateSeededWalletPublicKey(sourceSigner.address);
+      createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
+      const signingOutcomeMock = vi.fn().mockResolvedValue(FIRST_SIGNATURE);
+      createKoraAdapterMock.mockReturnValue(ownedSubmissionAdapter(signingOutcomeMock));
+      const counterpartyId = await seedCounterparty(`batch_external_id_${externalId}`);
+      const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+        counterpartyId,
+        walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+      });
+      const send = (idempotencyKey: string) =>
+        app.request(
+          "/v1/payments/transfer-batches",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_API_KEY.raw}`,
+              "Idempotency-Key": idempotencyKey,
+            },
+            body: JSON.stringify({
+              externalId,
+              sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+              token: "SOL",
+              recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
+              options: { preflight: false },
+            }),
+          },
+          env
+        );
+      return { send, signingOutcomeMock, sourceSigner };
+    }
+
+    async function countBatches(): Promise<number> {
+      const row = await getDb(env)
+        .prepare(
+          "SELECT COUNT(*)::int AS count FROM payment_transfer_batches WHERE organization_id = ? AND project_id = ?"
+        )
+        .bind(TEST_ORG.id, TEST_PROJECT.id)
+        .first<{ count: number }>();
+      return required(row).count;
+    }
+
+    it("refuses a reused externalId under a new key with the existing batch, signing nothing", async () => {
+      const { send, signingOutcomeMock } = await seedOneRecipientBatch("payroll_reused");
+
+      const first = await send("batch-external-id-first");
+      expect(first.status).toBe(200);
+      const firstBody = (await first.json()) as { data: { batch: { id: string } } };
+      vi.clearAllMocks();
+
+      const resend = await send("batch-external-id-resend");
+
+      expect(resend.status).toBe(409);
+      expect(await resend.json()).toMatchObject({
+        error: {
+          code: "CONFLICT",
+          details: { batchId: firstBody.data.batch.id, externalId: "payroll_reused" },
+        },
+      });
+      // Refused before any chain read, signer or broadcast.
+      expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
+      expect(getRecentBlockhashMock).not.toHaveBeenCalled();
+      expect(signingOutcomeMock).not.toHaveBeenCalled();
+      expect(sendTransactionMock).not.toHaveBeenCalled();
+      expect(await countBatches()).toBe(1);
+    });
+
+    it("still replays a same-key retry of a batch with an externalId", async () => {
+      const { send, signingOutcomeMock } = await seedOneRecipientBatch("payroll_replayed");
+
+      const first = await send("batch-external-id-replay");
+      const retry = await send("batch-external-id-replay");
+
+      expect(first.status).toBe(200);
+      expect(retry.status).toBe(200);
+      expect(((await retry.json()) as { data: unknown }).data).toEqual(
+        ((await first.json()) as { data: unknown }).data
+      );
+      expect(signingOutcomeMock).toHaveBeenCalledTimes(1);
+      expect(await countBatches()).toBe(1);
+    });
+
+    it("refuses an externalId another batch takes after the early check, sending nothing", async () => {
+      const { send, signingOutcomeMock, sourceSigner } =
+        await seedOneRecipientBatch("payroll_raced");
+      let racer: { id: string } | undefined;
+      // The other request commits between this request's check and its insert.
+      createOrgSignerForCustodyWalletMock.mockImplementation(async () => {
+        const created = await batchesRepositoryPostgres
+          .createPostgresPaymentTransferBatchesRepository(getDb(env))
+          .createTransferBatchWithRecipients({
+            batch: {
+              organizationId: TEST_ORG.id,
+              projectId: TEST_PROJECT.id,
+              externalId: "payroll_raced",
+              sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+              sourceWalletId: TEST_WALLET_ID,
+              sourceAddress: sourceSigner.address,
+              token: "SOL",
+              status: "processing",
+              totalAmount: "0.1",
+              recipientCount: 0,
+              transactionCount: 0,
+              options: {},
+              initiatedByKeyId: null,
+              idempotencyKey: "another-request-key",
+              idempotencyFingerprint: "another-request-fingerprint",
+            },
+            recipients: [],
+          });
+        racer = created.batch;
+        return sourceSigner;
+      });
+
+      const response = await send("batch-external-id-raced");
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({
+        error: { code: "CONFLICT", details: { batchId: required(racer).id } },
+      });
+      expect(signingOutcomeMock).not.toHaveBeenCalled();
+      expect(sendTransactionMock).not.toHaveBeenCalled();
+      expect(await countBatches()).toBe(1);
+    });
+  });
+
   it.each([
     {
       label: "legacy SPL Token",

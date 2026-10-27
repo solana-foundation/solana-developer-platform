@@ -1,12 +1,14 @@
 import { getRecentBlockhash } from "@sdp/rpc/solana";
 import { getDb } from "@/db/client";
-import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import type {
   PaymentTransferBatchRow,
   PaymentTransferRecipientRow,
 } from "@/db/repositories/payment-transfer-batches.repository";
-import { createPostgresPaymentTransferBatchesRepository } from "@/db/repositories/payment-transfer-batches.repository.postgres";
-import { AppError, badRequest, internalError } from "@/lib/errors";
+import {
+  createPostgresPaymentTransferBatchesRepository,
+  transferBatchUniqueViolation,
+} from "@/db/repositories/payment-transfer-batches.repository.postgres";
+import { AppError, badRequest, conflict, internalError } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { type AuthorizeInput, getAuthorized } from "@/middleware/authorize";
 import {
@@ -48,6 +50,71 @@ async function respondToTransferBatchReplay(
 ) {
   const response = await buildTransferBatchResponse(c, batch, organizationId, projectId);
   return success(c, response);
+}
+
+/**
+ * A payout run's externalId already names a batch on this source wallet
+ * (HOO-2335, SDP-021 SA-2): sending it again under a new Idempotency-Key would
+ * pay that batch's recipients twice, so it is refused with the batch's id.
+ */
+function externalIdReused(holder: PaymentTransferBatchRow): AppError {
+  return conflict(
+    "A transfer batch with this externalId already exists for this source wallet. Read it with GET /v1/payments/transfer-batches/{batchId} and send only its failed recipients in a new batch with a new externalId.",
+    { batchId: holder.id, externalId: holder.external_id }
+  );
+}
+
+interface BatchWalletScope {
+  organizationId: string;
+  projectId: string;
+  sourceCustodyWalletId: string;
+}
+
+function findExternalIdHolder(c: AppContext, scope: BatchWalletScope, externalId: string) {
+  return getPaymentTransferBatchesRepository(c).findTransferBatchByExternalId({
+    ...scope,
+    externalId,
+  });
+}
+
+/**
+ * The batch insert lost on a unique index. A concurrent attempt under this
+ * request's key (a takeover) wrote its row first and can trip either index:
+ * the request answers from that row. A batch of another request that took the
+ * externalId after the early check refuses this one (409). Nothing was sent.
+ */
+async function answerLostBatchInsert(
+  c: AppContext,
+  error: unknown,
+  scope: BatchWalletScope,
+  idempotencyKey: string | null,
+  externalId: string | null
+) {
+  const violation = transferBatchUniqueViolation(error);
+  if (idempotencyKey && violation !== null) {
+    const replay = await getPaymentTransferBatchesRepository(c).findTransferBatchByIdempotency({
+      organizationId: scope.organizationId,
+      projectId: scope.projectId,
+      idempotencyKey,
+    });
+    if (replay) {
+      if (
+        replay.idempotency_fingerprint === null ||
+        !idempotencyFingerprintMatches(c, replay.idempotency_fingerprint)
+      ) {
+        // Another request's row: refused unstored, so that request's own retry
+        // is still answered from it.
+        markIdempotencyRecordMismatch(c);
+        throw new AppError("IDEMPOTENCY_KEY_REUSED");
+      }
+      return respondToTransferBatchReplay(c, replay, scope.organizationId, scope.projectId);
+    }
+  }
+  if (violation === "external_id" && externalId !== null) {
+    const holder = await findExternalIdHolder(c, scope, externalId);
+    if (holder) throw externalIdReused(holder);
+  }
+  throw error;
 }
 
 /**
@@ -127,7 +194,9 @@ export async function findTransferBatchRecordReplay(
  * The final batch status comes from the locked repository recompute — never
  * from in-memory state — so a reconciliation run that settles chunks during
  * the request cannot be overwritten with a stale status.
- * Replays idempotently by Idempotency-Key + payload fingerprint.
+ * Replays idempotently by Idempotency-Key + payload fingerprint, and refuses
+ * an externalId another batch on the source wallet holds (409) before it
+ * reads the chain or loads a signer; the unique index catches a race.
  *
  * @param c - Request context.
  * @returns JSON batch response with recipients and chunk transfers.
@@ -137,11 +206,24 @@ export async function createTransferBatch(
 ) {
   const body = c.req.valid("json");
   const authorized = getAuthorized<AuthorizedBatchRequest>(c);
-  const resolved = await resolveBatchMovement(body, authorized);
   // The credential-bound record key (ADR 0009), never the raw client key, and
   // the key layer's fingerprint, which canonicalizes the batch body.
   const idempotencyKey = getIdempotencyRecordKey(c) ?? null;
   const idempotencyFingerprint = getIdempotencyFingerprint(c) ?? null;
+  const externalId = body.externalId === undefined ? null : body.externalId;
+  const walletScope: BatchWalletScope = {
+    organizationId: authorized.scope.auth.organizationId,
+    projectId: authorized.projectId,
+    sourceCustodyWalletId: authorized.sourceWallet.id,
+  };
+  if (externalId !== null) {
+    const holder = await findExternalIdHolder(c, walletScope, externalId);
+    // A row under this request's own key is a takeover's: the insert answers it.
+    if (holder !== null && holder.idempotency_key !== idempotencyKey) {
+      throw externalIdReused(holder);
+    }
+  }
+  const resolved = await resolveBatchMovement(body, authorized);
 
   const feePayment = createSponsorshipFeePayment(
     c.env,
@@ -190,7 +272,7 @@ export async function createTransferBatch(
       batch: {
         organizationId: resolved.scope.auth.organizationId,
         projectId: resolved.projectId,
-        externalId: body.externalId === undefined ? null : body.externalId,
+        externalId,
         sourceCustodyWalletId: resolved.sourceWallet.id,
         sourceWalletId: resolved.sourceWallet.walletId,
         sourceAddress: resolved.sourceAddress,
@@ -221,32 +303,7 @@ export async function createTransferBatch(
     // The batch row exists under the key: any later answer is stored for its retries.
     markIdempotencyCommitted(c);
   } catch (error) {
-    if (idempotencyKey && isPostgresUniqueViolation(error)) {
-      // A concurrent attempt under this key (a takeover) wrote the row first.
-      const replay = await batchRepository.findTransferBatchByIdempotency({
-        organizationId: resolved.scope.auth.organizationId,
-        projectId: resolved.projectId,
-        idempotencyKey,
-      });
-      if (replay) {
-        if (
-          replay.idempotency_fingerprint === null ||
-          !idempotencyFingerprintMatches(c, replay.idempotency_fingerprint)
-        ) {
-          // Another request's row: refused unstored, so that request's own retry
-          // is still answered from it.
-          markIdempotencyRecordMismatch(c);
-          throw new AppError("IDEMPOTENCY_KEY_REUSED");
-        }
-        return respondToTransferBatchReplay(
-          c,
-          replay,
-          resolved.scope.auth.organizationId,
-          resolved.projectId
-        );
-      }
-    }
-    throw error;
+    return answerLostBatchInsert(c, error, walletScope, idempotencyKey, externalId);
   }
   const recipientsByIndex = new Map<number, PaymentTransferRecipientRow>(
     resolved.recipients.map((recipient, position) => [recipient.index, recipientRows[position]])

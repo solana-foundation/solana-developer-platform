@@ -125,6 +125,13 @@ transfer row was never sent. When a takeover or a retry past the 24 hours finds 
 answers; the pending-transfers job does the same for a batch over an hour old that no one retries.
 Neither resumes or re-sends: a recipient with a transfer row is settled from that row as before.
 
+The key dedupes one request; a batch's `externalId` dedupes the payout run (HOO-2335, SDP-021
+SA-2). It is unique per project and source wallet (migration 0184), so a run resent under a new
+key after a partial failure is refused with `409 CONFLICT` and the existing batch's id instead of
+paying its recipients again. The handler checks it before any chain read or signer, and the index
+catches a race. `externalId` is optional: a caller who omits it gets no server-side guard against
+paying a run twice beyond the key.
+
 Recurring payments carve this out: their cron resumes and completes a half-finished row (an
 `activating`, `canceling` or `resuming` schedule, or a collection in flight) from the signature
 its attempt recorded; it does not fail the row. Every step saves its signature and its blockhash's
