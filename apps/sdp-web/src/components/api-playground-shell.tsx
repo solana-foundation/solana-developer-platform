@@ -1335,14 +1335,17 @@ export function ApiPlaygroundShell({
   rightMessages = [],
 }: ApiPlaygroundShellProps) {
   const t = useTranslations();
-  const releaseChannel = useOptionalDashboardWorkspace()?.flags.releaseChannel;
-  const endpoints = useMemo(
-    () =>
+  const workspace = useOptionalDashboardWorkspace();
+  const releaseChannel = workspace?.flags.releaseChannel;
+  // A read-only member runs reads only; the API would refuse every other call.
+  const readsOnly = workspace?.dashboardAccess.capabilities.canWrite === false;
+  const endpoints = useMemo(() => {
+    const published =
       releaseChannel === undefined
         ? offeredEndpoints
-        : filterPlaygroundEndpointsToReleaseChannel(offeredEndpoints, releaseChannel),
-    [offeredEndpoints, releaseChannel]
-  );
+        : filterPlaygroundEndpointsToReleaseChannel(offeredEndpoints, releaseChannel);
+    return readsOnly ? published.filter((endpoint) => endpoint.method === "GET") : published;
+  }, [offeredEndpoints, releaseChannel, readsOnly]);
   const refresh = useThemeScope() === "refresh";
   const {
     activeEndpoint,
@@ -1378,9 +1381,16 @@ export function ApiPlaygroundShell({
 
   if (!activeEndpoint) {
     // Every operation this surface offers is outside the published catalog.
-    return endpoints.length === 0 && offeredEndpoints.length > 0 ? (
-      <EmptyState>{t("Shared.SharedComponents.noPublishedPlaygroundOperations")}</EmptyState>
-    ) : null;
+    if (endpoints.length === 0 && offeredEndpoints.length > 0) {
+      return (
+        <EmptyState>
+          {readsOnly
+            ? t("Shared.SharedComponents.noReadOnlyPlaygroundOperations")
+            : t("Shared.SharedComponents.noPublishedPlaygroundOperations")}
+        </EmptyState>
+      );
+    }
+    return null;
   }
 
   const panelContent = resolvePanelContent(activePanel, codeSnippet, responseBody, exampleBody);

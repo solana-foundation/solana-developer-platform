@@ -23,6 +23,7 @@ import {
 } from "@/lib/money-admission";
 import { runAsMoneyPrincipal } from "@/lib/money-principal";
 import { getLogger } from "@/runtime/logger";
+import { logEvent } from "@/runtime/money-path-events";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { activateRecurringPayment } from "@/services/payments/recurring-payments/activation";
 import {
@@ -432,6 +433,12 @@ export async function collectDueRecurringPayments(
   await processRowsConcurrently(result, duePayments, "collected", (row) =>
     asMandate(row, () => collectRow(env, row))
   );
+
+  logEvent(result.failed > 0 ? "warn" : "info", {
+    event: "sdp_api_recurring_collection_run",
+    environment,
+    ...result,
+  });
 
   return result;
 }

@@ -8,7 +8,6 @@ exports[`API route ownership > lists every route with its owner 1`] = `
   "core DELETE /v1/members/:memberId",
   "core DELETE /v1/members/invitations/:invitationId",
   "core DELETE /v1/members/me",
-  "core DELETE /v1/organizations/:orgId",
   "core GET /",
   "core GET /admin/allowlist",
   "core GET /docs",

@@ -5,6 +5,7 @@ import { PaymentsPayPageSkeleton } from "@/app/dashboard/[projectId]/payments/pa
 import { loadPaymentsActionPageData } from "@/app/dashboard/[projectId]/payments/ramps/payments-action-page.server";
 import { PaymentsActionPage } from "@/app/dashboard/[projectId]/payments/ramps/ramp-action-page";
 import { getAuthEntryPath } from "@/lib/auth-entry";
+import { redirectUnlessCanWrite } from "@/lib/require-write-access";
 
 export default async function PaymentsPayPage() {
   const { userId, orgId } = await auth();
@@ -14,6 +15,7 @@ export default async function PaymentsPayPage() {
   if (!orgId) {
     redirect("/dashboard");
   }
+  await redirectUnlessCanWrite("/dashboard/payments");
 
   const actionPageData = await loadPaymentsActionPageData({ includePrivateSendStatus: true });
   // The flow reads the contact to preselect from the URL, so it gets its own boundary; the

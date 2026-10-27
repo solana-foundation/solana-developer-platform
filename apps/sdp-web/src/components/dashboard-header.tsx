@@ -552,7 +552,7 @@ function playgroundHeaderTabs(t: ReturnType<typeof useTranslations>): DashboardH
  */
 function refreshFlowPageConfig(config: {
   title: string;
-  tabs: readonly { id: string; label: string }[];
+  tabs: DashboardHeaderTabsConfig["tabs"];
 }): DashboardPageConfig {
   return {
     title: config.title,
@@ -735,6 +735,7 @@ function getCounterpartyRoutePageConfig(
       },
       headerAction: {
         label: t("Shared.dashboardShell.pay"),
+        capability: "canWrite",
         href: `/dashboard/payments/pay?counterpartyId=${encodeURIComponent(counterpartyId)}`,
         variant: "primary",
       },
@@ -1064,6 +1065,7 @@ function getRefreshPaymentsPageConfig(
       contentWidthClass: REFRESH_PAGE_WIDTH,
       headerAction: {
         label: t("DashboardPayments.counterparty.add"),
+        capability: "canWrite",
         href: "/dashboard/payments/counterparty/create",
         icon: "plus",
         variant: "primary",
@@ -1099,6 +1101,7 @@ function getRefreshPaymentsPageConfig(
       contentWidthClass: REFRESH_PAGE_WIDTH,
       headerAction: {
         label: t("DashboardPayments.requests.new"),
+        capability: "canWrite",
         href: PAYMENT_REQUEST_NEW_HREF,
         icon: "plus",
         variant: "primary",
@@ -1140,6 +1143,7 @@ function getRefreshPaymentsPageConfig(
       contentWidthClass: REFRESH_PAGE_WIDTH,
       headerAction: {
         label: t("DashboardPayments.recurring.new"),
+        capability: "canWrite",
         href: "/dashboard/payments/recurring/create",
         icon: "plus",
         variant: "primary",
@@ -1160,7 +1164,11 @@ function getRefreshPaymentsPageConfig(
       title: t("Shared.dashboardShell.deposit"),
       tabs: [
         { id: "address", label: t("DashboardPayments.depositMethod.address") },
-        { id: "provider", label: t("DashboardPayments.depositMethod.provider") },
+        {
+          id: "provider",
+          label: t("DashboardPayments.depositMethod.provider"),
+          capability: "canWrite",
+        },
       ],
     });
   }
@@ -1247,7 +1255,7 @@ export function getDashboardPageConfig(
     return privateChannelsConfig;
   }
   if (pathname.startsWith("/dashboard/payments/")) {
-    const action = getPaymentsActions(t).find((item) => pathname.startsWith(item.href));
+    const action = getPaymentsActions(t, true).find((item) => pathname.startsWith(item.href));
     const title = action
       ? action.label
       : pathname.endsWith("/receive")

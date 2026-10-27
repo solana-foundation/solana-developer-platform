@@ -43,12 +43,15 @@ interface OperationContext {
   ops: TokenOperations;
   token: Token;
   canManageTokenAdmin: boolean;
+  /** False for a read-only member (`viewer`): minting and burning are not offered. */
+  canWrite: boolean;
   t: Translate;
   onSelect: (action: OperationAction) => void;
   labels: ReturnType<typeof getOperationLabels>;
 }
 
-function supplyRows({ ops, t }: OperationContext) {
+function supplyRows({ ops, t, canWrite }: OperationContext) {
+  if (!canWrite) return [];
   const availability = ops.operationAvailability;
   const supply: OperationRow[] = [
     {

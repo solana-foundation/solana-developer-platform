@@ -7,6 +7,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import * as playgroundCatalog from "@/lib/api-playground-openapi-catalog";
 import {
   createIdempotencyKeyStore,
   resetIdempotencyKeyStoresForTests,
@@ -18,8 +19,13 @@ import { type ApiPlaygroundEndpointConfig, ApiPlaygroundShell } from "./api-play
 interface ShellTestMocks {
   replaceSearchParams: ReturnType<typeof vi.fn>;
   searchParamGet: ReturnType<typeof vi.fn<() => string | null>>;
-  /** The dashboard workspace the shell reads its release channel from; none by default. */
-  workspace: { flags: { releaseChannel: SdpReleaseChannel } } | undefined;
+  /** The dashboard workspace the shell reads its release channel and access from; none by default. */
+  workspace:
+    | {
+        flags: { releaseChannel: SdpReleaseChannel };
+        dashboardAccess: { capabilities: { canWrite: boolean } };
+      }
+    | undefined;
 }
 
 const mocks = vi.hoisted(
@@ -553,7 +559,10 @@ describe("ApiPlaygroundShell refresh layout", () => {
   });
 
   it("says the playground has nothing to run when no offered operation is published", () => {
-    mocks.workspace = { flags: { releaseChannel: "experimental" } };
+    mocks.workspace = {
+      flags: { releaseChannel: "experimental" },
+      dashboardAccess: { capabilities: { canWrite: true } },
+    };
     try {
       const view = render(
         <I18nProvider locale="en" messages={getMessages("en")}>
@@ -566,6 +575,46 @@ describe("ApiPlaygroundShell refresh layout", () => {
         )
       ).toBeTruthy();
     } finally {
+      mocks.workspace = undefined;
+    }
+  });
+
+  it("offers a read-only member reads only, and says so when nothing is left", () => {
+    const write: ApiPlaygroundEndpointConfig = {
+      ...endpoint,
+      id: "test-write",
+      title: "Test write",
+      method: "POST",
+    };
+    mocks.workspace = {
+      flags: { releaseChannel: "experimental" },
+      dashboardAccess: { capabilities: { canWrite: false } },
+    };
+    const filter = vi
+      .spyOn(playgroundCatalog, "filterPlaygroundEndpointsToReleaseChannel")
+      .mockImplementation((endpoints) => endpoints);
+    try {
+      const withRead = render(
+        <I18nProvider locale="en" messages={getMessages("en")}>
+          <ApiPlaygroundShell endpoints={[write, endpoint]} productName="Test product" />
+        </I18nProvider>
+      );
+      expect(withRead.queryByText("Test write")).toBeNull();
+      expect(withRead.getAllByText("Test request").length).toBeGreaterThan(0);
+      withRead.unmount();
+
+      const writesOnly = render(
+        <I18nProvider locale="en" messages={getMessages("en")}>
+          <ApiPlaygroundShell endpoints={[write]} productName="Test product" />
+        </I18nProvider>
+      );
+      expect(
+        writesOnly.getByText(
+          "Every operation here changes something, and read-only access can only run reads."
+        )
+      ).toBeTruthy();
+    } finally {
+      filter.mockRestore();
       mocks.workspace = undefined;
     }
   });

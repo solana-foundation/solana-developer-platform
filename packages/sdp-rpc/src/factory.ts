@@ -23,6 +23,13 @@ import { MANAGED_RPC_ENV_KEYS } from "./managed-rpc-env-keys";
 import { currentClusterScope } from "./scope";
 import { withReadSocketRetry } from "./socket-retry";
 import { DEFAULT_RPC_REQUEST_TIMEOUT_MS, type SolanaRpc } from "./solana";
+import {
+  emitRpcTelemetry,
+  markRpcAttemptDeadline,
+  type RpcTelemetryEvent,
+  rpcFailureOutcome,
+  rpcProviderForEndpoint,
+} from "./telemetry";
 import { isTransientRpcError } from "./transient";
 
 /** How long a genesis match is trusted before re-probing: the node behind a URL can be repointed. */
@@ -90,17 +97,24 @@ const koraUpstreamPools: PoolMemo = { transports: new Map(), rpcs: new Map() };
  * when it has one, so a caller signal never removes the deadline. Whichever fires first aborts.
  *
  * @param transport - The transport to bound.
- * @param timeoutMs - The per-attempt deadline.
+ * @param timeoutMs - The deadline duration.
+ * @param owner - Whether this bounds a provider attempt or the caller's whole request.
  * @returns A transport whose deadline expiry rejects with a transient-classified timeout.
  */
-function withAttemptDeadline(transport: RpcTransport, timeoutMs: number): RpcTransport {
+function withTransportDeadline(
+  transport: RpcTransport,
+  timeoutMs: number,
+  owner: "attempt" | "caller"
+): RpcTransport {
   return async <TResponse>(rpcRequest: Parameters<RpcTransport>[0]) => {
     const deadline = new AbortController();
+    const deadlineSignal =
+      owner === "attempt" ? markRpcAttemptDeadline(deadline.signal) : deadline.signal;
     const deadlineReason = new Error("RPC attempt deadline elapsed");
     const timer = setTimeout(() => deadline.abort(deadlineReason), timeoutMs);
     const signal = rpcRequest.signal
-      ? AbortSignal.any([rpcRequest.signal, deadline.signal])
-      : deadline.signal;
+      ? AbortSignal.any([rpcRequest.signal, deadlineSignal])
+      : deadlineSignal;
     try {
       return await transport<TResponse>({ ...rpcRequest, signal });
     } catch (cause) {
@@ -132,7 +146,7 @@ function proveGenesis(
   if (probeInFlight) return probeInFlight;
   const probe = (async () => {
     const servedGenesisHash = await createSolanaRpcFromTransport(
-      withAttemptDeadline(endpointTransport, GENESIS_PROBE_TIMEOUT_MS)
+      withTransportDeadline(endpointTransport, GENESIS_PROBE_TIMEOUT_MS, "attempt")
     )
       .getGenesisHash()
       .send();
@@ -314,16 +328,65 @@ function endpointAttemptOrder(lastFailedAt: readonly number[], now: number): num
   ];
 }
 
+interface RpcEndpoint {
+  transport: RpcTransport;
+  provider: string;
+  cluster: SolanaCluster;
+  genesisProofKey: string;
+}
+
+function emitAttemptTelemetry<TResponse>(
+  endpoint: RpcEndpoint,
+  rpcRequest: Parameters<RpcTransport>[0],
+  outcome: AttemptOutcome<TResponse>,
+  verdict: AttemptVerdict,
+  hasNext: boolean,
+  startedAt: number,
+  genesisProbeRequired: boolean
+): void {
+  let telemetryOutcome: RpcTelemetryEvent["outcome"];
+  if (outcome.ok) {
+    telemetryOutcome = servedJsonRpcError(outcome.response) === null ? "succeeded" : "failed";
+  } else {
+    telemetryOutcome = rpcFailureOutcome(rpcRequest.signal);
+  }
+  const statusCode =
+    !outcome.ok && isSolanaError(outcome.cause, SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR)
+      ? outcome.cause.context.statusCode
+      : undefined;
+  const common = {
+    provider: endpoint.provider,
+    cluster: endpoint.cluster,
+    method: isJsonRpcPayload(rpcRequest.payload) ? rpcRequest.payload.method : "batch",
+  };
+  emitRpcTelemetry({
+    event: "sdp_rpc_attempt",
+    surface: "managed_pool",
+    ...common,
+    outcome: telemetryOutcome,
+    status_code: statusCode,
+    duration_ms: performance.now() - startedAt,
+    genesis_probe_required: genesisProbeRequired,
+  });
+  if (verdict.cooldown) {
+    emitRpcTelemetry({ event: "sdp_rpc_cooldown", surface: "managed_pool", ...common });
+  }
+  if (verdict.tryNext && hasNext) {
+    emitRpcTelemetry({ event: "sdp_rpc_failover", surface: "managed_pool", ...common });
+  }
+}
+
 /**
  * Per-request failover across a cluster's endpoints: try each endpoint in `endpointAttemptOrder`
  * and let `judgeAttempt` decide whether to cool it down and whether to ask the next one. The last
  * endpoint's answer or error is returned as-is, so kit raises its typed error.
  *
- * @param endpointTransports - The guarded endpoint transports, in failover order.
+ * @param endpoints - Guarded transports with provider names, in failover order.
  * @returns The pool transport.
  */
-function createPoolTransport(endpointTransports: readonly RpcTransport[]) {
-  const lastFailedAt = endpointTransports.map(() => Number.NEGATIVE_INFINITY);
+
+function createPoolTransport(endpoints: readonly RpcEndpoint[]) {
+  const lastFailedAt = endpoints.map(() => Number.NEGATIVE_INFINITY);
   return async <TResponse>(rpcRequest: Parameters<RpcTransport>[0]): Promise<TResponse> => {
     const attemptOrder = endpointAttemptOrder(lastFailedAt, Date.now());
     // NOTE: perf. A `minContextSlot` no endpoint has reached yet walks every endpoint before the
@@ -332,13 +395,23 @@ function createPoolTransport(endpointTransports: readonly RpcTransport[]) {
     // confirmed, so the full walk is rare. If it shows up, stop after two -32016 answers.
     for (let attempt = 0; ; attempt += 1) {
       const endpointIndex = attemptOrder[attempt];
-      const outcome = await attemptEndpoint<TResponse>(
-        endpointTransports[endpointIndex],
-        rpcRequest
-      );
+      const endpoint = endpoints[endpointIndex];
+      const genesisProbeRequired =
+        (genesisProofExpiry.get(endpoint.genesisProofKey) ?? 0) <= Date.now();
+      const startedAt = performance.now();
+      const outcome = await attemptEndpoint<TResponse>(endpoint.transport, rpcRequest);
       const verdict = judgeAttempt(outcome, rpcRequest);
-      if (verdict.cooldown) lastFailedAt[endpointIndex] = Date.now();
       const isLastEndpoint = attempt === attemptOrder.length - 1;
+      emitAttemptTelemetry(
+        endpoint,
+        rpcRequest,
+        outcome,
+        verdict,
+        !isLastEndpoint,
+        startedAt,
+        genesisProbeRequired
+      );
+      if (verdict.cooldown) lastFailedAt[endpointIndex] = Date.now();
       if (verdict.tryNext && !isLastEndpoint) continue;
       if (outcome.ok) return outcome.response;
       throw outcome.cause instanceof UnsentRequestError ? outcome.cause.cause : outcome.cause;
@@ -422,7 +495,9 @@ export function createClusterRpc(options?: ClusterRpcOptions): SolanaRpc {
   const clientKey = `${options.timeoutMs} ${poolKey}`;
   const memoizedRpc = boundedRpcs.get(clientKey);
   if (memoizedRpc) return memoizedRpc;
-  const rpc = createSolanaRpcFromTransport(withAttemptDeadline(poolTransport, options.timeoutMs));
+  const rpc = createSolanaRpcFromTransport(
+    withTransportDeadline(poolTransport, options.timeoutMs, "caller")
+  );
   boundedRpcs.set(clientKey, rpc);
   return rpc;
 }
@@ -541,7 +616,7 @@ export async function proveEarnClusterEndpoint(
   const proofExpiresAt = genesisProofExpiry.get(genesisProofKey);
   if (proofExpiresAt !== undefined && proofExpiresAt > Date.now()) return;
   await proveGenesis(
-    withReadSocketRetry(createDefaultRpcTransport({ url: endpointUrl })),
+    withReadSocketRetry(createDefaultRpcTransport({ url: endpointUrl }), endpointUrl),
     cluster,
     genesisProofKey
   );
@@ -564,17 +639,27 @@ function pooledClusterTransport(
   const poolKey = `${cluster} ${endpointUrls.join(" ")}`;
   const memoizedTransport = memoizedTransports.get(poolKey);
   if (memoizedTransport) return { poolKey, poolTransport: memoizedTransport };
-  const endpointTransports = endpointUrls.map((endpointUrl) =>
-    withAttemptDeadline(
-      withGenesisGuard(
-        withReadSocketRetry(createDefaultRpcTransport({ url: endpointUrl })),
-        cluster,
-        endpointUrl
+  const endpoints = endpointUrls.map((endpointUrl): RpcEndpoint => {
+    const provider =
+      memoizedTransports === koraUpstreamPools.transports
+        ? "kora-upstream"
+        : rpcProviderForEndpoint(cluster, endpointUrl);
+    return {
+      provider,
+      cluster,
+      genesisProofKey: `${cluster} ${endpointUrl}`,
+      transport: withTransportDeadline(
+        withGenesisGuard(
+          withReadSocketRetry(createDefaultRpcTransport({ url: endpointUrl })),
+          cluster,
+          endpointUrl
+        ),
+        DEFAULT_RPC_REQUEST_TIMEOUT_MS,
+        "attempt"
       ),
-      DEFAULT_RPC_REQUEST_TIMEOUT_MS
-    )
-  );
-  const poolTransport = createPoolTransport(endpointTransports);
+    };
+  });
+  const poolTransport = createPoolTransport(endpoints);
   memoizedTransports.set(poolKey, poolTransport);
   return { poolKey, poolTransport };
 }

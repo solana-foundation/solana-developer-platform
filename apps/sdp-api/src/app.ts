@@ -18,8 +18,8 @@ import { SdpRpcError } from "@sdp/rpc/errors";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { HTTPException } from "hono/http-exception";
-import { logger } from "hono/logger";
 import { prettyJSON } from "hono/pretty-json";
+import { routePath } from "hono/route";
 import { secureHeaders } from "hono/secure-headers";
 import { DatabaseUnavailableError } from "@/db/client";
 import { AppError, badRequest, payloadTooLarge, serviceUnavailable } from "@/lib/errors";
@@ -327,14 +327,6 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
     return next();
   });
 
-  // Logger in development
-  app.use("*", async (c, next) => {
-    if (c.env.ENVIRONMENT === "development") {
-      return logger((message) => getLogger().info(message))(c, next);
-    }
-    return next();
-  });
-
   // KV store — populates c.var.kv. Must precede rate-limit and auth
   // middleware (all of which read from c.var.kv).
   app.use("*", kvStoreMiddleware(...KV_FREE_PATHS));
@@ -417,6 +409,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
     const requestId = c.get("requestId");
     const traceId = c.get("traceId");
     const requestSource = c.get("requestSource");
+    const path = routePath(c, -1) || "unmatched";
 
     const logVendorError = (vendor: string, code: string, status: number) =>
       logEvent("error", {
@@ -425,7 +418,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
         code,
         status,
         method: c.req.method,
-        path: c.req.path,
+        path,
         request_id: requestId,
         ...describeError(err),
       });
@@ -456,7 +449,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
           code: err.code,
           status: err.statusCode,
           method: c.req.method,
-          path: c.req.path,
+          path,
           request_id: requestId,
           ...describeError(err),
           error_diagnostics: paymentsErrorDiagnostics(err),
@@ -549,7 +542,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
     logEvent("error", {
       event: "sdp_api_internal_error",
       method: c.req.method,
-      path: c.req.path,
+      path,
       request_id: requestId,
       ...describeError(err),
     });

@@ -1,9 +1,14 @@
 import Redis from "ioredis";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { env } from "@/test/helpers/env";
 import { required } from "@/test/helpers/required";
 import { flushWorkerRedis } from "@/test/mocks/kv";
-import { closeAllRedisClients, createKVStoreSet, RedisKVStore } from "./kv-redis";
+import {
+  closeAllRedisClients,
+  createKVStoreSet,
+  getDisplayPriceRedisClient,
+  RedisKVStore,
+} from "./kv-redis";
 
 describe("RedisKVStore (HOO-510)", () => {
   let raw: Redis;
@@ -255,6 +260,27 @@ describe("RedisKVStore (HOO-510)", () => {
 
     it("throws when REDIS_URL is whitespace-only", () => {
       expect(() => createKVStoreSet({ ...env, REDIS_URL: "   " })).toThrow(/REDIS_URL is required/);
+    });
+  });
+
+  describe("display price connections", () => {
+    afterEach(async () => {
+      vi.restoreAllMocks();
+      await closeAllRedisClients();
+    });
+
+    it("stops a failed connection's reconnect loop and recovers on the next lookup", async () => {
+      await closeAllRedisClients();
+      const connect = vi.spyOn(Redis.prototype, "connect");
+      const disconnect = vi.spyOn(Redis.prototype, "disconnect");
+      connect.mockRejectedValueOnce(new Error("Redis temporarily unavailable"));
+
+      await expect(getDisplayPriceRedisClient(env)).rejects.toThrow("temporarily unavailable");
+      expect(disconnect).toHaveBeenCalledOnce();
+
+      const recovered = getDisplayPriceRedisClient(env);
+      expect(getDisplayPriceRedisClient(env)).toBe(recovered);
+      expect(await (await recovered).ping()).toBe("PONG");
     });
   });
 });

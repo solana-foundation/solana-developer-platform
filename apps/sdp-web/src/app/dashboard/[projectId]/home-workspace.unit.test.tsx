@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => {
       flags: { custody: true, issuance: true, payments: true },
       dashboardAccess: {
         capabilities: {
+          canWrite: true,
           canManageCustody: true,
           canManageTokenWrite: true,
           canManageApiKeys: true,
@@ -42,6 +43,7 @@ vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => mocks.workspace,
   useOptionalDashboardWorkspace: () => mocks.workspace,
+  useCanWrite: () => mocks.workspace.dashboardAccess.capabilities.canWrite,
 }));
 
 const { HomeWorkspace } = await import("./home-workspace");
@@ -149,6 +151,7 @@ beforeEach(() => {
   vi.setSystemTime(new Date("2026-09-25T12:00:00.000Z"));
   mocks.workspace.flags = { custody: true, issuance: true, payments: true };
   mocks.workspace.dashboardAccess.capabilities = {
+    canWrite: true,
     canManageCustody: true,
     canManageTokenWrite: true,
     canManageApiKeys: true,
@@ -251,13 +254,33 @@ describe("Overview (HomeWorkspace)", () => {
   it("offers nothing a viewer cannot do", () => {
     mocks.workspace.flags = { custody: false, issuance: false, payments: false };
     mocks.workspace.dashboardAccess.capabilities = {
+      canWrite: false,
       canManageCustody: false,
       canManageTokenWrite: false,
       canManageApiKeys: false,
     };
     renderOverview({ wallets: [], balances: [], walletCount: 0, totalBalance: null });
     expect(screen.queryByRole("link", { name: "Create a wallet" })).toBeNull();
+    expect(
+      screen.getByText(
+        "You have read-only access. Ask a teammate who can make changes to add the first one."
+      )
+    ).toBeTruthy();
     expect(section("actions")).toBeNull();
+  });
+
+  it("offers a read-only member no payment to send, with payments on", () => {
+    // A viewer's capabilities: every module flag on, but nothing beyond reads.
+    mocks.workspace.dashboardAccess.capabilities = {
+      canWrite: false,
+      canManageCustody: false,
+      canManageTokenWrite: false,
+      canManageApiKeys: false,
+    };
+    renderOverview();
+    expect(screen.queryByText("Send a payment")).toBeNull();
+    expect(section("actions")).toBeNull();
+    expect(screen.getByRole("link", { name: "See all payments" })).toBeTruthy();
   });
 
   it("lists recent activity with its status, amount, token and explorer link", () => {

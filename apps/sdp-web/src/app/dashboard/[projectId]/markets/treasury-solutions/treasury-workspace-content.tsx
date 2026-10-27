@@ -87,7 +87,7 @@ import {
   PAYMENTS_TABLE_HEAD,
 } from "@/app/dashboard/[projectId]/payments/payments-table";
 import { RecordBlock, RecordStack } from "@/components/refresh-record";
-import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import { useCanWrite, useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { DASHBOARD_SIDE_NAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { useProjectHref } from "@/lib/use-dashboard-project";
@@ -661,6 +661,7 @@ function TreasuryPositionActions({
   position: EarnVaultPosition;
 }) {
   const t = useTranslations();
+  const canWrite = useCanWrite();
   // The exit routes (PRO-1702). Deliberately NOT gated on availability,
   // surfacing, or environment: money out beats money off (ADR 0002), so the
   // verbs stay live wherever a position exists. A provider whose exit SDP
@@ -673,6 +674,8 @@ function TreasuryPositionActions({
     position.shares === undefined || !isEarnVaultHoldingEmpty({ shares: position.shares });
   const redeemable = position.parIntermediate?.withdrawableAmount;
   const holdsIntermediate = redeemable !== undefined && isPositiveDecimal(redeemable);
+  // A read-only member (`viewer`) sees the position but no exit, which the API refuses them.
+  if (!canWrite) return null;
   return (
     <div className="flex flex-wrap justify-end gap-2">
       {holdsIntermediate ? (
@@ -999,6 +1002,9 @@ function StrategyAction({
   strategy: EarnStrategy;
 }) {
   const t = useTranslations();
+  // A read-only member (`viewer`) sees the shelf but no way in, which the API refuses them.
+  const canWrite = useCanWrite();
+  if (!canWrite) return null;
   const availability = earnVaultDepositAvailability(strategy, environment, providerAccess);
   const sandboxMainnet = environment === "sandbox" && strategy.hostCluster === "mainnet-beta";
   if (availability === "available" && !sandboxMainnet) {
@@ -1323,6 +1329,7 @@ function TreasuryPrograms({
 }) {
   const t = useTranslations();
   const locale = useLocale();
+  const canWrite = useCanWrite();
   // Most organizations hold none, so nothing stands in while the list loads: a placeholder
   // that then disappears would shift the page. The section closes the page, so arriving late
   // moves nothing.
@@ -1390,8 +1397,8 @@ function TreasuryPrograms({
                     >
                       {/* An open provider id may outlive its runtime capability. Never open a
                           provider-specific withdrawal form unless the shared contract declares
-                          a Solana payout lane. */}
-                      {withdrawalAvailable ? (
+                          a Solana payout lane. A read-only member (`viewer`) gets neither. */}
+                      {!canWrite ? null : withdrawalAvailable ? (
                         <Button
                           data-earn-withdraw-focus-fallback={program.id}
                           disabled={program.wallet.status === "creating"}

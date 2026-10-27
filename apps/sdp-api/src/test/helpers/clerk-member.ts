@@ -21,7 +21,7 @@ export async function signSeededClerkMember(
     [userId, organizationId]
   );
   assert(member);
-  assert(member.role === "admin" || member.role === "member");
+  assert(member.role === "admin" || member.role === "member" || member.role === "viewer");
   const clerkUserId = `clerk_user_${userId}`;
   const clerkOrgId = `clerk_org_${organizationId}`;
   await db.batch([
@@ -40,7 +40,8 @@ export async function signSeededClerkMember(
   return signTestClerkJwt({
     clerkUserId,
     clerkOrgId,
-    orgRole: member.role,
+    // Clerk holds only admin and member; SDP reads the role it stores either way.
+    orgRole: member.role === "admin" ? "admin" : "member",
     orgSlug: member.slug,
     email: member.email,
     expiresInSeconds: 300,

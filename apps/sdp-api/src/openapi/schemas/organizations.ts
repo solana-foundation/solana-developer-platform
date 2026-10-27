@@ -94,7 +94,7 @@ const organizationMemberSchema = z
   .object({
     id: memberIdParamSchema,
     role: z
-      .enum(["admin", "member"])
+      .enum(ORGANIZATION_ROLES)
       .openapi({ description: "Organization member role.", example: "member" }),
     status: z
       .enum(["active", "suspended", "removed"])
@@ -141,7 +141,7 @@ const invitationSchema = z
       .email()
       .openapi({ description: "Invitee email.", example: "dev@example.com" }),
     role: z
-      .enum(["admin", "member"])
+      .enum(ORGANIZATION_ROLES)
       .openapi({ description: "Role offered to the invitee.", example: "member" }),
     expiresAt: isoDateTimeSchema.openapi({
       description: "Invitation expiration timestamp.",
@@ -169,7 +169,7 @@ const pendingInvitationSchema = z
       .email()
       .openapi({ description: "Invitee email.", example: "dev@example.com" }),
     role: z
-      .enum(["admin", "member"])
+      .enum(ORGANIZATION_ROLES)
       .openapi({ description: "Role offered to the invitee.", example: "member" }),
     status: z.literal("pending").openapi({ description: "Invitation status.", example: "pending" }),
     createdAt: isoDateTimeSchema.openapi({

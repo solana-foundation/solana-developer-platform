@@ -1,7 +1,9 @@
-import { type Action, organizationRoleMayPerform } from "@sdp/types/actions";
+import { ACTIONS, type Action, actionVerbOf, organizationRoleMayPerform } from "@sdp/types/actions";
 import type { OrganizationRole } from "@sdp/types/roles";
 
 export interface DashboardCapabilities {
+  /** Whether the role holds anything beyond reads. False for `viewer`: every control that changes state is hidden. */
+  canWrite: boolean;
   canManageApiKeys: boolean;
   canManageCustody: boolean;
   canManageOrgSettings: boolean;
@@ -30,6 +32,7 @@ export function resolveDashboardAccess(role: OrganizationRole): DashboardAccess 
   return {
     role,
     capabilities: {
+      canWrite: ACTIONS.some((action) => actionVerbOf(action) !== "read" && mayPerform(action)),
       canManageApiKeys: mayPerform("api_keys.manage"),
       canManageCustody: mayPerform("wallets.configure"),
       canManageOrgSettings: mayPerform("organizations.manage"),

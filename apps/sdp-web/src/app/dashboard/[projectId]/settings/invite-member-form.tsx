@@ -1,5 +1,6 @@
 "use client";
 
+import { ORGANIZATION_ROLES, type OrganizationRole } from "@sdp/types/roles";
 import { Button } from "@sdp/ui/button";
 import { Input } from "@sdp/ui/input";
 import { Select, SelectItem } from "@sdp/ui/select";
@@ -31,7 +32,7 @@ export function InviteMemberForm() {
     return result;
   };
   const [state, formAction, isPending] = useActionState<InviteState, FormData>(submitInvite, null);
-  const [role, setRole] = useState<"admin" | "member">("member");
+  const [role, setRole] = useState<OrganizationRole>("member");
   const formRef = useRef<HTMLFormElement>(null);
   // useActionState keeps the last result, so react to identity changes rather
   // than value: two failures with the same message must still both surface.
@@ -85,9 +86,14 @@ export function InviteMemberForm() {
           <Select
             ariaLabel={t("Shared.members.inviteRole")}
             value={role}
-            onValueChange={(next) => setRole(next === "admin" ? "admin" : "member")}
+            onValueChange={(next) => {
+              // Only the options above can be chosen; anything else leaves the choice as it was.
+              const picked = ORGANIZATION_ROLES.find((candidate) => candidate === next);
+              if (picked) setRole(picked);
+            }}
           >
             <SelectItem value="member">{t("Shared.members.roleMember")}</SelectItem>
+            <SelectItem value="viewer">{t("Shared.members.roleViewer")}</SelectItem>
             <SelectItem value="admin">{t("Shared.members.roleAdmin")}</SelectItem>
           </Select>
         </div>

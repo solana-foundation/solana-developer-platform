@@ -6,7 +6,6 @@
   "DELETE /v1/issuance/tokens/:_/allowlist/:_": "issuance.enforce",
   "DELETE /v1/members/:_": "members.manage",
   "DELETE /v1/members/invitations/:_": "members.manage",
-  "DELETE /v1/organizations/:_": "organizations.manage",
   "DELETE /v1/private-channels/channels/:_": "private_channels.manage",
   "DELETE /v1/private-channels/channels/:_/principals/:_": "private_channels.configure",
   "DELETE /v1/private-channels/instance": "private_channels.configure",
