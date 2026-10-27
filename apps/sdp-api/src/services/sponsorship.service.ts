@@ -8,13 +8,10 @@ import { getDb } from "@/db/client";
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest, internalError } from "@/lib/errors";
 import type { MoneyAdmissionSubject } from "@/lib/money-admission";
-import { isSelfHostedDeployment } from "@/lib/runtime-env";
 import { instrumentVendorPort } from "@/runtime/vendor-calls";
 import type { Env } from "@/types/env";
 import { ProjectService } from "./project.service";
-import { assertSponsorshipAdmitted, readSponsorshipAdmissionFacts } from "./sponsorship-admission";
-import { BudgetedFeePayment, getFullySignedSubmission } from "./sponsorship-budget.service";
-import { assertSponsorSignedSameMessage } from "./sponsorship-integrity";
+import { BudgetedFeePayment } from "./sponsorship-budget.service";
 
 type SponsorshipActorType = "api_key" | "project" | "user" | "wallet";
 
@@ -68,48 +65,6 @@ export interface SponsorshipFeePayment extends FeePaymentPort {
   ): Promise<PreparedOwnedSubmission>;
 }
 
-/**
- * Self-hosted sponsorship: checks money admission before each sponsor
- * signature (one organization read; none for an exit).
- */
-function withOwnedSubmissionLifecycle(
-  provider: FeePaymentPort,
-  admission: { env: Env; scope: SponsorshipMovementScope }
-): SponsorshipFeePayment {
-  const admit = async () => {
-    assertSponsorshipAdmitted(
-      admission.scope,
-      await readSponsorshipAdmissionFacts(admission.env, admission.scope)
-    );
-  };
-  const signVerified = async (transaction: Uint8Array) => {
-    await admit();
-    const signedTransaction = await provider.signAsFeePayer(transaction);
-    const decoded = await assertSponsorSignedSameMessage({
-      requested: transaction,
-      sponsorSigned: signedTransaction,
-      sponsor: await provider.getFeePayer(),
-    });
-    return { signedTransaction, decoded };
-  };
-  return {
-    providerId: provider.providerId,
-    getFeePayer: () => provider.getFeePayer(),
-    signAsFeePayer: async (transaction) => (await signVerified(transaction)).signedTransaction,
-    getSponsorshipConfiguration: () => provider.getSponsorshipConfiguration(),
-    async prepareOwnedSubmission(transaction, lifecycle) {
-      const { decoded } = await signVerified(transaction);
-      const submission = {
-        ...getFullySignedSubmission(decoded),
-        releaseDefinitelyUnbroadcast: async () => {},
-      };
-      await lifecycle.persistSigned(submission);
-      await lifecycle.markStarted();
-      return submission;
-    },
-  };
-}
-
 type AppContext = Context<{ Bindings: Env }>;
 
 function requireScopeSegment(value: string, label: string): string {
@@ -154,7 +109,7 @@ function instrumentedAdapter(env: Env, userId: string): FeePaymentPort {
 
 /**
  * The only sponsor that can sign: binds the scope to its movement, then wraps the adapter in money
- * admission and the budget (managed) or the owned submission lifecycle (self-hosted).
+ * admission and the sponsorship budget, in every deployment mode.
  *
  * @param env - API environment for provider, database and Redis access.
  * @param scope - Who is sponsored.
@@ -175,10 +130,7 @@ export function createSponsorshipFeePayment(
     movement,
     custodyWalletId: subject.custodyWalletId,
   };
-  const provider = instrumentedAdapter(env, buildKoraUserId(admitted));
-  return isSelfHostedDeployment(env)
-    ? withOwnedSubmissionLifecycle(provider, { env, scope: admitted })
-    : new BudgetedFeePayment(env, admitted, provider);
+  return new BudgetedFeePayment(env, admitted, instrumentedAdapter(env, buildKoraUserId(admitted)));
 }
 
 /**
