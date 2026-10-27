@@ -1,6 +1,6 @@
 -- Validate the token-movement CHECKs added NOT VALID (ADR 0012).
 --
--- 0184 (payment request expectations), 0185 (recurring mandates) and 0186
+-- 0186 (payment request expectations), 0187 (recurring mandates) and 0188
 -- (a leg's `verified_by` and its chain-verified reasons) added these CHECKs
 -- NOT VALID, so the add did not scan rows written before it. Every row
 -- written since is checked, and the rows before have none of the new columns
@@ -9,7 +9,7 @@
 -- runs in a later migration than the adds, as check:migration-compat
 -- requires.
 --
--- Deploy only after the previous revisions' migrations (0184-0186) are in
+-- Deploy only after the previous revisions' migrations (0186-0188) are in
 -- production past their rollback window: a rollback past them would let an
 -- older revision write rows these CHECKs refuse.
 

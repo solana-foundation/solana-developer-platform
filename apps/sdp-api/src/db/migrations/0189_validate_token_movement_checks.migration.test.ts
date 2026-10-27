@@ -2,7 +2,7 @@ import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { env } from "@/test/helpers/env";
 
-/** The CHECKs 0184-0186 added NOT VALID, which 0187 validates. */
+/** The CHECKs 0186-0188 added NOT VALID, which 0189 validates. */
 const VALIDATED = [
   ["payment_requests", "payment_requests_expectation_shape"],
   ["payment_recurring_payments", "payment_recurring_payments_mandate_shape"],
@@ -22,7 +22,7 @@ afterAll(async () => {
   await client.end();
 });
 
-describe("0187 validate token movement checks", () => {
+describe("0189 validate token movement checks", () => {
   it("leaves every token-movement CHECK validated", async () => {
     const { rows } = await client.query<{ table: string; constraint: string; validated: boolean }>(
       `SELECT rel.relname AS table, con.conname AS constraint, con.convalidated AS validated
