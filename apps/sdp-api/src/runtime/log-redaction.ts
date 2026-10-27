@@ -36,11 +36,16 @@ export const REDACTION_CENSOR = "[REDACTED]";
  * deanonymizes every transfer a shielded wallet has ever received, and a
  * nullifier key can spend from it. `ringsMetadata` is the catch-all envelope the
  * gateway attaches to operations, whose contents are not ours to audit.
+ * `proof_ref` (the persisted spelling; the in-memory patch uses `proofRef`) is
+ * the gateway's opaque handle to a customer's proof — a customer-transfer-graph
+ * secret, logged under whichever shape the caller passes.
  */
 export const REDACTED_LEAF_FIELDS: readonly string[] = [
   "viewingKey",
   "nullifierKey",
   "ringsMetadata",
+  "proof_ref",
+  "proofRef",
 ];
 
 /**

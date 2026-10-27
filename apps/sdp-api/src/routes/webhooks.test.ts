@@ -522,6 +522,38 @@ describe("Clerk webhooks", () => {
       { user_id: KNOWN_ADMIN.userId, role: "admin", status: "removed" },
     ]);
   });
+
+  it("rejects an invalid Clerk webhook signature without echoing verifier internals", async () => {
+    const payload = JSON.stringify({
+      type: "organization.updated",
+      data: { id: KNOWN_CLERK_ORG_ID, object: "organization" },
+    });
+    const res = await app.request(
+      "/webhooks/clerk/link-orgs",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          // Real Svix headers whose signature does not verify.
+          "svix-id": `msg_${crypto.randomUUID()}`,
+          "svix-timestamp": String(Math.floor(Date.now() / 1000)),
+          "svix-signature": "v1,K9dWtdL4G1HvV7N7G4pFZ0S0KtGJ5pQ2m3Z0eG7V1R0=",
+        },
+        body: payload,
+      },
+      env
+    );
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body.error).toEqual({
+      code: "UNAUTHORIZED",
+      message: "Invalid webhook signature",
+    });
+    // No `details` (the old shape carried the verifier's internal message in
+    // `details.cause`) — nothing about the verification internals reaches an
+    // unauthenticated caller.
+    expect(body.error.details).toBeUndefined();
+  });
 });
 
 describe("MoonPay ramp webhook", () => {

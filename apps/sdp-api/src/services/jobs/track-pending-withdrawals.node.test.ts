@@ -49,6 +49,15 @@ vi.mock("@sdp/rpc/solana", () => ({
   getTransaction,
 }));
 
+// The reconciler dials a stored tenant gateway URL, so it must go through the
+// egress-guarded gateway client; assert on that seam, not the raw transport.
+const { createChannelGatewayRpc, createPrivateChannelGatewayTransport } = vi.hoisted(() => ({
+  createChannelGatewayRpc: vi.fn(() => ({ __rpc: true })),
+  createPrivateChannelGatewayTransport: vi.fn(() => ({ __transport: true })),
+}));
+vi.mock("@sdp/private-channels/gateway", () => ({ createChannelGatewayRpc }));
+vi.mock("@/services/private-channels/egress", () => ({ createPrivateChannelGatewayTransport }));
+
 const { loadProjectRpcClient } = vi.hoisted(() => {
   const PROJECT_RPC = { __projectRpc: true };
   return {
@@ -156,7 +165,11 @@ describe("trackPendingWithdrawals", () => {
 
     await trackPendingWithdrawals({} as Env);
 
-    expect(createRpc).toHaveBeenCalledWith(expect.anything(), { rpcUrl: "http://gw-live" });
+    expect(createChannelGatewayRpc).toHaveBeenCalledWith(
+      expect.anything(),
+      "http://gw-live",
+      expect.objectContaining({ transportFactory: expect.any(Function) })
+    );
     expect(withdrawalRepo.updateWithdrawal).toHaveBeenCalledWith(
       expect.objectContaining({ id: "w1", status: "confirmed", expectedStatus: "submitted" })
     );
@@ -176,7 +189,7 @@ describe("trackPendingWithdrawals", () => {
 
     // One batched read for the whole tick, not one RPC per row; one RPC client
     // per gateway.
-    expect(createRpc).toHaveBeenCalledTimes(1);
+    expect(createChannelGatewayRpc).toHaveBeenCalledTimes(1);
     expect(getSignatureStatuses).toHaveBeenCalledTimes(1);
     expect(getSignatureStatuses).toHaveBeenCalledWith(expect.anything(), ["burnsig1", "burnsig2"], {
       searchTransactionHistory: true,
@@ -208,7 +221,7 @@ describe("trackPendingWithdrawals", () => {
 
     await trackPendingWithdrawals({} as Env);
 
-    expect(createRpc).toHaveBeenCalledTimes(2);
+    expect(createChannelGatewayRpc).toHaveBeenCalledTimes(2);
     expect(getSignatureStatuses).toHaveBeenCalledTimes(2);
     expect(getSignatureStatuses).toHaveBeenCalledWith(expect.anything(), ["burnsig1"], {
       searchTransactionHistory: true,

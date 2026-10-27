@@ -469,9 +469,14 @@ export const handleClerkWebhook = async (c: AppContext) => {
   try {
     event = await verifyWebhook(c.req.raw, { signingSecret: secret });
   } catch (err) {
-    throw new AppError("UNAUTHORIZED", "Invalid webhook signature", {
-      cause: err instanceof Error ? err.message : String(err),
-    });
+    // The verifier's message is internal library detail on an unauthenticated
+    // route; log it (the logger scrubs credentials) and answer generically so
+    // nothing about the verification internals reaches the caller.
+    getLogger().warn(
+      { error: err instanceof Error ? err.message : String(err) },
+      "Clerk webhook signature verification failed"
+    );
+    throw new AppError("UNAUTHORIZED", "Invalid webhook signature");
   }
 
   switch (event.type) {

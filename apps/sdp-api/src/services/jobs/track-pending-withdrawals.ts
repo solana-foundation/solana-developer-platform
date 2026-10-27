@@ -30,8 +30,8 @@
  * memo/withdrawId on the release tx would make it exact.
  */
 
+import { createChannelGatewayRpc } from "@sdp/private-channels/gateway";
 import {
-  createRpc,
   getSignatureStatuses,
   getSignaturesForAddress,
   getTransaction,
@@ -56,6 +56,7 @@ import {
 } from "@/db/repositories/repository-factory";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { getLogger } from "@/runtime/logger";
+import { createPrivateChannelGatewayTransport } from "@/services/private-channels/egress";
 import { knownMintToken } from "@/services/private-channels/mint";
 import {
   loadProjectRpcClient,
@@ -116,7 +117,16 @@ export async function trackPendingWithdrawals(env: Env): Promise<void> {
   const gatewayRpcFor = (instance: PrivateChannelInstanceRow): SolanaRpc => {
     let rpc = gatewayRpcs.get(instance.gateway_url);
     if (!rpc) {
-      rpc = createRpc(env, { rpcUrl: instance.gateway_url });
+      // Egress-guarded, like every other runtime leg that dials a stored
+      // tenant gateway URL: the connect-time allowlist check re-runs on every
+      // dial and the transport resolves through the shared egress guard, so a
+      // tampered row or a rebinding DNS name cannot point SDP's process at an
+      // internal address while this job reads burn statuses. No bearer token
+      // here (the status reads are not JWT-gated; auth-enabled instances are
+      // wired through withGatewayRpc on their own paths).
+      rpc = createChannelGatewayRpc(env, instance.gateway_url, {
+        transportFactory: () => createPrivateChannelGatewayTransport(env, instance.gateway_url),
+      });
       gatewayRpcs.set(instance.gateway_url, rpc);
     }
     return rpc;

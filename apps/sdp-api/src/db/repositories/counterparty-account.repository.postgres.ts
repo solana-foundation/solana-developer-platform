@@ -5,6 +5,7 @@ import type {
   CounterpartyAccountStatus,
 } from "@sdp/types/counterparties";
 import type { DatabaseClient as AppDb } from "@/db/client";
+import { escapeLikePattern } from "@/db/postgres-utils";
 import type {
   ArchiveCounterpartyAccountInput,
   CounterpartyAccountRow,
@@ -268,7 +269,10 @@ export function createPostgresCounterpartyAccountsRepository(
     },
 
     async listBatchRecipients(params) {
-      const searchLike = params.search ? `%${params.search}%` : null;
+      // Escaped like every other search-shaped ILIKE in this layer: a caller's
+      // own `%` or `_` is a literal to match, not a wildcard that widens the
+      // recipient list past what the caller searched for.
+      const searchLike = params.search ? `%${escapeLikePattern(params.search)}%` : null;
       const idValues = params.accountIds && params.accountIds.length > 0 ? params.accountIds : [];
       const idClause =
         idValues.length > 0 ? `AND a.id IN (${idValues.map(() => "?").join(", ")})` : "";
@@ -284,7 +288,7 @@ export function createPostgresCounterpartyAccountsRepository(
               AND c.status = 'active'
               AND COALESCE(a.network, a.details->>'network') = 'solana'
               AND COALESCE(a.address, a.details->>'address') IS NOT NULL
-              AND (?::text IS NULL OR c.display_name ILIKE ?)
+              AND (?::text IS NULL OR c.display_name ILIKE ? ESCAPE '\\')
               ${idClause}`;
 
       const [rowsResult, countRow] = await Promise.all([
