@@ -446,7 +446,13 @@ export interface RampProviderWebhook<Event = unknown> {
     readonly encoding: "hex" | "base64";
     readonly signedPayload: "timestamp-prefixed" | "raw-body";
   };
-  /** A provider-issued delivery id only; null when the provider supplies none. */
+  /**
+   * A provider-issued delivery id; null when the provider supplies none. A
+   * processor whose provider names no delivery id may derive a deterministic
+   * one from the signed payload instead (identical bytes are the same
+   * delivery): the inbox's unique index dedupes on it, so a redelivery no
+   * longer schedules a second apply.
+   */
   eventId(rawBody: string): string | null;
   parse(rawBody: string, environment?: SdpEnvironment): Event;
 }

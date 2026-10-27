@@ -9,6 +9,7 @@ import {
 } from "@sdp/helius-rings-sdk/outer-tx-policy";
 import { instrumentVendorPort } from "@/runtime/vendor-calls";
 import { createGuardedFetch } from "@/services/guarded-egress";
+import { createCustomerRpcTransport } from "@/services/rpc-egress";
 import type { Env } from "@/types/env";
 import { RingsAdapterError } from "./adapter-error";
 import { type ResolvedRingsConnection, resolveRingsConnection } from "./connection-resolver";
@@ -62,8 +63,8 @@ export async function resolvePersistedRingsGateway(
  * hostname cannot rebind or bounce the API into a private or metadata address
  * after passing the literal write-time check. Development returns undefined —
  * local endpoints legitimately resolve to loopback, which the guard exists to
- * refuse. The one leg this cannot cover is the Zolana client's own Solana RPC
- * transport, which the library builds internally (upstream gap).
+ * refuse. The same gate selects the guarded Kit transport for the Zolana
+ * client's own Solana RPC leg below.
  */
 export function ringsEgressFetch(
   env: Env,
@@ -104,6 +105,14 @@ export function createConfiguredRingsGateway(
   const create = dependencies.createGateway ?? createRingsGateway;
   const recordRingLookupTable = dependencies.recordRingLookupTable;
   const egressFetch = ringsEgressFetch(env);
+  // The Zolana client's own Solana RPC leg dials the tenant's URL with Kit's
+  // own transport unless handed one, so it takes the same guarded Kit
+  // transport the submit leg uses (`createCustomerRpcTransport`): DNS-checked
+  // at connect time, redirects re-guarded per hop. Development keeps the
+  // plain transport, like `ringsEgressFetch` keeps the plain fetch.
+  const solanaRpcTransport = egressFetch
+    ? createCustomerRpcTransport(connection.solanaRpcUrl)
+    : undefined;
 
   const gatewayConfig = {
     solanaRpcUrl: connection.solanaRpcUrl,
@@ -112,6 +121,7 @@ export function createConfiguredRingsGateway(
     ...(connection.ringRpcUrl ? { ringRpcUrl: connection.ringRpcUrl } : {}),
     ...(recordRingLookupTable ? { recordRingLookupTable } : {}),
     ...(egressFetch ? { fetch: egressFetch } : {}),
+    ...(solanaRpcTransport ? { solanaRpcTransport } : {}),
     organizationId: tenant.organizationId,
     projectId: tenant.projectId,
     allowInsecureHttp: connection.allowInsecureHttp,

@@ -18,4 +18,19 @@ describe("updateProjectSchema settings", () => {
 
     expect(updateProjectSchema.parse(input)).toEqual(input);
   });
+
+  // A webhook URL is a stored tenant-controlled endpoint — where a future
+  // dispatcher would POST the project's events — so it is https-only even
+  // while nothing dials it yet.
+  it("rejects a non-https webhook URL", () => {
+    for (const webhookUrl of [
+      "http://hooks.example.com/x",
+      "ftp://hooks.example.com/x",
+      "javascript:alert(1)",
+    ]) {
+      expect(updateProjectSchema.safeParse({ settings: { webhookUrl } }).success, webhookUrl).toBe(
+        false
+      );
+    }
+  });
 });

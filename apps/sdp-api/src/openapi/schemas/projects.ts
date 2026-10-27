@@ -18,10 +18,17 @@ import { userSchema } from "./organizations";
 
 const projectSettingsSchema = z
   .object({
-    webhookUrl: z.string().url().optional().openapi({
-      description: "Webhook URL for event notifications.",
-      example: "https://example.com/webhook",
-    }),
+    webhookUrl: z
+      .string()
+      .url()
+      .refine((value) => new URL(value).protocol === "https:", {
+        message: "webhookUrl must be an https URL",
+      })
+      .optional()
+      .openapi({
+        description: "Webhook URL for event notifications. Must be https.",
+        example: "https://example.com/webhook",
+      }),
     metadata: z
       .record(z.string(), z.string())
       .optional()

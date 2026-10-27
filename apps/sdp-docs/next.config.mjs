@@ -76,6 +76,11 @@ const nextConfig = {
           },
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          // HSTS, like sdp-web. The docs are also served from their own origin
+          // (this deployment), so a first plaintext request to it could be
+          // downgraded. Browsers ignore the header on plain http, so local and
+          // self-hosted http deployments are unaffected.
+          { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains" },
         ],
       },
       {

@@ -3,6 +3,7 @@ import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import { AppError } from "@/lib/errors";
 import { isAssetProfilesEnabled } from "@/lib/feature-flags";
 import { unifiedAuthMiddleware } from "@/middleware/auth";
+import { localRateLimit } from "@/middleware/local-rate-limit";
 import { meteredQuota } from "@/middleware/metered-quota";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { requestGate } from "@/middleware/request-gate";
@@ -73,11 +74,25 @@ export const issuance = new Hono<{ Bindings: Env }>();
 // Public: SDP-hosted token metadata JSON. Registered BEFORE the auth middleware
 // below so wallets and explorers can fetch it without credentials (Hono applies
 // `use(...)` only to routes registered after it). App-wide KV/rate-limit bypass
-// for this path is wired via KV_FREE_PATHS in app.ts.
+// for this path is wired via KV_FREE_PATHS in app.ts, which leaves this route
+// with no limiter at all — the local one below is its backstop, so a spray of
+// random token ids cannot turn an unauthenticated route into an unbounded
+// database load (each miss resolves its id in Postgres). Generous: a wallet or
+// explorer fetches a handful of tokens per page view. Per instance, per source
+// address, like the webhooks router's.
+const METADATA_MAX_REQUESTS_PER_MINUTE = 300;
+const METADATA_RATE_LIMIT_WINDOW_MS = 60_000;
+const METADATA_MAX_TRACKED_ADDRESSES = 4096;
 // Public lookups resolve a token by id with no tenant in scope, so the
 // handler runs under an explicit system database identity.
 issuance.get(
   "/tokens/:tokenId/metadata.json",
+  localRateLimit({
+    name: "token-metadata",
+    maxRequests: METADATA_MAX_REQUESTS_PER_MINUTE,
+    windowMs: METADATA_RATE_LIMIT_WINDOW_MS,
+    maxTrackedKeys: METADATA_MAX_TRACKED_ADDRESSES,
+  }),
   publicRoute("token metadata: public on-chain metadata a wallet or explorer fetches"),
   (c) => runWithSystemDatabaseIdentity("http:token-metadata", () => serveTokenMetadata(c))
 );

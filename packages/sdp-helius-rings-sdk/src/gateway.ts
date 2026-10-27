@@ -18,6 +18,7 @@ import type {
   VerifyIndexedResult,
 } from "@sdp/helius-rings/port";
 import type { RuntimeHealth } from "@sdp/helius-rings/types";
+import type { RpcTransport } from "@solana/kit";
 import { buildRingsOperation } from "./build.js";
 import { createRingsClient } from "./client.js";
 import { createCustodyMaterialSource } from "./custody-ka/derivation";
@@ -69,11 +70,16 @@ export interface RingsGatewayConfig {
   readonly healthTimeoutMs?: number;
   /**
    * Carries every leg this package dials directly — health probes, the
-   * indexer, the prover, and ring bring-up's Ring RPC. The Zolana client's
-   * own Solana RPC transport cannot take one (upstream gap), so that leg
-   * stays on the library's plain transport.
+   * indexer, the prover, and ring bring-up's Ring RPC.
    */
   readonly fetch?: typeof globalThis.fetch;
+  /**
+   * Carries the Zolana client's own Solana RPC leg (chain reads and blockhash
+   * requests against `solanaRpcUrl`). Supplied, that leg stops building Kit's
+   * plain transport and dials through this one, so a host that guards egress
+   * can put a tenant URL behind its guard too.
+   */
+  readonly solanaRpcTransport?: RpcTransport;
 }
 
 const ALL_RED: RuntimeHealth = { rpc: "red", photon: "red", prover: "red" };

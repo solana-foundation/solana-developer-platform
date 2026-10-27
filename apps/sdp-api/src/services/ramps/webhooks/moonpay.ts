@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readRecord, readString } from "@sdp/payments/json";
 import {
   type MoonpaySettlementEvent,
@@ -338,8 +339,15 @@ export const moonpayWebhook = {
     signedPayload: "timestamp-prefixed",
   } as const,
 
-  eventId(): null {
-    return null;
+  eventId(rawBody: string): string {
+    // MoonPay names no delivery id, so the signed payload is its own identity:
+    // identical bytes are the same delivery, and the inbox's unique index then
+    // holds a redelivery to one apply instead of scheduling a duplicate. A
+    // redelivery that re-serializes the same state hashes differently and
+    // merely re-runs the apply, which is monotonic — the dedupe is a
+    // work-saving, never a correctness dependency (the replay job retries any
+    // row whose apply failed, dedupe or not).
+    return createHash("sha256").update(rawBody).digest("hex");
   },
 
   async verify({

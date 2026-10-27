@@ -86,6 +86,9 @@ describe("createConfiguredRingsGateway", () => {
     });
 
     expect(captured[0]?.fetch).toBeTypeOf("function");
+    // The Zolana client's own Solana RPC leg: handed the guarded Kit transport
+    // so the tenant URL cannot be dialled around the guard either.
+    expect(captured[0]?.solanaRpcTransport).toBeTypeOf("function");
   });
 
   it("keeps plain transports in development, where endpoints resolve to loopback", () => {
@@ -95,6 +98,7 @@ describe("createConfiguredRingsGateway", () => {
     });
 
     expect(captured[0]?.fetch).toBeUndefined();
+    expect(captured[0]?.solanaRpcTransport).toBeUndefined();
   });
 
   it.each([
