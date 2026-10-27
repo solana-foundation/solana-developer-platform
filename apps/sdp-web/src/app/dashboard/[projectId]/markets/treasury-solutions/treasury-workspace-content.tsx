@@ -1315,6 +1315,42 @@ function TreasuryStrategies({
   );
 }
 
+/**
+ * A custodial program's way out. An open provider id may outlive its runtime capability, so the
+ * withdrawal form opens only where the shared contract declares a Solana payout lane, and the row
+ * says why otherwise. A read-only member (`viewer`) gets neither, which the API refuses them.
+ */
+function TreasuryProgramAction({
+  onWithdraw,
+  program,
+}: {
+  onWithdraw: (program: EarnProgram) => void;
+  program: EarnProgram;
+}) {
+  const t = useTranslations();
+  const canWrite = useCanWrite();
+  if (!canWrite) return null;
+  if (earnProgramSolanaPayoutTokens(program.provider).length === 0) {
+    return (
+      <span className="block truncate text-tertiary">
+        {t("DashboardMarkets.treasury.providerWithdrawalUnavailable")}
+      </span>
+    );
+  }
+  return (
+    <Button
+      data-earn-withdraw-focus-fallback={program.id}
+      disabled={program.wallet.status === "creating"}
+      onClick={() => onWithdraw(program)}
+      size="sm"
+      type="button"
+      variant="outline"
+    >
+      {t("DashboardMarkets.treasury.withdraw")}
+    </Button>
+  );
+}
+
 /** Organization-wide custodial programs: listed and withdrawable after their provider closes. */
 function TreasuryPrograms({
   isLoading,
@@ -1329,7 +1365,6 @@ function TreasuryPrograms({
 }) {
   const t = useTranslations();
   const locale = useLocale();
-  const canWrite = useCanWrite();
   // Most organizations hold none, so nothing stands in while the list loads: a placeholder
   // that then disappears would shift the page. The section closes the page, so arriving late
   // moves nothing.
@@ -1365,8 +1400,6 @@ function TreasuryPrograms({
             </TableHeader>
             <TableBody>
               {programs.map((program) => {
-                const withdrawalAvailable =
-                  earnProgramSolanaPayoutTokens(program.provider).length > 0;
                 const status = PROGRAM_STATUS_DISPLAY[program.wallet.status];
                 return (
                   <TableRow key={program.id}>
@@ -1395,25 +1428,7 @@ function TreasuryPrograms({
                     <TableCell
                       className={cn(PAYMENTS_TABLE_CELL, TREASURY_PROGRAM_COLUMNS.actions)}
                     >
-                      {/* An open provider id may outlive its runtime capability. Never open a
-                          provider-specific withdrawal form unless the shared contract declares
-                          a Solana payout lane. A read-only member (`viewer`) gets neither. */}
-                      {!canWrite ? null : withdrawalAvailable ? (
-                        <Button
-                          data-earn-withdraw-focus-fallback={program.id}
-                          disabled={program.wallet.status === "creating"}
-                          onClick={() => onWithdraw(program)}
-                          size="sm"
-                          type="button"
-                          variant="outline"
-                        >
-                          {t("DashboardMarkets.treasury.withdraw")}
-                        </Button>
-                      ) : (
-                        <span className="block truncate text-tertiary">
-                          {t("DashboardMarkets.treasury.providerWithdrawalUnavailable")}
-                        </span>
-                      )}
+                      <TreasuryProgramAction onWithdraw={onWithdraw} program={program} />
                     </TableCell>
                   </TableRow>
                 );

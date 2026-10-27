@@ -37,7 +37,7 @@ function MarketsPathGroupSkeleton({ paths }: { paths: readonly string[] }) {
       </div>
       <div className="grid min-w-0 grid-cols-2 gap-2">
         {paths.map((id) => (
-          <SkeletonBlock className="h-[120px] w-full rounded-control" key={id} />
+          <SkeletonBlock className="h-30 w-full rounded-control" key={id} />
         ))}
       </div>
     </section>
