@@ -28,7 +28,20 @@ const TREASURY_TILE_FIGURE_SKELETON_IDS = ["cash", "deployed"];
 const TREASURY_TABLE_SKELETON_ROW_IDS = ["one", "two", "three", "four"];
 const EARN_PATH_SKELETON_IDS = ["treasury", "program"];
 const DVP_PATH_SKELETON_IDS = ["dvp"];
-const GUIDE_INTRO_LINE_IDS = ["one", "two", "three"];
+
+/**
+ * The guide intro's lines, each hidden from the work-area width where the English copy rewraps
+ * to fewer. Measured from 360px to 1440px: six lines at 360, five to 412, four to tablet widths,
+ * three at 1024, two from 1100.
+ */
+const GUIDE_INTRO_LINES = [
+  { id: "one", hidden: undefined },
+  { id: "two", hidden: undefined },
+  { id: "three", hidden: "@3xl:hidden" },
+  { id: "four", hidden: "@xl:hidden" },
+  { id: "five", hidden: "@min-[26.875rem]:hidden" },
+  { id: "six", hidden: "@min-[23rem]:hidden" },
+] as const satisfies readonly { id: string; hidden: string | undefined }[];
 
 /** A landing group: its 24px heading line, then a tile per path, two to a row. */
 function MarketsPathGroupSkeleton({ paths }: { paths: readonly string[] }) {
@@ -241,8 +254,8 @@ export function EarnIntegrationGuideSkeleton() {
     <DashboardWorkspaceOverviewPanel aria-busy="true" data-embedded-yield-loading="integrate">
       <div className="flex min-w-0 flex-col gap-8">
         <div>
-          {GUIDE_INTRO_LINE_IDS.map((id) => (
-            <div className="flex h-5 items-center" key={id}>
+          {GUIDE_INTRO_LINES.map((line) => (
+            <div className={cn("flex h-5 items-center", line.hidden)} key={line.id}>
               <SkeletonBlock className="h-3.5 w-full" />
             </div>
           ))}
@@ -253,15 +266,31 @@ export function EarnIntegrationGuideSkeleton() {
             <div className="flex h-4 items-center">
               <SkeletonBlock className="h-3 w-56" />
             </div>
-            <SkeletonBlock className="h-20 w-full rounded-card" />
+            {/* The strategy ID: a code block's 36px title bar over one 24px line in 14px padding,
+                inside a 1px border. */}
+            <SkeletonBlock className="h-22.5 w-full rounded-card" />
           </EarnSectionSkeleton>
           <EarnSectionSkeleton>
-            <SkeletonBlock className="h-14 w-full rounded-card" />
+            {/* Copy all code wraps under the title on the narrowest phones, its 30px button set
+                in the title row's 24px line by -4px margins. */}
+            <SkeletonBlock className="-my-1 h-7.5 w-33 rounded-control @min-[23rem]:hidden" />
+            {/* The API key callout: three lines on a phone, two from a 448px work area, one from
+                768px, in 16px padding and a 1px border. */}
+            <SkeletonBlock className="h-23.5 w-full rounded-card @md:h-18.5 @3xl:h-13.5" />
             <SkeletonBlock className="h-7 w-full rounded-control @2xl:w-96" />
-            <div className="flex h-5 items-center">
-              <SkeletonBlock className="h-3.5 w-80 max-w-full" />
+            <div className="flex min-w-0 flex-col gap-3">
+              <div>
+                <div className="flex h-5 items-center">
+                  <SkeletonBlock className="h-3.5 w-full" />
+                </div>
+                <div className="flex h-5 items-center @xl:hidden">
+                  <SkeletonBlock className="h-3.5 w-2/3" />
+                </div>
+              </div>
+              {/* The code block: the guide's 36rem viewport under its 36px title bar, inside a
+                  1px border. */}
+              <SkeletonBlock className="h-[calc(36rem+2.375rem)] w-full rounded-card" />
             </div>
-            <SkeletonBlock className="h-[36rem] w-full rounded-card" />
           </EarnSectionSkeleton>
         </RecordStack>
       </div>
