@@ -25,6 +25,7 @@ import { withReadSocketRetry } from "./socket-retry";
 import { DEFAULT_RPC_REQUEST_TIMEOUT_MS, type SolanaRpc } from "./solana";
 import {
   emitRpcTelemetry,
+  markRpcAttemptDeadline,
   type RpcTelemetryEvent,
   rpcFailureOutcome,
   rpcProviderForEndpoint,
@@ -96,17 +97,24 @@ const koraUpstreamPools: PoolMemo = { transports: new Map(), rpcs: new Map() };
  * when it has one, so a caller signal never removes the deadline. Whichever fires first aborts.
  *
  * @param transport - The transport to bound.
- * @param timeoutMs - The per-attempt deadline.
+ * @param timeoutMs - The deadline duration.
+ * @param owner - Whether this bounds a provider attempt or the caller's whole request.
  * @returns A transport whose deadline expiry rejects with a transient-classified timeout.
  */
-function withAttemptDeadline(transport: RpcTransport, timeoutMs: number): RpcTransport {
+function withTransportDeadline(
+  transport: RpcTransport,
+  timeoutMs: number,
+  owner: "attempt" | "caller"
+): RpcTransport {
   return async <TResponse>(rpcRequest: Parameters<RpcTransport>[0]) => {
     const deadline = new AbortController();
+    const deadlineSignal =
+      owner === "attempt" ? markRpcAttemptDeadline(deadline.signal) : deadline.signal;
     const deadlineReason = new Error("RPC attempt deadline elapsed");
     const timer = setTimeout(() => deadline.abort(deadlineReason), timeoutMs);
     const signal = rpcRequest.signal
-      ? AbortSignal.any([rpcRequest.signal, deadline.signal])
-      : deadline.signal;
+      ? AbortSignal.any([rpcRequest.signal, deadlineSignal])
+      : deadlineSignal;
     try {
       return await transport<TResponse>({ ...rpcRequest, signal });
     } catch (cause) {
@@ -138,7 +146,7 @@ function proveGenesis(
   if (probeInFlight) return probeInFlight;
   const probe = (async () => {
     const servedGenesisHash = await createSolanaRpcFromTransport(
-      withAttemptDeadline(endpointTransport, GENESIS_PROBE_TIMEOUT_MS)
+      withTransportDeadline(endpointTransport, GENESIS_PROBE_TIMEOUT_MS, "attempt")
     )
       .getGenesisHash()
       .send();
@@ -487,7 +495,9 @@ export function createClusterRpc(options?: ClusterRpcOptions): SolanaRpc {
   const clientKey = `${options.timeoutMs} ${poolKey}`;
   const memoizedRpc = boundedRpcs.get(clientKey);
   if (memoizedRpc) return memoizedRpc;
-  const rpc = createSolanaRpcFromTransport(withAttemptDeadline(poolTransport, options.timeoutMs));
+  const rpc = createSolanaRpcFromTransport(
+    withTransportDeadline(poolTransport, options.timeoutMs, "caller")
+  );
   boundedRpcs.set(clientKey, rpc);
   return rpc;
 }
@@ -638,13 +648,14 @@ function pooledClusterTransport(
       provider,
       cluster,
       genesisProofKey: `${cluster} ${endpointUrl}`,
-      transport: withAttemptDeadline(
+      transport: withTransportDeadline(
         withGenesisGuard(
           withReadSocketRetry(createDefaultRpcTransport({ url: endpointUrl })),
           cluster,
           endpointUrl
         ),
-        DEFAULT_RPC_REQUEST_TIMEOUT_MS
+        DEFAULT_RPC_REQUEST_TIMEOUT_MS,
+        "attempt"
       ),
     };
   });

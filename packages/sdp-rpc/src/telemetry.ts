@@ -165,9 +165,28 @@ function httpStatusOf(error: unknown): number | undefined {
     : undefined;
 }
 
+const attemptDeadlineReasons = new WeakSet<Error>();
+
+/**
+ * Mark a transport's own deadline without changing its signal or error. The
+ * reason survives AbortSignal.any and shared-read cancellation forwarding.
+ * Weak references cannot retain finished requests or their abort reasons.
+ */
+export function markRpcAttemptDeadline(signal: AbortSignal): AbortSignal {
+  const record = () => {
+    const reason: unknown = signal.reason;
+    if (reason instanceof Error) attemptDeadlineReasons.add(reason);
+  };
+  if (signal.aborted) record();
+  else signal.addEventListener("abort", record, { once: true });
+  return signal;
+}
+
 /** A caller's cancellation or deadline is separate from a provider failure. */
 export function rpcFailureOutcome(signal: AbortSignal | null | undefined): "aborted" | "failed" {
-  return signal?.aborted ? "aborted" : "failed";
+  if (!signal?.aborted) return "failed";
+  const reason: unknown = signal.reason;
+  return reason instanceof Error && attemptDeadlineReasons.has(reason) ? "failed" : "aborted";
 }
 
 function emitPinnedAttempt(

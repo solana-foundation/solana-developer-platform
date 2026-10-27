@@ -77,6 +77,10 @@ method; they never include endpoint URLs or request payloads.
   without sampling. Provider failure rates count `failed` against
   `succeeded|failed`; they exclude cancellations and unverified responses.
   Managed endpoint timeouts remain failures and retain their existing failover.
+- Mark each transport-owned deadline with `markRpcAttemptDeadline` before
+  composing or forwarding its signal. Pinned provider timeouts then remain
+  `failed`, including deadlines forwarded through shared reads; caller-owned
+  cancellation and whole-request budgets remain `aborted`.
 
 Telemetry adds no RPC calls and preserves provider request budgets.
 

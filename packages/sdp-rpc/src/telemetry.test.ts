@@ -5,6 +5,7 @@ import { createDefaultRpcTransport } from "@solana/kit";
 import { fetchWithReadSocketRetry, withReadSocketRetry } from "./socket-retry";
 import {
   emitRpcTelemetry,
+  markRpcAttemptDeadline,
   pinRpcTelemetryEndpoint,
   type RpcTelemetryEvent,
   runWithPinnedRpcTelemetry,
@@ -163,6 +164,31 @@ describe("RPC telemetry", () => {
   ];
 
   for (const { name, send } of callers) {
+    it(`records ${name} provider deadlines as failures through composed signals`, async () => {
+      process.env[envKey] = endpointUrl;
+      const deadline = new AbortController();
+      const caller = new AbortController();
+      const reason = new Error("provider deadline elapsed");
+      const signal = AbortSignal.any([caller.signal, markRpcAttemptDeadline(deadline.signal)]);
+      const events: RpcTelemetryEvent[] = [];
+      setRpcTelemetrySink((event) => events.push(event));
+      globalThis.fetch = async () => {
+        deadline.abort(reason);
+        caller.abort(new Error("caller cancelled later"));
+        throw reason;
+      };
+
+      await runWithPinnedRpcTelemetry(async () => {
+        pinRpcTelemetryEndpoint("devnet", endpointUrl);
+        await assert.rejects(send(signal), (error: unknown) => error === reason);
+      });
+
+      assert.deepEqual(
+        events.map((event) => event.outcome),
+        ["failed"]
+      );
+    });
+
     for (const reasonName of ["AbortError", "TimeoutError"]) {
       it(`records ${name} caller ${reasonName} separately from provider failures`, async () => {
         process.env[envKey] = endpointUrl;
@@ -190,6 +216,62 @@ describe("RPC telemetry", () => {
       });
     }
   }
+
+  it("retains the first cancellation when a provider deadline fires afterwards", async () => {
+    process.env[envKey] = endpointUrl;
+    const caller = new AbortController();
+    const deadline = new AbortController();
+    const signal = AbortSignal.any([caller.signal, markRpcAttemptDeadline(deadline.signal)]);
+    const reason = new Error("caller cancelled first");
+    const events: RpcTelemetryEvent[] = [];
+    setRpcTelemetrySink((event) => events.push(event));
+    globalThis.fetch = async () => {
+      caller.abort(reason);
+      deadline.abort(new Error("provider deadline elapsed later"));
+      throw reason;
+    };
+
+    await runWithPinnedRpcTelemetry(async () => {
+      pinRpcTelemetryEndpoint("devnet", endpointUrl);
+      await assert.rejects(
+        fetchWithReadSocketRetry(endpointUrl, { signal }),
+        (error: unknown) => error === reason
+      );
+    });
+    assert.deepEqual(
+      events.map((event) => event.outcome),
+      ["aborted"]
+    );
+  });
+
+  it("recognizes native deadlines and their reasons forwarded by shared reads", async () => {
+    process.env[envKey] = endpointUrl;
+    const deadline = markRpcAttemptDeadline(AbortSignal.timeout(1));
+    const shared = new AbortController();
+    deadline.addEventListener("abort", () => shared.abort(deadline.reason), { once: true });
+    const events: RpcTelemetryEvent[] = [];
+    setRpcTelemetrySink((event) => events.push(event));
+    globalThis.fetch = async () =>
+      new Promise<Response>((_resolve, reject) => {
+        shared.signal.throwIfAborted();
+        shared.signal.addEventListener("abort", () => reject(shared.signal.reason), { once: true });
+      });
+
+    const rejected = runWithPinnedRpcTelemetry(async () => {
+      pinRpcTelemetryEndpoint("devnet", endpointUrl);
+      await assert.rejects(
+        fetchWithReadSocketRetry(endpointUrl, { signal: shared.signal }),
+        (error: unknown) => error === deadline.reason
+      );
+    });
+    // Native timeout signals do not keep Node alive on their own.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await rejected;
+    assert.deepEqual(
+      events.map((event) => event.outcome),
+      ["failed"]
+    );
+  });
 
   it("uses an init signal override when the Request's signal was aborted", async () => {
     process.env[envKey] = endpointUrl;

@@ -1,4 +1,10 @@
 import { readStamp, withMinimumRpcSlot, withReadFloor } from "@sdp/rpc/read-context";
+import {
+  pinRpcTelemetryEndpoint,
+  type RpcTelemetryEvent,
+  runWithPinnedRpcTelemetry,
+  setRpcTelemetrySink,
+} from "@sdp/rpc/telemetry";
 import { address, type Base64EncodedWireTransaction, type RpcTransport } from "@solana/kit";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -50,8 +56,46 @@ const ACCOUNTS = ["11111111111111111111111111111111"];
 const laterTask = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  setRpcTelemetrySink(null);
+});
+
+describe("withVedaRpcTimeout", () => {
+  it.each([
+    { name: "build", createRpc: createVedaRpc },
+    { name: "shared read", createRpc: createVedaReadRpc },
+  ])("records a stalled $name client's deadline as a provider failure", async ({ createRpc }) => {
+    vi.useFakeTimers();
+    const endpoint = "https://veda-deadline.invalid";
+    const events: RpcTelemetryEvent[] = [];
+    setRpcTelemetrySink((event) => events.push(event));
+    const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      const signal = init?.signal;
+      if (!signal) throw new Error("Expected a transport signal");
+      signal.throwIfAborted();
+      return new Promise<Response>((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = runWithPinnedRpcTelemetry(() => {
+      pinRpcTelemetryEndpoint("devnet", endpoint);
+      return createRpc(endpoint, 25)
+        .getMultipleAccounts([address("11111111111111111111111111111111")], { encoding: "base64" })
+        .send();
+    });
+    const rejected = expect(result).rejects.toThrow("Veda RPC request timed out after 25ms");
+    await vi.advanceTimersByTimeAsync(25);
+    await rejected;
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(events.map((event) => [event.method, event.outcome])).toEqual([
+      ["getMultipleAccounts", "failed"],
+    ]);
+  });
 });
 
 describe("withVedaReadDeduplication", () => {

@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { readFloor, readStamp, withRpcReadContext } from "@sdp/rpc/read-context";
 import { withReadSocketRetry } from "@sdp/rpc/socket-retry";
+import { markRpcAttemptDeadline } from "@sdp/rpc/telemetry";
 import {
   createDefaultRpcTransport,
   createSolanaRpcFromTransport,
@@ -27,13 +28,14 @@ export function withVedaRpcTimeout(
   const scopedTransport = withRpcReadContext(transport);
   return async <TResponse>(config: Parameters<RpcTransport>[0]) => {
     const controller = new AbortController();
+    const deadlineSignal = markRpcAttemptDeadline(controller.signal);
     // A distinct reason lets the catch path tell our deadline from a caller
     // cancellation even if both signals abort before the transport rejects.
     const deadlineReason = new Error("Veda RPC deadline elapsed");
     const timer = setTimeout(() => controller.abort(deadlineReason), timeoutMs);
     const signal = config.signal
-      ? AbortSignal.any([config.signal, controller.signal])
-      : controller.signal;
+      ? AbortSignal.any([config.signal, deadlineSignal])
+      : deadlineSignal;
     try {
       return await scopedTransport<TResponse>({ ...config, signal });
     } catch (cause) {
