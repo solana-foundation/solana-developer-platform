@@ -685,6 +685,7 @@ describe("payment transfer batches", () => {
     );
     expect(body.data.transfers.every((transfer) => transfer.type === "transfer_batch")).toBe(true);
     expect(body.data.transfers.every((transfer) => transfer.status === "processing")).toBe(true);
+    expect(body.data.transfers.every((transfer) => !("serializedTx" in transfer))).toBe(true);
     expect(signingOutcomeMock).toHaveBeenCalledTimes(2);
     expect(confirmTransactionMock).not.toHaveBeenCalled();
 
@@ -781,10 +782,12 @@ describe("payment transfer batches", () => {
     );
     expect(detailRes.status).toBe(200);
     const detailBody = (await detailRes.json()) as {
-      data: { recipients: unknown[]; transfers: unknown[] };
+      data: { recipients: unknown[]; transfers: Array<{ signature: string | null }> };
     };
     expect(detailBody.data.recipients).toHaveLength(2);
     expect(detailBody.data.transfers).toHaveLength(2);
+    expect(detailBody.data.transfers.every((transfer) => Boolean(transfer.signature))).toBe(true);
+    expect(detailBody.data.transfers.every((transfer) => !("serializedTx" in transfer))).toBe(true);
 
     const listRes = await app.request(
       "/v1/payments/transfer-batches",
