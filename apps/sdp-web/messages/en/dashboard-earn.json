@@ -245,7 +245,6 @@
       "apiKeyCalloutBefore": "You need a",
       "apiKeyCalloutLink": "Developer API key",
       "apiKeyCalloutAfter": "for this project (it includes earn:read and earn:write). Keep it on your server, never in the client.",
-      "back": "Back",
       "missingStrategyTitle": "Choose a strategy first",
       "missingStrategyDescription": "Return to Embedded Yield and select a live strategy this integration should fund.",
       "unknownStrategyTitle": "Strategy no longer available",

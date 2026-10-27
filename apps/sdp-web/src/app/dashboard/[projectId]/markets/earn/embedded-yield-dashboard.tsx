@@ -504,6 +504,8 @@ export function EmbeddedYieldDashboard({ configureHref }: { configureHref: strin
 
   let content: ReactNode;
   if (!summary) {
+    // No Integrate of its own: the header's stays on screen here, and only the zero-position
+    // state moves that action into its body (`hidesPageAction`).
     content = (
       <ListEmptyState
         description={t("DashboardMarkets.earnProgram.portfolioErrorDescription")}
