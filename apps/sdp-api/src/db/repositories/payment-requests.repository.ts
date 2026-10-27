@@ -162,6 +162,12 @@ export interface PaymentRequestsRepository {
     signedTransaction: string;
   }): Promise<boolean>;
   listPaymentRequests(params: ListPaymentRequestsInput): Promise<ListPaymentRequestsResult>;
+  /**
+   * Whether `environment` holds any open request with a sponsored transaction window, the hot
+   * lane's only candidates, so the lane reads the cluster's block height only when there is a
+   * window to compare it against.
+   */
+  hasHotPaymentRequests(params: { environment: SdpEnvironment }): Promise<boolean>;
   listHotPaymentRequests(params: {
     environment: SdpEnvironment;
     minLastValidBlockHeight: bigint;
@@ -174,6 +180,14 @@ export interface PaymentRequestsRepository {
     agedCreatedBefore: string;
     limit: number;
   }): Promise<PaymentRequestRow[]>;
+  /**
+   * Whether `environment` holds any lapsed request due for an expiry check, so the expiry lane
+   * reads the cluster's block height only when there is a request to close.
+   */
+  hasLapsedPaymentRequests(params: {
+    environment: SdpEnvironment;
+    checkedBefore: string;
+  }): Promise<boolean>;
   listLapsedPaymentRequests(params: {
     environment: SdpEnvironment;
     checkedBefore: string;

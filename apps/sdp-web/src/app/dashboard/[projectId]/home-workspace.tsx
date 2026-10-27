@@ -13,9 +13,10 @@ import { CoinsIcon, KeyIcon, ReceiptIcon, WalletIcon } from "lucide-react";
 import Link from "next/link";
 import { Fragment, useMemo } from "react";
 import { DashboardQuickStart } from "@/components/dashboard-quick-start";
+import { ReadOnlyEmptyNote } from "@/components/read-only-empty-note";
 import { TokenMark } from "@/components/token-mark";
 import { ActionTile } from "@/components/ui/action-tile";
-import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import { useCanWrite, useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { readApiErrorMessage } from "@/lib/api-error";
@@ -104,6 +105,7 @@ function ActivityAddress({ row, cluster }: { row: HomeActivityRow; cluster: Sola
  */
 function FirstWalletPrompt({ canCreateWallet }: { canCreateWallet: boolean }) {
   const t = useTranslations();
+  const canWrite = useCanWrite();
   const locale = useLocale();
   const href = useProjectHref();
   return (
@@ -126,6 +128,12 @@ function FirstWalletPrompt({ canCreateWallet }: { canCreateWallet: boolean }) {
             {t("Shared.homeWorkspace.createWallet")}
           </Link>
         </Button>
+      ) : null}
+      {/* Without this a read-only member is told to start with a wallet and offered no way. */}
+      {!canCreateWallet && !canWrite ? (
+        <div className="mt-6">
+          <ReadOnlyEmptyNote />
+        </div>
       ) : null}
     </section>
   );
@@ -647,7 +655,7 @@ export function HomeWorkspace({
           } as const,
         ]
       : []),
-    ...(flags.payments && !firstRun
+    ...(flags.payments && capabilities.canWrite && !firstRun
       ? [
           {
             key: "payment",

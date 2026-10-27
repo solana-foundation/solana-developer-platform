@@ -41,7 +41,9 @@ import {
   DashboardWorkspaceCard,
   DashboardWorkspaceOverviewPanel,
 } from "@/components/dashboard-workspace-panel";
+import { ReadOnlyEmptyNote } from "@/components/read-only-empty-note";
 import { TokenMark } from "@/components/token-mark";
+import { useCanWrite } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
@@ -432,6 +434,8 @@ function TradesTable({
 function CreateTradeButton() {
   const t = useTranslations();
   const href = useProjectHref();
+  const canWrite = useCanWrite();
+  if (!canWrite) return null;
   return (
     <Button asChild size="sm">
       <Link href={href(`${DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}/create`)}>
@@ -506,13 +510,14 @@ function TradesCardBody({
   toolbar: ReactNode;
 }) {
   const t = useTranslations();
+  const canWrite = useCanWrite();
   if (listIsEmpty) {
     // The strip is suppressed with the list, because the empty state already
     // carries this exact call to action and two of the same button on one
     // screen reads as two different actions.
     return (
       <ListEmptyState
-        action={<CreateTradeButton />}
+        action={canWrite ? <CreateTradeButton /> : <ReadOnlyEmptyNote />}
         description={t("DashboardMarkets.dvp.emptyDescription")}
         icon={<ArrowLeftRightIcon className="size-5" />}
         message={t("DashboardMarkets.dvp.empty")}

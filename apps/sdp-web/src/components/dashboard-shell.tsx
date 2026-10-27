@@ -1,6 +1,7 @@
 "use client";
 
 import { SignInButton, useAuth } from "@clerk/nextjs";
+import { Badge } from "@sdp/ui/badge";
 import { cn } from "@sdp/ui/cn";
 import { type ThemeScope, themeScopeAttributes } from "@sdp/ui/theme-scope";
 import { ThemeScopeProvider } from "@sdp/ui/theme-scope-provider";
@@ -492,6 +493,7 @@ export function DashboardShell({
     marketsEnabled,
     paymentsEnabled,
     privateChannelsEnabled,
+    canWrite: dashboardAccess.capabilities.canWrite,
     walletFavorites: walletFavoriteItems,
     rampsEnabled,
   });
@@ -501,7 +503,12 @@ export function DashboardShell({
       : null;
   const pageTitle = activeTitleOverride?.title ?? pageConfig.title;
   const contentWidthClass = pageConfig.contentWidthClass ?? "max-w-5xl";
-  const headerTabs = pageConfig.headerTabs;
+  const headerTabs = pageConfig.headerTabs && {
+    ...pageConfig.headerTabs,
+    tabs: pageConfig.headerTabs.tabs.filter(
+      (tab) => !tab.capability || dashboardAccess.capabilities[tab.capability]
+    ),
+  };
   const routeTabs = pageConfig.routeTabs;
   const hasHeaderTabs = Boolean(headerTabs || routeTabs);
   // A refresh action page sets its way back over a left title, in the page's column, as the
@@ -531,16 +538,28 @@ export function DashboardShell({
       dashboardAccess.capabilities[pageConfig.headerAction.capability]) ? (
       <DashboardHeaderAction action={pageConfig.headerAction} search={urlSearchParams.toString()} />
     ) : null;
+  // A read-only member sees why no page offers a write, in the slot a route's action would take.
+  const readOnlyBadge = dashboardAccess.capabilities.canWrite ? null : (
+    <Badge variant="outline" data-testid="dashboard-read-only-badge">
+      {/* The badge wraps its children in one block span, so the icon and label need a row. */}
+      <span className="inline-flex items-center gap-1">
+        <LockIcon className="size-3" aria-hidden />
+        {t("Shared.dashboardShell.readOnly")}
+      </span>
+    </Badge>
+  );
   // A page's own actions (a wallet's star) sit before the route's action, in the same slot.
   const pageActions = activeTitleOverride?.actions;
+  const slotItems = [pageActions, routeAction, readOnlyBadge].filter(Boolean);
   const headerAction =
-    pageActions && routeAction ? (
+    slotItems.length > 1 ? (
       <span className="flex items-center gap-2">
         {pageActions}
         {routeAction}
+        {readOnlyBadge}
       </span>
     ) : (
-      (pageActions ?? routeAction)
+      (slotItems[0] ?? null)
     );
   // Refresh pages put the title, the tabs and the content in one column with one gutter, so all
   // three share a left edge, and drop the full-bleed rule under the tabs. The column is the

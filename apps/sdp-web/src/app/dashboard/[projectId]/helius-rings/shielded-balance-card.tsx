@@ -1,6 +1,7 @@
 "use client";
 
 import { formatCurrencyAmount } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import { useCanWrite } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import type { RingsWallet } from "./helius-rings.data";
 import { RekeyWalletDialog } from "./rekey-wallet-dialog";
@@ -26,7 +27,9 @@ export function ShieldedBalanceCard({
   // A paused wallet is suppressed alongside an unprovisioned one: the read is
   // refused for an identity that cannot be derived, and this card mounts per
   // wallet on every visit, so asking would fail on a loop.
-  const readable = wallet.shieldedAddress !== null && wallet.status !== "paused";
+  // The balance is read by a sync, which writes; a read-only member never asks.
+  const canWrite = useCanWrite();
+  const readable = canWrite && wallet.shieldedAddress !== null && wallet.status !== "paused";
   const { state } = useRingsBalance(readable ? wallet.id : null, refreshTick);
 
   // Paused is checked first, and having no address does not exempt a wallet from
@@ -49,6 +52,14 @@ export function ShieldedBalanceCard({
     return (
       <p className="text-pretty break-words text-sm text-secondary">
         {t("DashboardHeliusRings.balances.notProvisioned")}
+      </p>
+    );
+  }
+
+  if (!canWrite) {
+    return (
+      <p className="text-pretty break-words text-sm text-secondary">
+        {t("DashboardHeliusRings.balances.readOnly")}
       </p>
     );
   }

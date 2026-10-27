@@ -30,6 +30,7 @@ import {
 import { submitOfframpDeposit } from "@/app/dashboard/[projectId]/payments/ramps/offramp-deposit";
 import { rampTransferPollInterval } from "@/app/dashboard/[projectId]/payments/ramps/ramp-phase";
 import { getRampTransferState } from "@/app/dashboard/[projectId]/payments/ramps/ramp-transfer-state";
+import { useCanWrite } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import type { PaymentTransferDetail } from "./transaction-detail.data";
 
@@ -90,6 +91,7 @@ export function RampOpenSale({
 }) {
   const t = useTranslations();
   const router = useRouter();
+  const canWrite = useCanWrite();
   const [confirmingSend, setConfirmingSend] = useState(false);
   const [confirmingCancel, setConfirmingCancel] = useState(false);
   const [canceling, setCanceling] = useState(false);
@@ -175,29 +177,32 @@ export function RampOpenSale({
         </RecordList>
       ) : null}
       <OfframpSendError message={sendError instanceof Error ? sendError.message : null} />
-      <div className="mt-4 flex flex-wrap gap-3">
-        {deposit && transfer.custodyWalletId && transfer.token ? (
+      {/* Send and Cancel both change the sale; a read-only member sees where it stands. */}
+      {canWrite ? (
+        <div className="mt-4 flex flex-wrap gap-3">
+          {deposit && transfer.custodyWalletId && transfer.token ? (
+            <Button
+              type="button"
+              iconLeft={<SendIcon />}
+              disabled={sending || canceling || sent !== undefined}
+              onClick={() => setConfirmingSend(true)}
+            >
+              {sending
+                ? t("DashboardPayments.ramps.sending")
+                : t("DashboardPayments.ramps.sendCrypto", { amount: deposit.amount, token })}
+            </Button>
+          ) : null}
           <Button
             type="button"
-            iconLeft={<SendIcon />}
-            disabled={sending || canceling || sent !== undefined}
-            onClick={() => setConfirmingSend(true)}
+            variant="secondary"
+            iconLeft={<XIcon />}
+            disabled={canceling || sending}
+            onClick={() => setConfirmingCancel(true)}
           >
-            {sending
-              ? t("DashboardPayments.ramps.sending")
-              : t("DashboardPayments.ramps.sendCrypto", { amount: deposit.amount, token })}
+            {t("DashboardPayments.ramps.cancelPayout")}
           </Button>
-        ) : null}
-        <Button
-          type="button"
-          variant="secondary"
-          iconLeft={<XIcon />}
-          disabled={canceling || sending}
-          onClick={() => setConfirmingCancel(true)}
-        >
-          {t("DashboardPayments.ramps.cancelPayout")}
-        </Button>
-      </div>
+        </div>
+      ) : null}
       {deposit ? (
         <SendDepositDialog
           open={confirmingSend}
