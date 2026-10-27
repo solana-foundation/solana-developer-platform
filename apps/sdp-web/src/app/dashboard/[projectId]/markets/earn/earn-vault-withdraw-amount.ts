@@ -15,16 +15,24 @@ export type VaultWithdrawalAmountValidation =
   | { kind: "valid"; canonicalAmount: string }
   | { kind: "invalid" };
 
-export function validateVaultWithdrawalAmount(value: string): VaultWithdrawalAmountValidation {
+/** The one validator body: shape, the caller's fraction ceiling, positivity. */
+function validateUnsignedDecimal(
+  value: string,
+  maxFractionDecimals: number
+): VaultWithdrawalAmountValidation {
   const amount = parseUnsignedDecimal(value, { maxLength: MAX_AMOUNT_LENGTH });
   if (
     !amount ||
-    amount.fraction.length > VAULT_WITHDRAWAL_AMOUNT_DECIMALS ||
+    amount.fraction.length > maxFractionDecimals ||
     !isPositiveDecimal(amount.canonical)
   ) {
     return { kind: "invalid" };
   }
   return { kind: "valid", canonicalAmount: amount.canonical };
+}
+
+export function validateVaultWithdrawalAmount(value: string): VaultWithdrawalAmountValidation {
+  return validateUnsignedDecimal(value, VAULT_WITHDRAWAL_AMOUNT_DECIMALS);
 }
 
 /**
@@ -34,15 +42,7 @@ export function validateVaultWithdrawalAmount(value: string): VaultWithdrawalAmo
  * the selected fund's exact mint scale.
  */
 export function validateVaultWithdrawalShares(value: string): VaultWithdrawalAmountValidation {
-  const shares = parseUnsignedDecimal(value, { maxLength: MAX_AMOUNT_LENGTH });
-  if (
-    !shares ||
-    shares.fraction.length > VAULT_WITHDRAWAL_SHARE_DECIMALS ||
-    !isPositiveDecimal(shares.canonical)
-  ) {
-    return { kind: "invalid" };
-  }
-  return { kind: "valid", canonicalAmount: shares.canonical };
+  return validateUnsignedDecimal(value, VAULT_WITHDRAWAL_SHARE_DECIMALS);
 }
 
 /** Exact share intent for a provider-settled redemption, capped by live holdings. */

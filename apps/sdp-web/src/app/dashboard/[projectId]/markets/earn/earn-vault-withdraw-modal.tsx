@@ -229,7 +229,7 @@ interface WithdrawalResultCopy {
   title: string;
 }
 
-export type EarnVaultWithdrawalSettlement = "atomic" | "provider_order";
+type EarnVaultWithdrawalSettlement = "atomic" | "provider_order";
 
 function withdrawalResultCopy(
   outcome: WithdrawalOutcome,
