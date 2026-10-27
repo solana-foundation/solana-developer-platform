@@ -5,9 +5,9 @@
  * and mounted, but the whole family is behind `MARKETS_ENABLED` and the swap
  * program is deployed on devnet only (PRO-1798). Publishing them would expose
  * an unsupported public surface. Promoting the family is one line in
- * `registerPublicPaths` plus a `"dvp"` slug in
- * `apps/sdp-docs/scripts/lib/public-openapi.mjs`, and it is a product-policy
- * decision rather than a code one.
+ * `registerPublicPaths` (the docs reference, Postman collection and AI files
+ * follow the document), and it is a product-policy decision rather than a code
+ * one.
  */
 
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
