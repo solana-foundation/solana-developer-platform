@@ -55,7 +55,7 @@ export function VaultSlippageSection({
         aria-controls={`${idPrefix}-slippage-section`}
         aria-expanded={expanded}
         aria-label={`${title}. ${summary}`}
-        className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left transition-colors hover:bg-fill-subtle focus-visible:outline-2 focus-visible:outline-border-strong focus-visible:outline-offset-[-2px] disabled:cursor-not-allowed disabled:opacity-50"
+        className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left transition-colors hover:bg-fill-subtle focus-visible:outline-2 focus-visible:outline-border-strong focus-visible:-outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
         disabled={submitting}
         onClick={onToggle}
         type="button"
