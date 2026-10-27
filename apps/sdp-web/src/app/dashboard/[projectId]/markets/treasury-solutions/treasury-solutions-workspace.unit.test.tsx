@@ -937,8 +937,14 @@ describe("TreasurySolutionsWorkspace", () => {
         .getAllByRole("columnheader")
         .map((header) => header.textContent)
     ).toEqual(["Position", "Wallet", "Status", "Balance", "Actions"]);
-    // Status reads as words in its tone, not a pill.
-    expect(within(vaultPositionRow).getByText("Active").className).toContain("text-success");
+    // Status reads as words in its tone, not a pill: in its column, and under the balance on a
+    // phone, where the column drops out.
+    const statusWords = within(vaultPositionRow).getAllByText("Active");
+    expect(statusWords).toHaveLength(2);
+    for (const word of statusWords) expect(word.className).toContain("text-success");
+    expect(
+      statusWords.some((word) => word.closest("td")?.querySelector("[data-earn-vault-balance]"))
+    ).toBe(true);
 
     // PRO-1723: the allocation summary totals the float above the tables.
     expect(screen.getByText("Deposited")).toBeTruthy();
@@ -2478,6 +2484,8 @@ describe("TreasurySolutionsWorkspace", () => {
     if (!programRow) throw new Error("Expected existing provider program row");
     expect(within(programRow).queryByRole("button", { name: "Withdraw" })).toBeNull();
     expect(within(programRow).getByText("Provider withdrawal unavailable")).toBeTruthy();
+    // The status reads in its column, and under the balance on a phone.
+    expect(within(programRow).getAllByText("Ready")).toHaveLength(2);
   });
 
   it("recovers every provider-accepted in-flight withdrawal from the durable ledger", async () => {

@@ -63,6 +63,7 @@ import {
 import { earnVaultHoldingValue } from "@/app/dashboard/[projectId]/markets/earn/earn-vault-holding";
 import type { EarnVaultParRedemptionSource } from "@/app/dashboard/[projectId]/markets/earn/earn-vault-par-redemption-modal";
 import {
+  type EarnVaultPositionUiStatus,
   earnVaultDepositUiState,
   earnVaultPositionStatusLabels,
   earnVaultWithdrawalUiState,
@@ -646,21 +647,31 @@ function TreasuryWallets({
   );
 }
 
+const POSITION_STATUS_TONE = {
+  active: "positive",
+  pending: "progress",
+} as const satisfies Record<EarnVaultPositionUiStatus, StatusTone>;
+
 /**
- * A position's status in its tone, explained on hover and focus: settled positions read
- * Active, ones whose deposit or withdrawal is still moving read Pending.
+ * Settled positions read Active, ones whose latest deposit or withdrawal is still moving read
+ * Pending.
  */
-function TreasuryPositionStatus({ activity }: { activity?: TrackedVaultActivity }) {
+function vaultPositionStatus(
+  activity: TrackedVaultActivity | undefined
+): EarnVaultPositionUiStatus {
+  if (activity === undefined) return "active";
+  if (activity.kind === "deposit") {
+    return earnVaultDepositUiState(activity.movement.status).positionStatus;
+  }
+  return earnVaultWithdrawalUiState(activity.movement.status).positionStatus;
+}
+
+/** A position's status in its tone, explained on hover and focus. */
+function TreasuryPositionStatus({ status }: { status: EarnVaultPositionUiStatus }) {
   const t = useTranslations();
-  const positionStatus = activity
-    ? (activity.kind === "deposit"
-        ? earnVaultDepositUiState(activity.movement.status)
-        : earnVaultWithdrawalUiState(activity.movement.status)
-      ).positionStatus
-    : "active";
-  const display = earnVaultPositionStatusLabels(positionStatus, t);
+  const display = earnVaultPositionStatusLabels(status, t);
   const description =
-    positionStatus === "pending"
+    status === "pending"
       ? t("DashboardMarkets.treasury.positionStatusPendingDescription")
       : t("DashboardMarkets.treasury.positionStatusActiveDescription");
 
@@ -673,10 +684,7 @@ function TreasuryPositionStatus({ activity }: { activity?: TrackedVaultActivity 
             className="inline-flex max-w-full cursor-help rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-strong"
             type="button"
           >
-            <StatusText
-              className="truncate"
-              tone={positionStatus === "pending" ? "progress" : "positive"}
-            >
+            <StatusText className="truncate" tone={POSITION_STATUS_TONE[status]}>
               {display.label}
             </StatusText>
           </button>
@@ -690,17 +698,26 @@ function TreasuryPositionStatus({ activity }: { activity?: TrackedVaultActivity 
 function TreasuryPositionBalanceCell({
   formattedBalance,
   parIntermediate,
+  status,
   syncing,
   lastVerifiedAt,
 }: {
   formattedBalance: string;
   parIntermediate: EarnVaultPosition["parIntermediate"];
+  status: EarnVaultPositionUiStatus;
   syncing: boolean;
   lastVerifiedAt?: number;
 }) {
   const t = useTranslations();
   const locale = useLocale();
   const syncingLabel = t("DashboardMarkets.treasury.positionBalanceSyncing");
+  const stale = lastVerifiedAt !== undefined;
+  const parIntermediateNote =
+    parIntermediate !== undefined && !stale && !syncing
+      ? t("DashboardEarn.parRedemption.positionIntermediate", {
+          amount: formatProviderAmount(parIntermediate.amount, locale),
+        })
+      : undefined;
   return (
     <TableCell
       className={cn(
@@ -725,7 +742,7 @@ function TreasuryPositionBalanceCell({
           )}
         </div>
       </div>
-      {lastVerifiedAt !== undefined ? (
+      {stale ? (
         <span
           className="block truncate text-tertiary"
           title={new Date(lastVerifiedAt).toLocaleString(locale, VERIFIED_AT_FORMAT)}
@@ -733,13 +750,23 @@ function TreasuryPositionBalanceCell({
           {t("DashboardMarkets.treasury.positionBalanceLastVerified")}
         </span>
       ) : null}
-      {parIntermediate && lastVerifiedAt === undefined && !syncing ? (
-        <span className="block truncate text-tertiary" data-earn-vault-par-intermediate>
-          {t("DashboardEarn.parRedemption.positionIntermediate", {
-            amount: formatProviderAmount(parIntermediate.amount, locale),
-          })}
+      {parIntermediateNote === undefined ? null : (
+        <span
+          className="block truncate text-tertiary"
+          data-earn-vault-par-intermediate
+          title={parIntermediateNote}
+        >
+          {parIntermediateNote}
         </span>
-      ) : null}
+      )}
+      {/* On a phone the status column drops out and its word reads here, so the row keeps two
+          lines. A balance note takes the line instead: a note never shows while a movement is
+          unconfirmed, so its position reads Active. */}
+      {stale || parIntermediateNote !== undefined ? null : (
+        <StatusText className="block truncate @2xl:hidden" tone={POSITION_STATUS_TONE[status]}>
+          {earnVaultPositionStatusLabels(status, t).label}
+        </StatusText>
+      )}
     </TableCell>
   );
 }
@@ -770,13 +797,21 @@ function TreasuryPositionActions({
   return (
     <div className="flex flex-wrap justify-end gap-2">
       {holdsIntermediate ? (
+        // A phone's action slot fits the verb alone, so the token drops from the label there;
+        // the button's name keeps it at every width.
         <Button
+          aria-label={t("DashboardMarkets.treasury.redeemIntermediate")}
           onClick={() => onWithdraw(position, "intermediate")}
           size="sm"
           type="button"
           variant="outline"
         >
-          {t("DashboardMarkets.treasury.redeemIntermediate")}
+          <span className="@2xl:hidden">
+            {t("DashboardMarkets.treasury.redeemIntermediateShort")}
+          </span>
+          <span className="hidden @2xl:inline">
+            {t("DashboardMarkets.treasury.redeemIntermediate")}
+          </span>
         </Button>
       ) : null}
       {holdsShares ? (
@@ -906,6 +941,7 @@ function TreasuryPositions({
               const asset = earnMintAsset(position.tokenMint);
               const wallet = walletById.get(position.custodyWalletId);
               const balance = balanceOf(position);
+              const status = vaultPositionStatus(latestActivityByPositionId.get(position.id));
               return (
                 <TableRow key={position.id}>
                   <TableCell
@@ -928,14 +964,13 @@ function TreasuryPositions({
                       shortenMarketAddress(wallet?.publicKey ?? position.custodyWalletId)}
                   </TableCell>
                   <TableCell className={cn(PAYMENTS_TABLE_CELL, TREASURY_POSITION_COLUMNS.status)}>
-                    <TreasuryPositionStatus
-                      activity={latestActivityByPositionId.get(position.id)}
-                    />
+                    <TreasuryPositionStatus status={status} />
                   </TableCell>
                   <TreasuryPositionBalanceCell
                     formattedBalance={formatTokenValue(balance.value, position.tokenMint, locale)}
                     lastVerifiedAt={balance.lastVerifiedAt}
                     parIntermediate={position.parIntermediate}
+                    status={status}
                     syncing={balance.syncing}
                   />
                   <TableCell className={cn(PAYMENTS_TABLE_CELL, TREASURY_POSITION_COLUMNS.actions)}>
@@ -1468,8 +1503,9 @@ function TreasuryProgramAction({
   const canWrite = useCanWrite();
   if (!canWrite) return null;
   if (earnProgramSolanaPayoutTokens(program.provider).length === 0) {
+    // The reason wraps rather than truncates: it stands in for the action, so it reads whole.
     return (
-      <span className="block truncate text-tertiary">
+      <span className="block whitespace-normal text-pretty text-tertiary">
         {t("DashboardMarkets.treasury.providerWithdrawalUnavailable")}
       </span>
     );
@@ -1561,6 +1597,10 @@ function TreasuryPrograms({
                       )}
                     >
                       {formatUsd(program.wallet.balance.totalUsd, locale)}
+                      {/* On a phone the status column drops out and its word reads here. */}
+                      <StatusText className="block truncate @2xl:hidden" tone={status.tone}>
+                        {t(status.labelKey)}
+                      </StatusText>
                     </TableCell>
                     <TableCell
                       className={cn(PAYMENTS_TABLE_CELL, TREASURY_PROGRAM_COLUMNS.actions)}

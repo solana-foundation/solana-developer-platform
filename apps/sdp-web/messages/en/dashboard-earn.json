@@ -98,6 +98,7 @@
       "deposit": "Deposit",
       "withdraw": "Withdraw",
       "redeemIntermediate": "Redeem wYLDS",
+      "redeemIntermediateShort": "Redeem",
       "noBalance": "No active position",
       "positionValueUnavailable": "Live value unavailable",
       "depositAvailable": "Available",
