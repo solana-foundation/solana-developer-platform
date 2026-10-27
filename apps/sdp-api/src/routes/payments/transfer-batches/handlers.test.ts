@@ -17,6 +17,7 @@ import {
   TRANSFER_CHECKED_DISCRIMINATOR,
 } from "@solana-program/token-2022";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db/client";
 import * as batchesRepositoryPostgres from "@/db/repositories/payment-transfer-batches.repository.postgres";
 import * as paymentsRepositoryPostgres from "@/db/repositories/payments.repository.postgres";
@@ -781,13 +782,19 @@ describe("payment transfer batches", () => {
       env
     );
     expect(detailRes.status).toBe(200);
-    const detailBody = (await detailRes.json()) as {
-      data: { recipients: unknown[]; transfers: Array<{ signature: string | null }> };
-    };
+    // `serializedTx: z.never()` fails the parse if a chunk carries signed bytes (HOO-2344).
+    const detailBody = z
+      .object({
+        data: z.object({
+          recipients: z.array(z.unknown()),
+          transfers: z.array(
+            z.object({ signature: z.string().min(1), serializedTx: z.never().optional() })
+          ),
+        }),
+      })
+      .parse(await detailRes.json());
     expect(detailBody.data.recipients).toHaveLength(2);
     expect(detailBody.data.transfers).toHaveLength(2);
-    expect(detailBody.data.transfers.every((transfer) => Boolean(transfer.signature))).toBe(true);
-    expect(detailBody.data.transfers.every((transfer) => !("serializedTx" in transfer))).toBe(true);
 
     const listRes = await app.request(
       "/v1/payments/transfer-batches",

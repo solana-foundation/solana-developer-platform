@@ -782,9 +782,17 @@ describe("Payments routes — list transfers", () => {
       );
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        data: Array<{ id: string; signature: string | null; serializedTx: string | null }>;
-      };
+      const body = z
+        .object({
+          data: z.array(
+            z.object({
+              id: z.string(),
+              signature: z.string().nullable(),
+              serializedTx: z.string().nullable(),
+            })
+          ),
+        })
+        .parse(await res.json());
       const byId = new Map(body.data.map((transfer) => [transfer.id, transfer]));
       expect(byId.get("xfr_bytes_batch")).toMatchObject({
         signature: "sig_batch",
