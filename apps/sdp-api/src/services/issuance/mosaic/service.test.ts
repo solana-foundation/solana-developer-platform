@@ -12,7 +12,9 @@
 import { MosaicService } from "@sdp/issuance/mosaic/service";
 import type { CreateTokenOptions } from "@sdp/issuance/mosaic/types";
 import * as RpcModule from "@sdp/rpc/solana";
+import * as ReadTokenTerms from "@sdp/solana/read-token-terms";
 import type { SponsoredSubmitter } from "@sdp/solana/token-2022";
+import { parseTokenAmount } from "@sdp/solana/token-amount";
 import type { Address, Signature, TransactionSigner } from "@solana/kit";
 import * as Kit from "@solana/kit";
 import * as MosaicSdk from "@solana/mosaic-sdk";
@@ -21,6 +23,7 @@ import { findMintConfigPda, parseSetAuthorityInstruction } from "@solana/token-a
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppError, transactionFailed } from "@/lib/errors";
 import { env } from "@/test/helpers/env";
+import { mintTermsAt } from "@/test/helpers/token-movement";
 
 // Sentinels — the SDK template builder is stubbed, so its concrete return value
 // is irrelevant; we only care which arguments the service hands it.
@@ -390,11 +393,15 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
       } as Awaited<ReturnType<typeof RpcModule.confirmTransaction>>);
       const onBeforeSubmit = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
 
+      const mintedMint = (await Kit.generateKeyPairSigner()).address;
+      vi.spyOn(ReadTokenTerms, "fetchTokenTerms").mockResolvedValue(
+        mintTermsAt(mintedMint, "token-2022", { decimals: 6, extensions: [] })
+      );
       const result = await sponsored.mintTo(
         {
-          mint: (await Kit.generateKeyPairSigner()).address,
+          mint: mintedMint,
           destination: (await Kit.generateKeyPairSigner()).address,
-          amount: 1,
+          amount: parseTokenAmount("1", 6),
           mintAuthority: signer.address,
           feePayer: signer.address,
         },
@@ -590,6 +597,9 @@ describe("MosaicService mint and transfer — fee payer", () => {
     mintToSpy = vi
       .spyOn(MosaicSdk, "createMintToTransaction")
       .mockResolvedValue(FAKE_FULL_TX as never);
+    vi.spyOn(ReadTokenTerms, "fetchTokenTerms").mockResolvedValue(
+      mintTermsAt(mint, "token-2022", { decimals: 6, extensions: [] })
+    );
     transferSpy = vi
       .spyOn(MosaicSdk, "createTransferTransaction")
       .mockResolvedValue(FAKE_FULL_TX as never);
@@ -617,7 +627,7 @@ describe("MosaicService mint and transfer — fee payer", () => {
     const result = await service.prepareMintTo({
       mint,
       destination,
-      amount: 5,
+      amount: parseTokenAmount("5", 6),
       mintAuthority: clientAddress,
       feePayer: clientAddress,
     });
@@ -632,7 +642,7 @@ describe("MosaicService mint and transfer — fee payer", () => {
     await service.prepareMintTo({
       mint,
       destination,
-      amount: 5,
+      amount: parseTokenAmount("5", 6),
       mintAuthority: signer.address,
       feePayer: signer.address,
     });
@@ -662,7 +672,7 @@ describe("MosaicService mint and transfer — fee payer", () => {
     await service.mintTo({
       mint,
       destination,
-      amount: 5,
+      amount: parseTokenAmount("5", 6),
       mintAuthority: signer.address,
       feePayer: signer.address,
     });
@@ -670,6 +680,72 @@ describe("MosaicService mint and transfer — fee payer", () => {
     expect(fee.getFeePayer).toHaveBeenCalledTimes(1);
     expect(feePayerAddress(mintToSpy.mock.calls[0][5])).toBe(koraAddress);
     expect(submitSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("hands Mosaic the amount as the exact number its conversion turns back into the base units", async () => {
+    await service.prepareMintTo({
+      mint,
+      destination,
+      amount: parseTokenAmount("5.000001", 6),
+      mintAuthority: clientAddress,
+      feePayer: clientAddress,
+    });
+
+    expect(ReadTokenTerms.fetchTokenTerms).toHaveBeenCalledWith(expect.anything(), {
+      kind: "mint",
+      mint,
+    });
+    expect(mintToSpy.mock.calls[0][3]).toBe(5.000001);
+  });
+
+  it("refuses a recorded scale the live mint does not have, and an amount Mosaic cannot take exactly", async () => {
+    await expect(
+      service.mintTo({
+        mint,
+        destination,
+        amount: parseTokenAmount("5", 9),
+        mintAuthority: signer.address,
+        feePayer: signer.address,
+      })
+    ).rejects.toMatchObject({ name: "MosaicAmountError", reason: "scale_mismatch" });
+    vi.mocked(ReadTokenTerms.fetchTokenTerms).mockResolvedValueOnce(
+      mintTermsAt(mint, "token-2022", { decimals: 9, extensions: [] })
+    );
+    await expect(
+      service.mintTo({
+        mint,
+        destination,
+        // 1e-7 as a JS number: Mosaic's conversion cannot read it back.
+        amount: parseTokenAmount("0.0000001", 9),
+        mintAuthority: signer.address,
+        feePayer: signer.address,
+      })
+    ).rejects.toMatchObject({ name: "MosaicAmountError", reason: "inexact" });
+    expect(mintToSpy).not.toHaveBeenCalled();
+    expect(submitSpy).not.toHaveBeenCalled();
+  });
+
+  it("refuses to seize a mint whose transfer hook runs, which Mosaic's force transfer cannot pass", async () => {
+    const hookProgram = (await Kit.generateKeyPairSigner()).address;
+    vi.mocked(ReadTokenTerms.fetchTokenTerms).mockResolvedValueOnce(
+      mintTermsAt(mint, "token-2022", {
+        decimals: 6,
+        extensions: [{ __kind: "TransferHook", authority: signer.address, programId: hookProgram }],
+      })
+    );
+    const forceTransferSpy = vi.spyOn(MosaicSdk, "createForceTransferTransaction");
+
+    await expect(
+      service.prepareForceTransfer({
+        mint,
+        source: clientAddress,
+        destination,
+        amount: parseTokenAmount("1", 6),
+        permanentDelegate: signer.address,
+        feePayer: signer.address,
+      })
+    ).rejects.toMatchObject({ name: "MosaicAmountError", movementRefusal: "transfer_hook" });
+    expect(forceTransferSpy).not.toHaveBeenCalled();
   });
 
   it("transfer still sponsors the fee through Kora", async () => {

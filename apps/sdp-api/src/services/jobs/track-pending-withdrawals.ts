@@ -39,10 +39,12 @@ import {
   type SignatureStatusInfo,
   type SolanaRpc,
 } from "@sdp/rpc/solana";
-import { parseDecimalAmount } from "@sdp/solana/amount";
+import { fetchTokenTerms } from "@sdp/solana/read-token-terms";
+import { parseTokenAmount, toBaseUnits } from "@sdp/solana/token-amount";
 import { PRIVATE_CHANNEL_EVENT_TYPES } from "@sdp/types/private-channels";
+import { SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
 import { address, type Signature } from "@solana/kit";
-import { findAssociatedTokenPda, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
+import { findAssociatedTokenPda } from "@solana-program/token";
 import type { PrivateChannelInstanceRow } from "@/db/repositories/private-channel-instance.repository";
 import type { PrivateChannelSettlementObservationRepository } from "@/db/repositories/private-channel-settlement-observation.repository";
 import type {
@@ -56,7 +58,6 @@ import {
 } from "@/db/repositories/repository-factory";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { getLogger } from "@/runtime/logger";
-import { knownMintToken } from "@/services/private-channels/mint";
 import {
   loadProjectRpcClient,
   type PrivateChannelProjectRpcClient,
@@ -458,18 +459,16 @@ async function reconcileReleaseGroup(
     return;
   }
 
-  const cluster = projectRpc.cluster;
   const mint = address(group.mint);
 
   // Content matching needs this mint's own scale AND its owning token program: the
   // program seeds every ATA below, so guessing it would scan an address that never
-  // receives the release. Every mint SDP writes comes from the instance allowlist,
-  // so the catalogue resolves it; a row predating that (or a mint an operator
-  // allowlisted out of band) falls back to what all such rows are — classic SPL at
-  // six decimals.
-  const knownMint = knownMintToken(group.mint, cluster);
-  const decimals = knownMint?.decimals ?? 6;
-  const tokenProgram = address(knownMint?.tokenProgram ?? TOKEN_PROGRAM_ADDRESS);
+  // receives the release. Both come from the mint's Token Terms read live (ADR
+  // 0012, one getMultipleAccounts per group and tick), never from a catalogue
+  // constant or a default scale.
+  const terms = await fetchTokenTerms(projectRpc.rpc, { kind: "mint", mint });
+  const decimals = terms.decimals;
+  const tokenProgram = address(SPL_TOKEN_PROGRAMS[terms.asset.program]);
 
   // The release transfers FROM the instance escrow's ATA for this mint on devnet.
   const [vaultAta] = await findAssociatedTokenPda({
@@ -501,7 +500,7 @@ async function reconcileReleaseGroup(
       mint,
       tokenProgram,
     });
-    const wantBaseUnits = parseDecimalAmount(withdrawal.amount, decimals);
+    const wantBaseUnits = toBaseUnits(parseTokenAmount(withdrawal.amount, decimals));
 
     // All content-matching releases; walk them so a PK conflict on the first
     // pick doesn't orphan a same-content sibling withdrawal.

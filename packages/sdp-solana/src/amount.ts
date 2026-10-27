@@ -5,8 +5,6 @@ import {
   rawDecimalFixedPoint,
 } from "@solana/fixed-points";
 
-export const MAX_SAFE_BASE_UNITS = BigInt(Number.MAX_SAFE_INTEGER);
-
 export class AmountError extends Error {
   constructor(message: string) {
     super(message);
@@ -209,14 +207,4 @@ export const toNumberAmount = (value: string): number => {
   }
 
   return amount;
-};
-
-export const toMosaicAmount = (value: string, decimals: number): number => {
-  const baseUnits = parseDecimalAmount(value, decimals);
-
-  if (baseUnits > MAX_SAFE_BASE_UNITS) {
-    throw new AmountError("Amount is too large for Mosaic minting");
-  }
-
-  return toNumberAmount(formatDecimalAmount(baseUnits, decimals));
 };

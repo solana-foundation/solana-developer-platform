@@ -1,7 +1,10 @@
 /**
  * Token-2022 Service
  *
- * Burn and unsigned burn transactions using the Mosaic SDK.
+ * Burn and unsigned burn transactions using the Mosaic SDK. The amount
+ * reaches Mosaic only through `mosaicAmountUnderLiveTerms` (ADR 0012): the
+ * mint's terms read live, the `issuance` capability row asked, and the number
+ * checked to convert back to exactly the amount's base units.
  */
 
 import {
@@ -29,7 +32,9 @@ import {
 import type { FullTransaction } from "@solana/mosaic-sdk";
 import { createBurnTransaction, resolveTokenAccount } from "@solana/mosaic-sdk";
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
+import { mosaicAmountUnderLiveTerms } from "./mosaic-amount";
 import { safeStringify } from "./token-2022.utils";
+import type { TokenAmount } from "./token-amount";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Types
@@ -75,8 +80,8 @@ export interface BurnOptions {
   mint: Address;
   /** Source token account or owner address */
   source: Address;
-  /** Amount to burn (in UI/decimal units) */
-  amount: number;
+  /** Exact token units to burn, at the scale SDP recorded for the mint. */
+  amount: TokenAmount;
   /** Owner/authority signer (KeyPairSigner or custody TransactionSigner) */
   authority: TransactionSigner;
 }
@@ -184,7 +189,7 @@ export class Token2022Service {
       rpc,
       options.mint,
       options.authority,
-      options.amount,
+      await mosaicAmountUnderLiveTerms(rpc, options.mint, options.amount, "issuance"),
       feePayer
     );
 
@@ -220,7 +225,7 @@ export class Token2022Service {
       rpc,
       options.mint,
       authority,
-      options.amount,
+      await mosaicAmountUnderLiveTerms(rpc, options.mint, options.amount, "issuance"),
       authority
     );
 

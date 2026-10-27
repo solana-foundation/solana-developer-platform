@@ -308,7 +308,9 @@ export async function issuePaymentRequestTransaction(
  * RPC budget (before → now): a token mint's owner read and the payer's token accounts → the
  * mint, the Clock and the destination token account in one `getMultipleAccounts`, beside the
  * payer's token accounts (at once for a catalogue mint); a hook mint adds its validation account
- * and any extra account read from data. Native SOL: none → none.
+ * and any extra account read from data; a frozen-by-default Token ACL mint whose destination
+ * account the payment creates adds its config and its gate's thaw list, and the payer signs the
+ * thaw. Native SOL: none → none.
  *
  * @throws AppError (400) when the movement is refused, or no longer meets the expectation.
  */

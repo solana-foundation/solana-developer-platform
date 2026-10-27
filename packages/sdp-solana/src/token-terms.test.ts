@@ -159,6 +159,7 @@ describe("decodeTokenTerms", () => {
       transferFee: null,
       display: { kind: "plain" },
       transferHookProgram: null,
+      transferHookAuthority: null,
       paused: false,
       nonTransferable: false,
       defaultAccountState: "initialized",
@@ -188,6 +189,7 @@ describe("decodeTokenTerms", () => {
     const zero = { epoch: 0n, basisPoints: 0, maximumFee: 0n };
     assert.deepEqual(terms.transferFee, { older: zero, newer: zero });
     assert.equal(terms.transferHookProgram, null);
+    assert.equal(terms.transferHookAuthority, AUTHORITY);
     assert.equal(terms.permanentDelegate, AUTHORITY);
     assert.equal(terms.confidentialTransfers, true);
     assert.equal(terms.mintCloseAuthority, AUTHORITY);

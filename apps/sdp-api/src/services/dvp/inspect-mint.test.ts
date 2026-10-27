@@ -8,17 +8,42 @@
  * exist to avoid.
  */
 
-import { type Address, none, some } from "@solana/kit";
+import { type Address, none, some, unixTimestamp } from "@solana/kit";
+import { getSysvarClockEncoder, SYSVAR_CLOCK_ADDRESS } from "@solana/sysvars";
 import { extension, getMintEncoder } from "@solana-program/token-2022";
 import { describe, expect, it } from "vitest";
 
-/** An RPC whose `getAccountInfo` returns the given wire-format account. */
-function rpcReturning(account: { owner: string; data: string } | null) {
+const CLOCK = {
+  owner: "Sysvar1111111111111111111111111111111111111",
+  data: [
+    Buffer.from(
+      getSysvarClockEncoder().encode({
+        slot: 900n,
+        epochStartTimestamp: unixTimestamp(1_799_990_000n),
+        epoch: 700n,
+        leaderScheduleEpoch: 701n,
+        unixTimestamp: unixTimestamp(1_800_000_000n),
+      })
+    ).toString("base64"),
+    "base64",
+  ],
+  lamports: 1n,
+  executable: false,
+  space: 40n,
+};
+
+/**
+ * An RPC whose `getMultipleAccounts` returns the given wire-format account for
+ * `mint` and the Clock; it throws on any other address, so a wrong mint fails.
+ */
+function rpcReturning(mint: string, account: { owner: string; data: string } | null) {
   return {
-    getAccountInfo: () => ({
+    getMultipleAccounts: (addresses: readonly string[]) => ({
       send: async () => ({
-        value:
-          account === null
+        value: addresses.map((at) => {
+          if (at === SYSVAR_CLOCK_ADDRESS) return CLOCK;
+          if (at !== mint) throw new Error(`unexpected read of ${at}`);
+          return account === null
             ? null
             : {
                 owner: account.owner,
@@ -26,7 +51,8 @@ function rpcReturning(account: { owner: string; data: string } | null) {
                 lamports: 1n,
                 executable: false,
                 space: 0n,
-              },
+              };
+        }),
       }),
     }),
   } as never;
@@ -55,7 +81,7 @@ const USDC_DATA =
 
 describe("inspectDvpMint", () => {
   it("reads decimals and inline metadata from a Token-2022 mint", async () => {
-    const rpc = rpcReturning({ owner: TOKEN_2022, data: ATD_DATA });
+    const rpc = rpcReturning(ATD_MINT, { owner: TOKEN_2022, data: ATD_DATA });
 
     await expect(inspectDvpMint(rpc, ATD_MINT as never)).resolves.toMatchObject({
       decimals: 6,
@@ -79,7 +105,7 @@ describe("inspectDvpMint", () => {
       freezeAuthority: none(),
       extensions: some([extension("TransferHook", { authority, programId: authority })]),
     });
-    const rpc = rpcReturning({
+    const rpc = rpcReturning(ATD_MINT, {
       owner: TOKEN_2022,
       data: Buffer.from(data).toString("base64"),
     });
@@ -93,7 +119,7 @@ describe("inspectDvpMint", () => {
   // The whole point: a pasted mint can now offer a human amount, because its
   // decimals are one account read away rather than unknowable client-side.
   it("reads decimals from a legacy mint that carries no extensions", async () => {
-    const rpc = rpcReturning({ owner: LEGACY_TOKEN, data: USDC_DATA });
+    const rpc = rpcReturning(USDC_MINT, { owner: LEGACY_TOKEN, data: USDC_DATA });
 
     await expect(inspectDvpMint(rpc, USDC_MINT as never)).resolves.toMatchObject({
       decimals: 6,
@@ -105,7 +131,7 @@ describe("inspectDvpMint", () => {
   // A legacy mint has no extensions by construction, so there is no metadata to
   // find and the form falls back to the address rather than inventing a label.
   it("reports no name for a mint with no metadata extension", async () => {
-    const rpc = rpcReturning({ owner: LEGACY_TOKEN, data: USDC_DATA });
+    const rpc = rpcReturning(USDC_MINT, { owner: LEGACY_TOKEN, data: USDC_DATA });
 
     const result = await inspectDvpMint(rpc, USDC_MINT as never);
 
@@ -115,7 +141,7 @@ describe("inspectDvpMint", () => {
 
   describe("refuses to guess", () => {
     it("returns null when nothing is at the address", async () => {
-      const rpc = rpcReturning(null);
+      const rpc = rpcReturning(ATD_MINT, null);
 
       await expect(inspectDvpMint(rpc, ATD_MINT as never)).resolves.toBeNull();
     });
@@ -123,7 +149,10 @@ describe("inspectDvpMint", () => {
     // A wallet, a program, any non-mint account. Decoding it anyway would put a
     // confident wrong decimals in front of someone about to enter an amount.
     it("returns null when the account is not owned by a token program", async () => {
-      const rpc = rpcReturning({ owner: "11111111111111111111111111111111", data: ATD_DATA });
+      const rpc = rpcReturning(ATD_MINT, {
+        owner: "11111111111111111111111111111111",
+        data: ATD_DATA,
+      });
 
       await expect(inspectDvpMint(rpc, ATD_MINT as never)).resolves.toBeNull();
     });
@@ -132,7 +161,7 @@ describe("inspectDvpMint", () => {
     // unreadable would refuse a valid token until someone retried.
     it("throws when the account read fails, rather than judging the mint", async () => {
       const rpc = {
-        getAccountInfo: () => ({
+        getMultipleAccounts: () => ({
           send: async () => {
             throw new Error("rpc down");
           },
@@ -145,7 +174,7 @@ describe("inspectDvpMint", () => {
     // Not "nothing is there": SDP cannot rule a transfer hook out of a mint it
     // cannot read, so create refuses it and the form is told the same reason.
     it("reports an undecodable token-2022 mint as ineligible, not missing", async () => {
-      const rpc = rpcReturning({ owner: TOKEN_2022, data: "AAAA" });
+      const rpc = rpcReturning(ATD_MINT, { owner: TOKEN_2022, data: "AAAA" });
 
       await expect(inspectDvpMint(rpc, ATD_MINT as never)).resolves.toEqual({
         mint: ATD_MINT,

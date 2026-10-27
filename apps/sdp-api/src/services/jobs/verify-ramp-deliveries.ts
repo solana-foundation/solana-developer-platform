@@ -8,15 +8,26 @@ import {
   type SolanaRpc,
   tokenBalanceDelta,
 } from "@sdp/rpc/solana";
-import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
+import { compareDecimalAmounts, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
+import { type AssetRef, NATIVE_ASSET } from "@sdp/solana/asset-ref";
+import { baseUnits } from "@sdp/solana/token-amount";
+import { feeFor, type TokenTerms } from "@sdp/solana/token-terms";
 import type { RampDeliveryMismatch, RampDeliveryMismatchReason } from "@sdp/types/payments";
-import { SOL_DECIMALS, SOL_MINT, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
-import { assertIsSignature, type Signature } from "@solana/kit";
+import { type AmountVerificationVerdict, MOVEMENT_NOT_EXECUTED } from "@sdp/types/token-movements";
+import {
+  SOL_DECIMALS,
+  SOL_MINT,
+  SPL_TOKEN_PROGRAMS,
+  WELL_KNOWN_TOKEN_BY_MINT,
+} from "@sdp/types/well-known-tokens";
+import { address, assertIsSignature, type Epoch, type Signature, unixTimestamp } from "@solana/kit";
+import { z } from "zod";
 import type { PaymentsRepository, PaymentTransferRow } from "@/db/repositories/payments.repository";
 import {
   createSystemPaymentsRepository,
   createSystemTransactionalPaymentsRepository,
 } from "@/db/repositories/repository-factory";
+import type { ChainVerifiedLeg } from "@/db/repositories/token-movement-legs.repository";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
 import { auditedRampWriteSystem } from "@/services/payments/ramp-audit";
@@ -25,6 +36,7 @@ import {
   type ProviderSettlement,
   readDeliveryMismatch,
 } from "@/services/payments/ramp-provider-settlement";
+import { readTokenTerms } from "@/services/token-movement/read-terms";
 import type { Env } from "@/types/env";
 
 // One status request covers every off-ramp on this page. On-ramps need one
@@ -41,6 +53,50 @@ const TRANSACTION_NOT_FOUND_AFTER_MS = 60 * 60 * 1000;
 export interface RampChainReader {
   getTransaction(signature: Signature): Promise<ParsedTransaction | null>;
   getSignatureStatuses(signatures: Signature[]): Promise<Array<SignatureStatusInfo | null>>;
+  /** A mint's Token Terms, read live: only when a delivery's debit and credit differ. */
+  readTokenTerms(asset: Extract<AssetRef, { kind: "token" }>): Promise<TokenTerms>;
+  /** The epoch `slot` is in, from the cluster's epoch schedule (read once per process). */
+  epochOfSlot(slot: bigint): Promise<Epoch>;
+}
+
+type EpochSchedule = Awaited<ReturnType<ReturnType<SolanaRpc["getEpochSchedule"]>["send"]>>;
+
+/** Each cluster's epoch schedule, a static fact; a failed read is never kept. */
+const epochSchedules = new Map<string, Promise<EpochSchedule>>();
+
+function clusterEpochSchedule(rpc: SolanaRpc): Promise<EpochSchedule> {
+  const { cluster } = currentClusterScope();
+  const cached = epochSchedules.get(cluster);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const read = rpc.getEpochSchedule().send();
+  epochSchedules.set(cluster, read);
+  read.catch(() => epochSchedules.delete(cluster));
+  return read;
+}
+
+/**
+ * The epoch `slot` is in, as `EpochSchedule::get_epoch` computes it: warmup
+ * epochs double from the minimum length until `firstNormalSlot`, then every
+ * epoch is `slotsPerEpoch` long.
+ */
+export function epochAt(
+  schedule: Pick<EpochSchedule, "firstNormalEpoch" | "firstNormalSlot" | "slotsPerEpoch">,
+  slot: bigint
+): Epoch {
+  if (slot >= schedule.firstNormalSlot) {
+    return schedule.firstNormalEpoch + (slot - schedule.firstNormalSlot) / schedule.slotsPerEpoch;
+  }
+  let epoch = 0n;
+  let length = MINIMUM_SLOTS_PER_EPOCH;
+  let start = 0n;
+  while (slot >= start + length) {
+    start += length;
+    length *= 2n;
+    epoch += 1n;
+  }
+  return epoch;
 }
 
 function createRampChainReader(rpc: SolanaRpc = createClusterRpc()): RampChainReader {
@@ -48,6 +104,8 @@ function createRampChainReader(rpc: SolanaRpc = createClusterRpc()): RampChainRe
     getTransaction: (signature) => getTransaction(rpc, signature, "finalized"),
     getSignatureStatuses: (signatures) =>
       getSignatureStatuses(rpc, signatures, { searchTransactionHistory: true }),
+    readTokenTerms: (asset) => readTokenTerms(asset),
+    epochOfSlot: async (slot) => epochAt(await clusterEpochSchedule(rpc), slot),
   };
 }
 
@@ -77,12 +135,12 @@ function reportedFieldsMatch(transfer: PaymentTransferRow, settled: ProviderSett
       return false;
     }
     if (onchain?.amount !== undefined && transfer.amount !== null) {
+      // Both are token units; they compare exactly, at no assumed scale.
       try {
         const token = WELL_KNOWN_TOKEN_BY_MINT.get(transfer.token);
         if (
           !token?.clusters.includes(currentClusterScope().cluster) ||
-          parseDecimalAmount(onchain.amount, token.decimals) !==
-            parseDecimalAmount(transfer.amount, token.decimals)
+          compareDecimalAmounts(onchain.amount, transfer.amount) !== 0
         ) {
           return false;
         }
@@ -94,9 +152,12 @@ function reportedFieldsMatch(transfer: PaymentTransferRow, settled: ProviderSett
   return true;
 }
 
+/** `MINIMUM_SLOTS_PER_EPOCH`: the first warmup epoch's length. */
+const MINIMUM_SLOTS_PER_EPOCH = 32n;
+
 /** What one read of a finalized transaction proves about a provider-reported delivery. */
 type DeliveryVerdict =
-  | { kind: "verified"; amount: string }
+  | { kind: "verified"; amount: string; leg: ChainVerifiedLeg }
   | { kind: "pending" }
   | { kind: "mismatch"; reason: RampDeliveryMismatchReason; observedAmount?: string };
 
@@ -119,63 +180,303 @@ function landedAfterTransfer(
   return blockTime + DELIVERY_CLOCK_SKEW_SECONDS >= BigInt(Math.floor(createdAtMs / 1000));
 }
 
-/** The quoted asset's net movement into `destination`; "absent" when it moved none, null when unreadable. */
-function deliveredBaseUnits(
-  transfer: PaymentTransferRow,
-  destination: string,
-  decimals: number,
-  transaction: ParsedTransaction
-): bigint | "absent" | null {
+/**
+ * The asset an on-ramp delivers, or null when its token is no catalogue asset
+ * on this cluster. Rows store native SOL under the wrapped SOL mint
+ * (`normalizePaymentToken`), and providers deliver SOL natively, so that mint
+ * on a ramp row is native SOL; every other token is its catalogue mint.
+ */
+function rampDeliveryAsset(transfer: PaymentTransferRow): AssetRef | null {
   if (transfer.token === SOL_MINT) {
+    return NATIVE_ASSET;
+  }
+  const token = WELL_KNOWN_TOKEN_BY_MINT.get(transfer.token);
+  if (!token?.clusters.includes(currentClusterScope().cluster)) {
+    return null;
+  }
+  return { kind: "token", mint: address(transfer.token), program: token.tokenProgram };
+}
+
+/** What the chain shows a delivery moved into its destination, in base units. */
+interface ObservedDelivery {
+  decimals: number;
+  /** What the destination received: its balance change plus what left its accounts. */
+  credit: bigint;
+  /** What the transfers into the destination debited, by their instruction data. */
+  debit: bigint;
+  /** Each transfer's own debit: a fee is charged, capped and rounded per transfer. */
+  debits: readonly bigint[];
+  /** The fee the transfers stated (TransferCheckedWithFee); null when one stated none. */
+  statedFee: bigint | null;
+}
+
+const TOKEN_TRANSFER_TYPES: ReadonlySet<string> = new Set([
+  "transfer",
+  "transferChecked",
+  "transferCheckedWithFee",
+]);
+
+const TOKEN_BURN_TYPES: ReadonlySet<string> = new Set(["burn", "burnChecked"]);
+
+const rawTokenAmountSchema = z.object({ amount: z.string().regex(/^\d+$/) });
+
+/**
+ * A parsed instruction's raw amount at `key` (`tokenAmount.amount` or
+ * `feeAmount.amount`), or the flat `amount` an unchecked `transfer` carries.
+ */
+function rawAmountOf(
+  info: Record<string, unknown>,
+  key: "tokenAmount" | "feeAmount"
+): bigint | null {
+  const nested = rawTokenAmountSchema.safeParse(info[key]);
+  if (nested.success) return BigInt(nested.data.amount);
+  if (key === "feeAmount") return null;
+  const flat = rawTokenAmountSchema.safeParse(info);
+  return flat.success ? BigInt(flat.data.amount) : null;
+}
+
+/**
+ * The asset's movement into `destination`: "absent" when the transaction moved
+ * none, null when it cannot be read. Base units only: a token's credit is the
+ * owner's raw balance change at the mint's own decimals as the chain reports
+ * them (`tokenBalanceDelta`) plus what left those accounts in the transaction,
+ * never a display value or a catalogue scale, and its debit is the instruction
+ * data of the transfers into the owner's token accounts of the mint.
+ */
+async function observedDelivery(
+  asset: AssetRef,
+  destination: string,
+  transaction: ParsedTransaction,
+  feeAt: FeeAtLanding
+): Promise<ObservedDelivery | "absent" | null> {
+  if (asset.kind === "native") {
     const index = transaction.accountKeys.indexOf(destination);
     if (index < 0) return "absent";
     const pre = transaction.preBalances?.[index];
     const post = transaction.postBalances?.[index];
-    return pre === undefined || post === undefined ? null : post - pre;
+    if (pre === undefined || post === undefined) return null;
+    // A native delivery carries no transfer fee.
+    return {
+      decimals: SOL_DECIMALS,
+      credit: post - pre,
+      debit: post - pre,
+      debits: [post - pre],
+      statedFee: 0n,
+    };
   }
   if (transaction.preTokenBalances === undefined || transaction.postTokenBalances === undefined) {
     return null;
   }
-  const delta = tokenBalanceDelta(transaction, { mint: transfer.token, owner: destination });
+  const delta = tokenBalanceDelta(transaction, { mint: asset.mint, owner: destination });
   if (delta === null) return "absent";
-  return delta.decimals === decimals ? delta.baseUnits : null;
+
+  const destinationAccounts = new Set(
+    [...transaction.preTokenBalances, ...transaction.postTokenBalances]
+      .filter((balance) => balance.mint === asset.mint && balance.owner === destination)
+      .map((balance) => transaction.accountKeys[balance.accountIndex])
+  );
+  const moves = tokenMovesTouching(
+    transaction,
+    SPL_TOKEN_PROGRAMS[asset.program],
+    destinationAccounts
+  );
+  if (moves === null) return null;
+  // A fee no longer on chain leaves the credit short, which the amount checks
+  // then hold for a person.
+  const withheld = (await feeAt(moves.within)) ?? 0n;
+  const credit = delta.baseUnits + moves.left + withheld;
+  const debit = moves.debits.reduce((total, amount) => total + amount, 0n);
+  // A delivery by an instruction this reader does not parse (a CPI it cannot
+  // attribute) is judged by its credit alone.
+  return moves.debits.length === 0 || debit < credit
+    ? { decimals: delta.decimals, credit, debit: credit, debits: [credit], statedFee: 0n }
+    : { decimals: delta.decimals, credit, debit, debits: moves.debits, statedFee: moves.statedFee };
 }
 
-function judgeOnrampDelivery(
+/**
+ * The mint's token program's moves in `transaction` that touch `accounts`:
+ * each transfer into them (its debit), the fee those transfers stated (null
+ * when one stated none), what left them, moved out or burned, or was withheld
+ * by a stated fee moving between them, and the moves between them that
+ * stated no fee. Each lowers the balance change without being the delivery's
+ * fee. Null when an amount cannot be read.
+ */
+function tokenMovesTouching(
+  transaction: ParsedTransaction,
+  tokenProgram: string,
+  accounts: ReadonlySet<string>
+): { debits: bigint[]; statedFee: bigint | null; left: bigint; within: bigint[] } | null {
+  const debits: bigint[] = [];
+  const within: bigint[] = [];
+  let statedFee: bigint | null = 0n;
+  let left = 0n;
+  for (const { programId, parsedType, info } of transaction.instructions) {
+    // The System program's "transfer" moves lamports, as when the ATA program
+    // tops up rent for an account that already held some: only the mint's own
+    // token program moves its tokens.
+    if (programId !== tokenProgram || parsedType === null || info === null) continue;
+    // A transfer back into its own account moves nothing and withholds no fee.
+    if (info.source !== undefined && info.source === info.destination) continue;
+    const { out, into } = touches(parsedType, info, accounts);
+    if (!out && !into) continue;
+    const amount = rawAmountOf(info, "tokenAmount");
+    if (amount === null) return null;
+    const fee = parsedType === "transferCheckedWithFee" ? rawAmountOf(info, "feeAmount") : null;
+    // A move between the owner's own accounts delivers nothing, but the fee it
+    // withheld lowered the balance change: a stated one is added back, and an
+    // unstated one is left for the fee rule to price.
+    if (out && into) {
+      if (fee === null) within.push(amount);
+      else left += fee;
+      continue;
+    }
+    if (out) {
+      left += amount;
+      continue;
+    }
+    debits.push(amount);
+    statedFee = statedFee === null || fee === null ? null : statedFee + fee;
+  }
+  return { debits, statedFee, left, within };
+}
+
+/** Whether a token instruction moves out of (or burns from) `accounts`, and into them. */
+function touches(
+  parsedType: string,
+  info: Record<string, unknown>,
+  accounts: ReadonlySet<string>
+): { out: boolean; into: boolean } {
+  const transfer = TOKEN_TRANSFER_TYPES.has(parsedType);
+  const from = TOKEN_BURN_TYPES.has(parsedType) ? info.account : transfer ? info.source : undefined;
+  return {
+    out: accounts.has(String(from)),
+    into: transfer && accounts.has(String(info.destination)),
+  };
+}
+
+/**
+ * What the mint's transfer fee charged `debits` in the epoch the delivery
+ * landed, summed (each is capped and rounded on its own): 0 when nothing could
+ * charge one, null when both fee entries the mint keeps came after the
+ * delivery, so the fee it paid is no longer on chain and no later read could
+ * price it either. Reads the mint and the epoch once, on first need.
+ */
+type FeeAtLanding = (debits: readonly bigint[]) => Promise<bigint | null>;
+
+function feeAtLanding(
+  asset: AssetRef,
+  landedSlot: bigint,
+  chain: Pick<RampChainReader, "readTokenTerms" | "epochOfSlot">
+): FeeAtLanding {
+  let rule: Promise<{ terms: TokenTerms; epoch: Epoch } | null> | undefined;
+  return async (debits) => {
+    // Only a Token-2022 mint can charge a transfer fee.
+    if (debits.length === 0 || asset.kind !== "token" || asset.program !== "token-2022") return 0n;
+    rule ??= chain
+      .readTokenTerms(asset)
+      .then(async (terms) =>
+        terms.transferFee === null ? null : { terms, epoch: await chain.epochOfSlot(landedSlot) }
+      );
+    const read = await rule;
+    if (read === null) return 0n;
+    const { terms, epoch } = read;
+    if (terms.transferFee === null || epoch < terms.transferFee.older.epoch) return null;
+    return debits.reduce((total, debit) => total + feeFor(terms, baseUnits(debit), epoch), 0n);
+  };
+}
+
+/**
+ * Whether the transfer fee rule explains a delivery's debit and credit
+ * differing: the program checked a fee the transfers stated, or the mint's fee
+ * entry in force in the epoch the delivery landed charges exactly that fee.
+ * Unexplained when that entry is no longer on chain; a person decides.
+ */
+async function feeRuleExplains(
+  asset: AssetRef,
+  delivery: ObservedDelivery,
+  feeAt: FeeAtLanding
+): Promise<boolean> {
+  const fee = delivery.debit - delivery.credit;
+  if (fee === 0n) return true;
+  if (asset.kind !== "token") return false;
+  if (delivery.statedFee !== null) {
+    return delivery.statedFee === fee;
+  }
+  return (await feeAt(delivery.debits)) === fee;
+}
+
+async function judgeOnrampDelivery(
   transfer: PaymentTransferRow,
   settled: ProviderSettlement,
-  transaction: ParsedTransaction
-): DeliveryVerdict {
+  transaction: ParsedTransaction,
+  chain: Pick<RampChainReader, "readTokenTerms" | "epochOfSlot">
+): Promise<DeliveryVerdict> {
   const destination = transfer.destination_address;
-  const token = WELL_KNOWN_TOKEN_BY_MINT.get(transfer.token);
-  if (
-    !destination ||
-    !token?.clusters.includes(currentClusterScope().cluster) ||
-    !transaction.executionResultKnown
-  ) {
+  const asset = rampDeliveryAsset(transfer);
+  if (!destination || asset === null || !transaction.executionResultKnown) {
     return PENDING;
   }
   if (transaction.err !== null) return mismatch("transaction_failed");
   const landed = landedAfterTransfer(transfer, transaction);
-  if (landed === null) return PENDING;
+  if (landed === null || transaction.blockTime === null || transaction.blockTime === undefined) {
+    return PENDING;
+  }
   if (!landed) return mismatch("predates_transfer");
-  const decimals = transfer.token === SOL_MINT ? SOL_DECIMALS : token.decimals;
-  const moved = deliveredBaseUnits(transfer, destination, decimals, transaction);
-  if (moved === null) return PENDING;
-  if (moved === "absent" || moved <= 0n) return mismatch("not_delivered");
-  const observedAmount = formatDecimalAmount(moved, decimals);
+  // RPC budget: the mint and the epoch are read at most once, and only for a
+  // transfer that states no fee.
+  const feeAt = feeAtLanding(asset, transaction.slot, chain);
+  const delivery = await observedDelivery(asset, destination, transaction, feeAt);
+  if (delivery === null) return PENDING;
+  if (delivery === "absent" || delivery.credit <= 0n) return mismatch("not_delivered");
+  const { decimals } = delivery;
+  const observedAmount = formatDecimalAmount(delivery.credit, decimals);
+  // A provider may report what it received (the credit) or what it sent (the
+  // debit): the debit counts only when the fee rule explains the difference.
+  const debitCounts =
+    delivery.debit !== delivery.credit && (await feeRuleExplains(asset, delivery, feeAt));
   try {
-    const short = transfer.amount !== null && moved < parseDecimalAmount(transfer.amount, decimals);
     const reported = [settled.receivedAmount, settled.onchain?.amount].filter(
       (amount): amount is string => amount !== undefined
     );
-    if (short || reported.some((amount) => parseDecimalAmount(amount, decimals) !== moved)) {
+    const quoted = transfer.amount === null ? null : parseDecimalAmount(transfer.amount, decimals);
+    const reportsHold = reported.every((amount) => {
+      const units = parseDecimalAmount(amount, decimals);
+      return units === delivery.credit || (debitCounts && units === delivery.debit);
+    });
+    const quoteHolds =
+      quoted === null || delivery.credit >= quoted || (debitCounts && delivery.debit >= quoted);
+    if (!reportsHold || !quoteHolds) {
       return mismatch("amount_mismatch", observedAmount);
     }
   } catch {
     return mismatch("amount_mismatch", observedAmount);
   }
-  return { kind: "verified", amount: observedAmount };
+  // What the chain shows, whether or not the provider may report the debit.
+  const amounts = {
+    debit: baseUnits(delivery.debit),
+    fee: baseUnits(delivery.debit - delivery.credit),
+    credit: baseUnits(delivery.credit),
+  };
+  return {
+    kind: "verified",
+    amount: observedAmount,
+    leg: {
+      quote: {
+        asset,
+        decimals,
+        // A provider's delivery amount is a receipt.
+        basis: "credit",
+        quoted: amounts,
+        // No terms read prices the fee: it is what the chain shows.
+        feeEpoch: null,
+        asOf:
+          asset.kind === "native"
+            ? null
+            : { slot: transaction.slot, unixTimestamp: unixTimestamp(transaction.blockTime) },
+      },
+      observed: amounts,
+    },
+  };
 }
 
 /**
@@ -187,7 +488,8 @@ async function holdDelivery(
   repo: PaymentsRepository,
   transfer: PaymentTransferRow,
   settled: ProviderSettlement,
-  verdict: { reason: RampDeliveryMismatchReason; observedAmount?: string }
+  verdict: { reason: RampDeliveryMismatchReason; observedAmount?: string },
+  legVerdict: AmountVerificationVerdict | null
 ): Promise<void> {
   // An off-ramp's receivedAmount is the fiat payout, never the deposit.
   const reportedAmount =
@@ -202,6 +504,7 @@ async function holdDelivery(
     transferId: transfer.id,
     providerSettlement: settled,
     mismatch: { ...hold },
+    legVerdict,
     updatedAt: checkedAt,
   });
   if (!held) return;
@@ -245,20 +548,21 @@ async function verifyOnramp(
   const transactionSignature = signature(settled.onchain?.signature);
   if (!transactionSignature || transactionSignature !== transfer.signature) return false;
   if (!reportedFieldsMatch(transfer, settled)) {
-    await holdDelivery(repo, transfer, settled, { reason: "provider_report_mismatch" });
+    await holdDelivery(repo, transfer, settled, { reason: "provider_report_mismatch" }, null);
     return false;
   }
   const transaction = await chain.getTransaction(transactionSignature);
   if (!transaction) {
     // An RPC behind on history answers null too, so this stays checked.
     if (reportedLongAgo(transfer) && readDeliveryMismatch(transfer.provider_data) === undefined) {
-      await holdDelivery(repo, transfer, settled, { reason: "transaction_not_found" });
+      await holdDelivery(repo, transfer, settled, { reason: "transaction_not_found" }, null);
     }
     return false;
   }
-  const verdict = judgeOnrampDelivery(transfer, settled, transaction);
+  const verdict = await judgeOnrampDelivery(transfer, settled, transaction, chain);
   if (verdict.kind === "mismatch") {
-    await holdDelivery(repo, transfer, settled, verdict);
+    // An on-ramp is provider-built: it has no leg until its delivery verifies.
+    await holdDelivery(repo, transfer, settled, verdict, null);
     return false;
   }
   if (verdict.kind === "pending" || transaction.slot > BigInt(Number.MAX_SAFE_INTEGER)) {
@@ -272,6 +576,8 @@ async function verifyOnramp(
     projectId: transfer.project_id,
     transition: "delivery_verified",
     deliveryEvidence: { providerSettlement: settled, signature: transactionSignature },
+    // The delivery's leg: what the chain shows the provider moved, verified.
+    chainVerifiedLeg: verdict.leg,
     providerData: {
       verifiedDelivery: {
         signature: transactionSignature,
@@ -327,7 +633,7 @@ async function verifyOfframps(
       continue;
     }
     if (!reportedFieldsMatch(transfer, settled)) {
-      await holdDelivery(repo, transfer, settled, { reason: "provider_report_mismatch" });
+      await holdDelivery(repo, transfer, settled, { reason: "provider_report_mismatch" }, null);
       continue;
     }
     eligible.push({ transfer, settled, submittedSignature });
@@ -344,7 +650,14 @@ async function verifyOfframps(
     const status = statuses[index];
     if (status?.confirmationStatus !== "finalized") continue;
     if (status.err !== null) {
-      await holdDelivery(repo, entry.transfer, entry.settled, { reason: "transaction_failed" });
+      // The deposit SDP built failed on chain, so it moved nothing.
+      await holdDelivery(
+        repo,
+        entry.transfer,
+        entry.settled,
+        { reason: "transaction_failed" },
+        MOVEMENT_NOT_EXECUTED
+      );
       continue;
     }
     if (BigInt(status.slot) > BigInt(Number.MAX_SAFE_INTEGER)) continue;

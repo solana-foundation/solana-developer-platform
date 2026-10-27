@@ -35,6 +35,7 @@ import { isAbandonedReservation } from "@/lib/idempotency";
 import { MoneyMovementRefusedError } from "@/lib/money-admission";
 import { matchesTransferReplay } from "@/routes/private-channels/replay";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
+import { privateChannelWriteRpc } from "@/test/helpers/private-channels-rpc";
 import type { Env } from "@/types/env";
 import type { SpcAuthContext } from "./auth/gateway-auth";
 import * as gatewayAuthService from "./auth/gateway-auth";
@@ -134,11 +135,13 @@ function makeInput(overrides: Partial<Parameters<typeof createChannelTransfer>[1
     gatewayAuth: auth,
     projectRpc: {
       cluster: "devnet" as const,
-      rpc: {
-        getAccountInfo: () => ({
-          send: async () => ({ value: { owner: PRIVATE_CHANNEL_ESCROW_PROGRAM_ADDRESS } }),
-        }),
-      } as never,
+      rpc: privateChannelWriteRpc(
+        {
+          escrowProgramId: PRIVATE_CHANNEL_ESCROW_PROGRAM_ADDRESS,
+          escrowInstanceAddr: senderSigner.address,
+        },
+        null
+      ),
       probe: vi.fn(),
     },
     ...overrides,

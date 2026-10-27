@@ -1,4 +1,4 @@
-import { formatDecimalAmount, parseDecimalAmount, toMosaicAmount } from "@sdp/solana/amount";
+import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import { describe, expect, it } from "vitest";
 
 describe("amount helpers", () => {
@@ -28,10 +28,5 @@ describe("amount helpers", () => {
 
   it("formats amounts with zero decimals", () => {
     expect(formatDecimalAmount(42n, 0)).toBe("42");
-  });
-
-  it("creates safe Mosaic amounts", () => {
-    expect(toMosaicAmount("1.5", 6)).toBe(1.5);
-    expect(toMosaicAmount("100", 0)).toBe(100);
   });
 });

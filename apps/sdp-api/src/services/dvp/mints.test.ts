@@ -13,7 +13,9 @@
  * that extension, which the program accepts — passes.
  */
 
-import { type Address, none, some } from "@solana/kit";
+import { createRpcFromTransport, type SolanaRpc } from "@sdp/rpc/solana";
+import { type Address, address, none, type RpcTransport, some, unixTimestamp } from "@solana/kit";
+import { getSysvarClockEncoder, SYSVAR_CLOCK_ADDRESS } from "@solana/sysvars";
 import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import {
   type ExtensionArgs,
@@ -22,10 +24,12 @@ import {
   TOKEN_2022_PROGRAM_ADDRESS,
 } from "@solana-program/token-2022";
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
+import { syntheticAddress } from "@/test/helpers/parsed-transactions";
 import { validateDvpMints } from "./mints";
 
-const MINT_A = "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1" as Address;
-const AUTHORITY = "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC" as Address;
+const MINT_A = syntheticAddress(4_101);
+const AUTHORITY = syntheticAddress(4_102);
 
 function encodeMint(extensions: ExtensionArgs[]): Uint8Array {
   return new Uint8Array(
@@ -40,27 +44,58 @@ function encodeMint(extensions: ExtensionArgs[]): Uint8Array {
   );
 }
 
-/**
- * An RPC whose only job is to answer `getAccountInfo` for the mint under test,
- * returning data in the base64 wire format `fetchEncodedAccount` expects.
- */
-function rpcReturning(account: { owner: Address; data: Uint8Array } | null) {
+function wireAccount(account: { owner: Address; data: Uint8Array }) {
   return {
-    getAccountInfo: () => ({
-      send: async () => ({
-        value:
-          account === null
-            ? null
-            : {
-                owner: account.owner,
-                data: [Buffer.from(account.data).toString("base64"), "base64"],
-                lamports: 1n,
-                executable: false,
-                space: BigInt(account.data.length),
-              },
-      }),
-    }),
-  } as never;
+    owner: account.owner,
+    data: [Buffer.from(account.data).toString("base64"), "base64"],
+    lamports: 1n,
+    executable: false,
+    space: BigInt(account.data.length),
+  };
+}
+
+const CLOCK = wireAccount({
+  owner: address("Sysvar1111111111111111111111111111111111111"),
+  data: new Uint8Array(
+    getSysvarClockEncoder().encode({
+      slot: 900n,
+      epochStartTimestamp: unixTimestamp(1_799_990_000n),
+      epoch: 700n,
+      leaderScheduleEpoch: 701n,
+      unixTimestamp: unixTimestamp(1_800_000_000n),
+    })
+  ),
+});
+
+const readSchema = z.object({
+  id: z.union([z.string(), z.number()]),
+  method: z.literal("getMultipleAccounts"),
+  params: z.tuple([z.array(z.string())]).rest(z.unknown()),
+});
+
+/**
+ * An RPC whose only job is to answer `getMultipleAccounts` for the Clock and
+ * `MINT_A`, in the base64 wire format `fetchEncodedAccounts` expects. It throws
+ * on any other address, so a read of the wrong mint fails the test.
+ *
+ * @param onRead - Called once per read.
+ */
+function rpcReturning(
+  account: { owner: Address; data: Uint8Array } | null,
+  onRead: () => void = () => {}
+): SolanaRpc {
+  const transport: RpcTransport = async <TResponse>({ payload }: Parameters<RpcTransport>[0]) => {
+    const request = readSchema.parse(payload);
+    onRead();
+    const value = request.params[0].map((at) => {
+      if (at === SYSVAR_CLOCK_ADDRESS) return CLOCK;
+      if (at !== MINT_A) throw new Error(`unexpected read of ${at}`);
+      return account === null ? null : wireAccount(account);
+    });
+    // SAFETY: the transport returns the JSON-RPC response body kit asked for.
+    return { jsonrpc: "2.0", id: request.id, result: { context: { slot: 0 }, value } } as TResponse;
+  };
+  return createRpcFromTransport(transport);
 }
 
 const leg = (tokenProgram: Address = TOKEN_2022_PROGRAM_ADDRESS) => [
@@ -138,10 +173,7 @@ describe("validateDvpMints", () => {
   it("refuses a token program that is not an SPL token program", async () => {
     const rpc = rpcReturning({ owner: TOKEN_2022_PROGRAM_ADDRESS, data: encodeMint([]) });
 
-    const problems = await validateDvpMints(
-      rpc,
-      leg("11111111111111111111111111111111" as Address)
-    );
+    const problems = await validateDvpMints(rpc, leg(address("11111111111111111111111111111111")));
 
     expect(problems[0]).toContain("is not an SPL token program");
   });
@@ -157,7 +189,7 @@ describe("validateDvpMints", () => {
   // then does the extensions check attempt to decode.
   it("refuses undecodable bytes via the owner check rather than throwing", async () => {
     const rpc = rpcReturning({
-      owner: "11111111111111111111111111111111" as Address,
+      owner: address("11111111111111111111111111111111"),
       data: new Uint8Array([1, 2, 3]),
     });
 
@@ -190,12 +222,9 @@ describe("validateDvpMints", () => {
 
   // Reporting one problem at a time would make a caller fix a payload by trial
   // and error, which is the same contract validateDvpTerms holds itself to.
-  it("reports a problem on every leg at once", async () => {
-    const rpc = {
-      getAccountInfo: vi.fn().mockReturnValue({
-        send: async () => ({ value: null }),
-      }),
-    } as never;
+  it("reports a problem on every leg at once, from one read", async () => {
+    const onRead = vi.fn();
+    const rpc = rpcReturning(null, onRead);
 
     const problems = await validateDvpMints(rpc, [
       { label: "mintA", mint: MINT_A, tokenProgram: TOKEN_2022_PROGRAM_ADDRESS },
@@ -205,5 +234,39 @@ describe("validateDvpMints", () => {
     expect(problems).toHaveLength(2);
     expect(problems[0]).toContain("mintA");
     expect(problems[1]).toContain("mintB");
+    expect(onRead).toHaveBeenCalledOnce();
+  });
+
+  // The `dvp` row of the capability table: a hook that can never run passes,
+  // a pause is refused with its own reason, and every refusal is reported.
+  it("accepts an immutable hook with no program, which can never run", async () => {
+    const unset = address("11111111111111111111111111111111");
+    const rpc = rpcReturning({
+      owner: TOKEN_2022_PROGRAM_ADDRESS,
+      data: encodeMint([extension("TransferHook", { authority: unset, programId: unset })]),
+    });
+
+    await expect(validateDvpMints(rpc, leg())).resolves.toEqual([]);
+  });
+
+  it("refuses a paused mint, and reports each refusal of one mint", async () => {
+    const rpc = rpcReturning({
+      owner: TOKEN_2022_PROGRAM_ADDRESS,
+      data: encodeMint([
+        extension("TransferFeeConfig", {
+          transferFeeConfigAuthority: AUTHORITY,
+          withdrawWithheldAuthority: AUTHORITY,
+          withheldAmount: 0n,
+          olderTransferFee: { epoch: 0n, maximumFee: 0n, transferFeeBasisPoints: 0 },
+          newerTransferFee: { epoch: 0n, maximumFee: 0n, transferFeeBasisPoints: 0 },
+        }),
+        extension("PausableConfig", { authority: AUTHORITY, paused: true }),
+      ]),
+    });
+
+    await expect(validateDvpMints(rpc, leg())).resolves.toEqual([
+      `mintA ${MINT_A} carries the TransferFeeConfig extension, which DvP settlement refuses`,
+      `mintA ${MINT_A} is paused, so no leg of it can be funded, settled or refunded`,
+    ]);
   });
 });

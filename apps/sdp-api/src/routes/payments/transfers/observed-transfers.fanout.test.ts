@@ -41,7 +41,7 @@ function tokenBalance(accountIndex: number, owner: string, amount: string) {
 function buildOnSandbox(signatures: SignatureInfo[]) {
   return runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
     buildObservedTransfersForSignatures(signatures, context)
-  );
+  ).then((observed) => observed.map(({ row }) => row));
 }
 
 describe("buildObservedTransfersForSignatures", () => {

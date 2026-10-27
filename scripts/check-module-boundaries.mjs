@@ -74,6 +74,7 @@ const MODULE_METADATA = [
       "@sdp/api",
       "@sdp/private-channels",
       "@sdp/rpc",
+      "@sdp/solana",
       "@sdp/spc-escrow",
       "@sdp/types",
     ],
