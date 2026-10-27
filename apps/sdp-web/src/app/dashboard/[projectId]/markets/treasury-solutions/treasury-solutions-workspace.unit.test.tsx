@@ -26,6 +26,7 @@ if (!window.matchMedia) {
 
 const mocks = vi.hoisted(() => ({
   canManageCustody: true,
+  canWrite: true,
   environment: "sandbox" as "sandbox" | "production",
   programProvider: "upshift",
   // Every cluster value useEarnStrategies was asked for, across renders.
@@ -217,7 +218,7 @@ vi.mock("./kamino-allocations", () => ({
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => ({ sdpEnvironment: mocks.environment }),
-  useCanWrite: () => true,
+  useCanWrite: () => mocks.canWrite,
   useOptionalDashboardWorkspace: () => ({
     dashboardAccess: { capabilities: { canManageCustody: mocks.canManageCustody } },
     flags: { custody: true },
@@ -822,6 +823,7 @@ const devnetStrategyRow = (name: string) =>
     .find((row) => row?.textContent?.includes("Devnet"));
 
 beforeEach(() => {
+  mocks.canWrite = true;
   mocks.positionsAfterMovementIds = [];
   mocks.canManageCustody = true;
   mocks.environment = "sandbox";
@@ -963,6 +965,18 @@ describe("TreasurySolutionsWorkspace", () => {
     const legacyRow = screen.getByText("Legacy treasury program").closest("tr");
     if (!legacyRow) throw new Error("Expected existing legacy program row");
     expect(legacyRow.textContent).toContain("$900.50");
+  });
+
+  it("shows a read-only member every holding and no money action", () => {
+    // A viewer's writes are refused by the API, so no deposit, exit or program withdrawal shows.
+    mocks.canWrite = false;
+    renderWorkspace();
+
+    expect(screen.getAllByText("Steakhouse USDC").length).toBeGreaterThan(0);
+    expect(screen.getByText("Legacy treasury program")).toBeTruthy();
+    expect(summaryFigure()).toBe("$130.50");
+    expect(screen.queryByRole("button", { name: "Deposit" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Withdraw" })).toBeNull();
   });
 
   it("keeps a position its par intermediate still funds and offers only its par redemption", async () => {
