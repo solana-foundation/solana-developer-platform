@@ -26,6 +26,7 @@ import {
   type MoneyPrincipal,
   type MoneyPrincipalKind,
 } from "@/lib/money-principal";
+import { parseDisabledMovements } from "@/lib/movement-control";
 import { parseOrganizationEntitlements } from "@/lib/production-entitlement";
 import { logEvent } from "@/runtime/money-path-events";
 import { parseGrantsColumn } from "@/services/api-key.service";
@@ -67,6 +68,7 @@ import type { Env } from "@/types/env";
 
 export type MoneyAdmissionRefusal =
   | "project_not_found"
+  | "movement_disabled"
   | "organization_inactive"
   | "production_not_enabled"
   | "principal_missing"
@@ -115,6 +117,8 @@ export interface MoneyAdmissionFacts {
   projectEnvironment: ProjectEnvironment;
   /** The raw `organizations.settings` column. */
   rawSettings: string | null;
+  /** Operator-only project controls, read live for starts. */
+  disabledMovements: readonly MovementId[];
   principal: MoneyPrincipalFacts;
   /** When the row was read (epoch ms), for key expiry. */
   readAt: number;
@@ -157,6 +161,7 @@ export interface MoneyStartContext {
 
 const REFUSAL_MESSAGES: Record<Exclude<MoneyAdmissionRefusal, "action_not_held">, string> = {
   project_not_found: "Project not found",
+  movement_disabled: "This movement is disabled for the project",
   organization_inactive: "Organization is not active",
   // Matches `productionNotEnabled()`, the edge refusal for the same reason.
   production_not_enabled: "Production is not enabled for this organization",
@@ -469,7 +474,9 @@ export function decideMovement(
   if (!organization.admitted || !facts) {
     return organization;
   }
-  return decidePrincipal(movement, facts, subject);
+  const principal = decidePrincipal(movement, facts, subject);
+  if (!principal.admitted) return principal;
+  return facts.disabledMovements.includes(movement) ? refuse("movement_disabled") : ADMITTED;
 }
 
 /**
@@ -536,6 +543,7 @@ const walletScopeSchema = z.enum(API_KEY_WALLET_SCOPES);
 
 interface MoneyAdmissionRow {
   environment: ProjectEnvironment;
+  disabled_movements: unknown;
   status: string;
   settings: string | null;
   key_id: string | null;
@@ -648,7 +656,7 @@ export async function readMovementFactsWith(
   subject: MoneyAdmissionSubject
 ): Promise<MoneyAdmissionFacts | null> {
   return movementNeedsAdmissionFacts(movement)
-    ? readMoneyAdmissionFactsWith(db, scope, subject)
+    ? readMoneyAdmissionFactsWith(db, scope, movement, subject)
     : null;
 }
 
@@ -656,9 +664,10 @@ export async function readMovementFactsWith(
 export async function readMoneyAdmissionFacts(
   env: Env,
   scope: MoneyAdmissionScope,
+  movement: MovementId,
   subject: MoneyAdmissionSubject
 ): Promise<MoneyAdmissionFacts | null> {
-  return readMoneyAdmissionFactsWith(getDb(env), scope, subject);
+  return readMoneyAdmissionFactsWith(getDb(env), scope, movement, subject);
 }
 
 /**
@@ -673,12 +682,13 @@ export async function readMoneyAdmissionFacts(
 async function readMoneyAdmissionFactsWith(
   db: DatabaseExecutor,
   scope: MoneyAdmissionScope,
+  movement: MovementId,
   subject: MoneyAdmissionSubject
 ): Promise<MoneyAdmissionFacts | null> {
   const principal = currentMoneyPrincipal();
   const row = await db
     .prepare(
-      `SELECT p.environment, o.status, o.settings,
+      `SELECT p.environment, p.disabled_movements, o.status, o.settings,
               ak.id AS key_id, ak.status AS key_status, ak.expires_at AS key_expires_at,
               ak.rotation_deadline AS key_rotation_deadline, ak.grants AS key_grants,
               ak.wallet_scope AS key_wallet_scope,
@@ -723,6 +733,12 @@ async function readMoneyAdmissionFactsWith(
         organizationStatus: row.status,
         projectEnvironment: row.environment,
         rawSettings: row.settings,
+        // A malformed control fails starts closed. Exits never consult it,
+        // including when their credential still requires a live read.
+        disabledMovements:
+          MOVEMENTS[movement].kind === "start"
+            ? parseDisabledMovements(row.disabled_movements)
+            : [],
         principal: principalFacts(principal, row),
         readAt: Date.now(),
       }

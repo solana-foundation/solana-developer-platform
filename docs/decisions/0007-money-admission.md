@@ -109,6 +109,25 @@ included:
   Revocation locks the key row and lists what it started after it commits,
   so revoke-and-cancel either refuses the claim or sees it.
 
+## Addendum: 2026-10-28 Project movement control (HOO-2334)
+
+An operator can disable a named `start` from `MOVEMENTS` for one project. The
+control is an internal `projects.disabled_movements` column, separate from
+tenant-editable project settings. The existing single live admission read
+includes it, and `decideMovement` refuses the start with `movement_disabled`
+after organization and principal admission. Custody and sponsor waists, plus
+provider-API starts, use that same decision. An exit never consults the
+control, even when it reads a credential. A malformed stored control fails
+starts closed.
+
+The operator command serializes changes on the project row and commits each
+change with an audit-ledger entry. Re-enabling requires the current version,
+so an older status read cannot lift a newer stop. This is a per-project control;
+the cluster-wide policy remains a separate decision. A signature whose live
+read completed before the stop commits can still finish. The control applies
+to the next admission read. A custody-provider policy can provide a separate
+external boundary for in-flight requests when configured.
+
 ## Alternatives considered
 
 - **Capability token carried to the signer** (draft #2250): rejected, above.

@@ -19,6 +19,10 @@ import {
 } from "@/lib/money-admission";
 import { type MoneyPrincipal, runAsMoneyPrincipal } from "@/lib/money-principal";
 import * as moneyPathEvents from "@/runtime/money-path-events";
+import {
+  changeProjectMovementControl,
+  getProjectMovementControl,
+} from "@/services/project-movement-control";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PRODUCTION_PROJECT, TEST_PROJECT } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
@@ -33,6 +37,7 @@ function facts(overrides: Partial<MoneyAdmissionFacts> = {}): MoneyAdmissionFact
     organizationStatus: "active",
     projectEnvironment: "production",
     rawSettings: ENTITLED,
+    disabledMovements: [],
     principal: LIVE_KEY_PRINCIPAL_FACTS,
     readAt: Date.now(),
     ...overrides,
@@ -145,6 +150,34 @@ describe("decideMovement", () => {
       MOVEMENTS[movement].kind === "exit" ? { admitted: true } : decideMoneyStart(subject)
     );
   });
+
+  it.each(
+    (Object.keys(MOVEMENTS) as MovementId[]).filter(
+      (movement) => MOVEMENTS[movement].kind === "start"
+    )
+  )("refuses disabled start %s after the principal check", (movement) => {
+    expect(decideMovement(movement, facts({ disabledMovements: [movement] }), NO_WALLET)).toEqual({
+      admitted: false,
+      reason: "movement_disabled",
+    });
+    expect(
+      decideMovement(
+        movement,
+        facts({ disabledMovements: [movement], principal: { kind: "none" } }),
+        NO_WALLET
+      )
+    ).toEqual({ admitted: false, reason: "principal_missing" });
+  });
+
+  it.each(
+    (Object.keys(MOVEMENTS) as MovementId[]).filter(
+      (movement) => MOVEMENTS[movement].kind === "exit"
+    )
+  )("leaves exit %s open when the project has disabled starts", (movement) => {
+    expect(
+      decideMovement(movement, facts({ disabledMovements: ["payments.transfer"] }), NO_WALLET)
+    ).toEqual({ admitted: true });
+  });
 });
 
 const PRODUCTION_KEY_ID = "key_money_admission_production";
@@ -199,6 +232,7 @@ describe("money admission reads", () => {
         readMoneyAdmissionFacts(
           env,
           { organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id },
+          "payments.transfer",
           NO_WALLET
         )
       )
@@ -208,10 +242,146 @@ describe("money admission reads", () => {
         readMoneyAdmissionFacts(
           env,
           { organizationId: "org_other", projectId: TEST_PROJECT.id },
+          "payments.transfer",
           NO_WALLET
         )
       )
     ).resolves.toBeNull();
+  });
+
+  it("refuses only the disabled project's movement on the next read, then admits it when cleared", async () => {
+    const db = getDb(env);
+    const sandbox = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id };
+    const production = { organizationId: TEST_ORG.id, projectId: TEST_PRODUCTION_PROJECT.id };
+    const context = {
+      surface: "job",
+      movement: "payments.transfer_batch",
+      subjectId: "batch_test",
+    } as const;
+    const start = (scope: typeof sandbox) =>
+      asSystem(() =>
+        runAsMoneyPrincipal({ kind: "api_key", apiKeyId: PRODUCTION_KEY_ID }, () =>
+          assertMoneyStartAdmitted(env, scope, context, NO_WALLET)
+        )
+      );
+    // Use a live key on the production project and entitlement for both reads.
+    await seedProductionKey({ grants: ["transfer_batches.execute", "transfers.execute"] });
+    await db
+      .prepare(
+        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+         VALUES (?, ?, ?, 'admin', 'active')`
+      )
+      .bind("om_movement_control", TEST_ORG.id, TEST_USER.id)
+      .run();
+    await db
+      .prepare("UPDATE organizations SET settings = ? WHERE id = ?")
+      .bind(ENTITLED, TEST_ORG.id)
+      .run();
+    await db
+      .prepare("UPDATE projects SET disabled_movements = ?::text[] WHERE id = ?")
+      .bind(["payments.transfer_batch"], TEST_PRODUCTION_PROJECT.id)
+      .run();
+
+    await expect(start(production)).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      reason: "movement_disabled",
+    });
+    // A different movement and a different project remain admitted.
+    await expect(
+      asSystem(() =>
+        runAsMoneyPrincipal({ kind: "api_key", apiKeyId: PRODUCTION_KEY_ID }, () =>
+          assertMoneyStartAdmitted(
+            env,
+            production,
+            { ...context, movement: "payments.transfer" },
+            NO_WALLET
+          )
+        )
+      )
+    ).resolves.toBeUndefined();
+    await expect(
+      asSystem(() =>
+        runAsMoneyPrincipal({ kind: "member", userId: TEST_USER.id }, () =>
+          assertMoneyStartAdmitted(env, sandbox, context, NO_WALLET)
+        )
+      )
+    ).resolves.toBeUndefined();
+    await db
+      .prepare("UPDATE projects SET disabled_movements = ARRAY[]::text[] WHERE id = ?")
+      .bind(TEST_PRODUCTION_PROJECT.id)
+      .run();
+    await expect(start(production)).resolves.toBeUndefined();
+  });
+
+  it("audits operator changes and requires the current version to re-enable", async () => {
+    const scope = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id };
+    const change = {
+      ...scope,
+      movement: "payments.pay_request" as const,
+      operator: "ops:test",
+      reason: "stage drill",
+      ticket: "HOO-2334",
+    };
+    await expect(asSystem(() => getProjectMovementControl(env, scope))).resolves.toEqual({
+      disabledMovements: [],
+      version: 0,
+    });
+    await expect(
+      asSystem(() => changeProjectMovementControl(env, { ...change, operation: "disable" }))
+    ).resolves.toEqual({ disabledMovements: ["payments.pay_request"], version: 1 });
+    await expect(
+      asSystem(() =>
+        changeProjectMovementControl(env, { ...change, operation: "enable", expectedVersion: 0 })
+      )
+    ).rejects.toThrow("current version 1");
+    await expect(
+      asSystem(() =>
+        changeProjectMovementControl(env, { ...change, operation: "enable", expectedVersion: 1 })
+      )
+    ).resolves.toEqual({ disabledMovements: [], version: 2 });
+    const audit = await getDb(env)
+      .prepare(
+        "SELECT metadata FROM audit_logs WHERE resource_type = 'project' AND resource_id = ? ORDER BY ledger_sequence"
+      )
+      .bind(scope.projectId)
+      .all<{ metadata: string }>();
+    expect(audit.results).toHaveLength(2);
+    expect(audit.results.map((entry) => JSON.parse(entry.metadata))).toEqual([
+      expect.objectContaining({
+        movement: change.movement,
+        operation: "disable",
+        ticket: change.ticket,
+      }),
+      expect.objectContaining({
+        movement: change.movement,
+        operation: "enable",
+        ticket: change.ticket,
+      }),
+    ]);
+  });
+
+  it("keeps credentialed exits available when the stored control is malformed", async () => {
+    const db = getDb(env);
+    const scope = { organizationId: TEST_ORG.id, projectId: TEST_PRODUCTION_PROJECT.id };
+    await seedProductionKey();
+    await db
+      .prepare("UPDATE projects SET disabled_movements = ?::text[] WHERE id = ?")
+      .bind(["unclassified.movement"], scope.projectId)
+      .run();
+    await expect(
+      asSystem(() =>
+        runAsMoneyPrincipal(PRODUCTION_KEY, async () =>
+          decideMovement(
+            "recurring.cancel",
+            await readMoneyAdmissionFacts(env, scope, "recurring.cancel", NO_WALLET),
+            NO_WALLET
+          )
+        )
+      )
+    ).resolves.toEqual({ admitted: true });
+    await expect(
+      asSystem(() => readMoneyAdmissionFacts(env, scope, "recurring.collect", NO_WALLET))
+    ).rejects.toThrow();
   });
 
   it("refuses a deleted organization on the next movement, uncached", async () => {
@@ -587,7 +757,9 @@ describe("money admission reads the principal in the same statement", () => {
     await seedProductionKey({ walletScope: "selected" });
     const read = await asSystem(() =>
       runAsMoneyPrincipal(PRODUCTION_KEY, () =>
-        readMoneyAdmissionFacts(env, scope, { custodyWalletId: "cwlt_not_listed" })
+        readMoneyAdmissionFacts(env, scope, "recurring.collect", {
+          custodyWalletId: "cwlt_not_listed",
+        })
       )
     );
     expect(read?.principal).toEqual({
@@ -658,7 +830,7 @@ describe("money admission reads the principal in the same statement", () => {
       );
 
     await expect(
-      asMember(() => readMoneyAdmissionFacts(env, sandbox, NO_WALLET))
+      asMember(() => readMoneyAdmissionFacts(env, sandbox, "payments.transfer", NO_WALLET))
     ).resolves.toMatchObject({
       principal: { kind: "member", member: { status: "active", role: "admin", inProject: true } },
     });
@@ -677,7 +849,7 @@ describe("money admission reads the principal in the same statement", () => {
       asMember(async () =>
         decideMovement(
           "private_channels.withdraw",
-          await readMoneyAdmissionFacts(env, sandbox, NO_WALLET),
+          await readMoneyAdmissionFacts(env, sandbox, "private_channels.withdraw", NO_WALLET),
           NO_WALLET
         )
       )
@@ -691,6 +863,7 @@ describe("money admission reads the principal in the same statement", () => {
         readMoneyAdmissionFacts(
           env,
           { organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id },
+          "recurring.collect",
           NO_WALLET
         )
       )
