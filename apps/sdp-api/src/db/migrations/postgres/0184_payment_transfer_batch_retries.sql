@@ -12,14 +12,12 @@ CREATE TABLE payment_transfer_batch_retries (
     idempotency_fingerprint TEXT NOT NULL,
     initiated_by_key_id TEXT,
     recipient_ids JSONB NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived')),
     created_at TEXT NOT NULL DEFAULT sdp_iso_now()
 );
 
 CREATE UNIQUE INDEX payment_transfer_batch_retries_org_project_key
     ON payment_transfer_batch_retries (organization_id, project_id, idempotency_key);
-
-CREATE INDEX payment_transfer_batch_retries_batch
-    ON payment_transfer_batch_retries (batch_id);
 
 ALTER TABLE payment_transfer_batch_retries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE payment_transfer_batch_retries FORCE ROW LEVEL SECURITY;

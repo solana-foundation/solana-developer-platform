@@ -847,7 +847,8 @@ export function createPostgresPaymentTransferBatchesRepository(
       const row = await db
         .prepare(
           `SELECT * FROM payment_transfer_batch_retries
-            WHERE organization_id = ? AND project_id = ? AND idempotency_key = ?`
+            WHERE organization_id = ? AND project_id = ? AND idempotency_key = ?
+              AND status = 'active'`
         )
         .bind(organizationId, projectId, idempotencyKey)
         .first<Record<string, unknown>>();
