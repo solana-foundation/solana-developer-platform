@@ -29,11 +29,10 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
 **Accepted.** The key is optional, and honored when sent.
 
 - Wallets: `POST /v1/wallets`, `POST /v1/wallets/initialize`, `POST /v1/wallets/signer-check`, `PATCH /v1/wallets/{walletId}`, `DELETE /v1/wallets`
-- Subscription plans and subscriptions (beta): `POST /v1/payments/subscription-plans`, `PATCH /v1/payments/subscription-plans/{planId}`, `POST /v1/payments/subscriptions`
 - Counterparties: `POST`, `PATCH` and `DELETE` on `/v1/counterparties` and on counterparty accounts
 - Compliance: `POST /v1/compliance/address-screenings`
 
-**Not used.** `POST /v1/payments/transfer-batches/estimate` moves and stores nothing. The subscription `prepare-*` routes and subscription-plan `prepare-create` (beta) return an unsigned transaction bound to a fresh blockhash, which a stored replay would hand back after it expired. Neither reads the key.
+**Not used.** `POST /v1/payments/transfer-batches/estimate` moves and stores nothing, so it does not read the key.
 
 Modules with their own key handling say so on their pages.
 
