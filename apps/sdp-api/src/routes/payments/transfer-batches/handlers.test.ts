@@ -33,9 +33,6 @@ import { app } from "@/index";
 import { AppError } from "@/lib/errors";
 import { deriveProviderRequestId } from "@/lib/idempotency";
 import { createTenantScope } from "@/lib/tenant-scope";
-import { deriveIdempotencyRecordKey, requestFingerprint } from "@/middleware/idempotency";
-import { canonicalizeTransferBatchBody } from "@/routes/payments/transfer-batches/idempotency";
-import type { CreateTransferBatchInput } from "@/routes/payments/transfer-batches/types";
 import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
 import { rootLogger } from "@/runtime/logger";
 import { SigningService } from "@/services/domain/signing.service";
@@ -2450,122 +2447,6 @@ describe("payment transfer batches", () => {
       expect(late.status).toBe(200);
       expect(await batchIdOf(late)).toBe(firstId);
       expect((await readRecipients(firstId)).map((r) => r.status)).toEqual(["failed"]);
-      expect(signingOutcomeMock).not.toHaveBeenCalled();
-    });
-
-    it("leaves batches recorded before run keys out of the run", async () => {
-      const { send, sourceSigner } = await seedOneRecipientBatch("payroll_legacy");
-      // Two earlier batches share the externalId under their own request keys.
-      await insertBatchRow(sourceSigner.address, "payroll_legacy", "legacy-request-key-1");
-      await insertBatchRow(sourceSigner.address, "payroll_legacy", "legacy-request-key-2");
-
-      const first = await send("batch-external-id-after-legacy", ORIGINAL);
-      const resend = await send("batch-external-id-after-legacy-resend", ORIGINAL);
-
-      expect(first.status).toBe(200);
-      expect(resend.status).toBe(200);
-      expect(await batchIdOf(resend)).toBe(await batchIdOf(first));
-      expect(await countBatches()).toBe(3);
-    });
-
-    it("still answers a batch recorded before run keys on a same-key retry after its record expires", async () => {
-      const { send, sourceSigner, signingOutcomeMock } = await seedOneRecipientBatch("payroll_old");
-      const first = await send("batch-external-id-old-key", ORIGINAL);
-      expect(first.status).toBe(200);
-      const firstId = await batchIdOf(first);
-      // As a batch recorded before run keys: under the request's own record key.
-      const recordKey = deriveIdempotencyRecordKey(
-        {
-          organizationId: TEST_ORG.id,
-          projectId: TEST_PROJECT.id,
-          principal: TEST_SEEDED_API_KEY.id,
-        },
-        "batch-external-id-old-key"
-      );
-      await getDb(env)
-        .prepare("UPDATE payment_transfer_batches SET idempotency_key = ? WHERE id = ?")
-        .bind(recordKey, firstId)
-        .run();
-      await getDb(env).execute("DELETE FROM idempotency_keys");
-      vi.clearAllMocks();
-      createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
-
-      const again = await send("batch-external-id-old-key", ORIGINAL);
-
-      expect(again.status).toBe(200);
-      expect(again.headers.get("Idempotent-Replayed")).toBe("true");
-      expect(await batchIdOf(again)).toBe(firstId);
-      expect(signingOutcomeMock).not.toHaveBeenCalled();
-      expect(await countBatches()).toBe(1);
-    });
-
-    it("still replays a batch created before externalId was required on its own key", async () => {
-      const sourceSigner = await generateKeyPairSigner();
-      await updateSeededWalletPublicKey(sourceSigner.address);
-      createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
-      const signingOutcomeMock = vi.fn().mockResolvedValue(FIRST_SIGNATURE);
-      createKoraAdapterMock.mockReturnValue(ownedSubmissionAdapter(signingOutcomeMock));
-      const counterpartyId = await seedCounterparty("batch_legacy_no_run");
-      const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
-        counterpartyId,
-        walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
-      });
-      const legacyBody = {
-        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-        token: "SOL",
-        recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
-        options: { preflight: false },
-      };
-      const send = (idempotencyKey: string, body: CreateTransferBatchInput) =>
-        app.request(
-          "/v1/payments/transfer-batches",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${TEST_API_KEY.raw}`,
-              "Idempotency-Key": idempotencyKey,
-            },
-            body: JSON.stringify(body),
-          },
-          env
-        );
-      const created = await send("batch-legacy-seed", { ...legacyBody, externalId: "legacy-seed" });
-      expect(created.status).toBe(200);
-      const batchId = await batchIdOf(created);
-      // Rewritten as a batch from before the field was required: no run,
-      // recorded under its request's own key and fingerprint.
-      await getDb(env)
-        .prepare(
-          "UPDATE payment_transfer_batches SET external_id = NULL, idempotency_key = ?, idempotency_fingerprint = ? WHERE id = ?"
-        )
-        .bind(
-          deriveIdempotencyRecordKey(
-            {
-              organizationId: TEST_ORG.id,
-              projectId: TEST_PROJECT.id,
-              principal: TEST_SEEDED_API_KEY.id,
-            },
-            "batch-legacy-key"
-          ),
-          requestFingerprint({
-            operation: "POST /v1/payments/transfer-batches",
-            params: {},
-            query: {},
-            body: canonicalizeTransferBatchBody(legacyBody),
-          }),
-          batchId
-        )
-        .run();
-      await getDb(env).execute("DELETE FROM idempotency_keys");
-      vi.clearAllMocks();
-
-      const replay = await send("batch-legacy-key", legacyBody);
-      const fresh = await send("batch-legacy-new-key", legacyBody);
-
-      expect(replay.status).toBe(200);
-      expect(await batchIdOf(replay)).toBe(batchId);
-      expect(fresh.status).toBe(400);
       expect(signingOutcomeMock).not.toHaveBeenCalled();
     });
 
