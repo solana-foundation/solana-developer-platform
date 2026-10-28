@@ -77,4 +77,21 @@ describe("ChainalysisComplianceProvider", () => {
     expect(result.status).toBe("error");
     expect(result.message).toContain("403");
   });
+
+  it("never echoes a raw error body into the client-facing message", async () => {
+    // Upstream error bodies can echo the credentials we sent; the raw body
+    // must never travel to the caller or a log (the redaction package's rule).
+    mockResponse("<html>token sk_live_abcdef0123456789 rejected</html>", 502);
+    const result = await provider().screenAddress(INPUT);
+    expect(result.status).toBe("error");
+    expect(result.message).not.toContain("sk_live_abcdef0123456789");
+    expect(result.message).not.toContain("<html>");
+  });
+
+  it("keeps only the message field of a known error envelope", async () => {
+    mockResponse({ message: "forbidden", request_id: "sk_live_abcdef0123456789" }, 403);
+    const result = await provider().screenAddress(INPUT);
+    expect(result.message).toContain("forbidden");
+    expect(result.message).not.toContain("sk_live_abcdef0123456789");
+  });
 });

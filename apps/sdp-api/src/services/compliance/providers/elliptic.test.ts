@@ -103,4 +103,19 @@ describe("EllipticComplianceProvider", () => {
     expect(result.status).toBe("error");
     expect(result.message).toContain("401");
   });
+
+  it("scrubs credential-shaped prose before it reaches the client message", async () => {
+    // A provider error that quotes the token we sent must not forward it.
+    mockResponse({ message: "Invalid token: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9" }, 401);
+    const result = await provider().screenAddress(INPUT);
+    expect(result.status).toBe("error");
+    expect(result.message).not.toContain("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9");
+  });
+
+  it("still reads the not-in-blockchain prose from a non-envelope 404 body", async () => {
+    // The 404 special case reads the raw body, so a plain-text variant passes.
+    mockResponse("Address has not yet been processed into the Elliptic tool", 404);
+    const result = await provider().screenAddress(INPUT);
+    expect(result.status).toBe("ok");
+  });
 });

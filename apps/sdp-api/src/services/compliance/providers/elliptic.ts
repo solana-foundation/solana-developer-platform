@@ -178,8 +178,8 @@ export class EllipticComplianceProvider implements ComplianceProvider {
           })();
 
       if (!response.ok) {
-        const body = extractProviderErrorMessage(await response.text().catch(() => ""));
-        if (isNotInBlockchainResponse(response.status, body)) {
+        const rawBody = await response.text().catch(() => "");
+        if (isNotInBlockchainResponse(response.status, rawBody)) {
           return {
             provider: this.name,
             status: "ok",
@@ -189,6 +189,7 @@ export class EllipticComplianceProvider implements ComplianceProvider {
           };
         }
 
+        const body = extractProviderErrorMessage(rawBody, response.status);
         return {
           provider: this.name,
           status: "error",

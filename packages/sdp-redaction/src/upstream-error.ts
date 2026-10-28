@@ -11,7 +11,7 @@ const UPSTREAM_ERROR_CODE_KEYS = [
   "reason",
 ];
 const UPSTREAM_ERROR_CODE_PATTERN = /^[A-Za-z0-9_.:-]{1,64}$/;
-const UNKNOWN_UPSTREAM_ERROR_CODE = "unavailable";
+export const UNKNOWN_UPSTREAM_ERROR_CODE = "unavailable";
 
 /**
  * Reduce an upstream error body to a single machine-readable code that is safe

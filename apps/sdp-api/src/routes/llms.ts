@@ -63,7 +63,7 @@ function renderBody(releaseChannel: SdpReleaseChannel): string {
     "- API keys are issued by SDP in the shared `sf_<key id>_<secret><checksum>` format; keys issued earlier (`sk_test_...`, `sk_live_...`) are still accepted.",
     ...(earnPublished
       ? [
-          "- Earn strategy reads, previews, withdrawal-route discovery, and instant unsigned external-wallet builds may be anonymous; queued action builds, submits, and tenant reads require an API key.",
+          "- Every Earn endpoint requires an authenticated credential (an API key, or a dashboard session with a project) and runs in that project's environment; nothing in this resource is anonymous.",
         ]
       : []),
     "- Session-only or internal routes are intentionally excluded from this resource.",

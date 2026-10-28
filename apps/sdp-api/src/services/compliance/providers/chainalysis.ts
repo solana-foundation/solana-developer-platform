@@ -92,7 +92,10 @@ export class ChainalysisComplianceProvider implements ComplianceProvider {
       });
 
       if (!response.ok) {
-        const body = extractProviderErrorMessage(await response.text().catch(() => ""));
+        const body = extractProviderErrorMessage(
+          await response.text().catch(() => ""),
+          response.status
+        );
         return {
           provider: this.name,
           status: "error",

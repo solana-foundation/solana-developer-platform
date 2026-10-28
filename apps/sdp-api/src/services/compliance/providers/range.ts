@@ -4,6 +4,8 @@ import type {
   ComplianceProviderResult,
 } from "@/services/compliance/types";
 
+import { extractProviderErrorMessage } from "./provider-response";
+
 const DEFAULT_RANGE_API_BASE_URL = "https://api.range.org";
 
 type RangeAddressRiskResponse = {
@@ -19,26 +21,6 @@ export interface RangeComplianceProviderConfig {
 function normalizeRangeApiBaseUrl(baseUrl: string | undefined): string {
   const value = (baseUrl ?? DEFAULT_RANGE_API_BASE_URL).trim();
   return value.endsWith("/") ? value.slice(0, -1) : value;
-}
-
-function extractErrorMessage(body: string): string {
-  if (!body) {
-    return "";
-  }
-
-  try {
-    const parsed = JSON.parse(body) as { error?: { message?: unknown }; message?: unknown };
-    if (typeof parsed.error?.message === "string") {
-      return parsed.error.message;
-    }
-    if (typeof parsed.message === "string") {
-      return parsed.message;
-    }
-  } catch {
-    // Fall back to raw body when response is not JSON.
-  }
-
-  return body;
 }
 
 export class RangeComplianceProvider implements ComplianceProvider {
@@ -74,7 +56,10 @@ export class RangeComplianceProvider implements ComplianceProvider {
       });
 
       if (!response.ok) {
-        const body = extractErrorMessage(await response.text().catch(() => ""));
+        const body = extractProviderErrorMessage(
+          await response.text().catch(() => ""),
+          response.status
+        );
         return {
           provider: this.name,
           status: "error",
