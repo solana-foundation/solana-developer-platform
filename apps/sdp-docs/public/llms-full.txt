@@ -5381,7 +5381,6 @@ Source: https://platform.solana.com/docs/reference/api/payments
 | `GET` | `/v1/payments/transfer-batches` | List transfer batches |
 | `POST` | `/v1/payments/transfer-batches` | Create transfer batch |
 | `GET` | `/v1/payments/transfer-batches/{batchId}` | Get transfer batch |
-| `POST` | `/v1/payments/transfer-batches/{batchId}/retry` | Retry a transfer batch's failed recipients |
 | `POST` | `/v1/payments/transfer-batches/estimate` | Estimate transfer batch |
 | `GET` | `/v1/payments/transfers` | List transfers |
 | `POST` | `/v1/payments/transfers` | Execute transfer (custody) |
