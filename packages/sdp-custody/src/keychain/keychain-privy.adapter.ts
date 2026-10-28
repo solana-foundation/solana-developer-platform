@@ -132,7 +132,7 @@ function rethrowPrivySigningError(error: unknown): never {
     privyPolicyViolationContextSchema.safeParse(error.context).success
   ) {
     throw new SigningError(
-      "The custody provider's policy refused to sign this transaction",
+      "The custody provider's policy refused to sign this request",
       "POLICY_REFUSED",
       error
     );

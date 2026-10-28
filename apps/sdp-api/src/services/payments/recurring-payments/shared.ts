@@ -1,4 +1,3 @@
-import { SigningError } from "@sdp/custody/signing";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { confirmTransaction, getRecentBlockhash, type SolanaRpc } from "@sdp/rpc/solana";
 import { withTransientRpcRetry } from "@sdp/rpc/transient";
@@ -43,7 +42,6 @@ import {
   AppError,
   badRequest,
   conflict,
-  custodyPolicyRefused,
   internalError,
   PUBLIC_INTERNAL_ERROR_MESSAGE,
   transactionFailed,
@@ -664,19 +662,7 @@ export async function confirmSubscriptionSignature(
   }
 }
 
-/**
- * The message a recurring payment attempt stores for a failure: an API
- * error's own message, the custody policy refusal in plain words, and the
- * public internal-error message for anything else, so a provider's raw answer
- * is never stored.
- *
- * @param error - The failure the attempt ended with.
- * @returns The message to store and show.
- */
 export function recurringPaymentErrorMessage(error: Error): string {
-  if (error instanceof SigningError && error.code === "POLICY_REFUSED") {
-    return custodyPolicyRefused().message;
-  }
   return error instanceof AppError ? error.message : PUBLIC_INTERNAL_ERROR_MESSAGE;
 }
 

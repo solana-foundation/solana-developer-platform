@@ -1,4 +1,3 @@
-import { SigningError } from "@sdp/custody/signing";
 import { compareDecimalAmounts } from "@sdp/payments/decimal";
 // biome-ignore lint/style/noRestrictedImports: the transfers list reads wallet signature history through the Helius-first pool
 import { createClusterHistoryRpc, createClusterRpc } from "@sdp/rpc/factory";
@@ -57,7 +56,6 @@ import {
   badRequest,
   badRequestQuery,
   conflict,
-  custodyPolicyRefused,
   type ErrorCode,
   internalError,
   isErrorCode,
@@ -687,16 +685,12 @@ async function settleTransferExecutionFailure(
  * rejections as `custom program error: 0x11` (decimal code 17), the hex form
  * from the JSON-RPC preflight response, not `@solana/kit`'s own decimal `#17`
  * `SolanaError` formatting — are surfaced as the existing 400 `ACCOUNT_FROZEN`
- * error instead of an opaque 502. A custody policy refusal is the 422
- * `CUSTODY_POLICY_REFUSED`; anything else falls back to the generic
+ * error instead of an opaque 502; anything else falls back to the generic
  * `SOLANA_RPC_ERROR`.
  */
 export function mapTransferExecutionError(error: unknown): AppError {
   if (error instanceof AppError) {
     return error;
-  }
-  if (error instanceof SigningError && error.code === "POLICY_REFUSED") {
-    return custodyPolicyRefused();
   }
   const message = error instanceof Error ? error.message : "Unknown transfer error";
   const programErrorCode = /custom program error: (0x[0-9a-f]+)/i.exec(message)?.[1].toLowerCase();

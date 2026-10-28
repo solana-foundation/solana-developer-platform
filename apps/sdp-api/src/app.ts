@@ -119,16 +119,12 @@ const KV_FREE_PATHS = [
 const MAX_API_BODY_BYTES = 1024 * 1024;
 
 function mapSigningError(err: SigningError): {
-  status: 400 | 404 | 409 | 422 | 502 | 504;
+  status: 400 | 404 | 409 | 502 | 504;
   code: string;
   message: string;
 } {
   const message = getSafeSigningErrorMessage(err);
   switch (err.code) {
-    case "POLICY_REFUSED": {
-      const refusal = custodyPolicyRefused();
-      return { status: 422, code: refusal.code, message: refusal.message };
-    }
     case "WALLET_NOT_FOUND":
     case "NOT_FOUND":
       return { status: 404, code: err.code, message };
@@ -245,6 +241,25 @@ function getFireblocksBlockedError(err: Error): {
     message:
       "Fireblocks blocked this signing request. Confirm raw signing is enabled for this workspace and that the raw-signing policy allows this API user and vault.",
   };
+}
+
+/**
+ * The `AppError` an error the app maps itself stands for, or the error unchanged. Hono core throws
+ * `HTTPException(400)` for malformed JSON bodies before route-level body validation runs. A custody
+ * policy refusal is already an `AppError` at the signer waist; one from a path that signs outside
+ * it answers the same, as a backstop.
+ *
+ * @param err - The error the handler threw.
+ * @returns The `AppError` to answer with, or `err`.
+ */
+function normalizeToAppError(err: Error): Error {
+  if (err instanceof HTTPException && err.status === 400) {
+    return badRequest(err.message);
+  }
+  if (err instanceof SigningError && err.code === "POLICY_REFUSED") {
+    return custodyPolicyRefused(err);
+  }
+  return err;
 }
 
 /** How long a client is told to wait after the database could not take its request. */
@@ -433,10 +448,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
         ...describeError(err),
       });
 
-    // Hono core throws HTTPException(400) for malformed JSON bodies before
-    // route-level body validation runs; normalize it into the AppError envelope.
-    const normalizedError =
-      err instanceof HTTPException && err.status === 400 ? badRequest(err.message) : err;
+    const normalizedError = normalizeToAppError(err);
 
     if (normalizedError instanceof AppError) {
       return appErrorResponse(c, normalizedError);

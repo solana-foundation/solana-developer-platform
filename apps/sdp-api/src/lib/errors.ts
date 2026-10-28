@@ -206,8 +206,13 @@ export class AppError extends Error {
   public readonly statusCode: number;
   public readonly details?: Record<string, unknown>;
 
-  constructor(code: ErrorCode, message?: string, details?: Record<string, unknown>) {
-    super(message || DEFAULT_ERROR_MESSAGES[code]);
+  constructor(
+    code: ErrorCode,
+    message?: string,
+    details?: Record<string, unknown>,
+    options?: ErrorOptions
+  ) {
+    super(message || DEFAULT_ERROR_MESSAGES[code], options);
     this.code = code;
     this.statusCode = ERROR_STATUS_CODES[code];
     this.details = details;
@@ -284,9 +289,15 @@ export function transactionExpired(message?: string, details?: Record<string, un
   return new AppError("TRANSACTION_EXPIRED", message, details);
 }
 
-/** A signature the custody provider's own policy declined (HOO-2333): nothing was signed. */
-export function custodyPolicyRefused(): AppError {
-  return new AppError("CUSTODY_POLICY_REFUSED");
+/**
+ * A signature the custody provider's own policy declined (HOO-2333): nothing was signed. The
+ * custody signer raises it once, at the signer waist, for every flow that signs.
+ *
+ * @param cause - The provider's refusal, kept for logs; its wording never reaches the response.
+ * @returns The 422 `CUSTODY_POLICY_REFUSED` error.
+ */
+export function custodyPolicyRefused(cause: Error): AppError {
+  return new AppError("CUSTODY_POLICY_REFUSED", undefined, undefined, { cause });
 }
 
 export function rateLimited(message?: string): AppError {
