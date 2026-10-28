@@ -31,14 +31,25 @@ const ANONYMOUS_MAX_REQUESTS = 20;
 export const DASHBOARD_ACTOR_MAX_REQUESTS = 300;
 
 /**
- * Per-IP ceiling for requests that present an sk_-shaped credential. Keyed
- * traffic gets its real limit per key id after auth (enforceRateLimit in the
- * auth middleware), so the anonymous limit must not apply — it would cap
- * every tier at 20/min per IP. The key is unverified at this point, so a high
- * IP ceiling still bounds invalid-key spray (a fresh hash per request) against
- * the DB read in auth.
+ * Per-IP ceiling for requests that present an API key on a path where API-key
+ * authentication runs (API_KEY_AUTHENTICATED_PATHS). Keyed traffic gets its
+ * real limit per key id after auth (enforceRateLimit in the auth middleware),
+ * so the anonymous limit must not apply — it would cap every tier at 20/min
+ * per IP. The key is unverified at this point, so a high IP ceiling still
+ * bounds invalid-key spray (a fresh hash per request) against the DB read in
+ * auth. Anywhere else a presented key is never checked, so it buys nothing.
  */
 export const KEYED_IP_BACKSTOP_MAX_REQUESTS = Math.max(...Object.values(RATE_LIMIT_TIERS)) * 5;
+
+/**
+ * The mounts whose routers run API-key authentication (`unifiedAuthMiddleware`
+ * and the gates built on it), matched as segment prefixes by matchesFreePath.
+ * Only here does the auth middleware's per-key limit stand behind the keyed IP
+ * backstop; on every other path (`/pay` above all, which makes the fee payer
+ * sign for anyone) a key-shaped header is unverified decoration, and the
+ * anonymous limit applies whatever headers are sent.
+ */
+export const API_KEY_AUTHENTICATED_PATHS = ["/v1", "/internal/dashboard", "/admin/allowlist"];
 
 /**
  * Per-key-hash flood guard the auth middleware applies before it reads the
@@ -434,9 +445,14 @@ export async function enforceRateLimit(
  * see matchesFreePath; bare `startsWith` would mis-skip the whole API when
  * `/` is listed). For everything else: verified Clerk dashboard JWTs get a
  * generous per-user limit (not an exemption — see CLERK_USER_MAX_REQUESTS),
- * sk_-shaped requests get the high per-IP backstop (their real limit is
- * enforced per key after auth via enforceRateLimit), and everything else gets
- * the anonymous per-IP limit.
+ * requests presenting an API key on an API_KEY_AUTHENTICATED_PATHS mount get
+ * the high per-IP backstop (their real limit is enforced per key after auth
+ * via enforceRateLimit), and everything else, a key-shaped header on any other
+ * path included, gets the anonymous per-IP limit.
+ *
+ * The anonymous limit fails closed: it guards unauthenticated work (the
+ * sponsored signature `/pay` produces), so a counter-store outage refuses it
+ * with 503 rather than admitting it unmetered.
  *
  * Requires c.var.kv to be populated (by kvStoreMiddleware) on non-exempt
  * paths, so every path kv-store skips must be listed here too — the
@@ -445,7 +461,8 @@ export async function enforceRateLimit(
  * @param paths - Path patterns exempt from rate limiting.
  * @returns Hono middleware that admits or 429s the request before calling next.
  * @throws AppError RATE_LIMITED (429) from the returned middleware when the
- *   applicable per-IP limit is exceeded.
+ *   applicable per-IP limit is exceeded; AppError SERVICE_UNAVAILABLE (503)
+ *   when the anonymous limit's counter store is unavailable.
  */
 export function skipRateLimitPaths(...paths: string[]) {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
@@ -469,13 +486,14 @@ export function skipRateLimitPaths(...paths: string[]) {
     }
 
     const clientIp = getClientIp(c) ?? "unknown";
-    if (presentsApiKey(c)) {
+    if (matchesFreePath(c.req.path, API_KEY_AUTHENTICATED_PATHS) && presentsApiKey(c)) {
       await enforceRateLimit(c, clientIp, KEYED_IP_BACKSTOP_MAX_REQUESTS, {
         fallback: keyedIpBackstopFallback,
       });
     } else {
       await enforceRateLimit(c, clientIp, ANONYMOUS_MAX_REQUESTS, {
         metricTier: "anonymous_default",
+        failClosed: true,
       });
     }
     await next();
