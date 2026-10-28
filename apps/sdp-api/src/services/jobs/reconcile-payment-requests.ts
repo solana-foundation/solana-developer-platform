@@ -1,4 +1,3 @@
-import { createClusterRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import type {
   PaymentRequestCheckStamp,
@@ -12,7 +11,7 @@ import {
   checkClosedPaymentRequestForLatePayment,
   closeLapsedPaymentRequest,
   type PaymentRequestCheck,
-  SPONSORED_CLAIM_BLOCK_MARGIN,
+  readLiveClaimFloor,
 } from "@/services/payments/payment-requests";
 import type { Env } from "@/types/env";
 
@@ -47,10 +46,9 @@ export async function reconcileHotPaymentRequests(env: Env): Promise<void> {
   // The block height only bounds a live sponsored window, so with no window open the cluster
   // is not asked at all: this lane runs every 30 s in every environment.
   if (await repo.hasHotPaymentRequests({ environment })) {
-    const blockHeight = await createClusterRpc().getBlockHeight({ commitment: "confirmed" }).send();
     rows = await repo.listHotPaymentRequests({
       environment,
-      minLastValidBlockHeight: blockHeight - SPONSORED_CLAIM_BLOCK_MARGIN,
+      minLastValidBlockHeight: await readLiveClaimFloor(),
       limit: HOT_BATCH_SIZE,
     });
   }
@@ -94,11 +92,10 @@ export async function expirePaymentRequests(env: Env): Promise<void> {
   // As in the hot lane, the height only holds back a request whose sponsored transaction can
   // still land: with nothing lapsed, the cluster is not asked.
   if (await repo.hasLapsedPaymentRequests({ environment, checkedBefore })) {
-    const blockHeight = await createClusterRpc().getBlockHeight({ commitment: "confirmed" }).send();
     lapsed = await repo.listLapsedPaymentRequests({
       environment,
       checkedBefore,
-      liveClaimMinLastValidBlockHeight: blockHeight - SPONSORED_CLAIM_BLOCK_MARGIN,
+      liveClaimMinLastValidBlockHeight: await readLiveClaimFloor(),
       limit: EXPIRY_BATCH_SIZE,
     });
   }

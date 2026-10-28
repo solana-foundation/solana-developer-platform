@@ -1,6 +1,3 @@
-import { SdpRpcError } from "@sdp/rpc/errors";
-import { createClusterRpc } from "@sdp/rpc/factory";
-import { isSolanaError } from "@solana/kit";
 import type { Context } from "hono";
 import { getDb } from "@/db/client";
 import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
@@ -9,14 +6,11 @@ import {
   createTransactionalPaymentRequestsRepository,
 } from "@/db/repositories/repository-factory";
 import { resolveCreatorUserId } from "@/lib/creator";
-import { conflict, internalError, solanaRpcError } from "@/lib/errors";
+import { conflict, internalError } from "@/lib/errors";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { logEvent } from "@/runtime/money-path-events";
 import { AuditService } from "@/services/audit.service";
-import {
-  isPaymentRequestExpired,
-  SPONSORED_CLAIM_BLOCK_MARGIN,
-} from "@/services/payments/payment-requests";
+import { isPaymentRequestExpired, readLiveClaimFloor } from "@/services/payments/payment-requests";
 import type { Env } from "@/types/env";
 
 const LIVE_CLAIM_MESSAGE =
@@ -56,22 +50,20 @@ function cancelState(row: PaymentRequestRow): "canceled" | "open" {
 }
 
 /**
- * The lowest last valid block height a sponsored transaction may hold and still land, read as
- * the expiry lane reads it: confirmed height less the hot-lane margin.
+ * The live-claim floor for cancelling these requests, read from the cluster once and only when
+ * one of them holds a sponsored transaction claim.
  *
- * @returns The height below which a claim can no longer land.
- * @throws AppError `SOLANA_RPC_ERROR` when the cluster cannot be read; the cancel never proceeds
+ * @param rows - The requests about to be canceled.
+ * @returns The floor, or null when no row holds a claim.
+ * @throws AppError `SOLANA_RPC_ERROR` when the cluster cannot be read; no cancel proceeds
  *   without the check.
  */
-async function readLiveClaimMinLastValidBlockHeight(): Promise<bigint> {
-  let blockHeight: bigint;
-  try {
-    blockHeight = await createClusterRpc().getBlockHeight({ commitment: "confirmed" }).send();
-  } catch (error) {
-    if (error instanceof SdpRpcError || !isSolanaError(error)) throw error;
-    throw solanaRpcError("Could not read the cluster's block height; retry the cancel");
-  }
-  return blockHeight - SPONSORED_CLAIM_BLOCK_MARGIN;
+export async function readLiveClaimFloorFor(
+  rows: readonly PaymentRequestRow[]
+): Promise<bigint | null> {
+  return rows.some((row) => row.sponsored_tx_last_valid_block_height !== null)
+    ? readLiveClaimFloor()
+    : null;
 }
 
 /**
@@ -80,24 +72,24 @@ async function readLiveClaimMinLastValidBlockHeight(): Promise<bigint> {
  * already canceled answers with its row.
  *
  * A request holding a sponsored transaction that can still land stays open: that transaction is
- * a bearer instrument until its blockhash expires. Only then is the cluster read, once, for its
- * confirmed height. A lagging node reads a lower height, so the hold lasts longer: the safe
- * direction. A payment signed before the cancel and landed after it is recorded by the late
- * watch as paid.
+ * a bearer instrument until its blockhash expires. The caller reads the live-claim floor once
+ * ({@link readLiveClaimFloorFor}), only when a row holds a claim. A lagging node reads a lower
+ * height, so the hold lasts longer: the safe direction. Without a floor, any claim holds. A
+ * payment signed before the cancel and landed after it is recorded by the late watch as paid.
  *
  * @param c - The request context: its tenant scope, database identity and audit actor.
- * @param params - The request to cancel and who cancels it.
+ * @param params - The request to cancel, who cancels it, and the floor read for it.
  * @param params.row - The request as read in the caller's Project; the compare-and-set decides.
  * @param params.canceledBy - The acting principal, in the identifier format `created_by` uses.
+ * @param params.liveClaimFloor - The live-claim floor, or null when no row read held a claim.
  * @returns The canceled request.
  * @throws AppError `CONFLICT` when it is paid or expired, or a sponsored transaction can land.
- * @throws AppError `SOLANA_RPC_ERROR` when the block height cannot be read.
  */
 export async function cancelOpenPaymentRequest(
   c: Context<{ Bindings: Env }>,
-  params: { row: PaymentRequestRow; canceledBy: string }
+  params: { row: PaymentRequestRow; canceledBy: string; liveClaimFloor: bigint | null }
 ): Promise<PaymentRequestRow> {
-  const { row, canceledBy } = params;
+  const { row, canceledBy, liveClaimFloor } = params;
   if (cancelState(row) === "canceled") return row;
   const key = {
     requestId: row.id,
@@ -106,19 +98,20 @@ export async function cancelOpenPaymentRequest(
   };
   const scope = getRequestTenantScope(c);
 
-  let liveClaimMinLastValidBlockHeight: bigint | null = null;
-  if (row.sponsored_tx_last_valid_block_height !== null) {
-    liveClaimMinLastValidBlockHeight = await readLiveClaimMinLastValidBlockHeight();
-    if (row.sponsored_tx_last_valid_block_height >= liveClaimMinLastValidBlockHeight) {
-      throw conflict(LIVE_CLAIM_MESSAGE);
-    }
+  const claimHeight = row.sponsored_tx_last_valid_block_height;
+  if (claimHeight !== null && (liveClaimFloor === null || claimHeight >= liveClaimFloor)) {
+    throw conflict(LIVE_CLAIM_MESSAGE);
   }
 
   const canceled = await new AuditService(getDb(c.env)).logWithin(c, async (tx) => {
     const result = await createTransactionalPaymentRequestsRepository(
       tx,
       scope
-    ).cancelPaymentRequest({ ...key, canceledBy, liveClaimMinLastValidBlockHeight });
+    ).cancelPaymentRequest({
+      ...key,
+      canceledBy,
+      liveClaimMinLastValidBlockHeight: liveClaimFloor,
+    });
     return {
       entry:
         result === null
@@ -162,7 +155,7 @@ export async function cancelOpenPaymentRequest(
  * under its own id or one it was rotated from. Revoking a key never does this on its own, since
  * a request is an invoice that pays the merchant; a person asks for it on revoke. Each runs on
  * its own: one that fails, a request with a live sponsored transaction above all, is reported
- * and leaves the others canceled.
+ * and leaves the others canceled. The live-claim floor is read once, before any cancel.
  *
  * @param c - The revoke request's context, under the key's Project.
  * @param scope - The revoked key and the Project it belongs to.
@@ -170,6 +163,8 @@ export async function cancelOpenPaymentRequest(
  * @param scope.projectId - The key's Project.
  * @param scope.apiKeyId - The revoked key.
  * @returns The ids canceled and the ids that could not be.
+ * @throws AppError `SOLANA_RPC_ERROR` when a row holds a claim and the cluster cannot be read;
+ *   the revocation has already committed, so a retry of the revoke runs the cancels again.
  */
 export async function cancelPaymentRequestsCreatedByKey(
   c: Context<{ Bindings: Env }>,
@@ -180,10 +175,11 @@ export async function cancelPaymentRequestsCreatedByKey(
     getRequestTenantScope(c)
   ).listOpenPaymentRequestsCreatedByApiKey(scope);
   const canceledBy = await resolveCreatorUserId(c);
+  const liveClaimFloor = await readLiveClaimFloorFor(rows);
   const result: CancelCreatedByKeyResult = { canceled: [], failed: [] };
   for (const paymentRequest of rows) {
     try {
-      await cancelOpenPaymentRequest(c, { row: paymentRequest, canceledBy });
+      await cancelOpenPaymentRequest(c, { row: paymentRequest, canceledBy, liveClaimFloor });
       result.canceled.push(paymentRequest.id);
     } catch (error) {
       if (!(error instanceof Error)) throw error;

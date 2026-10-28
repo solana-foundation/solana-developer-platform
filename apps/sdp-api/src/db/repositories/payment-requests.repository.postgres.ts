@@ -282,6 +282,7 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
              FROM payment_requests pr
             WHERE pr.organization_id = ?
               AND pr.project_id = ?
+              AND pr.created_by_api_key_id IS NOT NULL
               AND pr.created_by_api_key_id IN (SELECT id FROM lineage)
               AND pr.status = 'awaiting_payment'
               AND (pr.expires_at IS NULL OR pr.expires_at > sdp_iso_now())

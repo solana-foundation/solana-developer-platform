@@ -1,6 +1,6 @@
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { assertValidAddress } from "@sdp/solana/address";
-import { isPayablePaymentRequestStatus } from "@sdp/types/payments";
+import { isPaymentRequestPayableAt } from "@sdp/types/payments";
 import { getSdpDocsOrigin } from "@sdp/types/site";
 import { encodeURL } from "@solana/pay";
 import type { Context } from "hono";
@@ -32,7 +32,11 @@ export async function getPaymentRequest(c: Context<{ Bindings: Env }, "/:token">
 
   const expired = isPaymentRequestExpired(request.expires_at);
   const status = expired && request.status === "awaiting_payment" ? "expired" : request.status;
-  const payable = isPayablePaymentRequestStatus(status) && request.custody_wallet_id !== null;
+  const payable =
+    isPaymentRequestPayableAt(
+      { status: request.status, expiresAt: request.expires_at },
+      Date.now()
+    ) && request.custody_wallet_id !== null;
 
   let solanaPayUrl: string | null = null;
   if (payable) {
@@ -81,8 +85,10 @@ export async function createSponsoredTransaction(
     c.header("Retry-After", String(seconds))
   );
   if (
-    !isPayablePaymentRequestStatus(request.status) ||
-    isPaymentRequestExpired(request.expires_at)
+    !isPaymentRequestPayableAt(
+      { status: request.status, expiresAt: request.expires_at },
+      Date.now()
+    )
   ) {
     throw badRequest("Payment request is no longer payable");
   }

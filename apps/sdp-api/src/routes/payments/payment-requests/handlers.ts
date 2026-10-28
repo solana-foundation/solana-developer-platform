@@ -9,7 +9,7 @@ import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repos
 import { createPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
-import { badRequestParams, badRequestQuery, notFound } from "@/lib/errors";
+import { badRequestQuery } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { getAuthorized } from "@/middleware/authorize";
@@ -17,14 +17,13 @@ import type { ValidatedBodyContext } from "@/middleware/validate";
 import type { AppContext } from "@/routes/payments/context";
 import { resolveScope, resolveWallet } from "@/routes/payments/wallets";
 import { normalizePaymentToken } from "@/services/payment-operation.service";
-import { cancelOpenPaymentRequest } from "@/services/payments/payment-request-cancel";
+import {
+  cancelOpenPaymentRequest,
+  readLiveClaimFloorFor,
+} from "@/services/payments/payment-request-cancel";
 import { isPaymentRequestExpired } from "@/services/payments/payment-requests";
 import { parseStaticPaymentAmount } from "@/services/payments/token-amount";
-import {
-  type createPaymentRequestSchema,
-  listPaymentRequestsQuerySchema,
-  paymentRequestParamsSchema,
-} from "./schemas";
+import { type createPaymentRequestSchema, listPaymentRequestsQuerySchema } from "./schemas";
 
 /**
  * A payment request without its public token. The token is the bearer
@@ -83,26 +82,8 @@ export async function listPaymentRequests(c: AppContext) {
   return success(c, response);
 }
 
-async function readPaymentRequest(c: AppContext): Promise<PaymentRequestRow> {
-  const auth = getAuth(c);
-  const projectId = requireProjectId(c);
-  const params = paymentRequestParamsSchema.safeParse(c.req.param());
-  if (!params.success) throw badRequestParams();
-
-  const row = await createPaymentRequestsRepository(
-    c.env,
-    getRequestTenantScope(c)
-  ).getPaymentRequestById({
-    requestId: params.data.paymentRequestId,
-    organizationId: auth.organizationId,
-    projectId,
-  });
-  if (!row) throw notFound("Payment request");
-  return row;
-}
-
 export async function getPaymentRequest(c: AppContext) {
-  return success(c, mapPaymentRequest(await readPaymentRequest(c)));
+  return success(c, mapPaymentRequest(getAuthorized<PaymentRequestRow>(c)));
 }
 
 /**
@@ -111,7 +92,7 @@ export async function getPaymentRequest(c: AppContext) {
  * the route needs `payment_requests.manage`.
  */
 export async function getPaymentRequestLink(c: AppContext) {
-  const row = await readPaymentRequest(c);
+  const row = getAuthorized<PaymentRequestRow>(c);
 
   const response: PaymentRequestLink = { id: row.id, publicToken: row.public_token };
   return success(c, response);
@@ -157,15 +138,17 @@ export async function createPaymentRequest(
  * Cancel an open payment request: its `/pay` link stops building and sponsoring transactions.
  * An exit, so it takes `payment_requests.manage`. A request that is already canceled answers
  * with its row; a paid or expired one, or one whose sponsored transaction can still land, is a
- * 409. The response is the read shape, never the link token.
+ * 409. The response is the record a read returns, never the link token.
  *
  * @param c - The request context, after `authorizeExistingPaymentRequest` loaded the request.
  * @returns The canceled payment request.
  */
 export async function cancelPaymentRequest(c: AppContext) {
+  const authorized = getAuthorized<PaymentRequestRow>(c);
   const row = await cancelOpenPaymentRequest(c, {
-    row: getAuthorized<PaymentRequestRow>(c),
+    row: authorized,
     canceledBy: await resolveCreatorUserId(c),
+    liveClaimFloor: await readLiveClaimFloorFor([authorized]),
   });
   return success(c, mapPaymentRequest(row));
 }

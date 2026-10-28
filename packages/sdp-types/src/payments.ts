@@ -1228,6 +1228,26 @@ export function isPayablePaymentRequestStatus(status: PaymentRequestStatus): boo
 }
 
 /**
+ * Whether a payment request can still be paid at `now`: a payable status, and not past its
+ * expiry. `/pay` and the dashboard both decide with it.
+ *
+ * @param request - The request's status and expiry.
+ * @param request.status - Its stored status.
+ * @param request.expiresAt - Its expiry, or null for one that never expires.
+ * @param now - The time to judge at, in epoch milliseconds.
+ * @returns True while the request's link can still be paid.
+ */
+export function isPaymentRequestPayableAt(
+  request: { status: PaymentRequestStatus; expiresAt: string | null },
+  now: number
+): boolean {
+  return (
+    isPayablePaymentRequestStatus(request.status) &&
+    (request.expiresAt === null || Date.parse(request.expiresAt) > now)
+  );
+}
+
+/**
  * Whether each status closes a payment request without a payment: a payer who signed before it
  * closed can still land the transfer, and the reconciler records that money as a late payment.
  */
@@ -1238,8 +1258,17 @@ export const PAYMENT_REQUEST_STATUS_CLOSED_UNPAID = {
   expired: true,
 } as const satisfies Record<PaymentRequestStatus, boolean>;
 
+/** The statuses that close a payment request without a payment. */
+export type ClosedUnpaidPaymentRequestStatus = {
+  [Status in PaymentRequestStatus]: (typeof PAYMENT_REQUEST_STATUS_CLOSED_UNPAID)[Status] extends true
+    ? Status
+    : never;
+}[PaymentRequestStatus];
+
 /** Reports whether a payment request closed without a payment, so a late one can still settle it. */
-export function isClosedUnpaidPaymentRequestStatus(status: PaymentRequestStatus): boolean {
+export function isClosedUnpaidPaymentRequestStatus(
+  status: PaymentRequestStatus
+): status is ClosedUnpaidPaymentRequestStatus {
   return PAYMENT_REQUEST_STATUS_CLOSED_UNPAID[status];
 }
 
@@ -1265,7 +1294,7 @@ export interface PaymentRequest {
   status: PaymentRequestStatus;
   expiresAt: string | null;
   fulfilledByTransferId: string | null;
-  paidLate?: boolean;
+  paidLate: boolean;
   lastCheckedAt?: string | null;
   canceledBy: string | null;
   canceledAt: string | null;

@@ -1,10 +1,14 @@
+import { SdpRpcError } from "@sdp/rpc/errors";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { getSignatureStatuses, getSignaturesForAddress, type SignatureInfo } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { AmountError, parseTokenAmount } from "@sdp/solana/amount";
-import { isClosedUnpaidPaymentRequestStatus } from "@sdp/types/payments";
+import {
+  type ClosedUnpaidPaymentRequestStatus,
+  isClosedUnpaidPaymentRequestStatus,
+} from "@sdp/types/payments";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
-import { type Address, type Signature, signature } from "@solana/kit";
+import { type Address, isSolanaError, type Signature, signature } from "@solana/kit";
 import { ValidateTransferError } from "@solana/pay";
 import { z } from "zod";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
@@ -26,10 +30,10 @@ import {
   createTransactionalPaymentRequestsRepository,
   createTransactionalPaymentsRepository,
 } from "@/db/repositories/repository-factory";
-import { AppError, internalError, rateLimited } from "@/lib/errors";
+import { AppError, internalError, rateLimited, solanaRpcError } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
-import { logEvent } from "@/runtime/money-path-events";
+import { describeError, logEvent } from "@/runtime/money-path-events";
 import { createSystemAuditService, type SystemAuditLogEntry } from "@/services/audit.service";
 import {
   type PaymentRequestTransferFields,
@@ -50,10 +54,34 @@ const UNREADABLE_SIGNATURE_GIVE_UP_MS = 60 * 60 * 1000;
 
 /**
  * How far below the confirmed block height a sponsored transaction's last valid block height
- * may sit and still count as able to land. Every hold on a live claim uses it: the hot lane,
- * the expiry lane, and a cancel.
+ * may sit and still count as able to land.
  */
-export const SPONSORED_CLAIM_BLOCK_MARGIN = 150n;
+const SPONSORED_CLAIM_BLOCK_MARGIN = 150n;
+
+/**
+ * The live-claim floor: the lowest last valid block height a sponsored transaction may hold and
+ * still land, the confirmed height less a margin. Every hold on a live claim reads it here: the
+ * hot lane, the expiry lane and a cancel. A lagging node reads a lower height, so a hold lasts
+ * longer, which is the safe direction.
+ *
+ * @returns The height below which a sponsored transaction can no longer land.
+ * @throws AppError `SOLANA_RPC_ERROR` when the cluster answers with a Solana error; an SDP RPC
+ *   error passes through as it is.
+ */
+export async function readLiveClaimFloor(): Promise<bigint> {
+  let blockHeight: bigint;
+  try {
+    blockHeight = await createClusterRpc().getBlockHeight({ commitment: "confirmed" }).send();
+  } catch (error) {
+    if (error instanceof SdpRpcError || !isSolanaError(error)) throw error;
+    logEvent("warn", {
+      event: "payment_requests.claim_floor_read_failed",
+      ...describeError(error),
+    });
+    throw solanaRpcError("Could not read the cluster's block height; retry");
+  }
+  return blockHeight - SPONSORED_CLAIM_BLOCK_MARGIN;
+}
 
 export function isPaymentRequestExpired(expiresAt: string | null): boolean {
   return expiresAt !== null && Date.parse(expiresAt) <= Date.now();
@@ -103,7 +131,7 @@ type TransferExpectation = z.infer<typeof transferExpectationSchema>;
 
 interface PaidTransition {
   row: PaymentRequestRow;
-  from: "awaiting_payment" | "expired" | "canceled" | null;
+  from: "awaiting_payment" | ClosedUnpaidPaymentRequestStatus | null;
 }
 
 interface PaymentRequestKey {

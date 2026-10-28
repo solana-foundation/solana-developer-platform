@@ -21,11 +21,15 @@ paymentRequests.get("/", requireAction("payment_requests.read"), listPaymentRequ
 paymentRequests.get(
   "/:paymentRequestId",
   requireAction("payment_requests.read"),
+  validateParams(paymentRequestParamsSchema),
+  authorize(authorizeExistingPaymentRequest),
   getPaymentRequest
 );
 paymentRequests.get(
   "/:paymentRequestId/link",
   requireAction("payment_requests.manage"),
+  validateParams(paymentRequestParamsSchema),
+  authorize(authorizeExistingPaymentRequest),
   getPaymentRequestLink
 );
 paymentRequests.post(
