@@ -10,7 +10,7 @@ import { CHECK_VIOLATION, seedOrgProject } from "@/test/helpers/migration-db";
 const migrationsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "postgres");
 const cancelSql = readFileSync(path.join(migrationsDir, "0186_payment_request_cancel.sql"), "utf8");
 const validateSql = readFileSync(
-  path.join(migrationsDir, "0189_payment_request_cancel_validate.sql"),
+  path.join(migrationsDir, "0188_payment_request_cancel_validate.sql"),
   "utf8"
 );
 const CANCELED_BY_STATUS = "payment_requests_canceled_by_only_when_canceled";
@@ -61,7 +61,6 @@ beforeEach(async () => {
     `ALTER TABLE payment_requests
        DROP CONSTRAINT payment_requests_canceled_by_only_when_canceled,
        DROP COLUMN canceled_at,
-       DROP COLUMN created_by_api_key_id,
        ADD CONSTRAINT payment_requests_canceled_by_only_when_canceled
          CHECK (canceled_by IS NULL OR status = 'canceled')`
   );
@@ -102,7 +101,7 @@ describe("0186 payment request cancel", () => {
     ]);
   });
 
-  it("adds the canceled_by check NOT VALID and 0189 validates it over a request from before 0186", async () => {
+  it("adds the canceled_by check NOT VALID and 0188 validates it over a request from before 0186", async () => {
     await client.query(
       `INSERT INTO payment_requests (
          id, organization_id, project_id, wallet_id, destination_address, token, amount,

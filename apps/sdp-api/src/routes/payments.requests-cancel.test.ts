@@ -52,7 +52,6 @@ function seedSandboxRequest() {
     amount: "1.5",
     expiresAt: null,
     createdBy: TEST_USER.id,
-    createdByApiKeyId: TEST_API_KEY.id,
   });
 }
 
@@ -192,7 +191,6 @@ describe("POST /v1/payments/requests/:paymentRequestId/cancel", () => {
       amount: "1.5",
       expiresAt: null,
       createdBy: TEST_USER.id,
-      createdByApiKeyId: null,
     });
 
     const response = await postCancel(request.id);

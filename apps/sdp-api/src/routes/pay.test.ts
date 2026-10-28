@@ -139,7 +139,6 @@ describe("Public payment request routes", () => {
       amount: "1.5",
       expiresAt: null,
       createdBy: TEST_USER.id,
-      createdByApiKeyId: null,
     });
   }
 

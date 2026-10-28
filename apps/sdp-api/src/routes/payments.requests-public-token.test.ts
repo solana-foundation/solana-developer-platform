@@ -98,7 +98,6 @@ describe("payment request public tokens", () => {
       amount: "25.00",
       expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
       createdBy: USER_ID,
-      createdByApiKeyId: null,
     });
     requestId = request.id;
     publicToken = request.public_token;

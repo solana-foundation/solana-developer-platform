@@ -187,45 +187,27 @@ describe("saveApiKeyAuthoringAction: edit", () => {
 describe("deactivateApiKeyInlineAction", () => {
   const revoke = { keyId: "key_1", keyName: "Payouts worker", confirmation: "Payouts worker" };
 
-  it("revokes without canceling anything the key started unless asked", async () => {
-    client.fetch.mockResolvedValue({ recurringPayments: null, paymentRequests: null });
+  it("revokes without touching recurring payments unless asked", async () => {
+    client.fetch.mockResolvedValue({ recurringPayments: null });
 
-    const result = await deactivateApiKeyInlineAction({
-      ...revoke,
-      cancelRecurringPayments: false,
-      cancelPaymentRequests: false,
-    });
+    const result = await deactivateApiKeyInlineAction(revoke);
 
     expect(client.fetch.mock.calls[0]?.[0]).toBe("/v1/api-keys/key_1");
-    expect(lastBody()).toEqual({
-      confirmation: "Payouts worker",
-      cancelRecurringPayments: false,
-      cancelPaymentRequests: false,
-    });
+    expect(lastBody()).toEqual({ confirmation: "Payouts worker", cancelRecurringPayments: false });
     expect(result).toEqual({ ok: true, message: "DashboardCustody.apiKeyDeactivated" });
   });
 
-  it("asks the API to cancel what the key started, and reports each outcome", async () => {
+  it("asks the API to cancel what the key started, and reports both counts", async () => {
     client.fetch.mockResolvedValue({
       recurringPayments: { canceled: ["prp_1", "prp_2"], failed: ["prp_3"] },
-      paymentRequests: { canceled: ["preq_1"], failed: [] },
     });
 
-    const result = await deactivateApiKeyInlineAction({
-      ...revoke,
-      cancelRecurringPayments: true,
-      cancelPaymentRequests: true,
-    });
+    const result = await deactivateApiKeyInlineAction({ ...revoke, cancelRecurringPayments: true });
 
-    expect(lastBody()).toEqual({
-      confirmation: "Payouts worker",
-      cancelRecurringPayments: true,
-      cancelPaymentRequests: true,
-    });
+    expect(lastBody()).toEqual({ confirmation: "Payouts worker", cancelRecurringPayments: true });
     expect(result).toEqual({
       ok: true,
-      message:
-        "DashboardCustody.apiKeyDeactivated DashboardCustody.apiKeyRecurringCanceled DashboardCustody.apiKeyPaymentRequestsCanceled",
+      message: "DashboardCustody.apiKeyDeactivated DashboardCustody.apiKeyRecurringCanceled",
     });
   });
 });

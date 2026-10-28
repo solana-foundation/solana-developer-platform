@@ -220,7 +220,6 @@ async function createRequestFor(params: {
     amount: params.amount,
     expiresAt: params.expiresAt,
     createdBy: TEST_USER.id,
-    createdByApiKeyId: null,
   });
 }
 

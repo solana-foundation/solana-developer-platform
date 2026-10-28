@@ -163,7 +163,6 @@ describe("PaymentRequestsRepository (postgres)", () => {
       amount: "25.00",
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
       createdBy: TEST_USER.id,
-      createdByApiKeyId: null,
       ...overrides,
     };
   }
@@ -493,52 +492,6 @@ describe("PaymentRequestsRepository (postgres)", () => {
         canceled_by: null,
         canceled_at: null,
       });
-    });
-  });
-
-  describe("listOpenPaymentRequestsCreatedByApiKey", () => {
-    async function insertApiKey(id: string, rotatedFrom: string | null) {
-      await getDb(env)
-        .prepare(
-          `INSERT INTO api_keys
-             (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status, rotated_from)
-           VALUES (?, ?, ?, ?, ?, 'sk_test_prq', ?, '{}', 'active', ?)`
-        )
-        .bind(id, TEST_ORG.id, TEST_PROJECT_ID, TEST_USER.id, id, `hash_${id}`, rotatedFrom)
-        .run();
-    }
-
-    function listCreatedBy(apiKeyId: string) {
-      return repo.listOpenPaymentRequestsCreatedByApiKey({
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-        apiKeyId,
-      });
-    }
-
-    it("lists the open requests of a key and the keys it was rotated from, oldest first", async () => {
-      await insertApiKey("key_preq_repo_old", null);
-      await insertApiKey("key_preq_repo_new", "key_preq_repo_old");
-      await insertApiKey("key_preq_repo_other", null);
-      const byOld = await repo.createPaymentRequest(
-        createInput({ createdByApiKeyId: "key_preq_repo_old" })
-      );
-      const byNew = await repo.createPaymentRequest(
-        createInput({ createdByApiKeyId: "key_preq_repo_new" })
-      );
-      await setPaymentRequestColumns(env, byOld.id, { created_at: ago(2 * DAY) });
-      await setPaymentRequestColumns(env, byNew.id, { created_at: ago(DAY) });
-      await repo.createPaymentRequest(createInput({ createdByApiKeyId: "key_preq_repo_other" }));
-      await repo.createPaymentRequest(createInput({ createdByApiKeyId: null }));
-      await repo.createPaymentRequest(
-        createInput({ createdByApiKeyId: "key_preq_repo_new", expiresAt: PAST })
-      );
-
-      expect((await listCreatedBy("key_preq_repo_new")).map((row) => row.id)).toEqual([
-        byOld.id,
-        byNew.id,
-      ]);
-      expect((await listCreatedBy("key_preq_repo_old")).map((row) => row.id)).toEqual([byOld.id]);
     });
   });
 

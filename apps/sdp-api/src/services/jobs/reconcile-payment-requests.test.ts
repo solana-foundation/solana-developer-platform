@@ -43,7 +43,6 @@ async function createRequest(params: { token: string; expiresAt: string | null }
     amount: "1.5",
     expiresAt: params.expiresAt,
     createdBy: TEST_USER.id,
-    createdByApiKeyId: null,
   });
 }
 
