@@ -1490,6 +1490,22 @@ export function isTerminalEarnMovementStatus(
 }
 
 /**
+ * Vault-direct statuses whose transaction the chain has committed. `confirmed`
+ * is what the dashboard reports as done, though a fork can still drop it;
+ * `finalized` is irreversible.
+ */
+export const EARN_LANDED_VAULT_DIRECT_MOVEMENT_STATUSES = [
+  "confirmed",
+  "finalized",
+] as const satisfies readonly EarnVaultDirectMovementStatus[];
+
+export function isLandedEarnVaultDirectMovementStatus(
+  status: EarnVaultDirectMovementStatus
+): status is (typeof EARN_LANDED_VAULT_DIRECT_MOVEMENT_STATUSES)[number] {
+  return EARN_LANDED_VAULT_DIRECT_MOVEMENT_STATUSES.some((landed) => landed === status);
+}
+
+/**
  * Legal transitions, keyed by TARGET status to the statuses it may be reached
  * from — the shape both legacy guards already used.
  *

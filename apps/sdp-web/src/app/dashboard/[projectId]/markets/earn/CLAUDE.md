@@ -209,10 +209,12 @@ nothing else; the program create still sends the body `requestId` form.
   direct withdraw, queued withdraw), tightened on a phone so all five fit.
   "Copy all code" copies the whole module (`buildEarnServerIntegration`), not
   just the active tab. The snippets remain server-only and the page says so in
-  an info callout that links to the API keys page (a Developer key includes
-  earn:read and earn:write), because the module they document carries a secret
-  API key. The module needs only the strategy id and that key: no strategy
-  object, no `sourceTokenMint` on a direct deposit.
+  an info callout that links to the API keys page, because the module they
+  document carries a secret API key. Keys hold explicit grants, not roles: the
+  module needs Earn Read and Execute, plus Manage, which the queued-withdrawal
+  cancellation build (`withdrawal-request-cancel-transactions`) requires. The
+  module needs only the strategy id and that key: no strategy object, no
+  `sourceTokenMint` on a direct deposit.
 - `earn-integration-snippets.ts` — the snippet source,
   `buildEarnIntegrationSections(strategy)` (+ `buildEarnServerIntegration`,
   the sections joined). Pure string building so the exact wire contract is
@@ -710,7 +712,10 @@ browser pass on `/dashboard/markets/embedded-yield` and
   `@2xl`, never its action; a dropped status reads under the row's balance.
   The integration guide's skeleton draws its intro and API key callout at the
   English copy's wrap widths, so editing `guideIntro` or the callout copy means
-  re-measuring it against the page from 360 to 1440.
+  re-measuring it against the page from 360 to 1440. Those blocks query their
+  own width (`@container` on the block), not the work area: the page's side
+  padding steps from 16px to 24px at the `md` viewport, so one work-area
+  breakpoint cannot match a wrap point in both layouts.
 - **Nothing may overlap — provider and fund names run long.**
   `@solana/design-system`'s `cn` is a plain string join — **no tailwind-merge**.
   A class handed to `Table*` that conflicts with one of its own base classes
