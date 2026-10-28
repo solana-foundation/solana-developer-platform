@@ -15,8 +15,9 @@ import {
 import type { RecentBlockhash, ResolvedRecipient, TokenContext } from "./types";
 
 /**
- * Rent-exempt minimums by cluster and data size. They follow the cluster's rent parameters, which
- * do not change while a process runs; a failed read is forgotten.
+ * Rent-exempt minimums by cluster and data size, kept for the process; a failed read is forgotten.
+ * A rent feature gate can change the cluster's rent parameters mid-process, but rent has only ever
+ * gone down, so a stale value over-plans (more, smaller chunks), which is safe.
  */
 const rentByClusterAndSize = new Map<string, Promise<bigint>>();
 

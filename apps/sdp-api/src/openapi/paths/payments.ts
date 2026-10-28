@@ -198,7 +198,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Estimate transfer batch",
     operationId: "estimatePaymentTransferBatch",
     description:
-      "Validates an exact-wallet transfer batch request and estimates transaction chunking and fees, planning chunks exactly as create does. Returns `422 RECIPIENT_NOT_SPONSORABLE` for recipients the fee sponsor can never fund: `details.reason` is `token_account_address_prefunded` (the recipient's token account address holds lamports without being a token account) or `rent_exceeds_limit` (its new token account alone costs more rent than the sponsor funds per transaction), and `details.recipientIndexes` names them. Metered: `429` when the caller exceeds the estimate quota.",
+      "Validates an exact-wallet transfer batch request and estimates transaction chunking and fees, planning chunks exactly as create does. Returns `422 RECIPIENT_NOT_SPONSORABLE` for recipients the fee sponsor can never fund: `details.reason` is `token_account_address_prefunded` (the recipient's token account address holds lamports without being a token account: creating it may need a fee-payer System Transfer and the sponsor charges full rent regardless, so SDP cannot price it) or `rent_exceeds_limit` (its new token account alone costs more rent than the sponsor funds per transaction), and `details.recipientIndexes` names them. Metered: `429` when the caller exceeds the estimate quota.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,

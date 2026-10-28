@@ -630,8 +630,9 @@ export interface PaymentTransferBatchRecipientRequest {
 /**
  * Why a transfer batch refuses a recipient the fee sponsor can never fund: its new token account
  * costs more rent than the sponsor's per-transaction limit, or its token account address already
- * holds lamports without being a token account, so creating it needs a fee-payer transfer the
- * sponsor refuses.
+ * holds lamports without being a token account. SDP refuses the latter because creating it may
+ * need a fee-payer System Transfer and the sponsor charges full rent for the create regardless,
+ * so the plan cannot price it.
  */
 export const RECIPIENT_NOT_SPONSORABLE_REASONS = [
   "rent_exceeds_limit",

@@ -177,14 +177,11 @@ async function readPaymentMint(mint: Address): Promise<PaymentMintFacts> {
       decimals: wellKnown.decimals,
       tokenProgram,
       toBaseUnits: (amount) => parsePaymentAmount(amount, wellKnown.decimals),
-      readNewTokenAccountSize: readOnce(async () =>
-        tokenProgram === SPL_TOKEN_PROGRAMS["token-2022"]
-          ? newTokenAccountSize(
-              tokenProgram,
-              unwrapOption((await decodePaymentMintAccount(mint)).data.extensions)
-            )
-          : getTokenSize()
-      ),
+      readNewTokenAccountSize: readOnce(async () => {
+        if (tokenProgram !== SPL_TOKEN_PROGRAMS["token-2022"]) return getTokenSize();
+        const decoded = await decodePaymentMintAccount(mint);
+        return newTokenAccountSize(tokenProgram, unwrapOption(decoded.data.extensions));
+      }),
     };
   }
 

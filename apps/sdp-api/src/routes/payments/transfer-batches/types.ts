@@ -32,6 +32,8 @@ export type TokenContext =
       newTokenAccountSize: number;
     };
 
+export type SplTokenContext = Extract<TokenContext, { kind: "spl" }>;
+
 export interface ResolvedRecipient {
   index: number;
   externalId: string | null;

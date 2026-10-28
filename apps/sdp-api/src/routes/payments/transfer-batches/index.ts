@@ -23,8 +23,6 @@ transferBatches.post(
   "/estimate",
   requireAction("transfer_batches.read"),
   validateBody(estimateTransferBatchSchema),
-  // Each estimate reads Kora's configuration, every recipient token account and the fee of every
-  // chunk, so it is metered like a ramp estimate.
   meteredQuota({ name: "transfer-batch-estimate", actorMax: 30, orgMax: 120 }),
   estimateTransferBatch
 );

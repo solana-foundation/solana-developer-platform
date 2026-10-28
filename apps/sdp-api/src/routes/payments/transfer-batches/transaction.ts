@@ -21,13 +21,14 @@ import {
   getTransferCheckedInstruction,
 } from "@solana-program/token-2022";
 import { badRequest, recipientNotSponsorable } from "@/lib/errors";
-import type { RecentBlockhash, ResolvedRecipient, TokenContext } from "./types";
+import type { RecentBlockhash, ResolvedRecipient, SplTokenContext } from "./types";
 
 export const DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION = 20;
 
 export interface RecipientInstructionGroup extends ResolvedRecipient {
   instructions: Instruction[];
-  destinationTokenAccount?: Address;
+  /** The associated token account an SPL recipient receives into; null for SOL. */
+  destinationTokenAccount: Address | null;
 }
 
 export interface TransactionChunk {
@@ -50,13 +51,12 @@ export interface SponsoredRentBudget {
   missingTokenAccounts: ReadonlySet<Address>;
   /**
    * Recipient token account addresses holding lamports without being a token account of the
-   * batch's token program. Creating one funds it with a fee-payer System Transfer, which Kora
-   * refuses, so their recipients are refused up front.
+   * batch's token program. SDP refuses their recipients up front: creating such an account may
+   * need a fee-payer System Transfer to top it up, and Kora charges full rent for the create
+   * regardless, so the plan cannot price it.
    */
   prefundedTokenAccounts: ReadonlySet<Address>;
 }
-
-export type SplTokenContext = Extract<TokenContext, { kind: "spl" }>;
 
 /** A recipient with the associated token account it receives into. */
 export interface TokenAccountRecipient extends ResolvedRecipient {
@@ -99,6 +99,7 @@ export function buildSolInstructionGroups(params: {
 }): RecipientInstructionGroup[] {
   return params.recipients.map((recipient) => ({
     ...recipient,
+    destinationTokenAccount: null,
     instructions: [
       getTransferSolInstruction({
         source: params.sourceSigner,
@@ -263,16 +264,16 @@ function fundedTokenAccount(
   rentBudget: SponsoredRentBudget
 ): Address | null {
   const tokenAccount = group.destinationTokenAccount;
-  return tokenAccount !== undefined && rentBudget.missingTokenAccounts.has(tokenAccount)
-    ? tokenAccount
-    : null;
+  if (tokenAccount === null) return null;
+  return rentBudget.missingTokenAccounts.has(tokenAccount) ? tokenAccount : null;
 }
 
 /**
  * Refuses a batch naming recipients the fee sponsor can never fund, before any chunk is built, so
  * nothing is stored or signed for it:
- * - a token account address that already holds lamports without being a token account: the ATA
- *   program would fund it with a fee-payer System Transfer, which Kora refuses;
+ * - a token account address that already holds lamports without being a token account: creating
+ *   it may need a fee-payer System Transfer, and Kora charges full rent for the create regardless,
+ *   so the plan cannot price it;
  * - a new token account whose rent alone exceeds the per-transaction limit: no chunk could carry it.
  *
  * @param groups - Instruction groups in recipient order.
@@ -286,13 +287,13 @@ function assertRecipientsSponsorable(
   const prefundedIndexes = groups
     .filter(
       (group) =>
-        group.destinationTokenAccount !== undefined &&
+        group.destinationTokenAccount !== null &&
         rentBudget.prefundedTokenAccounts.has(group.destinationTokenAccount)
     )
     .map((group) => group.index);
   if (prefundedIndexes.length > 0) {
     throw recipientNotSponsorable(
-      `recipients.${prefundedIndexes[0]} has a token account address that already holds lamports without being a token account, so the fee sponsor cannot create it`,
+      `recipients.${prefundedIndexes[0]} has a token account address that already holds lamports without being a token account; SDP cannot price creating it for the fee sponsor`,
       { reason: "token_account_address_prefunded", recipientIndexes: prefundedIndexes }
     );
   }

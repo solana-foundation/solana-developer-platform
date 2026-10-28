@@ -313,22 +313,31 @@ export function providerNotConfigured(message?: string): AppError {
   return new AppError("PROVIDER_NOT_CONFIGURED", message);
 }
 
+/** What a `RECIPIENT_NOT_SPONSORABLE` answer carries, by reason. */
+export type RecipientNotSponsorableDetails =
+  | {
+      reason: Extract<RecipientNotSponsorableReason, "token_account_address_prefunded">;
+      recipientIndexes: number[];
+    }
+  | {
+      reason: Extract<RecipientNotSponsorableReason, "rent_exceeds_limit">;
+      recipientIndexes: number[];
+      rentLamportsPerTokenAccount: string;
+      maxSponsoredLamportsPerTransaction: string;
+    };
+
 /**
  * A batch names recipients the fee sponsor can never fund, refused before anything is stored or
  * signed: the same request can never succeed, so the caller drops or changes those recipients.
  *
  * @param message - Which recipient is refused and why, for the caller.
- * @param details - `reason`, the refused `recipientIndexes`, and the lamport figures that apply.
- * @param details.reason - Why the sponsor cannot fund them.
- * @param details.recipientIndexes - The refused recipients' positions in the request.
+ * @param details - `reason`, the refused `recipientIndexes`, and for `rent_exceeds_limit` the rent
+ *   of one new token account and the per-transaction limit, as lamport strings.
  * @returns The `RECIPIENT_NOT_SPONSORABLE` error.
  */
 export function recipientNotSponsorable(
   message: string,
-  details: { reason: RecipientNotSponsorableReason; recipientIndexes: number[] } & Record<
-    string,
-    unknown
-  >
+  details: RecipientNotSponsorableDetails
 ): AppError {
   return new AppError("RECIPIENT_NOT_SPONSORABLE", message, details);
 }
