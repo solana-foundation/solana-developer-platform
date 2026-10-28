@@ -600,7 +600,11 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
             maxLength={256}
             placeholder={t("DashboardPayments.batchSend.referencePlaceholder")}
             size="xl"
+            aria-describedby="batch-send-reference-hint"
           />
+          <p id="batch-send-reference-hint" className="text-sm text-tertiary">
+            {t("DashboardPayments.batchSend.referenceHint")}
+          </p>
         </div>
 
         <div className="space-y-3">

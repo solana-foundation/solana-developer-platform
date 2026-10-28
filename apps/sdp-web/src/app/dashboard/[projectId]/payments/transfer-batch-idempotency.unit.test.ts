@@ -7,6 +7,7 @@ import type { Translate } from "./payments-workspace.data";
 import {
   canonicalTransferBatchRequest,
   claimTransferBatchIdempotencyKey,
+  defaultTransferBatchReference,
   releaseTransferBatchIdempotencyKey,
   resetTransferBatchIdempotencyStateForTests,
   retryTransferBatchUnderKey,
@@ -438,5 +439,35 @@ describe("degraded storage", () => {
     } finally {
       setItem.mockRestore();
     }
+  });
+});
+
+describe("defaultTransferBatchReference", () => {
+  it("names the same batch the same way on a day, whatever its recipient order", () => {
+    const reference = defaultTransferBatchReference(batchRequest(), "2026-10-28");
+    const reordered = batchRequest({ recipients: [...batchRequest().recipients].reverse() });
+
+    expect(reference).toMatch(/^batch-2026-10-28-[0-9a-f]{8}$/);
+    expect(defaultTransferBatchReference(reordered, "2026-10-28")).toBe(reference);
+    // A reference the caller set is not part of the run's default.
+    expect(
+      defaultTransferBatchReference(batchRequest({ externalId: "payroll-05" }), "2026-10-28")
+    ).toBe(reference);
+  });
+
+  it("names a different amount, wallet or day as a different run", () => {
+    const reference = defaultTransferBatchReference(batchRequest(), "2026-10-28");
+    const otherAmount = batchRequest({
+      recipients: [
+        { counterpartyId: "cp_1", counterpartyAccountId: "acct_1", amount: "1.6" },
+        { counterpartyId: "cp_2", counterpartyAccountId: "acct_2", amount: "2" },
+      ],
+    });
+
+    expect(defaultTransferBatchReference(otherAmount, "2026-10-28")).not.toBe(reference);
+    expect(
+      defaultTransferBatchReference(batchRequest({ sourceCustodyWalletId: "cwlt_2" }), "2026-10-28")
+    ).not.toBe(reference);
+    expect(defaultTransferBatchReference(batchRequest(), "2026-10-29")).not.toBe(reference);
   });
 });

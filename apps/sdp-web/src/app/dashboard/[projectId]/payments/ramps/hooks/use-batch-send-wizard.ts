@@ -39,6 +39,7 @@ import {
 import { walletBalanceAssetOptions } from "@/app/dashboard/[projectId]/payments/ramps/wallet-options";
 import {
   canonicalTransferBatchRequest,
+  defaultTransferBatchReference,
   retryTransferBatchUnderKey,
   sendTransferBatchUnderKey,
 } from "@/app/dashboard/[projectId]/payments/transfer-batch-idempotency";
@@ -107,6 +108,30 @@ export interface UseBatchSendWizardProps {
   issuedTokenSymbolsByMint: Record<string, string>;
   cluster: SolanaCluster;
   onExit: () => void;
+}
+
+/** Copy for the retry refusals the API names (HOO-2343); each sent nothing. */
+const RETRY_REFUSAL_COPY: Partial<Record<string, { title: MessageKey; description: MessageKey }>> =
+  {
+    TRANSFER_BATCH_RETRY_CLAIMED: {
+      title: "DashboardPayments.batchSend.retryAlreadyClaimed",
+      description: "DashboardPayments.batchSend.retryAlreadyClaimedDescription",
+    },
+    TRANSFER_BATCH_NOTHING_TO_RETRY: {
+      title: "DashboardPayments.batchSend.nothingToRetry",
+      description: "DashboardPayments.batchSend.nothingToRetryDescription",
+    },
+    TRANSFER_BATCH_DESTINATION_CHANGED: {
+      title: "DashboardPayments.batchSend.retryDestinationChanged",
+      description: "DashboardPayments.batchSend.retryDestinationChangedDescription",
+    },
+  };
+
+/** The local calendar day as `YYYY-MM-DD`. */
+function localCalendarDay(date: Date): string {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
 }
 
 /**
@@ -307,6 +332,8 @@ export function useBatchSendWizard({
   const [walletId, setWalletId] = useState("");
   const [asset, setAsset] = useState("");
   const [externalId, setExternalId] = useState("");
+  // Fixed for the session, so a retry after midnight still names the same run.
+  const [referenceDay] = useState(() => localCalendarDay(new Date()));
   const { entries, setEntries, setRecipientAmount, toggleRecipient, setManySelected } =
     useBatchRecipientEntries();
   const [submitting, setSubmitting] = useState(false);
@@ -448,21 +475,27 @@ export function useBatchSendWizard({
 
   // Canonical form, not the order the recipients were assembled in: the API
   // fingerprints recipients IN ORDER, so a retry that reorders the same set
-  // has to send the same bytes or it is refused as a key conflict.
-  const request = useMemo(
-    () =>
-      canonicalTransferBatchRequest({
-        ...(trimmedExternalId.length > 0 ? { externalId: trimmedExternalId } : {}),
-        sourceCustodyWalletId: walletId,
-        token: asset,
-        recipients: recipients.map((r) => ({
-          counterpartyId: r.counterpartyId,
-          counterpartyAccountId: r.counterpartyAccountId,
-          amount: r.amount,
-        })),
-      }),
-    [walletId, asset, recipients, trimmedExternalId]
-  );
+  // has to send the same bytes or it is refused as a key conflict. Every batch
+  // names its payout run: a blank Reference gets the day's default, so the
+  // same batch sent again from another browser is never paid twice (HOO-2335).
+  const request = useMemo(() => {
+    const unnamed = canonicalTransferBatchRequest({
+      sourceCustodyWalletId: walletId,
+      token: asset,
+      recipients: recipients.map((r) => ({
+        counterpartyId: r.counterpartyId,
+        counterpartyAccountId: r.counterpartyAccountId,
+        amount: r.amount,
+      })),
+    });
+    return {
+      ...unnamed,
+      externalId:
+        trimmedExternalId.length > 0
+          ? trimmedExternalId
+          : defaultTransferBatchReference(unnamed, referenceDay),
+    };
+  }, [walletId, asset, recipients, trimmedExternalId, referenceDay]);
   const recipientsValid = batchSendSchema.safeParse({
     walletId,
     asset,
@@ -622,10 +655,16 @@ export function useBatchSendWizard({
         position: "bottom-right",
       });
     } catch (error) {
-      toast.error(t("DashboardPayments.batchSend.retryRequestFailed"), {
+      // A refusal the API names sent nothing; say what happened in our words.
+      const refusal =
+        error instanceof TransferBatchRequestError
+          ? RETRY_REFUSAL_COPY[error.code ?? ""]
+          : undefined;
+      toast.error(t(refusal?.title ?? "DashboardPayments.batchSend.retryRequestFailed"), {
         id: toastId,
-        description:
-          error instanceof Error
+        description: refusal
+          ? t(refusal.description)
+          : error instanceof Error
             ? error.message
             : t("DashboardPayments.batchSend.retryRequestFailed"),
         position: "bottom-right",
