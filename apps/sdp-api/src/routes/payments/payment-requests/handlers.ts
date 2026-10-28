@@ -140,6 +140,9 @@ export async function createPaymentRequest(
  * with its row; a paid or expired one, or one whose sponsored transaction can still land, is a
  * 409. The response is the record a read returns, never the link token.
  *
+ * A same-key retry after a 5xx reruns rather than replays (`serverErrors: "rerun"`): the cancel
+ * is a compare-and-set on its own row, a canceled request answers 200, and a 5xx wrote nothing.
+ *
  * @param c - The request context, after `authorizeExistingPaymentRequest` loaded the request.
  * @returns The canceled payment request.
  */

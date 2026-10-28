@@ -82,6 +82,10 @@ const keyAcceptedHeaders = projectScopeWithDeclaredIdempotencyHeaders({
   key: "accepted",
   serverErrors: "store",
 });
+const keyAcceptedRerunHeaders = projectScopeWithDeclaredIdempotencyHeaders({
+  key: "accepted",
+  serverErrors: "rerun",
+});
 
 export function registerPaymentsPaths(registry: OpenAPIRegistry) {
   // ═══════════════════════════════════════════════════════════════════════════
@@ -412,7 +416,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
       "Cancels an open payment request, so its payment link stops building and sponsoring transactions. Requires `payment_requests.manage`. Canceling a request that is already canceled returns it unchanged. A paid or expired request returns 409, and so does one whose fee-sponsored transaction can still land: retry once that transaction's blockhash expires. A payer who signed before the cancel can still land the payment; SDP records it as paid, with `paidLate` set when it landed after the cancel.",
     security: [{ apiKeyAuth: [] }],
     request: {
-      headers: keyAcceptedHeaders,
+      headers: keyAcceptedRerunHeaders,
       params: paymentRequestIdParamsSchema,
     },
     responses: {

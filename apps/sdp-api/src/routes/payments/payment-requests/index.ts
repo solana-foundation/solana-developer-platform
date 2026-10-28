@@ -45,6 +45,6 @@ paymentRequests.post(
   requireAction("payment_requests.manage"),
   validateParams(paymentRequestParamsSchema),
   authorize(authorizeExistingPaymentRequest),
-  idempotent({ key: "accepted", serverErrors: "store" }),
+  idempotent({ key: "accepted", serverErrors: "rerun" }),
   cancelPaymentRequest
 );
