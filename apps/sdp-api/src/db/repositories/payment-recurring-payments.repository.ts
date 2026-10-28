@@ -13,15 +13,6 @@ import type {
   UnpausedRecurringPaymentStatus,
 } from "@sdp/types/payments";
 
-/**
- * The metadata a resume attempt records (HOO-2340): it brought the schedule back from a pause, so
- * the failures that count toward the next pause start after it
- * (`countFailedCollectionAttemptsSinceResume` filters on `resumedFrom`).
- */
-export const RECURRING_PAYMENT_RESUME_ATTEMPT_METADATA = {
-  resumedFrom: "paused",
-} as const satisfies Record<"resumedFrom", PaymentRecurringPaymentStatus>;
-
 export interface PaymentRecurringPaymentRow {
   id: string;
   organization_id: string;
@@ -48,6 +39,8 @@ export interface PaymentRecurringPaymentRow {
   authorization_signature: string | null;
   status: PaymentRecurringPaymentStatus;
   paused_reason: RecurringPaymentPauseReason | null;
+  /** The due period's failed collections since it became due or the schedule last resumed. */
+  failed_collection_attempts: number;
   metadata_uri: string | null;
   created_by: string | null;
   created_at: string;
@@ -304,13 +297,10 @@ export interface PauseRecurringPaymentInput {
   updatedAt: string;
 }
 
-/** The failed attempts at one due period since the schedule last resumed from a pause. */
-export interface CountFailedCollectionAttemptsSinceResumeInput {
+export interface IncrementFailedCollectionAttemptsInput {
   recurringPaymentId: string;
   organizationId: string;
   projectId: string;
-  subscriptionId: string;
-  dueAt: string;
 }
 
 export interface ClaimPaymentRecurringPaymentUpdateInput {
@@ -680,9 +670,14 @@ export interface PaymentRecurringPaymentsRepository {
   pauseRecurringPayment(
     input: PauseRecurringPaymentInput
   ): Promise<PaymentRecurringPaymentRow | null>;
-  countFailedCollectionAttemptsSinceResume(
-    input: CountFailedCollectionAttemptsSinceResumeInput
-  ): Promise<number>;
+  /**
+   * Counts one more failed collection against an `active` schedule and holds its row lock until
+   * the transaction ends, so the pause that follows decides on this count.
+   * Null when the schedule is no longer `active`.
+   */
+  incrementFailedCollectionAttempts(
+    input: IncrementFailedCollectionAttemptsInput
+  ): Promise<number | null>;
   claimRecurringPaymentUpdate(
     input: ClaimPaymentRecurringPaymentUpdateInput
   ): Promise<PaymentRecurringPaymentRow | null>;

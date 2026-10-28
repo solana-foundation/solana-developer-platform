@@ -130,6 +130,7 @@ function recurringRow(
     authorization_signature: "auth_sig",
     status,
     paused_reason: null,
+    failed_collection_attempts: 0,
     metadata_uri: null,
     created_by: null,
     created_at: "2026-07-01T11:00:00.000Z",

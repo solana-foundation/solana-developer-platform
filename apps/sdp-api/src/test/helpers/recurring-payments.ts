@@ -247,7 +247,8 @@ export async function pauseRecurringPayment(recurringPaymentId: string): Promise
 
 /**
  * Seeds earlier failed collection attempts at one due period of a schedule, each written at
- * `failedAt`, for the pause's failure count (HOO-2340).
+ * `failedAt`, and sets the schedule's failure count to `count`, as those failures leave it
+ * (HOO-2340).
  *
  * @param options.organizationId - Tenant organization.
  * @param options.projectId - Tenant project.
@@ -276,8 +277,8 @@ export async function seedFailedCollectionAttempts(options: {
     recurringPaymentId: options.recurringPaymentId,
     initiatedByKeyId: null,
   } satisfies PaymentSubscriptionCollectionAttemptMetadata;
-  await db.batch(
-    Array.from({ length: options.count }, () =>
+  await db.batch([
+    ...Array.from({ length: options.count }, () =>
       db
         .prepare(
           `INSERT INTO payment_subscription_collection_attempts
@@ -298,8 +299,11 @@ export async function seedFailedCollectionAttempts(options: {
           options.failedAt,
           options.failedAt
         )
-    )
-  );
+    ),
+    db
+      .prepare("UPDATE payment_recurring_payments SET failed_collection_attempts = ? WHERE id = ?")
+      .bind(options.count, options.recurringPaymentId),
+  ]);
 }
 
 type DurableCollectionJournal =

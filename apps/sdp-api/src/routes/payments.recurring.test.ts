@@ -117,6 +117,7 @@ import {
   testSignature,
 } from "@/test/helpers/recurring-payments";
 import { required } from "@/test/helpers/required";
+import { holdTransaction, untilLockWaiters } from "@/test/helpers/row-locks";
 import { sendTransactionPreflightError } from "@/test/helpers/rpc-errors";
 import { respondMintAccounts, scaledUiAmountConfig } from "@/test/helpers/token-mints";
 
@@ -387,6 +388,14 @@ async function recurringPaymentDueAt(recurringPaymentId: string) {
     .bind(recurringPaymentId)
     .first<{ status: string; next_collection_due_at: string | Date }>();
   return { status: row?.status, dueAt: new Date(row?.next_collection_due_at ?? 0).getTime() };
+}
+
+async function failedCollectionAttempts(recurringPaymentId: string) {
+  const row = await getDb(env)
+    .prepare("SELECT failed_collection_attempts FROM payment_recurring_payments WHERE id = ?")
+    .bind(recurringPaymentId)
+    .first<{ failed_collection_attempts: number }>();
+  return required(row).failed_collection_attempts;
 }
 
 async function authorityRevocations() {
@@ -2679,7 +2688,7 @@ describe("Payments routes — recurring", () => {
     expect(dbRow?.status).toBe("canceled");
   });
 
-  it("resumes a paused recurring payment without signing, recording that it resumed from a pause", async () => {
+  it("resumes a paused recurring payment without signing", async () => {
     const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
     await pauseRecurringPayment(activated.id);
     const paused = (
@@ -2722,7 +2731,7 @@ describe("Payments routes — recurring", () => {
         status: "confirmed",
         stage: "finalize",
         signature: null,
-        metadata: { resumedFrom: "paused" },
+        metadata: {},
       },
     ]);
     expect(sendTransactionMock).toHaveBeenCalledTimes(sendsBefore);
@@ -4551,6 +4560,59 @@ describe("Payments routes — recurring", () => {
       expect(await collectionAttempts(activated.subscriptionId)).toHaveLength(
         maxFailedAttemptsBeforePause
       );
+    });
+
+    it("counts a new period's failures afresh once the last period collected", async () => {
+      const { activated, dueAt } = await dueRecurringPayment();
+      await seedEarlierFailures(activated, dueAt, 2);
+      const collected = await app.request(
+        `/v1/payments/recurring-payments/${activated.id}/collect`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+      expect(collected.status).toBe(200);
+      await setRecurringCollectionDue({
+        recurringPaymentId: activated.id,
+        subscriptionId: activated.subscriptionId,
+        dueAt: new Date(Date.now() - 30 * 1000).toISOString(),
+      });
+      const signerDown = new Error("collection signer unavailable");
+
+      for (let failure = 0; failure < maxFailedAttemptsBeforePause - 2; failure++) {
+        expect(await failCollection(activated.id, signerDown)).toBe("active");
+      }
+      expect(await failedCollectionAttempts(activated.id)).toBe(maxFailedAttemptsBeforePause - 2);
+    });
+
+    it("does not count a recovery's re-fail of an attempt a concurrent recovery already failed", async () => {
+      const { activated, dueAt } = await dueRecurringPayment();
+      await seedEarlierFailures(activated, dueAt, maxFailedAttemptsBeforePause - 2);
+      const attemptId = `psca_${crypto.randomUUID()}`;
+      await seedRecurringCollectionJournal({
+        stage: "claimed",
+        attemptId,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        recurringPaymentId: activated.id,
+        subscriptionId: activated.subscriptionId,
+        collectionDueAt: dueAt,
+        token: DEFAULT_RECURRING_FIXTURE.token,
+        amount: DEFAULT_RECURRING_FIXTURE.amount,
+        attemptedAt: new Date(Date.now() - 20 * 60 * 1000).toISOString(),
+      });
+      const concurrentRecovery = await holdTransaction(getDb(env), async (tx) => {
+        await tx.execute(
+          "UPDATE payment_subscription_collection_attempts SET status = 'failed' WHERE id = ?",
+          [attemptId]
+        );
+      });
+
+      const collecting = failCollection(activated.id, new Error("collection signer unavailable"));
+      await untilLockWaiters(getDb(env), { fragment: "WITH prior AS", count: 1 });
+      await concurrentRecovery.commit();
+
+      expect(await collecting).toBe("active");
+      expect(await failedCollectionAttempts(activated.id)).toBe(maxFailedAttemptsBeforePause - 1);
     });
   });
 

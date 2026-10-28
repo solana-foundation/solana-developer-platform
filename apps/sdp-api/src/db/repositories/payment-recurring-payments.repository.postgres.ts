@@ -1,7 +1,6 @@
 import {
   COLLECTION_ATTEMPT_STATUSES_BLOCKING_NEW_CYCLE,
   COLLECTION_ATTEMPT_STATUSES_WITH_SUBMITTED_TRANSFER,
-  FAILED_COLLECTION_ATTEMPT_STATUSES,
   LIVE_RECURRING_PAYMENT_STATUSES,
   PAYMENT_RECURRING_PAYMENT_ACTIVATION_ATTEMPT_STAGES,
   PAYMENT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
@@ -18,13 +17,12 @@ import {
 } from "@sdp/types/payments";
 import { z } from "zod";
 import type { DatabaseExecutor } from "@/db/client";
-import { AppError, internalError } from "@/lib/errors";
+import { AppError } from "@/lib/errors";
 import type {
   ClaimPaymentRecurringPaymentCancelInput,
   ClaimPaymentRecurringPaymentUpdateInput,
   ClearPaymentRecurringPaymentStepSignatureInput,
   CollectibleRecurringPaymentRow,
-  CountFailedCollectionAttemptsSinceResumeInput,
   CreatePaymentRecurringPaymentActivationAttemptInput,
   CreatePaymentRecurringPaymentInput,
   CreatePaymentRecurringPaymentLifecycleAttemptInput,
@@ -33,6 +31,7 @@ import type {
   GetLatestPaymentRecurringPaymentActivationAttemptInput,
   GetLatestPaymentRecurringPaymentLifecycleAttemptInput,
   GetLatestPaymentRecurringPaymentUpdateAttemptInput,
+  IncrementFailedCollectionAttemptsInput,
   ListPaymentRecurringPaymentsInput,
   ListPaymentRecurringPaymentsResult,
   PauseRecurringPaymentInput,
@@ -57,7 +56,6 @@ import type {
   UpdatePaymentRecurringPaymentLifecycleInput,
   UpdatePaymentRecurringPaymentUpdateAttemptInput,
 } from "./payment-recurring-payments.repository";
-import { RECURRING_PAYMENT_RESUME_ATTEMPT_METADATA } from "./payment-recurring-payments.repository";
 
 type DatabaseBindValues = Parameters<ReturnType<DatabaseExecutor["prepare"]>["bind"]>;
 
@@ -105,6 +103,7 @@ const recurringPaymentRowSchema = z.object({
   authorization_signature: z.string().nullable(),
   status: z.enum(PAYMENT_RECURRING_PAYMENT_STATUSES),
   paused_reason: z.enum(RECURRING_PAYMENT_PAUSE_REASONS).nullable(),
+  failed_collection_attempts: z.number().int().nonnegative(),
   metadata_uri: z.string().nullable(),
   created_by: z.string().nullable(),
   created_at: z.string(),
@@ -527,6 +526,12 @@ export function createPostgresPaymentRecurringPaymentsRepository(
                     CASE WHEN ?::boolean THEN ? ELSE next_collection_due_at END,
                   plan_id = CASE WHEN ?::boolean THEN ? ELSE plan_id END,
                   subscription_id = CASE WHEN ?::boolean THEN ? ELSE subscription_id END,
+                  failed_collection_attempts = CASE
+                    WHEN (?::boolean AND ?::text IS DISTINCT FROM next_collection_due_at)
+                      OR (?::boolean AND ?::text IS DISTINCT FROM subscription_id)
+                    THEN 0
+                    ELSE failed_collection_attempts
+                  END,
                   plan_pda = CASE WHEN ?::boolean THEN ? ELSE plan_pda END,
                   plan_created_at =
                     CASE WHEN ?::boolean THEN ? ELSE plan_created_at END,
@@ -575,6 +580,10 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.nextCollectionDueAt ?? null,
           input.planId !== undefined,
           input.planId ?? null,
+          input.subscriptionId !== undefined,
+          input.subscriptionId ?? null,
+          input.nextCollectionDueAt !== undefined,
+          input.nextCollectionDueAt ?? null,
           input.subscriptionId !== undefined,
           input.subscriptionId ?? null,
           input.planPda !== undefined,
@@ -756,6 +765,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
         .prepare(
           `UPDATE payment_recurring_payments
               SET next_collection_due_at = ?,
+                  failed_collection_attempts = 0,
                   destination_token_account =
                     CASE WHEN ?::boolean THEN ? ELSE destination_token_account END,
                   updated_at = ?
@@ -893,44 +903,21 @@ export function createPostgresPaymentRecurringPaymentsRepository(
       return row ? mapRecurringPaymentRow(row) : null;
     },
 
-    async countFailedCollectionAttemptsSinceResume(
-      input: CountFailedCollectionAttemptsSinceResumeInput
-    ) {
+    async incrementFailedCollectionAttempts(input: IncrementFailedCollectionAttemptsInput) {
       const row = await db
         .prepare(
-          `SELECT count(*)::int AS failed
-             FROM payment_subscription_collection_attempts attempt
-            WHERE attempt.organization_id = ?
-              AND attempt.project_id = ?
-              AND attempt.subscription_id = ?
-              AND attempt.due_at = ?
-              AND attempt.status = ANY(?::text[])
-              AND attempt.created_at > COALESCE((
-                SELECT max(resume.updated_at)
-                  FROM payment_recurring_payment_lifecycle_attempts resume
-                 WHERE resume.recurring_payment_id = ?
-                   AND resume.organization_id = ?
-                   AND resume.project_id = ?
-                   AND resume.operation = 'resume'
-                   AND resume.status = 'confirmed'
-                   AND resume.metadata->>'resumedFrom' = ?), '')`
+          `UPDATE payment_recurring_payments
+              SET failed_collection_attempts = failed_collection_attempts + 1
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND status = 'active'
+          RETURNING failed_collection_attempts`
         )
-        .bind(
-          input.organizationId,
-          input.projectId,
-          input.subscriptionId,
-          input.dueAt,
-          [...FAILED_COLLECTION_ATTEMPT_STATUSES],
-          input.recurringPaymentId,
-          input.organizationId,
-          input.projectId,
-          RECURRING_PAYMENT_RESUME_ATTEMPT_METADATA.resumedFrom
-        )
-        .first<{ failed: number }>();
-      if (row === null) {
-        throw internalError("Failed to count failed collection attempts");
-      }
-      return row.failed;
+        .bind(input.recurringPaymentId, input.organizationId, input.projectId)
+        .first<{ failed_collection_attempts: number }>();
+
+      return row ? row.failed_collection_attempts : null;
     },
 
     async claimRecurringPaymentUpdate(input: ClaimPaymentRecurringPaymentUpdateInput) {
@@ -995,6 +982,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           `UPDATE payment_recurring_payments
               SET status = 'active',
                   paused_reason = NULL,
+                  failed_collection_attempts = 0,
                   next_collection_due_at = ?,
                   updated_at = ?,
                   ${ACTIVATED_BY_ASSIGNMENTS}

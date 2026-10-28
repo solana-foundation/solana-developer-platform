@@ -617,21 +617,19 @@ interface RecurringPaymentPause {
 }
 
 /**
- * Inside a collection failure's transaction, after the failed attempt is written, pauses the
- * schedule when retrying cannot help (HOO-2340): at once on a custody policy refusal, which is
- * deterministic, or once the due period has failed
- * `RECURRING_PAYMENT_COLLECTION_CONFIG.maxFailedAttemptsBeforePause` times since the schedule last
- * resumed from a pause. The count is derived from the period's failed attempts, and the pause is a
- * compare-and-set from `active` that records the reason, so a schedule canceled, being updated or
- * already paused is left alone. The cron selects only active schedules, so a paused one stops
+ * Inside a collection failure's transaction, once an attempt has newly become failed, counts it
+ * on the schedule and pauses the schedule when retrying cannot help (HOO-2340): at once on a
+ * custody policy refusal, which is deterministic, or once the due period has failed
+ * `RECURRING_PAYMENT_COLLECTION_CONFIG.maxFailedAttemptsBeforePause` times since it became due or
+ * the schedule last resumed. The increment holds the schedule's row lock, so concurrent failures
+ * count one by one, and only an `active` schedule counts or pauses: one canceled, being updated
+ * or already paused is left alone. The cron selects only active schedules, so a paused one stops
  * retrying until resumed.
  *
  * @param tx - The failure's transaction.
  * @param input.organizationId - Tenant organization.
  * @param input.projectId - Tenant project.
  * @param input.recurringPaymentId - The schedule.
- * @param input.subscriptionId - Its subscription, which the attempts name.
- * @param input.dueAt - The due period that failed.
  * @param input.error - The failure.
  * @param input.pausedAt - The failure's time.
  * @returns The pause, or null when the schedule keeps retrying.
@@ -642,14 +640,13 @@ async function pauseFailingRecurringPayment(
     organizationId: string;
     projectId: string;
     recurringPaymentId: string;
-    subscriptionId: string;
-    dueAt: string;
     error: Error;
     pausedAt: string;
   }
 ): Promise<RecurringPaymentPause | null> {
   const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
-  const failedAttempts = await recurringRepo.countFailedCollectionAttemptsSinceResume(input);
+  const failedAttempts = await recurringRepo.incrementFailedCollectionAttempts(input);
+  if (failedAttempts === null) return null;
   const policyRefused =
     input.error instanceof AppError && input.error.code === "CUSTODY_POLICY_REFUSED";
   if (
@@ -968,8 +965,6 @@ export async function journalAutomatedCollectionFailure(input: {
       organizationId: input.organizationId,
       projectId: input.projectId,
       recurringPaymentId: recurringPayment.id,
-      subscriptionId: attempt.subscription_id,
-      dueAt: attempt.due_at,
       error: input.error,
       pausedAt: attemptedAt,
     });
@@ -985,6 +980,75 @@ export async function journalAutomatedCollectionFailure(input: {
       dueAt: journaled.attempt.due_at,
     });
   }
+}
+
+/**
+ * Writes a collection failure's outcome onto its attempt: `failed`, or `confirmed` when its
+ * transfer turned out to have landed. A recovery can re-fail an attempt that is already failed, so
+ * the write locks the row first and returns its status from before the write; only a newly failed
+ * attempt counts toward a pause.
+ *
+ * @returns The attempt's status before this write.
+ */
+async function settleCollectionAttempt(
+  tx: DatabaseExecutor,
+  input: {
+    organizationId: string;
+    projectId: string;
+    attemptId: string;
+    transferId: string | null;
+    status: "confirmed" | "failed";
+    signature: Signature | null;
+    error: string | null;
+    metadata: unknown;
+    updatedAt: string;
+  }
+): Promise<string> {
+  const settled = await tx
+    .prepare(
+      `WITH prior AS (
+         SELECT id, status
+           FROM payment_subscription_collection_attempts
+          WHERE id = ?
+            AND organization_id = ?
+            AND project_id = ?
+          FOR UPDATE
+       )
+       UPDATE payment_subscription_collection_attempts AS attempt
+          SET transfer_id = CASE WHEN ?::boolean THEN ? ELSE attempt.transfer_id END,
+              status = ?,
+              signature = CASE WHEN ?::boolean THEN ? ELSE attempt.signature END,
+              error = ?,
+              metadata = ?::jsonb,
+              updated_at = ?
+         FROM prior
+        WHERE attempt.id = prior.id
+          AND (
+            (?::text = 'confirmed' AND prior.status IN ('pending', 'processing', 'confirmed'))
+            OR (?::text = 'failed' AND prior.status IN ('pending', 'processing', 'failed'))
+          )
+        RETURNING prior.status AS prior_status`
+    )
+    .bind(
+      input.attemptId,
+      input.organizationId,
+      input.projectId,
+      input.transferId !== null,
+      input.transferId,
+      input.status,
+      input.signature !== null,
+      input.signature,
+      input.error,
+      JSON.stringify(input.metadata),
+      input.updatedAt,
+      input.status,
+      input.status
+    )
+    .first<{ prior_status: string }>();
+  if (settled === null) {
+    throw internalError("Failed to mark collection attempt failed");
+  }
+  return settled.prior_status;
 }
 
 /**
@@ -1080,49 +1144,22 @@ async function markRecurringPaymentCollectionFailedAtomically(input: {
       });
     }
 
-    const attemptRows = await tx
-      .prepare(
-        `UPDATE payment_subscription_collection_attempts
-            SET transfer_id = CASE WHEN ?::boolean THEN ? ELSE transfer_id END,
-                status = ?,
-                signature = CASE WHEN ?::boolean THEN ? ELSE signature END,
-                error = ?,
-                metadata = ?::jsonb,
-                updated_at = ?
-          WHERE id = ?
-            AND organization_id = ?
-            AND project_id = ?
-            AND (
-              (?::text = 'confirmed' AND status IN ('pending', 'processing', 'confirmed'))
-              OR (?::text = 'failed' AND status IN ('pending', 'processing', 'failed'))
-            )`
-      )
-      .bind(
-        input.transfer !== null,
-        input.transfer?.id ?? null,
-        attemptStatus,
-        attemptSignature !== null,
-        attemptSignature,
-        attemptError,
-        JSON.stringify(attemptMetadata),
-        failedAt,
-        input.attempt.id,
-        input.organizationId,
-        input.projectId,
-        attemptStatus,
-        attemptStatus
-      )
-      .run();
-    if (attemptRows === 0) {
-      throw internalError("Failed to mark collection attempt failed");
-    }
-    if (attemptStatus !== "failed") return null;
+    const priorStatus = await settleCollectionAttempt(tx, {
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      attemptId: input.attempt.id,
+      transferId: input.transfer?.id ?? null,
+      status: attemptStatus,
+      signature: attemptSignature,
+      error: attemptError,
+      metadata: attemptMetadata,
+      updatedAt: failedAt,
+    });
+    if (attemptStatus !== "failed" || priorStatus === "failed") return null;
     return pauseFailingRecurringPayment(tx, {
       organizationId: input.organizationId,
       projectId: input.projectId,
       recurringPaymentId: input.recurringPaymentId,
-      subscriptionId: input.attempt.subscription_id,
-      dueAt: input.attempt.due_at,
       error: input.error,
       pausedAt: failedAt,
     });

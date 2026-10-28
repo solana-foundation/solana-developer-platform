@@ -25,11 +25,10 @@ import type { SubscriptionDelegation } from "@solana/subscriptions";
 import * as subscriptionsProgram from "@solana/subscriptions";
 import { z } from "zod";
 import { getDb } from "@/db/client";
-import {
-  type PaymentRecurringPaymentLifecycleAttemptRow,
-  type PaymentRecurringPaymentRow,
-  type PaymentRecurringPaymentsRepository,
-  RECURRING_PAYMENT_RESUME_ATTEMPT_METADATA,
+import type {
+  PaymentRecurringPaymentLifecycleAttemptRow,
+  PaymentRecurringPaymentRow,
+  PaymentRecurringPaymentsRepository,
 } from "@/db/repositories/payment-recurring-payments.repository";
 import { createPostgresPaymentRecurringPaymentsRepository } from "@/db/repositories/payment-recurring-payments.repository.postgres";
 import type { PaymentSubscriptionRow } from "@/db/repositories/payment-subscriptions.repository";
@@ -958,7 +957,7 @@ export async function resumeRecurringPayment(input: {
       stage: "finalize",
       signature: null,
       error: null,
-      metadata: RECURRING_PAYMENT_RESUME_ATTEMPT_METADATA,
+      metadata: {},
       createdAt: resumedAt,
       updatedAt: resumedAt,
       idempotencyKey: input.idempotencyKey,
