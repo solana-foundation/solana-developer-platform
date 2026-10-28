@@ -794,6 +794,12 @@ export const PAYMENT_RECURRING_PAYMENT_STATUSES = [
   "expired",
 ] as const;
 export type PaymentRecurringPaymentStatus = (typeof PAYMENT_RECURRING_PAYMENT_STATUSES)[number];
+/**
+ * Every status but `paused`. A `paused` row carries a pause reason (migration 0184), so only the
+ * pause, resume, cancel claim and cancel release writes move a row into or out of it; the generic
+ * writers take these.
+ */
+export type UnpausedRecurringPaymentStatus = Exclude<PaymentRecurringPaymentStatus, "paused">;
 
 /**
  * Why SDP paused a recurring payment (HOO-2340): the custody provider's policy refused to sign a

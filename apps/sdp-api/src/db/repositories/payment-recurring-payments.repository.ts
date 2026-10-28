@@ -10,6 +10,7 @@ import type {
   RecurringPaymentLifecycleClaimableStatus,
   RecurringPaymentPauseReason,
   RecurringPaymentStatusWithRecoverableCollection,
+  UnpausedRecurringPaymentStatus,
 } from "@sdp/types/payments";
 
 /**
@@ -210,9 +211,9 @@ export interface UpdatePaymentRecurringPaymentInput {
   subscriptionPda?: string | null;
   subscriptionAuthorityAddress?: string | null;
   authorizationSignature?: string | null;
-  status?: PaymentRecurringPaymentStatus;
+  status?: UnpausedRecurringPaymentStatus;
   metadataUri?: string | null;
-  expectedStatus?: PaymentRecurringPaymentStatus;
+  expectedStatus?: UnpausedRecurringPaymentStatus;
   expectedUpdatedAt?: string;
   updatedAt: string;
 }
@@ -263,16 +264,19 @@ export type RecurringPaymentActivator =
   | { apiKeyId: null; userId: string };
 
 /**
- * A cancel's claim, a compare-and-set into `canceling`: from `claimedFrom`, the status the caller
- * read (running or paused), or, when it is null, a `canceling` claim last touched at or before
- * `staleBefore`, which this takes over. A lost race matches nothing. The claim clears the pause
- * reason, which only a paused row carries.
+ * A cancel's claim, a compare-and-set into `canceling`: from `claimedFrom` with `pausedReason`,
+ * the status and pause reason the caller read (running, or paused for that reason), or, when
+ * `claimedFrom` is null, a `canceling` claim last touched at or before `staleBefore`, which this
+ * takes over. Matching the reason too closes a pause, resume and pause again for another reason
+ * between the read and the claim. A lost race matches nothing. The claim clears the pause reason,
+ * which only a paused row carries.
  */
 export interface ClaimPaymentRecurringPaymentCancelInput {
   recurringPaymentId: string;
   organizationId: string;
   projectId: string;
   claimedFrom: RecurringPaymentLifecycleClaimableStatus | null;
+  pausedReason: RecurringPaymentPauseReason | null;
   updatedAt: string;
   staleBefore: string;
 }
@@ -326,8 +330,8 @@ export interface UpdatePaymentRecurringPaymentLifecycleInput {
   recurringPaymentId: string;
   organizationId: string;
   projectId: string;
-  status: PaymentRecurringPaymentStatus;
-  expectedStatus: PaymentRecurringPaymentStatus;
+  status: UnpausedRecurringPaymentStatus;
+  expectedStatus: UnpausedRecurringPaymentStatus;
   updatedAt: string;
 }
 

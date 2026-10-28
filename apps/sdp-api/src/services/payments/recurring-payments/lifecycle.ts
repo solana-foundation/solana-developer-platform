@@ -529,6 +529,7 @@ async function runRecurringPaymentCancel(input: {
       organizationId: input.organizationId,
       projectId: input.projectId,
       claimedFrom,
+      pausedReason: input.recurringPayment.paused_reason,
       updatedAt: new Date().toISOString(),
       staleBefore: getRecurringPaymentOperationStaleBefore(nowIso),
     });
@@ -547,7 +548,11 @@ async function runRecurringPaymentCancel(input: {
   });
 
   if (!claimResult) {
-    throw conflict("Recurring payment cancel is already processing");
+    throw conflict(
+      claimedFrom === null
+        ? "Recurring payment cancel is already processing"
+        : "Recurring payment changed before it could be canceled"
+    );
   }
   const { claimed } = claimResult;
   let { attempt } = claimResult;
