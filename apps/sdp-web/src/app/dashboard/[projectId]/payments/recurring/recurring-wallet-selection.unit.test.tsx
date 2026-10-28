@@ -1,10 +1,13 @@
 // @vitest-environment jsdom
 
 import type { Counterparty, CounterpartyAccount } from "@sdp/types/counterparties";
-import type {
-  PaymentRecurringPayment,
-  PaymentSubscriptionCollectionAttempt,
-  PaymentsDashboardWallet,
+import {
+  type PaymentRecurringPayment,
+  type PaymentSubscriptionCollectionAttempt,
+  type PaymentsDashboardWallet,
+  RECURRING_PAYMENT_COLLECTION_CONFIG,
+  RECURRING_PAYMENT_PAUSE_REASONS,
+  type RecurringPaymentPauseReason,
 } from "@sdp/types/payments";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -70,6 +73,7 @@ const recurring: PaymentRecurringPayment & { sourceCustodyWalletId: string } = {
   subscriptionAuthorityAddress: null,
   authorizationSignature: null,
   status: "active",
+  pausedReason: null,
   metadataUri: null,
   createdBy: null,
   createdAt: "2026-09-14T00:00:00.000Z",
@@ -335,7 +339,12 @@ describe("Recurring Payment exact source selection", () => {
 });
 
 describe("Recurring Payment lifecycle actions", () => {
-  const reason = "The custody provider's policy refused to sign.";
+  const lastRunError = "The custody provider's policy refused to sign.";
+  const pausedCopy = {
+    failed_attempts: `SDP paused this schedule because its runs kept failing: one run failed ${RECURRING_PAYMENT_COLLECTION_CONFIG.maxFailedAttemptsBeforePause} times. Nothing runs while it is paused. Fix the cause, then resume it, or cancel it.`,
+    custody_policy_refused:
+      "SDP paused this schedule because the custody provider's policy refused it. Nothing runs while it is paused. Change the wallet's policy with your custody provider, then resume it, or cancel it.",
+  } satisfies Record<RecurringPaymentPauseReason, string>;
   const failedRun: PaymentSubscriptionCollectionAttempt = {
     id: "pcat_failed",
     organizationId: "org_test",
@@ -348,7 +357,7 @@ describe("Recurring Payment lifecycle actions", () => {
     attemptedAt: "2026-09-20T00:05:00.000Z",
     status: "failed",
     signature: null,
-    error: reason,
+    error: lastRunError,
     metadata: { source: "automated", recurringPaymentId: recurring.id, initiatedByKeyId: null },
     createdAt: "2026-09-20T00:05:00.000Z",
     updatedAt: "2026-09-20T00:05:00.000Z",
@@ -374,20 +383,22 @@ describe("Recurring Payment lifecycle actions", () => {
     );
   }
 
-  it("leads with Resume and offers Cancel on a paused schedule, naming its last failure", async () => {
-    renderDetail({ ...recurring, status: "paused", subscriptionId: "psub_test" }, [failedRun]);
-    expect(
-      await screen.findByText(
-        `SDP paused this schedule after its runs kept failing. The last run failed with: ${reason} Nothing runs while it is paused. Fix the cause, then resume it, or cancel it.`
-      )
-    ).toBeTruthy();
-    expect(
-      screen.getByRole("button", { name: "Resume schedule" }).getAttribute("data-variant")
-    ).toBe("default");
-    expect(
-      screen.getByRole("button", { name: "Cancel payment" }).getAttribute("data-variant")
-    ).toBe("outline");
-  });
+  it.each(RECURRING_PAYMENT_PAUSE_REASONS)(
+    "leads with Resume and offers Cancel on a schedule paused for %s, naming its reason and last failure",
+    async (pausedReason) => {
+      renderDetail({ ...recurring, status: "paused", pausedReason, subscriptionId: "psub_test" }, [
+        failedRun,
+      ]);
+      expect(await screen.findByText(pausedCopy[pausedReason])).toBeTruthy();
+      expect(screen.getByText(`Last run: ${lastRunError}`)).toBeTruthy();
+      expect(
+        screen.getByRole("button", { name: "Resume schedule" }).getAttribute("data-variant")
+      ).toBe("default");
+      expect(
+        screen.getByRole("button", { name: "Cancel payment" }).getAttribute("data-variant")
+      ).toBe("outline");
+    }
+  );
 
   it("offers no lifecycle action on a canceled schedule that ran", async () => {
     renderDetail({ ...recurring, status: "canceled", subscriptionId: "psub_test" }, [failedRun]);

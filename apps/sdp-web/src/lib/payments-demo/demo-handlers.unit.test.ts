@@ -535,18 +535,30 @@ describe("schedules", () => {
     expect(act("demo_rp_lumen_retainer", "resume")?.status).toBe(409);
     expect(act("demo_rp_northwind_supply", "cancel")?.status).toBe(200);
     expect(act("demo_rp_northwind_supply", "resume")?.status).toBe(409);
+    expect(refusal(act("demo_rp_jane_stipend", "resume"))).toEqual([409, "conflict"]);
   });
 
-  it("resumes a paused schedule onto its next period, and never a canceled one that ran", () => {
+  it.each([
+    [
+      "resume",
+      {
+        status: "active",
+        pausedReason: null,
+        nextCollectionDueAt: new Date(NOW.getTime() + 720 * HOUR_MS).toISOString(),
+      },
+    ],
+    ["cancel", { status: "canceled", pausedReason: null, nextCollectionDueAt: null }],
+  ] as const)("%s on a paused schedule clears its pause reason", (action, expected) => {
     const id = "demo_rp_lumen_retainer";
     const pausedWorld = () => {
       const seeded = buildWorld(now, RAMP_PROVIDERS);
       const schedule = seeded.schedules.find((candidate) => candidate.id === id);
       if (!schedule) throw new Error(`no demo schedule ${id}`);
       schedule.status = "paused";
+      schedule.pausedReason = "failed_attempts";
       return seeded;
     };
-    const parts = demoPathParts(`/v1/payments/recurring-payments/${id}/resume`);
+    const parts = demoPathParts(`/v1/payments/recurring-payments/${id}/${action}`);
     if (!parts) throw new Error("not a demo path");
     const result = demoWrite("POST", {
       segments: parts.segments,
@@ -555,13 +567,9 @@ describe("schedules", () => {
       ops: [],
       now,
     });
-    if (!result) throw new Error("resume has no demo handler");
-    const resumed = applyDemoOps(pausedWorld(), result.ops, now);
-    expect(result.answer(resumed).status).toBe(200);
-    expect(resumed.schedules.find((candidate) => candidate.id === id)).toMatchObject({
-      status: "active",
-      nextCollectionDueAt: new Date(NOW.getTime() + 720 * HOUR_MS).toISOString(),
-    });
-    expect(refusal(act("demo_rp_jane_stipend", "resume"))).toEqual([409, "conflict"]);
+    if (!result) throw new Error(`${action} has no demo handler`);
+    const applied = applyDemoOps(pausedWorld(), result.ops, now);
+    expect(result.answer(applied).status).toBe(200);
+    expect(applied.schedules.find((candidate) => candidate.id === id)).toMatchObject(expected);
   });
 });
