@@ -2,12 +2,14 @@
 
 import {
   isPartiallyFailedTransferBatchStatus,
+  type MoneyMovementStatus,
   type PaymentTransferBatchRequest,
 } from "@sdp/types/payments";
 import { z } from "zod";
 import { MOVEMENT_READ_PATHS, settleWhenMovementFinal } from "@/lib/dashboard-fetch";
 import {
   canonicalDecimalAmount,
+  isMovementInFlight,
   storageFingerprint,
   uncertainMoneyAnswerMessage,
 } from "@/lib/idempotency";
@@ -168,6 +170,43 @@ export function claimDefaultTransferBatchReference(
   return reference;
 }
 
+/**
+ * A partially failed batch keeps its default reference, so sending it again is
+ * answered with the batch. Once a retry has finished it, the run is done: the
+ * name is forgotten (while the resent recipients are still processing, only
+ * once the batch reads final), so a later identical payout is a new run.
+ */
+function releaseReferenceWhenFinished(retried: CreateTransferBatchResult): void {
+  const reference = retried.batch.externalId;
+  if (reference === null || reference === undefined) return;
+  const release = (status: MoneyMovementStatus) => {
+    if (!isMovementInFlight(status) && !isPartiallyFailedTransferBatchStatus(status)) {
+      releaseDefaultReferenceNamed(reference);
+    }
+  };
+  if (!isMovementInFlight(retried.batch.status)) {
+    release(retried.batch.status);
+    return;
+  }
+  settleWhenMovementFinal(MOVEMENT_READ_PATHS.batch(retried.batch.id), release);
+}
+
+/** Forgets whichever stored default reference carries this name. */
+function releaseDefaultReferenceNamed(reference: string): void {
+  const storage = referenceStorage();
+  if (storage === null) return;
+  try {
+    for (const name of Object.keys(storage)) {
+      if (!name.startsWith(DEFAULT_REFERENCE_STORE_PREFIX)) continue;
+      const raw = storage.getItem(name);
+      const stored = raw ? storedReferenceSchema.safeParse(JSON.parse(raw)) : null;
+      if (stored?.success && stored.data.reference === reference) storage.removeItem(name);
+    }
+  } catch {
+    // Left to expire.
+  }
+}
+
 /** Forgets a settled send's default reference, so the next identical batch is a new run. */
 function releaseDefaultTransferBatchReference(sent: PaymentTransferBatchRequest): void {
   const storage = referenceStorage();
@@ -303,6 +342,7 @@ export async function retryTransferBatchUnderKey(
   try {
     const retried = await retryTransferBatch(batchId, t, { value: key, persisted });
     retryStore.release(fingerprint, key);
+    releaseReferenceWhenFinished(retried);
     return retried;
   } catch (error) {
     if (error instanceof TransferBatchRequestError) {

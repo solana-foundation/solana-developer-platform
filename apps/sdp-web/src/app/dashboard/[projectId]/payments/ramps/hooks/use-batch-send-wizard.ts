@@ -110,37 +110,44 @@ export interface UseBatchSendWizardProps {
 }
 
 /** Copy for the retry refusals the API names (HOO-2343); each sent nothing. */
-const RETRY_REFUSAL_COPY: Partial<Record<string, { title: MessageKey; description: MessageKey }>> =
-  {
-    TRANSFER_BATCH_RETRY_CLAIMED: {
-      title: "DashboardPayments.batchSend.retryAlreadyClaimed",
-      description: "DashboardPayments.batchSend.retryAlreadyClaimedDescription",
-    },
-    TRANSFER_BATCH_NOTHING_TO_RETRY: {
-      title: "DashboardPayments.batchSend.nothingToRetry",
-      description: "DashboardPayments.batchSend.nothingToRetryDescription",
-    },
-    TRANSFER_BATCH_DESTINATION_CHANGED: {
-      title: "DashboardPayments.batchSend.retryDestinationChanged",
-      description: "DashboardPayments.batchSend.retryDestinationChangedDescription",
-    },
-  };
+const RETRY_REFUSAL_COPY = {
+  TRANSFER_BATCH_RETRY_CLAIMED: {
+    title: "DashboardPayments.batchSend.retryAlreadyClaimed",
+    description: "DashboardPayments.batchSend.retryAlreadyClaimedDescription",
+  },
+  TRANSFER_BATCH_NOTHING_TO_RETRY: {
+    title: "DashboardPayments.batchSend.nothingToRetry",
+    description: "DashboardPayments.batchSend.nothingToRetryDescription",
+  },
+  TRANSFER_BATCH_DESTINATION_CHANGED: {
+    title: "DashboardPayments.batchSend.retryDestinationChanged",
+    description: "DashboardPayments.batchSend.retryDestinationChangedDescription",
+  },
+} as const satisfies Record<string, { title: MessageKey; description: MessageKey }>;
+
+type RetryRefusalCode = keyof typeof RETRY_REFUSAL_COPY;
+
+function isRetryRefusalCode(code: string | null): code is RetryRefusalCode {
+  return code !== null && Object.hasOwn(RETRY_REFUSAL_COPY, code);
+}
 
 /**
  * What a failed retry request tells the user. A refusal the API names sent
  * nothing, so it is said in our words; anything else shows its own message.
+ *
+ * @param failure - The caught value, narrowed: the API's refusal, another
+ *   error, or null for anything that is not an Error.
  */
 function retryFailureCopy(
-  error: unknown,
+  failure: TransferBatchRequestError | Error | null,
   t: (key: MessageKey) => string
 ): { title: string; description: string } {
-  const refusal =
-    error instanceof TransferBatchRequestError ? RETRY_REFUSAL_COPY[error.code ?? ""] : undefined;
-  if (refusal !== undefined) {
+  if (failure instanceof TransferBatchRequestError && isRetryRefusalCode(failure.code)) {
+    const refusal = RETRY_REFUSAL_COPY[failure.code];
     return { title: t(refusal.title), description: t(refusal.description) };
   }
   const fallback = t("DashboardPayments.batchSend.retryRequestFailed");
-  return { title: fallback, description: error instanceof Error ? error.message : fallback };
+  return { title: fallback, description: failure === null ? fallback : failure.message };
 }
 
 /**
@@ -657,7 +664,7 @@ export function useBatchSendWizard({
         position: "bottom-right",
       });
     } catch (error) {
-      const { title, description } = retryFailureCopy(error, t);
+      const { title, description } = retryFailureCopy(error instanceof Error ? error : null, t);
       toast.error(title, { id: toastId, description, position: "bottom-right" });
       // The API may have taken the retry even though its answer was lost: read
       // the batch again, so a resend in flight resumes the poll.

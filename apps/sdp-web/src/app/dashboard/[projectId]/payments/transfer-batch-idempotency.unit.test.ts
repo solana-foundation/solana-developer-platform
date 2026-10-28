@@ -535,6 +535,48 @@ describe("claimDefaultTransferBatchReference", () => {
     expect(stored).toEqual([]);
   });
 
+  it("keeps a partially failed batch's name until a retry finishes it", async () => {
+    const storedNames = () =>
+      Object.keys(window.localStorage).filter((name) =>
+        name.startsWith("sdp:payments:transfer-batch:reference:v1:")
+      );
+    const sendFetch = vi.fn<typeof fetch>(async (_input, init) =>
+      Response.json({
+        data: {
+          batch: {
+            id: "batch_1",
+            status: "partially_failed",
+            externalId: z.object({ externalId: z.string() }).parse(JSON.parse(String(init?.body)))
+              .externalId,
+          },
+          recipients: [],
+          transfers: [],
+        },
+      })
+    );
+    vi.stubGlobal("fetch", sendFetch);
+    const sent = await sendTransferBatchUnderKey(batchRequest(), t);
+    // Sending it again must return this batch, so its name is kept.
+    expect(storedNames()).toHaveLength(1);
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async () =>
+        Response.json({
+          data: {
+            batch: { id: "batch_1", status: "confirmed", externalId: sent.batch.externalId },
+            recipients: [],
+            transfers: [],
+          },
+        })
+      )
+    );
+    await retryTransferBatchUnderKey("batch_1", ["xrec_2"], t);
+
+    // Finished by the retry: a later identical payout is a new run.
+    expect(storedNames()).toEqual([]);
+  });
+
   it("leaves a reference the user typed alone", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () =>
       Response.json({
