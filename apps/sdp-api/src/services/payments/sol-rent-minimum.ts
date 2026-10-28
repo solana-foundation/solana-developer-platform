@@ -46,11 +46,6 @@ function readSystemAccountRentMinimum(): Promise<bigint> {
   return lamports;
 }
 
-/** @internal Test-only: forget the cached rent minimum. */
-export function clearRentMinimumCacheForTests(): void {
-  rentMinimumByCluster.clear();
-}
-
 /** The SOL a movement sends, as the rent check reads it. */
 export interface SolMovement {
   /** The sending wallet, or null when SDP cannot see what it holds. */
@@ -89,6 +84,13 @@ async function readLamports(addresses: readonly Address[]): Promise<Map<Address,
     await Promise.all(pages.map((page) => getMultipleAccountsLamports(rpc, page)))
   ).flat();
   return new Map(unique.map((account, position) => [account, balances[position]]));
+}
+
+/** An address readLamports was asked about; it always answers every one. */
+function readBalance(lamports: ReadonlyMap<Address, bigint>, account: Address): bigint {
+  const balance = lamports.get(account);
+  if (balance === undefined) throw internalError(`No balance was read for ${account}`);
+  return balance;
 }
 
 /**
@@ -152,14 +154,18 @@ export async function findSolRentShortfall(
   const lamports = await readLamports(reads);
 
   const recipientIndexes = small
-    .filter((payment) => lamports.get(payment.destination) === 0n)
+    .filter((payment) => readBalance(lamports, payment.destination) === 0n)
     .map((payment) => payment.index)
     .sort((a, b) => a - b);
-  const sourceBalance = movement.source === null ? undefined : lamports.get(movement.source);
   const sourceRemainderLamports =
-    movement.source === null || sourceBalance === undefined
+    movement.source === null
       ? null
-      : sourceRemainderBelowMinimum(movement.source, sourceBalance, movement, minimumLamports);
+      : sourceRemainderBelowMinimum(
+          movement.source,
+          readBalance(lamports, movement.source),
+          movement,
+          minimumLamports
+        );
   if (recipientIndexes.length === 0 && sourceRemainderLamports === null) return null;
   return {
     recipientIndexes,

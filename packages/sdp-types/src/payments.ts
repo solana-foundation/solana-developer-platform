@@ -748,8 +748,7 @@ export interface PaymentTransferBatchEstimate {
     tokenAccountRentLamports: string;
     sponsored: boolean;
   };
-  /** Absent from an API older than HOO-2375. */
-  warnings?: PaymentTransferBatchEstimateWarning[];
+  warnings: PaymentTransferBatchEstimateWarning[];
 }
 
 export interface PaymentTransferBatchEnvelope {
