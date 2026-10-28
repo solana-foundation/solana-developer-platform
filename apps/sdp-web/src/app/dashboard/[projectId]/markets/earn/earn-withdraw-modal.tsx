@@ -71,7 +71,7 @@ export function withdrawalRequestSignature(
  * for a withdrawal from program A would be carried into an identical-looking
  * withdrawal from program B.
  */
-function useWithdrawalRequestId(
+function useWithdrawalIdempotencyKey(
   programId: string,
   amountUsd: string,
   token: EarnPortfolioToken | undefined,
@@ -610,7 +610,7 @@ export function EarnWithdrawModal({
   const destination = destinationInput.trim();
   const destinationValid = BASE58_ADDRESS_PATTERN.test(destination);
 
-  const requestId = useWithdrawalRequestId(programId, amount, token, destination);
+  const requestId = useWithdrawalIdempotencyKey(programId, amount, token, destination);
 
   useEffect(() => {
     if (submitting) contentRef.current?.focus();
@@ -740,12 +740,13 @@ export function EarnWithdrawModal({
     submittingRef.current = true;
     setSubmitting(true);
     setSubmitError(null);
-    const result = await createEarnWithdrawal(programId, {
-      requestId,
-      amountUsd: amount,
-      token,
-      destinationAddress: destination,
-    });
+    const result = await createEarnWithdrawal(
+      programId,
+      { amountUsd: amount, token, destinationAddress: destination },
+      // The signature-bound key rides the Idempotency-Key header; the body
+      // never carries a requestId, which the API would refuse as ambiguous.
+      requestId
+    );
     submittingRef.current = false;
     setSubmitting(false);
     if (!result.ok) {

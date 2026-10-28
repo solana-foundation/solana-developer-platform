@@ -109,12 +109,18 @@ one grows — and the API already answers an unknown value with an empty page, w
 is the honest result.
 
 `proxyToSdpApi` never copies the inbound header bag — auth, project scope and
-tracing stay server-owned — so a client-set `Idempotency-Key` never reaches the
-API on its own. A route forwards one deliberately, per header, through the
-optional `upstreamHeaders` argument, spelling it `IDEMPOTENCY_KEY_HEADER`
-(`src/lib/idempotency.ts`). `vault-deposits/`, `vault-withdrawals/`, and the
-queued request create/cancel routes opt in, forwarding that single header and
-nothing else; the program create still sends the body `requestId` form.
+tracing stay server-owned. The one exception is `Idempotency-Key`: every
+mutation relays the browser's key upstream (HOO-1918), because without it a
+retried request is a new one at the API; GETs relay nothing and
+`upstreamHeaders` adds route-chosen headers on top. The transport
+(`dashboardFetch`) auto-keys every POST that arrives without a key, so an earn
+client that ALSO carried the legacy body `requestId` would send both sources
+and the API would refuse every submit rather than guess which one a retry
+keeps stable. The earn creates therefore send the caller's key as the
+`IDEMPOTENCY_KEY_HEADER` header (`src/lib/idempotency.ts`) and never in the
+JSON body; the program create BFF route still speaks the body `requestId`
+form for its legacy contract, and a dashboard caller of it must switch to the
+header form first.
 
 ## Routes
 

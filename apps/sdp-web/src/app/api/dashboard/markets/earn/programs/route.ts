@@ -11,9 +11,12 @@ export async function GET(request: Request) {
 
 /**
  * Explicit create (PRO-1670). The API requires exactly one of a body
- * `requestId` or an `Idempotency-Key` header — this legacy program client sends
- * the body form. The route intentionally supplies no upstream headers, so an
- * inbound `Idempotency-Key` is still dropped rather than implicitly relayed.
+ * `requestId` or an `Idempotency-Key` header. This legacy program contract
+ * sends the body form, and the proxy relays a browser `Idempotency-Key` on
+ * every mutation (HOO-1918) — so a dashboard caller here must send the header
+ * form ONLY (see `createEarnWithdrawal`): beside the relayed header, the body
+ * `requestId` is refused with 400 on every submit. No dashboard page calls
+ * this route today.
  */
 export async function POST(request: Request) {
   return proxyToSdpApi({

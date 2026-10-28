@@ -15,6 +15,7 @@ import {
   appendVaultPositionsRead,
   createEarnVaultDeposit,
   createEarnVaultWithdrawalRequest,
+  createEarnWithdrawal,
   type EarnVaultPositionsRead,
   earnExternalWalletSummaryRefreshInterval,
   earnLedgerRefreshInterval,
@@ -692,6 +693,60 @@ describe("createEarnVaultDeposit", () => {
 
     expect(result.ok).toBe(false);
     expect(result).toMatchObject({ error: "Invalid vault deposit response", status: 201 });
+  });
+});
+
+describe("createEarnWithdrawal", () => {
+  /**
+   * The API refuses a withdrawal carrying BOTH a body `requestId` and an
+   * `Idempotency-Key` header — it cannot tell which one a retry keeps stable,
+   * so it will not guess on a double payout — and since HOO-1918 the proxy
+   * relays the browser's header on every mutation. The create must therefore
+   * ride the header alone: a caller still on the legacy body form would 400
+   * on every confirm.
+   */
+  it("sends idempotency only as a header and allowlists the JSON body", async () => {
+    const destination = "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx";
+    const withdrawal = {
+      withdrawalRef: "wref_1",
+      status: "processing",
+      destinationAddress: destination,
+      createdAt: TIMESTAMP,
+    } as const;
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(JSON.stringify({ data: { withdrawal } }), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    // An untyped caller replaying the legacy body form must not reach the API.
+    const untypedInput = {
+      amountUsd: "12.50",
+      token: "usdc",
+      destinationAddress: destination,
+      requestId: "must-not-be-forwarded",
+    } as unknown as Parameters<typeof createEarnWithdrawal>[1];
+
+    const result = await createEarnWithdrawal("earn_program_1", untypedInput, "withdrawal-key");
+
+    expect(result).toEqual({
+      ok: true,
+      status: 201,
+      data: { data: { withdrawal } },
+    });
+    const [path, options] = fetchMock.mock.calls[0] ?? [];
+    expect(path).toBe("/api/dashboard/markets/earn/programs/earn_program_1/withdrawals");
+    const headers = new Headers(options?.headers);
+    expect(headers.get("Idempotency-Key")).toBe("withdrawal-key");
+    expect(headers.get("x-project-id")).toBe("prj_test_sandbox");
+    expect(JSON.parse(String(options?.body))).toEqual({
+      amountUsd: "12.50",
+      token: "usdc",
+      destinationAddress: destination,
+    });
+    expect(String(options?.body)).not.toContain("requestId");
   });
 });
 

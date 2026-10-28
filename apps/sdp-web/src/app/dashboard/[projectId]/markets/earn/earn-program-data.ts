@@ -1752,16 +1752,36 @@ export function previewEarnWithdrawal(
 }
 
 export interface EarnWithdrawalCreateInput extends EarnWithdrawalPreviewInput {
-  /** Client-minted UUIDv4 so a retried confirm can never double-withdraw. */
-  requestId: string;
   destinationAddress: string;
 }
 
+/**
+ * The custodial payout of a program's balance to a caller-supplied address.
+ *
+ * The caller's key rides the `Idempotency-Key` header and is never copied into
+ * the JSON body: the transport keys every dashboard POST that arrives without
+ * one, and the proxy relays that header upstream (HOO-1918), while the API
+ * refuses a withdrawal carrying BOTH a body `requestId` and a header key — it
+ * cannot tell which one a retry keeps stable, so it will not guess on a
+ * double payout. The body is rebuilt field by field so even an untyped caller
+ * cannot smuggle the legacy body `requestId` back in (the vault creates do the
+ * same).
+ */
 export function createEarnWithdrawal(
   programId: string,
-  input: EarnWithdrawalCreateInput
+  input: EarnWithdrawalCreateInput,
+  idempotencyKey: string
 ): Promise<DashboardFetchResult<{ data: EarnProgramWithdrawalResponse }>> {
-  return dashboardFetch(programPath(programId, "/withdrawals"), { method: "POST", body: input });
+  const body: EarnWithdrawalCreateInput = {
+    token: input.token,
+    ...(input.amountUsd === undefined ? {} : { amountUsd: input.amountUsd }),
+    destinationAddress: input.destinationAddress,
+  };
+  return dashboardFetch(programPath(programId, "/withdrawals"), {
+    method: "POST",
+    headers: { [IDEMPOTENCY_KEY_HEADER]: idempotencyKey },
+    body,
+  });
 }
 
 export function fetchEarnWithdrawal(

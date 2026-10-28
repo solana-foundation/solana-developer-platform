@@ -131,5 +131,21 @@ describe("EarnWithdrawModal submit lock", () => {
     await screen.findByText("Withdrawal submitted");
     expect(mocks.createEarnWithdrawal).toHaveBeenCalledTimes(2);
     expect(onWithdrawalCreated).toHaveBeenCalledWith("wref_1");
+
+    // The retry key is transport metadata: the create carries NO body
+    // `requestId` (the API refuses it next to the relayed header key) and
+    // reuses the ONE signature-bound key across the failed attempt and its
+    // unchanged retry.
+    const [first, retry] = mocks.createEarnWithdrawal.mock.calls;
+    expect(first?.[0]).toBe("earn_program_1");
+    expect(first?.[1]).toEqual({
+      amountUsd: "12.50",
+      token: "usdc",
+      destinationAddress: DESTINATION,
+    });
+    expect(first?.[1]).not.toHaveProperty("requestId");
+    const keyPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+    expect(first?.[2]).toMatch(keyPattern);
+    expect(retry?.[2]).toBe(first?.[2]);
   });
 });
