@@ -1,8 +1,8 @@
--- A merchant cancels an open payment request (SOLA9-762), and revoking an API key cancels the
--- open requests that key created. canceled_at anchors the late-payment watch: a payer who
--- signed before the cancel can still land the transfer, and the reconciler records it as paid
--- late. created_by_api_key_id names the key behind an API-created request; created_by holds the
--- key creator's user id and cannot tell keys apart. Rows from before this change stay NULL.
+-- A merchant cancels an open payment request (SOLA9-762). canceled_at anchors the late-payment
+-- watch: a payer who signed before the cancel can still land the transfer, and the reconciler
+-- records it as paid late. created_by_api_key_id names the key behind an API-created request,
+-- so the requests list can filter by it; created_by holds the key creator's user id and cannot
+-- tell keys apart. Rows from before this change stay NULL.
 ALTER TABLE payment_requests
     ADD COLUMN IF NOT EXISTS canceled_at TEXT,
     ADD COLUMN IF NOT EXISTS created_by_api_key_id TEXT;
