@@ -1,7 +1,11 @@
 // @vitest-environment jsdom
 
 import type { Counterparty, CounterpartyAccount } from "@sdp/types/counterparties";
-import type { PaymentRecurringPayment, PaymentsDashboardWallet } from "@sdp/types/payments";
+import type {
+  PaymentRecurringPayment,
+  PaymentSubscriptionCollectionAttempt,
+  PaymentsDashboardWallet,
+} from "@sdp/types/payments";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
@@ -327,5 +331,70 @@ describe("Recurring Payment exact source selection", () => {
     );
     expect(await screen.findAllByText("Select a currency.")).toHaveLength(2);
     expect(writes).toEqual([]);
+  });
+});
+
+describe("Recurring Payment lifecycle actions", () => {
+  const reason = "The custody provider's policy refused to sign.";
+  const failedRun: PaymentSubscriptionCollectionAttempt = {
+    id: "pcat_failed",
+    organizationId: "org_test",
+    projectId: "proj_test",
+    subscriptionId: "psub_test",
+    transferId: null,
+    token: MINT,
+    amount: "1",
+    dueAt: "2026-09-20T00:00:00.000Z",
+    attemptedAt: "2026-09-20T00:05:00.000Z",
+    status: "failed",
+    signature: null,
+    error: reason,
+    metadata: { source: "automated", recurringPaymentId: recurring.id, initiatedByKeyId: null },
+    createdAt: "2026-09-20T00:05:00.000Z",
+    updatedAt: "2026-09-20T00:05:00.000Z",
+  };
+
+  function renderDetail(
+    recurringPayment: typeof recurring,
+    collectionAttempts: PaymentSubscriptionCollectionAttempt[]
+  ) {
+    vi.stubGlobal("fetch", async () => Response.json({ data: { wallets: [source] } }));
+    render(
+      <RecurringPaymentDetailWorkspace
+        recurringPayment={recurringPayment}
+        wallet={source}
+        wallets={[source]}
+        issuedTokensByMint={{}}
+        counterpartyAccounts={[account]}
+        counterpartyLabel="Receiver"
+        collectionAttempts={collectionAttempts}
+        collectionAttemptsTotal={collectionAttempts.length}
+      />,
+      { wrapper }
+    );
+  }
+
+  it("leads with Resume and offers Cancel on a paused schedule, naming its last failure", async () => {
+    renderDetail({ ...recurring, status: "paused", subscriptionId: "psub_test" }, [failedRun]);
+    expect(
+      await screen.findByText(
+        `SDP paused this schedule after its runs kept failing. The last run failed with: ${reason} Nothing runs while it is paused. Fix the cause, then resume it, or cancel it.`
+      )
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Resume schedule" }).getAttribute("data-variant")
+    ).toBe("default");
+    expect(
+      screen.getByRole("button", { name: "Cancel payment" }).getAttribute("data-variant")
+    ).toBe("outline");
+  });
+
+  it("offers no lifecycle action on a canceled schedule that ran", async () => {
+    renderDetail({ ...recurring, status: "canceled", subscriptionId: "psub_test" }, [failedRun]);
+    expect(
+      await screen.findByText("This schedule will not run again. Its past runs keep their record.")
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Resume schedule" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Cancel payment" })).toBeNull();
   });
 });

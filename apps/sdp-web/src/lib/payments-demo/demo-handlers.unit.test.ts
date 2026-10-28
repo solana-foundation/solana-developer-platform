@@ -1,7 +1,7 @@
 import { OFFRAMP_SUPPORT, ONRAMP_SUPPORT } from "@sdp/types/generated/ramp.generated";
 import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
 import { beforeEach, describe, expect, it } from "vitest";
-import { buildWorld, DEMO_TOKENS, demoPathParts } from "./demo-fixtures";
+import { buildWorld, DEMO_TOKENS, demoPathParts, HOUR_MS } from "./demo-fixtures";
 import { demoFlowRead, demoWrite } from "./demo-handlers";
 import type { DemoOp } from "./demo-ops";
 import { DEMO_RAMP_ASSETS, demoRampPairs, isDemoRampRail } from "./demo-ramp-assets";
@@ -534,7 +534,34 @@ describe("schedules", () => {
     expect(act("demo_rp_jane_stipend", "cancel")?.status).toBe(409);
     expect(act("demo_rp_lumen_retainer", "resume")?.status).toBe(409);
     expect(act("demo_rp_northwind_supply", "cancel")?.status).toBe(200);
-    // Canceled before it ever ran, so there is nothing to resume.
     expect(act("demo_rp_northwind_supply", "resume")?.status).toBe(409);
+  });
+
+  it("resumes a paused schedule onto its next period, and never a canceled one that ran", () => {
+    const id = "demo_rp_lumen_retainer";
+    const pausedWorld = () => {
+      const seeded = buildWorld(now, RAMP_PROVIDERS);
+      const schedule = seeded.schedules.find((candidate) => candidate.id === id);
+      if (!schedule) throw new Error(`no demo schedule ${id}`);
+      schedule.status = "paused";
+      return seeded;
+    };
+    const parts = demoPathParts(`/v1/payments/recurring-payments/${id}/resume`);
+    if (!parts) throw new Error("not a demo path");
+    const result = demoWrite("POST", {
+      segments: parts.segments,
+      body: {},
+      world: pausedWorld(),
+      ops: [],
+      now,
+    });
+    if (!result) throw new Error("resume has no demo handler");
+    const resumed = applyDemoOps(pausedWorld(), result.ops, now);
+    expect(result.answer(resumed).status).toBe(200);
+    expect(resumed.schedules.find((candidate) => candidate.id === id)).toMatchObject({
+      status: "active",
+      nextCollectionDueAt: new Date(NOW.getTime() + 720 * HOUR_MS).toISOString(),
+    });
+    expect(refusal(act("demo_rp_jane_stipend", "resume"))).toEqual([409, "conflict"]);
   });
 });
