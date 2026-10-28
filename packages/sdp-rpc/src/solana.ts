@@ -669,10 +669,15 @@ function numericTransactionError(err: TransactionError): TransactionError {
  * @param options.searchTransactionHistory - Search ledger history beyond the recent status cache.
  * @param options.minContextSlot - With history search, the lowest slot the answering node may be
  * at; a node behind it errors instead of answering.
+ * @param options.commitment - With history search, the bank that answers and that
+ * `minContextSlot` is checked against. Agave 4.4 and later honor it; older nodes ignore it and
+ * answer from their processed bank.
  * @param options.retryDelaysMs - Backoff delays between transient-failure retries.
  * @returns Each signature's status, or null where the node has none.
  * @throws MinContextSlotNotReachedError when the response comes from a slot below
  * `minContextSlot`, so an upstream that ignores the option cannot report a landed signature absent.
+ * @throws SdpRpcError `SOLANA_RPC_ERROR` when the response is short a status, which would
+ * otherwise read as absence.
  */
 export async function getSignatureStatuses(
   rpc: SolanaRpc,
@@ -682,6 +687,7 @@ export async function getSignatureStatuses(
     | {
         searchTransactionHistory: true;
         minContextSlot?: Slot;
+        commitment?: Commitment;
         retryDelaysMs?: readonly number[];
       } = {}
 ): Promise<Array<SignatureStatusInfo | null>> {
@@ -695,10 +701,12 @@ export async function getSignatureStatuses(
         ? rpc.getSignatureStatuses(
             signatures,
             // SAFETY: Agave's RpcSignatureStatusConfig accepts minContextSlot (a node behind it
-            // errors instead of answering); kit's config type lags the server and omits it.
+            // errors instead of answering) and, from 4.4, commitment; kit's config type lags the
+            // server and omits both.
             {
               searchTransactionHistory: true,
               minContextSlot: options.minContextSlot,
+              commitment: options.commitment,
             } as Parameters<SolanaRpc["getSignatureStatuses"]>[1]
           )
         : rpc.getSignatureStatuses(signatures)
@@ -711,6 +719,11 @@ export async function getSignatureStatuses(
     response.context.slot < options.minContextSlot
   ) {
     throw new MinContextSlotNotReachedError(response.context.slot, options.minContextSlot);
+  }
+  if (response.value.length !== signatures.length) {
+    throw solanaRpcError(
+      `getSignatureStatuses returned ${response.value.length} statuses for ${signatures.length} signatures`
+    );
   }
 
   return response.value.map((item) =>
@@ -744,8 +757,7 @@ export interface ExpiredUnseenSignature {
  * @param minContextSlot - The slot the height read was answered at.
  * @returns The batch statuses with each re-read status in place.
  * @throws When no node at `minContextSlot` answered (a served `-32016`, or
- * `MinContextSlotNotReachedError` from SDP's own check), or the answer is short a status, which
- * would otherwise read as absence; the caller leaves those rows unjudged.
+ * `MinContextSlotNotReachedError` from SDP's own check); the caller leaves those rows unjudged.
  */
 export async function reReadExpiredStatuses(
   rpc: SolanaRpc,
@@ -760,11 +772,6 @@ export async function reReadExpiredStatuses(
     expired.map(({ signature }) => signature),
     { searchTransactionHistory: true, minContextSlot }
   );
-  if (current.length !== expired.length) {
-    throw solanaRpcError(
-      `getSignatureStatuses returned ${current.length} statuses for ${expired.length} signatures`
-    );
-  }
   for (const [position, { index }] of expired.entries()) {
     reRead[index] = current[position];
   }
