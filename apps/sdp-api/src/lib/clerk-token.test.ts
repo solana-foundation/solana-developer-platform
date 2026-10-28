@@ -159,3 +159,45 @@ describe("Clerk signing key resolution", () => {
     await expect(warmClerkSigningKeys(env)).rejects.toThrow("fetch failed");
   });
 });
+
+describe("Clerk authorized party", () => {
+  async function envFor(environment: Env["ENVIRONMENT"]): Promise<Env> {
+    const { issuer, jwksUrl } = await ensureTestClerkIssuer({ ...testEnv });
+    return {
+      ...testEnv,
+      ENVIRONMENT: environment,
+      FRONTEND_URL: "https://platform.example/some/path",
+      CLERK_ISSUER: issuer,
+      CLERK_JWKS_URL: jwksUrl,
+    };
+  }
+
+  it("accepts a production token issued to the dashboard origin", async () => {
+    const env = await envFor("production");
+    const token = await signTestClerkClaims(
+      { sub: "user_dashboard", azp: "https://platform.example" },
+      300
+    );
+
+    await expect(verifyClerkJwt(token, env)).resolves.toMatchObject({ sub: "user_dashboard" });
+  });
+
+  it.each([
+    ["no azp", { sub: "user_no_azp" }],
+    ["another origin's azp", { sub: "user_foreign_azp", azp: "https://evil.example" }],
+  ])("refuses a production token with %s", async (_label, claims) => {
+    const env = await envFor("production");
+    const token = await signTestClerkClaims(claims, 300);
+
+    await expect(verifyClerkJwt(token, env)).rejects.toThrow(
+      "Clerk session was not issued to the dashboard"
+    );
+  });
+
+  it("accepts a development token with no azp", async () => {
+    const env = await envFor("development");
+    const token = await signTestClerkClaims({ sub: "user_dev_no_azp" }, 300);
+
+    await expect(verifyClerkJwt(token, env)).resolves.toMatchObject({ sub: "user_dev_no_azp" });
+  });
+});

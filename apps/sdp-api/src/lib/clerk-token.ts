@@ -164,7 +164,32 @@ function resolveClerkConfig(env: Env) {
   return {
     issuer,
     jwksUrl: resolvedJwksUrl,
+    authorizedParty: resolveClerkAuthorizedParty(env),
   };
+}
+
+/**
+ * The dashboard origin a production session token must name in `azp`, so a
+ * token minted by any other page on the Clerk instance's domain is refused.
+ * Development deployments accept every origin: their PR previews run on
+ * per-deployment Vercel URLs against a separate Clerk instance.
+ */
+function resolveClerkAuthorizedParty(env: Env): string | null {
+  if (env.ENVIRONMENT !== "production") {
+    return null;
+  }
+  const frontendUrl = env.FRONTEND_URL?.trim();
+  if (!frontendUrl || !URL.canParse(frontendUrl)) {
+    throw internalError("FRONTEND_URL must be the dashboard URL for Clerk auth in production");
+  }
+  return new URL(frontendUrl).origin;
+}
+
+/** Fails boot on Clerk configuration every session token would be refused under. */
+export function assertClerkConfigured(env: Env): void {
+  if (env.CLERK_ISSUER?.trim()) {
+    resolveClerkConfig(env);
+  }
 }
 
 /**
@@ -190,6 +215,10 @@ export async function verifyClerkJwt(token: string, env: Env): Promise<ClerkJwtP
     issuer: config.issuer,
     clockTolerance: CLERK_CLOCK_TOLERANCE_SECONDS,
   });
+
+  if (config.authorizedParty !== null && payload.azp !== config.authorizedParty) {
+    throw new Error("Clerk session was not issued to the dashboard");
+  }
 
   return payload as ClerkJwtPayload;
 }
