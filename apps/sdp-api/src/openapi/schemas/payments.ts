@@ -4,6 +4,8 @@ import {
   paymentSubscriptionCollectionAttemptMetadataSchema,
   RAMP_DELIVERY_MISMATCH_REASONS,
   RAMPS_MEMO_LIMITS,
+  RECURRING_PAYMENT_COLLECTION_CONFIG,
+  RECURRING_PAYMENT_PAUSE_REASONS,
 } from "@sdp/types/payments";
 import { PERSISTED_RAMP_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types/provider-access";
 import { UNIFIED_TRANSACTION_MODULE_CONTRACTS } from "@sdp/types/unified-transactions";
@@ -857,6 +859,13 @@ const paymentRecurringPaymentSchema = z
       .nullable()
       .openapi({ description: "Solana signature for subscription authorization." }),
     status: paymentRecurringPaymentStatusSchema,
+    pausedReason: z
+      .enum(RECURRING_PAYMENT_PAUSE_REASONS)
+      .nullable()
+      .openapi({
+        description: `Why SDP paused the recurring payment, set exactly while \`status\` is \`paused\`: \`custody_policy_refused\` when the custody provider's policy refused to sign a collection, \`failed_attempts\` when one due period failed ${RECURRING_PAYMENT_COLLECTION_CONFIG.maxFailedAttemptsBeforePause} times. Resume clears it.`,
+        example: null,
+      }),
     metadataUri: z.string().nullable().openapi({ description: "Optional plan metadata URI." }),
     createdBy: z.string().nullable().openapi({ description: "Creator user ID or API key ID." }),
     createdAt: isoDateTimeSchema,

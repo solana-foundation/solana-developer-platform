@@ -1193,7 +1193,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}/cancel",
-            "description": "Permanently stops an active or paused SDP-custody recurring payment by submitting the Solana subscriptions cancellation transaction. A canceled recurring payment never collects or resumes again. When no other live recurring payment uses the same wallet and token, the token approval it relied on is revoked right after the cancel; otherwise the approval stays for the schedules that still use it. A collection already in processing may still settle independently."
+            "description": "Permanently stops an active or paused SDP-custody recurring payment by submitting the Solana subscriptions cancellation transaction. A canceled recurring payment never collects or resumes again. When no other live recurring payment uses the same wallet and token, the token approval it relied on is revoked right after the cancel; otherwise the approval stays for the schedules that still use it. A collection already in processing settles independently: if it lands before that revoke it settles as collected, and if the revoke lands first it fails on chain and is recorded as failed."
           }
         },
         {
@@ -1409,7 +1409,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/payments/subscriptions/{{subscriptionId}}/prepare-resume",
-            "description": "Prepares the subscriber-signed Solana transaction that resumes a canceled subscription before revocation. The transaction must still be signed and submitted by the client.",
+            "description": "Prepares the subscriber-signed Solana transaction that resumes a canceled subscription before revocation. The transaction must still be signed and submitted by the client. A subscription that belongs to a recurring payment answers 409: a recurring payment's cancel is final.",
             "body": {
               "mode": "raw",
               "raw": "{}",
@@ -1433,7 +1433,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/payments/subscriptions/{{subscriptionId}}/prepare-collection",
-            "description": "Prepares the collector-signed Solana subscriptions transfer transaction for an active subscription. The transaction must still be signed and submitted by the collector/fee-payer flow.",
+            "description": "Prepares the collector-signed Solana subscriptions transfer transaction for an active subscription. The transaction must still be signed and submitted by the collector/fee-payer flow. A subscription that belongs to a recurring payment answers 409: SDP collects those through the recurring payment.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"receiverTokenAccount\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\"\n}",

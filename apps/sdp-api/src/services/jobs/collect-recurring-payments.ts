@@ -259,7 +259,7 @@ async function recoverLifecycleRow(
     }
     if (isCancelingRecurringPaymentStatus(row.status)) {
       // An exit: never refused, for deleted and unentitled organizations alike.
-      await cancelRecurringPayment(input);
+      await cancelRecurringPayment({ ...input, releaseAuthority: "inline" });
       return "ok";
     }
     throw internalError(`Unhandled lifecycle status ${row.status}`);

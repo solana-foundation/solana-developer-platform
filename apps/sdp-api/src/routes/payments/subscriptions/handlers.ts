@@ -28,7 +28,7 @@ import type {
 } from "@/db/repositories/payment-subscriptions.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
-import { AppError, badRequest, badRequestParams, badRequestQuery } from "@/lib/errors";
+import { AppError, badRequest, badRequestParams, badRequestQuery, conflict } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { getAuthorized } from "@/middleware/authorize";
 import type { ValidatedBodyContext } from "@/middleware/validate";
@@ -359,6 +359,31 @@ export const getSubscription = async (c: AppContext) => {
   return success(c, response);
 };
 
+/**
+ * Refuses a standalone-route transaction for a subscription a recurring payment owns: SDP signs
+ * for those, and a cancel there is terminal (HOO-2339), so a prepared resume or collection would
+ * bring back or charge a schedule SDP stopped.
+ *
+ * @param c - The request.
+ * @param subscription - The subscription the route prepares a transaction for.
+ * @throws AppError `CONFLICT` when a recurring payment owns it.
+ */
+async function assertStandaloneSubscription(
+  c: AppContext,
+  subscription: PaymentSubscriptionRow
+): Promise<void> {
+  const owned = await getPaymentSubscriptionsRepository(c).isRecurringPaymentSubscription({
+    subscriptionId: subscription.id,
+    organizationId: subscription.organization_id,
+    projectId: subscription.project_id,
+  });
+  if (owned) {
+    throw conflict(
+      "This subscription belongs to a recurring payment. Manage it through /v1/payments/recurring-payments instead."
+    );
+  }
+}
+
 async function prepareSubscriptionLifecycle(
   c: ValidatedBodyContext<typeof prepareSubscriptionLifecycleSchema>,
   operation: "cancel" | "resume"
@@ -370,6 +395,9 @@ async function prepareSubscriptionLifecycle(
   }
 
   const { plan, subscription } = await getSubscriptionWithPlan(c, params.data.subscriptionId);
+  if (operation === "resume") {
+    await assertStandaloneSubscription(c, subscription);
+  }
   const { planPda } = await derivePlanAddresses(plan);
   const subscriber = assertValidAddress(subscription.subscriber_address, "subscriberAddress");
   const [derivedSubscriptionPda] = await findSubscriptionDelegationPda({ planPda, subscriber });
@@ -425,6 +453,7 @@ export const prepareSubscriptionCollection = async (
   const body = c.req.valid("json");
 
   const { plan, subscription } = await getSubscriptionWithPlan(c, params.data.subscriptionId);
+  await assertStandaloneSubscription(c, subscription);
   if (subscription.status !== "active") {
     throw badRequest("Subscription must be active before collection");
   }

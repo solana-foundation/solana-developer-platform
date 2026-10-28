@@ -47,9 +47,12 @@ import {
  * standalone subscription after its billing period, since its subscriber can still resume it), and
  * finishes any revoke a cancel left. A revoke closes the PDA, refunding its rent to whoever paid it.
  *
- * The revoke is an exit (`recurring.revoke_authority`), signed with no money principal: no API key
- * or member is asked, so revoking the key that set a schedule up never stops its cleanup, and an
- * organization's status never refuses it (ADR 0002).
+ * The revoke is an exit (`recurring.revoke_authority`); an organization's status never refuses it
+ * (ADR 0002). The sweep signs it with no money principal, so no API key or member is asked and
+ * revoking the key that set a schedule up never stops its cleanup. The inline revoke after a cancel
+ * inherits the request's principal and is admitted as an exit through `decidePrincipal`: the
+ * credential must still be live and hold the wallet in its scope, and a refusal leaves the revoke
+ * `failed` for the sweep.
  */
 
 const MOVEMENT = "recurring.revoke_authority";

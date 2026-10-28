@@ -401,6 +401,7 @@ function applySchedule(world: DemoWorld, op: DemoOpOf<"schedule">): void {
     subscriptionAuthorityAddress: null,
     authorizationSignature: null,
     status: "pending_activation",
+    pausedReason: null,
     metadataUri: null,
     createdBy: CREATED_BY,
     createdAt: iso(op.at),
@@ -481,12 +482,14 @@ function applyScheduleAction(world: DemoWorld, op: DemoOpOf<"schedule-action">):
         isRecurringPaymentLifecycleClaimableStatus("cancel", schedule.status)
       ) {
         schedule.status = "canceled";
+        schedule.pausedReason = null;
         schedule.nextCollectionDueAt = null;
       }
       break;
     case "resume":
       if (isRecurringPaymentLifecycleClaimableStatus("resume", schedule.status)) {
         schedule.status = "active";
+        schedule.pausedReason = null;
         schedule.nextCollectionDueAt = iso(op.at + schedule.periodHours * HOUR_MS);
       }
       break;

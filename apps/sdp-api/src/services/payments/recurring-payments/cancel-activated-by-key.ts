@@ -67,6 +67,9 @@ export async function cancelRecurringPaymentsActivatedByKey(
         // Revocation cancels under no request key, as the cron does. It signs as
         // the person revoking (requireHumanActor), whom wallet scope never narrows.
         idempotencyKey: null,
+        // One request cancels every schedule the key set up; the sweep revokes
+        // the authorities they leave idle on its next run.
+        releaseAuthority: "sweep",
       });
       result.canceled.push(recurringPayment.id);
     } catch (error) {

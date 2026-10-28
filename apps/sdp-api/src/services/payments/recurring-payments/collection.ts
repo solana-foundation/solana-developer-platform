@@ -1,4 +1,3 @@
-import { SigningError } from "@sdp/custody/signing";
 import {
   firstRecurringPaymentDueAfter,
   hasRecurringPaymentAdvancedPastDueAt,
@@ -15,9 +14,9 @@ import {
   hasRecoverableRecurringPaymentCollection,
   isCollectableRecurringPaymentStatus,
   isSuccessfulPaymentTransferStatus,
-  type PaymentSubscriptionCollectionAttemptInitialStatus,
   type PaymentSubscriptionCollectionAttemptMetadata,
   RECURRING_PAYMENT_COLLECTION_CONFIG,
+  type RecurringPaymentPauseReason,
 } from "@sdp/types/payments";
 import {
   AccountRole,
@@ -611,9 +610,6 @@ async function lockOpenCollectionCycle(
   return activeAttempt === null;
 }
 
-/** Why SDP paused a schedule (HOO-2340). */
-type RecurringPaymentPauseReason = "custody_policy_refused" | "failed_attempts";
-
 interface RecurringPaymentPause {
   reason: RecurringPaymentPauseReason;
   /** Failed attempts at the due period since the schedule last resumed, this one included. */
@@ -626,8 +622,9 @@ interface RecurringPaymentPause {
  * deterministic, or once the due period has failed
  * `RECURRING_PAYMENT_COLLECTION_CONFIG.maxFailedAttemptsBeforePause` times since the schedule last
  * resumed from a pause. The count is derived from the period's failed attempts, and the pause is a
- * compare-and-set from `active`, so a schedule canceled, being updated or already paused is left
- * alone. The cron selects only active schedules, so a paused one stops retrying until resumed.
+ * compare-and-set from `active` that records the reason, so a schedule canceled, being updated or
+ * already paused is left alone. The cron selects only active schedules, so a paused one stops
+ * retrying until resumed.
  *
  * @param tx - The failure's transaction.
  * @param input.organizationId - Tenant organization.
@@ -651,65 +648,27 @@ async function pauseFailingRecurringPayment(
     pausedAt: string;
   }
 ): Promise<RecurringPaymentPause | null> {
-  const counted = await tx
-    .prepare(
-      `SELECT count(*)::int AS failed
-         FROM payment_subscription_collection_attempts attempt
-        WHERE attempt.organization_id = ?
-          AND attempt.project_id = ?
-          AND attempt.subscription_id = ?
-          AND attempt.due_at = ?
-          AND attempt.status = ANY(?::text[])
-          AND attempt.created_at > COALESCE((
-            SELECT max(resume.updated_at)
-              FROM payment_recurring_payment_lifecycle_attempts resume
-             WHERE resume.recurring_payment_id = ?
-               AND resume.organization_id = ?
-               AND resume.project_id = ?
-               AND resume.operation = 'resume'
-               AND resume.status = 'confirmed'
-               AND resume.metadata->>'resumedFrom' = 'paused'), '')`
-    )
-    .bind(
-      input.organizationId,
-      input.projectId,
-      input.subscriptionId,
-      input.dueAt,
-      [...FAILED_COLLECTION_ATTEMPT_STATUSES],
-      input.recurringPaymentId,
-      input.organizationId,
-      input.projectId
-    )
-    .first<{ failed: number }>();
-  if (counted === null) {
-    throw internalError("Failed to count failed recurring payment collection attempts");
-  }
+  const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
+  const failedAttempts = await recurringRepo.countFailedCollectionAttemptsSinceResume(input);
   const policyRefused =
-    input.error instanceof SigningError && input.error.code === "POLICY_REFUSED";
+    input.error instanceof AppError && input.error.code === "CUSTODY_POLICY_REFUSED";
   if (
     !policyRefused &&
-    counted.failed < RECURRING_PAYMENT_COLLECTION_CONFIG.maxFailedAttemptsBeforePause
+    failedAttempts < RECURRING_PAYMENT_COLLECTION_CONFIG.maxFailedAttemptsBeforePause
   ) {
     return null;
   }
-  const paused = await tx
-    .prepare(
-      `UPDATE payment_recurring_payments
-          SET status = 'paused',
-              updated_at = ?
-        WHERE id = ?
-          AND organization_id = ?
-          AND project_id = ?
-          AND status = 'active'
-      RETURNING id`
-    )
-    .bind(input.pausedAt, input.recurringPaymentId, input.organizationId, input.projectId)
-    .first<{ id: string }>();
-  if (paused === null) return null;
-  return {
-    reason: policyRefused ? "custody_policy_refused" : "failed_attempts",
-    failedAttempts: counted.failed,
-  };
+  const reason: RecurringPaymentPauseReason = policyRefused
+    ? "custody_policy_refused"
+    : "failed_attempts";
+  const paused = await recurringRepo.pauseRecurringPayment({
+    recurringPaymentId: input.recurringPaymentId,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    reason,
+    updatedAt: input.pausedAt,
+  });
+  return paused === null ? null : { reason, failedAttempts };
 }
 
 /**
@@ -740,58 +699,6 @@ function logRecurringPaymentPaused(
     subscription_id: context.subscriptionId,
     attempt_id: context.attemptId,
     due_at: context.dueAt,
-  });
-}
-
-async function createCollectionAttemptUnderRecurringLock(input: {
-  env: Env;
-  organizationId: string;
-  projectId: string;
-  recurringPayment: RecurringPaymentCollectionCycleRow;
-  attemptedAt: string;
-  status: PaymentSubscriptionCollectionAttemptInitialStatus;
-  error: string | null;
-  metadata: PaymentSubscriptionCollectionAttemptMetadata;
-  enforceCooldown: boolean;
-  /** Run in the same transaction once the attempt is written; null when none was. */
-  afterCreate: (
-    tx: DatabaseExecutor,
-    attempt: PaymentSubscriptionCollectionAttemptRow
-  ) => Promise<RecurringPaymentPause | null>;
-}): Promise<{
-  attempt: PaymentSubscriptionCollectionAttemptRow;
-  pause: RecurringPaymentPause | null;
-} | null> {
-  const subscriptionId = input.recurringPayment.subscription_id;
-  const dueAt = input.recurringPayment.next_collection_due_at;
-
-  return getDb(input.env).transaction(async (tx) => {
-    if (!(await lockOpenCollectionCycle(tx, input))) return null;
-
-    const subscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
-    if (input.enforceCooldown && (await hasRecentCollectionFailure(subscriptionsRepo, input))) {
-      return null;
-    }
-
-    const attempt = await subscriptionsRepo.createCollectionAttempt({
-      id: `psca_${crypto.randomUUID()}`,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      subscriptionId,
-      transferId: null,
-      token: input.recurringPayment.token,
-      amount: input.recurringPayment.amount,
-      dueAt,
-      attemptedAt: input.attemptedAt,
-      status: input.status,
-      signature: null,
-      error: input.error,
-      metadata: input.metadata,
-      createdAt: input.attemptedAt,
-      updatedAt: input.attemptedAt,
-    });
-    if (!attempt) return null;
-    return { attempt, pause: await input.afterCreate(tx, attempt) };
   });
 }
 
@@ -999,6 +906,20 @@ export async function skipRefusedRecurringCollectionPeriod(input: {
   });
 }
 
+/**
+ * Journals an automated collection that failed before it claimed a transfer (an unresolved
+ * source wallet, a wallet that may not sign): under the lock collectors take before they sign,
+ * one transaction writes the failed attempt and, when the failure means retrying cannot help,
+ * pauses the schedule. Nothing is written when the cycle moved on, an attempt holds it, or a
+ * failure inside the retry window already recorded it.
+ *
+ * @param input.env - Runtime environment.
+ * @param input.organizationId - Tenant organization.
+ * @param input.projectId - Tenant project.
+ * @param input.recurringPayment - The due schedule.
+ * @param input.initiatedByKeyId - The key that started it, or null for the cron.
+ * @param input.error - The failure.
+ */
 export async function journalAutomatedCollectionFailure(input: {
   env: Env;
   organizationId: string;
@@ -1008,38 +929,57 @@ export async function journalAutomatedCollectionFailure(input: {
   error: Error;
 }): Promise<void> {
   const attemptedAt = new Date().toISOString();
-  const message = recurringPaymentErrorMessage(input.error);
-  const journaled = await createCollectionAttemptUnderRecurringLock({
-    ...input,
-    attemptedAt,
-    status: "failed",
-    error: message,
-    metadata: retryCollectionMetadata({
-      metadata: initialCollectionMetadata({
-        recurringPaymentId: input.recurringPayment.id,
-        source: "automated",
-        initiatedByKeyId: input.initiatedByKeyId,
-      }),
+  const { recurringPayment } = input;
+  const journaled = await getDb(input.env).transaction(async (tx) => {
+    if (!(await lockOpenCollectionCycle(tx, { ...input, attemptedAt }))) return null;
+
+    const subscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
+    if (await hasRecentCollectionFailure(subscriptionsRepo, { ...input, attemptedAt })) {
+      return null;
+    }
+
+    const attempt = await subscriptionsRepo.createCollectionAttempt({
+      id: `psca_${crypto.randomUUID()}`,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      subscriptionId: recurringPayment.subscription_id,
       transferId: null,
-      ...collectionRetryMetadata(input.error),
-    }),
-    enforceCooldown: true,
-    afterCreate: (tx, attempt) =>
-      pauseFailingRecurringPayment(tx, {
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        recurringPaymentId: input.recurringPayment.id,
-        subscriptionId: attempt.subscription_id,
-        dueAt: attempt.due_at,
-        error: input.error,
-        pausedAt: attemptedAt,
+      token: recurringPayment.token,
+      amount: recurringPayment.amount,
+      dueAt: recurringPayment.next_collection_due_at,
+      attemptedAt,
+      status: "failed",
+      signature: null,
+      error: recurringPaymentErrorMessage(input.error),
+      metadata: retryCollectionMetadata({
+        metadata: initialCollectionMetadata({
+          recurringPaymentId: recurringPayment.id,
+          source: "automated",
+          initiatedByKeyId: input.initiatedByKeyId,
+        }),
+        transferId: null,
+        ...collectionRetryMetadata(input.error),
       }),
+      createdAt: attemptedAt,
+      updatedAt: attemptedAt,
+    });
+    if (!attempt) return null;
+    const pause = await pauseFailingRecurringPayment(tx, {
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPaymentId: recurringPayment.id,
+      subscriptionId: attempt.subscription_id,
+      dueAt: attempt.due_at,
+      error: input.error,
+      pausedAt: attemptedAt,
+    });
+    return { attempt, pause };
   });
   if (journaled !== null) {
     logRecurringPaymentPaused(journaled.pause, {
       organizationId: input.organizationId,
       projectId: input.projectId,
-      recurringPaymentId: input.recurringPayment.id,
+      recurringPaymentId: recurringPayment.id,
       subscriptionId: journaled.attempt.subscription_id,
       attemptId: journaled.attempt.id,
       dueAt: journaled.attempt.due_at,

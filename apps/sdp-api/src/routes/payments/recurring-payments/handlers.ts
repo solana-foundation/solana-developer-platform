@@ -91,6 +91,7 @@ function mapRecurringPayment(row: PaymentRecurringPaymentRow): PaymentRecurringP
     subscriptionAuthorityAddress: row.subscription_authority_address,
     authorizationSignature: row.authorization_signature,
     status: row.status,
+    pausedReason: row.paused_reason,
     metadataUri: row.metadata_uri,
     createdBy: row.created_by,
     createdAt: row.created_at,
@@ -423,6 +424,7 @@ async function mutateRecurringPaymentLifecycle(c: AppContext, operation: "cancel
           sourceWallet,
           recurringPayment,
           idempotencyKey: requiredIdempotency(c).key,
+          releaseAuthority: "inline",
         })
       : await resumeRecurringPaymentRecord({
           env: c.env,

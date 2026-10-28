@@ -1100,6 +1100,7 @@ function buildSchedule(spec: ScheduleSpec, world: WorldBase, clock: Clock): Sche
       subscriptionAuthorityAddress: onchain(demoAddress(`subscription-authority:${spec.key}`)),
       authorizationSignature: onchain(demoSignature(`authorization:${spec.key}`)),
       status: spec.status,
+      pausedReason: null,
       metadataUri: null,
       createdBy: CREATED_BY,
       createdAt: clock.at(spec.createdAt),

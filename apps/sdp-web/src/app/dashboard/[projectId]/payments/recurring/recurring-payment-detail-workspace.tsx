@@ -6,6 +6,7 @@ import {
   type PaymentRecurringPaymentStatus,
   type PaymentSubscriptionCollectionAttempt,
   RECURRING_PAYMENT_COLLECTION_CONFIG,
+  type RecurringPaymentPauseReason,
 } from "@sdp/types/payments";
 import { Button } from "@sdp/ui/button";
 import { ArrowUpRightIcon, Loader2Icon } from "lucide-react";
@@ -288,19 +289,37 @@ function walletBand({
   return null;
 }
 
+/** Why SDP paused the schedule, in the words for its reason. */
+function pausedBody(reason: RecurringPaymentPauseReason | null, t: Translate): string {
+  switch (reason) {
+    case "custody_policy_refused":
+      return t("DashboardPayments.recurring.statePausedPolicyRefusedBody");
+    case "failed_attempts":
+      return t("DashboardPayments.recurring.statePausedFailedAttemptsBody", {
+        count: RECURRING_PAYMENT_COLLECTION_CONFIG.maxFailedAttemptsBeforePause,
+      });
+    case null:
+      return t("DashboardPayments.recurring.statePausedBody");
+    default: {
+      const unreachable: never = reason;
+      throw new Error(`Unhandled pause reason ${String(unreachable)}`);
+    }
+  }
+}
+
 /** Otherwise the status itself, in the design's words for it. */
 function statusBand({
   recurringPayment,
   lastRunFailed,
-  pauseReason,
+  lastRunError,
   scheduleLabel,
   locale,
   t,
 }: {
   recurringPayment: PaymentRecurringPayment;
   lastRunFailed: boolean;
-  /** The last failed run's error while paused; null when none is shown. */
-  pauseReason: string | null;
+  /** The last failed run's error while paused, shown under the pause reason; null when none. */
+  lastRunError: string | null;
   scheduleLabel: string;
   locale: string;
   t: Translate;
@@ -333,10 +352,16 @@ function statusBand({
       return {
         tone: "warn",
         state,
-        body:
-          pauseReason === null
-            ? t("DashboardPayments.recurring.statePausedBody")
-            : t("DashboardPayments.recurring.statePausedReasonBody", { reason: pauseReason }),
+        body: (
+          <>
+            {pausedBody(recurringPayment.pausedReason, t)}
+            {lastRunError === null ? null : (
+              <span className="mt-1 block text-secondary">
+                {t("DashboardPayments.recurring.statePausedLastRunError", { error: lastRunError })}
+              </span>
+            )}
+          </>
+        ),
       };
     case "canceled":
       return {
@@ -724,8 +749,8 @@ export function RecurringPaymentDetailWorkspace({
   const scheduleLabel = formatPeriodHours(recurringPayment.periodHours, t);
   const lastRun = latestAttempt(collectionAttempts);
   const lastRunFailed = status === "active" && lastRun?.status === "failed";
-  // SDP pauses a schedule on a failed run, so the latest run says why.
-  const pauseReason =
+  // SDP pauses a schedule on a failed run, so the latest run's error supports the reason.
+  const lastRunError =
     status === "paused" && lastRun?.status === "failed" && lastRun.error !== null
       ? lastRun.error
       : null;
@@ -785,7 +810,7 @@ export function RecurringPaymentDetailWorkspace({
           t,
         })
       : null) ??
-    statusBand({ recurringPayment, lastRunFailed, pauseReason, scheduleLabel, locale, t });
+    statusBand({ recurringPayment, lastRunFailed, lastRunError, scheduleLabel, locale, t });
   const canEdit = canWrite && isEditable && !controlsDisabled && !editing;
 
   return (

@@ -795,6 +795,18 @@ export const PAYMENT_RECURRING_PAYMENT_STATUSES = [
 ] as const;
 export type PaymentRecurringPaymentStatus = (typeof PAYMENT_RECURRING_PAYMENT_STATUSES)[number];
 
+/**
+ * Why SDP paused a recurring payment (HOO-2340): the custody provider's policy refused to sign a
+ * collection, or one due period failed
+ * {@link RECURRING_PAYMENT_COLLECTION_CONFIG.maxFailedAttemptsBeforePause} times. Migration 0184
+ * checks the column against these and keeps it set exactly while the row is `paused`.
+ */
+export const RECURRING_PAYMENT_PAUSE_REASONS = [
+  "custody_policy_refused",
+  "failed_attempts",
+] as const;
+export type RecurringPaymentPauseReason = (typeof RECURRING_PAYMENT_PAUSE_REASONS)[number];
+
 export const PAYMENT_RECURRING_PAYMENT_ATTEMPT_STATUSES = [
   "processing",
   "confirmed",
@@ -962,14 +974,19 @@ export const SUBSCRIPTION_AUTHORITY_REVOCATION_HOLDING_STATUSES = [
   "processing",
 ] as const satisfies readonly SubscriptionAuthorityRevocationStatus[];
 /**
- * A recurring payment in these no longer needs its authority once its last
- * billing period is over; every other status does, or may again.
+ * A recurring payment in these no longer needs its authority, at once: a
+ * cancel is terminal (HOO-2339) and nothing resumes an expired schedule. Every
+ * other status needs it, or may again; `paused` keeps it for its resume.
  */
 export const RECURRING_PAYMENT_STATUSES_RELEASING_AUTHORITY = [
   "canceled",
   "expired",
 ] as const satisfies readonly PaymentRecurringPaymentStatus[];
-/** A subscription in these no longer needs its authority once its last billing period is over. */
+/**
+ * A subscription in these no longer needs its authority: a recurring payment's at once, a
+ * standalone one once its last billing period is over, since its subscriber can still resume it
+ * until then.
+ */
 export const PAYMENT_SUBSCRIPTION_STATUSES_RELEASING_AUTHORITY = [
   "canceled",
   "expired",
@@ -1216,6 +1233,8 @@ export interface PaymentRecurringPayment {
   subscriptionAuthorityAddress: string | null;
   authorizationSignature: string | null;
   status: PaymentRecurringPaymentStatus;
+  /** Why SDP paused it; set exactly while `status` is `paused`. */
+  pausedReason: RecurringPaymentPauseReason | null;
   metadataUri: string | null;
   createdBy: string | null;
   createdAt: string;

@@ -7,8 +7,19 @@ import type {
   PaymentRecurringPaymentStatus,
   PaymentRecurringPaymentUpdateAttemptMode,
   PaymentRecurringPaymentUpdateAttemptStage,
+  RecurringPaymentLifecycleClaimableStatus,
+  RecurringPaymentPauseReason,
   RecurringPaymentStatusWithRecoverableCollection,
 } from "@sdp/types/payments";
+
+/**
+ * The metadata a resume attempt records (HOO-2340): it brought the schedule back from a pause, so
+ * the failures that count toward the next pause start after it
+ * (`countFailedCollectionAttemptsSinceResume` filters on `resumedFrom`).
+ */
+export const RECURRING_PAYMENT_RESUME_ATTEMPT_METADATA = {
+  resumedFrom: "paused",
+} as const satisfies Record<"resumedFrom", PaymentRecurringPaymentStatus>;
 
 export interface PaymentRecurringPaymentRow {
   id: string;
@@ -35,6 +46,7 @@ export interface PaymentRecurringPaymentRow {
   subscription_authority_address: string | null;
   authorization_signature: string | null;
   status: PaymentRecurringPaymentStatus;
+  paused_reason: RecurringPaymentPauseReason | null;
   metadata_uri: string | null;
   created_by: string | null;
   created_at: string;
@@ -251,15 +263,50 @@ export type RecurringPaymentActivator =
   | { apiKeyId: null; userId: string };
 
 /**
- * A cancel's claim: a running or paused schedule, or a `canceling` one last touched at or before
- * `staleBefore`, moves to `canceling`.
+ * A cancel's claim, a compare-and-set into `canceling`: from `claimedFrom`, the status the caller
+ * read (running or paused), or, when it is null, a `canceling` claim last touched at or before
+ * `staleBefore`, which this takes over. A lost race matches nothing. The claim clears the pause
+ * reason, which only a paused row carries.
  */
 export interface ClaimPaymentRecurringPaymentCancelInput {
   recurringPaymentId: string;
   organizationId: string;
   projectId: string;
+  claimedFrom: RecurringPaymentLifecycleClaimableStatus | null;
   updatedAt: string;
   staleBefore: string;
+}
+
+/**
+ * A cancel that definitely failed puts the schedule back from `canceling` to the status it claimed
+ * it from, with the pause reason it had when that was `paused`.
+ */
+export type ReleasePaymentRecurringPaymentCancelClaimInput = {
+  recurringPaymentId: string;
+  organizationId: string;
+  projectId: string;
+  updatedAt: string;
+} & (
+  | { status: "active"; pausedReason: null }
+  | { status: "paused"; pausedReason: RecurringPaymentPauseReason }
+);
+
+/** A collection failure's pause (HOO-2340): `active` to `paused` under compare-and-set. */
+export interface PauseRecurringPaymentInput {
+  recurringPaymentId: string;
+  organizationId: string;
+  projectId: string;
+  reason: RecurringPaymentPauseReason;
+  updatedAt: string;
+}
+
+/** The failed attempts at one due period since the schedule last resumed from a pause. */
+export interface CountFailedCollectionAttemptsSinceResumeInput {
+  recurringPaymentId: string;
+  organizationId: string;
+  projectId: string;
+  subscriptionId: string;
+  dueAt: string;
 }
 
 export interface ClaimPaymentRecurringPaymentUpdateInput {
@@ -285,8 +332,8 @@ export interface UpdatePaymentRecurringPaymentLifecycleInput {
 }
 
 /**
- * A paused schedule's resume (HOO-2340): `paused` to `active` under compare-and-set, recording who
- * resumed it as its activator and the due date it collects next.
+ * A paused schedule's resume (HOO-2340): `paused` to `active` under compare-and-set, clearing its
+ * pause reason and recording who resumed it as its activator and the due date it collects next.
  */
 export interface ResumePausedRecurringPaymentInput {
   recurringPaymentId: string;
@@ -621,6 +668,17 @@ export interface PaymentRecurringPaymentsRepository {
   claimRecurringPaymentCancel(
     input: ClaimPaymentRecurringPaymentCancelInput
   ): Promise<PaymentRecurringPaymentRow | null>;
+  /** Null when the schedule is no longer `canceling`. */
+  releaseRecurringPaymentCancelClaim(
+    input: ReleasePaymentRecurringPaymentCancelClaimInput
+  ): Promise<PaymentRecurringPaymentRow | null>;
+  /** Null when the schedule is no longer `active`. */
+  pauseRecurringPayment(
+    input: PauseRecurringPaymentInput
+  ): Promise<PaymentRecurringPaymentRow | null>;
+  countFailedCollectionAttemptsSinceResume(
+    input: CountFailedCollectionAttemptsSinceResumeInput
+  ): Promise<number>;
   claimRecurringPaymentUpdate(
     input: ClaimPaymentRecurringPaymentUpdateInput
   ): Promise<PaymentRecurringPaymentRow | null>;

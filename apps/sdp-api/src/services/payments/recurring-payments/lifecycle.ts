@@ -9,22 +9,26 @@ import { createClusterRpc } from "@sdp/rpc/factory";
 import { assertValidAddress } from "@sdp/solana/address";
 import {
   IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
+  isCanceledRecurringPaymentStatus,
   isPendingActivationRecurringPaymentStatus,
   isRecurringPaymentLifecycleClaimableStatus,
   type PaymentRecurringPaymentLifecycleAttemptStage,
-  type PaymentRecurringPaymentStatus,
   RECURRING_PAYMENT_CANCEL_PROCESSING_STATUS,
   RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS,
+  RECURRING_PAYMENT_PAUSE_REASONS,
+  type RecurringPaymentLifecycleClaimableStatus,
+  type RecurringPaymentPauseReason,
 } from "@sdp/types/payments";
 import type { Address, MaybeAccount, Signature } from "@solana/kit";
 import type { SubscriptionDelegation } from "@solana/subscriptions";
 import * as subscriptionsProgram from "@solana/subscriptions";
 import { z } from "zod";
 import { getDb } from "@/db/client";
-import type {
-  PaymentRecurringPaymentLifecycleAttemptRow,
-  PaymentRecurringPaymentRow,
-  PaymentRecurringPaymentsRepository,
+import {
+  type PaymentRecurringPaymentLifecycleAttemptRow,
+  type PaymentRecurringPaymentRow,
+  type PaymentRecurringPaymentsRepository,
+  RECURRING_PAYMENT_RESUME_ATTEMPT_METADATA,
 } from "@/db/repositories/payment-recurring-payments.repository";
 import { createPostgresPaymentRecurringPaymentsRepository } from "@/db/repositories/payment-recurring-payments.repository.postgres";
 import type { PaymentSubscriptionRow } from "@/db/repositories/payment-subscriptions.repository";
@@ -37,6 +41,7 @@ import { badRequest, conflict, internalError, notFound } from "@/lib/errors";
 import { currentMandateActivator } from "@/lib/money-principal";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
+import { logEvent } from "@/runtime/money-path-events";
 import { createSigningService } from "@/services/domain/signing.service";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import { isDefiniteSubmissionError } from "@/services/sponsorship-submission";
@@ -54,6 +59,7 @@ import {
   ResumedStepUnsettledError,
   readRecurringPaymentStep,
   recurringPaymentErrorMessage,
+  refuseWhileSubscriptionAuthorityRevokes,
   type SubscriptionStep,
   savedStepSend,
   sendSubscriptionInstructions,
@@ -65,13 +71,27 @@ const CANCEL_FAILED_MESSAGE = "Recurring payment cancellation failed on-chain";
 
 /**
  * What a cancel attempt records about its claim (HOO-2340): the status it claimed the schedule
- * from, so a cancel that definitely failed puts a paused schedule back to paused and a running one
- * back to active.
+ * from and, for a paused one, its pause reason, which the claim clears. A cancel that definitely
+ * failed puts a paused schedule back to paused with that reason and a running one back to active.
  */
-const cancelAttemptMetadataSchema = z.object({
-  claimedFrom: z.enum(RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS.cancel.claimableStatuses),
-});
+const cancelAttemptMetadataSchema = z.discriminatedUnion("claimedFrom", [
+  z.object({ claimedFrom: z.literal("active"), pausedReason: z.null() }),
+  z.object({
+    claimedFrom: z.literal("paused"),
+    pausedReason: z.enum(RECURRING_PAYMENT_PAUSE_REASONS),
+  }),
+]);
 
+/**
+ * Refuses a cancel the schedule's status does not allow: one already in flight and not yet stale,
+ * or a status cancel never claims. A canceled schedule, a claimable one and a stale `canceling` one
+ * pass.
+ *
+ * @param input.recurringPayment - The schedule as read.
+ * @param input.sourceWallet - The custody wallet it must be pinned to.
+ * @param input.nowIso - Now, for the stale window.
+ * @throws AppError `CONFLICT` when the cancel cannot proceed.
+ */
 function assertCancelPreconditions(input: {
   recurringPayment: PaymentRecurringPaymentRow;
   sourceWallet: CustodyWallet;
@@ -104,7 +124,9 @@ function assertCancelPreconditions(input: {
  *
  * @param input.recurringRepo - The claim transaction's repository.
  * @param input.claimed - The schedule as claimed (`canceling`).
- * @param input.claimedFrom - Its status before the claim.
+ * @param input.claimedFrom - Its status before the claim; null when the claim took over a stale
+ *   `canceling` one, whose in-flight attempt its own claim wrote.
+ * @param input.pausedReason - Its pause reason before the claim, set exactly when it was paused.
  * @param input.organizationId - Tenant organization.
  * @param input.projectId - Tenant project.
  * @param input.nowIso - Claim time.
@@ -114,7 +136,8 @@ function assertCancelPreconditions(input: {
 async function getOrCreateCancelAttempt(input: {
   recurringRepo: PaymentRecurringPaymentsRepository;
   claimed: PaymentRecurringPaymentRow;
-  claimedFrom: PaymentRecurringPaymentStatus;
+  claimedFrom: RecurringPaymentLifecycleClaimableStatus | null;
+  pausedReason: RecurringPaymentPauseReason | null;
   organizationId: string;
   projectId: string;
   nowIso: string;
@@ -159,10 +182,8 @@ async function getOrCreateCancelAttempt(input: {
     return adopted;
   }
 
-  // Only a fresh claim reaches here: a stale `canceling` claim always has the
-  // in-flight attempt its own claim wrote in the same transaction.
-  if (!isRecurringPaymentLifecycleClaimableStatus("cancel", input.claimedFrom)) {
-    throw internalError("A recurring payment cancel claim has no in-flight attempt");
+  if (input.claimedFrom === null) {
+    throw internalError("A stale recurring payment cancel claim has no in-flight attempt");
   }
   const attempt = await input.recurringRepo.createLifecycleAttempt({
     id: `prpl_${crypto.randomUUID()}`,
@@ -174,7 +195,10 @@ async function getOrCreateCancelAttempt(input: {
     stage: "claim",
     signature: null,
     error: null,
-    metadata: { claimedFrom: input.claimedFrom },
+    metadata: cancelAttemptMetadataSchema.parse({
+      claimedFrom: input.claimedFrom,
+      pausedReason: input.pausedReason,
+    }),
     createdAt: input.nowIso,
     updatedAt: input.nowIso,
     idempotencyKey: input.idempotencyKey,
@@ -226,8 +250,18 @@ async function answerFinalLifecycle(input: {
 }
 
 /**
- * Fails a cancel attempt nothing it sent can still land on, and puts the schedule back to the
- * status its claim took it from, in one transaction.
+ * Fails a cancel attempt nothing it sent can still land on and, in the same transaction, puts the
+ * schedule back from `canceling` to the status its claim took it from, with the pause reason it had
+ * when that was `paused`. Both writes are compare-and-sets.
+ *
+ * @param input.env - Runtime environment.
+ * @param input.attempt - The cancel attempt, whose metadata records the claim.
+ * @param input.organizationId - Tenant organization.
+ * @param input.projectId - Tenant project.
+ * @param input.stage - The stage it failed at.
+ * @param input.error - The failure.
+ * @param input.failedAt - The failure's time.
+ * @throws AppError `CONFLICT` when the attempt or the schedule changed meanwhile.
  */
 async function recordCancelFailure(input: {
   env: Env;
@@ -238,7 +272,11 @@ async function recordCancelFailure(input: {
   error: Error;
   failedAt: string;
 }): Promise<void> {
-  const { claimedFrom } = cancelAttemptMetadataSchema.parse(input.attempt.metadata);
+  const claim = cancelAttemptMetadataSchema.parse(input.attempt.metadata);
+  const restored =
+    claim.claimedFrom === "active"
+      ? { status: "active" as const, pausedReason: null }
+      : { status: "paused" as const, pausedReason: claim.pausedReason };
   await getDb(input.env).transaction(async (tx) => {
     const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
     const updatedAttempt = await recurringRepo.updateLifecycleAttempt({
@@ -253,12 +291,11 @@ async function recordCancelFailure(input: {
     if (updatedAttempt === null)
       throw conflict("Recurring payment lifecycle attempt changed concurrently");
 
-    const updatedRecurringPayment = await recurringRepo.updateRecurringPaymentLifecycle({
+    const updatedRecurringPayment = await recurringRepo.releaseRecurringPaymentCancelClaim({
       recurringPaymentId: input.attempt.recurring_payment_id,
       organizationId: input.organizationId,
       projectId: input.projectId,
-      status: claimedFrom,
-      expectedStatus: RECURRING_PAYMENT_CANCEL_PROCESSING_STATUS,
+      ...restored,
       updatedAt: input.failedAt,
     });
     if (updatedRecurringPayment === null)
@@ -312,6 +349,22 @@ async function preserveRecoverableLifecycleAttempt(input: {
   );
 }
 
+/**
+ * Finalizes a cancel that landed on chain, in one transaction: the subscription `canceled`, the
+ * schedule `canceling` to `canceled` under compare-and-set, and the attempt `confirmed` with its
+ * signature.
+ *
+ * @param input.env - Runtime environment.
+ * @param input.organizationId - Tenant organization.
+ * @param input.projectId - Tenant project.
+ * @param input.recurringPayment - The claimed schedule.
+ * @param input.subscription - Its subscription.
+ * @param input.attempt - The cancel attempt.
+ * @param input.signature - The cancel's signature; null when an earlier run's send landed before
+ *   it saved the signature.
+ * @returns The canceled schedule.
+ * @throws AppError `INTERNAL_ERROR` when any write did not land as expected.
+ */
 async function finalizeRecurringPaymentCancel(input: {
   env: Env;
   organizationId: string;
@@ -319,7 +372,6 @@ async function finalizeRecurringPaymentCancel(input: {
   recurringPayment: PaymentRecurringPaymentRow;
   subscription: PaymentSubscriptionRow;
   attempt: PaymentRecurringPaymentLifecycleAttemptRow;
-  /** Null when an earlier run's send landed before it saved the signature. */
   signature: Signature | null;
 }): Promise<PaymentRecurringPaymentRow> {
   const finalizedAt = new Date().toISOString();
@@ -375,25 +427,28 @@ async function finalizeRecurringPaymentCancel(input: {
 }
 
 /**
- * Finalizes a cancel that landed. A cancel is terminal (HOO-2339), so it then revokes the
- * subscription authority the schedule used when no other live schedule on the same wallet and mint
- * needs it; otherwise the authority stays for the sweep. The revoke runs once the cancel has
- * committed and never fails it.
+ * Finalizes a cancel that landed. A cancel is terminal (HOO-2339), so when `releaseAuthority` is
+ * `inline` it then revokes the subscription authority the schedule used, if no other live schedule
+ * on the same wallet and mint needs it; otherwise the authority stays for the sweep, which revokes
+ * an idle one on its next run. The revoke runs once the cancel has committed and never fails it.
  *
  * @param input - What {@link finalizeRecurringPaymentCancel} takes, plus the revoke's signer.
  * @param input.sourceWallet - The schedule's custody wallet, which granted the authority.
  * @param input.tokenMint - The mint the authority is for.
+ * @param input.releaseAuthority - Whether this request revokes the authority or leaves it to the
+ *   sweep.
  * @returns The canceled recurring payment.
  */
 async function finalizeCancelAndReleaseAuthority(
   input: Parameters<typeof finalizeRecurringPaymentCancel>[0] & {
     sourceWallet: CustodyWallet;
     tokenMint: Address;
+    releaseAuthority: CancelAuthorityRelease;
   }
 ): Promise<PaymentRecurringPaymentRow> {
   const finalized = await finalizeRecurringPaymentCancel(input);
   const authorityAddress = input.subscription.subscription_authority_address;
-  if (authorityAddress !== null) {
+  if (input.releaseAuthority === "inline" && authorityAddress !== null) {
     await revokeSubscriptionAuthorityAfterCancel(input.env, {
       organization_id: input.organizationId,
       project_id: input.projectId,
@@ -407,10 +462,28 @@ async function finalizeCancelAndReleaseAuthority(
 }
 
 /**
- * Cancels a schedule that went on chain, running or paused: claims it as `canceling`, signs the
- * Subscriptions cancel as an exit (money admission never refuses it, ADR 0002; an API key's wallet
- * scope bounds it at the route's authorize step, HOO-2337), and finalizes it once it lands. A
- * stale claim settles from the chain first.
+ * Who revokes a canceled schedule's subscription authority: the cancel itself, right after it
+ * lands, or the sweep's next run. Revoke-and-cancel cancels many schedules in one request and
+ * leaves it to the sweep.
+ */
+export type CancelAuthorityRelease = "inline" | "sweep";
+
+/**
+ * Cancels a schedule that went on chain, running or paused: claims it as `canceling` with a
+ * compare-and-set from the status read (or takes over a stale claim), signs the Subscriptions
+ * cancel as an exit (money admission never refuses it, ADR 0002; an API key's wallet scope bounds
+ * it at the route's authorize step, HOO-2337), and finalizes it once it lands. A stale claim
+ * settles from the chain first.
+ *
+ * @param input.env - Runtime environment.
+ * @param input.organizationId - Tenant organization.
+ * @param input.projectId - Tenant project.
+ * @param input.sourceWallet - The schedule's custody wallet.
+ * @param input.recurringPayment - The schedule as read.
+ * @param input.idempotencyKey - The request's key, written on the attempt; null for the cron.
+ * @param input.releaseAuthority - Whether the cancel revokes the authority itself.
+ * @returns The canceled schedule.
+ * @throws AppError `CONFLICT` when the status does not allow a cancel or another claim won.
  */
 async function runRecurringPaymentCancel(input: {
   env: Env;
@@ -418,8 +491,8 @@ async function runRecurringPaymentCancel(input: {
   projectId: string;
   sourceWallet: CustodyWallet;
   recurringPayment: PaymentRecurringPaymentRow;
-  /** The request's Idempotency-Key, written on the attempt it claims; null for the cron. */
   idempotencyKey: string | null;
+  releaseAuthority: CancelAuthorityRelease;
 }): Promise<PaymentRecurringPaymentRow> {
   const recurringRepo = createPaymentRecurringPaymentsRepository(
     input.env,
@@ -432,9 +505,7 @@ async function runRecurringPaymentCancel(input: {
   const nowIso = new Date().toISOString();
 
   assertCancelPreconditions({ ...input, nowIso });
-  if (
-    input.recurringPayment.status === RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS.cancel.finalStatus
-  ) {
+  if (isCanceledRecurringPaymentStatus(input.recurringPayment.status)) {
     return answerFinalLifecycle({
       ...input,
       operation: "cancel",
@@ -449,12 +520,15 @@ async function runRecurringPaymentCancel(input: {
     input.sourceWallet.id
   );
 
+  const status = input.recurringPayment.status;
+  const claimedFrom = isRecurringPaymentLifecycleClaimableStatus("cancel", status) ? status : null;
   const claimResult = await getDb(input.env).transaction(async (tx) => {
     const transactionRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
     const claimed = await transactionRepo.claimRecurringPaymentCancel({
       recurringPaymentId: input.recurringPayment.id,
       organizationId: input.organizationId,
       projectId: input.projectId,
+      claimedFrom,
       updatedAt: new Date().toISOString(),
       staleBefore: getRecurringPaymentOperationStaleBefore(nowIso),
     });
@@ -462,7 +536,8 @@ async function runRecurringPaymentCancel(input: {
     const attempt = await getOrCreateCancelAttempt({
       recurringRepo: transactionRepo,
       claimed,
-      claimedFrom: input.recurringPayment.status,
+      claimedFrom,
+      pausedReason: input.recurringPayment.paused_reason,
       organizationId: input.organizationId,
       projectId: input.projectId,
       nowIso,
@@ -549,6 +624,7 @@ async function runRecurringPaymentCancel(input: {
           signature,
           sourceWallet: input.sourceWallet,
           tokenMint,
+          releaseAuthority: input.releaseAuthority,
         });
       }
       signature = null;
@@ -623,6 +699,7 @@ async function runRecurringPaymentCancel(input: {
       signature,
       sourceWallet: input.sourceWallet,
       tokenMint,
+      releaseAuthority: input.releaseAuthority,
     });
   } catch (error) {
     if (!(error instanceof Error)) throw error;
@@ -693,6 +770,7 @@ export async function cancelRecurringPayment(input: {
   recurringPayment: PaymentRecurringPaymentRow;
   /** The request's Idempotency-Key, written on the attempt; null for the cron. */
   idempotencyKey: string | null;
+  releaseAuthority: CancelAuthorityRelease;
 }): Promise<PaymentRecurringPaymentRow> {
   if (isPendingActivationRecurringPaymentStatus(input.recurringPayment.status)) {
     return cancelPendingRecurringPayment(input);
@@ -826,7 +904,7 @@ export async function resumeRecurringPayment(input: {
   const now = new Date();
   const resumedAt = now.toISOString();
   const nextDueAt = resumedCollectionDueAt(currentDueAt, recurringPayment.period_hours, now);
-  return getDb(input.env).transaction(async (tx) => {
+  const resumed = await getDb(input.env).transaction(async (tx) => {
     await lockLiveActivatingKey(tx, {
       activator: activatedBy,
       organizationId: input.organizationId,
@@ -835,8 +913,12 @@ export async function resumeRecurringPayment(input: {
       recurringPaymentId: recurringPayment.id,
       custodyWalletIds: [input.sourceWallet.id],
     });
+    await refuseWhileSubscriptionAuthorityRevokes(tx, {
+      projectId: input.projectId,
+      custodyWalletIds: [input.sourceWallet.id],
+    });
     const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
-    const resumed = await recurringRepo.resumePausedRecurringPayment({
+    const resumedRow = await recurringRepo.resumePausedRecurringPayment({
       recurringPaymentId: recurringPayment.id,
       organizationId: input.organizationId,
       projectId: input.projectId,
@@ -845,24 +927,20 @@ export async function resumeRecurringPayment(input: {
       activatedBy,
       updatedAt: resumedAt,
     });
-    if (!resumed) {
+    if (!resumedRow) {
       throw conflict("Recurring payment changed before it could be resumed");
     }
-    if (nextDueAt !== currentDueAt) {
-      const subscription = await createPostgresPaymentSubscriptionsRepository(
-        tx
-      ).updateSubscription({
-        subscriptionId,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        nextCollectionDueAt: nextDueAt,
-        expectedNextCollectionDueAt: currentDueAt,
-        expectedStatus: "active",
-        updatedAt: resumedAt,
-      });
-      if (!subscription) {
-        throw conflict("Subscription changed before the recurring payment could be resumed");
-      }
+    const subscription = await createPostgresPaymentSubscriptionsRepository(tx).updateSubscription({
+      subscriptionId,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      nextCollectionDueAt: nextDueAt,
+      expectedNextCollectionDueAt: currentDueAt,
+      expectedStatus: "active",
+      updatedAt: resumedAt,
+    });
+    if (!subscription) {
+      throw conflict("Subscription changed before the recurring payment could be resumed");
     }
     const attempt = await recurringRepo.createLifecycleAttempt({
       id: `prpl_${crypto.randomUUID()}`,
@@ -874,8 +952,7 @@ export async function resumeRecurringPayment(input: {
       stage: "finalize",
       signature: null,
       error: null,
-      // The pause's failure count starts again after this attempt (collection.ts).
-      metadata: { resumedFrom: "paused" },
+      metadata: RECURRING_PAYMENT_RESUME_ATTEMPT_METADATA,
       createdAt: resumedAt,
       updatedAt: resumedAt,
       idempotencyKey: input.idempotencyKey,
@@ -883,6 +960,16 @@ export async function resumeRecurringPayment(input: {
     if (!attempt) {
       throw internalError("Failed to journal recurring payment resume");
     }
-    return resumed;
+    return resumedRow;
   });
+  logEvent("info", {
+    event: "sdp_recurring_payment_resumed",
+    organization_id: input.organizationId,
+    project_id: input.projectId,
+    recurring_payment_id: recurringPayment.id,
+    subscription_id: subscriptionId,
+    paused_reason: recurringPayment.paused_reason,
+    next_collection_due_at: nextDueAt,
+  });
+  return resumed;
 }

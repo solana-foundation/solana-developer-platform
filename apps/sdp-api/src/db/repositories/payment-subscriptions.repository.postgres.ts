@@ -7,6 +7,7 @@ import {
 } from "@sdp/types/payments";
 import { z } from "zod";
 import type { DatabaseExecutor } from "@/db/client";
+import { internalError } from "@/lib/errors";
 import type {
   CreatePaymentSubscriptionCollectionAttemptInput,
   CreatePaymentSubscriptionInput,
@@ -419,6 +420,34 @@ export function createPostgresPaymentSubscriptionsRepository(
         .first<Record<string, unknown>>();
 
       return row ? mapSubscriptionRow(row) : null;
+    },
+
+    async isRecurringPaymentSubscription(params) {
+      const row = await db.queryOne<{ owned: boolean }>(
+        `SELECT EXISTS (
+                  SELECT 1 FROM payment_recurring_payments owner
+                   WHERE owner.subscription_id = ?
+                     AND owner.organization_id = ?
+                     AND owner.project_id = ?)
+             OR EXISTS (
+                  SELECT 1 FROM payment_recurring_payment_update_attempts linked
+                   WHERE (linked.new_subscription_id = ? OR linked.old_subscription_id = ?)
+                     AND linked.organization_id = ?
+                     AND linked.project_id = ?) AS owned`,
+        [
+          params.subscriptionId,
+          params.organizationId,
+          params.projectId,
+          params.subscriptionId,
+          params.subscriptionId,
+          params.organizationId,
+          params.projectId,
+        ]
+      );
+      if (row === null) {
+        throw internalError("Failed to read whether a recurring payment owns the subscription");
+      }
+      return row.owned;
     },
 
     getSubscriptionById(params) {
