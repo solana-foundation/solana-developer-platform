@@ -29,6 +29,7 @@ import { app } from "@/index";
 import { AppError } from "@/lib/errors";
 import { deriveProviderRequestId } from "@/lib/idempotency";
 import { createTenantScope } from "@/lib/tenant-scope";
+import { deriveIdempotencyRecordKey } from "@/middleware/idempotency";
 import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
 import { rootLogger } from "@/runtime/logger";
 import { SigningService } from "@/services/domain/signing.service";
@@ -2375,6 +2376,37 @@ describe("payment transfer batches", () => {
       expect(resend.status).toBe(200);
       expect(await batchIdOf(resend)).toBe(await batchIdOf(first));
       expect(await countBatches()).toBe(3);
+    });
+
+    it("still answers a batch recorded before run keys on a same-key retry after its record expires", async () => {
+      const { send, sourceSigner, signingOutcomeMock } = await seedOneRecipientBatch("payroll_old");
+      const first = await send("batch-external-id-old-key");
+      expect(first.status).toBe(200);
+      const firstId = await batchIdOf(first);
+      // As a batch recorded before run keys: under the request's own record key.
+      const recordKey = deriveIdempotencyRecordKey(
+        {
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT.id,
+          principal: TEST_SEEDED_API_KEY.id,
+        },
+        "batch-external-id-old-key"
+      );
+      await getDb(env)
+        .prepare("UPDATE payment_transfer_batches SET idempotency_key = ? WHERE id = ?")
+        .bind(recordKey, firstId)
+        .run();
+      await getDb(env).execute("DELETE FROM idempotency_keys");
+      vi.clearAllMocks();
+      createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
+
+      const again = await send("batch-external-id-old-key");
+
+      expect(again.status).toBe(200);
+      expect(again.headers.get("Idempotent-Replayed")).toBe("true");
+      expect(await batchIdOf(again)).toBe(firstId);
+      expect(signingOutcomeMock).not.toHaveBeenCalled();
+      expect(await countBatches()).toBe(1);
     });
 
     it("guards nothing across keys for a batch without an externalId", async () => {

@@ -200,35 +200,44 @@ export async function findTransferBatchRecordReplay(
   // SAFETY: mounted after validateBody(createTransferBatchSchema).
   const body = input.body as CreateTransferBatchInput;
   const organizationId = authorized.scope.auth.organizationId;
-  const row = await getPaymentTransferBatchesRepository(c).findTransferBatchByIdempotency({
+  const repository = getPaymentTransferBatchesRepository(c);
+  // The request's own key first: a batch without a run, or one recorded
+  // before run keys, keeps its same-key answer and its crash settle.
+  const row = await repository.findTransferBatchByIdempotency({
+    organizationId,
+    projectId: authorized.projectId,
+    idempotencyKey: recordKey,
+  });
+  if (row !== null && row.idempotency_fingerprint !== null) {
+    if (!idempotencyFingerprintMatches(c, row.idempotency_fingerprint)) {
+      // Another request's row: the step refuses it (422) without touching it.
+      return { fingerprint: row.idempotency_fingerprint, respond: () => success(c, {}) };
+    }
+    const settled =
+      row.status === "processing"
+        ? await repository.failUnsentTransferRecipients({
+            batchId: row.id,
+            organizationId,
+            projectId: authorized.projectId,
+            error: "The batch request ended before this recipient's transfer was sent",
+          })
+        : row;
+    return {
+      fingerprint: settled.idempotency_fingerprint,
+      respond: () => respondToTransferBatchReplay(c, settled, organizationId, authorized.projectId),
+    };
+  }
+  if (body.externalId === undefined) return null;
+  const run = await repository.findTransferBatchByIdempotency({
     organizationId,
     projectId: authorized.projectId,
     idempotencyKey: transferBatchRowKey(authorized, body.externalId, recordKey),
   });
-  if (row === null || row.idempotency_fingerprint === null) return null;
-  if (body.externalId !== undefined) {
-    assertSamePayoutRun(c, row, authorized);
-    return {
-      fingerprint: row.idempotency_fingerprint,
-      respond: () => respondToTransferBatchReplay(c, row, organizationId, authorized.projectId),
-    };
-  }
-  if (!idempotencyFingerprintMatches(c, row.idempotency_fingerprint)) {
-    // Another request's row: the step refuses it (422) without touching it.
-    return { fingerprint: row.idempotency_fingerprint, respond: () => success(c, {}) };
-  }
-  const settled =
-    row.status === "processing"
-      ? await getPaymentTransferBatchesRepository(c).failUnsentTransferRecipients({
-          batchId: row.id,
-          organizationId,
-          projectId: authorized.projectId,
-          error: "The batch request ended before this recipient's transfer was sent",
-        })
-      : row;
+  if (run === null || run.idempotency_fingerprint === null) return null;
+  assertSamePayoutRun(c, run, authorized);
   return {
-    fingerprint: settled.idempotency_fingerprint,
-    respond: () => respondToTransferBatchReplay(c, settled, organizationId, authorized.projectId),
+    fingerprint: run.idempotency_fingerprint,
+    respond: () => respondToTransferBatchReplay(c, run, organizationId, authorized.projectId),
   };
 }
 
