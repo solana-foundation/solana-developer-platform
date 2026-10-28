@@ -615,6 +615,9 @@ export function useBatchSendWizard({
             : t("DashboardPayments.batchSend.retryRequestFailed"),
         position: "bottom-right",
       });
+      // The API may have taken the retry even though its answer was lost: read
+      // the batch again, so a resend in flight resumes the poll.
+      void setLiveBatch();
     } finally {
       setRetrying(false);
     }
