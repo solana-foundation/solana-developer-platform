@@ -11,6 +11,7 @@ import { required } from "@/test/helpers/required";
 import {
   type SubscriptionAuthorityTenant,
   seedAuthoritySubscription,
+  seedRecurringPaymentUpdateAttempt,
   seedSubscriptionAuthorityTenant,
 } from "@/test/helpers/subscription-authorities";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -129,13 +130,14 @@ describe("SubscriptionAuthorityRevocationsRepository (postgres)", () => {
       changedAt: LONG_AGO,
       recurring: null,
     });
-    await getDb(env).execute(
-      `INSERT INTO payment_recurring_payment_update_attempts (
-         id, organization_id, project_id, recurring_payment_id, mode, status, stage,
-         new_subscription_id)
-       VALUES ('rpua_replacement', ?, ?, ?, 'replacement', 'processing', 'authorize_subscription', ?)`,
-      [TEST_ORG.id, tenant.projectId, required(recurringPaymentId), pending.subscriptionId]
-    );
+    await seedRecurringPaymentUpdateAttempt(tenant, {
+      id: "rpua_replacement",
+      recurringPaymentId: required(recurringPaymentId),
+      status: "processing",
+      stage: "authorize_subscription",
+      oldSubscriptionId: null,
+      newSubscriptionId: pending.subscriptionId,
+    });
 
     // The replacement update is still in flight: its authorization may land.
     expect(await list()).toEqual([]);

@@ -1,4 +1,9 @@
-import type { PaymentRecurringPaymentStatus, PaymentSubscriptionStatus } from "@sdp/types/payments";
+import type {
+  PaymentRecurringPaymentAttemptStatus,
+  PaymentRecurringPaymentStatus,
+  PaymentRecurringPaymentUpdateAttemptStage,
+  PaymentSubscriptionStatus,
+} from "@sdp/types/payments";
 import { getDb } from "@/db/client";
 import { createPostgresCounterpartiesRepository } from "@/db/repositories/counterparty.repository.postgres";
 import { createPostgresCounterpartyAccountsRepository } from "@/db/repositories/counterparty-account.repository.postgres";
@@ -177,4 +182,47 @@ export async function seedAuthoritySubscription(
     [input.recurring.status, input.authority, input.changedAt, recurringPaymentId]
   );
   return { subscriptionId: subscription.id, recurringPaymentId };
+}
+
+/**
+ * A replacement update attempt on one of the tenant's recurring payments, naming the subscription
+ * it replaced and the one it created.
+ *
+ * @param tenant - The tenant the recurring payment belongs to.
+ * @param attempt - The attempt to seed.
+ * @param attempt.id - Id of the update attempt.
+ * @param attempt.recurringPaymentId - The recurring payment being edited.
+ * @param attempt.status - The attempt's status.
+ * @param attempt.stage - The step the attempt reached.
+ * @param attempt.oldSubscriptionId - The subscription the edit replaces, or null.
+ * @param attempt.newSubscriptionId - The subscription the edit created, or null.
+ * @returns Resolves once the attempt is written.
+ */
+export async function seedRecurringPaymentUpdateAttempt(
+  tenant: SubscriptionAuthorityTenant,
+  attempt: {
+    id: string;
+    recurringPaymentId: string;
+    status: PaymentRecurringPaymentAttemptStatus;
+    stage: PaymentRecurringPaymentUpdateAttemptStage;
+    oldSubscriptionId: string | null;
+    newSubscriptionId: string | null;
+  }
+): Promise<void> {
+  await getDb(env).execute(
+    `INSERT INTO payment_recurring_payment_update_attempts (
+       id, organization_id, project_id, recurring_payment_id, mode, status, stage,
+       old_subscription_id, new_subscription_id)
+     VALUES (?, ?, ?, ?, 'replacement', ?, ?, ?, ?)`,
+    [
+      attempt.id,
+      TEST_ORG.id,
+      tenant.projectId,
+      attempt.recurringPaymentId,
+      attempt.status,
+      attempt.stage,
+      attempt.oldSubscriptionId,
+      attempt.newSubscriptionId,
+    ]
+  );
 }
