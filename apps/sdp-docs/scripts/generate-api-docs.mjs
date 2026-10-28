@@ -75,8 +75,14 @@ const validateGeneratedTagPages = async ({ outputDir, families }) => {
     );
   }
 
-  for (const family of families) {
-    const source = await fs.readFile(path.join(outputDir, `${slugify(family.name)}.mdx`), "utf8");
+  const pages = await Promise.all(
+    families.map(async (family) => ({
+      family,
+      source: await fs.readFile(path.join(outputDir, `${slugify(family.name)}.mdx`), "utf8"),
+    }))
+  );
+
+  for (const { family, source } of pages) {
     const sections = source.split(/^## /m).slice(1);
     const anchors = sections.map((section) => /\[#([^\]]+)\]\n/.exec(section)?.[1]);
     const expected = family.operations.map((operation) => operation.operationId);

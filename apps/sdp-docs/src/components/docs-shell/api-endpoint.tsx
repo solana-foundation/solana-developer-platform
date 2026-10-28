@@ -1,17 +1,29 @@
 import type { ApiMethod } from "@sdp/api-catalog/reference";
 import { Fragment } from "react";
 
-/** One path segment, its `{parameter}` parts dimmed. */
-function PathSegment({ segment }: { segment: string }) {
-  return segment.split(/(\{[^}]+\})/).map((part, index) =>
-    index % 2 === 1 ? (
-      // biome-ignore lint/suspicious/noArrayIndexKey: the parts of one segment never reorder.
-      <span key={index} className="launch-api-path-param">
-        {part}
-      </span>
-    ) : (
-      part
-    )
+/**
+ * A path's segments, each keyed by the path up to it, which is unique within the path and the
+ * same on every render.
+ */
+function segmentsOf(path: string): { key: string; text: string }[] {
+  const segments = path.split("/");
+  return segments.map((text, index) => ({
+    key: segments.slice(0, index + 1).join("/"),
+    text,
+  }));
+}
+
+/** One path segment, its `{parameter}` part dimmed. */
+function PathSegment({ text }: { text: string }) {
+  const parameter = /^(.*?)(\{[^}]+\})(.*)$/.exec(text);
+  if (parameter === null) return text;
+  const [, before, name, after] = parameter;
+  return (
+    <>
+      {before}
+      <span className="launch-api-path-param">{name}</span>
+      {after}
+    </>
   );
 }
 
@@ -27,15 +39,14 @@ export function ApiEndpoint({ method, path }: { method: ApiMethod; path: string 
         {method}
       </span>
       <code>
-        {path.split("/").map((segment, index) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: the segments of one path never reorder.
-          <Fragment key={index}>
+        {segmentsOf(path).map((segment, index) => (
+          <Fragment key={segment.key}>
             {index > 0 ? (
               <>
                 /<wbr />
               </>
             ) : null}
-            <PathSegment segment={segment} />
+            <PathSegment text={segment.text} />
           </Fragment>
         ))}
       </code>

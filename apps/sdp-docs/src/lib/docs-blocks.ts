@@ -116,14 +116,12 @@ const API_METHOD_NAMES = {
   DELETE: true,
 } as const satisfies Record<ApiMethod, true>;
 
-const apiEndpointSchema = z
-  .object({
-    method: z.custom<ApiMethod>(
-      (value) => typeof value === "string" && Object.hasOwn(API_METHOD_NAMES, value)
-    ),
-    path: z.string().startsWith("/"),
-  })
-  .strict();
+const apiEndpointSchema = z.strictObject({
+  method: z.custom<ApiMethod>(
+    (value) => typeof value === "string" && Object.hasOwn(API_METHOD_NAMES, value)
+  ),
+  path: z.string().startsWith("/"),
+});
 
 /**
  * Components the API reference places (scripts/lib/api-reference-page.ts). Unlike a block, the
