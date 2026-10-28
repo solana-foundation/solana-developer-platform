@@ -482,9 +482,12 @@ describe("Payments routes — signed submission", () => {
     it("fails a transfer its custody policy refuses with 422 and answers its key from the row", async () => {
       const source = await generateKeyPairSigner();
       await updateSeededWalletPublicKey(source.address);
+      const refusal = custodyPolicyRefused(
+        new SigningError("Privy policy refused", "POLICY_REFUSED")
+      );
       const signTransactions = vi
         .fn<TransactionPartialSigner["signTransactions"]>()
-        .mockRejectedValue(new SigningError("Privy policy refused", "POLICY_REFUSED"));
+        .mockRejectedValue(refusal);
       createOrgSignerForCustodyWalletMock.mockResolvedValueOnce({
         address: source.address,
         signTransactions,
@@ -494,7 +497,7 @@ describe("Payments routes — signed submission", () => {
       const first = await transferRequest("1", key);
       expect(first.status).toBe(422);
       expect(await first.json()).toEqual({
-        error: { code: "CUSTODY_POLICY_REFUSED", message: custodyPolicyRefused().message },
+        error: { code: "CUSTODY_POLICY_REFUSED", message: refusal.message },
         meta: { requestId: expect.stringMatching(/^req_/) },
       });
       expect(await latestTransferRow()).toMatchObject({ status: "failed", signature: null });

@@ -1,5 +1,8 @@
 import {
+  IN_FLIGHT_COLLECTION_ATTEMPT_STATUSES,
   IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
+  PAYMENT_SUBSCRIPTION_COLLECTION_ATTEMPT_STATUSES,
+  type PaymentSubscriptionCollectionAttemptMetadata,
   RECURRING_PAYMENT_STATUSES_CLAIMING_AUTHORITY,
 } from "@sdp/types/payments";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -254,6 +257,41 @@ describe("SubscriptionAuthorityRevocationsRepository (postgres)", () => {
     }
     expect(await list()).toHaveLength(1);
   });
+
+  it.each(PAYMENT_SUBSCRIPTION_COLLECTION_ATTEMPT_STATUSES)(
+    "claims an authority only while no collection on it is in flight: %s",
+    async (status) => {
+      const { subscriptionId, recurringPaymentId } = await canceledSchedule();
+      const metadata = {
+        source: "automated",
+        recurringPaymentId: required(recurringPaymentId),
+        initiatedByKeyId: null,
+      } satisfies PaymentSubscriptionCollectionAttemptMetadata;
+      await getDb(env).execute(
+        `INSERT INTO payment_subscription_collection_attempts
+           (id, organization_id, project_id, subscription_id, token, amount, due_at, status,
+            metadata)
+         VALUES (?, ?, ?, ?, ?, '1', ?, ?, ?::jsonb)`,
+        [
+          `psca_${status}`,
+          TEST_ORG.id,
+          tenant.projectId,
+          subscriptionId,
+          MINT,
+          LONG_AGO,
+          status,
+          JSON.stringify(metadata),
+        ]
+      );
+      const inFlight = IN_FLIGHT_COLLECTION_ATTEMPT_STATUSES.some(
+        (candidate) => candidate === status
+      );
+
+      expect(await claim(`psar_${status}`)).toEqual(
+        inFlight ? null : expect.objectContaining({ status: "processing" })
+      );
+    }
+  );
 
   it("holds one revoke in flight per authority and offers it again only after a later change", async () => {
     const { subscriptionId } = await canceledSchedule();

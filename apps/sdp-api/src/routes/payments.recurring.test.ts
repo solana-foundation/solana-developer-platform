@@ -2690,6 +2690,7 @@ describe("Payments routes — recurring", () => {
         )
       )
     ).data.recurringPayment;
+    expect(paused).toMatchObject({ status: "paused", pausedReason: "failed_attempts" });
     const sendsBefore = sendTransactionMock.mock.calls.length;
 
     const resumeRes = await app.request(
@@ -2875,8 +2876,101 @@ describe("Payments routes — recurring", () => {
       env
     );
     expect(resumeRes.status).toBe(409);
-    expect(sendTransactionMock).toHaveBeenCalledTimes(4);
+    expect(sendTransactionMock).toHaveBeenCalledTimes(3);
+    expect(await authorityRevocations()).toEqual([]);
   });
+
+  it("refuses a cancel whose schedule paused between its read and its claim, keeping the pause", async () => {
+    const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    const admission = vi
+      .spyOn(SigningService.prototype, "admitRuntimeExecution")
+      .mockImplementationOnce(() => pauseRecurringPayment(activated.id));
+    onTestFinished(() => admission.mockRestore());
+    const sendsBefore = sendTransactionMock.mock.calls.length;
+
+    const cancelRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/cancel`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+
+    expect(cancelRes.status).toBe(409);
+    expect(await cancelRes.json()).toEqual({
+      error: { code: "CONFLICT", message: "Recurring payment cancel is already processing" },
+      meta: { requestId: expect.stringMatching(/^req_/) },
+    });
+    expect(
+      await getDb(env)
+        .prepare("SELECT status, paused_reason FROM payment_recurring_payments WHERE id = ?")
+        .bind(activated.id)
+        .first<{ status: string; paused_reason: string | null }>()
+    ).toEqual({ status: "paused", paused_reason: "failed_attempts" });
+    expect(sendTransactionMock).toHaveBeenCalledTimes(sendsBefore);
+  });
+
+  it("refuses a resume while a revoke holds the wallet's authorities, leaving it paused", async () => {
+    const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    await pauseRecurringPayment(activated.id);
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_subscription_authority_revocations
+           (id, organization_id, project_id, environment, custody_wallet_id, wallet_address,
+            token_mint, subscription_authority_address, status, lease_id)
+         VALUES ('psar_resume_hold', ?, ?, 'sandbox', ?, ?, ?, ?, 'processing', 'lease_resume_hold')`
+      )
+      .bind(
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        TEST_CUSTODY_WALLET_ID,
+        recurringExecution.sourceSigner().address,
+        TEST_SOLANA_ADDRESSES.wallet3,
+        TEST_SOLANA_ADDRESSES.wallet1
+      )
+      .run();
+
+    const resumeRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/resume`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+
+    expect(resumeRes.status).toBe(409);
+    expect(await resumeRes.json()).toEqual({
+      error: {
+        code: "CONFLICT",
+        message:
+          "This wallet's recurring payment authorization is being cleaned up; retry in a minute",
+      },
+      meta: { requestId: expect.stringMatching(/^req_/) },
+    });
+    expect((await recurringPaymentDueAt(activated.id)).status).toBe("paused");
+  });
+
+  it.each([
+    ["prepare-resume", {}],
+    ["prepare-collection", { receiverTokenAccount: TEST_SOLANA_ADDRESSES.wallet3 }],
+  ] as const)(
+    "refuses the standalone %s route for a recurring payment's subscription",
+    async (route, body) => {
+      const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+
+      const res = await app.request(
+        `/v1/payments/subscriptions/${activated.subscriptionId}/${route}`,
+        { method: "POST", headers: RECURRING_HEADERS, body: JSON.stringify(body) },
+        env
+      );
+
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({
+        error: {
+          code: "CONFLICT",
+          message:
+            "This subscription belongs to a recurring payment. Manage it through /v1/payments/recurring-payments instead.",
+        },
+        meta: { requestId: expect.stringMatching(/^req_/) },
+      });
+    }
+  );
 
   it.each(RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS.cancel.claimableStatuses)(
     "puts a %s schedule back when its cancel fails subscription validation",
@@ -4373,6 +4467,14 @@ describe("Payments routes — recurring", () => {
       expect(pauseEvents()).toEqual([
         expect.objectContaining({ reason: "custody_policy_refused", failed_attempts: 1 }),
       ]);
+      const paused = await app.request(
+        `/v1/payments/recurring-payments/${activated.id}`,
+        { headers: RECURRING_HEADERS },
+        env
+      );
+      expect((await parseRecurringResponse(paused)).data.recurringPayment.pausedReason).toBe(
+        "custody_policy_refused"
+      );
     });
 
     it("rolls an automated failure's attempt back with a pause that fails, and pauses on the next tick", async () => {
@@ -6027,6 +6129,7 @@ describe("Payments routes — recurring", () => {
 
       expect(await cancelFor(TEST_API_KEY.id)).toEqual({ canceled: [activated.id], failed: [] });
       expect(await statusOf(activated.id)).toBe("canceled");
+      expect(await authorityRevocations()).toEqual([]);
     });
 
     it("cancels a payment a key's rotated-from predecessor activated", async () => {

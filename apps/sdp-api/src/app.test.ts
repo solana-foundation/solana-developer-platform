@@ -348,7 +348,7 @@ describe("createApp onError", () => {
     expect(rejectedBody.error.message).toContain("fee sponsor rejected this transaction");
   });
 
-  it("answers a custody policy refusal with 422 CUSTODY_POLICY_REFUSED", async () => {
+  it("answers a custody policy refusal raised outside the signer waist with 422 CUSTODY_POLICY_REFUSED", async () => {
     const app = buildApp();
 
     const res = await app.request(POLICY_REFUSED_PATH, {}, baseEnv);
@@ -358,7 +358,7 @@ describe("createApp onError", () => {
       error: {
         code: "CUSTODY_POLICY_REFUSED",
         message:
-          "Your custody provider's policy refused to sign this transaction. Nothing was signed or sent; review the wallet's policy with your custody provider, since retrying will be refused the same way",
+          "Your custody provider's policy refused to sign this request. Nothing was signed or sent; review the wallet's policy with your custody provider, since retrying will be refused the same way",
       },
       meta: { requestId: expect.stringMatching(/^req_/) },
     });

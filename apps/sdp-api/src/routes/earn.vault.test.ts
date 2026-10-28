@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { SigningError } from "@sdp/custody/signing";
 import { supportsVaultDepositQuote } from "@sdp/earn/capabilities";
 import { hashString } from "@sdp/payments/hash";
 import type { CustodyProvider } from "@sdp/types/custody";
@@ -44,7 +45,7 @@ import type { EarnStrategyRow, UpsertEarnStrategyInput } from "@/db/repositories
 import { createPostgresEarnRepository } from "@/db/repositories/earn.repository.postgres";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import { app } from "@/index";
-import { badRequest, serviceUnavailable } from "@/lib/errors";
+import { badRequest, custodyPolicyRefused, serviceUnavailable } from "@/lib/errors";
 import { buildEarnVaultDepositFingerprint } from "@/lib/idempotency";
 import { AuditService } from "@/services/audit.service";
 import { resolveEarnExecutionClient } from "@/services/earn/execution-registry";
@@ -1505,6 +1506,41 @@ describe("POST /v1/earn/vault-deposits: audit ledger parity (PRO-1866)", () => {
     expect(results).toHaveLength(1);
     expect(required(results)[0]).toMatchObject({ status: "failure" });
     expect(String(required(required(results)[0]).metadata)).toContain("simulation failed");
+  });
+
+  it("closes the intent as a CUSTODY_POLICY_REFUSED failure when the custody policy refuses to sign", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy({});
+    await seedWallet({
+      publicKey: WALLET_ADDRESS,
+      projectId: TEST_PROJECT.id,
+      configId: "cfg_earn_vault_audit_policy",
+      provider: "privy",
+      custodyWalletId: "cwlt_earn_vault_audit_policy",
+      providerWalletId: "privy_earn_vault_audit_policy",
+    });
+    depositIntoVault.mockRejectedValue(
+      custodyPolicyRefused(new SigningError("Privy policy refused", "POLICY_REFUSED"))
+    );
+
+    const res = await postVaultDeposit(
+      {
+        strategyId: strategy.id,
+        custodyWalletId: "cwlt_earn_vault_audit_policy",
+        amount: "10",
+        requestId: crypto.randomUUID(),
+      },
+      crypto.randomUUID(),
+      TEST_API_KEY.raw
+    );
+
+    expect(res.status).toBe(422);
+    expect(
+      await getDb(env).queryMany<{ status: string; failure_code: string | null }>(
+        `SELECT status, metadata::jsonb ->> 'failureCode' AS failure_code
+           FROM audit_logs WHERE action = 'deposit' AND resource_type = 'earn_movement'`
+      )
+    ).toEqual([{ status: "failure", failure_code: "CUSTODY_POLICY_REFUSED" }]);
   });
 
   it("leaves the intent unresolved on an ambiguous 5xx: the send may have landed", async () => {

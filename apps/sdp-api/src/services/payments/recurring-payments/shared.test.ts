@@ -272,10 +272,12 @@ describe("readRecurringPaymentStep", () => {
 });
 
 describe("recurringPaymentErrorMessage", () => {
-  it("stores a custody policy refusal in plain words", () => {
-    expect(
-      recurringPaymentErrorMessage(new SigningError("Privy policy refused", "POLICY_REFUSED"))
-    ).toBe(custodyPolicyRefused().message);
+  it("stores the custody policy refusal the signer raises in its own plain words", () => {
+    const refusal = custodyPolicyRefused(
+      new SigningError("Privy policy refused", "POLICY_REFUSED")
+    );
+
+    expect(recurringPaymentErrorMessage(refusal)).toBe(refusal.message);
   });
 
   it("keeps another signing failure on the public internal-error message", () => {

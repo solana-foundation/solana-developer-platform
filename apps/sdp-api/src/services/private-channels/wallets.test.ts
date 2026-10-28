@@ -1,4 +1,5 @@
 import { KeychainPrivyAdapter } from "@sdp/custody/keychain/keychain-privy.adapter";
+import { SigningError } from "@sdp/custody/signing";
 import * as authPkg from "@sdp/private-channels/auth";
 import { PrivateChannelError } from "@sdp/private-channels/errors";
 import type { Action } from "@sdp/types/actions";
@@ -470,6 +471,14 @@ describe("verifyPrivateChannelWallet", () => {
     });
     expect(spcSession.getSpcSession).toHaveBeenCalledTimes(1);
     expect(client.challengeWallet).toHaveBeenCalledTimes(1);
+    expect(client.verifyWallet).not.toHaveBeenCalled();
+  });
+  it("answers a custody policy refusal of the challenge as CUSTODY_POLICY_REFUSED", async () => {
+    signMessages.mockRejectedValueOnce(new SigningError("Privy policy refused", "POLICY_REFUSED"));
+    await expect(verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID)).rejects.toMatchObject({
+      code: "CUSTODY_POLICY_REFUSED",
+      statusCode: 422,
+    });
     expect(client.verifyWallet).not.toHaveBeenCalled();
   });
 });
