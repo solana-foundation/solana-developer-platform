@@ -130,7 +130,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Execute transfer (custody)",
     operationId: "createPaymentTransfer",
     description:
-      "Executes an on-chain transfer using the exact SDP Wallet ID (`id` from `/v1/wallets`) and server-side custody signing. Requires an Idempotency-Key: a retry with the same key and request returns the original transfer instead of sending a second one. A 200 may return a processing transfer with its signature when broadcast or confirmation is still being reconciled; do not create a replacement transfer for that payment.",
+      "Executes an on-chain transfer using the exact SDP Wallet ID (`id` from `/v1/wallets`) and server-side custody signing. Requires an Idempotency-Key: a retry with the same key and request returns the original transfer instead of sending a second one. A 200 may return a processing transfer with its signature when broadcast or confirmation is still being reconciled; do not create a replacement transfer for that payment. A native SOL transfer is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM`, before anything is written or sent, when it pays less than the rent-exempt minimum to an address with no account or would leave the source wallet holding more than nothing but less than the minimum.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: movementKeyHeaders,
@@ -198,7 +198,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Estimate transfer batch",
     operationId: "estimatePaymentTransferBatch",
     description:
-      "Validates an exact-wallet transfer batch request and estimates transaction chunking and fees.",
+      "Validates an exact-wallet transfer batch request and estimates transaction chunking and fees. `warnings` lists what would make the batch fail: a native SOL amount below the rent-exempt minimum sent to an address with no account, or a source wallet left below the minimum; create refuses those with 409 `AMOUNT_BELOW_RENT_MINIMUM`.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -223,7 +223,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Create transfer batch",
     operationId: "createPaymentTransferBatch",
     description:
-      "Executes an outbound transfer batch from one exact SDP Wallet ID, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records. Requires an Idempotency-Key: a retry with the same key and request returns the original batch without another on-chain submission. Recipient order does not change the request. " +
+      "Executes an outbound transfer batch from one exact SDP Wallet ID, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records. Requires an Idempotency-Key: a retry with the same key and request returns the original batch without another on-chain submission. Recipient order does not change the request. A native SOL batch is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM`, before anything is written or sent, when a recipient whose address has no account gets less than the rent-exempt minimum (`details.recipientIndexes`) or the source wallet would be left holding more than nothing but less than the minimum (`details.sourceRemainder`). " +
       "An `externalId` already used by a batch on the same project and source wallet never pays again: the same request from the same credential returns that batch, and any other returns `409 CONFLICT` with its `batchId` in `error.details`. " +
       "To finish a batch after a partial failure, call `POST /v1/payments/transfer-batches/{batchId}/retry`: it sends only the batch's `failed` recipients. Never resend the whole batch under a new Idempotency-Key, which pays the recipients that succeeded again.",
     security: [{ apiKeyAuth: [] }],
@@ -251,7 +251,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     operationId: "retryPaymentTransferBatch",
     description:
       "Sends the batch's `failed` recipients again, from the same source wallet with the batch's options, and no other recipient. A failed recipient was not paid: its transaction never reached the network or the network rejected it. Recipients still `pending` or `processing` may land and are never sent again. Each resent recipient keeps its row and links to its new chunk transfer. " +
-      "Takes no body and requires an Idempotency-Key: a retry with the same key, including one sent after a timeout or a server error, returns the batch's current state without sending again. Each recipient is paid the address the batch recorded for it. Returns `409 CONFLICT`, sending nothing, when the batch has no failed recipients, when a concurrent retry claimed them first, or when a failed recipient's counterparty account has changed its address since (send that recipient in a new batch). Only recipients that are still `failed` are ever sent, so a retry under a new key never pays anyone twice.",
+      "Takes no body and requires an Idempotency-Key: a retry with the same key, including one sent after a timeout or a server error, returns the batch's current state without sending again. Each recipient is paid the address the batch recorded for it. Returns `409 CONFLICT`, sending nothing, when the batch has no failed recipients, when a concurrent retry claimed them first, or when a failed recipient's counterparty account has changed its address since (send that recipient in a new batch). A native SOL retry is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM`, as create is, when a failed recipient would still be paid less than the rent-exempt minimum at an address with no account; its recipients stay `failed`. Only recipients that are still `failed` are ever sent, so a retry under a new key never pays anyone twice.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: movementKeyHeaders,

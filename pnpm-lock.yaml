@@ -366,6 +366,9 @@ importers:
       '@flags-sdk/vercel':
         specifier: 1.4.9
         version: 1.4.9(flags@4.3.1(@opentelemetry/api@1.9.1)(next@16.4.2(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@26.6.2)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(next@16.4.2(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@26.6.2)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))
+      '@sdp/api-catalog':
+        specifier: workspace:*
+        version: link:../../packages/sdp-api-catalog
       '@sdp/design-tokens':
         specifier: workspace:*
         version: link:../../packages/sdp-design-tokens
@@ -429,9 +432,6 @@ importers:
       react-dom:
         specifier: 19.3.0
         version: 19.3.0(react@19.3.0)
-      shiki:
-        specifier: 4.4.3
-        version: 4.4.3
       sonner:
         specifier: 2.0.8
         version: 2.0.8(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -510,6 +510,15 @@ importers:
         version: 4.1.12(@opentelemetry/api@1.9.1)(@types/node@26.6.2)(@vitest/coverage-istanbul@4.1.12)(@vitest/coverage-v8@4.1.12)(jsdom@30.1.1(@noble/hashes@2.4.0))(vite@7.3.7(@types/node@26.6.2)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
 
   packages/bigint-buffer: {}
+
+  packages/sdp-api-catalog:
+    devDependencies:
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: 4.1.12
+        version: 4.1.12(@opentelemetry/api@1.9.1)(@types/node@26.6.2)(@vitest/coverage-istanbul@4.1.12)(@vitest/coverage-v8@4.1.12)(jsdom@30.1.1(@noble/hashes@2.4.0))(vite@7.3.7(@types/node@26.6.2)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
 
   packages/sdp-api-integration:
     dependencies:
@@ -1087,6 +1096,9 @@ importers:
       react-day-picker:
         specifier: 10.0.1
         version: 10.0.1(@types/react@19.3.0)(react@19.3.0)
+      shiki:
+        specifier: 4.4.3
+        version: 4.4.3
       tailwind-merge:
         specifier: 3.7.0
         version: 3.7.0

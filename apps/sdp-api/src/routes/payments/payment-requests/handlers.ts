@@ -5,6 +5,7 @@ import type {
   PaymentRequest,
   PaymentRequestLink,
 } from "@sdp/types/payments";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
 import { createPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { getAuth, requireProjectId } from "@/lib/auth";
@@ -17,6 +18,7 @@ import type { AppContext } from "@/routes/payments/context";
 import { resolveScope, resolveWallet } from "@/routes/payments/wallets";
 import { normalizePaymentToken } from "@/services/payment-operation.service";
 import { isPaymentRequestExpired } from "@/services/payments/payment-requests";
+import { assertNoSolRentShortfall } from "@/services/payments/sol-rent-minimum";
 import { parseStaticPaymentAmount } from "@/services/payments/token-amount";
 import {
   type createPaymentRequestSchema,
@@ -125,7 +127,24 @@ export async function createPaymentRequest(
   const scope = await resolveScope(c);
   const wallet = resolveWallet(scope.wallets, body.walletId);
   const token = assertValidAddress(normalizePaymentToken(body.token), "token");
-  await parseStaticPaymentAmount(body.amount, token);
+  const amountBaseUnits = await parseStaticPaymentAmount(body.amount, token);
+  // A SOL request to a wallet with no account below the rent minimum could
+  // never be paid (HOO-2375). The payer's own remainder is checked at /pay.
+  if (token === SOL_MINT) {
+    await assertNoSolRentShortfall(
+      {
+        source: null,
+        payments: [
+          {
+            index: 0,
+            destination: assertValidAddress(wallet.publicKey, "walletId"),
+            lamports: amountBaseUnits,
+          },
+        ],
+      },
+      "transfer"
+    );
+  }
 
   const row = await createPaymentRequestsRepository(
     c.env,

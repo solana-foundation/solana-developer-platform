@@ -1,5 +1,6 @@
 import type { EarnVaultDirectMovementStatus, EarnVaultMovementStatus } from "@sdp/types/earn";
 import type { BadgeVariant } from "@sdp/ui/badge";
+import type { StatusTone } from "@sdp/ui/status-text";
 import type { useTranslations } from "@/i18n/provider";
 
 export type EarnVaultPositionUiStatus = "pending" | "active";
@@ -76,4 +77,26 @@ export function vaultOutcomeTone(statusVariant: BadgeVariant): "info" | "success
   if (statusVariant === "success") return "success";
   if (statusVariant === "warning") return "warning";
   return "info";
+}
+
+const STATUS_TEXT_TONE = {
+  default: "progress",
+  primary: "progress",
+  info: "progress",
+  success: "positive",
+  warning: "attention",
+  danger: "critical",
+  outline: "neutral",
+} as const satisfies Record<BadgeVariant, StatusTone>;
+
+/**
+ * A status badge's variant as the refresh design's status text tone, so a list that sets
+ * statuses as words reads the same meaning the badge did: a plain badge is a state still
+ * moving, an outline one a state that lapsed without harm.
+ *
+ * @param statusVariant - The variant a status presentation assigns.
+ * @returns The tone to set the status's words in.
+ */
+export function earnStatusTextTone(statusVariant: BadgeVariant): StatusTone {
+  return STATUS_TEXT_TONE[statusVariant];
 }

@@ -58,6 +58,8 @@ SDP checks the scope each time it signs, together with the key's grants and whet
 
 The scope narrows what a key may sign with, not what it may read. A `selected` key's wallet list (`GET /v1/wallets`) and wallet detail reads show only its wallets; every other read, such as transfers, batches and recurring payments, covers the whole project. Give a separate project to an integration that must not see another's records.
 
+For recurring payments the scope also bounds writes that sign nothing. A `selected` key may create, change, cancel, activate, collect or resume only a recurring payment whose source wallet it lists, and may move one only to another listed wallet, because whoever activates a pending payment signs the terms it was last given. Anything else is refused with `wallet_out_of_scope` before it is recorded. Reading and listing recurring payments still cover the whole project.
+
 The dashboard starts a key that holds any `execute` action on **Selected wallets**, so it can sign with nothing you did not give it; choose **All wallets** to widen it.
 
 ## Recurring payments outlive the key

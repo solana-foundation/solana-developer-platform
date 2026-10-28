@@ -55,9 +55,19 @@ The retry sends only the batch's `failed` recipients, to the addresses the batch
 - The same `Idempotency-Key` returns the batch's current state without sending again, including after a timeout or a server error, so retry a lost answer under the same key.
 - A batch with nothing `failed` returns `409 CONFLICT`, as does a retry that loses to a concurrent one. Nothing is sent.
 - A failed recipient whose counterparty account changed its address since the batch was sent is not paid either address: the retry returns `409 CONFLICT` naming it in `error.details.recipientIds`, and nothing is sent. Send that recipient in a new batch.
+- A native SOL recipient paid less than the rent-exempt minimum at an address with no account fails again for the same reason, so the retry is refused with `409 AMOUNT_BELOW_RENT_MINIMUM` and that recipient stays `failed`. Send it in a new batch with a larger amount.
 - Only recipients that are still `failed` are ever sent, so a retry under a new key never pays anyone twice.
 
 Never resend the whole batch under a new `Idempotency-Key` to finish it: that pays the recipients who already succeeded again.
+
+### The SOL rent-exempt minimum
+
+A Solana wallet holds either nothing or at least the rent-exempt minimum (about 0.00089 SOL), and the network refuses a native SOL transfer that would break that, along with every recipient in the same transaction. SDP checks before it sends:
+
+- A recipient whose address has no account must receive at least the minimum.
+- The source wallet must end with nothing or at least the minimum. Chunks land in any order, so a batch that sends the wallet's whole balance also needs every chunk to move at least the minimum.
+
+`POST /v1/payments/transfer-batches/estimate` lists what would fail in `estimate.warnings` (`AMOUNT_BELOW_RENT_MINIMUM` per recipient, `SOURCE_BELOW_RENT_MINIMUM` for the source). `POST /v1/payments/transfer-batches` refuses the batch with `409 AMOUNT_BELOW_RENT_MINIMUM`, naming `details.recipientIndexes` and `details.sourceRemainder`, before anything is written or sent. The 409 is not stored under the `Idempotency-Key`, so the same request runs again once it would clear. Token batches are unaffected: SDP funds a missing token account's rent (`tokenAccountRentLamports`).
 
 The rest of this page covers the per-recipient alternative for destinations that are not registered counterparty accounts.
 

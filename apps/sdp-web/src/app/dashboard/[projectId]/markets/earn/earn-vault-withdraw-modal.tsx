@@ -4,13 +4,15 @@ import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { EarnVaultPosition, EarnVaultWithdrawal } from "@sdp/types/earn";
 import { earnWithdrawSlippageFloor } from "@sdp/types/provider-access";
 import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
-import { Badge, type BadgeVariant } from "@sdp/ui/badge";
+import type { BadgeVariant } from "@sdp/ui/badge";
 import { Button } from "@sdp/ui/button";
+import { DetailList, DetailRow } from "@sdp/ui/detail-list";
 import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
 import { Modal } from "@sdp/ui/modal";
+import { StatusText } from "@sdp/ui/status-text";
 import { Loader2Icon } from "lucide-react";
-import { type ChangeEvent, useEffect, useRef, useState } from "react";
+import { type ChangeEvent, type FormEvent, useEffect, useRef, useState } from "react";
 import { EarnFlowStepper } from "@/app/dashboard/[projectId]/markets/earn/earn-flow-stepper";
 import { EarnFlowTransition } from "@/app/dashboard/[projectId]/markets/earn/earn-flow-transition";
 import { EarnOutcomeMark } from "@/app/dashboard/[projectId]/markets/earn/earn-outcome-mark";
@@ -23,6 +25,7 @@ import { compareUnsignedDecimals, isPositiveDecimal } from "./earn-decimal";
 import { EarnErrorNote } from "./earn-error-note";
 import { formatTokenValue, positionDisplayName } from "./earn-format";
 import { earnMintAsset, TransactionLink } from "./earn-market-presentation";
+import { EARN_TRANSACTION_MODAL_FRAME } from "./earn-modal";
 import {
   createEarnVaultWithdrawal,
   type EarnVaultWithdrawalPreview,
@@ -51,6 +54,7 @@ import {
 } from "./earn-vault-slippage";
 import { VaultQuoteNotices, VaultSlippageSection } from "./earn-vault-slippage-section";
 import {
+  earnStatusTextTone,
   earnVaultPositionStatusLabels,
   earnVaultWithdrawalUiState,
   vaultOutcomeTone,
@@ -338,56 +342,51 @@ function WithdrawalResult({
   return (
     <>
       {processing ? null : <EarnOutcomeMark tone={vaultOutcomeTone(statusVariant)} />}
-      <div className="flex items-center gap-2 pr-8">
+      <div className="flex items-center gap-3 pr-8">
         <h2
-          className="text-base font-medium text-primary outline-none"
+          className="text-subheading font-medium text-primary outline-none"
           data-modal-focus-target
           tabIndex={-1}
         >
           {copy.title}
         </h2>
-        <Badge variant={statusVariant}>{status}</Badge>
+        <StatusText className="shrink-0 text-body" tone={earnStatusTextTone(statusVariant)}>
+          {status}
+        </StatusText>
       </div>
-      <p className="mt-2 text-sm leading-5 text-secondary">{copy.body}</p>
+      <p className="mt-2 text-body text-secondary">{copy.body}</p>
 
-      <dl className="mt-5 grid gap-3 rounded-xl bg-fill-subtle px-4 py-3 text-sm">
-        <div className="flex items-baseline justify-between gap-5">
-          <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultStrategy")}</dt>
-          <dd className="max-w-64 text-right text-primary">{positionName}</dd>
-        </div>
-        <div className="flex items-baseline justify-between gap-5">
-          <dt className="text-tertiary">
-            {t(
-              settlement === "provider_order"
-                ? "DashboardEarn.vaultWithdraw.sharesLabel"
-                : "DashboardEarn.vaultWithdraw.amountLabel"
-            )}
-          </dt>
-          <dd className="text-right tabular-nums text-primary">
+      <DetailList className="mt-5" variant="summary">
+        <DetailRow fit="wrap" label={t("DashboardEarn.deposit.vaultStrategy")}>
+          {positionName}
+        </DetailRow>
+        <DetailRow
+          label={t(
+            settlement === "provider_order"
+              ? "DashboardEarn.vaultWithdraw.sharesLabel"
+              : "DashboardEarn.vaultWithdraw.amountLabel"
+          )}
+          fit="figure"
+        >
+          <span className="tabular-nums">
             {settlement === "provider_order"
               ? requestedAmount
               : formatTokenValue(requestedAmount, asset.mint, locale)}
-          </dd>
-        </div>
+          </span>
+        </DetailRow>
         {settlement === "provider_order" ? null : (
-          <div className="flex items-baseline justify-between gap-5">
-            <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.receiveAs")}</dt>
-            <dd className="text-right text-primary">{asset.symbol}</dd>
-          </div>
+          <DetailRow label={t("DashboardEarn.vaultWithdraw.receiveAs")}>{asset.symbol}</DetailRow>
         )}
         {withdrawal.status === "requested" ? null : (
-          <div className="flex items-baseline justify-between gap-5">
-            <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.transaction")}</dt>
-            <dd className="text-right">
-              <TransactionLink
-                cluster={CLUSTER_BY_SDP_ENVIRONMENT[environment]}
-                signature={withdrawal.signature}
-              />
-            </dd>
-          </div>
+          <DetailRow label={t("DashboardEarn.vaultWithdraw.transaction")}>
+            <TransactionLink
+              cluster={CLUSTER_BY_SDP_ENVIRONMENT[environment]}
+              signature={withdrawal.signature}
+            />
+          </DetailRow>
         )}
-      </dl>
-      <p className="mt-4 text-xs leading-5 text-tertiary">{copy.note}</p>
+      </DetailList>
+      <p className="mt-4 text-meta text-tertiary">{copy.note}</p>
       <div className="mt-5 flex justify-end">
         <Button onClick={onClose}>{t("DashboardEarn.withdraw.done")}</Button>
       </div>
@@ -451,9 +450,14 @@ function WithdrawalDetailsStep(props: WithdrawalDetailsStepProps) {
   } = props;
   const locale = useLocale();
   const t = useTranslations();
+  // A form, so Enter in the amount continues to the review as the button does.
+  const continueFromForm = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!continueBlocked) onContinue();
+  };
 
   return (
-    <>
+    <form noValidate onSubmit={continueFromForm}>
       <div className="mt-5 flex flex-col gap-2">
         <Label htmlFor="earn-vault-withdraw-amount">
           {t(
@@ -489,7 +493,7 @@ function WithdrawalDetailsStep(props: WithdrawalDetailsStepProps) {
           placeholder="0.00"
           value={amountInput}
         />
-        <div className="min-h-5 text-xs text-tertiary" id="earn-vault-withdraw-balance">
+        <div className="min-h-5 text-meta text-tertiary" id="earn-vault-withdraw-balance">
           {settlement === "provider_order"
             ? shareBalanceHint(t, shares, availableAmount, hasStakedShares)
             : amountBalanceHint(
@@ -502,12 +506,12 @@ function WithdrawalDetailsStep(props: WithdrawalDetailsStepProps) {
               )}
         </div>
         {amountError ? (
-          <p className="text-xs text-error" role="alert">
+          <p className="text-meta text-error" role="alert">
             {amountError}
           </p>
         ) : null}
         {overAvailableAmount ? (
-          <p className="text-xs text-warning" role="status">
+          <p className="text-meta text-warning" role="status">
             {t(
               settlement === "provider_order"
                 ? "DashboardEarn.vaultWithdraw.overShares"
@@ -518,11 +522,11 @@ function WithdrawalDetailsStep(props: WithdrawalDetailsStepProps) {
       </div>
 
       <div className="mt-6">
-        <Button className="!w-full" disabled={continueBlocked} onClick={onContinue}>
+        <Button className="!w-full" disabled={continueBlocked} type="submit">
           {t("DashboardEarn.deposit.continueAction")}
         </Button>
       </div>
-    </>
+    </form>
   );
 }
 
@@ -551,10 +555,9 @@ function ProviderOrderReviewRows({ amount }: { amount: string }) {
   const t = useTranslations();
 
   return (
-    <div className="flex items-baseline justify-between gap-5">
-      <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.sharesLabel")}</dt>
-      <dd className="text-right tabular-nums text-primary">{amount}</dd>
-    </div>
+    <DetailRow fit="figure" label={t("DashboardEarn.vaultWithdraw.sharesLabel")}>
+      <span className="tabular-nums">{amount}</span>
+    </DetailRow>
   );
 }
 
@@ -576,31 +579,21 @@ function AtomicReviewRows({
 
   return (
     <>
-      <div className="flex items-baseline justify-between gap-5">
-        <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.amountLabel")}</dt>
-        <dd className="text-right tabular-nums text-primary">
-          {formatTokenValue(amount, tokenMint, locale)}
-        </dd>
-      </div>
-      <div className="flex items-baseline justify-between gap-5">
-        <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.receiveAs")}</dt>
-        <dd className="text-right text-primary">{assetSymbol}</dd>
-      </div>
+      <DetailRow fit="figure" label={t("DashboardEarn.vaultWithdraw.amountLabel")}>
+        <span className="tabular-nums">{formatTokenValue(amount, tokenMint, locale)}</span>
+      </DetailRow>
+      <DetailRow label={t("DashboardEarn.vaultWithdraw.receiveAs")}>{assetSymbol}</DetailRow>
       {quote.kind === "quoted" && quote.preview.blockingIssues.length === 0 ? (
-        <div className="flex items-baseline justify-between gap-5">
-          <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.expectedAmount")}</dt>
-          <dd className="text-right tabular-nums text-primary">
+        <DetailRow fit="figure" label={t("DashboardEarn.vaultWithdraw.expectedAmount")}>
+          <span className="tabular-nums">
             {formatTokenValue(quote.preview.assetsOut, tokenMint, locale)}
-          </dd>
-        </div>
+          </span>
+        </DetailRow>
       ) : null}
       {minAmountOut !== undefined ? (
-        <div className="flex items-baseline justify-between gap-5">
-          <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.minAmount")}</dt>
-          <dd className="text-right tabular-nums text-primary">
-            {formatTokenValue(minAmountOut, tokenMint, locale)}
-          </dd>
-        </div>
+        <DetailRow fit="figure" label={t("DashboardEarn.vaultWithdraw.minAmount")}>
+          <span className="tabular-nums">{formatTokenValue(minAmountOut, tokenMint, locale)}</span>
+        </DetailRow>
       ) : null}
     </>
   );
@@ -660,13 +653,10 @@ function WithdrawalReviewStep(props: WithdrawalReviewStepProps) {
 
   return (
     <>
-      <p className="mt-1 text-sm text-secondary">{t("DashboardEarn.deposit.progressReview")}</p>
-
-      <dl className="mt-5 grid gap-3 rounded-xl bg-fill-subtle px-4 py-3 text-sm">
-        <div className="flex items-baseline justify-between gap-5">
-          <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultStrategy")}</dt>
-          <dd className="max-w-64 text-right text-primary">{positionDisplayName(position)}</dd>
-        </div>
+      <DetailList className="mt-5" variant="summary">
+        <DetailRow fit="wrap" label={t("DashboardEarn.deposit.vaultStrategy")}>
+          {positionDisplayName(position)}
+        </DetailRow>
         <ReviewAmountRows
           amount={amount}
           assetSymbol={assetSymbol}
@@ -675,7 +665,7 @@ function WithdrawalReviewStep(props: WithdrawalReviewStepProps) {
           settlement={settlement}
           tokenMint={position.tokenMint}
         />
-      </dl>
+      </DetailList>
 
       {settlement === "provider_order" ? null : (
         <VaultQuoteNotices
@@ -706,11 +696,11 @@ function WithdrawalReviewStep(props: WithdrawalReviewStepProps) {
       ) : null}
 
       {settlement === "provider_order" ? (
-        <p className="mt-4 text-xs leading-5 text-tertiary">
+        <p className="mt-4 text-meta text-tertiary">
           {t("DashboardEarn.vaultWithdraw.providerOrderReviewNote")}
         </p>
       ) : null}
-      <p className="mt-4 text-xs leading-5 text-tertiary">
+      <p className="mt-4 text-meta text-tertiary">
         {position.feeSponsored
           ? t("DashboardEarn.vaultWithdraw.confirmNoteSponsored")
           : t("DashboardEarn.vaultWithdraw.confirmNote")}
@@ -986,7 +976,7 @@ export function EarnVaultWithdrawModal({
         ariaLabel={modalLabel}
         contentClassName={movementProcessing ? "earn-processing-modal" : undefined}
         onClose={onClose}
-        size="md"
+        {...EARN_TRANSACTION_MODAL_FRAME}
       >
         <div className="p-6" ref={contentRef}>
           <EarnFlowStepper currentStep={progressStep} steps={progressSteps} />
@@ -1008,12 +998,18 @@ export function EarnVaultWithdrawModal({
   }
 
   return (
-    <Modal isOpen ariaLabel={modalLabel} closeDisabled={submitting} onClose={onClose} size="md">
+    <Modal
+      isOpen
+      ariaLabel={modalLabel}
+      closeDisabled={submitting}
+      onClose={onClose}
+      {...EARN_TRANSACTION_MODAL_FRAME}
+    >
       <div aria-busy={submitting} className="p-6" ref={contentRef}>
         <EarnFlowStepper currentStep={progressStep} steps={progressSteps} />
         <EarnFlowTransition stepKey={step}>
           <h2
-            className="pr-8 text-lg font-medium leading-6 text-primary outline-none"
+            className="pr-8 text-subheading font-medium text-primary outline-none"
             data-modal-focus-target
             tabIndex={-1}
           >

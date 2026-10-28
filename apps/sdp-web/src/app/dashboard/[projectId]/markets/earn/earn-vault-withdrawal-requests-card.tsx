@@ -1,11 +1,12 @@
 "use client";
 
 import type { EarnVaultWithdrawalRequestRecord } from "@sdp/types/earn";
-import { Badge } from "@sdp/ui/badge";
 import { Button } from "@sdp/ui/button";
-import { Card } from "@sdp/ui/card";
-import { Clock3Icon, Loader2Icon } from "lucide-react";
+import { Callout } from "@sdp/ui/callout";
+import { StatusText } from "@sdp/ui/status-text";
+import { Loader2Icon } from "lucide-react";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { RecordBlock } from "@/components/refresh-record";
 import { useCanWrite } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
@@ -19,6 +20,7 @@ import {
   isEarnVaultParRedemptionCancelable,
 } from "./earn-vault-par-redemption-presentation";
 import { earnVaultQueuedWithdrawalStatusPresentation } from "./earn-vault-queued-withdrawal-presentation";
+import { earnStatusTextTone } from "./earn-vault-ui-state";
 
 function freshestRequest(
   server: EarnVaultWithdrawalRequestRecord,
@@ -96,27 +98,31 @@ function WithdrawalRequestItem({
     ? "DashboardEarn.parRedemption.cancelAction"
     : "DashboardEarn.queuedWithdraw.cancelAction";
 
+  // A ruled row as the design lists activity: the vault and its status over what the request
+  // will pay, and the one way out of it at the end.
   return (
-    <li className="grid gap-4 px-6 py-4 md:grid-cols-[1fr_auto] md:items-center">
+    <li className="grid gap-3 border-b border-border-subtle py-3 last:border-b-0 md:grid-cols-[minmax(0,1fr)_auto] md:items-center md:gap-6">
       <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <Clock3Icon aria-hidden="true" className="size-4 text-tertiary" />
-          <span className="truncate text-sm font-medium text-primary">
+        <p className="flex min-w-0 items-center gap-2 text-body">
+          <span className="truncate font-medium text-primary">
             {shortenMarketAddress(request.providerReference)}
           </span>
-          <Badge variant={status.variant}>{t(status.labelKey)}</Badge>
-        </div>
-        <p className="mt-1 text-xs leading-5 text-secondary">
+          <StatusText className="shrink-0" tone={earnStatusTextTone(status.variant)}>
+            {t(status.labelKey)}
+          </StatusText>
+        </p>
+        <p className="mt-0.5 text-meta text-secondary">
           <WithdrawalRequestSummary parRedemption={parRedemption} request={request} />
         </p>
         {cancelError ? (
-          <p className="mt-2 text-xs text-error" role="alert">
+          <p className="mt-2 text-meta text-error" role="alert">
             {cancelError}
           </p>
         ) : null}
       </div>
       {cancelable && canWrite ? (
         <Button
+          className="justify-self-start md:justify-self-end"
           disabled={busy}
           iconLeft={busy ? <Loader2Icon aria-hidden="true" className="animate-spin" /> : null}
           onClick={onCancel}
@@ -133,7 +139,7 @@ function WithdrawalRequestItem({
 /** Durable recovery surface for queued requests that outlive their create modal. */
 export function EarnVaultWithdrawalRequestsCard({ onChanged }: { onChanged?: () => void }) {
   const t = useTranslations();
-  const { withdrawalRequests, error, isLoading, refresh } = useEarnVaultWithdrawalRequests();
+  const { withdrawalRequests, error, refresh } = useEarnVaultWithdrawalRequests();
   const cancelKeys = useRef(new Map<string, string>());
   const observedOpenRequestIds = useRef<ReadonlySet<string> | null>(null);
   const reportedDisappearances = useRef(new Set<string>());
@@ -168,7 +174,9 @@ export function EarnVaultWithdrawalRequestsCard({ onChanged }: { onChanged?: () 
     }
   }, [error, withdrawalRequests]);
 
-  if (!error && !isLoading && (withdrawalRequests?.length ?? 0) === 0) return null;
+  // Nothing stands in while the list loads: most treasuries hold no request, and a placeholder
+  // that then disappears would move every section under it.
+  if (!error && (withdrawalRequests?.length ?? 0) === 0) return null;
 
   async function cancel(request: EarnVaultWithdrawalRequestRecord) {
     if (cancelling.has(request.withdrawalRequestId)) return;
@@ -197,40 +205,30 @@ export function EarnVaultWithdrawalRequestsCard({ onChanged }: { onChanged?: () 
   }
 
   return (
-    <section>
-      <h2 className="mb-4 text-[19px] font-medium leading-6 text-primary">
-        {t("DashboardEarn.queuedWithdraw.activeTitle")}
-      </h2>
-      <Card className="overflow-hidden rounded-2xl py-0">
-        {error ? (
-          <div className="px-6 py-5 text-sm text-error" role="alert">
-            {t("DashboardEarn.queuedWithdraw.activeError")}
-          </div>
-        ) : isLoading && !withdrawalRequests ? (
-          <div className="flex items-center gap-2 px-6 py-5 text-sm text-secondary" role="status">
-            <Loader2Icon aria-hidden="true" className="size-4 animate-spin" />
-            {t("DashboardEarn.queuedWithdraw.activeLoading")}
-          </div>
-        ) : (
-          <ul className="divide-y divide-border-subtle">
-            {(withdrawalRequests ?? []).map((serverRequest) => {
-              const request = freshestRequest(
-                serverRequest,
-                cancelResults[serverRequest.withdrawalRequestId]
-              );
-              return (
-                <WithdrawalRequestItem
-                  busy={cancelling.has(request.withdrawalRequestId)}
-                  cancelError={cancelError[request.withdrawalRequestId]}
-                  key={request.withdrawalRequestId}
-                  onCancel={() => void cancel(request)}
-                  request={request}
-                />
-              );
-            })}
-          </ul>
-        )}
-      </Card>
-    </section>
+    <RecordBlock title={t("DashboardEarn.queuedWithdraw.activeTitle")}>
+      {error ? (
+        <Callout live variant="warning">
+          {t("DashboardEarn.queuedWithdraw.activeError")}
+        </Callout>
+      ) : (
+        <ul>
+          {(withdrawalRequests ?? []).map((serverRequest) => {
+            const request = freshestRequest(
+              serverRequest,
+              cancelResults[serverRequest.withdrawalRequestId]
+            );
+            return (
+              <WithdrawalRequestItem
+                busy={cancelling.has(request.withdrawalRequestId)}
+                cancelError={cancelError[request.withdrawalRequestId]}
+                key={request.withdrawalRequestId}
+                onCancel={() => void cancel(request)}
+                request={request}
+              />
+            );
+          })}
+        </ul>
+      )}
+    </RecordBlock>
   );
 }

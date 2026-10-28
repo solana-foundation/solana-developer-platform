@@ -21,6 +21,7 @@ import type { MovementStepInput, RecordAnswer } from "@/middleware/movement-step
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { type AppContext, getPaymentTransferBatchesRepository } from "@/routes/payments/context";
 import { admitPaymentWalletRuntimeExecution } from "@/routes/payments/wallets";
+import { assertNoSolRentShortfall } from "@/services/payments/sol-rent-minimum";
 import {
   type AuthorizedBatchRequest,
   authorizeBatchRequest,
@@ -29,6 +30,7 @@ import {
 import { buildTransferBatchResponse } from "./respond";
 import { prepareBatchChunks, runBatchChunks } from "./run";
 import type { createTransferBatchSchema } from "./schemas";
+import { solBatchMovement } from "./sol-movement";
 import type { CreateTransferBatchInput } from "./types";
 
 async function respondToTransferBatchReplay(
@@ -251,6 +253,9 @@ export async function createTransferBatch(
   const externalId = body.externalId === undefined ? null : body.externalId;
   const prepared = await prepareBatchChunks(c, resolved, body.options?.maxRecipientsPerTransaction);
   const { chunks } = prepared;
+  // Before the batch row: a refusal is unstored, so the same key runs again once it clears.
+  const solMovement = solBatchMovement(resolved, chunks);
+  if (solMovement !== null) await assertNoSolRentShortfall(solMovement, "batch");
 
   let batch: PaymentTransferBatchRow;
   let recipientRows: PaymentTransferRecipientRow[];

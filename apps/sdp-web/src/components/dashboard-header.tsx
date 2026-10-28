@@ -566,6 +566,9 @@ function refreshFlowPageConfig(config: {
 /** Width of the refresh Payments overview and list pages: the design's 900px column. */
 const REFRESH_PAGE_WIDTH = "max-w-page";
 
+/** Embedded Yield's former home, which still renders the same pages. */
+const LEGACY_EARN_PROGRAM_HREF = "/dashboard/markets/earn";
+
 function actionPageConfig(config: {
   title: string;
   backHref: string;
@@ -748,8 +751,8 @@ function getMarketsRoutePageConfig(
   if (pathname === "/dashboard/markets") {
     return {
       title: t("Shared.dashboardShell.markets"),
-      titlePosition: "center",
-      contentWidthClass: "max-w-none",
+      titlePosition: "left",
+      contentWidthClass: REFRESH_PAGE_WIDTH,
     };
   }
   // Create is a detail/action route, so it keeps a centred title and a way back
@@ -779,23 +782,48 @@ function getMarketsRoutePageConfig(
       contentWidthClass: "max-w-none",
     };
   }
-  if (
-    pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions ||
-    pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram ||
-    pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.dvp
-  ) {
+  if (pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.treasurySolutions) {
     return {
-      title: t("Shared.dashboardShell.markets"),
-      titlePosition: "center",
-      contentWidthClass: "max-w-none",
+      title: t("Shared.dashboardShell.treasurySolutions"),
+      titlePosition: "left",
+      contentWidthClass: REFRESH_PAGE_WIDTH,
     };
   }
+  // Embedded Yield, also at its legacy `earn` alias, with the integration as its page action.
   if (
-    pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/configure` ||
-    pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/integrate`
+    pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram ||
+    pathname === LEGACY_EARN_PROGRAM_HREF
   ) {
     return {
-      title: t("Shared.dashboardShell.configureEarnButton"),
+      title: t("Shared.dashboardShell.earnProgram"),
+      titlePosition: "left",
+      contentWidthClass: REFRESH_PAGE_WIDTH,
+      headerAction: {
+        label: t("DashboardMarkets.earnProgram.configureShort"),
+        href: `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/configure`,
+        variant: "primary",
+      },
+    };
+  }
+  // The integration guide, under both its routes and the legacy alias: the way back to the
+  // portfolio over a left title.
+  if (
+    pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/configure` ||
+    pathname === `${DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram}/integrate` ||
+    pathname === `${LEGACY_EARN_PROGRAM_HREF}/configure`
+  ) {
+    return {
+      title: t("DashboardMarkets.earnProgram.configureShort"),
+      contentWidthClass: REFRESH_PAGE_WIDTH,
+      backAction: {
+        href: DASHBOARD_MARKETS_SUBNAV_HREFS.earnProgram,
+        label: t("Shared.dashboardShell.earnProgram"),
+      },
+    };
+  }
+  if (pathname === DASHBOARD_MARKETS_SUBNAV_HREFS.dvp) {
+    return {
+      title: t("Shared.dashboardShell.markets"),
       titlePosition: "center",
       contentWidthClass: "max-w-none",
     };

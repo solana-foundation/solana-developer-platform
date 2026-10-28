@@ -57,6 +57,7 @@ const MODULE_METADATA = [
     // @sdp/issuance is imported only through its mosaic-free `capabilities`
     // subpath (the advanced-settings catalog + lookups the editor renders).
     allowedDependencies: [
+      "@sdp/api-catalog",
       "@sdp/design-tokens",
       "@sdp/issuance",
       "@sdp/private-channels",
@@ -65,6 +66,12 @@ const MODULE_METADATA = [
       "@sdp/types",
       "@sdp/ui",
     ],
+  },
+  {
+    name: "@sdp/api-catalog",
+    directory: "packages/sdp-api-catalog",
+    purpose: "The public API's request snippets, shared by the dashboard and the docs.",
+    allowedDependencies: [],
   },
   {
     name: "@sdp/api-integration",

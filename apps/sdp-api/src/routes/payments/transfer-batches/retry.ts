@@ -15,6 +15,7 @@ import {
 import type { MovementStepInput, RecordAnswer } from "@/middleware/movement-steps";
 import { type AppContext, getPaymentTransferBatchesRepository } from "@/routes/payments/context";
 import { admitPaymentWalletRuntimeExecution } from "@/routes/payments/wallets";
+import { assertNoSolRentShortfall } from "@/services/payments/sol-rent-minimum";
 import {
   type AuthorizedBatchRequest,
   authorizeBatchRequest,
@@ -23,6 +24,7 @@ import {
 import { buildTransferBatchResponse } from "./respond";
 import { prepareBatchChunks, runBatchChunks } from "./run";
 import { MAX_TRANSFER_BATCH_RECIPIENTS, transferBatchOptionsSchema } from "./schemas";
+import { solBatchMovement } from "./sol-movement";
 import type { CreateTransferBatchInput } from "./types";
 
 /** The batch a retry names, and the access check of everything it pays. */
@@ -209,6 +211,10 @@ export async function retryTransferBatch(c: AppContext) {
     resolved.recipients.map((recipient) => recipient.destinationAddress)
   );
   const prepared = await prepareBatchChunks(c, resolved, options.maxRecipientsPerTransaction);
+  // Before the claim: a recipient still below the rent minimum would only fail
+  // again, so the retry is refused and its recipients stay failed (HOO-2375).
+  const solMovement = solBatchMovement(resolved, prepared.chunks);
+  if (solMovement !== null) await assertNoSolRentShortfall(solMovement, "batch");
   const idempotencyKey = getIdempotencyRecordKey(c);
   const idempotencyFingerprint = getIdempotencyFingerprint(c);
   if (idempotencyKey === undefined || idempotencyFingerprint === undefined) {

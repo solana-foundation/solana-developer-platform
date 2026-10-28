@@ -5,6 +5,7 @@ import type {
   EarnExternalWalletPositionSummary,
   EarnStrategy,
 } from "@sdp/types/earn";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EnglishTestI18n } from "@/app/dashboard/[projectId]/markets/test-i18n";
@@ -22,6 +23,15 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
+// A strategy's wallets slide open through HeightReveal, which measures itself with a
+// ResizeObserver jsdom does not ship.
+vi.stubGlobal(
+  "ResizeObserver",
+  class {
+    observe() {}
+    disconnect() {}
+  }
+);
 vi.mock("@/lib/use-solana-cluster", () => ({
   useSolanaCluster: () => mocks.cluster,
 }));
@@ -90,6 +100,17 @@ function renderDashboard() {
   );
 }
 
+/** The hero figure under the summary's "Live value" label. */
+function liveValueFigure(): string | undefined {
+  const label = screen.getByRole("heading", { name: /^Live value/ });
+  return label.nextElementSibling?.textContent ?? undefined;
+}
+
+/** A stat-line count, read beside the words that name it. */
+function summaryCount(words: string): string | undefined {
+  return screen.getByText(words).previousElementSibling?.textContent ?? undefined;
+}
+
 afterEach(() => {
   cleanup();
   mocks.summary = undefined;
@@ -103,7 +124,7 @@ afterEach(() => {
 });
 
 describe("EmbeddedYieldDashboard", () => {
-  it("renders complete customer totals and the configuration entry point", () => {
+  it("leads with the portfolio's live value and counts, then each strategy's total", () => {
     mocks.strategies = [strategyFixture()];
     mocks.summary = {
       walletCount: 3,
@@ -141,12 +162,16 @@ describe("EmbeddedYieldDashboard", () => {
 
     renderDashboard();
 
-    expect(
-      screen.getByRole("link", { name: "Integrate Embedded Yield" }).getAttribute("href")
-    ).toBe("/dashboard/prj_test_sandbox/markets/embedded-yield/configure");
-    expect(screen.getByText("USDC Core Yield")).toBeTruthy();
-    expect(screen.getByText("$1,250.42")).toBeTruthy();
-    expect(screen.getByText("Instant")).toBeTruthy();
+    expect(liveValueFigure()).toBe("$1,250.42");
+    expect(summaryCount("customer wallets")).toBe("3");
+    expect(summaryCount("live positions")).toBe("4");
+    expect(summaryCount("asset earning")).toBe("1");
+    const strategyRow = screen.getByRole("row", {
+      name: "View customer wallets for USDC Core Yield",
+    });
+    expect(within(strategyRow).getByText("USDC Core Yield")).toBeTruthy();
+    expect(within(strategyRow).getByText("$1,250.42")).toBeTruthy();
+    expect(within(strategyRow).getByText("Kamino · USDC · Instant")).toBeTruthy();
     expect(screen.queryByText("Active")).toBeNull();
   });
 
@@ -199,12 +224,13 @@ describe("EmbeddedYieldDashboard", () => {
     const strategyRow = screen.getByRole("row", {
       name: "View customer wallets for USDC Core Yield",
     });
-    expect(within(strategyRow).getByText("T+3 days")).toBeTruthy();
+    expect(within(strategyRow).getByText("Kamino · USDC · T+3 days")).toBeTruthy();
     expect(screen.queryByText("Pending")).toBeNull();
 
     fireEvent.click(strategyRow);
     const details = screen.getByRole("region", { name: "USDC Core Yield" });
-    expect(within(details).getByText("T+3 days")).toBeTruthy();
+    // The wallets under the row do not restate the strategy's own terms.
+    expect(within(details).queryByText(/T\+3 days/)).toBeNull();
     expect(within(details).queryByText("Pending")).toBeNull();
   });
 
@@ -342,6 +368,13 @@ describe("EmbeddedYieldDashboard", () => {
 
     expect(screen.getByText(/Live values are unavailable for 1 position/)).toBeTruthy();
     expect(screen.getByText("Unavailable")).toBeTruthy();
+    // The hero withholds the sum too, and says why behind its (i).
+    expect(liveValueFigure()).toBe("—");
+    expect(
+      screen.getByRole("button", {
+        name: "Withheld until every position's live value is read, so it never shows as partial.",
+      })
+    ).toBeTruthy();
     expect(document.body.textContent).not.toContain("$0.00");
   });
 
@@ -363,91 +396,70 @@ describe("EmbeddedYieldDashboard", () => {
     };
     renderDashboard();
 
-    expect(screen.getByText("Customer Portfolio")).toBeTruthy();
     expect(document.querySelector("[aria-busy='true']")).toBeNull();
-    expect(document.querySelector("[data-portfolio-chart='wallets']")).toBeTruthy();
-    expect(document.querySelector("[data-portfolio-chart='positions']")).toBeTruthy();
-    expect(document.querySelector("[data-portfolio-chart='assets']")).toBeTruthy();
-    expect(screen.getByText("Wallets by oldest live position")).toBeTruthy();
-    expect(screen.getByText("Live positions by age")).toBeTruthy();
+    expect(liveValueFigure()).toBe("$1,250.42");
+    expect(screen.getByRole("heading", { name: "Portfolio by strategy" })).toBeTruthy();
   });
 
-  it("groups additional asset segments into one labeled remainder", () => {
+  it("withholds the live value when an asset is not a dollar stablecoin", () => {
     mocks.summary = {
-      walletCount: 5,
-      positionCount: 15,
+      walletCount: 2,
+      positionCount: 2,
       unavailablePositionCount: 0,
       totalsByToken: [
-        { tokenMint: "TOKEN_A", walletCount: 1, positionCount: 5, unavailablePositionCount: 0 },
-        { tokenMint: "TOKEN_B", walletCount: 1, positionCount: 4, unavailablePositionCount: 0 },
-        { tokenMint: "TOKEN_C", walletCount: 1, positionCount: 3, unavailablePositionCount: 0 },
-        { tokenMint: "TOKEN_D", walletCount: 1, positionCount: 2, unavailablePositionCount: 0 },
-        { tokenMint: "TOKEN_E", walletCount: 1, positionCount: 1, unavailablePositionCount: 0 },
+        {
+          tokenMint: USDC,
+          walletCount: 1,
+          positionCount: 1,
+          unavailablePositionCount: 0,
+          tokenValue: "10",
+        },
+        {
+          tokenMint: SOL_MINT,
+          walletCount: 1,
+          positionCount: 1,
+          unavailablePositionCount: 0,
+          tokenValue: "5",
+        },
       ],
       totalsByStrategy: [],
     };
 
     renderDashboard();
 
-    const chart = document.querySelector("[data-portfolio-chart='assets']");
-    if (!(chart instanceof HTMLElement)) throw new Error("Expected asset portfolio chart");
-    expect(within(chart).getByText("TOKEN_A")).toBeTruthy();
-    expect(within(chart).getByText("TOKEN_B")).toBeTruthy();
-    expect(within(chart).getByText("TOKEN_C")).toBeTruthy();
-    expect(within(chart).getByText("Other assets")).toBeTruthy();
-    expect(within(chart).getAllByText("3")).toHaveLength(2);
-    expect(within(chart).queryByText("TOKEN_D")).toBeNull();
-    expect(within(chart).queryByText("TOKEN_E")).toBeNull();
+    // Dollars and SOL do not add, so there is no single figure, and no wrong one.
+    expect(liveValueFigure()).toBe("—");
+    expect(
+      screen.getByRole("button", {
+        name: "Some assets aren't dollar stablecoins, so no single total is shown.",
+      })
+    ).toBeTruthy();
+    expect(summaryCount("assets earning")).toBe("2");
   });
 
-  it("charts the age of every position included by the live summary", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-09-10T00:00:00.000Z"));
+  it("words each count for one and for several", () => {
     mocks.summary = {
-      walletCount: 3,
-      positionCount: 3,
+      walletCount: 1,
+      positionCount: 2,
       unavailablePositionCount: 0,
-      totalsByToken: [],
-      totalsByStrategy: [
+      totalsByToken: [
         {
-          provider: "kamino",
-          providerReference: "vault_1",
-          label: "USDC Core Yield",
-          ownerAddresses: ["11111111111111111111111111111111", "22222222222222222222222222222222"],
-          positions: [
-            positionFixture(),
-            positionFixture({
-              id: "position_2",
-              ownerAddress: "22222222222222222222222222222222",
-              createdAt: "2026-08-01T00:00:00.000Z",
-            }),
-            positionFixture({
-              id: "closed_position",
-              ownerAddress: "33333333333333333333333333333333",
-              createdAt: "2026-01-01T00:00:00.000Z",
-              // The API keeps this holding in the live summary while a redeposit is pending.
-              closedAt: "2026-02-01T00:00:00.000Z",
-            }),
-          ],
-          walletCount: 3,
-          positionCount: 3,
-          totalsByToken: [],
+          tokenMint: USDC,
+          walletCount: 1,
+          positionCount: 2,
+          unavailablePositionCount: 0,
+          tokenValue: "7.5",
         },
       ],
+      totalsByStrategy: [],
     };
 
     renderDashboard();
 
-    expect(
-      screen.getByRole("img", {
-        name: "Wallets by oldest live position: 0–7 days 1, 8–30 days 0, 31–90 days 1, 90+ days 1",
-      })
-    ).toBeTruthy();
-    expect(
-      screen.getByRole("img", {
-        name: "Live positions by age: 0–7 days 1, 8–30 days 0, 31–90 days 1, 90+ days 1",
-      })
-    ).toBeTruthy();
+    expect(summaryCount("customer wallet")).toBe("1");
+    expect(summaryCount("live positions")).toBe("2");
+    expect(summaryCount("asset earning")).toBe("1");
+    expect(liveValueFigure()).toBe("$7.50");
   });
 
   it("keeps the refresh status region mounted before an error occurs", () => {
@@ -476,7 +488,13 @@ describe("EmbeddedYieldDashboard", () => {
     renderDashboard();
 
     expect(screen.queryByRole("list", { name: "Embedded Yield integration path" })).toBeNull();
-    expect(screen.getByRole("link", { name: "Integrate" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Integrate" }).getAttribute("href")).toBe(
+      "/dashboard/prj_test_sandbox/markets/embedded-yield/configure"
+    );
+    // The empty state's action is the page's own, so the header hides its copy.
+    expect(document.querySelector("[data-hides-page-action]")).toBeTruthy();
+    // Zero positions is the empty state alone: no zero hero or empty counts.
+    expect(screen.queryByRole("heading", { name: /^Live value/ })).toBeNull();
     expect(screen.queryByText("Preview UI")).toBeNull();
   });
 

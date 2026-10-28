@@ -94,6 +94,15 @@ included:
   scope is fixed runs. `assertCallerWalletInScope` reads the scope from
   authentication (ADR 0009) and is a fast refusal only; the waist still
   decides every signature.
+- **Recurring payments scope every write (HOO-2337, SDP-023 RE-3).** A
+  pending schedule's edit signs nothing, but the activator later signs the
+  terms it left, so a key scoped to wallet A could set what an in-scope
+  activator of wallet B signs. The recurring routes' `authorize` therefore
+  refuses an API key whose scope lacks the schedule's source wallet (or the
+  wallet an update moves it to) on create, every update shape, cancel,
+  activate, collect and resume, signing or not. Reads and lists stay
+  project-wide. A dashboard session holds every wallet; the job and
+  revocation cancel run without a request and are unchanged.
 - **A claim the job can finish is ordered against revocation.** A fresh
   recurring activation or resume is admitted before its claim, and the claim
   re-reads the activating key under a share lock (`lockLiveActivatingKey`).
