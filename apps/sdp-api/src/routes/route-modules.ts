@@ -18,10 +18,8 @@ export const ROUTE_OWNERS: readonly (readonly [RegExp, RouteOwner])[] = [
   [/^\/v1\/dvp(\/|$)/, "dvp"],
   [/^\/v1\/private-channels(\/|$)/, "private_channels"],
   [/^\/(v1|internal\/dashboard)\/helius-rings(\/|$)/, "helius_rings"],
-  [
-    /^\/v1\/payments\/(recurring-payments|subscription-plans|subscriptions)(\/|$)/,
-    "recurring_payments",
-  ],
+  [/^\/v1\/payments\/recurring-payments(\/|$)/, "recurring_payments"],
+  [/^\/v1\/payments\/(subscription-plans|subscriptions)(\/|$)/, "subscriptions"],
   [/^\/(v1\/payments|v1\/counterparties|v1\/transactions|pay)(\/|$)/, "payments"],
   [/^\/(v1\/wallets|internal\/dashboard\/(custody|wallets|fireblocks))(\/|$)/, "custody"],
   [/^\/v1\/compliance(\/|$)/, "compliance"],

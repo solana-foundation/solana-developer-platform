@@ -123,7 +123,7 @@ export const DOCS_ACTION_MODULES = {
   payment_requests: "Payment requests and their payment links",
   counterparties: "Counterparties, their accounts, and provider requirements",
   transactions: "The unified transaction list; each row also needs the read of its own module",
-  recurring: "Recurring payments, subscription plans and subscriptions",
+  recurring: "Recurring payments and their collection attempts",
   wallets: "Custody wallets and their balances",
   compliance: "Address screening",
   api_keys: "API keys",
