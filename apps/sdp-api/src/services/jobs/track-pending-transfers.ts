@@ -61,26 +61,25 @@ const MAX_SIGNATURES_PER_BATCH = 256;
 // still-confirmed row ages out of the finalization poll and rests at
 // confirmed instead of costing an RPC history search forever.
 const CONFIRMED_FINALIZATION_WINDOW_MS = 24 * 60 * 60 * 1000;
-/** Agave's target slot duration (`DEFAULT_MS_PER_SLOT`); real slots run no faster. */
-const AGAVE_TARGET_SLOT_MS = 400;
 /**
- * How long after a transaction could last have landed the tracker still trusts a floored history
- * null to prove it never did. Agave purges each node's blockstore oldest-slot-first by shred
- * count, never by slot count (`--limit-blockstore-size`: 400M shreds by default and no fewer than
- * 100M; `ledger/src/blockstore/cleanup_service.rs`), so a node's window shrinks as load grows. An
- * hour is 9,000 blocks at most; a node at Agave's smallest limit keeps that until blocks average
- * about 11,000 shreds (~55,000 TPS at the 4 transactions a shred `ledger/src/shred.rs` assumes),
- * and an indexer-backed node keeps everything. The hour also spans twelve missed passes of the
- * five-minute cron. Snapshot-booted nodes and history-backend errors read as null (Agave
+ * How many blocks past a row's last valid block height the tracker still trusts a floored history
+ * null to prove the transaction never landed. On the five-minute cron a row is judged within a
+ * pass of its expiry, so the horizon only matters when the tracker has been down for more than
+ * about an hour (9,000 blocks of Agave's 400 ms target slot): past it the row stays processing and
+ * `sdp_api_transfer_verdict_unprovable` pages an operator, who resolves it by hand until HOO-2338's
+ * second provider replaces that.
+ *
+ * Agave purges each node's blockstore oldest-slot-first by shred count, never by slot count
+ * (`--limit-blockstore-size`: 400M shreds by default and no fewer than 100M;
+ * `ledger/src/blockstore/cleanup_service.rs`), and skipped slots carry no shreds, so retention is
+ * counted in blocks and shrinks as load grows. A node at Agave's smallest limit keeps 9,000 blocks
+ * until they average about 11,000 shreds (~55,000 TPS at the 4 transactions a shred
+ * `ledger/src/shred.rs` assumes); an indexer-backed node keeps everything. The transaction could
+ * only have landed within the 150 blocks before its last valid block height (`MAX_PROCESSING_AGE`),
+ * which that margin covers. Snapshot-booted nodes and history-backend errors read as null (Agave
  * `rpc.rs` `.unwrap_or(None)`) are outside what any horizon can bound.
  */
-const VERDICT_HISTORY_HORIZON_MS = 60 * 60 * 1000;
-/**
- * The horizon in blocks past a signed row's last valid block height. Skipped slots carry no
- * shreds, so retention is counted in blocks; the transaction could only have landed within the
- * 150 blocks before that height (`MAX_PROCESSING_AGE`), which the margin above covers.
- */
-const VERDICT_HISTORY_HORIZON_BLOCKS = BigInt(VERDICT_HISTORY_HORIZON_MS / AGAVE_TARGET_SLOT_MS);
+const VERDICT_HISTORY_HORIZON_BLOCKS = 9_000n;
 
 type PaymentTransferWithSignature = PaymentTransferRow & { signature: Signature };
 type PaymentTransferWithSignedSubmission = PaymentTransferWithSignature & {
@@ -547,7 +546,7 @@ async function syncProcessingTransfersOnChain(
   repo: PaymentsRepository,
   nowIso: string
 ): Promise<void> {
-  const { valid: processingWithSig, invalid } = partitionByValidStoredSignature(
+  const { valid, invalid } = partitionByValidStoredSignature(
     await repo.listTransfersByStatus({
       environment: currentClusterScope().environment,
       statuses: ["processing"],
@@ -557,8 +556,18 @@ async function syncProcessingTransfersOnChain(
       limit: MAX_SIGNATURES_PER_BATCH,
     })
   );
+  const processingWithSig = valid.filter(hasSignedSubmission);
+  // Every writer saves signed bytes before the signature, so a row without them has no expiry to
+  // prove and nothing to judge; it rotates so it cannot pin the oldest-first page.
+  const unsigned = valid.filter((transfer) => !hasSignedSubmission(transfer));
+  for (const transfer of unsigned) {
+    getLogger().error(
+      { transfer_id: transfer.id },
+      "trackPendingTransfers: processing transfer has a signature but no signed submission"
+    );
+  }
 
-  for (const transfer of invalid) {
+  for (const transfer of [...invalid, ...unsigned]) {
     try {
       await repo.updateTransfer({
         transferId: transfer.id,
@@ -605,24 +614,19 @@ async function syncProcessingTransfersOnChain(
     const transfer = processingWithSig[i];
     const status = statuses[i] ?? null;
     if (status && !(await applyOnChainVerdict(env, repo, transfer, status, nowIso))) {
-      const reason = unresolvedReasonForStatus(status);
-      if (reason === "processed_only" && !hasSignedSubmission(transfer)) continue;
-      await keepStartedSubmissionForReconciliation(repo, transfer, nowIso, { reason });
+      await keepStartedSubmissionForReconciliation(repo, transfer, nowIso, {
+        reason: unresolvedReasonForStatus(status),
+      });
     }
   }
 
-  const cacheMisses = processingWithSig.filter((_transfer, index) => !statuses[index]);
-  const now = new Date();
-  await reconcileCacheMisses(env, repo, rpc, {
-    legacy: cacheMisses.filter(
-      (transfer) =>
-        !hasSignedSubmission(transfer) &&
-        now.getTime() - new Date(transfer.updated_at).getTime() > STUCK_PROCESSING_AFTER_MS
-    ),
-    signed: cacheMisses.filter(hasSignedSubmission),
-    now,
-    nowIso,
-  });
+  await reconcileCacheMisses(
+    env,
+    repo,
+    rpc,
+    processingWithSig.filter((_transfer, index) => !statuses[index]),
+    nowIso
+  );
 }
 
 /**
@@ -635,33 +639,21 @@ async function syncProcessingTransfersOnChain(
  * this pass. A null from a node at the floor fails the row only while its landing window is inside
  * the history horizon; past it the row stays processing and alerts.
  *
- * Legacy rows (a signature but no signed bytes) carry no last valid block height: they are judged
- * only once `STUCK_PROCESSING_AFTER_MS` has passed since their last write (a blockhash outlives
- * about 150 blocks, so the send expired long before), and their horizon runs from `created_at`.
- *
  * @param env - Process environment.
  * @param repo - System payments repository.
  * @param rpc - The pass's pool client.
- * @param params - The rows to judge and the pass's clock.
- * @param params.legacy - Legacy cache misses past `STUCK_PROCESSING_AFTER_MS`.
- * @param params.signed - Cache misses with saved signed bytes and a last valid block height.
- * @param params.now - The pass's clock, for the legacy horizon.
- * @param params.nowIso - Timestamp applied to every written row.
+ * @param signed - The cache misses, each with saved signed bytes and a last valid block height.
+ * @param nowIso - Timestamp applied to every written row.
  * @returns Resolves once every row is settled or rotated.
  */
 async function reconcileCacheMisses(
   env: Env,
   repo: PaymentsRepository,
   rpc: SolanaRpc,
-  params: {
-    legacy: PaymentTransferWithSignature[];
-    signed: PaymentTransferWithSignedSubmission[];
-    now: Date;
-    nowIso: string;
-  }
+  signed: PaymentTransferWithSignedSubmission[],
+  nowIso: string
 ): Promise<void> {
-  const { legacy, signed, now, nowIso } = params;
-  if (legacy.length === 0 && signed.length === 0) return;
+  if (signed.length === 0) return;
 
   let finalized: FinalizedHeight;
   try {
@@ -674,7 +666,7 @@ async function reconcileCacheMisses(
       },
       "trackPendingTransfers: finalized getEpochInfo RPC call failed"
     );
-    for (const transfer of [...legacy, ...signed]) {
+    for (const transfer of signed) {
       await keepStartedSubmissionForReconciliation(repo, transfer, nowIso, {
         reason: "history_unavailable",
       });
@@ -696,10 +688,7 @@ async function reconcileCacheMisses(
     }
   }
 
-  const candidates: PaymentTransferWithSignature[] = [
-    ...legacy,
-    ...expiredSigned.filter((transfer) => transfer.submission_started_at !== null),
-  ];
+  const candidates = expiredSigned.filter((transfer) => transfer.submission_started_at !== null);
   if (candidates.length === 0) return;
 
   let history: Array<SignatureStatusInfo | null>;
@@ -733,7 +722,7 @@ async function reconcileCacheMisses(
   }
 
   for (const [index, transfer] of candidates.entries()) {
-    await settleFromHistory(env, repo, transfer, history[index], { finalized, now, nowIso });
+    await settleFromHistory(env, repo, transfer, history[index], { finalized, nowIso });
   }
 }
 
@@ -743,31 +732,33 @@ async function reconcileCacheMisses(
  *
  * @param env - Process environment.
  * @param repo - System payments repository.
- * @param transfer - A legacy row, or a signed row that started broadcast and expired.
+ * @param transfer - A signed row that started broadcast and expired.
  * @param status - Its status from a node at or past the floor, or null when that node has none.
- * @param pass - The pass's proof and clock.
+ * @param pass - The pass's proof and timestamp.
  * @param pass.finalized - The finalized height that proved the expiry and floored the read.
- * @param pass.now - The pass's clock, for the legacy horizon.
  * @param pass.nowIso - Timestamp applied to the written row.
  * @returns Resolves once the row is settled or rotated.
  */
 async function settleFromHistory(
   env: Env,
   repo: PaymentsRepository,
-  transfer: PaymentTransferWithSignature,
+  transfer: PaymentTransferWithSignedSubmission,
   status: SignatureStatusInfo | null,
-  pass: { finalized: FinalizedHeight; now: Date; nowIso: string }
+  pass: { finalized: FinalizedHeight; nowIso: string }
 ): Promise<void> {
-  const { finalized, now, nowIso } = pass;
+  const { finalized, nowIso } = pass;
   if (status !== null) {
     if (!(await applyOnChainVerdict(env, repo, transfer, status, nowIso))) {
-      const reason = unresolvedReasonForStatus(status);
-      if (reason === "processed_only" && !hasSignedSubmission(transfer)) return;
-      await keepStartedSubmissionForReconciliation(repo, transfer, nowIso, { reason });
+      await keepStartedSubmissionForReconciliation(repo, transfer, nowIso, {
+        reason: unresolvedReasonForStatus(status),
+      });
     }
     return;
   }
-  if (!isWithinHistoryHorizon(transfer, finalized, now)) {
+  if (
+    finalized.blockHeight - BigInt(transfer.last_valid_block_height) >
+    VERDICT_HISTORY_HORIZON_BLOCKS
+  ) {
     await keepUnprovableVerdict(repo, transfer, nowIso, finalized);
     return;
   }
@@ -790,27 +781,6 @@ async function settleFromHistory(
     finalized_block_height: finalized.blockHeight.toString(),
     min_context_slot: finalized.absoluteSlot.toString(),
   });
-}
-
-/**
- * Whether a row's transaction, had it landed, would still be inside the history every pool node
- * keeps, so a floored null proves it never did. A signed row could only land at or below its last
- * valid block height; a legacy row only after it was created.
- *
- * @param transfer - The row whose history read came back null.
- * @param finalized - The finalized height that proved the expiry.
- * @param now - The pass's clock.
- * @returns True while the row's landing window is within the horizon.
- */
-function isWithinHistoryHorizon(
-  transfer: PaymentTransferWithSignature,
-  finalized: FinalizedHeight,
-  now: Date
-): boolean {
-  return hasSignedSubmission(transfer)
-    ? finalized.blockHeight - BigInt(transfer.last_valid_block_height) <=
-        VERDICT_HISTORY_HORIZON_BLOCKS
-    : now.getTime() - new Date(transfer.created_at).getTime() <= VERDICT_HISTORY_HORIZON_MS;
 }
 
 /**
@@ -939,7 +909,7 @@ async function keepStartedSubmissionForReconciliation(
  */
 async function keepUnprovableVerdict(
   repo: PaymentsRepository,
-  transfer: PaymentTransferWithSignature,
+  transfer: PaymentTransferWithSignedSubmission,
   nowIso: string,
   finalized: FinalizedHeight
 ): Promise<void> {
@@ -952,7 +922,6 @@ async function keepUnprovableVerdict(
     transfer_id: transfer.id,
     transfer_type: transfer.type,
     signature: transfer.signature,
-    created_at: transfer.created_at,
     last_valid_block_height: transfer.last_valid_block_height,
     submission_started_at: transfer.submission_started_at,
     finalized_block_height: finalized.blockHeight.toString(),
