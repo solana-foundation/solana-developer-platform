@@ -2710,8 +2710,15 @@ const response = await sdp.post("/v1/payments/transfer-batches", {
 });
 // 200: this run's batch, new or replayed. 409 TRANSFER_BATCH_RUN_EXISTS: the run was
 // already sent with a different body; read error.details.batchId instead of resending.
-const batchId =
-  response.status === 409 ? response.error.details.batchId : response.data.batch.id;
+// Any other error (a 409 AMOUNT_BELOW_RENT_MINIMUM, say) sent nothing: report it.
+let batchId: string;
+if (response.ok) {
+  batchId = response.data.batch.id;
+} else if (response.error.code === "TRANSFER_BATCH_RUN_EXISTS") {
+  batchId = response.error.details.batchId;
+} else {
+  throw new Error(`Payout run ${externalId} was refused: ${response.error.code}`);
+}
 ```
 
 `externalId` is optional. A batch without one gets no such guard: only its `Idempotency-Key` stops a resend from paying the same recipients again. Send one for every payout run.
