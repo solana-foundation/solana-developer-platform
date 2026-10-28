@@ -2,13 +2,12 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
+import { SDP_RELEASE_CHANNELS } from "@sdp/types/release-channels";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { DOCS_SKILL_NAME, getAgentSetupOptions } from "@/lib/agent-setup";
-import { isModulePublished } from "@/lib/release-channel";
+import { isModulePublished, publicSurface } from "@/lib/release-channel";
 
-// Checked against the build's own release channel: the committed surface is experimental,
-// and a stable build of the docs runs the same assertions.
 describe("Agent setup commands", () => {
   const options = getAgentSetupOptions();
 
@@ -16,6 +15,17 @@ describe("Agent setup commands", () => {
     for (const option of options) {
       assert.match(option.command, / --skill sdp-docs(?: |$)/);
       assert.equal(option.command.includes("sdp-tokenization"), isModulePublished("issuance"));
+    }
+  });
+
+  // CI generates the experimental surface, so this swaps in the stable channel's modules.
+  it("follow the stable channel's modules on a stable build", (t) => {
+    t.mock.property(publicSurface, "modules", SDP_RELEASE_CHANNELS.stable);
+    for (const option of getAgentSetupOptions()) {
+      assert.equal(
+        option.command.includes("sdp-tokenization"),
+        SDP_RELEASE_CHANNELS.stable.includes("issuance")
+      );
     }
   });
 
