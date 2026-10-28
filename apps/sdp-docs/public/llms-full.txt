@@ -23207,9 +23207,9 @@ r = requests.post("https://api.solana.com/v1/compliance/address-screenings",
 ### Counterparties
 Source: https://platform.solana.com/docs/reference/api/counterparties
 
-> Counterparty (customer/beneficiary) identity records.
+> A counterparty is a person or business you pay or get paid by. You save their details and payment accounts once, then reuse them in payouts and ramps.
 
-## Counterparties
+## Profiles
 
 | Method | Endpoint | Summary |
 | --- | --- | --- |
@@ -23234,7 +23234,7 @@ Source: https://platform.solana.com/docs/reference/api/counterparties
 
 ---
 
-## Counterparties: Counterparties
+## Counterparties: Profiles
 
 ### Get counterparty field options
 Source: https://platform.solana.com/docs/reference/api/counterparties/get-counterparty-field-options
