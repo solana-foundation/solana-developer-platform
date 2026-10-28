@@ -19,14 +19,22 @@
  * transfers whose project is in the scope's environment and reads them through that cluster.
  */
 
+import { MinContextSlotNotReachedError } from "@sdp/rpc/errors";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import type { SignatureStatusInfo, SolanaRpc } from "@sdp/rpc/solana";
-import { getSignatureStatuses } from "@sdp/rpc/solana";
+import { getChainHeight, getSignatureStatuses, reReadExpiredStatuses } from "@sdp/rpc/solana";
 import { withTransientRpcRetry } from "@sdp/rpc/transient";
 import type { TransferChainVerdictStatus } from "@sdp/types/payments";
 import { WALLET_TRANSFER_TYPES } from "@sdp/types/payments";
-import { assertIsSignature, commitmentComparator, type Signature } from "@solana/kit";
+import {
+  assertIsSignature,
+  commitmentComparator,
+  isSolanaError,
+  type Signature,
+  type Slot,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
+} from "@solana/kit";
 import type {
   ConfirmedTransferPollVerdict,
   PaymentsRepository,
@@ -53,12 +61,48 @@ const MAX_SIGNATURES_PER_BATCH = 256;
 // still-confirmed row ages out of the finalization poll and rests at
 // confirmed instead of costing an RPC history search forever.
 const CONFIRMED_FINALIZATION_WINDOW_MS = 24 * 60 * 60 * 1000;
+/** Agave's target slot duration (`DEFAULT_MS_PER_SLOT`); real slots run no faster. */
+const AGAVE_TARGET_SLOT_MS = 400;
+/**
+ * How long after a transaction could last have landed the tracker still trusts a floored history
+ * null to prove it never did. Agave purges each node's blockstore oldest-slot-first by shred
+ * count, never by slot count (`--limit-blockstore-size`: 400M shreds by default and no fewer than
+ * 100M; `ledger/src/blockstore/cleanup_service.rs`), so a node's window shrinks as load grows. An
+ * hour is 9,000 blocks at most; a node at Agave's smallest limit keeps that until blocks average
+ * about 11,000 shreds (~55,000 TPS at the 4 transactions a shred `ledger/src/shred.rs` assumes),
+ * and an indexer-backed node keeps everything. The hour also spans twelve missed passes of the
+ * five-minute cron. Snapshot-booted nodes and history-backend errors read as null (Agave
+ * `rpc.rs` `.unwrap_or(None)`) are outside what any horizon can bound.
+ */
+const VERDICT_HISTORY_HORIZON_MS = 60 * 60 * 1000;
+/**
+ * The horizon in blocks past a signed row's last valid block height. Skipped slots carry no
+ * shreds, so retention is counted in blocks; the transaction could only have landed within the
+ * 150 blocks before that height (`MAX_PROCESSING_AGE`), which the margin above covers.
+ */
+const VERDICT_HISTORY_HORIZON_BLOCKS = BigInt(VERDICT_HISTORY_HORIZON_MS / AGAVE_TARGET_SLOT_MS);
 
 type PaymentTransferWithSignature = PaymentTransferRow & { signature: Signature };
 type PaymentTransferWithSignedSubmission = PaymentTransferWithSignature & {
   signed_transaction: string;
   last_valid_block_height: string;
 };
+
+type FinalizedHeight = Awaited<ReturnType<typeof getChainHeight>>;
+
+/** What proves a processing row's transaction never landed. */
+type NotLandedProof = "broadcast_never_started" | "expired_unseen";
+
+/** Why a processing row keeps its status this pass. */
+type UnresolvedVerdict =
+  | {
+      reason:
+        | "history_unavailable"
+        | "processed_only"
+        | "error_unfinalized"
+        | "verdict_write_failed";
+    }
+  | { reason: "node_behind_floor"; contextSlot: string; minContextSlot: string };
 
 function hasValidStoredSignature(
   transfer: PaymentTransferRow
@@ -134,42 +178,40 @@ async function updateTerminalTransfer(
 }
 
 /**
- * Applies a complete on-chain verdict to one processing transfer. A null
- * verdict is terminal only after a successful transaction-history lookup or
- * durable proof that broadcast never started; recent-cache misses alone must
- * not be passed here.
+ * Applies an observed on-chain status to one processing transfer. A success settles at the
+ * commitment observed (`confirmed` or `finalized`); an on-chain error is terminal only at
+ * `finalized`.
+ *
+ * @param env - Process environment.
+ * @param repo - System payments repository.
+ * @param transfer - The processing transfer the status belongs to.
+ * @param status - The transaction's status as a node reported it.
+ * @param nowIso - Timestamp applied to the settled row.
+ * @returns True when the status settled the row (a lost CAS is a no-op, not an error); false
+ * when the status settles nothing yet or the write failed.
  */
 async function applyOnChainVerdict(
   env: Env,
   repo: PaymentsRepository,
   transfer: PaymentTransferRow,
-  status: SignatureStatusInfo | null,
+  status: SignatureStatusInfo,
   nowIso: string
 ): Promise<boolean> {
+  // An error seen only at "processed" may be on a fork the cluster drops, and
+  // the same signed transaction can still land; failing the row here would
+  // let a retry pay twice (APE SOLA9-708). A confirmed block can still be
+  // rolled back, so an error is final only once finalized.
+  const committed =
+    status.confirmationStatus !== null &&
+    commitmentComparator(status.confirmationStatus, "confirmed") >= 0;
+  const finalized =
+    status.confirmationStatus !== null &&
+    commitmentComparator(status.confirmationStatus, "finalized") >= 0;
+  if (!committed || (status.err && !finalized)) {
+    return false;
+  }
+
   try {
-    if (!status) {
-      await updateTerminalTransfer(env, repo, transfer, {
-        transferId: transfer.id,
-        status: "failed",
-        error: "Transaction not found on chain",
-        updatedAt: nowIso,
-        // With signed bytes, absence is definitive only while broadcast has
-        // not started. Recheck that proof in SQL, not just on the selected row.
-        requireUnstarted: transfer.signed_transaction !== null ? true : undefined,
-      });
-      return true;
-    }
-
-    // An error seen only at "processed" may be on a fork the cluster drops, and
-    // the same signed transaction can still land; failing the row here would
-    // let a retry pay twice (APE SOLA9-708).
-    const committed =
-      status.confirmationStatus !== null &&
-      commitmentComparator(status.confirmationStatus, "confirmed") >= 0;
-    if (!committed) {
-      return false;
-    }
-
     if (status.err) {
       await updateTerminalTransfer(env, repo, transfer, {
         transferId: transfer.id,
@@ -181,23 +223,53 @@ async function applyOnChainVerdict(
       return true;
     }
 
-    if (
-      status.confirmationStatus !== null &&
-      commitmentComparator(status.confirmationStatus, "finalized") >= 0
-    ) {
-      await updateTerminalTransfer(env, repo, transfer, {
-        transferId: transfer.id,
-        status: "finalized",
-        slot: Number(status.slot),
-        updatedAt: nowIso,
-      });
-      return true;
-    }
     await updateTerminalTransfer(env, repo, transfer, {
       transferId: transfer.id,
-      status: "confirmed",
+      status: finalized ? "finalized" : "confirmed",
       slot: Number(status.slot),
       updatedAt: nowIso,
+    });
+    return true;
+  } catch (err) {
+    getLogger().error(
+      {
+        transfer_id: transfer.id,
+        error: err instanceof Error ? err.message : String(err),
+      },
+      "trackPendingTransfers: failed to update transfer"
+    );
+    return false;
+  }
+}
+
+/**
+ * Fails a processing transfer whose transaction provably never landed. A row that never started
+ * broadcast fails only while SQL still shows it unstarted (`requireUnstarted`), so a request that
+ * starts the send concurrently wins. A row whose expiry the finalized height proved, and whose
+ * signature is absent from history read at the finalized slot, fails from processing whatever its
+ * start marker says.
+ *
+ * @param env - Process environment.
+ * @param repo - System payments repository.
+ * @param transfer - The processing transfer to fail.
+ * @param proof - What proves the transaction never landed.
+ * @param nowIso - Timestamp applied to the failed row.
+ * @returns True when the write ran (a lost CAS is a no-op, not an error); false when it failed.
+ */
+async function failNotLanded(
+  env: Env,
+  repo: PaymentsRepository,
+  transfer: PaymentTransferRow,
+  proof: NotLandedProof,
+  nowIso: string
+): Promise<boolean> {
+  try {
+    await updateTerminalTransfer(env, repo, transfer, {
+      transferId: transfer.id,
+      status: "failed",
+      error: "Transaction not found on chain",
+      updatedAt: nowIso,
+      requireUnstarted: proof === "broadcast_never_started" ? true : undefined,
     });
     return true;
   } catch (err) {
@@ -535,142 +607,252 @@ async function syncProcessingTransfersOnChain(
     if (status && !(await applyOnChainVerdict(env, repo, transfer, status, nowIso))) {
       const reason = unresolvedReasonForStatus(status);
       if (reason === "processed_only" && !hasSignedSubmission(transfer)) continue;
-      await keepStartedSubmissionForReconciliation(repo, transfer, nowIso, reason);
+      await keepStartedSubmissionForReconciliation(repo, transfer, nowIso, { reason });
     }
   }
 
   const cacheMisses = processingWithSig.filter((_transfer, index) => !statuses[index]);
   const now = new Date();
-  const expiredLegacyTransfers = cacheMisses.filter(
-    (transfer) =>
-      !hasSignedSubmission(transfer) &&
-      now.getTime() - new Date(transfer.updated_at).getTime() > STUCK_PROCESSING_AFTER_MS
-  );
-  await reconcileExpiredLegacyCacheMisses(env, repo, rpc, expiredLegacyTransfers, nowIso);
-
-  await reconcileSignedSubmissionCacheMisses(
-    env,
-    repo,
-    rpc,
-    cacheMisses.filter(hasSignedSubmission),
-    nowIso
-  );
+  await reconcileCacheMisses(env, repo, rpc, {
+    legacy: cacheMisses.filter(
+      (transfer) =>
+        !hasSignedSubmission(transfer) &&
+        now.getTime() - new Date(transfer.updated_at).getTime() > STUCK_PROCESSING_AFTER_MS
+    ),
+    signed: cacheMisses.filter(hasSignedSubmission),
+    now,
+    nowIso,
+  });
 }
 
 /**
- * Resolves expired signature-bearing rows without a signed submission from
- * transaction history: the recent-status cache alone cannot distinguish a
- * dropped transaction from one that landed and aged out of the cache.
+ * Judges the processing rows the recent-status cache did not answer, by the lag-aware rule the
+ * sponsorship budget and Earn reconcilers share. The `finalized` block height proves a signed
+ * row's blockhash expired: every later block descends from one that can no longer include it.
+ * Every row that may have been broadcast is then re-read from transaction history at the
+ * finalized slot (`minContextSlot`, with SDP's own `context.slot` check), so a node behind that
+ * proof cannot report a landed transaction absent. A node behind the floor is a miss: no verdict
+ * this pass. A null from a node at the floor fails the row only while its landing window is inside
+ * the history horizon; past it the row stays processing and alerts.
+ *
+ * Legacy rows (a signature but no signed bytes) carry no last valid block height: they are judged
+ * only once `STUCK_PROCESSING_AFTER_MS` has passed since their last write (a blockhash outlives
+ * about 150 blocks, so the send expired long before), and their horizon runs from `created_at`.
+ *
+ * @param env - Process environment.
+ * @param repo - System payments repository.
+ * @param rpc - The pass's pool client.
+ * @param params - The rows to judge and the pass's clock.
+ * @param params.legacy - Legacy cache misses past `STUCK_PROCESSING_AFTER_MS`.
+ * @param params.signed - Cache misses with saved signed bytes and a last valid block height.
+ * @param params.now - The pass's clock, for the legacy horizon.
+ * @param params.nowIso - Timestamp applied to every written row.
+ * @returns Resolves once every row is settled or rotated.
  */
-async function reconcileExpiredLegacyCacheMisses(
+async function reconcileCacheMisses(
   env: Env,
   repo: PaymentsRepository,
   rpc: SolanaRpc,
-  transfers: PaymentTransferWithSignature[],
-  nowIso: string
-): Promise<void> {
-  if (transfers.length === 0) return;
-
-  const archived = await getArchivedStatuses(rpc, transfers);
-  if (archived === null) {
-    for (const transfer of transfers) {
-      await keepStartedSubmissionForReconciliation(repo, transfer, nowIso, "history_unavailable");
-    }
-    return;
+  params: {
+    legacy: PaymentTransferWithSignature[];
+    signed: PaymentTransferWithSignedSubmission[];
+    now: Date;
+    nowIso: string;
   }
-
-  for (let i = 0; i < transfers.length; i++) {
-    const transfer = transfers[i];
-    const status = archived[i] ?? null;
-    if (!(await applyOnChainVerdict(env, repo, transfer, status, nowIso))) {
-      if (status && unresolvedReasonForStatus(status) === "processed_only") continue;
-      await keepStartedSubmissionForReconciliation(repo, transfer, nowIso, "verdict_write_failed");
-    }
-  }
-}
-
-async function reconcileSignedSubmissionCacheMisses(
-  env: Env,
-  repo: PaymentsRepository,
-  rpc: SolanaRpc,
-  signedSubmissions: PaymentTransferWithSignedSubmission[],
-  nowIso: string
 ): Promise<void> {
-  if (signedSubmissions.length === 0) return;
+  const { legacy, signed, now, nowIso } = params;
+  if (legacy.length === 0 && signed.length === 0) return;
 
-  let currentBlockHeight: bigint | null = null;
+  let finalized: FinalizedHeight;
   try {
-    currentBlockHeight = await withTransientRpcRetry(() =>
-      rpc.getBlockHeight({ commitment: "confirmed" }).send()
-    );
+    finalized = await withTransientRpcRetry(() => getChainHeight(rpc, "finalized"));
   } catch (err) {
     getLogger().error(
       {
         error: err instanceof Error ? err.message : String(err),
         environment: currentClusterScope().environment,
       },
-      "trackPendingTransfers: getBlockHeight RPC call failed"
+      "trackPendingTransfers: finalized getEpochInfo RPC call failed"
     );
-  }
-
-  if (currentBlockHeight === null) {
-    for (const transfer of signedSubmissions) {
-      await keepStartedSubmissionForReconciliation(repo, transfer, nowIso, "history_unavailable");
+    for (const transfer of [...legacy, ...signed]) {
+      await keepStartedSubmissionForReconciliation(repo, transfer, nowIso, {
+        reason: "history_unavailable",
+      });
     }
     return;
   }
 
-  const expiredSignedSubmissions = signedSubmissions.filter(
-    (transfer) => currentBlockHeight > BigInt(transfer.last_valid_block_height)
+  const expiredSigned = signed.filter(
+    (transfer) => finalized.blockHeight > BigInt(transfer.last_valid_block_height)
   );
-
-  for (const transfer of expiredSignedSubmissions) {
-    if (transfer.submission_started_at === null) {
-      if (!(await applyOnChainVerdict(env, repo, transfer, null, nowIso))) {
-        await keepStartedSubmissionForReconciliation(
-          repo,
-          transfer,
-          nowIso,
-          "verdict_write_failed"
-        );
-      }
+  for (const transfer of expiredSigned) {
+    if (
+      transfer.submission_started_at === null &&
+      !(await failNotLanded(env, repo, transfer, "broadcast_never_started", nowIso))
+    ) {
+      await keepStartedSubmissionForReconciliation(repo, transfer, nowIso, {
+        reason: "verdict_write_failed",
+      });
     }
   }
 
-  const archivalCandidates = expiredSignedSubmissions.filter(
-    (transfer) => transfer.submission_started_at !== null
-  );
+  const candidates: PaymentTransferWithSignature[] = [
+    ...legacy,
+    ...expiredSigned.filter((transfer) => transfer.submission_started_at !== null),
+  ];
+  if (candidates.length === 0) return;
 
-  const archived = await getArchivedStatuses(rpc, archivalCandidates);
-  if (archived === null) {
-    for (const transfer of archivalCandidates) {
-      await keepStartedSubmissionForReconciliation(repo, transfer, nowIso, "history_unavailable");
+  let history: Array<SignatureStatusInfo | null>;
+  try {
+    history = await reReadExpiredStatuses(
+      rpc,
+      candidates.map(() => null),
+      candidates.map((transfer, index) => ({ index, signature: transfer.signature })),
+      finalized.absoluteSlot
+    );
+  } catch (err) {
+    const behind = nodeBehindFloor(err, finalized.absoluteSlot);
+    if (behind === null) {
+      getLogger().error(
+        {
+          error: err instanceof Error ? err.message : String(err),
+          environment: currentClusterScope().environment,
+        },
+        "trackPendingTransfers: archival getSignatureStatuses RPC call failed"
+      );
     }
-    return;
-  }
-
-  for (let i = 0; i < archivalCandidates.length; i++) {
-    const transfer = archivalCandidates[i];
-    const status = archived[i] ?? null;
-    if (!status) {
-      await keepStartedSubmissionForReconciliation(repo, transfer, nowIso, "history_absent");
-    } else if (!(await applyOnChainVerdict(env, repo, transfer, status, nowIso))) {
+    for (const transfer of candidates) {
       await keepStartedSubmissionForReconciliation(
         repo,
         transfer,
         nowIso,
-        unresolvedReasonForStatus(status)
+        behind === null ? { reason: "history_unavailable" } : behind
       );
     }
+    return;
   }
+
+  for (const [index, transfer] of candidates.entries()) {
+    await settleFromHistory(env, repo, transfer, history[index], { finalized, now, nowIso });
+  }
+}
+
+/**
+ * Settles one row from its history status read at the finalized floor: a status applies as an
+ * on-chain verdict; a null fails the row inside the history horizon and alerts past it.
+ *
+ * @param env - Process environment.
+ * @param repo - System payments repository.
+ * @param transfer - A legacy row, or a signed row that started broadcast and expired.
+ * @param status - Its status from a node at or past the floor, or null when that node has none.
+ * @param pass - The pass's proof and clock.
+ * @param pass.finalized - The finalized height that proved the expiry and floored the read.
+ * @param pass.now - The pass's clock, for the legacy horizon.
+ * @param pass.nowIso - Timestamp applied to the written row.
+ * @returns Resolves once the row is settled or rotated.
+ */
+async function settleFromHistory(
+  env: Env,
+  repo: PaymentsRepository,
+  transfer: PaymentTransferWithSignature,
+  status: SignatureStatusInfo | null,
+  pass: { finalized: FinalizedHeight; now: Date; nowIso: string }
+): Promise<void> {
+  const { finalized, now, nowIso } = pass;
+  if (status !== null) {
+    if (!(await applyOnChainVerdict(env, repo, transfer, status, nowIso))) {
+      const reason = unresolvedReasonForStatus(status);
+      if (reason === "processed_only" && !hasSignedSubmission(transfer)) return;
+      await keepStartedSubmissionForReconciliation(repo, transfer, nowIso, { reason });
+    }
+    return;
+  }
+  if (!isWithinHistoryHorizon(transfer, finalized, now)) {
+    await keepUnprovableVerdict(repo, transfer, nowIso, finalized);
+    return;
+  }
+  if (!(await failNotLanded(env, repo, transfer, "expired_unseen", nowIso))) {
+    await keepStartedSubmissionForReconciliation(repo, transfer, nowIso, {
+      reason: "verdict_write_failed",
+    });
+    return;
+  }
+  logEvent("warn", {
+    event: "sdp_api_payment_submission_not_landed",
+    flow: "reconciler",
+    organization_id: transfer.organization_id,
+    project_id: transfer.project_id,
+    transfer_id: transfer.id,
+    transfer_type: transfer.type,
+    signature: transfer.signature,
+    last_valid_block_height: transfer.last_valid_block_height,
+    submission_started_at: transfer.submission_started_at,
+    finalized_block_height: finalized.blockHeight.toString(),
+    min_context_slot: finalized.absoluteSlot.toString(),
+  });
+}
+
+/**
+ * Whether a row's transaction, had it landed, would still be inside the history every pool node
+ * keeps, so a floored null proves it never did. A signed row could only land at or below its last
+ * valid block height; a legacy row only after it was created.
+ *
+ * @param transfer - The row whose history read came back null.
+ * @param finalized - The finalized height that proved the expiry.
+ * @param now - The pass's clock.
+ * @returns True while the row's landing window is within the horizon.
+ */
+function isWithinHistoryHorizon(
+  transfer: PaymentTransferWithSignature,
+  finalized: FinalizedHeight,
+  now: Date
+): boolean {
+  return hasSignedSubmission(transfer)
+    ? finalized.blockHeight - BigInt(transfer.last_valid_block_height) <=
+        VERDICT_HISTORY_HORIZON_BLOCKS
+    : now.getTime() - new Date(transfer.created_at).getTime() <= VERDICT_HISTORY_HORIZON_MS;
+}
+
+/**
+ * The lag behind a refused floored read, when the refusal says the answering node had not reached
+ * the floor: SDP's own `context.slot` check, or a served `-32016` once every pool endpoint refused.
+ *
+ * @param cause - What the floored read threw.
+ * @param minContextSlot - The floor the read demanded.
+ * @returns The answering node's slot and the floor, or null when the read failed for another reason.
+ */
+function nodeBehindFloor(
+  cause: unknown,
+  minContextSlot: Slot
+): Extract<UnresolvedVerdict, { reason: "node_behind_floor" }> | null {
+  if (cause instanceof MinContextSlotNotReachedError) {
+    return {
+      reason: "node_behind_floor",
+      contextSlot: cause.contextSlot.toString(),
+      minContextSlot: cause.minContextSlot.toString(),
+    };
+  }
+  if (isSolanaError(cause, SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED)) {
+    return {
+      reason: "node_behind_floor",
+      contextSlot: String(cause.context.contextSlot),
+      minContextSlot: minContextSlot.toString(),
+    };
+  }
+  return null;
 }
 
 function unresolvedReasonForStatus(
   status: SignatureStatusInfo
-): "processed_only" | "verdict_write_failed" {
-  return status.confirmationStatus !== null &&
+): "processed_only" | "error_unfinalized" | "verdict_write_failed" {
+  if (
+    status.confirmationStatus === null ||
     commitmentComparator(status.confirmationStatus, "confirmed") < 0
-    ? "processed_only"
+  ) {
+    return "processed_only";
+  }
+  return status.err && commitmentComparator(status.confirmationStatus, "finalized") < 0
+    ? "error_unfinalized"
     : "verdict_write_failed";
 }
 
@@ -680,32 +862,26 @@ function hasSignedSubmission(
   return transfer.signed_transaction !== null && transfer.last_valid_block_height !== null;
 }
 
-/** Keep unresolved started rows visible to operators and rotate the polling queue. */
-async function keepStartedSubmissionForReconciliation(
+/**
+ * Moves a processing row to the back of the poll queue (`updated_at`), its status unchanged.
+ *
+ * @param repo - System payments repository.
+ * @param transfer - The row to rotate.
+ * @param nowIso - The row's new `updated_at`.
+ * @returns True when this pass rotated it; false when it left processing or the write failed.
+ */
+async function rotateProcessingTransfer(
   repo: PaymentsRepository,
   transfer: PaymentTransferRow,
-  nowIso: string,
-  reason: "history_unavailable" | "history_absent" | "processed_only" | "verdict_write_failed"
-): Promise<void> {
+  nowIso: string
+): Promise<boolean> {
   try {
     const rotated = await repo.updateTransfer({
       transferId: transfer.id,
       expectedStatus: "processing",
       updatedAt: nowIso,
     });
-    if (!rotated) return;
-    logEvent("warn", {
-      event: "sdp_api_payment_submission_unresolved",
-      flow: "reconciler",
-      reason,
-      organization_id: transfer.organization_id,
-      project_id: transfer.project_id,
-      transfer_id: transfer.id,
-      transfer_type: transfer.type,
-      signature: transfer.signature,
-      last_valid_block_height: transfer.last_valid_block_height,
-      submission_started_at: transfer.submission_started_at,
-    });
+    return rotated !== null;
   } catch (err) {
     getLogger().error(
       {
@@ -714,37 +890,72 @@ async function keepStartedSubmissionForReconciliation(
       },
       "trackPendingTransfers: failed to rotate unresolved submission"
     );
+    return false;
   }
 }
 
-async function getArchivedStatuses(
-  rpc: SolanaRpc,
-  transfers: PaymentTransferWithSignature[]
-): Promise<Array<SignatureStatusInfo | null> | null> {
-  if (transfers.length === 0) {
-    return [];
-  }
+/**
+ * Keep an unresolved started row visible to operators and rotate the polling queue.
+ *
+ * @param repo - System payments repository.
+ * @param transfer - The row this pass could not settle.
+ * @param nowIso - The row's new `updated_at`.
+ * @param unresolved - Why it stays processing, with the lag when a node was behind the floor.
+ * @returns Resolves once the row is rotated and logged.
+ */
+async function keepStartedSubmissionForReconciliation(
+  repo: PaymentsRepository,
+  transfer: PaymentTransferRow,
+  nowIso: string,
+  unresolved: UnresolvedVerdict
+): Promise<void> {
+  if (!(await rotateProcessingTransfer(repo, transfer, nowIso))) return;
+  logEvent("warn", {
+    event: "sdp_api_payment_submission_unresolved",
+    flow: "reconciler",
+    reason: unresolved.reason,
+    organization_id: transfer.organization_id,
+    project_id: transfer.project_id,
+    transfer_id: transfer.id,
+    transfer_type: transfer.type,
+    signature: transfer.signature,
+    last_valid_block_height: transfer.last_valid_block_height,
+    submission_started_at: transfer.submission_started_at,
+    context_slot: unresolved.reason === "node_behind_floor" ? unresolved.contextSlot : null,
+    min_context_slot: unresolved.reason === "node_behind_floor" ? unresolved.minContextSlot : null,
+  });
+}
 
-  try {
-    const statuses = await getSignatureStatuses(
-      rpc,
-      transfers.map((transfer) => transfer.signature),
-      { searchTransactionHistory: true }
-    );
-    if (statuses.length !== transfers.length) {
-      throw internalError(
-        `getSignatureStatuses returned ${statuses.length} statuses for ${transfers.length} signatures`
-      );
-    }
-    return statuses;
-  } catch (err) {
-    getLogger().error(
-      {
-        error: err instanceof Error ? err.message : String(err),
-        environment: currentClusterScope().environment,
-      },
-      "trackPendingTransfers: archival getSignatureStatuses RPC call failed"
-    );
-    return null;
-  }
+/**
+ * Keep a row whose history read came back null past the history horizon: absence there no longer
+ * proves the transaction never landed, so the row stays processing, rotates, and raises
+ * `sdp_api_transfer_verdict_unprovable` for an operator.
+ *
+ * @param repo - System payments repository.
+ * @param transfer - The row whose verdict is unprovable.
+ * @param nowIso - The row's new `updated_at`.
+ * @param finalized - The finalized height the history read was floored at.
+ * @returns Resolves once the row is rotated and the alert logged.
+ */
+async function keepUnprovableVerdict(
+  repo: PaymentsRepository,
+  transfer: PaymentTransferWithSignature,
+  nowIso: string,
+  finalized: FinalizedHeight
+): Promise<void> {
+  if (!(await rotateProcessingTransfer(repo, transfer, nowIso))) return;
+  logEvent("error", {
+    event: "sdp_api_transfer_verdict_unprovable",
+    flow: "reconciler",
+    organization_id: transfer.organization_id,
+    project_id: transfer.project_id,
+    transfer_id: transfer.id,
+    transfer_type: transfer.type,
+    signature: transfer.signature,
+    created_at: transfer.created_at,
+    last_valid_block_height: transfer.last_valid_block_height,
+    submission_started_at: transfer.submission_started_at,
+    finalized_block_height: finalized.blockHeight.toString(),
+    min_context_slot: finalized.absoluteSlot.toString(),
+  });
 }
