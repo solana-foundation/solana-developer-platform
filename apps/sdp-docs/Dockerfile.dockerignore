@@ -46,6 +46,7 @@ apps/sdp-web
 packages/*
 !packages/sdp-types
 !packages/sdp-env-config
+!packages/sdp-design-tokens
 !packages/sdp-rpc
 !packages/sdp-custody
 !packages/sdp-redaction

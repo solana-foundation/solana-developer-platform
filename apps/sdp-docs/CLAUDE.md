@@ -4,58 +4,59 @@
 
 - **Next.js 16** (App Router) + **Fumadocs** (`fumadocs-core`, `fumadocs-ui`) for the docs framework
 - **Tailwind v4** via `src/styles/solana-design-system.css`
-- **Custom CSS** in `src/app/globals.css` — all layout classes are prefixed `launch-docs-*`
+- **`@sdp/design-tokens`** for every color, type size, radius, control height, motion value and font, so the docs match the dashboard's refresh design. `globals.css` imports `tokens.css` and `theme.css`; `<html>` carries `refreshThemeProps`
+- **Custom CSS** in `src/app/globals.css`: all layout classes are prefixed `launch-docs-*`
 - **Lucide React** for icons
+- **Docker image**: `Dockerfile.dockerignore` drops `packages/*` except an allowlist, so a new workspace dependency needs its own `!packages/<name>` line (and its `COPY` lines in the `Dockerfile`), or the image build fails with `not found`
 
 ---
 
 ## Fonts
 
-Three fonts loaded as CSS variables in `src/app/layout.tsx`:
+`src/app/layout.tsx` loads the refresh faces from `packages/sdp-design-tokens/src/assets/fonts` with `next/font/local`, as sdp-web does, under the variable names `tokens.css` reads:
 
 | Variable | Font | Usage |
 |---|---|---|
-| `--font-sans` / `--font-inter` | Inter Variable | Body text, nav items |
-| `--font-abc-diatype` | ABC Diatype | Headings (`h1`–`h6`), page title, description |
-| `--font-berkeley-mono` | Berkeley Mono | Monospace labels, breadcrumbs, sidebar actions, section labels |
+| `--font-sans` | Season Sans 400 and 500 (`--font-season-sans`) | All text: body, headings, nav, labels |
+| `--font-mono` | Geist Mono, variable (`--font-geist-mono`) | Inline code, code blocks, the `.env` preview |
 
-Apply via Tailwind utilities: `font-sans`, `font-abc-diatype`, `font-berkeley-mono`.
+Season Sans ships 400 and 500 only, so cap `font-weight` at 500. `html` sets `font-synthesis-weight: none` so the browser never fakes a bold, and `strong`, `b` and `th` are 500 inside `.sdp-docs-shell`.
 
 ---
 
 ## Color Tokens
 
-All tokens are CSS custom properties defined in `src/app/globals.css`. Always use these — never hardcode colors.
+The docs keep no palette of their own: read the refresh tokens from `packages/sdp-design-tokens/src/tokens.css`. Light values sit on `:root` and dark on `:root.dark`, so one rule covers both modes. Never hardcode a color; a missing token goes in the package.
 
-### Semantic tokens (light + dark mode aware)
-
-| Token | Light | Dark | Use for |
-|---|---|---|---|
-| `--launch-cream` | warm off-white | near-black | page background |
-| `--launch-bg` | slightly warm white | dark grey | sidebar, table headers |
-| `--launch-white` | pure white | dark card | sidebar, card surfaces |
-| `--launch-ink` | very dark warm | near-white | primary text, headings, strong |
-| `--launch-text` | medium warm grey | light grey | body text |
-| `--launch-muted` | muted warm grey | muted grey | secondary text, nav items, breadcrumbs |
-| `--launch-border` | light sand | 10% white | default borders |
-| `--launch-border-strong` | darker sand | 18% white | hover borders, blockquote border |
-| `--launch-hover-bg` | 48% white | 8% white | hover states |
-| `--launch-active-bg` | sand-200 68% | 10% white | active/selected backgrounds |
-| `--launch-icon-muted` | sand-500 | muted grey | icon opacity, link underline color |
-| `--launch-marker` | warm sand | grey | list item markers |
-| `--launch-inline-code-bg/text/border` | sand bg + ink text | dark bg | inline code |
+| Token | Use for |
+|---|---|
+| `--paper` | page background |
+| `--paper-side` | sidebar |
+| `--paper-card` | cards, tables, popovers |
+| `--paper-tile` | table headers, badges, muted fills |
+| `--ink` | headings, links, strong text, the active nav item |
+| `--ink-secondary` | body text, nav items, breadcrumbs |
+| `--ink-tertiary` | captions, section labels, icons, list markers, link underlines |
+| `--rule` / `--rule-strong` / `--rule-faint` | default borders / emphasis (step chips, blockquotes) / hairline separators |
+| `--wash` / `--wash-strong` / `--wash-strongest` | hover fill / active nav item and inline code / pressed or selected |
+| `--chip` + `--chip-ring` | raised controls: sidebar actions, the `⌘K` keys, the mobile menu button |
+| `--positive`, `--critical` | status only (the Devnet dot, form errors) |
 
 ### Fumadocs bridge tokens
 
-Fumadocs components read `--color-fd-*` vars. These are mapped to `--launch-*` values in `:root` — do not change them independently.
+Fumadocs components read `--color-fd-*` vars. One `:root` block in `globals.css` points them at the refresh palette (`--color-fd-background: var(--paper)`, `--color-fd-card: var(--paper-card)`, …). Change colors in `@sdp/design-tokens`, never in the bridge.
+
+### Motion
+
+Transition durations and easing come from the package: `--motion-duration-fast` (120ms) for hover and press feedback, `--motion-duration-base` (180ms) for a small reveal, `--motion-duration-slow` (240ms) for a panel, with `--motion-ease-out`. They drop to 0ms under `prefers-reduced-motion`. Every transition in `globals.css` reads them; use them for new hover, press or reveal motion instead of a raw `ms` value.
 
 ---
 
 ## Layout Structure
 
 ```
-<div class="sdp-docs-shell">           ← min-height 100vh, cream bg
-  <DocsSidebar />                      ← 320px fixed left, white bg
+<div class="sdp-docs-shell">           ← min-height 100vh, --paper bg
+  <DocsSidebar />                      ← 320px fixed left, --paper-side bg
   <main class="launch-docs-main">      ← margin-left: 320px on desktop
     <div class="launch-docs-main-inner"> ← max-width 1120px (1240px at 1180px+), centered, padded
       <DocsBreadcrumb />
@@ -69,7 +70,7 @@ Fumadocs components read `--color-fd-*` vars. These are mapped to `--launch-*` v
 
 | Breakpoint | Change |
 |---|---|
-| `< 768px` | Sidebar hidden, mobile toggle shown |
+| `< 768px` | Sidebar hidden, fixed menu button shown, content padded to start below it |
 | `≥ 768px` | Sidebar fixed visible, main gets `margin-left: 320px`, more padding |
 | `≥ 1180px` | Two-column page grid (article + TOC), max-width expands to 1240px |
 
@@ -99,25 +100,26 @@ import { DocsPage, DocsTitle, DocsDescription, DocsBody } from "@/components/doc
 
 | Class | Element |
 |---|---|
-| `.launch-docs-title` | H1, ABC Diatype, clamp(32px, 4.5vw, 40px), weight 700 |
-| `.launch-docs-description` | Subtitle `<p>`, ABC Diatype 18px, max-width 720px, margin-bottom 36px |
-| `.launch-docs-body` | Content wrapper, Inter, `--launch-text` color |
-| `.launch-mdx-heading` | Base heading style (ABC Diatype, bold, ink color) |
-| `.launch-mdx-heading-2` | H2 — 26px, margin-top 52px |
-| `.launch-mdx-heading-3` | H3 — 20px, margin-top 34px |
-| `.launch-mdx-heading-4` | H4 — 16px, margin-top 28px |
+| `.launch-docs-title` | H1, clamp(30px, 3.4vw, 36px), weight 500, letter-spacing -0.02em: the article display size, above the tokens' 24px page title |
+| `.launch-docs-description` | Subtitle `<p>`, `--font-size-subheading`, `--ink-secondary`, max-width 720px |
+| `.launch-docs-body` | Content wrapper, `--ink-secondary` |
+| `.launch-mdx-heading` | Base heading style (weight 500, `--ink`, `--letter-spacing-heading`) |
+| `.launch-mdx-heading-2` | H2: `--font-size-heading` (24/32), margin-top 52px |
+| `.launch-mdx-heading-3` | H3: `--font-size-subheading` (18/24), margin-top 34px |
+| `.launch-mdx-heading-4` | H4: `--font-size-field` (16/24), margin-top 28px |
 | `.launch-mdx-paragraph` | Body paragraph, 15px, line-height 1.68, margin-bottom 18px |
-| `.launch-mdx-link` | Links — ink color, weight 650, underline offset 3px |
-| `.launch-mdx-list` | `<ul>` / `<ol>` grid, gap 9px |
-| `.launch-mdx-table` | Full-width table, border-radius 10px, white bg |
-| `.launch-mdx-th` | Table header — sand bg, 13px, weight 650 |
-| `.launch-mdx-td` | Table cell — 14px |
+| `.launch-mdx-link` | Links: `--ink`, weight 500, `--ink-tertiary` underline offset 3px |
+| `.launch-mdx-list` | `<ul>` / `<ol>` one-column grid (`minmax(0, 1fr)`, so a code block in an item scrolls instead of widening the page), gap 9px |
+| `.launch-mdx-table-frame` | Wraps every MDX table: border, `--corner-card` radius, `--paper-card` bg; a table wider than the column scrolls inside it |
+| `.launch-mdx-table` | Full-width table inside the frame |
+| `.launch-mdx-th` | Table header: `--paper-tile` bg, 13px, weight 500 |
+| `.launch-mdx-td` | Table cell: 14px |
 
 ---
 
 ## Sidebar Components
 
-`src/components/docs-shell/sidebar.tsx` — `"use client"`, receives `tree` (Fumadocs page tree) and optional `dashboardUrl`.
+`src/components/docs-shell/sidebar.tsx`: `"use client"`, receives `tree` (Fumadocs page tree) and optional `dashboardUrl`. The footer holds the network status rows and the Fumadocs `ThemeSwitch` (light, dark, system).
 
 **Do not add new navigation patterns outside the page tree.** Navigation is auto-generated from `source.pageTree` via Fumadocs. To add pages to the sidebar, add MDX files to `content/docs/` and update `meta.json`.
 
@@ -135,22 +137,24 @@ Sidebar icons are optional and opt-in per page/folder. Set `icon: <LucideName>` 
 
 | Class | Purpose |
 |---|---|
-| `.launch-docs-sidebar` | Fixed 320px sidebar, white bg, border-right |
-| `.launch-docs-sidebar-header` | Logo + action buttons area, border-bottom |
+| `.launch-docs-sidebar` | Fixed 320px sidebar, `--paper-side` bg, border-right |
+| `.launch-docs-sidebar-header` | Logo, action chips and search, border-bottom |
 | `.launch-docs-brand` | Logo link (flex, gap 12px) |
-| `.launch-docs-brand-mark` | 36×36px icon box, cream bg, border-radius 10px |
-| `.launch-docs-sidebar-actions` | 2-col grid of action buttons |
-| `.launch-docs-sidebar-action` | Button links — Berkeley Mono 12px, border, radius 8px |
+| `.launch-docs-brand-mark` | 36×36px icon box, `--paper` bg, border-radius 10px |
+| `.launch-docs-sidebar-actions` | One equal-width column per action |
+| `.launch-docs-sidebar-action` | Chip links (`--chip` + `--chip-ring`), `--control-height-sm`, `--font-size-meta` |
+| `.launch-docs-sidebar-search` | Search trigger, `--control-height-md`, `--wash` fill; the `⌘K` keys are chips |
 | `.launch-docs-sidebar-nav` | Scrollable nav area |
-| `.launch-docs-nav-item` | Page link — Inter 13px, weight 550, muted color, hover bg |
-| `.launch-docs-nav-item.is-active` | Active page — sand bg, ink color |
+| `.launch-docs-nav-item` | Page link: `--font-size-body`, `--ink-secondary`, `--wash` on hover |
+| `.launch-docs-nav-item.is-active` | Active page: `--wash-strong` bg, `--ink`, weight 500 |
 | `.launch-docs-nav-folder` | Folder container |
-| `.launch-docs-nav-folder-label` | Non-linked folder label — Berkeley Mono 12px |
-| `.launch-docs-nav-folder-link` | Linked folder — same style as nav-item |
-| `.launch-docs-nav-toggle` | Expand/collapse chevron button — 24×24px |
+| `.launch-docs-nav-folder-btn` | Non-linked folder label that toggles the folder: `--ink`, weight 500 |
+| `.launch-docs-nav-folder-link` | Linked folder: `--ink`, weight 500 |
+| `.launch-docs-nav-toggle` | Expand/collapse chevron button, 28px |
 | `.launch-docs-nav-children` | Indented children container |
-| `.launch-docs-sidebar-section` | Section separator with label — Berkeley Mono 10px uppercase |
-| `.launch-docs-sidebar-separator` | Plain 1px horizontal rule |
+| `.launch-docs-sidebar-section` | Section label: `--font-size-meta`, `--ink-tertiary`, sentence case |
+| `.launch-docs-sidebar-separator` | Plain 1px `--rule-faint` rule |
+| `.launch-docs-sidebar-status` | Footer: status rows (`.launch-docs-status-list`) and the theme switch |
 
 ---
 
@@ -215,14 +219,14 @@ Currently unpublished: the whole Earn family, guide and API reference, until PRO
 
 ## Do's and Don'ts
 
-- **Do** use `--launch-*` CSS tokens for all colors
-- **Do** use `font-abc-diatype` for headings, `font-sans` for body, `font-berkeley-mono` for labels/mono
+- **Do** read colors, type sizes, radii, control heights and motion from `@sdp/design-tokens` (`--paper*`, `--ink*`, `--rule*`, `--wash*`, `--font-size-*`, `--corner-*`, `--control-height-*`, `--motion-*`)
+- **Do** use `var(--font-sans)` for text and `var(--font-mono)` for code, at weights 400 and 500 only
 - **Do** use `<DocsPage>`, `<DocsTitle>`, `<DocsDescription>`, `<DocsBody>` as the page wrapper
 - **Do** use Lucide React for all icons (already a dependency)
 - **Don't** hardcode colors — always use design tokens
 - **Don't** add new global layout structures — the shell is `sdp-docs-shell` → sidebar + main, keep it
 - **Don't** use Fumadocs UI components directly for layout (they're used internally); the custom shell wraps them
-- **Don't** change `--color-fd-*` tokens independently — they mirror `--launch-*` tokens
+- **Don't** change `--color-fd-*` tokens independently: they point at the refresh palette
 
 
 When working on design or frontend changes:

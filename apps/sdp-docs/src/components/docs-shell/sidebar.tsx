@@ -2,6 +2,7 @@
 
 import type { Root } from "fumadocs-core/page-tree";
 import { useSearchContext } from "fumadocs-ui/contexts/search";
+import { ThemeSwitch } from "fumadocs-ui/layouts/shared/slots/theme-switch";
 import { ArrowUpRight, Menu, Search, X } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -105,15 +106,18 @@ export function DocsSidebar({ tree, dashboardUrl }: DocsSidebarProps) {
         </nav>
 
         <div className="launch-docs-sidebar-status">
-          <span className="launch-docs-status-row">
-            <span className="launch-docs-status-dot" aria-hidden="true" />
-            Live on Devnet
-          </span>
-          <span className="launch-docs-status-row">
-            <span className="launch-docs-status-dot is-muted" aria-hidden="true" />
-            Mainnet
-            <span className="launch-badge">Coming soon</span>
-          </span>
+          <div className="launch-docs-status-list">
+            <span className="launch-docs-status-row">
+              <span className="launch-docs-status-dot" aria-hidden="true" />
+              Live on Devnet
+            </span>
+            <span className="launch-docs-status-row">
+              <span className="launch-docs-status-dot is-muted" aria-hidden="true" />
+              Mainnet
+              <span className="launch-badge">Coming soon</span>
+            </span>
+          </div>
+          <ThemeSwitch mode="light-dark-system" className="launch-docs-theme-switch" />
         </div>
       </aside>
     </>

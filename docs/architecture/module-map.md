@@ -42,7 +42,7 @@ This map is generated from the module-boundary check. It records the permitted w
 | `@sdp/veda` | Kit-native Veda SVM vault deposit, instant and queued withdrawal plans, plus position and lifecycle reads over @vedatech/svm-sdk. | `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
 | `@sdp/wisdomtree` | Kit-native WisdomTree Connect transfer plans (on-receipt subscription/redemption legs) and Token-2022 fund position reads. | `@sdp/earn`, `@sdp/rpc`, `@sdp/types` |
 | `bigint-buffer` | Private pure-JavaScript compatibility package replacing bigint-buffer's vulnerable native binding. | None |
-| `sdp-docs` | Public documentation site and generated API reference. | `@sdp/env-config`, `@sdp/types` |
+| `sdp-docs` | Public documentation site and generated API reference. | `@sdp/design-tokens`, `@sdp/env-config`, `@sdp/types` |
 | `sdp-web` | Dashboard application. | `@sdp/api-catalog`, `@sdp/design-tokens`, `@sdp/issuance`, `@sdp/private-channels`, `@sdp/redaction`, `@sdp/solana`, `@sdp/types`, `@sdp/ui` |
 
 ## Declared Workspace Graph
@@ -75,5 +75,5 @@ This map is generated from the module-boundary check. It records the permitted w
 - `@sdp/veda` -> `@sdp/earn`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types`
 - `@sdp/wisdomtree` -> `@sdp/earn`, `@sdp/rpc`, `@sdp/types`
 - `bigint-buffer` -> None
-- `sdp-docs` -> `@sdp/env-config`, `@sdp/types`
+- `sdp-docs` -> `@sdp/design-tokens`, `@sdp/env-config`, `@sdp/types`
 - `sdp-web` -> `@sdp/api-catalog`, `@sdp/design-tokens`, `@sdp/issuance`, `@sdp/private-channels`, `@sdp/redaction`, `@sdp/solana`, `@sdp/types`, `@sdp/ui`

@@ -48,7 +48,7 @@ const MODULE_METADATA = [
     name: "sdp-docs",
     directory: "apps/sdp-docs",
     purpose: "Public documentation site and generated API reference.",
-    allowedDependencies: ["@sdp/env-config", "@sdp/types"],
+    allowedDependencies: ["@sdp/design-tokens", "@sdp/env-config", "@sdp/types"],
   },
   {
     name: "sdp-web",

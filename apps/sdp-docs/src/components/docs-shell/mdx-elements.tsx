@@ -76,8 +76,14 @@ export function MDXBlockquote({
   return <blockquote className={cn("launch-mdx-blockquote", className)} {...props} />;
 }
 
+// The frame scrolls a table wider than the column (API reference endpoints on a phone) instead of
+// widening the whole page.
 export function MDXTable({ className, ...props }: React.ComponentPropsWithoutRef<"table">) {
-  return <table className={cn("launch-mdx-table", className)} {...props} />;
+  return (
+    <div className="launch-mdx-table-frame">
+      <table className={cn("launch-mdx-table", className)} {...props} />
+    </div>
+  );
 }
 
 export function MDXTableHeader({ className, ...props }: React.ComponentPropsWithoutRef<"th">) {
