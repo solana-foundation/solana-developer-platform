@@ -483,6 +483,10 @@ export function useBatchSendWizard({
     () => estimateTransferBatch(request, t),
     {
       revalidateOnFocus: false,
+      // Each estimate belongs to its own request: its warnings index that
+      // request's recipients, and Send waits for it. The dashboard default
+      // keeps the previous request's estimate while the next one loads.
+      keepPreviousData: false,
       // A flagged address may be funded elsewhere: recheck until it clears,
       // so Send re-enables without the request changing (HOO-2375).
       refreshInterval: (latest) =>

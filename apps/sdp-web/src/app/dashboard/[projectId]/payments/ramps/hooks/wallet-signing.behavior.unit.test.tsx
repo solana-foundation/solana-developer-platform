@@ -200,6 +200,101 @@ describe("wallet selection during payments", () => {
     expect(sent).toEqual([]);
   });
 
+  it("pairs each review with its own estimate after a flagged recipient is removed (HOO-2375)", async () => {
+    const recipients = ["cpa_a", "cpa_b"].map((counterpartyAccountId) => ({
+      counterpartyId: "cpty_receiver",
+      counterpartyAccountId,
+      name: counterpartyAccountId,
+      address: wallet.publicKey,
+      label: null,
+    }));
+    const estimate = (count: number, warnings: unknown[]) => ({
+      data: {
+        estimate: {
+          recipientCount: count,
+          transactionCount: 1,
+          estimatedFees: {
+            networkFeeLamports: "5000",
+            priorityFeeLamports: "0",
+            tokenAccountRentLamports: "0",
+            sponsored: true,
+          },
+          warnings,
+        },
+      },
+    });
+    let releaseSecond: (() => void) | undefined;
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes("/wallets?"))
+        return Response.json({ data: { wallets: [wallet] } });
+      if (String(input).includes("/accounts?"))
+        return Response.json({ data: { accounts: recipients, total: 2 } });
+      if (String(input).endsWith("/estimate")) {
+        // SAFETY: the wizard posts the canonical batch request as JSON.
+        const body = JSON.parse(String(init?.body)) as { recipients: unknown[] };
+        if (body.recipients.length === 2) {
+          return Response.json(
+            estimate(2, [
+              {
+                code: "AMOUNT_BELOW_RENT_MINIMUM",
+                recipientIndex: 1,
+                minimumAmount: "0.00089088",
+                message: "below minimum",
+              },
+            ])
+          );
+        }
+        await new Promise<void>((resolve) => {
+          releaseSecond = resolve;
+        });
+        return Response.json(estimate(1, []));
+      }
+      return Response.json({ error: { message: "Unexpected request" } }, { status: 400 });
+    });
+    const { result } = renderHook(
+      () =>
+        useBatchSendWizard({
+          wallets: [wallet],
+          walletsError: null,
+          issuedTokenSymbolsByMint: {},
+          cluster: "devnet",
+          onExit: vi.fn(),
+        }),
+      {
+        // The dashboard's default, which an estimate must not inherit.
+        wrapper: ({ children }: { children: ReactNode }) => (
+          <I18nProvider locale="en" messages={getMessages("en")}>
+            <SWRConfig
+              value={{ provider: () => new Map(), dedupingInterval: 0, keepPreviousData: true }}
+            >
+              {children}
+            </SWRConfig>
+          </I18nProvider>
+        ),
+      }
+    );
+    await waitFor(() => expect(result.current.pageRecipients).toHaveLength(2));
+    act(() => {
+      result.current.selectWallet(wallet.id);
+      for (const recipient of recipients) result.current.setRecipientAmount(recipient, "0.0001");
+    });
+    await act(() => result.current.handlePrimary());
+    await waitFor(() => expect(result.current.belowRentMinimum.size).toBe(1));
+    expect(result.current.canProceed).toBe(false);
+
+    act(() => result.current.handleBack());
+    act(() => result.current.toggleRecipient(recipients[1]));
+    await act(() => result.current.handlePrimary());
+
+    // The two-recipient estimate is not reused for the one-recipient request.
+    expect(result.current.currentStepId).toBe("REVIEW");
+    expect(result.current.belowRentMinimum.size).toBe(0);
+    expect(result.current.canProceed).toBe(false);
+    await waitFor(() => expect(releaseSecond).toBeDefined());
+    act(() => releaseSecond?.());
+    await waitFor(() => expect(result.current.canProceed).toBe(true));
+  });
+
   it.each(["disabled", "removed"])(
     "does not replace a %s exact wallet at send review",
     async (change) => {
