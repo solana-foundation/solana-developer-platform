@@ -63,7 +63,7 @@ function renderWorkspace(props: Partial<ComponentProps<typeof PaymentRequestsWor
       total={1}
       totalIsExact
       hasNextPage={false}
-      listState={{ page: 1, pageSize: 25, status: null, search: null, createdBy: null }}
+      listState={{ page: 1, pageSize: 25, status: null, search: null }}
       {...props}
     />,
     { wrapper }
@@ -90,9 +90,7 @@ describe("PaymentRequestsWorkspace search", () => {
       "",
       "/dashboard/prj_test_sandbox/payments/requests?page=3&status=paid"
     );
-    renderWorkspace({
-      listState: { page: 3, pageSize: 25, status: "paid", search: null, createdBy: null },
-    });
+    renderWorkspace({ listState: { page: 3, pageSize: 25, status: "paid", search: null } });
 
     await userEvent.type(screen.getByRole("searchbox"), " jane {Enter}");
 
@@ -103,9 +101,7 @@ describe("PaymentRequestsWorkspace search", () => {
   });
 
   it("does not reload for a search the list already shows", async () => {
-    renderWorkspace({
-      listState: { page: 1, pageSize: 25, status: null, search: "jane", createdBy: null },
-    });
+    renderWorkspace({ listState: { page: 1, pageSize: 25, status: null, search: "jane" } });
 
     await userEvent.type(screen.getByRole("searchbox"), "{Enter}");
 
@@ -116,7 +112,7 @@ describe("PaymentRequestsWorkspace search", () => {
     renderWorkspace({
       initialPaymentRequests: [paymentRequest, otherRequest],
       total: 2,
-      listState: { page: 1, pageSize: 25, status: null, search: "80", createdBy: null },
+      listState: { page: 1, pageSize: 25, status: null, search: "80" },
     });
 
     expect(screen.getByText("80.00 SOL")).toBeTruthy();
@@ -129,7 +125,7 @@ describe("PaymentRequestsWorkspace search", () => {
     renderWorkspace({
       initialPaymentRequests: [paymentRequest],
       total: 1,
-      listState: { page: 1, pageSize: 25, status: null, search: "nobody", createdBy: null },
+      listState: { page: 1, pageSize: 25, status: null, search: "nobody" },
     });
 
     expect(screen.getByText("No requests match these filters.")).toBeTruthy();
@@ -150,13 +146,7 @@ describe("PaymentRequestsWorkspace pager", () => {
       total: 40,
       totalIsExact: false,
       hasNextPage: true,
-      listState: {
-        page: 2,
-        pageSize: 25,
-        status: "awaiting_payment",
-        search: null,
-        createdBy: null,
-      },
+      listState: { page: 2, pageSize: 25, status: "awaiting_payment", search: null },
     });
 
     expect(screen.getByText("Page 2")).toBeTruthy();
@@ -168,13 +158,7 @@ describe("PaymentRequestsWorkspace pager", () => {
       total: 40,
       totalIsExact: false,
       hasNextPage: false,
-      listState: {
-        page: 2,
-        pageSize: 25,
-        status: "awaiting_payment",
-        search: null,
-        createdBy: null,
-      },
+      listState: { page: 2, pageSize: 25, status: "awaiting_payment", search: null },
     });
     expect(screen.getByRole("button", { name: "Next page" })).toHaveProperty("disabled", true);
   });

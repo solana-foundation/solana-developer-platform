@@ -1,66 +1,50 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
-import { SWRConfig } from "swr";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
-import { resetDashboardNavigation } from "@/test/dashboard-navigation";
 import * as apiKeyActions from "./actions";
 import { DeleteApiKeyModal } from "./delete-api-key-modal";
 
-vi.mock("next/navigation", () => import("@/test/next-navigation"));
-
-function renderModal() {
-  return render(
-    <I18nProvider locale="en" messages={getMessages("en")}>
-      <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
-        <DeleteApiKeyModal
-          keyId="key_test_1"
-          keyName="Payouts worker"
-          open
-          onOpenChange={() => {}}
-        />
-      </SWRConfig>
-    </I18nProvider>
-  );
-}
-
 afterEach(() => {
   cleanup();
-  resetDashboardNavigation();
   vi.restoreAllMocks();
 });
 
-describe("DeleteApiKeyModal linked payments", () => {
-  it("links what the key set up to this project's lists, narrowed to the key", async () => {
-    const load = vi
-      .spyOn(apiKeyActions, "loadApiKeyLinkedPaymentsAction")
-      .mockResolvedValue({ ok: true, activeRecurringPayments: 1, openPaymentRequests: 4 });
-    renderModal();
+describe("DeleteApiKeyModal", () => {
+  it.each([false, true])(
+    "asks to cancel the key's payment requests only when its box is checked: %s",
+    async (checked) => {
+      const deactivate = vi
+        .spyOn(apiKeyActions, "deactivateApiKeyInlineAction")
+        .mockResolvedValue({ ok: true, message: "Deleted" });
+      const user = userEvent.setup();
+      render(
+        <I18nProvider locale="en" messages={getMessages("en")}>
+          <DeleteApiKeyModal keyId="key_1" keyName="Payouts worker" open onOpenChange={() => {}} />
+        </I18nProvider>
+      );
 
-    const recurring = await screen.findByRole("link", { name: "Active recurring payments: 1" });
-    expect(recurring.getAttribute("href")).toBe(
-      "/dashboard/prj_test_sandbox/payments/recurring?status=active&activatedByApiKeyId=key_test_1"
-    );
-    expect(
-      screen.getByRole("link", { name: "Open payment requests: 4" }).getAttribute("href")
-    ).toBe(
-      "/dashboard/prj_test_sandbox/payments/requests?status=awaiting_payment&createdByApiKeyId=key_test_1"
-    );
-    expect(screen.getByRole("listitem").textContent).toBe(
-      "Active recurring payments: 1Open payment requests: 4"
-    );
-    expect(load).toHaveBeenCalledWith("key_test_1");
-  });
+      await user.type(screen.getByLabelText("Confirm key name"), "Payouts worker");
+      if (checked) {
+        await user.click(
+          screen.getByRole("checkbox", {
+            name: /Also cancel open payment requests this key created/,
+          })
+        );
+      }
+      await user.click(screen.getByRole("button", { name: "Delete key" }));
 
-  it("alerts when the read itself rejects", async () => {
-    vi.spyOn(apiKeyActions, "loadApiKeyLinkedPaymentsAction").mockRejectedValue(
-      new Error("network down")
-    );
-    renderModal();
-
-    expect((await screen.findByRole("alert")).textContent).toBe(
-      "Couldn't check what it set up: network down"
-    );
-  });
+      await waitFor(() =>
+        expect(deactivate).toHaveBeenCalledWith({
+          keyId: "key_1",
+          keyName: "Payouts worker",
+          confirmation: "Payouts worker",
+          cancelRecurringPayments: false,
+          cancelPaymentRequests: checked,
+        })
+      );
+    }
+  );
 });
