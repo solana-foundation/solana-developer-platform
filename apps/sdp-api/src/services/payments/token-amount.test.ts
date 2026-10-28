@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
 import { syntheticAddress } from "@/test/helpers/parsed-transactions";
+import { required } from "@/test/helpers/required";
 import {
   type LegacyStubMint,
   respondMintAccounts,
@@ -41,6 +42,21 @@ const SCALED_BY_TWO_UNTIL_LATER: ExtensionArgs = scaledUiAmountConfig({
   multiplier: 2,
   newMultiplier: 4,
   newMultiplierEffectiveTimestamp: CLOCK_UNIX_TIMESTAMP + ONE_YEAR_SECONDS,
+});
+
+const NO_TRANSFER_FEE = { epoch: 0n, maximumFee: 0n, transferFeeBasisPoints: 0 };
+
+const TRANSFER_FEE_CONFIG: ExtensionArgs = extension("TransferFeeConfig", {
+  transferFeeConfigAuthority: syntheticAddress(4),
+  withdrawWithheldAuthority: syntheticAddress(5),
+  withheldAmount: 0n,
+  olderTransferFee: NO_TRANSFER_FEE,
+  newerTransferFee: NO_TRANSFER_FEE,
+});
+
+const TRANSFER_HOOK: ExtensionArgs = extension("TransferHook", {
+  authority: syntheticAddress(6),
+  programId: syntheticAddress(7),
 });
 
 function inSandboxScope<TResult>(operation: () => TResult): TResult {
@@ -226,6 +242,44 @@ describe("loadPaymentAmountConverter", () => {
     serveMint({ decimals: 9, extensions: null });
     expect((await inSandboxScope(() => loadPaymentMint(MINT))).decimals).toBe(9);
     expect(accountInfoReads()).toEqual([MINT, MINT, MINT]);
+  });
+
+  it.each<{ label: string; mint: StubMint | LegacyStubMint; size: number }>([
+    {
+      label: "legacy SPL Token",
+      mint: { tokenProgram: TOKEN_PROGRAM_ADDRESS, decimals: 6 },
+      size: 165,
+    },
+    { label: "plain Token-2022", mint: { decimals: 6, extensions: null }, size: 170 },
+    {
+      label: "transfer-fee and transfer-hook Token-2022",
+      mint: { decimals: 6, extensions: [TRANSFER_FEE_CONFIG, TRANSFER_HOOK] },
+      size: 187,
+    },
+  ])("sizes a new token account of a $label mint at $size bytes", async ({ mint, size }) => {
+    serveMint(mint);
+
+    await inSandboxScope(async () =>
+      expect(await (await loadPaymentMint(MINT)).readNewTokenAccountSize()).toBe(size)
+    );
+    expect(accountInfoReads()).toEqual([MINT]);
+  });
+
+  it("reads a catalogue Token-2022 mint once, only when a new token account is sized", async () => {
+    const pyusd = address(required(WELL_KNOWN_TOKENS.PYUSD.mints.devnet).address);
+    respondMintAccounts(rpc, {
+      mints: new Map([[pyusd, { decimals: 6, extensions: [TRANSFER_HOOK] }]]),
+      clockUnixTimestamp: CLOCK_UNIX_TIMESTAMP,
+    });
+
+    await inSandboxScope(async () => {
+      const facts = await loadPaymentMint(pyusd);
+      expect(facts.toBaseUnits("1.5")).toBe(1_500_000n);
+      expect(accountInfoReads()).toEqual([]);
+      expect(await facts.readNewTokenAccountSize()).toBe(175);
+      expect(await facts.readNewTokenAccountSize()).toBe(175);
+    });
+    expect(accountInfoReads()).toEqual([pyusd]);
   });
 
   it("answers 400 for a mint with no account", async () => {

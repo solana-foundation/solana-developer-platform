@@ -8,6 +8,7 @@ import {
   unixTimestamp,
 } from "@solana/kit";
 import { getSysvarClockEncoder, SYSVAR_CLOCK_ADDRESS } from "@solana/sysvars";
+import { SYSTEM_PROGRAM_ADDRESS } from "@solana-program/system";
 import {
   getMintEncoder as getLegacyMintEncoder,
   type TOKEN_PROGRAM_ADDRESS,
@@ -175,34 +176,57 @@ function rentExemptLamports(dataSize: number): number {
 }
 
 /**
+ * A data-less account owned by `owner` holding `lamports`, as one `getMultipleAccounts` entry.
+ *
+ * @param owner - The program that owns the account.
+ * @param lamports - The account's balance.
+ * @returns The JSON-RPC account entry.
+ */
+function emptyAccountInfo(owner: Address, lamports: number): JsonRpcResult {
+  return { data: ["", "base64"], executable: false, lamports, owner, rentEpoch: 0, space: 0 };
+}
+
+/**
  * Answer every `getMinimumBalanceForRentExemption` of the current test at mainnet's rent, and every
- * `getMultipleAccounts` with the associated token account of each of `holders` for `mint` as an
- * existing token account and any other address as no account.
+ * `getMultipleAccounts` by address: the associated token account for `mint` of each of `holders` as
+ * an initialized token account, that of each of `prefunded` as a System account holding lamports,
+ * and any other address as no account.
  *
  * @param rpc - The suite's cluster RPC responder.
- * @param params.mint - The mint the holders' associated token accounts are for.
+ * @param params.mint - The mint the associated token accounts are for.
  * @param params.tokenProgram - The mint's owning token program.
  * @param params.holders - The owners whose associated token account already exists.
+ * @param params.prefunded - The owners whose associated token account address only holds lamports.
  * @returns Resolves once both methods are answered.
  */
 export async function respondRecipientTokenAccounts(
   rpc: ClusterRpcResponder,
-  params: { mint: Address; tokenProgram: Address; holders: readonly Address[] }
+  params: {
+    mint: Address;
+    tokenProgram: Address;
+    holders: readonly Address[];
+    prefunded: readonly Address[];
+  }
 ): Promise<void> {
-  const existingTokenAccounts: ReadonlySet<string> = new Set(
-    await Promise.all(
-      params.holders.map(
-        async (owner) =>
-          (
-            await findAssociatedTokenPda({
-              owner,
-              mint: params.mint,
-              tokenProgram: params.tokenProgram,
-            })
-          )[0]
+  const tokenAccountsOf = async (owners: readonly Address[]): Promise<ReadonlySet<string>> =>
+    new Set(
+      await Promise.all(
+        owners.map(
+          async (owner) =>
+            (
+              await findAssociatedTokenPda({
+                owner,
+                mint: params.mint,
+                tokenProgram: params.tokenProgram,
+              })
+            )[0]
+        )
       )
-    )
-  );
+    );
+  const [existingTokenAccounts, prefundedTokenAccounts] = await Promise.all([
+    tokenAccountsOf(params.holders),
+    tokenAccountsOf(params.prefunded),
+  ]);
   rpc.respond("getMinimumBalanceForRentExemption", (request) => ({
     result: rentExemptLamports(z.number().parse(request.params[0])),
   }));
@@ -212,18 +236,14 @@ export async function respondRecipientTokenAccounts(
       value: z
         .array(z.string())
         .parse(request.params[0])
-        .map((accountAddress) =>
-          existingTokenAccounts.has(accountAddress)
-            ? {
-                data: ["", "base64"],
-                executable: false,
-                lamports: rentExemptLamports(165),
-                owner: params.tokenProgram,
-                rentEpoch: 0,
-                space: 0,
-              }
-            : null
-        ),
+        .map((accountAddress) => {
+          if (existingTokenAccounts.has(accountAddress)) {
+            return emptyAccountInfo(params.tokenProgram, rentExemptLamports(165));
+          }
+          return prefundedTokenAccounts.has(accountAddress)
+            ? emptyAccountInfo(SYSTEM_PROGRAM_ADDRESS, 1_000_000)
+            : null;
+        }),
     },
   }));
 }

@@ -1,8 +1,14 @@
 import assert from "node:assert/strict";
+import { FeePaymentError } from "@sdp/fee-payment/port";
 import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
+import {
+  RECIPIENT_NOT_SPONSORABLE_REASONS,
+  type RecipientNotSponsorableReason,
+} from "@sdp/types/payments";
 import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import {
+  type Address,
   address,
   createNoopSigner,
   generateKeyPairSigner,
@@ -61,7 +67,7 @@ import {
   scaledUiAmountConfig,
 } from "@/test/helpers/token-mints";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
-import { clearKVStores } from "@/test/mocks/kv";
+import { clearKVStores, seedRateLimit } from "@/test/mocks/kv";
 
 const getAccountInfoMock = vi.spyOn(solanaRpc, "getAccountInfo");
 const getRecentBlockhashMock = vi.spyOn(solanaRpc, "getRecentBlockhash");
@@ -1931,6 +1937,7 @@ describe("payment transfer batches", () => {
         mint: address(expectedMint),
         tokenProgram: address(SPL_TOKEN_PROGRAMS["spl-token"]),
         holders: [],
+        prefunded: [],
       });
 
       const signingOutcomeMock = vi.fn().mockResolvedValueOnce(FIRST_SIGNATURE);
@@ -2121,6 +2128,7 @@ describe("payment transfer batches", () => {
       mint,
       tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
       holders: [address(TEST_SOLANA_ADDRESSES.wallet2), address(TEST_SOLANA_ADDRESSES.wallet3)],
+      prefunded: [],
     });
     const signingOutcomeMock = vi
       .fn<(transactionBytes: Uint8Array) => Promise<string>>()
@@ -2210,6 +2218,7 @@ describe("payment transfer batches", () => {
       mint: address(MAINNET_USDC_MINT),
       tokenProgram: address(SPL_TOKEN_PROGRAMS["spl-token"]),
       holders: [],
+      prefunded: [],
     });
     const counterpartyId = await seedProjectCounterparty(
       productionProjectId,
@@ -2267,6 +2276,254 @@ describe("payment transfer batches", () => {
         transfer_token: MAINNET_USDC_MINT,
       },
     ]);
+  });
+
+  const DEVNET_USDC_MINT = address(WELL_KNOWN_TOKENS.USDC.mints.devnet.address);
+  const RECIPIENT_OWNERS = [syntheticAddress(731), syntheticAddress(732), syntheticAddress(733)];
+
+  async function seedUsdcBatchBody(params: {
+    owners: readonly Address[];
+    holders: readonly Address[];
+    prefunded: readonly Address[];
+  }): Promise<string> {
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
+    answerSourceTokenAccount(DEVNET_USDC_MINT);
+    await respondRecipientTokenAccounts(rpc, {
+      mint: DEVNET_USDC_MINT,
+      tokenProgram: address(SPL_TOKEN_PROGRAMS["spl-token"]),
+      holders: params.holders,
+      prefunded: params.prefunded,
+    });
+    const counterpartyId = await seedCounterparty("batch_rent_counterparty");
+    const accountIds = await seedCryptoWalletCounterpartyAccounts(counterpartyId, [
+      ...params.owners,
+    ]);
+    return JSON.stringify({
+      sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+      token: DEVNET_USDC_MINT,
+      recipients: accountIds.map((counterpartyAccountId) => ({
+        counterpartyId,
+        counterpartyAccountId,
+        amount: "1",
+      })),
+      options: { preflight: false },
+    });
+  }
+
+  async function postBatch(path: string, body: string): Promise<Response> {
+    return app.request(
+      path,
+      {
+        method: "POST",
+        headers: {
+          "Idempotency-Key": crypto.randomUUID(),
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body,
+      },
+      env
+    );
+  }
+
+  function sponsorAllowing(maxAllowedLamports: bigint): void {
+    createKoraAdapterMock.mockReturnValue(
+      testKoraAdapter({
+        getFeePayer: vi.fn().mockResolvedValue(TEST_MOCK_FEE_PAYER),
+        getSponsorshipConfiguration: vi
+          .fn()
+          .mockResolvedValue({ ...TEST_SPONSORSHIP_PROVIDER_CONFIG, maxAllowedLamports }),
+        signAsFeePayer: vi.fn(fullySignTestTransaction),
+      })
+    );
+  }
+
+  async function countStoredBatchRows(): Promise<{ batches: number; recipients: number } | null> {
+    return getDb(env)
+      .prepare(
+        `SELECT (SELECT COUNT(*)::int FROM payment_transfer_batches) AS batches,
+                (SELECT COUNT(*)::int FROM payment_transfer_recipients) AS recipients`
+      )
+      .first<{ batches: number; recipients: number }>();
+  }
+
+  it.each([
+    { maxAllowedLamports: 2_500_000n, transactionCount: 2 },
+    { maxAllowedLamports: 4_078_560n, transactionCount: 1 },
+  ])(
+    "plans estimate and create alike under a $maxAllowedLamports-lamport sponsor limit",
+    async ({ maxAllowedLamports, transactionCount }) => {
+      sponsorAllowing(maxAllowedLamports);
+      rpc.answer("getFeeForMessage", { context: { slot: 1 }, value: 5000 });
+      const body = await seedUsdcBatchBody({
+        owners: RECIPIENT_OWNERS,
+        holders: [required(RECIPIENT_OWNERS[2])],
+        prefunded: [],
+      });
+
+      const estimate = await postBatch("/v1/payments/transfer-batches/estimate", body);
+      const created = await postBatch("/v1/payments/transfer-batches", body);
+
+      expect(estimate.status).toBe(200);
+      expect(await estimate.json()).toEqual({
+        data: {
+          estimate: {
+            recipientCount: 3,
+            transactionCount,
+            estimatedFees: {
+              networkFeeLamports: String(5000 * transactionCount),
+              priorityFeeLamports: "0",
+              tokenAccountRentLamports: "4078560",
+              sponsored: true,
+            },
+          },
+        },
+        meta: { requestId: expect.any(String), timestamp: expect.any(String) },
+      });
+      expect(created.status).toBe(200);
+      expect(await created.json()).toMatchObject({ data: { batch: { transactionCount } } });
+      expect(sendTransactionMock).toHaveBeenCalledTimes(transactionCount);
+    }
+  );
+
+  const REFUSALS = {
+    rent_exceeds_limit: {
+      maxAllowedLamports: 1_000_000n,
+      prefunded: [],
+      error: {
+        code: "RECIPIENT_NOT_SPONSORABLE",
+        message:
+          "recipients.1 needs a new token account whose rent (2039280 lamports) exceeds the 1000000 lamports the fee sponsor funds per transaction",
+        details: {
+          reason: "rent_exceeds_limit",
+          recipientIndexes: [1],
+          rentLamportsPerTokenAccount: "2039280",
+          maxSponsoredLamportsPerTransaction: "1000000",
+        },
+      },
+    },
+    token_account_address_prefunded: {
+      maxAllowedLamports: 2_500_000n,
+      prefunded: [required(RECIPIENT_OWNERS[1])],
+      error: {
+        code: "RECIPIENT_NOT_SPONSORABLE",
+        message:
+          "recipients.1 has a token account address that already holds lamports without being a token account, so the fee sponsor cannot create it",
+        details: { reason: "token_account_address_prefunded", recipientIndexes: [1] },
+      },
+    },
+  } satisfies Record<
+    RecipientNotSponsorableReason,
+    { maxAllowedLamports: bigint; prefunded: Address[]; error: Record<string, unknown> }
+  >;
+
+  it.each(RECIPIENT_NOT_SPONSORABLE_REASONS)(
+    "refuses a %s recipient on estimate and create before storing anything",
+    async (reason) => {
+      const refusal = REFUSALS[reason];
+      sponsorAllowing(refusal.maxAllowedLamports);
+      const body = await seedUsdcBatchBody({
+        owners: RECIPIENT_OWNERS.slice(0, 2),
+        holders: [required(RECIPIENT_OWNERS[0])],
+        prefunded: refusal.prefunded,
+      });
+
+      for (const path of [
+        "/v1/payments/transfer-batches/estimate",
+        "/v1/payments/transfer-batches",
+      ]) {
+        const response = await postBatch(path, body);
+        expect(response.status).toBe(422);
+        expect(await response.json()).toEqual({
+          error: refusal.error,
+          meta: { requestId: expect.any(String) },
+        });
+      }
+      expect(await countStoredBatchRows()).toEqual({ batches: 0, recipients: 0 });
+      expect(sendTransactionMock).not.toHaveBeenCalled();
+    }
+  );
+
+  it("429s an estimate once the actor's metered quota is exhausted, before any chain read", async () => {
+    await seedRateLimit(
+      env,
+      `metered:transfer-batch-estimate:org:${TEST_ORG.id}:key:${TEST_API_KEY.id}`,
+      30
+    );
+
+    const response = await postBatch(
+      "/v1/payments/transfer-batches/estimate",
+      JSON.stringify({
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        token: "SOL",
+        recipients: [{ counterpartyAccountId: "cpacct_batch_quota_unseeded", amount: "0.1" }],
+      })
+    );
+
+    expect(response.status).toBe(429);
+    expect(await response.json()).toEqual({
+      error: { code: "RATE_LIMITED", message: expect.any(String) },
+      meta: { requestId: expect.any(String) },
+    });
+    expect(rpc.calls).toEqual([]);
+  });
+
+  it("fails only the chunk whose sponsor signature Kora refuses", async () => {
+    const [acceptedOwner, refusedOwner] = RECIPIENT_OWNERS;
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerForCustodyWalletMock.mockResolvedValueOnce(sourceSigner);
+    createKoraAdapterMock.mockReturnValue(
+      ownedSubmissionAdapter(async (transactionBytes) => {
+        const message = getCompiledTransactionMessageDecoder().decode(
+          getTransactionDecoder().decode(transactionBytes).messageBytes
+        );
+        if (message.staticAccounts.includes(required(refusedOwner))) {
+          throw new FeePaymentError("Kora refused the sponsored transaction", "PROVIDER_REJECTED");
+        }
+        return FIRST_SIGNATURE;
+      })
+    );
+    const counterpartyId = await seedCounterparty("batch_sponsor_refusal_counterparty");
+    const accountIds = await seedCryptoWalletCounterpartyAccounts(counterpartyId, [
+      required(acceptedOwner),
+      required(refusedOwner),
+    ]);
+
+    const response = await postBatch(
+      "/v1/payments/transfer-batches",
+      JSON.stringify({
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        token: "SOL",
+        recipients: accountIds.map((counterpartyAccountId) => ({
+          counterpartyId,
+          counterpartyAccountId,
+          amount: "0.1",
+        })),
+        options: { preflight: false, maxRecipientsPerTransaction: 1 },
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const rows = await getDb(env)
+      .prepare("SELECT destination_address, status, error FROM payment_transfer_recipients")
+      .all<{ destination_address: string; status: string; error: string | null }>();
+    expect(
+      Object.fromEntries(
+        rows.results.map((row) => [
+          row.destination_address,
+          { status: row.status, error: row.error },
+        ])
+      )
+    ).toEqual({
+      [required(acceptedOwner)]: { status: "processing", error: null },
+      [required(refusedOwner)]: {
+        status: "failed",
+        error: expect.stringContaining("Kora refused the sponsored transaction"),
+      },
+    });
   });
 
   it("returns a submitted chunk as processing without confirming in-request", async () => {
