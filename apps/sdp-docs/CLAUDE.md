@@ -200,7 +200,7 @@ Every MDX under `content/docs/` is built and served (static params) and indexed 
 
 ## Release Channels
 
-Each docs deployment documents only what its release channel publishes. The API decides that (`createPublicSurfaceManifest` in `apps/sdp-api/src/openapi/spec.ts`: modules, ramp providers and the actions an API key can be granted, Earn's hold included); `generate:api` writes it to `src/generated/public-surface.json` from `SDP_RELEASE_CHANNEL` (required on Vercel; `experimental` when unset elsewhere, which is what the committed file holds).
+Each docs deployment documents only what its release channel publishes. The API decides that (`createPublicSurfaceManifest` in `apps/sdp-api/src/openapi/spec.ts`: modules, ramp providers and the actions an API key can be granted, Earn's hold included, plus the rate limits every channel enforces); `generate:api` writes it to `src/generated/public-surface.json` from `SDP_RELEASE_CHANNEL` (required on Vercel; `experimental` when unset elsewhere, which is what the committed file holds).
 
 Before documenting a new ramp provider, follow
 `docs/contributing/ramp-provider-safety.md` and verify its sandbox settlement
@@ -209,7 +209,7 @@ delivery.
 
 Gates follow module declarations, never sentences:
 - A page about one module takes `module: issuance` (or `ramps`, …) frontmatter; a page about one ramp provider takes `rampProvider: moonpay` (ramp provider pages are `payments/ramps-<provider>.mdx`). Outside the channel the page leaves `source` (it 404s and drops out of the sidebar, search, sitemap and the Markdown route) and the `llms*.txt` files.
-- Shared pages never name a module. Module-specific content lives on that module's pages; where a shared page lists modules, providers or operations, it places a generated block instead: `<ModuleTable />`, `<ModuleCapabilities />`, `<RampProviderMatrix />`, `<ApiKeyGrantsTable />`. The blocks render from `src/lib/docs-catalog.ts` (add a module or provider there) and the manifest.
+- Shared pages never name a module. Module-specific content lives on that module's pages; where a shared page lists modules, providers or operations, it places a generated block instead: `<ModuleTable />`, `<ModuleCapabilities />`, `<RampProviderMatrix />`, `<ApiKeyGrantsTable />`, and `<RateLimitTable />` for the API's limits. The blocks render from `src/lib/docs-catalog.ts` (add a module or provider there) and the manifest.
 - `remarkDocsBlocks` (`src/lib/docs-blocks.ts`) expands the blocks before Fumadocs extracts headings and search text; `expandDocsBlocks` puts the same Markdown into raw MDX for the llms files, the Markdown route and the link checker. A `rotate-providers` code fence shows only published providers.
 - Frontmatter (titles, descriptions) of shared pages must stay module-neutral.
 - `check:links` checks the channel in the manifest; CI runs it on `experimental` and `stable`.
@@ -223,6 +223,8 @@ API reference pages are different: they are generated from the public OpenAPI do
 - The pages are Markdown, so `.md`, `llms-full.txt` and search carry everything. `expandDocsBlocks` writes `<ApiEndpoint />` as `METHOD /path` in a code span (search gets the same text) and unwraps the wrappers to their content: `<ApiOperationTable>` also points each row at its operation's `.md`, while `<ActionLinks>` (a page's action links as chips, the Postman download), `<ApiOperation>` and `<ApiPanel>` only lay a page out. A new reference component needs both forms. `check:links` accepts a page's `.md`, and `generate-ai-resources.ts` reads a family folder's index as its first page and names a group's section after its family (`Payments: Transfers`).
 - On a reference page, `remarkDocsBlocks` sets each `·` between a field's facts in a `.launch-api-separator` span so the dots get room, and points the code at this deployment's API: it swaps `canonicalSite.apiUrl` for `apiUrl` (`src/lib/site.ts`, from `NEXT_PUBLIC_SDP_API_URL`, which the Docker image fills in at start). On Vercel the variable needs setting per environment, like `SDP_RELEASE_CHANNEL`; a deployment without it shows the canonical host. The MDX, the `.md` route and the llms files keep the plain text and the canonical host.
 - On an operation page, `apiReference: true` makes the page full width with no table of contents and scopes the `.is-api-reference` styles in `globals.css`, and `icon: method:<METHOD>` puts its method beside it in the sidebar (`src/lib/source.ts`). Each sample is a box whose code scrolls inside it. From 1280px its `<ApiPanel>` (the samples and example responses) sits beside the body; on a window at least 750px tall it stays in view, sized to the window, and never scrolls itself: the last box (the example responses) takes the height left, which 750px keeps at 10 lines or more. Below, it follows the body.
+
+Reference > Conventions (`content/docs/reference/conventions/`) holds the rules every route shares (errors, pagination, rate limits, versioning) and links the authentication, environments and idempotency guides; the API Reference index links it. It is written by hand, apart from `<RateLimitTable />`, names no module, and lives outside `reference/api/`, which `generate:api` rewrites.
 
 Currently unpublished: the whole Earn family, guide and API reference, until PRO-2038.
 

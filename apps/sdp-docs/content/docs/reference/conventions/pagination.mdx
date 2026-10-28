@@ -1,0 +1,23 @@
+---
+title: Pagination
+description: Lists return one page at a time, by page number on most routes and by cursor on a few.
+---
+
+Each list operation's page says which of the two it uses, with its default and largest page size.
+
+## Page numbers
+
+Most lists take `page` (from 1) and `pageSize`. The page's items are in `data`, and `meta` says where you are:
+
+| Field | Means |
+| --- | --- |
+| `total` | Items across every page |
+| `page` | This page's number |
+| `pageSize` | Items per page |
+| `hasMore` | Whether a later page exists |
+
+Ask for the next `page` while `hasMore` is `true`.
+
+## Cursors
+
+A few lists take a `limit` instead and return a `nextCursor` with each page. Send it back as `cursor` to get the next page; it's `null` on the last one.

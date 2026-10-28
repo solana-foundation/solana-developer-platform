@@ -32,6 +32,7 @@ import { apiUrl, canonicalSite } from "./site";
  * - `<ModuleCapabilities />`: one capability line per module (the AI guide).
  * - `<RampProviderMatrix />`: the ramp providers, each linking to its page.
  * - `<ApiKeyGrantsTable />`: the actions an API key can be granted, by module.
+ * - `<RateLimitTable />`: the API's rate limits, per API key tier and without a key.
  *
  * Each block is rendered once, to Markdown, from docs-catalog.ts and the
  * build's manifest. `remarkDocsBlocks` swaps it into the MDX tree before
@@ -90,7 +91,23 @@ const BLOCKS = {
         DOCS_ACTION_MODULES[module],
       ])
     ),
+  RateLimitTable: ({ rateLimits }) =>
+    table(
+      ["Caller", `Requests per ${windowLabel(rateLimits.windowSeconds)}`],
+      [
+        ...Object.entries(rateLimits.apiKeyTiers).map(([tier, requests]) => [
+          `An API key on the \`${tier}\` tier`,
+          requests.toLocaleString("en-US"),
+        ]),
+        ["No API key, per IP address", rateLimits.unauthenticatedPerIp.toLocaleString("en-US")],
+      ]
+    ),
 } satisfies Record<string, (surface: PublicSurface) => string>;
+
+/** A rate limit window's length as a table heading reads it: `minute`, or `30 seconds`. */
+function windowLabel(seconds: number): string {
+  return seconds === 60 ? "minute" : `${seconds} seconds`;
+}
 
 type BlockName = keyof typeof BLOCKS;
 

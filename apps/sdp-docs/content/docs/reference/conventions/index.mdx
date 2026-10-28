@@ -1,0 +1,16 @@
+---
+title: API conventions
+description: What every SDP API call has in common, from how it authenticates to how it fails.
+---
+
+Every route follows the same rules, so learn them once:
+
+- [Authentication](/docs/developing-with-sdp/authentication): send an API key in the `Authorization` header. Its grants decide what it can do.
+- [Environments](/docs/developing-with-sdp#environments): a project runs in sandbox (devnet) or production (mainnet-beta), and its keys work in that environment only.
+- [Idempotency](/docs/developing-with-sdp/idempotency): send an `Idempotency-Key` to retry a mutation safely. Routes that move money require one.
+- [Errors](/docs/reference/conventions/errors): one error envelope, with a code to branch on.
+- [Pagination](/docs/reference/conventions/pagination): lists return one page at a time.
+- [Rate limits](/docs/reference/conventions/rate-limits): each API key gets a set number of requests per minute.
+- [Versioning](/docs/reference/conventions/versioning): the version is in the path, and a breaking change gets a new one.
+
+A successful response wraps its payload in `data`, with `meta.requestId` beside it. Quote the request ID when you report a problem.

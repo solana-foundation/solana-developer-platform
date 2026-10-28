@@ -5180,6 +5180,136 @@ Requests to routes that require an `Idempotency-Key` send a saved per-operation 
 
 ---
 
+## Conventions
+
+### API conventions
+Source: https://platform.solana.com/docs/reference/conventions
+
+> What every SDP API call has in common, from how it authenticates to how it fails.
+
+Every route follows the same rules, so learn them once:
+
+- [Authentication](/docs/developing-with-sdp/authentication): send an API key in the `Authorization` header. Its grants decide what it can do.
+- [Environments](/docs/developing-with-sdp#environments): a project runs in sandbox (devnet) or production (mainnet-beta), and its keys work in that environment only.
+- [Idempotency](/docs/developing-with-sdp/idempotency): send an `Idempotency-Key` to retry a mutation safely. Routes that move money require one.
+- [Errors](/docs/reference/conventions/errors): one error envelope, with a code to branch on.
+- [Pagination](/docs/reference/conventions/pagination): lists return one page at a time.
+- [Rate limits](/docs/reference/conventions/rate-limits): each API key gets a set number of requests per minute.
+- [Versioning](/docs/reference/conventions/versioning): the version is in the path, and a breaking change gets a new one.
+
+A successful response wraps its payload in `data`, with `meta.requestId` beside it. Quote the request ID when you report a problem.
+
+---
+
+### Errors
+Source: https://platform.solana.com/docs/reference/conventions/errors
+
+> A failed request returns an HTTP error status and one error envelope, with a code to branch on.
+
+A failed request returns an error status and this body:
+
+```json
+{
+  "error": {
+    "code": "FORBIDDEN",
+    "message": "Access denied"
+  },
+  "meta": { "requestId": "req_..." }
+}
+```
+
+- `code` is stable: branch on it, not on `message`, which is for people and can change.
+- `details`, when present, says more, such as which field failed validation.
+- `meta.requestId` identifies the request. Quote it when you report a problem.
+
+## Statuses
+
+| Status | Means | Common codes |
+| --- | --- | --- |
+| `400` | The request is malformed or fails validation. | `BAD_REQUEST`, `IDEMPOTENCY_KEY_REQUIRED` |
+| `401` | The API key is missing, invalid, expired or revoked. | `UNAUTHORIZED`, `INVALID_API_KEY` |
+| `403` | The key lacks the grant or wallet access the request needs, or the call comes from an IP address the key doesn't allow. | `FORBIDDEN`, `INSUFFICIENT_PERMISSIONS` |
+| `404` | Nothing with that ID exists in the project. | `NOT_FOUND` |
+| `409` | The request conflicts with the resource's state, or a request with the same idempotency key is still running. | `CONFLICT`, `IDEMPOTENCY_KEY_IN_FLIGHT` |
+| `422` | The request is well formed but can't go ahead: its idempotency key was used for a different request, or the signing provider refused the transaction. | `IDEMPOTENCY_KEY_REUSED`, `SIGNING_REJECTED` |
+| `429` | Too many requests. See [Rate limits](/docs/reference/conventions/rate-limits). | `RATE_LIMITED` |
+| `500` | Something failed inside SDP. | `INTERNAL_ERROR` |
+| `502` | A Solana RPC call failed. | `SOLANA_RPC_ERROR` |
+| `503` | SDP, or a provider it depends on, is unavailable for now. | `SERVICE_UNAVAILABLE`, `PROVIDER_UNAVAILABLE` |
+
+Each operation's page lists the statuses it can return, with an example body for each.
+
+## Retrying
+
+- `400`, `401`, `403`, `404` and `422`: fix the request before you send it again.
+- `409 CONFLICT`: read the resource's current state, then decide.
+- `409 IDEMPOTENCY_KEY_IN_FLIGHT`, `429` and `5xx`: wait (for `Retry-After` when the response has one), then retry. Send a mutation's retry with the same `Idempotency-Key`; [Idempotency](/docs/developing-with-sdp/idempotency) covers what each retry returns.
+
+---
+
+### Pagination
+Source: https://platform.solana.com/docs/reference/conventions/pagination
+
+> Lists return one page at a time, by page number on most routes and by cursor on a few.
+
+Each list operation's page says which of the two it uses, with its default and largest page size.
+
+## Page numbers
+
+Most lists take `page` (from 1) and `pageSize`. The page's items are in `data`, and `meta` says where you are:
+
+| Field | Means |
+| --- | --- |
+| `total` | Items across every page |
+| `page` | This page's number |
+| `pageSize` | Items per page |
+| `hasMore` | Whether a later page exists |
+
+Ask for the next `page` while `hasMore` is `true`.
+
+## Cursors
+
+A few lists take a `limit` instead and return a `nextCursor` with each page. Send it back as `cursor` to get the next page; it's `null` on the last one.
+
+---
+
+### Rate limits
+Source: https://platform.solana.com/docs/reference/conventions/rate-limits
+
+> Each API key gets a set number of requests per minute, by its tier, and responses say how many are left.
+
+Requests count against a limit per minute. A request with an API key counts against that key's tier; keys start on `standard`. A request without a key counts against its IP address.
+
+| Caller | Requests per minute |
+| --- | --- |
+| An API key on the `standard` tier | 100 |
+| An API key on the `elevated` tier | 500 |
+| An API key on the `unlimited` tier | 10,000 |
+| No API key, per IP address | 20 |
+
+Responses say where you stand:
+
+| Header | Means |
+| --- | --- |
+| `X-RateLimit-Limit` | Requests allowed per window |
+| `X-RateLimit-Remaining` | Requests left in this window |
+| `X-RateLimit-Reset` | When this window ends, in Unix seconds |
+
+Past the limit, a request gets `429` with the code `RATE_LIMITED` and a `Retry-After` header. Wait that many seconds before you send it again.
+
+---
+
+### Versioning
+Source: https://platform.solana.com/docs/reference/conventions/versioning
+
+> The API version is in every path. /v1 is current, and a breaking change ships under a new major version.
+
+Every route's path starts with its version: `/v1` is the current contract. A breaking change ships under a new major version, such as `/v2`, never inside `/v1`.
+
+The OpenAPI document's `info.version` counts revisions of that document for the current path version. It is not the API's version.
+
+---
+
 ## API
 
 ### API Reference
@@ -5189,6 +5319,8 @@ Source: https://platform.solana.com/docs/reference/api
 
 <a href="/docs/postman/collection.json" download>Download Postman collection</a>
   <a href="/docs/postman/collection.json">Open raw JSON</a>
+
+Every operation follows the [API conventions](/docs/reference/conventions): authentication, environments, idempotency, errors, pagination, rate limits and versioning.
 
 - [Health](/docs/reference/api/health)
 - [Wallets](/docs/reference/api/wallets)

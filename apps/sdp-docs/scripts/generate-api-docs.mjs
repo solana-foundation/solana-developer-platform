@@ -55,6 +55,8 @@ description: Endpoint index from the repository OpenAPI spec.
   <a href="${POSTMAN_COLLECTION_ROUTE}">Open raw JSON</a>
 </ActionLinks>
 
+Every operation follows the [API conventions](/docs/reference/conventions): authentication, environments, idempotency, errors, pagination, rate limits and versioning.
+
 ${links}
 `;
 };

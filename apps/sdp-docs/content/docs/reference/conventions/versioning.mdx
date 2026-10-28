@@ -1,0 +1,8 @@
+---
+title: Versioning
+description: The API version is in every path. /v1 is current, and a breaking change ships under a new major version.
+---
+
+Every route's path starts with its version: `/v1` is the current contract. A breaking change ships under a new major version, such as `/v2`, never inside `/v1`.
+
+The OpenAPI document's `info.version` counts revisions of that document for the current path version. It is not the API's version.

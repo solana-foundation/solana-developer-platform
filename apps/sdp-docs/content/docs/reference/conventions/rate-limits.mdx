@@ -1,0 +1,18 @@
+---
+title: Rate limits
+description: Each API key gets a set number of requests per minute, by its tier, and responses say how many are left.
+---
+
+Requests count against a limit per minute. A request with an API key counts against that key's tier; keys start on `standard`. A request without a key counts against its IP address.
+
+<RateLimitTable />
+
+Responses say where you stand:
+
+| Header | Means |
+| --- | --- |
+| `X-RateLimit-Limit` | Requests allowed per window |
+| `X-RateLimit-Remaining` | Requests left in this window |
+| `X-RateLimit-Reset` | When this window ends, in Unix seconds |
+
+Past the limit, a request gets `429` with the code `RATE_LIMITED` and a `Retry-After` header. Wait that many seconds before you send it again.
