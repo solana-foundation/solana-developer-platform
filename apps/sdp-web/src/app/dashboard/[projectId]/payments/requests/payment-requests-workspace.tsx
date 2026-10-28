@@ -17,7 +17,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type KeyboardEvent, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { PaymentPrincipalFilterChip } from "@/app/dashboard/[projectId]/payments/payment-principal-filter-chip";
 import { shortenAddress } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
 import {
   formatDateTime,
@@ -30,10 +29,6 @@ import { ReadOnlyEmptyNote } from "@/components/read-only-empty-note";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
-import {
-  PAYMENT_REQUEST_CREATED_BY_PARAMS,
-  setPaymentPrincipalParams,
-} from "@/lib/payment-principal-filter";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import {
   PAYMENT_REQUEST_NEW_HREF,
@@ -223,7 +218,6 @@ interface ListParamsUpdate {
   pageSize?: number;
   status?: PaymentRequestStatus | null;
   search?: string;
-  createdBy?: null;
 }
 
 function setOrDeleteParam(params: URLSearchParams, key: string, value: string | null) {
@@ -269,10 +263,6 @@ function listHrefAfter(
     if (search === (currentSearch ?? "")) return null;
     params.delete("page");
     setOrDeleteParam(params, "search", search === "" ? null : search);
-  }
-  if (updates.createdBy !== undefined) {
-    params.delete("page");
-    setPaymentPrincipalParams(params, updates.createdBy, PAYMENT_REQUEST_CREATED_BY_PARAMS);
   }
   const next = params.toString();
   return `${PAYMENT_REQUESTS_HREF}${next ? `?${next}` : ""}`;
@@ -429,11 +419,7 @@ export function PaymentRequestsWorkspace({
     if (href === null) return;
     startTransition(() => router.replace(projectHref(href), { scroll: false }));
   };
-  const listIsEmpty =
-    total === 0 &&
-    listState.status === null &&
-    listState.search === null &&
-    listState.createdBy === null;
+  const listIsEmpty = total === 0 && listState.status === null && listState.search === null;
 
   const copyLink = (row: PaymentRequest) => {
     // A demo request lives in this browser only, so the public pay page can't open its link.
@@ -488,13 +474,6 @@ export function PaymentRequestsWorkspace({
         />
       ) : (
         <>
-          {listState.createdBy === null ? null : (
-            <PaymentPrincipalFilterChip
-              filter={listState.createdBy}
-              pending={isPending}
-              onClear={() => applyListParams({ createdBy: null })}
-            />
-          )}
           {/* The design draws the search at the Filter button's 30px, its rule level with the
               button's bottom edge; the shared field defaults to the taller input. */}
           <ListToolbar

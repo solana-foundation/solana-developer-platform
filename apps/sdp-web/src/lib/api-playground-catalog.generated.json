@@ -1528,7 +1528,7 @@
         "operationId": "listPaymentRecurringPayments",
         "title": "List recurring payments",
         "method": "GET",
-        "path": "/v1/payments/recurring-payments?counterpartyId={counterpartyId}&status={status}&activatedByApiKeyId={activatedByApiKeyId}&activatedByUserId={activatedByUserId}&page={page}&pageSize={pageSize}",
+        "path": "/v1/payments/recurring-payments?counterpartyId={counterpartyId}&status={status}&page={page}&pageSize={pageSize}",
         "releaseModule": "recurring_payments",
         "shadowedBy": [],
         "pathFields": [
@@ -1584,20 +1584,6 @@
                 "value": "expired"
               }
             ]
-          },
-          {
-            "key": "activatedByApiKeyId",
-            "label": "activatedByApiKeyId",
-            "description": "Filter to recurring payments this API key, or a key it was rotated from, activated or last resumed. Cannot be combined with `activatedByUserId`.",
-            "defaultValue": "key_example",
-            "required": false
-          },
-          {
-            "key": "activatedByUserId",
-            "label": "activatedByUserId",
-            "description": "Filter to recurring payments this member activated or last resumed in the dashboard, not through an API key. Cannot be combined with `activatedByApiKeyId`.",
-            "defaultValue": "usr_example",
-            "required": false
           },
           {
             "key": "page",

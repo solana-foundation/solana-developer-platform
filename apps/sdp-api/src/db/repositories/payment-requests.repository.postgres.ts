@@ -3,7 +3,6 @@ import { z } from "zod";
 import type { DatabaseClient as AppDb } from "@/db/client";
 import { internalError } from "@/lib/errors";
 import { parseNullableCustodyWalletId } from "./payment-execution-identity";
-import { type PaymentPrincipalFilter, paymentPrincipalPredicate } from "./payment-principal-filter";
 import type {
   AdvanceSignatureScanInput,
   CancelPaymentRequestInput,
@@ -118,22 +117,6 @@ async function markClosedPaymentRequestPaid(
     )
     .first<Record<string, unknown>>();
   return row ? mapPaymentRequestRow(row) : null;
-}
-
-/**
- * The creator predicate for `payment_requests`: an API key by `created_by_api_key_id`, a member
- * by `created_by` on a request no key created.
- *
- * @param filter - The principal, or null for no filter.
- * @param organizationId - The Organization the key lineage is read in.
- * @returns The predicate and its binds.
- */
-function createdByPredicate(filter: PaymentPrincipalFilter | null, organizationId: string) {
-  return paymentPrincipalPredicate(filter, {
-    organizationId,
-    apiKeyColumn: "created_by_api_key_id",
-    userColumn: "created_by",
-  });
 }
 
 function paymentRequestStatusFilter(status: PaymentRequestStatus | undefined): {
@@ -282,6 +265,42 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
       return row ? mapPaymentRequestRow(row) : null;
     },
 
+    async listOpenPaymentRequestsCreatedByApiKey(params) {
+      const result = await db
+        .prepare(
+          // The key and every predecessor it was rotated from, in this project.
+          `WITH RECURSIVE lineage(id, rotated_from) AS (
+             SELECT id, rotated_from FROM api_keys
+              WHERE id = ? AND organization_id = ? AND project_id = ?
+             UNION
+             SELECT ak.id, ak.rotated_from
+               FROM api_keys ak
+               JOIN lineage ON ak.id = lineage.rotated_from
+              WHERE ak.organization_id = ? AND ak.project_id = ?
+           )
+           SELECT pr.*
+             FROM payment_requests pr
+            WHERE pr.organization_id = ?
+              AND pr.project_id = ?
+              AND pr.created_by_api_key_id IS NOT NULL
+              AND pr.created_by_api_key_id IN (SELECT id FROM lineage)
+              AND pr.status = 'awaiting_payment'
+              AND (pr.expires_at IS NULL OR pr.expires_at > sdp_iso_now())
+            ORDER BY pr.created_at ASC, pr.id ASC`
+        )
+        .bind(
+          params.apiKeyId,
+          params.organizationId,
+          params.projectId,
+          params.organizationId,
+          params.projectId,
+          params.organizationId,
+          params.projectId
+        )
+        .all<Record<string, unknown>>();
+      return result.results.map(mapPaymentRequestRow);
+    },
+
     async getPaymentRequestById(params) {
       const row = await db
         .prepare(
@@ -385,14 +404,8 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
       params: ListPaymentRequestsInput
     ): Promise<ListPaymentRequestsResult> {
       const filter = paymentRequestStatusFilter(params.status);
-      const createdBy = createdByPredicate(params.createdBy, params.organizationId);
-      const where = `WHERE organization_id = ? AND project_id = ? AND ${filter.sql} AND ${createdBy.sql}`;
-      const scopeBinds = [
-        params.organizationId,
-        params.projectId,
-        ...filter.binds,
-        ...createdBy.binds,
-      ];
+      const where = `WHERE organization_id = ? AND project_id = ? AND ${filter.sql}`;
+      const scopeBinds = [params.organizationId, params.projectId, ...filter.binds];
 
       const [rowsResult, countRow] = await Promise.all([
         db
@@ -414,21 +427,6 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
         rows: rowsResult.results.map(mapPaymentRequestRow),
         total: countRow.total,
       };
-    },
-
-    async countOpenPaymentRequestsByProject(params) {
-      const filter = paymentRequestStatusFilter("awaiting_payment");
-      const createdBy = createdByPredicate(params.createdBy, params.organizationId);
-      const result = await db
-        .prepare(
-          `SELECT project_id, COUNT(*)::int AS count
-             FROM payment_requests
-            WHERE organization_id = ? AND ${filter.sql} AND ${createdBy.sql}
-            GROUP BY project_id`
-        )
-        .bind(params.organizationId, ...filter.binds, ...createdBy.binds)
-        .all<{ project_id: string; count: number }>();
-      return result.results.map((row) => ({ projectId: row.project_id, count: row.count }));
     },
 
     async hasHotPaymentRequests({ environment }) {

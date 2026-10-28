@@ -38,7 +38,6 @@ import {
   getPaymentsRepository,
 } from "@/routes/payments/context";
 import { mapCollectionAttemptRow, mapTransferRow } from "@/routes/payments/mappers";
-import { paymentPrincipalQuery } from "@/routes/payments/schemas";
 import { activateRecurringPayment as activateRecurringPaymentRecord } from "@/services/payments/recurring-payments/activation";
 import { collectRecurringPayment as collectRecurringPaymentRecord } from "@/services/payments/recurring-payments/collection";
 import {
@@ -502,15 +501,13 @@ export const listRecurringPayments = async (c: AppContext) => {
     throw badRequestQuery({ errors: z.treeifyError(parsed.error) });
   }
 
-  const { page, pageSize, counterpartyId, status, activatedByApiKeyId, activatedByUserId } =
-    parsed.data;
+  const { page, pageSize, counterpartyId, status } = parsed.data;
 
   const { rows, total } = await getPaymentRecurringPaymentsRepository(c).listRecurringPayments({
     organizationId: auth.organizationId,
     projectId,
     counterpartyId,
     status,
-    activatedBy: paymentPrincipalQuery(activatedByApiKeyId, activatedByUserId),
     limit: pageSize,
     offset: (page - 1) * pageSize,
   });

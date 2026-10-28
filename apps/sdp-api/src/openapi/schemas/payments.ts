@@ -857,19 +857,6 @@ export const paymentListRecurringPaymentsQuerySchema = listRecurringPaymentsQuer
       example: "cpty_example",
     }),
     status: paymentRecurringPaymentStatusSchema.optional(),
-    activatedByApiKeyId: withOpenApi(
-      listRecurringPaymentsQuerySchemaBase.shape.activatedByApiKeyId,
-      {
-        description:
-          "Filter to recurring payments this API key, or a key it was rotated from, activated or last resumed. Cannot be combined with `activatedByUserId`.",
-        example: "key_example",
-      }
-    ),
-    activatedByUserId: withOpenApi(listRecurringPaymentsQuerySchemaBase.shape.activatedByUserId, {
-      description:
-        "Filter to recurring payments this member activated or last resumed in the dashboard, not through an API key. Cannot be combined with `activatedByApiKeyId`.",
-      example: "usr_example",
-    }),
   })
   .openapi({ description: "Recurring payment list filters." });
 

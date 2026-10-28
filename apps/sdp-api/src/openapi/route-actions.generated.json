@@ -82,7 +82,6 @@
   "GET /v1/issuance/tokens/facets": "issuance.read",
   "GET /v1/issuance/transactions": "issuance.read",
   "GET /v1/members": "members.read",
-  "GET /v1/members/:_/linked-payments": "members.manage",
   "GET /v1/members/me": "members.read",
   "GET /v1/organizations/:_": "organizations.read",
   "GET /v1/organizations/:_/provider-access": "organizations.read",

@@ -4,7 +4,6 @@ import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { z } from "zod";
 import { getRequestLocale, getTranslations } from "@/i18n/server";
 import { parseAllowedIps } from "@/lib/ip-allowlist-input";
 import { createSdpApiClient, requestProjectHref, requestProjectId } from "@/lib/sdp-api";
@@ -114,6 +113,8 @@ async function deactivateApiKeyRequest(input: {
   keyId: string;
   keyName: string;
   confirmation: string;
+  cancelRecurringPayments: boolean;
+  cancelPaymentRequests: boolean;
 }): Promise<{ ok: true; message: string } | { ok: false; message: string }> {
   const t = await getTranslations();
   const { keyId, keyName, confirmation } = normalizeDeactivateApiKeyInput(input);
@@ -148,11 +149,37 @@ async function deactivateApiKeyRequest(input: {
 
   try {
     const client = await createSdpApiClient();
-    await client.fetch(`/v1/api-keys/${encodeURIComponent(keyId)}`, {
+    const { cancelRecurringPayments, cancelPaymentRequests } = input;
+    const response = await client.fetch<{
+      recurringPayments: { canceled: string[]; failed: string[] } | null;
+      paymentRequests: { canceled: string[]; failed: string[] } | null;
+    }>(`/v1/api-keys/${encodeURIComponent(keyId)}`, {
       method: "DELETE",
-      body: JSON.stringify({ confirmation }),
+      body: JSON.stringify({ confirmation, cancelRecurringPayments, cancelPaymentRequests }),
     });
-    return { ok: true, message: t("DashboardCustody.apiKeyDeactivated", { name: keyName }) };
+
+    // The key is revoked either way; anything that could not be canceled is
+    // reported so it can be canceled on its own.
+    const recurring = response.recurringPayments;
+    const paymentRequests = response.paymentRequests;
+    const message = [
+      t("DashboardCustody.apiKeyDeactivated", { name: keyName }),
+      cancelRecurringPayments && recurring
+        ? t("DashboardCustody.apiKeyRecurringCanceled", {
+            canceled: recurring.canceled.length,
+            failed: recurring.failed.length,
+          })
+        : null,
+      cancelPaymentRequests && paymentRequests
+        ? t("DashboardCustody.apiKeyPaymentRequestsCanceled", {
+            canceled: paymentRequests.canceled.length,
+            failed: paymentRequests.failed.length,
+          })
+        : null,
+    ]
+      .filter((part) => part !== null)
+      .join(" ");
+    return { ok: true, message };
   } catch (error) {
     return {
       ok: false,
@@ -314,6 +341,8 @@ export async function deactivateApiKeyAction(formData: FormData) {
     keyId: String(formData.get("keyId") ?? ""),
     keyName: String(formData.get("keyName") ?? ""),
     confirmation: String(formData.get("confirmation") ?? ""),
+    cancelRecurringPayments: false,
+    cancelPaymentRequests: false,
   });
 
   await setFlash({
@@ -329,6 +358,8 @@ export async function deactivateApiKeyInlineAction(input: {
   keyId: string;
   keyName: string;
   confirmation: string;
+  cancelRecurringPayments: boolean;
+  cancelPaymentRequests: boolean;
 }): Promise<{ ok: true; message: string } | { ok: false; message: string }> {
   const result = await deactivateApiKeyRequest(input);
   if (result.ok) {
@@ -336,48 +367,4 @@ export async function deactivateApiKeyInlineAction(input: {
   }
 
   return result;
-}
-
-const listTotalSchema = z.object({ total: z.number().int() });
-
-/**
- * What an API key set up in this project that SDP keeps running after it is deleted: its active
- * recurring payments and open payment requests, counted by the lists the delete dialog links to.
- *
- * @param keyId - The key about to be deleted.
- * @returns The counts, or why they could not be read.
- */
-export async function loadApiKeyLinkedPaymentsAction(
-  keyId: string
-): Promise<
-  | { ok: true; activeRecurringPayments: number; openPaymentRequests: number }
-  | { ok: false; message: string }
-> {
-  const apiKeyId = z.string().min(1).max(200).parse(keyId);
-  try {
-    const client = await createSdpApiClient();
-    const [recurring, requests] = await Promise.all([
-      client.fetch<unknown>(
-        `/v1/payments/recurring-payments?${new URLSearchParams({
-          status: "active",
-          activatedByApiKeyId: apiKeyId,
-          pageSize: "1",
-        }).toString()}`
-      ),
-      client.fetch<unknown>(
-        `/v1/payments/requests?${new URLSearchParams({
-          status: "awaiting_payment",
-          createdByApiKeyId: apiKeyId,
-          pageSize: "1",
-        }).toString()}`
-      ),
-    ]);
-    return {
-      ok: true,
-      activeRecurringPayments: listTotalSchema.parse(recurring).total,
-      openPaymentRequests: listTotalSchema.parse(requests).total,
-    };
-  } catch (error) {
-    return { ok: false, message: extractErrorMessage(error) };
-  }
 }

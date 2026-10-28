@@ -13,17 +13,7 @@ import { MoreHorizontalIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import useSWR from "swr";
-import { membersQueryKeys } from "@/app/dashboard/[projectId]/settings/members-query-key";
-import {
-  changeMemberRole,
-  loadMemberLinkedPaymentsAction,
-  removeMember,
-} from "@/app/members/actions";
-import {
-  LinkedPaymentsNotice,
-  type LinkedPaymentsState,
-} from "@/components/linked-payments-notice";
+import { changeMemberRole, removeMember } from "@/app/members/actions";
 import { useTranslations } from "@/i18n/provider";
 import { useActionIdempotencyKey } from "@/lib/use-action-idempotency-key";
 
@@ -153,7 +143,6 @@ export function MemberActions({
           <p className="text-secondary text-sm">
             {t("Shared.members.removeConfirm", { member: label })}
           </p>
-          <MemberLinkedPaymentsNotice memberId={memberId} />
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setConfirmOpen(false)} disabled={isPending}>
               {t("Shared.members.cancel")}
@@ -166,31 +155,4 @@ export function MemberActions({
       </Modal>
     </>
   );
-}
-
-/**
- * What the member set up directly, in every project, that keeps running after removal. Mounted
- * only while the confirmation is open, so each open reads it again.
- *
- * @param props - The member.
- * @param props.memberId - The member about to be removed.
- * @returns The notice.
- */
-function MemberLinkedPaymentsNotice({ memberId }: { memberId: string }) {
-  const { data } = useSWR(
-    membersQueryKeys.linkedPayments(memberId),
-    ([, id]: readonly [string, string]) => loadMemberLinkedPaymentsAction(id),
-    { revalidateOnFocus: false, revalidateOnReconnect: false, revalidateIfStale: false }
-  );
-  const state: LinkedPaymentsState =
-    data === undefined
-      ? { status: "loading" }
-      : data.ok
-        ? {
-            status: "loaded",
-            filter: { kind: "member", userId: data.linked.userId },
-            projects: data.linked.projects,
-          }
-        : { status: "error", message: data.message };
-  return <LinkedPaymentsNotice subject="member" state={state} />;
 }

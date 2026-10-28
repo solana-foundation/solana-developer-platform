@@ -25,12 +25,6 @@ import {
   IdempotencyOutcomeUnknownError,
   uncertainMoneyAnswerMessage,
 } from "@/lib/idempotency";
-import {
-  type PaymentPrincipalFilter,
-  parsePaymentPrincipalParams,
-  RECURRING_ACTIVATED_BY_PARAMS,
-  setPaymentPrincipalParams,
-} from "@/lib/payment-principal-filter";
 import type { SdpApiClient } from "@/lib/sdp-api";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
@@ -46,15 +40,12 @@ export interface RecurringPaymentsListOptions {
   pageSize?: number;
   status?: PaymentRecurringPaymentStatus | null;
   counterpartyId?: string;
-  activatedBy?: PaymentPrincipalFilter | null;
 }
 
 export interface RecurringPaymentsListState {
   page: number;
   pageSize: number;
   status: PaymentRecurringPaymentStatus | null;
-  /** Who activated the schedules listed; null lists everyone's. */
-  activatedBy: PaymentPrincipalFilter | null;
 }
 
 function firstParamValue(value: string | string[] | undefined): string | undefined {
@@ -82,7 +73,6 @@ export function parseRecurringPaymentsListParams(
       RECURRING_PAYMENTS_PAGE_SIZE
     ),
     status: status.success ? status.data : null,
-    activatedBy: parsePaymentPrincipalParams(params, RECURRING_ACTIVATED_BY_PARAMS),
   };
 }
 
@@ -195,9 +185,6 @@ export function buildRecurringPaymentsQuery(
   }
   if (options.counterpartyId !== undefined) {
     query.set("counterpartyId", options.counterpartyId);
-  }
-  if (options.activatedBy !== undefined) {
-    setPaymentPrincipalParams(query, options.activatedBy, RECURRING_ACTIVATED_BY_PARAMS);
   }
   return query;
 }
@@ -369,7 +356,6 @@ export async function fetchRecurringPayments(
       pageSize: options.pageSize ?? RECURRING_PAYMENTS_PAGE_SIZE,
       status: options.status,
       counterpartyId: options.counterpartyId,
-      activatedBy: options.activatedBy,
     });
     const response = await request(`/v1/payments/recurring-payments?${query.toString()}`);
     if (!response.ok) {

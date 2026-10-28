@@ -11,12 +11,7 @@ import {
   updateMemberRoleRequestSchema,
 } from "@/openapi/schemas/organizations";
 import { errorResponses, jsonContent, projectScopeWithDeclaredIdempotencyHeaders } from "./helpers";
-import {
-  inviteMemberResponse,
-  listMembersResponse,
-  memberLinkedPaymentsResponse,
-  memberRoleResponse,
-} from "./responses";
+import { inviteMemberResponse, listMembersResponse, memberRoleResponse } from "./responses";
 
 // Matches each route's `idempotent()` step (ADR 0009); spec.test.ts checks.
 const keyAcceptedStoredHeaders = projectScopeWithDeclaredIdempotencyHeaders({
@@ -134,29 +129,6 @@ export function registerMemberPaths(registry: OpenAPIRegistry) {
   });
 
   registry.registerPath({
-    method: "get",
-    path: "/v1/members/{memberId}/linked-payments",
-    tags: ["Members"],
-    summary: "List member's linked payments",
-    operationId: "getMemberLinkedPayments",
-    description:
-      "Counts, project by project, the active recurring payments a member activated and the open payment requests they created, both directly rather than through an API key. SDP runs these, so removing the member stops neither; cancel any that should stop. Requires `members.manage`, since it counts across every project in the organization.",
-    security: [{ clerkBearerAuth: [] }],
-    request: {
-      params: z.object({
-        memberId: memberIdParamSchema,
-      }),
-    },
-    responses: {
-      200: {
-        description: "Member's linked payments",
-        content: jsonContent(memberLinkedPaymentsResponse),
-      },
-      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
-    },
-  });
-
-  registry.registerPath({
     method: "patch",
     path: "/v1/members/{memberId}",
     tags: ["Members"],
@@ -191,7 +163,7 @@ export function registerMemberPaths(registry: OpenAPIRegistry) {
     summary: "Remove member",
     operationId: "removeMember",
     description:
-      "Removes another member from the organization, along with their project memberships in it and their pending invitations, so an unspent invitation cannot readmit them. Recurring payments they activated and payment requests they created keep running; `GET /v1/members/{memberId}/linked-payments` lists them. The last active admin cannot be removed, and nobody can remove themselves (409). Removing a member already removed withdraws their Clerk membership again and changes nothing else, so a retry after a failed Clerk call completes the removal. Re-inviting the removed member issues a fresh invitation that works normally.",
+      "Removes another member from the organization, along with their project memberships in it and their pending invitations, so an unspent invitation cannot readmit them. The last active admin cannot be removed, and nobody can remove themselves (409). Removing a member already removed withdraws their Clerk membership again and changes nothing else, so a retry after a failed Clerk call completes the removal. Re-inviting the removed member issues a fresh invitation that works normally.",
     security: [{ clerkBearerAuth: [] }],
     request: {
       headers: keyAcceptedRerunHeaders,

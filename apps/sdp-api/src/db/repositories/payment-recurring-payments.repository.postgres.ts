@@ -1,6 +1,7 @@
 import {
   COLLECTION_ATTEMPT_STATUSES_BLOCKING_NEW_CYCLE,
   COLLECTION_ATTEMPT_STATUSES_WITH_SUBMITTED_TRANSFER,
+  LIVE_RECURRING_PAYMENT_STATUSES,
   PAYMENT_RECURRING_PAYMENT_ACTIVATION_ATTEMPT_STAGES,
   PAYMENT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
   PAYMENT_RECURRING_PAYMENT_LIFECYCLE_ATTEMPT_STAGES,
@@ -16,7 +17,6 @@ import {
 import { z } from "zod";
 import type { DatabaseExecutor } from "@/db/client";
 import { AppError } from "@/lib/errors";
-import { type PaymentPrincipalFilter, paymentPrincipalPredicate } from "./payment-principal-filter";
 import type {
   ClaimPaymentRecurringPaymentLifecycleInput,
   ClaimPaymentRecurringPaymentUpdateInput,
@@ -338,22 +338,6 @@ const STEP_SIGNATURE_TABLES = {
   update_attempt: "payment_recurring_payment_update_attempts",
   lifecycle_attempt: "payment_recurring_payment_lifecycle_attempts",
 } as const satisfies Record<RecurringPaymentStepSignatureSlot["row"], string>;
-
-/**
- * The activator predicate for `payment_recurring_payments`: an API key by
- * `activated_by_api_key_id`, a member by `activated_by_user_id`.
- *
- * @param filter - The principal, or null for no filter.
- * @param organizationId - The Organization the key lineage is read in.
- * @returns The predicate and its binds.
- */
-function activatedByPredicate(filter: PaymentPrincipalFilter | null, organizationId: string) {
-  return paymentPrincipalPredicate(filter, {
-    organizationId,
-    apiKeyColumn: "activated_by_api_key_id",
-    userColumn: "activated_by_user_id",
-  });
-}
 
 export function createPostgresPaymentRecurringPaymentsRepository(
   db: DatabaseExecutor
@@ -1446,6 +1430,54 @@ export function createPostgresPaymentRecurringPaymentsRepository(
       });
     },
 
+    async listLiveRecurringPaymentsActivatedByApiKey(params) {
+      const rows = await db
+        .prepare(
+          // The key and every predecessor it was rotated from, in this project.
+          `WITH RECURSIVE lineage(id, rotated_from) AS (
+             SELECT id, rotated_from FROM api_keys
+              WHERE id = ? AND organization_id = ? AND project_id = ?
+             UNION
+             SELECT ak.id, ak.rotated_from
+               FROM api_keys ak
+               JOIN lineage ON ak.id = lineage.rotated_from
+              WHERE ak.organization_id = ? AND ak.project_id = ?
+           )
+           SELECT rp.*
+             FROM payment_recurring_payments rp
+            WHERE rp.organization_id = ?
+              AND rp.project_id = ?
+              AND (
+                rp.activated_by_api_key_id IN (SELECT id FROM lineage)
+                -- An update in flight already names its caller, and puts the
+                -- key it replaced back if it fails: that key still answers
+                -- for the payment until the update lands.
+                OR (rp.status = 'updating' AND EXISTS (
+                  SELECT 1 FROM payment_recurring_payment_update_attempts a
+                   WHERE a.recurring_payment_id = rp.id
+                     AND a.organization_id = rp.organization_id
+                     AND a.project_id = rp.project_id
+                     AND a.status = 'processing'
+                     AND a.previous_activator->>'apiKeyId' IN (SELECT id FROM lineage)
+                ))
+              )
+              AND rp.status = ANY(?::text[])
+            ORDER BY rp.created_at ASC`
+        )
+        .bind(
+          params.apiKeyId,
+          params.organizationId,
+          params.projectId,
+          params.organizationId,
+          params.projectId,
+          params.organizationId,
+          params.projectId,
+          [...LIVE_RECURRING_PAYMENT_STATUSES]
+        )
+        .all<Record<string, unknown>>();
+      return rows.results.map(mapRecurringPaymentRow);
+    },
+
     async getRecurringPaymentById(params) {
       const clauses = ["id = ?", "organization_id = ?", "project_id = ?"];
       const values: DatabaseBindValues = [
@@ -1478,9 +1510,6 @@ export function createPostgresPaymentRecurringPaymentsRepository(
         clauses.push("counterparty_id = ?");
         values.push(params.counterpartyId);
       }
-      const activatedBy = activatedByPredicate(params.activatedBy, params.organizationId);
-      clauses.push(activatedBy.sql);
-      values.push(...activatedBy.binds);
       const whereClause = clauses.join(" AND ");
       const [rows, countRow] = await Promise.all([
         db
@@ -1510,20 +1539,6 @@ export function createPostgresPaymentRecurringPaymentsRepository(
         rows: rows.results.map(mapRecurringPaymentRow),
         total: countRow.total,
       } satisfies ListPaymentRecurringPaymentsResult;
-    },
-
-    async countActiveRecurringPaymentsByProject(params) {
-      const activatedBy = activatedByPredicate(params.activatedBy, params.organizationId);
-      const result = await db
-        .prepare(
-          `SELECT project_id, COUNT(*)::int AS count
-             FROM payment_recurring_payments
-            WHERE organization_id = ? AND status = ? AND ${activatedBy.sql}
-            GROUP BY project_id`
-        )
-        .bind(params.organizationId, "active", ...activatedBy.binds)
-        .all<{ project_id: string; count: number }>();
-      return result.results.map((row) => ({ projectId: row.project_id, count: row.count }));
     },
   };
 }

@@ -15,7 +15,6 @@ import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { getAuthorized } from "@/middleware/authorize";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import type { AppContext } from "@/routes/payments/context";
-import { paymentPrincipalQuery } from "@/routes/payments/schemas";
 import { resolveScope, resolveWallet } from "@/routes/payments/wallets";
 import { normalizePaymentToken } from "@/services/payment-operation.service";
 import {
@@ -62,7 +61,7 @@ export async function listPaymentRequests(c: AppContext) {
   const query = listPaymentRequestsQuerySchema.safeParse(c.req.query());
   if (!query.success) throw badRequestQuery();
 
-  const { page, pageSize, status, createdByApiKeyId, createdByUserId } = query.data;
+  const { page, pageSize, status } = query.data;
   const { rows, total } = await createPaymentRequestsRepository(
     c.env,
     getRequestTenantScope(c)
@@ -70,7 +69,6 @@ export async function listPaymentRequests(c: AppContext) {
     organizationId: auth.organizationId,
     projectId,
     status,
-    createdBy: paymentPrincipalQuery(createdByApiKeyId, createdByUserId),
     limit: pageSize,
     offset: (page - 1) * pageSize,
   });
@@ -153,7 +151,7 @@ export async function cancelPaymentRequest(c: AppContext) {
   const row = await cancelOpenPaymentRequest(c, {
     row: authorized,
     canceledBy: await resolveCreatorUserId(c),
-    liveClaimFloor: await readLiveClaimFloorFor(authorized),
+    liveClaimFloor: await readLiveClaimFloorFor([authorized]),
   });
   return success(c, mapPaymentRequest(row));
 }

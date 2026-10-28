@@ -163,23 +163,6 @@ export interface OrganizationMemberWithUser extends OrganizationMember {
   user: User;
 }
 
-/**
- * What a member set up directly, project by project: SDP keeps running it after they leave,
- * so removing them stops nothing. Projects with none are absent.
- */
-export interface MemberLinkedPayments {
-  /** The member's user id, as the payment list filters take it. */
-  userId: string;
-  projects: Array<{
-    projectId: string;
-    projectName: string;
-    /** Counted as `GET /v1/payments/recurring-payments?status=active&activatedByUserId=` lists them. */
-    activeRecurringPayments: number;
-    /** Counted as `GET /v1/payments/requests?status=awaiting_payment&createdByUserId=` lists them. */
-    openPaymentRequests: number;
-  }>;
-}
-
 export interface Invitation {
   id: string;
   organizationId: string;

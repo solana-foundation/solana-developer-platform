@@ -19,7 +19,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { z } from "zod";
-import { PaymentPrincipalFilterChip } from "@/app/dashboard/[projectId]/payments/payment-principal-filter-chip";
 import {
   formatDisplayAmount,
   resolveTokenByMint,
@@ -35,10 +34,6 @@ import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspac
 import { ReadOnlyEmptyNote } from "@/components/read-only-empty-note";
 import { useCanWrite } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import {
-  RECURRING_ACTIVATED_BY_PARAMS,
-  setPaymentPrincipalParams,
-} from "@/lib/payment-principal-filter";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import {
   RECURRING_LIST_DEFAULT_PAGE_SIZE,
@@ -118,7 +113,6 @@ type ListParamUpdates = {
   page?: number;
   pageSize?: number;
   status?: PaymentRecurringPaymentStatus | null;
-  activatedBy?: null;
 };
 
 /**
@@ -154,10 +148,6 @@ function useRecurringListParams() {
       } else {
         params.set("status", updates.status);
       }
-    }
-    if (updates.activatedBy !== undefined) {
-      params.delete("page");
-      setPaymentPrincipalParams(params, updates.activatedBy, RECURRING_ACTIVATED_BY_PARAMS);
     }
     const search = params.toString();
     startTransition(() =>
@@ -495,19 +485,12 @@ export function RecurringPaymentsWorkspace({
     return <RecurringPaymentsLoadError error={initialError} />;
   }
 
-  if (total === 0 && listState.status === null && listState.activatedBy === null) {
+  if (total === 0 && listState.status === null) {
     return <RecurringPaymentsEmpty />;
   }
 
   return (
     <DashboardWorkspaceOverviewPanel className="flex flex-col gap-5">
-      {listState.activatedBy === null ? null : (
-        <PaymentPrincipalFilterChip
-          filter={listState.activatedBy}
-          pending={isPending}
-          onClear={() => applyListParams({ activatedBy: null })}
-        />
-      )}
       <RecurringPaymentsToolbar
         status={listState.status}
         query={query}

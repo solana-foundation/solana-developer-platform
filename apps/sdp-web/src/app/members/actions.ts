@@ -1,6 +1,6 @@
 "use server";
 
-import { MEMBER_STATUSES, type MemberLinkedPayments } from "@sdp/types/organizations";
+import { MEMBER_STATUSES } from "@sdp/types/organizations";
 import { ORGANIZATION_ROLES, type OrganizationRole } from "@sdp/types/roles";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -221,38 +221,4 @@ export async function inviteMember(formData: FormData): Promise<InviteMemberResu
   // Members render inside the settings page; /members only redirects there.
   revalidatePath(await requestProjectHref("/dashboard/settings"));
   return { status: "success", email: parsed.data.email };
-}
-
-const memberLinkedPaymentsSchema = z.object({
-  userId: z.string().min(1),
-  projects: z.array(
-    z.object({
-      projectId: z.string().min(1),
-      projectName: z.string(),
-      activeRecurringPayments: z.number().int(),
-      openPaymentRequests: z.number().int(),
-    })
-  ),
-}) satisfies z.ZodType<MemberLinkedPayments>;
-
-/**
- * What a member set up directly, project by project, that SDP keeps running after they are
- * removed. Read through the org client: it counts across every project in the organization.
- *
- * @param memberId - The member about to be removed.
- * @returns Their linked payments, or why they could not be read.
- */
-export async function loadMemberLinkedPaymentsAction(
-  memberId: string
-): Promise<{ ok: true; linked: MemberLinkedPayments } | { ok: false; message: string }> {
-  const id = idSchema.parse(memberId);
-  try {
-    const client = await createOrgSdpApiClient();
-    const linked = memberLinkedPaymentsSchema.parse(
-      await client.fetch<unknown>(`/v1/members/${encodeURIComponent(id)}/linked-payments`)
-    );
-    return { ok: true, linked };
-  } catch (error) {
-    return { ok: false, message: readableApiError(error) };
-  }
 }

@@ -15,7 +15,6 @@ import {
   authorizeOrganizationInvitation,
   authorizeOrganizationMember,
   getCurrentMember,
-  getMemberLinkedPayments,
   inviteMember,
   leaveOrganization,
   listMembers,
@@ -37,14 +36,6 @@ members.use("*", requireHumanSession());
 // project context because idempotency keys are scoped to a project.
 members.get("/", requireAction("members.read"), listMembers);
 members.get("/me", requireAction("members.read"), getCurrentMember);
-// Counts across every project, including ones the caller cannot open, so it takes the removal's
-// own action rather than members.read.
-members.get(
-  "/:memberId/linked-payments",
-  requireAction("members.manage"),
-  authorize(authorizeOrganizationMember),
-  getMemberLinkedPayments
-);
 members.post(
   "/invite",
   projectContextMiddleware(),
