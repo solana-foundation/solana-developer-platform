@@ -141,6 +141,58 @@ function isElementName(name: string | null): name is ElementName {
   return name !== null && Object.hasOwn(ELEMENTS, name);
 }
 
+/**
+ * Wrappers the reference lays its Markdown out with: `<ApiOperationTable>` holds a family's table
+ * of operations. On the page each row links to its operation's page; in Markdown the wrapper
+ * goes and each link points at that page's `.md`, so an agent reading a family reads on in
+ * Markdown.
+ */
+const WRAPPERS: ReadonlySet<string> = new Set(["ApiOperationTable"]);
+
+/** The wrapper element a node is, or undefined for any other node. */
+function wrapperOf(node: RootContent, where: string) {
+  if (node.type !== "mdxJsxFlowElement" || node.name === null || !WRAPPERS.has(node.name)) {
+    return undefined;
+  }
+  if (node.attributes.length > 0) throw new Error(`${where}: <${node.name}> takes no attributes`);
+  return node;
+}
+
+/** Every link inside a node, however deep. */
+function linksIn(node: RootContent): Extract<RootContent, { type: "link" }>[] {
+  if (node.type === "link") return [node];
+  return "children" in node ? node.children.flatMap(linksIn) : [];
+}
+
+/** A wrapper's Markdown, as edits to its source: its tags go, and each link inside gains `.md`. */
+function unwrap(
+  wrapper: Extract<RootContent, { type: "mdxJsxFlowElement" }>,
+  source: string,
+  where: string
+): { start: number; end: number; markdown: string }[] {
+  const span = spanOf(wrapper, where);
+  const [first] = wrapper.children;
+  const last = wrapper.children.at(-1);
+  if (first === undefined || last === undefined) {
+    throw new Error(`${where}: <${wrapper.name}> holds nothing`);
+  }
+  const links = wrapper.children.flatMap(linksIn).map((link) => {
+    // Each row links an operation's page inline: `[Summary](/docs/...)`.
+    const linkSpan = spanOf(link, where);
+    const text = source.slice(linkSpan.start, linkSpan.end);
+    const target = `](${link.url})`;
+    if (!/^\/docs\/[^#?]+$/.test(link.url) || !text.endsWith(target)) {
+      throw new Error(`${where}: <${wrapper.name}> links ${text}, not a docs page inline`);
+    }
+    return { ...linkSpan, markdown: `${text.slice(0, -target.length)}](${link.url}.md)` };
+  });
+  return [
+    { start: span.start, end: spanOf(first, where).start, markdown: "" },
+    ...links,
+    { start: spanOf(last, where).end, end: span.end, markdown: "" },
+  ];
+}
+
 /** A reference component's text, or undefined for any other node. */
 function elementTextOf(node: RootContent, where: string): string | undefined {
   if (node.type !== "mdxJsxFlowElement" || !isElementName(node.name)) return undefined;
@@ -223,6 +275,7 @@ export function expandDocsBlocks(
     for (const child of parent.children) {
       const block = blockOf(child, where);
       const elementText = elementTextOf(child, where);
+      const wrapper = wrapperOf(child, where);
       if (child.type === "code" && child.meta?.includes("rotate-providers") && leadProvider) {
         // The page rotates this fence's provider; text names the first published one.
         const span = spanOf(child, where);
@@ -234,6 +287,8 @@ export function expandDocsBlocks(
         blocks.push({ ...spanOf(child, where), markdown: BLOCKS[block.name](surface) });
       } else if (elementText !== undefined) {
         blocks.push({ ...spanOf(child, where), markdown: `\`${elementText}\`` });
+      } else if (wrapper !== undefined) {
+        blocks.push(...unwrap(wrapper, source, where));
       } else if ("children" in child) {
         walk(child);
       }

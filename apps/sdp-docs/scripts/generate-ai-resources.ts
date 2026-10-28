@@ -1,6 +1,8 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { parse as parseYaml } from "yaml";
+import { z } from "zod";
 import { DOCS_SKILL_NAME } from "@/lib/agent-setup";
 import { expandDocsBlocks, stripMdxEsm } from "@/lib/docs-blocks";
 import { DOCS_MODULES } from "@/lib/docs-catalog";
@@ -100,16 +102,20 @@ function stripMdxContent(source: string, where: string): string {
   return content.replace(/\n{3,}/g, "\n\n").trim();
 }
 
+const pageFrontmatterSchema = z.object({
+  title: z.string().optional(),
+  description: z.string().optional(),
+});
+
+/** A page's title and description, read as YAML: a generated value may be quoted. */
 function parseFrontmatter(source: string): { title: string; description: string } {
   const match = source.match(/^---\n([\s\S]*?)\n---\n?/);
-  const frontmatter = match?.[1] ?? "";
-
-  const title = stripMarkdownFormatting(frontmatter.match(/^title:\s*(.+)$/m)?.[1] ?? "");
-  const description = stripMarkdownFormatting(
-    frontmatter.match(/^description:\s*(.+)$/m)?.[1] ?? ""
-  );
-
-  return { title, description };
+  if (match?.[1] === undefined) return { title: "", description: "" };
+  const { title, description } = pageFrontmatterSchema.parse(parseYaml(match[1]));
+  return {
+    title: title === undefined ? "" : stripMarkdownFormatting(title),
+    description: description === undefined ? "" : stripMarkdownFormatting(description),
+  };
 }
 
 async function listFiles(dirPath: string): Promise<string[]> {
@@ -253,6 +259,17 @@ function buildSections(
     flush();
     const sectionTitle = folderMeta.title || entry;
     currentSection = { title: sectionTitle, pages: [] };
+    // A folder's index is the folder's own page even where its meta lists only the rest, as an
+    // API family lists its operations.
+    const folderIndex = pages.get(`${fullSlug}/index`);
+    if (
+      folderIndex &&
+      !(folderMeta.pages ?? []).includes("index") &&
+      !emitted.has(folderIndex.slug)
+    ) {
+      currentSection.pages.push(folderIndex);
+      emitted.add(folderIndex.slug);
+    }
     for (const subEntry of folderMeta.pages || []) {
       visit(subEntry, fullSlug, sectionTitle);
     }
@@ -278,7 +295,12 @@ function apiReferenceSlugs(folderMetas: Map<string, DocsMeta>): string[] {
   if (!pages) {
     throw new Error('Missing content/docs/reference/api/meta.json; run "pnpm generate:api" first');
   }
-  return pages.map((page) => `reference/api/${page}`);
+  // A family is a folder: its table is the folder's index.
+  return pages.map((page) =>
+    folderMetas.has(`reference/api/${page}`)
+      ? `reference/api/${page}/index`
+      : `reference/api/${page}`
+  );
 }
 
 function buildKeyPages(

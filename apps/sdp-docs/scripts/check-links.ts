@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { expandDocsBlocks } from "@/lib/docs-blocks";
 import { isPageSourcePublished, publicSurface } from "@/lib/release-channel";
-import { getDocsPagePath } from "@/lib/site";
+import { getDocsMarkdownPath, getDocsPagePath } from "@/lib/site";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -170,8 +170,11 @@ function createAllowedInternalPaths(docSlugs: Iterable<string>): Set<string> {
     "/sitemap.xml",
   ]);
 
+  // Every page also serves as Markdown at its `.md`, which the Markdown forms link (a family's
+  // table of API operations, in docs-blocks.ts).
   for (const slug of docSlugs) {
     allowed.add(normalizePathname(getDocsPagePath(slug)));
+    allowed.add(getDocsMarkdownPath(slug));
   }
 
   return allowed;

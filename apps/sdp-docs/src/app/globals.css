@@ -1502,24 +1502,145 @@ body {
 }
 
 /* ── API reference ── */
-/* The generated reference pages (scripts/lib/api-reference-page.ts): each operation is an h2
-   with its endpoint, then field lists whose first line names the field, its type and facts. */
+/* The generated reference (scripts/lib/api-reference-page.ts). A family's page is its table of
+   operations, each row one link to the operation's page; an operation's page leads with its
+   endpoint, then sections whose field lists name the field, its type and facts on one line. */
 .is-api-reference .launch-mdx-heading-2 {
-  margin-top: 64px;
-  padding-top: 40px;
-  border-top: 1px solid var(--rule-faint);
+  margin: 40px 0 10px;
+  font-size: var(--font-size-subheading);
+  line-height: var(--line-height-subheading);
 }
 
-.is-api-reference > .launch-mdx-heading-2:first-child {
-  margin-top: 8px;
-  padding-top: 0;
-  border-top: 0;
+/* A row is one link: the summary's link covers it, so the whole row opens the operation. */
+.launch-api-operation-table .launch-mdx-table tbody tr {
+  position: relative;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
-.is-api-reference .launch-mdx-heading-3 {
-  margin: 30px 0 8px;
-  font-size: var(--font-size-field);
-  line-height: var(--line-height-field);
+.launch-api-operation-table .launch-mdx-table tbody tr:hover {
+  background: var(--wash);
+}
+
+.launch-api-operation-table .launch-mdx-td:last-child {
+  padding-right: 40px;
+}
+
+/* A path stays on one line; a table too wide for a phone scrolls in its frame. */
+.launch-api-operation-table code {
+  white-space: nowrap;
+}
+
+.launch-api-operation-table .launch-mdx-link {
+  color: inherit;
+  font-weight: 400;
+  text-decoration: none;
+}
+
+.launch-api-operation-table .launch-mdx-link::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+}
+
+.launch-api-operation-table .launch-mdx-link:focus-visible {
+  outline: none;
+}
+
+.launch-api-operation-table .launch-mdx-link:focus-visible::after {
+  outline: 2px solid var(--ink);
+  outline-offset: -2px;
+}
+
+/* The chevron: drawn from the row's text colour, it moves a little toward the page on hover. */
+.launch-api-operation-table .launch-mdx-td:last-child::after {
+  position: absolute;
+  top: 50%;
+  right: 14px;
+  width: 14px;
+  height: 14px;
+  margin-top: -7px;
+  background: var(--ink-tertiary);
+  content: "";
+  mask:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 18 6-6-6-6'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  pointer-events: none;
+  transition:
+    transform var(--motion-duration-fast) var(--motion-ease-out),
+    background-color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.launch-api-operation-table .launch-mdx-table tbody tr:hover .launch-mdx-td:last-child::after {
+  background: var(--ink);
+  transform: translateX(3px);
+}
+
+/* On a phone each row stacks: method and path on one line, the summary below. */
+@media (max-width: 639px) {
+  .launch-api-operation-table .launch-mdx-table,
+  .launch-api-operation-table .launch-mdx-table tbody,
+  .launch-api-operation-table .launch-mdx-table tr,
+  .launch-api-operation-table .launch-mdx-td {
+    display: block;
+  }
+
+  .launch-api-operation-table .launch-mdx-table thead {
+    display: none;
+  }
+
+  .launch-api-operation-table .launch-mdx-table tbody tr {
+    padding: 12px 40px 12px 14px;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .launch-api-operation-table .launch-mdx-table tbody tr:last-child {
+    border-bottom: 0;
+  }
+
+  .launch-api-operation-table .launch-mdx-td,
+  .launch-api-operation-table .launch-mdx-td:last-child {
+    padding: 0;
+    border-bottom: 0;
+  }
+
+  .launch-api-operation-table .launch-mdx-td:first-child {
+    display: inline-block;
+    margin-right: 8px;
+  }
+
+  .launch-api-operation-table .launch-mdx-td:nth-child(2) {
+    display: inline;
+  }
+
+  .launch-api-operation-table .launch-mdx-td:last-child {
+    margin-top: 6px;
+  }
+
+  .launch-api-operation-table code {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}
+
+/* An operation's method beside its name in the sidebar (`icon: method:<METHOD>`). */
+.launch-docs-nav-method {
+  width: 3.9em;
+  color: var(--positive);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-meta);
+  font-weight: 500;
+}
+
+.launch-docs-nav-method[data-method="POST"] {
+  color: var(--attention);
+}
+
+.launch-docs-nav-method:is([data-method="PUT"], [data-method="PATCH"]) {
+  color: var(--progress);
+}
+
+.launch-docs-nav-method[data-method="DELETE"] {
+  color: var(--critical);
 }
 
 /* The path wraps beside its method on a phone rather than dropping below it. */

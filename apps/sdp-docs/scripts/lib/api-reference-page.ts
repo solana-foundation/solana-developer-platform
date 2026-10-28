@@ -15,11 +15,12 @@ import { stringify as stringifyYaml } from "yaml";
 import { canonicalSite } from "@/lib/site";
 
 /**
- * One API reference page per family, as Markdown-first MDX: every operation is an `##` section
- * anchored by its operationId, with its parameters, request body, responses, a cURL, TypeScript
- * and Python sample and an example per status. The page renders, searches and serves as `.md`
- * from the same text; the one component, `<ApiEndpoint />`, has its Markdown form in
- * `expandDocsBlocks` (`src/lib/docs-blocks.ts`).
+ * The API reference as Markdown-first MDX: per family, a table of its operations
+ * (`<family>/index.mdx`), and per operation, its own page (`<family>/<endpointId>.mdx`) with its
+ * parameters, request body, responses, a cURL, TypeScript and Python sample and an example per
+ * status. Each page renders, searches and serves as `.md` from the same text; the components it
+ * places (`<ApiEndpoint />`, `<ApiOperationTable>`) have their Markdown forms in `expandDocsBlocks`
+ * (`src/lib/docs-blocks.ts`).
  */
 
 const SNIPPET_FENCES = {
@@ -238,14 +239,14 @@ function parameterSections(parameters: ApiParameter[]): string[] {
   return API_PARAMETER_LOCATIONS.flatMap((location) => {
     const located = parameters.filter((parameter) => parameter.in === location);
     if (located.length === 0) return [];
-    return [`### ${PARAMETER_HEADINGS[location]}`, "", ...located.flatMap(parameterLines)];
+    return [`## ${PARAMETER_HEADINGS[location]}`, "", ...located.flatMap(parameterLines)];
   });
 }
 
 function requestBodySection(body: ApiRequestBody): string[] {
   const facts = [codeSpan(body.contentType)];
   if (body.required) facts.push("required");
-  const lines = ["### Request body", "", facts.join(" · "), ""];
+  const lines = ["## Request body", "", facts.join(" · "), ""];
   if (body.description !== null) lines.push(mdxText(body.description), "");
   lines.push(...childLines(body.schema, 0));
   return lines;
@@ -303,46 +304,96 @@ function exampleResponseFences(responses: ApiResponse[]): string[] {
   });
 }
 
+/** The first sentence of `text`, and the rest: a page's description, then its opening. */
+export function splitFirstSentence(text: string): { first: string; rest: string | null } {
+  const match = /^([\s\S]*?[.!?])\s+(?=[A-Z`(])([\s\S]*)$/.exec(text);
+  if (match === null) return { first: text, rest: null };
+  const [, first, rest] = match;
+  return { first, rest };
+}
+
+/** An operation's page body: its endpoint, the rest of its description, then its sections. */
 export function renderOperation(operation: ApiOperation): string {
-  const lines = [
-    `## ${mdxText(operation.summary)} [#${operation.operationId}]`,
-    "",
-    `<ApiEndpoint method="${operation.method}" path="${operation.path}" />`,
-    "",
-  ];
+  const lines = [`<ApiEndpoint method="${operation.method}" path="${operation.path}" />`, ""];
   if (operation.deprecated) lines.push("**Deprecated.**", "");
-  if (operation.description !== null) lines.push(mdxText(operation.description), "");
+  // The description's first sentence is the page's own description, shown under its title.
+  const opening =
+    operation.description === null ? null : splitFirstSentence(operation.description).rest;
+  if (opening !== null) lines.push(mdxText(opening), "");
   lines.push(authLine(operation), "");
   lines.push(...parameterSections(operation.parameters));
   if (operation.requestBody !== null) lines.push(...requestBodySection(operation.requestBody));
-  lines.push("### Responses", "", ...operation.responses.map(responseLine), "");
-  lines.push("### Example request", "", ...sampleFences(operation));
+  lines.push("## Responses", "", ...operation.responses.map(responseLine), "");
+  lines.push("## Example request", "", ...sampleFences(operation));
   const examples = exampleResponseFences(operation.responses);
-  if (examples.length > 0) lines.push("### Example responses", "", ...examples);
+  if (examples.length > 0) lines.push("## Example responses", "", ...examples);
   return lines
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
 
-/** One line of YAML: plain where it can be, quoted only where YAML needs it. */
-function yamlScalar(value: string): string {
-  return stringifyYaml(value, { lineWidth: 0 }).trimEnd();
+/**
+ * A page's frontmatter as YAML, plain where it can be. `generate-ai-resources.ts` parses it as
+ * YAML, so a value that needs quotes reads the same there.
+ */
+function frontmatter(data: Record<string, string | boolean>): string {
+  return `---\n${stringifyYaml(data, { lineWidth: 0 }).trimEnd()}\n---`;
+}
+
+/** Plain text for a frontmatter field, which no Markdown renders: code spans lose their ticks. */
+function plainText(value: string): string {
+  return value.replace(/`([^`]+)`/g, "$1");
 }
 
 /**
- * A family's page. `apiReference: true` keeps its table of contents to the operations and scopes
- * the reference styles (`src/app/docs/[[...slug]]/page.tsx`).
+ * An operation's own page. `apiReference: true` keeps its table of contents to its sections and
+ * scopes the reference styles (`src/app/docs/[[...slug]]/page.tsx`); `icon: method:<METHOD>`
+ * puts its method beside it in the sidebar (`src/lib/source.ts`).
  */
-export function renderFamilyPage(family: ApiFamily): string {
+export function renderOperationPage(operation: ApiOperation): string {
+  const fields: Record<string, string | boolean> = { title: operation.summary };
+  if (operation.description !== null) {
+    fields.description = plainText(splitFirstSentence(operation.description).first);
+  }
+  fields.icon = `method:${operation.method}`;
+  fields.apiReference = true;
+  return `${frontmatter(fields)}\n\n${renderOperation(operation)}\n`;
+}
+
+/**
+ * Markdown as a table cell: each pipe that would end the cell is escaped. One the text already
+ * escapes, after an odd run of backslashes, stays as it is.
+ */
+export function tableCell(markdown: string): string {
+  return markdown.replace(/(?<!\\)((?:\\\\)*)\|/g, "$1\\|");
+}
+
+/**
+ * A family's page: a table of its operations, each row linking to the operation's page.
+ *
+ * @param family - The family.
+ * @param href - The URL of an operation's page.
+ */
+export function renderFamilyIndex(
+  family: ApiFamily,
+  href: (operation: ApiOperation) => string
+): string {
+  const rows = family.operations.map(
+    (operation) =>
+      `| ${codeSpan(operation.method)} | ${codeSpan(operation.path)} | [${tableCell(mdxText(operation.summary))}](${href(operation)}) |`
+  );
   return [
-    "---",
-    `title: ${yamlScalar(family.name)}`,
-    `description: ${yamlScalar(family.description)}`,
-    "apiReference: true",
-    "---",
+    frontmatter({ title: family.name, description: family.description }),
     "",
-    family.operations.map(renderOperation).join("\n\n"),
+    // biome-ignore lint/security/noSecrets: an MDX component tag, not a secret.
+    "<ApiOperationTable>",
+    "",
+    "| Method | Endpoint | Summary |",
+    "| --- | --- | --- |",
+    ...rows,
+    "",
+    "</ApiOperationTable>",
     "",
   ].join("\n");
 }

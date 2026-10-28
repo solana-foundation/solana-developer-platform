@@ -2,7 +2,11 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { apiReferenceSchema } from "@sdp/api-catalog/reference";
-import { renderFamilyPage, SAMPLE_TAB_MARKERS } from "./lib/api-reference-page.ts";
+import {
+  renderFamilyIndex,
+  renderOperationPage,
+  SAMPLE_TAB_MARKERS,
+} from "./lib/api-reference-page.ts";
 import { POSTMAN_COLLECTION_ROUTE, slugify } from "./lib/public-openapi.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -62,9 +66,13 @@ const writeJson = async (filePath, value) => {
 // Families every release channel runs, so every build must render them.
 const ALWAYS_PUBLIC_TAG_SLUGS = ["health", "wallets", "projects"];
 
+/** An operation's page, beside its family's table: `/docs/reference/api/<family>/<endpointId>`. */
+const operationHref = (familySlug, operation) =>
+  `/docs/reference/api/${familySlug}/${operation.endpointId}`;
+
 /**
- * Every family page holds one section per operation, anchored by its operationId, and each
- * section the three request samples: the reference's coverage, checked on what was written.
+ * Every family's table links each of its operations, and every operation has its page with the
+ * three request samples: the reference's coverage, checked on what was written.
  */
 const validateGeneratedTagPages = async ({ outputDir, families }) => {
   const generatedSlugs = new Set(families.map((family) => slugify(family.name)));
@@ -76,26 +84,38 @@ const validateGeneratedTagPages = async ({ outputDir, families }) => {
   }
 
   const pages = await Promise.all(
-    families.map(async (family) => ({
-      family,
-      source: await fs.readFile(path.join(outputDir, `${slugify(family.name)}.mdx`), "utf8"),
-    }))
+    families.flatMap((family) => {
+      const slug = slugify(family.name);
+      return [
+        fs.readFile(path.join(outputDir, slug, "index.mdx"), "utf8").then((source) => ({
+          family,
+          slug,
+          table: source,
+        })),
+        ...family.operations.map((operation) =>
+          fs
+            .readFile(path.join(outputDir, slug, `${operation.endpointId}.mdx`), "utf8")
+            .then((source) => ({ family, operation, source }))
+        ),
+      ];
+    })
   );
 
-  for (const { family, source } of pages) {
-    const sections = source.split(/^## /m).slice(1);
-    const anchors = sections.map((section) => /\[#([^\]]+)\]\n/.exec(section)?.[1]);
-    const expected = family.operations.map((operation) => operation.operationId);
-    if (JSON.stringify(anchors) !== JSON.stringify(expected)) {
-      throw new Error(
-        `Generated API docs for ${family.name} have sections ${anchors.join(", ")}, expected ${expected.join(", ")}`
+  for (const page of pages) {
+    if ("table" in page) {
+      const unlinked = page.family.operations.filter(
+        (operation) => !page.table.includes(`](${operationHref(page.slug, operation)})`)
       );
-    }
-    for (const [index, section] of sections.entries()) {
-      const missing = SAMPLE_TAB_MARKERS.filter((marker) => !section.includes(marker));
-      if (missing.length > 0) {
-        throw new Error(`${family.name} ${expected[index]} is missing ${missing.join(", ")}`);
+      if (unlinked.length > 0) {
+        throw new Error(
+          `The ${page.family.name} table does not link ${unlinked.map((operation) => operation.operationId).join(", ")}`
+        );
       }
+      continue;
+    }
+    const missing = SAMPLE_TAB_MARKERS.filter((marker) => !page.source.includes(marker));
+    if (missing.length > 0) {
+      throw new Error(`${page.operation.operationId}'s page is missing ${missing.join(", ")}`);
     }
   }
 };
@@ -108,22 +128,47 @@ const run = async () => {
 
   await fs.mkdir(outputDir, { recursive: true });
 
-  const existingFiles = await fs.readdir(outputDir);
+  // What an earlier run wrote: the index, the meta and a folder per family.
+  const existingEntries = await fs.readdir(outputDir, { withFileTypes: true });
   await Promise.all(
-    existingFiles
-      .filter((fileName) => fileName.endsWith(".mdx") || fileName === "meta.json")
-      .map((fileName) => fs.rm(path.join(outputDir, fileName), { force: true }))
+    existingEntries
+      .filter(
+        (entry) => entry.isDirectory() || entry.name.endsWith(".mdx") || entry.name === "meta.json"
+      )
+      .map((entry) => fs.rm(path.join(outputDir, entry.name), { recursive: true, force: true }))
   );
 
   const tagPages = families.map((family) => ({ title: family.name, slug: slugify(family.name) }));
+  const index = tagPages.find((tagPage) => tagPage.slug === "index");
+  if (index !== undefined) {
+    throw new Error(`The ${index.title} family's folder would replace the API reference index`);
+  }
+  // A folder per family: its table as the folder's index, then a page per operation, which the
+  // folder's meta.json lists in document order for the sidebar and the previous and next links.
   await Promise.all(
-    families.map((family, index) =>
-      fs.writeFile(
-        path.join(outputDir, `${tagPages[index].slug}.mdx`),
-        renderFamilyPage(family),
-        "utf8"
-      )
-    )
+    families.map(async (family, position) => {
+      const { slug } = tagPages[position];
+      const familyDir = path.join(outputDir, slug);
+      await fs.mkdir(familyDir, { recursive: true });
+      await Promise.all([
+        fs.writeFile(
+          path.join(familyDir, "index.mdx"),
+          renderFamilyIndex(family, (operation) => operationHref(slug, operation)),
+          "utf8"
+        ),
+        writeJson(path.join(familyDir, "meta.json"), {
+          title: family.name,
+          pages: family.operations.map((operation) => operation.endpointId),
+        }),
+        ...family.operations.map((operation) =>
+          fs.writeFile(
+            path.join(familyDir, `${operation.endpointId}.mdx`),
+            renderOperationPage(operation),
+            "utf8"
+          )
+        ),
+      ]);
+    })
   );
   const exposedOperationsCount = families.reduce(
     (total, family) => total + family.operations.length,
