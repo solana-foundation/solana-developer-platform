@@ -1,6 +1,7 @@
 import { getBase58Decoder } from "@solana/codecs";
 import {
   type Address,
+  address,
   decompileTransactionMessage,
   generateKeyPairSigner,
   getCompiledTransactionMessageDecoder,
@@ -10,6 +11,7 @@ import {
   type Signature,
   signature,
 } from "@solana/kit";
+import { findSubscriptionAuthorityPda } from "@solana/subscriptions";
 import { beforeEach, expect, vi } from "vitest";
 import type { z } from "zod";
 import { getDb } from "@/db/client";
@@ -26,8 +28,10 @@ import {
   createKoraAdapterMock,
   createOrgSignerForCustodyWalletMock,
   DEVNET_USDC_MINT,
+  getAccountInfoMock,
   seedCounterparty,
   sendTransactionMock,
+  sourceTokenAccountInfo,
   TEST_CUSTODY_WALLET_ID,
   TEST_SPONSORSHIP_PROVIDER_CONFIG,
   testKoraAdapter,
@@ -67,6 +71,11 @@ export function installRecurringExecutionHooks() {
     sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
     createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
+    const [subscriptionAuthority] = await findSubscriptionAuthorityPda({
+      user: sourceSigner.address,
+      tokenMint: address(DEVNET_USDC_MINT),
+    });
+    getAccountInfoMock.mockResolvedValue(sourceTokenAccountInfo(subscriptionAuthority, 1_000_000n));
     rpc.answer("getAccountInfo", mintAccountInfoResult({ decimals: 6, extensions: null }));
     signAsFeePayerMock = vi
       .fn<(transaction: Uint8Array) => Promise<Uint8Array>>()

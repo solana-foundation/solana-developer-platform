@@ -10,15 +10,21 @@ import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { getBase58Codec } from "@solana/codecs";
 import {
   type Account,
+  type Address,
   address,
+  type Base64EncodedBytes,
   createNoopSigner,
+  getBase64Decoder,
   getSignatureFromTransaction,
   getTransactionDecoder,
   lamports,
+  none,
   type Signature,
+  some,
 } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
-import { findAssociatedTokenPda } from "@solana-program/token-2022";
+import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
+import { AccountState, findAssociatedTokenPda, getTokenEncoder } from "@solana-program/token-2022";
 import { afterEach, beforeEach, onTestFinished, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { SponsorshipBudgetRepository } from "@/db/repositories/sponsorship-budget.repository";
@@ -108,6 +114,43 @@ export const TEST_SUBSCRIPTION_AUTHORITY: Account<subscriptionsProgram.Subscript
     initId: 1n,
   },
 };
+
+/** An account as `getAccountInfo` answers for an address that holds one. */
+export type TestAccountInfo = NonNullable<Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>>;
+
+/**
+ * A source wallet's 165-byte SPL token account as `getAccountInfo` answers for it, delegating
+ * `delegatedAmount` to `delegate`.
+ *
+ * @param delegate - The token account's delegate.
+ * @param delegatedAmount - The allowance the delegate has left.
+ * @returns The account.
+ */
+export function sourceTokenAccountInfo(
+  delegate: Address,
+  delegatedAmount: bigint
+): TestAccountInfo {
+  const data = getTokenEncoder().encode({
+    mint: address(DEVNET_USDC_MINT),
+    owner: address(TEST_SOLANA_ADDRESSES.wallet1),
+    amount: 25_000_000n,
+    delegate: some(delegate),
+    state: AccountState.Initialized,
+    isNative: none(),
+    delegatedAmount,
+    closeAuthority: none(),
+    extensions: none(),
+  });
+  return {
+    executable: false,
+    lamports: lamports(4_200_000_000n),
+    owner: TOKEN_PROGRAM_ADDRESS,
+    space: BigInt(data.length),
+    // SAFETY: `getBase64Decoder` returns the base64 encoding of `data`; kit has no constructor for
+    // the `Base64EncodedBytes` brand.
+    data: [getBase64Decoder().decode(data) as Base64EncodedBytes, "base64"],
+  };
+}
 
 export const fetchMaybeSubscriptionDelegationMock = vi.spyOn(
   subscriptionsProgram,
@@ -526,10 +569,9 @@ export function installPaymentsRouteTestHooks(): void {
       }),
     } as unknown as ReturnType<typeof solanaRpc.createRpc>);
     priceSponsoredTransactionMock.mockResolvedValue(TEST_SPONSORED_PRICE);
-    getAccountInfoMock.mockResolvedValue({
-      lamports: 4200000000n,
-      owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
-    } as Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>);
+    getAccountInfoMock.mockResolvedValue(
+      sourceTokenAccountInfo(TEST_SUBSCRIPTION_AUTHORITY.address, 1_000_000n)
+    );
     getRecentBlockhashMock.mockResolvedValue({
       blockhash: "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N" as Awaited<
         ReturnType<typeof solanaRpc.getRecentBlockhash>

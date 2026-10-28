@@ -70,7 +70,6 @@ import {
   createOrgSignerForCustodyWalletMock,
   DEVNET_USDC_MINT,
   enableMainnetSponsorship,
-  fetchMaybeSubscriptionAuthorityMock,
   fetchMaybeSubscriptionDelegationMock,
   getAccountInfoMock,
   getRecentBlockhashMock,
@@ -2468,7 +2467,7 @@ describe("Payments routes — recurring", () => {
     expect(activateRes.status).toBe(200);
     const activateBody = await parseRecurringResponse(activateRes);
     expect(activateBody.data.recurringPayment.status).toBe("active");
-    expect(sendTransactionMock).toHaveBeenCalledTimes(3);
+    expect(sendTransactionMock).toHaveBeenCalledTimes(4);
     const subscriptionRow = await getDb(env)
       .prepare("SELECT subscriber_token_account FROM payment_subscriptions WHERE id = ?")
       .bind(activateBody.data.recurringPayment.subscriptionId)
@@ -2476,7 +2475,7 @@ describe("Payments routes — recurring", () => {
     expect(subscriptionRow?.subscriber_token_account).toBe(expectedSourceAta);
   });
 
-  async function withoutSourceSetupAccounts(): Promise<void> {
+  async function withoutSourceTokenAccount(): Promise<void> {
     const [sourceTokenAccount] = await findAssociatedTokenPda({
       owner: recurringExecution.sourceSigner().address,
       tokenProgram: TOKEN_PROGRAM_ADDRESS,
@@ -2486,12 +2485,11 @@ describe("Payments routes — recurring", () => {
     getAccountInfoMock.mockImplementation(async (...args) =>
       args[1] === sourceTokenAccount ? null : readAccount(...args)
     );
-    fetchMaybeSubscriptionAuthorityMock.mockResolvedValueOnce(noAccount);
   }
 
   it("keeps the token account's setup signature and fails the activation when Kora refuses the authority init", async () => {
     const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
-    await withoutSourceSetupAccounts();
+    await withoutSourceTokenAccount();
     const signAsFeePayer = recurringExecution.signAsFeePayerMock();
     const sponsorSign = required(signAsFeePayer.getMockImplementation());
     signAsFeePayer
@@ -2543,7 +2541,7 @@ describe("Payments routes — recurring", () => {
 
   it("sends each missing setup account as its own sponsored transaction on a plan replacement", async () => {
     const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
-    await withoutSourceSetupAccounts();
+    await withoutSourceTokenAccount();
 
     const res = await app.request(
       `/v1/payments/recurring-payments/${activated.id}`,
@@ -2660,8 +2658,8 @@ describe("Payments routes — recurring", () => {
         )
         .bind(activated.id)
         .first<{ status: string; signature: string | null }>()
-    ).toEqual({ status: "confirmed", signature: poolSentSignatures()[2] });
-    expect(sendTransactionMock).toHaveBeenCalledTimes(3);
+    ).toEqual({ status: "confirmed", signature: poolSentSignatures()[3] });
+    expect(sendTransactionMock).toHaveBeenCalledTimes(4);
   });
 
   it("keeps a cancel whose send outcome is unknown in flight with its signature saved", async () => {

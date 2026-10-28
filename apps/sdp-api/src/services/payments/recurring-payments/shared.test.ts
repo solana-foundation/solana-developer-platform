@@ -28,14 +28,18 @@ import {
   signatureStatusesReplyAt,
 } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
+import { syntheticAddress } from "@/test/helpers/parsed-transactions";
 import {
   confirmTransactionMock,
   DEVNET_USDC_MINT,
   fetchMaybeSubscriptionAuthorityMock,
+  getAccountInfoMock,
   installPaymentsRouteTestHooks,
+  sourceTokenAccountInfo,
   TEST_ORG,
   TEST_PROJECT,
   TEST_SUBSCRIPTION_AUTHORITY,
+  type TestAccountInfo,
 } from "@/test/helpers/payments-routes";
 import {
   createRecurringPaymentFixture,
@@ -295,6 +299,7 @@ const MISSING_AUTHORITY = {
   address: TEST_SUBSCRIPTION_AUTHORITY.address,
 } as const satisfies MaybeAccount<SubscriptionAuthority>;
 const SOURCE_OWNER = address(TEST_SOLANA_ADDRESSES.wallet1);
+const DELEGATING_TO_AUTHORITY = sourceTokenAccountInfo(TEST_SUBSCRIPTION_AUTHORITY.address, 1n);
 
 describe("prepareSubscriptionAuthority", () => {
   installPaymentsRouteTestHooks();
@@ -308,7 +313,6 @@ describe("prepareSubscriptionAuthority", () => {
 
   function prepare(
     tokenAccountExists: boolean,
-    subscriptionAuthority: MaybeAccount<SubscriptionAuthority>,
     sendSetup: (instruction: Instruction) => Promise<Signature>
   ) {
     return runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
@@ -319,7 +323,6 @@ describe("prepareSubscriptionAuthority", () => {
           tokenAccount: address(TEST_SOLANA_ADDRESSES.wallet2),
           exists: tokenAccountExists,
         },
-        subscriptionAuthority,
         subscriptionAuthorityAddress: TEST_SUBSCRIPTION_AUTHORITY.address,
         owner: SOURCE_OWNER,
         mint: address(DEVNET_USDC_MINT),
@@ -333,47 +336,54 @@ describe("prepareSubscriptionAuthority", () => {
 
   it.each<{
     state: string;
-    tokenAccountExists: boolean;
-    authority: MaybeAccount<SubscriptionAuthority>;
+    sourceToken: TestAccountInfo | null;
+    firstAuthorityRead: MaybeAccount<SubscriptionAuthority>;
     created: (keyof typeof SETUP_PROGRAMS)[];
     authorityReads: number;
   }>([
     {
-      state: "neither account exists",
-      tokenAccountExists: false,
-      authority: MISSING_AUTHORITY,
+      state: "the token account is missing",
+      sourceToken: null,
+      firstAuthorityRead: TEST_SUBSCRIPTION_AUTHORITY,
       created: ["tokenAccount", "authority"],
       authorityReads: 1,
     },
     {
-      state: "only the authority exists",
-      tokenAccountExists: false,
-      authority: TEST_SUBSCRIPTION_AUTHORITY,
-      created: ["tokenAccount"],
-      authorityReads: 0,
+      state: "the authority is missing",
+      sourceToken: DELEGATING_TO_AUTHORITY,
+      firstAuthorityRead: MISSING_AUTHORITY,
+      created: ["authority"],
+      authorityReads: 2,
     },
     {
-      state: "only the token account exists",
-      tokenAccountExists: true,
-      authority: MISSING_AUTHORITY,
+      state: "the token account delegates to another address",
+      sourceToken: sourceTokenAccountInfo(syntheticAddress(1), 1_000_000n),
+      firstAuthorityRead: TEST_SUBSCRIPTION_AUTHORITY,
       created: ["authority"],
+      authorityReads: 2,
+    },
+    {
+      state: "the authority's allowance is spent",
+      sourceToken: sourceTokenAccountInfo(TEST_SUBSCRIPTION_AUTHORITY.address, 0n),
+      firstAuthorityRead: TEST_SUBSCRIPTION_AUTHORITY,
+      created: ["authority"],
+      authorityReads: 2,
+    },
+    {
+      state: "the authority exists with allowance left",
+      sourceToken: DELEGATING_TO_AUTHORITY,
+      firstAuthorityRead: TEST_SUBSCRIPTION_AUTHORITY,
+      created: [],
       authorityReads: 1,
     },
-    {
-      state: "both accounts exist",
-      tokenAccountExists: true,
-      authority: TEST_SUBSCRIPTION_AUTHORITY,
-      created: [],
-      authorityReads: 0,
-    },
   ])(
-    "sends one confirmed transaction per missing account when $state",
-    async ({ tokenAccountExists, authority, created, authorityReads }) => {
+    "sends one confirmed transaction per setup instruction needed when $state",
+    async ({ sourceToken, firstAuthorityRead, created, authorityReads }) => {
+      getAccountInfoMock.mockResolvedValue(sourceToken);
+      fetchMaybeSubscriptionAuthorityMock.mockResolvedValueOnce(firstAuthorityRead);
       const sendSetup = setupSender();
 
-      expect(await prepare(tokenAccountExists, authority, sendSetup)).toBe(
-        TEST_SUBSCRIPTION_AUTHORITY
-      );
+      expect(await prepare(sourceToken !== null, sendSetup)).toBe(TEST_SUBSCRIPTION_AUTHORITY);
       expect(sendSetup.mock.calls.map(([instruction]) => instruction.programAddress)).toEqual(
         created.map((account) => SETUP_PROGRAMS[account])
       );
@@ -393,7 +403,7 @@ describe("prepareSubscriptionAuthority", () => {
     });
     const sendSetup = setupSender();
 
-    await expect(prepare(false, MISSING_AUTHORITY, sendSetup)).rejects.toMatchObject({
+    await expect(prepare(false, sendSetup)).rejects.toMatchObject({
       code: "TRANSACTION_FAILED",
       message: SETUP_FAILED,
     });
@@ -401,10 +411,20 @@ describe("prepareSubscriptionAuthority", () => {
   });
 
   it("keeps the step in flight while the authority it created is not visible at confirmed", async () => {
-    fetchMaybeSubscriptionAuthorityMock.mockResolvedValueOnce(MISSING_AUTHORITY);
+    fetchMaybeSubscriptionAuthorityMock
+      .mockResolvedValueOnce(MISSING_AUTHORITY)
+      .mockResolvedValueOnce(MISSING_AUTHORITY);
+    const sendSetup = setupSender();
 
-    await expect(prepare(true, MISSING_AUTHORITY, setupSender())).rejects.toBeInstanceOf(
-      ResumedStepUnsettledError
-    );
+    await expect(prepare(true, sendSetup)).rejects.toBeInstanceOf(ResumedStepUnsettledError);
+    expect(sendSetup).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the step in flight and sends nothing while the token account is not visible at confirmed", async () => {
+    getAccountInfoMock.mockResolvedValueOnce(null);
+    const sendSetup = setupSender();
+
+    await expect(prepare(true, sendSetup)).rejects.toBeInstanceOf(ResumedStepUnsettledError);
+    expect(sendSetup).not.toHaveBeenCalled();
   });
 });
