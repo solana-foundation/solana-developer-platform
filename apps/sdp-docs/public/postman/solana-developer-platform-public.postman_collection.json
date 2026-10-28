@@ -1236,6 +1236,15 @@
           }
         },
         {
+          "name": "List recurring payment collection attempts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}/collection-attempts",
+            "description": "Lists collection attempts for a recurring payment's current subscription. A recurring payment that has not been activated has none."
+          }
+        },
+        {
           "name": "List subscription plans",
           "request": {
             "method": "GET",

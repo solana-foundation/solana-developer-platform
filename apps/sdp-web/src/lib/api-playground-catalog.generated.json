@@ -2152,12 +2152,109 @@
         }
       },
       {
+        "id": "list-payment-recurring-payment-collection-attempts",
+        "operationId": "listPaymentRecurringPaymentCollectionAttempts",
+        "title": "List recurring payment collection attempts",
+        "method": "GET",
+        "path": "/v1/payments/recurring-payments/{id}/collection-attempts?status={status}&page={page}&pageSize={pageSize}",
+        "releaseModule": "recurring_payments",
+        "shadowedBy": [],
+        "pathFields": [
+          {
+            "key": "id",
+            "label": "{id}",
+            "description": "SDP recurring payment record ID.",
+            "defaultValue": "prp_example",
+            "required": true
+          },
+          {
+            "key": "status",
+            "label": "status",
+            "description": "Collection attempt status.",
+            "defaultValue": "pending",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "pending",
+                "value": "pending"
+              },
+              {
+                "label": "processing",
+                "value": "processing"
+              },
+              {
+                "label": "confirmed",
+                "value": "confirmed"
+              },
+              {
+                "label": "failed",
+                "value": "failed"
+              },
+              {
+                "label": "skipped",
+                "value": "skipped"
+              }
+            ]
+          },
+          {
+            "key": "page",
+            "label": "page",
+            "defaultValue": "1",
+            "required": false,
+            "valueType": "number"
+          },
+          {
+            "key": "pageSize",
+            "label": "pageSize",
+            "defaultValue": "20",
+            "required": false,
+            "valueType": "number"
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "collectionAttempts": [
+              {
+                "id": "psca_example",
+                "organizationId": "org_example",
+                "projectId": "prj_example",
+                "subscriptionId": "subscription_example",
+                "transferId": "xfr_example",
+                "token": "example",
+                "amount": "100.00",
+                "dueAt": "2025-01-01T00:00:00.000Z",
+                "attemptedAt": "2025-01-01T00:00:00.000Z",
+                "status": "pending",
+                "signature": "example",
+                "error": "example",
+                "metadata": {
+                  "recurringPaymentId": "recurringpayment_example",
+                  "initiatedByKeyId": "initiatedbykey_example",
+                  "source": "manual"
+                },
+                "createdAt": "2025-01-01T00:00:00.000Z",
+                "updatedAt": "2025-01-01T00:00:00.000Z"
+              }
+            ],
+            "total": 1,
+            "page": 1,
+            "pageSize": 1
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
         "id": "create-payment-subscription-plan",
         "operationId": "createPaymentSubscriptionPlan",
         "title": "Create subscription plan",
         "method": "POST",
         "path": "/v1/payments/subscription-plans",
-        "releaseModule": "recurring_payments",
+        "releaseModule": "subscriptions",
         "shadowedBy": [],
         "pathFields": [],
         "bodyFields": [
@@ -2206,7 +2303,7 @@
         "title": "List subscription plans",
         "method": "GET",
         "path": "/v1/payments/subscription-plans?status={status}&page={page}&pageSize={pageSize}",
-        "releaseModule": "recurring_payments",
+        "releaseModule": "subscriptions",
         "shadowedBy": [],
         "pathFields": [
           {
@@ -2287,7 +2384,7 @@
         "title": "Prepare subscription plan creation",
         "method": "POST",
         "path": "/v1/payments/subscription-plans/{planId}/prepare-create",
-        "releaseModule": "recurring_payments",
+        "releaseModule": "subscriptions",
         "shadowedBy": [],
         "pathFields": [
           {
@@ -2351,7 +2448,7 @@
         "title": "Get subscription plan",
         "method": "GET",
         "path": "/v1/payments/subscription-plans/{planId}",
-        "releaseModule": "recurring_payments",
+        "releaseModule": "subscriptions",
         "shadowedBy": [],
         "pathFields": [
           {
@@ -2398,7 +2495,7 @@
         "title": "Update subscription plan",
         "method": "PATCH",
         "path": "/v1/payments/subscription-plans/{planId}",
-        "releaseModule": "recurring_payments",
+        "releaseModule": "subscriptions",
         "shadowedBy": [],
         "pathFields": [
           {
@@ -2455,7 +2552,7 @@
         "title": "Create subscription",
         "method": "POST",
         "path": "/v1/payments/subscriptions",
-        "releaseModule": "recurring_payments",
+        "releaseModule": "subscriptions",
         "shadowedBy": [],
         "pathFields": [],
         "bodyFields": [
@@ -2504,7 +2601,7 @@
         "title": "List subscriptions",
         "method": "GET",
         "path": "/v1/payments/subscriptions?planId={planId}&counterpartyId={counterpartyId}&status={status}&dueBefore={dueBefore}&page={page}&pageSize={pageSize}",
-        "releaseModule": "recurring_payments",
+        "releaseModule": "subscriptions",
         "shadowedBy": [],
         "pathFields": [
           {
@@ -2612,7 +2709,7 @@
         "title": "Prepare subscription authorization",
         "method": "POST",
         "path": "/v1/payments/subscriptions/{subscriptionId}/prepare-authorization",
-        "releaseModule": "recurring_payments",
+        "releaseModule": "subscriptions",
         "shadowedBy": [],
         "pathFields": [
           {
@@ -2677,7 +2774,7 @@
         "title": "Prepare subscription cancellation",
         "method": "POST",
         "path": "/v1/payments/subscriptions/{subscriptionId}/prepare-cancel",
-        "releaseModule": "recurring_payments",
+        "releaseModule": "subscriptions",
         "shadowedBy": [],
         "pathFields": [
           {
@@ -2740,7 +2837,7 @@
         "title": "Prepare subscription resume",
         "method": "POST",
         "path": "/v1/payments/subscriptions/{subscriptionId}/prepare-resume",
-        "releaseModule": "recurring_payments",
+        "releaseModule": "subscriptions",
         "shadowedBy": [],
         "pathFields": [
           {
@@ -2803,7 +2900,7 @@
         "title": "Prepare subscription collection",
         "method": "POST",
         "path": "/v1/payments/subscriptions/{subscriptionId}/prepare-collection",
-        "releaseModule": "recurring_payments",
+        "releaseModule": "subscriptions",
         "shadowedBy": [],
         "pathFields": [
           {
@@ -2887,7 +2984,7 @@
         "title": "Get subscription",
         "method": "GET",
         "path": "/v1/payments/subscriptions/{subscriptionId}",
-        "releaseModule": "recurring_payments",
+        "releaseModule": "subscriptions",
         "shadowedBy": [],
         "pathFields": [
           {
@@ -2934,7 +3031,7 @@
         "title": "List subscription collection attempts",
         "method": "GET",
         "path": "/v1/payments/subscriptions/{subscriptionId}/collection-attempts?status={status}&page={page}&pageSize={pageSize}",
-        "releaseModule": "recurring_payments",
+        "releaseModule": "subscriptions",
         "shadowedBy": [],
         "pathFields": [
           {

@@ -89,6 +89,7 @@
   "GET /v1/payments/ramps/onramp/currency": "onramp.read",
   "GET /v1/payments/recurring-payments": "recurring.read",
   "GET /v1/payments/recurring-payments/:_": "recurring.read",
+  "GET /v1/payments/recurring-payments/:_/collection-attempts": "recurring.read",
   "GET /v1/payments/requests": "payment_requests.read",
   "GET /v1/payments/requests/:_": "payment_requests.read",
   "GET /v1/payments/requests/:_/link": "payment_requests.manage",
