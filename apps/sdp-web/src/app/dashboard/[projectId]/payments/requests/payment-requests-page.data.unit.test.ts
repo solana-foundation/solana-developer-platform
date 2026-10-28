@@ -27,6 +27,7 @@ function requestRow(id: string, overrides: Partial<PaymentRequest> = {}): Paymen
     expiresAt: null,
     fulfilledByTransferId: null,
     canceledBy: null,
+    canceledAt: null,
     lifecycle: [{ status: "awaiting_payment", at: "2026-09-14T00:00:00.000Z" }],
     createdBy: null,
     createdAt: "2026-09-14T00:00:00.000Z",

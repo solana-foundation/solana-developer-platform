@@ -1,18 +1,30 @@
 // @vitest-environment jsdom
 
 import type { PaymentRequest } from "@sdp/types/payments";
+import type { OrganizationRole } from "@sdp/types/roles";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { PaymentsDemoProvider } from "@/lib/payments-demo/payments-demo-context";
+import { dashboardRouter, resetDashboardNavigation } from "@/test/dashboard-navigation";
 import { PaymentRequestDetailWorkspace } from "./payment-request-detail-workspace";
+import * as requestsData from "./payment-requests-page.data";
+
+const workspace = vi.hoisted((): { role: OrganizationRole } => ({ role: "admin" }));
+
+Element.prototype.scrollIntoView = () => {};
 
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
-  useDashboardWorkspace: () => ({ sdpEnvironment: "sandbox" }),
+  useDashboardWorkspace: () => ({
+    sdpEnvironment: "sandbox",
+    dashboardAccess: resolveDashboardAccess(workspace.role),
+  }),
 }));
 
 const paymentRequest: PaymentRequest = {
@@ -28,13 +40,14 @@ const paymentRequest: PaymentRequest = {
   expiresAt: null,
   fulfilledByTransferId: null,
   canceledBy: null,
+  canceledAt: null,
   lifecycle: [{ status: "awaiting_payment", at: "2026-09-14T00:00:00.000Z" }],
   createdBy: null,
   createdAt: "2026-09-14T00:00:00.000Z",
   updatedAt: "2026-09-14T00:00:00.000Z",
 };
 
-function renderDetail(demo: boolean, publicToken: string | null = "tok_1") {
+function renderDetail(demo: boolean, publicToken: string | null, request: PaymentRequest) {
   function wrapper({ children }: { children: ReactNode }) {
     return (
       <I18nProvider locale="en" messages={getMessages("en")}>
@@ -43,38 +56,37 @@ function renderDetail(demo: boolean, publicToken: string | null = "tok_1") {
     );
   }
   return render(
-    <PaymentRequestDetailWorkspace
-      request={paymentRequest}
-      publicToken={publicToken}
-      walletName={null}
-    />,
+    <PaymentRequestDetailWorkspace request={request} publicToken={publicToken} walletName={null} />,
     { wrapper }
   );
 }
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
+  resetDashboardNavigation();
+  workspace.role = "admin";
 });
 
 describe("PaymentRequestDetailWorkspace payment link", () => {
   // The token is a bearer credential (APE-849): a member who may not manage
   // payment requests gets none, and no link is drawn.
   it("shows no link or QR code without the link token", async () => {
-    renderDetail(false, null);
+    renderDetail(false, null, paymentRequest);
 
     await waitFor(() => expect(screen.queryByText(/\/pay\//)).toBeNull());
     expect(screen.queryByRole("img", { name: "QR code for the payment link" })).toBeNull();
   });
 
   it("shows the pay link and its QR code", async () => {
-    renderDetail(false);
+    renderDetail(false, "tok_1", paymentRequest);
 
     expect(await screen.findByText(`${window.location.origin}/pay/tok_1`)).toBeTruthy();
     expect(await screen.findByRole("img", { name: "QR code for the payment link" })).toBeTruthy();
   });
 
   it("shows no QR code or link for a demo request, only why there is none", async () => {
-    renderDetail(true);
+    renderDetail(true, "tok_1", paymentRequest);
 
     // The link is read after mount; once the actions enable, it would be drawn.
     await waitFor(() =>
@@ -87,5 +99,42 @@ describe("PaymentRequestDetailWorkspace payment link", () => {
     ).toBeTruthy();
     expect(screen.queryByRole("img", { name: "QR code for the payment link" })).toBeNull();
     expect(screen.queryByText(/\/pay\/tok_1/)).toBeNull();
+  });
+});
+
+describe("PaymentRequestDetailWorkspace cancel", () => {
+  it.each<{ role: OrganizationRole; status: PaymentRequest["status"]; shown: boolean }>([
+    { role: "member", status: "awaiting_payment", shown: true },
+    { role: "viewer", status: "awaiting_payment", shown: false },
+    { role: "admin", status: "expired", shown: false },
+  ])("offers Cancel request to $role on a $status request: $shown", ({ role, status, shown }) => {
+    workspace.role = role;
+    renderDetail(false, "tok_1", { ...paymentRequest, status });
+
+    expect(screen.queryByRole("button", { name: "Cancel request" }) !== null).toBe(shown);
+  });
+
+  it("cancels on confirm, holds every control while it runs, then reads the request again", async () => {
+    const pending = Promise.withResolvers<{ ok: true } | { ok: false; error: string }>();
+    const cancel = vi.spyOn(requestsData, "cancelPaymentRequest").mockReturnValue(pending.promise);
+    const user = userEvent.setup();
+    renderDetail(false, "tok_1", paymentRequest);
+
+    const open = await screen.findByRole("button", { name: "Cancel request" });
+    await user.click(open);
+    const panel = within(
+      screen.getByRole("group", { name: "This link will stop accepting payments." })
+    );
+    await user.click(panel.getByRole("button", { name: "Cancel request" }));
+
+    expect(cancel).toHaveBeenCalledWith("preq_1");
+    expect(open).toHaveProperty("disabled", true);
+    expect(panel.getByRole("button", { name: "Keep it" })).toHaveProperty("disabled", true);
+    expect(panel.getByRole("button", { name: "Canceling" })).toHaveProperty("disabled", true);
+    expect(dashboardRouter.refresh).not.toHaveBeenCalled();
+
+    pending.resolve({ ok: true });
+    await waitFor(() => expect(dashboardRouter.refresh).toHaveBeenCalledTimes(1));
+    expect(open).toHaveProperty("disabled", false);
   });
 });
