@@ -51,12 +51,9 @@ export const transferBatchExternalIdSchema = z.string().min(1).max(256);
 /**
  * A batch names its payout run (HOO-2335): the run key that keeps a resend
  * under a new Idempotency-Key from paying anyone twice is derived from it.
- * Required for every new batch, but the schema lets an omitted one through so
- * a same-key retry of a batch created before the field was required still
- * reaches its replay; createTransferBatch refuses any other request without it.
  */
 export const createTransferBatchSchema = transferBatchMovementSchema.extend({
-  externalId: transferBatchExternalIdSchema.optional(),
+  externalId: transferBatchExternalIdSchema,
 });
 
 /** An estimate moves nothing, so it needs no run name; one sent is accepted. */

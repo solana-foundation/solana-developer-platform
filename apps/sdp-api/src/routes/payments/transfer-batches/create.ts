@@ -154,61 +154,23 @@ export async function admitTransferBatchExecution(
 /**
  * Answers a create-batch request from its row, before admission, so a request
  * that already ran is answered even if its wallet can no longer move money.
- * No RPC and no account state.
- *
- * A row under the request's own key is found after a takeover of a crashed
- * attempt, or once the shared record has expired. It runs only once the
- * request that created the batch is presumed dead (the key layer took the key
- * over, or it expired), so recipients still pending with no chunk transfer
- * will never be sent: a chunk's transfer row and links commit before its
- * broadcast. They are failed, and the batch settles, before it answers,
- * instead of replaying a batch stuck in `processing` forever.
- *
- * A row under a payout run's key (`externalId`) may belong to a request still
- * running under another key, so it is answered as it stands and never
- * settled here; the stranded-batch job settles a crashed one. It is this
- * request's batch only for the same credential and body; any other is 409.
+ * No RPC and no account state. Every batch is recorded under its payout run's
+ * key (HOO-2335), so the row is found whatever Idempotency-Key the request
+ * carries: after a takeover of a crashed attempt, once the shared record has
+ * expired, or for a resend of the run under a new key. That row may belong to
+ * a request still running under another key, so it is answered as it stands
+ * and never settled here; the stranded-batch job settles a crashed one. It is
+ * this request's batch only for the same credential and body; any other is 409.
  */
 export async function findTransferBatchRecordReplay(
   c: AppContext,
-  input: MovementStepInput<AuthorizedBatchRequest>,
-  recordKey: string
+  input: MovementStepInput<AuthorizedBatchRequest>
 ): Promise<RecordAnswer | null> {
   const { authorized } = input;
   // SAFETY: mounted after validateBody(createTransferBatchSchema).
   const body = input.body as CreateTransferBatchInput;
   const organizationId = authorized.scope.auth.organizationId;
-  const repository = getPaymentTransferBatchesRepository(c);
-  // The request's own key first: a batch without a run, or one recorded
-  // before run keys, keeps its same-key answer and its crash settle.
-  const row = await repository.findTransferBatchByIdempotency({
-    organizationId,
-    projectId: authorized.projectId,
-    idempotencyKey: recordKey,
-  });
-  if (row !== null && row.idempotency_fingerprint !== null) {
-    if (!idempotencyFingerprintMatches(c, row.idempotency_fingerprint)) {
-      // Another request's row: the step refuses it (422) without touching it.
-      return { fingerprint: row.idempotency_fingerprint, respond: () => success(c, {}) };
-    }
-    const settled =
-      row.status === "processing"
-        ? await repository.failUnsentTransferRecipients({
-            batchId: row.id,
-            organizationId,
-            projectId: authorized.projectId,
-            error: "The batch request ended before this recipient's transfer was sent",
-          })
-        : row;
-    return {
-      fingerprint: settled.idempotency_fingerprint,
-      respond: () => respondToTransferBatchReplay(c, settled, organizationId, authorized.projectId),
-    };
-  }
-  // A same-key retry of a batch created before externalId was required has
-  // no run: the request key above is all it has, and the handler refuses it.
-  if (body.externalId === undefined) return null;
-  const run = await repository.findTransferBatchByIdempotency({
+  const run = await getPaymentTransferBatchesRepository(c).findTransferBatchByIdempotency({
     organizationId,
     projectId: authorized.projectId,
     idempotencyKey: transferBatchRunKey(authorized, body.externalId),
@@ -249,14 +211,6 @@ export async function createTransferBatch(
 ) {
   const body = c.req.valid("json");
   const authorized = getAuthorized<AuthorizedBatchRequest>(c);
-  // Every new batch names its payout run (HOO-2335). The schema lets an
-  // omitted one through only so a legacy same-key retry reaches its replay,
-  // which has answered by now; refused before any chain read.
-  if (body.externalId === undefined) {
-    throw badRequest("Invalid request body: externalId is required to name the payout run", {
-      field: "externalId",
-    });
-  }
   const resolved = await resolveBatchMovement(body, authorized);
   // The row's key (the payout run's, never the raw client key) and the key
   // layer's fingerprint, which canonicalizes the batch body.

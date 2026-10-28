@@ -126,16 +126,16 @@ answers; the pending-transfers job does the same for a batch over an hour old th
 Neither resumes or re-sends: a recipient with a transfer row is settled from that row as before.
 
 The key dedupes one request; a batch's `externalId` dedupes the payout run (HOO-2335, SDP-021
-SA-2). A batch is recorded under its run's key, derived from the project, source
-wallet and `externalId`, instead of the credential-bound record key: the HTTP key step is
-unchanged, only the row's identity is. So `replayFromRecord` finds the run under any new key,
-before admission: the same request from the same credential is answered with the batch as it
-stands (never settled there, since its own request may still be running), and any other gets
-`409 TRANSFER_BATCH_RUN_EXISTS` with the batch's id, unstored. The batch key index (migration 0026) lets one of two
-concurrent sends win. No migration was needed: batches recorded before this keep their request
-keys, so earlier duplicate `externalId`s never collide. `externalId` is required on create (HOO-2335): every batch names its run, so no caller is left
-without the guard. It protects only callers who send the same value on every attempt at a run, which
-is why the docs say to derive it from the caller's own data and never generate it at random.
+SA-2). `externalId` is required on create, and a batch is recorded under its run's key, derived
+from the project, source wallet and `externalId`, instead of the credential-bound record key: the
+HTTP key step is unchanged, only the row's identity is. So `replayFromRecord` finds the run under
+any key, before admission: the same request from the same credential is answered with the batch
+as it stands (never settled there, since its own request may still be running), and any other
+gets `409 TRANSFER_BATCH_RUN_EXISTS` with the batch's id, unstored. The batch key index
+(migration 0026) lets one of two concurrent sends win, so no migration was needed; SDP had no
+live batches when this shipped, so there is no older row keyed any other way. The guard protects
+only callers who send the same value on every attempt at a run, which is why the docs say to
+derive it from the caller's own data and never generate it at random.
 
 Recurring payments carve this out: their cron resumes and completes a half-finished row (an
 `activating`, `canceling` or `resuming` schedule, or a collection in flight) from the signature
