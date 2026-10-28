@@ -51,7 +51,8 @@ beforeEach(async () => {
     `ALTER TABLE payment_recurring_payments
        DROP CONSTRAINT ${REASON_CHECK},
        DROP CONSTRAINT ${STATUS_CHECK},
-       DROP COLUMN paused_reason`
+       DROP COLUMN paused_reason,
+       DROP COLUMN failed_collection_attempts`
   );
   tenant = await seedOrgProject(client, "0184");
   await seedCounterparty(client, {
