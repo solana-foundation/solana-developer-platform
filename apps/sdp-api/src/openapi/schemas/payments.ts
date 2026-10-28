@@ -48,6 +48,7 @@ import {
   createTransferBatchSchema as createTransferBatchSchemaBase,
   estimateTransferBatchSchema as estimateTransferBatchSchemaBase,
   listTransferBatchesQuerySchema as listTransferBatchesQuerySchemaBase,
+  transferBatchExternalIdSchema,
   transferBatchIdParamsSchema as transferBatchIdParamsSchemaBase,
   transferBatchRecipientStatusSchema as transferBatchRecipientStatusSchemaBase,
   transferBatchStatusSchema as transferBatchStatusSchemaBase,
@@ -457,7 +458,9 @@ export const createTransferBatchRequestSchema = createTransferBatchSchemaBase
       description: "Project identifier for the transfer batch context.",
       example: "prj_example",
     }),
-    externalId: withOpenApi(createTransferBatchSchemaBase.shape.externalId, {
+    // Required for new batches; the route accepts an omitted one only for a
+    // legacy same-key replay (createTransferBatchSchema), which isn't published.
+    externalId: withOpenApi(transferBatchExternalIdSchema, {
       description:
         "Your ID for this payout run, unique per project and source wallet. Derive it from your own data so a restarted worker computes the same value (for example `payroll-2026-05`); never generate it at random, which gives no protection. Sending the same request again with this `externalId`, from the same credential, under any Idempotency-Key returns the existing batch; a different request with it returns `409 TRANSFER_BATCH_RUN_EXISTS` with the existing batch's `batchId` in `error.details`. Neither pays anyone again. New recipients go in a new run with a new `externalId`. Required: it is what stops a resend under a new Idempotency-Key from paying the same recipients twice.",
       example: "payroll_2026_06_30",
