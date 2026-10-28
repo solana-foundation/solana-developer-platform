@@ -10,6 +10,8 @@ import {
   SOLANA_ERROR__CODECS__INVALID_STRING_FOR_BASE,
 } from "@solana/kit";
 import { z } from "zod";
+import type { PaymentPrincipalFilter } from "@/db/repositories/payment-principal-filter";
+import { badRequest } from "@/lib/errors";
 
 export function solanaAddressSchema(fieldName: string) {
   return z
@@ -116,3 +118,28 @@ export const i64StringSchema = z
       return false;
     }
   }, "Value must fit in a signed 64-bit integer");
+
+/**
+ * The principal a payment list is filtered by, from its two query params: an API key (with the
+ * keys it was rotated from) or a member acting directly, never both.
+ *
+ * @param apiKeyId - The API key query param, when given.
+ * @param userId - The member query param, when given.
+ * @returns The filter, or null when neither is given.
+ * @throws AppError `BAD_REQUEST` when both are given.
+ */
+export function paymentPrincipalQuery(
+  apiKeyId: string | undefined,
+  userId: string | undefined
+): PaymentPrincipalFilter | null {
+  if (apiKeyId !== undefined && userId !== undefined) {
+    throw badRequest("Filter by an API key or by a member, not both");
+  }
+  if (apiKeyId !== undefined) {
+    return { kind: "api_key", apiKeyId };
+  }
+  if (userId !== undefined) {
+    return { kind: "member", userId };
+  }
+  return null;
+}

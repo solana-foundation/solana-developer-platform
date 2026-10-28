@@ -1616,6 +1616,11 @@
       "dismiss": "Dismiss",
       "scope": "Hide these warnings for this project on this browser.",
       "saveFailed": "Couldn’t save this preference. Check that browser storage is enabled."
+    },
+    "principalFilter": {
+      "apiKey": "Set up by API key {id}",
+      "member": "Set up by one member",
+      "clear": "Show all"
     }
   }
 }

@@ -100,14 +100,4 @@ export const apiKeyRotateSchema = z.object({
 
 export const apiKeyRevokeSchema = z.strictObject({
   confirmation: z.string().trim().min(1).optional(),
-  /**
-   * Also cancel the active recurring payments this key activated or resumed:
-   * the compromised-key path. Revoking alone leaves them collecting (APE-343).
-   */
-  cancelRecurringPayments: z.boolean().optional(),
-  /**
-   * Also cancel the open payment requests this key created. Revoking alone leaves their links
-   * payable: a request is an invoice that pays the merchant.
-   */
-  cancelPaymentRequests: z.boolean().optional(),
 });

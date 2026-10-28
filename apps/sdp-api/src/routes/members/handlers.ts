@@ -1,10 +1,14 @@
-import { INVITATION_STATUSES } from "@sdp/types/organizations";
+import { INVITATION_STATUSES, type MemberLinkedPayments } from "@sdp/types/organizations";
 import { normalizeOrganizationRole } from "@sdp/types/roles";
 import type { Context } from "hono";
 import { z } from "zod";
 import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
-import { createOrganizationRepository } from "@/db/repositories/repository-factory";
+import {
+  createOrganizationRepository,
+  createPaymentRecurringPaymentsRepository,
+  createPaymentRequestsRepository,
+} from "@/db/repositories/repository-factory";
 import {
   AppError,
   badRequest,
@@ -14,6 +18,7 @@ import {
   unauthorized,
 } from "@/lib/errors";
 import { created, noContent, success } from "@/lib/response";
+import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { getAuthorized } from "@/middleware/authorize";
 import { requireHumanActor } from "@/middleware/human-session";
 import { callerMayPerform } from "@/middleware/require-action";
@@ -31,6 +36,12 @@ import {
 } from "@/services/organization-membership.service";
 import type { Env } from "@/types/env";
 import type { inviteSchema, updateMemberRoleSchema } from "./schemas";
+
+/** A membership of the caller's organization, as the member routes' access check loads it. */
+interface AuthorizedOrganizationMember {
+  id: string;
+  user_id: string;
+}
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -465,7 +476,7 @@ export const inviteMember = async (c: ValidatedBodyContext<typeof inviteSchema>)
 
 export const updateMemberRole = async (c: ValidatedBodyContext<typeof updateMemberRoleSchema>) => {
   const { organizationId, userId } = resolveActor(c);
-  const { id: memberId } = getAuthorized<{ id: string }>(c);
+  const { id: memberId } = getAuthorized<AuthorizedOrganizationMember>(c);
   const { role } = c.req.valid("json");
 
   const updated = await new AuditService(getDb(c.env)).logWithin(c, async (tx) => {
@@ -500,22 +511,75 @@ export const updateMemberRole = async (c: ValidatedBodyContext<typeof updateMemb
  * @param c - The request context.
  * @returns The member's id.
  */
-export async function authorizeOrganizationMember(c: AppContext): Promise<{ id: string }> {
+export async function authorizeOrganizationMember(
+  c: AppContext
+): Promise<AuthorizedOrganizationMember> {
   const { memberId } = c.req.param();
   const { organizationId } = resolveActor(c);
   const member = await getDb(c.env)
-    .prepare("SELECT id FROM organization_members WHERE id = ? AND organization_id = ?")
+    .prepare("SELECT id, user_id FROM organization_members WHERE id = ? AND organization_id = ?")
     .bind(memberId, organizationId)
-    .first<{ id: string }>();
+    .first<AuthorizedOrganizationMember>();
   if (!member) {
     throw notFound("Member");
   }
   return member;
 }
 
+/**
+ * What the member set up directly in each project of the organization: active recurring payments
+ * they activated and open payment requests they created. SDP runs both, so removing the member
+ * stops neither; the dashboard shows them before a removal. Counted with the payment lists' own
+ * filters, so each count matches the list it links to.
+ *
+ * @param c - The request context, after `authorizeOrganizationMember` loaded the member.
+ * @returns The member's user id and the projects holding anything they set up.
+ */
+export const getMemberLinkedPayments = async (c: AppContext) => {
+  const { organizationId } = resolveActor(c);
+  const member = getAuthorized<AuthorizedOrganizationMember>(c);
+  const principal = { kind: "member", userId: member.user_id } as const;
+  const [recurring, requests] = await Promise.all([
+    createPaymentRecurringPaymentsRepository(
+      c.env,
+      getRequestTenantScope(c)
+    ).countActiveRecurringPaymentsByProject({ organizationId, activatedBy: principal }),
+    createPaymentRequestsRepository(
+      c.env,
+      getRequestTenantScope(c)
+    ).countOpenPaymentRequestsByProject({ organizationId, createdBy: principal }),
+  ]);
+  const projectIds = [...new Set([...recurring, ...requests].map((row) => row.projectId))];
+  const projects =
+    projectIds.length === 0
+      ? []
+      : (
+          await getDb(c.env)
+            .prepare(
+              "SELECT id, name FROM projects WHERE organization_id = ? AND id = ANY(?::text[]) ORDER BY name, id"
+            )
+            .bind(organizationId, projectIds)
+            .all<{ id: string; name: string }>()
+        ).results;
+  const countIn = (rows: Array<{ projectId: string; count: number }>, projectId: string) => {
+    const found = rows.find((row) => row.projectId === projectId);
+    return found === undefined ? 0 : found.count;
+  };
+  const response: MemberLinkedPayments = {
+    userId: member.user_id,
+    projects: projects.map((project) => ({
+      projectId: project.id,
+      projectName: project.name,
+      activeRecurringPayments: countIn(recurring, project.id),
+      openPaymentRequests: countIn(requests, project.id),
+    })),
+  };
+  return success(c, response);
+};
+
 export const removeMember = async (c: AppContext) => {
   const { organizationId, userId } = resolveActor(c);
-  const member = getAuthorized<{ id: string }>(c);
+  const member = getAuthorized<AuthorizedOrganizationMember>(c);
 
   const removed = await endMembership(c, {
     organizationId,

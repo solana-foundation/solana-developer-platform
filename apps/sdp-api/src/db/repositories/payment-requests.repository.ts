@@ -3,6 +3,7 @@ import type { PaymentRequestLifecycleEvent, PaymentRequestStatus } from "@sdp/ty
 import { generateKeyPairSigner } from "@solana/kit";
 import { customAlphabet } from "nanoid";
 import { z } from "zod";
+import type { PaymentPrincipalFilter } from "./payment-principal-filter";
 
 // URL-safe, dash-only alphabet (nanoid's default also includes "_").
 // biome-ignore lint/security/noSecrets: token alphabet constant, not a secret.
@@ -63,7 +64,7 @@ export interface CreatePaymentRequestInput {
   amount: string;
   expiresAt: string | null;
   createdBy: string | null;
-  /** The API key that created the request, so revoking it can cancel what it left open. */
+  /** The API key that created the request; `created_by` holds its creator and cannot tell keys apart. */
   createdByApiKeyId: string | null;
 }
 
@@ -144,6 +145,7 @@ export interface ListPaymentRequestsInput {
   organizationId: string;
   projectId: string;
   status?: PaymentRequestStatus;
+  createdBy: PaymentPrincipalFilter | null;
   limit: number;
   offset: number;
 }
@@ -168,15 +170,6 @@ export interface PaymentRequestsRepository {
    * Compare-and-set from `awaiting_payment`; null when the row was not in that state.
    */
   cancelPaymentRequest(input: CancelPaymentRequestInput): Promise<PaymentRequestRow | null>;
-  /**
-   * The open, unexpired requests an API key created, under its own id or one it was rotated
-   * from, in one Project, oldest first.
-   */
-  listOpenPaymentRequestsCreatedByApiKey(params: {
-    organizationId: string;
-    projectId: string;
-    apiKeyId: string;
-  }): Promise<PaymentRequestRow[]>;
   getPaymentRequestById(params: {
     requestId: string;
     organizationId: string;
@@ -198,6 +191,14 @@ export interface PaymentRequestsRepository {
     signedTransaction: string;
   }): Promise<boolean>;
   listPaymentRequests(params: ListPaymentRequestsInput): Promise<ListPaymentRequestsResult>;
+  /**
+   * How many open, unexpired requests a principal created in each Project of an Organization, as
+   * `listPaymentRequests` under `awaiting_payment` counts them. Projects with none are absent.
+   */
+  countOpenPaymentRequestsByProject(params: {
+    organizationId: string;
+    createdBy: PaymentPrincipalFilter;
+  }): Promise<Array<{ projectId: string; count: number }>>;
   /**
    * Whether `environment` holds any open request with a sponsored transaction window, the hot
    * lane's only candidates, so the lane reads the cluster's block height only when there is a

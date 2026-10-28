@@ -196,34 +196,6 @@ export const revokeApiKeyResponseSchema = z
       description: "Revocation timestamp.",
       example: "2025-01-10T12:00:00.000Z",
     }),
-    recurringPayments: z
-      .object({
-        canceled: z.array(z.string()).openapi({
-          description: "Recurring payments this key activated that are now canceled.",
-        }),
-        failed: z.array(z.string()).openapi({
-          description: "Recurring payments that could not be canceled; cancel them individually.",
-        }),
-      })
-      .nullable()
-      .openapi({
-        description:
-          "Null unless the request set `cancelRecurringPayments`. The key is revoked either way.",
-      }),
-    paymentRequests: z
-      .object({
-        canceled: z.array(z.string()).openapi({
-          description: "Open payment requests this key created that are now canceled.",
-        }),
-        failed: z.array(z.string()).openapi({
-          description: "Payment requests that could not be canceled; cancel them individually.",
-        }),
-      })
-      .nullable()
-      .openapi({
-        description:
-          "Null unless the request set `cancelPaymentRequests`. The key is revoked either way.",
-      }),
   })
   .openapi({ description: "API key revocation response payload." });
 

@@ -14,6 +14,7 @@ import {
   isoDateTimeSchema,
   memberIdParamSchema,
   orgIdParamSchema,
+  projectIdParamSchema,
   userIdSchema,
   withOpenApi,
 } from "./base";
@@ -123,6 +124,30 @@ export const memberRoleSchema = z
     }),
   })
   .openapi({ description: "A membership in the authenticated organization and its role." });
+
+export const memberLinkedPaymentsSchema = z
+  .object({
+    userId: userIdSchema,
+    projects: z
+      .array(
+        z.object({
+          projectId: projectIdParamSchema,
+          projectName: z.string().openapi({ example: "Payments" }),
+          activeRecurringPayments: z.number().int().openapi({
+            description:
+              "Active recurring payments the member activated, as `GET /v1/payments/recurring-payments?status=active&activatedByUserId=` lists them.",
+            example: 2,
+          }),
+          openPaymentRequests: z.number().int().openapi({
+            description:
+              "Open payment requests the member created, as `GET /v1/payments/requests?status=awaiting_payment&createdByUserId=` lists them.",
+            example: 1,
+          }),
+        })
+      )
+      .openapi({ description: "Projects holding anything the member set up; others are absent." }),
+  })
+  .openapi({ description: "What a member set up directly, which keeps running after removal." });
 
 export const updateMemberRoleRequestSchema = updateMemberRoleSchemaBase
   .extend({

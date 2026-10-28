@@ -6,10 +6,17 @@ import { Label } from "@sdp/ui/label";
 import { Modal } from "@sdp/ui/modal";
 import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
+import useSWR from "swr";
 import { z } from "zod";
+import {
+  LinkedPaymentsNotice,
+  type LinkedPaymentsState,
+} from "@/components/linked-payments-notice";
 import { useTranslations } from "@/i18n/provider";
+import { useProjectId } from "@/lib/use-dashboard-project";
 import { useZodForm } from "@/lib/use-zod-form";
-import { deactivateApiKeyInlineAction } from "./actions";
+import { deactivateApiKeyInlineAction, loadApiKeyLinkedPaymentsAction } from "./actions";
+import { apiKeysQueryKeys } from "./api-keys-query-key";
 
 interface DeleteApiKeyModalProps {
   keyId: string;
@@ -22,9 +29,41 @@ interface DeleteApiKeyModalProps {
 
 const deleteApiKeyFormSchema = z.object({
   confirmation: z.string(),
-  cancelRecurringPayments: z.boolean(),
-  cancelPaymentRequests: z.boolean(),
 });
+
+/**
+ * What the key set up in this project that keeps running after it is deleted, read once each
+ * time the dialog opens.
+ *
+ * @param keyId - The key about to be deleted.
+ * @returns The read, as the notice renders it.
+ */
+function useApiKeyLinkedPayments(keyId: string): LinkedPaymentsState {
+  const projectId = useProjectId();
+  const { data } = useSWR(
+    apiKeysQueryKeys.linkedPayments(keyId),
+    ([, id]: readonly [string, string]) => loadApiKeyLinkedPaymentsAction(id),
+    { revalidateOnFocus: false, revalidateOnReconnect: false, revalidateIfStale: false }
+  );
+  if (data === undefined) {
+    return { status: "loading" };
+  }
+  if (!data.ok) {
+    return { status: "error", message: data.message };
+  }
+  return {
+    status: "loaded",
+    filter: { kind: "api_key", apiKeyId: keyId },
+    projects: [
+      {
+        projectId,
+        projectName: null,
+        activeRecurringPayments: data.activeRecurringPayments,
+        openPaymentRequests: data.openPaymentRequests,
+      },
+    ],
+  };
+}
 
 export function DeleteApiKeyModal({
   keyId,
@@ -128,9 +167,8 @@ function DeleteApiKeyForm({
   const t = useTranslations();
   const form = useZodForm(deleteApiKeyFormSchema, {
     confirmation: "",
-    cancelRecurringPayments: false,
-    cancelPaymentRequests: false,
   });
+  const linkedPayments = useApiKeyLinkedPayments(keyId);
   const canSubmit = form.values.confirmation.trim() === keyName.trim();
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -149,8 +187,6 @@ function DeleteApiKeyForm({
       keyId,
       keyName,
       confirmation: parsed.data.confirmation,
-      cancelRecurringPayments: parsed.data.cancelRecurringPayments,
-      cancelPaymentRequests: parsed.data.cancelPaymentRequests,
     }).catch((error) => ({
       ok: false,
       message: error instanceof Error ? error.message : t("DashboardCustody.deleteApiKey"),
@@ -184,39 +220,7 @@ function DeleteApiKeyForm({
         disabled={isSubmitting}
       />
 
-      <label className="flex items-start gap-2 text-sm text-secondary">
-        <input
-          type="checkbox"
-          className="mt-0.5"
-          checked={form.values.cancelRecurringPayments}
-          onChange={(event) =>
-            form.setField("cancelRecurringPayments", event.currentTarget.checked)
-          }
-          disabled={isSubmitting}
-        />
-        <span>
-          <span className="block text-primary">
-            {t("DashboardCustody.apiKeyCancelRecurringPayments")}
-          </span>
-          {t("DashboardCustody.apiKeyCancelRecurringPaymentsHelp")}
-        </span>
-      </label>
-
-      <label className="flex items-start gap-2 text-sm text-secondary">
-        <input
-          type="checkbox"
-          className="mt-0.5"
-          checked={form.values.cancelPaymentRequests}
-          onChange={(event) => form.setField("cancelPaymentRequests", event.currentTarget.checked)}
-          disabled={isSubmitting}
-        />
-        <span>
-          <span className="block text-primary">
-            {t("DashboardCustody.apiKeyCancelPaymentRequests")}
-          </span>
-          {t("DashboardCustody.apiKeyCancelPaymentRequestsHelp")}
-        </span>
-      </label>
+      <LinkedPaymentsNotice subject="api_key" state={linkedPayments} />
 
       <DeleteApiKeyFormActions
         canSubmit={canSubmit}

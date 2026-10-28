@@ -570,7 +570,7 @@ Rotation replaces the secret without an availability gap: the new key is a fresh
 
 Open the **Actions** dropdown next to the key and click **Delete key**. The key stops working on its next request and cannot be restored. Deleting a rotated key during its grace period ends the overlap early: the replacement keeps working.
 
-If the key may be compromised, also cancel the recurring payments it activated: send `"cancelRecurringPayments": true` with the revocation. A recurring payment answers to the key that activated or last resumed it, or that last changed its source wallet, recipient, token, amount or period: that change re-authorizes where its money goes. Changing only its metadata or next collection date does not. The response lists the recurring payments it canceled and any it could not, which you can cancel one by one.
+Deleting a key stops nothing it set up: SDP runs recurring payments and payment requests itself, so a schedule the key activated keeps collecting and a request it created stays payable. The delete dialog counts what the key set up in the project and links to each list. Through the API, list them with `activatedByApiKeyId` on `GET /v1/payments/recurring-payments` and `createdByApiKeyId` on `GET /v1/payments/requests`; both also match the keys it was rotated from. Cancel any that should stop, a compromised key above all.
 
 ---
 

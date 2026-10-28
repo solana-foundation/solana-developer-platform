@@ -569,5 +569,14 @@
     "keyReusedRestoreOriginal": "This differs from the request first sent for this action, which may already have gone through. Restore the original details to retry it, or check the list for its outcome.",
     "processingCheckStatus": "This payment is still processing. Check its status before sending it again; sending the same details now returns this payment.",
     "keyNotPersisted": "This browser isn’t keeping the request’s retry key (private browsing or storage full), so it wasn’t sent. Allow site storage and try again."
+  },
+  "linkedPayments": {
+    "checking": "Checking what it set up…",
+    "loadFailed": "Couldn't check what it set up: {error}",
+    "none": "Nothing it set up is still running.",
+    "keepsRunningKey": "SDP keeps running these after the key is deleted. Cancel any that should stop.",
+    "keepsRunningMember": "SDP keeps running these after the member is removed. Cancel any that should stop.",
+    "activeRecurringPayments": "Active recurring payments: {count}",
+    "openPaymentRequests": "Open payment requests: {count}"
   }
 }

@@ -12,6 +12,8 @@ export const listPaymentRequestsQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
   status: z.enum(["awaiting_payment", "paid", "canceled", "expired"]).optional(),
+  createdByApiKeyId: z.string().min(1).optional(),
+  createdByUserId: z.string().min(1).optional(),
 });
 
 export const paymentRequestParamsSchema = z.object({

@@ -9,6 +9,7 @@ import type {
   PaymentRecurringPaymentUpdateAttemptStage,
   RecurringPaymentStatusWithRecoverableCollection,
 } from "@sdp/types/payments";
+import type { PaymentPrincipalFilter } from "./payment-principal-filter";
 
 export interface PaymentRecurringPaymentRow {
   id: string;
@@ -499,6 +500,7 @@ export interface ListPaymentRecurringPaymentsInput {
   projectId: string;
   status?: PaymentRecurringPaymentStatus;
   counterpartyId?: string;
+  activatedBy: PaymentPrincipalFilter | null;
   limit: number;
   offset: number;
 }
@@ -576,17 +578,6 @@ export interface PaymentRecurringPaymentsRepository {
     staleBefore?: string;
     activatedBy: RecurringPaymentActivator | null;
   }): Promise<PaymentRecurringPaymentRow | null>;
-  /**
-   * Recurring payments a key activated or last resumed that collect, or will
-   * once an operation in flight finishes, for revoke-and-cancel: under this
-   * key's id or any id it was rotated from, since rotation mints a new row
-   * for the same credential.
-   */
-  listLiveRecurringPaymentsActivatedByApiKey(params: {
-    organizationId: string;
-    projectId: string;
-    apiKeyId: string;
-  }): Promise<PaymentRecurringPaymentRow[]>;
   resetRecurringPaymentActivationIfNotActive(params: {
     recurringPaymentId: string;
     organizationId: string;
@@ -667,4 +658,13 @@ export interface PaymentRecurringPaymentsRepository {
   listRecurringPayments(
     params: ListPaymentRecurringPaymentsInput
   ): Promise<ListPaymentRecurringPaymentsResult>;
+  /**
+   * How many active recurring payments a principal activated in each Project of an
+   * Organization, as `listRecurringPayments` under `active` counts them. Projects with none are
+   * absent.
+   */
+  countActiveRecurringPaymentsByProject(params: {
+    organizationId: string;
+    activatedBy: PaymentPrincipalFilter;
+  }): Promise<Array<{ projectId: string; count: number }>>;
 }

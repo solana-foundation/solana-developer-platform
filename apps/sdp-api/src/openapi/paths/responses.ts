@@ -75,6 +75,7 @@ import {
   createOrganizationResponseSchema,
   inviteMemberResponseSchema,
   listMembersResponseSchema,
+  memberLinkedPaymentsSchema,
   memberRoleSchema,
   organizationSchema,
 } from "@/openapi/schemas/organizations";
@@ -116,6 +117,7 @@ export const createOrganizationResponse = successResponseSchema(createOrganizati
 export const listMembersResponse = successResponseSchema(listMembersResponseSchema);
 export const inviteMemberResponse = successResponseSchema(inviteMemberResponseSchema);
 export const memberRoleResponse = successResponseSchema(memberRoleSchema);
+export const memberLinkedPaymentsResponse = successResponseSchema(memberLinkedPaymentsSchema);
 export const actionSuccessResponse = successResponseSchema(actionSuccessSchema);
 
 export const listApiKeysResponse = successResponseSchema(listApiKeysResponseSchema);

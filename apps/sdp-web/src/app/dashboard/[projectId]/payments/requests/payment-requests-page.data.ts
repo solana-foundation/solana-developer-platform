@@ -12,6 +12,12 @@ import {
 } from "@sdp/types/well-known-tokens";
 import { z } from "zod";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
+import {
+  PAYMENT_REQUEST_CREATED_BY_PARAMS,
+  type PaymentPrincipalFilter,
+  parsePaymentPrincipalParams,
+  setPaymentPrincipalParams,
+} from "@/lib/payment-principal-filter";
 import { PAYMENT_REQUESTS_HREF } from "@/lib/payments-routes";
 import type { SdpApiClient } from "@/lib/sdp-api";
 
@@ -86,7 +92,12 @@ export function deriveTokenOptions(cluster: SolanaCluster): PaymentRequestTokenO
  */
 export async function fetchPaymentRequests(
   request: SdpApiClient["request"],
-  options: { page?: number; pageSize?: number; status?: PaymentRequest["status"] } = {}
+  options: {
+    page?: number;
+    pageSize?: number;
+    status?: PaymentRequest["status"];
+    createdBy?: PaymentPrincipalFilter | null;
+  } = {}
 ): Promise<PaymentRequestsResult> {
   try {
     const query = new URLSearchParams({
@@ -94,6 +105,9 @@ export async function fetchPaymentRequests(
       pageSize: String(options.pageSize ?? PAYMENT_REQUESTS_PAGE_SIZE),
       ...(options.status ? { status: options.status } : {}),
     });
+    if (options.createdBy !== undefined) {
+      setPaymentPrincipalParams(query, options.createdBy, PAYMENT_REQUEST_CREATED_BY_PARAMS);
+    }
     const response = await request(`/v1/payments/requests?${query.toString()}`);
     if (!response.ok) {
       return { ok: false, data: [], total: 0, error: await response.text() };
@@ -124,6 +138,8 @@ export interface PaymentRequestsListState {
   status: PaymentRequest["status"] | null;
   /** Trimmed, never empty; `null` when the list is not searched. */
   search: string | null;
+  /** Who created the requests listed; null lists everyone's. */
+  createdBy: PaymentPrincipalFilter | null;
 }
 
 function firstParamValue(value: string | string[] | undefined): string | undefined {
@@ -161,6 +177,7 @@ export function parsePaymentRequestsListParams(
     ),
     status: PAYMENT_REQUEST_STATUSES.find((candidate) => candidate === status) ?? null,
     search: search ? search : null,
+    createdBy: parsePaymentPrincipalParams(params, PAYMENT_REQUEST_CREATED_BY_PARAMS),
   };
 }
 
@@ -207,6 +224,7 @@ export function paymentRequestsListHref(state: PaymentRequestsListState): string
   }
   if (state.status) query.set("status", state.status);
   if (state.search) query.set("search", state.search);
+  setPaymentPrincipalParams(query, state.createdBy, PAYMENT_REQUEST_CREATED_BY_PARAMS);
   const search = query.toString();
   return `${PAYMENT_REQUESTS_HREF}${search ? `?${search}` : ""}`;
 }
@@ -238,11 +256,12 @@ export async function loadPaymentRequestsList(
   request: SdpApiClient["request"],
   state: PaymentRequestsListState
 ): Promise<PaymentRequestsListResult> {
-  const { page, pageSize, status } = state;
+  const { page, pageSize, status, createdBy } = state;
   const result = await fetchPaymentRequests(request, {
     page,
     pageSize,
     ...(status ? { status } : {}),
+    createdBy,
   });
   const hasNextPage = result.ok && page * pageSize < result.total;
   if (!result.ok || status !== "awaiting_payment") {
