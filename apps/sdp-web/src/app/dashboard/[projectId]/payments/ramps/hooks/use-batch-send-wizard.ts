@@ -23,6 +23,7 @@ import {
   type CreateTransferBatchResult,
   estimateTransferBatch,
   fetchBatchRecipients,
+  TransferBatchRequestError,
 } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import type { BulkImportRow } from "@/app/dashboard/[projectId]/payments/ramps/bulk-import";
 import {
@@ -484,6 +485,20 @@ export function useBatchSendWizard({
         });
       }
     } catch (error) {
+      // A reference another batch on this wallet already uses (HOO-2335): nothing was sent.
+      if (
+        error instanceof TransferBatchRequestError &&
+        error.status === 409 &&
+        error.code === "CONFLICT" &&
+        request.externalId !== undefined
+      ) {
+        toast.error(t("DashboardPayments.batchSend.referenceInUse"), {
+          id: toastId,
+          description: t("DashboardPayments.batchSend.referenceInUseDescription"),
+          position: "bottom-right",
+        });
+        return;
+      }
       toast.error(t("DashboardPayments.batchSend.resultFailed"), {
         id: toastId,
         description:
@@ -513,7 +528,7 @@ export function useBatchSendWizard({
       setBatchResult(result);
       toast.success(t("DashboardPayments.batchSend.retrySubmitted"), {
         id: toastId,
-        description: t("Shared.idempotency.processingCheckStatus"),
+        description: t("DashboardPayments.batchSend.retrySubmittedDescription"),
         position: "bottom-right",
       });
     } catch (error) {

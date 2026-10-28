@@ -78,7 +78,7 @@ async function answerHeldExternalId(
     return respondToTransferBatchReplay(c, holder, scope.organizationId, scope.projectId);
   }
   throw conflict(
-    "A different transfer batch with this externalId already exists for this source wallet. Read it with GET /v1/payments/transfer-batches/{batchId} and send only its failed recipients in a new batch with a new externalId.",
+    "A different transfer batch with this externalId already exists for this source wallet. Read it with GET /v1/payments/transfer-batches/{batchId}, and send its failed recipients again with POST /v1/payments/transfer-batches/{batchId}/retry.",
     { batchId: holder.id, externalId: holder.external_id }
   );
 }
