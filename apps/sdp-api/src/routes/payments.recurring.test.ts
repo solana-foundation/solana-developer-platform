@@ -8,6 +8,7 @@ import {
   type PaymentRecurringPaymentAttemptStatus,
   type PaymentRecurringPaymentLifecycleAttemptStage,
   type PaymentRecurringPaymentLifecycleOperation,
+  type PaymentRecurringPaymentStatus,
   type PaymentRecurringPaymentUpdateAttemptStage,
   type PaymentSubscriptionCollectionAttemptMetadata,
   RECURRING_PAYMENT_CANCEL_PROCESSING_STATUS,
@@ -189,7 +190,7 @@ function sentApprovals(): { delegate: string; amount: bigint }[] {
  */
 async function rewindRecurringPaymentStatus(
   recurringPaymentId: string,
-  status: string,
+  status: PaymentRecurringPaymentStatus,
   updatedAt: string
 ): Promise<void> {
   await getDb(env).transaction(async (tx) => {
@@ -2641,8 +2642,8 @@ describe("Payments routes — recurring", () => {
       cancelNow.mockRestore();
       plainCancel.mockRestore();
     });
-    // A plain cancel's end-of-period expiry still lets that period be pulled, so it is not taken
-    // as landed: cancel-now is sent over it.
+    // A plain cancel's end-of-period expiry still lets that period be pulled: a fresh cancel sends
+    // cancel-now over it.
     fetchMaybeSubscriptionDelegationMock.mockResolvedValue(delegation(1_800_000_000n));
 
     const response = await app.request(
@@ -6895,7 +6896,7 @@ describe("Payments routes — recurring", () => {
     /** Puts the schedule back mid-transition (not stale) and its keyed attempt in flight. */
     async function leaveMidTransition(input: {
       recurringPaymentId: string;
-      status: string;
+      status: PaymentRecurringPaymentStatus;
       attemptTable: string;
       key: string;
     }) {
@@ -8094,7 +8095,11 @@ describe("Payments routes — recurring", () => {
             signature: string | null;
           }>();
 
-      it("finishes a cancel whose send landed without sending it again", async () => {
+      it.each([
+        { cancel: "cancel-now", landed: () => canceledNowDelegation() },
+        // A plain cancel sent while a collection was in flight, which has settled since.
+        { cancel: "plain cancel", landed: () => delegation(1_800_000_000n) },
+      ])("finishes a $cancel whose send landed without sending it again", async ({ landed }) => {
         const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
         const key = crypto.randomUUID();
         expect(
@@ -8109,8 +8114,8 @@ describe("Payments routes — recurring", () => {
         // A fresh attempt has sent nothing, so it reads nothing extra.
         expect(finalizedReads(fetchMaybeSubscriptionDelegationMock.mock.calls)).toBe(0);
         await leaveUnsavedSend({ recurringPaymentId: activated.id, key });
-        // The chain shows the cancel: the period's end is set.
-        fetchMaybeSubscriptionDelegationMock.mockResolvedValue(canceledNowDelegation());
+        // The chain shows the cancel: its expiry is set.
+        fetchMaybeSubscriptionDelegationMock.mockResolvedValue(landed());
         const sent = sends();
 
         const retry = await app.request(

@@ -65,7 +65,6 @@ import {
   confirmSubscriptionSignature,
   createSubscriptionStepStore,
   isSubscriptionDelegationCanceled,
-  isSubscriptionDelegationCanceledNow,
   lockLiveActivatingKey,
   parseNullableStoredSignature,
   ResumedStepUnsettledError,
@@ -479,21 +478,6 @@ async function finalizeCancelAndReleaseAuthority(
 }
 
 /**
- * Whether the chain shows a cancel landed: one that ends the delegation now only once it can no
- * longer be pulled from, one that waits for a collection in flight once any expiry is set.
- *
- * @param endsNow - Whether this cancel ends the delegation now.
- * @returns The predicate over the delegation as read.
- */
-function cancelLanded(
-  endsNow: boolean
-): (delegation: MaybeAccount<SubscriptionDelegation>) => boolean {
-  return endsNow
-    ? (delegation) => isSubscriptionDelegationCanceledNow(delegation, new Date())
-    : isSubscriptionDelegationCanceled;
-}
-
-/**
  * Whether a collection of the schedule's due period was already in flight when its cancel claimed
  * it. None can start after the claim (a collection claims only an `active` schedule), so the
  * answer only goes from true to false. One database read, no RPC.
@@ -720,7 +704,10 @@ async function runRecurringPaymentCancel(input: {
       subscriptionId: subscription.id,
       dueAt: claimed.next_collection_due_at,
     }));
-    const isCanceled = cancelLanded(endsNow);
+    // Either cancel counts as landed. Whether one is in flight can change between runs, so an
+    // earlier run may have sent the plain cancel; its delegation stays pullable until the period
+    // ends, but only by this custody wallet, which never collects a canceled schedule.
+    const isCanceled = isSubscriptionDelegationCanceled;
     // The program refuses a cancel once the subscription is canceled: by an earlier cancel, or one
     // the wallet's owner signed outside SDP. When this send cannot have landed, the chain decides,
     // and a canceled delegation finalizes instead of rolling back. An unreadable chain keeps the

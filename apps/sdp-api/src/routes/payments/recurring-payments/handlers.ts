@@ -181,11 +181,14 @@ async function recurringPaymentResponse(
   c: AppContext,
   recurringPayment: PaymentRecurringPaymentRow
 ): Promise<PaymentRecurringPaymentResponse> {
-  const tokenApproval = await describeTokenApprovalAfterCancel(c.env, recurringPayment);
-  return {
+  const response: PaymentRecurringPaymentResponse = {
     recurringPayment: mapRecurringPayment(recurringPayment),
-    ...(tokenApproval === undefined ? {} : { tokenApproval }),
   };
+  const tokenApproval = await describeTokenApprovalAfterCancel(c.env, recurringPayment);
+  if (tokenApproval !== undefined) {
+    response.tokenApproval = tokenApproval;
+  }
+  return response;
 }
 
 function tenant(c: AppContext): { organizationId: string; projectId: string } {

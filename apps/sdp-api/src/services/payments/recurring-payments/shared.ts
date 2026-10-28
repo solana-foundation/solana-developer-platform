@@ -436,9 +436,9 @@ export function createSubscriptionStepStore(
 }
 
 /**
- * Whether a subscription delegation is canceled on chain: `cancelSubscription`
- * sets `expiresAtTs` to the end of the current period and `resumeSubscription`
- * clears it to 0.
+ * Whether a subscription delegation is canceled on chain: `cancelSubscriptionNow`
+ * sets `expiresAtTs` to the chain's clock, `cancelSubscription` to the end of the
+ * current period, and `resumeSubscription` clears it to 0.
  */
 export function isSubscriptionDelegationCanceled(
   delegation: MaybeAccount<SubscriptionDelegation>
@@ -476,32 +476,6 @@ export function approveSubscriptionAuthority(input: {
       amount: input.amount,
     },
     { programAddress: input.tokenProgram }
-  );
-}
-
-/**
- * How far the chain's clock may run ahead of ours when a cancel-now has just landed. A plain
- * cancel's expiry is the end of a period, hours away, so it stays outside this.
- */
-const CANCEL_NOW_CLOCK_SLACK_SECONDS = 300n;
-
-/**
- * Whether the delegation can no longer be pulled from: a cancel-now set its expiry to the chain's
- * clock at the time (HOO-2339). A plain cancel, which leaves the current period pullable, does not
- * count until that period has ended.
- *
- * @param delegation - The subscription delegation as read.
- * @param now - The reading time.
- */
-export function isSubscriptionDelegationCanceledNow(
-  delegation: MaybeAccount<SubscriptionDelegation>,
-  now: Date
-): boolean {
-  return (
-    isSubscriptionDelegationCanceled(delegation) &&
-    delegation.exists &&
-    delegation.data.expiresAtTs <=
-      BigInt(Math.floor(now.getTime() / 1000)) + CANCEL_NOW_CLOCK_SLACK_SECONDS
   );
 }
 

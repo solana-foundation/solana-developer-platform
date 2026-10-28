@@ -1,4 +1,5 @@
 import { SDP_ENVIRONMENTS } from "@sdp/types/api-keys";
+import { z } from "zod";
 import { closeDatabasePools, getDb } from "@/db/client";
 import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import { getProcessEnv } from "@/lib/runtime-env";
@@ -11,59 +12,52 @@ import { revokeSubscriptionAuthorityNow } from "@/services/payments/recurring-pa
  * `docs/ops/subscription-authority-revoke.md`.
  */
 
-const FLAGS = new Set([
-  "organization-id",
-  "project-id",
-  "custody-wallet-id",
-  "token",
-  "operator",
-  "reason",
-  "ticket",
-]);
+const argsSchema = z
+  .object({
+    "organization-id": z.string().trim().min(1),
+    "project-id": z.string().trim().min(1),
+    "custody-wallet-id": z.string().trim().min(1),
+    token: z.string().trim().min(1),
+    operator: z.string().trim().min(1),
+    reason: z.string().trim().min(1),
+    ticket: z.string().trim().min(1),
+  })
+  .strict();
 
-function flags(): Map<string, string> {
-  const result = new Map<string, string>();
-  for (let index = 2; index < process.argv.length; index += 2) {
-    const flag = process.argv[index];
-    const value = process.argv[index + 1];
-    if (!flag?.startsWith("--") || !FLAGS.has(flag.slice(2)) || !value || value.startsWith("--")) {
+const projectSchema = z.object({ environment: z.enum(SDP_ENVIRONMENTS) });
+
+/** `--flag value` pairs from argv, each named once, parsed with {@link argsSchema}. */
+function parseArgs(argv: readonly string[]): z.infer<typeof argsSchema> {
+  const pairs = new Map<string, string>();
+  for (let index = 0; index < argv.length; index += 2) {
+    const flag = argv[index];
+    const value = argv[index + 1];
+    if (!flag?.startsWith("--") || value === undefined || value.startsWith("--")) {
       throw new Error(`Invalid argument: ${flag ?? "(missing flag)"}`);
     }
-    if (result.has(flag.slice(2))) throw new Error(`Duplicate argument: ${flag}`);
-    result.set(flag.slice(2), value);
+    if (pairs.has(flag.slice(2))) throw new Error(`Duplicate argument: ${flag}`);
+    pairs.set(flag.slice(2), value);
   }
-  return result;
-}
-
-function required(args: Map<string, string>, name: string): string {
-  const value = args.get(name)?.trim();
-  if (!value) throw new Error(`--${name} is required`);
-  return value;
+  return argsSchema.parse(Object.fromEntries(pairs));
 }
 
 async function main(): Promise<void> {
-  const args = flags();
+  const args = parseArgs(process.argv.slice(2));
   const env = getProcessEnv();
-  const organizationId = required(args, "organization-id");
-  const projectId = required(args, "project-id");
   const project = await getDb(env)
     .prepare("SELECT environment FROM projects WHERE id = ? AND organization_id = ?")
-    .bind(projectId, organizationId)
-    .first<{ environment: string }>();
-  const environment = SDP_ENVIRONMENTS.find((candidate) => candidate === project?.environment);
-  if (environment === undefined) throw new Error("Project not found in that organization");
+    .bind(args["project-id"], args["organization-id"])
+    .first<unknown>();
+  if (project === null) throw new Error("Project not found in that organization");
+  const { environment } = projectSchema.parse(project);
 
   const result = await runInEnvironmentClusterScope(environment, () =>
     revokeSubscriptionAuthorityNow(env, {
-      organizationId,
-      projectId,
-      custodyWalletId: required(args, "custody-wallet-id"),
-      token: required(args, "token"),
-      incident: {
-        operator: required(args, "operator"),
-        reason: required(args, "reason"),
-        ticket: required(args, "ticket"),
-      },
+      organizationId: args["organization-id"],
+      projectId: args["project-id"],
+      custodyWalletId: args["custody-wallet-id"],
+      token: args.token,
+      incident: { operator: args.operator, reason: args.reason, ticket: args.ticket },
     })
   );
   console.log(JSON.stringify(result, null, 2));
