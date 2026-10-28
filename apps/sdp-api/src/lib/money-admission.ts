@@ -50,6 +50,9 @@ import type { Env } from "@/types/env";
  * | active               | production without the entitlement       | refuse  |
  * | suspended or deleted | any                                      | refuse  |
  *
+ * An operator-disabled project movement also refuses its start. The same
+ * live read supplies this control without another database round trip.
+ *
  * Then the principal (see `lib/money-principal.ts`): a start with none is
  * refused; an API key must be live, hold one of the movement's actions and
  * have the signing wallet in its wallet scope; a member must be active, still
