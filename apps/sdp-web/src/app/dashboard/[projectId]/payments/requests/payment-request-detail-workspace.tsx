@@ -28,6 +28,7 @@ import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { transactionHref } from "@/lib/payments-routes";
+import { useClientNow } from "@/lib/use-client-now";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { REQUEST_STATUS_TONE, REQUEST_STATUS_TRANSLATION_KEYS } from "./payment-request-status";
 import { cancelPaymentRequest, deriveTokenOptions } from "./payment-requests-page.data";
@@ -298,6 +299,9 @@ function RequestCancelFooter({ requestId }: { requestId: string }) {
   );
 }
 
+/** How often an open request's Cancel is re-decided, so it goes once the request expires. */
+const CANCEL_ELIGIBILITY_REFRESH_MS = 30_000;
+
 interface PaymentRequestDetailWorkspaceProps {
   request: PaymentRequest | null;
   /**
@@ -354,6 +358,9 @@ function PaymentRequestRecord({
   const projectHref = useProjectHref();
   const locale = useLocale();
   const { sdpEnvironment, dashboardAccess } = useDashboardWorkspace();
+  // Whether it is still payable depends on the clock, so it is decided only in the browser: the
+  // server render and the first client render both leave Cancel out, and agree.
+  const now = useClientNow(CANCEL_ELIGIBILITY_REFRESH_MS);
   const tokenSymbolByMint = useMemo(
     () =>
       new Map(
@@ -429,7 +436,8 @@ function PaymentRequestRecord({
           </RecordColumns>
         </div>
 
-        {isPaymentRequestPayableAt(request, Date.now()) &&
+        {now !== null &&
+        isPaymentRequestPayableAt(request, now) &&
         dashboardAccess.capabilities.canManagePaymentRequests ? (
           <RequestCancelFooter requestId={request.id} />
         ) : null}
