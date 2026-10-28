@@ -204,6 +204,9 @@ export async function findTransferBatchRecordReplay(
           organizationId,
           projectId: authorized.projectId,
           error: "The batch request ended before this recipient's transfer was sent",
+          // Only the recipients this request wrote, in the batch's own
+          // transaction: a retry may have claimed others since, and may be live.
+          attemptedBefore: new Date(Date.parse(row.created_at) + 1).toISOString(),
         })
       : row;
   return {

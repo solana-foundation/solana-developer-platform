@@ -6,7 +6,13 @@ import { getAuth, requireProjectId } from "@/lib/auth";
 import { conflict, internalError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { type AuthorizeInput, getAuthorized } from "@/middleware/authorize";
-import type { MovementStepInput } from "@/middleware/movement-steps";
+import {
+  getIdempotencyFingerprint,
+  getIdempotencyRecordKey,
+  idempotencyFingerprintMatches,
+  markIdempotencyCommitted,
+} from "@/middleware/idempotency";
+import type { MovementStepInput, RecordAnswer } from "@/middleware/movement-steps";
 import { type AppContext, getPaymentTransferBatchesRepository } from "@/routes/payments/context";
 import { admitPaymentWalletRuntimeExecution } from "@/routes/payments/wallets";
 import {
@@ -77,6 +83,63 @@ export async function authorizeTransferBatchRetry(
   return { ...authorized, batch };
 }
 
+/**
+ * Answers a retry from the row its claim recorded under the key (HOO-2343,
+ * ADR 0009): a rerun after a 5xx, a takeover of a crashed retry, or a retry of
+ * the key once its record expired. Its recipients were claimed, and are sent,
+ * linked or failed by now, or still pending if that request died before
+ * sending them; nothing is claimed again. It answers the batch as it stands
+ * and settles nothing: the stranded-batch job fails a dead claim's unsent
+ * recipients once they are past any request's lifetime.
+ */
+export async function findTransferBatchRetryReplay(
+  c: AppContext,
+  input: MovementStepInput<AuthorizedBatchRetry>,
+  recordKey: string
+): Promise<RecordAnswer | null> {
+  const { batch, projectId } = input.authorized;
+  const organizationId = input.authorized.scope.auth.organizationId;
+  const retry = await getPaymentTransferBatchesRepository(c).findTransferBatchRetryByIdempotency({
+    organizationId,
+    projectId,
+    idempotencyKey: recordKey,
+  });
+  if (retry === null) return null;
+  if (
+    retry.batch_id !== batch.id ||
+    !idempotencyFingerprintMatches(c, retry.idempotency_fingerprint)
+  ) {
+    // Another request's retry under this key: the step refuses it (422).
+    return { fingerprint: retry.idempotency_fingerprint, respond: () => success(c, {}) };
+  }
+  return {
+    fingerprint: retry.idempotency_fingerprint,
+    respond: async () =>
+      success(c, await buildTransferBatchResponse(c, batch, organizationId, projectId)),
+  };
+}
+
+/**
+ * Refuses (409) a retry whose recipient's counterparty account now holds a
+ * different address than the one the batch recorded for it: the retry pays
+ * the recorded address or nobody, and the caller decides with the batch in
+ * hand. Nothing has been signed.
+ */
+function assertRecordedDestinations(
+  batch: PaymentTransferBatchRow,
+  failed: PaymentTransferRecipientRow[],
+  resolvedAddresses: string[]
+): void {
+  const changed = failed.filter(
+    (row, index) => row.destination_address !== resolvedAddresses[index]
+  );
+  if (changed.length === 0) return;
+  throw conflict(
+    "A failed recipient's counterparty account changed its address since the batch was sent. Nothing was sent; send that recipient in a new batch.",
+    { batchId: batch.id, recipientIds: changed.map((row) => row.id) }
+  );
+}
+
 /** The custody runtime takes the source wallet: state, after the key's replay exits. */
 export async function admitTransferBatchRetryExecution(
   c: AppContext,
@@ -92,9 +155,12 @@ export async function admitTransferBatchRetryExecution(
  * rejected it. Pending and processing recipients may still land and are never
  * touched. The resend is built first, then the failed recipients are claimed
  * back to pending under the batch lock, all or nothing, so a concurrent retry
- * that claimed one first answers 409 and sends nothing. Each recipient keeps
- * its row and is linked to its new chunk transfer; the failed transfer rows
- * stay as they were. The batch's stored options apply.
+ * that claimed one first answers 409 and sends nothing. The claim records the
+ * retry under its key in the same transaction, so a rerun is answered from it
+ * (findTransferBatchRetryReplay). Each recipient is paid the address the batch
+ * recorded for it, or the retry is refused. Each keeps its row and is linked
+ * to its new chunk transfer; the failed transfer rows stay as they were. The
+ * batch's stored options apply.
  *
  * @param c - Request context.
  * @returns JSON batch response with recipients and chunk transfers.
@@ -124,13 +190,24 @@ export async function retryTransferBatch(c: AppContext) {
     asBatchInput(batch, authorized.sourceWallet.id, failed.rows),
     authorized
   );
+  assertRecordedDestinations(
+    batch,
+    failed.rows,
+    resolved.recipients.map((recipient) => recipient.destinationAddress)
+  );
   const prepared = await prepareBatchChunks(c, resolved, options.maxRecipientsPerTransaction);
+  const idempotencyKey = getIdempotencyRecordKey(c);
+  const idempotencyFingerprint = getIdempotencyFingerprint(c);
+  if (idempotencyKey === undefined || idempotencyFingerprint === undefined) {
+    throw internalError("Transfer batch retry is missing its Idempotency-Key");
+  }
   const claimed = await repository.claimFailedTransferRecipients({
     batchId: batch.id,
     organizationId,
     projectId,
     recipientIds: failed.rows.map((row) => row.id),
     addedTransactionCount: prepared.chunks.length,
+    retry: { idempotencyKey, idempotencyFingerprint, initiatedByKeyId: authorized.scope.auth.id },
   });
   if (claimed === null) {
     throw conflict(
@@ -138,6 +215,8 @@ export async function retryTransferBatch(c: AppContext) {
       { batchId: batch.id }
     );
   }
+  // The retry row exists under the key: any later answer is stored for its reruns.
+  markIdempotencyCommitted(c);
   const claimedById = new Map(claimed.recipients.map((row) => [row.id, row]));
   const finalBatch = await runBatchChunks({
     c,

@@ -1,4 +1,6 @@
+import { z } from "zod";
 import type { DatabaseClient as AppDb, DatabaseExecutor } from "@/db/client";
+import { parsePostgresJson } from "@/db/postgres-utils";
 import { internalError } from "@/lib/errors";
 import { parseNullableCustodyWalletId } from "./payment-execution-identity";
 import {
@@ -12,12 +14,14 @@ import {
   type GetPaymentTransferBatchInput,
   type GetPaymentTransferRecipientInput,
   generatePaymentTransferBatchId,
+  generatePaymentTransferBatchRetryId,
   generatePaymentTransferRecipientId,
   type ListPaymentTransferBatchesInput,
   type ListPaymentTransferBatchesResult,
   type ListPaymentTransferRecipientsInput,
   type ListPaymentTransferRecipientsResult,
   type PaymentTransferBatchesRepository,
+  type PaymentTransferBatchRetryRow,
   type PaymentTransferBatchRow,
   type PaymentTransferRecipientRow,
   type RecomputeTransferBatchStatusInput,
@@ -822,21 +826,32 @@ export function createPostgresPaymentTransferBatchesRepository(
              JOIN projects p ON p.id = b.project_id
             WHERE p.environment = ?
               AND b.status = 'processing'
-              AND b.created_at < ?
               AND EXISTS (
                 SELECT 1 FROM payment_transfer_recipients r
                  WHERE r.batch_id = b.id AND r.status = 'pending' AND r.transfer_id IS NULL
+                   AND r.updated_at < ?
               )
             ORDER BY b.created_at
             LIMIT ?`
         )
-        .bind(input.environment, input.createdBefore, input.limit)
+        .bind(input.environment, input.attemptedBefore, input.limit)
         .all<{ id: string; organization_id: string; project_id: string }>();
       return result.results.map((row) => ({
         batchId: row.id,
         organizationId: row.organization_id,
         projectId: row.project_id,
       }));
+    },
+
+    async findTransferBatchRetryByIdempotency({ organizationId, projectId, idempotencyKey }) {
+      const row = await db
+        .prepare(
+          `SELECT * FROM payment_transfer_batch_retries
+            WHERE organization_id = ? AND project_id = ? AND idempotency_key = ?`
+        )
+        .bind(organizationId, projectId, idempotencyKey)
+        .first<Record<string, unknown>>();
+      return row ? mapPaymentTransferBatchRetryRow(row) : null;
     },
 
     async failUnsentTransferRecipients(input) {
@@ -858,9 +873,16 @@ export function createPostgresPaymentTransferBatchesRepository(
                 AND organization_id = ?
                 AND project_id = ?
                 AND status = 'pending'
-                AND transfer_id IS NULL`
+                AND transfer_id IS NULL
+                AND updated_at < ?`
           )
-          .bind(input.error, input.batchId, input.organizationId, input.projectId)
+          .bind(
+            input.error,
+            input.batchId,
+            input.organizationId,
+            input.projectId,
+            input.attemptedBefore
+          )
           .run();
         return recomputeBatchStatusInTransaction(tx, input);
       });
@@ -899,9 +921,30 @@ export function createPostgresPaymentTransferBatchesRepository(
           if (claimed.results.length !== input.recipientIds.length) {
             throw new ClaimLostError();
           }
+          const retry = await tx
+            .prepare(
+              `INSERT INTO payment_transfer_batch_retries
+                 (id, batch_id, organization_id, project_id, idempotency_key,
+                  idempotency_fingerprint, initiated_by_key_id, recipient_ids)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb)
+               RETURNING *`
+            )
+            .bind(
+              generatePaymentTransferBatchRetryId(),
+              input.batchId,
+              input.organizationId,
+              input.projectId,
+              input.retry.idempotencyKey,
+              input.retry.idempotencyFingerprint,
+              input.retry.initiatedByKeyId,
+              JSON.stringify(input.recipientIds)
+            )
+            .first<Record<string, unknown>>();
+          if (!retry) throw internalError("Transfer batch retry was not recorded");
           return {
             batch: await recomputeBatchStatusInTransaction(tx, input),
             recipients: claimed.results.map(mapPaymentTransferRecipientRow),
+            retry: mapPaymentTransferBatchRetryRow(retry),
           };
         })
         .catch((error: unknown) => {
@@ -909,6 +952,21 @@ export function createPostgresPaymentTransferBatchesRepository(
           throw error;
         });
     },
+  };
+}
+
+const retryRecipientIdsSchema = z.array(z.string());
+
+function mapPaymentTransferBatchRetryRow(
+  row: Record<string, unknown>
+): PaymentTransferBatchRetryRow {
+  return {
+    id: String(row.id),
+    batch_id: String(row.batch_id),
+    idempotency_fingerprint: String(row.idempotency_fingerprint),
+    initiated_by_key_id: row.initiated_by_key_id === null ? null : String(row.initiated_by_key_id),
+    recipient_ids: retryRecipientIdsSchema.parse(parsePostgresJson<unknown>(row.recipient_ids)),
+    created_at: String(row.created_at),
   };
 }
 

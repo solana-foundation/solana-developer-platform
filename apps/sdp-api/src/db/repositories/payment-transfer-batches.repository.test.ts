@@ -265,12 +265,18 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
       })
     ).toMatchObject([{ id: second }]);
 
+    let claims = 0;
     const claim = (recipientIds: string[]) =>
       repo.claimFailedTransferRecipients({
         ...scope,
         batchId: batch.id,
         recipientIds,
         addedTransactionCount: 1,
+        retry: {
+          idempotencyKey: `retry-record-key-${++claims}`,
+          idempotencyFingerprint: "retry-fingerprint",
+          initiatedByKeyId: null,
+        },
       });
     // The second recipient is processing, so a claim naming it takes neither.
     expect(await claim([first, second])).toBeNull();
@@ -278,6 +284,18 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
     expect(claimed?.recipients).toMatchObject([{ id: first, status: "pending", error: null }]);
     expect(claimed?.batch.transaction_count).toBe(2);
     expect(await claim([first])).toBeNull();
+    // Only the claim that took its recipients recorded a retry.
+    expect(
+      await repo.findTransferBatchRetryByIdempotency({
+        ...scope,
+        idempotencyKey: "retry-record-key-2",
+      })
+    ).toMatchObject({ batch_id: batch.id, recipient_ids: [first] });
+    for (const lost of ["retry-record-key-1", "retry-record-key-3"]) {
+      expect(
+        await repo.findTransferBatchRetryByIdempotency({ ...scope, idempotencyKey: lost })
+      ).toBeNull();
+    }
   });
 });
 
@@ -400,6 +418,10 @@ describe("PaymentTransferBatchesRepository.listStrandedTransferBatches (postgres
       .prepare("UPDATE payment_transfer_batches SET created_at = ?")
       .bind(new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString())
       .run();
+    await getDb(env)
+      .prepare("UPDATE payment_transfer_recipients SET updated_at = ?")
+      .bind(new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString())
+      .run();
   });
 
   it.each(SDP_ENVIRONMENTS)(
@@ -407,7 +429,7 @@ describe("PaymentTransferBatchesRepository.listStrandedTransferBatches (postgres
     async (environment) => {
       const stranded = await repo.listStrandedTransferBatches({
         environment,
-        createdBefore: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+        attemptedBefore: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
         limit: 50,
       });
 

@@ -140,10 +140,14 @@ A partial failure is finished with `POST /transfer-batches/:batchId/retry` (HOO-
 It sends only `failed` recipients, which were definitely not paid. Before it sends, it claims them
 back to `pending` with no transfer under the batch lock, all or nothing, so a concurrent retry gets
 409. A chunk links a recipient only while it is still pending with no transfer, so a recipient that
-another writer failed or claimed first rolls the chunk back before it is signed. The retry has no
-row of its own to answer from (`serverErrors: "store"`): after a crash it answers
-`IDEMPOTENCY_KEY_OUTCOME_UNKNOWN`, and a retry under a new key is safe because only still-failed
-recipients are claimed.
+another writer failed or claimed first rolls the chunk back before it is signed. The claim writes a
+`payment_transfer_batch_retries` row under the retry's record key in the same transaction (migration
+0184), so the route runs like create (`serverErrors: "rerun"`, `recovery: "record"`): a rerun after a
+5xx or a takeover is answered from that row with the batch as it stands, and claims nothing again.
+It pays the address each recipient recorded, and refuses (409) if the account now holds another.
+Unsent recipients age by their own last write, not the batch's: the stranded-batch job and the
+create takeover fail only recipients no live request can still be sending, so a retry's fresh claim
+on an old batch is left to it.
 
 Recurring payments carve this out: their cron resumes and completes a half-finished row (an
 `activating`, `canceling` or `resuming` schedule, or a collection in flight) from the signature

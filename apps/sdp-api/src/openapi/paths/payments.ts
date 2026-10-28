@@ -76,11 +76,6 @@ const keyRequiredRerunHeaders = projectScopeWithDeclaredIdempotencyHeaders({
   serverErrors: "rerun",
   recovery: "record",
 });
-// A batch retry has no row of its own to answer from, so it stores its answers.
-const keyRequiredStoreHeaders = projectScopeWithDeclaredIdempotencyHeaders({
-  key: "required",
-  serverErrors: "store",
-});
 const keyAcceptedHeaders = projectScopeWithDeclaredIdempotencyHeaders({
   key: "accepted",
   serverErrors: "store",
@@ -256,10 +251,10 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     operationId: "retryPaymentTransferBatch",
     description:
       "Sends the batch's `failed` recipients again, from the same source wallet with the batch's options, and no other recipient. A failed recipient was not paid: its transaction never reached the network or the network rejected it. Recipients still `pending` or `processing` may land and are never sent again. Each resent recipient keeps its row and links to its new chunk transfer. " +
-      "Takes no body and requires an Idempotency-Key: a retry with the same key returns the first answer without sending again. Returns `409 CONFLICT` when the batch has no failed recipients, or when a concurrent retry claimed them first; nothing is sent. After a timeout, read the batch with `GET /v1/payments/transfer-batches/{batchId}` and retry again with a new key: only recipients that are still `failed` are ever sent.",
+      "Takes no body and requires an Idempotency-Key: a retry with the same key, including one sent after a timeout or a server error, returns the retry as recorded without sending again. Each recipient is paid the address the batch recorded for it. Returns `409 CONFLICT`, sending nothing, when the batch has no failed recipients, when a concurrent retry claimed them first, or when a failed recipient's counterparty account has changed its address since (send that recipient in a new batch). Only recipients that are still `failed` are ever sent, so a retry under a new key never pays anyone twice.",
     security: [{ apiKeyAuth: [] }],
     request: {
-      headers: keyRequiredStoreHeaders,
+      headers: movementKeyHeaders,
       params: paymentTransferBatchIdParamsSchema,
     },
     responses: {

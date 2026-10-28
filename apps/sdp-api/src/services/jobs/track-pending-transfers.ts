@@ -27,6 +27,7 @@ import { withTransientRpcRetry } from "@sdp/rpc/transient";
 import type { TransferChainVerdictStatus } from "@sdp/types/payments";
 import { WALLET_TRANSFER_TYPES } from "@sdp/types/payments";
 import { assertIsSignature, commitmentComparator, type Signature } from "@solana/kit";
+import { TRANSFER_BATCH_ATTEMPT_LIFETIME_MS } from "@/db/repositories/payment-transfer-batches.repository";
 import type {
   ConfirmedTransferPollVerdict,
   PaymentsRepository,
@@ -235,8 +236,6 @@ export async function trackPendingTransfers(env: Env): Promise<void> {
   );
 }
 
-/** Past any request's lifetime (renewal cap plus lease), with room to spare. */
-const STRANDED_BATCH_AGE_MS = 60 * 60 * 1000;
 const STRANDED_BATCH_PAGE_SIZE = 50;
 
 /**
@@ -249,15 +248,21 @@ const STRANDED_BATCH_PAGE_SIZE = 50;
  */
 async function failStrandedTransferBatches(env: Env, now: Date): Promise<void> {
   const batches = createSystemPaymentTransferBatchesRepository(env);
+  // Aged by each recipient's last write, so a retry that just claimed
+  // recipients of an old batch is never failed under it (HOO-2343).
+  const attemptedBefore = new Date(
+    now.getTime() - TRANSFER_BATCH_ATTEMPT_LIFETIME_MS
+  ).toISOString();
   const stranded = await batches.listStrandedTransferBatches({
     environment: currentClusterScope().environment,
-    createdBefore: new Date(now.getTime() - STRANDED_BATCH_AGE_MS).toISOString(),
+    attemptedBefore,
     limit: STRANDED_BATCH_PAGE_SIZE,
   });
   for (const batch of stranded) {
     await batches.failUnsentTransferRecipients({
       ...batch,
       error: "The batch request ended before this recipient's transfer was sent",
+      attemptedBefore,
     });
   }
 }

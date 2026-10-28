@@ -16,6 +16,7 @@ import { getTransferBatch, listTransferBatches } from "@/routes/payments/transfe
 import {
   admitTransferBatchRetryExecution,
   authorizeTransferBatchRetry,
+  findTransferBatchRetryReplay,
   retryTransferBatch,
 } from "@/routes/payments/transfer-batches/retry";
 import type { Env } from "@/types/env";
@@ -66,10 +67,11 @@ transferBatches.post(
   validateParams(transferBatchIdParamsSchema),
   validateBody(retryTransferBatchSchema),
   authorize(authorizeTransferBatchRetry),
-  // No row of its own to answer from: a 5xx is stored, and a retry after a
-  // crash gets OUTCOME_UNKNOWN. A new key is then safe, since a retry only
-  // ever claims recipients that are failed (HOO-2343).
-  idempotent({ key: "required", serverErrors: "store" }),
+  meteredQuota(TRANSFER_BATCH_QUOTA),
+  // The claim records the retry under its key before anything is signed, so a
+  // rerun after a 5xx or a crash is answered from that row (HOO-2343).
+  idempotent({ key: "required", serverErrors: "rerun", recovery: "record", leaseSeconds: 300 }),
+  replayFromRecord(findTransferBatchRetryReplay),
   admit(admitTransferBatchRetryExecution),
   retryTransferBatch
 );

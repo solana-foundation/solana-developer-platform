@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
+import type {
+  PaymentTransferBatchRecipientStatus,
+  PaymentTransferBatchStatus,
+} from "@sdp/types/payments";
 import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import {
   address,
@@ -1439,7 +1443,9 @@ describe("payment transfer batches", () => {
     await getDb(env)
       .prepare(
         `WITH unlinked AS (
-           UPDATE payment_transfer_recipients SET transfer_id = NULL, status = 'pending', error = NULL
+           UPDATE payment_transfer_recipients r
+              SET transfer_id = NULL, status = 'pending', error = NULL,
+                  updated_at = (SELECT created_at FROM payment_transfer_batches WHERE id = r.batch_id)
             WHERE batch_id = ? RETURNING id
          )
          UPDATE payment_transfer_batches SET status = 'processing' WHERE id = ?`
@@ -1500,9 +1506,9 @@ describe("payment transfer batches", () => {
     // Stranded two hours ago: recipients unlinked, no chunk transfer, still processing.
     await getDb(env)
       .prepare(
-        "UPDATE payment_transfer_recipients SET transfer_id = NULL, status = 'pending', error = NULL WHERE batch_id = ?"
+        "UPDATE payment_transfer_recipients SET transfer_id = NULL, status = 'pending', error = NULL, updated_at = ? WHERE batch_id = ?"
       )
-      .bind(batchId)
+      .bind(new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), batchId)
       .run();
     await getDb(env)
       .prepare(
@@ -2128,8 +2134,12 @@ describe("payment transfer batches", () => {
   describe("retry failed recipients (HOO-2343)", () => {
     type BatchBody = {
       data: {
-        batch: { id: string; status: string; transactionCount: number };
-        recipients: Array<{ id: string; status: string; transferId: string | null }>;
+        batch: { id: string; status: PaymentTransferBatchStatus; transactionCount: number };
+        recipients: Array<{
+          id: string;
+          status: PaymentTransferBatchRecipientStatus;
+          transferId: string | null;
+        }>;
         transfers: Array<{ id: string; status: string }>;
       };
     };
@@ -2233,6 +2243,79 @@ describe("payment transfer batches", () => {
       expect(sendTransactionMock).toHaveBeenCalledTimes(1);
     });
 
+    it("answers a rerun of a retry from its recorded row once the key's record is gone", async () => {
+      const { batch } = await seedPartiallyFailedBatch();
+      vi.clearAllMocks();
+      const key = crypto.randomUUID();
+      expect((await retry(batch.id, key)).status).toBe(200);
+      // The key's stored answer is gone (expired, or lost to a crash before it was stored).
+      await clearKVStores(env);
+      vi.clearAllMocks();
+
+      const rerun = await retry(batch.id, key);
+
+      expect(rerun.status).toBe(200);
+      expect(rerun.headers.get("Idempotent-Replayed")).toBe("true");
+      expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
+      expect(sendTransactionMock).not.toHaveBeenCalled();
+    });
+
+    it("refuses a retry whose recipient's account changed address, signing nothing", async () => {
+      const { batch, failed } = await seedPartiallyFailedBatch();
+      await getDb(env)
+        .prepare(
+          `UPDATE counterparty_accounts
+              SET details = jsonb_set(details, '{address}', to_jsonb(?::text))
+            WHERE id = (SELECT counterparty_account_id FROM payment_transfer_recipients WHERE id = ?)`
+        )
+        .bind(TEST_SOLANA_ADDRESSES.wallet1, failed.id)
+        .run();
+      vi.clearAllMocks();
+
+      const response = await retry(batch.id);
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({
+        error: { code: "CONFLICT", details: { batchId: batch.id, recipientIds: [failed.id] } },
+      });
+      expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
+      expect(sendTransactionMock).not.toHaveBeenCalled();
+    });
+
+    it("leaves a retry's just-claimed recipients of an old batch to the retry", async () => {
+      const { batch, failed } = await seedPartiallyFailedBatch();
+      const repository = batchesRepositoryPostgres.createPostgresPaymentTransferBatchesRepository(
+        getDb(env)
+      );
+      // A live retry has claimed the recipient and not linked it yet.
+      await repository.claimFailedTransferRecipients({
+        batchId: batch.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        recipientIds: [failed.id],
+        addedTransactionCount: 1,
+        retry: {
+          idempotencyKey: "live-retry-record-key",
+          idempotencyFingerprint: "live-retry-fingerprint",
+          initiatedByKeyId: null,
+        },
+      });
+      // The batch itself is hours old.
+      await getDb(env)
+        .prepare("UPDATE payment_transfer_batches SET created_at = ? WHERE id = ?")
+        .bind(new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), batch.id)
+        .run();
+
+      await runInEachClusterScope(() => trackPendingTransfers(env));
+
+      const recipient = await repository.getTransferRecipientById({
+        recipientId: failed.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+      });
+      expect(recipient).toMatchObject({ status: "pending", transfer_id: null });
+    });
+
     it("refuses a retry with no failed recipients and sends nothing", async () => {
       const { batch } = await seedPartiallyFailedBatch();
       expect((await retry(batch.id)).status).toBe(200);
@@ -2262,6 +2345,11 @@ describe("payment transfer batches", () => {
             projectId: TEST_PROJECT.id,
             recipientIds: [failed.id],
             addedTransactionCount: 1,
+            retry: {
+              idempotencyKey: "another-retry-record-key",
+              idempotencyFingerprint: "another-retry-fingerprint",
+              initiatedByKeyId: null,
+            },
           });
         return sourceSigner;
       });
