@@ -2,17 +2,18 @@ import { Hono } from "hono";
 import { authorize } from "@/middleware/authorize";
 import { idempotent } from "@/middleware/idempotency";
 import { requireAction } from "@/middleware/require-action";
-import { validateBody } from "@/middleware/validate";
-import { authorizePaymentRequest } from "@/routes/payments/access";
+import { validateBody, validateParams } from "@/middleware/validate";
+import { authorizeExistingPaymentRequest, authorizePaymentRequest } from "@/routes/payments/access";
 import { canonicalizePaymentBody } from "@/routes/payments/fingerprint";
 import type { Env } from "@/types/env";
 import {
+  cancelPaymentRequest,
   createPaymentRequest,
   getPaymentRequest,
   getPaymentRequestLink,
   listPaymentRequests,
 } from "./handlers";
-import { createPaymentRequestSchema } from "./schemas";
+import { createPaymentRequestSchema, paymentRequestParamsSchema } from "./schemas";
 
 export const paymentRequests = new Hono<{ Bindings: Env }>();
 
@@ -34,4 +35,12 @@ paymentRequests.post(
   authorize(authorizePaymentRequest),
   idempotent({ key: "accepted", serverErrors: "store", canonicalize: canonicalizePaymentBody }),
   createPaymentRequest
+);
+paymentRequests.post(
+  "/:paymentRequestId/cancel",
+  requireAction("payment_requests.manage"),
+  validateParams(paymentRequestParamsSchema),
+  authorize(authorizeExistingPaymentRequest),
+  idempotent({ key: "accepted", serverErrors: "store" }),
+  cancelPaymentRequest
 );

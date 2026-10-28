@@ -24,6 +24,10 @@ import {
 } from "@/services/api-key-scope.service";
 import { type AuditLogEntry, AuditService } from "@/services/audit.service";
 import {
+  type CancelCreatedByKeyResult,
+  cancelPaymentRequestsCreatedByKey,
+} from "@/services/payments/payment-request-cancel";
+import {
   type CancelActivatedByKeyResult,
   cancelRecurringPaymentsActivatedByKey,
 } from "@/services/payments/recurring-payments/cancel-activated-by-key";
@@ -323,7 +327,7 @@ export const revokeApiKey = async (c: ValidatedBodyContext<typeof apiKeyRevokeSc
   const actor = resolveActor(c);
   const projectId = requireProjectId(c);
 
-  const { confirmation, cancelRecurringPayments } = c.req.valid("json");
+  const { confirmation, cancelRecurringPayments, cancelPaymentRequests } = c.req.valid("json");
 
   const existing = await getDb(c.env)
     .prepare(
@@ -349,6 +353,7 @@ export const revokeApiKey = async (c: ValidatedBodyContext<typeof apiKeyRevokeSc
       success: true,
       revokedAt: existing.revoked_at,
       recurringPayments: await cancelActivatedRecurringPayments(c, cancelRecurringPayments, keyId),
+      paymentRequests: await cancelCreatedPaymentRequests(c, cancelPaymentRequests, keyId),
     });
   }
 
@@ -386,6 +391,7 @@ export const revokeApiKey = async (c: ValidatedBodyContext<typeof apiKeyRevokeSc
     success: true,
     revokedAt: revokedKey.revokedAt,
     recurringPayments: await cancelActivatedRecurringPayments(c, cancelRecurringPayments, keyId),
+    paymentRequests: await cancelCreatedPaymentRequests(c, cancelPaymentRequests, keyId),
   });
 };
 
@@ -414,4 +420,36 @@ async function cancelActivatedRecurringPayments(
     metadata: { action: "cancel_recurring_payments", ...recurringPayments },
   });
   return recurringPayments;
+}
+
+/**
+ * After the revocation committed, and only when asked: cancel the open payment requests the key
+ * created, so their links stop accepting payments. Each cancel is audited on its own; a failure
+ * is reported, never undoes the revocation.
+ *
+ * @param c - The revoke request's context.
+ * @param requested - The request's `cancelPaymentRequests` flag.
+ * @param apiKeyId - The revoked key.
+ * @returns The ids canceled and the ids that could not be, or null when not asked.
+ */
+async function cancelCreatedPaymentRequests(
+  c: AppContext,
+  requested: boolean | undefined,
+  apiKeyId: string
+): Promise<CancelCreatedByKeyResult | null> {
+  if (requested !== true) {
+    return null;
+  }
+  const paymentRequests = await cancelPaymentRequestsCreatedByKey(c, {
+    organizationId: requireHumanActor(c).organizationId,
+    projectId: requireProjectId(c),
+    apiKeyId,
+  });
+  await logReductionBestEffort(c, {
+    action: "update",
+    resourceType: "api_key",
+    resourceId: apiKeyId,
+    metadata: { action: "cancel_payment_requests", ...paymentRequests },
+  });
+  return paymentRequests;
 }

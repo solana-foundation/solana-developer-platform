@@ -1210,6 +1210,39 @@ export const PAYMENT_REQUEST_STATUSES = [
 ] as const;
 export type PaymentRequestStatus = (typeof PAYMENT_REQUEST_STATUSES)[number];
 
+/**
+ * Whether a payment request in each status can still be paid through its `/pay` link. A payable
+ * status is not enough on its own: an `awaiting_payment` request past its `expiresAt` is not
+ * payable either.
+ */
+export const PAYMENT_REQUEST_STATUS_PAYABLE = {
+  awaiting_payment: true,
+  paid: false,
+  canceled: false,
+  expired: false,
+} as const satisfies Record<PaymentRequestStatus, boolean>;
+
+/** Reports whether a payment request's status still admits a payment through its link. */
+export function isPayablePaymentRequestStatus(status: PaymentRequestStatus): boolean {
+  return PAYMENT_REQUEST_STATUS_PAYABLE[status];
+}
+
+/**
+ * Whether each status closes a payment request without a payment: a payer who signed before it
+ * closed can still land the transfer, and the reconciler records that money as a late payment.
+ */
+export const PAYMENT_REQUEST_STATUS_CLOSED_UNPAID = {
+  awaiting_payment: false,
+  paid: false,
+  canceled: true,
+  expired: true,
+} as const satisfies Record<PaymentRequestStatus, boolean>;
+
+/** Reports whether a payment request closed without a payment, so a late one can still settle it. */
+export function isClosedUnpaidPaymentRequestStatus(status: PaymentRequestStatus): boolean {
+  return PAYMENT_REQUEST_STATUS_CLOSED_UNPAID[status];
+}
+
 export interface PaymentRequestLifecycleEvent {
   status: PaymentRequestStatus;
   at: string;
@@ -1235,6 +1268,7 @@ export interface PaymentRequest {
   paidLate?: boolean;
   lastCheckedAt?: string | null;
   canceledBy: string | null;
+  canceledAt: string | null;
   lifecycle: PaymentRequestLifecycleEvent[];
   createdBy: string | null;
   createdAt: string;

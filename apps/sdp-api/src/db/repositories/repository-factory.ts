@@ -140,7 +140,7 @@ const PAYMENT_REQUESTS_SYSTEM_ONLY_METHODS = [
   "listPaymentRequestsDueForCheck",
   "hasLapsedPaymentRequests",
   "listLapsedPaymentRequests",
-  "listExpiredPaymentRequestsForLateCheck",
+  "listClosedPaymentRequestsForLateCheck",
   "markPaymentRequestsChecked",
   "countStaleAwaitingPaymentRequests",
   "countStaleLapsedPaymentRequests",

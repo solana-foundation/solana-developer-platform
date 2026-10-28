@@ -2,6 +2,7 @@ import { createClusterRpc } from "@sdp/rpc/factory";
 import { getSignatureStatuses, getSignaturesForAddress, type SignatureInfo } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { AmountError, parseTokenAmount } from "@sdp/solana/amount";
+import { isClosedUnpaidPaymentRequestStatus } from "@sdp/types/payments";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { type Address, type Signature, signature } from "@solana/kit";
 import { ValidateTransferError } from "@solana/pay";
@@ -46,6 +47,13 @@ const RETRYABLE_TRANSFER_CHECK_ERRORS: ReadonlySet<string> = new Set([
   "Transaction meta missing",
 ]);
 const UNREADABLE_SIGNATURE_GIVE_UP_MS = 60 * 60 * 1000;
+
+/**
+ * How far below the confirmed block height a sponsored transaction's last valid block height
+ * may sit and still count as able to land. Every hold on a live claim uses it: the hot lane,
+ * the expiry lane, and a cancel.
+ */
+export const SPONSORED_CLAIM_BLOCK_MARGIN = 150n;
 
 export function isPaymentRequestExpired(expiresAt: string | null): boolean {
   return expiresAt !== null && Date.parse(expiresAt) <= Date.now();
@@ -95,7 +103,7 @@ type TransferExpectation = z.infer<typeof transferExpectationSchema>;
 
 interface PaidTransition {
   row: PaymentRequestRow;
-  from: "awaiting_payment" | "expired" | null;
+  from: "awaiting_payment" | "expired" | "canceled" | null;
 }
 
 interface PaymentRequestKey {
@@ -208,23 +216,39 @@ export async function closeLapsedPaymentRequest(
   }
 }
 
-export async function checkExpiredPaymentRequestForLatePayment(
+/**
+ * The late-payment watch over a request that closed without a payment, expired or canceled: a
+ * payer who signed before it closed can still land the transfer, and that money is recorded.
+ *
+ * @param env - The bindings.
+ * @param row - The closed request.
+ * @returns The row after the check and how the check ended.
+ */
+export async function checkClosedPaymentRequestForLatePayment(
   env: Env,
   row: PaymentRequestRow
 ): Promise<PaymentRequestCheck> {
-  if (row.status !== "expired" || row.custody_wallet_id === null) {
+  if (!isClosedUnpaidPaymentRequestStatus(row.status) || row.custody_wallet_id === null) {
     return skippedCheck(row);
   }
   return settleIfPaid(env, row, row.custody_wallet_id, await findValidPayment(env, row));
 }
 
-function isPaidLate(blockTime: bigint | null, expiresAt: string | null): boolean {
-  if (expiresAt === null) {
+/**
+ * Whether a payment landed after the request closed: past its expiry, or after its cancel.
+ * Without a block time, a close already in the past counts as late.
+ *
+ * @param blockTime - The payment's block time in seconds, when the chain reported one.
+ * @param closedAt - When the request closed or closes; null for one that never expires.
+ * @returns True when the payment landed after `closedAt`.
+ */
+function isPaidLate(blockTime: bigint | null, closedAt: string | null): boolean {
+  if (closedAt === null) {
     return false;
   }
   return blockTime !== null
-    ? Number(blockTime) * 1000 > Date.parse(expiresAt)
-    : isPaymentRequestExpired(expiresAt);
+    ? Number(blockTime) * 1000 > Date.parse(closedAt)
+    : isPaymentRequestExpired(closedAt);
 }
 
 async function findValidPayment(env: Env, row: PaymentRequestRow): Promise<PaymentSearchResult> {
@@ -458,7 +482,6 @@ async function settlePaymentRequest(
 ): Promise<PaymentRequestRow> {
   const key = paymentRequestKey(row);
   const scope = createTenantScope({ organizationId: key.organizationId, projectId: key.projectId });
-  const paidLate = isPaidLate(found.blockTime, row.expires_at);
   const audit = createSystemAuditService(env);
   const settle = () =>
     audit.logSystemWithin(async (db) => {
@@ -474,7 +497,7 @@ async function settlePaymentRequest(
         row,
         key,
         transfer.id,
-        paidLate
+        found.blockTime
       );
       return {
         entry: transition.from === null ? null : settlementAuditEntry(transition, transfer, found),
@@ -491,19 +514,32 @@ async function settlePaymentRequest(
   }
 }
 
+/**
+ * Move a request to paid by its settling transfer, from whichever state it is in when the
+ * payment is found: open, or closed without a payment. A closed one is paid late when the
+ * payment landed after it closed: past `expires_at` for an expired one, after `canceled_at` for
+ * a canceled one, which keeps who canceled it.
+ *
+ * @param requestsRepo - The settlement transaction's repository.
+ * @param row - The request as the check read it.
+ * @param key - The request and its tenant.
+ * @param transferId - The settling transfer.
+ * @param blockTime - The payment's block time in seconds, when the chain reported one.
+ * @returns The row after the transition, and the status it left; null when none moved.
+ */
 async function transitionToPaid(
   requestsRepo: PaymentRequestsRepository,
   row: PaymentRequestRow,
   key: PaymentRequestKey,
   transferId: string,
-  paidLate: boolean
+  blockTime: bigint | null
 ): Promise<PaidTransition> {
-  const paid = { ...key, fulfilledByTransferId: transferId, paidLate };
+  const settlement = { ...key, fulfilledByTransferId: transferId };
   if (row.status === "awaiting_payment") {
     const settled = await requestsRepo.markPaymentRequest({
-      ...paid,
+      ...settlement,
       status: "paid",
-      canceledBy: null,
+      paidLate: isPaidLate(blockTime, row.expires_at),
       chainRead: true,
     });
     if (settled) {
@@ -511,13 +547,33 @@ async function transitionToPaid(
     }
   }
   const current = await reread(requestsRepo, key);
-  if (current.status !== "expired") {
-    return { row: current, from: null };
+  switch (current.status) {
+    case "expired": {
+      const converted = await requestsRepo.markExpiredPaymentRequestPaid({
+        ...settlement,
+        paidLate: isPaidLate(blockTime, current.expires_at),
+      });
+      return converted
+        ? { row: converted, from: "expired" }
+        : { row: await reread(requestsRepo, key), from: null };
+    }
+    case "canceled": {
+      const converted = await requestsRepo.markCanceledPaymentRequestPaid({
+        ...settlement,
+        paidLate: isPaidLate(blockTime, current.canceled_at),
+      });
+      return converted
+        ? { row: converted, from: "canceled" }
+        : { row: await reread(requestsRepo, key), from: null };
+    }
+    case "awaiting_payment":
+    case "paid":
+      return { row: current, from: null };
+    default: {
+      const unreachable: never = current.status;
+      throw internalError(`Unhandled payment request status ${String(unreachable)}`);
+    }
   }
-  const converted = await requestsRepo.markExpiredPaymentRequestPaid(paid);
-  return converted
-    ? { row: converted, from: "expired" }
-    : { row: await reread(requestsRepo, key), from: null };
 }
 
 function settlementAuditEntry(
@@ -559,7 +615,6 @@ async function markExpired(
       ...key,
       status: "expired",
       fulfilledByTransferId: null,
-      canceledBy: null,
       paidLate: false,
       chainRead,
     });

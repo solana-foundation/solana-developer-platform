@@ -5301,6 +5301,7 @@ Source: https://platform.solana.com/docs/reference/api/payments
 | `POST` | `/v1/payments/recurring-payments/{id}/cancel` | Cancel recurring payment |
 | `POST` | `/v1/payments/recurring-payments/{id}/collect` | Collect recurring payment |
 | `POST` | `/v1/payments/recurring-payments/{id}/resume` | Resume recurring payment |
+| `POST` | `/v1/payments/requests/{paymentRequestId}/cancel` | Cancel payment request |
 | `GET` | `/v1/payments/subscription-plans` | List subscription plans |
 | `POST` | `/v1/payments/subscription-plans` | Create subscription plan |
 | `GET` | `/v1/payments/subscription-plans/{planId}` | Get subscription plan |

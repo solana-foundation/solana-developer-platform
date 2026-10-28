@@ -12,10 +12,12 @@ import { resolveCreatorUserId } from "@/lib/creator";
 import { badRequestParams, badRequestQuery, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
+import { getAuthorized } from "@/middleware/authorize";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import type { AppContext } from "@/routes/payments/context";
 import { resolveScope, resolveWallet } from "@/routes/payments/wallets";
 import { normalizePaymentToken } from "@/services/payment-operation.service";
+import { cancelOpenPaymentRequest } from "@/services/payments/payment-request-cancel";
 import { isPaymentRequestExpired } from "@/services/payments/payment-requests";
 import { parseStaticPaymentAmount } from "@/services/payments/token-amount";
 import {
@@ -46,6 +48,7 @@ function mapPaymentRequest(row: PaymentRequestRow): PaymentRequest {
     paidLate: row.paid_late,
     lastCheckedAt: row.last_verified_at,
     canceledBy: row.canceled_by,
+    canceledAt: row.canceled_at,
     lifecycle: row.lifecycle,
     createdBy: row.created_by,
     createdAt: row.created_at,
@@ -140,6 +143,7 @@ export async function createPaymentRequest(
     amount: body.amount,
     expiresAt: body.expiresAt,
     createdBy: await resolveCreatorUserId(c),
+    createdByApiKeyId: scope.auth.apiKeyId,
   });
 
   const response: CreatedPaymentRequest = {
@@ -147,4 +151,21 @@ export async function createPaymentRequest(
     publicToken: row.public_token,
   };
   return created(c, response);
+}
+
+/**
+ * Cancel an open payment request: its `/pay` link stops building and sponsoring transactions.
+ * An exit, so it takes `payment_requests.manage`. A request that is already canceled answers
+ * with its row; a paid or expired one, or one whose sponsored transaction can still land, is a
+ * 409. The response is the read shape, never the link token.
+ *
+ * @param c - The request context, after `authorizeExistingPaymentRequest` loaded the request.
+ * @returns The canceled payment request.
+ */
+export async function cancelPaymentRequest(c: AppContext) {
+  const row = await cancelOpenPaymentRequest(c, {
+    row: getAuthorized<PaymentRequestRow>(c),
+    canceledBy: await resolveCreatorUserId(c),
+  });
+  return success(c, mapPaymentRequest(row));
 }
