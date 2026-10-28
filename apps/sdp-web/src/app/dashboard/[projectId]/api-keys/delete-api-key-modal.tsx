@@ -40,14 +40,11 @@ const deleteApiKeyFormSchema = z.object({
  */
 function useApiKeyLinkedPayments(keyId: string): LinkedPaymentsState {
   const projectId = useProjectId();
-  const { data, error } = useSWR(
+  const { data } = useSWR(
     apiKeysQueryKeys.linkedPayments(keyId),
     ([, id]: readonly [string, string]) => loadApiKeyLinkedPaymentsAction(id),
     { revalidateOnFocus: false, revalidateOnReconnect: false, revalidateIfStale: false }
   );
-  if (error instanceof Error) {
-    return { status: "error", message: error.message };
-  }
   if (data === undefined) {
     return { status: "loading" };
   }

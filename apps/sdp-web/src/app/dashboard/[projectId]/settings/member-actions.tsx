@@ -169,41 +169,28 @@ export function MemberActions({
 }
 
 /**
- * What the member set up directly, in every project, that keeps running after removal, read
- * once each time the confirmation opens.
- *
- * @param memberId - The member about to be removed.
- * @returns The read, as the notice renders it.
- */
-function useMemberLinkedPayments(memberId: string): LinkedPaymentsState {
-  const { data, error } = useSWR(
-    membersQueryKeys.linkedPayments(memberId),
-    ([, id]: readonly [string, string]) => loadMemberLinkedPaymentsAction(id),
-    { revalidateOnFocus: false, revalidateOnReconnect: false, revalidateIfStale: false }
-  );
-  if (error instanceof Error) {
-    return { status: "error", message: error.message };
-  }
-  if (data === undefined) {
-    return { status: "loading" };
-  }
-  if (!data.ok) {
-    return { status: "error", message: data.message };
-  }
-  return {
-    status: "loaded",
-    filter: { kind: "member", userId: data.linked.userId },
-    projects: data.linked.projects,
-  };
-}
-
-/**
- * The linked-payments notice for a removal. Mounted only while the confirmation is open.
+ * What the member set up directly, in every project, that keeps running after removal. Mounted
+ * only while the confirmation is open, so each open reads it again.
  *
  * @param props - The member.
  * @param props.memberId - The member about to be removed.
  * @returns The notice.
  */
 function MemberLinkedPaymentsNotice({ memberId }: { memberId: string }) {
-  return <LinkedPaymentsNotice subject="member" state={useMemberLinkedPayments(memberId)} />;
+  const { data } = useSWR(
+    membersQueryKeys.linkedPayments(memberId),
+    ([, id]: readonly [string, string]) => loadMemberLinkedPaymentsAction(id),
+    { revalidateOnFocus: false, revalidateOnReconnect: false, revalidateIfStale: false }
+  );
+  const state: LinkedPaymentsState =
+    data === undefined
+      ? { status: "loading" }
+      : data.ok
+        ? {
+            status: "loaded",
+            filter: { kind: "member", userId: data.linked.userId },
+            projects: data.linked.projects,
+          }
+        : { status: "error", message: data.message };
+  return <LinkedPaymentsNotice subject="member" state={state} />;
 }
