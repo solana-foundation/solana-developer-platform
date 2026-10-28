@@ -1813,6 +1813,104 @@ body {
   font-size: var(--font-size-body);
 }
 
+/* An operation's page (`<ApiOperation>`): its body, then a panel of its samples and example
+   responses (`<ApiPanel>`). From 1280px the panel sits beside the body and stays in view;
+   below, it follows, at the article's width. */
+.launch-docs-page.is-full .launch-docs-article:has(> .is-api-reference) {
+  max-width: 780px;
+}
+
+.launch-api-operation-main,
+.launch-api-panel {
+  min-width: 0;
+}
+
+/* One frame per sample: the tab card's, not a second border on the code inside it. */
+.launch-api-panel figure.shiki {
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.launch-api-panel .fd-scroll-container {
+  max-height: 26rem;
+}
+
+@media (min-width: 1280px) {
+  .launch-docs-page.is-full .launch-docs-article:has(> .is-api-reference) {
+    max-width: none;
+  }
+
+  .launch-api-operation {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) clamp(340px, 42%, 500px);
+    column-gap: 40px;
+    align-items: start;
+  }
+
+  .launch-api-panel {
+    position: sticky;
+    top: 24px;
+    max-height: calc(100vh - 48px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .launch-api-panel > .launch-mdx-heading-2:first-child {
+    margin-top: 0;
+  }
+}
+
+/* A long sample, held to its first lines until opened (`<ApiFold>`). */
+.launch-api-fold {
+  position: relative;
+}
+
+.launch-api-fold:not([data-open]) .fd-scroll-container {
+  max-height: 18rem;
+  overflow: hidden;
+}
+
+/* Opened, the sample shows every line; the panel scrolls instead. */
+.launch-api-fold[data-open] .fd-scroll-container {
+  max-height: none;
+}
+
+.launch-api-fold[data-overflows]::after {
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  left: 1px;
+  height: 72px;
+  border-radius: 0 0 var(--corner-card) var(--corner-card);
+  background: linear-gradient(transparent, var(--color-fd-secondary));
+  content: "";
+  pointer-events: none;
+}
+
+.launch-api-fold-toggle {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  z-index: 1;
+  transform: translateX(-50%);
+  height: var(--control-height-sm);
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--corner-control);
+  background: var(--chip);
+  box-shadow: var(--chip-ring);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-meta);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.launch-api-fold-toggle:hover {
+  background: var(--paper-tile);
+}
+
 /* ── Docs Home page ── */
 .launch-home {
   margin-top: -16px;

@@ -19,7 +19,8 @@ import { canonicalSite } from "@/lib/site";
  * (`<family>/index.mdx`), and per operation, its own page (`<family>/<endpointId>.mdx`) with its
  * parameters, request body, responses, a cURL, TypeScript and Python sample and an example per
  * status. Each page renders, searches and serves as `.md` from the same text; the components it
- * places (`<ApiEndpoint />`, `<ApiOperationTable>`) have their Markdown forms in `expandDocsBlocks`
+ * places (`<ApiEndpoint />`, and the wrappers `<ApiOperationTable>`, `<ApiOperation>`,
+ * `<ApiPanel>`, `<ApiFold>`) have their Markdown forms in `expandDocsBlocks`
  * (`src/lib/docs-blocks.ts`).
  */
 
@@ -46,6 +47,9 @@ const PARAMETER_HEADINGS = {
 const GENERIC_ERROR_DESCRIPTION = "Error";
 
 const AUTHENTICATION_GUIDE = "/docs/developing-with-sdp/authentication";
+
+/** A sample longer than this many lines starts folded on the page (`<ApiFold>`). */
+const FOLD_LINES = 16;
 
 /** Text from the document as MDX: outside a code span, `{`, `}` and `<` would open JSX. */
 export function mdxText(value: string): string {
@@ -290,10 +294,14 @@ function sampleFences(operation: ApiOperation): string[] {
     auth: operation.auth,
     takesIdempotencyKey: operation.takesIdempotencyKey,
   });
-  return SNIPPET_LANGUAGES.flatMap((language) => {
+  const fences = SNIPPET_LANGUAGES.flatMap((language) => {
     const fenceLanguage = SNIPPET_FENCES[language].language;
     return [fence(fenceLanguage, sampleTabMarker(language), snippets[language]), ""];
   });
+  const longest = Math.max(
+    ...SNIPPET_LANGUAGES.map((language) => snippets[language].split("\n").length)
+  );
+  return longest > FOLD_LINES ? ["<ApiFold>", "", ...fences, "</ApiFold>", ""] : fences;
 }
 
 function exampleResponseFences(responses: ApiResponse[]): string[] {
@@ -314,9 +322,17 @@ export function splitFirstSentence(text: string): { first: string; rest: string 
   return { first, rest };
 }
 
-/** An operation's page body: its endpoint, the rest of its description, then its sections. */
+/**
+ * An operation's page body: its endpoint, the rest of its description and its sections, then
+ * `<ApiPanel>` with the samples and example responses, which a wide page sets beside them.
+ */
 export function renderOperation(operation: ApiOperation): string {
-  const lines = [`<ApiEndpoint method="${operation.method}" path="${operation.path}" />`, ""];
+  const lines = [
+    "<ApiOperation>",
+    "",
+    `<ApiEndpoint method="${operation.method}" path="${operation.path}" />`,
+    "",
+  ];
   if (operation.deprecated) lines.push("**Deprecated.**", "");
   // The description's first sentence is the page's own description, shown under its title.
   const opening =
@@ -326,9 +342,10 @@ export function renderOperation(operation: ApiOperation): string {
   lines.push(...parameterSections(operation.parameters));
   if (operation.requestBody !== null) lines.push(...requestBodySection(operation.requestBody));
   lines.push("## Responses", "", ...operation.responses.map(responseLine), "");
-  lines.push("## Example request", "", ...sampleFences(operation));
+  lines.push("<ApiPanel>", "", "## Example request", "", ...sampleFences(operation));
   const examples = exampleResponseFences(operation.responses);
   if (examples.length > 0) lines.push("## Example responses", "", ...examples);
+  lines.push("</ApiPanel>", "", "</ApiOperation>");
   return lines
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
@@ -349,9 +366,9 @@ function plainText(value: string): string {
 }
 
 /**
- * An operation's own page. `apiReference: true` keeps its table of contents to its sections and
- * scopes the reference styles (`src/app/docs/[[...slug]]/page.tsx`); `icon: method:<METHOD>`
- * puts its method beside it in the sidebar (`src/lib/source.ts`).
+ * An operation's own page. `apiReference: true` gives it the full width, its panel taking the
+ * table of contents' column, and scopes the reference styles (`src/app/docs/[[...slug]]/page.tsx`);
+ * `icon: method:<METHOD>` puts its method beside it in the sidebar (`src/lib/source.ts`).
  */
 export function renderOperationPage(operation: ApiOperation): string {
   const fields: Record<string, string | boolean> = { title: operation.summary };
