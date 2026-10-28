@@ -1,10 +1,9 @@
 import { refreshThemeProps } from "@sdp/design-tokens";
 import { SOLANA_CLUSTER_LABELS, type SolanaCluster } from "@sdp/types/well-known-tokens";
 import { Badge } from "@sdp/ui/badge";
-import { Callout } from "@sdp/ui/callout";
-import { ArrowUpRightIcon } from "lucide-react";
+import { ArrowUpRightIcon, CheckCircle2Icon, ClockIcon, XIcon } from "lucide-react";
 import { notFound } from "next/navigation";
-import type { ComponentProps } from "react";
+import type { ReactNode } from "react";
 import {
   formatDisplayAmount,
   formatTimestamp,
@@ -29,8 +28,7 @@ interface PayRequest {
 }
 
 interface StatusPanel {
-  /** The status colour: green once paid, red when the sender canceled, none when it lapsed. */
-  variant: NonNullable<ComponentProps<typeof Callout>["variant"]>;
+  icon: ReactNode;
   title: string;
   body: string;
 }
@@ -38,17 +36,17 @@ interface StatusPanel {
 function getStatusPanels(t: Awaited<ReturnType<typeof getTranslations>>) {
   return {
     paid: {
-      variant: "success",
+      icon: <CheckCircle2Icon className="size-12 text-success" />,
       title: t("Shared.pay.paymentReceived"),
       body: t("Shared.pay.paymentReceivedDescription"),
     },
     expired: {
-      variant: "neutral",
+      icon: <ClockIcon className="size-12 text-tertiary" />,
       title: t("Shared.pay.linkExpired"),
       body: t("Shared.pay.linkExpiredDescription"),
     },
     canceled: {
-      variant: "danger",
+      icon: <XIcon className="size-12 text-error" />,
       title: t("Shared.pay.requestCanceled"),
       body: t("Shared.pay.requestCanceledDescription"),
     },
@@ -137,9 +135,11 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
               </a>
             </div>
           ) : statusPanel ? (
-            <Callout variant={statusPanel.variant} title={statusPanel.title} className="mt-7">
-              {statusPanel.body}
-            </Callout>
+            <div className="mt-7 flex flex-col items-center gap-3 py-6 text-center">
+              {statusPanel.icon}
+              <p className="text-subheading font-medium text-primary">{statusPanel.title}</p>
+              <p className="max-w-xs text-body text-secondary">{statusPanel.body}</p>
+            </div>
           ) : null}
 
           <div className="mt-8 space-y-3 border-t border-border-default pt-6 text-body">
