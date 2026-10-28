@@ -46,6 +46,33 @@ already handed to a provider, or an existing provider authorization. For a
 hard external stop, apply the custody-provider policy as well. Exits remain
 available; do not disable them through this command.
 
-Before production use, drill disable, refusal, unaffected project,
-credentialed exit, and versioned re-enable on stage with the deployed image.
-Record the stage evidence in HOO-2334.
+## Stage drill before production use
+
+Deploy the candidate API and Worker to stage and confirm `/health/ready` reports
+its SHA. The stage deployment runs migration `0189` before replacing either
+service. Use a dedicated Sandbox project and a second project in the same
+organization; do not disable the shared stage smoke project. Use devnet wallets
+and test amounts only. The operator CLI needs the stage runtime database role
+and network access to stage Postgres; `stg_ci` browser credentials alone do not
+provide that access.
+
+1. Record the SHA, organization and project ids, both `status` outputs, and the
+   control version before the stop.
+2. Disable `payments.transfer_batch` on the dedicated project. Confirm its
+   version increments and the movement appears in `disabledMovements`.
+3. Try a new batch with a fresh Idempotency-Key. Expect HTTP 403 with
+   `details.reason = movement_disabled`, no batch row, and no sponsor signature.
+   Retry that same key after re-enable to prove the refusal was not stored.
+4. Check an unaffected project and a different movement can still start.
+   Check a credentialed exit, such as recurring cancellation, still works.
+5. Try re-enabling with the version from step 1. It must fail. Read the current
+   version, re-enable with it, and confirm the control is clear.
+6. Confirm the disable and enable audit-ledger entries name the operator,
+   reason, ticket, movement, and before/after versions. Record the stage smoke
+   result and evidence in HOO-2334.
+
+The next batch chunk is checked at the sponsor waist. The deterministic
+stop-between-chunks integration test covers that race; a manual stage request
+cannot reliably pause between concurrent chunks. Already signed chunks may
+still broadcast, so inspect their transfer rows before treating a batch as
+fully stopped.

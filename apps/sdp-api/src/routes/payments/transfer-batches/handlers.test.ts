@@ -875,6 +875,88 @@ describe("payment transfer batches", () => {
     expect(await count()).toEqual({ count: 1 });
   });
 
+  it("refuses the next chunk when a project is stopped after the first sponsor signs", async () => {
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerForCustodyWalletMock.mockResolvedValueOnce(sourceSigner);
+
+    let unblockSecondSimulation = () => {};
+    const secondSimulation = new Promise<void>((resolve) => {
+      unblockSecondSimulation = resolve;
+    });
+    let simulationCount = 0;
+    const simulationSpy = vi
+      .spyOn(solanaRpc, "simulateTransaction")
+      .mockImplementation(async () => {
+        simulationCount += 1;
+        if (simulationCount === 2) await secondSimulation;
+        return { success: true, logs: [], unitsConsumed: null, error: null };
+      });
+    const signingOutcomeMock = vi.fn(async () => {
+      await getDb(env)
+        .prepare("UPDATE projects SET disabled_movements = ?::text[] WHERE id = ?")
+        .bind(["payments.transfer_batch"], TEST_PROJECT.id)
+        .run();
+      unblockSecondSimulation();
+      return FIRST_SIGNATURE;
+    });
+    createKoraAdapterMock.mockReturnValueOnce(ownedSubmissionAdapter(signingOutcomeMock));
+
+    try {
+      const counterpartyId = await seedCounterparty("batch_stopped_between_chunks");
+      const firstAccountId = await seedCryptoWalletCounterpartyAccount({
+        counterpartyId,
+        walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+      });
+      const secondAccountId = await seedCryptoWalletCounterpartyAccount({
+        counterpartyId,
+        walletAddress: TEST_SOLANA_ADDRESSES.wallet3,
+      });
+      const response = await app.request(
+        "/v1/payments/transfer-batches",
+        {
+          method: "POST",
+          headers: {
+            "Idempotency-Key": crypto.randomUUID(),
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            token: "SOL",
+            recipients: [
+              { counterpartyId, counterpartyAccountId: firstAccountId, amount: "0.1" },
+              { counterpartyId, counterpartyAccountId: secondAccountId, amount: "0.2" },
+            ],
+            options: { preflight: true, maxRecipientsPerTransaction: 1 },
+          }),
+        },
+        env
+      );
+
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        data: {
+          recipients: Array<{ status: string; error: string | null }>;
+          transfers: Array<{ status: string }>;
+        };
+      };
+      expect(body.data.recipients.map((recipient) => recipient.status).sort()).toEqual([
+        "failed",
+        "processing",
+      ]);
+      expect(
+        body.data.recipients.find((recipient) => recipient.status === "failed")?.error
+      ).toContain("disabled");
+      expect(body.data.transfers).toHaveLength(2);
+      expect(signingOutcomeMock).toHaveBeenCalledOnce();
+      expect(sendTransactionMock).toHaveBeenCalledOnce();
+    } finally {
+      unblockSecondSimulation();
+      simulationSpy.mockRestore();
+    }
+  });
+
   it("creates a SOL transfer batch and records chunk transfers", async () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
