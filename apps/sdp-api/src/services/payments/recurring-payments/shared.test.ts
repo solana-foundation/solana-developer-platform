@@ -1,25 +1,41 @@
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { runInClusterScope } from "@sdp/rpc/scope";
-import { beforeEach, describe, expect, it } from "vitest";
+import {
+  address,
+  createNoopSigner,
+  type Instruction,
+  type MaybeAccount,
+  type Signature,
+} from "@solana/kit";
+import { SUBSCRIPTIONS_PROGRAM_ADDRESS, type SubscriptionAuthority } from "@solana/subscriptions";
+import { ASSOCIATED_TOKEN_PROGRAM_ADDRESS, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { createPostgresPaymentRecurringPaymentsRepository } from "@/db/repositories/payment-recurring-payments.repository.postgres";
 import {
+  prepareSubscriptionAuthority,
   ResumedStepUnsettledError,
   readRecurringPaymentStep,
   type SavedStepSend,
   type SubscriptionStep,
 } from "@/services/payments/recurring-payments/shared";
+import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import {
   epochInfoResult,
+  installClusterRpcResponder,
   type StubSignatureStatus,
   signatureStatusesRead,
   signatureStatusesReplyAt,
 } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import {
+  confirmTransactionMock,
+  DEVNET_USDC_MINT,
+  fetchMaybeSubscriptionAuthorityMock,
   installPaymentsRouteTestHooks,
   TEST_ORG,
   TEST_PROJECT,
+  TEST_SUBSCRIPTION_AUTHORITY,
 } from "@/test/helpers/payments-routes";
 import {
   createRecurringPaymentFixture,
@@ -28,6 +44,7 @@ import {
   testSignature,
 } from "@/test/helpers/recurring-payments";
 import { required } from "@/test/helpers/required";
+import { TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
 
 const SAVED_SEND = {
   signature: testSignature(1),
@@ -265,5 +282,129 @@ describe("readRecurringPaymentStep", () => {
 
     await expect(readStep("none", SAVED_SEND)).rejects.toBeInstanceOf(ResumedStepUnsettledError);
     expect(await savedRows()).toEqual({ ...untouchedRows, attempt_signature: testSignature(2) });
+  });
+});
+
+const SETUP_PROGRAMS = {
+  tokenAccount: ASSOCIATED_TOKEN_PROGRAM_ADDRESS,
+  authority: SUBSCRIPTIONS_PROGRAM_ADDRESS,
+} as const;
+const SETUP_FAILED = "Recurring payment setup failed on-chain";
+const MISSING_AUTHORITY = {
+  exists: false,
+  address: TEST_SUBSCRIPTION_AUTHORITY.address,
+} as const satisfies MaybeAccount<SubscriptionAuthority>;
+const SOURCE_OWNER = address(TEST_SOLANA_ADDRESSES.wallet1);
+
+describe("prepareSubscriptionAuthority", () => {
+  installPaymentsRouteTestHooks();
+  installClusterRpcResponder();
+
+  function setupSender() {
+    const sendSetup = vi.fn<(instruction: Instruction) => Promise<Signature>>();
+    sendSetup.mockImplementation(async () => testSignature(sendSetup.mock.calls.length));
+    return sendSetup;
+  }
+
+  function prepare(
+    tokenAccountExists: boolean,
+    subscriptionAuthority: MaybeAccount<SubscriptionAuthority>,
+    sendSetup: (instruction: Instruction) => Promise<Signature>
+  ) {
+    return runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
+      prepareSubscriptionAuthority({
+        rpc: createClusterRpc(),
+        sourceSigner: createNoopSigner(SOURCE_OWNER),
+        sourceTokenAccount: {
+          tokenAccount: address(TEST_SOLANA_ADDRESSES.wallet2),
+          exists: tokenAccountExists,
+        },
+        subscriptionAuthority,
+        subscriptionAuthorityAddress: TEST_SUBSCRIPTION_AUTHORITY.address,
+        owner: SOURCE_OWNER,
+        mint: address(DEVNET_USDC_MINT),
+        tokenProgram: TOKEN_PROGRAM_ADDRESS,
+        feePayer: TEST_MOCK_FEE_PAYER,
+        failureMessage: SETUP_FAILED,
+        sendSetup,
+      })
+    );
+  }
+
+  it.each<{
+    state: string;
+    tokenAccountExists: boolean;
+    authority: MaybeAccount<SubscriptionAuthority>;
+    created: (keyof typeof SETUP_PROGRAMS)[];
+    authorityReads: number;
+  }>([
+    {
+      state: "neither account exists",
+      tokenAccountExists: false,
+      authority: MISSING_AUTHORITY,
+      created: ["tokenAccount", "authority"],
+      authorityReads: 1,
+    },
+    {
+      state: "only the authority exists",
+      tokenAccountExists: false,
+      authority: TEST_SUBSCRIPTION_AUTHORITY,
+      created: ["tokenAccount"],
+      authorityReads: 0,
+    },
+    {
+      state: "only the token account exists",
+      tokenAccountExists: true,
+      authority: MISSING_AUTHORITY,
+      created: ["authority"],
+      authorityReads: 1,
+    },
+    {
+      state: "both accounts exist",
+      tokenAccountExists: true,
+      authority: TEST_SUBSCRIPTION_AUTHORITY,
+      created: [],
+      authorityReads: 0,
+    },
+  ])(
+    "sends one confirmed transaction per missing account when $state",
+    async ({ tokenAccountExists, authority, created, authorityReads }) => {
+      const sendSetup = setupSender();
+
+      expect(await prepare(tokenAccountExists, authority, sendSetup)).toBe(
+        TEST_SUBSCRIPTION_AUTHORITY
+      );
+      expect(sendSetup.mock.calls.map(([instruction]) => instruction.programAddress)).toEqual(
+        created.map((account) => SETUP_PROGRAMS[account])
+      );
+      expect(confirmTransactionMock.mock.calls.map(([, signature]) => signature)).toEqual(
+        created.map((_, index) => testSignature(index + 1))
+      );
+      expect(fetchMaybeSubscriptionAuthorityMock).toHaveBeenCalledTimes(authorityReads);
+    }
+  );
+
+  it("sends no authority init when the token account's create fails on chain", async () => {
+    confirmTransactionMock.mockResolvedValueOnce({
+      signature: testSignature(1),
+      slot: 100n,
+      confirmationStatus: "confirmed",
+      err: { InstructionError: [0, "Custom"] },
+    });
+    const sendSetup = setupSender();
+
+    await expect(prepare(false, MISSING_AUTHORITY, sendSetup)).rejects.toMatchObject({
+      code: "TRANSACTION_FAILED",
+      message: SETUP_FAILED,
+    });
+    expect(sendSetup).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the step in flight while the authority it created is not visible at confirmed", async () => {
+    fetchMaybeSubscriptionAuthorityMock.mockResolvedValueOnce(MISSING_AUTHORITY);
+
+    await expect(prepare(true, MISSING_AUTHORITY, setupSender())).rejects.toBeInstanceOf(
+      ResumedStepUnsettledError
+    );
   });
 });

@@ -1,3 +1,4 @@
+import { FeePaymentError } from "@sdp/fee-payment/port";
 import { runInClusterScope } from "@sdp/rpc/scope";
 import type * as solanaRpc from "@sdp/rpc/solana";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
@@ -26,6 +27,7 @@ import {
   signature,
 } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
+import { ASSOCIATED_TOKEN_PROGRAM_ADDRESS, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { z } from "zod";
@@ -68,6 +70,7 @@ import {
   createOrgSignerForCustodyWalletMock,
   DEVNET_USDC_MINT,
   enableMainnetSponsorship,
+  fetchMaybeSubscriptionAuthorityMock,
   fetchMaybeSubscriptionDelegationMock,
   getAccountInfoMock,
   getRecentBlockhashMock,
@@ -102,6 +105,7 @@ import {
   seedRecurringCollectionJournal,
   setRecurringCollectionDue,
   testSignature,
+  transactionInstructionPrograms,
 } from "@/test/helpers/recurring-payments";
 import { required } from "@/test/helpers/required";
 import { sendTransactionPreflightError } from "@/test/helpers/rpc-errors";
@@ -2470,6 +2474,101 @@ describe("Payments routes — recurring", () => {
       .bind(activateBody.data.recurringPayment.subscriptionId)
       .first<{ subscriber_token_account: string | null }>();
     expect(subscriptionRow?.subscriber_token_account).toBe(expectedSourceAta);
+  });
+
+  async function withoutSourceSetupAccounts(): Promise<void> {
+    const [sourceTokenAccount] = await findAssociatedTokenPda({
+      owner: recurringExecution.sourceSigner().address,
+      tokenProgram: TOKEN_PROGRAM_ADDRESS,
+      mint: address(DEVNET_USDC_MINT),
+    });
+    const readAccount = required(getAccountInfoMock.getMockImplementation());
+    getAccountInfoMock.mockImplementation(async (...args) =>
+      args[1] === sourceTokenAccount ? null : readAccount(...args)
+    );
+    fetchMaybeSubscriptionAuthorityMock.mockResolvedValueOnce(noAccount);
+  }
+
+  it("keeps the token account's setup signature and fails the activation when Kora refuses the authority init", async () => {
+    const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    await withoutSourceSetupAccounts();
+    const signAsFeePayer = recurringExecution.signAsFeePayerMock();
+    const sponsorSign = required(signAsFeePayer.getMockImplementation());
+    signAsFeePayer
+      .mockImplementationOnce(sponsorSign)
+      .mockImplementationOnce(sponsorSign)
+      .mockRejectedValueOnce(
+        new FeePaymentError("Kora Error -32001: Validation error", "PROVIDER_REJECTED")
+      );
+
+    const res = await app.request(
+      `/v1/payments/recurring-payments/${created.id}/activate`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+
+    expect(res.status).toBe(422);
+    expect(
+      signAsFeePayer.mock.calls
+        .slice(1)
+        .map(([transaction]) => transactionInstructionPrograms(transaction))
+    ).toEqual([
+      [ASSOCIATED_TOKEN_PROGRAM_ADDRESS],
+      [subscriptionsProgram.SUBSCRIPTIONS_PROGRAM_ADDRESS],
+    ]);
+    const [, tokenAccountSignature] = poolSentSignatures();
+    expect(sendTransactionMock).toHaveBeenCalledTimes(2);
+    expect(
+      await getDb(env)
+        .prepare(
+          `SELECT a.status, a.stage, a.authorization_setup_signature, rp.status AS schedule_status
+             FROM payment_recurring_payment_activation_attempts a
+             JOIN payment_recurring_payments rp ON rp.id = a.recurring_payment_id
+            WHERE rp.id = ?`
+        )
+        .bind(created.id)
+        .first<{
+          status: string;
+          stage: string;
+          authorization_setup_signature: string | null;
+          schedule_status: string;
+        }>()
+    ).toEqual({
+      status: "failed",
+      stage: "authorize_subscription",
+      authorization_setup_signature: tokenAccountSignature,
+      schedule_status: "pending_activation",
+    });
+  });
+
+  it("sends each missing setup account as its own sponsored transaction on a plan replacement", async () => {
+    const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    await withoutSourceSetupAccounts();
+
+    const res = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}`,
+      { method: "PATCH", headers: RECURRING_HEADERS, body: JSON.stringify({ amount: "30.00" }) },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    expect(sendTransactionMock).toHaveBeenCalledTimes(7);
+    expect(
+      sendTransactionMock.mock.calls
+        .slice(3, 5)
+        .map(([, transaction]) => transactionInstructionPrograms(transaction))
+    ).toEqual([
+      [ASSOCIATED_TOKEN_PROGRAM_ADDRESS],
+      [subscriptionsProgram.SUBSCRIPTIONS_PROGRAM_ADDRESS],
+    ]);
+    expect(
+      await getDb(env)
+        .prepare(
+          "SELECT authorization_setup_signature FROM payment_recurring_payment_update_attempts WHERE recurring_payment_id = ?"
+        )
+        .bind(activated.id)
+        .first<{ authorization_setup_signature: string | null }>()
+    ).toEqual({ authorization_setup_signature: poolSentSignatures()[4] });
   });
 
   it("cancels active recurring payments through SDP API routes", async () => {

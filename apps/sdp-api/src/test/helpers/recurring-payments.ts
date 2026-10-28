@@ -1,8 +1,12 @@
 import { getBase58Decoder } from "@solana/codecs";
 import {
+  type Address,
+  decompileTransactionMessage,
   generateKeyPairSigner,
+  getCompiledTransactionMessageDecoder,
   getSignatureFromTransaction,
   getTransactionDecoder,
+  type Instruction,
   type Signature,
   signature,
 } from "@solana/kit";
@@ -88,6 +92,16 @@ export function poolSentSignatures(): Signature[] {
   return sendTransactionMock.mock.calls.map(([, transactionBytes]) =>
     getSignatureFromTransaction(getTransactionDecoder().decode(transactionBytes))
   );
+}
+
+/** The program each instruction of a wire transaction calls, in order. */
+export function transactionInstructionPrograms(transactionBytes: Uint8Array): Address[] {
+  const instructions: readonly Instruction[] = decompileTransactionMessage(
+    getCompiledTransactionMessageDecoder().decode(
+      getTransactionDecoder().decode(transactionBytes).messageBytes
+    )
+  ).instructions;
+  return instructions.map(({ programAddress }) => programAddress);
 }
 
 /**
