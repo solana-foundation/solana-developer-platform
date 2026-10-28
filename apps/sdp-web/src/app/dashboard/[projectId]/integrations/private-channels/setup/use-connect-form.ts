@@ -43,7 +43,7 @@ function toValues(instance: PrivateChannelInstance | null): ConnectFormValues {
   };
 }
 
-export interface ReactivatePrompt {
+interface ReactivatePrompt {
   existing: PrivateChannelInstance;
   message: string;
 }

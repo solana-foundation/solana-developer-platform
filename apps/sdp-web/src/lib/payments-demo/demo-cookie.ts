@@ -19,7 +19,7 @@ export const DEMO_SESSION_COOKIE_PREFIX = "sdp-demo-session";
  */
 export const TAB_DEMO_HEADER_NAME = "x-sdp-tab-demo";
 
-export const PAYMENTS_PATH_PREFIX = "/dashboard/payments";
+const PAYMENTS_PATH_PREFIX = "/dashboard/payments";
 
 /** Whether a dashboard path is a Payments screen. */
 export function isPaymentsPath(pathname: string | null | undefined): boolean {

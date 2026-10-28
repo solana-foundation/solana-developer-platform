@@ -1,7 +1,7 @@
 import type { EarnVaultPosition } from "@sdp/types/earn";
 import { earnVaultHoldingValue } from "@/app/dashboard/[projectId]/markets/earn/earn-vault-holding";
 
-export type VaultMovementKind = "deposit" | "withdrawal";
+type VaultMovementKind = "deposit" | "withdrawal";
 
 export interface VaultPositionsRead {
   startedAt: number;

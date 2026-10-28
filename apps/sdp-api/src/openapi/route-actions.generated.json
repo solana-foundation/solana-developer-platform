@@ -241,6 +241,7 @@
   "POST /v1/payments/recurring-payments/:_/collect": "recurring.execute",
   "POST /v1/payments/recurring-payments/:_/resume": "recurring.execute",
   "POST /v1/payments/requests": "payment_requests.manage",
+  "POST /v1/payments/requests/:_/cancel": "payment_requests.manage",
   "POST /v1/payments/subscription-plans": "recurring.manage",
   "POST /v1/payments/subscription-plans/:_/prepare-create": "recurring.manage",
   "POST /v1/payments/subscriptions": "recurring.manage",

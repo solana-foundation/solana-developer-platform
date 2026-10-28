@@ -7,6 +7,7 @@ export interface DashboardCapabilities {
   canManageApiKeys: boolean;
   canManageCustody: boolean;
   canManageOrgSettings: boolean;
+  canManagePaymentRequests: boolean;
   canManageTokenAdmin: boolean;
   canManageTokenWrite: boolean;
   canUseWalletSignerCheck: boolean;
@@ -36,6 +37,7 @@ export function resolveDashboardAccess(role: OrganizationRole): DashboardAccess 
       canManageApiKeys: mayPerform("api_keys.manage"),
       canManageCustody: mayPerform("wallets.configure"),
       canManageOrgSettings: mayPerform("organizations.manage"),
+      canManagePaymentRequests: mayPerform("payment_requests.manage"),
       canManageTokenAdmin: mayPerform("issuance.enforce"),
       canManageTokenWrite: mayPerform("issuance.manage"),
       // Current dashboard implementation creates a short-lived API key before signer check.

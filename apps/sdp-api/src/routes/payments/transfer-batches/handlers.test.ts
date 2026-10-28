@@ -34,7 +34,6 @@ import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
 import { rootLogger } from "@/runtime/logger";
 import { SigningService } from "@/services/domain/signing.service";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
-import { clearRentMinimumCacheForTests } from "@/services/payments/sol-rent-minimum";
 import * as solanaSigner from "@/services/solana/signer";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
@@ -419,7 +418,6 @@ describe("payment transfer batches", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     labeledSignatures.clear();
-    clearRentMinimumCacheForTests();
     rpc.answer("getMinimumBalanceForRentExemption", SYSTEM_ACCOUNT_RENT_MINIMUM);
     // Every destination is a funded account unless a test says otherwise.
     getMultipleAccountsLamportsMock.mockImplementation(async (_rpc, addresses) =>
@@ -724,7 +722,7 @@ describe("payment transfer batches", () => {
       expect(accepted.status).toBe(200);
     });
 
-    it("reads only the source when every recipient clears the minimum, and the minimum once per TTL", async () => {
+    it("reads only the source when every recipient clears the minimum", async () => {
       rpc.answer("getFeeForMessage", { context: { slot: 1 }, value: 5000 });
       const recipients = (await seedRentRecipients()).map((recipient) => ({
         ...recipient,
@@ -747,9 +745,6 @@ describe("payment transfer batches", () => {
       for (const [, addresses] of getMultipleAccountsLamportsMock.mock.calls) {
         expect(addresses).toHaveLength(1);
       }
-      expect(
-        rpc.calls.filter((call) => call.method === "getMinimumBalanceForRentExemption")
-      ).toHaveLength(1);
     });
 
     it("warns and refuses when the batch would leave the source wallet below the minimum", async () => {
@@ -983,8 +978,8 @@ describe("payment transfer batches", () => {
       },
       {
         slot: 102n,
-        confirmations: 0n,
-        confirmationStatus: "confirmed",
+        confirmations: null,
+        confirmationStatus: "finalized",
         err: { InstructionError: [0, "InsufficientFunds"] },
       },
     ]);
@@ -2882,8 +2877,8 @@ describe("payment transfer batches", () => {
     getSignatureStatusesMock.mockResolvedValueOnce([
       {
         slot: 104n,
-        confirmations: 0n,
-        confirmationStatus: "confirmed",
+        confirmations: null,
+        confirmationStatus: "finalized",
         err: { InstructionError: [0, "InsufficientFunds"] },
       },
     ]);
@@ -3010,8 +3005,8 @@ describe("payment transfer batches", () => {
             ? { slot: 200n, confirmations: 5n, confirmationStatus: "confirmed", err: null }
             : {
                 slot: 201n,
-                confirmations: 0n,
-                confirmationStatus: "confirmed",
+                confirmations: null,
+                confirmationStatus: "finalized",
                 err: { InstructionError: [0, { Custom: 1 }] },
               }
       )

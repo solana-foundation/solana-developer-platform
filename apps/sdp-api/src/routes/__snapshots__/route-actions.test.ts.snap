@@ -169,6 +169,7 @@ exports[`route actions > pins each route's action 1`] = `
   "organizations.read GET /v1/organizations/:orgId/provider-access",
   "payment_requests.manage GET /v1/payments/requests/:paymentRequestId/link",
   "payment_requests.manage POST /v1/payments/requests",
+  "payment_requests.manage POST /v1/payments/requests/:paymentRequestId/cancel",
   "payment_requests.read GET /v1/payments/requests",
   "payment_requests.read GET /v1/payments/requests/:paymentRequestId",
   "private_channels.configure DELETE /v1/private-channels/channels/:channelId/principals/:principalId",
