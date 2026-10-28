@@ -954,6 +954,15 @@ export const IN_FLIGHT_COLLECTION_ATTEMPT_STATUSES = [
 export const FAILED_COLLECTION_ATTEMPT_STATUSES = [
   "failed",
 ] as const satisfies readonly PaymentSubscriptionCollectionAttemptStatus[];
+/**
+ * The statuses a collection failure's write settles an attempt from, by its outcome: `confirmed`
+ * when the attempt's transfer turned out to have landed, else `failed`. Each outcome also rewrites
+ * itself, as a recovery re-settling the same attempt does.
+ */
+export const COLLECTION_ATTEMPT_STATUSES_SETTLING_TO = {
+  confirmed: ["pending", "processing", "confirmed"],
+  failed: ["pending", "processing", "failed"],
+} as const satisfies Record<string, readonly PaymentSubscriptionCollectionAttemptStatus[]>;
 export const COLLECTION_ATTEMPT_INITIAL_STATUSES = [
   "processing",
   "failed",

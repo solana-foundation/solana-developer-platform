@@ -9,12 +9,14 @@ import { getTransaction, type ParsedInstruction, type SolanaRpc } from "@sdp/rpc
 import { assertValidAddress } from "@sdp/solana/address";
 import {
   COLLECTION_ATTEMPT_STATUSES_BLOCKING_NEW_CYCLE,
+  COLLECTION_ATTEMPT_STATUSES_SETTLING_TO,
   COLLECTION_ATTEMPT_STATUSES_WITH_SUBMITTED_TRANSFER,
   FAILED_COLLECTION_ATTEMPT_STATUSES,
   hasRecoverableRecurringPaymentCollection,
   isCollectableRecurringPaymentStatus,
   isSuccessfulPaymentTransferStatus,
   type PaymentSubscriptionCollectionAttemptMetadata,
+  type PaymentSubscriptionCollectionAttemptStatus,
   RECURRING_PAYMENT_COLLECTION_CONFIG,
   type RecurringPaymentPauseReason,
 } from "@sdp/types/payments";
@@ -997,13 +999,13 @@ async function settleCollectionAttempt(
     projectId: string;
     attemptId: string;
     transferId: string | null;
-    status: "confirmed" | "failed";
+    status: keyof typeof COLLECTION_ATTEMPT_STATUSES_SETTLING_TO;
     signature: Signature | null;
     error: string | null;
-    metadata: unknown;
+    metadata: PaymentSubscriptionCollectionAttemptMetadata;
     updatedAt: string;
   }
-): Promise<string> {
+): Promise<PaymentSubscriptionCollectionAttemptStatus> {
   const settled = await tx
     .prepare(
       `WITH prior AS (
@@ -1023,10 +1025,7 @@ async function settleCollectionAttempt(
               updated_at = ?
          FROM prior
         WHERE attempt.id = prior.id
-          AND (
-            (?::text = 'confirmed' AND prior.status IN ('pending', 'processing', 'confirmed'))
-            OR (?::text = 'failed' AND prior.status IN ('pending', 'processing', 'failed'))
-          )
+          AND prior.status = ANY(?::text[])
         RETURNING prior.status AS prior_status`
     )
     .bind(
@@ -1041,10 +1040,9 @@ async function settleCollectionAttempt(
       input.error,
       JSON.stringify(input.metadata),
       input.updatedAt,
-      input.status,
-      input.status
+      [...COLLECTION_ATTEMPT_STATUSES_SETTLING_TO[input.status]]
     )
-    .first<{ prior_status: string }>();
+    .first<{ prior_status: PaymentSubscriptionCollectionAttemptStatus }>();
   if (settled === null) {
     throw internalError("Failed to mark collection attempt failed");
   }
