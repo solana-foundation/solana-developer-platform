@@ -565,7 +565,7 @@
       {
         "id": "create-payment-transfer",
         "operationId": "createPaymentTransfer",
-        "title": "Execute transfer (custody)",
+        "title": "Execute a provider-signed transfer",
         "method": "POST",
         "path": "/v1/payments/transfers",
         "pathFields": [],
@@ -4370,7 +4370,7 @@
           {
             "key": "destinationCustodyWalletId",
             "label": "destinationCustodyWalletId",
-            "description": "Custody wallet ID (the `id` returned by the wallets API). Required when direction is onramp.",
+            "description": "Connected wallet ID (the `id` returned by the wallets API). Required when direction is onramp.",
             "defaultValue": "cwlt_example",
             "required": false
           }
@@ -7003,7 +7003,7 @@
       {
         "id": "confirm-deploy",
         "operationId": "confirmDeploy",
-        "title": "Confirm non-custodial deploy",
+        "title": "Confirm a caller-signed deployment",
         "method": "POST",
         "path": "/v1/issuance/tokens/{tokenId}/deploy/confirm",
         "pathFields": [
@@ -8188,7 +8188,7 @@
           {
             "key": "signingCustodyWalletId",
             "label": "signingCustodyWalletId",
-            "description": "Optional exact SDP Wallet ID controlling the live list authority. Omission requires exactly one matching in-scope custody record; multiple matches return 409. Database-only lists do not require a signer.",
+            "description": "Optional exact SDP Wallet ID controlling the live list authority. Omission requires exactly one matching in-scope wallet record; multiple matches return 409. Database-only lists do not require a signer.",
             "defaultValue": "cwlt_example",
             "required": false
           }
