@@ -21,6 +21,7 @@ import {
   type PublicSurface,
   publicSurface,
 } from "./release-channel";
+import { apiUrl, canonicalSite } from "./site";
 
 /**
  * Generated blocks. A page about one module carries `module:` (or
@@ -108,7 +109,8 @@ function blockOf(node: RootContent, where: string): { name: BlockName } | undefi
 }
 
 // Every API method, checked against the package's list by the compiler. source.config.ts loads
-// this file without a TypeScript resolver, so workspace packages are imported for types only.
+// this file without a TypeScript resolver, so workspace packages are imported for types only:
+// Node cannot follow their extensionless imports. `@sdp/types/site` (through `./site`) has none.
 const API_METHOD_NAMES = {
   GET: true,
   POST: true,
@@ -237,12 +239,17 @@ function spanOf(node: RootContent, where: string): { start: number; end: number 
 
 const parser = unified().use(remarkParse).use(remarkMdx).use(remarkGfm);
 
-/** Remark plugin for the Fumadocs MDX pipeline; source.config.ts runs it first. */
-export function remarkDocsBlocks(options: { surface?: PublicSurface } = {}) {
+/**
+ * Remark plugin for the Fumadocs MDX pipeline; source.config.ts runs it first. On a generated
+ * reference page it also sets a field's facts apart and points the code at this deployment's API
+ * (`apiUrl`, from `NEXT_PUBLIC_SDP_API_URL`), where the Markdown keeps the canonical one.
+ */
+export function remarkDocsBlocks(options: { surface?: PublicSurface; apiUrl?: string } = {}) {
   const surface = options.surface ?? publicSurface;
+  const pageApiUrl = options.apiUrl ?? apiUrl;
   return (tree: Root, file: Parameters<typeof embedSource>[0]) => {
     const where = file.path ?? "MDX page";
-    const spacesFacts = REFERENCE_PAGE.test(where);
+    const referencePage = REFERENCE_PAGE.test(where);
     const walk = (parent: Parent) => {
       parent.children = parent.children.flatMap((child) => {
         const block = blockOf(child, where);
@@ -263,8 +270,12 @@ export function remarkDocsBlocks(options: { surface?: PublicSurface } = {}) {
           };
           return [child];
         }
-        if (spacesFacts && child.type === "text" && child.value.includes(FACT_SEPARATOR)) {
+        if (referencePage && child.type === "text" && child.value.includes(FACT_SEPARATOR)) {
           return spacedFacts(child.value);
+        }
+        if (referencePage && child.type === "code") {
+          child.value = child.value.replaceAll(canonicalSite.apiUrl, pageApiUrl);
+          return [child];
         }
         if ("children" in child) walk(child);
         return [child];
