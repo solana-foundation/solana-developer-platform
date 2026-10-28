@@ -113,10 +113,11 @@ included:
 
 An operator can disable a named `start` from `MOVEMENTS` for one project. The
 control is an internal `projects.disabled_movements` column, separate from
-tenant-editable project settings. The existing single live admission read
-includes it, and `decideMovement` refuses the start with `movement_disabled`
-after organization and principal admission. Custody and sponsor waists, plus
-provider-API starts, use that same decision. An exit never consults the
+tenant-editable project settings. The live admission read includes it, and
+`decideMovement` refuses the start with `movement_disabled` after organization
+and principal admission. Direct transfers and batches check before writing
+their recovery row, then the custody and sponsor waists check again before
+signing. Provider-API starts use the same decision. An exit never consults the
 control, even when it reads a credential. A malformed stored control fails
 starts closed.
 

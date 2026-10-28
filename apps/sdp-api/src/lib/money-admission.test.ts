@@ -360,6 +360,78 @@ describe("money admission reads", () => {
     ]);
   });
 
+  it("keeps a repeated stop idempotent and refuses stale or cross-project re-enable", async () => {
+    const scope = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id };
+    const change = {
+      ...scope,
+      movement: "payments.transfer" as const,
+      operator: "ops:test",
+      reason: "stage drill",
+      ticket: "HOO-2334",
+    };
+    const disable = () =>
+      asSystem(() => changeProjectMovementControl(env, { ...change, operation: "disable" }));
+
+    await expect(disable()).resolves.toEqual({
+      disabledMovements: ["payments.transfer"],
+      version: 1,
+    });
+    await expect(disable()).resolves.toEqual({
+      disabledMovements: ["payments.transfer"],
+      version: 1,
+    });
+    await expect(
+      asSystem(() =>
+        changeProjectMovementControl(env, {
+          ...change,
+          organizationId: "org_other",
+          operation: "enable",
+          expectedVersion: 1,
+        })
+      )
+    ).rejects.toThrow("Project not found in organization");
+    await expect(
+      asSystem(() =>
+        changeProjectMovementControl(env, {
+          ...change,
+          operation: "enable",
+          expectedVersion: 0,
+        })
+      )
+    ).rejects.toThrow("current version 1");
+    await expect(asSystem(() => getProjectMovementControl(env, scope))).resolves.toEqual({
+      disabledMovements: ["payments.transfer"],
+      version: 1,
+    });
+    const audit = await getDb(env)
+      .prepare(
+        "SELECT id FROM audit_logs WHERE resource_type = 'project' AND resource_id = ? ORDER BY ledger_sequence"
+      )
+      .bind(scope.projectId)
+      .all<{ id: string }>();
+    expect(audit.results).toHaveLength(1);
+  });
+
+  it("rejects an exit as an operator control without changing the project", async () => {
+    const scope = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id };
+    expect(() =>
+      asSystem(() =>
+        changeProjectMovementControl(env, {
+          ...scope,
+          movement: "recurring.cancel",
+          operation: "disable",
+          operator: "ops:test",
+          reason: "stage drill",
+          ticket: "HOO-2334",
+        })
+      )
+    ).toThrow("Only start movements can be disabled");
+    await expect(asSystem(() => getProjectMovementControl(env, scope))).resolves.toEqual({
+      disabledMovements: [],
+      version: 0,
+    });
+  });
+
   it("keeps credentialed exits available when the stored control is malformed", async () => {
     const db = getDb(env);
     const scope = { organizationId: TEST_ORG.id, projectId: TEST_PRODUCTION_PROJECT.id };

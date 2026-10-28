@@ -197,7 +197,18 @@ beforeEach(() => {
         return Promise.resolve(Response.json({ data: { transfer } }));
       }
       return Promise.resolve(
-        Response.json({ error: { message: "transfer rejected" } }, { status: transferStatus })
+        Response.json(
+          {
+            error: {
+              message:
+                transferStatus === 403
+                  ? "This movement is disabled for the project"
+                  : "transfer rejected",
+              ...(transferStatus === 403 ? { details: { reason: "movement_disabled" } } : {}),
+            },
+          },
+          { status: transferStatus }
+        )
       );
     }
     return Promise.resolve(Response.json({ data: {} }));
@@ -342,6 +353,28 @@ describe("useOnchainSendWizard", () => {
       amount: "0.5",
     });
     expect(mocks.toastError).toHaveBeenCalledTimes(succeeds ? 0 : 1);
+  });
+
+  it("shows an operator stop at Send and safely retries after re-enable", async () => {
+    transferStatus = 403;
+    const { result } = renderWizard();
+    await prepareReview(result);
+
+    await act(async () => result.current.handlePrimary());
+
+    expect(result.current.currentStepId).toBe("REVIEW");
+    expect(result.current.submitting).toBe(false);
+    expect(result.current.transferResult).toBeNull();
+    expect(mocks.toastError).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ description: "This movement is disabled for the project" })
+    );
+
+    transferStatus = 200;
+    await act(async () => result.current.handlePrimary());
+    expect(result.current.transferResult).toEqual(transfer);
+    const [refused, retried] = sentIdempotencyKeys();
+    expect(retried).toBe(refused);
   });
 
   // A refusal retires a fresh key; after a lost answer it settles nothing about

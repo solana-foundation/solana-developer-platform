@@ -39,7 +39,7 @@ import type { Env } from "@/types/env";
  *
  * The signing waists (custody signer, fee sponsor) ask on every start
  * signature; jobs, `/pay` and provider-API starts (ramp quotes) ask before
- * their first provider call or signature. All of them make the same single
+ * their first provider call or signature. Each check makes one live
  * read, {@link readMoneyAdmissionFactsWith}: the project and organization, and
  * the ambient principal's own row, joined into one primary-key statement. The
  * decision, {@link decideMovement}, is pure.
