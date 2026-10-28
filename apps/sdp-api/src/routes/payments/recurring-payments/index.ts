@@ -24,6 +24,7 @@ import {
   findRecurringPaymentResumeReplay,
   findRecurringPaymentUpdateReplay,
   getRecurringPayment,
+  listRecurringPaymentCollectionAttempts,
   listRecurringPayments,
   resumeRecurringPayment,
   updateRecurringPayment,
@@ -116,3 +117,8 @@ recurringPayments.post(
   resumeRecurringPayment
 );
 recurringPayments.get("/:id", requireAction("recurring.read"), getRecurringPayment);
+recurringPayments.get(
+  "/:id/collection-attempts",
+  requireAction("recurring.read"),
+  listRecurringPaymentCollectionAttempts
+);

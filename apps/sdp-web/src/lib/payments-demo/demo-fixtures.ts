@@ -1564,12 +1564,18 @@ function recurringPaymentBody(world: DemoWorld, recurringPaymentId: string) {
   return recurringPayment ? { data: { recurringPayment } } : undefined;
 }
 
-function collectionAttemptsBody(world: DemoWorld, subscriptionId: string, params: URLSearchParams) {
-  if (!world.schedules.some((schedule) => schedule.subscriptionId === subscriptionId)) {
+/** `GET /v1/payments/recurring-payments/:id/collection-attempts`: the attempts of the schedule's subscription. */
+function collectionAttemptsBody(
+  world: DemoWorld,
+  recurringPaymentId: string,
+  params: URLSearchParams
+) {
+  const recurringPayment = world.schedules.find((schedule) => schedule.id === recurringPaymentId);
+  if (!recurringPayment) {
     return undefined;
   }
   const attempts = world.attempts
-    .filter((attempt) => attempt.subscriptionId === subscriptionId)
+    .filter((attempt) => attempt.subscriptionId === recurringPayment.subscriptionId)
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   const page = pageOf(attempts, params);
   return {
@@ -1614,7 +1620,7 @@ function paymentsRoute(rest: string[], params: URLSearchParams, world: DemoWorld
     }
   }
   if (collection === "requests" && child === "link") return requestLinkBody(world, id);
-  if (collection === "subscriptions" && child === "collection-attempts") {
+  if (collection === "recurring-payments" && child === "collection-attempts") {
     return collectionAttemptsBody(world, id, params);
   }
   if (collection === "wallets" && child === "balances") return walletBalancesBody(world, id);

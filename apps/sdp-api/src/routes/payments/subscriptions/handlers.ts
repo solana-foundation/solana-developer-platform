@@ -34,6 +34,7 @@ import { getAuthorized } from "@/middleware/authorize";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { type AppContext, getPaymentSubscriptionsRepository } from "@/routes/payments/context";
 import { mapCollectionAttemptRow } from "@/routes/payments/mappers";
+import { listSubscriptionCollectionAttemptsQuerySchema } from "@/routes/payments/schemas";
 import { resolveScope, resolveWallet } from "@/routes/payments/wallets";
 import { parseI64String, parseU64String } from "@/services/payment-operation.service";
 import {
@@ -48,7 +49,6 @@ import {
 } from "@/services/sponsorship.service";
 import {
   type createSubscriptionSchema,
-  listSubscriptionCollectionAttemptsQuerySchema,
   listSubscriptionsQuerySchema,
   type prepareSubscriptionAuthorizationSchema,
   type prepareSubscriptionCollectionSchema,

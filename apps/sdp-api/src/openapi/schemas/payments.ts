@@ -24,7 +24,11 @@ import {
   recurringPaymentIdParamsSchema as recurringPaymentIdParamsSchemaBase,
   updateRecurringPaymentSchema as updateRecurringPaymentSchemaBase,
 } from "@/routes/payments/recurring-payments/schemas";
-import { transferIdParamsSchema as transferIdParamsSchemaBase } from "@/routes/payments/schemas";
+import {
+  listSubscriptionCollectionAttemptsQuerySchema as listSubscriptionCollectionAttemptsQuerySchemaBase,
+  paymentSubscriptionCollectionAttemptStatusSchema as paymentSubscriptionCollectionAttemptStatusSchemaBase,
+  transferIdParamsSchema as transferIdParamsSchemaBase,
+} from "@/routes/payments/schemas";
 import {
   createSubscriptionPlanSchema as createSubscriptionPlanSchemaBase,
   listSubscriptionPlansQuerySchema as listSubscriptionPlansQuerySchemaBase,
@@ -35,9 +39,7 @@ import {
 } from "@/routes/payments/subscription-plans/schemas";
 import {
   createSubscriptionSchema as createSubscriptionSchemaBase,
-  listSubscriptionCollectionAttemptsQuerySchema as listSubscriptionCollectionAttemptsQuerySchemaBase,
   listSubscriptionsQuerySchema as listSubscriptionsQuerySchemaBase,
-  paymentSubscriptionCollectionAttemptStatusSchema as paymentSubscriptionCollectionAttemptStatusSchemaBase,
   paymentSubscriptionStatusSchema as paymentSubscriptionStatusSchemaBase,
   prepareSubscriptionAuthorizationSchema as prepareSubscriptionAuthorizationSchemaBase,
   prepareSubscriptionCollectionSchema as prepareSubscriptionCollectionSchemaBase,

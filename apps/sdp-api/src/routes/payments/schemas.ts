@@ -1,4 +1,5 @@
 import { isDecimalString } from "@sdp/solana/amount";
+import { PAYMENT_SUBSCRIPTION_COLLECTION_ATTEMPT_STATUSES } from "@sdp/types/payments";
 import { isWellKnownTokenSymbol, SOL_MINT } from "@sdp/types/well-known-tokens";
 import { assertIsAddress, isAddress } from "@solana/addresses";
 import {
@@ -116,3 +117,14 @@ export const i64StringSchema = z
       return false;
     }
   }, "Value must fit in a signed 64-bit integer");
+
+export const paymentSubscriptionCollectionAttemptStatusSchema = z.enum(
+  PAYMENT_SUBSCRIPTION_COLLECTION_ATTEMPT_STATUSES
+);
+
+/** Filters and paging for a subscription's collection attempts, read by subscriptions and recurring payments alike. */
+export const listSubscriptionCollectionAttemptsQuerySchema = z.object({
+  status: paymentSubscriptionCollectionAttemptStatusSchema.optional(),
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+});

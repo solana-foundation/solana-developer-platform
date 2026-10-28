@@ -146,7 +146,6 @@ export default async function RecurringPaymentDetailRoute({
       const wallets = walletsResult.data ?? [];
       const wallet =
         wallets.find((entry) => entry.id === recurringPayment.sourceCustodyWalletId) ?? null;
-      const subscriptionId = recurringPayment.subscriptionId;
       const [counterparty, counterpartyAccounts, collectionAttemptsResult] = await Promise.all([
         trace.step("fetch_recurring_payment_counterparty", () =>
           fetchCounterparty(apiClient.request, recurringPayment.counterpartyId)
@@ -154,14 +153,9 @@ export default async function RecurringPaymentDetailRoute({
         trace.step("fetch_recurring_payment_counterparty_accounts", () =>
           fetchAllCounterpartyWalletAccounts(apiClient.request, recurringPayment.counterpartyId)
         ),
-        subscriptionId
-          ? trace.step("fetch_recurring_payment_collection_attempts", () =>
-              fetchRecurringPaymentCollectionAttempts(apiClient.request, subscriptionId, t)
-            )
-          : Promise.resolve({
-              ok: true as const,
-              data: { collectionAttempts: [], total: 0 },
-            }),
+        trace.step("fetch_recurring_payment_collection_attempts", () =>
+          fetchRecurringPaymentCollectionAttempts(apiClient.request, recurringPayment.id, t)
+        ),
       ]);
       const counterpartyLabel =
         counterparty?.displayName ?? t("DashboardPayments.recurring.counterpartyUnavailable");

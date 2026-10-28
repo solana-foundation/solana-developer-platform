@@ -411,13 +411,13 @@ export async function fetchRecurringPaymentById(
 
 export async function fetchRecurringPaymentCollectionAttempts(
   request: SdpApiClient["request"],
-  subscriptionId: string,
+  recurringPaymentId: string,
   t: Translate
 ): Promise<RecurringFetchResult<RecurringPaymentCollectionAttemptsResult>> {
   try {
     const response = await request(
-      `/v1/payments/subscriptions/${encodeURIComponent(
-        subscriptionId
+      `/v1/payments/recurring-payments/${encodeURIComponent(
+        recurringPaymentId
       )}/collection-attempts?page=1&pageSize=25`
     );
     if (!response.ok) {

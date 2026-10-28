@@ -5,6 +5,7 @@ import {
 import {
   isInFlightRecurringPaymentAttemptStatus,
   type ListPaymentRecurringPaymentsResponse,
+  type ListPaymentSubscriptionCollectionAttemptsResponse,
   type PaymentRecurringPayment,
   type PaymentRecurringPaymentCollectionResponse,
   type PaymentRecurringPaymentResponse,
@@ -18,6 +19,7 @@ import {
   badRequestParams,
   badRequestQuery,
   internalError,
+  notFound,
   walletNotFound,
 } from "@/lib/errors";
 import { assertMoneyStartAdmitted } from "@/lib/money-admission";
@@ -38,6 +40,7 @@ import {
   getPaymentsRepository,
 } from "@/routes/payments/context";
 import { mapCollectionAttemptRow, mapTransferRow } from "@/routes/payments/mappers";
+import { listSubscriptionCollectionAttemptsQuerySchema } from "@/routes/payments/schemas";
 import { activateRecurringPayment as activateRecurringPaymentRecord } from "@/services/payments/recurring-payments/activation";
 import { collectRecurringPayment as collectRecurringPaymentRecord } from "@/services/payments/recurring-payments/collection";
 import {
@@ -542,6 +545,59 @@ export const getRecurringPayment = async (c: AppContext) => {
 
   const response: PaymentRecurringPaymentResponse = {
     recurringPayment: mapRecurringPayment(recurringPayment),
+  };
+  return success(c, response);
+};
+
+/**
+ * Lists the collection attempts of a recurring payment's current subscription, scoped to the
+ * request's project. A recurring payment that has no subscription yet has no attempts.
+ *
+ * @param c - Request context carrying the `id` path parameter and the paging query.
+ * @returns The page of collection attempts, in the subscription collection-attempt list contract.
+ */
+export const listRecurringPaymentCollectionAttempts = async (c: AppContext) => {
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+  const params = recurringPaymentIdParamsSchema.safeParse(c.req.param());
+
+  if (!params.success) {
+    throw badRequestParams();
+  }
+
+  const parsed = listSubscriptionCollectionAttemptsQuerySchema.safeParse(c.req.query());
+  if (!parsed.success) {
+    throw badRequestQuery({ errors: z.treeifyError(parsed.error) });
+  }
+
+  const recurringPayment = await getPaymentRecurringPaymentsRepository(c).getRecurringPaymentById({
+    recurringPaymentId: params.data.id,
+    organizationId: auth.organizationId,
+    projectId,
+  });
+
+  if (!recurringPayment) {
+    throw notFound("Recurring payment");
+  }
+
+  const { page, pageSize, status } = parsed.data;
+  const { rows, total } =
+    recurringPayment.subscription_id === null
+      ? { rows: [], total: 0 }
+      : await getPaymentSubscriptionsRepository(c).listCollectionAttempts({
+          organizationId: auth.organizationId,
+          projectId,
+          subscriptionId: recurringPayment.subscription_id,
+          status,
+          limit: pageSize,
+          offset: (page - 1) * pageSize,
+        });
+
+  const response: ListPaymentSubscriptionCollectionAttemptsResponse = {
+    collectionAttempts: rows.map(mapCollectionAttemptRow),
+    total,
+    page,
+    pageSize,
   };
   return success(c, response);
 };
