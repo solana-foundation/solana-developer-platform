@@ -259,11 +259,11 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
 **Accepted.** The key is optional, and honored when sent.
 
 - Wallets: `POST /v1/wallets`, `POST /v1/wallets/initialize`, `POST /v1/wallets/signer-check`, `PATCH /v1/wallets/{walletId}`, `DELETE /v1/wallets`
-- Subscription plans and subscriptions: `POST /v1/payments/subscription-plans`, `PATCH /v1/payments/subscription-plans/{planId}`, `POST /v1/payments/subscriptions`
+- Subscription plans and subscriptions (beta): `POST /v1/payments/subscription-plans`, `PATCH /v1/payments/subscription-plans/{planId}`, `POST /v1/payments/subscriptions`
 - Counterparties: `POST`, `PATCH` and `DELETE` on `/v1/counterparties` and on counterparty accounts
 - Compliance: `POST /v1/compliance/address-screenings`
 
-**Not used.** `POST /v1/payments/transfer-batches/estimate` moves and stores nothing. The subscription `prepare-*` routes and subscription-plan `prepare-create` return an unsigned transaction bound to a fresh blockhash, which a stored replay would hand back after it expired. Neither reads the key.
+**Not used.** `POST /v1/payments/transfer-batches/estimate` moves and stores nothing. The subscription `prepare-*` routes and subscription-plan `prepare-create` (beta) return an unsigned transaction bound to a fresh blockhash, which a stored replay would hand back after it expired. Neither reads the key.
 
 Modules with their own key handling say so on their pages.
 
@@ -487,7 +487,7 @@ Every API route performs exactly one **action**, named `module.verb`, and a key 
 | `payment_requests` | `payment_requests.read`, `payment_requests.manage` | Payment requests and their payment links |
 | `counterparties` | `counterparties.read`, `counterparties.manage`, `counterparties.execute` | Counterparties, their accounts, and provider requirements |
 | `transactions` | `transactions.read` | The unified transaction list; each row also needs the read of its own module |
-| `recurring` | `recurring.read`, `recurring.manage`, `recurring.execute` | Recurring payments, subscription plans and subscriptions |
+| `recurring` | `recurring.read`, `recurring.manage`, `recurring.execute` | Recurring payments and their collection attempts; on beta, also subscription plans and subscriptions |
 | `wallets` | `wallets.read`, `wallets.manage`, `wallets.execute` | Custody wallets and their balances |
 | `compliance` | `compliance.execute` | Address screening |
 | `projects` | `projects.read` | Projects and provider availability |
@@ -15661,6 +15661,7 @@ Source: https://platform.solana.com/docs/reference/api/payments
 | `POST` | `/v1/payments/recurring-payments/{id}/cancel` | [Cancel recurring payment](/docs/reference/api/payments/cancel-payment-recurring-payment.md) |
 | `POST` | `/v1/payments/recurring-payments/{id}/collect` | [Collect recurring payment](/docs/reference/api/payments/collect-payment-recurring-payment.md) |
 | `POST` | `/v1/payments/recurring-payments/{id}/resume` | [Resume recurring payment](/docs/reference/api/payments/resume-payment-recurring-payment.md) |
+| `GET` | `/v1/payments/recurring-payments/{id}/collection-attempts` | [List recurring payment collection attempts](/docs/reference/api/payments/list-payment-recurring-payment-collection-attempts.md) |
 
 ## Payment requests
 
@@ -19567,6 +19568,175 @@ r = requests.post("https://api.solana.com/v1/payments/recurring-payments/prp_exa
   "error": {
     "code": "IDEMPOTENCY_KEY_REUSED",
     "message": "This Idempotency-Key was already used for a different request"
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+```json tab="500"
+{
+  "error": {
+    "code": "INTERNAL_ERROR",
+    "message": "An internal error occurred"
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+---
+
+### List recurring payment collection attempts
+Source: https://platform.solana.com/docs/reference/api/payments/list-payment-recurring-payment-collection-attempts
+
+> Lists every collection attempt a recurring payment has made over its whole history, newest first: its current subscription and every subscription an edit replaced.
+
+`GET /v1/payments/recurring-payments/{id}/collection-attempts`
+
+A recurring payment that has not been activated has none.
+
+Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurring.read` action.
+
+## Path parameters
+
+- **`id`** · `string` · required · min length 1 · example `prp_example`
+
+  SDP recurring payment record ID.
+
+## Query parameters
+
+- **`status`** · `string` · one of `pending`, `processing`, `confirmed`, `failed`, `skipped` · example `pending`
+
+  Collection attempt status.
+
+- **`page`** · `integer` · greater than 0 · default `1`
+
+- **`pageSize`** · `integer` · min 1 · max 100 · default `20`
+
+## Headers
+
+- **`x-project-id`** · `string` · min length 1 · example `prj_example`
+
+  Selects the active project for this request. Required for Clerk (dashboard) callers. Ignored when authenticating with an API key, whose scope is fixed to the key's project.
+
+## Responses
+
+- **`200`** Collection attempt list
+- **`400`** Bad Request
+- **`401`** Unauthorized
+- **`403`** Forbidden. Requires the `recurring.read` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
+- **`404`** Not Found
+- **`500`** Internal Server Error
+
+## Example request
+
+```bash tab="cURL"
+curl 'https://api.solana.com/v1/payments/recurring-payments/prp_example/collection-attempts' \
+  -H "Authorization: Bearer $SDP_API_KEY"
+```
+
+```ts tab="TypeScript"
+const res = await fetch("https://api.solana.com/v1/payments/recurring-payments/prp_example/collection-attempts", {
+  method: "GET",
+  headers: {
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`
+  }
+});
+```
+
+```python tab="Python"
+import os, requests
+
+r = requests.get("https://api.solana.com/v1/payments/recurring-payments/prp_example/collection-attempts",
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
+```
+
+## Example responses
+
+```json tab="200"
+{
+  "data": {
+    "collectionAttempts": [
+      {
+        "id": "psca_example",
+        "organizationId": "org_example",
+        "projectId": "prj_example",
+        "subscriptionId": "subscription_example",
+        "transferId": "xfr_example",
+        "token": "example",
+        "amount": "100.00",
+        "dueAt": "2025-01-01T00:00:00.000Z",
+        "attemptedAt": "2025-01-01T00:00:00.000Z",
+        "status": "pending",
+        "signature": "example",
+        "error": "example",
+        "metadata": {
+          "recurringPaymentId": "recurringpayment_example",
+          "initiatedByKeyId": "initiatedbykey_example",
+          "source": "manual"
+        },
+        "createdAt": "2025-01-01T00:00:00.000Z",
+        "updatedAt": "2025-01-01T00:00:00.000Z"
+      }
+    ],
+    "total": 1,
+    "page": 1,
+    "pageSize": 1
+  },
+  "meta": {
+    "requestId": "req_example",
+    "timestamp": "2025-01-01T00:00:00.000Z"
+  }
+}
+```
+
+```json tab="400"
+{
+  "error": {
+    "code": "BAD_REQUEST",
+    "message": "Invalid request"
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+```json tab="401"
+{
+  "error": {
+    "code": "UNAUTHORIZED",
+    "message": "Authentication required"
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+```json tab="403"
+{
+  "error": {
+    "code": "INSUFFICIENT_PERMISSIONS",
+    "message": "Missing action: recurring.read",
+    "details": {
+      "action": "recurring.read"
+    }
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+```json tab="404"
+{
+  "error": {
+    "code": "NOT_FOUND",
+    "message": "Resource not found"
   },
   "meta": {
     "requestId": "req_example"

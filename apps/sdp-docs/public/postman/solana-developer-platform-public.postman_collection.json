@@ -1241,7 +1241,7 @@
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/payments/recurring-payments/{{id}}/collection-attempts",
-            "description": "Lists collection attempts for a recurring payment's current subscription. A recurring payment that has not been activated has none."
+            "description": "Lists every collection attempt a recurring payment has made over its whole history, newest first: its current subscription and every subscription an edit replaced. A recurring payment that has not been activated has none."
           }
         },
         {

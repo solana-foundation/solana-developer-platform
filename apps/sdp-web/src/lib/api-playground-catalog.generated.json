@@ -4,7 +4,7 @@
     "command": "pnpm -C apps/sdp-api playground:generate",
     "modules": {
       "wallets": 10,
-      "payments": 35,
+      "payments": 36,
       "counterparties": 13,
       "issuance": 37
     }
