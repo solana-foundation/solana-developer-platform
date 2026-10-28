@@ -124,14 +124,3 @@ export function earnVaultDepositOnlyEnvironment(provider: string): SdpEnvironmen
  * Un-surfacing closes the door in, never the door out.
  */
 export const EARN_PROGRAM_CREATION_ENABLED = SURFACED_CUSTODIAL_EARN_PROVIDERS.length > 0;
-
-/**
- * The provider a NEW program is created with, or `undefined` when none is
- * offered.
- *
- * V1 has at most one custodial provider offered at a time, so "the first" is
- * exact rather than a guess. When a second lands this becomes a user choice, and
- * the compiler points at every call site because they all read this.
- */
-export const EARN_PROGRAM_CREATE_PROVIDER: EarnProviderId | undefined =
-  SURFACED_CUSTODIAL_EARN_PROVIDERS[0];

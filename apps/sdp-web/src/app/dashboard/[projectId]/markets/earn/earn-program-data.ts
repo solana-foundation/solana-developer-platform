@@ -1481,46 +1481,61 @@ const earnVaultWithdrawalRequestRecordSchema: z.ZodType<EarnVaultWithdrawalReque
     replayed: z.boolean().optional(),
   });
 
-type QueuedReadResult<T> = { kind: "ready"; value: T } | { kind: "unavailable" };
+type VaultReadResult<T> = { kind: "ready"; value: T } | { kind: "unavailable" };
+
+/**
+ * The shared POST-quote envelope: one dashboard POST, folded to `unavailable`
+ * on transport failure or a response that fails the caller's schema. Every
+ * vault quote read answers this way, so an upstream miss never splits into
+ * two caller-visible shapes.
+ */
+async function postEarnVaultRead<T>(
+  path: string,
+  body: unknown,
+  schema: z.ZodType<T>,
+  signal?: AbortSignal
+): Promise<VaultReadResult<T>> {
+  const result = await dashboardFetch<unknown>(path, { method: "POST", body, signal });
+  if (!result.ok) return { kind: "unavailable" };
+  const parsed = z.object({ data: schema }).safeParse(result.data);
+  return parsed.success ? { kind: "ready", value: parsed.data.data } : { kind: "unavailable" };
+}
 
 /** Read settlement routes independently. No client-side provider list chooses one. */
 export async function fetchEarnVaultWithdrawalOptions(
   positionId: string,
   signal?: AbortSignal
-): Promise<QueuedReadResult<EarnVaultWithdrawalOptions>> {
-  const result = await dashboardFetch<unknown>(
+): Promise<VaultReadResult<EarnVaultWithdrawalOptions>> {
+  return postEarnVaultRead(
     "/api/dashboard/markets/earn/vault-withdrawal-options",
-    { method: "POST", body: { positionId }, signal }
+    { positionId },
+    earnVaultWithdrawalOptionsSchema,
+    signal
   );
-  if (!result.ok) return { kind: "unavailable" };
-  const parsed = z.object({ data: earnVaultWithdrawalOptionsSchema }).safeParse(result.data);
-  return parsed.success ? { kind: "ready", value: parsed.data.data } : { kind: "unavailable" };
 }
 
 export async function fetchEarnVaultQueuedWithdrawalPreview(
   input: EarnVaultQueuedWithdrawalTermsRequest,
   signal?: AbortSignal
-): Promise<QueuedReadResult<EarnVaultQueuedWithdrawalPreview>> {
-  const result = await dashboardFetch<unknown>(
+): Promise<VaultReadResult<EarnVaultQueuedWithdrawalPreview>> {
+  return postEarnVaultRead(
     "/api/dashboard/markets/earn/vault-queued-withdrawal-previews",
-    { method: "POST", body: input, signal }
+    input,
+    earnVaultQueuedWithdrawalPreviewSchema,
+    signal
   );
-  if (!result.ok) return { kind: "unavailable" };
-  const parsed = z.object({ data: earnVaultQueuedWithdrawalPreviewSchema }).safeParse(result.data);
-  return parsed.success ? { kind: "ready", value: parsed.data.data } : { kind: "unavailable" };
 }
 
 export async function fetchEarnVaultParRedemptionPreview(
   input: EarnVaultParRedemptionTermsRequest,
   signal?: AbortSignal
-): Promise<QueuedReadResult<EarnVaultParRedemptionPreview>> {
-  const result = await dashboardFetch<unknown>(
+): Promise<VaultReadResult<EarnVaultParRedemptionPreview>> {
+  return postEarnVaultRead(
     "/api/dashboard/markets/earn/vault-queued-withdrawal-previews",
-    { method: "POST", body: input, signal }
+    input,
+    earnVaultParRedemptionPreviewSchema,
+    signal
   );
-  if (!result.ok) return { kind: "unavailable" };
-  const parsed = z.object({ data: earnVaultParRedemptionPreviewSchema }).safeParse(result.data);
-  return parsed.success ? { kind: "ready", value: parsed.data.data } : { kind: "unavailable" };
 }
 
 const queuedMutationEnvelopeSchema = z.object({

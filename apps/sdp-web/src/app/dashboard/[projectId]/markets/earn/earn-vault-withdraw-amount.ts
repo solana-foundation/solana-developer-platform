@@ -15,16 +15,28 @@ export type VaultWithdrawalAmountValidation =
   | { kind: "valid"; canonicalAmount: string }
   | { kind: "invalid" };
 
-export function validateVaultWithdrawalAmount(value: string): VaultWithdrawalAmountValidation {
+/**
+ * The shared validator body: an unsigned decimal that parses, keeps its
+ * fraction within the caller's scale, and is positive. Every Earn entry field
+ * validates through this one helper so the verdicts cannot drift.
+ */
+function validateUnsignedDecimal(
+  value: string,
+  maxFractionDigits: number
+): VaultWithdrawalAmountValidation {
   const amount = parseUnsignedDecimal(value, { maxLength: MAX_AMOUNT_LENGTH });
   if (
     !amount ||
-    amount.fraction.length > VAULT_WITHDRAWAL_AMOUNT_DECIMALS ||
+    amount.fraction.length > maxFractionDigits ||
     !isPositiveDecimal(amount.canonical)
   ) {
     return { kind: "invalid" };
   }
   return { kind: "valid", canonicalAmount: amount.canonical };
+}
+
+export function validateVaultWithdrawalAmount(value: string): VaultWithdrawalAmountValidation {
+  return validateUnsignedDecimal(value, VAULT_WITHDRAWAL_AMOUNT_DECIMALS);
 }
 
 /**
@@ -34,15 +46,7 @@ export function validateVaultWithdrawalAmount(value: string): VaultWithdrawalAmo
  * the selected fund's exact mint scale.
  */
 export function validateVaultWithdrawalShares(value: string): VaultWithdrawalAmountValidation {
-  const shares = parseUnsignedDecimal(value, { maxLength: MAX_AMOUNT_LENGTH });
-  if (
-    !shares ||
-    shares.fraction.length > VAULT_WITHDRAWAL_SHARE_DECIMALS ||
-    !isPositiveDecimal(shares.canonical)
-  ) {
-    return { kind: "invalid" };
-  }
-  return { kind: "valid", canonicalAmount: shares.canonical };
+  return validateUnsignedDecimal(value, VAULT_WITHDRAWAL_SHARE_DECIMALS);
 }
 
 /** Exact share intent for a provider-settled redemption, capped by live holdings. */

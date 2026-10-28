@@ -33,6 +33,17 @@ export function isCommittedVaultMovement(movement: Pick<TrackedVaultMovement, "s
   return movement.status === "confirmed" || movement.status === "finalized";
 }
 
+/**
+ * A commit a live position read has observed (`committedObservedAt` set by
+ * `observeVaultMovementCommit`). The balance reader re-reads only these: a
+ * movement still waiting on its first confirming read is not one of them.
+ */
+export function hasObservedVaultCommit(
+  movement: Pick<TrackedVaultMovement, "status" | "committedObservedAt">
+): boolean {
+  return isCommittedVaultMovement(movement) && movement.committedObservedAt !== undefined;
+}
+
 export function hasUnconfirmedVaultMovement(
   activities: readonly VaultActivity[],
   positionId?: string
@@ -81,8 +92,7 @@ export function pendingVaultBalanceReads<Activity extends VaultActivity>(
   return activities.filter(
     ({ movement }) =>
       (positionId === undefined || movement.positionId === positionId) &&
-      isCommittedVaultMovement(movement) &&
-      movement.committedObservedAt !== undefined &&
+      hasObservedVaultCommit(movement) &&
       (!acknowledgedMovements.has(movement.movementId) ||
         unreadablePositions.has(movement.positionId))
   );
