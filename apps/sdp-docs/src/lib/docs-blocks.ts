@@ -244,9 +244,8 @@ const parser = unified().use(remarkParse).use(remarkMdx).use(remarkGfm);
  * reference page it also sets a field's facts apart and points the code at this deployment's API
  * (`apiUrl`, from `NEXT_PUBLIC_SDP_API_URL`), where the Markdown keeps the canonical one.
  */
-export function remarkDocsBlocks(options: { surface?: PublicSurface; apiUrl?: string } = {}) {
+export function remarkDocsBlocks(options: { surface?: PublicSurface } = {}) {
   const surface = options.surface ?? publicSurface;
-  const pageApiUrl = options.apiUrl ?? apiUrl;
   return (tree: Root, file: Parameters<typeof embedSource>[0]) => {
     const where = file.path ?? "MDX page";
     const referencePage = REFERENCE_PAGE.test(where);
@@ -274,7 +273,7 @@ export function remarkDocsBlocks(options: { surface?: PublicSurface; apiUrl?: st
           return spacedFacts(child.value);
         }
         if (referencePage && child.type === "code") {
-          child.value = child.value.replaceAll(canonicalSite.apiUrl, pageApiUrl);
+          child.value = child.value.replaceAll(canonicalSite.apiUrl, apiUrl);
           return [child];
         }
         if ("children" in child) walk(child);

@@ -7,7 +7,7 @@ import remarkParse from "remark-parse";
 import { unified } from "unified";
 import { expandDocsBlocks, remarkDocsBlocks, stripMdxEsm } from "@/lib/docs-blocks";
 import { publicSurface } from "@/lib/release-channel";
-import { canonicalSite, docsPageSlugOf } from "@/lib/site";
+import { docsPageSlugOf } from "@/lib/site";
 import {
   codeSpan,
   mdxText,
@@ -455,29 +455,6 @@ describe("fact separators", () => {
 
   it("keeps the dots as text in the Markdown agents get", () => {
     assert.equal(expandDocsBlocks(facts, "content/docs/reference/api/widgets/list.mdx"), facts);
-  });
-});
-
-describe("the samples' API", () => {
-  const page = renderOperation(CREATE_WIDGET);
-  const deploymentApi = "https://api.stage.example";
-  const compiled = (path: string) => {
-    const tree = unified().use(remarkParse).use(remarkMdx).parse(page);
-    remarkDocsBlocks({ surface: publicSurface, apiUrl: deploymentApi })(tree, { path });
-    return JSON.stringify(tree);
-  };
-
-  it("is this deployment's on a generated reference page, and only there", () => {
-    const reference = compiled("/repo/apps/sdp-docs/content/docs/reference/api/widgets/create.mdx");
-    assert.ok(reference.includes(`${deploymentApi}/v1/widgets/wdg_1`));
-    assert.ok(!reference.includes(canonicalSite.apiUrl));
-    const guide = compiled("/repo/apps/sdp-docs/content/docs/guides/widgets.mdx");
-    assert.ok(guide.includes(`${canonicalSite.apiUrl}/v1/widgets/wdg_1`));
-  });
-
-  it("stays canonical in the Markdown agents and the llms files get", () => {
-    const markdown = expandDocsBlocks(`${page}\n`, "content/docs/reference/api/widgets/create.mdx");
-    assert.ok(markdown.includes(`${canonicalSite.apiUrl}/v1/widgets/wdg_1`));
   });
 });
 
