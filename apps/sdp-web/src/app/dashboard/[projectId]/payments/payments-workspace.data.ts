@@ -48,6 +48,7 @@ import {
   type CallerIdempotencyKey,
   dashboardRequest,
   dashboardRequestUnderOwnKey,
+  MOVEMENT_READ_PATHS,
 } from "@/lib/dashboard-fetch";
 import { apiErrorCode } from "@/lib/idempotency";
 import {
@@ -784,6 +785,18 @@ export async function retryTransferBatch(
     { method: "POST" },
     idempotencyKey
   );
+  return readTransferBatchAnswer(response, t);
+}
+
+/** Reads a batch as it stands now: its recipients settle after the send answers. */
+export async function fetchTransferBatch(
+  batchId: string,
+  t: Translate
+): Promise<CreateTransferBatchResult> {
+  const response = await dashboardRequest(MOVEMENT_READ_PATHS.batch(batchId), {
+    method: "GET",
+    cache: "no-store",
+  });
   return readTransferBatchAnswer(response, t);
 }
 

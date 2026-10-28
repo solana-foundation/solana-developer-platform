@@ -340,14 +340,7 @@ describe("partially failed batches (APE-462)", () => {
 });
 
 describe("retryTransferBatchUnderKey", () => {
-  const seen = {
-    batch: { id: "batch_1", status: "partially_failed" },
-    recipients: [
-      { id: "xrec_1", status: "confirmed" },
-      { id: "xrec_2", status: "failed" },
-    ],
-    transfers: [],
-  } as unknown as Parameters<typeof retryTransferBatchUnderKey>[0];
+  const retryFailed = () => retryTransferBatchUnderKey("batch_1", ["xrec_2"], t);
   const retried = () =>
     Response.json({
       data: { batch: { id: "batch_1", status: "processing" }, recipients: [], transfers: [] },
@@ -363,8 +356,8 @@ describe("retryTransferBatchUnderKey", () => {
     const fetchMock = vi.fn<typeof fetch>(async () => retried());
     vi.stubGlobal("fetch", fetchMock);
 
-    await retryTransferBatchUnderKey(seen, t);
-    await retryTransferBatchUnderKey(seen, t);
+    await retryFailed();
+    await retryFailed();
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
       "/api/dashboard/payments/transfers/batch/batch_1/retry"
@@ -386,10 +379,8 @@ describe("retryTransferBatchUnderKey", () => {
       );
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(retryTransferBatchUnderKey(seen, t)).rejects.toThrow(
-      "Shared.idempotency.outcomeUnknownCheckList"
-    );
-    await retryTransferBatchUnderKey(seen, t);
+    await expect(retryFailed()).rejects.toThrow("Shared.idempotency.outcomeUnknownCheckList");
+    await retryFailed();
 
     const [unknown, next] = keys(fetchMock);
     expect(next).toBe(unknown);

@@ -23,6 +23,7 @@ import {
   type CreateTransferBatchResult,
   estimateTransferBatch,
   fetchBatchRecipients,
+  fetchTransferBatch,
   TransferBatchRequestError,
 } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import type { BulkImportRow } from "@/app/dashboard/[projectId]/payments/ramps/bulk-import";
@@ -102,6 +103,9 @@ export interface UseBatchSendWizardProps {
   cluster: SolanaCluster;
   onExit: () => void;
 }
+
+/** How often a submitted batch is read while its recipients are still settling. */
+const TRANSFER_BATCH_REFRESH_MS = 3000;
 
 /**
  * One page of the contacts a batch can pay, filtered by the search box. A new search starts
@@ -510,13 +514,30 @@ export function useBatchSendWizard({
     }
   };
 
-  const failedRecipientCount =
-    batchResult?.recipients.filter((recipient) => recipient.status === "failed").length ?? 0;
+  // The send answers before its chunks settle, so the batch is read until it
+  // is final: a recipient that fails later still offers Retry.
+  const { data: liveBatch, mutate: setLiveBatch } = useSWR(
+    batchResult ? paymentsQueryKeys.transferBatch({ batchId: batchResult.batch.id }) : null,
+    ([, batchId]) => fetchTransferBatch(batchId, t),
+    {
+      revalidateOnFocus: false,
+      refreshInterval: (latest) =>
+        isMovementInFlight((latest ?? batchResult)?.batch.status ?? null)
+          ? TRANSFER_BATCH_REFRESH_MS
+          : 0,
+    }
+  );
+  const currentBatch = liveBatch ?? batchResult;
+  const failedRecipientIds =
+    currentBatch?.recipients
+      .filter((recipient) => recipient.status === "failed")
+      .map((recipient) => recipient.id) ?? [];
+  const failedRecipientCount = failedRecipientIds.length;
 
   // Sends only the recipients the API still finds failed (HOO-2343); the rest
   // of the batch is never sent again.
   const retryFailedRecipients = async () => {
-    if (batchResult === null || failedRecipientCount === 0 || retrying) {
+    if (currentBatch === null || failedRecipientCount === 0 || retrying) {
       return;
     }
     setRetrying(true);
@@ -524,8 +545,9 @@ export function useBatchSendWizard({
       position: "bottom-right",
     });
     try {
-      const result = await retryTransferBatchUnderKey(batchResult, t);
+      const result = await retryTransferBatchUnderKey(currentBatch.batch.id, failedRecipientIds, t);
       setBatchResult(result);
+      await setLiveBatch(result, { revalidate: false });
       toast.success(t("DashboardPayments.batchSend.retrySubmitted"), {
         id: toastId,
         description: t("DashboardPayments.batchSend.retrySubmittedDescription"),
@@ -617,7 +639,7 @@ export function useBatchSendWizard({
     estimate: estimate ?? null,
     estimateError: estimateErrorMessage(estimateError, t),
     submitting,
-    batchResult,
+    batchResult: currentBatch,
     failedRecipientCount,
     retrying,
     retryFailedRecipients,

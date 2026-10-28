@@ -1,6 +1,6 @@
 "use client";
 
-import type { PaymentTransferBatchRequest } from "@sdp/types/payments";
+import type { MoneyMovementStatus, PaymentTransferBatchRequest } from "@sdp/types/payments";
 import { MOVEMENT_READ_PATHS, settleWhenMovementFinal } from "@/lib/dashboard-fetch";
 import { canonicalDecimalAmount, uncertainMoneyAnswerMessage } from "@/lib/idempotency";
 import {
@@ -35,7 +35,7 @@ const retryStore = createIdempotencyKeyStore("sdp:payments:transfer-batch-retry:
  * were paid. Its failed recipients are finished with a retry
  * ({@link retryTransferBatchUnderKey}).
  */
-function batchKeepsKey(status: string): boolean {
+function batchKeepsKey(status: MoneyMovementStatus): boolean {
   return status === "partially_failed";
 }
 
@@ -181,29 +181,29 @@ export function transferBatchRetryFingerprint(
 /**
  * Retries a batch's failed recipients under a key kept per batch and failed
  * set, so a double press, a timeout or a reload is answered by the first
- * retry instead of sending again. Unlike a send, a recorded answer retires the
- * key at once, even while the resent recipients are processing: the API only
- * ever sends recipients that are failed when it runs, so a later retry under
- * a new key cannot pay anyone twice. An uncertain answer keeps the key, as
+ * retry instead of sending again. The API records the retry under its key
+ * before it sends anything, so a same-key press after a timeout or a 5xx is
+ * answered from that record (HOO-2343). A recorded answer retires the key at
+ * once, even while the resent recipients are processing: the API only ever
+ * sends recipients that are failed when it runs, so a later retry under a new
+ * key cannot pay anyone twice, and if they fail again the same failed set
+ * must not be answered by this retry. An uncertain answer keeps the key, as
  * for a send.
  *
- * @param result - The batch as the dashboard last saw it.
+ * @param batchId - The batch to retry.
+ * @param failedRecipientIds - Its recipients the dashboard last read as failed.
  * @param t - Translator, for the API's refusal message.
  * @returns The batch after the retry.
  */
 export async function retryTransferBatchUnderKey(
-  result: CreateTransferBatchResult,
+  batchId: string,
+  failedRecipientIds: readonly string[],
   t: Translate
 ): Promise<CreateTransferBatchResult> {
-  const fingerprint = transferBatchRetryFingerprint(
-    result.batch.id,
-    result.recipients
-      .filter((recipient) => recipient.status === "failed")
-      .map((recipient) => recipient.id)
-  );
+  const fingerprint = transferBatchRetryFingerprint(batchId, failedRecipientIds);
   const { key, persisted } = retryStore.claim(fingerprint);
   try {
-    const retried = await retryTransferBatch(result.batch.id, t, { value: key, persisted });
+    const retried = await retryTransferBatch(batchId, t, { value: key, persisted });
     retryStore.release(fingerprint, key);
     return retried;
   } catch (error) {
