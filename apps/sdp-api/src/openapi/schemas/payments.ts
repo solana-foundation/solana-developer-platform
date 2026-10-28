@@ -633,27 +633,51 @@ const transferBatchEstimateSchema = z
     warnings: z
       .array(
         z
-          .object({
-            code: z.enum(["AMOUNT_BELOW_RENT_MINIMUM"]).openapi({
-              description:
-                "AMOUNT_BELOW_RENT_MINIMUM: a native SOL recipient's address holds no account and its amount is below the rent-exempt minimum. Creating this batch is refused with 409 until the amount is at least minimumAmount or the address is funded.",
-            }),
-            recipientIndex: z.number().int().openapi({
-              description: "Zero-based index of the recipient in the request.",
-              example: 0,
-            }),
-            minimumAmount: z.string().openapi({
-              description:
-                "The smallest SOL amount the address can receive while it has no account.",
-              example: "0.00089088",
-            }),
-            message: z.string().openapi({ description: "Human-readable warning." }),
+          .discriminatedUnion("code", [
+            z
+              .object({
+                code: z.literal("AMOUNT_BELOW_RENT_MINIMUM").openapi({
+                  description:
+                    "A native SOL recipient's address holds no account and its amount is below the rent-exempt minimum.",
+                }),
+                recipientIndex: z.number().int().openapi({
+                  description: "Zero-based index of the recipient in the request.",
+                  example: 0,
+                }),
+                minimumAmount: z.string().openapi({
+                  description:
+                    "The smallest SOL amount the address can receive while it has no account.",
+                  example: "0.00089088",
+                }),
+                message: z.string().openapi({ description: "Human-readable warning." }),
+              })
+              .openapi({ description: "A recipient the batch could not pay as requested." }),
+            z
+              .object({
+                code: z.literal("SOURCE_BELOW_RENT_MINIMUM").openapi({
+                  description:
+                    "The source wallet would be left holding more than nothing but less than the rent-exempt minimum, at the end or after some order of the batch's concurrent transactions.",
+                }),
+                sourceRemainder: z.string().openapi({
+                  description: "The SOL the source wallet would be left with.",
+                  example: "0.0003",
+                }),
+                minimumAmount: z.string().openapi({
+                  description: "The rent-exempt minimum for a SOL wallet.",
+                  example: "0.00089088",
+                }),
+                message: z.string().openapi({ description: "Human-readable warning." }),
+              })
+              .openapi({ description: "The source wallet would fall below the rent minimum." }),
+          ])
+          .openapi({
+            description:
+              "Something create would refuse with 409 AMOUNT_BELOW_RENT_MINIMUM until it is fixed.",
           })
-          .openapi({ description: "A recipient the batch could not pay as requested." })
       )
       .openapi({
         description:
-          "Recipients that would make the batch fail. Empty when the batch can be sent as estimated.",
+          "What would make the batch fail. Empty when the batch can be sent as estimated.",
       }),
   })
   .openapi({ description: "Transfer batch estimate." });

@@ -656,8 +656,15 @@ function RecipientRow({ children, trailing }: { children: ReactNode; trailing: R
 
 function BatchReviewView({ wizard }: { wizard: BatchSendWizard }) {
   const t = useTranslations();
-  const { recipients, displayAsset, totalAmount, estimate, estimateError, belowRentMinimum } =
-    wizard;
+  const {
+    recipients,
+    displayAsset,
+    totalAmount,
+    estimate,
+    estimateError,
+    belowRentMinimum,
+    sourceRentShortfall,
+  } = wizard;
   if (displayAsset === null) {
     return null;
   }
@@ -746,6 +753,14 @@ function BatchReviewView({ wizard }: { wizard: BatchSendWizard }) {
               : "DashboardPayments.batchSend.belowRentMinimumNotePlural",
             { count: belowRentMinimum.size }
           )}
+        </p>
+      ) : null}
+      {sourceRentShortfall ? (
+        <p role="alert" className="rounded-xl bg-fill-subtle px-4 py-3 text-sm text-error">
+          {t("DashboardPayments.batchSend.sourceBelowRentMinimumNote", {
+            remainder: formatTokenAmount(sourceRentShortfall.sourceRemainder),
+            minimum: formatTokenAmount(sourceRentShortfall.minimumAmount),
+          })}
         </p>
       ) : null}
       <div className="flex flex-col gap-0.5">

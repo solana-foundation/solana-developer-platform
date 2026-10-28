@@ -257,12 +257,21 @@ export function belowRentMinimumByAccount(
 ): Map<string, string> {
   const byAccount = new Map<string, string>();
   for (const warning of warnings ?? []) {
+    if (warning.code !== "AMOUNT_BELOW_RENT_MINIMUM") continue;
     const recipient = requestRecipients[warning.recipientIndex];
-    if (warning.code === "AMOUNT_BELOW_RENT_MINIMUM" && recipient) {
-      byAccount.set(recipient.counterpartyAccountId, warning.minimumAmount);
-    }
+    if (recipient) byAccount.set(recipient.counterpartyAccountId, warning.minimumAmount);
   }
   return byAccount;
+}
+
+/** The source wallet's rent warning, if the estimate gave one (HOO-2375). */
+export function sourceBelowRentMinimum(
+  warnings: readonly PaymentTransferBatchEstimateWarning[] | undefined
+): { sourceRemainder: string; minimumAmount: string } | null {
+  const warning = warnings?.find((entry) => entry.code === "SOURCE_BELOW_RENT_MINIMUM");
+  return warning?.code === "SOURCE_BELOW_RENT_MINIMUM"
+    ? { sourceRemainder: warning.sourceRemainder, minimumAmount: warning.minimumAmount }
+    : null;
 }
 
 /** The fee estimate's failure as a sentence, or null while it has not failed. */
@@ -478,6 +487,7 @@ export function useBatchSendWizard({
     () => belowRentMinimumByAccount(estimate?.warnings, request.recipients),
     [estimate, request]
   );
+  const sourceRentShortfall = useMemo(() => sourceBelowRentMinimum(estimate?.warnings), [estimate]);
   // Create would refuse the batch (409): nothing to send until it is fixed.
   // Review sends only once the estimate has answered (or failed, as before)
   // and named no recipient create would refuse.
@@ -486,7 +496,7 @@ export function useBatchSendWizard({
     canProceed &&
     (currentStepId !== "REVIEW" ||
       batchResult !== null ||
-      (estimateSettled && belowRentMinimum.size === 0));
+      (estimateSettled && belowRentMinimum.size === 0 && sourceRentShortfall === null));
 
   const submitBatch = async () => {
     setSubmitting(true);
@@ -609,6 +619,7 @@ export function useBatchSendWizard({
     bulkImport,
     estimate: estimate ?? null,
     belowRentMinimum,
+    sourceRentShortfall,
     estimateError: estimateErrorMessage(estimateError, t),
     submitting,
     batchResult,

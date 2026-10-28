@@ -20,13 +20,13 @@ import type { MovementStepInput, RecordAnswer } from "@/middleware/movement-step
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { type AppContext, getPaymentTransferBatchesRepository } from "@/routes/payments/context";
 import { admitPaymentWalletRuntimeExecution } from "@/routes/payments/wallets";
+import { assertNoSolRentShortfall } from "@/services/payments/sol-rent-minimum";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
   createSponsorshipFeePayment,
   resolveRequestSponsorshipScope,
 } from "@/services/sponsorship.service";
 import { applyRecipientRowUpdates, executeChunk, updateRecipientRows } from "./execute";
-import { assertNoRentMinimumShortfall } from "./rent";
 import {
   type AuthorizedBatchRequest,
   authorizeBatchRequest,
@@ -34,6 +34,7 @@ import {
 } from "./resolve";
 import { buildTransferBatchResponse } from "./respond";
 import type { createTransferBatchSchema } from "./schemas";
+import { solBatchMovement } from "./sol-movement";
 import {
   buildInstructionGroups,
   chunkInstructionGroups,
@@ -139,7 +140,6 @@ export async function createTransferBatch(
   const body = c.req.valid("json");
   const authorized = getAuthorized<AuthorizedBatchRequest>(c);
   const resolved = await resolveBatchMovement(body, authorized);
-  await assertNoRentMinimumShortfall(resolved);
   // The credential-bound record key (ADR 0009), never the raw client key, and
   // the key layer's fingerprint, which canonicalizes the batch body.
   const idempotencyKey = getIdempotencyRecordKey(c) ?? null;
@@ -181,6 +181,10 @@ export async function createTransferBatch(
         ? DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION
         : body.options.maxRecipientsPerTransaction,
   });
+
+  // Before the batch row: a refusal is unstored, so the same key runs again once it clears.
+  const solMovement = solBatchMovement(resolved, chunks);
+  if (solMovement !== null) await assertNoSolRentShortfall(solMovement, "batch");
 
   const batchRepository = getPaymentTransferBatchesRepository(c);
   let batch: PaymentTransferBatchRow;

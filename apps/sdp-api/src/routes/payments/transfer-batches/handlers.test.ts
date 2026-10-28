@@ -32,6 +32,7 @@ import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
 import { rootLogger } from "@/runtime/logger";
 import { SigningService } from "@/services/domain/signing.service";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
+import { clearRentMinimumCacheForTests } from "@/services/payments/sol-rent-minimum";
 import * as solanaSigner from "@/services/solana/signer";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
@@ -58,7 +59,6 @@ import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sp
 import { respondMintAccounts, scaledUiAmountConfig } from "@/test/helpers/token-mints";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
-import { clearRentMinimumCacheForTests } from "./rent";
 
 const getAccountInfoMock = vi.spyOn(solanaRpc, "getAccountInfo");
 const getRecentBlockhashMock = vi.spyOn(solanaRpc, "getRecentBlockhash");
@@ -676,12 +676,14 @@ describe("payment transfer batches", () => {
           message: expect.stringContaining("0.00089088 SOL"),
         },
       ]);
-      // One batched read, of the two small recipients' addresses only.
+      // One batched read: the two small recipients' addresses and the source wallet.
       expect(getMultipleAccountsLamportsMock).toHaveBeenCalledTimes(1);
-      expect(getMultipleAccountsLamportsMock.mock.calls[0][1]).toEqual([FUNDED, UNFUNDED]);
+      const read = getMultipleAccountsLamportsMock.mock.calls[0][1];
+      expect(read).toHaveLength(3);
+      expect(read).toEqual(expect.arrayContaining([FUNDED, UNFUNDED]));
     });
 
-    it("refuses create with an unstored 409 before loading a signer, and runs again once the address is funded", async () => {
+    it("refuses create with an unstored 409 before writing or sending, and runs again once the address is funded", async () => {
       answerOnlyFunded();
       const recipients = await seedRentRecipients();
       const idempotencyKey = crypto.randomUUID();
@@ -699,7 +701,6 @@ describe("payment transfer batches", () => {
           },
         },
       });
-      expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
       expect(sendTransactionMock).not.toHaveBeenCalled();
       expect(
         await getDb(env)
@@ -721,7 +722,7 @@ describe("payment transfer batches", () => {
       expect(accepted.status).toBe(200);
     });
 
-    it("reads no account when every recipient clears the minimum, and the minimum once per TTL", async () => {
+    it("reads only the source when every recipient clears the minimum, and the minimum once per TTL", async () => {
       rpc.answer("getFeeForMessage", { context: { slot: 1 }, value: 5000 });
       const recipients = (await seedRentRecipients()).map((recipient) => ({
         ...recipient,
@@ -739,10 +740,91 @@ describe("payment transfer batches", () => {
         const body = (await res.json()) as { data: { estimate: { warnings: unknown[] } } };
         expect(body.data.estimate.warnings).toEqual([]);
       }
-      expect(getMultipleAccountsLamportsMock).not.toHaveBeenCalled();
+      // One read per request, of the source wallet alone.
+      expect(getMultipleAccountsLamportsMock).toHaveBeenCalledTimes(2);
+      for (const [, addresses] of getMultipleAccountsLamportsMock.mock.calls) {
+        expect(addresses).toHaveLength(1);
+      }
       expect(
         rpc.calls.filter((call) => call.method === "getMinimumBalanceForRentExemption")
       ).toHaveLength(1);
+    });
+
+    it("warns and refuses when the batch would leave the source wallet below the minimum", async () => {
+      rpc.answer("getFeeForMessage", { context: { slot: 1 }, value: 5000 });
+      const recipients = (await seedRentRecipients()).map((recipient) => ({
+        ...recipient,
+        amount: "0.01",
+      }));
+      // 0.0303 SOL held, 0.03 sent: 0.0003 SOL left, below the 0.00089088 minimum.
+      getMultipleAccountsLamportsMock.mockImplementation(async (_rpc, addresses) =>
+        addresses.map(() => 30_300_000n)
+      );
+
+      const estimate = await postBatch(
+        "/v1/payments/transfer-batches/estimate",
+        recipients,
+        crypto.randomUUID()
+      );
+      expect(estimate.status).toBe(200);
+      // SAFETY: a 200 from the estimate route, whose body the OpenAPI schema fixes.
+      const body = (await estimate.json()) as { data: { estimate: { warnings: unknown[] } } };
+      expect(body.data.estimate.warnings).toEqual([
+        {
+          code: "SOURCE_BELOW_RENT_MINIMUM",
+          sourceRemainder: "0.0003",
+          minimumAmount: "0.00089088",
+          message: expect.stringContaining("left with 0.0003 SOL"),
+        },
+      ]);
+
+      const refused = await postBatch(
+        "/v1/payments/transfer-batches",
+        recipients,
+        crypto.randomUUID()
+      );
+      expect(refused.status).toBe(409);
+      expect(await refused.json()).toMatchObject({
+        error: {
+          code: "AMOUNT_BELOW_RENT_MINIMUM",
+          details: { recipientIndexes: [], sourceRemainder: "0.0003" },
+        },
+      });
+      expect(sendTransactionMock).not.toHaveBeenCalled();
+    });
+
+    it("refuses a sweep whose concurrent chunks could leave the source below the minimum", async () => {
+      const recipients = (await seedRentRecipients()).map((recipient, index) => ({
+        ...recipient,
+        amount: index === 0 ? "0.0005" : "0.01",
+      }));
+      // Exactly the total held, one recipient per chunk: the 0.0005 chunk landing last leaves
+      // 0.0005 SOL behind until it does.
+      getMultipleAccountsLamportsMock.mockImplementation(async (_rpc, addresses) =>
+        addresses.map((account) => (account === FUNDED ? 5_000_000n : 20_500_000n))
+      );
+      const res = await app.request(
+        "/v1/payments/transfer-batches",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "Idempotency-Key": crypto.randomUUID(),
+          },
+          body: JSON.stringify({
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            token: "SOL",
+            recipients,
+            options: { maxRecipientsPerTransaction: 1 },
+          }),
+        },
+        env
+      );
+      expect(res.status).toBe(409);
+      expect(await res.json()).toMatchObject({
+        error: { code: "AMOUNT_BELOW_RENT_MINIMUM", details: { sourceRemainder: "0.0005" } },
+      });
     });
   });
 

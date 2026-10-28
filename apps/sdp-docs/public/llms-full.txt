@@ -2526,6 +2526,10 @@ curl https://api.solana.com/v1/payments/transfers/txn_abc123 \
 
 </HowItWorks>
 
+## SOL and the rent-exempt minimum
+
+A Solana wallet holds either nothing or at least the rent-exempt minimum (about 0.00089 SOL). A native SOL transfer that pays less than that to an address with no account, or that leaves the source wallet holding more than nothing but less than the minimum, is refused with `409 AMOUNT_BELOW_RENT_MINIMUM` before anything is written or sent. `details.recipientIndexes` (`[0]`) or `details.sourceRemainder` says which, and `details.minimumAmount` gives the minimum. Send at least the minimum, fund the address, or send the wallet's whole balance; the 409 is not stored under the `Idempotency-Key`, so the same request runs again once it clears. Token transfers are unaffected: SDP's sponsor funds a missing token account's rent.
+
 ## Deduplication
 
 `POST /v1/payments/transfers` requires an `Idempotency-Key`: a request without one returns `400 IDEMPOTENCY_KEY_REQUIRED`. Send one stable key per logical payment and reuse it for every retry. A retry with the same key and request returns the original transfer instead of sending a second one; reusing the key with a different payload, wallet or credential returns `422 IDEMPOTENCY_KEY_REUSED`, and a retry while the original is still running returns `409 IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`. A transfer that fails after it was recorded (such as `400 TRANSACTION_FAILED`) answers every same-key retry with the same error; send a new key to try again. A replay is a snapshot, so read the transfer with `GET` to see whether it has finalized. See [Idempotency](/docs/developing-with-sdp/idempotency) for the full contract.
@@ -2687,14 +2691,14 @@ curl -X POST https://api.solana.com/v1/payments/transfer-batches \
 
 `Idempotency-Key` is required. Reuse the same key for retries of that exact request; recipient order does not change the request. Use `GET /v1/payments/transfer-batches/{batchId}` to inspect recipient and chunk outcomes. `externalId` is a correlation field, not an idempotency key.
 
-### SOL to an address with no account
+### The SOL rent-exempt minimum
 
-Solana refuses a native SOL transfer that would leave a new account below the rent-exempt minimum (about 0.00089 SOL), and the refusal fails every recipient in that transaction. SDP checks before it sends:
+A Solana wallet holds either nothing or at least the rent-exempt minimum (about 0.00089 SOL), and the network refuses a native SOL transfer that would break that, along with every recipient in the same transaction. SDP checks before it sends:
 
-- `POST /v1/payments/transfer-batches/estimate` lists each such recipient in `estimate.warnings` (`code: "AMOUNT_BELOW_RENT_MINIMUM"`, with `recipientIndex` and `minimumAmount`).
-- `POST /v1/payments/transfer-batches` refuses the batch with `409 AMOUNT_BELOW_RENT_MINIMUM` and `details.recipientIndexes`, before anything is written or sent.
+- A recipient whose address has no account must receive at least the minimum.
+- The source wallet must end with nothing or at least the minimum. Chunks land in any order, so a batch that sends the wallet's whole balance also needs every chunk to move at least the minimum.
 
-Raise those amounts to at least `minimumAmount`, or fund the addresses first. The 409 is not stored under the `Idempotency-Key`, so once the addresses are funded the same request under the same key runs. Token batches are unaffected: SDP funds a missing token account's rent, which the estimate reports as `tokenAccountRentLamports`.
+`POST /v1/payments/transfer-batches/estimate` lists what would fail in `estimate.warnings` (`AMOUNT_BELOW_RENT_MINIMUM` per recipient, `SOURCE_BELOW_RENT_MINIMUM` for the source). `POST /v1/payments/transfer-batches` refuses the batch with `409 AMOUNT_BELOW_RENT_MINIMUM`, naming `details.recipientIndexes` and `details.sourceRemainder`, before anything is written or sent. The 409 is not stored under the `Idempotency-Key`, so the same request runs again once it would clear. Token batches are unaffected: SDP funds a missing token account's rent (`tokenAccountRentLamports`).
 
 The rest of this page covers the per-recipient alternative for destinations that are not registered counterparty accounts.
 
