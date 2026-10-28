@@ -15,6 +15,7 @@ import {
 import {
   type ExtensionArgs,
   extension,
+  findAssociatedTokenPda,
   getMintEncoder,
   TOKEN_2022_PROGRAM_ADDRESS,
 } from "@solana-program/token-2022";
@@ -160,4 +161,69 @@ export function respondMintAccounts(
         mint === undefined ? { context: { slot: 1 }, value: null } : mintAccountInfoResult(mint),
     };
   });
+}
+
+/**
+ * The rent-exempt minimum for `dataSize` bytes at mainnet's rent parameters (3,480 lamports per
+ * byte-year, two years exempt, 128 bytes of account overhead).
+ *
+ * @param dataSize - The account data size in bytes.
+ * @returns The lamports a stubbed `getMinimumBalanceForRentExemption` answers.
+ */
+function rentExemptLamports(dataSize: number): number {
+  return (128 + dataSize) * 6_960;
+}
+
+/**
+ * Answer every `getMinimumBalanceForRentExemption` of the current test at mainnet's rent, and every
+ * `getMultipleAccounts` with the associated token account of each of `holders` for `mint` as an
+ * existing token account and any other address as no account.
+ *
+ * @param rpc - The suite's cluster RPC responder.
+ * @param params.mint - The mint the holders' associated token accounts are for.
+ * @param params.tokenProgram - The mint's owning token program.
+ * @param params.holders - The owners whose associated token account already exists.
+ * @returns Resolves once both methods are answered.
+ */
+export async function respondRecipientTokenAccounts(
+  rpc: ClusterRpcResponder,
+  params: { mint: Address; tokenProgram: Address; holders: readonly Address[] }
+): Promise<void> {
+  const existingTokenAccounts: ReadonlySet<string> = new Set(
+    await Promise.all(
+      params.holders.map(
+        async (owner) =>
+          (
+            await findAssociatedTokenPda({
+              owner,
+              mint: params.mint,
+              tokenProgram: params.tokenProgram,
+            })
+          )[0]
+      )
+    )
+  );
+  rpc.respond("getMinimumBalanceForRentExemption", (request) => ({
+    result: rentExemptLamports(z.number().parse(request.params[0])),
+  }));
+  rpc.respond("getMultipleAccounts", (request) => ({
+    result: {
+      context: { slot: 1 },
+      value: z
+        .array(z.string())
+        .parse(request.params[0])
+        .map((accountAddress) =>
+          existingTokenAccounts.has(accountAddress)
+            ? {
+                data: ["", "base64"],
+                executable: false,
+                lamports: rentExemptLamports(165),
+                owner: params.tokenProgram,
+                rentEpoch: 0,
+                space: 0,
+              }
+            : null
+        ),
+    },
+  }));
 }

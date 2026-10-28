@@ -127,9 +127,9 @@ export const TEST_KORA_FEE_PAYER = "4YhMUz8xDgHMPAevvfMpnJX9TJmw9DTNDA1sNWPRZG9q
 
 export const TEST_SPONSORSHIP_PROVIDER_CONFIG = {
   signerAddress: TEST_MOCK_FEE_PAYER,
-  maxAllowedLamports: 0n,
+  maxAllowedLamports: 2_500_000n,
   feePayerMayTransferLamports: false,
-  feePayerPolicy: { test: "zero-outflow" },
+  feePayerPolicy: { test: "mainnet-outflow" },
 } satisfies SponsorshipProviderConfiguration;
 
 const TEST_SEEDED_API_KEY: SeededApiKey = {

@@ -55,7 +55,11 @@ import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { sendTransactionPreflightError } from "@/test/helpers/rpc-errors";
 import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
-import { respondMintAccounts, scaledUiAmountConfig } from "@/test/helpers/token-mints";
+import {
+  respondMintAccounts,
+  respondRecipientTokenAccounts,
+  scaledUiAmountConfig,
+} from "@/test/helpers/token-mints";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 
@@ -1923,6 +1927,11 @@ describe("payment transfer batches", () => {
         owner: tokenProgram,
       } as Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>);
       answerSourceTokenAccount(expectedMint);
+      await respondRecipientTokenAccounts(rpc, {
+        mint: address(expectedMint),
+        tokenProgram: address(SPL_TOKEN_PROGRAMS["spl-token"]),
+        holders: [],
+      });
 
       const signingOutcomeMock = vi.fn().mockResolvedValueOnce(FIRST_SIGNATURE);
       createKoraAdapterMock.mockReturnValueOnce(ownedSubmissionAdapter(signingOutcomeMock));
@@ -2108,6 +2117,11 @@ describe("payment transfer batches", () => {
       ]),
       clockUnixTimestamp: 1_750_000_000n,
     });
+    await respondRecipientTokenAccounts(rpc, {
+      mint,
+      tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
+      holders: [address(TEST_SOLANA_ADDRESSES.wallet2), address(TEST_SOLANA_ADDRESSES.wallet3)],
+    });
     const signingOutcomeMock = vi
       .fn<(transactionBytes: Uint8Array) => Promise<string>>()
       .mockResolvedValueOnce(FIRST_SIGNATURE);
@@ -2192,6 +2206,11 @@ describe("payment transfer batches", () => {
     });
     await enableMainnetSponsorship();
     answerSourceTokenAccount(MAINNET_USDC_MINT);
+    await respondRecipientTokenAccounts(rpc, {
+      mint: address(MAINNET_USDC_MINT),
+      tokenProgram: address(SPL_TOKEN_PROGRAMS["spl-token"]),
+      holders: [],
+    });
     const counterpartyId = await seedProjectCounterparty(
       productionProjectId,
       "batch_production_counterparty"
