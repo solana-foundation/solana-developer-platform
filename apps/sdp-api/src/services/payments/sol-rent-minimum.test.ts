@@ -30,7 +30,7 @@ describe("findSolRentShortfall", () => {
     vi.useRealTimers();
   });
 
-  it("reads the minimum once an hour per cluster", async () => {
+  it("reads the minimum once an hour", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     // An hour past whatever an earlier test in this file cached.
     vi.setSystemTime(Date.now() + 2 * 60 * 60 * 1000);

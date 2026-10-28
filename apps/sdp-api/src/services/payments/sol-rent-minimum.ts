@@ -154,7 +154,7 @@ export async function findSolRentShortfall(
   const lamports = await readLamports(reads);
 
   const recipientIndexes = small
-    .filter((payment) => lamports.get(payment.destination) === 0n)
+    .filter((payment) => readBalance(lamports, payment.destination) === 0n)
     .map((payment) => payment.index)
     .sort((a, b) => a - b);
   const sourceRemainderLamports =
