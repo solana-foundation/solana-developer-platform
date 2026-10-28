@@ -58,6 +58,8 @@ export type ErrorCode =
   | "VAULT_EXPOSURE_CAP"
   // Native SOL sent to an account that does not exist (HOO-2375)
   | "AMOUNT_BELOW_RENT_MINIMUM"
+  // A batch's externalId names a payout run another batch already sent (HOO-2335)
+  | "TRANSFER_BATCH_RUN_EXISTS"
   // Idempotency-Key (HOO-1918, draft-ietf-httpapi-idempotency-key-header)
   | IdempotencyErrorCode;
 
@@ -126,6 +128,8 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   // 409, never stored under an Idempotency-Key: the request is well-formed, and
   // the same request is admissible once the address is funded.
   AMOUNT_BELOW_RENT_MINIMUM: 409,
+  // 409, never stored: the existing batch is in details.batchId.
+  TRANSFER_BATCH_RUN_EXISTS: 409,
   // Idempotency-Key (HOO-1918)
   IDEMPOTENCY_KEY_REQUIRED: 400,
   IDEMPOTENCY_KEY_REUSED: 422,
@@ -188,6 +192,8 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
     "This deposit would take SDP's total holdings in the vault past its exposure cap",
   AMOUNT_BELOW_RENT_MINIMUM:
     "A SOL amount sent to an address with no account must be at least the rent-exempt minimum",
+  TRANSFER_BATCH_RUN_EXISTS:
+    "A different transfer batch with this externalId already exists for this source wallet",
   // Idempotency-Key (HOO-1918)
   IDEMPOTENCY_KEY_REQUIRED: "This operation requires an Idempotency-Key header",
   IDEMPOTENCY_KEY_REUSED: "This Idempotency-Key was already used for a different request",

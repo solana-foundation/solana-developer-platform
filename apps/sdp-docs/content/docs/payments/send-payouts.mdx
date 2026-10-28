@@ -36,7 +36,22 @@ curl -X POST https://api.solana.com/v1/payments/transfer-batches \
 The batch `externalId` names the payout run, and it is unique per project and source wallet. Whatever `Idempotency-Key` it carries, a batch with an `externalId` already used on that wallet never pays anyone again:
 
 - The same request, from the same API key, returns the existing batch as it stands. A worker that restarts with a fresh key gets the original run back.
-- Any other request (different recipients, amounts or options, or another API key) returns `409 CONFLICT` with the existing batch in `error.details.batchId`.
+- Any other request (different recipients, amounts or options, or another API key) returns `409 TRANSFER_BATCH_RUN_EXISTS` with the existing batch in `error.details.batchId`.
+
+Derive the `externalId` from data you already have, so a worker that crashes and restarts computes the same value without storing anything: `payroll-2026-05`, `invoice-run-8812`. Never generate it at random: a random value is new on every attempt and protects nothing. New recipients go in a new run with a new `externalId`, never in a renamed copy of a run that was already sent.
+
+```ts title="payroll-worker.ts"
+// Safe to run again after a crash: the run's id comes from the period, not from storage.
+const externalId = `payroll-${period}`;
+const response = await sdp.post("/v1/payments/transfer-batches", {
+  headers: { "Idempotency-Key": crypto.randomUUID() },
+  body: { externalId, sourceCustodyWalletId, token, recipients },
+});
+// 200: this run's batch, new or replayed. 409 TRANSFER_BATCH_RUN_EXISTS: the run was
+// already sent with a different body; read error.details.batchId instead of resending.
+const batchId =
+  response.status === 409 ? response.error.details.batchId : response.data.batch.id;
+```
 
 `externalId` is optional. A batch without one gets no such guard: only its `Idempotency-Key` stops a resend from paying the same recipients again. Send one for every payout run.
 
@@ -59,11 +74,9 @@ A Solana wallet holds either nothing or at least the rent-exempt minimum (about 
 
 `POST /v1/payments/transfer-batches/estimate` lists what would fail in `estimate.warnings` (`AMOUNT_BELOW_RENT_MINIMUM` per recipient, `SOURCE_BELOW_RENT_MINIMUM` for the source). `POST /v1/payments/transfer-batches` refuses the batch with `409 AMOUNT_BELOW_RENT_MINIMUM`, naming `details.recipientIndexes` and `details.sourceRemainder`, before anything is written or sent. The 409 is not stored under the `Idempotency-Key`, so the same request runs again once it would clear. Token batches are unaffected: SDP funds a missing token account's rent (`tokenAccountRentLamports`).
 
-The rest of this page covers the per-recipient alternative for destinations that are not registered counterparty accounts.
+## Paying recipients one transfer at a time
 
-## Designing a payout run
-
-A typical pattern:
+For destinations that are not registered counterparty accounts, a run can send one transfer per recipient instead of a batch. A typical pattern:
 
 1. **Resolve recipients** in your application — list (or stream) the rows to be paid, with destination address and amount per row.
 2. **Pick a batch identifier** you control (`payout_2026-05-14_marketplace_sellers`).
@@ -73,9 +86,9 @@ A typical pattern:
 
 Send transfers sequentially or in modest concurrency (4–8 in flight); high concurrency increases the chance of priority-fee contention and blockhash expiry without much throughput gain.
 
-## Dedup and retries
+### Dedup and retries for single transfers
 
-Two layers protect you against double-spends if a worker dies mid-run:
+Two layers protect a run of single transfers against double-spends if a worker dies mid-run:
 
 1. **Idempotency keys** — `POST /v1/payments/transfers` requires an `Idempotency-Key`. Generate one stable key per recipient row and reuse it for retries. A retry with the same key and request returns the original transfer; reusing the key for a different request returns `422 IDEMPOTENCY_KEY_REUSED`, and a retry while the original is still running returns `409 IDEMPOTENCY_KEY_IN_FLIGHT`.
 2. **Application mapping** — persist the SDP transfer ID for each recipient row before moving to the next row. On restart, replay with the same idempotency key or skip rows that already have an associated `Transfer.id`.

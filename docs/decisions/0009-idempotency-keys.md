@@ -131,7 +131,7 @@ wallet and `externalId`, instead of the credential-bound record key: the HTTP ke
 unchanged, only the row's identity is. So `replayFromRecord` finds the run under any new key,
 before admission: the same request from the same credential is answered with the batch as it
 stands (never settled there, since its own request may still be running), and any other gets
-`409 CONFLICT` with the batch's id, unstored. The batch key index (migration 0026) lets one of two
+`409 TRANSFER_BATCH_RUN_EXISTS` with the batch's id, unstored. The batch key index (migration 0026) lets one of two
 concurrent sends win. No migration was needed: batches recorded before this keep their request
 keys, so earlier duplicate `externalId`s never collide. `externalId` is optional: a caller who
 omits it gets no server-side guard against paying a run twice beyond the key.
