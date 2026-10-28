@@ -198,7 +198,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Estimate transfer batch",
     operationId: "estimatePaymentTransferBatch",
     description:
-      "Validates an exact-wallet transfer batch request and estimates transaction chunking and fees.",
+      "Validates an exact-wallet transfer batch request and estimates transaction chunking and fees. `warnings` lists recipients that would make the batch fail, such as a native SOL amount below the rent-exempt minimum sent to an address with no account; create refuses those with 409 `AMOUNT_BELOW_RENT_MINIMUM`.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -223,7 +223,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Create transfer batch",
     operationId: "createPaymentTransferBatch",
     description:
-      "Executes an outbound transfer batch from one exact SDP Wallet ID, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records. Requires an Idempotency-Key: a retry with the same key and request returns the original batch without another on-chain submission. Recipient order does not change the request.",
+      "Executes an outbound transfer batch from one exact SDP Wallet ID, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records. Requires an Idempotency-Key: a retry with the same key and request returns the original batch without another on-chain submission. Recipient order does not change the request. A native SOL recipient whose address has no account must receive at least the rent-exempt minimum: otherwise the batch is refused with 409 `AMOUNT_BELOW_RENT_MINIMUM` naming `details.recipientIndexes`, before anything is written or sent.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: movementKeyHeaders,

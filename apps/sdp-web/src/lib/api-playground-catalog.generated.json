@@ -1075,7 +1075,15 @@
                 "priorityFeeLamports": "0",
                 "tokenAccountRentLamports": "0",
                 "sponsored": true
-              }
+              },
+              "warnings": [
+                {
+                  "code": "AMOUNT_BELOW_RENT_MINIMUM",
+                  "recipientIndex": 0,
+                  "minimumAmount": "0.00089088",
+                  "message": "example"
+                }
+              ]
             }
           },
           "meta": {

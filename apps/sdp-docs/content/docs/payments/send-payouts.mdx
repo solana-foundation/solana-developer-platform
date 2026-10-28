@@ -31,6 +31,15 @@ curl -X POST https://api.solana.com/v1/payments/transfer-batches \
 
 `Idempotency-Key` is required. Reuse the same key for retries of that exact request; recipient order does not change the request. Use `GET /v1/payments/transfer-batches/{batchId}` to inspect recipient and chunk outcomes. `externalId` is a correlation field, not an idempotency key.
 
+### SOL to an address with no account
+
+Solana refuses a native SOL transfer that would leave a new account below the rent-exempt minimum (about 0.00089 SOL), and the refusal fails every recipient in that transaction. SDP checks before it sends:
+
+- `POST /v1/payments/transfer-batches/estimate` lists each such recipient in `estimate.warnings` (`code: "AMOUNT_BELOW_RENT_MINIMUM"`, with `recipientIndex` and `minimumAmount`).
+- `POST /v1/payments/transfer-batches` refuses the batch with `409 AMOUNT_BELOW_RENT_MINIMUM` and `details.recipientIndexes`, before anything is written or sent.
+
+Raise those amounts to at least `minimumAmount`, or fund the addresses first. The 409 is not stored under the `Idempotency-Key`, so once the addresses are funded the same request under the same key runs. Token batches are unaffected: SDP funds a missing token account's rent, which the estimate reports as `tokenAccountRentLamports`.
+
 The rest of this page covers the per-recipient alternative for destinations that are not registered counterparty accounts.
 
 ## Designing a payout run

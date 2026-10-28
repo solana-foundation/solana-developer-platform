@@ -26,6 +26,7 @@ import {
   resolveRequestSponsorshipScope,
 } from "@/services/sponsorship.service";
 import { applyRecipientRowUpdates, executeChunk, updateRecipientRows } from "./execute";
+import { assertNoRentMinimumShortfall } from "./rent";
 import {
   type AuthorizedBatchRequest,
   authorizeBatchRequest,
@@ -138,6 +139,7 @@ export async function createTransferBatch(
   const body = c.req.valid("json");
   const authorized = getAuthorized<AuthorizedBatchRequest>(c);
   const resolved = await resolveBatchMovement(body, authorized);
+  await assertNoRentMinimumShortfall(resolved);
   // The credential-bound record key (ADR 0009), never the raw client key, and
   // the key layer's fingerprint, which canonicalizes the batch body.
   const idempotencyKey = getIdempotencyRecordKey(c) ?? null;

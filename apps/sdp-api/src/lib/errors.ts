@@ -56,6 +56,8 @@ export type ErrorCode =
   | "UNSUPPORTED_CORRIDOR"
   // Earn volume caps (ADR 0004)
   | "VAULT_EXPOSURE_CAP"
+  // Native SOL sent to an account that does not exist (HOO-2375)
+  | "AMOUNT_BELOW_RENT_MINIMUM"
   // Idempotency-Key (HOO-1918, draft-ietf-httpapi-idempotency-key-header)
   | IdempotencyErrorCode;
 
@@ -121,6 +123,9 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   UNSUPPORTED_CORRIDOR: 400,
   // Earn volume caps (ADR 0004)
   VAULT_EXPOSURE_CAP: 409,
+  // 409, never stored under an Idempotency-Key: the request is well-formed, and
+  // the same request is admissible once the address is funded.
+  AMOUNT_BELOW_RENT_MINIMUM: 409,
   // Idempotency-Key (HOO-1918)
   IDEMPOTENCY_KEY_REQUIRED: 400,
   IDEMPOTENCY_KEY_REUSED: 422,
@@ -181,6 +186,8 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   // Earn volume caps (ADR 0004)
   VAULT_EXPOSURE_CAP:
     "This deposit would take SDP's total holdings in the vault past its exposure cap",
+  AMOUNT_BELOW_RENT_MINIMUM:
+    "A SOL amount sent to an address with no account must be at least the rent-exempt minimum",
   // Idempotency-Key (HOO-1918)
   IDEMPOTENCY_KEY_REQUIRED: "This operation requires an Idempotency-Key header",
   IDEMPOTENCY_KEY_REUSED: "This Idempotency-Key was already used for a different request",
@@ -321,6 +328,18 @@ export function vaultExposureCapExceeded(
   details?: Record<string, unknown>
 ): AppError {
   return new AppError("VAULT_EXPOSURE_CAP", message, details);
+}
+
+/**
+ * Native SOL recipients whose address holds no account and whose amount is
+ * below the rent-exempt minimum (HOO-2375): the chain refuses such a transfer
+ * in preflight, and its whole transaction with it.
+ */
+export function amountBelowRentMinimum(
+  message?: string,
+  details?: Record<string, unknown>
+): AppError {
+  return new AppError("AMOUNT_BELOW_RENT_MINIMUM", message, details);
 }
 
 export function providerUnavailable(message?: string, details?: Record<string, unknown>): AppError {

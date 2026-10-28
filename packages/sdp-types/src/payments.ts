@@ -702,6 +702,16 @@ export interface ListProjectCounterpartyAccountsEnvelope {
   };
 }
 
+/** A recipient the batch could not pay as estimated (HOO-2375). */
+export interface PaymentTransferBatchEstimateWarning {
+  code: "AMOUNT_BELOW_RENT_MINIMUM";
+  /** Index into the estimated request's recipients. */
+  recipientIndex: number;
+  /** The smallest SOL amount the recipient's address can receive. */
+  minimumAmount: string;
+  message: string;
+}
+
 export interface PaymentTransferBatchEstimate {
   recipientCount: number;
   transactionCount: number;
@@ -711,6 +721,8 @@ export interface PaymentTransferBatchEstimate {
     tokenAccountRentLamports: string;
     sponsored: boolean;
   };
+  /** Absent from an API older than HOO-2375. */
+  warnings?: PaymentTransferBatchEstimateWarning[];
 }
 
 export interface PaymentTransferBatchEnvelope {

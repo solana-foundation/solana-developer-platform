@@ -1,7 +1,11 @@
 "use client";
 
 import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
-import type { CounterpartyAccountSummary, PaymentsDashboardWallet } from "@sdp/types/payments";
+import type {
+  CounterpartyAccountSummary,
+  PaymentsDashboardWallet,
+  PaymentTransferBatchEstimateWarning,
+} from "@sdp/types/payments";
 import {
   isWellKnownTokenSymbol,
   type SolanaCluster,
@@ -239,6 +243,25 @@ function batchCanProceed({
   );
 }
 
+/**
+ * The minimum SOL amount of each recipient the estimate says create would
+ * refuse (HOO-2375), by counterparty account. Warnings name recipients by
+ * index into the canonical request, which may be reordered.
+ */
+export function belowRentMinimumByAccount(
+  warnings: readonly PaymentTransferBatchEstimateWarning[] | undefined,
+  requestRecipients: readonly { counterpartyAccountId: string }[]
+): Map<string, string> {
+  const byAccount = new Map<string, string>();
+  for (const warning of warnings ?? []) {
+    const recipient = requestRecipients[warning.recipientIndex];
+    if (warning.code === "AMOUNT_BELOW_RENT_MINIMUM" && recipient) {
+      byAccount.set(recipient.counterpartyAccountId, warning.minimumAmount);
+    }
+  }
+  return byAccount;
+}
+
 /** The fee estimate's failure as a sentence, or null while it has not failed. */
 function estimateErrorMessage(error: unknown, t: Translate): string | null {
   if (!error) {
@@ -442,6 +465,12 @@ export function useBatchSendWizard({
     () => estimateTransferBatch(request, t),
     { revalidateOnFocus: false }
   );
+  const belowRentMinimum = useMemo(
+    () => belowRentMinimumByAccount(estimate?.warnings, request.recipients),
+    [estimate, request]
+  );
+  // Create would refuse the batch (409): nothing to send until it is fixed.
+  const canSend = canProceed && (currentStepId !== "REVIEW" || belowRentMinimum.size === 0);
 
   const submitBatch = async () => {
     setSubmitting(true);
@@ -494,7 +523,7 @@ export function useBatchSendWizard({
   };
 
   const handlePrimary = async () => {
-    if (!canProceed) {
+    if (!canSend) {
       return;
     }
     if (isLastStep) {
@@ -527,7 +556,7 @@ export function useBatchSendWizard({
     stepIndex,
     currentStepId,
     isLastStep,
-    canProceed,
+    canProceed: canSend,
     liveWallets,
     walletsLoading,
     liveWalletsError,
@@ -563,6 +592,7 @@ export function useBatchSendWizard({
     setRecipientAmount,
     bulkImport,
     estimate: estimate ?? null,
+    belowRentMinimum,
     estimateError: estimateErrorMessage(estimateError, t),
     submitting,
     batchResult,

@@ -630,6 +630,31 @@ const transferBatchEstimateSchema = z
         }),
       })
       .openapi({ description: "Estimated fee components." }),
+    warnings: z
+      .array(
+        z
+          .object({
+            code: z.enum(["AMOUNT_BELOW_RENT_MINIMUM"]).openapi({
+              description:
+                "AMOUNT_BELOW_RENT_MINIMUM: a native SOL recipient's address holds no account and its amount is below the rent-exempt minimum. Creating this batch is refused with 409 until the amount is at least minimumAmount or the address is funded.",
+            }),
+            recipientIndex: z.number().int().openapi({
+              description: "Zero-based index of the recipient in the request.",
+              example: 0,
+            }),
+            minimumAmount: z.string().openapi({
+              description:
+                "The smallest SOL amount the address can receive while it has no account.",
+              example: "0.00089088",
+            }),
+            message: z.string().openapi({ description: "Human-readable warning." }),
+          })
+          .openapi({ description: "A recipient the batch could not pay as requested." })
+      )
+      .openapi({
+        description:
+          "Recipients that would make the batch fail. Empty when the batch can be sent as estimated.",
+      }),
   })
   .openapi({ description: "Transfer batch estimate." });
 

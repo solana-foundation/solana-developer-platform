@@ -16,6 +16,7 @@ import {
   resolveRequestSponsorshipScope,
   resolveSponsoredFeePayer,
 } from "@/services/sponsorship.service";
+import { findRentMinimumShortfall } from "./rent";
 import { resolveBatchRequest } from "./resolve";
 import type { estimateTransferBatchSchema } from "./schemas";
 import {
@@ -85,7 +86,8 @@ async function estimateMissingAtaRentLamports(
 
 /**
  * POST /transfer-batches/estimate — prices a batch without executing it:
- * transaction count, network fees, and sponsored token-account rent.
+ * transaction count, network fees, sponsored token-account rent, and
+ * warnings for recipients create would refuse (HOO-2375).
  *
  * @param c - Request context.
  * @returns JSON estimate response.
@@ -114,10 +116,20 @@ export async function estimateTransferBatch(
     maxRecipientsPerTransaction:
       body.options?.maxRecipientsPerTransaction ?? DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION,
   });
-  const [networkFeeLamports, tokenAccountRentLamports] = await Promise.all([
+  const [networkFeeLamports, tokenAccountRentLamports, rentShortfall] = await Promise.all([
     estimateNetworkFeeLamports(resolved.rpc, chunks),
     estimateMissingAtaRentLamports(resolved.rpc, groups, resolved.tokenContext),
+    findRentMinimumShortfall(resolved),
   ]);
+  const warnings =
+    rentShortfall === null
+      ? []
+      : rentShortfall.recipientIndexes.map((recipientIndex) => ({
+          code: "AMOUNT_BELOW_RENT_MINIMUM" as const,
+          recipientIndex,
+          minimumAmount: rentShortfall.minimumAmount,
+          message: `Recipient ${recipientIndex}'s address has no account, so it must receive at least ${rentShortfall.minimumAmount} SOL, the rent-exempt minimum`,
+        }));
 
   return success(c, {
     estimate: {
@@ -129,6 +141,7 @@ export async function estimateTransferBatch(
         tokenAccountRentLamports: tokenAccountRentLamports.toString(),
         sponsored: true,
       },
+      warnings,
     },
   });
 }
