@@ -171,10 +171,10 @@ function registerEarnVaultShareReconciliationPath(
     method: "get",
     path: "/v1/earn/vault-share-reconciliation",
     tags: ["Earn"],
-    summary: "Reconcile custody vault shares against recorded positions",
+    summary: "Reconcile vault shares against recorded positions",
     operationId: "getEarnVaultShareReconciliation",
     description:
-      "Report-only comparison of each scoped custody wallet's on-chain share balances against " +
+      "Report-only comparison of each scoped connected wallet's on-chain share balances against " +
       "the recorded claim set, both directions: share balances of catalogued vaults with no " +
       "recorded position (for example, shares acquired by signing outside SDP), and recorded " +
       "open positions whose wallet holds none of their shares. Writes nothing. Takes the same " +
@@ -343,7 +343,7 @@ function registerEarnExternalWalletPaths(registry: OpenAPIRegistry, security: Ea
     summary: "Build an unsigned external-wallet deposit transaction",
     operationId: "createEarnExternalWalletDepositTransaction",
     description:
-      "Builds one unsigned vault deposit transaction for a wallet SDP does not custody. The " +
+      "Builds one unsigned vault deposit transaction for the wallet owner to sign. The " +
       "build takes the provider entitlement, persists a submit-capable build, and may name a " +
       "caller-controlled `feePayer` that signs alongside the owner. The transaction expires " +
       "with its blockhash, and nothing moves during the build.",

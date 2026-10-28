@@ -113,7 +113,7 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
     summary: "Delete wallet",
     operationId: "deleteWallet",
     description:
-      "Deletes the wallet from its exact owning custody target when that Provider supports wallet deletion. Provider, when supplied, is a consistency assertion.",
+      "Deletes the wallet from its exact owning provider account when that Provider supports wallet deletion. Provider, when supplied, is a consistency assertion.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: keyAcceptedHeaders,

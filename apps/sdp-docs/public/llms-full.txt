@@ -6282,7 +6282,7 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Delete wallet
 Source: https://platform.solana.com/docs/reference/api/wallets/delete-wallet
 
-> Deletes the wallet from its exact owning custody target when that Provider supports wallet deletion.
+> Deletes the wallet from its exact owning provider account when that Provider supports wallet deletion.
 
 `DELETE /v1/wallets`
 
@@ -7221,7 +7221,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `wallet
 
 `application/json` · required
 
-walletId is the Provider wallet ID to check, required. Ambiguous Provider IDs are rejected; the check uses the resolved exact custody wallet record, and an API key may check only a wallet within its wallet scope.
+walletId is the Provider wallet ID to check, required. Ambiguous Provider IDs are rejected; the check uses the resolved exact connected wallet record, and an API key may check only a wallet within its wallet scope.
 
 - **`walletId`** · `string` · required · min length 1
 
@@ -7251,7 +7251,7 @@ walletId is the Provider wallet ID to check, required. Ambiguous Provider IDs ar
 
     - **`signature`** · `string` · required · example `sig_example`
 
-      The custody wallet's Ed25519 signature over the check message, base58. Verified server-side and exercised in RPC simulation only — the check never broadcasts, so this signature does not exist on chain.
+      The connected wallet's Ed25519 signature over the check message, base58. Verified server-side and exercised in RPC simulation only — the check never broadcasts, so this signature does not exist on chain.
 
     - **`simulated`** · `boolean` · required · always `true`
 
@@ -7461,7 +7461,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `wallet
 
       - **`provider`** · `string` · required · one of `local`, `fireblocks`, `privy`, `coinbase_cdp`, `para`, `turnkey`, `dfns`, `ibm_haven`, `anchorage`, `utila` · example `privy`
 
-        Wallet custody provider.
+        Wallet signing provider.
 
       - **`isRuntimeExecutionAllowed`** · `boolean` · required · example `true`
 
@@ -8873,7 +8873,7 @@ Source: https://platform.solana.com/docs/reference/api/issuance
 | --- | --- | --- |
 | `POST` | `/v1/issuance/tokens/{tokenId}/deploy` | [Deploy token](/docs/reference/api/issuance/deploy-token.md) |
 | `POST` | `/v1/issuance/tokens/{tokenId}/deploy/prepare` | [Prepare token deploy transaction](/docs/reference/api/issuance/prepare-deploy-token.md) |
-| `POST` | `/v1/issuance/tokens/{tokenId}/deploy/confirm` | [Confirm non-custodial deploy](/docs/reference/api/issuance/confirm-deploy.md) |
+| `POST` | `/v1/issuance/tokens/{tokenId}/deploy/confirm` | [Confirm a caller-signed deployment](/docs/reference/api/issuance/confirm-deploy.md) |
 | `POST` | `/v1/issuance/tokens/{tokenId}/deploy/prepare-metadata` | [Prepare metadata-URI follow-up transaction](/docs/reference/api/issuance/prepare-deploy-metadata.md) |
 
 ## Mint and burn
@@ -11032,7 +11032,7 @@ Update token request body.
 
 - **`signingCustodyWalletId`** · `string` · min length 1 · example `cwlt_example`
 
-  Optional exact SDP Wallet ID. On an undeployed pending draft, updates the deployment wallet. After deployment, selects the signer only for this on-chain metadata update and does not change deployment attribution. A request containing only this field after deployment returns 400; include the token changes to apply. Database-only edits need no signer. For on-chain metadata updates, the selected wallet must control the current metadata authority; omission requires exactly one matching in-scope custody record, otherwise returns 409.
+  Optional exact SDP Wallet ID. On an undeployed pending draft, updates the deployment wallet. After deployment, selects the signer only for this on-chain metadata update and does not change deployment attribution. A request containing only this field after deployment returns 400; include the token changes to apply. Database-only edits need no signer. For on-chain metadata updates, the selected wallet must control the current metadata authority; omission requires exactly one matching in-scope wallet record, otherwise returns 409.
 
 - **`name`** · `string` · min length 1 · max length 100 · example `Example Token Updated`
 
@@ -12741,7 +12741,7 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Deploy token
 Source: https://platform.solana.com/docs/reference/api/issuance/deploy-token
 
-> Deploys the token to Solana using custody signing.
+> Deploys the token to Solana using the connected provider for signing.
 
 `POST /v1/issuance/tokens/{tokenId}/deploy`
 
@@ -13444,10 +13444,10 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 
 ---
 
-### Confirm non-custodial deploy
+### Confirm a caller-signed deployment
 Source: https://platform.solana.com/docs/reference/api/issuance/confirm-deploy
 
-> Records the mint after the client signs and submits a prepared (non-custodial) deploy transaction.
+> Records the mint after the client signs and submits a prepared deploy transaction.
 
 `POST /v1/issuance/tokens/{tokenId}/deploy/confirm`
 
@@ -13471,7 +13471,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuan
 
 `application/json` · required
 
-Confirm non-custodial deploy request body.
+Confirm a caller-signed deployment request body.
 
 - **`signature`** · `string` · required · example `5x...signature`
 
@@ -13913,7 +13913,7 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Prepare metadata-URI follow-up transaction
 Source: https://platform.solana.com/docs/reference/api/issuance/prepare-deploy-metadata
 
-> Follow-up step for the non-custodial deploy flow.
+> Follow-up step for the caller-signed deploy flow.
 
 `POST /v1/issuance/tokens/{tokenId}/deploy/prepare-metadata`
 
@@ -14498,7 +14498,7 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Execute mint
 Source: https://platform.solana.com/docs/reference/api/issuance/execute-mint
 
-> Mints tokens using custody signing and submission.
+> Mints tokens by requesting a signature from the connected provider, then submitting the transaction.
 
 `POST /v1/issuance/tokens/{tokenId}/mint`
 
@@ -15196,7 +15196,7 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Execute burn
 Source: https://platform.solana.com/docs/reference/api/issuance/execute-burn
 
-> Burns tokens using custody signing and submission.
+> Burns tokens by requesting a signature from the connected provider, then submitting the transaction.
 
 `POST /v1/issuance/tokens/{tokenId}/burn`
 
@@ -16975,7 +16975,7 @@ Pause token request body.
 
 - **`signingCustodyWalletId`** · `string` · min length 1 · example `cwlt_example`
 
-  Optional exact SDP Wallet ID controlling the current pause authority. Omission requires exactly one matching in-scope custody record; multiple matches return 409. Replay must retain the original wallet.
+  Optional exact SDP Wallet ID controlling the current pause authority. Omission requires exactly one matching in-scope wallet record; multiple matches return 409. Replay must retain the original wallet.
 
 - **`options`** · `object`
 
@@ -17255,7 +17255,7 @@ Pause token request body.
 
 - **`signingCustodyWalletId`** · `string` · min length 1 · example `cwlt_example`
 
-  Optional exact SDP Wallet ID controlling the current pause authority. Omission requires exactly one matching in-scope custody record; multiple matches return 409. Replay must retain the original wallet.
+  Optional exact SDP Wallet ID controlling the current pause authority. Omission requires exactly one matching in-scope wallet record; multiple matches return 409. Replay must retain the original wallet.
 
 - **`options`** · `object`
 
@@ -18539,7 +18539,7 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Execute authority update
 Source: https://platform.solana.com/docs/reference/api/issuance/execute-update-authority
 
-> Updates token authorities using custody signing.
+> Updates token authorities using the connected provider for signing.
 
 `POST /v1/issuance/tokens/{tokenId}/authority`
 
@@ -19092,7 +19092,7 @@ Add token allowlist entry request body.
 
 - **`signingCustodyWalletId`** · `string` · min length 1 · example `cwlt_example`
 
-  Optional exact SDP Wallet ID controlling the live list authority. Omission requires exactly one matching in-scope custody record; multiple matches return 409. Database-only lists do not require a signer.
+  Optional exact SDP Wallet ID controlling the live list authority. Omission requires exactly one matching in-scope wallet record; multiple matches return 409. Database-only lists do not require a signer.
 
 - **`address`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
 
@@ -19458,7 +19458,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuan
 
 - **`signingCustodyWalletId`** · `string` · min length 1 · example `cwlt_example`
 
-  Optional exact SDP Wallet ID controlling the live list authority. Omission requires exactly one matching in-scope custody record; multiple matches return 409. Database-only lists do not require a signer.
+  Optional exact SDP Wallet ID controlling the live list authority. Omission requires exactly one matching in-scope wallet record; multiple matches return 409. Database-only lists do not require a signer.
 
 ## Headers
 
@@ -19862,7 +19862,7 @@ Source: https://platform.solana.com/docs/reference/api/payments
 
 | Method | Endpoint | Summary |
 | --- | --- | --- |
-| `POST` | `/v1/payments/transfers` | [Execute transfer (custody)](/docs/reference/api/payments/create-payment-transfer.md) |
+| `POST` | `/v1/payments/transfers` | [Execute a provider-signed transfer](/docs/reference/api/payments/create-payment-transfer.md) |
 | `GET` | `/v1/payments/transfers` | [List transfers](/docs/reference/api/payments/list-payment-transfers.md) |
 | `GET` | `/v1/payments/transfers/{transferId}` | [Get transfer](/docs/reference/api/payments/get-payment-transfer.md) |
 
@@ -19935,7 +19935,7 @@ Source: https://platform.solana.com/docs/reference/api/payments
 ### Get wallet balances
 Source: https://platform.solana.com/docs/reference/api/payments/get-payment-wallet-balances
 
-> Retrieves balances for a custody wallet.
+> Retrieves balances for a connected wallet.
 
 `GET /v1/payments/wallets/{walletId}/balances`
 
@@ -20489,10 +20489,10 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 
 ## Payments: Transfers
 
-### Execute transfer (custody)
+### Execute a provider-signed transfer
 Source: https://platform.solana.com/docs/reference/api/payments/create-payment-transfer
 
-> Executes an on-chain transfer using the exact SDP Wallet ID (id from /v1/wallets) and server-side custody signing.
+> Executes an on-chain transfer using the exact SDP Wallet ID (id from /v1/wallets) and server-side signing through the connected provider.
 
 `POST /v1/payments/transfers`
 
@@ -20514,7 +20514,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
 `application/json` · required
 
-Create transfer request payload for a custody-managed source wallet. This endpoint does not provision wallets.
+Create transfer request payload for a provider-connected source wallet. This endpoint does not provision wallets.
 
 - **`projectId`** · `string` · min length 1 · example `prj_example`
 
@@ -22432,7 +22432,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
 `application/json` · required
 
-Create a custody-executed outbound transfer batch.
+Create an outbound transfer batch.
 
 - **`projectId`** · `string` · min length 1 · example `prj_example`
 
@@ -22510,7 +22510,7 @@ Create a custody-executed outbound transfer batch.
 
       - **`sourceAddress`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
 
-        Source custody wallet address.
+        Source connected wallet address.
 
       - **`token`** · `string` · required · example `SOL`
 
@@ -23218,7 +23218,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
     - **`sourceAddress`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
 
-      Source custody wallet address.
+      Source connected wallet address.
 
     - **`token`** · `string` · required · example `SOL`
 
@@ -23457,7 +23457,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
       - **`sourceAddress`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
 
-        Source custody wallet address.
+        Source connected wallet address.
 
       - **`token`** · `string` · required · example `SOL`
 
@@ -24092,7 +24092,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
       - **`sourceAddress`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
 
-        Source custody wallet address.
+        Source connected wallet address.
 
       - **`token`** · `string` · required · example `SOL`
 
@@ -24659,7 +24659,7 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Create recurring payment
 Source: https://platform.solana.com/docs/reference/api/payments/create-payment-recurring-payment
 
-> Creates an SDP-custody outbound recurring payment intent from a custody wallet to a counterparty crypto-wallet account.
+> Creates an outbound recurring payment intent from a connected wallet to a counterparty crypto-wallet account.
 
 `POST /v1/payments/recurring-payments`
 
@@ -24681,7 +24681,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
 `application/json` · required
 
-Creates an SDP-custody outbound recurring payment intent. Activation and collection are added by follow-up endpoints.
+Creates an outbound recurring payment intent. Activation and collection are added by follow-up endpoints.
 
 - **`sourceCustodyWalletId`** · `string` · required · min length 1 · example `cwlt_example`
 
@@ -24725,7 +24725,7 @@ Creates an SDP-custody outbound recurring payment intent. Activation and collect
 
     - **`recurringPayment`** · `object` · required
 
-      SDP-custody outbound recurring payment record.
+      Outbound recurring payment record.
 
       - **`id`** · `string` · required · example `prp_example`
 
@@ -25060,7 +25060,7 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### List recurring payments
 Source: https://platform.solana.com/docs/reference/api/payments/list-payment-recurring-payments
 
-> Lists SDP-custody outbound recurring payments for the authenticated organization or project scope.
+> Lists outbound recurring payments for the authenticated organization or project scope.
 
 `GET /v1/payments/recurring-payments`
 
@@ -25360,7 +25360,7 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Update recurring payment
 Source: https://platform.solana.com/docs/reference/api/payments/update-payment-recurring-payment
 
-> Updates an SDP-custody recurring payment.
+> Updates a recurring payment.
 
 `PATCH /v1/payments/recurring-payments/{id}`
 
@@ -25436,7 +25436,7 @@ Updates a recurring payment. Pending payments are edited directly. Active metada
 
     - **`recurringPayment`** · `object` · required
 
-      SDP-custody outbound recurring payment record.
+      Outbound recurring payment record.
 
       - **`id`** · `string` · required · example `prp_example`
 
@@ -25774,7 +25774,7 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Get recurring payment
 Source: https://platform.solana.com/docs/reference/api/payments/get-payment-recurring-payment
 
-> Retrieves an SDP-custody outbound recurring payment record.
+> Retrieves an outbound recurring payment record.
 
 `GET /v1/payments/recurring-payments/{id}`
 
@@ -25802,7 +25802,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
     - **`recurringPayment`** · `object` · required
 
-      SDP-custody outbound recurring payment record.
+      Outbound recurring payment record.
 
       - **`id`** · `string` · required · example `prp_example`
 
@@ -26091,7 +26091,7 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Activate recurring payment
 Source: https://platform.solana.com/docs/reference/api/payments/activate-payment-recurring-payment
 
-> Activates a pending SDP-custody recurring payment by creating the Solana subscriptions plan, authorizing the subscription, and storing the resulting on-chain identifiers and signatures.
+> Activates a pending recurring payment by creating the Solana subscriptions plan, authorizing the subscription, and storing the resulting on-chain identifiers and signatures.
 
 `POST /v1/payments/recurring-payments/{id}/activate`
 
@@ -26125,7 +26125,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
     - **`recurringPayment`** · `object` · required
 
-      SDP-custody outbound recurring payment record.
+      Outbound recurring payment record.
 
       - **`id`** · `string` · required · example `prp_example`
 
@@ -26428,7 +26428,7 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Cancel recurring payment
 Source: https://platform.solana.com/docs/reference/api/payments/cancel-payment-recurring-payment
 
-> Permanently stops an active or paused SDP-custody recurring payment by submitting the Solana subscriptions immediate cancellation, which ends its on-chain subscription at once rather than at the end of the billing period.
+> Permanently stops an active or paused recurring payment by submitting the Solana subscriptions immediate cancellation, which ends its on-chain subscription at once rather than at the end of the billing period.
 
 `POST /v1/payments/recurring-payments/{id}/cancel`
 
@@ -26462,7 +26462,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
     - **`recurringPayment`** · `object` · required
 
-      SDP-custody outbound recurring payment record.
+      Outbound recurring payment record.
 
       - **`id`** · `string` · required · example `prp_example`
 
@@ -26765,7 +26765,7 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Collect recurring payment
 Source: https://platform.solana.com/docs/reference/api/payments/collect-payment-recurring-payment
 
-> Manually starts a due active SDP-custody recurring payment collection, creating a linked payment transfer and collection attempt.
+> Manually starts a due active recurring payment collection, creating a linked payment transfer and collection attempt.
 
 `POST /v1/payments/recurring-payments/{id}/collect`
 
@@ -26799,7 +26799,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
     - **`recurringPayment`** · `object` · required
 
-      SDP-custody outbound recurring payment record.
+      Outbound recurring payment record.
 
       - **`id`** · `string` · required · example `prp_example`
 
@@ -27540,7 +27540,7 @@ Error responses use the [standard error shape](/docs/reference/conventions/error
 ### Resume recurring payment
 Source: https://platform.solana.com/docs/reference/api/payments/resume-payment-recurring-payment
 
-> Resumes a paused SDP-custody recurring payment.
+> Resumes a paused recurring payment.
 
 `POST /v1/payments/recurring-payments/{id}/resume`
 
@@ -27574,7 +27574,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
     - **`recurringPayment`** · `object` · required
 
-      SDP-custody outbound recurring payment record.
+      Outbound recurring payment record.
 
       - **`id`** · `string` · required · example `prp_example`
 
@@ -28468,7 +28468,7 @@ Creates an SDP subscription plan record. Prepare the on-chain Solana subscriptio
 
 - **`ownerWalletId`** · `string` · required · min length 1 · example `wal_merchant`
 
-  Custody wallet that owns the Solana subscription plan.
+  Connected wallet that owns the Solana subscription plan.
 
 - **`token`** · `string` · required · example `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`
 
@@ -28496,7 +28496,7 @@ Creates an SDP subscription plan record. Prepare the on-chain Solana subscriptio
 
 - **`pullerWalletId`** · `string` · min length 1 · example `wal_collector`
 
-  Optional SDP custody wallet allowed to pull subscription payments.
+  Optional connected wallet allowed to pull subscription payments.
 
 - **`metadataUri`** · `string` · format `uri` · max length 128 · example `https://example.com/subscriptions/monthly-usdc.json`
 
@@ -32751,7 +32751,7 @@ Create an on-ramp quote. The response uses `deliveryMode` to indicate whether th
 
 - **`destinationCustodyWalletId`** · `string` · required · min length 1 · example `cwlt_example`
 
-  Custody wallet ID (the `id` returned by the wallets API) for purchased crypto.
+  Connected wallet ID (the `id` returned by the wallets API) for purchased crypto.
 
 - **`assetRail`** · `string` · required · one of `sol.solana`, `usdc.solana`, `usdt.solana`, `usdg.solana`, `pyusd.solana` · example `usdc.solana`
 
@@ -34609,7 +34609,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `counte
 
 - **`destinationCustodyWalletId`** · `string` · min length 1 · example `cwlt_example`
 
-  Custody wallet ID (the `id` returned by the wallets API). Required when direction is onramp.
+  Connected wallet ID (the `id` returned by the wallets API). Required when direction is onramp.
 
 ## Headers
 
