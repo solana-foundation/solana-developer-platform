@@ -1865,9 +1865,12 @@ body {
   position: relative;
 }
 
+/* Folded, a sample keeps its first lines but still scrolls sideways: a short tab shares the fold
+   of a long one without its button. */
 .launch-api-fold:not([data-open]) .fd-scroll-container {
   max-height: 18rem;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 /* Opened, the sample shows every line; the panel scrolls instead. */
