@@ -2,7 +2,7 @@ import { apiReferenceSchema } from "@sdp/api-catalog/reference";
 import { buildSnippets, SNIPPET_LANGUAGES } from "@sdp/api-catalog/snippets";
 import { SDP_RELEASE_CHANNEL_NAMES } from "@sdp/types/release-channels";
 import { DEFAULT_SDP_API_URL } from "@sdp/types/site";
-import type { OpenAPIObject } from "openapi3-ts/oas30";
+import type { OpenAPIObject, OperationObject } from "openapi3-ts/oas30";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { AppError, type ErrorCode, isErrorCode } from "@/lib/errors";
@@ -176,13 +176,16 @@ describe("buildApiReference", () => {
 
   it("carries each operation's docs group, and fails a family that groups only some", () => {
     const healthChecks = (live: string | undefined, ready: string | undefined): OpenAPIObject => {
-      const operation = (operationId: string, group: string | undefined) => ({
-        tags: ["Health"],
-        operationId,
-        summary: "Check",
-        responses: { "200": { description: "OK" } },
-        ...(group === undefined ? {} : { [DOCS_GROUP]: group }),
-      });
+      const operation = (operationId: string, group: string | undefined): OperationObject => {
+        const built: OperationObject = {
+          tags: ["Health"],
+          operationId,
+          summary: "Check",
+          responses: { "200": { description: "OK" } },
+        };
+        if (group !== undefined) built[DOCS_GROUP] = group;
+        return built;
+      };
       return {
         openapi: "3.0.3",
         info: { title: "Test", version: "0" },

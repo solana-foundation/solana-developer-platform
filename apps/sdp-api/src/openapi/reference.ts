@@ -476,14 +476,13 @@ function authOf(
   return "apiKey";
 }
 
+const docsGroupSchema = z.string().trim().min(1).optional();
+
 /** The group an operation names within its tag (`DOCS_GROUP`), or null when it names none. */
 function docsGroupOf(operation: OperationObject, where: string): string | null {
-  const group: unknown = operation[DOCS_GROUP];
-  if (group === undefined) return null;
-  if (typeof group !== "string" || group.trim() === "") {
-    throw new Error(`${where}: ${DOCS_GROUP} must name a group`);
-  }
-  return group;
+  const group = docsGroupSchema.safeParse(operation[DOCS_GROUP]);
+  if (!group.success) throw new Error(`${where}: ${DOCS_GROUP} must name a group`);
+  return group.data ?? null;
 }
 
 function toApiOperation(
