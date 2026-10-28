@@ -531,7 +531,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "List recurring payment collection attempts",
     operationId: "listPaymentRecurringPaymentCollectionAttempts",
     description:
-      "Lists collection attempts for a recurring payment's current subscription. A recurring payment that has not been activated has none.",
+      "Lists every collection attempt a recurring payment has made over its whole history, newest first: its current subscription and every subscription an edit replaced. A recurring payment that has not been activated has none.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,

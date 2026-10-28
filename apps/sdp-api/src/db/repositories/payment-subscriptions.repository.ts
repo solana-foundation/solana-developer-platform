@@ -198,6 +198,15 @@ export interface ListPaymentSubscriptionCollectionAttemptsInput {
   offset: number;
 }
 
+export interface ListRecurringPaymentCollectionAttemptsInput {
+  organizationId: string;
+  projectId: string;
+  recurringPaymentId: string;
+  status?: PaymentSubscriptionCollectionAttemptStatus;
+  limit: number;
+  offset: number;
+}
+
 export interface GetPaymentSubscriptionCollectionAttemptByDueInput {
   organizationId: string;
   projectId: string;
@@ -274,5 +283,12 @@ export interface PaymentSubscriptionsRepository {
   ): Promise<PaymentSubscriptionCollectionAttemptRow | null>;
   listCollectionAttempts(
     params: ListPaymentSubscriptionCollectionAttemptsInput
+  ): Promise<ListPaymentSubscriptionCollectionAttemptsResult>;
+  /**
+   * Lists a recurring payment's collection attempts across its whole history: its current
+   * subscription and every subscription an edit replaced or created for it, newest first.
+   */
+  listRecurringPaymentCollectionAttempts(
+    params: ListRecurringPaymentCollectionAttemptsInput
   ): Promise<ListPaymentSubscriptionCollectionAttemptsResult>;
 }

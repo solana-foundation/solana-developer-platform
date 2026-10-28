@@ -5,7 +5,6 @@ import {
 import {
   isInFlightRecurringPaymentAttemptStatus,
   type ListPaymentRecurringPaymentsResponse,
-  type ListPaymentSubscriptionCollectionAttemptsResponse,
   type PaymentRecurringPayment,
   type PaymentRecurringPaymentCollectionResponse,
   type PaymentRecurringPaymentResponse,
@@ -18,6 +17,7 @@ import {
   AppError,
   badRequestParams,
   badRequestQuery,
+  conflict,
   internalError,
   notFound,
   walletNotFound,
@@ -39,8 +39,11 @@ import {
   getPaymentSubscriptionsRepository,
   getPaymentsRepository,
 } from "@/routes/payments/context";
-import { mapCollectionAttemptRow, mapTransferRow } from "@/routes/payments/mappers";
-import { listSubscriptionCollectionAttemptsQuerySchema } from "@/routes/payments/schemas";
+import {
+  mapCollectionAttemptRow,
+  mapTransferRow,
+  respondWithCollectionAttemptsPage,
+} from "@/routes/payments/mappers";
 import { activateRecurringPayment as activateRecurringPaymentRecord } from "@/services/payments/recurring-payments/activation";
 import { collectRecurringPayment as collectRecurringPaymentRecord } from "@/services/payments/recurring-payments/collection";
 import {
@@ -138,7 +141,7 @@ export async function findRecurringPaymentCreateReplay(
 /** The schedule's pinned source wallet; an unresolved pin is refused for new work (state). */
 function pinnedSourceWallet(authorized: AuthorizedRecurringPayment): CustodyWallet {
   if (authorized.sourceWallet === null) {
-    throw new AppError("CONFLICT", "Recurring payment source wallet is unresolved");
+    throw conflict("Recurring payment source wallet is unresolved");
   }
   return authorized.sourceWallet;
 }
@@ -540,7 +543,7 @@ export const getRecurringPayment = async (c: AppContext) => {
   });
 
   if (!recurringPayment) {
-    throw new AppError("NOT_FOUND", "Recurring payment not found");
+    throw notFound("Recurring payment");
   }
 
   const response: PaymentRecurringPaymentResponse = {
@@ -550,8 +553,8 @@ export const getRecurringPayment = async (c: AppContext) => {
 };
 
 /**
- * Lists the collection attempts of a recurring payment's current subscription, scoped to the
- * request's project. A recurring payment that has no subscription yet has no attempts.
+ * Lists every collection attempt a recurring payment has made, across the subscriptions its edits
+ * replaced as well as its current one, scoped to the request's project.
  *
  * @param c - Request context carrying the `id` path parameter and the paging query.
  * @returns The page of collection attempts, in the subscription collection-attempt list contract.
@@ -565,39 +568,22 @@ export const listRecurringPaymentCollectionAttempts = async (c: AppContext) => {
     throw badRequestParams();
   }
 
-  const parsed = listSubscriptionCollectionAttemptsQuerySchema.safeParse(c.req.query());
-  if (!parsed.success) {
-    throw badRequestQuery({ errors: z.treeifyError(parsed.error) });
-  }
-
-  const recurringPayment = await getPaymentRecurringPaymentsRepository(c).getRecurringPaymentById({
-    recurringPaymentId: params.data.id,
-    organizationId: auth.organizationId,
-    projectId,
+  return respondWithCollectionAttemptsPage(c, async (page) => {
+    const recurringPayment = await getPaymentRecurringPaymentsRepository(c).getRecurringPaymentById(
+      {
+        recurringPaymentId: params.data.id,
+        organizationId: auth.organizationId,
+        projectId,
+      }
+    );
+    if (!recurringPayment) {
+      throw notFound("Recurring payment");
+    }
+    return getPaymentSubscriptionsRepository(c).listRecurringPaymentCollectionAttempts({
+      organizationId: auth.organizationId,
+      projectId,
+      recurringPaymentId: recurringPayment.id,
+      ...page,
+    });
   });
-
-  if (!recurringPayment) {
-    throw notFound("Recurring payment");
-  }
-
-  const { page, pageSize, status } = parsed.data;
-  const { rows, total } =
-    recurringPayment.subscription_id === null
-      ? { rows: [], total: 0 }
-      : await getPaymentSubscriptionsRepository(c).listCollectionAttempts({
-          organizationId: auth.organizationId,
-          projectId,
-          subscriptionId: recurringPayment.subscription_id,
-          status,
-          limit: pageSize,
-          offset: (page - 1) * pageSize,
-        });
-
-  const response: ListPaymentSubscriptionCollectionAttemptsResponse = {
-    collectionAttempts: rows.map(mapCollectionAttemptRow),
-    total,
-    page,
-    pageSize,
-  };
-  return success(c, response);
 };

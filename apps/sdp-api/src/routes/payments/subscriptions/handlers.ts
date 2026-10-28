@@ -2,7 +2,6 @@ import type { CounterpartyRow } from "@sdp/payments/counterparty";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { assertValidAddress } from "@sdp/solana/address";
 import type {
-  ListPaymentSubscriptionCollectionAttemptsResponse,
   ListPaymentSubscriptionsResponse,
   PaymentSubscription,
   PaymentSubscriptionResponse,
@@ -28,13 +27,12 @@ import type {
 } from "@/db/repositories/payment-subscriptions.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
-import { AppError, badRequest, badRequestParams, badRequestQuery } from "@/lib/errors";
+import { badRequest, badRequestParams, badRequestQuery, conflict, notFound } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { getAuthorized } from "@/middleware/authorize";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { type AppContext, getPaymentSubscriptionsRepository } from "@/routes/payments/context";
-import { mapCollectionAttemptRow } from "@/routes/payments/mappers";
-import { listSubscriptionCollectionAttemptsQuerySchema } from "@/routes/payments/schemas";
+import { respondWithCollectionAttemptsPage } from "@/routes/payments/mappers";
 import { resolveScope, resolveWallet } from "@/routes/payments/wallets";
 import { parseI64String, parseU64String } from "@/services/payment-operation.service";
 import {
@@ -86,7 +84,7 @@ async function getExpectedSubscriptionExpiresAtTs(subscriptionPda: Address): Pro
     { commitment: "confirmed" }
   );
   if (!onChainSubscription.exists) {
-    throw new AppError("CONFLICT", "Subscription was not found on-chain");
+    throw conflict("Subscription was not found on-chain");
   }
   return onChainSubscription.data.expiresAtTs;
 }
@@ -120,10 +118,7 @@ async function persistSubscriptionAuthorizationAddresses(
   });
 
   if (!updated) {
-    throw new AppError(
-      "CONFLICT",
-      "Subscription authorization state changed while preparing authorization"
-    );
+    throw conflict("Subscription authorization state changed while preparing authorization");
   }
 
   return updated;
@@ -143,7 +138,7 @@ async function getSubscriptionWithPlan(
   });
 
   if (!subscription) {
-    throw new AppError("NOT_FOUND", "Subscription not found");
+    throw notFound("Subscription");
   }
 
   const plan = await repo.getPlanById({
@@ -153,7 +148,7 @@ async function getSubscriptionWithPlan(
   });
 
   if (!plan) {
-    throw new AppError("NOT_FOUND", "Subscription plan not found");
+    throw notFound("Subscription plan");
   }
 
   return { plan, subscription };
@@ -177,7 +172,7 @@ export const createSubscription = async (
   }
   // An inactive counterparty reads as missing, as the active-only lookup answered.
   if (counterparty.status !== "active") {
-    throw new AppError("NOT_FOUND", "Counterparty not found");
+    throw notFound("Counterparty");
   }
 
   const existing = await repo.listSubscriptions({
@@ -189,7 +184,7 @@ export const createSubscription = async (
     offset: 0,
   });
   if (existing.total > 0) {
-    throw new AppError("CONFLICT", "Counterparty already has a subscription for this plan");
+    throw conflict("Counterparty already has a subscription for this plan");
   }
 
   const now = new Date().toISOString();
@@ -215,7 +210,7 @@ export const createSubscription = async (
   });
 
   if (!subscription) {
-    throw new AppError("CONFLICT", "Counterparty already has a subscription for this plan");
+    throw conflict("Counterparty already has a subscription for this plan");
   }
 
   const response: PaymentSubscriptionResponse = { subscription: mapSubscription(subscription) };
@@ -238,10 +233,7 @@ export const prepareSubscriptionAuthorization = async (
     throw badRequest("Subscription plan must be active before authorization");
   }
   if (subscription.status !== "pending_authorization") {
-    throw new AppError(
-      "BAD_REQUEST",
-      "Subscription authorization can only be prepared while pending authorization"
-    );
+    throw badRequest("Subscription authorization can only be prepared while pending authorization");
   }
 
   const { owner, planId, planPda } = await derivePlanAddresses(plan);
@@ -352,7 +344,7 @@ export const getSubscription = async (c: AppContext) => {
   });
 
   if (!subscription) {
-    throw new AppError("NOT_FOUND", "Subscription not found");
+    throw notFound("Subscription");
   }
 
   const response: PaymentSubscriptionResponse = { subscription: mapSubscription(subscription) };
@@ -476,37 +468,21 @@ export const listSubscriptionCollectionAttempts = async (c: AppContext) => {
     throw badRequestParams();
   }
 
-  const parsed = listSubscriptionCollectionAttemptsQuerySchema.safeParse(c.req.query());
-  if (!parsed.success) {
-    throw badRequestQuery({ errors: z.treeifyError(parsed.error) });
-  }
-
-  const repo = getPaymentSubscriptionsRepository(c);
-  const subscription = await repo.getSubscriptionById({
-    subscriptionId: params.data.subscriptionId,
-    organizationId: auth.organizationId,
-    projectId,
+  return respondWithCollectionAttemptsPage(c, async (page) => {
+    const repo = getPaymentSubscriptionsRepository(c);
+    const subscription = await repo.getSubscriptionById({
+      subscriptionId: params.data.subscriptionId,
+      organizationId: auth.organizationId,
+      projectId,
+    });
+    if (!subscription) {
+      throw notFound("Subscription");
+    }
+    return repo.listCollectionAttempts({
+      organizationId: auth.organizationId,
+      projectId,
+      subscriptionId: params.data.subscriptionId,
+      ...page,
+    });
   });
-  if (!subscription) {
-    throw new AppError("NOT_FOUND", "Subscription not found");
-  }
-
-  const { page, pageSize, status } = parsed.data;
-  const { rows, total } = await repo.listCollectionAttempts({
-    organizationId: auth.organizationId,
-    projectId,
-    subscriptionId: params.data.subscriptionId,
-    status,
-    limit: pageSize,
-    offset: (page - 1) * pageSize,
-  });
-
-  const response: ListPaymentSubscriptionCollectionAttemptsResponse = {
-    collectionAttempts: rows.map(mapCollectionAttemptRow),
-    total,
-    page,
-    pageSize,
-  };
-
-  return success(c, response);
 };
