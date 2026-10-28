@@ -147,6 +147,13 @@ function partitionByValidStoredSignature<T extends PaymentTransferRow>(transfers
  * delayed observation can never regress a newer terminal status. Other
  * transfers settle through a processing-guarded update with the same
  * no-op-on-conflict semantics.
+ *
+ * @param env - Process environment.
+ * @param repo - System payments repository.
+ * @param transfer - The processing transfer to settle.
+ * @param input - The terminal status and the fields and guards it is written with.
+ * @returns True when this call wrote the row; false when its guards matched nothing (a concurrent
+ * settle, or a start marker the input requires absent).
  */
 async function updateTerminalTransfer(
   env: Env,
@@ -157,12 +164,12 @@ async function updateTerminalTransfer(
       | { status: Exclude<TransferChainVerdictStatus, "failed"> }
       | { status: "failed"; error: string }
     )
-): Promise<void> {
+): Promise<boolean> {
   if (transfer.type === "transfer_batch") {
     if (transfer.project_id === null) {
       throw internalError("Transfer batch transfer is missing a project");
     }
-    await createSystemPaymentTransferBatchesRepository(env).settleTransferBatch({
+    return createSystemPaymentTransferBatchesRepository(env).settleTransferBatch({
       transferId: transfer.id,
       requireUnsigned: input.requireUnsigned,
       organizationId: transfer.organization_id,
@@ -173,9 +180,8 @@ async function updateTerminalTransfer(
       updatedAt: input.updatedAt,
       requireUnstarted: input.requireUnstarted,
     });
-    return;
   }
-  await repo.updateTransfer({ ...input, expectedStatus: "processing" });
+  return (await repo.updateTransfer({ ...input, expectedStatus: "processing" })) !== null;
 }
 
 /**
@@ -255,7 +261,8 @@ async function applyOnChainVerdict(
  * @param transfer - The processing transfer to fail.
  * @param proof - What proves the transaction never landed.
  * @param nowIso - Timestamp applied to the failed row.
- * @returns True when the write ran (a lost CAS is a no-op, not an error); false when it failed.
+ * @returns `written` when this call failed the row, `lost_race` when its guards matched nothing
+ * (a concurrent settle or send start), and `errored` when the write threw.
  */
 async function failNotLanded(
   env: Env,
@@ -263,16 +270,16 @@ async function failNotLanded(
   transfer: PaymentTransferRow,
   proof: NotLandedProof,
   nowIso: string
-): Promise<boolean> {
+): Promise<"written" | "lost_race" | "errored"> {
   try {
-    await updateTerminalTransfer(env, repo, transfer, {
+    const written = await updateTerminalTransfer(env, repo, transfer, {
       transferId: transfer.id,
       status: "failed",
       error: "Transaction not found on chain",
       updatedAt: nowIso,
       requireUnstarted: proof === "broadcast_never_started" ? true : undefined,
     });
-    return true;
+    return written ? "written" : "lost_race";
   } catch (err) {
     getLogger().error(
       {
@@ -281,7 +288,7 @@ async function failNotLanded(
       },
       "trackPendingTransfers: failed to update transfer"
     );
-    return false;
+    return "errored";
   }
 }
 
@@ -662,7 +669,7 @@ async function reconcileCacheMisses(
   for (const transfer of expiredSigned) {
     if (
       transfer.submission_started_at === null &&
-      !(await failNotLanded(env, repo, transfer, "broadcast_never_started", nowIso))
+      (await failNotLanded(env, repo, transfer, "broadcast_never_started", nowIso)) === "errored"
     ) {
       await keepStartedSubmissionForReconciliation(repo, transfer, nowIso, {
         reason: "verdict_write_failed",
@@ -752,12 +759,14 @@ async function settleFromHistory(
     await keepUnprovableVerdict(repo, transfer, nowIso, finalized);
     return;
   }
-  if (!(await failNotLanded(env, repo, transfer, "expired_unseen", nowIso))) {
+  const outcome = await failNotLanded(env, repo, transfer, "expired_unseen", nowIso);
+  if (outcome === "errored") {
     await keepStartedSubmissionForReconciliation(repo, transfer, nowIso, {
       reason: "verdict_write_failed",
     });
     return;
   }
+  if (outcome === "lost_race") return;
   logEvent("warn", {
     event: "sdp_api_payment_submission_not_landed",
     flow: "reconciler",
