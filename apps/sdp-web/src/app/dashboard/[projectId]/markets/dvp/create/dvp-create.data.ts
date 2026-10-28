@@ -1,6 +1,6 @@
 import { SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
 import { z } from "zod";
-import { dvpErrorEnvelopeSchema } from "@/app/dashboard/[projectId]/markets/dvp/dvp-trade";
+import { parseDvpRefusal } from "@/app/dashboard/[projectId]/markets/dvp/dvp-trade";
 import type { SdpApiClient } from "@/lib/sdp-api";
 
 /**
@@ -208,7 +208,7 @@ export async function fetchDvpCreateContext(
         tokens: [],
         counterpartyAccounts: [],
         error:
-          dvpErrorEnvelopeSchema.safeParse(walletsBody).data?.error.message ??
+          parseDvpRefusal(walletsBody)?.message ??
           `Wallet list failed (${walletsResponse.status}).`,
       };
     }

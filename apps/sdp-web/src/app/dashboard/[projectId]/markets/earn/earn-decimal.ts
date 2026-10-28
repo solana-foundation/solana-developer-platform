@@ -74,6 +74,43 @@ export function compareUnsignedDecimals(left: string, right: string): -1 | 0 | 1
 }
 
 /**
+ * Whether `value` is strictly above `ceiling`, spelled once for the over-ceiling
+ * guards every vault modal derives. Fail-soft like `compareUnsignedDecimals`:
+ * a value or ceiling that is missing or cannot be compared never counts as
+ * over — the fail-closed answer, since an incomparable amount must not pass a
+ * guard.
+ */
+export function exceedsDecimal(
+  value: string | null | undefined,
+  ceiling: string | null | undefined
+): boolean {
+  return (
+    value !== null &&
+    value !== undefined &&
+    ceiling !== null &&
+    ceiling !== undefined &&
+    compareUnsignedDecimals(value, ceiling) === 1
+  );
+}
+
+/**
+ * Whether `value` is strictly below `floor`, fail-soft like `exceedsDecimal`:
+ * a missing or incomparable side never counts as below.
+ */
+export function belowDecimal(
+  value: string | null | undefined,
+  floor: string | null | undefined
+): boolean {
+  return (
+    value !== null &&
+    value !== undefined &&
+    floor !== null &&
+    floor !== undefined &&
+    compareUnsignedDecimals(value, floor) === -1
+  );
+}
+
+/**
  * Whether the value parses as an unsigned decimal AND is strictly above zero.
  *
  * Every money surface answers the same question — a balance of "0" offers
@@ -82,7 +119,7 @@ export function compareUnsignedDecimals(left: string, right: string): -1 | 0 | 1
  * positive, which is the fail-closed answer.
  */
 export function isPositiveDecimal(value: string): boolean {
-  return compareUnsignedDecimals(value, "0") === 1;
+  return exceedsDecimal(value, "0");
 }
 
 /**

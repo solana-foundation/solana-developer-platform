@@ -54,6 +54,23 @@ export const dvpErrorEnvelopeSchema = z.object({
   }),
 });
 
+/**
+ * A DvP endpoint's refusal, read once: the API's own message and, when the
+ * refusal is a structured one, its reason code. Null when the body is not that
+ * envelope at all — a proxy's error page, say, which the callers report with
+ * their own copy.
+ */
+export function parseDvpRefusal(
+  body: unknown
+): { message: string; reason: string | undefined } | null {
+  const envelope = dvpErrorEnvelopeSchema.safeParse(body);
+  if (!envelope.success) return null;
+  return {
+    message: envelope.data.error.message,
+    reason: envelope.data.error.details?.reason,
+  };
+}
+
 /** One side of a trade as the API resolves it for the caller. */
 export interface DvpPartyRef {
   address: string;

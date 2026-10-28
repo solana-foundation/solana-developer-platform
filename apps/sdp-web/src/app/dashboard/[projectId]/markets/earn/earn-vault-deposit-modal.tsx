@@ -47,7 +47,8 @@ import {
 } from "./deposit/earn-funding-wallets";
 import { EarnAmountMaxButton } from "./earn-amount-max-button";
 import {
-  compareUnsignedDecimals,
+  belowDecimal,
+  exceedsDecimal,
   isPositiveDecimal,
   MAX_AMOUNT_LENGTH,
   parseUnsignedDecimal,
@@ -258,10 +259,10 @@ function deriveDepositFormState(input: {
     t,
   } = input;
   const amountValidation = validateVaultDepositAmount(amountInput, fundingDecimals);
-  const overKnownBalance =
-    amountValidation.kind === "valid" && selectedWalletBalance !== undefined
-      ? compareUnsignedDecimals(amountValidation.canonicalAmount, selectedWalletBalance) === 1
-      : false;
+  const overKnownBalance = exceedsDecimal(
+    amountValidation.kind === "valid" ? amountValidation.canonicalAmount : undefined,
+    selectedWalletBalance
+  );
   const amountError = amountValidationMessage(amountInput, amountValidation, t);
   const { slippageBps, slippageInvalid } = parseSlippageToleranceState(
     slippagePolicy,
@@ -330,9 +331,7 @@ async function revalidateExpiredFloor(
   if (fresh.kind !== "quoted" || fresh.preview.blockingIssues.length > 0) {
     return "quote_unavailable";
   }
-  return compareUnsignedDecimals(fresh.preview.sharesOut, floor) === -1
-    ? "floor_exceeded"
-    : "still_satisfiable";
+  return belowDecimal(fresh.preview.sharesOut, floor) ? "floor_exceeded" : "still_satisfiable";
 }
 
 type Translation = ReturnType<typeof useTranslations>;

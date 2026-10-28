@@ -118,91 +118,88 @@ function CopyableAddress({
  * Derived from the condition that actually fired rather than from a single
  * flag: an icon's accessible name is the whole of what a screen reader gets
  * from it, and a warning triangle captioned for the wrong reason is worse than
- * no icon at all.
+ * no icon at all. Keyed by outcome so a new one must state its presentation
+ * here to compile.
  */
+const LEG_STATUS: Record<
+  DvpLegOutcome,
+  { Icon: LucideIcon; tone: string; bar: string; key: MessageKey }
+> = {
+  delivered: {
+    Icon: CircleCheckIcon,
+    tone: "text-success",
+    bar: "bg-success",
+    key: "DashboardMarkets.dvp.legDelivered",
+  },
+  refunded: {
+    Icon: CircleCheckIcon,
+    tone: "text-tertiary",
+    bar: "bg-fill-strong",
+    key: "DashboardMarkets.dvp.legRefunded",
+  },
+  closed: {
+    Icon: CircleCheckIcon,
+    tone: "text-tertiary",
+    bar: "bg-fill-strong",
+    key: "DashboardMarkets.dvp.legClosed",
+  },
+  expired: {
+    Icon: ClockIcon,
+    tone: "text-warning",
+    bar: "bg-warning",
+    key: "DashboardMarkets.dvp.legExpired",
+  },
+  frozen: {
+    Icon: SnowflakeIcon,
+    tone: "text-warning",
+    bar: "bg-warning",
+    key: "DashboardMarkets.dvp.legFrozen",
+  },
+  overfunded: {
+    Icon: TriangleAlertIcon,
+    tone: "text-warning",
+    bar: "bg-warning",
+    key: "DashboardMarkets.dvp.legOverFunded",
+  },
+  funded: {
+    Icon: CircleCheckIcon,
+    tone: "text-success",
+    bar: "bg-success",
+    key: "DashboardMarkets.dvp.legFunded",
+  },
+  reclaimed: {
+    Icon: ClockIcon,
+    tone: "text-warning",
+    bar: "bg-warning",
+    key: "DashboardMarkets.dvp.legReclaimed",
+  },
+  recoverable: {
+    Icon: TriangleAlertIcon,
+    tone: "text-warning",
+    bar: "bg-warning",
+    key: "DashboardMarkets.dvp.legRecoverable",
+  },
+  awaiting: {
+    Icon: ClockIcon,
+    tone: "text-tertiary",
+    bar: "bg-info",
+    key: "DashboardMarkets.dvp.legAwaiting",
+  },
+  partial: {
+    Icon: ClockIcon,
+    tone: "text-tertiary",
+    bar: "bg-info",
+    key: "DashboardMarkets.dvp.legAwaiting",
+  },
+};
+
 function legStatus(leg: DvpTradeLeg): {
   Icon: LucideIcon;
   tone: string;
   bar: string;
   key: MessageKey;
 } {
-  switch (leg.outcome) {
-    case "delivered":
-      return {
-        Icon: CircleCheckIcon,
-        tone: "text-success",
-        bar: "bg-success",
-        key: "DashboardMarkets.dvp.legDelivered",
-      };
-    case "refunded":
-      return {
-        Icon: CircleCheckIcon,
-        tone: "text-tertiary",
-        bar: "bg-fill-strong",
-        key: "DashboardMarkets.dvp.legRefunded",
-      };
-    case "closed":
-      return {
-        Icon: CircleCheckIcon,
-        tone: "text-tertiary",
-        bar: "bg-fill-strong",
-        key: "DashboardMarkets.dvp.legClosed",
-      };
-    case "expired":
-      return {
-        Icon: ClockIcon,
-        tone: "text-warning",
-        bar: "bg-warning",
-        key: "DashboardMarkets.dvp.legExpired",
-      };
-    case "frozen":
-      return {
-        Icon: SnowflakeIcon,
-        tone: "text-warning",
-        bar: "bg-warning",
-        key: "DashboardMarkets.dvp.legFrozen",
-      };
-    case "overfunded":
-      return {
-        Icon: TriangleAlertIcon,
-        tone: "text-warning",
-        bar: "bg-warning",
-        key: "DashboardMarkets.dvp.legOverFunded",
-      };
-    case "funded":
-      return {
-        Icon: CircleCheckIcon,
-        tone: "text-success",
-        bar: "bg-success",
-        key: "DashboardMarkets.dvp.legFunded",
-      };
-    case "reclaimed":
-      return {
-        Icon: ClockIcon,
-        tone: "text-warning",
-        bar: "bg-warning",
-        key: "DashboardMarkets.dvp.legReclaimed",
-      };
-    case "recoverable":
-      return {
-        Icon: TriangleAlertIcon,
-        tone: "text-warning",
-        bar: "bg-warning",
-        key: "DashboardMarkets.dvp.legRecoverable",
-      };
-    case "awaiting":
-    case "partial":
-      return {
-        Icon: ClockIcon,
-        tone: "text-tertiary",
-        bar: "bg-info",
-        key: "DashboardMarkets.dvp.legAwaiting",
-      };
-    default: {
-      const unreachable: never = leg.outcome;
-      throw new Error(`Unhandled DvP leg outcome ${String(unreachable)}`);
-    }
-  }
+  return LEG_STATUS[leg.outcome];
 }
 
 /**

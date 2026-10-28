@@ -13,7 +13,7 @@ import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import { Modal } from "@sdp/ui/modal";
 import { Loader2Icon } from "lucide-react";
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EARN_TRANSACTION_MODAL_FRAME } from "@/app/dashboard/[projectId]/markets/earn/earn-modal";
 import {
   EarnVaultDepositOutcomeTracker,
@@ -115,10 +115,6 @@ type VaultMovementWatchInput<Movement extends VaultMovementBalanceState> = Omit<
   "committedObservedAt" | "observedOrder"
 >;
 
-type VaultDepositWatchInput = VaultMovementWatchInput<TrackedVaultDeposit>;
-
-type VaultWithdrawalWatchInput = VaultMovementWatchInput<TrackedVaultWithdrawal>;
-
 const MAX_VISIBLE_VAULT_ACTIVITY = 50;
 
 function replaceTrackedVaultMovement<
@@ -182,6 +178,57 @@ function observeIncomingVaultMovements<Movement>(
     ...movement,
     observedOrder: nextOrder(),
   }));
+}
+
+/**
+ * One vault movement watch list plus the settled tombstones that keep a
+ * terminal movement off it and out of polling. The deposit and withdrawal
+ * watchers run the same React scaffolding around the pure merge/replace
+ * helpers above, so that scaffolding exists once here. `activityOrder` is the
+ * page's one activity-order ref, passed in so deposits and withdrawals
+ * interleave in a single sequence.
+ */
+function useVaultMovementWatches<Movement extends TrackedVaultMovement>(
+  activityOrder: RefObject<number>
+) {
+  const [watches, setWatches] = useState<readonly Movement[]>([]);
+  const [settledIds, setSettledIds] = useState<ReadonlySet<string>>(() => new Set());
+
+  // Pure updater: the recovery list re-asserts every 30s, so this runs often
+  // and must not have side effects (StrictMode double-invokes it in dev).
+  const add = useCallback(
+    (incoming: readonly VaultMovementWatchInput<Movement>[]) => {
+      const observedIncoming = observeIncomingVaultMovements(
+        incoming,
+        () => ++activityOrder.current
+      );
+      setWatches((current) =>
+        // A stamped input is the movement it will merge into: the stamp is one
+        // of the movement's own fields.
+        mergeTrackedVaultMovements(current, observedIncoming as Movement[], settledIds)
+      );
+    },
+    // The order ref is stable for the page's lifetime.
+    [activityOrder, settledIds]
+  );
+
+  const update = useCallback(
+    <Update extends { movementId: string; status: string }>(updated: Update) => {
+      setWatches((current) => replaceTrackedVaultMovement(current, updated));
+    },
+    []
+  );
+
+  const settle = useCallback((movement: { movementId: string }) => {
+    setSettledIds((current) => new Set(current).add(movement.movementId));
+  }, []);
+
+  const active = useMemo(
+    () => watches.filter((movement) => !settledIds.has(movement.movementId)),
+    [settledIds, watches]
+  );
+
+  return { active, add, settle, setWatches, update, watches };
 }
 
 function provisionalVaultPosition(
@@ -477,47 +524,8 @@ export function TreasurySolutionsWorkspace({
   const [withdrawalWatches, setWithdrawalWatches] = useState<readonly EarnWithdrawalWatch[]>([]);
   const settledWithdrawalKeys = useRef(new Set<string>());
   const vaultActivityOrder = useRef(0);
-  const [vaultDepositWatches, setVaultDepositWatches] = useState<readonly TrackedVaultDeposit[]>(
-    []
-  );
-  const [settledVaultDepositIds, setSettledVaultDepositIds] = useState<ReadonlySet<string>>(
-    () => new Set()
-  );
-  const [vaultWithdrawalWatches, setVaultWithdrawalWatches] = useState<
-    readonly TrackedVaultWithdrawal[]
-  >([]);
-  const [settledVaultWithdrawalIds, setSettledVaultWithdrawalIds] = useState<ReadonlySet<string>>(
-    () => new Set()
-  );
-
-  // Pure updater: the recovery list re-asserts every 30s, so this runs often
-  // and must not have side effects (StrictMode double-invokes it in dev).
-  const addVaultDepositWatches = useCallback(
-    (incoming: readonly VaultDepositWatchInput[]) => {
-      const observedIncoming = observeIncomingVaultMovements(
-        incoming,
-        () => ++vaultActivityOrder.current
-      );
-      setVaultDepositWatches((current) =>
-        mergeTrackedVaultMovements(current, observedIncoming, settledVaultDepositIds)
-      );
-    },
-    [settledVaultDepositIds]
-  );
-
-  // Same pure-updater and tombstone rules as the deposit watches above.
-  const addVaultWithdrawalWatches = useCallback(
-    (incoming: readonly VaultWithdrawalWatchInput[]) => {
-      const observedIncoming = observeIncomingVaultMovements(
-        incoming,
-        () => ++vaultActivityOrder.current
-      );
-      setVaultWithdrawalWatches((current) =>
-        mergeTrackedVaultMovements(current, observedIncoming, settledVaultWithdrawalIds)
-      );
-    },
-    [settledVaultWithdrawalIds]
-  );
+  const vaultDeposits = useVaultMovementWatches<TrackedVaultDeposit>(vaultActivityOrder);
+  const vaultWithdrawals = useVaultMovementWatches<TrackedVaultWithdrawal>(vaultActivityOrder);
 
   const addWithdrawalWatches = useCallback((incoming: readonly EarnWithdrawalWatch[]) => {
     setWithdrawalWatches((current) => {
@@ -532,16 +540,9 @@ export function TreasurySolutionsWorkspace({
     });
   }, []);
 
-  const updateVaultDepositWatch = useCallback((updatedDeposit: EarnVaultDepositRecord) => {
-    setVaultDepositWatches((current) => replaceTrackedVaultMovement(current, updatedDeposit));
-  }, []);
-  const updateVaultWithdrawalWatch = useCallback((updatedWithdrawal: EarnVaultWithdrawal) => {
-    setVaultWithdrawalWatches((current) => replaceTrackedVaultMovement(current, updatedWithdrawal));
-  }, []);
-
   const trackedActivities = useMemo(
-    () => vaultActivities(vaultDepositWatches, vaultWithdrawalWatches),
-    [vaultDepositWatches, vaultWithdrawalWatches]
+    () => vaultActivities(vaultDeposits.watches, vaultWithdrawals.watches),
+    [vaultDeposits.watches, vaultWithdrawals.watches]
   );
 
   const {
@@ -560,7 +561,7 @@ export function TreasurySolutionsWorkspace({
   // A provisional row stands in only until the API lists the position itself.
   useEffect(() => {
     const listed = new Set(positions?.map((position) => position.id));
-    setVaultDepositWatches((current) => {
+    vaultDeposits.setWatches((current) => {
       let changed = false;
       const next = current.map((deposit) => {
         if (deposit.provisionalPosition === undefined || !listed.has(deposit.positionId)) {
@@ -572,7 +573,7 @@ export function TreasurySolutionsWorkspace({
       });
       return changed ? next : current;
     });
-  }, [positions]);
+  }, [positions, vaultDeposits.setWatches]);
 
   const activeWallets = useMemo(() => wallets ?? [], [wallets]);
   // Every share mint the page knows about, from positions AND the catalogue:
@@ -615,25 +616,12 @@ export function TreasurySolutionsWorkspace({
   // before its detail poll observes terminal state, which would unmount the
   // tracker and skip `onSettled` balance refreshes and the final table status.
   useEffect(() => {
-    addVaultDepositWatches((discoveredVaultDeposits ?? []).filter(isEarnVaultDepositInFlight));
-  }, [addVaultDepositWatches, discoveredVaultDeposits]);
+    vaultDeposits.add((discoveredVaultDeposits ?? []).filter(isEarnVaultDepositInFlight));
+  }, [discoveredVaultDeposits, vaultDeposits.add]);
   useEffect(() => {
-    addVaultWithdrawalWatches(
-      (discoveredVaultWithdrawals ?? []).filter(isEarnVaultWithdrawalInFlight)
-    );
-  }, [addVaultWithdrawalWatches, discoveredVaultWithdrawals]);
+    vaultWithdrawals.add((discoveredVaultWithdrawals ?? []).filter(isEarnVaultWithdrawalInFlight));
+  }, [discoveredVaultWithdrawals, vaultWithdrawals.add]);
 
-  const activeVaultDepositWatches = useMemo(
-    () => vaultDepositWatches.filter((deposit) => !settledVaultDepositIds.has(deposit.movementId)),
-    [settledVaultDepositIds, vaultDepositWatches]
-  );
-  const activeVaultWithdrawalWatches = useMemo(
-    () =>
-      vaultWithdrawalWatches.filter(
-        (withdrawal) => !settledVaultWithdrawalIds.has(withdrawal.movementId)
-      ),
-    [settledVaultWithdrawalIds, vaultWithdrawalWatches]
-  );
   const portfolioApy = useMemo(
     () => treasuryPortfolioApy(allocation, positions, positionsError, strategies, strategiesError),
     [allocation, positions, positionsError, strategies, strategiesError]
@@ -686,8 +674,8 @@ export function TreasurySolutionsWorkspace({
         providerAccess={providerAccess}
         summaryLoading={summaryLoading}
         balancesRefreshing={balancesRefreshing}
-        vaultDeposits={vaultDepositWatches}
-        vaultWithdrawals={vaultWithdrawalWatches}
+        vaultDeposits={vaultDeposits.watches}
+        vaultWithdrawals={vaultWithdrawals.watches}
         walletsFailed={Boolean(walletsError)}
         walletsLoading={walletsLoading}
       />
@@ -708,7 +696,7 @@ export function TreasurySolutionsWorkspace({
             const provisionalPosition = authoritativePosition
               ? undefined
               : provisionalVaultPosition(deposit, intent.custodyWalletId, depositStrategy);
-            addVaultDepositWatches([
+            vaultDeposits.add([
               {
                 failureReason: deposit.failureReason,
                 movementId: deposit.movementId,
@@ -727,7 +715,7 @@ export function TreasurySolutionsWorkspace({
               custodyWalletId,
             })
           }
-          onMovementUpdated={updateVaultDepositWatch}
+          onMovementUpdated={vaultDeposits.update}
           strategy={depositStrategy}
         />
       ) : null}
@@ -751,7 +739,7 @@ export function TreasurySolutionsWorkspace({
           onWithdrawn={(withdrawal, intent) => {
             // Like a deposit, the watch triggers the confirmation-floored read;
             // a read now would only fetch the pre-exit balance.
-            addVaultWithdrawalWatches([
+            vaultWithdrawals.add([
               {
                 createdAt: withdrawal.createdAt,
                 failureReason: withdrawal.failureReason,
@@ -764,7 +752,7 @@ export function TreasurySolutionsWorkspace({
             ]);
           }}
           onSubmissionStart={() => beginSubmission(withdrawPosition)}
-          onMovementUpdated={updateVaultWithdrawalWatch}
+          onMovementUpdated={vaultWithdrawals.update}
           onAsyncRequest={() => {
             // An asynchronous request can move or escrow shares without paying
             // assets yet. Refresh holdings without projecting an instant exit.
@@ -785,29 +773,27 @@ export function TreasurySolutionsWorkspace({
         />
       ))}
 
-      {activeVaultWithdrawalWatches.map((withdrawal) => (
+      {vaultWithdrawals.active.map((withdrawal) => (
         <EarnVaultWithdrawalOutcomeTracker
           key={`vault-withdrawal:${withdrawal.movementId}`}
           movementId={withdrawal.movementId}
-          onUpdated={updateVaultWithdrawalWatch}
+          onUpdated={vaultWithdrawals.update}
           onSettled={(settledWithdrawal) => {
-            updateVaultWithdrawalWatch(settledWithdrawal);
-            setSettledVaultWithdrawalIds((current) =>
-              new Set(current).add(settledWithdrawal.movementId)
-            );
+            vaultWithdrawals.update(settledWithdrawal);
+            vaultWithdrawals.settle(settledWithdrawal);
             if (settledWithdrawal.status === "failed") void refreshTreasuryBalances();
           }}
         />
       ))}
 
-      {activeVaultDepositWatches.map((deposit) => (
+      {vaultDeposits.active.map((deposit) => (
         <EarnVaultDepositOutcomeTracker
           key={`vault-deposit:${deposit.movementId}`}
           movementId={deposit.movementId}
-          onUpdated={updateVaultDepositWatch}
+          onUpdated={vaultDeposits.update}
           onSettled={(settledDeposit) => {
-            updateVaultDepositWatch(settledDeposit);
-            setSettledVaultDepositIds((current) => new Set(current).add(settledDeposit.movementId));
+            vaultDeposits.update(settledDeposit);
+            vaultDeposits.settle(settledDeposit);
             if (settledDeposit.status === "failed") void refreshTreasuryBalances();
           }}
         />

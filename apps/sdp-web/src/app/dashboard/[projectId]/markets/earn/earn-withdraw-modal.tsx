@@ -21,7 +21,7 @@ import { BASE58_ADDRESS_PATTERN } from "@/app/dashboard/[projectId]/markets/base
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useModalFocus } from "@/lib/use-modal-focus";
-import { compareUnsignedDecimals, isPositiveDecimal, parseUnsignedDecimal } from "./earn-decimal";
+import { exceedsDecimal, isPositiveDecimal, parseUnsignedDecimal } from "./earn-decimal";
 import { formatDurationRange, formatUsd, isoDurationDays } from "./earn-format";
 import { EARN_TRANSACTION_MODAL_FRAME } from "./earn-modal";
 import { createEarnWithdrawal, previewEarnWithdrawal } from "./earn-program-data";
@@ -292,21 +292,17 @@ function AmountError({
 }) {
   const t = useTranslations();
   const locale = useLocale();
-  if (!formatValid) {
-    return (
-      <p id="earn-withdraw-error" className="text-meta text-error" role="alert">
-        {t("DashboardEarn.withdraw.errorAmountRequired")}
-      </p>
-    );
-  }
+  const message = !formatValid
+    ? t("DashboardEarn.withdraw.errorAmountRequired")
+    : laneCeiling === undefined
+      ? t("DashboardEarn.withdraw.errorExceedsWithdrawable", { token: token.toUpperCase() })
+      : t("DashboardEarn.withdraw.errorExceedsCeiling", {
+          token: token.toUpperCase(),
+          amount: formatUsd(laneCeiling, locale),
+        });
   return (
     <p id="earn-withdraw-error" className="text-meta text-error" role="alert">
-      {laneCeiling === undefined
-        ? t("DashboardEarn.withdraw.errorExceedsWithdrawable", { token: token.toUpperCase() })
-        : t("DashboardEarn.withdraw.errorExceedsCeiling", {
-            token: token.toUpperCase(),
-            amount: formatUsd(laneCeiling, locale),
-          })}
+      {message}
     </p>
   );
 }
@@ -466,9 +462,7 @@ function AmountField({
           <button
             type="button"
             disabled={
-              submitting ||
-              maxFillAmount === undefined ||
-              compareUnsignedDecimals(maxFillAmount, "0") !== 1
+              submitting || maxFillAmount === undefined || !isPositiveDecimal(maxFillAmount)
             }
             onClick={() => {
               if (maxFillAmount !== undefined) onAmountInputChange(maxFillAmount);
@@ -604,9 +598,7 @@ export function EarnWithdrawModal({
   // availability, which ADR 0002 forbids — the provider decides, as it always
   // did; we just no longer pretend to know the answer first.
   const amountValid =
-    token !== undefined &&
-    amountFormatValid &&
-    (laneCeiling === undefined || compareUnsignedDecimals(amount, laneCeiling) !== 1);
+    token !== undefined && amountFormatValid && !exceedsDecimal(amount, laneCeiling);
   const destination = destinationInput.trim();
   const destinationValid = BASE58_ADDRESS_PATTERN.test(destination);
 

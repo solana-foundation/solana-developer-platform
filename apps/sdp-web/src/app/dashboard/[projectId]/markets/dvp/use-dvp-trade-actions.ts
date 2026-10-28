@@ -31,7 +31,7 @@ import { dashboardRequest } from "@/lib/dashboard-fetch";
 import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
 import { DVP_TOAST_POSITION, dvpToastAction } from "./dvp-action-toast";
 import { freshDvpIdempotencyKey } from "./dvp-idempotency-key";
-import { dvpErrorEnvelopeSchema } from "./dvp-trade";
+import { parseDvpRefusal } from "./dvp-trade";
 
 type DvpTradeActionName = "settle" | "cancel" | "fund" | "reclaim";
 
@@ -206,21 +206,20 @@ export function useDvpTradeActions(tradeId: string, cluster: SolanaCluster): Dvp
 
   /** Plain copy for a refusal the dashboard can name, else the API's own message. */
   function refusalMessage(body: unknown, status: number, symbol: string | null): string {
-    const envelope = dvpErrorEnvelopeSchema.safeParse(body);
-    if (!envelope.success) {
+    const refusal = parseDvpRefusal(body);
+    if (refusal === null) {
       return t("DashboardMarkets.dvp.actionFailed", { status: String(status) });
     }
-    const reasonCode = envelope.data.error.details?.reason;
-    const legReason = legRefusalReasonSchema.safeParse(reasonCode);
+    const legReason = legRefusalReasonSchema.safeParse(refusal.reason);
     if (legReason.success) {
       const copy = LEG_REFUSAL_MESSAGE[legReason.data];
       return symbol === null ? t(copy.withoutSymbol) : t(copy.withSymbol, { symbol });
     }
-    const closeReason = closeRefusalReasonSchema.safeParse(reasonCode);
+    const closeReason = closeRefusalReasonSchema.safeParse(refusal.reason);
     if (closeReason.success) {
       return t(CLOSE_REFUSAL_MESSAGE[closeReason.data]);
     }
-    return envelope.data.error.message;
+    return refusal.message;
   }
 
   async function act(...call: DvpTradeActionCall) {

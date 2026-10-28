@@ -25,9 +25,9 @@ interface NextStep {
 }
 
 /**
- * The legs every trade kind answers the same way. The closed/creating states
- * are not anybody's move to act on differently, so their copy exists exactly
- * once and each switch below spreads it.
+ * The statuses every trade kind answers the same way. The closed/creating
+ * states are not anybody's move to act on differently, so their copy exists
+ * exactly once and `statusSharedByKind` answers them before the kind switches.
  */
 function creatingStep(t: ReturnType<typeof useTranslations>): NextStep {
   return {
@@ -60,6 +60,29 @@ function settleStep(t: ReturnType<typeof useTranslations>): NextStep {
     title: t("DashboardMarkets.dvp.nextSettleTitle"),
     body: t("DashboardMarkets.dvp.nextSettleBody"),
   };
+}
+
+/**
+ * The statuses every trade kind answers the same way: still creating, expired
+ * while open, or never created. Their copy exists exactly once (above), so the
+ * kind switches below each answer only the statuses they genuinely differ on.
+ * A party view passes through untouched: its creating and create_failed
+ * trades are not this party's move at all, so they say nothing.
+ */
+function statusSharedByKind(
+  trade: DvpTrade,
+  t: ReturnType<typeof useTranslations>
+): NextStep | null {
+  switch (trade.status) {
+    case "creating":
+      return creatingStep(t);
+    case "expired":
+      return expiredStep(t);
+    case "create_failed":
+      return createFailedStep(t);
+    default:
+      return null;
+  }
 }
 
 /** Whether the caller's every custodied leg already holds its target. */
@@ -111,9 +134,9 @@ function partyNextStep(trade: DvpTrade, t: ReturnType<typeof useTranslations>): 
  * two parties pay their own, and settling is the only thing an agent does.
  */
 function agentNextStep(trade: DvpTrade, t: ReturnType<typeof useTranslations>): NextStep | null {
+  const shared = statusSharedByKind(trade, t);
+  if (shared) return shared;
   switch (trade.status) {
-    case "creating":
-      return creatingStep(t);
     case "created":
     case "partially_funded": {
       const paid = [trade.legs.a, trade.legs.b].filter((leg) => leg.funding?.funded).length;
@@ -137,10 +160,6 @@ function agentNextStep(trade: DvpTrade, t: ReturnType<typeof useTranslations>): 
         title: t("DashboardMarkets.dvp.nextAgentSettleTitle"),
         body: t("DashboardMarkets.dvp.nextAgentSettleBody"),
       };
-    case "expired":
-      return expiredStep(t);
-    case "create_failed":
-      return createFailedStep(t);
     default:
       return null;
   }
@@ -156,9 +175,9 @@ function bilateralNextStep(
   trade: DvpTrade,
   t: ReturnType<typeof useTranslations>
 ): NextStep | null {
+  const shared = statusSharedByKind(trade, t);
+  if (shared) return shared;
   switch (trade.status) {
-    case "creating":
-      return creatingStep(t);
     case "created":
     case "partially_funded":
       return ownLegsFunded(trade)
@@ -174,10 +193,6 @@ function bilateralNextStep(
           };
     case "funded":
       return settleStep(t);
-    case "expired":
-      return expiredStep(t);
-    case "create_failed":
-      return createFailedStep(t);
     default:
       return null;
   }
@@ -202,9 +217,9 @@ function principalNextStep(
   const sdpLeg = trade.legs[side];
   const otherLeg = trade.legs[side === "a" ? "b" : "a"];
 
+  const shared = statusSharedByKind(trade, t);
+  if (shared) return shared;
   switch (trade.status) {
-    case "creating":
-      return creatingStep(t);
     case "created":
     case "partially_funded": {
       // "Partially funded" is not one situation. Which leg is outstanding
@@ -228,10 +243,6 @@ function principalNextStep(
     }
     case "funded":
       return settleStep(t);
-    case "expired":
-      return expiredStep(t);
-    case "create_failed":
-      return createFailedStep(t);
     // Settled, cancelled, rejected and closed_unknown are over. The status
     // badge already says so, and inventing a "next step" for a closed trade
     // would be worse than saying nothing.
