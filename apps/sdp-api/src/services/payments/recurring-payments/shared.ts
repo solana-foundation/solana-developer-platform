@@ -1,5 +1,10 @@
 import { createClusterRpc } from "@sdp/rpc/factory";
-import { confirmTransaction, getRecentBlockhash, type SolanaRpc } from "@sdp/rpc/solana";
+import {
+  confirmTransaction,
+  getAccountInfo,
+  getRecentBlockhash,
+  type SolanaRpc,
+} from "@sdp/rpc/solana";
 import { withTransientRpcRetry } from "@sdp/rpc/transient";
 import { assertValidAddress } from "@sdp/solana/address";
 import type { ApiKeyWalletScope, SdpEnvironment } from "@sdp/types/api-keys";
@@ -19,12 +24,14 @@ import {
   getTransactionEncoder,
   type Instruction,
   type MaybeAccount,
+  parseBase64RpcAccount,
   partiallySignTransactionMessageWithSigners,
   pipe,
   type Signature,
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
   type TransactionSigner,
+  unwrapOption,
 } from "@solana/kit";
 import {
   fetchMaybeSubscriptionAuthority,
@@ -33,7 +40,10 @@ import {
   type SubscriptionAuthority,
   type SubscriptionDelegation,
 } from "@solana/subscriptions";
-import { getCreateAssociatedTokenIdempotentInstruction } from "@solana-program/token-2022";
+import {
+  decodeToken,
+  getCreateAssociatedTokenIdempotentInstruction,
+} from "@solana-program/token-2022";
 import { type DatabaseExecutor, getDb } from "@/db/client";
 import type {
   PaymentRecurringPaymentRow,
@@ -672,20 +682,28 @@ export async function confirmSubscriptionSignature(
   }
 }
 
+/** The allowance `InitSubscriptionAuthority` approves its PDA for on the source token account. */
+const SUBSCRIPTION_AUTHORITY_ALLOWANCE = 2n ** 64n - 1n;
+
 /**
- * Creates whichever of the source wallet's token account and its `SubscriptionAuthority` is
- * missing, with the fee payer funding the rent. Each create is its own sponsored transaction,
- * confirmed before the next is sent: Kora refuses a transaction whose fee-payer outflow exceeds
- * its `max_allowed_lamports`, and on mainnet the two rents together exceed it. The authority's
- * init reads the token account, so the token account lands first, and a run that creates the
- * token account always sends the init: on an existing authority it pays no rent and approves the
- * authority as delegate on the new token account. Both creates are idempotent on chain, so a run
- * that resumes after a crash sends only what is still missing and pays no rent twice. A node that
- * has not yet seen the token account's confirmation can refuse the init with a 422; the retry then
- * sends only the init.
+ * Prepares the source wallet's token account and its `SubscriptionAuthority` for a subscription,
+ * with the fee payer funding the rent. Each create is its own sponsored transaction, confirmed
+ * before the next is sent: Kora refuses a transaction whose fee-payer outflow exceeds its
+ * `max_allowed_lamports`, and on mainnet the two rents together exceed it. The authority's init
+ * reads the token account, so the token account lands first.
+ *
+ * Whether the init is sent is decided from the token account's state at `confirmed`, not from
+ * whether the authority exists: it is sent unless the authority exists and the token account
+ * names its PDA as delegate for the full allowance. A missing token account has no delegate, so
+ * its create is always followed by the init. On an existing authority the init pays no rent and
+ * re-approves the delegate. The delegate check is what makes a crash between the token account's
+ * create and the init resumable: the retry finds the token account without the delegate and sends
+ * the init. Both instructions are idempotent on chain, so a resumed run pays no rent twice. A node
+ * that has not yet seen the token account's confirmation can refuse the init with a 422; the retry
+ * then sends only the init.
  *
  * @param input - The source wallet's setup accounts and the sender for one setup transaction.
- * @param input.rpc - Cluster RPC for the authority reads before setup and after its init lands.
+ * @param input.rpc - Cluster RPC for the token account and authority reads.
  * @param input.sourceSigner - The source wallet's signer, the authority's owner.
  * @param input.sourceTokenAccount - The source wallet's token account and whether it exists.
  * @param input.subscriptionAuthorityAddress - The authority's PDA.
@@ -712,12 +730,25 @@ export async function prepareSubscriptionAuthority(input: {
 }): Promise<Account<SubscriptionAuthority>> {
   const payer = createNoopSigner(input.feePayer);
   if (input.sourceTokenAccount.exists) {
-    const existingAuthority = await fetchMaybeSubscriptionAuthority(
-      input.rpc,
-      input.subscriptionAuthorityAddress,
-      { commitment: "confirmed" }
-    );
-    if (existingAuthority.exists) {
+    const [sourceToken, existingAuthority] = await Promise.all([
+      getAccountInfo(input.rpc, input.sourceTokenAccount.tokenAccount, "confirmed").then(
+        (rpcAccount) =>
+          decodeToken(parseBase64RpcAccount(input.sourceTokenAccount.tokenAccount, rpcAccount))
+      ),
+      fetchMaybeSubscriptionAuthority(input.rpc, input.subscriptionAuthorityAddress, {
+        commitment: "confirmed",
+      }),
+    ]);
+    if (!sourceToken.exists) {
+      throw new ResumedStepUnsettledError(
+        "Source token account is not visible on-chain yet; retry"
+      );
+    }
+    if (
+      existingAuthority.exists &&
+      unwrapOption(sourceToken.data.delegate) === input.subscriptionAuthorityAddress &&
+      sourceToken.data.delegatedAmount === SUBSCRIPTION_AUTHORITY_ALLOWANCE
+    ) {
       return existingAuthority;
     }
   } else {
