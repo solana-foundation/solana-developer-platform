@@ -7,7 +7,7 @@ import type {
   PaymentTransferRecipientRow,
 } from "@/db/repositories/payment-transfer-batches.repository";
 import { createPostgresPaymentTransferBatchesRepository } from "@/db/repositories/payment-transfer-batches.repository.postgres";
-import { AppError } from "@/lib/errors";
+import { AppError, badRequest } from "@/lib/errors";
 import { deriveProviderRequestId } from "@/lib/idempotency";
 import { success } from "@/lib/response";
 import { type AuthorizeInput, getAuthorized } from "@/middleware/authorize";
