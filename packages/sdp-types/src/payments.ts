@@ -937,6 +937,14 @@ export const COLLECTION_ATTEMPT_STATUSES_WITH_SUBMITTED_TRANSFER = [
   "processing",
   "confirmed",
 ] as const satisfies readonly PaymentSubscriptionCollectionAttemptStatus[];
+/**
+ * A collection attempt in these has not settled, so it may still pull funds through its
+ * subscription's authority: nothing revokes that authority under it (HOO-2339).
+ */
+export const IN_FLIGHT_COLLECTION_ATTEMPT_STATUSES = [
+  "pending",
+  "processing",
+] as const satisfies readonly PaymentSubscriptionCollectionAttemptStatus[];
 export const FAILED_COLLECTION_ATTEMPT_STATUSES = [
   "failed",
 ] as const satisfies readonly PaymentSubscriptionCollectionAttemptStatus[];

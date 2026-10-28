@@ -386,7 +386,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Cancel recurring payment",
     operationId: "cancelPaymentRecurringPayment",
     description:
-      "Permanently stops an active or paused SDP-custody recurring payment by submitting the Solana subscriptions cancellation transaction. A canceled recurring payment never collects or resumes again. When no other live recurring payment uses the same wallet and token, the token approval it relied on is revoked right after the cancel; otherwise the approval stays for the schedules that still use it. A collection already in processing settles independently: if it lands before that revoke it settles as collected, and if the revoke lands first it fails on chain and is recorded as failed.",
+      "Permanently stops an active or paused SDP-custody recurring payment by submitting the Solana subscriptions cancellation transaction. A canceled recurring payment never collects or resumes again. When no other live recurring payment uses the same wallet and token, the token approval it relied on is revoked right after the cancel; otherwise the approval stays for the schedules that still use it. A collection already in processing settles before the approval is revoked: the revoke waits for it, and the background sweep revokes the approval once it has settled.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: keyRequiredRerunHeaders,

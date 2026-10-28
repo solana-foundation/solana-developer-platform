@@ -1,5 +1,6 @@
 import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types/api-keys";
 import {
+  IN_FLIGHT_COLLECTION_ATTEMPT_STATUSES,
   IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
   PAYMENT_SUBSCRIPTION_STATUSES_AWAITING_AUTHORIZATION,
   PAYMENT_SUBSCRIPTION_STATUSES_RELEASING_AUTHORITY,
@@ -66,12 +67,13 @@ const STATUS_BINDINGS = [
   [...IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES],
   [...SUBSCRIPTION_AUTHORITY_REVOCATION_HOLDING_STATUSES],
   [...PAYMENT_SUBSCRIPTION_STATUSES_AWAITING_AUTHORIZATION],
+  [...IN_FLIGHT_COLLECTION_ATTEMPT_STATUSES],
 ] as const;
 
 /** The `authority_ref` columns after its first five, bound in this order from STATUS_BINDINGS. */
 const STATUS_COLUMNS = `?::text[] AS subscription_released, ?::text[] AS payment_released,
   ?::text[] AS payment_claiming, ?::text[] AS attempt_in_flight, ?::text[] AS revocation_holding,
-  ?::text[] AS subscription_awaiting`;
+  ?::text[] AS subscription_awaiting, ?::text[] AS collection_in_flight`;
 
 /**
  * Whether `authority_ref.authority` has nothing left that needs it. `authority_ref` is a row the
@@ -92,6 +94,9 @@ const STATUS_COLUMNS = `?::text[] AS subscription_released, ?::text[] AS payment
  * - Nothing may be about to use one of the wallet's authorities before recording it: no recurring
  *   payment from the wallet is activating or updating, and no update in flight is moving
  *   a recurring payment onto the wallet.
+ * - No collection attempt on any of its subscriptions is in flight: an unsettled collection may
+ *   still pull through it, so a revoke (the sweep's, or a cancel's inline one) waits until it
+ *   settles rather than lose a period that was already due.
  * - No revoke of it holds it, none failed within the retry window, and none has confirmed since
  *   the last change on it.
  */
@@ -145,6 +150,13 @@ const AUTHORITY_IDLE_PREDICATE = `
      WHERE destination.public_key = authority_ref.wallet
        AND moving_project.environment = authority_ref.environment
        AND moving.status = ANY(authority_ref.attempt_in_flight))
+  AND NOT EXISTS (
+    SELECT 1 FROM payment_subscription_collection_attempts live_attempt
+      JOIN payment_subscriptions attempted ON attempted.id = live_attempt.subscription_id
+      JOIN projects attempted_project ON attempted_project.id = attempted.project_id
+     WHERE attempted.subscription_authority_address = authority_ref.authority
+       AND attempted_project.environment = authority_ref.environment
+       AND live_attempt.status = ANY(authority_ref.collection_in_flight))
   AND NOT EXISTS (
     SELECT 1 FROM payment_subscription_authority_revocations revocation
      WHERE revocation.environment = authority_ref.environment

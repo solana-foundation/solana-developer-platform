@@ -177,7 +177,7 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   SIGNING_FAILED: "Transaction signing failed",
   SIGNING_REJECTED: "The signing provider rejected this transaction",
   CUSTODY_POLICY_REFUSED:
-    "Your custody provider's policy refused to sign this transaction. Nothing was signed or sent; review the wallet's policy with your custody provider, since retrying will be refused the same way",
+    "Your custody provider's policy refused to sign this request. Nothing was signed or sent; review the wallet's policy with your custody provider, since retrying will be refused the same way",
   PROVIDER_NOT_CONFIGURED: "Payment provider is not configured for this environment",
   PROVIDER_UNAVAILABLE: "Payment provider is temporarily unavailable",
   PROVIDER_RESPONSE_INVALID: "Payment provider returned a response SDP could not read",
