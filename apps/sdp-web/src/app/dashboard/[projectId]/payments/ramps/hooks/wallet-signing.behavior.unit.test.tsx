@@ -1,10 +1,14 @@
 // @vitest-environment jsdom
 
-import type { PaymentsDashboardWallet } from "@sdp/types/payments";
+import type {
+  PaymentsDashboardWallet,
+  PaymentTransferBatchEstimateWarning,
+} from "@sdp/types/payments";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { SWRConfig, useSWRConfig } from "swr";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
@@ -25,6 +29,8 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
 }));
 
 const MINT = "So11111111111111111111111111111111111111112";
+/** The part of a posted batch estimate request the stubs read. */
+const postedBatchSchema = z.object({ recipients: z.array(z.unknown()) });
 const wallet: PaymentsDashboardWallet = {
   id: "cwlt_selected",
   walletId: "privy_shared",
@@ -208,7 +214,7 @@ describe("wallet selection during payments", () => {
       address: wallet.publicKey,
       label: null,
     }));
-    const estimate = (count: number, warnings: unknown[]) => ({
+    const estimate = (count: number, warnings: PaymentTransferBatchEstimateWarning[]) => ({
       data: {
         estimate: {
           recipientCount: count,
@@ -230,8 +236,7 @@ describe("wallet selection during payments", () => {
       if (String(input).includes("/accounts?"))
         return Response.json({ data: { accounts: recipients, total: 2 } });
       if (String(input).endsWith("/estimate")) {
-        // SAFETY: the wizard posts the canonical batch request as JSON.
-        const body = JSON.parse(String(init?.body)) as { recipients: unknown[] };
+        const body = postedBatchSchema.parse(JSON.parse(String(init?.body)));
         if (body.recipients.length === 2) {
           return Response.json(
             estimate(2, [
