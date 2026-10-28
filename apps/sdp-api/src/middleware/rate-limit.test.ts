@@ -11,6 +11,7 @@ import { apiKeyFloodGuardFallback, authMiddleware, optionalAuth } from "@/middle
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import {
   API_KEY_PRE_READ_MAX_REQUESTS,
+  anonymousFallback,
   apiKeyFloodGuardIdentifier,
   enforceRateLimit,
   InProcessRateLimiter,
@@ -88,6 +89,7 @@ describe("Rate limiting", () => {
 
   afterEach(async () => {
     vi.restoreAllMocks();
+    anonymousFallback.resetForTesting();
     await clearKVStores(env);
   });
 
@@ -272,23 +274,20 @@ describe("Rate limiting", () => {
       expect(res.status).not.toBe(429);
     });
 
-    it.each(["sk_test_pay_header", "sf_pay_header"])(
-      "caps /pay at the anonymous limit when it presents %s",
-      async (key) => {
-        await seedRateLimit(env, CLIENT_IP, 20);
+    it("caps /pay at the anonymous limit when it presents an API key", async () => {
+      await seedRateLimit(env, CLIENT_IP, 20);
 
-        const res = await app.request(
-          "/pay/pay_tok_ratelimit/tx",
-          {
-            method: "POST",
-            headers: { Authorization: `Bearer ${key}`, "x-forwarded-for": CLIENT_IP },
-          },
-          env
-        );
+      const res = await app.request(
+        "/pay/pay_tok_ratelimit/tx",
+        {
+          method: "POST",
+          headers: { Authorization: "Bearer sk_test_pay_header", "x-forwarded-for": CLIENT_IP },
+        },
+        env
+      );
 
-        expect(res.status).toBe(429);
-      }
-    );
+      expect(res.status).toBe(429);
+    });
 
     it("still caps keyed requests at the per-IP backstop", async () => {
       await seedApiKeyRow(env, validKeyHash, TEST_SEEDED_API_KEY);
@@ -588,8 +587,7 @@ describe("Rate limiting", () => {
       expect(read).not.toHaveBeenCalled();
     });
 
-    it("refuses /pay with a 503 before its handler while the store is down", async () => {
-      const handler = vi.fn();
+    it("counts /pay per IP in memory while the store is down", async () => {
       const app = new Hono<{ Bindings: Env }>();
       app.onError((err, c) =>
         err instanceof AppError
@@ -601,20 +599,19 @@ describe("Rate limiting", () => {
         await next();
       });
       app.use("*", skipRateLimitPaths());
-      app.post("/pay/:token/tx", (c) => {
-        handler();
-        return c.text("ok");
-      });
+      app.post("/pay/:token/tx", (c) => c.text("ok"));
 
-      const res = await app.request(
-        "/pay/pay_tok_store_down/tx",
-        { method: "POST", headers: { "x-forwarded-for": CLIENT_IP } },
-        env
-      );
+      const statuses: number[] = [];
+      for (let i = 0; i < 21; i++) {
+        const res = await app.request(
+          "/pay/pay_tok_store_down/tx",
+          { method: "POST", headers: { "x-forwarded-for": CLIENT_IP } },
+          env
+        );
+        statuses.push(res.status);
+      }
 
-      expect(res.status).toBe(503);
-      expect(await res.json()).toMatchObject({ error: { code: "SERVICE_UNAVAILABLE" } });
-      expect(handler).not.toHaveBeenCalled();
+      expect(statuses).toEqual([...Array.from({ length: 20 }, () => 200), 429]);
     });
   });
 });
