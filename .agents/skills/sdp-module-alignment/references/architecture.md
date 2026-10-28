@@ -67,13 +67,19 @@ two 0007s), so cite the file name and the bold bullet, for example
   open cluster scope (`currentClusterScope()`, `pkg/sdp-rpc/src/scope.ts`). A
   project's environment picks the cluster (sandbox = devnet, production =
   mainnet) and every deployment serves both. Nothing passes a cluster,
-  environment, RPC client, RPC URL or fee payer that the scope already holds.
+  environment, RPC URL or fee payer that the scope already holds, and API code
+  never threads a client a callee could take from the door itself.
+- **Package boundaries keep explicit clients.** Low-level package helpers take
+  an `rpc` parameter, and the API hands them a door client: some package work
+  runs with no scope open (Veda's snapshot fills), so a helper that read the
+  scope would throw (`adr/0007-cluster-scope-ambient.md` "Packages").
 - **Legacy selectors to remove:** `SOLANA_NETWORK`, `ENVIRONMENT` used as a
   network, `resolveDefaultCluster`, `getSolanaConfig`,
   `defaultFeePaymentCluster`, `resolveClusterRpcUrl(s)`, `SOLANA_RPC_URL`,
   `SOLANA_<CLUSTER>_RPC_URL`, `createRpc(env)`, `CLUSTER_BY_SDP_ENVIRONMENT`
   lookups inside services, `resolveSdpEnvironment(c)` threaded into services,
-  and `env`/`cluster`/`rpcUrl` parameters.
+  and `env`/`cluster`/`rpcUrl` parameters (a package helper's `rpc` client
+  parameter stays).
 - **Who opens a scope:** the project middleware
   (`api/middleware/project-context.ts`), the cron runner, webhook handlers, the
   `/pay` context and tests. Never a service. Work that starts from a row opens
@@ -208,9 +214,13 @@ two 0007s), so cite the file name and the bold bullet, for example
 
 - **Condition:** mutating routes run validate, then `authorize(fn)` or
   `authorizeNone(reason)` (`api/middleware/authorize.ts`), then
-  `idempotent({ key, serverErrors })` (`api/middleware/idempotency.ts`), then
-  `replayFromRecord` (`api/middleware/movement-steps.ts`), then admission, then
-  the handler. Money routes use `key: "required"`. The domain row is written
+  `idempotent({ key, serverErrors, recovery: "record" })`
+  (`api/middleware/idempotency.ts`), then `replayFromRecord`
+  (`api/middleware/movement-steps.ts`), then admission, then the handler.
+  `recovery: "record"` is required wherever `replayFromRecord` is mounted: the
+  route inventory refuses the pair without it, and on a `serverErrors: "store"`
+  route a retry after a lapsed claim gets 409 `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN`
+  instead of reaching the saved row. Money routes use `key: "required"`. The domain row is written
   under `getIdempotencyRecordKey(...)`, never the raw client key. Refusals use
   400 `IDEMPOTENCY_KEY_REQUIRED` and 422 `IDEMPOTENCY_KEY_REUSED`; replays carry
   `Idempotent-Replayed`. `authorize` checks access, never state.
@@ -219,8 +229,9 @@ two 0007s), so cite the file name and the bold bullet, for example
   store in `web/lib/dashboard-fetch.ts`), and keeps it across a 5xx retry.
 - **Never:** a direct `Idempotency-Key` header read, a module replay table, a
   `requestGate` mixing access, state and replay, a body `requestId` used as the
-  key, the step on a route whose response carries a secret, a key reuse
-  answered 409, or a dashboard mutation sent with a bare `{ method: "POST" }`.
+  key, `replayFromRecord` without `recovery: "record"`, the step on a route
+  whose response carries a secret, a key reuse answered 409, or a dashboard
+  mutation sent with a bare `{ method: "POST" }`.
 - **Source:** `adr/0009-idempotency-keys.md` (its Context names DvP, Earn,
   issuance and Private Channels as keeping their own handling); code-standards
   "Idempotency coverage"; AGENTS.md hard rule. Modules outside `stable` may keep

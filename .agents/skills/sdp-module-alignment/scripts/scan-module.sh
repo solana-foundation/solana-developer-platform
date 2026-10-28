@@ -20,6 +20,11 @@
 # naming convention misses (a shared job, a provider package, a shared page).
 set -uo pipefail
 
+if [ "${BASH_VERSINFO[0]}" -lt 4 ] || { [ "${BASH_VERSINFO[0]}" -eq 4 ] && [ "${BASH_VERSINFO[1]}" -lt 3 ]; }; then
+  echo "scan-module.sh needs bash 4.3+ (macOS ships 3.2: brew install bash, then run it with that bash)" >&2
+  exit 2
+fi
+
 MODULE="${1:?usage: scan-module.sh <module> [extra-path ...]}"
 shift
 MAX_HITS="${MAX_HITS:-10}"
@@ -31,7 +36,12 @@ WEB=apps/sdp-web/src
 DASH="$WEB/app/dashboard/[projectId]"
 SNAKE="${MODULE//-/_}"
 UPPER="${SNAKE^^}"
-CAMEL="$(printf '%s' "$MODULE" | sed -E 's/-([a-z])/\U\1/g')"
+# Pure bash: BSD sed has no \U, so a sed conversion breaks on macOS.
+IFS=- read -ra words <<<"$MODULE"
+CAMEL="${words[0]}"
+for w in "${words[@]:1}"; do CAMEL+="${w^}"; done
+# Tables use the singular too (private_channels, private_channel_instances).
+TABLE_PREFIX="${SNAKE%s}"
 INFRA="${SDP_INFRA_DIR:-$HOME/sdp-infra}"
 
 add_existing() { # array-name path...
@@ -218,8 +228,8 @@ lead A10 "hard deletes" "DELETE FROM|\.delete\(\)\.|deleteFrom\(" "${api_paths[@
 nullable=""
 tables=""
 for m in "$API"/db/migrations/postgres/*.sql; do
-  grep -qiE "CREATE TABLE (IF NOT EXISTS )?\"?$SNAKE" "$m" || continue
-  tables+="$(grep -oiE "CREATE TABLE (IF NOT EXISTS )?\"?$SNAKE[a-z0-9_]*" "$m" | awk '{print $NF}' | tr -d '"' | tr '\n' ' ')"
+  grep -qiE "CREATE TABLE (IF NOT EXISTS )?\"?$TABLE_PREFIX" "$m" || continue
+  tables+="$(grep -oiE "CREATE TABLE (IF NOT EXISTS )?\"?$TABLE_PREFIX[a-z0-9_]*" "$m" | awk '{print $NF}' | tr -d '"' | tr '\n' ' ')"
   hit="$(grep -nE '^\s*project_id\b' "$m" | grep -vE 'NOT NULL|PRIMARY KEY' || true)"
   [ -n "$hit" ] && nullable+="${m#"$API"/}: $hit"$'\n'
 done
