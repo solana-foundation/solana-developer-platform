@@ -25,7 +25,6 @@ import { currentClusterScope } from "@sdp/rpc/scope";
 import type { SignatureStatusInfo, SolanaRpc } from "@sdp/rpc/solana";
 import { getChainHeight, getSignatureStatuses } from "@sdp/rpc/solana";
 import { withTransientRpcRetry } from "@sdp/rpc/transient";
-import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { TransferChainVerdictStatus } from "@sdp/types/payments";
 import { WALLET_TRANSFER_TYPES } from "@sdp/types/payments";
 import {
@@ -344,7 +343,7 @@ async function failStrandedTransferBatches(env: Env, now: Date): Promise<void> {
   const attemptedBefore = new Date(
     now.getTime() - TRANSFER_BATCH_ATTEMPT_LIFETIME_MS
   ).toISOString();
-  const expiredBelowBlockHeight = await blockHeightPastAnUnsentAttempt(batches, environment);
+  const expiredBelowBlockHeight = await blockHeightPastAnUnsentAttempt(batches);
   const cutoff =
     expiredBelowBlockHeight === null
       ? { attemptedBefore }
@@ -368,9 +367,9 @@ async function failStrandedTransferBatches(env: Env, now: Date): Promise<void> {
  * an attempt height it may have passed; otherwise null, without an RPC call.
  */
 async function blockHeightPastAnUnsentAttempt(
-  batches: ReturnType<typeof createSystemPaymentTransferBatchesRepository>,
-  environment: SdpEnvironment
+  batches: ReturnType<typeof createSystemPaymentTransferBatchesRepository>
 ): Promise<bigint | null> {
+  const { environment } = currentClusterScope();
   const lowest = await batches.lowestUnsentAttemptBlockHeight({ environment });
   if (lowest === null) return null;
   try {
