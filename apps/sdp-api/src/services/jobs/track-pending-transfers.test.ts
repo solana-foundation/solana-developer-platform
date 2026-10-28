@@ -595,7 +595,7 @@ describe("trackPendingTransfers", () => {
       );
     });
 
-    it("leaves alone a row a request confirmed after the tracker listed it", async () => {
+    function writeAfterQueueListed(sql: string, transferId: string): void {
       const createRepository = paymentsRepositoryPostgres.createPostgresPaymentsRepository;
       const repositorySpy = vi
         .spyOn(paymentsRepositoryPostgres, "createPostgresPaymentsRepository")
@@ -605,32 +605,94 @@ describe("trackPendingTransfers", () => {
             ...repository,
             listProcessingSignedSubmissions: async (params) => {
               const queue = await repository.listProcessingSignedSubmissions(params);
-              await getDb(env)
-                .prepare("UPDATE payment_transfers SET status = 'confirmed', slot = ? WHERE id = ?")
-                .bind(4321, "xfr_confirmed_mid_pass")
-                .run();
+              await getDb(env).prepare(sql).bind(transferId).run();
               return queue;
             },
           };
         });
       onTestFinished(() => repositorySpy.mockRestore());
+    }
 
+    it.each([
+      { type: "transfer", seedRecipients: async () => undefined, recipients: [] },
+      {
+        type: "transfer_batch",
+        seedRecipients: async () => {
+          await seedProcessingBatchChunk(env, {
+            organizationId: TEST_ORG_ID,
+            projectId: TEST_PROJECT_IDS.sandbox,
+            createdBy: TEST_USER_ID,
+            transferId: "xfr_confirmed_mid_pass",
+            sourceAddress: SOURCE_ADDRESS,
+            destinationAddress: DESTINATION_ADDRESS,
+          });
+        },
+        recipients: [{ status: "processing" }],
+      },
+    ])(
+      "leaves alone a $type row a request confirmed after the tracker listed it",
+      async ({ type, seedRecipients, recipients }) => {
+        writeAfterQueueListed(
+          "UPDATE payment_transfers SET status = 'confirmed', slot = 4321 WHERE id = ?",
+          "xfr_confirmed_mid_pass"
+        );
+        const warn = spyOnLog("warn");
+        await insertTransfer({
+          ...signedSubmission({
+            id: "xfr_confirmed_mid_pass",
+            signature: TEST_SIG_1,
+            submissionStartedAt: minutesAgo(10),
+            updatedAt: minutesAgo(10),
+          }),
+          type,
+        });
+        await seedRecipients();
+
+        await trackSandboxTransfers();
+
+        await expect(getTransfer("xfr_confirmed_mid_pass")).resolves.toMatchObject({
+          status: "confirmed",
+          slot: 4321,
+          error: null,
+        });
+        const linked = await getDb(env)
+          .prepare("SELECT status FROM payment_transfer_recipients WHERE transfer_id = ?")
+          .bind("xfr_confirmed_mid_pass")
+          .all<{ status: string }>();
+        expect(linked.results).toEqual(recipients);
+        expect(warn).not.toHaveBeenCalledWith(
+          expect.objectContaining({ event: "sdp_api_payment_submission_not_landed" }),
+          "sdp_api_payment_submission_not_landed"
+        );
+      }
+    );
+
+    it("leaves alone a never-started row whose send starts after the tracker listed it", async () => {
+      writeAfterQueueListed(
+        "UPDATE payment_transfers SET submission_started_at = sdp_iso_now() WHERE id = ?",
+        "xfr_started_mid_pass"
+      );
+      const warn = spyOnLog("warn");
+      const staleAt = minutesAgo(10);
       await insertTransfer(
         signedSubmission({
-          id: "xfr_confirmed_mid_pass",
+          id: "xfr_started_mid_pass",
           signature: TEST_SIG_1,
-          submissionStartedAt: minutesAgo(10),
-          updatedAt: minutesAgo(10),
+          submissionStartedAt: null,
+          updatedAt: staleAt,
         })
       );
 
       await trackSandboxTransfers();
 
-      await expect(getTransfer("xfr_confirmed_mid_pass")).resolves.toMatchObject({
-        status: "confirmed",
-        slot: 4321,
-        error: null,
+      await expect(getTransfer("xfr_started_mid_pass")).resolves.toMatchObject({
+        status: "processing",
+        updated_at: staleAt,
       });
+      expect(warn).not.toHaveBeenCalledWith(
+        expect.objectContaining({ event: "sdp_api_payment_submission_unresolved" }),
+        "sdp_api_payment_submission_unresolved"
+      );
     });
 
     it("keeps and rotates expired submissions when archival history is unavailable", async () => {

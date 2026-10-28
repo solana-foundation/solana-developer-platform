@@ -263,6 +263,56 @@ describe("PaymentsRepository transfer writes (postgres)", () => {
     }
   );
 
+  it("reports whether settleTransferBatch claimed the chunk from processing", async () => {
+    const input = { ...transferInput({ suffix: "settle_claim" }), type: "transfer_batch" as const };
+    await repo.createTransfer(input);
+    await seedProjectCryptoWalletCounterparty(getDb(env), {
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      createdBy: TEST_USER.id,
+      counterpartyId: "cpty_settle_claim",
+      counterpartyAccountId: "cpacct_settle_claim",
+      walletAddress: input.destinationAddress,
+    });
+    const batches = createPostgresPaymentTransferBatchesRepository(getDb(env));
+    await batches.createTransferBatchWithRecipients({
+      batch: {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        sourceWalletId: TEST_WALLET_ID,
+        sourceAddress: input.sourceAddress,
+        token: input.token,
+        status: "processing",
+      },
+      recipients: [
+        {
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          transferId: input.id,
+          counterpartyId: "cpty_settle_claim",
+          counterpartyAccountId: "cpacct_settle_claim",
+          destinationAddress: input.destinationAddress,
+          amount: "1",
+          status: "processing",
+        },
+      ],
+    });
+    const settle = () =>
+      batches.settleTransferBatch({
+        transferId: input.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        transferStatus: "failed",
+        error: "Transaction not found on chain",
+        slot: null,
+        updatedAt: new Date().toISOString(),
+      });
+
+    await expect(settle()).resolves.toBe(true);
+    await expect(settle()).resolves.toBe(false);
+  });
+
   it("installs the indexed payment-ledger search plan", async () => {
     const extension = await getDb(env)
       .prepare("SELECT extname FROM pg_extension WHERE extname = 'pg_trgm'")
