@@ -275,9 +275,8 @@ function WalletLinkAnchor({
 
 // ── Compact ──────────────────────────────────────────────────────────────────
 // Provider mark, name line, then a detail line carrying the shortened key with an
-// inline copy. Built to the 24px mark / 28px text rhythm the AuthoritiesGlyph tile
-// already uses, so it drops into a hero tile without growing the grid — and it is
-// narrow enough to sit inside the authority popovers too.
+// inline copy. Built to a 24px mark / 28px text rhythm, narrow enough to sit inside
+// the authority popovers.
 
 const WARNING_MARK = (
   <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-warning-border bg-warning-bg text-warning">

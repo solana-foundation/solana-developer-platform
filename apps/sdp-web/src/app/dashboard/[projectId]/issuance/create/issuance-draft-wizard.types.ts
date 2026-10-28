@@ -1,6 +1,6 @@
 import type { AssetCategory } from "@sdp/types/asset-profiles";
 
-export type AccessControlMode = "allowlist" | "blocklist" | "disabled";
+type AccessControlMode = "allowlist" | "blocklist" | "disabled";
 
 // Off-chain compliance capacities (the "Advanced (Recommended)" collapse). Stored
 // under compliance.capacities.* in the issuance metadata. On-chain, extension-
@@ -27,9 +27,9 @@ export type CapacityKey = (typeof CAPACITY_KEYS)[number];
 // per capacity and always optional — a capacity may be enabled but not yet
 // configured (surfaced as a readiness item).
 
-export const WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
+const WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
 type Weekday = (typeof WEEKDAYS)[number];
-export type TradingHoursSchedule = "24_7" | "market_hours" | "custom";
+type TradingHoursSchedule = "24_7" | "market_hours" | "custom";
 
 export interface TradingHoursConfig {
   schedule: TradingHoursSchedule;
@@ -41,7 +41,7 @@ export interface TradingHoursConfig {
   timezone?: string; // IANA tz id, e.g. "America/New_York".
 }
 
-export type TransferApprovalRule = "all" | "above_amount" | "new_counterparty";
+type TransferApprovalRule = "all" | "above_amount" | "new_counterparty";
 export interface TransferApprovalsConfig {
   rule: TransferApprovalRule;
   // Only for "above_amount": threshold in whole tokens (string; may exceed 2^53).
@@ -52,7 +52,7 @@ export interface TransferApprovalsConfig {
 
 // Redemptions redeem against reserves, so the rule keys off amount (not a
 // counterparty). Mirrors transfer approvals otherwise.
-export type RedemptionApprovalRule = "all" | "above_amount";
+type RedemptionApprovalRule = "all" | "above_amount";
 export interface RedemptionApprovalsConfig {
   rule: RedemptionApprovalRule;
   amount?: string;
@@ -177,7 +177,7 @@ export interface DraftState {
   publicFields: string[];
 }
 
-export function createInitialCapacities(): Record<CapacityKey, CapacitySelection> {
+function createInitialCapacities(): Record<CapacityKey, CapacitySelection> {
   return {
     kyc: { enabled: false },
     restrictTradingHours: { enabled: false },

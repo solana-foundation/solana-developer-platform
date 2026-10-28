@@ -183,9 +183,8 @@ nothing else; the program create still sends the body `requestId` form.
 
 ## Module map
 
-- `earn-surfacing.ts` — the availability brain. `SURFACED_CUSTODIAL_EARN_PROVIDERS`,
-  `SURFACED_VAULT_DIRECT_EARN_PROVIDERS`, `EARN_PROGRAM_CREATION_ENABLED`,
-  `EARN_PROGRAM_CREATE_PROVIDER`, `earnVaultDepositAvailability` and
+- `earn-surfacing.ts` — the availability brain. `SURFACED_VAULT_DIRECT_EARN_PROVIDERS`,
+  `earnVaultDepositAvailability` and
   `earnVaultDepositOnlyEnvironment` (which side an `environment_unavailable`
   verdict points at, so Jupiter/Ondo read "Production only" rather than the
   sandbox-era "Sandbox only"), all DERIVED from `@sdp/types` — **no provider id
@@ -640,9 +639,10 @@ Do not move them back.
 
 They started in `earn-program-data.ts` (a client module). A Server Component
 importing a *value* from a client module receives a **client-reference proxy,
-not the value** — an object, so always truthy. `if (!EARN_PROGRAM_CREATION_ENABLED)`
-was therefore dead code and the deposit route happily rendered the full wizard
-with no provider that could create anything.
+not the value** — an object, so always truthy. The program-creation guard (since
+retired with the custodial provider) was therefore dead code and the deposit
+route happily rendered the full wizard with no provider that could create
+anything.
 
 What makes this worth a section: **nothing catches it but a browser.** The types
 are correct, so `tsc` passes; the unit tests mock the module, so they pass; lint

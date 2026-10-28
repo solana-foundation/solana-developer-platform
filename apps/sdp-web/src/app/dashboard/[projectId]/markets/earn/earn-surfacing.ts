@@ -21,6 +21,21 @@ export type EarnVaultDepositAvailability =
   | "access_unavailable"
   | "provider_unavailable";
 
+/**
+ * Which providers this module drives, and whether a deposit is offered.
+ *
+ * **This file carries no `"use client"` directive, and that is the whole reason
+ * it exists.** A Server Component importing a value from a client module
+ * receives a client-reference PROXY, not the value. The proxy is an object, so
+ * a server-side guard on such a constant is always truthy and silently never
+ * fires. Typecheck passes (the types are right) and unit tests pass (they mock
+ * the module), so only a browser catches it.
+ *
+ * Keep server-readable gates here. Anything that needs a hook, SWR, or
+ * `window` belongs in `earn-program-data.ts`; client callers import the gates
+ * from this file directly, never through that client module.
+ */
+
 /** Offered providers whose deposits are signed from an SDP custody wallet. */
 export const SURFACED_VAULT_DIRECT_EARN_PROVIDERS: readonly EarnProviderId[] =
   SURFACED_EARN_PROVIDERS.filter((provider) => earnDepositStyle(provider) === "vault_direct");
