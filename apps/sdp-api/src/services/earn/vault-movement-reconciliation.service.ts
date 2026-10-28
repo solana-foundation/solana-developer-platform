@@ -7,6 +7,7 @@ import {
   getChainHeight,
   getSignatureStatuses,
   getTransaction,
+  reReadExpiredStatuses,
   type SignatureStatusInfo,
   type SolanaRpc,
   tokenBalanceDelta,
@@ -31,7 +32,6 @@ import {
   resolveRecordedVaultWithdrawClient,
   resolveVaultDirectClient,
 } from "@/services/earn/execution-registry";
-import { reReadExpiredStatuses } from "@/services/earn/expired-status-proof";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import { broadcastVaultTransaction } from "@/services/earn/vault-execution.service";
 import { describeVaultSimulationError } from "@/services/earn/vault-simulation-error";

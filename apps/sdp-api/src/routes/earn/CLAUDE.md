@@ -1091,7 +1091,7 @@ request pool failover can answer the batch statuses from an endpoint behind the
 one that answered the height; a failed re-read leaves those rows unjudged and
 fails the tick. The queued-withdrawal sweep applies the same rule at its
 confirmed height before any expired request or cancel recovery; both share
-`services/earn/expired-status-proof.ts`.
+`reReadExpiredStatuses` (`@sdp/rpc/solana`) with the payments settlement tracker.
 
 When neither status nor history observes the transaction past its window, a
 `requested` row moves conservatively to `submitted` through the guarded writer.
