@@ -243,6 +243,9 @@ function batchCanProceed({
   );
 }
 
+/** How often an estimate with warnings is re-read while the review is open. */
+const ESTIMATE_WARNING_RECHECK_MS = 10_000;
+
 /**
  * The minimum SOL amount of each recipient the estimate says create would
  * refuse (HOO-2375), by counterparty account. Warnings name recipients by
@@ -463,14 +466,27 @@ export function useBatchSendWizard({
       ? paymentsQueryKeys.batchEstimate({ serializedRequest: JSON.stringify(request) })
       : null,
     () => estimateTransferBatch(request, t),
-    { revalidateOnFocus: false }
+    {
+      revalidateOnFocus: false,
+      // A flagged address may be funded elsewhere: recheck until it clears,
+      // so Send re-enables without the request changing (HOO-2375).
+      refreshInterval: (latest) =>
+        latest?.warnings && latest.warnings.length > 0 ? ESTIMATE_WARNING_RECHECK_MS : 0,
+    }
   );
   const belowRentMinimum = useMemo(
     () => belowRentMinimumByAccount(estimate?.warnings, request.recipients),
     [estimate, request]
   );
   // Create would refuse the batch (409): nothing to send until it is fixed.
-  const canSend = canProceed && (currentStepId !== "REVIEW" || belowRentMinimum.size === 0);
+  // Review sends only once the estimate has answered (or failed, as before)
+  // and named no recipient create would refuse.
+  const estimateSettled = estimate !== undefined || estimateError !== undefined;
+  const canSend =
+    canProceed &&
+    (currentStepId !== "REVIEW" ||
+      batchResult !== null ||
+      (estimateSettled && belowRentMinimum.size === 0));
 
   const submitBatch = async () => {
     setSubmitting(true);

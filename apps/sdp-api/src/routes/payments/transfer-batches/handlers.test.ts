@@ -666,6 +666,7 @@ describe("payment transfer batches", () => {
       );
 
       expect(res.status).toBe(200);
+      // SAFETY: a 200 from the estimate route, whose body the OpenAPI schema fixes.
       const body = (await res.json()) as { data: { estimate: { warnings: unknown[] } } };
       expect(body.data.estimate.warnings).toEqual([
         {
@@ -734,6 +735,7 @@ describe("payment transfer batches", () => {
           crypto.randomUUID()
         );
         expect(res.status).toBe(200);
+        // SAFETY: a 200 from the estimate route, whose body the OpenAPI schema fixes.
         const body = (await res.json()) as { data: { estimate: { warnings: unknown[] } } };
         expect(body.data.estimate.warnings).toEqual([]);
       }
