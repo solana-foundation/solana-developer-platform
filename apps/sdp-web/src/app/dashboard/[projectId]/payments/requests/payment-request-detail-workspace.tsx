@@ -24,11 +24,12 @@ import {
   RecordStateBand,
 } from "@/app/dashboard/[projectId]/payments/payments-record";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
-import { downloadSolanaQrCode, SolanaQrCode } from "@/components/solana-qr-code";
+import { SolanaQrCode } from "@/components/solana-qr-code";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { transactionHref } from "@/lib/payments-routes";
+import { downloadSolanaQrCode } from "@/lib/solana-qr";
 import { useClientNow } from "@/lib/use-client-now";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { REQUEST_STATUS_TONE, REQUEST_STATUS_TRANSLATION_KEYS } from "./payment-request-status";
