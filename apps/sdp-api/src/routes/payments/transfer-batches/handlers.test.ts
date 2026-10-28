@@ -981,8 +981,8 @@ describe("payment transfer batches", () => {
       },
       {
         slot: 102n,
-        confirmations: 0n,
-        confirmationStatus: "confirmed",
+        confirmations: null,
+        confirmationStatus: "finalized",
         err: { InstructionError: [0, "InsufficientFunds"] },
       },
     ]);
@@ -2579,8 +2579,8 @@ describe("payment transfer batches", () => {
     getSignatureStatusesMock.mockResolvedValueOnce([
       {
         slot: 104n,
-        confirmations: 0n,
-        confirmationStatus: "confirmed",
+        confirmations: null,
+        confirmationStatus: "finalized",
         err: { InstructionError: [0, "InsufficientFunds"] },
       },
     ]);
@@ -2707,8 +2707,8 @@ describe("payment transfer batches", () => {
             ? { slot: 200n, confirmations: 5n, confirmationStatus: "confirmed", err: null }
             : {
                 slot: 201n,
-                confirmations: 0n,
-                confirmationStatus: "confirmed",
+                confirmations: null,
+                confirmationStatus: "finalized",
                 err: { InstructionError: [0, { Custom: 1 }] },
               }
       )

@@ -29,7 +29,7 @@ import {
   resolveDefaultCluster,
   resolveSolanaRpcProviderUrls,
 } from "./config";
-import { RpcTimeoutError, solanaRpcError } from "./errors";
+import { MinContextSlotNotReachedError, RpcTimeoutError, solanaRpcError } from "./errors";
 import { withReadSocketRetry } from "./socket-retry";
 import { markRpcAttemptDeadline } from "./telemetry";
 import { isTransientRpcError, withTransientRpcRetry } from "./transient";
@@ -262,7 +262,7 @@ export function createRpcForSdk<TSdkRpc>(
  * @param minContextSlot - The lowest slot the answering node may be at; a node behind it errors
  * instead of answering.
  * @returns The latest blockhash and its last valid block height.
- * @throws SdpRpcError `SOLANA_RPC_ERROR` when the response comes from a slot below
+ * @throws MinContextSlotNotReachedError when the response comes from a slot below
  * `minContextSlot`, so an upstream that ignores the option cannot answer stale.
  */
 export async function getRecentBlockhash(
@@ -272,10 +272,7 @@ export async function getRecentBlockhash(
 ): Promise<BlockhashWithExpiry> {
   const response = await rpc.getLatestBlockhash({ commitment, minContextSlot }).send();
   if (minContextSlot !== undefined && response.context.slot < minContextSlot) {
-    throw solanaRpcError("Solana RPC answered from a slot below minContextSlot", {
-      contextSlot: response.context.slot.toString(),
-      minContextSlot: minContextSlot.toString(),
-    });
+    throw new MinContextSlotNotReachedError(response.context.slot, minContextSlot);
   }
 
   return {
@@ -672,10 +669,15 @@ function numericTransactionError(err: TransactionError): TransactionError {
  * @param options.searchTransactionHistory - Search ledger history beyond the recent status cache.
  * @param options.minContextSlot - With history search, the lowest slot the answering node may be
  * at; a node behind it errors instead of answering.
+ * @param options.commitment - With history search, the bank that answers and that
+ * `minContextSlot` is checked against. Agave 4.4 and later honor it; older nodes ignore it and
+ * answer from their processed bank.
  * @param options.retryDelaysMs - Backoff delays between transient-failure retries.
  * @returns Each signature's status, or null where the node has none.
- * @throws SdpRpcError `SOLANA_RPC_ERROR` when the response comes from a slot below
+ * @throws MinContextSlotNotReachedError when the response comes from a slot below
  * `minContextSlot`, so an upstream that ignores the option cannot report a landed signature absent.
+ * @throws SdpRpcError `SOLANA_RPC_ERROR` when the response is short a status, which would
+ * otherwise read as absence.
  */
 export async function getSignatureStatuses(
   rpc: SolanaRpc,
@@ -685,6 +687,7 @@ export async function getSignatureStatuses(
     | {
         searchTransactionHistory: true;
         minContextSlot?: Slot;
+        commitment?: Commitment;
         retryDelaysMs?: readonly number[];
       } = {}
 ): Promise<Array<SignatureStatusInfo | null>> {
@@ -698,10 +701,12 @@ export async function getSignatureStatuses(
         ? rpc.getSignatureStatuses(
             signatures,
             // SAFETY: Agave's RpcSignatureStatusConfig accepts minContextSlot (a node behind it
-            // errors instead of answering); kit's config type lags the server and omits it.
+            // errors instead of answering) and, from 4.4, commitment; kit's config type lags the
+            // server and omits both.
             {
               searchTransactionHistory: true,
               minContextSlot: options.minContextSlot,
+              commitment: options.commitment,
             } as Parameters<SolanaRpc["getSignatureStatuses"]>[1]
           )
         : rpc.getSignatureStatuses(signatures)
@@ -713,10 +718,12 @@ export async function getSignatureStatuses(
     options.minContextSlot !== undefined &&
     response.context.slot < options.minContextSlot
   ) {
-    throw solanaRpcError("Solana RPC answered from a slot below minContextSlot", {
-      contextSlot: response.context.slot.toString(),
-      minContextSlot: options.minContextSlot.toString(),
-    });
+    throw new MinContextSlotNotReachedError(response.context.slot, options.minContextSlot);
+  }
+  if (response.value.length !== signatures.length) {
+    throw solanaRpcError(
+      `getSignatureStatuses returned ${response.value.length} statuses for ${signatures.length} signatures`
+    );
   }
 
   return response.value.map((item) =>
@@ -729,6 +736,46 @@ export async function getSignatureStatuses(
         }
       : null
   );
+}
+
+/** A batch row whose blockhash a height read shows expired while its batch status was null. */
+export interface ExpiredUnseenSignature {
+  /** The row's position in the batch. */
+  index: number;
+  signature: Signature;
+}
+
+/**
+ * Re-read the status of every expired, unseen signature from a node at least as current as the
+ * height read that proved the expiry (`minContextSlot`), as sponsorship budget reconciliation
+ * does. Per-request pool failover can answer the batch statuses from an endpoint behind the one
+ * that answered the height, so a null batch status alone never proves a transaction absent.
+ *
+ * @param rpc - The cluster's pool client.
+ * @param statuses - The batch statuses, by row index.
+ * @param expired - The rows to re-read.
+ * @param minContextSlot - The slot the height read was answered at.
+ * @returns The batch statuses with each re-read status in place.
+ * @throws When no node at `minContextSlot` answered (a served `-32016`, or
+ * `MinContextSlotNotReachedError` from SDP's own check); the caller leaves those rows unjudged.
+ */
+export async function reReadExpiredStatuses(
+  rpc: SolanaRpc,
+  statuses: ReadonlyArray<SignatureStatusInfo | null>,
+  expired: readonly ExpiredUnseenSignature[],
+  minContextSlot: Slot
+): Promise<Array<SignatureStatusInfo | null>> {
+  const reRead = [...statuses];
+  if (expired.length === 0) return reRead;
+  const current = await getSignatureStatuses(
+    rpc,
+    expired.map(({ signature }) => signature),
+    { searchTransactionHistory: true, minContextSlot }
+  );
+  for (const [position, { index }] of expired.entries()) {
+    reRead[index] = current[position];
+  }
+  return reRead;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
