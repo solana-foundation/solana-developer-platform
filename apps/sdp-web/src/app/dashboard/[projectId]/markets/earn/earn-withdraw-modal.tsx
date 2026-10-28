@@ -52,15 +52,20 @@ export function withdrawalRequestSignature(
 }
 
 /**
- * The idempotency key identifies ONE intended withdrawal, so it is bound to
- * the parameters that define it. Retrying an unchanged confirm reuses the key
- * (the provider collapses the duplicate instead of paying twice); changing the
- * amount, token, or destination after a failed attempt mints a new key, so a
- * corrected withdrawal can never be answered with the cached result of the
- * one the user just fixed — which would settle funds to the old address while
+ * The withdrawal's idempotency key identifies ONE intended withdrawal, so it is
+ * bound to the parameters that define it. Retrying an unchanged confirm reuses
+ * the key (the provider collapses the duplicate instead of paying twice);
+ * changing the amount, token, or destination after a failed attempt mints a new
+ * key, so a corrected withdrawal can never be answered with the cached result of
+ * the one the user just fixed — which would settle funds to the old address while
  * reporting success. "Changing the amount" means its VALUE: the signature is
  * canonical (see `withdrawalRequestSignature`), so re-spelling the same value
  * after an ambiguous failure replays the original key instead of paying twice.
+ *
+ * The key travels as the `Idempotency-Key` HEADER, never a body `requestId`:
+ * the dashboard's transport auto-keys every unkeyed mutation with a header, and
+ * the API refuses a request carrying both forms — a body key would 400 every
+ * confirm while the preview (keyless, unvalidated) kept working.
  *
  * A ref, not `useMemo`: React may discard a memo cache and recompute, which
  * would hand the same parameters a fresh key and reintroduce the
@@ -71,7 +76,7 @@ export function withdrawalRequestSignature(
  * for a withdrawal from program A would be carried into an identical-looking
  * withdrawal from program B.
  */
-function useWithdrawalRequestId(
+function useWithdrawalIdempotencyKey(
   programId: string,
   amountUsd: string,
   token: EarnPortfolioToken | undefined,
@@ -610,7 +615,7 @@ export function EarnWithdrawModal({
   const destination = destinationInput.trim();
   const destinationValid = BASE58_ADDRESS_PATTERN.test(destination);
 
-  const requestId = useWithdrawalRequestId(programId, amount, token, destination);
+  const idempotencyKey = useWithdrawalIdempotencyKey(programId, amount, token, destination);
 
   useEffect(() => {
     if (submitting) contentRef.current?.focus();
@@ -740,12 +745,11 @@ export function EarnWithdrawModal({
     submittingRef.current = true;
     setSubmitting(true);
     setSubmitError(null);
-    const result = await createEarnWithdrawal(programId, {
-      requestId,
-      amountUsd: amount,
-      token,
-      destinationAddress: destination,
-    });
+    const result = await createEarnWithdrawal(
+      programId,
+      { amountUsd: amount, token, destinationAddress: destination },
+      idempotencyKey
+    );
     submittingRef.current = false;
     setSubmitting(false);
     if (!result.ok) {

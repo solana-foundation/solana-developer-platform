@@ -270,7 +270,7 @@ describe("the floor memo", () => {
     const exit = vaultWithdrawalRequestFingerprint({
       projectId: "prj_1",
       positionId: "pos_1",
-      shares: "1",
+      amount: "1",
       toleranceBps: 10,
     });
     const first = vaultWithdrawalIdempotencyKeyStore.claim(exit).key;

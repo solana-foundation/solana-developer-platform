@@ -41,6 +41,7 @@ import {
 } from "./earn-program-data";
 import { earnQueryKeys } from "./earn-query-key";
 import {
+  type EarnVaultAsyncWithdrawalIntent,
   vaultAsyncWithdrawalIdempotencyKeyStore,
   vaultAsyncWithdrawalRequestFingerprint,
 } from "./earn-vault-async-withdrawal-tracking";
@@ -171,6 +172,8 @@ function parRedemptionAmountState(
         compareUnsignedDecimals(canonical, terms.minimumIntermediateAmount) === -1,
       intermediateAmount: canonical,
       shares: undefined,
+      // The typed amount is the fingerprint for this branch directly.
+      typedAmount: canonical,
     };
   }
   const shares =
@@ -184,6 +187,9 @@ function parRedemptionAmountState(
       compareUnsignedDecimals(shares, terms.minimumShares) === -1,
     intermediateAmount: undefined,
     shares,
+    // The typed amount the shares were derived from — the idempotency
+    // fingerprint keys on it, never on these rate-derived shares.
+    typedAmount: canonical,
   };
 }
 
@@ -263,21 +269,39 @@ function useParRedemptionSubmission(options: {
 
   async function submit(
     input: EarnVaultParRedemptionTermsRequest | null,
-    preview: EarnVaultParRedemptionPreview | null
+    preview: EarnVaultParRedemptionPreview | null,
+    typedAmount: string | undefined
   ) {
     if (!input || !preview || preview.blockingIssues.length > 0) return;
     setSubmitting(true);
     const finishSubmission = options.onSubmissionStart?.(options.custodyWalletId);
     options.setError(null);
     try {
-      const fingerprint = vaultAsyncWithdrawalRequestFingerprint({
-        projectId: options.projectId,
-        positionId: input.positionId,
-        ...(input.intermediateAmount === undefined
-          ? { shares: input.shares }
-          : { intermediateAmount: input.intermediateAmount }),
-        route: { kind: "operator_redemption" },
-      });
+      // Fingerprint the TYPED input, never the rate-derived shares the wire
+      // request carries: a rate tick between an ambiguous failure and its
+      // retry must not mint a fresh key for one intent — see
+      // `EarnVaultAsyncWithdrawalIntent`. A held-intermediate request is
+      // already typed one-for-one. A shares request whose typed amount went
+      // missing is refused rather than fingerprinted on the wrong value (the
+      // preview could only have resolved from a valid amount).
+      const fingerprintInput: EarnVaultAsyncWithdrawalIntent | null =
+        input.intermediateAmount !== undefined
+          ? {
+              projectId: options.projectId,
+              positionId: input.positionId,
+              intermediateAmount: input.intermediateAmount,
+              route: { kind: "operator_redemption" },
+            }
+          : typedAmount === undefined
+            ? null
+            : {
+                projectId: options.projectId,
+                positionId: input.positionId,
+                amount: typedAmount,
+                route: { kind: "operator_redemption" },
+              };
+      if (fingerprintInput === null) return;
+      const fingerprint = vaultAsyncWithdrawalRequestFingerprint(fingerprintInput);
       const { key, persisted } = vaultAsyncWithdrawalIdempotencyKeyStore.claim(fingerprint);
       if (!persisted) {
         options.setError(t("DashboardEarn.intentStorageUnavailable"));
@@ -745,7 +769,8 @@ export function EarnVaultParRedemptionModal({
   const [amount, setAmount] = useState("");
   const availableAmount = parAvailableAmount(position, source);
   const amountState = parRedemptionAmountState(position, amount, availableAmount, terms, source);
-  const { belowMinimum, intermediateAmount, overAvailableAmount, shares } = amountState;
+  const { belowMinimum, intermediateAmount, overAvailableAmount, shares, typedAmount } =
+    amountState;
   const input = useMemo(
     () =>
       parPreviewInput(position, { belowMinimum, intermediateAmount, overAvailableAmount, shares }),
@@ -801,7 +826,7 @@ export function EarnVaultParRedemptionModal({
               onMax={() => {
                 if (availableAmount) setAmount(availableAmount);
               }}
-              onSubmit={() => void submit(input, preview)}
+              onSubmit={() => void submit(input, preview, typedAmount)}
               overAvailableAmount={amountState.overAvailableAmount}
               preview={preview}
               source={source}

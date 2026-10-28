@@ -15,6 +15,7 @@ import {
   appendVaultPositionsRead,
   createEarnVaultDeposit,
   createEarnVaultWithdrawalRequest,
+  createEarnWithdrawal,
   type EarnVaultPositionsRead,
   earnExternalWalletSummaryRefreshInterval,
   earnLedgerRefreshInterval,
@@ -692,6 +693,46 @@ describe("createEarnVaultDeposit", () => {
 
     expect(result.ok).toBe(false);
     expect(result).toMatchObject({ error: "Invalid vault deposit response", status: 201 });
+  });
+});
+
+describe("createEarnWithdrawal", () => {
+  it("sends idempotency only as a header and allowlists the JSON body", async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(
+          JSON.stringify({
+            data: { withdrawal: { withdrawalRef: "withdrawal_1", status: "processing" } },
+          }),
+          { status: 201, headers: { "Content-Type": "application/json" } }
+        )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    // Even an untyped caller cannot smuggle the legacy body form in: the API
+    // refuses a money movement carrying BOTH a body requestId and the header
+    // (it cannot tell which one a retry keeps stable), and the dashboard
+    // transport auto-keys every request the caller did not key itself — so a
+    // body requestId 400s every confirm while the keyless preview keeps
+    // working.
+    const untypedInput = {
+      amountUsd: "10",
+      token: "usdc",
+      destinationAddress: "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin",
+      requestId: "must-not-be-forwarded",
+    } as unknown as Parameters<typeof createEarnWithdrawal>[1];
+
+    await createEarnWithdrawal("program_1", untypedInput, "withdrawal-key");
+
+    const [, options] = fetchMock.mock.calls[0] ?? [];
+    const headers = new Headers(options?.headers);
+    expect(headers.get("Idempotency-Key")).toBe("withdrawal-key");
+    expect(headers.get("x-project-id")).toBe("prj_test_sandbox");
+    expect(JSON.parse(String(options?.body))).toEqual({
+      amountUsd: "10",
+      token: "usdc",
+      destinationAddress: "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin",
+    });
+    expect(String(options?.body)).not.toContain("requestId");
   });
 });
 

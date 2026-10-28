@@ -232,17 +232,33 @@ function useQueuedWithdrawalSubmission(options: {
 
   async function submit(
     previewInput: EarnVaultQueuedWithdrawalTermsRequest | null,
-    preview: EarnVaultQueuedWithdrawalPreview | null
+    preview: EarnVaultQueuedWithdrawalPreview | null,
+    typedAmount: string | undefined
   ) {
-    if (!previewInput || !preview || preview.blockingIssues.length > 0) return;
+    // `typedAmount` comes from the same validated input the shares were
+    // derived from, so a null previewInput already implies it; the check
+    // keeps the fingerprint honest even if that invariant ever drifts —
+    // refuse to submit rather than fingerprint on the wrong value.
+    if (
+      !previewInput ||
+      !preview ||
+      preview.blockingIssues.length > 0 ||
+      typedAmount === undefined
+    ) {
+      return;
+    }
     setSubmitting(true);
     const finishSubmission = options.onSubmissionStart?.(options.custodyWalletId);
     options.setError(null);
     try {
+      // Fingerprint the TYPED amount, never the rate-derived shares the wire
+      // request carries: a rate tick between an ambiguous failure and its
+      // retry must not mint a fresh key for one intent — see
+      // `EarnVaultAsyncWithdrawalIntent`.
       const fingerprint = vaultAsyncWithdrawalRequestFingerprint({
         projectId: options.projectId,
         positionId: previewInput.positionId,
-        shares: previewInput.shares,
+        amount: typedAmount,
         route: {
           kind: "queue",
           discountBps: previewInput.discountBps,
@@ -856,7 +872,15 @@ export function EarnVaultQueuedWithdrawModal({
                   error={error}
                   loading={previewLoading}
                   onBack={() => setStep("details")}
-                  onSubmit={() => void submit(previewInput, preview)}
+                  onSubmit={() =>
+                    void submit(
+                      previewInput,
+                      preview,
+                      amountValidation.kind === "valid"
+                        ? amountValidation.canonicalAmount
+                        : undefined
+                    )
+                  }
                   position={position}
                   preview={preview}
                   submitting={submitting}

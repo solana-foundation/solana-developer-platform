@@ -425,6 +425,50 @@ describe("EarnVaultWithdrawModal", () => {
     expect(screen.getByText(/No provider payout was recorded/)).toBeTruthy();
     expect(screen.queryByText("Awaiting provider settlement")).toBeNull();
   });
+
+  // The rate-derived shares must never enter the key fingerprint: a rate tick
+  // between an ambiguous failure and its retry re-derives DIFFERENT shares for
+  // the same typed amount, and a shares-keyed fingerprint would mint a fresh
+  // key there — a second exit while the first attempt may already have
+  // executed. See `vaultWithdrawalRequestFingerprint`.
+  it("keeps one key across a rate tick: a retry after an ambiguous failure is the same exit", async () => {
+    mocks.createEarnVaultWithdrawal
+      .mockResolvedValueOnce({
+        ok: false,
+        error: "Bad gateway",
+        status: 503,
+        body: null,
+      })
+      .mockResolvedValue({
+        ok: true,
+        status: 200,
+        data: { kind: "submitted", withdrawal: withdrawal("submitted") },
+      });
+
+    const first = renderModal();
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm withdrawal" }));
+    await vi.waitFor(() => expect(mocks.createEarnVaultWithdrawal).toHaveBeenCalledTimes(1));
+    first.unmount();
+
+    // The rate moves before the user learns the first attempt's answer: the
+    // same $2 now re-derives different shares. The typed intent did not
+    // change, so the retry must go out under the SAME key.
+    renderModal(vi.fn(), { ...position, tokenValue: "20" });
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm withdrawal" }));
+
+    await vi.waitFor(() => expect(mocks.createEarnVaultWithdrawal).toHaveBeenCalledTimes(2));
+    expect(mocks.createEarnVaultWithdrawal.mock.calls[1][0].shares).not.toBe(
+      mocks.createEarnVaultWithdrawal.mock.calls[0][0].shares
+    );
+    expect(mocks.createEarnVaultWithdrawal.mock.calls[1][1]).toBe(
+      mocks.createEarnVaultWithdrawal.mock.calls[0][1]
+    );
+    await screen.findByText("Withdrawal submitted");
+  });
 });
 
 describe("exit slippage floors (quote-derived)", () => {

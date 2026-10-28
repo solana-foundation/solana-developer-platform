@@ -109,12 +109,17 @@ one grows — and the API already answers an unknown value with an empty page, w
 is the honest result.
 
 `proxyToSdpApi` never copies the inbound header bag — auth, project scope and
-tracing stay server-owned — so a client-set `Idempotency-Key` never reaches the
-API on its own. A route forwards one deliberately, per header, through the
-optional `upstreamHeaders` argument, spelling it `IDEMPOTENCY_KEY_HEADER`
-(`src/lib/idempotency.ts`). `vault-deposits/`, `vault-withdrawals/`, and the
-queued request create/cancel routes opt in, forwarding that single header and
-nothing else; the program create still sends the body `requestId` form.
+tracing stay server-owned — so a client-set `Idempotency-Key` reaches the API
+only through `withForwardedIdempotencyKey` (HOO-1918), which every mutating
+proxy call applies to that one header; routes passing `upstreamHeaders` add
+endpoint-specific headers beside it, never instead of it. The key is spelled
+`IDEMPOTENCY_KEY_HEADER` (`src/lib/idempotency.ts`). The vault and queued
+create/cancel clients send the header form; the custodial program withdrawal
+does too (its legacy body `requestId` is gone — the dashboard transport
+auto-keys any request the caller did not key itself, and the API refuses a
+movement carrying both forms, so the body key 400'd every confirm). The API
+still accepts the body form for callers outside the dashboard, so the program
+create's `requestId` contract is unchanged.
 
 ## Routes
 
@@ -360,9 +365,12 @@ nothing else; the program create still sends the body `requestId` form.
   detail through terminal state. An expired request exposes an idempotent cancel
   action that recovers escrowed shares; closing the create modal never hides it.
 - `earn-vault-withdraw-tracking.ts` — the withdrawal idempotency-key store
-  (fingerprint: project, position, shares, minAmountOut — the derived exit
-  floor is in there for the same reason the deposit's is) under its own
-  versioned `sessionStorage` key.
+  (fingerprint: project, position, the TYPED exit quantity — the stablecoin
+  amount for an atomic exit, the exact shares for a provider-settled one — and
+  the USER's toleranceBps; never the rate-derived shares, which would move
+  with every rate tick and mint a fresh key for one retried intent, and never
+  the derived floor, for the reason the deposit's fingerprint documents) under
+  its own versioned `sessionStorage` key.
 - `earn-vault-slippage.ts` — the slippage-floor machinery BOTH vault modals
   share: `parseSlippageToleranceBps`, `floorForTolerance` (BigInt at the quoted
   mint's scale, floored, one-atom minimum; a quote FINER than that scale is a

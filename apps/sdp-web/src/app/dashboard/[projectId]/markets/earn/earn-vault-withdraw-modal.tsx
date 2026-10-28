@@ -838,10 +838,15 @@ export function EarnVaultWithdrawModal({
   const submitBlocked = continueBlocked || (slippagePolicy !== null && minAmountOut === undefined);
 
   async function submitResolvedIntent(controller: AbortController, shares: string, amount: string) {
+    // Fingerprint the TYPED quantity, never the rate-derived `shares`: the
+    // atomic exit converts the user's amount to shares through the live
+    // position value, and a rate tick between an ambiguous failure and its
+    // retry must not mint a fresh key for one intent — see the fingerprint's
+    // own note. For a provider-order exit the typed input IS the shares.
     const fingerprint = vaultWithdrawalRequestFingerprint({
       projectId,
       positionId: position.id,
-      shares,
+      amount,
       toleranceBps: slippagePolicy === null ? null : slippageBps,
     });
     const reused = vaultWithdrawalIdempotencyKeyStore.has(fingerprint);

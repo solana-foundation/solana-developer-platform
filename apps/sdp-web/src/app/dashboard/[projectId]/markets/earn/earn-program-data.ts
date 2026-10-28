@@ -1750,16 +1750,36 @@ export function previewEarnWithdrawal(
 }
 
 export interface EarnWithdrawalCreateInput extends EarnWithdrawalPreviewInput {
-  /** Client-minted UUIDv4 so a retried confirm can never double-withdraw. */
-  requestId: string;
   destinationAddress: string;
 }
 
+/**
+ * The key rides the `Idempotency-Key` HEADER, never a body `requestId` (the
+ * legacy custodial-program contract): the dashboard's own transport already
+ * attaches an auto-keyed header to every unkeyed mutation, and the API refuses
+ * a request that carries both forms — so a body key 400s every confirm. A
+ * caller-set header suppresses the auto-key instead, and the API resolves the
+ * caller key from it alone. Like every money-moving caller here, the modal
+ * mints a UUIDv4 bound to the request's defining parameters and reuses it
+ * across retries of the same intent (see `useWithdrawalIdempotencyKey`).
+ */
 export function createEarnWithdrawal(
   programId: string,
-  input: EarnWithdrawalCreateInput
+  input: EarnWithdrawalCreateInput,
+  idempotencyKey: string
 ): Promise<DashboardFetchResult<{ data: EarnProgramWithdrawalResponse }>> {
-  return dashboardFetch(programPath(programId, "/withdrawals"), { method: "POST", body: input });
+  // Rebuild the body field-by-field so even an untyped caller cannot smuggle a
+  // requestId back into this value-moving request — the header is the only key
+  // form it accepts (see the deposit's identical rebuild).
+  return dashboardFetch(programPath(programId, "/withdrawals"), {
+    method: "POST",
+    headers: { [IDEMPOTENCY_KEY_HEADER]: idempotencyKey },
+    body: {
+      amountUsd: input.amountUsd,
+      token: input.token,
+      destinationAddress: input.destinationAddress,
+    },
+  });
 }
 
 function fetchEarnWithdrawal(

@@ -5,7 +5,7 @@ describe("vaultAsyncWithdrawalRequestFingerprint", () => {
   const intent = {
     projectId: "project_1",
     positionId: "position_1",
-    shares: "5",
+    amount: "5",
     route: {
       kind: "queue" as const,
       discountBps: 25,
@@ -19,7 +19,7 @@ describe("vaultAsyncWithdrawalRequestFingerprint", () => {
     // serialization would fail here.
     const sameIntent = {
       positionId: intent.positionId,
-      shares: intent.shares,
+      amount: intent.amount,
       projectId: intent.projectId,
       route: {
         deadlineSeconds: intent.route.deadlineSeconds,
@@ -35,7 +35,7 @@ describe("vaultAsyncWithdrawalRequestFingerprint", () => {
   const changedIntents = [
     ["project", { ...intent, projectId: "project_2" }],
     ["position", { ...intent, positionId: "position_2" }],
-    ["shares", { ...intent, shares: "6" }],
+    ["amount", { ...intent, amount: "6" }],
     ["discount", { ...intent, route: { ...intent.route, discountBps: 26 } }],
     ["deadline", { ...intent, route: { ...intent.route, deadlineSeconds: 361 } }],
   ] satisfies ReadonlyArray<readonly [string, typeof intent]>;
@@ -46,7 +46,7 @@ describe("vaultAsyncWithdrawalRequestFingerprint", () => {
     );
   });
 
-  it("keys a held-intermediate par request apart from a shares request of the same number", () => {
+  it("keys a held-intermediate par request apart from a typed-amount request of the same number", () => {
     const route = { kind: "operator_redemption" as const };
     const held = vaultAsyncWithdrawalRequestFingerprint({
       projectId: intent.projectId,
@@ -61,7 +61,7 @@ describe("vaultAsyncWithdrawalRequestFingerprint", () => {
       vaultAsyncWithdrawalRequestFingerprint({
         projectId: intent.projectId,
         positionId: intent.positionId,
-        shares: "5",
+        amount: "5",
         route,
       })
     );
@@ -71,7 +71,7 @@ describe("vaultAsyncWithdrawalRequestFingerprint", () => {
     const operatorIntent = {
       projectId: intent.projectId,
       positionId: intent.positionId,
-      shares: intent.shares,
+      amount: intent.amount,
       route: { kind: "operator_redemption" as const },
     };
 
