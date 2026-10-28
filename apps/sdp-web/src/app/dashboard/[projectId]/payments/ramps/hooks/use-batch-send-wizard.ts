@@ -545,9 +545,7 @@ export function useBatchSendWizard({
       // A reference another batch on this wallet already uses (HOO-2335): nothing was sent.
       if (
         error instanceof TransferBatchRequestError &&
-        error.status === 409 &&
-        error.code === "CONFLICT" &&
-        request.externalId !== undefined
+        error.code === "TRANSFER_BATCH_RUN_EXISTS"
       ) {
         toast.error(t("DashboardPayments.batchSend.referenceInUse"), {
           id: toastId,

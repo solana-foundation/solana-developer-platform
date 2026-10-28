@@ -5,7 +5,7 @@ import type {
   PaymentTransferRecipientRow,
 } from "@/db/repositories/payment-transfer-batches.repository";
 import { createPostgresPaymentTransferBatchesRepository } from "@/db/repositories/payment-transfer-batches.repository.postgres";
-import { AppError, conflict } from "@/lib/errors";
+import { AppError } from "@/lib/errors";
 import { deriveProviderRequestId } from "@/lib/idempotency";
 import { success } from "@/lib/response";
 import { type AuthorizeInput, getAuthorized } from "@/middleware/authorize";
@@ -86,8 +86,9 @@ function assertSamePayoutRun(
   ) {
     return;
   }
-  throw conflict(
-    "A different transfer batch with this externalId already exists for this source wallet. Read it with GET /v1/payments/transfer-batches/{batchId}, and send its failed recipients again with POST /v1/payments/transfer-batches/{batchId}/retry.",
+  throw new AppError(
+    "TRANSFER_BATCH_RUN_EXISTS",
+    "A different transfer batch with this externalId already exists for this source wallet. Read it with GET /v1/payments/transfer-batches/{batchId}, and send its failed recipients again with POST /v1/payments/transfer-batches/{batchId}/retry. New recipients go in a new payout run with its own externalId.",
     { batchId: row.id, externalId: row.external_id }
   );
 }

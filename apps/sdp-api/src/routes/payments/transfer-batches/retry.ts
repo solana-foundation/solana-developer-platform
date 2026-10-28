@@ -3,7 +3,7 @@ import type {
   PaymentTransferRecipientRow,
 } from "@/db/repositories/payment-transfer-batches.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
-import { conflict, internalError, notFound } from "@/lib/errors";
+import { AppError, internalError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { type AuthorizeInput, getAuthorized } from "@/middleware/authorize";
 import {
@@ -153,7 +153,8 @@ function assertRecordedDestinations(
     (row, index) => row.destination_address !== resolvedAddresses[index]
   );
   if (changed.length === 0) return;
-  throw conflict(
+  throw new AppError(
+    "TRANSFER_BATCH_DESTINATION_CHANGED",
     "A failed recipient's counterparty account changed its address since the batch was sent. Nothing was sent; send that recipient in a new batch.",
     { batchId: batch.id, recipientIds: changed.map((row) => row.id) }
   );
@@ -198,7 +199,7 @@ export async function retryTransferBatch(c: AppContext) {
     offset: 0,
   });
   if (failed.rows.length === 0) {
-    throw conflict("This transfer batch has no failed recipients to retry", {
+    throw new AppError("TRANSFER_BATCH_NOTHING_TO_RETRY", undefined, {
       batchId: batch.id,
       status: batch.status,
     });
@@ -233,7 +234,8 @@ export async function retryTransferBatch(c: AppContext) {
     retry: { idempotencyKey, idempotencyFingerprint, initiatedByKeyId: authorized.scope.auth.id },
   });
   if (claimed === null) {
-    throw conflict(
+    throw new AppError(
+      "TRANSFER_BATCH_RETRY_CLAIMED",
       "Another retry of this transfer batch claimed its failed recipients first. Read the batch, then retry what is still failed.",
       { batchId: batch.id }
     );

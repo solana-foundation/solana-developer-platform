@@ -2274,7 +2274,10 @@ describe("payment transfer batches", () => {
 
       expect(changed.status).toBe(409);
       expect(await changed.json()).toMatchObject({
-        error: { code: "CONFLICT", details: { batchId: firstId, externalId: "payroll_reused" } },
+        error: {
+          code: "TRANSFER_BATCH_RUN_EXISTS",
+          details: { batchId: firstId, externalId: "payroll_reused" },
+        },
       });
       expectNothingSigned(signingOutcomeMock);
       expect(await countBatches()).toBe(1);
@@ -2302,7 +2305,7 @@ describe("payment transfer batches", () => {
 
       expect(other.status).toBe(409);
       expect(await other.json()).toMatchObject({
-        error: { code: "CONFLICT", details: { batchId: firstId } },
+        error: { code: "TRANSFER_BATCH_RUN_EXISTS", details: { batchId: firstId } },
       });
       expectNothingSigned(signingOutcomeMock);
       expect(await countBatches()).toBe(1);
@@ -2339,7 +2342,7 @@ describe("payment transfer batches", () => {
 
       expect(response.status).toBe(409);
       expect(await response.json()).toMatchObject({
-        error: { code: "CONFLICT", details: { batchId: required(racer).id } },
+        error: { code: "TRANSFER_BATCH_RUN_EXISTS", details: { batchId: required(racer).id } },
       });
       expect(signingOutcomeMock).not.toHaveBeenCalled();
       expect(sendTransactionMock).not.toHaveBeenCalled();
@@ -2664,7 +2667,10 @@ describe("payment transfer batches", () => {
 
       expect(response.status).toBe(409);
       expect(await response.json()).toMatchObject({
-        error: { code: "CONFLICT", details: { batchId: batch.id, recipientIds: [failed.id] } },
+        error: {
+          code: "TRANSFER_BATCH_DESTINATION_CHANGED",
+          details: { batchId: batch.id, recipientIds: [failed.id] },
+        },
       });
       expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
       expect(sendTransactionMock).not.toHaveBeenCalled();
@@ -2713,7 +2719,7 @@ describe("payment transfer batches", () => {
 
       expect(nothingLeft.status).toBe(409);
       expect(await nothingLeft.json()).toMatchObject({
-        error: { code: "CONFLICT", details: { batchId: batch.id } },
+        error: { code: "TRANSFER_BATCH_NOTHING_TO_RETRY", details: { batchId: batch.id } },
       });
       expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
       expect(sendTransactionMock).not.toHaveBeenCalled();
@@ -2746,7 +2752,7 @@ describe("payment transfer batches", () => {
 
       expect(response.status).toBe(409);
       expect(await response.json()).toMatchObject({
-        error: { message: expect.stringContaining("claimed its failed recipients first") },
+        error: { code: "TRANSFER_BATCH_RETRY_CLAIMED" },
       });
       expect(sendTransactionMock).not.toHaveBeenCalled();
     });
