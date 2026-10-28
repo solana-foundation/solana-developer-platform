@@ -1,0 +1,61 @@
+---
+title: Go to Mainnet
+description: Move an integration from your sandbox project to your production project on Solana mainnet.
+---
+
+Every organization has two projects: a **sandbox** project on devnet and a **production** project on mainnet-beta. Both expose the same API, so going live means getting production access, setting up custody and keys in the production project, and pointing your integration at mainnet tokens. See [Environments](/docs/developing-with-sdp#environments) for how projects carry their environment.
+
+## What changes in production
+
+| | Sandbox | Production |
+| --- | --- | --- |
+| Network | devnet | mainnet-beta |
+| Access | Available when you create your organization | Enabled per organization by the SDP team |
+| Custody | Managed or bring your own key (BYOK) | BYOK only |
+| API keys | Created in the sandbox project | Created in the production project |
+| Tokens | Devnet mints | Mainnet mints |
+
+### 1. Request production access
+
+Production access is an entitlement SDP enables for each organization; signing up does not turn it on. Contact the SDP team with your organization ID, which you can copy from the **Organization Switcher** in the top-left of the sidebar.
+
+Until access is enabled, your production project does not appear in the dashboard, and API requests against it return `403`. A signature SDP refuses for this reason carries `details.reason` set to `production_not_enabled` (see [Signing refusals](/docs/developing-with-sdp/authentication#signing-refusals)).
+
+### 2. Switch to the production project
+
+Once access is enabled, open the **Organization Switcher** and select **Default Production Project** under **Projects**. Everything you create from here on (connections, wallets, API keys) belongs to the production project.
+
+### 3. Connect your own Privy account
+
+Production projects use BYOK custody only: SDP signs with wallets in your own provider account, never under SDP's. Privy is the BYOK provider to use.
+
+Open **Wallets**, click **New wallet** on **Privy**, enter the **Privy app ID** and **Privy app secret** from your Privy dashboard, and click **Connect and verify**. Then create wallets in that connection. Through the API, create them with `POST /v1/wallets` and the connection's `connectionId`; `POST /v1/wallets/initialize` sets up Managed custody and returns `403` with `details.reason` set to `custody_mode_not_allowed` in a production project. See [Set Up Wallets](/docs/guides/setup-wallets) for both paths.
+
+### 4. Create a production API key
+
+With the production project selected, create a key on the **API keys** page. A key reaches the network of the project it was created in, so your sandbox keys keep working against devnet and the new key works against mainnet. See [Manage API Keys](/docs/developing-with-sdp/manage-api-keys).
+
+### 5. Fund wallets with tokens, not fees
+
+SDP sponsors network fees on the transfers, batches, and recurring payments it signs from your Privy wallets, and pays the rent when a transfer creates the recipient's token account. Your wallets need the tokens they send, not SOL for fees.
+
+Sponsorship is capped over time. A payment past a cap is refused with `429` and `RATE_LIMITED` rather than charged to your wallet; retry later.
+
+### 6. Use mainnet USDC
+
+Mint addresses differ between devnet and mainnet. Send `"token": "USDC"` and SDP resolves it to the mint on your project's network. To pass the mint address instead, use the mainnet USDC mint `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`. Sending the devnet USDC mint to a production project returns `400`.
+
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/payments/transfers \
+  -H "Authorization: Bearer sf_..." \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: mainnet-payout-0001" \
+  -d '{
+    "sourceCustodyWalletId": "cwlt_123",
+    "destination": "7xKXz...9fGh",
+    "token": "USDC",
+    "amount": "100.00"
+  }'
+```
+
+See [Basic payment](/docs/payments/send-basic-payment) for the full transfer flow.
