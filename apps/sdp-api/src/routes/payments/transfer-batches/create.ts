@@ -228,6 +228,9 @@ export async function findTransferBatchRecordReplay(
       respond: () => respondToTransferBatchReplay(c, settled, organizationId, authorized.projectId),
     };
   }
+  // A same-key retry of a batch created before externalId was required has
+  // no run: the request key above is all it has, and the handler refuses it.
+  if (body.externalId === undefined) return null;
   const run = await repository.findTransferBatchByIdempotency({
     organizationId,
     projectId: authorized.projectId,
@@ -260,6 +263,14 @@ export async function createTransferBatch(
 ) {
   const body = c.req.valid("json");
   const authorized = getAuthorized<AuthorizedBatchRequest>(c);
+  // Every new batch names its payout run (HOO-2335). The schema lets an
+  // omitted one through only so a legacy same-key retry reaches its replay,
+  // which has answered by now; refused before any chain read.
+  if (body.externalId === undefined) {
+    throw badRequest("Invalid request body: externalId is required to name the payout run", {
+      field: "externalId",
+    });
+  }
   const resolved = await resolveBatchMovement(body, authorized);
   // The row's key (the payout run's, never the raw client key) and the key
   // layer's fingerprint, which canonicalizes the batch body.

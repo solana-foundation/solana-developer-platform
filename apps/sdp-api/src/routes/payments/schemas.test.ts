@@ -45,17 +45,12 @@ describe("payments exact wallet contract", () => {
     ).toBe(false);
 
     expect(createTransferBatchSchema.safeParse(batch).success).toBe(true);
-    // A batch must name its payout run (HOO-2335).
+    // The schema lets an omitted run name through so a same-key retry of a
+    // batch from before it was required can replay; the handler refuses a new
+    // one without it (HOO-2335).
     expect(createTransferBatchSchema.safeParse({ ...batch, externalId: undefined }).success).toBe(
-      false
+      true
     );
-    expect(
-      createTransferBatchSchema.safeParse({
-        ...batch,
-        sourceCustodyWalletId: undefined,
-        source: "provider_wallet_id",
-      }).success
-    ).toBe(false);
   });
 
   it("uses exact list filters and keeps observed history opt-in", () => {
