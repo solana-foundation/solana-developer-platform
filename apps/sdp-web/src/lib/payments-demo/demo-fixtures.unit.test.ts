@@ -299,7 +299,7 @@ describe("paymentsDemoBody pass-through", () => {
     "/v1/payments/transfers/xfr_real",
     "/v1/payments/transfer-batches/batch_real",
     "/v1/payments/recurring-payments/prp_real",
-    "/v1/payments/subscriptions/sub_real/collection-attempts?page=1&pageSize=25",
+    "/v1/payments/recurring-payments/prp_real/collection-attempts?page=1&pageSize=25",
     "/v1/wallets/cwlt_real",
     "/v1/issuance/tokens/tok_1",
     "/health",
@@ -372,13 +372,11 @@ describe("demo world", () => {
       ).accounts;
       expect(accounts.map((account) => account.id)).toContain(schedule.counterpartyAccountId);
       expect(accounts[0]?.details.address).toBe(schedule.destinationAddress);
-      if (schedule.subscriptionId) {
-        const attempts = demoData<{ collectionAttempts: PaymentSubscriptionCollectionAttempt[] }>(
-          `/v1/payments/subscriptions/${schedule.subscriptionId}/collection-attempts?page=1&pageSize=25`
-        ).collectionAttempts;
-        for (const attempt of attempts) {
-          if (attempt.transferId) expect(transferIds.has(attempt.transferId)).toBe(true);
-        }
+      const attempts = demoData<{ collectionAttempts: PaymentSubscriptionCollectionAttempt[] }>(
+        `/v1/payments/recurring-payments/${schedule.id}/collection-attempts?page=1&pageSize=25`
+      ).collectionAttempts;
+      for (const attempt of attempts) {
+        if (attempt.transferId) expect(transferIds.has(attempt.transferId)).toBe(true);
       }
     }
 
@@ -741,10 +739,9 @@ describe("Schedules", () => {
   );
 
   it("shows a failed collection with a readable reason, then its retry", async () => {
-    const weekly = demoSchedules().find((schedule) => schedule.periodHours === 168);
     const result = await fetchRecurringPaymentCollectionAttempts(
       harness.request,
-      weekly?.subscriptionId ?? "",
+      "demo_rp_kai_weekly",
       t
     );
     expect(result.ok).toBe(true);

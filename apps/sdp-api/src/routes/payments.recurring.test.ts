@@ -75,6 +75,7 @@ import {
   installPaymentsRouteTestHooks,
   MAINNET_USDC_MINT,
   recurringCollectionTransactionForSignature,
+  rehomeTestApiKeyToProduction,
   seedCachedKey,
   seedCounterparty,
   seedProductionPrivyWallet,
@@ -752,6 +753,136 @@ describe("Payments routes — recurring", () => {
     const getBody = await parseRecurringResponse(getRes);
     expect(getBody.data.recurringPayment.id).toBe(created.id);
     expect(getBody.data.recurringPayment.status).toBe("pending_activation");
+  });
+
+  describe("collection attempts", () => {
+    function listCollectionAttempts(recurringPaymentId: string, query: string) {
+      return app.request(
+        `/v1/payments/recurring-payments/${recurringPaymentId}/collection-attempts?${query}`,
+        { headers: RECURRING_HEADERS },
+        env
+      );
+    }
+
+    it("answers 404 for a recurring payment in another project", async () => {
+      const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      await rehomeTestApiKeyToProduction();
+
+      const response = await listCollectionAttempts(created.id, "page=1&pageSize=20");
+
+      expect(response.status).toBe(404);
+      expect(errorResponseSchema.parse(await response.json()).error.message).toBe(
+        "Recurring payment not found"
+      );
+    });
+
+    it("answers an empty page for a recurring payment with no subscription yet", async () => {
+      const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+
+      const response = await listCollectionAttempts(created.id, "page=2&pageSize=5");
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        data: { collectionAttempts: [], total: 0, page: 2, pageSize: 5 },
+        meta: { requestId: expect.any(String), timestamp: expect.any(String) },
+      });
+    });
+
+    it("pages the subscription's attempts newest first and filters them by status", async () => {
+      const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const confirmedId = `psca_${crypto.randomUUID()}`;
+      const processingId = `psca_${crypto.randomUUID()}`;
+      const transferId = `xfr_${crypto.randomUUID()}`;
+      const collectionSignature = testSignature(71);
+      const journal = {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        recurringPaymentId: activated.id,
+        subscriptionId: activated.subscriptionId,
+        token: DEVNET_USDC_MINT,
+        amount: "25.00",
+      };
+      await seedRecurringCollectionJournal({
+        ...journal,
+        stage: "confirmed",
+        attemptId: confirmedId,
+        collectionDueAt: "2026-01-01T00:00:00.000Z",
+        attemptedAt: "2026-01-01T00:01:00.000Z",
+        transfer: {
+          id: transferId,
+          walletId: TEST_WALLET_ID,
+          counterpartyId: activated.counterpartyId,
+          sourceAddress: recurringExecution.sourceSigner().address,
+          destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
+          signature: collectionSignature,
+        },
+      });
+      await seedRecurringCollectionJournal({
+        ...journal,
+        stage: "claimed",
+        attemptId: processingId,
+        collectionDueAt: "2026-01-02T00:00:00.000Z",
+        attemptedAt: "2026-01-02T00:01:00.000Z",
+      });
+      const attempt = {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        subscriptionId: activated.subscriptionId,
+        token: DEVNET_USDC_MINT,
+        amount: "25.00",
+        error: null,
+        metadata: { source: "manual", recurringPaymentId: activated.id, initiatedByKeyId: null },
+      };
+      const meta = { requestId: expect.any(String), timestamp: expect.any(String) };
+
+      const older = await listCollectionAttempts(activated.id, "page=2&pageSize=1");
+      expect(older.status).toBe(200);
+      expect(await older.json()).toEqual({
+        data: {
+          collectionAttempts: [
+            {
+              ...attempt,
+              id: confirmedId,
+              transferId,
+              dueAt: "2026-01-01T00:00:00.000Z",
+              attemptedAt: "2026-01-01T00:01:00.000Z",
+              status: "confirmed",
+              signature: collectionSignature,
+              createdAt: "2026-01-01T00:01:00.000Z",
+              updatedAt: "2026-01-01T00:01:00.000Z",
+            },
+          ],
+          total: 2,
+          page: 2,
+          pageSize: 1,
+        },
+        meta,
+      });
+
+      const processing = await listCollectionAttempts(activated.id, "status=processing");
+      expect(processing.status).toBe(200);
+      expect(await processing.json()).toEqual({
+        data: {
+          collectionAttempts: [
+            {
+              ...attempt,
+              id: processingId,
+              transferId: null,
+              dueAt: "2026-01-02T00:00:00.000Z",
+              attemptedAt: "2026-01-02T00:01:00.000Z",
+              status: "processing",
+              signature: null,
+              createdAt: "2026-01-02T00:01:00.000Z",
+              updatedAt: "2026-01-02T00:01:00.000Z",
+            },
+          ],
+          total: 1,
+          page: 1,
+          pageSize: 20,
+        },
+        meta,
+      });
+    });
   });
 
   it("fails closed before signing when a recurring payment has no exact wallet pin", async () => {

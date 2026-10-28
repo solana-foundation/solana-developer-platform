@@ -574,9 +574,8 @@ describe("requests and schedules", () => {
     expect((await run("activate")).body.data.recurringPayment.status).toBe("active");
     const collected = await run("collect");
     expect(collected.status).toBe(200);
-    const schedule = collected.body.data.recurringPayment;
     const attempts = await data<{ collectionAttempts: { status: string }[] }>(
-      `/v1/payments/subscriptions/${schedule.subscriptionId}/collection-attempts`
+      `/v1/payments/recurring-payments/${id}/collection-attempts`
     );
     expect(attempts.collectionAttempts.map((attempt) => attempt.status)).toEqual(["confirmed"]);
     expect((await run("collect")).status).toBe(409);

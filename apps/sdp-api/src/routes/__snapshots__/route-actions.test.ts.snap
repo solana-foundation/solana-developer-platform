@@ -229,6 +229,7 @@ exports[`route actions > pins each route's action 1`] = `
   "recurring.manage POST /v1/payments/subscriptions/:subscriptionId/prepare-cancel",
   "recurring.read GET /v1/payments/recurring-payments",
   "recurring.read GET /v1/payments/recurring-payments/:id",
+  "recurring.read GET /v1/payments/recurring-payments/:id/collection-attempts",
   "recurring.read GET /v1/payments/subscription-plans",
   "recurring.read GET /v1/payments/subscription-plans/:planId",
   "recurring.read GET /v1/payments/subscriptions",

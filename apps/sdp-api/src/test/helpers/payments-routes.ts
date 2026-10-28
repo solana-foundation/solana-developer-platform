@@ -334,12 +334,17 @@ export async function seedProductionPrivyWallet(wallet: {
     custodyWalletId: wallet.custodyWalletId,
     publicKey: wallet.publicKey,
   });
+  await rehomeTestApiKeyToProduction();
+  return walletId;
+}
+
+/** Re-home the seeded API key, row and cached copy, onto the organization's Production project. */
+export async function rehomeTestApiKeyToProduction(): Promise<void> {
   await getDb(env)
     .prepare("UPDATE api_keys SET project_id = ? WHERE id = ?")
     .bind(TEST_PRODUCTION_PROJECT_ID, TEST_API_KEY.id)
     .run();
   await seedCachedKey({ projectId: TEST_PRODUCTION_PROJECT_ID, environment: "production" });
-  return walletId;
 }
 
 /**

@@ -139,16 +139,6 @@ const WALLET_SCOPE_ROUTES = {
   "POST /v1/payments/recurring-payments/:id/cancel": {
     refusedEarly: { file: RECURRING, test: RECURRING_ACTIVE },
   },
-  "POST /v1/payments/subscription-plans": { exempt: SPONSOR_ONLY },
-  "PATCH /v1/payments/subscription-plans/:planId": { exempt: SPONSOR_ONLY },
-  "POST /v1/payments/subscription-plans/:planId/prepare-create": { exempt: SPONSOR_ONLY },
-  "POST /v1/payments/subscriptions": { exempt: SPONSOR_ONLY },
-  "POST /v1/payments/subscriptions/:subscriptionId/prepare-authorization": {
-    exempt: SPONSOR_ONLY,
-  },
-  "POST /v1/payments/subscriptions/:subscriptionId/prepare-cancel": { exempt: SPONSOR_ONLY },
-  "POST /v1/payments/subscriptions/:subscriptionId/prepare-collection": { exempt: SPONSOR_ONLY },
-  "POST /v1/payments/subscriptions/:subscriptionId/prepare-resume": { exempt: SPONSOR_ONLY },
 
   // DvP
   "POST /v1/dvp/trades": {
