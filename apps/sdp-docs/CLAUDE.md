@@ -131,7 +131,7 @@ Popovers (`fumadocs-ui/components/ui/popover`) render in a portal outside `.sdp-
 
 ### Navigation node icons (`navigation-node.tsx`)
 
-Sidebar icons are optional and opt-in per page/folder. Set `icon: <LucideName>` (e.g. `icon: BookOpen`) in a page's MDX frontmatter or a folder's `meta.json`; the loader in `src/lib/source.ts` resolves the name against `lucide-react` exports (unknown names throw at build time) and `NavigationNode` renders it before the label via `.launch-docs-nav-icon`. Pages without an `icon` stay text-only. The folder expand/collapse chevron (`ChevronDown` / `ChevronRight`) is unrelated and always shown.
+Sidebar icons are optional and opt-in per page/folder. Set `icon: <LucideName>` (e.g. `icon: BookOpen`) in a page's MDX frontmatter or a folder's `meta.json`; the loader in `src/lib/source.ts` resolves the name against `lucide-react` exports (unknown names throw at build time) and `NavigationNode` renders it before the label via `.launch-docs-nav-icon`. Pages without an `icon` stay text-only. The folder expand/collapse chevron (one `ChevronRight` that turns to point down while the folder is open, on the motion tokens; the toggle carries `aria-expanded`) is unrelated and always shown.
 
 ### Search
 

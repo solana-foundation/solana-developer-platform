@@ -487,6 +487,15 @@ body {
   height: 12px;
 }
 
+/* A folder's chevron turns from right to down as it opens, like the menu chevrons. */
+.launch-docs-nav-chevron {
+  transition: transform var(--motion-duration-base) var(--motion-ease-out);
+}
+
+[aria-expanded="true"] > .launch-docs-nav-chevron {
+  transform: rotate(90deg);
+}
+
 .launch-docs-nav-children {
   margin: 1px 0 4px;
 }
