@@ -210,13 +210,6 @@ describe("renderOperation", () => {
 
 describe("the operation's panel", () => {
   const markdown = renderOperation(CREATE_WIDGET);
-  const long = renderOperation({
-    ...CREATE_WIDGET,
-    request: {
-      path: "/v1/widgets/wdg_1",
-      body: Object.fromEntries(Array.from({ length: 20 }, (_, index) => [`field${index}`, index])),
-    },
-  });
 
   it("holds the samples and example responses, after the responses list", () => {
     const panel = markdown.slice(markdown.indexOf("<ApiPanel>"), markdown.indexOf("</ApiPanel>"));
@@ -227,19 +220,12 @@ describe("the operation's panel", () => {
     assert.ok(markdown.endsWith("</ApiPanel>\n\n</ApiOperation>"));
   });
 
-  it("folds a sample only when one of its languages runs past the fold", () => {
-    assert.ok(!markdown.includes("<ApiFold>"));
-    assert.ok(long.includes("<ApiFold>\n\n```bash"));
-  });
-
   it("unwraps into the Markdown it holds, links and all", () => {
-    for (const page of [markdown, long]) {
-      const expanded = expandDocsBlocks(`${page}\n`, "widgets/create-widget.mdx");
-      assert.ok(!/<\/?Api(Operation|Panel|Fold|Endpoint)/.test(expanded));
-      assert.ok(expanded.startsWith("`POST /v1/widgets/{widgetId}`\n\nThen it shapes it"));
-      assert.ok(expanded.includes("## Example request\n\n```bash"));
-      assert.ok(expanded.includes("[API key](/docs/developing-with-sdp/authentication) with"));
-    }
+    const expanded = expandDocsBlocks(`${markdown}\n`, "widgets/create-widget.mdx");
+    assert.ok(!/<\/?Api(Operation|Panel|Endpoint)/.test(expanded));
+    assert.ok(expanded.startsWith("`POST /v1/widgets/{widgetId}`\n\nThen it shapes it"));
+    assert.ok(expanded.includes("## Example request\n\n```bash"));
+    assert.ok(expanded.includes("[API key](/docs/developing-with-sdp/authentication) with"));
   });
 });
 

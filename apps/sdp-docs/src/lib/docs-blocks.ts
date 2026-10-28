@@ -146,16 +146,14 @@ function isElementName(name: string | null): name is ElementName {
  * Wrappers a page lays its Markdown out with. In Markdown each one goes and its content stays.
  * `<ApiOperationTable>` holds a family's table of operations: on the page each row links to its
  * operation's page, and in Markdown to that page's `.md`, so an agent reading a family reads on
- * in Markdown. The others only lay a page out: `<ActionLinks>` sets its links as chips,
- * `<ApiOperation>` an operation's body beside its `<ApiPanel>` of samples, and `<ApiFold>` folds
- * a long sample.
+ * in Markdown. The others only lay a page out: `<ActionLinks>` sets its links as chips, and
+ * `<ApiOperation>` an operation's body beside its `<ApiPanel>` of samples.
  */
 const WRAPPERS = {
   ApiOperationTable: "links",
   ActionLinks: "layout",
   ApiOperation: "layout",
   ApiPanel: "layout",
-  ApiFold: "layout",
 } as const satisfies Record<string, "links" | "layout">;
 
 type Wrapper = {

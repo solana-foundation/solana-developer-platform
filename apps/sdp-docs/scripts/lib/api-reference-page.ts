@@ -19,9 +19,8 @@ import { canonicalSite } from "@/lib/site";
  * (`<family>/index.mdx`), and per operation, its own page (`<family>/<endpointId>.mdx`) with its
  * parameters, request body, responses, a cURL, TypeScript and Python sample and an example per
  * status. Each page renders, searches and serves as `.md` from the same text; the components it
- * places (`<ApiEndpoint />`, and the wrappers `<ApiOperationTable>`, `<ApiOperation>`,
- * `<ApiPanel>`, `<ApiFold>`) have their Markdown forms in `expandDocsBlocks`
- * (`src/lib/docs-blocks.ts`).
+ * places (`<ApiEndpoint />`, and the wrappers `<ApiOperationTable>`, `<ApiOperation>` and
+ * `<ApiPanel>`) have their Markdown forms in `expandDocsBlocks` (`src/lib/docs-blocks.ts`).
  */
 
 const SNIPPET_FENCES = {
@@ -47,9 +46,6 @@ const PARAMETER_HEADINGS = {
 const GENERIC_ERROR_DESCRIPTION = "Error";
 
 const AUTHENTICATION_GUIDE = "/docs/developing-with-sdp/authentication";
-
-/** A sample longer than this many lines starts folded on the page (`<ApiFold>`). */
-const FOLD_LINES = 16;
 
 /** Text from the document as MDX: outside a code span, `{`, `}` and `<` would open JSX. */
 export function mdxText(value: string): string {
@@ -294,14 +290,10 @@ function sampleFences(operation: ApiOperation): string[] {
     auth: operation.auth,
     takesIdempotencyKey: operation.takesIdempotencyKey,
   });
-  const fences = SNIPPET_LANGUAGES.flatMap((language) => {
+  return SNIPPET_LANGUAGES.flatMap((language) => {
     const fenceLanguage = SNIPPET_FENCES[language].language;
     return [fence(fenceLanguage, sampleTabMarker(language), snippets[language]), ""];
   });
-  const longest = Math.max(
-    ...SNIPPET_LANGUAGES.map((language) => snippets[language].split("\n").length)
-  );
-  return longest > FOLD_LINES ? ["<ApiFold>", "", ...fences, "</ApiFold>", ""] : fences;
 }
 
 function exampleResponseFences(responses: ApiResponse[]): string[] {
