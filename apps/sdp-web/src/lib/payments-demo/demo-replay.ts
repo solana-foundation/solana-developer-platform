@@ -363,12 +363,26 @@ function applyRequest(world: DemoWorld, op: DemoOpOf<"request">): void {
     status: "awaiting_payment",
     expiresAt: op.expires,
     fulfilledByTransferId: null,
-    canceledBy: null,
+    paidLate: false,
+    canceledByApiKeyId: null,
+    canceledByUserId: null,
+    canceledAt: null,
     lifecycle: [{ status: "awaiting_payment", at: createdAt }],
     createdBy: CREATED_BY,
     createdAt,
     updatedAt: createdAt,
   });
+}
+
+function applyRequestCancel(world: DemoWorld, op: DemoOpOf<"request-cancel">): void {
+  const request = world.requests.find((candidate) => candidate.id === op.id);
+  if (request?.status !== "awaiting_payment") return;
+  const canceledAt = iso(op.at);
+  request.status = "canceled";
+  request.canceledByUserId = CREATED_BY;
+  request.canceledAt = canceledAt;
+  request.lifecycle = [...request.lifecycle, { status: "canceled", at: canceledAt }];
+  request.updatedAt = canceledAt;
 }
 
 function applySchedule(world: DemoWorld, op: DemoOpOf<"schedule">): void {
@@ -538,6 +552,9 @@ function applyOp(world: DemoWorld, op: DemoOp, now: number): void {
       return;
     case "request":
       applyRequest(world, op);
+      return;
+    case "request-cancel":
+      applyRequestCancel(world, op);
       return;
     case "schedule":
       applySchedule(world, op);

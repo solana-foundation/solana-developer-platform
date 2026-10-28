@@ -22,12 +22,8 @@ import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
 import * as repositoryFactory from "@/db/repositories/repository-factory";
-import {
-  createPaymentRequestsRepository,
-  createSystemPaymentRequestsRepository,
-} from "@/db/repositories/repository-factory";
+import { createSystemPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { app } from "@/index";
-import { createTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
 import * as paymentRequests from "@/services/payments/payment-requests";
 import * as sponsorshipService from "@/services/sponsorship.service";
@@ -40,6 +36,7 @@ import {
 import { seedUnreadPrivyWallet } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { syntheticAddress } from "@/test/helpers/parsed-transactions";
+import { cancelSeededPaymentRequest, seedPaymentRequest } from "@/test/helpers/payment-requests";
 import {
   createKoraAdapterMock,
   getRecentBlockhashMock,
@@ -132,10 +129,7 @@ describe("Public payment request routes", () => {
   }
 
   function createAwaitingTokenPaymentRequest(wallet: RequestWallet, token: string) {
-    return createPaymentRequestsRepository(
-      env,
-      createTenantScope({ organizationId: TEST_ORG.id, projectId: wallet.projectId })
-    ).createPaymentRequest({
+    return seedPaymentRequest(env, {
       organizationId: TEST_ORG.id,
       projectId: wallet.projectId,
       custodyWalletId: wallet.custodyWalletId,
@@ -206,6 +200,23 @@ describe("Public payment request routes", () => {
       expect(rpc.calls).toEqual([]);
     }
   );
+
+  it("refuses to build a transaction for a canceled request", async () => {
+    const sponsorship = stubSponsorship();
+    const request = await cancelSeededPaymentRequest(
+      env,
+      await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET),
+      { apiKeyId: null, userId: TEST_USER.id }
+    );
+
+    const response = await postTransaction(request.public_token);
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: { message: "Payment request is no longer payable" },
+    });
+    expect(sponsorship).not.toHaveBeenCalled();
+  });
 
   it("keeps an unresolved legacy request readable but refuses to build its transaction", async () => {
     const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
@@ -529,10 +540,7 @@ describe("Public payment request routes", () => {
       const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
       expect((await postTransaction(request.public_token)).status).toBe(200);
 
-      const expiry = vi
-        .spyOn(paymentRequests, "isPaymentRequestExpired")
-        .mockReturnValueOnce(false)
-        .mockReturnValue(true);
+      const expiry = vi.spyOn(paymentRequests, "isPaymentRequestExpired").mockReturnValue(true);
       onTestFinished(() => expiry.mockRestore());
 
       const replay = await postTransaction(request.public_token);
@@ -540,7 +548,7 @@ describe("Public payment request routes", () => {
       expect(await replay.json()).not.toHaveProperty("transaction");
     });
 
-    it("answers no longer payable when the claim is lost to the deadline", async () => {
+    it("answers no longer payable when the claim is lost to a cancel", async () => {
       const sponsorship = stubSponsorship();
       const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
       const systemRepository = repositoryFactory.createSystemPaymentRequestsRepository;
@@ -548,15 +556,16 @@ describe("Public payment request routes", () => {
         .spyOn(repositoryFactory, "createSystemPaymentRequestsRepository")
         .mockImplementation((bindings) => {
           const repository = systemRepository(bindings);
-          vi.spyOn(repository, "claimSponsoredTransactionWindow").mockResolvedValue(false);
+          vi.spyOn(repository, "claimSponsoredTransactionWindow").mockImplementation(async () => {
+            await cancelSeededPaymentRequest(env, request, {
+              apiKeyId: null,
+              userId: TEST_USER.id,
+            });
+            return false;
+          });
           return repository;
         });
       onTestFinished(() => factory.mockRestore());
-      const expiry = vi
-        .spyOn(paymentRequests, "isPaymentRequestExpired")
-        .mockReturnValueOnce(false)
-        .mockReturnValue(true);
-      onTestFinished(() => expiry.mockRestore());
 
       const response = await postTransaction(request.public_token);
 

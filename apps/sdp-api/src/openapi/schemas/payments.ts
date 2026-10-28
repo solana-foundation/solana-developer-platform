@@ -1,6 +1,7 @@
 import { COUNTERPARTY_ENTITY_TYPES } from "@sdp/types/counterparties";
 import { OFFRAMP_CRYPTO_RAILS, ONRAMP_CRYPTO_RAILS } from "@sdp/types/payment-rails";
 import {
+  PAYMENT_REQUEST_STATUSES,
   paymentSubscriptionCollectionAttemptMetadataSchema,
   paymentTransferBatchEstimateWarningSchema,
   RAMP_DELIVERY_MISMATCH_REASONS,
@@ -9,6 +10,7 @@ import {
 import { PERSISTED_RAMP_PROVIDERS, RAMP_PROVIDERS } from "@sdp/types/provider-access";
 import { UNIFIED_TRANSACTION_MODULE_CONTRACTS } from "@sdp/types/unified-transactions";
 import { z } from "zod";
+import { paymentRequestParamsSchema as paymentRequestParamsSchemaBase } from "@/routes/payments/payment-requests/schemas";
 import { listOfframpCurrenciesQuerySchema as listOfframpCurrenciesQuerySchemaBase } from "@/routes/payments/ramps/offramp/schemas";
 import {
   createOnrampQuoteSchema as createOnrampQuoteSchemaBase,
@@ -675,6 +677,70 @@ export const paymentRecurringPaymentIdParamsSchema = recurringPaymentIdParamsSch
     }),
   })
   .openapi({ description: "Recurring payment path parameters." });
+
+export const paymentRequestIdParamsSchema = paymentRequestParamsSchemaBase
+  .extend({
+    paymentRequestId: withOpenApi(paymentRequestParamsSchemaBase.shape.paymentRequestId, {
+      description: "SDP payment request ID.",
+      example: "preq_example",
+    }),
+  })
+  .openapi({ description: "Payment request path parameters." });
+
+const paymentRequestStatusSchema = z.enum(PAYMENT_REQUEST_STATUSES).openapi({
+  description:
+    "Payment request status. `awaiting_payment` is open; `paid` was settled by an on-chain payment; `canceled` and `expired` closed without one.",
+  example: "canceled",
+});
+
+export const paymentRequestSchema = z
+  .object({
+    id: z.string().openapi({ description: "SDP payment request ID.", example: "preq_example" }),
+    organizationId: z.string().openapi({ description: "Organization ID." }),
+    projectId: z.string().nullable().openapi({ description: "Project ID." }),
+    walletId: z.string().openapi({ description: "Receiving custody wallet's provider ID." }),
+    destinationAddress: solanaAddressSchema.openapi({
+      description: "Address the payment is sent to.",
+    }),
+    token: z.string().openapi({ description: "Token mint address." }),
+    amount: tokenAmountSchema,
+    reference: solanaAddressSchema.openapi({
+      description: "Solana Pay reference account that identifies the payment on chain.",
+    }),
+    status: paymentRequestStatusSchema,
+    expiresAt: isoDateTimeSchema.nullable().openapi({ description: "Expiry, if any." }),
+    fulfilledByTransferId: z
+      .string()
+      .nullable()
+      .openapi({ description: "The inbound transfer that paid the request." }),
+    paidLate: z.boolean().openapi({
+      description:
+        "Whether the payment landed after the request expired or was canceled. A payer who signed before then can still pay.",
+    }),
+    lastCheckedAt: isoDateTimeSchema
+      .nullable()
+      .openapi({ description: "When SDP last read the chain for the payment." }),
+    canceledByApiKeyId: z.string().nullable().openapi({
+      description:
+        "The API key that canceled the request; null when a member did, or it is not canceled.",
+    }),
+    canceledByUserId: z.string().nullable().openapi({
+      description:
+        "User ID of the member who canceled the request; null when an API key did, or it is not canceled.",
+    }),
+    canceledAt: isoDateTimeSchema.nullable().openapi({ description: "When it was canceled." }),
+    lifecycle: z
+      .array(z.object({ status: paymentRequestStatusSchema, at: isoDateTimeSchema }))
+      .openapi({ description: "Every status the request entered, oldest first." }),
+    createdBy: z.string().nullable().openapi({
+      description: "User ID of the member, or of the API key's creator, who created it.",
+    }),
+    createdAt: isoDateTimeSchema,
+    updatedAt: isoDateTimeSchema,
+  })
+  .openapi({
+    description: "A payment request. Reads never carry its link token.",
+  });
 
 export const paymentSubscriptionPlanIdParamsSchema = subscriptionPlanIdParamsSchemaBase
   .extend({
