@@ -1,5 +1,5 @@
 import { createClusterRpc } from "@sdp/rpc/factory";
-import { getAccountInfo, getMinimumBalanceForRentExemption, type SolanaRpc } from "@sdp/rpc/solana";
+import { getAccountInfo, type SolanaRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import {
@@ -8,16 +8,10 @@ import {
   createNoopSigner,
   type JsonParsedTokenAccount,
   type TransactionSigner,
-  unwrapOption,
 } from "@solana/kit";
 import {
-  type Extension,
-  type ExtensionArgs,
-  extension,
-  fetchMint,
   findAssociatedTokenPda,
   getCreateAssociatedTokenIdempotentInstruction,
-  getTokenSize,
   getTransferCheckedInstruction,
 } from "@solana-program/token-2022";
 import { badRequest } from "@/lib/errors";
@@ -276,84 +270,6 @@ export async function buildSplTransferInstructions(input: {
       { programAddress: tokenProgram }
     ),
   };
-}
-
-/**
- * The account extensions Token-2022 adds to every token account of a mint carrying each mint
- * extension (`required_init_account_extensions`, token-2022 `interface/src/extension/mod.rs`; the
- * kit codec names the program's `Pausable` `PausableConfig`). Mint extensions absent here require
- * none.
- */
-const ACCOUNT_EXTENSIONS_REQUIRED_BY_MINT = [
-  {
-    mintExtension: "TransferFeeConfig",
-    accountExtensions: [extension("TransferFeeAmount", { withheldAmount: 0n })],
-  },
-  {
-    mintExtension: "NonTransferable",
-    accountExtensions: [extension("NonTransferableAccount", {}), extension("ImmutableOwner", {})],
-  },
-  {
-    mintExtension: "TransferHook",
-    accountExtensions: [extension("TransferHookAccount", { transferring: false })],
-  },
-  {
-    mintExtension: "PausableConfig",
-    accountExtensions: [extension("PausableAccount", {})],
-  },
-] as const satisfies ReadonlyArray<{
-  mintExtension: Extension["__kind"];
-  accountExtensions: readonly ExtensionArgs[];
-}>;
-
-/**
- * The data size of a new associated token account for `mint`, as the ATA program allocates it: the
- * base account for SPL Token, and for Token-2022 the base account plus `ImmutableOwner` (which the
- * ATA program always requests) and every extension the mint requires on its accounts. That set
- * stays far below the 355-byte multisig length, so Token-2022's multisig padding never applies.
- *
- * @param mint - The token mint.
- * @param tokenProgram - The mint's owning token program.
- * @returns The account data size in bytes.
- */
-async function readAssociatedTokenAccountSize(
-  mint: Address,
-  tokenProgram: Address
-): Promise<number> {
-  if (tokenProgram !== SPL_TOKEN_2022_PROGRAM_ID) {
-    return getTokenSize();
-  }
-  const decoded = await fetchMint(createClusterRpc(), mint, { commitment: "confirmed" });
-  const mintExtensions = unwrapOption(decoded.data.extensions);
-  const mintExtensionKinds = new Set(
-    mintExtensions === null ? [] : mintExtensions.map((mintExtension) => mintExtension.__kind)
-  );
-  const accountExtensions = new Map<ExtensionArgs["__kind"], ExtensionArgs>([
-    ["ImmutableOwner", extension("ImmutableOwner", {})],
-  ]);
-  for (const requirement of ACCOUNT_EXTENSIONS_REQUIRED_BY_MINT) {
-    if (!mintExtensionKinds.has(requirement.mintExtension)) continue;
-    for (const accountExtension of requirement.accountExtensions) {
-      accountExtensions.set(accountExtension.__kind, accountExtension);
-    }
-  }
-  return getTokenSize([...accountExtensions.values()]);
-}
-
-/**
- * The rent-exempt lamports whoever pays for a new associated token account of `mint` funds when an
- * idempotent create finds it absent, sized by the mint's token program and extensions.
- *
- * @param mint - The token mint.
- * @param tokenProgram - The mint's owning token program.
- * @returns The rent-exempt minimum for one new associated token account, in lamports.
- */
-export async function readAssociatedTokenAccountRent(
-  mint: Address,
-  tokenProgram: Address
-): Promise<bigint> {
-  const size = await readAssociatedTokenAccountSize(mint, tokenProgram);
-  return getMinimumBalanceForRentExemption(createClusterRpc(), size);
 }
 
 async function findSourceTokenAccount(

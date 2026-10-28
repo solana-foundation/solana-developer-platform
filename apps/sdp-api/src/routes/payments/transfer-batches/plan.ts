@@ -1,11 +1,13 @@
 import { createClusterRpc } from "@sdp/rpc/factory";
-import { GET_MULTIPLE_ACCOUNTS_LIMIT } from "@sdp/rpc/solana";
+import { currentClusterScope } from "@sdp/rpc/scope";
+import { GET_MULTIPLE_ACCOUNTS_LIMIT, getMinimumBalanceForRentExemption } from "@sdp/rpc/solana";
 import { type Address, fetchEncodedAccounts, type TransactionSigner } from "@solana/kit";
 import { solanaRpcError } from "@/lib/errors";
-import { readAssociatedTokenAccountRent } from "@/routes/payments/token-accounts";
 import {
-  buildInstructionGroups,
+  buildSolInstructionGroups,
+  buildSplInstructionGroups,
   chunkInstructionGroups,
+  deriveDestinationTokenAccounts,
   type RecipientInstructionGroup,
   type SponsoredRentBudget,
   type TransactionChunk,
@@ -13,15 +15,48 @@ import {
 import type { RecentBlockhash, ResolvedRecipient, TokenContext } from "./types";
 
 /**
- * Which of `accounts` do not exist at `confirmed`, one `getMultipleAccounts` per
- * {@link GET_MULTIPLE_ACCOUNTS_LIMIT} addresses.
+ * Rent-exempt minimums by cluster and data size. They follow the cluster's rent parameters, which
+ * do not change while a process runs; a failed read is forgotten.
+ */
+const rentByClusterAndSize = new Map<string, Promise<bigint>>();
+
+/**
+ * The rent-exempt minimum for an account of `size` bytes on the open scope's cluster, read once
+ * per process per cluster and size.
  *
- * @param accounts - Distinct account addresses to look up.
- * @returns The addresses with no account.
+ * @param size - Account data size in bytes.
+ * @returns The rent-exempt minimum, in lamports.
+ */
+function readRentExemption(size: number): Promise<bigint> {
+  const cacheKey = `${currentClusterScope().cluster}:${size}`;
+  const cached = rentByClusterAndSize.get(cacheKey);
+  if (cached !== undefined) return cached;
+  const read = getMinimumBalanceForRentExemption(createClusterRpc(), size).catch(
+    (error: unknown) => {
+      rentByClusterAndSize.delete(cacheKey);
+      throw error;
+    }
+  );
+  rentByClusterAndSize.set(cacheKey, read);
+  return read;
+}
+
+/**
+ * Classifies recipient token account addresses at `confirmed`, one `getMultipleAccounts` per
+ * {@link GET_MULTIPLE_ACCOUNTS_LIMIT} addresses: an address owned by the token program is an
+ * initialized token account, one with no account is missing, and any other account (lamports sent
+ * to the address, so system-owned) is prefunded.
+ *
+ * @param accounts - Distinct token account addresses.
+ * @param tokenProgram - The batch mint's token program.
+ * @returns The missing and the prefunded addresses.
  * @throws AppError `SOLANA_RPC_ERROR` when the RPC answers for a different number of addresses
  *   than it was asked about.
  */
-async function readMissingAccounts(accounts: readonly Address[]): Promise<Set<Address>> {
+async function readTokenAccountStates(
+  accounts: readonly Address[],
+  tokenProgram: Address
+): Promise<{ missing: Set<Address>; prefunded: Set<Address> }> {
   const rpc = createClusterRpc();
   const slices: Address[][] = [];
   for (let start = 0; start < accounts.length; start += GET_MULTIPLE_ACCOUNTS_LIMIT) {
@@ -39,63 +74,30 @@ async function readMissingAccounts(accounts: readonly Address[]): Promise<Set<Ad
       return sliceAccounts;
     })
   );
-  return new Set(
-    fetched
-      .flat()
-      .filter((account) => !account.exists)
-      .map((account) => account.address)
-  );
-}
-
-/**
- * Reads what the fee payer funds for the batch's recipient token accounts: the rent of one new
- * account for the batch's mint, and which recipient accounts are absent now.
- *
- * @param params.tokenContext - Resolved token parameters for the batch.
- * @param params.groups - Instruction groups with derived destination token accounts.
- * @param params.maxLamportsPerTransaction - Kora's per-transaction fee-payer outflow limit.
- * @returns The rent budget the chunker packs against.
- */
-async function readSponsoredRentBudget(params: {
-  tokenContext: TokenContext;
-  groups: RecipientInstructionGroup[];
-  maxLamportsPerTransaction: bigint;
-}): Promise<SponsoredRentBudget> {
-  if (params.tokenContext.kind === "sol") {
-    return {
-      maxLamportsPerTransaction: params.maxLamportsPerTransaction,
-      rentPerTokenAccount: 0n,
-      missingTokenAccounts: new Set(),
-    };
+  const missing = new Set<Address>();
+  const prefunded = new Set<Address>();
+  for (const account of fetched.flat()) {
+    if (!account.exists) {
+      missing.add(account.address);
+    } else if (account.programAddress !== tokenProgram) {
+      prefunded.add(account.address);
+    }
   }
-
-  const tokenAccounts = new Set(
-    params.groups.flatMap((group) =>
-      group.destinationTokenAccount === undefined ? [] : [group.destinationTokenAccount]
-    )
-  );
-  const [rentPerTokenAccount, missingTokenAccounts] = await Promise.all([
-    readAssociatedTokenAccountRent(
-      params.tokenContext.mintAddress,
-      params.tokenContext.tokenProgram
-    ),
-    readMissingAccounts([...tokenAccounts]),
-  ]);
-  return {
-    maxLamportsPerTransaction: params.maxLamportsPerTransaction,
-    rentPerTokenAccount,
-    missingTokenAccounts,
-  };
+  return { missing, prefunded };
 }
 
 /**
- * Plans a batch's transactions, for create and `/estimate` alike so both report the same chunks:
- * per-recipient instruction groups, the rent the fee payer funds for recipient token accounts
- * absent now, and chunks that keep that rent within Kora's per-transaction outflow limit.
+ * Plans a batch's transactions, for create and `/estimate` alike so both report the same chunks.
  *
- * A token account that appears after planning only makes its idempotent create free. One closed
- * after planning makes its chunk fund more rent than planned; Kora's simulation at signing sees
- * the real outflow and refuses that chunk, which the chunk's executor settles as failed.
+ * Kora (deployed revision `f0377c0`) charges every fee-payer-funded ATA create against
+ * `max_allowed_lamports` at full rent unless its simulation shows the inner `CreateAccount`,
+ * idempotent creates of accounts that already exist included. So the plan reads each recipient's
+ * token account first, emits a create only for the missing ones, and packs chunks so their rent
+ * stays within the limit; recipients whose account exists cost nothing against it.
+ *
+ * A token account that appears after planning makes its create fund nothing, which Kora still
+ * charges as planned. One closed after planning has no create, so its `transferChecked` fails in
+ * simulation and the chunk's executor settles it as failed.
  *
  * @param params.tokenContext - Resolved token parameters for the batch.
  * @param params.recipients - Resolved recipients with base-unit amounts.
@@ -105,7 +107,7 @@ async function readSponsoredRentBudget(params: {
  * @param params.maxRecipientsPerTransaction - Upper bound on recipients per chunk.
  * @param params.maxSponsoredLamportsPerTransaction - Kora's `max_allowed_lamports`.
  * @returns The chunks to submit and the rent budget they were packed against.
- * @throws AppError `SIGNING_REJECTED` when one recipient's new token account alone exceeds the limit.
+ * @throws AppError `RECIPIENT_NOT_SPONSORABLE` for a recipient the fee sponsor can never fund.
  */
 export async function planBatchTransactions(params: {
   tokenContext: TokenContext;
@@ -116,17 +118,43 @@ export async function planBatchTransactions(params: {
   maxRecipientsPerTransaction: number;
   maxSponsoredLamportsPerTransaction: bigint;
 }): Promise<{ chunks: TransactionChunk[]; rentBudget: SponsoredRentBudget }> {
-  const groups = await buildInstructionGroups({
-    tokenContext: params.tokenContext,
-    recipients: params.recipients,
-    sourceSigner: params.sourceSigner,
-    feePayer: params.feePayer,
-  });
-  const rentBudget = await readSponsoredRentBudget({
-    tokenContext: params.tokenContext,
-    groups,
-    maxLamportsPerTransaction: params.maxSponsoredLamportsPerTransaction,
-  });
+  const { tokenContext } = params;
+  let groups: RecipientInstructionGroup[];
+  let rentBudget: SponsoredRentBudget;
+  if (tokenContext.kind === "sol") {
+    groups = buildSolInstructionGroups({
+      recipients: params.recipients,
+      sourceSigner: params.sourceSigner,
+    });
+    rentBudget = {
+      maxLamportsPerTransaction: params.maxSponsoredLamportsPerTransaction,
+      rentPerTokenAccount: 0n,
+      missingTokenAccounts: new Set(),
+      prefundedTokenAccounts: new Set(),
+    };
+  } else {
+    const recipients = await deriveDestinationTokenAccounts(tokenContext, params.recipients);
+    const [rentPerTokenAccount, states] = await Promise.all([
+      readRentExemption(tokenContext.newTokenAccountSize),
+      readTokenAccountStates(
+        [...new Set(recipients.map((recipient) => recipient.destinationTokenAccount))],
+        tokenContext.tokenProgram
+      ),
+    ]);
+    rentBudget = {
+      maxLamportsPerTransaction: params.maxSponsoredLamportsPerTransaction,
+      rentPerTokenAccount,
+      missingTokenAccounts: states.missing,
+      prefundedTokenAccounts: states.prefunded,
+    };
+    groups = buildSplInstructionGroups({
+      tokenContext,
+      recipients,
+      sourceSigner: params.sourceSigner,
+      feePayer: params.feePayer,
+      missingTokenAccounts: states.missing,
+    });
+  }
   const chunks = chunkInstructionGroups({
     groups,
     sourceSigner: params.sourceSigner,

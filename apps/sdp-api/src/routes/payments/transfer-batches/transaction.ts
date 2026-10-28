@@ -20,7 +20,7 @@ import {
   getCreateAssociatedTokenIdempotentInstruction,
   getTransferCheckedInstruction,
 } from "@solana-program/token-2022";
-import { badRequest, signingRejected } from "@/lib/errors";
+import { badRequest, recipientNotSponsorable } from "@/lib/errors";
 import type { RecentBlockhash, ResolvedRecipient, TokenContext } from "./types";
 
 export const DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION = 20;
@@ -46,75 +46,120 @@ export interface SponsoredRentBudget {
   /** Kora's `max_allowed_lamports`: the most one chunk may move out of the fee payer. */
   maxLamportsPerTransaction: bigint;
   rentPerTokenAccount: bigint;
-  /** Recipient token accounts absent when the batch was planned: their idempotent create funds rent. */
+  /** Recipient token accounts absent when the batch was planned: only these get a create. */
   missingTokenAccounts: ReadonlySet<Address>;
+  /**
+   * Recipient token account addresses holding lamports without being a token account of the
+   * batch's token program. Creating one funds it with a fee-payer System Transfer, which Kora
+   * refuses, so their recipients are refused up front.
+   */
+  prefundedTokenAccounts: ReadonlySet<Address>;
+}
+
+export type SplTokenContext = Extract<TokenContext, { kind: "spl" }>;
+
+/** A recipient with the associated token account it receives into. */
+export interface TokenAccountRecipient extends ResolvedRecipient {
+  destinationTokenAccount: Address;
 }
 
 /**
- * Builds the per-recipient instruction groups for the batch: a single system
- * transfer for SOL, or an idempotent create-ATA plus checked transfer for SPL
- * tokens.
+ * Derives each recipient's associated token account for the batch's mint.
  *
- * @param params.tokenContext - Resolved token parameters for the batch.
- * @param params.recipients - Resolved recipients with base-unit amounts.
- * @param params.sourceSigner - Signer for the source wallet.
- * @param params.feePayer - Fee payer address sponsoring the transactions.
- * @returns One instruction group per recipient, in request order.
+ * @param tokenContext - The batch's SPL token parameters.
+ * @param recipients - Resolved recipients, in request order.
+ * @returns The recipients with their destination token accounts, in request order.
  */
-export async function buildInstructionGroups(params: {
-  tokenContext: TokenContext;
-  recipients: ResolvedRecipient[];
-  sourceSigner: TransactionSigner;
-  feePayer: Address;
-}): Promise<RecipientInstructionGroup[]> {
-  if (params.tokenContext.kind === "sol") {
-    return params.recipients.map((recipient) => ({
-      ...recipient,
-      instructions: [
-        getTransferSolInstruction({
-          source: params.sourceSigner,
-          destination: recipient.destinationAddress,
-          amount: recipient.amountBaseUnits,
-        }),
-      ],
-    }));
-  }
-
-  const tokenContext = params.tokenContext;
-  const feePayerSigner = createNoopSigner(params.feePayer);
+export function deriveDestinationTokenAccounts(
+  tokenContext: SplTokenContext,
+  recipients: ResolvedRecipient[]
+): Promise<TokenAccountRecipient[]> {
   return Promise.all(
-    params.recipients.map(async (recipient) => {
+    recipients.map(async (recipient) => {
       const [destinationTokenAccount] = await findAssociatedTokenPda({
         owner: recipient.destinationAddress,
         tokenProgram: tokenContext.tokenProgram,
         mint: tokenContext.mintAddress,
       });
-      const createDestinationAtaInstruction = getCreateAssociatedTokenIdempotentInstruction({
-        payer: feePayerSigner,
-        ata: destinationTokenAccount,
-        owner: recipient.destinationAddress,
-        mint: tokenContext.mintAddress,
-        tokenProgram: tokenContext.tokenProgram,
-      });
-      const transferInstruction = getTransferCheckedInstruction(
-        {
-          source: tokenContext.sourceTokenAccount,
-          mint: tokenContext.mintAddress,
-          destination: destinationTokenAccount,
-          authority: params.sourceSigner,
-          amount: recipient.amountBaseUnits,
-          decimals: tokenContext.decimals,
-        },
-        { programAddress: tokenContext.tokenProgram }
-      );
-
-      return {
-        ...recipient,
-        destinationTokenAccount,
-        instructions: [createDestinationAtaInstruction, transferInstruction],
-      };
+      return { ...recipient, destinationTokenAccount };
     })
   );
+}
+
+/**
+ * Builds one system transfer per recipient of a SOL batch.
+ *
+ * @param params.recipients - Resolved recipients with lamport amounts.
+ * @param params.sourceSigner - Signer for the source wallet.
+ * @returns One instruction group per recipient, in request order.
+ */
+export function buildSolInstructionGroups(params: {
+  recipients: ResolvedRecipient[];
+  sourceSigner: TransactionSigner;
+}): RecipientInstructionGroup[] {
+  return params.recipients.map((recipient) => ({
+    ...recipient,
+    instructions: [
+      getTransferSolInstruction({
+        source: params.sourceSigner,
+        destination: recipient.destinationAddress,
+        amount: recipient.amountBaseUnits,
+      }),
+    ],
+  }));
+}
+
+/**
+ * Builds the per-recipient instruction groups of an SPL batch: a checked transfer, preceded by an
+ * idempotent create-ATA funded by the fee payer only when the recipient's token account was
+ * missing at planning. Kora charges full rent for every fee-payer-funded ATA create whose inner
+ * `CreateAccount` its simulation does not show, so a create for an account that already exists
+ * would spend the whole rent against the limit while funding nothing.
+ *
+ * @param params.tokenContext - The batch's SPL token parameters.
+ * @param params.recipients - Recipients with their destination token accounts.
+ * @param params.sourceSigner - Signer for the source wallet.
+ * @param params.feePayer - Fee payer address sponsoring the transactions.
+ * @param params.missingTokenAccounts - Destination token accounts absent at planning.
+ * @returns One instruction group per recipient, in request order.
+ */
+export function buildSplInstructionGroups(params: {
+  tokenContext: SplTokenContext;
+  recipients: TokenAccountRecipient[];
+  sourceSigner: TransactionSigner;
+  feePayer: Address;
+  missingTokenAccounts: ReadonlySet<Address>;
+}): RecipientInstructionGroup[] {
+  const { tokenContext } = params;
+  const feePayerSigner = createNoopSigner(params.feePayer);
+  return params.recipients.map((recipient) => {
+    const transferInstruction = getTransferCheckedInstruction(
+      {
+        source: tokenContext.sourceTokenAccount,
+        mint: tokenContext.mintAddress,
+        destination: recipient.destinationTokenAccount,
+        authority: params.sourceSigner,
+        amount: recipient.amountBaseUnits,
+        decimals: tokenContext.decimals,
+      },
+      { programAddress: tokenContext.tokenProgram }
+    );
+    const instructions: Instruction[] = params.missingTokenAccounts.has(
+      recipient.destinationTokenAccount
+    )
+      ? [
+          getCreateAssociatedTokenIdempotentInstruction({
+            payer: feePayerSigner,
+            ata: recipient.destinationTokenAccount,
+            owner: recipient.destinationAddress,
+            mint: tokenContext.mintAddress,
+            tokenProgram: tokenContext.tokenProgram,
+          }),
+          transferInstruction,
+        ]
+      : [transferInstruction];
+    return { ...recipient, instructions };
+  });
 }
 
 /**
@@ -224,30 +269,48 @@ function fundedTokenAccount(
 }
 
 /**
- * Refuses a batch with a recipient whose new token account alone costs more rent than Kora lets
- * one transaction move out of the fee payer: no chunk could carry it, so Kora would refuse it at
- * signing. Runs before any chunk is built, so nothing is stored or signed for the batch.
+ * Refuses a batch naming recipients the fee sponsor can never fund, before any chunk is built, so
+ * nothing is stored or signed for it:
+ * - a token account address that already holds lamports without being a token account: the ATA
+ *   program would fund it with a fee-payer System Transfer, which Kora refuses;
+ * - a new token account whose rent alone exceeds the per-transaction limit: no chunk could carry it.
  *
  * @param groups - Instruction groups in recipient order.
  * @param rentBudget - The batch's sponsored rent budget.
+ * @throws AppError `RECIPIENT_NOT_SPONSORABLE` naming the refused recipients and the reason.
  */
-function assertRecipientRentSponsorable(
+function assertRecipientsSponsorable(
   groups: RecipientInstructionGroup[],
   rentBudget: SponsoredRentBudget
 ): void {
+  const prefundedIndexes = groups
+    .filter(
+      (group) =>
+        group.destinationTokenAccount !== undefined &&
+        rentBudget.prefundedTokenAccounts.has(group.destinationTokenAccount)
+    )
+    .map((group) => group.index);
+  if (prefundedIndexes.length > 0) {
+    throw recipientNotSponsorable(
+      `recipients.${prefundedIndexes[0]} has a token account address that already holds lamports without being a token account, so the fee sponsor cannot create it`,
+      { reason: "token_account_address_prefunded", recipientIndexes: prefundedIndexes }
+    );
+  }
+
   if (rentBudget.rentPerTokenAccount <= rentBudget.maxLamportsPerTransaction) {
     return;
   }
-  const recipientIndexes = groups
+  const overLimitIndexes = groups
     .filter((group) => fundedTokenAccount(group, rentBudget) !== null)
     .map((group) => group.index);
-  if (recipientIndexes.length === 0) {
+  if (overLimitIndexes.length === 0) {
     return;
   }
-  throw signingRejected(
-    `recipients.${recipientIndexes[0]} needs a new token account whose rent (${rentBudget.rentPerTokenAccount} lamports) exceeds the ${rentBudget.maxLamportsPerTransaction} lamports the fee sponsor funds per transaction`,
+  throw recipientNotSponsorable(
+    `recipients.${overLimitIndexes[0]} needs a new token account whose rent (${rentBudget.rentPerTokenAccount} lamports) exceeds the ${rentBudget.maxLamportsPerTransaction} lamports the fee sponsor funds per transaction`,
     {
-      recipientIndexes,
+      reason: "rent_exceeds_limit",
+      recipientIndexes: overLimitIndexes,
       rentLamportsPerTokenAccount: rentBudget.rentPerTokenAccount.toString(),
       maxSponsoredLamportsPerTransaction: rentBudget.maxLamportsPerTransaction.toString(),
     }
@@ -258,9 +321,9 @@ function assertRecipientRentSponsorable(
  * Packs instruction groups into transaction chunks, greedily filling each
  * chunk up to the recipient cap, the Solana transaction size limit, and the
  * rent Kora lets one transaction move out of the fee payer. Recipients whose
- * token account already exists fund no rent, so they fill a chunk up to the
- * other two limits; a token account two recipients share is funded once per
- * chunk.
+ * token account already exists carry no create and fund no rent, so they fill
+ * a chunk up to the other two limits; a token account two recipients share is
+ * funded once per chunk, as Kora counts it once per transaction.
  *
  * @param params.groups - Instruction groups in recipient order.
  * @param params.sourceSigner - Signer for the source wallet.
@@ -269,7 +332,8 @@ function assertRecipientRentSponsorable(
  * @param params.maxRecipientsPerTransaction - Upper bound on recipients per chunk.
  * @param params.rentBudget - The rent the fee payer funds for new recipient token accounts.
  * @returns The chunks to submit, each within transaction size and sponsored outflow limits.
- * @throws AppError `SIGNING_REJECTED` when one recipient's new token account alone exceeds the limit.
+ * @throws AppError `RECIPIENT_NOT_SPONSORABLE` for a prefunded token account address, or a new
+ *   token account whose rent alone exceeds the limit.
  */
 export function chunkInstructionGroups(params: {
   groups: RecipientInstructionGroup[];
@@ -279,7 +343,7 @@ export function chunkInstructionGroups(params: {
   maxRecipientsPerTransaction: number;
   rentBudget: SponsoredRentBudget;
 }): TransactionChunk[] {
-  assertRecipientRentSponsorable(params.groups, params.rentBudget);
+  assertRecipientsSponsorable(params.groups, params.rentBudget);
 
   const chunks: TransactionChunk[] = [];
   let pending: RecipientInstructionGroup[] = [];

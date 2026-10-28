@@ -9,8 +9,7 @@ import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import {
   resolveRequestSponsorshipScope,
-  resolveSponsoredFeePayer,
-  resolveSponsoredOutflowLimit,
+  resolveSponsoredTransactionLimits,
 } from "@/services/sponsorship.service";
 import { planBatchTransactions } from "./plan";
 import { resolveBatchRequest } from "./resolve";
@@ -44,7 +43,9 @@ async function estimateNetworkFeeLamports(rpc: Rpc, chunks: TransactionChunk[]):
 /**
  * POST /transfer-batches/estimate — prices a batch without executing it:
  * transaction count, network fees, and sponsored token-account rent. It plans
- * chunks exactly as create does, against the same live Kora outflow limit.
+ * chunks exactly as create does, against the same live Kora outflow limit, so
+ * it refuses the same recipients with `RECIPIENT_NOT_SPONSORABLE` (422):
+ * `token_account_address_prefunded` or `rent_exceeds_limit`.
  *
  * @param c - Request context.
  * @returns JSON estimate response.
@@ -55,10 +56,8 @@ export async function estimateTransferBatch(
   const body = c.req.valid("json");
   const resolved = await resolveBatchRequest(c, body);
   const sourceSigner = createNoopSigner(resolved.sourceAddress);
-  const sponsorshipScope = resolveRequestSponsorshipScope(c);
-  const [feePayer, maxSponsoredLamportsPerTransaction, lifetime] = await Promise.all([
-    resolveSponsoredFeePayer(c.env, sponsorshipScope),
-    resolveSponsoredOutflowLimit(c.env, sponsorshipScope),
+  const [{ feePayer, maxAllowedLamports }, lifetime] = await Promise.all([
+    resolveSponsoredTransactionLimits(c.env, resolveRequestSponsorshipScope(c)),
     getRecentBlockhash(resolved.rpc, "confirmed"),
   ]);
   const { chunks, rentBudget } = await planBatchTransactions({
@@ -69,7 +68,7 @@ export async function estimateTransferBatch(
     lifetime,
     maxRecipientsPerTransaction:
       body.options?.maxRecipientsPerTransaction ?? DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION,
-    maxSponsoredLamportsPerTransaction,
+    maxSponsoredLamportsPerTransaction: maxAllowedLamports,
   });
   const networkFeeLamports = await estimateNetworkFeeLamports(resolved.rpc, chunks);
   const tokenAccountRentLamports =

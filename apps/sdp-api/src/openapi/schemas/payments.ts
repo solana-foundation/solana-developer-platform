@@ -480,7 +480,7 @@ export const createTransferBatchRequestSchema = createTransferBatchSchemaBase
     }),
     options: withOpenApi(createTransferBatchSchemaBase.shape.options, {
       description:
-        "Execution options for transaction chunking, priority fees, and preflight validation. `maxRecipientsPerTransaction` caps each chunk from above; a chunk also never funds more rent for new recipient token accounts than the fee sponsor allows in one transaction, so recipients that still need a token account may be split across more chunks. A recipient whose new token account alone costs more rent than that limit is refused with `422 SIGNING_REJECTED` before anything is stored.",
+        "Execution options for transaction chunking, priority fees, and preflight validation. `maxRecipientsPerTransaction` caps each chunk from above; a chunk also never funds more rent for new recipient token accounts than the fee sponsor allows in one transaction, so recipients that still need a token account may be split across more chunks, while recipients that already have one fill a chunk freely. A recipient the fee sponsor can never fund is refused with `422 RECIPIENT_NOT_SPONSORABLE` before anything is stored (`details.reason`: `rent_exceeds_limit` or `token_account_address_prefunded`).",
       example: {
         maxRecipientsPerTransaction: 20,
         priorityFee: "auto",

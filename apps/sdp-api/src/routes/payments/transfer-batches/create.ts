@@ -20,6 +20,7 @@ import type { MovementStepInput, RecordAnswer } from "@/middleware/movement-step
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { type AppContext, getPaymentTransferBatchesRepository } from "@/routes/payments/context";
 import { admitPaymentWalletRuntimeExecution } from "@/routes/payments/wallets";
+import { logEvent } from "@/runtime/money-path-events";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
   createSponsorshipFeePayment,
@@ -125,8 +126,12 @@ export async function findTransferBatchRecordReplay(
  * from in-memory state — so a reconciliation run that settles chunks during
  * the request cannot be overwritten with a stale status.
  * Chunks keep the rent the fee payer funds for new recipient token accounts
- * within Kora's per-transaction outflow limit; a recipient whose new token
- * account alone exceeds it refuses the batch (422) before anything is stored.
+ * within Kora's per-transaction outflow limit, and only a missing token account
+ * gets a create. A recipient the fee sponsor can never fund refuses the batch
+ * with `RECIPIENT_NOT_SPONSORABLE` (422) before anything is stored:
+ * `token_account_address_prefunded` (its token account address holds lamports
+ * without being a token account) or `rent_exceeds_limit` (its new token
+ * account alone exceeds the limit).
  * Replays idempotently by Idempotency-Key + payload fingerprint.
  *
  * @param c - Request context.
@@ -149,7 +154,7 @@ export async function createTransferBatch(
     "payments.transfer_batch",
     { custodyWalletId: resolved.sourceWallet.id }
   );
-  const [signer, feePayer, sponsorshipConfiguration, lifetime] = await Promise.all([
+  const [signer, sponsorshipConfiguration, lifetime] = await Promise.all([
     createOrgSignerForCustodyWallet(
       c.env,
       resolved.scope.auth.organizationId,
@@ -157,18 +162,17 @@ export async function createTransferBatch(
       resolved.sourceWallet.id,
       "payments.transfer_batch"
     ),
-    feePayment.getFeePayer(),
     feePayment.getSponsorshipConfiguration(),
     getRecentBlockhash(resolved.rpc, "confirmed"),
   ]);
   if (signer.address !== resolved.sourceWallet.publicKey) {
     throw badRequest("Resolved signing wallet does not match source wallet");
   }
-  const { chunks } = await planBatchTransactions({
+  const { chunks, rentBudget } = await planBatchTransactions({
     tokenContext: resolved.tokenContext,
     recipients: resolved.recipients,
     sourceSigner: signer,
-    feePayer,
+    feePayer: sponsorshipConfiguration.signerAddress,
     lifetime,
     maxRecipientsPerTransaction:
       body.options?.maxRecipientsPerTransaction === undefined
@@ -217,6 +221,18 @@ export async function createTransferBatch(
     recipientRows = created.recipients;
     // The batch row exists under the key: any later answer is stored for its retries.
     markIdempotencyCommitted(c);
+    logEvent("info", {
+      event: "sdp_api_transfer_batch_planned",
+      organization_id: resolved.scope.auth.organizationId,
+      project_id: resolved.projectId,
+      batch_id: created.batch.id,
+      recipient_count: resolved.recipients.length,
+      max_sponsored_lamports_per_transaction: rentBudget.maxLamportsPerTransaction.toString(),
+      rent_lamports_per_token_account: rentBudget.rentPerTokenAccount.toString(),
+      missing_token_accounts: rentBudget.missingTokenAccounts.size,
+      prefunded_token_accounts: rentBudget.prefundedTokenAccounts.size,
+      chunk_count: chunks.length,
+    });
   } catch (error) {
     if (idempotencyKey && isPostgresUniqueViolation(error)) {
       // A concurrent attempt under this key (a takeover) wrote the row first.

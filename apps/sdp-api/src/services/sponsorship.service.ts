@@ -194,25 +194,30 @@ export function resolveSponsoredFeePayer(env: Env, scope: SponsorshipScope): Pro
 }
 
 /**
- * The most lamports Kora lets one sponsored transaction move out of the fee payer
- * (`max_allowed_lamports`, read live from its `getConfig`), for flows that plan transactions before
- * a sponsor signs them. Kora counts every outflow its simulation sees, inner `CreateAccount` rent
- * included, against it; the network fee is checked against the same value separately, never
- * summed with the outflow. Returns only the number: no way to sponsor-sign escapes it.
+ * What a flow needs to plan transactions before a sponsor signs them: the fee payer they name and
+ * Kora's `max_allowed_lamports`, read live from its `getConfig` in one configuration read. Kora
+ * (deployed revision `f0377c0`) counts against that limit every outflow its simulation sees, inner
+ * `CreateAccount` rent included, and also charges full rent for each fee-payer-funded ATA create
+ * whose inner `CreateAccount` the simulation does not show, idempotent creates of existing accounts
+ * included. It checks the network fee against the same value separately, never summed with the
+ * outflow. Returns only these facts: no way to sponsor-sign escapes it.
  *
  * @param env - API environment naming the per-cluster Kora endpoints.
  * @param scope - Who is sponsored.
- * @returns The per-transaction fee-payer outflow limit, in lamports.
+ * @returns The fee payer address and the per-transaction fee-payer outflow limit, in lamports.
  */
-export async function resolveSponsoredOutflowLimit(
+export async function resolveSponsoredTransactionLimits(
   env: Env,
   scope: SponsorshipScope
-): Promise<bigint> {
+): Promise<{ feePayer: Address; maxAllowedLamports: bigint }> {
   const configuration = await instrumentedAdapter(
     env,
     buildKoraUserId(scope)
   ).getSponsorshipConfiguration();
-  return configuration.maxAllowedLamports;
+  return {
+    feePayer: configuration.signerAddress,
+    maxAllowedLamports: configuration.maxAllowedLamports,
+  };
 }
 
 /**

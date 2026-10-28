@@ -627,6 +627,18 @@ export interface PaymentTransferBatchRecipientRequest {
   amount: string;
 }
 
+/**
+ * Why a transfer batch refuses a recipient the fee sponsor can never fund: its new token account
+ * costs more rent than the sponsor's per-transaction limit, or its token account address already
+ * holds lamports without being a token account, so creating it needs a fee-payer transfer the
+ * sponsor refuses.
+ */
+export const RECIPIENT_NOT_SPONSORABLE_REASONS = [
+  "rent_exceeds_limit",
+  "token_account_address_prefunded",
+] as const;
+export type RecipientNotSponsorableReason = (typeof RECIPIENT_NOT_SPONSORABLE_REASONS)[number];
+
 export interface PaymentTransferBatchOptions {
   maxRecipientsPerTransaction?: number;
   priorityFee?: "none" | "low" | "medium" | "high" | "auto";

@@ -28,6 +28,8 @@ export type TokenContext =
       sourceTokenAccount: Address;
       /** Loaded once per batch; every recipient amount converts through it. */
       toBaseUnits: PaymentAmountConverter;
+      /** Data size of a new recipient token account, which sizes the rent the fee payer funds. */
+      newTokenAccountSize: number;
     };
 
 export interface ResolvedRecipient {

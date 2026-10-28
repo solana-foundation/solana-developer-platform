@@ -49,7 +49,8 @@ function parseRecipientAmount(amount: string, toBaseUnits: PaymentAmountConverte
 
 /**
  * Resolves the batch token into transfer parameters: native SOL, or an SPL
- * mint with its token program and the source wallet's token account.
+ * mint with its token program, the source wallet's token account, and the
+ * size of a new recipient token account.
  *
  * @param token - "SOL" or an SPL mint address.
  * @param sourceAddress - Source wallet address holding the token.
@@ -67,12 +68,12 @@ async function resolveTokenContext(token: string, sourceAddress: Address): Promi
   }
 
   const mintAddress = assertValidAddress(token, "token");
-  const { tokenProgram, decimals, toBaseUnits } = await loadPaymentMint(mintAddress);
-  const sourceTokenAccount = await resolveSourceTokenAccount(
-    sourceAddress,
-    mintAddress,
-    tokenProgram
-  );
+  const { tokenProgram, decimals, toBaseUnits, readNewTokenAccountSize } =
+    await loadPaymentMint(mintAddress);
+  const [sourceTokenAccount, newTokenAccountSize] = await Promise.all([
+    resolveSourceTokenAccount(sourceAddress, mintAddress, tokenProgram),
+    readNewTokenAccountSize(),
+  ]);
 
   return {
     kind: "spl",
@@ -82,6 +83,7 @@ async function resolveTokenContext(token: string, sourceAddress: Address): Promi
     tokenProgram,
     sourceTokenAccount: sourceTokenAccount.tokenAccount,
     toBaseUnits,
+    newTokenAccountSize,
   };
 }
 

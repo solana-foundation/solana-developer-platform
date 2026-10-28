@@ -5,7 +5,7 @@
 import { redactCredentialSecrets, redactCredentialString } from "@sdp/redaction/credentials";
 import type { Action } from "@sdp/types/actions";
 import type { IdempotencyErrorCode } from "@sdp/types/idempotency";
-import type { RampDirection } from "@sdp/types/payments";
+import type { RampDirection, RecipientNotSponsorableReason } from "@sdp/types/payments";
 import type { RampProviderId } from "@sdp/types/provider-access";
 
 export type ErrorCode =
@@ -49,6 +49,7 @@ export type ErrorCode =
   | "TRANSACTION_EXPIRED"
   | "SIGNING_FAILED"
   | "SIGNING_REJECTED"
+  | "RECIPIENT_NOT_SPONSORABLE"
   | "PROVIDER_NOT_CONFIGURED"
   | "PROVIDER_UNAVAILABLE"
   | "PROVIDER_RESPONSE_INVALID"
@@ -112,6 +113,7 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   TRANSACTION_EXPIRED: 409,
   SIGNING_FAILED: 400,
   SIGNING_REJECTED: 422,
+  RECIPIENT_NOT_SPONSORABLE: 422,
   PROVIDER_NOT_CONFIGURED: 503,
   PROVIDER_UNAVAILABLE: 503,
   // 502, never 503: the provider answered success, so the action may have
@@ -172,6 +174,7 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   TRANSACTION_EXPIRED: "The transaction's blockhash expired before it was submitted",
   SIGNING_FAILED: "Transaction signing failed",
   SIGNING_REJECTED: "The signing provider rejected this transaction",
+  RECIPIENT_NOT_SPONSORABLE: "The fee sponsor cannot fund a transfer to this recipient",
   PROVIDER_NOT_CONFIGURED: "Payment provider is not configured for this environment",
   PROVIDER_UNAVAILABLE: "Payment provider is temporarily unavailable",
   PROVIDER_RESPONSE_INVALID: "Payment provider returned a response SDP could not read",
@@ -311,15 +314,23 @@ export function providerNotConfigured(message?: string): AppError {
 }
 
 /**
- * The fee sponsor refuses, or would refuse, these exact transaction contents: a retry of the same
- * request cannot succeed. The same 422 a structured Kora refusal answers with.
+ * A batch names recipients the fee sponsor can never fund, refused before anything is stored or
+ * signed: the same request can never succeed, so the caller drops or changes those recipients.
  *
- * @param message - What the sponsor refuses, for the caller.
- * @param details - Structured context naming what to change.
- * @returns The `SIGNING_REJECTED` error.
+ * @param message - Which recipient is refused and why, for the caller.
+ * @param details - `reason`, the refused `recipientIndexes`, and the lamport figures that apply.
+ * @param details.reason - Why the sponsor cannot fund them.
+ * @param details.recipientIndexes - The refused recipients' positions in the request.
+ * @returns The `RECIPIENT_NOT_SPONSORABLE` error.
  */
-export function signingRejected(message: string, details: Record<string, unknown>): AppError {
-  return new AppError("SIGNING_REJECTED", message, details);
+export function recipientNotSponsorable(
+  message: string,
+  details: { reason: RecipientNotSponsorableReason; recipientIndexes: number[] } & Record<
+    string,
+    unknown
+  >
+): AppError {
+  return new AppError("RECIPIENT_NOT_SPONSORABLE", message, details);
 }
 
 /**

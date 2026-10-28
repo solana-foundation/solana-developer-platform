@@ -198,7 +198,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Estimate transfer batch",
     operationId: "estimatePaymentTransferBatch",
     description:
-      "Validates an exact-wallet transfer batch request and estimates transaction chunking and fees.",
+      "Validates an exact-wallet transfer batch request and estimates transaction chunking and fees, planning chunks exactly as create does. Returns `422 RECIPIENT_NOT_SPONSORABLE` for recipients the fee sponsor can never fund: `details.reason` is `token_account_address_prefunded` (the recipient's token account address holds lamports without being a token account) or `rent_exceeds_limit` (its new token account alone costs more rent than the sponsor funds per transaction), and `details.recipientIndexes` names them. Metered: `429` when the caller exceeds the estimate quota.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -212,7 +212,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Transfer batch estimate",
         content: jsonContent(transferBatchEstimateResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 422, 429, 500]),
     },
   });
 
@@ -223,7 +223,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Create transfer batch",
     operationId: "createPaymentTransferBatch",
     description:
-      "Executes an outbound transfer batch from one exact SDP Wallet ID, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records. Requires an Idempotency-Key: a retry with the same key and request returns the original batch without another on-chain submission. Recipient order does not change the request.",
+      "Executes an outbound transfer batch from one exact SDP Wallet ID, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records. Requires an Idempotency-Key: a retry with the same key and request returns the original batch without another on-chain submission. Recipient order does not change the request. Recipients the fee sponsor can never fund refuse the batch with `422 RECIPIENT_NOT_SPONSORABLE` before anything is stored: `details.reason` is `token_account_address_prefunded` or `rent_exceeds_limit`, and `details.recipientIndexes` names them.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: movementKeyHeaders,
