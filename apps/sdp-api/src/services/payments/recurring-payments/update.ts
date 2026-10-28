@@ -5,7 +5,6 @@ import {
   resolveRecurringPaymentCollectionSchedule,
 } from "@sdp/payments/recurring-payment-lifecycle";
 import { createClusterRpc } from "@sdp/rpc/factory";
-import type { SolanaRpc } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { normalizeDecimalString } from "@sdp/types/idempotency";
 import type { MovementId } from "@sdp/types/movements";
@@ -22,15 +21,8 @@ import {
   recurringPaymentInFlightLifecycleOperation,
   type UpdatePaymentRecurringPaymentRequest,
 } from "@sdp/types/payments";
-import {
-  type Address,
-  createNoopSigner,
-  removeNullCharacters,
-  type Signature,
-  type TransactionSigner,
-} from "@solana/kit";
+import { type Address, createNoopSigner, removeNullCharacters, type Signature } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
-import { getCreateAssociatedTokenIdempotentInstruction } from "@solana-program/token-2022";
 import { z } from "zod";
 import { type DatabaseExecutor, getDb } from "@/db/client";
 import type {
@@ -84,6 +76,7 @@ import {
   isSubscriptionDelegationCanceled,
   lockLiveActivatingKey,
   parseNullableStoredSignature,
+  prepareSubscriptionAuthority,
   ResumedStepUnsettledError,
   readRecurringPaymentStep,
   readRecurringPaymentStepIfResumed,
@@ -1063,104 +1056,6 @@ async function runMetadataScheduleUpdate(input: {
   });
 }
 
-async function prepareSubscriptionAuthorityForUpdate(input: {
-  env: Env;
-  recurringRepo: PaymentRecurringPaymentsRepository;
-  attempt: PaymentRecurringPaymentUpdateAttemptRow;
-  organizationId: string;
-  projectId: string;
-  rpc: SolanaRpc;
-  sourceWallet: CustodyWallet;
-  sourceSigner: TransactionSigner;
-  sourceTokenAccount: { tokenAccount: Address; exists: boolean };
-  subscriptionAuthority: Awaited<
-    ReturnType<typeof subscriptionsProgram.fetchMaybeSubscriptionAuthority>
-  >;
-  subscriptionAuthorityAddress: Address;
-  owner: Address;
-  mint: Address;
-  tokenProgram: Address;
-  feePayer: Address;
-}) {
-  if (input.subscriptionAuthority.exists && input.sourceTokenAccount.exists) {
-    return input.subscriptionAuthority;
-  }
-
-  const payer = createNoopSigner(input.feePayer);
-  const initAuthorityInstruction = input.subscriptionAuthority.exists
-    ? null
-    : await subscriptionsProgram.getInitSubscriptionAuthorityOverlayInstructionAsync({
-        owner: input.sourceSigner,
-        payer,
-        tokenMint: input.mint,
-        tokenProgram: input.tokenProgram,
-        userAta: input.sourceTokenAccount.tokenAccount,
-      });
-  const createSourceAtaInstruction = input.sourceTokenAccount.exists
-    ? null
-    : getCreateAssociatedTokenIdempotentInstruction({
-        payer,
-        ata: input.sourceTokenAccount.tokenAccount,
-        owner: input.owner,
-        mint: input.mint,
-        tokenProgram: input.tokenProgram,
-      });
-  const initSignature = await sendRecurringPaymentUpdateInstructions({
-    mint: input.mint,
-    movement: "recurring.update",
-    env: input.env,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    sourceWallet: input.sourceWallet,
-    sourceSigner: input.sourceSigner,
-    instructions: [
-      ...(createSourceAtaInstruction ? [createSourceAtaInstruction] : []),
-      ...(initAuthorityInstruction ? [initAuthorityInstruction] : []),
-    ],
-    feePayer: input.feePayer,
-    submissionStore: createSubscriptionStepStore({
-      env: input.env,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      save: async (send) => {
-        requireUpdatedAttempt(
-          await input.recurringRepo.updateUpdateAttempt({
-            attemptId: input.attempt.id,
-            organizationId: input.organizationId,
-            projectId: input.projectId,
-            authorizationSetupSignature: send.signature,
-            lastValidBlockHeight: send.lastValidBlockHeight,
-            updatedAt: new Date().toISOString(),
-          })
-        );
-      },
-      rows: [
-        {
-          slot: { row: "update_attempt", column: "authorization_setup_signature" },
-          id: input.attempt.id,
-        },
-      ],
-    }),
-  });
-  await confirmSubscriptionSignature(initSignature, "Recurring payment update failed on-chain");
-
-  if (!initAuthorityInstruction) {
-    return input.subscriptionAuthority;
-  }
-
-  const subscriptionAuthority = await subscriptionsProgram.fetchMaybeSubscriptionAuthority(
-    input.rpc,
-    input.subscriptionAuthorityAddress,
-    { commitment: "confirmed" }
-  );
-  if (!subscriptionAuthority.exists) {
-    throw new ResumedStepUnsettledError(
-      "Subscription authority is not visible on-chain yet; retry"
-    );
-  }
-  return subscriptionAuthority;
-}
-
 async function getOrCreateReplacementPlan(input: {
   subscriptionsRepo: PaymentSubscriptionsRepository;
   attempt: PaymentRecurringPaymentUpdateAttemptRow;
@@ -1698,11 +1593,6 @@ async function runReplacementUpdate(input: {
         updatedAt: new Date().toISOString(),
       })
     );
-    let subscriptionAuthority = await subscriptionsProgram.fetchMaybeSubscriptionAuthority(
-      rpc,
-      subscriptionAuthorityAddress,
-      { commitment: "confirmed" }
-    );
     const feePayment = createSponsorshipFeePayment(
       input.env,
       await resolveProjectSponsorshipScope(input.env, {
@@ -1715,22 +1605,56 @@ async function runReplacementUpdate(input: {
     );
     const feePayer = await feePayment.getFeePayer();
     const payer = createNoopSigner(feePayer);
-    subscriptionAuthority = await prepareSubscriptionAuthorityForUpdate({
-      env: input.env,
-      recurringRepo,
-      attempt,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
+    const subscriptionAuthority = await prepareSubscriptionAuthority({
       rpc,
-      sourceWallet: input.resolved.sourceWallet,
       sourceSigner,
       sourceTokenAccount,
-      subscriptionAuthority,
+      subscriptionAuthority: await subscriptionsProgram.fetchMaybeSubscriptionAuthority(
+        rpc,
+        subscriptionAuthorityAddress,
+        { commitment: "confirmed" }
+      ),
       subscriptionAuthorityAddress,
       owner,
       mint,
       tokenProgram,
       feePayer,
+      failureMessage: "Recurring payment update failed on-chain",
+      sendSetup: (instruction) =>
+        sendRecurringPaymentUpdateInstructions({
+          mint,
+          movement: "recurring.update",
+          env: input.env,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          sourceWallet: input.resolved.sourceWallet,
+          sourceSigner,
+          instructions: [instruction],
+          feePayer,
+          submissionStore: createSubscriptionStepStore({
+            env: input.env,
+            organizationId: input.organizationId,
+            projectId: input.projectId,
+            save: async (send) => {
+              requireUpdatedAttempt(
+                await recurringRepo.updateUpdateAttempt({
+                  attemptId: attempt.id,
+                  organizationId: input.organizationId,
+                  projectId: input.projectId,
+                  authorizationSetupSignature: send.signature,
+                  lastValidBlockHeight: send.lastValidBlockHeight,
+                  updatedAt: new Date().toISOString(),
+                })
+              );
+            },
+            rows: [
+              {
+                slot: { row: "update_attempt", column: "authorization_setup_signature" },
+                id: attempt.id,
+              },
+            ],
+          }),
+        }),
     });
     if (!subscriptionAuthority.exists) {
       throw new ResumedStepUnsettledError(

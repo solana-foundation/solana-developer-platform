@@ -12,6 +12,7 @@ import {
   appendTransactionMessageInstructions,
   assertIsSignature,
   compileTransaction,
+  createNoopSigner,
   createTransactionMessage,
   getBase64EncodedWireTransaction,
   getTransactionEncoder,
@@ -24,7 +25,14 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
   type TransactionSigner,
 } from "@solana/kit";
-import { findPlanPda, type SubscriptionDelegation } from "@solana/subscriptions";
+import {
+  fetchMaybeSubscriptionAuthority,
+  findPlanPda,
+  getInitSubscriptionAuthorityOverlayInstructionAsync,
+  type SubscriptionAuthority,
+  type SubscriptionDelegation,
+} from "@solana/subscriptions";
+import { getCreateAssociatedTokenIdempotentInstruction } from "@solana-program/token-2022";
 import { type DatabaseExecutor, getDb } from "@/db/client";
 import type {
   PaymentRecurringPaymentRow,
@@ -661,6 +669,84 @@ export async function confirmSubscriptionSignature(
   if (confirmation.err) {
     throw transactionFailed(message);
   }
+}
+
+/**
+ * Creates whichever of the source wallet's token account and its `SubscriptionAuthority` is
+ * missing, with the fee payer funding the rent. Each create is its own sponsored transaction,
+ * confirmed before the next is sent: Kora refuses a transaction whose fee-payer outflow exceeds
+ * its `max_allowed_lamports`, and on mainnet the two rents together exceed it. The authority's
+ * init reads the token account, so the token account lands first. Both creates are idempotent on
+ * chain, so a run that resumes after a crash sends only what is still missing and pays no rent
+ * twice.
+ *
+ * @param input - The source wallet's setup accounts and the sender for one setup transaction.
+ * @param input.rpc - Cluster RPC for the authority read after its init lands.
+ * @param input.sourceSigner - The source wallet's signer, the authority's owner.
+ * @param input.sourceTokenAccount - The source wallet's token account and whether it exists.
+ * @param input.subscriptionAuthority - The source wallet's authority as read before setup.
+ * @param input.subscriptionAuthorityAddress - The authority's PDA.
+ * @param input.owner - The source wallet's address, the token account's owner.
+ * @param input.mint - The schedule's mint.
+ * @param input.tokenProgram - The mint's token program.
+ * @param input.feePayer - The sponsor's fee payer, which funds both rents.
+ * @param input.failureMessage - The error a setup transaction failing on chain raises.
+ * @param input.sendSetup - Sends one setup instruction as its own sponsored transaction, saving
+ *   its signature before the send.
+ * @returns The source wallet's `SubscriptionAuthority`, read at `confirmed` when this run created it.
+ */
+export async function prepareSubscriptionAuthority(input: {
+  rpc: SolanaRpc;
+  sourceSigner: TransactionSigner;
+  sourceTokenAccount: { tokenAccount: Address; exists: boolean };
+  subscriptionAuthority: MaybeAccount<SubscriptionAuthority>;
+  subscriptionAuthorityAddress: Address;
+  owner: Address;
+  mint: Address;
+  tokenProgram: Address;
+  feePayer: Address;
+  failureMessage: string;
+  sendSetup: (instruction: Instruction) => Promise<Signature>;
+}): Promise<MaybeAccount<SubscriptionAuthority>> {
+  const payer = createNoopSigner(input.feePayer);
+  if (!input.sourceTokenAccount.exists) {
+    const createSourceAtaSignature = await input.sendSetup(
+      getCreateAssociatedTokenIdempotentInstruction({
+        payer,
+        ata: input.sourceTokenAccount.tokenAccount,
+        owner: input.owner,
+        mint: input.mint,
+        tokenProgram: input.tokenProgram,
+      })
+    );
+    await confirmSubscriptionSignature(createSourceAtaSignature, input.failureMessage);
+  }
+  if (input.subscriptionAuthority.exists) {
+    return input.subscriptionAuthority;
+  }
+
+  const initAuthoritySignature = await input.sendSetup(
+    await getInitSubscriptionAuthorityOverlayInstructionAsync({
+      owner: input.sourceSigner,
+      payer,
+      tokenMint: input.mint,
+      tokenProgram: input.tokenProgram,
+      userAta: input.sourceTokenAccount.tokenAccount,
+    })
+  );
+  await confirmSubscriptionSignature(initAuthoritySignature, input.failureMessage);
+
+  const subscriptionAuthority = await fetchMaybeSubscriptionAuthority(
+    input.rpc,
+    input.subscriptionAuthorityAddress,
+    { commitment: "confirmed" }
+  );
+  if (!subscriptionAuthority.exists) {
+    throw new ResumedStepUnsettledError(
+      "Subscription authority is not visible on-chain yet; retry"
+    );
+  }
+  return subscriptionAuthority;
 }
 
 export function recurringPaymentErrorMessage(error: Error): string {
