@@ -323,6 +323,8 @@ describe("sendTransferBatchUnderKey", () => {
 });
 
 function refuseSessionStorageWrites() {
+  // SAFETY: This is the runtime prototype of the Storage instance under test.
+  // Spying on Storage.prototype misses this jsdom implementation's setItem.
   return vi
     .spyOn(Object.getPrototypeOf(window.sessionStorage) as Storage, "setItem")
     .mockImplementation(() => {

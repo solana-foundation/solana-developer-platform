@@ -1,4 +1,4 @@
-import { MOVEMENTS, type MovementId } from "@sdp/types/movements";
+import { isMovementId, MOVEMENTS, type MovementId } from "@sdp/types/movements";
 import { type MemberStatus, ORGANIZATION_STATUSES } from "@sdp/types/organizations";
 import type { ProjectEnvironment } from "@sdp/types/projects";
 import type { LegacyOrganizationRole } from "@sdp/types/roles";
@@ -31,6 +31,7 @@ import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
 const ENTITLED = JSON.stringify({ enableProductionProject: true });
+const movementIds = Object.keys(MOVEMENTS).filter(isMovementId);
 
 function facts(overrides: Partial<MoneyAdmissionFacts> = {}): MoneyAdmissionFacts {
   return {
@@ -110,9 +111,7 @@ describe("MOVEMENTS exits", () => {
   // for its credential, so this list changes only with a named security
   // reviewer (see packages/sdp-types/src/movements.ts).
   it("exempts exactly the reviewed exits from admission", () => {
-    const exits = (Object.keys(MOVEMENTS) as MovementId[])
-      .filter((movement) => MOVEMENTS[movement].kind === "exit")
-      .sort();
+    const exits = movementIds.filter((movement) => MOVEMENTS[movement].kind === "exit").sort();
     expect(exits).toEqual([
       "dvp.cancel",
       "dvp.reclaim",
@@ -140,7 +139,7 @@ describe("decideMovement", () => {
   ];
 
   it.each(
-    (Object.keys(MOVEMENTS) as MovementId[]).flatMap((movement) =>
+    movementIds.flatMap((movement) =>
       cases.map(([label, subject]) => [movement, label, subject] as const)
     )
   )("decides %s for %s", (movement, _label, subject) => {
@@ -151,33 +150,33 @@ describe("decideMovement", () => {
     );
   });
 
-  it.each(
-    (Object.keys(MOVEMENTS) as MovementId[]).filter(
-      (movement) => MOVEMENTS[movement].kind === "start"
-    )
-  )("refuses disabled start %s after the principal check", (movement) => {
-    expect(decideMovement(movement, facts({ disabledMovements: [movement] }), NO_WALLET)).toEqual({
-      admitted: false,
-      reason: "movement_disabled",
-    });
-    expect(
-      decideMovement(
-        movement,
-        facts({ disabledMovements: [movement], principal: { kind: "none" } }),
-        NO_WALLET
-      )
-    ).toEqual({ admitted: false, reason: "principal_missing" });
-  });
+  it.each(movementIds.filter((movement) => MOVEMENTS[movement].kind === "start"))(
+    "refuses disabled start %s after the principal check",
+    (movement) => {
+      expect(decideMovement(movement, facts({ disabledMovements: [movement] }), NO_WALLET)).toEqual(
+        {
+          admitted: false,
+          reason: "movement_disabled",
+        }
+      );
+      expect(
+        decideMovement(
+          movement,
+          facts({ disabledMovements: [movement], principal: { kind: "none" } }),
+          NO_WALLET
+        )
+      ).toEqual({ admitted: false, reason: "principal_missing" });
+    }
+  );
 
-  it.each(
-    (Object.keys(MOVEMENTS) as MovementId[]).filter(
-      (movement) => MOVEMENTS[movement].kind === "exit"
-    )
-  )("leaves exit %s open when the project has disabled starts", (movement) => {
-    expect(
-      decideMovement(movement, facts({ disabledMovements: ["payments.transfer"] }), NO_WALLET)
-    ).toEqual({ admitted: true });
-  });
+  it.each(movementIds.filter((movement) => MOVEMENTS[movement].kind === "exit"))(
+    "leaves exit %s open when the project has disabled starts",
+    (movement) => {
+      expect(
+        decideMovement(movement, facts({ disabledMovements: ["payments.transfer"] }), NO_WALLET)
+      ).toEqual({ admitted: true });
+    }
+  );
 });
 
 const PRODUCTION_KEY_ID = "key_money_admission_production";
@@ -358,6 +357,39 @@ describe("money admission reads", () => {
         ticket: change.ticket,
       }),
     ]);
+  });
+
+  it("rolls back the project control when the audit insert fails", async () => {
+    const db = getDb(env);
+    const scope = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id };
+    // The audit insert follows the project update in the same transaction.
+    await db.execute(
+      "ALTER TABLE audit_logs ADD CONSTRAINT test_refuse_project_audit CHECK (resource_type <> 'project') NOT VALID"
+    );
+    try {
+      await expect(
+        asSystem(() =>
+          changeProjectMovementControl(env, {
+            ...scope,
+            movement: "payments.transfer_batch",
+            operation: "disable",
+            operator: "ops:test",
+            reason: "stage drill",
+            ticket: "HOO-2334",
+          })
+        )
+      ).rejects.toThrow();
+      await expect(asSystem(() => getProjectMovementControl(env, scope))).resolves.toEqual({
+        disabledMovements: [],
+        version: 0,
+      });
+      const audit = await db
+        .prepare("SELECT COUNT(*)::int AS count FROM audit_logs WHERE resource_type = 'project'")
+        .first<{ count: number }>();
+      expect(audit).toEqual({ count: 0 });
+    } finally {
+      await db.execute("ALTER TABLE audit_logs DROP CONSTRAINT test_refuse_project_audit");
+    }
   });
 
   it("keeps a repeated stop idempotent and refuses stale or cross-project re-enable", async () => {

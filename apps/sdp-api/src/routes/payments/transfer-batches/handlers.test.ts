@@ -935,12 +935,14 @@ describe("payment transfer batches", () => {
       );
 
       expect(response.status).toBe(200);
-      const body = (await response.json()) as {
-        data: {
-          recipients: Array<{ status: string; error: string | null }>;
-          transfers: Array<{ status: string }>;
-        };
-      };
+      const body = z
+        .object({
+          data: z.object({
+            recipients: z.array(z.object({ status: z.string(), error: z.string().nullable() })),
+            transfers: z.array(z.object({ status: z.string() })),
+          }),
+        })
+        .parse(await response.json());
       expect(body.data.recipients.map((recipient) => recipient.status).sort()).toEqual([
         "failed",
         "processing",

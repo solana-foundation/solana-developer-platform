@@ -196,20 +196,14 @@ beforeEach(() => {
       if (transferStatus === 200) {
         return Promise.resolve(Response.json({ data: { transfer } }));
       }
-      return Promise.resolve(
-        Response.json(
-          {
-            error: {
-              message:
-                transferStatus === 403
-                  ? "This movement is disabled for the project"
-                  : "transfer rejected",
-              ...(transferStatus === 403 ? { details: { reason: "movement_disabled" } } : {}),
-            },
-          },
-          { status: transferStatus }
-        )
-      );
+      const error =
+        transferStatus === 403
+          ? {
+              message: "This movement is disabled for the project",
+              details: { reason: "movement_disabled" },
+            }
+          : { message: "transfer rejected" };
+      return Promise.resolve(Response.json({ error }, { status: transferStatus }));
     }
     return Promise.resolve(Response.json({ data: {} }));
   });
