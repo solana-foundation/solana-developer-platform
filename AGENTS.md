@@ -10,7 +10,7 @@ This file is the canonical agent guide for this repository.
 - `packages/sdp-types`: shared runtime types and shared product constants
 - `packages/sdp-design-tokens`: shared design tokens (CSS custom properties, Tailwind theme mapping) and the `refresh` theme scope; see its README
 - `packages/sdp-ui`: the dashboard's UI primitives (`@sdp/ui`) over `@solana/design-system` and the design tokens; `apps/sdp-web/src/components/ui/*` re-exports them; see its README
-- `packages/sdp-api-catalog`: what the dashboard and the docs share about the public API (`@sdp/api-catalog`), today the request snippets; see its README
+- `packages/sdp-api-catalog`: what the API, the dashboard and the docs share about the public API (`@sdp/api-catalog`): the API reference model and the request snippets; see its README
 
 ## Source of truth
 
@@ -55,6 +55,7 @@ Public docs and AI artifacts should mirror the supported public surface only.
 ## Implementation guidance
 
 - **Every route declares one action.** `requireAction("module.verb")` (`apps/sdp-api/src/middleware/require-action.ts`) from the registry in `packages/sdp-types/src/actions.ts`, or `publicRoute(reason)`; `route-actions.test.ts` fails a route that declares neither. API keys hold explicit grants (no role, no wildcard) and can never hold key, member, organization or project administration or any `configure`.
+- **A route in a grouped API family names its docs group.** Payments, Issuance and Counterparties routes set `[DOCS_GROUP]: <FAMILY>_GROUPS.<group>` beside their `tags` (`apps/sdp-api/src/openapi/paths/helpers.ts`); the API reference shows each group as a folder of its family. `openapi:generate` fails a family that names groups on some routes but not all.
 
 - Follow `docs/contributing/code-standards.md` (correctness, concurrency, TypeScript, API, and dashboard rules). Reviews enforce it.
 - Every new ramp provider and ramp settlement change follows

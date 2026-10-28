@@ -1,8 +1,10 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { parse as parseYaml } from "yaml";
+import { z } from "zod";
 import { DOCS_SKILL_NAME } from "@/lib/agent-setup";
-import { expandDocsBlocks } from "@/lib/docs-blocks";
+import { expandDocsBlocks, stripMdxEsm } from "@/lib/docs-blocks";
 import { DOCS_MODULES } from "@/lib/docs-catalog";
 import {
   frontmatterOf,
@@ -10,7 +12,7 @@ import {
   isPageSourcePublished,
   pageGateOf,
 } from "@/lib/release-channel";
-import { canonicalSite } from "@/lib/site";
+import { canonicalSite, docsPageSlugOf, isDocsFolderGroup } from "@/lib/site";
 
 const {
   aiGuideUrl,
@@ -94,22 +96,26 @@ function normalizeLine(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
 
-function stripMdxContent(source: string): string {
+function stripMdxContent(source: string, where: string): string {
   let content = source.replace(/^---\n[\s\S]*?\n---\n?/, "");
-  content = content.replace(/^import\s+[^\n]*\n?/gm, "");
+  content = stripMdxEsm(content, where);
   return content.replace(/\n{3,}/g, "\n\n").trim();
 }
 
+const pageFrontmatterSchema = z.object({
+  title: z.string().optional(),
+  description: z.string().optional(),
+});
+
+/** A page's title and description, read as YAML: a generated value may be quoted. */
 function parseFrontmatter(source: string): { title: string; description: string } {
   const match = source.match(/^---\n([\s\S]*?)\n---\n?/);
-  const frontmatter = match?.[1] ?? "";
-
-  const title = stripMarkdownFormatting(frontmatter.match(/^title:\s*(.+)$/m)?.[1] ?? "");
-  const description = stripMarkdownFormatting(
-    frontmatter.match(/^description:\s*(.+)$/m)?.[1] ?? ""
-  );
-
-  return { title, description };
+  if (match?.[1] === undefined) return { title: "", description: "" };
+  const { title, description } = pageFrontmatterSchema.parse(parseYaml(match[1]));
+  return {
+    title: title === undefined ? "" : stripMarkdownFormatting(title),
+    description: description === undefined ? "" : stripMarkdownFormatting(description),
+  };
 }
 
 async function listFiles(dirPath: string): Promise<string[]> {
@@ -128,8 +134,7 @@ async function listFiles(dirPath: string): Promise<string[]> {
 }
 
 function toPageSlug(filePath: string): string {
-  const relativePath = path.relative(docsContentDir, filePath).replace(/\\/g, "/");
-  return relativePath.replace(/\.mdx$/, "");
+  return docsPageSlugOf(path.relative(docsContentDir, filePath).replace(/\\/g, "/"));
 }
 
 /** Pages a `module:` tag leaves out of this release channel. */
@@ -158,7 +163,7 @@ async function loadPages(): Promise<Map<string, DocsPage>> {
       title: title || slug.split("/").at(-1)?.replace(/-/g, " ") || slug,
       description,
       url: getDocsPageUrl(slug),
-      content: stripMdxContent(source),
+      content: stripMdxContent(source, filePath),
       shared: pageGateOf(frontmatterOf(raw, filePath).data, filePath) === undefined,
     });
   }
@@ -229,18 +234,20 @@ function buildSections(
       return;
     }
 
+    // The entry's path, `(name)` folders included, and the slug its page would have.
     const fullSlug = slugPrefix ? `${slugPrefix}/${entry}` : entry;
+    const pageSlug = docsPageSlugOf(fullSlug);
 
-    const page = pages.get(fullSlug);
+    const page = pages.get(pageSlug);
     if (page) {
-      if (!emitted.has(fullSlug)) {
+      if (!emitted.has(pageSlug)) {
         currentSection.pages.push(page);
-        emitted.add(fullSlug);
+        emitted.add(pageSlug);
       }
       return;
     }
 
-    if (excludedSlugs.has(fullSlug)) {
+    if (excludedSlugs.has(pageSlug)) {
       return;
     }
 
@@ -251,8 +258,25 @@ function buildSections(
     }
 
     flush();
-    const sectionTitle = folderMeta.title || entry;
+    // A `(name)` folder groups its parent's pages (an API family's operations), so its section
+    // names the parent too, and it has no index of its own.
+    const group = isDocsFolderGroup(entry);
+    const sectionTitle =
+      group && parentLabel
+        ? `${parentLabel}: ${folderMeta.title || entry}`
+        : folderMeta.title || entry;
     currentSection = { title: sectionTitle, pages: [] };
+    // A folder's index is the folder's own page even where its meta lists only the rest, as an
+    // API family lists its operations.
+    const folderIndex = group ? undefined : pages.get(docsPageSlugOf(`${fullSlug}/index`));
+    if (
+      folderIndex &&
+      !(folderMeta.pages ?? []).includes("index") &&
+      !emitted.has(folderIndex.slug)
+    ) {
+      currentSection.pages.push(folderIndex);
+      emitted.add(folderIndex.slug);
+    }
     for (const subEntry of folderMeta.pages || []) {
       visit(subEntry, fullSlug, sectionTitle);
     }
@@ -278,7 +302,12 @@ function apiReferenceSlugs(folderMetas: Map<string, DocsMeta>): string[] {
   if (!pages) {
     throw new Error('Missing content/docs/reference/api/meta.json; run "pnpm generate:api" first');
   }
-  return pages.map((page) => `reference/api/${page}`);
+  // A family is a folder: its table is the folder's index.
+  return pages.map((page) =>
+    folderMetas.has(`reference/api/${page}`)
+      ? `reference/api/${page}/index`
+      : `reference/api/${page}`
+  );
 }
 
 function buildKeyPages(

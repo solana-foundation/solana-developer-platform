@@ -41,7 +41,7 @@
 - [Issuance](https://platform.solana.com/docs/reference/api/issuance): Token issuance, allowlists, and lifecycle operations.
 - [Payments](https://platform.solana.com/docs/reference/api/payments): Wallet balances, transfers, and payment flows.
 - [Compliance](https://platform.solana.com/docs/reference/api/compliance): Risk and compliance screening endpoints.
-- [Counterparties](https://platform.solana.com/docs/reference/api/counterparties): Counterparty (customer/beneficiary) identity records.
+- [Counterparties](https://platform.solana.com/docs/reference/api/counterparties): A counterparty is a person or business you pay or get paid by. You save their details and payment accounts once, then reuse them in payouts and ramps.
 - [Asset Profiles](https://platform.solana.com/docs/reference/api/asset-profiles): Issued-asset identity and metadata profiles, plus the public token metadata URI.
 
 ## AI guide

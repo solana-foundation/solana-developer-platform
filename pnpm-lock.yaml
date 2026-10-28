@@ -239,6 +239,9 @@ importers:
       '@asteasolutions/zod-to-openapi':
         specifier: 9.1.0
         version: 9.1.0(zod@4.6.6)
+      '@sdp/api-catalog':
+        specifier: workspace:*
+        version: link:../../packages/sdp-api-catalog
       '@solana/keychain-core':
         specifier: 1.4.0
         version: 1.4.0(@solana/addresses@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/codecs-core@8.4.0(typescript@6.0.3))(@solana/codecs-strings@8.4.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/keys@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/signers@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/transactions@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))
@@ -281,6 +284,9 @@ importers:
 
   apps/sdp-docs:
     dependencies:
+      '@sdp/api-catalog':
+        specifier: workspace:*
+        version: link:../../packages/sdp-api-catalog
       '@sdp/design-tokens':
         specifier: workspace:*
         version: link:../../packages/sdp-design-tokens
@@ -512,6 +518,13 @@ importers:
   packages/bigint-buffer: {}
 
   packages/sdp-api-catalog:
+    dependencies:
+      '@sdp/types':
+        specifier: workspace:*
+        version: link:../sdp-types
+      zod:
+        specifier: 4.6.6
+        version: 4.6.6
     devDependencies:
       typescript:
         specifier: 6.0.3

@@ -9,6 +9,26 @@ export function normalizeDocsPageSlug(pageSlug: string): string {
   return pageSlug.replace(/\/index$/, "");
 }
 
+/** A `(name)` folder: Fumadocs shows it in the sidebar and leaves it out of its pages' URLs. */
+const FOLDER_GROUP = /^\(.+\)$/;
+
+/**
+ * A page's slug from its path in `content/docs` (`reference/api/payments/(transfers)/list.mdx`):
+ * as Fumadocs makes it, without the extension or any `(name)` folder.
+ */
+export function docsPageSlugOf(relativePath: string): string {
+  return relativePath
+    .replace(/\.mdx$/, "")
+    .split("/")
+    .filter((segment) => !FOLDER_GROUP.test(segment))
+    .join("/");
+}
+
+/** Whether a folder in `content/docs` is a `(name)` folder, a group of its parent's pages. */
+export function isDocsFolderGroup(folderName: string): boolean {
+  return FOLDER_GROUP.test(folderName);
+}
+
 export function getDocsPagePath(pageSlug: string): string {
   const normalized = normalizeDocsPageSlug(pageSlug);
   return normalized ? `/docs/${normalized}` : "/docs";

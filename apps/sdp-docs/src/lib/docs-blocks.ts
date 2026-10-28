@@ -1,8 +1,10 @@
+import type { ApiMethod } from "@sdp/api-catalog/reference";
 import type { Parent, Root, RootContent } from "mdast";
 import remarkGfm from "remark-gfm";
 import remarkMdx from "remark-mdx";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
+import { z } from "zod";
 import {
   DOCS_ACTION_MODULES,
   DOCS_MODULES,
@@ -104,6 +106,121 @@ function blockOf(node: RootContent, where: string): { name: BlockName } | undefi
   return { name: node.name };
 }
 
+// Every API method, checked against the package's list by the compiler. source.config.ts loads
+// this file without a TypeScript resolver, so workspace packages are imported for types only.
+const API_METHOD_NAMES = {
+  GET: true,
+  POST: true,
+  PUT: true,
+  PATCH: true,
+  DELETE: true,
+} as const satisfies Record<ApiMethod, true>;
+
+const apiEndpointSchema = z.strictObject({
+  method: z.custom<ApiMethod>(
+    (value) => typeof value === "string" && Object.hasOwn(API_METHOD_NAMES, value)
+  ),
+  path: z.string().startsWith("/"),
+});
+
+/**
+ * Components the API reference places (scripts/lib/api-reference-page.ts). Unlike a block, the
+ * page renders the component itself (mdx-components.tsx); each one's text is what
+ * `expandDocsBlocks` writes, in a code span, and what search indexes.
+ */
+const ELEMENTS = {
+  ApiEndpoint: (attributes) => {
+    const { method, path } = apiEndpointSchema.parse(attributes);
+    return `${method} ${path}`;
+  },
+} satisfies Record<string, (attributes: Record<string, string>) => string>;
+
+type ElementName = keyof typeof ELEMENTS;
+
+function isElementName(name: string | null): name is ElementName {
+  return name !== null && Object.hasOwn(ELEMENTS, name);
+}
+
+/**
+ * Wrappers a page lays its Markdown out with. In Markdown each one goes and its content stays.
+ * `<ApiOperationTable>` holds a family's table of operations: on the page each row links to its
+ * operation's page, and in Markdown to that page's `.md`, so an agent reading a family reads on
+ * in Markdown. The others only lay a page out: `<ActionLinks>` sets its links as chips.
+ */
+const WRAPPERS = {
+  ApiOperationTable: "links",
+  ActionLinks: "layout",
+} as const satisfies Record<string, "links" | "layout">;
+
+type Wrapper = {
+  element: Extract<RootContent, { type: "mdxJsxFlowElement" }>;
+  kind: (typeof WRAPPERS)[keyof typeof WRAPPERS];
+};
+
+function isWrapperName(name: string | null): name is keyof typeof WRAPPERS {
+  return name !== null && Object.hasOwn(WRAPPERS, name);
+}
+
+/** The wrapper a node is, with its kind, or undefined for any other node. */
+function wrapperOf(node: RootContent, where: string): Wrapper | undefined {
+  if (node.type !== "mdxJsxFlowElement" || !isWrapperName(node.name)) return undefined;
+  if (node.attributes.length > 0) throw new Error(`${where}: <${node.name}> takes no attributes`);
+  return { element: node, kind: WRAPPERS[node.name] };
+}
+
+/** Every link inside a node, however deep. */
+function linksIn(node: RootContent): Extract<RootContent, { type: "link" }>[] {
+  if (node.type === "link") return [node];
+  return "children" in node ? node.children.flatMap(linksIn) : [];
+}
+
+/**
+ * A wrapper's Markdown, as edits to its source: its tags go, and in a `links` wrapper each link
+ * gains `.md`. The caller walks its content like the page's own.
+ */
+function unwrap(
+  { element, kind }: Wrapper,
+  source: string,
+  where: string
+): { start: number; end: number; markdown: string }[] {
+  const span = spanOf(element, where);
+  const [first] = element.children;
+  const last = element.children.at(-1);
+  if (first === undefined || last === undefined) {
+    throw new Error(`${where}: <${element.name}> holds nothing`);
+  }
+  const tags = [
+    { start: span.start, end: spanOf(first, where).start, markdown: "" },
+    { start: spanOf(last, where).end, end: span.end, markdown: "" },
+  ];
+  if (kind === "layout") return tags;
+  const links = element.children.flatMap(linksIn).map((link) => {
+    // Each row links an operation's page inline: `[Summary](/docs/...)`.
+    const linkSpan = spanOf(link, where);
+    const text = source.slice(linkSpan.start, linkSpan.end);
+    const target = `](${link.url})`;
+    if (!/^\/docs\/[^#?]+$/.test(link.url) || !text.endsWith(target)) {
+      throw new Error(`${where}: <${element.name}> links ${text}, not a docs page inline`);
+    }
+    return { ...linkSpan, markdown: `${text.slice(0, -target.length)}](${link.url}.md)` };
+  });
+  return [...tags, ...links];
+}
+
+/** A reference component's text, or undefined for any other node. */
+function elementTextOf(node: RootContent, where: string): string | undefined {
+  if (node.type !== "mdxJsxFlowElement" || !isElementName(node.name)) return undefined;
+  const attributes: Record<string, string> = {};
+  for (const attribute of node.attributes) {
+    if (attribute.type !== "mdxJsxAttribute" || typeof attribute.value !== "string") {
+      throw new Error(`${where}: <${node.name} /> takes string attributes only`);
+    }
+    attributes[attribute.name] = attribute.value;
+  }
+  if (node.children.length > 0) throw new Error(`${where}: <${node.name} /> takes no children`);
+  return ELEMENTS[node.name](attributes);
+}
+
 /** A node's source offsets; the parser sets them on every node it produces. */
 function spanOf(node: RootContent, where: string): { start: number; end: number } {
   const start = node.position?.start.offset;
@@ -121,16 +238,71 @@ export function remarkDocsBlocks(options: { surface?: PublicSurface } = {}) {
   const surface = options.surface ?? publicSurface;
   return (tree: Root, file: { path?: string }) => {
     const where = file.path ?? "MDX page";
+    const spacesFacts = REFERENCE_PAGE.test(where);
     const walk = (parent: Parent) => {
       parent.children = parent.children.flatMap((child) => {
         const block = blockOf(child, where);
         if (block) return parser.parse(BLOCKS[block.name](surface)).children;
+        const elementText = elementTextOf(child, where);
+        if (elementText !== undefined) {
+          // Fumadocs' search (remark-structure) indexes `_stringify.text` for the element.
+          child.data = { ...child.data, _stringify: { text: elementText } };
+          return [child];
+        }
+        if (spacesFacts && child.type === "text" && child.value.includes(FACT_SEPARATOR)) {
+          return spacedFacts(child.value);
+        }
         if ("children" in child) walk(child);
         return [child];
       });
     };
     walk(tree);
   };
+}
+
+/** What separates a field's facts on a generated reference page (scripts/lib/api-reference-page.ts). */
+const FACT_SEPARATOR = " · ";
+
+/** The generated API reference's pages. */
+const REFERENCE_PAGE = /[\\/]content[\\/]docs[\\/]reference[\\/]api[\\/]/;
+
+/**
+ * Text with its fact separators as spans, so the page can give the dots room (globals.css). The
+ * Markdown agents get keeps ` · `.
+ */
+function spacedFacts(value: string): RootContent[] {
+  return value.split(FACT_SEPARATOR).flatMap((part, index): RootContent[] => {
+    const text: RootContent[] = part === "" ? [] : [{ type: "text", value: part }];
+    if (index === 0) return text;
+    return [
+      { type: "text", value: " " },
+      {
+        type: "mdxJsxTextElement",
+        name: "span",
+        attributes: [{ type: "mdxJsxAttribute", name: "className", value: "launch-api-separator" }],
+        children: [{ type: "text", value: "·" }],
+      },
+      { type: "text", value: " " },
+      ...text,
+    ];
+  });
+}
+
+/**
+ * Markdown without the page's ESM `import` and `export` statements, for the Markdown route and
+ * the llms files. The parser finds them, so a line in a code fence that starts with `import` (a
+ * Python sample's `import os, requests`) stays.
+ */
+export function stripMdxEsm(markdown: string, where: string): string {
+  const statements = parser
+    .parse(markdown)
+    .children.filter((node) => node.type === "mdxjsEsm")
+    .map((node) => spanOf(node, where));
+  let result = markdown;
+  for (const span of statements.sort((left, right) => right.start - left.start)) {
+    result = result.slice(0, span.start) + result.slice(span.end);
+  }
+  return result;
 }
 
 /** Expands a page's generated blocks in its raw MDX, keeping everything else byte for byte. */
@@ -148,6 +320,8 @@ export function expandDocsBlocks(
   const walk = (parent: Parent) => {
     for (const child of parent.children) {
       const block = blockOf(child, where);
+      const elementText = elementTextOf(child, where);
+      const wrapper = wrapperOf(child, where);
       if (child.type === "code" && child.meta?.includes("rotate-providers") && leadProvider) {
         // The page rotates this fence's provider; text names the first published one.
         const span = spanOf(child, where);
@@ -157,6 +331,12 @@ export function expandDocsBlocks(
         blocks.push({ ...span, markdown });
       } else if (block) {
         blocks.push({ ...spanOf(child, where), markdown: BLOCKS[block.name](surface) });
+      } else if (elementText !== undefined) {
+        blocks.push({ ...spanOf(child, where), markdown: `\`${elementText}\`` });
+      } else if (wrapper !== undefined) {
+        // Its content is the page's own Markdown, with its own components and wrappers.
+        blocks.push(...unwrap(wrapper, source, where));
+        walk(wrapper.element);
       } else if ("children" in child) {
         walk(child);
       }

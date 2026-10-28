@@ -1,111 +1,43 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { escapeMarkdownTableCell } from "./lib/markdown-escaping.mjs";
-import { getOperationFamily, POSTMAN_COLLECTION_ROUTE, slugify } from "./lib/public-openapi.mjs";
+import { apiReferenceSchema } from "@sdp/api-catalog/reference";
+import {
+  operationGroups,
+  renderFamilyIndex,
+  renderOperationPage,
+  SAMPLE_TAB_MARKERS,
+} from "./lib/api-reference-page.ts";
+import { POSTMAN_COLLECTION_ROUTE, slugify } from "./lib/public-openapi.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const generatedSpecPath = path.resolve(__dirname, "../../sdp-api/generated/openapi.json");
-// What the build's release channel publishes, written by openapi:generate beside
-// the spec. Committed at experimental like the other generated docs files.
+// The reference model `openapi:generate` builds from the channel's public OpenAPI document
+// (apps/sdp-api/src/openapi/reference.ts), with what that channel publishes beside it. The
+// surface is committed at experimental like the other generated docs files.
+const generatedReferencePath = path.resolve(
+  __dirname,
+  "../../sdp-api/generated/api-reference.json"
+);
 const generatedSurfacePath = path.resolve(__dirname, "../../sdp-api/generated/public-surface.json");
 const surfacePath = path.resolve(__dirname, "../src/generated/public-surface.json");
 const outputDir = path.resolve(__dirname, "../content/docs/reference/api");
 const rootMetaPath = path.resolve(__dirname, "../content/docs/meta.json");
 
-const HTTP_METHODS = new Set(["get", "post", "put", "patch", "delete", "head", "options"]);
-const SOURCE_PATH = "apps/sdp-api/generated/openapi.json";
-const renderOperationRow = (operation) =>
-  `| \`${operation.method}\` | \`${operation.path}\` | ${escapeMarkdownTableCell(operation.summary || "-")} |`;
+const SOURCE_PATH = "apps/sdp-api/generated/api-reference.json";
 
-const parseJsonSpec = (spec) => {
-  const tagDescriptions = new Map();
-  for (const tag of spec.tags || []) {
-    if (!tag?.name) {
-      continue;
-    }
-    tagDescriptions.set(tag.name, tag.description || "");
-  }
-
-  const operations = [];
-  const paths = spec.paths || {};
-
-  for (const [routePath, pathItem] of Object.entries(paths)) {
-    if (!pathItem || typeof pathItem !== "object") {
-      continue;
-    }
-
-    for (const method of HTTP_METHODS) {
-      const operation = pathItem[method];
-      if (!operation || typeof operation !== "object") {
-        continue;
-      }
-
-      const summary = operation.summary || operation.operationId || "-";
-      const tags = Array.isArray(operation.tags)
-        ? operation.tags.map((tag) => String(tag)).filter(Boolean)
-        : [];
-
-      operations.push({
-        method: method.toUpperCase(),
-        path: routePath,
-        summary,
-        tags,
-      });
-    }
-  }
-
-  return { tagDescriptions, operations };
-};
-
-const loadSpecData = async () => {
+const loadReference = async () => {
   let json;
-
   try {
-    json = await fs.readFile(generatedSpecPath, "utf8");
+    json = await fs.readFile(generatedReferencePath, "utf8");
   } catch (error) {
     throw new Error(
-      `Missing generated OpenAPI spec at ${SOURCE_PATH}. Run "pnpm -C apps/sdp-api run openapi:generate" first.`,
+      `Missing ${SOURCE_PATH}. Run "pnpm -C apps/sdp-api run openapi:generate" first.`,
       { cause: error }
     );
   }
-
-  let spec;
-  try {
-    spec = JSON.parse(json);
-  } catch (error) {
-    throw new Error(`Invalid JSON in ${SOURCE_PATH}.`, { cause: error });
-  }
-
-  const parsed = parseJsonSpec(spec);
-  if (parsed.operations.length === 0) {
-    throw new Error(`No API operations found in ${SOURCE_PATH}.`);
-  }
-
-  return parsed;
-};
-
-const renderTagPage = ({ tagName, description, operations }) => {
-  const sortedOperations = [...operations].sort((left, right) => {
-    if (left.path === right.path) {
-      return left.method.localeCompare(right.method);
-    }
-    return left.path.localeCompare(right.path);
-  });
-
-  const rows = sortedOperations.map(renderOperationRow).join("\n");
-
-  return `---
-title: ${tagName}
-description: ${description || `${tagName} API endpoints`}
----
-
-| Method | Endpoint | Summary |
-| --- | --- | --- |
-${rows}
-`;
+  return apiReferenceSchema.parse(JSON.parse(json));
 };
 
 const renderIndexPage = ({ tagPages }) => {
@@ -118,11 +50,10 @@ title: API Reference
 description: Endpoint index from the repository OpenAPI spec.
 ---
 
-<div>
+<ActionLinks>
   <a href="${POSTMAN_COLLECTION_ROUTE}" download>Download Postman collection</a>
-  {" · "}
   <a href="${POSTMAN_COLLECTION_ROUTE}">Open raw JSON</a>
-</div>
+</ActionLinks>
 
 ${links}
 `;
@@ -132,130 +63,158 @@ const writeJson = async (filePath, value) => {
   await fs.writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 };
 
-const extractRenderedRows = (content) => {
-  const body = content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
-
-  return body
-    .split(/\r?\n/)
-    .filter(
-      (line) => line.startsWith("| ") && !line.startsWith("| Method") && !line.startsWith("| ---")
-    );
-};
-
 // Families every release channel runs, so every build must render them.
 const ALWAYS_PUBLIC_TAG_SLUGS = ["health", "wallets", "projects"];
 
-const validateGeneratedTagPages = async ({
-  outputDir,
-  tagPages,
-  groupedOperations,
-  tagDescriptions,
-}) => {
-  const generatedSlugs = new Set(tagPages.map((tagPage) => tagPage.slug));
-  // The OpenAPI document is already narrowed to the build's release channel
-  // (SDP_RELEASE_CHANNEL), so every public family it declares needs a page.
-  const declaredSlugs = new Set([...tagDescriptions.keys()].map(slugify));
-  const requiredSlugs = [...new Set([...ALWAYS_PUBLIC_TAG_SLUGS, ...declaredSlugs])];
-  const missingPublicPages = requiredSlugs.filter((slug) => !generatedSlugs.has(slug));
+/** An operation's page, beside its family's table: `/docs/reference/api/<family>/<endpointId>`. */
+const operationHref = (familySlug, operation) =>
+  `/docs/reference/api/${familySlug}/${operation.endpointId}`;
 
+/**
+ * Where a family's operation pages sit in its folder: each group's in a `(group)` folder, which
+ * Fumadocs shows in the sidebar but leaves out of the pages' URLs, or all of them in the
+ * family's folder when it has no groups.
+ */
+const familyLayout = (family) => {
+  const groups = operationGroups(family).map((group) => {
+    if (group.title === null) return { ...group, folder: "" };
+    const slug = slugify(group.title);
+    if (slug === "") throw new Error(`${family.name}'s group "${group.title}" has no slug`);
+    return { ...group, folder: `(${slug})` };
+  });
+  const folders = groups.map((group) => group.folder);
+  if (new Set(folders).size !== folders.length) {
+    throw new Error(`${family.name} has two groups in one folder: ${folders.join(", ")}`);
+  }
+  return groups;
+};
+
+/**
+ * Every family's table links each of its operations, and every operation has its page with the
+ * three request samples: the reference's coverage, checked on what was written.
+ */
+const validateGeneratedTagPages = async ({ outputDir, families }) => {
+  const generatedSlugs = new Set(families.map((family) => slugify(family.name)));
+  const missingPublicPages = ALWAYS_PUBLIC_TAG_SLUGS.filter((slug) => !generatedSlugs.has(slug));
   if (missingPublicPages.length > 0) {
     throw new Error(
       `Generated API docs are missing required public sections: ${missingPublicPages.join(", ")}`
     );
   }
 
-  const renderedPages = await Promise.all(
-    tagPages.map(async (tagPage) => ({
-      tagPage,
-      source: await fs.readFile(path.join(outputDir, `${tagPage.slug}.mdx`), "utf8"),
-    }))
+  const pages = await Promise.all(
+    families.flatMap((family) => {
+      const slug = slugify(family.name);
+      return [
+        fs.readFile(path.join(outputDir, slug, "index.mdx"), "utf8").then((source) => ({
+          family,
+          slug,
+          table: source,
+        })),
+        ...familyLayout(family).flatMap((group) =>
+          group.operations.map((operation) =>
+            fs
+              .readFile(
+                path.join(outputDir, slug, group.folder, `${operation.endpointId}.mdx`),
+                "utf8"
+              )
+              .then((source) => ({ family, operation, source }))
+          )
+        ),
+      ];
+    })
   );
 
-  for (const { tagPage, source } of renderedPages) {
-    const actualRows = extractRenderedRows(source);
-    const actualRowSet = new Set(actualRows);
-    const expectedRows = (groupedOperations.get(tagPage.title) || [])
-      .slice()
-      .sort((left, right) => {
-        if (left.path === right.path) {
-          return left.method.localeCompare(right.method);
-        }
-        return left.path.localeCompare(right.path);
-      })
-      .map(renderOperationRow);
-
-    if (actualRows.length !== expectedRows.length) {
-      throw new Error(
-        `Generated API docs for ${tagPage.title} document ${actualRows.length} operations, expected ${expectedRows.length}`
+  for (const page of pages) {
+    if ("table" in page) {
+      const unlinked = page.family.operations.filter(
+        (operation) => !page.table.includes(`](${operationHref(page.slug, operation)})`)
       );
-    }
-
-    for (const row of expectedRows) {
-      if (!actualRowSet.has(row)) {
-        throw new Error(`Generated API docs for ${tagPage.title} are missing row: ${row}`);
+      if (unlinked.length > 0) {
+        throw new Error(
+          `The ${page.family.name} table does not link ${unlinked.map((operation) => operation.operationId).join(", ")}`
+        );
       }
+      continue;
+    }
+    const missing = SAMPLE_TAB_MARKERS.filter((marker) => !page.source.includes(marker));
+    if (missing.length > 0) {
+      throw new Error(`${page.operation.operationId}'s page is missing ${missing.join(", ")}`);
     }
   }
 };
 
 const run = async () => {
-  const { tagDescriptions, operations } = await loadSpecData();
+  const { families } = await loadReference();
 
   await fs.mkdir(path.dirname(surfacePath), { recursive: true });
   await fs.copyFile(generatedSurfacePath, surfacePath);
 
-  const groupedOperations = new Map();
-  for (const operation of operations) {
-    const family = getOperationFamily(operation, `${operation.method} ${operation.path}`);
-    if (!groupedOperations.has(family)) {
-      groupedOperations.set(family, []);
-    }
-    groupedOperations.get(family).push(operation);
-  }
-
-  const orderedTags = [];
-
-  for (const knownTag of tagDescriptions.keys()) {
-    if (groupedOperations.has(knownTag)) {
-      orderedTags.push(knownTag);
-    }
-  }
-
-  const additionalTags = [...groupedOperations.keys()]
-    .filter((tag) => !tagDescriptions.has(tag))
-    .sort((left, right) => left.localeCompare(right));
-
-  orderedTags.push(...additionalTags);
-  const exposedOperationsCount = [...groupedOperations.values()].reduce(
-    (total, operationsInTag) => total + operationsInTag.length,
-    0
-  );
-
   await fs.mkdir(outputDir, { recursive: true });
 
-  const existingFiles = await fs.readdir(outputDir);
+  // What an earlier run wrote: the index, the meta and a folder per family.
+  const existingEntries = await fs.readdir(outputDir, { withFileTypes: true });
   await Promise.all(
-    existingFiles
-      .filter((fileName) => fileName.endsWith(".mdx") || fileName === "meta.json")
-      .map((fileName) => fs.rm(path.join(outputDir, fileName), { force: true }))
+    existingEntries
+      .filter(
+        (entry) => entry.isDirectory() || entry.name.endsWith(".mdx") || entry.name === "meta.json"
+      )
+      .map((entry) => fs.rm(path.join(outputDir, entry.name), { recursive: true, force: true }))
   );
 
-  const tagPages = [];
-
-  for (const tagName of orderedTags) {
-    const tagSlug = slugify(tagName);
-    const tagOps = groupedOperations.get(tagName) || [];
-    const description = tagDescriptions.get(tagName) || "";
-
-    const tagContent = renderTagPage({
-      tagName,
-      description,
-      operations: tagOps,
-    });
-
-    await fs.writeFile(path.join(outputDir, `${tagSlug}.mdx`), tagContent, "utf8");
-    tagPages.push({ title: tagName, slug: tagSlug });
+  const tagPages = families.map((family) => ({ title: family.name, slug: slugify(family.name) }));
+  const index = tagPages.find((tagPage) => tagPage.slug === "index");
+  if (index !== undefined) {
+    throw new Error(`The ${index.title} family's folder would replace the API reference index`);
   }
+  // A folder per family: its table as the folder's index, then a page per operation, in its
+  // group's folder when the family has groups. Each meta.json lists its pages (or the family's
+  // its groups) in document order for the sidebar and the previous and next links.
+  await Promise.all(
+    families.map(async (family, position) => {
+      const { slug } = tagPages[position];
+      const familyDir = path.join(outputDir, slug);
+      const groups = familyLayout(family);
+      await Promise.all(
+        groups.map((group) => fs.mkdir(path.join(familyDir, group.folder), { recursive: true }))
+      );
+      const endpointIds = (group) => group.operations.map((operation) => operation.endpointId);
+      await Promise.all([
+        fs.writeFile(
+          path.join(familyDir, "index.mdx"),
+          renderFamilyIndex(family, (operation) => operationHref(slug, operation)),
+          "utf8"
+        ),
+        writeJson(path.join(familyDir, "meta.json"), {
+          title: family.name,
+          pages: groups.flatMap((group) =>
+            group.title === null ? endpointIds(group) : [group.folder]
+          ),
+        }),
+        ...groups.flatMap((group) => [
+          ...(group.title === null
+            ? []
+            : [
+                writeJson(path.join(familyDir, group.folder, "meta.json"), {
+                  title: group.title,
+                  pages: endpointIds(group),
+                }),
+              ]),
+          ...group.operations.map((operation) =>
+            fs.writeFile(
+              path.join(familyDir, group.folder, `${operation.endpointId}.mdx`),
+              renderOperationPage(operation),
+              "utf8"
+            )
+          ),
+        ]),
+      ]);
+    })
+  );
+  const exposedOperationsCount = families.reduce(
+    (total, family) => total + family.operations.length,
+    0
+  );
 
   const indexContent = renderIndexPage({
     tagPages,
@@ -342,12 +301,7 @@ const run = async () => {
     pages: newPages,
   });
 
-  await validateGeneratedTagPages({
-    outputDir,
-    tagPages,
-    groupedOperations,
-    tagDescriptions,
-  });
+  await validateGeneratedTagPages({ outputDir, families });
 
   console.log(
     `Generated ${exposedOperationsCount} endpoints across ${tagPages.length} API sections from ${SOURCE_PATH}`

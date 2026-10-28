@@ -394,18 +394,19 @@ body {
 }
 
 .launch-docs-nav-item.is-active .launch-docs-nav-icon,
-.launch-docs-nav-folder-link.is-active .launch-docs-nav-icon {
+.launch-docs-nav-folder-row.is-active .launch-docs-nav-icon {
   color: var(--ink);
 }
 
+/* A row's highlight: a folder's row is one, its toggle included. */
 .launch-docs-nav-item:hover,
-.launch-docs-nav-folder-link:hover {
+.launch-docs-nav-folder-row:hover {
   background: var(--wash);
   color: var(--ink);
 }
 
 .launch-docs-nav-item.is-active,
-.launch-docs-nav-folder-link.is-active {
+.launch-docs-nav-folder-row.is-active {
   background: var(--wash-strong);
   color: var(--ink);
   font-weight: 500;
@@ -418,6 +419,8 @@ body {
 .launch-docs-nav-folder-row {
   display: flex;
   align-items: center;
+  border-radius: var(--corner-control);
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .launch-docs-nav-folder-btn {
@@ -437,14 +440,6 @@ body {
   line-height: var(--line-height-body);
   cursor: pointer;
   text-align: left;
-  transition:
-    background-color var(--motion-duration-fast) var(--motion-ease-out),
-    color var(--motion-duration-fast) var(--motion-ease-out);
-}
-
-.launch-docs-nav-folder-btn:hover {
-  background: var(--wash);
-  color: var(--ink);
 }
 
 .launch-docs-nav-toggle-icon {
@@ -472,13 +467,10 @@ body {
   background: transparent;
   color: var(--ink-tertiary);
   cursor: pointer;
-  transition:
-    background-color var(--motion-duration-fast) var(--motion-ease-out),
-    color var(--motion-duration-fast) var(--motion-ease-out);
+  transition: color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .launch-docs-nav-toggle:hover {
-  background: var(--wash);
   color: var(--ink);
 }
 
@@ -496,8 +488,9 @@ body {
   transform: rotate(90deg);
 }
 
+/* Each level sits 14px further in, its highlight with it. */
 .launch-docs-nav-children {
-  margin: 1px 0 4px;
+  margin: 1px 0 4px 14px;
 }
 
 .launch-docs-sidebar-section {
@@ -591,8 +584,9 @@ body {
   color: var(--ink);
 }
 
+/* A section without a page of its own: a label, quieter than the links beside it. */
 .launch-docs-breadcrumb span {
-  color: var(--ink);
+  color: var(--ink-tertiary);
 }
 
 .launch-docs-breadcrumb svg {
@@ -1358,6 +1352,69 @@ body {
   color: var(--ink);
 }
 
+/* A page's action links (`<ActionLinks>`): raised chips like the page actions, a download led by
+   a download icon and a JSON link by braces. The hover wash is an inset shadow over the chip, so
+   it fades on the motion tokens. */
+.launch-docs-action-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 20px 0 28px;
+}
+
+.launch-docs-action-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: var(--control-height-sm);
+  padding: 0 12px;
+  border-radius: var(--corner-control);
+  background: var(--chip);
+  box-shadow:
+    var(--chip-ring),
+    inset 0 0 0 999px transparent;
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-body);
+  font-weight: 500;
+  text-decoration: none;
+  transition: box-shadow var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.launch-docs-action-links a:hover {
+  box-shadow:
+    var(--chip-ring),
+    inset 0 0 0 999px var(--wash);
+}
+
+.launch-docs-action-links a:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.launch-docs-action-links a::before {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  background: var(--ink-tertiary);
+  mask: center / contain no-repeat;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.launch-docs-action-links a[download]::before {
+  content: "";
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 15V3'/%3E%3Cpath d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E");
+}
+
+.launch-docs-action-links a[href$=".json"]:not([download])::before {
+  content: "";
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5c0 1.1.9 2 2 2h1'/%3E%3Cpath d='M16 21h1a2 2 0 0 0 2-2v-5c0-1.1.9-2 2-2a2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1'/%3E%3C/svg%3E");
+}
+
+.launch-docs-action-links a:hover::before {
+  background: var(--ink);
+}
+
 /* minmax(0, 1fr) holds an item to the column, so a code block inside it scrolls instead of
    widening the page. */
 .launch-mdx-list {
@@ -1499,6 +1556,261 @@ body {
   padding: 0.125rem 0.375rem;
   font-size: 0.875em;
   overflow-wrap: break-word;
+}
+
+/* ── API reference ── */
+/* The generated reference (scripts/lib/api-reference-page.ts). A family's page is its table of
+   operations, each row one link to the operation's page; an operation's page leads with its
+   endpoint, then sections whose field lists name the field, its type and facts on one line. */
+.is-api-reference .launch-mdx-heading-2 {
+  margin: 40px 0 10px;
+  font-size: var(--font-size-subheading);
+  line-height: var(--line-height-subheading);
+}
+
+/* A row is one link: the summary's link covers it, so the whole row opens the operation. */
+.launch-api-operation-table .launch-mdx-table tbody tr {
+  position: relative;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.launch-api-operation-table .launch-mdx-table tbody tr:hover {
+  background: var(--wash);
+}
+
+.launch-api-operation-table .launch-mdx-td:last-child {
+  padding-right: 40px;
+}
+
+/* A path stays on one line; a table too wide for a phone scrolls in its frame. */
+.launch-api-operation-table code {
+  white-space: nowrap;
+}
+
+.launch-api-operation-table .launch-mdx-link {
+  color: inherit;
+  font-weight: 400;
+  text-decoration: none;
+}
+
+.launch-api-operation-table .launch-mdx-link::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+}
+
+.launch-api-operation-table .launch-mdx-link:focus-visible {
+  outline: none;
+}
+
+.launch-api-operation-table .launch-mdx-link:focus-visible::after {
+  outline: 2px solid var(--ink);
+  outline-offset: -2px;
+}
+
+/* The chevron: drawn from the row's text colour, it moves a little toward the page on hover. */
+.launch-api-operation-table .launch-mdx-td:last-child::after {
+  position: absolute;
+  top: 50%;
+  right: 14px;
+  width: 14px;
+  height: 14px;
+  margin-top: -7px;
+  background: var(--ink-tertiary);
+  content: "";
+  mask:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 18 6-6-6-6'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  pointer-events: none;
+  transition:
+    transform var(--motion-duration-fast) var(--motion-ease-out),
+    background-color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.launch-api-operation-table .launch-mdx-table tbody tr:hover .launch-mdx-td:last-child::after {
+  background: var(--ink);
+  transform: translateX(3px);
+}
+
+/* On a phone each row stacks: method and path on one line, the summary below. */
+@media (max-width: 639px) {
+  .launch-api-operation-table .launch-mdx-table,
+  .launch-api-operation-table .launch-mdx-table tbody,
+  .launch-api-operation-table .launch-mdx-table tr,
+  .launch-api-operation-table .launch-mdx-td {
+    display: block;
+  }
+
+  .launch-api-operation-table .launch-mdx-table thead {
+    display: none;
+  }
+
+  .launch-api-operation-table .launch-mdx-table tbody tr {
+    padding: 12px 40px 12px 14px;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .launch-api-operation-table .launch-mdx-table tbody tr:last-child {
+    border-bottom: 0;
+  }
+
+  .launch-api-operation-table .launch-mdx-td,
+  .launch-api-operation-table .launch-mdx-td:last-child {
+    padding: 0;
+    border-bottom: 0;
+  }
+
+  .launch-api-operation-table .launch-mdx-td:first-child {
+    display: inline-block;
+    margin-right: 8px;
+  }
+
+  .launch-api-operation-table .launch-mdx-td:nth-child(2) {
+    display: inline;
+  }
+
+  .launch-api-operation-table .launch-mdx-td:last-child {
+    margin-top: 6px;
+  }
+
+  .launch-api-operation-table code {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}
+
+/* An operation's method beside its name in the sidebar (`icon: method:<METHOD>`). */
+.launch-docs-nav-method {
+  width: 3.9em;
+  color: var(--positive);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-meta);
+  font-weight: 500;
+}
+
+.launch-docs-nav-method[data-method="POST"] {
+  color: var(--attention);
+}
+
+.launch-docs-nav-method:is([data-method="PUT"], [data-method="PATCH"]) {
+  color: var(--progress);
+}
+
+.launch-docs-nav-method[data-method="DELETE"] {
+  color: var(--critical);
+}
+
+/* The path wraps beside its method on a phone rather than dropping below it. */
+.launch-api-endpoint {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0 0 18px;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-meta);
+}
+
+.launch-api-endpoint code {
+  min-width: 0;
+  padding: 2px 0 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font-size: var(--font-size-body);
+  overflow-wrap: break-word;
+}
+
+.launch-api-path-param {
+  color: var(--ink-tertiary);
+}
+
+/* Method colours follow the dashboard playground's badges. */
+.launch-api-method {
+  flex: none;
+  padding: 3px 7px;
+  border-radius: var(--corner-control-inner);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--positive);
+  background: var(--positive-wash);
+  box-shadow: inset 0 0 0 1px var(--positive-rule);
+}
+
+.launch-api-method[data-method="POST"] {
+  color: var(--attention);
+  background: var(--attention-wash);
+  box-shadow: inset 0 0 0 1px var(--attention-rule);
+}
+
+.launch-api-method:is([data-method="PUT"], [data-method="PATCH"]) {
+  color: var(--progress);
+  background: var(--progress-wash);
+  box-shadow: inset 0 0 0 1px var(--progress-rule);
+}
+
+.launch-api-method[data-method="DELETE"] {
+  color: var(--critical);
+  background: var(--critical-wash);
+  box-shadow: inset 0 0 0 1px var(--critical-rule);
+}
+
+.is-api-reference .launch-mdx-unordered-list {
+  gap: 0;
+  margin: 4px 0 20px;
+  padding-left: 0;
+  list-style: none;
+}
+
+.is-api-reference .launch-mdx-unordered-list > .launch-mdx-list-item {
+  padding: 12px 0;
+  border-top: 1px solid var(--rule-faint);
+  font-size: var(--font-size-body);
+  line-height: 1.6;
+}
+
+/* Nested fields hang off their parent on a guide rule. */
+.is-api-reference .launch-mdx-list-item .launch-mdx-unordered-list {
+  margin: 10px 0 0;
+  padding-left: 16px;
+  border-left: 1px solid var(--rule);
+}
+
+.is-api-reference
+  .launch-mdx-list-item
+  .launch-mdx-unordered-list
+  > .launch-mdx-list-item:first-child {
+  border-top: 0;
+  padding-top: 4px;
+}
+
+.is-api-reference .launch-mdx-list-item > .launch-mdx-paragraph {
+  margin: 4px 0 0;
+  font-size: var(--font-size-body);
+  line-height: 1.6;
+}
+
+/* The first line: field name, type and facts. */
+.is-api-reference .launch-mdx-list-item > .launch-mdx-paragraph:first-child {
+  margin-top: 0;
+  color: var(--ink-tertiary);
+  font-size: var(--font-size-meta);
+}
+
+/* The dot between two facts, with room on either side (`remarkDocsBlocks` sets it apart). */
+.launch-api-separator {
+  margin: 0 0.3em;
+}
+
+/* The field or status name, set apart from the inline code chips beside it. */
+.is-api-reference .launch-mdx-list-item > .launch-mdx-strong:first-child > code,
+.is-api-reference .launch-mdx-paragraph:first-child > .launch-mdx-strong:first-child > code {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-body);
 }
 
 /* ── Docs Home page ── */
