@@ -14,10 +14,7 @@ import {
 } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import type { PaymentTransferBatchesRepository } from "./payment-transfer-batches.repository";
-import {
-  createPostgresPaymentTransferBatchesRepository,
-  transferBatchUniqueViolation,
-} from "./payment-transfer-batches.repository.postgres";
+import { createPostgresPaymentTransferBatchesRepository } from "./payment-transfer-batches.repository.postgres";
 
 const TEST_PROJECT_ID = "prj_transfer_batches_repo_test";
 const TEST_WALLET_ID = "wallet_transfer_batches_repo_test";
@@ -281,110 +278,6 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
     expect(claimed?.recipients).toMatchObject([{ id: first, status: "pending", error: null }]);
     expect(claimed?.batch.transaction_count).toBe(2);
     expect(await claim([first])).toBeNull();
-  });
-
-  it("names the idempotency index when a batch reuses its key", async () => {
-    await repo.createTransferBatchWithRecipients({
-      batch: { ...baseInput, projectId: TEST_PROJECT_ID, idempotencyKey: "named-key" },
-      recipients: [],
-    });
-
-    await expect(
-      repo.createTransferBatchWithRecipients({
-        batch: { ...baseInput, projectId: TEST_PROJECT_ID, idempotencyKey: "named-key" },
-        recipients: [],
-      })
-    ).rejects.toSatisfy(
-      (error: unknown) => transferBatchUniqueViolation(error) === "idempotency_key"
-    );
-  });
-
-  it("refuses a second batch with the same externalId on the same project and wallet", async () => {
-    const { batch: holder } = await repo.createTransferBatchWithRecipients({
-      batch: {
-        ...baseInput,
-        projectId: TEST_PROJECT_ID,
-        externalId: "payroll_run_1",
-        idempotencyKey: "external-id-key-1",
-      },
-      recipients: [],
-    });
-
-    await expect(
-      repo.createTransferBatchWithRecipients({
-        batch: {
-          ...baseInput,
-          projectId: TEST_PROJECT_ID,
-          externalId: "payroll_run_1",
-          idempotencyKey: "external-id-key-2",
-        },
-        recipients: [],
-      })
-    ).rejects.toSatisfy((error: unknown) => transferBatchUniqueViolation(error) === "external_id");
-    expect(
-      await repo.findTransferBatchByExternalId({
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-        externalId: "payroll_run_1",
-      })
-    ).toMatchObject({ id: holder.id });
-  });
-
-  it("allows the same externalId on another wallet or project, and any number without one", async () => {
-    const otherCustodyWalletId = "cwlt_transfer_batches_repo_other";
-    await seedTestCustodyRows(env, {
-      configs: [],
-      wallets: [
-        {
-          id: otherCustodyWalletId,
-          owner: { kind: "config", custodyConfigId: "cfg_transfer_batches_exact" },
-          walletId: "wallet_transfer_batches_repo_other",
-          publicKey: "Source222",
-          label: null,
-          purpose: null,
-          status: "active",
-        },
-      ],
-    });
-    const create = (overrides: {
-      projectId: string;
-      sourceCustodyWalletId?: string;
-      externalId?: string;
-      idempotencyKey: string;
-    }) =>
-      repo.createTransferBatchWithRecipients({
-        batch: { ...baseInput, ...overrides },
-        recipients: [],
-      });
-
-    await create({ projectId: TEST_PROJECT_ID, externalId: "shared_run", idempotencyKey: "a" });
-    await expect(
-      create({
-        projectId: TEST_PROJECT_ID,
-        sourceCustodyWalletId: otherCustodyWalletId,
-        externalId: "shared_run",
-        idempotencyKey: "b",
-      })
-    ).resolves.toBeDefined();
-    await expect(
-      create({ projectId: projects.production.id, externalId: "shared_run", idempotencyKey: "c" })
-    ).resolves.toBeDefined();
-    await expect(
-      create({ projectId: TEST_PROJECT_ID, idempotencyKey: "d" })
-    ).resolves.toBeDefined();
-    await expect(
-      create({ projectId: TEST_PROJECT_ID, idempotencyKey: "e" })
-    ).resolves.toBeDefined();
-
-    expect(
-      await repo.findTransferBatchByExternalId({
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-        sourceCustodyWalletId: otherCustodyWalletId,
-        externalId: "shared_run",
-      })
-    ).toMatchObject({ source_custody_wallet_id: otherCustodyWalletId, idempotency_key: "b" });
   });
 });
 
