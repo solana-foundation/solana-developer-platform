@@ -1,40 +1,76 @@
+import { cn } from "@sdp/ui/cn";
 import { SkeletonBlock } from "@sdp/ui/skeleton-block";
 import { TableCell } from "@sdp/ui/table";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@solana/design-system/table";
-import { Fragment } from "react";
+import { Fragment, type ReactNode } from "react";
+import {
+  PAYMENTS_TABLE_CELL,
+  PAYMENTS_TABLE_HEAD,
+} from "@/app/dashboard/[projectId]/payments/payments-table";
 import {
   DashboardWorkspaceCard,
   DashboardWorkspaceOverviewPanel,
 } from "@/components/dashboard-workspace-panel";
+import { RecordStack } from "@/components/refresh-record";
 import type { DashboardFlags } from "@/flags/dashboard";
+import { EARN_TABLE, EARN_TABLE_FRAME, type EarnTableColumns } from "./earn/earn-table-layout";
+import { EMBEDDED_YIELD_STRATEGY_COLUMNS } from "./earn/embedded-yield-layout";
+import {
+  TREASURY_POSITION_COLUMNS,
+  TREASURY_POSITIONS_BODY,
+  TREASURY_STRATEGIES_BODY,
+  TREASURY_STRATEGY_COLUMNS,
+  TREASURY_WALLET_GRID,
+  TREASURY_WALLETS_BODY,
+} from "./treasury-solutions/treasury-layout";
 
-const BALANCE_SKELETON_IDS = ["one", "two", "three"];
-const STRATEGY_SKELETON_IDS = ["one", "two", "three"];
-const TREASURY_SECTION_SKELETON_IDS = ["one", "two"];
+const TREASURY_TILE_FIGURE_SKELETON_IDS = ["cash", "deployed"];
+const TREASURY_TABLE_SKELETON_ROW_IDS = ["one", "two", "three", "four"];
 const EARN_PATH_SKELETON_IDS = ["treasury", "program"];
 const DVP_PATH_SKELETON_IDS = ["dvp"];
-const INTEGRATION_SECTION_SKELETON_IDS = ["client", "deposit", "portfolio", "withdraw"];
 
 /**
- * One block per path card the landing renders: Earn's two, then DvP's. Markets runs when
- * either sub-module does, so drawing both showed a DvP card on stage (Earn `beta`, DvP
+ * The guide intro's lines, each hidden from the work-area width where the English copy rewraps
+ * to fewer. Measured from 360px to 1440px: six lines at 360, five to 412, four to tablet widths,
+ * three at 1024, two from 1100.
+ */
+const GUIDE_INTRO_LINES = [
+  { id: "one", hidden: undefined },
+  { id: "two", hidden: undefined },
+  { id: "three", hidden: "@3xl:hidden" },
+  { id: "four", hidden: "@xl:hidden" },
+  { id: "five", hidden: "@min-[26.875rem]:hidden" },
+  { id: "six", hidden: "@min-[23rem]:hidden" },
+] as const satisfies readonly { id: string; hidden: string | undefined }[];
+
+/** A landing group: its 24px heading line, then a tile per path, two to a row. */
+function MarketsPathGroupSkeleton({ paths }: { paths: readonly string[] }) {
+  return (
+    <section className="flex min-w-0 flex-col gap-4">
+      <div className="flex h-6 items-center">
+        <SkeletonBlock className="h-4 w-24" />
+      </div>
+      <div className="grid min-w-0 grid-cols-2 gap-2">
+        {paths.map((id) => (
+          <SkeletonBlock className="h-30 w-full rounded-control" key={id} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * The landing's groups and a tile per path it renders: Earn's two, then DvP's. Markets runs
+ * when either sub-module does, so drawing both showed a DvP tile on stage (Earn `beta`, DvP
  * `experimental`) that the page leaves out.
  */
 export function MarketsLandingSkeleton({ earn, dvp }: { earn: boolean; dvp: boolean }) {
-  const paths = [...(earn ? EARN_PATH_SKELETON_IDS : []), ...(dvp ? DVP_PATH_SKELETON_IDS : [])];
   return (
-    <DashboardWorkspaceOverviewPanel aria-busy="true">
-      <div className="mx-auto w-full max-w-4xl space-y-5">
-        <div className="max-w-3xl">
-          <SkeletonBlock className="h-3 w-28" />
-          <SkeletonBlock className="mt-3 h-4 w-[32rem] max-w-full" />
-        </div>
-        <div className="grid gap-4 md:grid-cols-2">
-          {paths.map((id) => (
-            <SkeletonBlock className="h-40 w-full rounded-2xl" key={id} />
-          ))}
-        </div>
-      </div>
+    <DashboardWorkspaceOverviewPanel aria-busy="true" data-loading-layout="markets-landing">
+      <RecordStack>
+        {earn ? <MarketsPathGroupSkeleton paths={EARN_PATH_SKELETON_IDS} /> : null}
+        {dvp ? <MarketsPathGroupSkeleton paths={DVP_PATH_SKELETON_IDS} /> : null}
+      </RecordStack>
     </DashboardWorkspaceOverviewPanel>
   );
 }
@@ -44,93 +80,219 @@ export function MarketsLandingFlagsSkeleton({ flags }: { flags?: DashboardFlags 
   return <MarketsLandingSkeleton earn={flags?.earn ?? false} dvp={flags?.dvp ?? false} />;
 }
 
-export function TreasurySolutionsSkeleton() {
+/**
+ * An Earn page's summary while it loads, as `EarnSummary` sets it: the 16px label line, the 44px
+ * hero figure 6px under it, then the rule and the 24px stat line.
+ */
+export function EarnSummarySkeleton() {
   return (
-    <DashboardWorkspaceOverviewPanel aria-busy="true">
-      <div className="mx-auto flex w-full max-w-[90rem] flex-col gap-16">
-        <div className="grid gap-2 sm:grid-cols-3">
-          {BALANCE_SKELETON_IDS.map((id) => (
-            <SkeletonBlock className="h-[7.5625rem] rounded-xl" key={`summary-${id}`} />
-          ))}
+    <section className="min-w-0" data-earn-loading="summary">
+      <div className="flex h-4 items-center">
+        <SkeletonBlock className="h-3 w-20" />
+      </div>
+      <SkeletonBlock className="mt-1.5 h-11 w-40" />
+      <div className="mt-10 border-t border-border-default pt-6">
+        <div className="flex h-6 items-center">
+          <SkeletonBlock className="h-4 w-64 max-w-full" />
         </div>
-        <section>
-          <div className="flex items-center justify-between gap-4">
-            <SkeletonBlock className="h-6 w-36" />
-            <SkeletonBlock className="h-7 w-16 rounded-md" />
+      </div>
+    </section>
+  );
+}
+
+/** One custody wallet tile: the mark beside two 20px lines, then the two 36px figures. */
+function TreasuryWalletTileSkeleton({ className }: { className?: string }) {
+  return (
+    <div className={cn("flex min-w-0 flex-col rounded-card bg-surface-tile", className)}>
+      <div className="flex items-center gap-3 px-4 pt-4">
+        <SkeletonBlock className="size-8 shrink-0 rounded-full" />
+        <div className="min-w-0 flex-1">
+          <div className="flex h-5 items-center">
+            <SkeletonBlock className="h-3.5 w-28" />
           </div>
-          <div className="mt-4 grid gap-2 md:grid-cols-3">
-            {BALANCE_SKELETON_IDS.map((id) => (
-              <SkeletonBlock className="h-[10.9375rem] rounded-2xl" key={`wallet-${id}`} />
-            ))}
+          <div className="flex h-5 items-center">
+            <SkeletonBlock className="h-3 w-16" />
           </div>
-        </section>
-        {TREASURY_SECTION_SKELETON_IDS.map((section) => (
-          <section key={section}>
-            <SkeletonBlock className="h-6 w-40" />
-            <div className="mt-4 overflow-hidden rounded-2xl border border-border-default">
-              {STRATEGY_SKELETON_IDS.map((id) => (
-                <SkeletonBlock
-                  className="h-[3.75rem] w-full rounded-none"
-                  key={`${section}-${id}`}
-                />
-              ))}
+        </div>
+      </div>
+      <div className="mt-5 grid grid-cols-2 gap-x-6 border-t border-border-subtle px-4 pt-3 pb-3">
+        {TREASURY_TILE_FIGURE_SKELETON_IDS.map((id) => (
+          <div key={id}>
+            <div className="flex h-4 items-center">
+              <SkeletonBlock className="h-3 w-20" />
             </div>
-          </section>
+            <div className="flex h-5 items-center">
+              <SkeletonBlock className="h-3.5 w-14" />
+            </div>
+          </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+/**
+ * The tiles' first row: one tile where they stack, two where they pair, so a treasury with one
+ * or two wallets loads into the footprint it ends with.
+ */
+export function TreasuryWalletTilesSkeleton() {
+  return (
+    <div className={TREASURY_WALLET_GRID} data-treasury-loading="wallets">
+      <TreasuryWalletTileSkeleton />
+      <TreasuryWalletTileSkeleton className="hidden @xl:flex" />
+    </div>
+  );
+}
+
+/**
+ * An Earn table while it loads, in the same table, columns and type the rows render into: the
+ * first cell's two 20px lines, every other cell's one.
+ */
+export function EarnTableSkeleton({ columns, rows }: { columns: EarnTableColumns; rows: number }) {
+  const entries = Object.entries(columns);
+  // Each block sits where its column sets its text: numbers and actions at the right.
+  const lineClass = (className: string) =>
+    cn("flex h-5 items-center", className.includes("text-right") && "justify-end");
+  return (
+    <div className={EARN_TABLE_FRAME} data-earn-loading="table">
+      <Table className={EARN_TABLE}>
+        <TableHeader>
+          <TableRow>
+            {entries.map(([id, className]) => (
+              <TableHead className={cn(PAYMENTS_TABLE_HEAD, className)} key={id}>
+                <div className={lineClass(className)}>
+                  <SkeletonBlock className="h-3 w-14" />
+                </div>
+              </TableHead>
+            ))}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {TREASURY_TABLE_SKELETON_ROW_IDS.slice(0, rows).map((row) => (
+            <TableRow key={row}>
+              {entries.map(([id, className], index) => (
+                <TableCell className={cn(PAYMENTS_TABLE_CELL, className)} key={id}>
+                  <div className={lineClass(className)}>
+                    <SkeletonBlock className={index === 0 ? "h-3.5 w-32" : "h-3.5 w-12"} />
+                  </div>
+                  {index === 0 ? (
+                    <div className="flex h-5 items-center">
+                      <SkeletonBlock className="h-3 w-20" />
+                    </div>
+                  ) : null}
+                </TableCell>
+              ))}
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
+/** An Earn section's 24px heading line over its body. */
+function EarnSectionSkeleton({ children }: { children: ReactNode }) {
+  return (
+    <section className="flex min-w-0 flex-col gap-4">
+      <div className="flex h-6 items-center">
+        <SkeletonBlock className="h-4 w-36" />
+      </div>
+      {children}
+    </section>
+  );
+}
+
+export function TreasurySolutionsSkeleton() {
+  return (
+    <DashboardWorkspaceOverviewPanel aria-busy="true" data-loading-layout="treasury">
+      <RecordStack>
+        <EarnSummarySkeleton />
+        <EarnSectionSkeleton>
+          <div className={TREASURY_WALLETS_BODY}>
+            <TreasuryWalletTilesSkeleton />
+          </div>
+        </EarnSectionSkeleton>
+        <EarnSectionSkeleton>
+          <div className={TREASURY_POSITIONS_BODY}>
+            <EarnTableSkeleton columns={TREASURY_POSITION_COLUMNS} rows={2} />
+          </div>
+        </EarnSectionSkeleton>
+        <EarnSectionSkeleton>
+          <div className={TREASURY_STRATEGIES_BODY}>
+            <EarnTableSkeleton columns={TREASURY_STRATEGY_COLUMNS} rows={4} />
+          </div>
+        </EarnSectionSkeleton>
+      </RecordStack>
     </DashboardWorkspaceOverviewPanel>
   );
 }
 
+/**
+ * Embedded Yield while its summary loads: the live value and counts, then the strategy table's
+ * heading, head and two rows, in the columns the rows render into.
+ */
 export function EmbeddedYieldPortfolioSkeleton() {
   return (
-    <DashboardWorkspaceOverviewPanel aria-busy="true">
-      <div
-        className="mx-auto flex w-full max-w-[90rem] flex-col gap-4 pt-3"
-        data-embedded-yield-loading="portfolio"
-      >
-        <div className="flex items-center justify-between gap-4">
-          <SkeletonBlock className="h-6 w-48" />
-          <SkeletonBlock className="h-6 w-20 rounded-md" />
-        </div>
-        <div className="grid gap-2 sm:grid-cols-3">
-          {BALANCE_SKELETON_IDS.map((id) => (
-            <SkeletonBlock className="h-44 rounded-2xl" key={`portfolio-${id}`} />
-          ))}
-        </div>
-        <SkeletonBlock className="h-[18.875rem] w-full rounded-2xl" />
-      </div>
+    <DashboardWorkspaceOverviewPanel aria-busy="true" data-embedded-yield-loading="portfolio">
+      <RecordStack>
+        <EarnSummarySkeleton />
+        <EarnSectionSkeleton>
+          <EarnTableSkeleton columns={EMBEDDED_YIELD_STRATEGY_COLUMNS} rows={2} />
+        </EarnSectionSkeleton>
+      </RecordStack>
     </DashboardWorkspaceOverviewPanel>
   );
 }
 
+/**
+ * The integration guide while the catalogue loads, as the page sets it: the intro, the strategy
+ * picker over its facts line and strategy ID, then the server code's heading, key note, section
+ * switch and code.
+ */
 export function EarnIntegrationGuideSkeleton() {
   return (
-    <DashboardWorkspaceOverviewPanel aria-busy="true">
-      <div className="mx-auto w-full max-w-5xl space-y-6" data-embedded-yield-loading="integrate">
-        <SkeletonBlock className="h-8 w-20 rounded-md" />
-        <SkeletonBlock className="h-4 w-full max-w-4xl" />
-        <section className="space-y-4">
-          <SkeletonBlock className="h-6 w-48" />
-          <div className="rounded-xl border border-border-default bg-surface-raised p-6">
-            <SkeletonBlock className="h-12 w-full rounded-xl" />
-            <SkeletonBlock className="mt-4 h-4 w-72 max-w-full" />
-            <SkeletonBlock className="mt-4 h-20 w-full rounded-xl" />
-          </div>
-        </section>
-        <section className="space-y-4">
-          <div className="flex items-center justify-between gap-4">
-            <SkeletonBlock className="h-6 w-56" />
-            <SkeletonBlock className="h-8 w-32 rounded-md" />
-          </div>
-          <SkeletonBlock className="h-11 w-full rounded-xl" />
-          <div className="grid grid-cols-4 gap-2">
-            {INTEGRATION_SECTION_SKELETON_IDS.map((id) => (
-              <SkeletonBlock className="h-9 w-full rounded-lg" key={id} />
-            ))}
-          </div>
-          <SkeletonBlock className="h-56 w-full rounded-xl" />
-        </section>
+    <DashboardWorkspaceOverviewPanel aria-busy="true" data-embedded-yield-loading="integrate">
+      <div className="flex min-w-0 flex-col gap-8">
+        <div>
+          {GUIDE_INTRO_LINES.map((line) => (
+            <div className={cn("flex h-5 items-center", line.hidden)} key={line.id}>
+              <SkeletonBlock className="h-3.5 w-full" />
+            </div>
+          ))}
+        </div>
+        <RecordStack>
+          <EarnSectionSkeleton>
+            <SkeletonBlock className="h-[var(--input-height-lg)] w-full rounded-control" />
+            <div className="flex h-4 items-center">
+              <SkeletonBlock className="h-3 w-56" />
+            </div>
+            {/* The strategy ID: a code block's 36px title bar over one 24px line in 14px padding,
+                inside a 1px border. */}
+            <SkeletonBlock className="h-22.5 w-full rounded-card" />
+          </EarnSectionSkeleton>
+          <EarnSectionSkeleton>
+            {/* Copy all code wraps under the title on the narrowest phones, its 30px button set
+                in the title row's 24px line by -4px margins. */}
+            <SkeletonBlock className="-my-1 h-7.5 w-33 rounded-control @min-[23rem]:hidden" />
+            {/* The API key callout: three lines on a phone, two from a 448px work area, one from
+                768px, in 16px padding and a 1px border. */}
+            <SkeletonBlock className="h-23.5 w-full rounded-card @md:h-18.5 @3xl:h-13.5" />
+            <SkeletonBlock className="h-7 w-full rounded-control @2xl:w-96" />
+            <div className="flex min-w-0 flex-col gap-3">
+              <div>
+                <div className="flex h-5 items-center">
+                  <SkeletonBlock className="h-3.5 w-full" />
+                </div>
+                <div className="flex h-5 items-center @xl:hidden">
+                  <SkeletonBlock className="h-3.5 w-2/3" />
+                </div>
+              </div>
+              {/* The code block: the guide's 36rem viewport under its 36px title bar, inside a
+                  1px border. */}
+              <SkeletonBlock className="h-[calc(36rem+2.375rem)] w-full rounded-card" />
+            </div>
+          </EarnSectionSkeleton>
+        </RecordStack>
       </div>
     </DashboardWorkspaceOverviewPanel>
   );

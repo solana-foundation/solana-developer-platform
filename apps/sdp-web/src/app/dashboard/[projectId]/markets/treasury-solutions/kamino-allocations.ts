@@ -15,8 +15,9 @@ import {
  * through the dashboard BFF (`/api/dashboard/markets/earn/kamino-allocations`)
  * so the browser never touches api.kamino.finance and never issues one request
  * per row. The BFF fans the batch out to its 45s per-vault cache and SWR keeps
- * the column fresh at its own slower cadence; a vault the batch could not read
- * is absent and its cell degrades to the shared placeholder.
+ * the column fresh at its own slower cadence. A failed refresh surfaces as
+ * `error` but keeps the last good read, which the rows go on showing; a vault
+ * no read has answered shows no allocations.
  *
  * Allocation weights move with the vault's rebalancing, not with focus, so a
  * focus event does not refetch them. A failed batch retries at the poll's own

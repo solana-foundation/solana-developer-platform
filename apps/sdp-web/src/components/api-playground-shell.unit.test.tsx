@@ -47,7 +47,7 @@ vi.mock("@/lib/dashboard-url-state", () => ({
   }),
 }));
 
-vi.mock("@/lib/shiki-code", () => ({
+vi.mock("@sdp/ui/shiki-code", () => ({
   HighlightedCode: ({ content }: { content: string }) => <pre>{content}</pre>,
 }));
 

@@ -134,6 +134,11 @@
       "import": "./src/select.tsx",
       "default": "./src/select.tsx"
     },
+    "./shiki-code": {
+      "types": "./src/shiki-code.tsx",
+      "import": "./src/shiki-code.tsx",
+      "default": "./src/shiki-code.tsx"
+    },
     "./skeleton-block": {
       "types": "./src/skeleton-block.tsx",
       "import": "./src/skeleton-block.tsx",
@@ -204,6 +209,7 @@
     "motion": "13.4.4",
     "radix-ui": "1.6.7",
     "react-day-picker": "10.0.1",
+    "shiki": "4.4.3",
     "tailwind-merge": "3.7.0"
   },
   "peerDependencies": {

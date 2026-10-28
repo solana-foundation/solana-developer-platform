@@ -121,6 +121,37 @@ function isLoopbackRequest(input: Parameters<typeof fetch>[0]): boolean {
   return LOOPBACK_HOSTNAMES.has(requestUrl.hostname);
 }
 
+/** The rent-exempt minimum for a 0-byte account the stub answers by default (0.00089088 SOL). */
+export const STUB_SYSTEM_ACCOUNT_RENT_MINIMUM = 890_880;
+
+const getMultipleAccountsParamsSchema = z.object({
+  params: z.tuple([z.array(z.string())]).rest(z.unknown()),
+});
+
+/**
+ * What the stub answers when a test registered nothing: the reads every native SOL movement
+ * makes for its rent check (HOO-2375), answered as a funded wallet, so tests about something else
+ * need not stub them. A test registers its own answer to see a missing account.
+ */
+function defaultResult(method: string, body: unknown): JsonRpcResult | undefined {
+  if (method === "getMinimumBalanceForRentExemption") return STUB_SYSTEM_ACCOUNT_RENT_MINIMUM;
+  if (method === "getMultipleAccounts") {
+    const [addresses] = getMultipleAccountsParamsSchema.parse(body).params;
+    return {
+      context: { slot: 1 },
+      value: addresses.map(() => ({
+        data: ["", "base64"],
+        executable: false,
+        lamports: 1_000_000_000,
+        owner: SYSTEM_PROGRAM_ADDRESS,
+        rentEpoch: 0,
+        space: 0,
+      })),
+    };
+  }
+  return undefined;
+}
+
 /**
  * Point the managed pool of each cluster at its one test endpoint (every other provider blanked)
  * and stub global `fetch` so each endpoint proves its own cluster's genesis hash and answers the
@@ -151,7 +182,7 @@ export function installClusterRpcStub(): ClusterRpcStub {
       if (method === "getGenesisHash") {
         return Response.json({ jsonrpc: "2.0", id, result: GENESIS_HASH_BY_CLUSTER[cluster] });
       }
-      const result = results.get(method);
+      const result = results.get(method) ?? defaultResult(method, body);
       if (result === undefined) {
         return Response.json({
           jsonrpc: "2.0",

@@ -8,12 +8,13 @@ import {
   type EarnPortfolioWithdrawalPreview,
 } from "@sdp/types/earn";
 import { earnProgramSolanaPayoutTokens } from "@sdp/types/provider-access";
-import { Badge } from "@sdp/ui/badge";
 import { Button } from "@sdp/ui/button";
+import { DetailList, DetailRow } from "@sdp/ui/detail-list";
 import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
 import { Modal } from "@sdp/ui/modal";
 import { Select, SelectItem } from "@sdp/ui/select";
+import { StatusText } from "@sdp/ui/status-text";
 import { Loader2Icon } from "lucide-react";
 import { type ChangeEvent, useCallback, useEffect, useRef, useState } from "react";
 import { BASE58_ADDRESS_PATTERN } from "@/app/dashboard/[projectId]/markets/base58-address";
@@ -22,7 +23,9 @@ import { useLocale, useTranslations } from "@/i18n/provider";
 import { useModalFocus } from "@/lib/use-modal-focus";
 import { compareUnsignedDecimals, isPositiveDecimal, parseUnsignedDecimal } from "./earn-decimal";
 import { formatDurationRange, formatUsd, isoDurationDays } from "./earn-format";
+import { EARN_TRANSACTION_MODAL_FRAME } from "./earn-modal";
 import { createEarnWithdrawal, previewEarnWithdrawal } from "./earn-program-data";
+import { earnStatusTextTone } from "./earn-vault-ui-state";
 
 export function isPositiveUsdAmount(value: string): boolean {
   const amount = parseUnsignedDecimal(value, { trim: false });
@@ -215,14 +218,14 @@ function ProcessingEstimateLine({
     const max = isoDurationDays(estimate.typicalMaxDuration);
     if (min !== undefined && max !== undefined) {
       return (
-        <p className="mt-1 text-xs text-tertiary">
+        <p className="mt-1 text-meta text-tertiary">
           {t("DashboardEarn.withdraw.previewProcessingBankingDays", { min, max })}
         </p>
       );
     }
   }
   return (
-    <p className="mt-1 text-xs text-tertiary">
+    <p className="mt-1 text-meta text-tertiary">
       {t("DashboardEarn.withdraw.previewProcessing", {
         range: formatDurationRange(estimate.typicalMinDuration, estimate.typicalMaxDuration),
       })}
@@ -250,15 +253,15 @@ function LaneAvailableLine({
   return (
     <>
       <div id="earn-withdraw-available" className="flex items-baseline justify-between gap-3">
-        <span className="text-xs text-secondary">
+        <span className="text-meta text-secondary">
           {t("DashboardEarn.withdraw.availableLabel", { token: token.toUpperCase() })}
         </span>
         {liquidity.phase === "ready" ? (
-          <span className="text-xs font-medium tabular-nums text-primary">
+          <span className="text-meta font-medium tabular-nums text-primary">
             {formatUsd(liquidity.withdrawableUsd, locale)}
           </span>
         ) : (
-          <span className="text-xs tabular-nums text-tertiary">
+          <span className="text-meta tabular-nums text-tertiary">
             {liquidity.phase === "loading" ? t("DashboardEarn.withdraw.availableChecking") : "—"}
           </span>
         )}
@@ -266,7 +269,9 @@ function LaneAvailableLine({
       {liquidity.phase === "error" ? (
         // Not an alert: nothing is wrong with what the reader did, and the
         // withdrawal can still proceed — the provider decides at confirm.
-        <p className="text-xs text-tertiary">{t("DashboardEarn.withdraw.availableUnavailable")}</p>
+        <p className="text-meta text-tertiary">
+          {t("DashboardEarn.withdraw.availableUnavailable")}
+        </p>
       ) : null}
     </>
   );
@@ -289,13 +294,13 @@ function AmountError({
   const locale = useLocale();
   if (!formatValid) {
     return (
-      <p id="earn-withdraw-error" className="text-xs text-error" role="alert">
+      <p id="earn-withdraw-error" className="text-meta text-error" role="alert">
         {t("DashboardEarn.withdraw.errorAmountRequired")}
       </p>
     );
   }
   return (
-    <p id="earn-withdraw-error" className="text-xs text-error" role="alert">
+    <p id="earn-withdraw-error" className="text-meta text-error" role="alert">
       {laneCeiling === undefined
         ? t("DashboardEarn.withdraw.errorExceedsWithdrawable", { token: token.toUpperCase() })
         : t("DashboardEarn.withdraw.errorExceedsCeiling", {
@@ -317,10 +322,14 @@ function WithdrawPreviewPanel({
   const locale = useLocale();
   if (preview.phase === "idle") return null;
   return (
-    <div className="mt-4 rounded-md border border-border-default bg-fill-subtle p-3">
-      <p className="text-xs font-medium text-primary">{t("DashboardEarn.withdraw.previewTitle")}</p>
+    <div className="mt-5">
+      <p className="text-body font-medium text-primary">
+        {t("DashboardEarn.withdraw.previewTitle")}
+      </p>
       {preview.phase === "loading" ? (
-        <p className="mt-1 text-xs text-secondary">{t("DashboardEarn.withdraw.previewLoading")}</p>
+        <p className="mt-1 text-meta text-secondary">
+          {t("DashboardEarn.withdraw.previewLoading")}
+        </p>
       ) : null}
       {preview.phase === "error" ? (
         // Translated, never the provider's wire text. Only Solana-payable
@@ -328,7 +337,7 @@ function WithdrawPreviewPanel({
         // left is lane funds; the preview stays the authority on the lane.
         // When the refusal carried the lane's real ceiling, SAY it — "try a
         // smaller amount" is advice, "$412.50 is available" is an answer.
-        <p className="mt-1 text-xs text-error" role="alert">
+        <p className="mt-1 text-meta text-error" role="alert">
           {preview.laneCeilingUsd === undefined
             ? t("DashboardEarn.withdraw.previewInsufficient", { token: token.toUpperCase() })
             : t("DashboardEarn.withdraw.previewInsufficientCeiling", {
@@ -339,20 +348,16 @@ function WithdrawPreviewPanel({
       ) : null}
       {preview.phase === "ready" ? (
         <>
-          <dl className="mt-1 text-xs">
-            <div className="flex items-baseline justify-between gap-4 py-1">
-              <dt className="text-tertiary">{t("DashboardEarn.withdraw.previewFee")}</dt>
-              <dd className="text-primary tabular-nums">
-                {formatUsd(preview.preview.feeUsd, locale)}
-              </dd>
-            </div>
-            <div className="flex items-baseline justify-between gap-4 py-1">
-              <dt className="text-tertiary">{t("DashboardEarn.withdraw.previewTotalAfter")}</dt>
-              <dd className="text-primary tabular-nums">
+          <DetailList className="mt-1" variant="summary">
+            <DetailRow fit="figure" label={t("DashboardEarn.withdraw.previewFee")}>
+              <span className="tabular-nums">{formatUsd(preview.preview.feeUsd, locale)}</span>
+            </DetailRow>
+            <DetailRow fit="figure" label={t("DashboardEarn.withdraw.previewTotalAfter")}>
+              <span className="tabular-nums">
                 {formatUsd(preview.preview.totalUsdAfterWithdrawal, locale)}
-              </dd>
-            </div>
-          </dl>
+              </span>
+            </DetailRow>
+          </DetailList>
           {preview.preview.processingEstimate ? (
             <ProcessingEstimateLine estimate={preview.preview.processingEstimate} />
           ) : null}
@@ -378,37 +383,36 @@ function WithdrawalCreatedView({
   const badge = WITHDRAWAL_STATUS_BADGES[withdrawal.status];
   return (
     <>
-      <div className="flex items-center gap-2">
-        <h2 className="text-base font-medium text-primary">
+      <div className="flex items-center gap-3 pr-8">
+        <h2 className="text-subheading font-medium text-primary">
           {t("DashboardEarn.withdraw.createdTitle")}
         </h2>
-        <Badge variant={badge.variant}>{t(badge.key)}</Badge>
+        <StatusText className="shrink-0 text-body" tone={earnStatusTextTone(badge.variant)}>
+          {t(badge.key)}
+        </StatusText>
       </div>
-      <p className="mt-1 text-sm leading-6 text-secondary">
+      <p className="mt-2 text-body text-secondary">
         {t(WITHDRAWAL_STATUS_DESCRIPTIONS[withdrawal.status])}
       </p>
 
-      <dl className="mt-4 rounded-md border border-border-default bg-fill-subtle p-3 text-xs">
-        <div className="flex items-baseline justify-between gap-4 py-1">
-          <dt className="text-tertiary">{t("DashboardEarn.withdraw.amountLabel")}</dt>
-          <dd className="text-primary tabular-nums">
+      <DetailList className="mt-5" variant="summary">
+        <DetailRow fit="figure" label={t("DashboardEarn.withdraw.amountLabel")}>
+          <span className="tabular-nums">
             {formatUsd(withdrawal.amountRequestedUsd ?? fallbackAmountUsd, locale)} ·{" "}
             {token.toUpperCase()}
-          </dd>
-        </div>
-        <div className="flex items-baseline justify-between gap-4 py-1">
-          <dt className="text-tertiary">{t("DashboardEarn.withdraw.destinationLabel")}</dt>
-          <dd className="max-w-52 truncate text-primary" title={withdrawal.destinationAddress}>
+          </span>
+        </DetailRow>
+        <DetailRow fit="wrap" label={t("DashboardEarn.withdraw.destinationLabel")}>
+          <span className="block max-w-52 truncate" title={withdrawal.destinationAddress}>
             {withdrawal.destinationAddress}
-          </dd>
-        </div>
-        <div className="flex items-baseline justify-between gap-4 py-1">
-          <dt className="text-tertiary">{t("DashboardEarn.withdraw.referenceLabel")}</dt>
-          <dd className="max-w-52 truncate text-primary" title={withdrawal.withdrawalRef}>
+          </span>
+        </DetailRow>
+        <DetailRow fit="wrap" label={t("DashboardEarn.withdraw.referenceLabel")}>
+          <span className="block max-w-52 truncate" title={withdrawal.withdrawalRef}>
             {withdrawal.withdrawalRef}
-          </dd>
-        </div>
-      </dl>
+          </span>
+        </DetailRow>
+      </DetailList>
 
       <div className="mt-5 flex justify-end">
         <Button onClick={onClose}>{t("DashboardEarn.withdraw.done")}</Button>
@@ -469,7 +473,7 @@ function AmountField({
             onClick={() => {
               if (maxFillAmount !== undefined) onAmountInputChange(maxFillAmount);
             }}
-            className="pointer-events-auto text-xs font-medium text-primary disabled:text-tertiary"
+            className="pointer-events-auto text-meta font-medium text-primary disabled:text-tertiary"
           >
             {t("DashboardEarn.withdraw.useMax")}
           </button>
@@ -514,7 +518,7 @@ function DestinationField({
         }
       />
       {destinationInput && !destinationValid ? (
-        <p id="earn-withdraw-destination-error" className="text-xs text-error" role="alert">
+        <p id="earn-withdraw-destination-error" className="text-meta text-error" role="alert">
           {t("DashboardEarn.withdraw.errorDestinationInvalid")}
         </p>
       ) : null}
@@ -780,9 +784,9 @@ export function EarnWithdrawModal({
         isOpen
         ariaLabel={t("DashboardEarn.withdraw.createdTitle")}
         onClose={onClose}
-        size="sm"
+        {...EARN_TRANSACTION_MODAL_FRAME}
       >
-        <div ref={contentRef} className="p-5">
+        <div ref={contentRef} className="p-6">
           <WithdrawalCreatedView
             withdrawal={created.withdrawal}
             fallbackAmountUsd={amount}
@@ -800,16 +804,16 @@ export function EarnWithdrawModal({
       ariaLabel={t("DashboardEarn.withdraw.title")}
       onClose={onClose}
       closeDisabled={submitting}
-      size="sm"
+      {...EARN_TRANSACTION_MODAL_FRAME}
     >
-      <div ref={contentRef} className="p-5" tabIndex={submitting ? 0 : -1} aria-busy={submitting}>
-        <h2 className="text-base font-medium text-primary">{t("DashboardEarn.withdraw.title")}</h2>
-        <p className="mt-0.5 text-sm leading-5 text-secondary">
-          {t("DashboardEarn.withdraw.description")}
-        </p>
+      <div ref={contentRef} className="p-6" tabIndex={submitting ? 0 : -1} aria-busy={submitting}>
+        <h2 className="text-subheading font-medium text-primary">
+          {t("DashboardEarn.withdraw.title")}
+        </h2>
+        <p className="mt-0.5 text-body text-secondary">{t("DashboardEarn.withdraw.description")}</p>
 
         {token === undefined ? (
-          <p className="mt-4 text-sm leading-5 text-secondary" role="status">
+          <p className="mt-4 text-body text-secondary" role="status">
             {t("DashboardEarn.withdraw.providerUnavailable")}
           </p>
         ) : (
@@ -821,7 +825,7 @@ export function EarnWithdrawModal({
               org shares, and the estimate that used to fill them is exactly what
               this flow stopped quoting (PRO-1675). */}
             <div className="mt-4 space-y-2">
-              <p className="text-sm font-medium text-primary">
+              <p className="text-body font-medium text-primary">
                 {t("DashboardEarn.withdraw.tokenLabel")}
               </p>
               <Select
@@ -868,7 +872,7 @@ export function EarnWithdrawModal({
         )}
 
         {submitError ? (
-          <p className="mt-4 text-xs text-error" role="alert">
+          <p className="mt-4 text-meta text-error" role="alert">
             {submitError}
           </p>
         ) : null}

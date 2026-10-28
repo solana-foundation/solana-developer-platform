@@ -87,14 +87,20 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
+/** The flow's progress as the reader sees it: the current step's name and "Step x of y". */
+function flowProgress(): { step: string | null; label: string | undefined } {
+  const progress = document.querySelector("[data-earn-flow-step]");
+  return {
+    step: progress?.getAttribute("data-earn-flow-step") ?? null,
+    label: progress?.querySelector('[role="status"]')?.textContent ?? undefined,
+  };
+}
+
 describe("EarnVaultWithdrawModal", () => {
   it("caps Max at the dollar value of unstaked withdrawable shares", async () => {
     const user = userEvent.setup();
     renderModal();
-    const progress = screen.getByRole("navigation", { name: "Progress" });
-    expect(
-      Array.from(progress.querySelectorAll("li"), (item) => item.textContent?.replace(/^\d/, ""))
-    ).toEqual(["Details", "Review", "Processing", "Complete"]);
+    expect(flowProgress()).toEqual({ step: "Details", label: "Details, Step 1 of 4" });
     expect(screen.getByText("$")).toBeTruthy();
 
     const amountInput = screen.getByLabelText("Amount") as HTMLInputElement;
@@ -104,6 +110,17 @@ describe("EarnVaultWithdrawModal", () => {
 
     expect(amountInput.value).toBe("6");
     expect(screen.getByText(/\$6.00 available of \$10.00 total/)).toBeTruthy();
+  });
+
+  it("continues to the review on Enter, and never submits the withdrawal on Enter", async () => {
+    const user = userEvent.setup();
+    renderModal();
+
+    await user.type(screen.getByLabelText("Amount"), "2{Enter}");
+    expect(flowProgress()).toEqual({ step: "Review", label: "Review, Step 2 of 4" });
+
+    await user.keyboard("{Enter}");
+    expect(mocks.createEarnVaultWithdrawal).not.toHaveBeenCalled();
   });
 
   it("submits exact provider-order shares without inventing a dollar value", async () => {
@@ -277,7 +294,7 @@ describe("EarnVaultWithdrawModal", () => {
     expect(screen.getByText("Active")).toBeTruthy();
     expect(document.querySelector(".earn-processing-modal")).toBeNull();
     expect(document.querySelector('[data-earn-outcome="success"]')).toBeTruthy();
-    expect(document.querySelector('[data-earn-step-terminal-active="true"]')).toBeTruthy();
+    expect(flowProgress()).toEqual({ step: "Complete", label: "Complete, Step 4 of 4" });
   });
 
   it("keeps a finalized provider order visibly pending its separate payout", async () => {
@@ -314,8 +331,10 @@ describe("EarnVaultWithdrawModal", () => {
     expect(screen.getByText(/not proof of a provider payout/)).toBeTruthy();
     expect(screen.getByText(/neither delivers nor guarantees a cash amount/)).toBeTruthy();
     expect(screen.getByText("Provider settlement")).toBeTruthy();
-    expect(screen.getByText("Provider settlement").getAttribute("aria-current")).toBe("step");
-    expect(document.querySelector('[data-earn-step-terminal-active="true"]')).toBeNull();
+    expect(flowProgress()).toEqual({
+      step: "Provider settlement",
+      label: "Provider settlement, Step 4 of 5",
+    });
     expect(screen.queryByText(/proceeds are in the custody wallet/)).toBeNull();
     expect(screen.queryByText(/same transaction/i)).toBeNull();
   });
@@ -349,7 +368,7 @@ describe("EarnVaultWithdrawModal", () => {
     expect(screen.getByText(/not proof of a provider payout/)).toBeTruthy();
     expect(screen.queryByText("Sending shares")).toBeNull();
     expect(screen.queryByText(/share transfer is final on Solana/)).toBeNull();
-    expect(document.querySelector('[data-earn-step-terminal-active="true"]')).toBeNull();
+    expect(flowProgress().step).not.toBe("Complete");
   });
 
   it("renders an observed provider-order transfer failure as failed", async () => {

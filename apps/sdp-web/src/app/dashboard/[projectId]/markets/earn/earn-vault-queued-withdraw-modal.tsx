@@ -9,13 +9,15 @@ import type {
   EarnVaultWithdrawalRequestRecord,
 } from "@sdp/types/earn";
 import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
-import { Badge } from "@sdp/ui/badge";
 import { Button } from "@sdp/ui/button";
+import { Callout } from "@sdp/ui/callout";
+import { DetailList, DetailRow } from "@sdp/ui/detail-list";
 import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
 import { Modal } from "@sdp/ui/modal";
+import { StatusText } from "@sdp/ui/status-text";
 import { ChevronDownIcon, Loader2Icon } from "lucide-react";
-import { type ChangeEvent, useEffect, useMemo, useState } from "react";
+import { type ChangeEvent, type FormEvent, useEffect, useMemo, useState } from "react";
 import { useSWRConfig } from "swr";
 import { EarnFlowStepper } from "@/app/dashboard/[projectId]/markets/earn/earn-flow-stepper";
 import { EarnFlowTransition } from "@/app/dashboard/[projectId]/markets/earn/earn-flow-transition";
@@ -34,6 +36,7 @@ import {
   positionDisplayName,
 } from "./earn-format";
 import { TransactionLink } from "./earn-market-presentation";
+import { EARN_TRANSACTION_MODAL_FRAME } from "./earn-modal";
 import {
   cancelEarnVaultWithdrawalRequest,
   createEarnVaultWithdrawalRequest,
@@ -51,6 +54,7 @@ import {
   earnVaultQueuedWithdrawalStatusPresentation,
   isEarnVaultQueuedWithdrawalTerminal,
 } from "./earn-vault-queued-withdrawal-presentation";
+import { earnStatusTextTone } from "./earn-vault-ui-state";
 import {
   VAULT_WITHDRAWAL_AMOUNT_DECIMALS,
   validateVaultWithdrawalAmount,
@@ -353,90 +357,77 @@ function QueuedWithdrawalResult({
   return (
     <>
       {terminal ? <EarnOutcomeMark tone={presentation.tone} /> : null}
-      <div className="flex items-center gap-2 pr-8">
+      <div className="flex items-center gap-3 pr-8">
         <h2
-          className="text-base font-medium text-primary outline-none"
+          className="text-subheading font-medium text-primary outline-none"
           data-modal-focus-target
           tabIndex={-1}
         >
           {t("DashboardEarn.queuedWithdraw.resultTitle")}
         </h2>
-        <Badge variant={presentation.variant}>{t(presentation.labelKey)}</Badge>
+        <StatusText className="shrink-0 text-body" tone={earnStatusTextTone(presentation.variant)}>
+          {t(presentation.labelKey)}
+        </StatusText>
       </div>
-      <p className="mt-2 text-sm leading-5 text-secondary">{t(presentation.bodyKey)}</p>
+      <p className="mt-2 text-body text-secondary">{t(presentation.bodyKey)}</p>
 
-      <dl className="mt-5 grid gap-3 rounded-xl bg-fill-subtle px-4 py-3 text-sm">
-        <div className="flex items-baseline justify-between gap-5">
-          <dt className="text-tertiary">{t("DashboardEarn.queuedWithdraw.quotedAmount")}</dt>
-          <dd className="text-right tabular-nums text-primary">
+      <DetailList className="mt-5" variant="summary">
+        <DetailRow fit="figure" label={t("DashboardEarn.queuedWithdraw.quotedAmount")}>
+          <span className="tabular-nums">
             {formatTokenValue(request.quotedAssets, request.assetMint, locale)}
-          </dd>
-        </div>
-        <div className="flex items-baseline justify-between gap-5">
-          <dt className="text-tertiary">{t("DashboardEarn.queuedWithdraw.maturity")}</dt>
-          <dd className="text-right text-primary">
-            {formatEpochSecondsOr(
-              request.maturityTimestamp,
-              locale,
-              t("DashboardEarn.unavailable")
-            )}
-          </dd>
-        </div>
-        <div className="flex items-baseline justify-between gap-5">
-          <dt className="text-tertiary">{t("DashboardEarn.queuedWithdraw.deadline")}</dt>
-          <dd className="text-right text-primary">
-            {formatEpochSecondsOr(
-              request.deadlineTimestamp,
-              locale,
-              t("DashboardEarn.unavailable")
-            )}
-          </dd>
-        </div>
-      </dl>
+          </span>
+        </DetailRow>
+        <DetailRow fit="wrap" label={t("DashboardEarn.queuedWithdraw.maturity")}>
+          {formatEpochSecondsOr(request.maturityTimestamp, locale, t("DashboardEarn.unavailable"))}
+        </DetailRow>
+        <DetailRow fit="wrap" label={t("DashboardEarn.queuedWithdraw.deadline")}>
+          {formatEpochSecondsOr(request.deadlineTimestamp, locale, t("DashboardEarn.unavailable"))}
+        </DetailRow>
+      </DetailList>
 
       <details className="group mt-4 border-t border-border-subtle pt-4">
-        <summary className="flex list-none items-center justify-between gap-3 text-sm font-medium text-secondary [&::-webkit-details-marker]:hidden">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-body font-medium text-secondary [&::-webkit-details-marker]:hidden">
           {t("DashboardEarn.queuedWithdraw.technicalDetails")}
           <ChevronDownIcon
             aria-hidden="true"
             className="size-4 transition-transform group-open:rotate-180"
           />
         </summary>
-        <dl className="mt-3 grid gap-3 text-sm">
-          <div className="flex items-start justify-between gap-5">
-            <dt className="text-tertiary">{t("DashboardEarn.queuedWithdraw.requestAccount")}</dt>
-            <dd className="max-w-56 break-all text-right text-primary">{request.requestAddress}</dd>
-          </div>
+        <DetailList className="mt-3" variant="summary">
+          <DetailRow label={t("DashboardEarn.queuedWithdraw.requestAccount")}>
+            {/* The whole account, so it can be checked and copied: it wraps rather than clips. */}
+            <span className="block max-w-56 whitespace-normal break-all">
+              {request.requestAddress}
+            </span>
+          </DetailRow>
           {request.creationSignature ? (
-            <div className="flex items-baseline justify-between gap-5">
-              <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.transaction")}</dt>
-              <dd className="text-right">
-                <TransactionLink
-                  cluster={CLUSTER_BY_SDP_ENVIRONMENT[environment]}
-                  signature={request.creationSignature}
-                />
-              </dd>
-            </div>
+            <DetailRow label={t("DashboardEarn.vaultWithdraw.transaction")}>
+              <TransactionLink
+                cluster={CLUSTER_BY_SDP_ENVIRONMENT[environment]}
+                signature={request.creationSignature}
+              />
+            </DetailRow>
           ) : null}
-        </dl>
+        </DetailList>
       </details>
 
       {request.status === "failed" && request.failureReason ? (
-        <div
-          className="mt-4 rounded-lg border border-destructive-border bg-destructive-bg p-3 text-sm text-error"
-          role="alert"
+        <Callout
+          className="mt-4 break-words"
+          live
+          title={t("DashboardEarn.queuedWithdraw.failureReason")}
+          variant="danger"
         >
-          <p className="font-medium">{t("DashboardEarn.queuedWithdraw.failureReason")}</p>
-          <p className="mt-1 break-words">{request.failureReason}</p>
-        </div>
+          {request.failureReason}
+        </Callout>
       ) : null}
 
       {request.status === "expiredCancelable" ? (
-        <p className="mt-4 text-xs leading-5 text-warning">
+        <p className="mt-4 text-meta text-warning">
           {t("DashboardEarn.queuedWithdraw.recoveryReady")}
         </p>
       ) : presentation.awaitingProvider ? (
-        <p className="mt-4 text-xs leading-5 text-tertiary">
+        <p className="mt-4 text-meta text-tertiary">
           {t("DashboardEarn.queuedWithdraw.solverNotice")}
         </p>
       ) : null}
@@ -483,60 +474,55 @@ function QueueReview({
   const locale = useLocale();
   return (
     <>
-      <p className="mt-1 text-sm text-secondary">{t("DashboardEarn.queuedWithdraw.reviewBody")}</p>
+      <p className="mt-1 text-body text-secondary">
+        {t("DashboardEarn.queuedWithdraw.reviewBody")}
+      </p>
       {loading ? (
-        <div className="mt-5 flex items-center gap-2 text-sm text-secondary" role="status">
+        <div className="mt-5 flex items-center gap-2 text-body text-secondary" role="status">
           <Loader2Icon aria-hidden="true" className="size-4 animate-spin" />
           {t("DashboardEarn.queuedWithdraw.previewLoading")}
         </div>
       ) : preview ? (
-        <dl className="mt-5 grid gap-3 rounded-xl bg-fill-subtle px-4 py-3 text-sm">
-          <div className="flex items-baseline justify-between gap-5">
-            <dt className="text-tertiary">{t("DashboardEarn.queuedWithdraw.expectedAmount")}</dt>
-            <dd className="text-right tabular-nums text-primary">
+        <DetailList className="mt-5" variant="summary">
+          <DetailRow fit="figure" label={t("DashboardEarn.queuedWithdraw.expectedAmount")}>
+            <span className="tabular-nums">
               {formatTokenValue(preview.assets, position.tokenMint, locale)}
-            </dd>
-          </div>
-          <div className="flex items-baseline justify-between gap-5">
-            <dt className="text-tertiary">{t("DashboardEarn.queuedWithdraw.discount")}</dt>
-            <dd className="text-right text-primary">{bpsToPercent(preview.discountBps)}%</dd>
-          </div>
-          <div className="flex items-baseline justify-between gap-5">
-            <dt className="text-tertiary">{t("DashboardEarn.queuedWithdraw.maturity")}</dt>
-            <dd className="text-right text-primary">
-              {formatEpochSecondsOr(
-                preview.maturityTimestamp,
-                locale,
-                t("DashboardEarn.unavailable")
-              )}
-            </dd>
-          </div>
-          <div className="flex items-baseline justify-between gap-5">
-            <dt className="text-tertiary">{t("DashboardEarn.queuedWithdraw.deadline")}</dt>
-            <dd className="text-right text-primary">
-              {formatEpochSecondsOr(
-                preview.deadlineTimestamp,
-                locale,
-                t("DashboardEarn.unavailable")
-              )}
-            </dd>
-          </div>
-        </dl>
+            </span>
+          </DetailRow>
+          <DetailRow fit="figure" label={t("DashboardEarn.queuedWithdraw.discount")}>
+            {bpsToPercent(preview.discountBps)}%
+          </DetailRow>
+          <DetailRow fit="wrap" label={t("DashboardEarn.queuedWithdraw.maturity")}>
+            {formatEpochSecondsOr(
+              preview.maturityTimestamp,
+              locale,
+              t("DashboardEarn.unavailable")
+            )}
+          </DetailRow>
+          <DetailRow fit="wrap" label={t("DashboardEarn.queuedWithdraw.deadline")}>
+            {formatEpochSecondsOr(
+              preview.deadlineTimestamp,
+              locale,
+              t("DashboardEarn.unavailable")
+            )}
+          </DetailRow>
+        </DetailList>
       ) : null}
       {preview && preview.blockingIssues.length > 0 ? (
-        <div
-          className="mt-4 rounded-lg border border-warning-border bg-warning-bg p-3 text-sm text-warning"
-          role="alert"
+        <Callout
+          className="mt-4"
+          live
+          title={t("DashboardEarn.queuedWithdraw.previewBlocked")}
+          variant="warning"
         >
-          <p>{t("DashboardEarn.queuedWithdraw.previewBlocked")}</p>
-          <ul className="mt-1 list-disc space-y-1 pl-5">
+          <ul className="list-disc space-y-1 pl-5">
             {preview.blockingIssues.map((issue) => (
               <li key={`${issue.code}:${issue.message}`}>{issue.message}</li>
             ))}
           </ul>
-        </div>
+        </Callout>
       ) : null}
-      <p className="mt-4 text-xs leading-5 text-tertiary">
+      <p className="mt-4 text-meta text-tertiary">
         {t("DashboardEarn.queuedWithdraw.solverNotice")}
       </p>
       {error ? <EarnErrorNote message={error} /> : null}
@@ -603,9 +589,14 @@ function QueueDetails({
   tokenMint: string;
 }) {
   const t = useTranslations();
+  // A form, so Enter in any field continues to the review as the button does.
+  const continueFromForm = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (detailsValid) onContinue();
+  };
   return (
-    <>
-      <p className="mt-2 text-sm leading-5 text-secondary">
+    <form noValidate onSubmit={continueFromForm}>
+      <p className="mt-2 text-body text-secondary">
         {t("DashboardEarn.queuedWithdraw.detailsBody")}
       </p>
       <div className="mt-5 grid gap-4">
@@ -632,7 +623,7 @@ function QueueDetails({
             placeholder="0.00"
             value={amount}
           />
-          <p className="text-xs text-tertiary">
+          <p className="text-meta text-tertiary">
             {lockedUntil && (!availableAmount || !isPositiveDecimal(availableAmount))
               ? t("DashboardEarn.queuedWithdraw.lockedUntil", { time: lockedUntil })
               : availableAmount
@@ -642,23 +633,23 @@ function QueueDetails({
                 : t("DashboardEarn.vaultWithdraw.amountUnavailable")}
           </p>
           {amountError ? (
-            <p className="text-xs text-error" role="alert">
+            <p className="text-meta text-error" role="alert">
               {amountError}
             </p>
           ) : null}
           {overAvailableAmount ? (
-            <p className="text-xs text-warning" role="status">
+            <p className="text-meta text-warning" role="status">
               {t("DashboardEarn.vaultWithdraw.overAmount")}
             </p>
           ) : null}
         </div>
-        <details className="group rounded-xl border border-border-default bg-surface-raised px-4 py-3">
-          <summary className="flex list-none items-center justify-between gap-3 [&::-webkit-details-marker]:hidden">
+        <details className="group rounded-card border border-border-default px-4 py-3">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 [&::-webkit-details-marker]:hidden">
             <span className="min-w-0">
-              <span className="block text-sm font-medium text-primary">
+              <span className="block text-body font-medium text-primary">
                 {t("DashboardEarn.queuedWithdraw.settingsTitle")}
               </span>
-              <span className="mt-0.5 block text-xs leading-5 text-tertiary">
+              <span className="mt-0.5 block text-meta text-tertiary">
                 {termsValid
                   ? t("DashboardEarn.queuedWithdraw.settingsSummary", {
                       discount: bpsToPercent(discountBps),
@@ -688,13 +679,13 @@ function QueueDetails({
                 }}
                 value={discount}
               />
-              <p className="text-xs text-tertiary">
+              <p className="text-meta text-tertiary">
                 {t("DashboardEarn.queuedWithdraw.discountRange", {
                   minimum: bpsToPercent(terms.minimumDiscountBps),
                   maximum: bpsToPercent(terms.maximumDiscountBps),
                 })}
               </p>
-              <p className="text-xs leading-5 text-tertiary">
+              <p className="text-meta text-tertiary">
                 {t("DashboardEarn.queuedWithdraw.discountHelp")}
               </p>
             </div>
@@ -712,7 +703,7 @@ function QueueDetails({
                 }}
                 value={deadline}
               />
-              <p className="text-xs text-tertiary">
+              <p className="text-meta text-tertiary">
                 {t("DashboardEarn.queuedWithdraw.deadlineMinimum", {
                   minimum:
                     formatDurationSeconds(terms.minimumSecondsToDeadline, locale) ??
@@ -722,24 +713,24 @@ function QueueDetails({
                     t("DashboardEarn.unavailable"),
                 })}
               </p>
-              <p className="text-xs leading-5 text-tertiary">
+              <p className="text-meta text-tertiary">
                 {t("DashboardEarn.queuedWithdraw.deadlineHelp")}
               </p>
             </div>
           </div>
           {!termsValid ? (
-            <p className="mt-3 text-xs text-error" role="alert">
+            <p className="mt-3 text-meta text-error" role="alert">
               {t("DashboardEarn.queuedWithdraw.settingsInvalid")}
             </p>
           ) : null}
         </details>
       </div>
       <div className="mt-6">
-        <Button className="!w-full" disabled={!detailsValid} onClick={onContinue}>
+        <Button className="!w-full" disabled={!detailsValid} type="submit">
           {t("DashboardEarn.deposit.continueAction")}
         </Button>
       </div>
-    </>
+    </form>
   );
 }
 
@@ -802,7 +793,13 @@ export function EarnVaultQueuedWithdrawModal({
   );
 
   return (
-    <Modal isOpen ariaLabel={modalLabel} closeDisabled={submitting} onClose={onClose} size="md">
+    <Modal
+      isOpen
+      ariaLabel={modalLabel}
+      closeDisabled={submitting}
+      onClose={onClose}
+      {...EARN_TRANSACTION_MODAL_FRAME}
+    >
       <div className="p-6">
         <EarnFlowStepper
           currentStep={queuedWithdrawalStepIndex(outcome, step)}
@@ -819,7 +816,7 @@ export function EarnVaultQueuedWithdrawModal({
           ) : (
             <>
               <h2
-                className="pr-8 text-lg font-medium leading-6 text-primary"
+                className="pr-8 text-subheading font-medium text-primary"
                 data-modal-focus-target
                 tabIndex={-1}
               >

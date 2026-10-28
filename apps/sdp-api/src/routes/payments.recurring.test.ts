@@ -2239,10 +2239,10 @@ describe("Payments routes — recurring", () => {
   });
 
   // HOO-2099: start admission runs only before a fresh update's claim. A
-  // recovered update whose saved signature landed only confirms it, so a key
-  // that has since lost the wallet still finishes it rather than leaving the
-  // mandate paused in `updating`.
-  it("confirms a landed stale metadata update after the key loses the wallet", async () => {
+  // recovered update whose saved signature landed only confirms it. Since
+  // HOO-2337 a key that has lost the wallet is refused at authorize, so the
+  // mandate stays `updating` until a key holding it, or a session, retries.
+  it("refuses a landed stale metadata update's retry once the key loses the wallet, and confirms it for a key that holds it", async () => {
     const updatePlanSignature = signature(
       "3agLAsjf2Qba9W59cqxbXFoPRJFDFKB3efqYRhT6wLxaM4KwV31NVrLDjKAw22hR1GFcQc4mePSjZ6XZEHUAjN4c"
     );
@@ -2298,13 +2298,18 @@ describe("Payments routes — recurring", () => {
     vi.mocked(subscriptionsProgram.fetchMaybePlan).mockResolvedValue(planAccount(metadataUri));
     await seedUnboundWallet();
     await bindApiKeyToWallet(UNBOUND_CUSTODY_WALLET_ID);
+    const update = () =>
+      app.request(
+        `/v1/payments/recurring-payments/${activated.id}`,
+        { method: "PATCH", headers: RECURRING_HEADERS, body: JSON.stringify({ metadataUri }) },
+        env
+      );
 
-    const updateRes = await app.request(
-      `/v1/payments/recurring-payments/${activated.id}`,
-      { method: "PATCH", headers: RECURRING_HEADERS, body: JSON.stringify({ metadataUri }) },
-      env
-    );
+    // Every recurring write is scoped, even one that signs nothing (HOO-2337).
+    await expectWalletOutOfScope(await update());
 
+    await bindApiKeyToWallet(TEST_CUSTODY_WALLET_ID);
+    const updateRes = await update();
     expect(updateRes.status).toBe(200);
     expect((await parseRecurringResponse(updateRes)).data.recurringPayment).toMatchObject({
       status: "active",
@@ -5312,28 +5317,199 @@ describe("Payments routes — recurring", () => {
     });
   });
 
-  // A key's wallet scope applies when SDP signs (HOO-2099): writes that sign
-  // nothing succeed on any project wallet, and every start is refused before
-  // its attempt is claimed.
-  it("lets a selected-wallet key edit and cancel a pending mandate on a wallet it cannot sign with, signing nothing", async () => {
-    await seedUnboundWallet();
-    const payment = await seedPendingRecurringPayment();
-    await bindApiKeyToWallet(UNBOUND_CUSTODY_WALLET_ID);
-    const executionCalls = recurringExecutionCallCounts();
+  // A key's wallet scope bounds every recurring write, signing or not
+  // (HOO-2337, SDP-023 RE-3): an in-scope activator signs whatever terms an
+  // out-of-scope edit left. Each is refused in authorize, before its key is
+  // claimed, so nothing is recorded and nothing is signed.
+  describe("wallet scope on every write (HOO-2337)", () => {
+    async function expectRefusedWithoutWrites(
+      recurringPaymentId: string,
+      request: { path: string; method: "PATCH" | "POST"; body: unknown }
+    ): Promise<void> {
+      const before = await recurringExecutionSnapshot(recurringPaymentId);
+      const executionCalls = recurringExecutionCallCounts();
+      const response = await app.request(
+        request.path,
+        { method: request.method, headers: RECURRING_HEADERS, body: JSON.stringify(request.body) },
+        env
+      );
+      await expectWalletOutOfScope(response);
+      expect(await recurringExecutionSnapshot(recurringPaymentId)).toEqual(before);
+      expect(recurringExecutionCallCounts()).toEqual(executionCalls);
+    }
 
-    const update = await app.request(
-      `/v1/payments/recurring-payments/${payment.id}`,
-      { method: "PATCH", headers: RECURRING_HEADERS, body: JSON.stringify({ amount: "26.00" }) },
-      env
+    it("refuses a create on a wallet outside the key's scope", async () => {
+      await seedUnboundWallet();
+      const payment = await seedPendingRecurringPayment();
+      await bindApiKeyToWallet(UNBOUND_CUSTODY_WALLET_ID);
+      const before = await recurringExecutionSnapshot(payment.id);
+
+      const response = await app.request(
+        "/v1/payments/recurring-payments",
+        {
+          method: "POST",
+          headers: RECURRING_HEADERS,
+          body: JSON.stringify({
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            counterpartyId: payment.counterpartyId,
+            counterpartyAccountId: payment.counterpartyAccountId,
+            token: DEFAULT_RECURRING_FIXTURE.token,
+            amount: "25.00",
+            periodHours: 24,
+          }),
+        },
+        env
+      );
+
+      await expectWalletOutOfScope(response);
+      // The snapshot counts every schedule: none was added.
+      expect(await recurringExecutionSnapshot(payment.id)).toEqual(before);
+    });
+
+    it.each([
+      { shape: "amount", body: { amount: "26.00" } },
+      { shape: "period", body: { periodHours: 48 } },
+      { shape: "first collection", body: { firstCollectionAt: null } },
+      { shape: "metadata", body: { metadataUri: "https://example.com/recurring/scoped.json" } },
+      { shape: "recipient account", body: { counterpartyAccountId: "counterparty_account_other" } },
+    ])("refuses a pending $shape edit on a wallet outside the key's scope", async ({ body }) => {
+      await seedUnboundWallet();
+      const payment = await seedPendingRecurringPayment();
+      await bindApiKeyToWallet(UNBOUND_CUSTODY_WALLET_ID);
+
+      await expectRefusedWithoutWrites(payment.id, {
+        path: `/v1/payments/recurring-payments/${payment.id}`,
+        method: "PATCH",
+        body,
+      });
+    });
+
+    it("refuses moving a pending schedule onto a wallet outside the key's scope", async () => {
+      await seedUnboundWallet();
+      const payment = await seedPendingRecurringPayment();
+      await bindApiKeyToWallet(TEST_CUSTODY_WALLET_ID);
+
+      await expectRefusedWithoutWrites(payment.id, {
+        path: `/v1/payments/recurring-payments/${payment.id}`,
+        method: "PATCH",
+        body: { sourceCustodyWalletId: UNBOUND_CUSTODY_WALLET_ID },
+      });
+    });
+
+    it("refuses moving a pending schedule off a wallet outside the key's scope onto one in it", async () => {
+      await seedUnboundWallet();
+      const payment = await seedPendingRecurringPayment();
+      await bindApiKeyToWallet(UNBOUND_CUSTODY_WALLET_ID);
+
+      await expectRefusedWithoutWrites(payment.id, {
+        path: `/v1/payments/recurring-payments/${payment.id}`,
+        method: "PATCH",
+        body: { sourceCustodyWalletId: UNBOUND_CUSTODY_WALLET_ID },
+      });
+    });
+
+    it("refuses a pending cancel on a wallet outside the key's scope", async () => {
+      await seedUnboundWallet();
+      const payment = await seedPendingRecurringPayment();
+      await bindApiKeyToWallet(UNBOUND_CUSTODY_WALLET_ID);
+
+      await expectRefusedWithoutWrites(payment.id, {
+        path: `/v1/payments/recurring-payments/${payment.id}/cancel`,
+        method: "POST",
+        body: {},
+      });
+    });
+
+    // Signing edits, cancel, collect and resume of an active schedule are
+    // covered by "refuses $route on an active mandate" below; these sign nothing.
+    it.each([
+      { shape: "schedule-only", body: { nextCollectionDueAt: null } },
+      { shape: "metadata", body: { metadataUri: "https://example.com/recurring/scoped.json" } },
+    ])(
+      "refuses an active schedule's $shape edit on a wallet outside the key's scope",
+      async ({ body }) => {
+        await seedUnboundWallet();
+        const activated = await activateRecurringPaymentForTest(RECURRING_HEADERS);
+        await bindApiKeyToWallet(UNBOUND_CUSTODY_WALLET_ID);
+
+        await expectRefusedWithoutWrites(activated.id, {
+          path: `/v1/payments/recurring-payments/${activated.id}`,
+          method: "PATCH",
+          body,
+        });
+      }
     );
-    expect(update.status).toBe(200);
-    const cancel = await app.request(
-      `/v1/payments/recurring-payments/${payment.id}/cancel`,
-      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
-      env
-    );
-    expect(cancel.status).toBe(200);
-    expect(recurringExecutionCallCounts()).toEqual(executionCalls);
+
+    it("lets a key whose scope holds the source wallet edit and cancel the schedule", async () => {
+      await seedUnboundWallet();
+      const payment = await seedPendingRecurringPayment();
+      await bindApiKeyToWallet(TEST_CUSTODY_WALLET_ID);
+
+      const update = await app.request(
+        `/v1/payments/recurring-payments/${payment.id}`,
+        { method: "PATCH", headers: RECURRING_HEADERS, body: JSON.stringify({ amount: "26.00" }) },
+        env
+      );
+      expect(update.status).toBe(200);
+      const cancel = await app.request(
+        `/v1/payments/recurring-payments/${payment.id}/cancel`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+      expect(cancel.status).toBe(200);
+    });
+
+    // Wallet scope narrows API keys only: a dashboard session holds every wallet.
+    it("leaves a dashboard session's edit and cancel unaffected", async () => {
+      const payment = await seedPendingRecurringPayment();
+      const { headers } = await authenticateTestClerkUser(env, getDb(env), {
+        userId: TEST_USER.id,
+        email: TEST_USER.email,
+        clerkUserId: `clerk_${TEST_USER.id}`,
+        organizationId: TEST_ORG.id,
+        clerkOrgId: "clerk_org_recurring_member",
+        orgSlug: TEST_ORG.slug,
+        role: "admin",
+      });
+      const sessionHeaders = { ...headers(TEST_PROJECT.id), "Content-Type": "application/json" };
+
+      const update = await app.request(
+        `/v1/payments/recurring-payments/${payment.id}`,
+        { method: "PATCH", headers: sessionHeaders, body: JSON.stringify({ amount: "26.00" }) },
+        env
+      );
+      expect(update.status).toBe(200);
+      const cancel = await app.request(
+        `/v1/payments/recurring-payments/${payment.id}/cancel`,
+        { method: "POST", headers: sessionHeaders, body: "{}" },
+        env
+      );
+      expect(cancel.status).toBe(200);
+    });
+
+    // The decision covers writes: reads and lists stay project-wide.
+    it("still lets a key outside the source wallet read and list the schedule", async () => {
+      await seedUnboundWallet();
+      const payment = await seedPendingRecurringPayment();
+      await bindApiKeyToWallet(UNBOUND_CUSTODY_WALLET_ID);
+
+      const read = await app.request(
+        `/v1/payments/recurring-payments/${payment.id}`,
+        { headers: RECURRING_HEADERS },
+        env
+      );
+      expect(read.status).toBe(200);
+      const list = await app.request(
+        "/v1/payments/recurring-payments",
+        { headers: RECURRING_HEADERS },
+        env
+      );
+      expect(list.status).toBe(200);
+      const listed = z
+        .object({ data: z.object({ recurringPayments: z.array(z.object({ id: z.string() })) }) })
+        .parse(await list.json());
+      expect(listed.data.recurringPayments.map((row) => row.id)).toContain(payment.id);
+    });
   });
 
   it("refuses activation by a selected-wallet key outside the source wallet, before claiming it", async () => {

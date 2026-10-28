@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildSnippets } from "./api-playground-snippets";
+import { buildSnippets } from "./snippets";
 
 const URL = "https://api-dev.solana.com/v1/wallets";
 

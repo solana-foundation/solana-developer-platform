@@ -44,10 +44,14 @@ describe("MarketsLanding", () => {
     expect(markup).not.toContain("DashboardMarkets.landing.description");
   });
 
-  it("keeps audience context on the two earn paths", () => {
-    expect(markup).toContain("DashboardMarkets.landing.treasuryAudience");
-    expect(markup).toContain("DashboardMarkets.landing.programAudience");
-    expect(markup).not.toContain("DashboardMarkets.dvp.landingAudience");
+  it("draws each path as an action tile with a one-line promise", () => {
+    expect(markup).toContain("DashboardMarkets.landing.treasuryTileDescription");
+    expect(markup).toContain("DashboardMarkets.landing.programTileDescription");
+    expect(markup).toContain("DashboardMarkets.dvp.landingTileDescription");
+    // ActionTile's 120px tinted tile, two to a row, never the old bordered card.
+    expect(markup.match(/min-h-\[120px\]/g)).toHaveLength(3);
+    expect(markup.match(/grid min-w-0 grid-cols-2 gap-2/g)).toHaveLength(2);
+    expect(markup).not.toContain("rounded-2xl border");
   });
 
   it("titles the cards with the shared subnav labels so they cannot drift", () => {
