@@ -1,13 +1,17 @@
 import type { ApiKeyStatus } from "@sdp/types/api-keys";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
+import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
 import { app } from "@/index";
 import { getLogger } from "@/runtime/logger";
 import { authenticateTestClerkUser } from "@/test/helpers/clerk";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
+import { seedPaymentRequest } from "@/test/helpers/payment-requests";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 
@@ -99,6 +103,64 @@ function revoke(keyId: string) {
     { method: "DELETE", headers, body: JSON.stringify({ confirmation: "Lifecycle key" }) },
     env
   );
+}
+
+function revokeCancelingPaymentRequests(keyId: string, cancelPaymentRequests: boolean) {
+  return app.request(
+    `/v1/api-keys/${keyId}`,
+    {
+      method: "DELETE",
+      headers,
+      body: JSON.stringify({ confirmation: "Lifecycle key", cancelPaymentRequests }),
+    },
+    env
+  );
+}
+
+async function seedRequestCreatedByKey(apiKeyId: string): Promise<PaymentRequestRow> {
+  await seedTestCustodyRows(env, {
+    configs: [
+      {
+        id: "cust_lifecycle_requests",
+        organizationId: ORGANIZATION_ID,
+        projectId: PROJECT_ID,
+        provider: "local",
+        configEncrypted: "test-config",
+        status: "active",
+      },
+    ],
+    wallets: [
+      {
+        id: "cwlt_lifecycle_requests",
+        owner: { kind: "config", custodyConfigId: "cust_lifecycle_requests" },
+        walletId: "wallet_lifecycle_requests",
+        publicKey: "wallet_lifecycle_requests_public_key",
+        label: null,
+        purpose: null,
+        status: "active",
+      },
+    ],
+  });
+  return seedPaymentRequest(env, {
+    organizationId: ORGANIZATION_ID,
+    projectId: PROJECT_ID,
+    custodyWalletId: "cwlt_lifecycle_requests",
+    walletId: "wallet_lifecycle_requests",
+    destinationAddress: "wallet_lifecycle_requests_public_key",
+    token: SOL_MINT,
+    amount: "1",
+    expiresAt: null,
+    createdBy: USER_ID,
+    createdByApiKeyId: apiKeyId,
+  });
+}
+
+async function paymentRequestStatus(requestId: string): Promise<string> {
+  const row = await getDb(env).queryOne<{ status: string }>(
+    "SELECT status FROM payment_requests WHERE id = ?",
+    [requestId]
+  );
+  return required(row).status;
 }
 
 /**
@@ -348,6 +410,36 @@ describe("API key lifecycle", () => {
         action: "delete",
         resource_id: TARGET_KEY_ID,
       });
+    });
+
+    it("cancels the open payment requests the key created when asked, and reports them", async () => {
+      await insertKey({ id: TARGET_KEY_ID });
+      const request = await seedRequestCreatedByKey(TARGET_KEY_ID);
+
+      const response = await revokeCancelingPaymentRequests(TARGET_KEY_ID, true);
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        data: {
+          success: true,
+          revokedAt: expect.any(String),
+          recurringPayments: null,
+          paymentRequests: { canceled: [request.id], failed: [] },
+        },
+        meta: { requestId: expect.any(String), timestamp: expect.any(String) },
+      });
+      expect(await paymentRequestStatus(request.id)).toBe("canceled");
+    });
+
+    it("leaves the key's payment requests payable when not asked to cancel them", async () => {
+      await insertKey({ id: TARGET_KEY_ID });
+      const request = await seedRequestCreatedByKey(TARGET_KEY_ID);
+
+      const response = await revokeCancelingPaymentRequests(TARGET_KEY_ID, false);
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ data: { paymentRequests: null } });
+      expect(await paymentRequestStatus(request.id)).toBe("awaiting_payment");
     });
 
     it("answers a repeat revocation with the time it was revoked", async () => {

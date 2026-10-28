@@ -22,12 +22,8 @@ import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
 import * as repositoryFactory from "@/db/repositories/repository-factory";
-import {
-  createPaymentRequestsRepository,
-  createSystemPaymentRequestsRepository,
-} from "@/db/repositories/repository-factory";
+import { createSystemPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { app } from "@/index";
-import { createTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
 import * as paymentRequests from "@/services/payments/payment-requests";
 import * as sponsorshipService from "@/services/sponsorship.service";
@@ -40,6 +36,7 @@ import {
 import { seedUnreadPrivyWallet } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { syntheticAddress } from "@/test/helpers/parsed-transactions";
+import { cancelSeededPaymentRequest, seedPaymentRequest } from "@/test/helpers/payment-requests";
 import {
   createKoraAdapterMock,
   getRecentBlockhashMock,
@@ -132,10 +129,7 @@ describe("Public payment request routes", () => {
   }
 
   function createAwaitingTokenPaymentRequest(wallet: RequestWallet, token: string) {
-    return createPaymentRequestsRepository(
-      env,
-      createTenantScope({ organizationId: TEST_ORG.id, projectId: wallet.projectId })
-    ).createPaymentRequest({
+    return seedPaymentRequest(env, {
       organizationId: TEST_ORG.id,
       projectId: wallet.projectId,
       custodyWalletId: wallet.custodyWalletId,
@@ -145,6 +139,7 @@ describe("Public payment request routes", () => {
       amount: "1.5",
       expiresAt: null,
       createdBy: TEST_USER.id,
+      createdByApiKeyId: null,
     });
   }
 
@@ -206,6 +201,23 @@ describe("Public payment request routes", () => {
       expect(rpc.calls).toEqual([]);
     }
   );
+
+  it("refuses to build a transaction for a canceled request", async () => {
+    const sponsorship = stubSponsorship();
+    const request = await cancelSeededPaymentRequest(
+      env,
+      await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET),
+      TEST_USER.id
+    );
+
+    const response = await postTransaction(request.public_token);
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: { message: "Payment request is no longer payable" },
+    });
+    expect(sponsorship).not.toHaveBeenCalled();
+  });
 
   it("keeps an unresolved legacy request readable but refuses to build its transaction", async () => {
     const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);

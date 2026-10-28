@@ -3,11 +3,10 @@ import { wellKnownMint } from "@sdp/types/well-known-tokens";
 import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
-import { createPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { app } from "@/index";
-import { createTenantScope } from "@/lib/tenant-scope";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
+import { seedPaymentRequest } from "@/test/helpers/payment-requests";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 
@@ -89,10 +88,7 @@ describe("payment request public tokens", () => {
     await seedKey(READ_KEY, ["payment_requests.read"]);
     await seedKey(MANAGE_KEY, ["payment_requests.manage"]);
 
-    const request = await createPaymentRequestsRepository(
-      env,
-      createTenantScope({ organizationId: ORGANIZATION_ID, projectId: PROJECT_ID })
-    ).createPaymentRequest({
+    const request = await seedPaymentRequest(env, {
       organizationId: ORGANIZATION_ID,
       projectId: PROJECT_ID,
       custodyWalletId: "cwlt_request_token",
@@ -102,6 +98,7 @@ describe("payment request public tokens", () => {
       amount: "25.00",
       expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
       createdBy: USER_ID,
+      createdByApiKeyId: null,
     });
     requestId = request.id;
     publicToken = request.public_token;
