@@ -1,3 +1,4 @@
+import { SigningError } from "@sdp/custody/signing";
 import { FeePaymentError } from "@sdp/fee-payment/port";
 import type { confirmTransaction } from "@sdp/rpc/solana";
 import {
@@ -6,12 +7,13 @@ import {
   getTransactionDecoder,
   getTransactionEncoder,
   partiallySignTransaction,
+  type TransactionPartialSigner,
 } from "@solana/kit";
 import { describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import type { UpdatePaymentTransferInput } from "@/db/repositories/payments.repository";
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
-import { AppError } from "@/lib/errors";
+import { AppError, custodyPolicyRefused } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { rootLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
@@ -474,6 +476,34 @@ describe("Payments routes — signed submission", () => {
       const late = await transferRequest("1", key);
       expect(late.status).toBe(409);
       expect((await errorBody(late)).error.code).toBe("CONFLICT");
+      expect(sendTransactionMock).not.toHaveBeenCalled();
+    });
+
+    it("fails a transfer its custody policy refuses with 422 and answers its key from the row", async () => {
+      const source = await generateKeyPairSigner();
+      await updateSeededWalletPublicKey(source.address);
+      const signTransactions = vi
+        .fn<TransactionPartialSigner["signTransactions"]>()
+        .mockRejectedValue(new SigningError("Privy policy refused", "POLICY_REFUSED"));
+      createOrgSignerForCustodyWalletMock.mockResolvedValueOnce({
+        address: source.address,
+        signTransactions,
+      });
+      const key = "policy-refused";
+
+      const first = await transferRequest("1", key);
+      expect(first.status).toBe(422);
+      expect(await first.json()).toEqual({
+        error: { code: "CUSTODY_POLICY_REFUSED", message: custodyPolicyRefused().message },
+        meta: { requestId: expect.stringMatching(/^req_/) },
+      });
+      expect(await latestTransferRow()).toMatchObject({ status: "failed", signature: null });
+
+      await expireIdempotencyKey(key);
+      const late = await transferRequest("1", key);
+      expect(late.status).toBe(422);
+      expect((await errorBody(late)).error.code).toBe("CUSTODY_POLICY_REFUSED");
+      expect(signTransactions).toHaveBeenCalledOnce();
       expect(sendTransactionMock).not.toHaveBeenCalled();
     });
 

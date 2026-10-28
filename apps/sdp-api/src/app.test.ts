@@ -20,6 +20,7 @@ const SECRET_APP_ERROR_PATH = "/__secret_app_error_test_throw";
 const SECRET_RPC_ERROR_PATH = "/__secret_rpc_error_test_throw";
 const SECRET_PAYMENTS_ERROR_PATH = "/__secret_payments_error_test_throw";
 const SECRET_SIGNING_ERROR_PATH = "/__secret_signing_error_test_throw";
+const POLICY_REFUSED_PATH = "/__policy_refused_test_throw";
 const SECRET_UNEXPECTED_ERROR_PATH = "/__secret_unexpected_error_test_throw";
 const FEE_ERROR_PATH = "/__fee_error_test_throw";
 const FEE_REJECTED_PATH = "/__fee_rejected_test_throw";
@@ -63,6 +64,9 @@ function buildApp() {
       'Privy API error: 401 - {"appSecret":"privy-secret"}',
       "PROVIDER_NOT_CONFIGURED"
     );
+  });
+  app.all(POLICY_REFUSED_PATH, () => {
+    throw new SigningError("Privy policy refused wal_policy_test", "POLICY_REFUSED");
   });
   app.all(SECRET_UNEXPECTED_ERROR_PATH, () => {
     throw Object.assign(new Error("privateKey=raw-private-key"), {
@@ -342,6 +346,22 @@ describe("createApp onError", () => {
     const rejected = await app.request(FEE_REJECTED_PATH, {}, baseEnv);
     const rejectedBody = (await rejected.json()) as { error: { message: string } };
     expect(rejectedBody.error.message).toContain("fee sponsor rejected this transaction");
+  });
+
+  it("answers a custody policy refusal with 422 CUSTODY_POLICY_REFUSED", async () => {
+    const app = buildApp();
+
+    const res = await app.request(POLICY_REFUSED_PATH, {}, baseEnv);
+
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({
+      error: {
+        code: "CUSTODY_POLICY_REFUSED",
+        message:
+          "Your custody provider's policy refused to sign this transaction. Nothing was signed or sent; review the wallet's policy with your custody provider, since retrying will be refused the same way",
+      },
+      meta: { requestId: expect.stringMatching(/^req_/) },
+    });
   });
 
   it("keeps unclassified signing failures on the retryable 502 path", async () => {
