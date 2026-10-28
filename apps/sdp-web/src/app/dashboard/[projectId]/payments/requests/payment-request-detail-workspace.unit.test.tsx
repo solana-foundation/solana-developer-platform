@@ -136,21 +136,19 @@ describe("PaymentRequestDetailWorkspace cancel", () => {
     const user = userEvent.setup();
     renderDetail(false, "tok_1", paymentRequest);
 
-    const open = await screen.findByRole("button", { name: "Cancel request" });
-    await user.click(open);
-    const panel = within(
-      screen.getByRole("group", { name: "This link will stop accepting payments." })
-    );
-    await user.click(panel.getByRole("button", { name: "Cancel request" }));
+    await user.click(await screen.findByRole("button", { name: "Cancel request" }));
+    const dialog = within(await screen.findByRole("dialog", { name: "Cancel request" }));
+    expect(dialog.getByText("This link will stop accepting payments.")).toBeTruthy();
+    await user.click(dialog.getByRole("button", { name: "Cancel request" }));
 
     expect(cancel).toHaveBeenCalledWith("preq_1");
-    expect(open).toHaveProperty("disabled", true);
-    expect(panel.getByRole("button", { name: "Keep it" })).toHaveProperty("disabled", true);
-    expect(panel.getByRole("button", { name: "Canceling" })).toHaveProperty("disabled", true);
+    expect(dialog.getByRole("button", { name: "Close modal" })).toHaveProperty("disabled", true);
+    expect(dialog.getByRole("button", { name: "Keep it" })).toHaveProperty("disabled", true);
+    expect(dialog.getByRole("button", { name: "Canceling" })).toHaveProperty("disabled", true);
     expect(dashboardRouter.refresh).not.toHaveBeenCalled();
 
     pending.resolve({ ok: true });
     await waitFor(() => expect(dashboardRouter.refresh).toHaveBeenCalledTimes(1));
-    expect(open).toHaveProperty("disabled", false);
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });
