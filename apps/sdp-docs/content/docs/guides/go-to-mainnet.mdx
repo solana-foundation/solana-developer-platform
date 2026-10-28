@@ -15,11 +15,13 @@ Every organization has two projects: a **sandbox** project on devnet and a **pro
 | API keys | Created in the sandbox project | Created in the production project |
 | Tokens | Devnet mints | Mainnet mints |
 
+## Steps
+
 ### 1. Request production access
 
 Production access is an entitlement SDP enables for each organization; signing up does not turn it on. Contact the SDP team with your organization ID, which you can copy from the **Organization Switcher** in the top-left of the sidebar.
 
-Until access is enabled, your production project does not appear in the dashboard, and API requests against it return `403`. A signature SDP refuses for this reason carries `details.reason` set to `production_not_enabled` (see [Signing refusals](/docs/developing-with-sdp/authentication#signing-refusals)).
+Until access is enabled, your production project does not appear in the dashboard, and requests against it return `403` with code `FORBIDDEN` and the message "Production is not enabled for this organization".
 
 ### 2. Switch to the production project
 
@@ -29,7 +31,16 @@ Once access is enabled, open the **Organization Switcher** and select **Default 
 
 Production projects use BYOK custody only: SDP signs with wallets in your own provider account, never under SDP's. Privy is the BYOK provider to use.
 
-Open **Wallets**, click **New wallet** on **Privy**, enter the **Privy app ID** and **Privy app secret** from your Privy dashboard, and click **Connect and verify**. Then create wallets in that connection. Through the API, create them with `POST /v1/wallets` and the connection's `connectionId`; `POST /v1/wallets/initialize` sets up Managed custody and returns `403` with `details.reason` set to `custody_mode_not_allowed` in a production project. See [Set Up Wallets](/docs/guides/setup-wallets) for both paths.
+In the dashboard:
+
+1. Open **Wallets** and click **Create wallet**.
+2. Under **Which provider holds the keys?**, select **Privy** and click **Continue**.
+3. A sandbox project asks for a **Custody mode**; choose **Bring your own credentials**. A production project offers only that mode, so it goes straight to the credential form.
+4. Enter a **Credential label**, the **Privy app ID** and **Privy app secret** from your Privy dashboard, and optionally an **Initial wallet label** for the first wallet in this connection. Click **Connect and verify**.
+
+To add more wallets later, click **Create wallet** again, select **Privy**, and pick your connection under **Account**.
+
+Through the API, create them with `POST /v1/wallets` and the connection's `connectionId`; `POST /v1/wallets/initialize` sets up Managed custody and returns `403` with `details.reason` set to `custody_mode_not_allowed` in a production project. See [Set Up Wallets](/docs/guides/setup-wallets) for both paths.
 
 ### 4. Create a production API key
 
@@ -37,9 +48,15 @@ With the production project selected, create a key on the **API keys** page. A k
 
 ### 5. Fund wallets with tokens, not fees
 
-SDP sponsors network fees on the transfers, batches, and recurring payments it signs from your Privy wallets, and pays the rent when a transfer creates the recipient's token account. Your wallets need the tokens they send, not SOL for fees.
+SDP sponsors network fees on the transfers, batches, and recurring payments it signs from your Privy wallets, and pays the rent when a payment creates the recipient's token account. Your wallets need the tokens they send, not SOL for fees.
 
-Sponsorship is capped over time. A payment past a cap is refused with `429` and `RATE_LIMITED` rather than charged to your wallet; retry later.
+When SDP can't sponsor a payment, it refuses it rather than charging your wallet:
+
+| Status | Code | Meaning |
+| --- | --- | --- |
+| `429` | `RATE_LIMITED` | The message names the fee sponsor: a sponsorship limit was reached. Retry later. |
+| `503` | `PROVIDER_UNAVAILABLE` | Fees can't be sponsored right now. Retry later. |
+| `422` | `SIGNING_REJECTED` | The fee sponsor's policy refused this transaction. Retrying the same request won't help. |
 
 ### 6. Use mainnet USDC
 

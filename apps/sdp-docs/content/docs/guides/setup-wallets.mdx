@@ -20,38 +20,29 @@ A **custody wallet** is a Solana keypair whose key is held and signed for by a c
 <Tabs items={["Dashboard", "API"]}>
 <Tab value="Dashboard">
 
-### 1. Navigate to Wallets
+### 1. Open the wallet setup
 
-Open the sidebar and click **Wallets**. If you haven't linked your organization yet, complete the [organization setup](/docs/guides/setup-organization) first.
+Open the sidebar and click **Wallets**, then click **Create wallet**. If you haven't linked your organization yet, complete the [organization setup](/docs/guides/setup-organization) first.
 
 ### 2. Choose a custody provider
 
-The Wallets page shows all supported providers, each with a **New wallet** button. Pick the provider that fits your setup.
+Under **Which provider holds the keys?**, select the provider that fits your setup and click **Continue**. The list shows only the providers your project can use; the provider cannot be changed after the wallet exists.
 
-![Wallets page showing custody provider cards](/images/getting-started/wallet-providers.png)
+### 3. Choose a custody mode
 
-### 3. Create the wallet
+When a provider is not set up yet and offers both modes, choose a **Custody mode**: **Managed** uses SDP's provider account, and **Bring your own credentials** connects your own provider app. Production projects offer only **Bring your own credentials** (see [Go to Mainnet](/docs/guides/go-to-mainnet)).
 
-Click **New wallet** on your chosen provider. In the modal, enter a label for the wallet and click **Create wallet**.
+For your own credentials, fill in the provider's credential form (for Privy: a **Credential label**, the **Privy app ID** and **Privy app secret**, and an optional **Initial wallet label**) and click **Connect and verify**. This connects the account and returns you to the Wallets page.
 
-If you have connected your own account with that provider, choose the account the wallet is created in: the provider's Managed account (when the project has one) or one of your active connections. The choice appears as soon as one active connection exists, and nothing is preselected: SDP has no default custody, so every wallet names where it lives.
+### 4. Create the wallet
 
-<img src="/docs/images/getting-started/wallet-create-modal.png" alt="New wallet modal" width="696" style={{ display: "block", maxWidth: "100%" }} />
+For Managed custody, or once the provider is set up, enter a **Wallet label**, pick a **Purpose**, and click **Create wallet**. When your project has an active connection with that provider, also choose the **Account** the wallet is created in: **Managed by SDP** (when the project has a Managed account) or one of your connections. Nothing is preselected: SDP has no default custody, so every wallet names where it lives.
 
-### 4. View your wallet
+The first wallet on a provider is always a transfer wallet; you can choose a purpose for wallets after it.
 
-After provisioning, the wallet card appears on the Wallets page with its address, wallet ID, and balance.
+### 5. View your wallet
 
-![Wallets page after wallet creation](/images/getting-started/wallet-created.png)
-
-To create additional wallets, click **Create Wallet** in the top right and repeat the process.
-
-### 5. Provider capabilities
-
-Each provider supports a different set of operations shown as capability chips:
-
-- **Transfers** — can sign payment transactions
-- **Compliance** — can sign freeze/unfreeze instructions
+After provisioning, the wallet appears on the Wallets page with its address, wallet ID, and balance. To create additional wallets, click **Create wallet** again and repeat the process.
 
 </Tab>
 <Tab value="API">
@@ -122,7 +113,7 @@ HttpRequest request = HttpRequest.newBuilder()
 </Tab>
 </Tabs>
 
-The `purpose` field is optional metadata in the API. The current dashboard create-wallet flow does not expose wallet-purpose selection.
+The `purpose` field is optional in the API. The dashboard sets it with the **Purpose** field.
 
 #### 3. List wallets
 

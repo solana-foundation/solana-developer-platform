@@ -25,7 +25,7 @@ The rest of this section assumes transfers are submitted by SDP from a custody w
 
 ## Fees and sponsorship
 
-Solana fees are paid in SOL by the transaction's fee payer. On wallet transfers, the source custody wallet is the fee payer by default; SDP can be configured to sponsor fees so end-user wallets do not need a SOL balance.
+Solana fees are paid in SOL by the transaction's fee payer. On the transfers, batches, and recurring payments SDP signs from a Privy wallet, SDP's fee sponsor is the fee payer and pays the rent when a payment creates the recipient's token account, so the source wallet needs no SOL for fees. Transfers from a Fireblocks wallet are the exception: Fireblocks submits them, and SDP does not sponsor them.
 
 ## The transfer data model
 
