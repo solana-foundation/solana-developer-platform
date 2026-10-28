@@ -2828,6 +2828,47 @@ describe("Payments routes — recurring", () => {
     });
   });
 
+  it("puts a stale cancel from before HOO-2340, whose attempt records no claim, back to active when its send is refused", async () => {
+    const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    const staleUpdatedAt = new Date(Date.now() - 16 * 60 * 1000).toISOString();
+    const attemptId = `prpl_${crypto.randomUUID()}`;
+    await getDb(env)
+      .prepare("UPDATE payment_recurring_payments SET status = ?, updated_at = ? WHERE id = ?")
+      .bind(RECURRING_PAYMENT_CANCEL_PROCESSING_STATUS, staleUpdatedAt, activated.id)
+      .run();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_recurring_payment_lifecycle_attempts (
+           id, organization_id, project_id, recurring_payment_id, operation,
+           status, stage, metadata, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, 'cancel', 'processing', 'claim', '{}'::jsonb, ?, ?)`
+      )
+      .bind(attemptId, TEST_ORG.id, TEST_PROJECT.id, activated.id, staleUpdatedAt, staleUpdatedAt)
+      .run();
+    fetchMaybeSubscriptionDelegationMock.mockResolvedValue(delegation(0n));
+    sendTransactionMock.mockRejectedValueOnce(sendTransactionPreflightError(17));
+
+    const response = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/cancel`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+
+    expect(response.status).toBe(400);
+    expect(
+      await getDb(env)
+        .prepare("SELECT status, paused_reason FROM payment_recurring_payments WHERE id = ?")
+        .bind(activated.id)
+        .first<{ status: string; paused_reason: string | null }>()
+    ).toEqual({ status: "active", paused_reason: null });
+    expect(
+      await getDb(env)
+        .prepare("SELECT status FROM payment_recurring_payment_lifecycle_attempts WHERE id = ?")
+        .bind(attemptId)
+        .first<{ status: string }>()
+    ).toEqual({ status: "failed" });
+  });
+
   it("cancels future collections while the current collection is processing", async () => {
     const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
     const dueAt = new Date(Date.now() - 60 * 1000).toISOString();

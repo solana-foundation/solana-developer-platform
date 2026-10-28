@@ -272,7 +272,12 @@ async function recordCancelFailure(input: {
   error: Error;
   failedAt: string;
 }): Promise<void> {
-  const claim = cancelAttemptMetadataSchema.parse(input.attempt.metadata);
+  // Attempts from the release before HOO-2340 record `{}`; that release claimed only from `active`.
+  const claim = cancelAttemptMetadataSchema.parse(
+    Object.keys(input.attempt.metadata).length === 0
+      ? { claimedFrom: "active", pausedReason: null }
+      : input.attempt.metadata
+  );
   const restored =
     claim.claimedFrom === "active"
       ? { status: "active" as const, pausedReason: null }
