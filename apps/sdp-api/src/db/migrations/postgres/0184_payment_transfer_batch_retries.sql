@@ -2,7 +2,8 @@
 -- in the claim's transaction before anything is signed. It is the retry's
 -- recovery point under its Idempotency-Key (ADR 0009): a rerun after a 5xx or
 -- a takeover is answered from it instead of claiming again, and it records
--- which recipients each retry resent.
+-- which recipients each retry resent and the failed chunk transfers it took
+-- them from, so the batch keeps showing those chunks.
 CREATE TABLE payment_transfer_batch_retries (
     id TEXT PRIMARY KEY,
     batch_id TEXT NOT NULL REFERENCES payment_transfer_batches(id) ON DELETE CASCADE,
@@ -12,12 +13,17 @@ CREATE TABLE payment_transfer_batch_retries (
     idempotency_fingerprint TEXT NOT NULL,
     initiated_by_key_id TEXT,
     recipient_ids JSONB NOT NULL,
+    superseded_transfer_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
     status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived')),
     created_at TEXT NOT NULL DEFAULT sdp_iso_now()
 );
 
 CREATE UNIQUE INDEX payment_transfer_batch_retries_org_project_key
     ON payment_transfer_batch_retries (organization_id, project_id, idempotency_key)
+    WHERE status = 'active';
+
+CREATE INDEX payment_transfer_batch_retries_batch
+    ON payment_transfer_batch_retries (batch_id)
     WHERE status = 'active';
 
 ALTER TABLE payment_transfer_batch_retries ENABLE ROW LEVEL SECURITY;

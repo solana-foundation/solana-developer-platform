@@ -843,6 +843,20 @@ export function createPostgresPaymentTransferBatchesRepository(
       }));
     },
 
+    async listSupersededTransferIds({ batchId, organizationId, projectId }) {
+      const result = await db
+        .prepare(
+          `SELECT superseded_transfer_ids FROM payment_transfer_batch_retries
+            WHERE batch_id = ? AND organization_id = ? AND project_id = ? AND status = 'active'
+            ORDER BY created_at`
+        )
+        .bind(batchId, organizationId, projectId)
+        .all<{ superseded_transfer_ids: unknown }>();
+      return result.results.flatMap((row) =>
+        idListSchema.parse(parsePostgresJson<unknown>(row.superseded_transfer_ids))
+      );
+    },
+
     async findTransferBatchRetryByIdempotency({ organizationId, projectId, idempotencyKey }) {
       const row = await db
         .prepare(
@@ -910,26 +924,39 @@ export function createPostgresPaymentTransferBatchesRepository(
           if (!batch) return null;
           const claimed = await tx
             .prepare(
-              `UPDATE payment_transfer_recipients
+              `UPDATE payment_transfer_recipients r
                 SET status = 'pending', transfer_id = NULL, error = NULL, updated_at = sdp_iso_now()
-              WHERE batch_id = ?
-                AND organization_id = ?
-                AND project_id = ?
-                AND status = 'failed'
-                AND id IN (${input.recipientIds.map(() => "?").join(", ")})
-              RETURNING *`
+               FROM (
+                 SELECT id, transfer_id FROM payment_transfer_recipients
+                  WHERE batch_id = ?
+                    AND organization_id = ?
+                    AND project_id = ?
+                    AND status = 'failed'
+                    AND id IN (${input.recipientIds.map(() => "?").join(", ")})
+                  FOR UPDATE
+               ) previous
+              WHERE r.id = previous.id
+              RETURNING r.*, previous.transfer_id AS superseded_transfer_id`
             )
             .bind(input.batchId, input.organizationId, input.projectId, ...input.recipientIds)
             .all<Record<string, unknown>>();
           if (claimed.results.length !== input.recipientIds.length) {
             throw new ClaimLostError();
           }
+          const supersededTransferIds = [
+            ...new Set(
+              claimed.results.flatMap((row) =>
+                typeof row.superseded_transfer_id === "string" ? [row.superseded_transfer_id] : []
+              )
+            ),
+          ];
           const retry = await tx
             .prepare(
               `INSERT INTO payment_transfer_batch_retries
                  (id, batch_id, organization_id, project_id, idempotency_key,
-                  idempotency_fingerprint, initiated_by_key_id, recipient_ids)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb)
+                  idempotency_fingerprint, initiated_by_key_id, recipient_ids,
+                  superseded_transfer_ids)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb)
                RETURNING *`
             )
             .bind(
@@ -940,7 +967,8 @@ export function createPostgresPaymentTransferBatchesRepository(
               input.retry.idempotencyKey,
               input.retry.idempotencyFingerprint,
               input.retry.initiatedByKeyId,
-              JSON.stringify(input.recipientIds)
+              JSON.stringify(input.recipientIds),
+              JSON.stringify(supersededTransferIds)
             )
             .first<Record<string, unknown>>();
           if (!retry) throw internalError("Transfer batch retry was not recorded");
@@ -958,7 +986,7 @@ export function createPostgresPaymentTransferBatchesRepository(
   };
 }
 
-const retryRecipientIdsSchema = z.array(z.string());
+const idListSchema = z.array(z.string());
 
 function mapPaymentTransferBatchRetryRow(
   row: Record<string, unknown>
@@ -968,7 +996,10 @@ function mapPaymentTransferBatchRetryRow(
     batch_id: String(row.batch_id),
     idempotency_fingerprint: String(row.idempotency_fingerprint),
     initiated_by_key_id: row.initiated_by_key_id === null ? null : String(row.initiated_by_key_id),
-    recipient_ids: retryRecipientIdsSchema.parse(parsePostgresJson<unknown>(row.recipient_ids)),
+    recipient_ids: idListSchema.parse(parsePostgresJson<unknown>(row.recipient_ids)),
+    superseded_transfer_ids: idListSchema.parse(
+      parsePostgresJson<unknown>(row.superseded_transfer_ids)
+    ),
     created_at: String(row.created_at),
   };
 }

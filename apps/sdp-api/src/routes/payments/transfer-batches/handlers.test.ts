@@ -2530,6 +2530,20 @@ describe("payment transfer batches", () => {
         transferId: sent.transferId,
       });
       expect(body.data.batch).toMatchObject({ status: "processing", transactionCount: 3 });
+      // The failed chunk stays in the batch's history beside the resend.
+      const transferIds = body.data.transfers.map((transfer) => transfer.id);
+      expect(transferIds).toHaveLength(3);
+      expect(transferIds).toContain(required(failed.transferId));
+      const read = await readBatch(
+        await app.request(
+          `/v1/payments/transfer-batches/${batch.id}`,
+          { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+          env
+        )
+      );
+      expect(read.data.transfers.map((transfer) => transfer.id).sort()).toEqual(
+        [...transferIds].sort()
+      );
     });
 
     it("replays a same-key retry without sending again", async () => {

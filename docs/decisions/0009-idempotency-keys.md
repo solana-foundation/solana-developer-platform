@@ -144,7 +144,9 @@ another writer failed or claimed first rolls the chunk back before it is sent. T
 `payment_transfer_batch_retries` row under the retry's record key in the same transaction (migration
 0184), so the route runs like create (`serverErrors: "rerun"`, `recovery: "record"`): a rerun after a
 5xx or a takeover is answered from that row with the batch as it stands, and claims nothing again.
-It pays the address each recipient recorded, and refuses (409) if the account now holds another.
+It pays the address each recipient recorded, and refuses (409) if the account now holds another. The row also
+records the failed chunk transfers the claim unlinked, so batch responses keep listing every chunk
+`transactionCount` counts.
 Unsent recipients age by their own last write, not the batch's: the stranded-batch job and the
 create takeover fail only recipients no live request can still be sending, so a retry's fresh claim
 on an old batch is left to it.

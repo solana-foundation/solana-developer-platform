@@ -261,6 +261,8 @@ export interface PaymentTransferBatchRetryRow {
   idempotency_fingerprint: string;
   initiated_by_key_id: string | null;
   recipient_ids: string[];
+  /** The failed chunk transfers the claim unlinked these recipients from. */
+  superseded_transfer_ids: string[];
   created_at: string;
 }
 
@@ -398,6 +400,11 @@ export interface PaymentTransferBatchesRepository {
     attemptedBefore: string;
     limit: number;
   }): Promise<RecomputeTransferBatchStatusInput[]>;
+  /**
+   * The failed chunk transfers the batch's retries unlinked their recipients
+   * from: still the batch's transactions, so its responses keep showing them.
+   */
+  listSupersededTransferIds(input: RecomputeTransferBatchStatusInput): Promise<string[]>;
   /** The retry recorded under a credential-bound record key, if any. */
   findTransferBatchRetryByIdempotency(input: {
     organizationId: string;

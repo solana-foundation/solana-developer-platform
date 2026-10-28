@@ -72,19 +72,21 @@ export async function buildTransferBatchResponse(
   organizationId: string,
   projectId: string
 ) {
-  const recipients = await getPaymentTransferBatchesRepository(c).listTransferRecipientsByBatch({
-    batchId: batch.id,
-    organizationId,
-    projectId,
-    limit: 500,
-    offset: 0,
-  });
+  const batchesRepository = getPaymentTransferBatchesRepository(c);
+  const scope = { batchId: batch.id, organizationId, projectId };
+  const [recipients, supersededTransferIds] = await Promise.all([
+    batchesRepository.listTransferRecipientsByBatch({ ...scope, limit: 500, offset: 0 }),
+    // A retry unlinks its recipients from their failed chunk; the chunk is
+    // still one of the batch's transactions (HOO-2343).
+    batchesRepository.listSupersededTransferIds(scope),
+  ]);
   const transferIds = Array.from(
-    new Set(
-      recipients.rows
+    new Set([
+      ...supersededTransferIds,
+      ...recipients.rows
         .map((recipient) => recipient.transfer_id)
-        .filter((transferId): transferId is string => Boolean(transferId))
-    )
+        .filter((transferId): transferId is string => Boolean(transferId)),
+    ])
   );
   const transferRows = await getPaymentsRepository(c).listTransfersByIds({
     transferIds,
