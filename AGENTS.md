@@ -103,7 +103,7 @@ Public docs and AI artifacts should mirror the supported public surface only.
 ## Repo-local skills
 
 - `skills/sdp-docs/SKILL.md`: generated, consumer-facing, read-only docs skill: where the public docs live and SDP's grounding rules (environments, API key grants, Idempotency-Key, prepare vs execute). `generate:ai` writes it with `apps/sdp-docs/public/SKILL.md`; it names no module, so one copy fits every release channel. The docs sidebar's Agent setup menu installs it with `npx skills add`.
-- `skills/sdp-tokenization/SKILL.md`: consumer-facing skill for explaining how to tokenize assets with SDP using the supported public docs and API surface. The Agent setup menu offers it only where Issuance is published.
+- `skills/sdp-tokenization/SKILL.md`: consumer-facing skill for explaining how to tokenize assets with SDP using the supported public docs and API surface. Unlisted in the docs' Agent setup menu (`MODULE_SKILLS` in `apps/sdp-docs/src/lib/agent-setup.ts`) until Issuance ships and its references move off repo paths.
 - `.agents/skills/sdp-ui-designer/SKILL.md`: SDP UI design skill for designing, prototyping, reviewing, or implementing payments, wallets, counterparty, and issuance UI. Its bundle ships the canonical token reference (`sdp-design-system.css`) and the UI handoff rules (`AGENTS.md`) alongside the skill; treat those as the design source of truth for UI work.
 - `.agents/skills/integrate-ramp-provider/SKILL.md`: explicit-only Payments/Ramps integration router; its sibling skills cover provider registration, rail discovery, estimates, counterparty requirements, on-ramp, off-ramp, and webhooks.
 - `.agents/skills/sdp-concise/SKILL.md`: explicit-only, action-first output contract shared by SDP workflows.

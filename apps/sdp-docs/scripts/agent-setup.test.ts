@@ -2,31 +2,36 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
-import { SDP_RELEASE_CHANNELS } from "@sdp/types/release-channels";
+import { SDP_MODULES, SDP_RELEASE_CHANNELS } from "@sdp/types/release-channels";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
-import { DOCS_SKILL_NAME, getAgentSetupOptions } from "@/lib/agent-setup";
-import { isModulePublished, publicSurface } from "@/lib/release-channel";
+import {
+  DOCS_SKILL_NAME,
+  getAgentSetupOptions,
+  MODULE_SKILLS,
+  offeredModuleSkills,
+} from "@/lib/agent-setup";
 
 describe("Agent setup commands", () => {
   const options = getAgentSetupOptions();
 
-  it("offer the tokenization skill exactly where issuance is published", () => {
+  it("install the docs skill and the offered module skills, on every deployment", () => {
+    const skills = [DOCS_SKILL_NAME, ...offeredModuleSkills(MODULE_SKILLS).map((s) => s.name)];
     for (const option of options) {
-      assert.match(option.command, / --skill sdp-docs(?: |$)/);
-      assert.equal(option.command.includes("sdp-tokenization"), isModulePublished("issuance"));
+      assert.match(option.command, new RegExp(` --skill ${skills.join(" ")}(?: --agent \\S+)?$`));
     }
   });
 
-  // CI generates the experimental surface, so this swaps in the stable channel's modules.
-  it("follow the stable channel's modules on a stable build", (t) => {
-    t.mock.property(publicSurface, "modules", SDP_RELEASE_CHANNELS.stable);
-    for (const option of getAgentSetupOptions()) {
-      assert.equal(
-        option.command.includes("sdp-tokenization"),
-        SDP_RELEASE_CHANNELS.stable.includes("issuance")
-      );
-    }
+  it("offer a module skill only while it is listed and its module is stable", () => {
+    const released = SDP_RELEASE_CHANNELS.stable[0];
+    const unreleased = SDP_MODULES.find((module) => !SDP_RELEASE_CHANNELS.stable.includes(module));
+    assert.ok(released && unreleased, "the stable channel holds some modules and not others");
+    const offered = offeredModuleSkills([
+      { name: "listed-released", module: released, listed: true },
+      { name: "listed-unreleased", module: unreleased, listed: true },
+      { name: "unlisted-released", module: released, listed: false },
+    ]).map((skill) => skill.name);
+    assert.deepEqual(offered, ["listed-released"]);
   });
 
   it("name each agent the skills CLI installs for", () => {
