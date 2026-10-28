@@ -143,7 +143,22 @@ describe("wallet selection during payments", () => {
         return Response.json({ data: { wallets: [wallet] } });
       if (String(input).includes("/accounts?"))
         return Response.json({ data: { accounts: [recipient], total: 1 } });
-      if (String(input).endsWith("/estimate")) return Response.json({ data: { estimate: {} } });
+      if (String(input).endsWith("/estimate"))
+        return Response.json({
+          data: {
+            estimate: {
+              recipientCount: 1,
+              transactionCount: 1,
+              estimatedFees: {
+                networkFeeLamports: "5000",
+                priorityFeeLamports: "0",
+                tokenAccountRentLamports: "0",
+                sponsored: true,
+              },
+              warnings: [],
+            },
+          },
+        });
       sent.push(JSON.parse(String(init?.body)));
       return Response.json({ error: { message: "Unexpected submission" } }, { status: 400 });
     });

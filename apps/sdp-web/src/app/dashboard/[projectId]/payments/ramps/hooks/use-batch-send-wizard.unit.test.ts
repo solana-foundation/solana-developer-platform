@@ -46,13 +46,12 @@ describe("belowRentMinimumByAccount", () => {
     );
   });
 
-  it("is empty for an estimate without warnings, or one from an older API", () => {
+  it("is empty for an estimate without warnings", () => {
     expect(belowRentMinimumByAccount([], requestRecipients).size).toBe(0);
-    expect(belowRentMinimumByAccount(undefined, requestRecipients).size).toBe(0);
   });
 
-  it("ignores an index the request does not have", () => {
-    expect(belowRentMinimumByAccount([warning(7)], requestRecipients).size).toBe(0);
+  it("fails loudly on an index the request does not have", () => {
+    expect(() => belowRentMinimumByAccount([warning(7)], requestRecipients)).toThrow("recipient 7");
   });
 });
 
@@ -77,7 +76,6 @@ describe("sourceBelowRentMinimum", () => {
   });
 
   it("is null without a source warning", () => {
-    expect(sourceBelowRentMinimum(undefined)).toBeNull();
     expect(sourceBelowRentMinimum([])).toBeNull();
   });
 });
