@@ -12,6 +12,7 @@ import {
   isCanceledRecurringPaymentStatus,
   isPendingActivationRecurringPaymentStatus,
   isRecurringPaymentLifecycleClaimableStatus,
+  isSubscriptionCancelableByRecurringPayment,
   type PaymentRecurringPaymentLifecycleAttemptStage,
   RECURRING_PAYMENT_CANCEL_PROCESSING_STATUS,
   RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS,
@@ -587,7 +588,7 @@ async function runRecurringPaymentCancel(input: {
     }
     const tokenMint = assertValidAddress(plan.token, "tokenMint");
 
-    if (subscription.status !== "active" && subscription.status !== "canceled") {
+    if (!isSubscriptionCancelableByRecurringPayment(subscription.status)) {
       throw conflict("Subscription cannot be canceled from this status");
     }
 

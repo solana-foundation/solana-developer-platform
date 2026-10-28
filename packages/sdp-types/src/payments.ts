@@ -1089,6 +1089,24 @@ export function isRecurringPaymentLifecycleClaimableStatus(
   return claimable.some((candidate) => candidate === status);
 }
 
+/**
+ * The subscription statuses a recurring payment's cancel proceeds from: `active` before its
+ * on-chain cancel, and `canceled` when a retried cancel finds it already landed.
+ */
+export const PAYMENT_SUBSCRIPTION_STATUSES_CANCELABLE_BY_RECURRING_PAYMENT = [
+  "active",
+  "canceled",
+] as const satisfies readonly PaymentSubscriptionStatus[];
+
+/** Whether a recurring payment's cancel may proceed with its subscription in `status`. */
+export function isSubscriptionCancelableByRecurringPayment(
+  status: PaymentSubscriptionStatus
+): boolean {
+  return PAYMENT_SUBSCRIPTION_STATUSES_CANCELABLE_BY_RECURRING_PAYMENT.some(
+    (candidate) => candidate === status
+  );
+}
+
 export const RECURRING_PAYMENT_ACTIVATION_TRANSITION = {
   processingStatus: "activating",
   claimableStatus: "pending_activation",
