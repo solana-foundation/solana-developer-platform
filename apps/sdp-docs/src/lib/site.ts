@@ -14,6 +14,11 @@ export function getDocsPagePath(pageSlug: string): string {
   return normalized ? `/docs/${normalized}` : "/docs";
 }
 
+/** The page's Markdown, as the `.md` route serves it: `/docs.md` for the home. */
+export function getDocsMarkdownPath(pageSlug: string): string {
+  return `${getDocsPagePath(pageSlug)}.md`;
+}
+
 /**
  * Derives the full URL set from a docs/api base pair, so the env-aware site
  * and the canonical constants below can never drift in shape.
@@ -23,6 +28,8 @@ function buildSiteUrls(docsUrl: string, apiUrl: string) {
   const aiGuidePath = getDocsPagePath(SDP_AI_GUIDE_DOCS_SLUG);
   const aiLlmsPath = "/docs/ai/llms.txt";
   const aiLlmsFullPath = "/docs/ai/llms-full.txt";
+  // Served from public/ at the docs root, and by sdp-web at the site root.
+  const aiSkillPath = "/SKILL.md";
   return {
     docsUrl,
     docsOrigin,
@@ -35,7 +42,11 @@ function buildSiteUrls(docsUrl: string, apiUrl: string) {
     aiLlmsUrl: `${docsOrigin}${aiLlmsPath}`,
     aiLlmsFullPath,
     aiLlmsFullUrl: `${docsOrigin}${aiLlmsFullPath}`,
+    aiSkillPath,
+    aiSkillUrl: `${docsOrigin}${aiSkillPath}`,
     getDocsPageUrl: (pageSlug: string): string => `${docsOrigin}${getDocsPagePath(pageSlug)}`,
+    getDocsMarkdownUrl: (pageSlug: string): string =>
+      `${docsOrigin}${getDocsMarkdownPath(pageSlug)}`,
   };
 }
 
@@ -65,5 +76,8 @@ export const {
   aiLlmsUrl,
   aiLlmsFullPath,
   aiLlmsFullUrl,
+  aiSkillPath,
+  aiSkillUrl,
   getDocsPageUrl,
+  getDocsMarkdownUrl,
 } = site;

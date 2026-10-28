@@ -3,15 +3,19 @@
 import type { Root } from "fumadocs-core/page-tree";
 import { useSearchContext } from "fumadocs-ui/contexts/search";
 import { ThemeSwitch } from "fumadocs-ui/layouts/shared/slots/theme-switch";
-import { ArrowUpRight, Menu, Search, X } from "lucide-react";
+import { ArrowUpRight, FileText, Menu, Search, X } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useState } from "react";
+import type { AgentSetupOptions } from "@/lib/agent-setup";
+import { aiLlmsPath } from "@/lib/site";
+import { AgentSetup } from "./agent-setup";
 import { NavigationNode } from "./navigation-node";
 
 type DocsSidebarProps = {
   tree: Root;
   dashboardUrl: string | null;
+  agentSetup: AgentSetupOptions;
 };
 
 function getNodeKey(node: Root["children"][number]) {
@@ -26,7 +30,7 @@ function getNodeKey(node: Root["children"][number]) {
   return String(node.name);
 }
 
-export function DocsSidebar({ tree, dashboardUrl }: DocsSidebarProps) {
+export function DocsSidebar({ tree, dashboardUrl, agentSetup }: DocsSidebarProps) {
   const [open, setOpen] = useState(false);
   const { setOpenSearch } = useSearchContext();
 
@@ -83,6 +87,7 @@ export function DocsSidebar({ tree, dashboardUrl }: DocsSidebarProps) {
                 <ArrowUpRight aria-hidden="true" />
               </a>
             ) : null}
+            <AgentSetup options={agentSetup} />
           </div>
 
           <button
@@ -116,6 +121,10 @@ export function DocsSidebar({ tree, dashboardUrl }: DocsSidebarProps) {
               Mainnet
               <span className="launch-badge">Coming soon</span>
             </span>
+            <a href={aiLlmsPath} className="launch-docs-status-row launch-docs-status-link">
+              <FileText aria-hidden="true" />
+              llms.txt
+            </a>
           </div>
           <ThemeSwitch mode="light-dark-system" className="launch-docs-theme-switch" />
         </div>

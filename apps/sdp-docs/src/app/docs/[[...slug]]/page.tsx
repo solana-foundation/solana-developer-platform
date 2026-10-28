@@ -6,7 +6,8 @@ import type { ComponentType } from "react";
 import { ProviderCallout } from "@/components/docs-shell/home";
 import { HOME_TOC } from "@/components/docs-shell/home-sections";
 import { DocsBody, DocsDescription, DocsPage, DocsTitle } from "@/components/docs-shell/page";
-import { getDocsPagePath } from "@/lib/site";
+import { PageActions } from "@/components/docs-shell/page-actions";
+import { getDocsMarkdownPath, getDocsMarkdownUrl, getDocsPagePath } from "@/lib/site";
 import { source } from "@/lib/source";
 import { getMDXComponents } from "@/mdx-components";
 
@@ -100,9 +101,17 @@ export default async function Page({ params }: DocsPageProps) {
         : [...baseToc, ...stepItems];
   }
 
+  const pageSlug = resolvedPage.pageSlug.join("/");
+
   return (
     <DocsPage toc={toc} full={data.full} tocFooter={isHome ? <ProviderCallout /> : undefined}>
-      {!data.hideTitle && <DocsTitle>{data.title}</DocsTitle>}
+      <div className="launch-docs-header">
+        {!data.hideTitle && <DocsTitle>{data.title}</DocsTitle>}
+        <PageActions
+          markdownPath={getDocsMarkdownPath(pageSlug)}
+          markdownUrl={getDocsMarkdownUrl(pageSlug)}
+        />
+      </div>
       {!data.hideTitle && <DocsDescription>{data.description}</DocsDescription>}
       <DocsBody prev={prev} next={next} bare={data.hideTitle}>
         <MDX components={mdxComponents} />

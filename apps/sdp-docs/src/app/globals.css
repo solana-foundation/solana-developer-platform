@@ -173,10 +173,14 @@ body {
 
 .launch-docs-sidebar-actions {
   display: grid;
-  grid-auto-columns: minmax(0, 1fr);
-  grid-auto-flow: column;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   margin-top: 18px;
+}
+
+/* Three chips don't fit one 272px row: the odd one out, Agent setup, takes a row of its own. */
+.launch-docs-sidebar-actions > :last-child:nth-child(odd) {
+  grid-column: 1 / -1;
 }
 
 .launch-docs-sidebar-action {
@@ -188,20 +192,34 @@ body {
   border-radius: var(--corner-control);
   background: var(--chip);
   box-shadow: var(--chip-ring);
+  border: 0;
   color: var(--ink-secondary);
   font-family: var(--font-sans);
   font-size: var(--font-size-meta);
   text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
   transition: color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
-.launch-docs-sidebar-action:hover {
+.launch-docs-sidebar-action:hover,
+.launch-docs-sidebar-action[data-state="open"] {
   color: var(--ink);
 }
 
 .launch-docs-sidebar-action svg {
   width: 13px;
   height: 13px;
+  flex: none;
+}
+
+/* A menu trigger's chevron turns over while its menu is open. */
+.launch-chevron {
+  transition: transform var(--motion-duration-base) var(--motion-ease-out);
+}
+
+[data-state="open"] > .launch-chevron {
+  transform: rotate(180deg);
 }
 
 .launch-docs-sidebar-search {
@@ -306,6 +324,24 @@ body {
 .launch-docs-status-dot.is-muted {
   background: var(--ink-tertiary);
   box-shadow: none;
+}
+
+.launch-docs-status-link {
+  text-decoration: none;
+  transition: color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.launch-docs-status-link:hover {
+  color: var(--ink);
+}
+
+/* The icon sits in the 7px dot column, so its label lines up with the status rows'. */
+.launch-docs-status-link svg {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  margin: 0 -3px;
+  color: var(--ink-tertiary);
 }
 
 /* ── Badge — shared pill for "Coming soon"-style annotations ── */
@@ -449,6 +485,15 @@ body {
 .launch-docs-nav-toggle svg {
   width: 12px;
   height: 12px;
+}
+
+/* A folder's chevron turns from right to down as it opens, like the menu chevrons. */
+.launch-docs-nav-chevron {
+  transition: transform var(--motion-duration-base) var(--motion-ease-out);
+}
+
+[aria-expanded="true"] > .launch-docs-nav-chevron {
+  transform: rotate(90deg);
 }
 
 .launch-docs-nav-children {
@@ -702,6 +747,364 @@ body {
 .launch-docs-body {
   color: var(--ink-secondary);
   font-family: var(--font-sans);
+}
+
+/* ── Page header: the title, with the page actions on its first line ── */
+.launch-docs-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.launch-docs-header .launch-docs-title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Copy page, with the other page actions behind its chevron: one raised chip split by a rule.
+   The top margin centres it on the title's first line, from the title's size and line height. */
+.launch-page-actions {
+  display: inline-flex;
+  flex: none;
+  height: var(--control-height-sm);
+  margin: calc((clamp(30px, 3.4vw, 36px) * 1.15 - var(--control-height-sm)) / 2) 0 0 auto;
+  border-radius: var(--corner-control);
+  background: var(--chip);
+  box-shadow: var(--chip-ring);
+}
+
+.launch-page-actions-copy,
+.launch-page-actions-more {
+  display: inline-flex;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--ink-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-meta);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease-out),
+    color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.launch-page-actions-copy {
+  gap: 6px;
+  padding: 0 10px;
+  border-radius: var(--corner-control) 0 0 var(--corner-control);
+}
+
+.launch-page-actions-more {
+  justify-content: center;
+  width: 28px;
+  border-left: 1px solid var(--rule-faint);
+  border-radius: 0 var(--corner-control) var(--corner-control) 0;
+}
+
+.launch-page-actions-copy:hover,
+.launch-page-actions-more:hover,
+.launch-page-actions-more[data-state="open"] {
+  background: var(--wash);
+  color: var(--ink);
+}
+
+.launch-page-actions-more svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* Both labels share one grid cell, so the chip stays as wide as "Copy page" when it says Copied. */
+.launch-page-actions-label {
+  display: grid;
+}
+
+.launch-page-actions-label > span {
+  grid-area: 1 / 1;
+  transition:
+    opacity var(--motion-duration-base) var(--motion-ease-out),
+    visibility var(--motion-duration-base) var(--motion-ease-out);
+}
+
+.launch-page-actions-label .is-copied,
+.launch-page-actions-copy[data-status="copied"] .is-idle {
+  visibility: hidden;
+  opacity: 0;
+}
+
+.launch-page-actions-copy[data-status="copied"] .is-copied {
+  visibility: visible;
+  opacity: 1;
+}
+
+/* On a phone Copy page drops its label (the menu still names every action), so the title keeps
+   its width. */
+@media (max-width: 639px) {
+  .launch-docs-header {
+    gap: 12px;
+  }
+
+  .launch-page-actions-copy {
+    justify-content: center;
+    width: var(--control-height-sm);
+    padding: 0;
+  }
+
+  .launch-page-actions-label {
+    display: none;
+  }
+}
+
+/* Copy, check and alert stacked in one box: the outcome morphs in place. */
+.launch-copy-icon {
+  display: inline-grid;
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+
+.launch-copy-icon svg {
+  grid-area: 1 / 1;
+  width: 14px;
+  height: 14px;
+  opacity: 0;
+  transform: scale(0.5);
+  transition:
+    opacity var(--motion-duration-base) var(--motion-ease-out),
+    transform var(--motion-duration-base) var(--motion-ease-out);
+}
+
+.launch-copy-icon-copied {
+  color: var(--positive);
+}
+
+.launch-copy-icon-failed {
+  color: var(--critical);
+}
+
+.launch-copy-icon[data-status="idle"] .launch-copy-icon-idle,
+.launch-copy-icon[data-status="copied"] .launch-copy-icon-copied,
+.launch-copy-icon[data-status="failed"] .launch-copy-icon-failed {
+  opacity: 1;
+  transform: scale(1);
+}
+
+/* Popovers render in a portal outside .sdp-docs-shell, so they set their own type and surface,
+   and replace Fumadocs' frosted panel and fixed 100ms animation with the motion tokens. */
+.launch-popover {
+  padding: 6px;
+  border: 1px solid var(--rule);
+  border-radius: var(--corner-card);
+  background: var(--paper-card);
+  backdrop-filter: none;
+  box-shadow: var(--elevation-popover);
+  color: var(--ink);
+  font-family: var(--font-sans);
+}
+
+.launch-popover[data-state="open"] {
+  animation: launch-popover-in var(--motion-duration-base) var(--motion-ease-out);
+}
+
+.launch-popover[data-state="closed"] {
+  animation: launch-popover-out var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+@keyframes launch-popover-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.97);
+  }
+}
+
+@keyframes launch-popover-out {
+  to {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.97);
+  }
+}
+
+.launch-menu {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  width: 268px;
+}
+
+.launch-menu-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--corner-control);
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--font-sans);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.launch-menu-item:hover,
+.launch-menu-item:focus-visible {
+  background: var(--wash);
+}
+
+.launch-menu-item:focus-visible {
+  outline: none;
+}
+
+.launch-menu-item-icon {
+  display: grid;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: var(--corner-control);
+  background: var(--chip);
+  box-shadow: var(--chip-ring);
+  color: var(--ink-secondary);
+}
+
+.launch-menu-item-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.launch-menu-item-text {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 1px;
+  min-width: 0;
+}
+
+.launch-menu-item-title {
+  font-size: var(--font-size-body);
+  font-weight: 500;
+  line-height: 20px;
+}
+
+.launch-menu-item-description {
+  color: var(--ink-tertiary);
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-meta);
+}
+
+.launch-menu-item-external {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  margin-top: 4px;
+  color: var(--ink-tertiary);
+}
+
+/* ── Agent setup menu (sidebar) ── */
+.launch-agent-setup {
+  width: min(400px, calc(100vw - 32px));
+  padding: 16px;
+}
+
+.launch-agent-setup-title {
+  margin: 0;
+  font-size: var(--font-size-body);
+  font-weight: 500;
+  line-height: 20px;
+}
+
+.launch-agent-setup-description {
+  margin: 4px 0 14px;
+  color: var(--ink-secondary);
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-meta);
+}
+
+.launch-agent-setup-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--corner-control);
+  background: var(--wash);
+}
+
+.launch-agent-setup-tab {
+  flex: 1 1 0;
+  min-height: 26px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--corner-control-inner);
+  background: transparent;
+  color: var(--ink-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-meta);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease-out),
+    box-shadow var(--motion-duration-fast) var(--motion-ease-out),
+    color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.launch-agent-setup-tab:hover {
+  color: var(--ink);
+}
+
+.launch-agent-setup-tab[aria-selected="true"] {
+  background: var(--chip);
+  box-shadow: var(--chip-ring);
+  color: var(--ink);
+}
+
+.launch-agent-setup-panel {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px 10px 10px 12px;
+  border: 1px solid var(--rule-faint);
+  border-radius: var(--corner-control);
+  background: var(--paper-tile);
+  color: var(--ink);
+}
+
+/* Not the inline code chip (`:not(pre) > code`): the panel is already the frame. */
+.launch-agent-setup-command {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.launch-agent-setup-word {
+  white-space: nowrap;
+}
+
+.launch-agent-setup-copy {
+  display: grid;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  margin: -3px -4px -3px 0;
+  place-items: center;
+  border: 0;
+  border-radius: var(--corner-control-inner);
+  background: transparent;
+  color: var(--ink-tertiary);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease-out),
+    color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.launch-agent-setup-copy:hover {
+  background: var(--wash-strong);
+  color: var(--ink);
 }
 
 .page-feedback {
@@ -1751,8 +2154,9 @@ a.rounded-lg.border.p-4 > p.truncate {
   display: none;
 }
 
-/* ── Tab panels — white card on beige background (matches dashboard cards) ── */
-[role="tabpanel"] {
+/* ── Tab panels: white card on beige background (matches dashboard cards). Scoped to the page,
+   so a tab panel in a portaled popover (the Agent setup menu) keeps its own surface. ── */
+.sdp-docs-shell [role="tabpanel"] {
   background-color: var(--color-fd-card);
   color: var(--color-fd-card-foreground);
   border: 1px solid var(--color-fd-border);

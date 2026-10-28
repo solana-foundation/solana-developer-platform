@@ -1,7 +1,7 @@
 "use client";
 
 import type { Node as PageTreeNode } from "fumadocs-core/page-tree";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -78,7 +78,6 @@ function FolderNode({ node, depth, pathname }: FolderNodeProps) {
   const folderName = typeof node.name === "string" ? node.name : String(node.name ?? "");
   const hasChildren = node.children.length > 0;
   const isActive = node.index?.url === pathname;
-  const ChevronIcon = isOpen ? ChevronDown : ChevronRight;
 
   return (
     <div className="launch-docs-nav-folder">
@@ -98,9 +97,10 @@ function FolderNode({ node, depth, pathname }: FolderNodeProps) {
                 type="button"
                 className="launch-docs-nav-toggle"
                 onClick={() => setIsOpen((v) => !v)}
+                aria-expanded={isOpen}
                 aria-label={isOpen ? `Collapse ${folderName}` : `Expand ${folderName}`}
               >
-                <ChevronIcon aria-hidden="true" />
+                <ChevronRight className="launch-docs-nav-chevron" aria-hidden="true" />
               </button>
             )}
           </>
@@ -110,6 +110,7 @@ function FolderNode({ node, depth, pathname }: FolderNodeProps) {
             className="launch-docs-nav-folder-btn"
             style={{ paddingLeft: `${12 + depth * 14}px` }}
             onClick={() => setIsOpen((v) => !v)}
+            aria-expanded={isOpen}
             aria-label={isOpen ? `Collapse ${folderName}` : `Expand ${folderName}`}
           >
             <span>
@@ -117,7 +118,10 @@ function FolderNode({ node, depth, pathname }: FolderNodeProps) {
               {node.name}
             </span>
             {hasChildren && (
-              <ChevronIcon className="launch-docs-nav-toggle-icon" aria-hidden="true" />
+              <ChevronRight
+                className="launch-docs-nav-toggle-icon launch-docs-nav-chevron"
+                aria-hidden="true"
+              />
             )}
           </button>
         )}
