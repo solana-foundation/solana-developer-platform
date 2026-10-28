@@ -1,3 +1,4 @@
+import type { PaymentSubscriptionCollectionAttemptMetadata } from "@sdp/types/payments";
 import { getBase58Decoder } from "@solana/codecs";
 import {
   generateKeyPairSigner,
@@ -9,6 +10,7 @@ import {
 import { beforeEach, expect, vi } from "vitest";
 import type { z } from "zod";
 import { getDb } from "@/db/client";
+import { createPostgresPaymentRecurringPaymentsRepository } from "@/db/repositories/payment-recurring-payments.repository.postgres";
 import { app as baseApp } from "@/index";
 import { successResponseSchema } from "@/openapi/schemas/base";
 import {
@@ -216,6 +218,88 @@ export async function setRecurringCollectionDue(options: {
       .prepare("UPDATE payment_subscriptions SET next_collection_due_at = ? WHERE id = ?")
       .bind(options.dueAt, options.subscriptionId),
   ]);
+}
+
+/**
+ * Pauses an active schedule through the collection failure's own compare-and-set, as SDP leaves one
+ * whose due period kept failing (HOO-2340).
+ *
+ * @param recurringPaymentId - The schedule.
+ */
+export async function pauseRecurringPayment(recurringPaymentId: string): Promise<void> {
+  const db = getDb(env);
+  const tenant = required(
+    await db
+      .prepare("SELECT organization_id, project_id FROM payment_recurring_payments WHERE id = ?")
+      .bind(recurringPaymentId)
+      .first<{ organization_id: string; project_id: string }>()
+  );
+  required(
+    await createPostgresPaymentRecurringPaymentsRepository(db).pauseRecurringPayment({
+      recurringPaymentId,
+      organizationId: tenant.organization_id,
+      projectId: tenant.project_id,
+      reason: "failed_attempts",
+      updatedAt: new Date().toISOString(),
+    })
+  );
+}
+
+/**
+ * Seeds earlier failed collection attempts at one due period of a schedule, each written at
+ * `failedAt`, for the pause's failure count (HOO-2340).
+ *
+ * @param options.organizationId - Tenant organization.
+ * @param options.projectId - Tenant project.
+ * @param options.recurringPaymentId - The schedule the attempts collect for.
+ * @param options.subscriptionId - Its subscription, which the attempts name.
+ * @param options.dueAt - The due period that failed.
+ * @param options.token - The schedule's token.
+ * @param options.amount - The schedule's amount.
+ * @param options.failedAt - When each attempt was written.
+ * @param options.count - How many attempts to seed.
+ */
+export async function seedFailedCollectionAttempts(options: {
+  organizationId: string;
+  projectId: string;
+  recurringPaymentId: string;
+  subscriptionId: string;
+  dueAt: string;
+  token: string;
+  amount: string;
+  failedAt: string;
+  count: number;
+}): Promise<void> {
+  const db = getDb(env);
+  const metadata = {
+    source: "automated",
+    recurringPaymentId: options.recurringPaymentId,
+    initiatedByKeyId: null,
+  } satisfies PaymentSubscriptionCollectionAttemptMetadata;
+  await db.batch(
+    Array.from({ length: options.count }, () =>
+      db
+        .prepare(
+          `INSERT INTO payment_subscription_collection_attempts
+             (id, organization_id, project_id, subscription_id, token, amount, due_at,
+              attempted_at, status, error, metadata, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'failed', 'Collection failed', ?::jsonb, ?, ?)`
+        )
+        .bind(
+          `psca_${crypto.randomUUID()}`,
+          options.organizationId,
+          options.projectId,
+          options.subscriptionId,
+          options.token,
+          options.amount,
+          options.dueAt,
+          options.failedAt,
+          JSON.stringify(metadata),
+          options.failedAt,
+          options.failedAt
+        )
+    )
+  );
 }
 
 type DurableCollectionJournal =

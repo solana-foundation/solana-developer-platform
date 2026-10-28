@@ -80,8 +80,9 @@ let sequence = 0;
 
 /**
  * A period-24 subscription from the tenant's wallet on `authority`, last changed at `changedAt`
- * (its cancel time when canceled), and the recurring payment it belongs to unless `recurring` is
- * null. Returns the subscription and recurring payment ids.
+ * (its cancel time when canceled), and the recurring payment that names it as its subscription
+ * unless `recurring` is null, which leaves it standalone. Returns the subscription and recurring
+ * payment ids.
  */
 export async function seedAuthoritySubscription(
   tenant: SubscriptionAuthorityTenant,
@@ -172,9 +173,9 @@ export async function seedAuthoritySubscription(
   );
   await db.execute(
     `UPDATE payment_recurring_payments
-        SET status = ?, subscription_authority_address = ?, updated_at = ?
+        SET status = ?, subscription_id = ?, subscription_authority_address = ?, updated_at = ?
       WHERE id = ?`,
-    [input.recurring.status, input.authority, input.changedAt, recurringPaymentId]
+    [input.recurring.status, subscription.id, input.authority, input.changedAt, recurringPaymentId]
   );
   return { subscriptionId: subscription.id, recurringPaymentId };
 }

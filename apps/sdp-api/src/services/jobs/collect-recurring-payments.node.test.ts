@@ -16,7 +16,6 @@ interface MockState {
   cancelRecurringPayment: ReturnType<typeof vi.fn>;
   collectRecurringPayment: ReturnType<typeof vi.fn>;
   journalAutomatedCollectionFailure: ReturnType<typeof vi.fn>;
-  resumeRecurringPayment: ReturnType<typeof vi.fn>;
   findOperationalWalletById: ReturnType<typeof vi.fn>;
   listStaleLifecyclePayments: ReturnType<typeof vi.fn>;
   listStaleUpdatePayments: ReturnType<typeof vi.fn>;
@@ -36,7 +35,6 @@ const mocks = vi.hoisted<MockState>(() => ({
   cancelRecurringPayment: vi.fn(),
   collectRecurringPayment: vi.fn(),
   journalAutomatedCollectionFailure: vi.fn(),
-  resumeRecurringPayment: vi.fn(),
   findOperationalWalletById: vi.fn(),
   listStaleLifecyclePayments: vi.fn(),
   listStaleUpdatePayments: vi.fn(),
@@ -89,14 +87,12 @@ vi.mock("@/services/payments/recurring-payments/collection", () => ({
 
 vi.mock("@/services/payments/recurring-payments/lifecycle", () => ({
   cancelRecurringPayment: mocks.cancelRecurringPayment,
-  resumeRecurringPayment: mocks.resumeRecurringPayment,
 }));
 
 let collectDueRecurringPayments: typeof import("./collect-recurring-payments").collectDueRecurringPayments;
 let activateRecurringPayment: typeof import("@/services/payments/recurring-payments/activation").activateRecurringPayment;
 let cancelRecurringPayment: typeof import("@/services/payments/recurring-payments/lifecycle").cancelRecurringPayment;
 let collectRecurringPayment: typeof import("@/services/payments/recurring-payments/collection").collectRecurringPayment;
-let resumeRecurringPayment: typeof import("@/services/payments/recurring-payments/lifecycle").resumeRecurringPayment;
 
 function collectDueRecurringPaymentsIn(environment: SdpEnvironment, now: Date) {
   return runInClusterScope({ projectId: null, environment }, () =>
@@ -133,6 +129,7 @@ function recurringRow(
     subscription_authority_address: "sub_auth",
     authorization_signature: "auth_sig",
     status,
+    paused_reason: null,
     metadata_uri: null,
     created_by: null,
     created_at: "2026-07-01T11:00:00.000Z",
@@ -150,9 +147,7 @@ describe("collectDueRecurringPayments", () => {
     ({ collectRecurringPayment } = await import(
       "@/services/payments/recurring-payments/collection"
     ));
-    ({ cancelRecurringPayment, resumeRecurringPayment } = await import(
-      "@/services/payments/recurring-payments/lifecycle"
-    ));
+    ({ cancelRecurringPayment } = await import("@/services/payments/recurring-payments/lifecycle"));
   });
 
   beforeEach(() => {
@@ -161,7 +156,6 @@ describe("collectDueRecurringPayments", () => {
     mocks.cancelRecurringPayment.mockReset();
     mocks.collectRecurringPayment.mockReset();
     mocks.journalAutomatedCollectionFailure.mockReset();
-    mocks.resumeRecurringPayment.mockReset();
     mocks.findOperationalWalletById.mockReset();
     mocks.rows.due = [];
     mocks.rows.lifecycle = [];
@@ -185,7 +179,6 @@ describe("collectDueRecurringPayments", () => {
     mocks.activateRecurringPayment.mockResolvedValue(recurringRow("active"));
     mocks.cancelRecurringPayment.mockResolvedValue(recurringRow("canceled"));
     mocks.collectRecurringPayment.mockResolvedValue({});
-    mocks.resumeRecurringPayment.mockResolvedValue(recurringRow("active"));
   });
 
   it("recovers interrupted operations before collecting due payments", async () => {
@@ -220,19 +213,15 @@ describe("collectDueRecurringPayments", () => {
     );
   });
 
-  it("routes canceling and resuming rows through lifecycle recovery", async () => {
+  it("routes a canceling row through cancel recovery", async () => {
     const canceling = recurringRow("canceling", { id: "prp_canceling" });
-    const resuming = recurringRow("resuming", { id: "prp_resuming" });
-    mocks.rows.lifecycle = [canceling, resuming];
+    mocks.rows.lifecycle = [canceling];
 
     const result = await collectDueRecurringPaymentsIn("sandbox", new Date());
 
-    expect(result).toEqual({ recovered: 2, collected: 0, failed: 0, skipped: 0, refused: 0 });
+    expect(result).toEqual({ recovered: 1, collected: 0, failed: 0, skipped: 0, refused: 0 });
     expect(cancelRecurringPayment).toHaveBeenCalledWith(
       expect.objectContaining({ recurringPayment: canceling })
-    );
-    expect(resumeRecurringPayment).toHaveBeenCalledWith(
-      expect.objectContaining({ recurringPayment: resuming })
     );
   });
 

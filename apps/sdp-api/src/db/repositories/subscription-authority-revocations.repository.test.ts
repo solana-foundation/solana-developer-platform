@@ -173,9 +173,17 @@ describe("SubscriptionAuthorityRevocationsRepository (postgres)", () => {
     expect(await list()).toEqual([]);
   });
 
-  it("keeps an authority while a canceled schedule on it is still inside its billing period", async () => {
+  it("frees a recurring payment's canceled subscription at once but holds a standalone one through its period", async () => {
     await canceledSchedule(RECENTLY);
+    expect((await list()).map((row) => row.subscription_authority_address)).toEqual([AUTHORITY]);
 
+    await seedAuthoritySubscription(tenant, {
+      authority: AUTHORITY,
+      tokenMint: MINT,
+      status: "canceled",
+      changedAt: RECENTLY,
+      recurring: null,
+    });
     expect(await list()).toEqual([]);
     expect(await claim("psar_recent")).toBeNull();
   });
