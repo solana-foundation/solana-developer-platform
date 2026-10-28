@@ -333,6 +333,7 @@ export async function createTransferBatch(
         status: "pending",
         error: null,
         attemptLastValidBlockHeight: prepared.lifetime.lastValidBlockHeight,
+        attemptId: prepared.attemptId,
       })),
     });
     batch = created.batch;

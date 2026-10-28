@@ -2733,6 +2733,7 @@ describe("payment transfer batches", () => {
         recipientIds: [failed.id],
         addedTransactionCount: 1,
         attemptLastValidBlockHeight: 500n,
+        attemptId: crypto.randomUUID(),
         retry: {
           idempotencyKey: "dead-retry-record-key",
           idempotencyFingerprint: "dead-retry-fingerprint",
@@ -2770,6 +2771,7 @@ describe("payment transfer batches", () => {
         recipientIds: [failed.id],
         addedTransactionCount: 1,
         attemptLastValidBlockHeight: 1_000n,
+        attemptId: crypto.randomUUID(),
         retry: {
           idempotencyKey: "live-retry-record-key",
           idempotencyFingerprint: "live-retry-fingerprint",
@@ -2822,6 +2824,7 @@ describe("payment transfer batches", () => {
             recipientIds: [failed.id],
             addedTransactionCount: 1,
             attemptLastValidBlockHeight: 1_000n,
+            attemptId: crypto.randomUUID(),
             retry: {
               idempotencyKey: "another-retry-record-key",
               idempotencyFingerprint: "another-retry-fingerprint",

@@ -154,7 +154,9 @@ that wrote or claimed it (every chunk of an attempt shares one blockhash and is 
 Once the chain passes it, nothing that attempt built can land, so the job fails it in minutes, and
 a resend of a run found under another request's key settles it the same way (one block-height
 read; the hour remains the fallback). The chunk link's compare-and-swap is what makes any of this
-safe: a recipient is linked before broadcast or failed, never both.
+safe: a recipient is linked before broadcast or failed, never both. Each attempt also owns the recipients it
+wrote or claimed (`attempt_id`), and a chunk links or fails only its own attempt's: an older attempt
+that finishes late never takes or fails a recipient a newer retry has claimed.
 
 Recurring payments carve this out: their cron resumes and completes a half-finished row (an
 `activating`, `canceling` or `resuming` schedule, or a collection in flight) from the signature

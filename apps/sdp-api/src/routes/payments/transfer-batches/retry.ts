@@ -232,6 +232,7 @@ export async function retryTransferBatch(c: AppContext) {
     recipientIds: failed.rows.map((row) => row.id),
     addedTransactionCount: prepared.chunks.length,
     attemptLastValidBlockHeight: prepared.lifetime.lastValidBlockHeight,
+    attemptId: prepared.attemptId,
     retry: { idempotencyKey, idempotencyFingerprint, initiatedByKeyId: authorized.scope.auth.id },
   });
   if (claimed === null) {

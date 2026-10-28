@@ -37,7 +37,7 @@ import type { ResolvedBatchRequest } from "./types";
  * @param params.transferId - Transfer row the recipients are linked to, or null when the chunk failed before its transfer row existed.
  * @param params.status - New recipient status.
  * @param params.error - Failure detail, or null.
- * @param params.requireUnsent - Link CAS: a recipient another writer failed or linked first throws.
+ * @param params.requireUnsentFor - Link CAS: a recipient another writer failed, linked or claimed for another attempt throws.
  * @returns Updated recipient rows keyed by recipient index.
  */
 export async function updateRecipientRows(params: {
@@ -49,8 +49,8 @@ export async function updateRecipientRows(params: {
   transferId: string | null;
   status: PaymentTransferRecipientRow["status"];
   error: string | null;
-  /** Update only recipients still unsent; any other makes this throw. */
-  requireUnsent?: true;
+  /** Update only recipients still unsent and owned by this attempt; any other makes this throw. */
+  requireUnsentFor?: { attemptId: string };
 }): Promise<Map<number, PaymentTransferRecipientRow>> {
   const targets = params.recipientIndexes.map((index) => {
     const existing = params.recipientsByIndex.get(index);
@@ -67,7 +67,7 @@ export async function updateRecipientRows(params: {
     transferId: params.transferId,
     status: params.status,
     error: params.error,
-    requireUnsent: params.requireUnsent,
+    requireUnsentFor: params.requireUnsentFor,
   });
 
   const updatedById = new Map(updatedRows.map((row) => [row.id, row]));
@@ -123,6 +123,8 @@ export async function executeChunk(params: {
   recipientsByIndex: Map<number, PaymentTransferRecipientRow>;
   feePayment: SponsorshipFeePayment;
   lastValidBlockHeight: bigint;
+  /** The attempt whose recipients this chunk may link (PreparedBatchChunks.attemptId). */
+  attemptId: string;
   preflight: boolean;
 }): Promise<void> {
   const { c, resolved, chunk } = params;
@@ -194,7 +196,7 @@ export async function executeChunk(params: {
       error: null,
       // A recipient another writer failed or claimed first rolls the chunk
       // back before it is sent; its signature is discarded.
-      requireUnsent: true,
+      requireUnsentFor: { attemptId: params.attemptId },
     });
 
     return { created, linked };

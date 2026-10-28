@@ -205,7 +205,7 @@ async function insertTransferRecipients(
     return [];
   }
 
-  const rowPlaceholder = `(${Array(13).fill("?").join(", ")})`;
+  const rowPlaceholder = `(${Array(14).fill("?").join(", ")})`;
   const values = inputs.flatMap((input) => [
     generatePaymentTransferRecipientId(),
     input.batchId,
@@ -222,6 +222,7 @@ async function insertTransferRecipients(
     input.attemptLastValidBlockHeight === undefined || input.attemptLastValidBlockHeight === null
       ? null
       : input.attemptLastValidBlockHeight.toString(),
+    input.attemptId ?? null,
   ]);
 
   const result = await db
@@ -239,7 +240,8 @@ async function insertTransferRecipients(
          amount,
          status,
          error,
-         attempt_last_valid_block_height
+         attempt_last_valid_block_height,
+         attempt_id
        ) VALUES ${inputs.map(() => rowPlaceholder).join(", ")}
        RETURNING *`
     )
@@ -643,11 +645,14 @@ export function createPostgresPaymentTransferBatchesRepository(
         projectId: input.projectId,
         extraClauses: [
           `id IN (${input.recipientIds.map(() => "?").join(", ")})`,
-          input.requireUnsent === true
-            ? "status = 'pending' AND transfer_id IS NULL"
-            : "status <> 'archived'",
+          input.requireUnsentFor === undefined
+            ? "status <> 'archived'"
+            : "status = 'pending' AND transfer_id IS NULL AND attempt_id = ?",
         ],
-        extraValues: input.recipientIds,
+        extraValues:
+          input.requireUnsentFor === undefined
+            ? input.recipientIds
+            : [...input.recipientIds, input.requireUnsentFor.attemptId],
       });
 
       const result = await db
@@ -952,7 +957,7 @@ export function createPostgresPaymentTransferBatchesRepository(
             .prepare(
               `UPDATE payment_transfer_recipients r
                 SET status = 'pending', transfer_id = NULL, error = NULL, updated_at = sdp_iso_now(),
-                    attempt_last_valid_block_height = ?
+                    attempt_last_valid_block_height = ?, attempt_id = ?
                FROM (
                  SELECT id, transfer_id FROM payment_transfer_recipients
                   WHERE batch_id = ?
@@ -967,6 +972,7 @@ export function createPostgresPaymentTransferBatchesRepository(
             )
             .bind(
               input.attemptLastValidBlockHeight.toString(),
+              input.attemptId,
               input.batchId,
               input.organizationId,
               input.projectId,

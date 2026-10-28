@@ -40,3 +40,10 @@ CREATE POLICY sdp_tenant_isolation ON payment_transfer_batch_retries
 -- wrote it, so it can be failed in minutes rather than after an hour.
 ALTER TABLE payment_transfer_recipients
     ADD COLUMN IF NOT EXISTS attempt_last_valid_block_height BIGINT;
+
+-- The attempt (a create, or a retry's claim) that owns a pending recipient.
+-- A chunk links, and a failed chunk fails, only the recipients its own attempt
+-- still owns, so an older attempt finishing late never takes or fails a
+-- recipient a newer retry has claimed.
+ALTER TABLE payment_transfer_recipients
+    ADD COLUMN IF NOT EXISTS attempt_id TEXT;

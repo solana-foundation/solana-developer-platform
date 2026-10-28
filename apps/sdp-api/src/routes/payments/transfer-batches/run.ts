@@ -25,6 +25,11 @@ export interface PreparedBatchChunks {
   feePayment: SponsorshipFeePayment;
   lifetime: RecentBlockhash;
   chunks: TransactionChunk[];
+  /**
+   * This attempt (a create, or a retry's claim): its recipients are written or
+   * claimed under it, and only it may link or fail them (HOO-2343).
+   */
+  attemptId: string;
 }
 
 /**
@@ -75,7 +80,7 @@ export async function prepareBatchChunks(
         ? DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION
         : maxRecipientsPerTransaction,
   });
-  return { feePayment, lifetime, chunks };
+  return { feePayment, lifetime, chunks, attemptId: crypto.randomUUID() };
 }
 
 /**
@@ -122,6 +127,7 @@ export async function runBatchChunks(params: {
         recipientsByIndex,
         feePayment: prepared.feePayment,
         lastValidBlockHeight: prepared.lifetime.lastValidBlockHeight,
+        attemptId: prepared.attemptId,
         preflight: params.preflight,
       })
     )
@@ -143,7 +149,7 @@ export async function runBatchChunks(params: {
       transferId: null,
       status: "failed",
       error: outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason),
-      requireUnsent: true,
+      requireUnsentFor: { attemptId: prepared.attemptId },
     });
   }
 

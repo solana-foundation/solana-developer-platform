@@ -176,6 +176,8 @@ export interface CreatePaymentTransferRecipientInput {
   error?: string | null;
   /** The writing attempt's lastValidBlockHeight, for a pending recipient (HOO-2343). */
   attemptLastValidBlockHeight?: bigint | null;
+  /** The writing attempt, which alone may link or fail the pending recipient. */
+  attemptId?: string | null;
 }
 
 export interface UpsertPaymentTransferRecipientInput extends CreatePaymentTransferRecipientInput {
@@ -238,10 +240,11 @@ export interface UpdatePaymentTransferRecipientsStatusInput {
   status: PaymentTransferBatchRecipientStatus;
   error: string | null;
   /**
-   * Link CAS: update only recipients still pending with no chunk transfer, so
-   * a chunk never claims a recipient another writer failed or linked first.
+   * Link CAS: update only recipients still pending with no chunk transfer and
+   * owned by this attempt, so a chunk never takes or fails a recipient another
+   * writer failed, linked or claimed for a newer attempt (HOO-2343).
    */
-  requireUnsent?: true;
+  requireUnsentFor?: { attemptId: string };
 }
 
 export interface ClaimFailedTransferRecipientsInput extends RecomputeTransferBatchStatusInput {
@@ -250,6 +253,8 @@ export interface ClaimFailedTransferRecipientsInput extends RecomputeTransferBat
   addedTransactionCount: number;
   /** The resend's lastValidBlockHeight, stored on the claimed recipients. */
   attemptLastValidBlockHeight: bigint;
+  /** The resend's attempt, which takes ownership of the claimed recipients. */
+  attemptId: string;
   /** The retry's recovery row, written in the claim's transaction (HOO-2343). */
   retry: {
     idempotencyKey: string;

@@ -238,6 +238,7 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
       amount: "1",
       status: "pending" as const,
       error: null,
+      attemptId: "attempt-create",
     };
     const { batch, recipients } = await repo.createTransferBatchWithRecipients({
       batch: { ...baseInput, projectId: TEST_PROJECT_ID, idempotencyKey: "claim-key" },
@@ -253,6 +254,17 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
       error: "rejected",
     });
 
+    // Another attempt's chunk cannot link this attempt's recipients.
+    expect(
+      await repo.updateTransferRecipientsStatus({
+        ...scope,
+        recipientIds: [second],
+        transferId: null,
+        status: "processing",
+        error: null,
+        requireUnsentFor: { attemptId: "attempt-other" },
+      })
+    ).toEqual([]);
     // A failed recipient is not unsent, so a chunk cannot link it.
     expect(
       await repo.updateTransferRecipientsStatus({
@@ -261,7 +273,7 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
         transferId: null,
         status: "processing",
         error: null,
-        requireUnsent: true,
+        requireUnsentFor: { attemptId: "attempt-create" },
       })
     ).toMatchObject([{ id: second }]);
 
@@ -273,6 +285,7 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
         recipientIds,
         addedTransactionCount: 1,
         attemptLastValidBlockHeight: 1_000n,
+        attemptId: `attempt-retry-${claims}`,
         retry: {
           idempotencyKey: `retry-record-key-${++claims}`,
           idempotencyFingerprint: "retry-fingerprint",
