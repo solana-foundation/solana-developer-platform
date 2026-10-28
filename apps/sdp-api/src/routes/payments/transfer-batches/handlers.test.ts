@@ -72,7 +72,7 @@ const confirmTransactionMock = vi.spyOn(solanaRpc, "confirmTransaction");
 const getSignatureStatusesMock = vi.spyOn(solanaRpc, "getSignatureStatuses");
 /** The payout run every batch a test sends belongs to, unless the test names another. */
 function testRunId(): string {
-  return `run-${expect.getState().currentTestName ?? "unnamed"}`.slice(0, 256);
+  return `run-${required(expect.getState().currentTestName)}`.slice(0, 256);
 }
 
 const getMultipleAccountsLamportsMock = vi.spyOn(solanaRpc, "getMultipleAccountsLamports");
