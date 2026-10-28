@@ -1,7 +1,7 @@
 import { refreshThemeProps } from "@sdp/design-tokens";
 import { SOLANA_CLUSTER_LABELS, type SolanaCluster } from "@sdp/types/well-known-tokens";
 import { Badge } from "@sdp/ui/badge";
-import { CheckCircle2Icon, ClockIcon, XCircleIcon } from "lucide-react";
+import { ArrowUpRightIcon, CheckCircle2Icon, ClockIcon, XCircleIcon } from "lucide-react";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import {
@@ -106,7 +106,7 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
     >
       <div className="w-full max-w-md overflow-hidden rounded-card border border-border-default bg-surface-raised">
         <div className="p-8">
-          <div className="flex items-center justify-center border-b border-border-default pb-6">
+          <div className="flex items-center justify-center">
             <span className="text-nav font-medium text-primary">{t("Shared.pay.productName")}</span>
           </div>
 
@@ -161,9 +161,10 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
             href="https://solana.com/docs/tools/solana-pay"
             target="_blank"
             rel="noreferrer"
-            className="text-meta text-tertiary transition-colors hover:text-secondary"
+            className="inline-flex items-center gap-1 text-meta text-tertiary underline underline-offset-4 transition-colors hover:text-secondary"
           >
             {t("Shared.pay.securedBySolanaPay")}
+            <ArrowUpRightIcon aria-hidden="true" className="size-3.5 shrink-0" />
           </a>
         </div>
       </div>
