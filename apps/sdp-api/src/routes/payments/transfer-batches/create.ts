@@ -108,48 +108,45 @@ function assertSamePayoutRun(
  * The batch insert lost on its key index: a concurrent attempt under this row
  * key wrote the row first, either a takeover under the same Idempotency-Key or
  * a send of the same payout run under another one. Answered from that row;
- * nothing was sent.
+ * nothing was sent. Null when no row holds the key, so the caller rethrows.
  */
 async function answerLostBatchInsert(
   c: AppContext,
-  error: unknown,
   authorized: AuthorizedBatchRequest,
-  idempotencyKey: string | null,
+  idempotencyKey: string,
   externalId: string | null
-): Promise<Response> {
-  if (idempotencyKey && isPostgresUniqueViolation(error)) {
-    const replay = await getPaymentTransferBatchesRepository(c).findTransferBatchByIdempotency({
-      organizationId: authorized.scope.auth.organizationId,
-      projectId: authorized.projectId,
-      idempotencyKey,
-    });
-    if (replay) {
-      if (externalId !== null) {
-        assertSamePayoutRun(c, replay, authorized);
-      } else if (
-        replay.idempotency_fingerprint === null ||
-        !idempotencyFingerprintMatches(c, replay.idempotency_fingerprint)
-      ) {
-        // Another request's row: refused unstored, so that request's own retry
-        // is still answered from it.
-        markIdempotencyRecordMismatch(c);
-        throw new AppError("IDEMPOTENCY_KEY_REUSED");
-      }
-      // The batch already existed: marked as a replay, as replayFromRecord
-      // marks one, so the client retires its key on it.
-      const answered = await respondToTransferBatchReplay(
-        c,
-        replay,
-        authorized.scope.auth.organizationId,
-        authorized.projectId
-      );
-      // Copied, so the header lands on whatever Response the answer built.
-      const replayed = new Response(answered.body, answered);
-      replayed.headers.set(IDEMPOTENT_REPLAYED_HEADER, "true");
-      return replayed;
+): Promise<Response | null> {
+  const replay = await getPaymentTransferBatchesRepository(c).findTransferBatchByIdempotency({
+    organizationId: authorized.scope.auth.organizationId,
+    projectId: authorized.projectId,
+    idempotencyKey,
+  });
+  if (replay) {
+    if (externalId !== null) {
+      assertSamePayoutRun(c, replay, authorized);
+    } else if (
+      replay.idempotency_fingerprint === null ||
+      !idempotencyFingerprintMatches(c, replay.idempotency_fingerprint)
+    ) {
+      // Another request's row: refused unstored, so that request's own retry
+      // is still answered from it.
+      markIdempotencyRecordMismatch(c);
+      throw new AppError("IDEMPOTENCY_KEY_REUSED");
     }
+    // The batch already existed: marked as a replay, as replayFromRecord
+    // marks one, so the client retires its key on it.
+    const answered = await respondToTransferBatchReplay(
+      c,
+      replay,
+      authorized.scope.auth.organizationId,
+      authorized.projectId
+    );
+    // Copied, so the header lands on whatever Response the answer built.
+    const replayed = new Response(answered.body, answered);
+    replayed.headers.set(IDEMPOTENT_REPLAYED_HEADER, "true");
+    return replayed;
   }
-  throw error;
+  return null;
 }
 
 /**
@@ -362,7 +359,12 @@ export async function createTransferBatch(
     // The batch row exists under the key: any later answer is stored for its retries.
     markIdempotencyCommitted(c);
   } catch (error) {
-    return answerLostBatchInsert(c, error, authorized, idempotencyKey, externalId);
+    const answered =
+      idempotencyKey && isPostgresUniqueViolation(error)
+        ? await answerLostBatchInsert(c, authorized, idempotencyKey, externalId)
+        : null;
+    if (answered === null) throw error;
+    return answered;
   }
   const recipientsByIndex = new Map<number, PaymentTransferRecipientRow>(
     resolved.recipients.map((recipient, position) => [recipient.index, recipientRows[position]])
