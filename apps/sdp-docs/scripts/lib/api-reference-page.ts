@@ -288,6 +288,7 @@ function sampleFences(operation: ApiOperation): string[] {
     url: `${canonicalSite.apiUrl}${operation.request.path}`,
     body: operation.request.body,
     auth: operation.auth,
+    takesIdempotencyKey: operation.takesIdempotencyKey,
   });
   return SNIPPET_LANGUAGES.flatMap((language) => {
     const fenceLanguage = SNIPPET_FENCES[language].language;

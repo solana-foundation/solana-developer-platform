@@ -517,6 +517,7 @@ function toApiOperation(
     module,
     action,
     auth: authOf(operation.security, document, where),
+    takesIdempotencyKey,
     summary,
     group: docsGroupOf(operation, where),
     description: operation.description ?? null,

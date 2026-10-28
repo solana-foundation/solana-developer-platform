@@ -48,6 +48,7 @@ const CREATE_WIDGET: ApiOperation = {
   module: "custody",
   action: "wallets.manage",
   auth: "apiKey",
+  takesIdempotencyKey: false,
   summary: "Create widget",
   group: null,
   description: "Creates a widget. Then it shapes it {once}, with `{braces}` in code.",
@@ -195,6 +196,14 @@ describe("renderOperation", () => {
     });
     assert.ok(health.includes("Public: this route takes no API key."));
     assert.ok(!health.includes("SDP_API_KEY"));
+  });
+
+  it("sends an Idempotency-Key in the samples only where the route takes one", () => {
+    assert.ok(!markdown.includes("Idempotency-Key"));
+    const keyed = renderOperation({ ...CREATE_WIDGET, takesIdempotencyKey: true });
+    assert.ok(keyed.includes('  -H "Idempotency-Key: $(uuidgen)"'));
+    assert.ok(keyed.includes('    "Idempotency-Key": crypto.randomUUID()'));
+    assert.ok(keyed.includes('"Idempotency-Key": str(uuid.uuid4())'));
   });
 });
 

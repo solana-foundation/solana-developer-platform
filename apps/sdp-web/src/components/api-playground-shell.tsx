@@ -1279,6 +1279,9 @@ function useApiPlaygroundState({
             : null,
         // The playground offers only operations an API key can call (generate-playground-catalog.ts).
         auth: "apiKey",
+        // Its Send keys every write (executePlaygroundRequest), and its catalog does not carry a
+        // route's declared header until it reads the API reference model (PRO-2298).
+        takesIdempotencyKey: hasRequestBody(activeEndpoint?.method ?? "GET"),
       }),
     [activeEndpoint, effectiveApiBaseUrl, requestBody, resolvedPath]
   );

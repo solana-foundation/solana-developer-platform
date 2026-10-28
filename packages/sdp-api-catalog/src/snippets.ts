@@ -15,14 +15,14 @@ export interface SnippetRequest {
   /** The JSON body, or null for a call without one. */
   body: unknown | null;
   auth: SnippetAuth;
+  /**
+   * Whether the route declares an `Idempotency-Key` header, so the call sends one. A route
+   * without it ignores the header, and a retry under the same key runs again.
+   */
+  takesIdempotencyKey: boolean;
 }
 
 const API_KEY_VARIABLE = "SDP_API_KEY";
-
-/** Every write carries its own Idempotency-Key, so a retried call runs once (HOO-1918). */
-function isWrite(method: string): boolean {
-  return method.toUpperCase() !== "GET";
-}
 
 /** JSON with every line after the first pushed in by `indent`, to sit inside a call. */
 function nestedJson(value: unknown, indent: string): string {
@@ -57,10 +57,10 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
-function curlSnippet({ method, url, body, auth }: SnippetRequest): string {
+function curlSnippet({ method, url, body, auth, takesIdempotencyKey }: SnippetRequest): string {
   const lines = [`curl ${method === "GET" ? "" : `-X ${method} `}${shellQuote(url)}`];
   if (auth === "apiKey") lines.push(`  -H "Authorization: Bearer $${API_KEY_VARIABLE}"`);
-  if (isWrite(method)) lines.push('  -H "Idempotency-Key: $(uuidgen)"');
+  if (takesIdempotencyKey) lines.push('  -H "Idempotency-Key: $(uuidgen)"');
   if (body !== null) {
     lines.push(
       '  -H "Content-Type: application/json"',
@@ -70,12 +70,18 @@ function curlSnippet({ method, url, body, auth }: SnippetRequest): string {
   return lines.join(" \\\n");
 }
 
-function typeScriptSnippet({ method, url, body, auth }: SnippetRequest): string {
+function typeScriptSnippet({
+  method,
+  url,
+  body,
+  auth,
+  takesIdempotencyKey,
+}: SnippetRequest): string {
   const headers: string[] = [];
   if (auth === "apiKey") {
     headers.push(`    Authorization: \`Bearer \${process.env.${API_KEY_VARIABLE}}\``);
   }
-  if (isWrite(method)) headers.push('    "Idempotency-Key": crypto.randomUUID()');
+  if (takesIdempotencyKey) headers.push('    "Idempotency-Key": crypto.randomUUID()');
   if (body !== null) headers.push('    "Content-Type": "application/json"');
   const options = [`  method: "${method}"`];
   if (headers.length > 0) options.push(["  headers: {", headers.join(",\n"), "  }"].join("\n"));
@@ -85,17 +91,17 @@ function typeScriptSnippet({ method, url, body, auth }: SnippetRequest): string 
   );
 }
 
-function pythonSnippet({ method, url, body, auth }: SnippetRequest): string {
+function pythonSnippet({ method, url, body, auth, takesIdempotencyKey }: SnippetRequest): string {
   const headers: string[] = [];
   if (auth === "apiKey")
     headers.push(`"Authorization": f"Bearer {os.environ['${API_KEY_VARIABLE}']}"`);
-  if (isWrite(method)) headers.push('"Idempotency-Key": str(uuid.uuid4())');
+  if (takesIdempotencyKey) headers.push('"Idempotency-Key": str(uuid.uuid4())');
   const args = [JSON.stringify(url)];
   if (headers.length > 0) args.push(`headers={${headers.join(", ")}}`);
   if (body !== null) args.push(`json=${pythonLiteral(body).replace(/\n/g, "\n  ")}`);
   const modules = ["requests"];
   if (auth === "apiKey") modules.unshift("os");
-  if (isWrite(method)) modules.push("uuid");
+  if (takesIdempotencyKey) modules.push("uuid");
   return [
     `import ${modules.join(", ")}`,
     "",
@@ -107,7 +113,7 @@ function pythonSnippet({ method, url, body, auth }: SnippetRequest): string {
  * The call written out in each language, the key read from `SDP_API_KEY` so a copied snippet
  * never carries one.
  *
- * @param request - The method, full URL and JSON body of the call.
+ * @param request - The method, full URL and JSON body of the call, and how its route takes it.
  * @returns The snippet for each of {@link SNIPPET_LANGUAGES}.
  */
 export function buildSnippets(request: SnippetRequest): Record<SnippetLanguage, string> {

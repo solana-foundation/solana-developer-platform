@@ -77,17 +77,23 @@ describe("buildApiReference", () => {
         }
       });
 
-      it("writes three samples per operation, with the key only where the route takes one", () => {
+      it("writes three samples per operation, each key only where the route takes it", () => {
         for (const operation of operations) {
           const snippets = buildSnippets({
             method: operation.method,
             url: `${DEFAULT_SDP_API_URL}${operation.request.path}`,
             body: operation.request.body,
             auth: operation.auth,
+            takesIdempotencyKey: operation.takesIdempotencyKey,
           });
+          const declaresIdempotencyKey = operation.parameters.some(
+            (parameter) => parameter.in === "header" && parameter.name === "Idempotency-Key"
+          );
+          expect(operation.takesIdempotencyKey).toBe(declaresIdempotencyKey);
           for (const language of SNIPPET_LANGUAGES) {
             expect(snippets[language]).toContain(operation.request.path.split("?")[0]);
             expect(snippets[language].includes("SDP_API_KEY")).toBe(operation.auth === "apiKey");
+            expect(snippets[language].includes("Idempotency-Key")).toBe(declaresIdempotencyKey);
           }
           expect(operation.request.path).not.toMatch(/[{}]/);
           expect(operation.request.body === null).toBe(operation.requestBody === null);
@@ -95,6 +101,17 @@ describe("buildApiReference", () => {
       });
     });
   }
+
+  it("keys a write's samples by the header the route declares, not by its method", () => {
+    const operations = buildApiReference(
+      createPublicOpenApiDocument({ releaseChannel: "experimental" })
+    ).families.flatMap((family) => family.operations);
+    const takesKey = (operationId: string) =>
+      operations.find((operation) => operation.operationId === operationId)?.takesIdempotencyKey;
+    // POST /v1/issuance/tokens ignores the header: a retry under one key creates a second token.
+    expect(takesKey("createToken")).toBe(false);
+    expect(takesKey("createPaymentTransfer")).toBe(true);
+  });
 
   it("names the route's action in its 403 example, as the API refuses it", () => {
     const reference = buildApiReference(createPublicOpenApiDocument({ releaseChannel: "stable" }));

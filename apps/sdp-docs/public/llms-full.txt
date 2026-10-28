@@ -7486,7 +7486,6 @@ Update project request body.
 ```bash tab="cURL"
 curl -X PATCH 'https://api.solana.com/v1/projects/prj_example' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Payments Updated",
@@ -7502,7 +7501,6 @@ const res = await fetch("https://api.solana.com/v1/projects/prj_example", {
   method: "PATCH",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -7516,10 +7514,10 @@ const res = await fetch("https://api.solana.com/v1/projects/prj_example", {
 ```
 
 ```python tab="Python"
-import os, requests, uuid
+import os, requests
 
 r = requests.patch("https://api.solana.com/v1/projects/prj_example",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
     "name": "Payments Updated",
     "description": "Updated project description.",
@@ -8351,7 +8349,6 @@ Create token request body.
 ```bash tab="cURL"
 curl -X POST 'https://api.solana.com/v1/issuance/tokens' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Example Token",
@@ -8382,7 +8379,6 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -8411,10 +8407,10 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens", {
 ```
 
 ```python tab="Python"
-import os, requests, uuid
+import os, requests
 
 r = requests.post("https://api.solana.com/v1/issuance/tokens",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
     "name": "Example Token",
     "symbol": "EXM",
@@ -9203,7 +9199,6 @@ Update token request body.
 ```bash tab="cURL"
 curl -X PATCH 'https://api.solana.com/v1/issuance/tokens/tok_example' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
   -d '{
     "signingCustodyWalletId": "cwlt_example",
@@ -9221,7 +9216,6 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example",
   method: "PATCH",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -9237,10 +9231,10 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example",
 ```
 
 ```python tab="Python"
-import os, requests, uuid
+import os, requests
 
 r = requests.patch("https://api.solana.com/v1/issuance/tokens/tok_example",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
     "signingCustodyWalletId": "cwlt_example",
     "name": "Example Token Updated",
@@ -9513,25 +9507,23 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuan
 
 ```bash tab="cURL"
 curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/supply/refresh' \
-  -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)"
+  -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 ```ts tab="TypeScript"
 const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/supply/refresh", {
   method: "POST",
   headers: {
-    Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID()
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`
   }
 });
 ```
 
 ```python tab="Python"
-import os, requests, uuid
+import os, requests
 
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/supply/refresh",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())})
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
 ```
 
 ## Example responses
@@ -10517,25 +10509,23 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuan
 
 ```bash tab="cURL"
 curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/deploy/prepare' \
-  -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)"
+  -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 ```ts tab="TypeScript"
 const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/deploy/prepare", {
   method: "POST",
   headers: {
-    Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID()
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`
   }
 });
 ```
 
 ```python tab="Python"
-import os, requests, uuid
+import os, requests
 
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/deploy/prepare",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())})
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
 ```
 
 ## Example responses
@@ -10721,7 +10711,6 @@ Confirm non-custodial deploy request body.
 ```bash tab="cURL"
 curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/deploy/confirm' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
   -d '{
     "signature": "5x...signature",
@@ -10736,7 +10725,6 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/d
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -10749,10 +10737,10 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/d
 ```
 
 ```python tab="Python"
-import os, requests, uuid
+import os, requests
 
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/deploy/confirm",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
     "signature": "5x...signature",
     "mint": "So11111111111111111111111111111111111111112",
@@ -10973,25 +10961,23 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuan
 
 ```bash tab="cURL"
 curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/deploy/prepare-metadata' \
-  -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)"
+  -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 ```ts tab="TypeScript"
 const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/deploy/prepare-metadata", {
   method: "POST",
   headers: {
-    Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID()
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`
   }
 });
 ```
 
 ```python tab="Python"
-import os, requests, uuid
+import os, requests
 
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/deploy/prepare-metadata",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())})
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
 ```
 
 ## Example responses
@@ -11190,7 +11176,6 @@ Mint request body.
 ```bash tab="cURL"
 curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/mint/prepare' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
   -d '{
     "signingCustodyWalletId": "cwlt_example",
@@ -11211,7 +11196,6 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/m
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -11230,10 +11214,10 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/m
 ```
 
 ```python tab="Python"
-import os, requests, uuid
+import os, requests
 
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/mint/prepare",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
     "signingCustodyWalletId": "cwlt_example",
     "mint": {
@@ -11710,7 +11694,6 @@ Burn request body.
 ```bash tab="cURL"
 curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/burn/prepare' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
   -d '{
     "signingCustodyWalletId": "cwlt_example",
@@ -11731,7 +11714,6 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/b
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -11750,10 +11732,10 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/b
 ```
 
 ```python tab="Python"
-import os, requests, uuid
+import os, requests
 
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/burn/prepare",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
     "signingCustodyWalletId": "cwlt_example",
     "burn": {
@@ -12236,7 +12218,6 @@ Seize (force transfer) request body.
 ```bash tab="cURL"
 curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/seize/prepare' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
   -d '{
     "signingCustodyWalletId": "cwlt_example",
@@ -12259,7 +12240,6 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/s
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -12280,10 +12260,10 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/s
 ```
 
 ```python tab="Python"
-import os, requests, uuid
+import os, requests
 
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/seize/prepare",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
     "signingCustodyWalletId": "cwlt_example",
     "seize": {
@@ -12776,7 +12756,6 @@ Force burn request body.
 ```bash tab="cURL"
 curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/force-burn/prepare' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
   -d '{
     "signingCustodyWalletId": "cwlt_example",
@@ -12798,7 +12777,6 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/f
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -12818,10 +12796,10 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/f
 ```
 
 ```python tab="Python"
-import os, requests, uuid
+import os, requests
 
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/force-burn/prepare",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
     "signingCustodyWalletId": "cwlt_example",
     "forceBurn": {
@@ -14309,7 +14287,6 @@ Update authority request body.
 ```bash tab="cURL"
 curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/authority/prepare' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
   -d '{
     "signingCustodyWalletId": "cwlt_example",
@@ -14329,7 +14306,6 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/a
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -14347,10 +14323,10 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/a
 ```
 
 ```python tab="Python"
-import os, requests, uuid
+import os, requests
 
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/authority/prepare",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
     "signingCustodyWalletId": "cwlt_example",
     "authority": {
@@ -14956,7 +14932,6 @@ Add token allowlist entry request body.
 ```bash tab="cURL"
 curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/allowlist' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
   -d '{
     "signingCustodyWalletId": "cwlt_example",
@@ -14970,7 +14945,6 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/a
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -14982,10 +14956,10 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/a
 ```
 
 ```python tab="Python"
-import os, requests, uuid
+import os, requests
 
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/allowlist",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
     "signingCustodyWalletId": "cwlt_example",
     "address": "So11111111111111111111111111111111111111112",
@@ -15273,25 +15247,23 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuan
 
 ```bash tab="cURL"
 curl -X DELETE 'https://api.solana.com/v1/issuance/tokens/tok_example/allowlist/al_example' \
-  -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)"
+  -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 ```ts tab="TypeScript"
 const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/allowlist/al_example", {
   method: "DELETE",
   headers: {
-    Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID()
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`
   }
 });
 ```
 
 ```python tab="Python"
-import os, requests, uuid
+import os, requests
 
 r = requests.delete("https://api.solana.com/v1/issuance/tokens/tok_example/allowlist/al_example",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())})
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
 ```
 
 ## Example responses
@@ -15538,7 +15510,6 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuan
 ```bash tab="cURL"
 curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/holders' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
   -d '{
     "walletAddress": "11111111111111111111111111111111",
@@ -15551,7 +15522,6 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/h
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -15562,10 +15532,10 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/h
 ```
 
 ```python tab="Python"
-import os, requests, uuid
+import os, requests
 
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/holders",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
     "walletAddress": "11111111111111111111111111111111",
     "reviewMode": "auto"
@@ -16956,7 +16926,6 @@ Estimate transaction chunking and fees for a transfer batch.
 ```bash tab="cURL"
 curl -X POST 'https://api.solana.com/v1/payments/transfer-batches/estimate' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
   -d '{
     "projectId": "prj_example",
@@ -16984,7 +16953,6 @@ const res = await fetch("https://api.solana.com/v1/payments/transfer-batches/est
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -17010,10 +16978,10 @@ const res = await fetch("https://api.solana.com/v1/payments/transfer-batches/est
 ```
 
 ```python tab="Python"
-import os, requests, uuid
+import os, requests
 
 r = requests.post("https://api.solana.com/v1/payments/transfer-batches/estimate",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
     "projectId": "prj_example",
     "externalId": "payroll_2026_06_30",
@@ -20296,7 +20264,6 @@ Optional overrides used when preparing the Solana subscriptions create-plan tran
 ```bash tab="cURL"
 curl -X POST 'https://api.solana.com/v1/payments/subscription-plans/psp_example/prepare-create' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
   -d '{
     "destinations": [
@@ -20315,7 +20282,6 @@ const res = await fetch("https://api.solana.com/v1/payments/subscription-plans/p
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -20332,10 +20298,10 @@ const res = await fetch("https://api.solana.com/v1/payments/subscription-plans/p
 ```
 
 ```python tab="Python"
-import os, requests, uuid
+import os, requests
 
 r = requests.post("https://api.solana.com/v1/payments/subscription-plans/psp_example/prepare-create",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
     "destinations": [
       "example"
@@ -21243,7 +21209,6 @@ Inputs for preparing the subscriber-signed Solana subscription authorization tra
 ```bash tab="cURL"
 curl -X POST 'https://api.solana.com/v1/payments/subscriptions/psub_example/prepare-authorization' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
   -d '{
     "subscriberTokenAccount": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
@@ -21257,7 +21222,6 @@ const res = await fetch("https://api.solana.com/v1/payments/subscriptions/psub_e
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -21269,10 +21233,10 @@ const res = await fetch("https://api.solana.com/v1/payments/subscriptions/psub_e
 ```
 
 ```python tab="Python"
-import os, requests, uuid
+import os, requests
 
 r = requests.post("https://api.solana.com/v1/payments/subscriptions/psub_example/prepare-authorization",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
     "subscriberTokenAccount": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
     "expectedPlanCreatedAt": "0",
@@ -21431,7 +21395,6 @@ Empty request body for preparing subscriber-signed subscription lifecycle transa
 ```bash tab="cURL"
 curl -X POST 'https://api.solana.com/v1/payments/subscriptions/psub_example/prepare-cancel' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
   -d '{}'
 ```
@@ -21441,7 +21404,6 @@ const res = await fetch("https://api.solana.com/v1/payments/subscriptions/psub_e
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
     "Content-Type": "application/json"
   },
   body: JSON.stringify({})
@@ -21449,10 +21411,10 @@ const res = await fetch("https://api.solana.com/v1/payments/subscriptions/psub_e
 ```
 
 ```python tab="Python"
-import os, requests, uuid
+import os, requests
 
 r = requests.post("https://api.solana.com/v1/payments/subscriptions/psub_example/prepare-cancel",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={})
 ```
 
@@ -21605,7 +21567,6 @@ Empty request body for preparing subscriber-signed subscription lifecycle transa
 ```bash tab="cURL"
 curl -X POST 'https://api.solana.com/v1/payments/subscriptions/psub_example/prepare-resume' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
   -d '{}'
 ```
@@ -21615,7 +21576,6 @@ const res = await fetch("https://api.solana.com/v1/payments/subscriptions/psub_e
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
     "Content-Type": "application/json"
   },
   body: JSON.stringify({})
@@ -21623,10 +21583,10 @@ const res = await fetch("https://api.solana.com/v1/payments/subscriptions/psub_e
 ```
 
 ```python tab="Python"
-import os, requests, uuid
+import os, requests
 
 r = requests.post("https://api.solana.com/v1/payments/subscriptions/psub_example/prepare-resume",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={})
 ```
 
@@ -21783,7 +21743,6 @@ Inputs for preparing the collector-signed Solana subscriptions transfer transact
 ```bash tab="cURL"
 curl -X POST 'https://api.solana.com/v1/payments/subscriptions/psub_example/prepare-collection' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
   -d '{
     "receiverTokenAccount": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"
@@ -21795,7 +21754,6 @@ const res = await fetch("https://api.solana.com/v1/payments/subscriptions/psub_e
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -21805,10 +21763,10 @@ const res = await fetch("https://api.solana.com/v1/payments/subscriptions/psub_e
 ```
 
 ```python tab="Python"
-import os, requests, uuid
+import os, requests
 
 r = requests.post("https://api.solana.com/v1/payments/subscriptions/psub_example/prepare-collection",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
     "receiverTokenAccount": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"
   })
@@ -22650,7 +22608,6 @@ Create an on-ramp quote. The response uses `deliveryMode` to indicate whether th
 ```bash tab="cURL"
 curl -X POST 'https://api.solana.com/v1/payments/ramps/onramp/quote' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
   -d '{
     "provider": "moonpay",
@@ -22667,7 +22624,6 @@ const res = await fetch("https://api.solana.com/v1/payments/ramps/onramp/quote",
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -22682,10 +22638,10 @@ const res = await fetch("https://api.solana.com/v1/payments/ramps/onramp/quote",
 ```
 
 ```python tab="Python"
-import os, requests, uuid
+import os, requests
 
 r = requests.post("https://api.solana.com/v1/payments/ramps/onramp/quote",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
     "provider": "moonpay",
     "counterpartyId": "cpty_example",
@@ -22872,7 +22828,6 @@ Sandbox-only helper that simulates the fiat pay-in for a persisted on-ramp quote
 ```bash tab="cURL"
 curl -X POST 'https://api.solana.com/v1/payments/ramps/sandbox/simulate' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
   -d '{
     "transferId": "xfr_example"
@@ -22884,7 +22839,6 @@ const res = await fetch("https://api.solana.com/v1/payments/ramps/sandbox/simula
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -22894,10 +22848,10 @@ const res = await fetch("https://api.solana.com/v1/payments/ramps/sandbox/simula
 ```
 
 ```python tab="Python"
-import os, requests, uuid
+import os, requests
 
 r = requests.post("https://api.solana.com/v1/payments/ramps/sandbox/simulate",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
     "transferId": "xfr_example"
   })
@@ -26077,7 +26031,6 @@ Create token + asset profile request body: the token-create fields plus the asse
 ```bash tab="cURL"
 curl -X POST 'https://api.solana.com/v1/issuance/asset-profiles' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Example Token",
@@ -26129,7 +26082,6 @@ const res = await fetch("https://api.solana.com/v1/issuance/asset-profiles", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -26179,10 +26131,10 @@ const res = await fetch("https://api.solana.com/v1/issuance/asset-profiles", {
 ```
 
 ```python tab="Python"
-import os, requests, uuid
+import os, requests
 
 r = requests.post("https://api.solana.com/v1/issuance/asset-profiles",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
     "name": "Example Token",
     "symbol": "EXM",
@@ -26879,7 +26831,6 @@ Update asset profile request body. At least one field must be provided.
 ```bash tab="cURL"
 curl -X PATCH 'https://api.solana.com/v1/issuance/asset-profiles/asset_profile_example' \
   -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
   -d '{
     "assetCategory": "stablecoin",
@@ -26933,7 +26884,6 @@ const res = await fetch("https://api.solana.com/v1/issuance/asset-profiles/asset
   method: "PATCH",
   headers: {
     Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -26985,10 +26935,10 @@ const res = await fetch("https://api.solana.com/v1/issuance/asset-profiles/asset
 ```
 
 ```python tab="Python"
-import os, requests, uuid
+import os, requests
 
 r = requests.patch("https://api.solana.com/v1/issuance/asset-profiles/asset_profile_example",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"},
   json={
     "assetCategory": "stablecoin",
     "assetType": "fiat_backed",
@@ -27213,25 +27163,23 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuan
 
 ```bash tab="cURL"
 curl -X DELETE 'https://api.solana.com/v1/issuance/asset-profiles/asset_profile_example' \
-  -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)"
+  -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 ```ts tab="TypeScript"
 const res = await fetch("https://api.solana.com/v1/issuance/asset-profiles/asset_profile_example", {
   method: "DELETE",
   headers: {
-    Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID()
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`
   }
 });
 ```
 
 ```python tab="Python"
-import os, requests, uuid
+import os, requests
 
 r = requests.delete("https://api.solana.com/v1/issuance/asset-profiles/asset_profile_example",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())})
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
 ```
 
 ## Example responses

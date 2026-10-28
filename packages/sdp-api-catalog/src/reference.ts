@@ -154,6 +154,11 @@ export const apiOperationSchema = z.object({
   action: z.enum(ACTIONS).nullable(),
   /** How the route authenticates, which is how its samples do. */
   auth: z.enum(SNIPPET_AUTH_MODES),
+  /**
+   * Whether the route declares an `Idempotency-Key` header, required or optional, which is
+   * whether its samples send one.
+   */
+  takesIdempotencyKey: z.boolean(),
   summary: z.string().min(1),
   /**
    * The group the operation sits in within its family (the document's `x-sdp-group`), or null
