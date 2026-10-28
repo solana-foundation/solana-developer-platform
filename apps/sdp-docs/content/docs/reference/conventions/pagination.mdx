@@ -20,4 +20,4 @@ Ask for the next `page` while `hasMore` is `true`.
 
 ## Cursors
 
-A few lists take a `limit` instead and return a `nextCursor` with each page. Send it back as `cursor` to get the next page; it's `null` on the last one.
+A few lists take a `limit` instead and return a `nextCursor` with each page. Send it back in the cursor parameter the operation names, `cursor` or `before`, to get the next page; it's `null` on the last one.

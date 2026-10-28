@@ -7,6 +7,8 @@ Requests count against a limit per minute. A request with an API key counts agai
 
 <RateLimitTable />
 
+These are the general limits. Some operations also have a tighter quota of their own, counted per key (or signed-in member) and per organization, so they can return `429` before the key reaches its tier's limit. While SDP's counter store is unavailable, those operations refuse with `503` rather than run uncounted.
+
 Responses usually say where you stand. The headers are left off while SDP's shared counter store is unavailable, so don't depend on them:
 
 | Header | Means |

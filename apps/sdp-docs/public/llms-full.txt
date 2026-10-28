@@ -5272,7 +5272,7 @@ Ask for the next `page` while `hasMore` is `true`.
 
 ## Cursors
 
-A few lists take a `limit` instead and return a `nextCursor` with each page. Send it back as `cursor` to get the next page; it's `null` on the last one.
+A few lists take a `limit` instead and return a `nextCursor` with each page. Send it back in the cursor parameter the operation names, `cursor` or `before`, to get the next page; it's `null` on the last one.
 
 ---
 
@@ -5289,6 +5289,8 @@ Requests count against a limit per minute. A request with an API key counts agai
 | An API key on the `elevated` tier | 500 |
 | An API key on the `unlimited` tier | 10,000 |
 | No API key, per IP address | 20 |
+
+These are the general limits. Some operations also have a tighter quota of their own, counted per key (or signed-in member) and per organization, so they can return `429` before the key reaches its tier's limit. While SDP's counter store is unavailable, those operations refuse with `503` rather than run uncounted.
 
 Responses usually say where you stand. The headers are left off while SDP's shared counter store is unavailable, so don't depend on them:
 
