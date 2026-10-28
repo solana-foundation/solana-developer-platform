@@ -7,6 +7,7 @@ import {
   type PaymentSubscriptionCollectionAttempt,
   RECURRING_PAYMENT_COLLECTION_CONFIG,
   type RecurringPaymentPauseReason,
+  type RecurringPaymentTokenApproval,
 } from "@sdp/types/payments";
 import { Button } from "@sdp/ui/button";
 import { ArrowUpRightIcon, Loader2Icon } from "lucide-react";
@@ -64,6 +65,8 @@ type ScheduleRecord = PaymentRecurringPayment & { sourceCustodyWalletId: string 
 
 interface RecurringPaymentDetailWorkspaceProps {
   recurringPayment: ScheduleRecord;
+  /** What became of a canceled schedule's token approval; null or absent for any other status. */
+  tokenApproval?: RecurringPaymentTokenApproval | null;
   wallet: RecurringPaymentWalletView | null;
   wallets: RecurringPaymentWalletView[];
   issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>;
@@ -307,9 +310,68 @@ function pausedBody(reason: RecurringPaymentPauseReason | null, t: Translate): s
   }
 }
 
+/**
+ * What a canceled schedule's cancel did with the wallet's token approval (HOO-2339). Every
+ * schedule from one wallet in one token shares it, so it stays while others still use it, and
+ * this names them.
+ */
+function CanceledTokenApprovalNote({
+  tokenApproval,
+  t,
+}: {
+  tokenApproval: RecurringPaymentTokenApproval;
+  t: Translate;
+}) {
+  const projectHref = useProjectHref();
+  const { sharedWith } = tokenApproval;
+  switch (tokenApproval.status) {
+    case "revoked":
+      return (
+        <span className="mt-1 block text-secondary">
+          {t("DashboardPayments.recurring.approvalRevokedBody")}
+        </span>
+      );
+    case "revoking":
+      return (
+        <span className="mt-1 block text-secondary">
+          {t("DashboardPayments.recurring.approvalRevokingBody")}
+        </span>
+      );
+    case "kept":
+      return (
+        <span className="mt-1 block text-secondary" data-token-approval="kept">
+          {t(
+            sharedWith.length === 1
+              ? "DashboardPayments.recurring.approvalKeptOneBody"
+              : "DashboardPayments.recurring.approvalKeptManyBody",
+            { count: sharedWith.length }
+          )}{" "}
+          {sharedWith.map((schedule, index) => (
+            <Fragment key={schedule.id}>
+              {index > 0 ? ", " : null}
+              <Link
+                href={projectHref(
+                  `/dashboard/payments/recurring/${encodeURIComponent(schedule.id)}`
+                )}
+                className={ROW_LINK}
+              >
+                {schedule.id}
+              </Link>
+            </Fragment>
+          ))}
+        </span>
+      );
+    default: {
+      const unreachable: never = tokenApproval.status;
+      throw new Error(`Unhandled token approval status ${String(unreachable)}`);
+    }
+  }
+}
+
 /** Otherwise the status itself, in the design's words for it. */
 function statusBand({
   recurringPayment,
+  tokenApproval,
   lastRunFailed,
   lastRunError,
   scheduleLabel,
@@ -317,6 +379,7 @@ function statusBand({
   t,
 }: {
   recurringPayment: PaymentRecurringPayment;
+  tokenApproval: RecurringPaymentTokenApproval | null;
   lastRunFailed: boolean;
   /** The last failed run's error while paused, shown under the pause reason; null when none. */
   lastRunError: string | null;
@@ -367,9 +430,16 @@ function statusBand({
       return {
         tone: "neutral",
         state,
-        body: recurringPayment.subscriptionId
-          ? t("DashboardPayments.recurring.stateCanceledBody")
-          : t("DashboardPayments.recurring.stateCanceledBeforeRunBody"),
+        body: (
+          <>
+            {recurringPayment.subscriptionId
+              ? t("DashboardPayments.recurring.stateCanceledBody")
+              : t("DashboardPayments.recurring.stateCanceledBeforeRunBody")}
+            {tokenApproval === null ? null : (
+              <CanceledTokenApprovalNote tokenApproval={tokenApproval} t={t} />
+            )}
+          </>
+        ),
       };
     case "expired":
       return { tone: "neutral", state, body: t("DashboardPayments.recurring.stateExpiredBody") };
@@ -698,6 +768,7 @@ function ScheduleFooter({
  */
 export function RecurringPaymentDetailWorkspace({
   recurringPayment,
+  tokenApproval = null,
   wallet,
   wallets,
   issuedTokensByMint,
@@ -810,7 +881,15 @@ export function RecurringPaymentDetailWorkspace({
           t,
         })
       : null) ??
-    statusBand({ recurringPayment, lastRunFailed, lastRunError, scheduleLabel, locale, t });
+    statusBand({
+      recurringPayment,
+      tokenApproval,
+      lastRunFailed,
+      lastRunError,
+      scheduleLabel,
+      locale,
+      t,
+    });
   const canEdit = canWrite && isEditable && !controlsDisabled && !editing;
 
   return (

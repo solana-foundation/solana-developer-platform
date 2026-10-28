@@ -1516,6 +1516,16 @@
               "createdBy": "example",
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-01T00:00:00.000Z"
+            },
+            "tokenApproval": {
+              "status": "kept",
+              "delegate": "So11111111111111111111111111111111111111112",
+              "sharedWith": [
+                {
+                  "id": "prp_example",
+                  "status": "active"
+                }
+              ]
             }
           },
           "meta": {
@@ -1707,6 +1717,16 @@
               "createdBy": "example",
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-01T00:00:00.000Z"
+            },
+            "tokenApproval": {
+              "status": "kept",
+              "delegate": "So11111111111111111111111111111111111111112",
+              "sharedWith": [
+                {
+                  "id": "prp_example",
+                  "status": "active"
+                }
+              ]
             }
           },
           "meta": {
@@ -1765,6 +1785,16 @@
               "createdBy": "example",
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-01T00:00:00.000Z"
+            },
+            "tokenApproval": {
+              "status": "kept",
+              "delegate": "So11111111111111111111111111111111111111112",
+              "sharedWith": [
+                {
+                  "id": "prp_example",
+                  "status": "active"
+                }
+              ]
             }
           },
           "meta": {
@@ -1823,6 +1853,16 @@
               "createdBy": "example",
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-01T00:00:00.000Z"
+            },
+            "tokenApproval": {
+              "status": "kept",
+              "delegate": "So11111111111111111111111111111111111111112",
+              "sharedWith": [
+                {
+                  "id": "prp_example",
+                  "status": "active"
+                }
+              ]
             }
           },
           "meta": {
@@ -1881,6 +1921,16 @@
               "createdBy": "example",
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-01T00:00:00.000Z"
+            },
+            "tokenApproval": {
+              "status": "kept",
+              "delegate": "So11111111111111111111111111111111111111112",
+              "sharedWith": [
+                {
+                  "id": "prp_example",
+                  "status": "active"
+                }
+              ]
             }
           },
           "meta": {
@@ -2091,6 +2141,16 @@
               "createdBy": "example",
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-01T00:00:00.000Z"
+            },
+            "tokenApproval": {
+              "status": "kept",
+              "delegate": "So11111111111111111111111111111111111111112",
+              "sharedWith": [
+                {
+                  "id": "prp_example",
+                  "status": "active"
+                }
+              ]
             }
           },
           "meta": {

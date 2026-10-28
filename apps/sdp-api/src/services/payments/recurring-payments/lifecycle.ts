@@ -8,6 +8,7 @@ import {
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { assertValidAddress } from "@sdp/solana/address";
 import {
+  IN_FLIGHT_COLLECTION_ATTEMPT_STATUSES,
   IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
   isCanceledRecurringPaymentStatus,
   isPendingActivationRecurringPaymentStatus,
@@ -20,7 +21,14 @@ import {
   type RecurringPaymentLifecycleClaimableStatus,
   type RecurringPaymentPauseReason,
 } from "@sdp/types/payments";
-import type { Address, MaybeAccount, Signature } from "@solana/kit";
+import type {
+  Account,
+  Address,
+  Instruction,
+  MaybeAccount,
+  Signature,
+  TransactionSigner,
+} from "@solana/kit";
 import type { SubscriptionDelegation } from "@solana/subscriptions";
 import * as subscriptionsProgram from "@solana/subscriptions";
 import { z } from "zod";
@@ -31,7 +39,10 @@ import type {
   PaymentRecurringPaymentsRepository,
 } from "@/db/repositories/payment-recurring-payments.repository";
 import { createPostgresPaymentRecurringPaymentsRepository } from "@/db/repositories/payment-recurring-payments.repository.postgres";
-import type { PaymentSubscriptionRow } from "@/db/repositories/payment-subscriptions.repository";
+import type {
+  PaymentSubscriptionRow,
+  PaymentSubscriptionsRepository,
+} from "@/db/repositories/payment-subscriptions.repository";
 import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories/payment-subscriptions.repository.postgres";
 import {
   createPaymentRecurringPaymentsRepository,
@@ -54,6 +65,7 @@ import {
   confirmSubscriptionSignature,
   createSubscriptionStepStore,
   isSubscriptionDelegationCanceled,
+  isSubscriptionDelegationCanceledNow,
   lockLiveActivatingKey,
   parseNullableStoredSignature,
   ResumedStepUnsettledError,
@@ -467,6 +479,107 @@ async function finalizeCancelAndReleaseAuthority(
 }
 
 /**
+ * Whether the chain shows a cancel landed: one that ends the delegation now only once it can no
+ * longer be pulled from, one that waits for a collection in flight once any expiry is set.
+ *
+ * @param endsNow - Whether this cancel ends the delegation now.
+ * @returns The predicate over the delegation as read.
+ */
+function cancelLanded(
+  endsNow: boolean
+): (delegation: MaybeAccount<SubscriptionDelegation>) => boolean {
+  return endsNow
+    ? (delegation) => isSubscriptionDelegationCanceledNow(delegation, new Date())
+    : isSubscriptionDelegationCanceled;
+}
+
+/**
+ * Whether a collection of the schedule's due period was already in flight when its cancel claimed
+ * it. None can start after the claim (a collection claims only an `active` schedule), so the
+ * answer only goes from true to false. One database read, no RPC.
+ *
+ * @param subscriptionsRepo - The tenant's subscriptions repository.
+ * @param input.subscriptionId - The schedule's subscription.
+ * @param input.dueAt - The schedule's due period; null when it has none.
+ * @returns Whether an attempt at that period is pending or processing.
+ */
+async function hasCollectionInFlight(
+  subscriptionsRepo: PaymentSubscriptionsRepository,
+  input: { organizationId: string; projectId: string; subscriptionId: string; dueAt: string | null }
+): Promise<boolean> {
+  if (input.dueAt === null) return false;
+  const attempt = await subscriptionsRepo.getCollectionAttemptByDue({
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    subscriptionId: input.subscriptionId,
+    dueAt: input.dueAt,
+    statuses: IN_FLIGHT_COLLECTION_ATTEMPT_STATUSES,
+  });
+  return attempt !== null;
+}
+
+/**
+ * The cancel to send (HOO-2339). With a delegation, cancel-now: it ends the delegation at once, so
+ * the plan cannot be pulled from again. It takes the plan owner's signature too, which is the same
+ * custody wallet: activation creates the plan with it as owner, subscriber and only puller. With
+ * none, a collection was in flight at the claim, and cancel-now would make the program refuse it:
+ * the program's plain cancel lets it land and ends the delegation with its period, the authority
+ * revoke waiting for it to settle.
+ *
+ * @param input.delegation - The delegation cancel-now binds to, or null to send the plain cancel.
+ * @param input.signer - The custody wallet's signer.
+ * @param input.planPda - The plan.
+ * @param input.subscriptionPda - The subscription delegation.
+ * @returns The instruction.
+ */
+function cancelInstruction(input: {
+  delegation: Account<SubscriptionDelegation> | null;
+  signer: TransactionSigner;
+  planPda: Address;
+  subscriptionPda: Address;
+}): Promise<Instruction> {
+  if (input.delegation === null) {
+    return subscriptionsProgram.getCancelSubscriptionOverlayInstructionAsync({
+      planPda: input.planPda,
+      subscriber: input.signer,
+      subscriptionPda: input.subscriptionPda,
+    });
+  }
+  return subscriptionsProgram.getCancelSubscriptionNowOverlayInstructionAsync({
+    expectedCurrentPeriodStartTs: input.delegation.data.currentPeriodStartTs,
+    merchant: input.signer,
+    planPda: input.planPda,
+    subscriber: input.signer,
+    subscriptionPda: input.subscriptionPda,
+  });
+}
+
+/**
+ * The delegation a cancel-now binds to, since the program checks the period it was signed for:
+ * the one a resumed attempt already read, or one `confirmed` read (a fresh cancel's only RPC before
+ * its send). One a cancel already ended is sent anyway: the program refuses it, and the refusal
+ * settles from a `finalized` read. A plain cancel binds to none and reads nothing.
+ *
+ * @param endsNow - Whether the cancel is a cancel-now.
+ * @param known - The delegation as already read, or null.
+ * @param read - Reads it at a commitment.
+ * @returns The delegation, or null for a plain cancel.
+ * @throws AppError `CONFLICT` when it is not on chain.
+ */
+async function delegationToCancel(
+  endsNow: boolean,
+  known: MaybeAccount<SubscriptionDelegation> | null,
+  read: (commitment: "confirmed") => Promise<MaybeAccount<SubscriptionDelegation>>
+): Promise<Account<SubscriptionDelegation> | null> {
+  if (!endsNow) return null;
+  const delegation = known ?? (await read("confirmed"));
+  if (!delegation.exists) {
+    throw conflict("Subscription was not found on-chain");
+  }
+  return delegation;
+}
+
+/**
  * Who revokes a canceled schedule's subscription authority: the cancel itself, right after it
  * lands, or the sweep's next run. Revoke-and-cancel cancels many schedules in one request and
  * leaves it to the sweep.
@@ -601,8 +714,13 @@ async function runRecurringPaymentCancel(input: {
     const rpc = createClusterRpc();
     const readDelegation = (commitment: "finalized" | "confirmed") =>
       subscriptionsProgram.fetchMaybeSubscriptionDelegation(rpc, subscriptionPda, { commitment });
-    const isCanceled = (delegation: MaybeAccount<SubscriptionDelegation>) =>
-      delegation.exists && isSubscriptionDelegationCanceled(delegation);
+    const endsNow = !(await hasCollectionInFlight(subscriptionsRepo, {
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      subscriptionId: subscription.id,
+      dueAt: claimed.next_collection_due_at,
+    }));
+    const isCanceled = cancelLanded(endsNow);
     // The program refuses a cancel once the subscription is canceled: by an earlier cancel, or one
     // the wallet's owner signed outside SDP. When this send cannot have landed, the chain decides,
     // and a canceled delegation finalizes instead of rolling back. An unreadable chain keeps the
@@ -618,6 +736,7 @@ async function runRecurringPaymentCancel(input: {
       projectId: input.projectId,
       rows: [{ slot: { row: "lifecycle_attempt", column: "signature" }, id: attempt.id }],
     } as const satisfies SubscriptionStep;
+    let onChainDelegation: MaybeAccount<SubscriptionDelegation> | null = null;
     if (resumedAtSubmit) {
       const step = await readRecurringPaymentStep({
         rpc,
@@ -647,8 +766,11 @@ async function runRecurringPaymentCancel(input: {
           releaseAuthority: input.releaseAuthority,
         });
       }
+      onChainDelegation = step.account;
       signature = null;
     }
+
+    const delegation = await delegationToCancel(endsNow, onChainDelegation, readDelegation);
 
     const sourceSigner = await createOrgSignerForCustodyWallet(
       input.env,
@@ -670,9 +792,10 @@ async function runRecurringPaymentCancel(input: {
       updatedAt: new Date().toISOString(),
     });
 
-    const instruction = await subscriptionsProgram.getCancelSubscriptionOverlayInstructionAsync({
+    const instruction = await cancelInstruction({
+      delegation,
+      signer: sourceSigner,
       planPda,
-      subscriber: sourceSigner,
       subscriptionPda,
     });
 

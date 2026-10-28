@@ -6,6 +6,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { runWithSystemDatabaseIdentity } from "@/db/identity";
 import { transactionFailed } from "@/lib/errors";
+import { TEST_ORG } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import {
   type SubscriptionAuthorityTenant,
@@ -15,6 +16,7 @@ import {
 import { seedTestDatabase } from "@/test/mocks/db";
 import {
   revokeIdleSubscriptionAuthorities,
+  revokeSubscriptionAuthorityNow,
   type SubscriptionAuthorityChain,
 } from "./authority-revocation";
 import type { SavedSendOutcome } from "./shared";
@@ -250,9 +252,127 @@ describe("revokeIdleSubscriptionAuthorities", () => {
   });
 
   it("asks the chain nothing when there is nothing to revoke", async () => {
-    await getDb(env).execute("UPDATE payment_recurring_payments SET status = 'canceling'");
+    // A canceled schedule stays canceled (migration 0190), so another one still needs it.
+    await seedAuthoritySubscription(tenant, {
+      authority,
+      tokenMint: MINT,
+      status: "active",
+      changedAt: LONG_AGO,
+      recurring: { status: "canceling" },
+    });
 
     expect(await sweep(chain)).toEqual({ revoked: 0, recovered: 0, failed: 0, skipped: 0 });
     expect(chain.authorityReads).toEqual([]);
+  });
+});
+
+describe("revokeSubscriptionAuthorityNow", () => {
+  let authority: Address;
+  let tenant: SubscriptionAuthorityTenant;
+  let chain: ScriptedChain;
+  const INCIDENT = { operator: "ops:test", reason: "drill", ticket: "HOO-2339" };
+
+  function revokeNow() {
+    return runInClusterScope({ projectId: tenant.projectId, environment: "sandbox" }, () =>
+      runWithSystemDatabaseIdentity("test:authority-revocation", () =>
+        revokeSubscriptionAuthorityNow(
+          env,
+          {
+            organizationId: TEST_ORG.id,
+            projectId: tenant.projectId,
+            custodyWalletId: tenant.custodyWalletId,
+            token: MINT,
+            incident: INCIDENT,
+          },
+          chain
+        )
+      )
+    );
+  }
+
+  beforeAll(async () => {
+    await seedTestDatabase(env);
+    [authority] = await findSubscriptionAuthorityPda({ user: WALLET, tokenMint: MINT });
+  });
+
+  afterAll(async () => {
+    await seedTestDatabase(env);
+  });
+
+  beforeEach(async () => {
+    tenant = await seedSubscriptionAuthorityTenant({
+      projectId: "prj_authority_revoke_now_test",
+      custodyWalletId: "cwlt_authority_revoke_now_test",
+      providerWalletId: "wallet_authority_revoke_now_test",
+      walletAddress: WALLET,
+    });
+    chain = new ScriptedChain(authority);
+  });
+
+  it("revokes while live schedules still use the authority, and names the ones it breaks", async () => {
+    const live = await seedAuthoritySubscription(tenant, {
+      authority,
+      tokenMint: MINT,
+      status: "active",
+      changedAt: LONG_AGO,
+      recurring: { status: "canceling" },
+    });
+    // The sweep leaves it: the schedule still needs it.
+    expect(await sweep(chain)).toEqual({ revoked: 0, recovered: 0, failed: 0, skipped: 0 });
+
+    const result = await revokeNow();
+
+    expect(result).toEqual({
+      outcome: "revoked",
+      subscriptionAuthorityAddress: authority,
+      brokenRecurringPayments: [{ id: live.recurringPaymentId, status: "canceling" }],
+    });
+    expect(chain.sendCount).toBe(1);
+    expect(await revocations()).toEqual([
+      { status: "confirmed", signature: SIGNATURE, error: null },
+    ]);
+  });
+
+  it("leaves a revoke already holding the authority to finish it", async () => {
+    await seedAuthoritySubscription(tenant, {
+      authority,
+      tokenMint: MINT,
+      status: "canceled",
+      changedAt: LONG_AGO,
+      recurring: { status: "canceled" },
+    });
+    chain.sends.push(() => {
+      throw new Error("socket hang up");
+    });
+    await sweep(chain);
+
+    const result = await revokeNow();
+
+    expect(result.outcome).toBe("held");
+    expect(chain.sendCount).toBe(1);
+    expect(await revocations()).toEqual([
+      { status: "processing", signature: SIGNATURE, error: null },
+    ]);
+  });
+
+  it("refuses a wallet that is not live in the project", async () => {
+    await expect(
+      runInClusterScope({ projectId: tenant.projectId, environment: "sandbox" }, () =>
+        runWithSystemDatabaseIdentity("test:authority-revocation", () =>
+          revokeSubscriptionAuthorityNow(
+            env,
+            {
+              organizationId: TEST_ORG.id,
+              projectId: tenant.projectId,
+              custodyWalletId: "cwlt_missing",
+              token: MINT,
+              incident: INCIDENT,
+            },
+            chain
+          )
+        )
+      )
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(chain.sendCount).toBe(0);
   });
 });

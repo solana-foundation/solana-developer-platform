@@ -30,7 +30,8 @@ import {
   signature,
 } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
-import { findAssociatedTokenPda } from "@solana-program/token-2022";
+import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
+import { findAssociatedTokenPda, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import pg from "pg";
 import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { z } from "zod";
@@ -154,6 +155,58 @@ function delegation(
       expiresAtTs,
     },
   };
+}
+
+/** Every token-program Approve the managed pool was asked to send, in order: delegate and amount. */
+function sentApprovals(): { delegate: string; amount: bigint }[] {
+  const tokenPrograms = new Set<string>([TOKEN_PROGRAM_ADDRESS, TOKEN_2022_PROGRAM_ADDRESS]);
+  return sendTransactionMock.mock.calls.flatMap(([, transactionBytes]) => {
+    const message = getCompiledTransactionMessageDecoder().decode(
+      getTransactionDecoder().decode(transactionBytes).messageBytes
+    );
+    if (!("instructions" in message)) return [];
+    return message.instructions.flatMap((instruction) => {
+      const program = message.staticAccounts[instruction.programAddressIndex];
+      const data = instruction.data;
+      // Approve: discriminator 4, then the amount as a little-endian u64.
+      if (!program || !tokenPrograms.has(program) || data?.[0] !== 4 || data.length !== 9) {
+        return [];
+      }
+      const delegateIndex = required(instruction.accountIndices)[1];
+      return [
+        {
+          delegate: required(message.staticAccounts[required(delegateIndex)]),
+          amount: new DataView(data.buffer, data.byteOffset + 1, 8).getBigUint64(0, true),
+        },
+      ];
+    });
+  });
+}
+
+/**
+ * Sets a schedule's status as a crash would have left it, even one already canceled: the
+ * tombstone trigger (migration 0190) lets a test database's transaction that asks rewind a cancel.
+ */
+async function rewindRecurringPaymentStatus(
+  recurringPaymentId: string,
+  status: string,
+  updatedAt: string
+): Promise<void> {
+  await getDb(env).transaction(async (tx) => {
+    await tx.execute("SELECT set_config('sdp.test_rewind_canceled', 'on', true)", []);
+    await tx.execute(
+      "UPDATE payment_recurring_payments SET status = ?, updated_at = ? WHERE id = ?",
+      [status, updatedAt, recurringPaymentId]
+    );
+  });
+}
+
+/**
+ * A delegation a cancel-now ended (HOO-2339): its expiry is the chain's clock when it landed. A
+ * plain cancel's expiry, the end of its period, still lets that period be pulled.
+ */
+function canceledNowDelegation(): MaybeAccount<subscriptionsProgram.SubscriptionDelegation> {
+  return delegation(BigInt(Math.floor(Date.now() / 1000)));
 }
 
 /** A plan on chain; `metadataUri` is stored NUL-padded to its fixed 128 bytes. */
@@ -2351,7 +2404,17 @@ describe("Payments routes — recurring", () => {
     });
     const staleAt = new Date(Date.now() - 16 * 60 * 1000).toISOString();
     const requestedNextDueAt = new Date(Date.now() - 60 * 1000).toISOString();
-    const advancedPeriodStartAt = new Date().toISOString();
+    // Whole seconds: the chain's period start, which the update reads first, has no millis.
+    const advancedPeriodStartAt = new Date(Math.floor(Date.now() / 1000) * 1000).toISOString();
+    const onChain = delegation(0n);
+    if (!onChain.exists) throw new Error("Expected the delegation on chain");
+    fetchMaybeSubscriptionDelegationMock.mockResolvedValue({
+      ...onChain,
+      data: {
+        ...onChain.data,
+        currentPeriodStartTs: BigInt(Date.parse(advancedPeriodStartAt) / 1000),
+      },
+    });
     const expectedClampedDueAt = new Date(
       new Date(advancedPeriodStartAt).getTime() + 24 * 60 * 60 * 1000
     ).toISOString();
@@ -2549,6 +2612,154 @@ describe("Payments routes — recurring", () => {
     expect(await authorityRevocations()).toEqual([
       { status: "confirmed", signature: poolSentSignatures()[3] },
     ]);
+    const approval = {
+      status: "revoked",
+      delegate: activated.subscriptionAuthorityAddress,
+      sharedWith: [],
+    };
+    expect(cancelBody.data.tokenApproval).toEqual(approval);
+    expect(replayBody.data.tokenApproval).toEqual(approval);
+    const read = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}`,
+      { headers: RECURRING_HEADERS },
+      env
+    );
+    expect((await parseRecurringResponse(read)).data.tokenApproval).toEqual(approval);
+  });
+
+  it("ends the delegation at once with cancel-now, bound to the period it read", async () => {
+    const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    const cancelNow = vi.spyOn(
+      subscriptionsProgram,
+      "getCancelSubscriptionNowOverlayInstructionAsync"
+    );
+    const plainCancel = vi.spyOn(
+      subscriptionsProgram,
+      "getCancelSubscriptionOverlayInstructionAsync"
+    );
+    onTestFinished(() => {
+      cancelNow.mockRestore();
+      plainCancel.mockRestore();
+    });
+    // A plain cancel's end-of-period expiry still lets that period be pulled, so it is not taken
+    // as landed: cancel-now is sent over it.
+    fetchMaybeSubscriptionDelegationMock.mockResolvedValue(delegation(1_800_000_000n));
+
+    const response = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/cancel`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+
+    expect(response.status).toBe(200);
+    expect(plainCancel).not.toHaveBeenCalled();
+    expect(cancelNow).toHaveBeenCalledTimes(1);
+    const [input] = required(cancelNow.mock.calls[0]);
+    expect(input.expectedCurrentPeriodStartTs).toBe(1_770_000_000n);
+    expect(input.merchant.address).toBe(input.subscriber.address);
+  });
+
+  it("bounds the authority's allowance: 0 after its setup, and each pull's own amount", async () => {
+    // No authority yet, so activation runs the program's setup, which approves u64::MAX.
+    fetchMaybeSubscriptionAuthorityMock.mockResolvedValueOnce(noAccount);
+    const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    expect(sentApprovals()).toEqual([
+      { delegate: activated.subscriptionAuthorityAddress, amount: 0n },
+    ]);
+    await setRecurringCollectionDue({
+      recurringPaymentId: activated.id,
+      subscriptionId: activated.subscriptionId,
+      dueAt: new Date(Date.now() - 60 * 1000).toISOString(),
+    });
+
+    const collect = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/collect`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+
+    expect(collect.status).toBe(200);
+    // 25.00 USDC in base units, approved in the same transaction as the pull.
+    expect(sentApprovals()).toEqual([
+      { delegate: activated.subscriptionAuthorityAddress, amount: 0n },
+      { delegate: activated.subscriptionAuthorityAddress, amount: 25_000_000n },
+    ]);
+  });
+
+  it("refuses a manual collection after cancel without recording a failure", async () => {
+    const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    await setRecurringCollectionDue({
+      recurringPaymentId: activated.id,
+      subscriptionId: activated.subscriptionId,
+      dueAt: new Date(Date.now() - 60 * 1000).toISOString(),
+    });
+    const cancel = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/cancel`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+    expect(cancel.status).toBe(200);
+    const sendsAfterCancel = sendTransactionMock.mock.calls.length;
+
+    const collect = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/collect`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+
+    expect(collect.status).toBe(409);
+    expect(await collect.json()).toMatchObject({
+      error: { message: "Recurring payment is canceled" },
+    });
+    expect(sendTransactionMock).toHaveBeenCalledTimes(sendsAfterCancel);
+    expect(await collectionAttempts(activated.subscriptionId)).toEqual([]);
+    expect(await failedCollectionAttempts(activated.id)).toBe(0);
+  });
+
+  it("skips a schedule the cron read as due before its cancel, recording no failure", async () => {
+    const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    const now = new Date();
+    const dueAt = new Date(now.getTime() - 60 * 1000).toISOString();
+    await setRecurringCollectionDue({
+      recurringPaymentId: activated.id,
+      subscriptionId: activated.subscriptionId,
+      dueAt,
+    });
+    const createRepository =
+      paymentRecurringPaymentsRepositoryPostgres.createPostgresPaymentRecurringPaymentsRepository;
+    const [staleRead] = await createRepository(getDb(env)).listDueCollectionPayments({
+      environment: "sandbox",
+      dueBefore: now.toISOString(),
+      retryBefore: dueAt,
+      limit: 10,
+    });
+    expect(staleRead?.id).toBe(activated.id);
+    const cancel = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/cancel`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+    expect(cancel.status).toBe(200);
+    const sendsAfterCancel = sendTransactionMock.mock.calls.length;
+    // The cron's due read happened before the cancel committed.
+    const repositorySpy = vi
+      .spyOn(
+        paymentRecurringPaymentsRepositoryPostgres,
+        "createPostgresPaymentRecurringPaymentsRepository"
+      )
+      .mockImplementation((db) => ({
+        ...createRepository(db),
+        listDueCollectionPayments: vi.fn(async () => [required(staleRead)]),
+      }));
+    onTestFinished(() => repositorySpy.mockRestore());
+
+    const result = await collectDueRecurringPaymentsIn("sandbox", now);
+
+    expect(result).toMatchObject({ collected: 0, failed: 0, skipped: 1 });
+    expect(sendTransactionMock).toHaveBeenCalledTimes(sendsAfterCancel);
+    expect(await collectionAttempts(activated.subscriptionId)).toEqual([]);
+    expect(await failedCollectionAttempts(activated.id)).toBe(0);
+    expect((await recurringPaymentDueAt(activated.id)).status).toBe("canceled");
   });
 
   it.each(RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS.cancel.claimableStatuses)(
@@ -2566,16 +2777,38 @@ describe("Payments routes — recurring", () => {
           env
         );
 
-      expect((await cancel(first.id)).status).toBe(200);
+      const firstCancel = await cancel(first.id);
+      expect(firstCancel.status).toBe(200);
       expect(await authorityRevocations()).toEqual([]);
+      const kept = {
+        status: "kept",
+        delegate: first.subscriptionAuthorityAddress,
+        sharedWith: [{ id: other.id, status: otherStatus }],
+      };
+      expect((await parseRecurringResponse(firstCancel)).data.tokenApproval).toEqual(kept);
+      const readFirst = async () =>
+        (
+          await parseRecurringResponse(
+            await app.request(
+              `/v1/payments/recurring-payments/${first.id}`,
+              { headers: RECURRING_HEADERS },
+              env
+            )
+          )
+        ).data.tokenApproval;
+      expect(await readFirst()).toEqual(kept);
 
       const last = await cancel(other.id);
 
       expect(last.status).toBe(200);
-      expect((await parseRecurringResponse(last)).data.recurringPayment.status).toBe("canceled");
+      const lastBody = await parseRecurringResponse(last);
+      expect(lastBody.data.recurringPayment.status).toBe("canceled");
+      expect(lastBody.data.tokenApproval).toMatchObject({ status: "revoked", sharedWith: [] });
       expect(await authorityRevocations()).toEqual([
         { status: "confirmed", signature: poolSentSignatures().at(-1) },
       ]);
+      // The earlier cancel now reads the approval as gone too.
+      expect(await readFirst()).toMatchObject({ status: "revoked", sharedWith: [] });
     }
   );
 
@@ -2636,7 +2869,7 @@ describe("Payments routes — recurring", () => {
 
   it("finalizes a cancel whose send is refused because the subscription was canceled outside SDP", async () => {
     const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
-    fetchMaybeSubscriptionDelegationMock.mockResolvedValue(delegation(1_800_000_000n));
+    fetchMaybeSubscriptionDelegationMock.mockResolvedValue(canceledNowDelegation());
     sendTransactionMock.mockRejectedValueOnce(sendTransactionPreflightError());
 
     const cancelRes = await app.request(
@@ -2826,7 +3059,7 @@ describe("Payments routes — recurring", () => {
         staleUpdatedAt
       )
       .run();
-    fetchMaybeSubscriptionDelegationMock.mockResolvedValue(delegation(1_800_000_000n));
+    fetchMaybeSubscriptionDelegationMock.mockResolvedValue(canceledNowDelegation());
     confirmTransactionMock.mockClear();
 
     const response = await app.request(
@@ -2931,6 +3164,18 @@ describe("Payments routes — recurring", () => {
       env
     );
     expect(updateRes.status).toBe(409);
+    const cancelNow = vi.spyOn(
+      subscriptionsProgram,
+      "getCancelSubscriptionNowOverlayInstructionAsync"
+    );
+    const plainCancel = vi.spyOn(
+      subscriptionsProgram,
+      "getCancelSubscriptionOverlayInstructionAsync"
+    );
+    onTestFinished(() => {
+      cancelNow.mockRestore();
+      plainCancel.mockRestore();
+    });
 
     const cancelRes = await app.request(
       `/v1/payments/recurring-payments/${activated.id}/cancel`,
@@ -2939,6 +3184,14 @@ describe("Payments routes — recurring", () => {
     );
 
     expect(cancelRes.status).toBe(200);
+    // Cancel-now would make the program refuse the collection in flight: the plain cancel lets it
+    // land and ends the delegation with its period (HOO-2339).
+    expect(cancelNow).not.toHaveBeenCalled();
+    expect(plainCancel).toHaveBeenCalledTimes(1);
+    expect((await parseRecurringResponse(cancelRes)).data.tokenApproval).toMatchObject({
+      status: "revoking",
+      sharedWith: [],
+    });
     const row = await getDb(env)
       .prepare("SELECT status, next_collection_due_at FROM payment_recurring_payments WHERE id = ?")
       .bind(activated.id)
@@ -4994,7 +5247,7 @@ describe("Payments routes — recurring", () => {
           staleUpdatedAt
         )
         .run();
-      fetchMaybeSubscriptionDelegationMock.mockResolvedValue(delegation(1_800_000_000n));
+      fetchMaybeSubscriptionDelegationMock.mockResolvedValue(canceledNowDelegation());
       await deleteTestOrganization();
 
       expect(await collectDueRecurringPaymentsIn("sandbox", new Date())).toMatchObject({
@@ -6647,10 +6900,7 @@ describe("Payments routes — recurring", () => {
       key: string;
     }) {
       const now = new Date().toISOString();
-      await getDb(env)
-        .prepare("UPDATE payment_recurring_payments SET status = ?, updated_at = ? WHERE id = ?")
-        .bind(input.status, now, input.recurringPaymentId)
-        .run();
+      await rewindRecurringPaymentStatus(input.recurringPaymentId, input.status, now);
       const updated = await getDb(env)
         .prepare(
           `UPDATE ${input.attemptTable} SET status = 'processing', updated_at = ? WHERE idempotency_key = ?`
@@ -7474,12 +7724,7 @@ describe("Payments routes — recurring", () => {
       ).toBe(200);
       // The first cancel crashed mid-transition long enough ago to be recoverable.
       const staleAt = new Date(Date.now() - 16 * 60 * 1000).toISOString();
-      await getDb(env)
-        .prepare(
-          "UPDATE payment_recurring_payments SET status = 'canceling', updated_at = ? WHERE id = ?"
-        )
-        .bind(staleAt, activated.id)
-        .run();
+      await rewindRecurringPaymentStatus(activated.id, "canceling", staleAt);
       await getDb(env)
         .prepare(
           `UPDATE payment_recurring_payment_lifecycle_attempts
@@ -7814,10 +8059,11 @@ describe("Payments routes — recurring", () => {
        */
       async function leaveUnsavedSend(input: { recurringPaymentId: string; key: string }) {
         const staleAt = new Date(Date.now() - 16 * 60 * 1000).toISOString();
-        await getDb(env)
-          .prepare("UPDATE payment_recurring_payments SET status = ?, updated_at = ? WHERE id = ?")
-          .bind(RECURRING_PAYMENT_CANCEL_PROCESSING_STATUS, staleAt, input.recurringPaymentId)
-          .run();
+        await rewindRecurringPaymentStatus(
+          input.recurringPaymentId,
+          RECURRING_PAYMENT_CANCEL_PROCESSING_STATUS,
+          staleAt
+        );
         fetchMaybeSubscriptionAuthorityMock.mockResolvedValue(noAccount);
         const updated = await getDb(env)
           .prepare(
@@ -7864,7 +8110,7 @@ describe("Payments routes — recurring", () => {
         expect(finalizedReads(fetchMaybeSubscriptionDelegationMock.mock.calls)).toBe(0);
         await leaveUnsavedSend({ recurringPaymentId: activated.id, key });
         // The chain shows the cancel: the period's end is set.
-        fetchMaybeSubscriptionDelegationMock.mockResolvedValue(delegation(1_800_000_000n));
+        fetchMaybeSubscriptionDelegationMock.mockResolvedValue(canceledNowDelegation());
         const sent = sends();
 
         const retry = await app.request(
@@ -8076,7 +8322,7 @@ describe("Payments routes — recurring", () => {
         await leaveUnsavedSend({ recurringPaymentId: activated.id, key });
         // Finality stalled: the cancel shows at `confirmed`, not yet at `finalized`.
         fetchMaybeSubscriptionDelegationMock.mockImplementation(async (_rpc, _pda, config) =>
-          delegation(config?.commitment === "confirmed" ? 1_800_000_000n : 0n)
+          config?.commitment === "confirmed" ? canceledNowDelegation() : delegation(0n)
         );
         const sent = sends();
 

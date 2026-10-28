@@ -11,6 +11,8 @@ import {
   type PaymentSubscriptionCollectionAttempt,
   paymentSubscriptionCollectionAttemptMetadataSchema,
   RECURRING_PAYMENT_PAUSE_REASONS,
+  RECURRING_PAYMENT_TOKEN_APPROVAL_STATUSES,
+  type RecurringPaymentTokenApproval,
   type UpdatePaymentRecurringPaymentRequest,
 } from "@sdp/types/payments";
 import { z } from "zod";
@@ -133,7 +135,17 @@ const collectionAttemptSchema = z.object({
   createdAt: z.string(),
   updatedAt: z.string(),
 });
-const recurringPaymentResponseSchema = z.object({ recurringPayment: recurringPaymentSchema });
+const tokenApprovalSchema = z.object({
+  status: z.enum(RECURRING_PAYMENT_TOKEN_APPROVAL_STATUSES),
+  delegate: z.string(),
+  sharedWith: z.array(
+    z.object({ id: z.string(), status: z.enum(PAYMENT_RECURRING_PAYMENT_STATUSES) })
+  ),
+});
+const recurringPaymentResponseSchema = z.object({
+  recurringPayment: recurringPaymentSchema,
+  tokenApproval: tokenApprovalSchema.optional(),
+});
 const recurringPaymentsListResponseSchema = z.object({
   recurringPayments: z.array(recurringPaymentSchema),
   total: z.number(),
@@ -382,11 +394,17 @@ export async function fetchRecurringPayments(
   }
 }
 
+/** A recurring payment as its detail page reads it: a canceled one with its token approval. */
+export interface RecurringPaymentDetail {
+  recurringPayment: PaymentRecurringPayment;
+  tokenApproval: RecurringPaymentTokenApproval | null;
+}
+
 export async function fetchRecurringPaymentById(
   request: SdpApiClient["request"],
   recurringPaymentId: string,
   t: Translate
-): Promise<RecurringFetchResult<PaymentRecurringPayment>> {
+): Promise<RecurringFetchResult<RecurringPaymentDetail>> {
   try {
     const response = await request(
       `/v1/payments/recurring-payments/${encodeURIComponent(recurringPaymentId)}`
@@ -400,7 +418,13 @@ export async function fetchRecurringPaymentById(
     }
 
     const json = recurringPaymentEnvelopeSchema.parse(await response.json());
-    return { ok: true, data: json.data.recurringPayment };
+    return {
+      ok: true,
+      data: {
+        recurringPayment: json.data.recurringPayment,
+        tokenApproval: json.data.tokenApproval ?? null,
+      },
+    };
   } catch (error) {
     return {
       ok: false,

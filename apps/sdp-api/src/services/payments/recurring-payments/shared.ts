@@ -25,6 +25,7 @@ import {
   type TransactionSigner,
 } from "@solana/kit";
 import { findPlanPda, type SubscriptionDelegation } from "@solana/subscriptions";
+import { getApproveInstruction } from "@solana-program/token-2022";
 import { type DatabaseExecutor, getDb } from "@/db/client";
 import type {
   PaymentRecurringPaymentRow,
@@ -443,6 +444,65 @@ export function isSubscriptionDelegationCanceled(
   delegation: MaybeAccount<SubscriptionDelegation>
 ): boolean {
   return delegation.exists && delegation.data.expiresAtTs !== 0n;
+}
+
+/**
+ * Sets how much the wallet's per-mint Subscriptions authority may spend from its token account
+ * (HOO-2339). The program's authority setup approves it for u64::MAX, which would leave the whole
+ * balance to the program's correctness; the program itself never reads the allowance. So SDP sets
+ * it to 0 right after that setup, in the same transaction, and each collection approves exactly
+ * its own amount right before its pull, which spends it back to 0. Approve sets the allowance
+ * outright, so schedules sharing the account never add to one another's.
+ *
+ * @param input.tokenAccount - The wallet's token account for the mint.
+ * @param input.authority - The per-mint authority, the delegate.
+ * @param input.owner - The custody wallet, the account's owner.
+ * @param input.amount - The allowance in base units.
+ * @param input.tokenProgram - The mint's token program.
+ * @returns The token program's Approve instruction.
+ */
+export function approveSubscriptionAuthority(input: {
+  tokenAccount: Address;
+  authority: Address;
+  owner: TransactionSigner;
+  amount: bigint;
+  tokenProgram: Address;
+}): Instruction {
+  return getApproveInstruction(
+    {
+      source: input.tokenAccount,
+      delegate: input.authority,
+      owner: input.owner,
+      amount: input.amount,
+    },
+    { programAddress: input.tokenProgram }
+  );
+}
+
+/**
+ * How far the chain's clock may run ahead of ours when a cancel-now has just landed. A plain
+ * cancel's expiry is the end of a period, hours away, so it stays outside this.
+ */
+const CANCEL_NOW_CLOCK_SLACK_SECONDS = 300n;
+
+/**
+ * Whether the delegation can no longer be pulled from: a cancel-now set its expiry to the chain's
+ * clock at the time (HOO-2339). A plain cancel, which leaves the current period pullable, does not
+ * count until that period has ended.
+ *
+ * @param delegation - The subscription delegation as read.
+ * @param now - The reading time.
+ */
+export function isSubscriptionDelegationCanceledNow(
+  delegation: MaybeAccount<SubscriptionDelegation>,
+  now: Date
+): boolean {
+  return (
+    isSubscriptionDelegationCanceled(delegation) &&
+    delegation.exists &&
+    delegation.data.expiresAtTs <=
+      BigInt(Math.floor(now.getTime() / 1000)) + CANCEL_NOW_CLOCK_SLACK_SECONDS
+  );
 }
 
 /** What the warning names when a step is found on chain without its saved signature. */

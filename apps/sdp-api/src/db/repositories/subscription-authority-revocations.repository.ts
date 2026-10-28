@@ -2,8 +2,10 @@ import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types/api-keys";
 import {
   IN_FLIGHT_COLLECTION_ATTEMPT_STATUSES,
   IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
+  PAYMENT_RECURRING_PAYMENT_STATUSES,
   PAYMENT_SUBSCRIPTION_STATUSES_AWAITING_AUTHORIZATION,
   PAYMENT_SUBSCRIPTION_STATUSES_RELEASING_AUTHORITY,
+  type PaymentRecurringPaymentStatus,
   RECURRING_PAYMENT_STATUSES_CLAIMING_AUTHORITY,
   RECURRING_PAYMENT_STATUSES_RELEASING_AUTHORITY,
   SUBSCRIPTION_AUTHORITY_REVOCATION_HOLDING_STATUSES,
@@ -15,8 +17,9 @@ import type { DatabaseExecutor } from "@/db/client";
 
 /**
  * Revokes of a wallet's per-mint Subscriptions authority (HOO-2210, migration 0153). The
- * revoke-subscription-authorities cron is the only writer; activation, update and resume only read
- * whether one holds their wallet.
+ * revoke-subscription-authorities cron, a recurring payment's cancel and the operator's incident
+ * revoke (HOO-2339) write them; activation, update and resume only read whether one holds their
+ * wallet.
  */
 
 /**
@@ -248,7 +251,45 @@ export interface SubscriptionAuthorityRevocationsRepository {
     now: string;
     limit: number;
   }): Promise<SubscriptionAuthorityRevocationRow[]>;
+  /**
+   * Records a `processing` revoke of the authority whatever still uses it: the operator's
+   * incident revoke (HOO-2339). Call under the wallet's lock. Null when another revoke holds it.
+   */
+  claimRevocationNow(input: {
+    id: string;
+    leaseId: string;
+    organizationId: string;
+    projectId: string;
+    environment: SdpEnvironment;
+    custodyWalletId: string;
+    walletAddress: string;
+    tokenMint: string;
+    subscriptionAuthorityAddress: string;
+    now: string;
+  }): Promise<SubscriptionAuthorityRevocationRow | null>;
+  /**
+   * The project's other recurring payments on the authority that still need it (any status but
+   * {@link RECURRING_PAYMENT_STATUSES_RELEASING_AUTHORITY}), oldest first: the ones a cancel
+   * names when it keeps the approval (HOO-2339).
+   */
+  listRecurringPaymentsSharingAuthority(input: {
+    organizationId: string;
+    projectId: string;
+    subscriptionAuthorityAddress: string;
+    excludeRecurringPaymentId: string;
+  }): Promise<{ id: string; status: PaymentRecurringPaymentStatus }[]>;
+  /** Whether a revoke of the authority has confirmed at or after `since`. */
+  hasConfirmedRevocationSince(input: {
+    environment: SdpEnvironment;
+    subscriptionAuthorityAddress: string;
+    since: string;
+  }): Promise<boolean>;
 }
+
+const sharingRecurringPaymentSchema = z.object({
+  id: z.string(),
+  status: z.enum(PAYMENT_RECURRING_PAYMENT_STATUSES),
+});
 
 export function createPostgresSubscriptionAuthorityRevocationsRepository(
   db: DatabaseExecutor
@@ -380,6 +421,61 @@ export function createPostgresSubscriptionAuthorityRevocationsRepository(
         [now, environment, staleBefore, limit]
       );
       return rows.map((row) => revocationRowSchema.parse(row));
+    },
+
+    async claimRevocationNow(input) {
+      const row = await db.queryOne(
+        `INSERT INTO payment_subscription_authority_revocations (
+            id, organization_id, project_id, environment, custody_wallet_id, wallet_address,
+            token_mint, subscription_authority_address, status, lease_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'processing', ?, ?, ?)
+         ON CONFLICT DO NOTHING
+         RETURNING *`,
+        [
+          input.id,
+          input.organizationId,
+          input.projectId,
+          input.environment,
+          input.custodyWalletId,
+          input.walletAddress,
+          input.tokenMint,
+          input.subscriptionAuthorityAddress,
+          input.leaseId,
+          input.now,
+          input.now,
+        ]
+      );
+      return row ? revocationRowSchema.parse(row) : null;
+    },
+
+    async listRecurringPaymentsSharingAuthority(input) {
+      const rows = await db.queryMany(
+        `SELECT id, status FROM payment_recurring_payments
+          WHERE organization_id = ? AND project_id = ?
+            AND subscription_authority_address = ?
+            AND id <> ?
+            AND status <> ALL(?::text[])
+          ORDER BY created_at ASC, id ASC`,
+        [
+          input.organizationId,
+          input.projectId,
+          input.subscriptionAuthorityAddress,
+          input.excludeRecurringPaymentId,
+          [...RECURRING_PAYMENT_STATUSES_RELEASING_AUTHORITY],
+        ]
+      );
+      return rows.map((row) => sharingRecurringPaymentSchema.parse(row));
+    },
+
+    async hasConfirmedRevocationSince({ environment, subscriptionAuthorityAddress, since }) {
+      const row = await db.queryOne(
+        `SELECT 1 AS revoked FROM payment_subscription_authority_revocations
+          WHERE environment = ? AND subscription_authority_address = ?
+            AND status = 'confirmed' AND created_at >= ?
+          LIMIT 1`,
+        [environment, subscriptionAuthorityAddress, since]
+      );
+      return row !== null;
     },
   };
 }

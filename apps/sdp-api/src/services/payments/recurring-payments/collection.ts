@@ -13,6 +13,7 @@ import {
   COLLECTION_ATTEMPT_STATUSES_WITH_SUBMITTED_TRANSFER,
   FAILED_COLLECTION_ATTEMPT_STATUSES,
   hasRecoverableRecurringPaymentCollection,
+  isCanceledRecurringPaymentStatus,
   isCollectableRecurringPaymentStatus,
   isSuccessfulPaymentTransferStatus,
   type PaymentSubscriptionCollectionAttemptMetadata,
@@ -88,6 +89,7 @@ import { isDefiniteSubmissionError } from "@/services/sponsorship-submission";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import {
+  approveSubscriptionAuthority,
   assertRecurringPaymentSourceWallet,
   canonicalAttemptSignature,
   confirmSubscriptionSignature,
@@ -1721,6 +1723,28 @@ export async function recoverOrBlockLifecycleCollection(input: {
   return { recurringPayment: input.recurringPayment, subscription };
 }
 
+/**
+ * Refuses to collect for a canceled schedule, a tombstone (HOO-2339): only a collection signed
+ * before its cancel settles, and that runs before this. The subscription, read fresh, shows a
+ * cancel that the cron's earlier read of the schedule missed. The cron counts this 409 as skipped,
+ * so it journals no failure and counts nothing toward a pause.
+ *
+ * @param recurringPayment - The schedule as the caller read it.
+ * @param subscription - Its subscription, read for this collection.
+ * @throws AppError `CONFLICT` when either shows the cancel.
+ */
+function refuseCanceledCollection(
+  recurringPayment: PaymentRecurringPaymentRow,
+  subscription: PaymentSubscriptionRow
+): void {
+  if (
+    isCanceledRecurringPaymentStatus(recurringPayment.status) ||
+    subscription.status === "canceled"
+  ) {
+    throw conflict("Recurring payment is canceled");
+  }
+}
+
 export async function collectRecurringPayment(input: {
   env: Env;
   organizationId: string;
@@ -1778,6 +1802,7 @@ export async function collectRecurringPayment(input: {
     idempotencyKey: input.idempotencyKey,
   });
   if (recovered) return recovered;
+  refuseCanceledCollection(input.recurringPayment, subscription);
   if (!isCollectableRecurringPaymentStatus(input.recurringPayment.status)) {
     throw conflict("Recurring payment must be active before collection");
   }
@@ -1979,7 +2004,18 @@ export async function collectRecurringPayment(input: {
       projectId: input.projectId,
       sourceWallet: input.sourceWallet,
       sourceSigner,
-      instructions: [createDestinationAtaInstruction, collectInstruction],
+      // The authority may spend exactly this pull (HOO-2339): the pull spends it back to 0.
+      instructions: [
+        createDestinationAtaInstruction,
+        approveSubscriptionAuthority({
+          tokenAccount: sourceTokenAccount.tokenAccount,
+          authority: subscriptionAuthority,
+          owner: sourceSigner,
+          amount: amountBaseUnits,
+          tokenProgram,
+        }),
+        collectInstruction,
+      ],
       feePayer,
       submissionStore,
     });

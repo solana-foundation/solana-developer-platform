@@ -562,7 +562,7 @@ export function installPaymentsRouteTestHooks(): void {
     fetchMaybeSubscriptionDelegationMock.mockResolvedValue({
       exists: true,
       address: address(TEST_SOLANA_ADDRESSES.wallet3),
-      data: { expiresAtTs: 1_800_000_000n },
+      data: { expiresAtTs: 1_800_000_000n, currentPeriodStartTs: 1_770_000_000n },
     } as Awaited<ReturnType<typeof subscriptionsProgram.fetchMaybeSubscriptionDelegation>>);
     createKoraAdapterMock.mockReturnValue(
       testKoraAdapter({

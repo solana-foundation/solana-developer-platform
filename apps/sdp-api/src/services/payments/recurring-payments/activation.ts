@@ -54,6 +54,7 @@ import { isDefiniteSubmissionError } from "@/services/sponsorship-submission";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import {
+  approveSubscriptionAuthority,
   assertRecurringPaymentSourceWallet,
   canonicalAttemptSignature,
   confirmSubscriptionSignature,
@@ -581,7 +582,20 @@ async function prepareSubscriptionAuthorityForActivation(input: {
     sourceSigner: input.sourceSigner,
     instructions: [
       ...(createSourceAtaInstruction ? [createSourceAtaInstruction] : []),
-      ...(initAuthorityInstruction ? [initAuthorityInstruction] : []),
+      ...(initAuthorityInstruction
+        ? [
+            initAuthorityInstruction,
+            // The setup approves the authority for u64::MAX; collections approve their own
+            // amount, so it holds nothing at rest (HOO-2339).
+            approveSubscriptionAuthority({
+              tokenAccount: input.sourceTokenAccount.tokenAccount,
+              authority: input.subscriptionAuthorityAddress,
+              owner: input.sourceSigner,
+              amount: 0n,
+              tokenProgram: input.tokenProgram,
+            }),
+          ]
+        : []),
     ],
     feePayer: input.feePayer,
     submissionStore: createSubscriptionStepStore({

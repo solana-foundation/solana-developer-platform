@@ -147,10 +147,14 @@ describe("SubscriptionAuthorityRevocationsRepository (postgres)", () => {
     await getDb(env).execute(
       "UPDATE payment_recurring_payment_update_attempts SET status = 'failed' WHERE id = 'rpua_replacement'"
     );
-    await getDb(env).execute(
-      "UPDATE payment_recurring_payments SET status = 'pending_activation', subscription_id = ? WHERE id = ?",
-      [pending.subscriptionId, required(recurringPaymentId)]
-    );
+    // Reviving a canceled schedule is refused outside a test database (migration 0190).
+    await getDb(env).transaction(async (tx) => {
+      await tx.execute("SELECT set_config('sdp.test_rewind_canceled', 'on', true)", []);
+      await tx.execute(
+        "UPDATE payment_recurring_payments SET status = 'pending_activation', subscription_id = ? WHERE id = ?",
+        [pending.subscriptionId, required(recurringPaymentId)]
+      );
+    });
     expect(await list()).toEqual([]);
 
     // The update failed and the payment that named it was canceled: nothing can authorize it.
