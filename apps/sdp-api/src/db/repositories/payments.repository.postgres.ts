@@ -1315,7 +1315,7 @@ export function createPostgresPaymentsRepository(
       statuses,
       fireblocks,
       types,
-      hasSignature,
+      unsigned,
       createdBefore,
       updatedBefore,
       limit,
@@ -1345,9 +1345,7 @@ export function createPostgresPaymentsRepository(
         clauses.push(`pt.type IN (${buildInClause(types.length)})`);
         values.push(...types);
       }
-      if (hasSignature === true) {
-        clauses.push("pt.signature IS NOT NULL");
-      } else if (hasSignature === false) {
+      if (unsigned) {
         clauses.push("pt.signature IS NULL");
       }
       if (createdBefore) {

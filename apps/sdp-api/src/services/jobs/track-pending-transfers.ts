@@ -23,7 +23,7 @@ import { MinContextSlotNotReachedError } from "@sdp/rpc/errors";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import type { SignatureStatusInfo, SolanaRpc } from "@sdp/rpc/solana";
-import { getChainHeight, getSignatureStatuses, reReadExpiredStatuses } from "@sdp/rpc/solana";
+import { getChainHeight, getSignatureStatuses } from "@sdp/rpc/solana";
 import { withTransientRpcRetry } from "@sdp/rpc/transient";
 import type { TransferChainVerdictStatus } from "@sdp/types/payments";
 import { WALLET_TRANSFER_TYPES } from "@sdp/types/payments";
@@ -67,18 +67,22 @@ const CONFIRMED_FINALIZATION_WINDOW_MS = 24 * 60 * 60 * 1000;
  * null to prove the transaction never landed. On the five-minute cron a row is judged within a
  * pass of its expiry, so the horizon only matters when the tracker has been down for more than
  * about an hour (9,000 blocks of Agave's 400 ms target slot): past it the row stays processing and
- * `sdp_api_transfer_verdict_unprovable` pages an operator, who resolves it by hand until HOO-2338's
+ * `sdp_api_payment_verdict_unprovable` pages an operator, who resolves it by hand until HOO-2338's
  * second provider replaces that.
  *
- * Agave purges each node's blockstore oldest-slot-first by shred count, never by slot count
- * (`--limit-blockstore-size`: 400M shreds by default and no fewer than 100M;
- * `ledger/src/blockstore/cleanup_service.rs`), and skipped slots carry no shreds, so retention is
- * counted in blocks and shrinks as load grows. A node at Agave's smallest limit keeps 9,000 blocks
- * until they average about 11,000 shreds (~55,000 TPS at the 4 transactions a shred
- * `ledger/src/shred.rs` assumes); an indexer-backed node keeps everything. The transaction could
- * only have landed within the 150 blocks before its last valid block height (`MAX_PROCESSING_AGE`),
- * which that margin covers. Snapshot-booted nodes and history-backend errors read as null (Agave
- * `rpc.rs` `.unwrap_or(None)`) are outside what any horizon can bound.
+ * The transaction could have landed up to 150 blocks before its last valid block height
+ * (`MAX_PROCESSING_AGE`), so the history must cover 9,150 blocks. Agave purges each node's
+ * blockstore oldest-slot-first by shred count, never by slot count (`--limit-blockstore-size`:
+ * 400M shreds by default and no fewer than 100M; `ledger/src/blockstore/cleanup_service.rs`), and
+ * skipped slots carry no shreds, so retention is counted in blocks and shrinks as load grows. A
+ * node at Agave's smallest limit keeps 9,150 blocks until they average about 10,900 shreds
+ * (~55,000 TPS at the 4 transactions a shred `ledger/src/shred.rs` assumes); an indexer-backed node
+ * keeps everything. Snapshot-booted nodes and history-backend errors read as null (Agave `rpc.rs`
+ * `.unwrap_or(None)`) are outside what any horizon can bound.
+ *
+ * The history read asks for the `finalized` bank, so on Agave 4.4 and later the floor is checked
+ * against the node's root and the answer comes from it. Before 4.4 nodes ignore that commitment:
+ * SDP's own `context.slot` check is then the only floor, and it tests the node's processed slot.
  */
 const VERDICT_HISTORY_HORIZON_BLOCKS = 9_000n;
 
@@ -430,12 +434,6 @@ async function finalizeConfirmedTransfers(
     return;
   }
 
-  if (statuses.length !== signatures.length) {
-    throw internalError(
-      `getSignatureStatuses returned ${statuses.length} statuses for ${signatures.length} signatures`
-    );
-  }
-
   const polled = confirmedTransfers.map(
     (transfer, i): ConfirmedTransferPollVerdict & { signature: string } => {
       const status = statuses[i];
@@ -508,7 +506,7 @@ async function recoverStuckProcessingTransfers(
     environment: currentClusterScope().environment,
     statuses: ["processing"],
     types: WALLET_TRANSFER_TYPES,
-    hasSignature: false,
+    unsigned: true,
     fireblocks: false,
     updatedBefore: cutoff,
     limit: MAX_SIGNATURES_PER_BATCH,
@@ -596,7 +594,7 @@ async function syncProcessingTransfersOnChain(
   // transaction-history lookup can delay the rest of the selected batch.
   for (let i = 0; i < processingWithSig.length; i++) {
     const transfer = processingWithSig[i];
-    const status = statuses[i] ?? null;
+    const status = statuses[i];
     if (status && !(await applyOnChainVerdict(env, repo, transfer, status, nowIso))) {
       await keepStartedSubmissionForReconciliation(repo, transfer, nowIso, {
         reason: unresolvedReasonForStatus(status),
@@ -618,10 +616,10 @@ async function syncProcessingTransfersOnChain(
  * sponsorship budget and Earn reconcilers share. The `finalized` block height proves a signed
  * row's blockhash expired: every later block descends from one that can no longer include it.
  * Every row that may have been broadcast is then re-read from transaction history at the
- * finalized slot (`minContextSlot`, with SDP's own `context.slot` check), so a node behind that
- * proof cannot report a landed transaction absent. A node behind the floor is a miss: no verdict
- * this pass. A null from a node at the floor fails the row only while its landing window is inside
- * the history horizon; past it the row stays processing and alerts.
+ * finalized slot (`minContextSlot` against the `finalized` bank, with SDP's own `context.slot`
+ * check), so a node behind that proof cannot report a landed transaction absent. A node behind the
+ * floor is a miss: no verdict this pass. A null from a node at the floor fails the row only while
+ * its landing window is inside the history horizon; past it the row stays processing and alerts.
  *
  * @param env - Process environment.
  * @param repo - System payments repository.
@@ -677,11 +675,14 @@ async function reconcileCacheMisses(
 
   let history: Array<SignatureStatusInfo | null>;
   try {
-    history = await reReadExpiredStatuses(
+    history = await getSignatureStatuses(
       rpc,
-      candidates.map(() => null),
-      candidates.map((transfer, index) => ({ index, signature: transfer.signature })),
-      finalized.absoluteSlot
+      candidates.map((transfer) => transfer.signature),
+      {
+        searchTransactionHistory: true,
+        minContextSlot: finalized.absoluteSlot,
+        commitment: "finalized",
+      }
     );
   } catch (err) {
     const behind = nodeBehindFloor(err, finalized.absoluteSlot);
@@ -713,6 +714,11 @@ async function reconcileCacheMisses(
 /**
  * Settles one row from its history status read at the finalized floor: a status applies as an
  * on-chain verdict; a null fails the row inside the history horizon and alerts past it.
+ *
+ * One floored null inside the horizon is terminal, an accepted risk: a snapshot-booted node, a
+ * history-backend error Agave turns into null, or a pre-4.4 node answering from a minority fork
+ * can still report a landed transaction absent. Confirming negative verdicts with a second
+ * provider follows HOO-2338.
  *
  * @param env - Process environment.
  * @param repo - System payments repository.
@@ -796,6 +802,13 @@ function nodeBehindFloor(
   return null;
 }
 
+/**
+ * Why an observed status settles nothing this pass.
+ *
+ * @param status - A status `applyOnChainVerdict` did not settle.
+ * @returns `processed_only` below `confirmed`, `error_unfinalized` for an on-chain error not yet
+ * finalized, and otherwise `verdict_write_failed` (the status was settleable but the write failed).
+ */
 function unresolvedReasonForStatus(
   status: SignatureStatusInfo
 ): "processed_only" | "error_unfinalized" | "verdict_write_failed" {
@@ -877,7 +890,7 @@ async function keepStartedSubmissionForReconciliation(
 /**
  * Keep a row whose history read came back null past the history horizon: absence there no longer
  * proves the transaction never landed, so the row stays processing, rotates, and raises
- * `sdp_api_transfer_verdict_unprovable` for an operator.
+ * `sdp_api_payment_verdict_unprovable` for an operator.
  *
  * @param repo - System payments repository.
  * @param transfer - The row whose verdict is unprovable.
@@ -893,7 +906,7 @@ async function keepUnprovableVerdict(
 ): Promise<void> {
   if (!(await rotateProcessingTransfer(repo, transfer, nowIso))) return;
   logEvent("error", {
-    event: "sdp_api_transfer_verdict_unprovable",
+    event: "sdp_api_payment_verdict_unprovable",
     flow: "reconciler",
     organization_id: transfer.organization_id,
     project_id: transfer.project_id,

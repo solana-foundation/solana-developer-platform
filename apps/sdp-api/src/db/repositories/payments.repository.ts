@@ -196,7 +196,8 @@ export interface ListTransfersByStatusInput {
   statuses: PaymentTransferStatus[];
   fireblocks?: boolean;
   types?: readonly PaymentTransferType[];
-  hasSignature?: boolean;
+  /** Only rows that carry no signature yet. */
+  unsigned?: true;
   createdBefore?: string;
   updatedBefore?: string;
   limit: number;
