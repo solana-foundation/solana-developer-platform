@@ -35,7 +35,6 @@ import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import * as solanaSigner from "@/services/solana/signer";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
-import { signSeededClerkMember } from "@/test/helpers/clerk-member";
 import { installClusterRpcResponder, tokenAccountsByOwnerResult } from "@/test/helpers/cluster-rpc";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
@@ -364,31 +363,6 @@ async function seedCryptoWalletCounterpartyAccount(params: {
     params.walletAddress,
   ]);
   return id;
-}
-
-async function _seedBatchApproverClerk(): Promise<Record<string, string>> {
-  const approverUserId = "usr_test_batch_payment_approver";
-  await getDb(env).batch([
-    getDb(env)
-      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
-      .bind(approverUserId, "batch-payment-approver@example.com"),
-    getDb(env)
-      .prepare(
-        `INSERT INTO organization_members (id, organization_id, user_id, role, status)
-         VALUES (?, ?, ?, 'admin', 'active')`
-      )
-      .bind("om_batch_payment_approver", TEST_ORG.id, approverUserId),
-    getDb(env)
-      .prepare(
-        `INSERT INTO project_members (id, project_id, user_id)
-         VALUES (?, ?, ?)`
-      )
-      .bind("pm_batch_payment_approver", TEST_PROJECT.id, approverUserId),
-  ]);
-  return {
-    Authorization: `Bearer ${await signSeededClerkMember(env, getDb(env), approverUserId, TEST_ORG.id)}`,
-    "x-project-id": TEST_PROJECT.id,
-  };
 }
 
 describe("payment transfer batches", () => {
