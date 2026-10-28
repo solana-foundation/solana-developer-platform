@@ -47,4 +47,6 @@ export type SigningErrorCode =
   | "ALREADY_INITIALIZED"
   | "NOT_FOUND"
   | "CONFLICT"
-  | "PROVIDER_CREDENTIAL_INVALID";
+  | "PROVIDER_CREDENTIAL_INVALID"
+  /** The custody provider's own policy declined to sign; nothing was signed. */
+  | "POLICY_REFUSED";

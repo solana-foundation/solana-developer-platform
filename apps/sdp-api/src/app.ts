@@ -22,7 +22,13 @@ import { prettyJSON } from "hono/pretty-json";
 import { routePath } from "hono/route";
 import { secureHeaders } from "hono/secure-headers";
 import { DatabaseUnavailableError } from "@/db/client";
-import { AppError, badRequest, payloadTooLarge, serviceUnavailable } from "@/lib/errors";
+import {
+  AppError,
+  badRequest,
+  custodyPolicyRefused,
+  payloadTooLarge,
+  serviceUnavailable,
+} from "@/lib/errors";
 import { appErrorResponse, mapErrorStatusCode } from "@/lib/response";
 import { corsMiddleware } from "@/middleware/cors";
 import { databaseIdentityBoundary } from "@/middleware/database-identity";
@@ -113,12 +119,16 @@ const KV_FREE_PATHS = [
 const MAX_API_BODY_BYTES = 1024 * 1024;
 
 function mapSigningError(err: SigningError): {
-  status: 400 | 404 | 409 | 502 | 504;
+  status: 400 | 404 | 409 | 422 | 502 | 504;
   code: string;
   message: string;
 } {
   const message = getSafeSigningErrorMessage(err);
   switch (err.code) {
+    case "POLICY_REFUSED": {
+      const refusal = custodyPolicyRefused();
+      return { status: 422, code: refusal.code, message: refusal.message };
+    }
     case "WALLET_NOT_FOUND":
     case "NOT_FOUND":
       return { status: 404, code: err.code, message };
