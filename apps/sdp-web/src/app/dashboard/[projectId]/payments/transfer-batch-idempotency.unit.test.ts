@@ -447,7 +447,7 @@ describe("defaultTransferBatchReference", () => {
     const reference = defaultTransferBatchReference(batchRequest(), "2026-10-28");
     const reordered = batchRequest({ recipients: [...batchRequest().recipients].reverse() });
 
-    expect(reference).toMatch(/^batch-2026-10-28-[0-9a-f]{8}$/);
+    expect(reference).toMatch(/^batch-2026-10-28-[0-9a-f]{16}$/);
     expect(defaultTransferBatchReference(reordered, "2026-10-28")).toBe(reference);
     // A reference the caller set is not part of the run's default.
     expect(

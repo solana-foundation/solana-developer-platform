@@ -128,6 +128,23 @@ const RETRY_REFUSAL_COPY: Partial<Record<string, { title: MessageKey; descriptio
   };
 
 /**
+ * What a failed retry request tells the user. A refusal the API names sent
+ * nothing, so it is said in our words; anything else shows its own message.
+ */
+function retryFailureCopy(
+  error: unknown,
+  t: (key: MessageKey) => string
+): { title: string; description: string } {
+  const refusal =
+    error instanceof TransferBatchRequestError ? RETRY_REFUSAL_COPY[error.code ?? ""] : undefined;
+  if (refusal !== undefined) {
+    return { title: t(refusal.title), description: t(refusal.description) };
+  }
+  const fallback = t("DashboardPayments.batchSend.retryRequestFailed");
+  return { title: fallback, description: error instanceof Error ? error.message : fallback };
+}
+
+/**
  * The UTC calendar day as `YYYY-MM-DD`: one boundary for every operator, so
  * two browsers in different time zones name the same batch the same run.
  */
@@ -656,20 +673,8 @@ export function useBatchSendWizard({
         position: "bottom-right",
       });
     } catch (error) {
-      // A refusal the API names sent nothing; say what happened in our words.
-      const refusal =
-        error instanceof TransferBatchRequestError
-          ? RETRY_REFUSAL_COPY[error.code ?? ""]
-          : undefined;
-      toast.error(t(refusal?.title ?? "DashboardPayments.batchSend.retryRequestFailed"), {
-        id: toastId,
-        description: refusal
-          ? t(refusal.description)
-          : error instanceof Error
-            ? error.message
-            : t("DashboardPayments.batchSend.retryRequestFailed"),
-        position: "bottom-right",
-      });
+      const { title, description } = retryFailureCopy(error, t);
+      toast.error(title, { id: toastId, description, position: "bottom-right" });
       // The API may have taken the retry even though its answer was lost: read
       // the batch again, so a resend in flight resumes the poll.
       void setLiveBatch();

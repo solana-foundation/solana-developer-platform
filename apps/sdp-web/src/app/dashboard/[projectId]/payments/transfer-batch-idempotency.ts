@@ -5,7 +5,11 @@ import {
   type PaymentTransferBatchRequest,
 } from "@sdp/types/payments";
 import { MOVEMENT_READ_PATHS, settleWhenMovementFinal } from "@/lib/dashboard-fetch";
-import { canonicalDecimalAmount, uncertainMoneyAnswerMessage } from "@/lib/idempotency";
+import {
+  canonicalDecimalAmount,
+  storageFingerprint,
+  uncertainMoneyAnswerMessage,
+} from "@/lib/idempotency";
 import {
   createIdempotencyKeyStore,
   resetIdempotencyKeyStoresForTests,
@@ -90,19 +94,9 @@ export function transferBatchRequestFingerprint(request: PaymentTransferBatchReq
   ]);
 }
 
-/** 32-bit FNV-1a of a string, as 8 hex digits: a short, stable digest, not a secret. */
-function fnv1aHex(input: string): string {
-  let hash = 0x811c9dc5;
-  for (let index = 0; index < input.length; index += 1) {
-    hash ^= input.charCodeAt(index);
-    hash = Math.imul(hash, 0x01000193) >>> 0;
-  }
-  return hash.toString(16).padStart(8, "0");
-}
-
 /**
  * The payout run reference the dashboard sends when the user leaves Reference
- * blank (HOO-2335): the day plus a digest of the wallet, token and recipients
+ * blank (HOO-2335): the UTC day plus a digest of the wallet, token and recipients
  * with their amounts. The same batch sent again that day, from any browser or
  * by another operator, names the same run, so the API answers it with the
  * first batch or refuses it (409) instead of paying everyone again. A real
@@ -116,7 +110,7 @@ export function defaultTransferBatchReference(
   day: string
 ): string {
   const { externalId: _ignored, ...rest } = request;
-  return `batch-${day}-${fnv1aHex(transferBatchRequestFingerprint(rest))}`;
+  return `batch-${day}-${storageFingerprint(transferBatchRequestFingerprint(rest))}`;
 }
 
 /**

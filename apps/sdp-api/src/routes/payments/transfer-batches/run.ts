@@ -1,3 +1,4 @@
+import { createClusterRpc } from "@sdp/rpc/factory";
 import { getRecentBlockhash } from "@sdp/rpc/solana";
 import type {
   PaymentTransferBatchRow,
@@ -59,7 +60,8 @@ export async function prepareBatchChunks(
       "payments.transfer_batch"
     ),
     feePayment.getFeePayer(),
-    getRecentBlockhash(resolved.rpc, "confirmed"),
+    // The open cluster scope's pooled client, not one carried in from resolve.
+    getRecentBlockhash(createClusterRpc(), "confirmed"),
   ]);
   if (signer.address !== resolved.sourceWallet.publicKey) {
     throw badRequest("Resolved signing wallet does not match source wallet");
