@@ -1,3 +1,4 @@
+import type { EarnVaultDirectProvider, EarnVaultPositionSnapshot } from "@sdp/earn/types";
 import { hashString } from "@sdp/payments/hash";
 import type { EarnExternalWalletPositionSummaryResponse } from "@sdp/types/earn";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -452,7 +453,9 @@ describe("external-wallet position reads", () => {
       label: "USDC vault",
     });
     readVaultPositions.mockImplementation(
-      async (_ctx: unknown, input: { owner: string; providerReferences: string[] }) =>
+      async (
+        ...[, input]: Parameters<EarnVaultDirectProvider["readVaultPositions"]>
+      ): Promise<EarnVaultPositionSnapshot[]> =>
         input.providerReferences.map((providerReference) => ({
           providerReference,
           owner: input.owner,
@@ -469,6 +472,7 @@ describe("external-wallet position reads", () => {
       "/v1/earn/external-wallet/positions/summary?includeOwnerAddresses=true&includePositions=true"
     );
     expect(response.status).toBe(200);
+    // SAFETY: the summary route's success envelope; the assertions below check every field read.
     const body = (await response.json()) as { data: EarnExternalWalletPositionSummaryResponse };
 
     expect(body.data.summary).toMatchObject({

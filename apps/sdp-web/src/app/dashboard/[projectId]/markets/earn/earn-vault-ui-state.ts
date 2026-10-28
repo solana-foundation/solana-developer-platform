@@ -1,7 +1,8 @@
-import type {
-  EarnVaultDirectMovementStatus,
-  EarnVaultMovementStatus,
-  EarnVaultWithdrawal,
+import {
+  type EarnVaultDirectMovementStatus,
+  type EarnVaultMovementStatus,
+  type EarnVaultWithdrawal,
+  isLandedEarnVaultDirectMovementStatus,
 } from "@sdp/types/earn";
 import type { BadgeVariant } from "@sdp/ui/badge";
 import type { StatusTone } from "@sdp/ui/status-text";
@@ -90,8 +91,9 @@ export function earnVaultWithdrawalPositionStatusLabels(
   t: ReturnType<typeof useTranslations>
 ): EarnVaultPositionStatusDisplay | undefined {
   const { positionStatus } = earnVaultWithdrawalUiState(withdrawal.status);
-  const settled = withdrawal.status === "confirmed" || withdrawal.status === "finalized";
-  if (!settled) return earnVaultPositionStatusLabels(positionStatus, t);
+  if (!isLandedEarnVaultDirectMovementStatus(withdrawal.status)) {
+    return earnVaultPositionStatusLabels(positionStatus, t);
+  }
   if (positionShares === undefined) return undefined;
   const ordering = compareUnsignedDecimals(withdrawal.shares, positionShares);
   if (ordering === undefined) return undefined;

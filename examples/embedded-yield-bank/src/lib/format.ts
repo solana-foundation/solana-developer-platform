@@ -13,6 +13,10 @@ function displayDigits(magnitude: number): string {
   }).format(magnitude);
 }
 
+function isZeroDigits(digits: string): boolean {
+  return !/[1-9]/.test(digits);
+}
+
 /**
  * Whether a figure renders as zero, so it may carry no sign: a vault's
  * rounding leaves earnings like -0.000002 that must not read as a loss.
@@ -20,8 +24,18 @@ function displayDigits(magnitude: number): string {
 export function roundsToZero(value: string): boolean {
   const amount = Number(value);
   return (
-    Number.isFinite(amount) && !/[1-9]/.test(displayDigits(Math.abs(amount)))
+    Number.isFinite(amount) && isZeroDigits(displayDigits(Math.abs(amount)))
   );
+}
+
+function amountSign(
+  amount: number,
+  digits: string,
+  signed: boolean
+): "" | "-" | "+" {
+  if (isZeroDigits(digits)) return "";
+  if (amount < 0) return "-";
+  return signed ? "+" : "";
 }
 
 /**
@@ -36,13 +50,7 @@ export function formatAmount(
   const amount = Number(value);
   if (!Number.isFinite(amount)) return "—";
   const digits = displayDigits(Math.abs(amount));
-  const sign = roundsToZero(value)
-    ? ""
-    : amount < 0
-      ? "-"
-      : options?.signed && amount > 0
-        ? "+"
-        : "";
+  const sign = amountSign(amount, digits, options?.signed === true);
   return USD_STABLECOINS.has(symbol)
     ? `${sign}$${digits}`
     : `${sign}${digits} ${symbol}`;
