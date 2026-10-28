@@ -274,8 +274,8 @@ export class InProcessRateLimiter {
   }
 }
 
-/** Distinct client IPs the keyed backstop's fallback remembers. */
-const KEYED_IP_BACKSTOP_FALLBACK_MAX_TRACKED = 10_000;
+/** Distinct client IPs each per-IP fallback remembers. */
+const PER_IP_FALLBACK_MAX_TRACKED = 10_000;
 
 /**
  * The keyed per-IP backstop's in-process stand-in while the shared counter
@@ -285,7 +285,19 @@ const KEYED_IP_BACKSTOP_FALLBACK_MAX_TRACKED = 10_000;
  */
 export const keyedIpBackstopFallback = new InProcessRateLimiter(
   "keyed_ip_backstop",
-  KEYED_IP_BACKSTOP_FALLBACK_MAX_TRACKED
+  PER_IP_FALLBACK_MAX_TRACKED
+);
+
+/**
+ * The anonymous per-IP limit's in-process stand-in while the shared counter
+ * store is down, so no unauthenticated path runs unmetered during an outage.
+ * It counts per instance rather than refusing: `/pay` reads stay up, and the
+ * sponsored signature `/pay` produces is still refused by sponsorship budget
+ * admission, which fails closed on the same store.
+ */
+export const anonymousFallback = new InProcessRateLimiter(
+  "anonymous_default",
+  PER_IP_FALLBACK_MAX_TRACKED
 );
 
 /**
@@ -454,9 +466,9 @@ export async function enforceRateLimit(
  * auth via enforceRateLimit). Everything else, any credential on any other
  * path included, gets the anonymous per-IP limit.
  *
- * The anonymous limit fails closed: it guards unauthenticated work (the
- * sponsored signature `/pay` produces), so a counter-store outage refuses it
- * with 503 rather than admitting it unmetered.
+ * Both per-IP limits count in this instance's memory while the shared counter
+ * store is down (keyedIpBackstopFallback, anonymousFallback), so neither runs
+ * unmetered during an outage.
  *
  * Requires c.var.kv to be populated (by kvStoreMiddleware) on non-exempt
  * paths, so every path kv-store skips must be listed here too — the
@@ -465,8 +477,7 @@ export async function enforceRateLimit(
  * @param paths - Path patterns exempt from rate limiting.
  * @returns Hono middleware that admits or 429s the request before calling next.
  * @throws AppError RATE_LIMITED (429) from the returned middleware when the
- *   applicable per-IP limit is exceeded; AppError SERVICE_UNAVAILABLE (503)
- *   when the anonymous limit's counter store is unavailable.
+ *   applicable per-IP limit is exceeded.
  */
 export function skipRateLimitPaths(...paths: string[]) {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
@@ -503,7 +514,7 @@ export function skipRateLimitPaths(...paths: string[]) {
     } else {
       await enforceRateLimit(c, clientIp, ANONYMOUS_MAX_REQUESTS, {
         metricTier: "anonymous_default",
-        failClosed: true,
+        fallback: anonymousFallback,
       });
     }
     await next();
