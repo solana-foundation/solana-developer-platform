@@ -394,18 +394,19 @@ body {
 }
 
 .launch-docs-nav-item.is-active .launch-docs-nav-icon,
-.launch-docs-nav-folder-link.is-active .launch-docs-nav-icon {
+.launch-docs-nav-folder-row.is-active .launch-docs-nav-icon {
   color: var(--ink);
 }
 
+/* A row's highlight: a folder's row is one, its toggle included. */
 .launch-docs-nav-item:hover,
-.launch-docs-nav-folder-link:hover {
+.launch-docs-nav-folder-row:hover {
   background: var(--wash);
   color: var(--ink);
 }
 
 .launch-docs-nav-item.is-active,
-.launch-docs-nav-folder-link.is-active {
+.launch-docs-nav-folder-row.is-active {
   background: var(--wash-strong);
   color: var(--ink);
   font-weight: 500;
@@ -418,6 +419,8 @@ body {
 .launch-docs-nav-folder-row {
   display: flex;
   align-items: center;
+  border-radius: var(--corner-control);
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .launch-docs-nav-folder-btn {
@@ -437,14 +440,6 @@ body {
   line-height: var(--line-height-body);
   cursor: pointer;
   text-align: left;
-  transition:
-    background-color var(--motion-duration-fast) var(--motion-ease-out),
-    color var(--motion-duration-fast) var(--motion-ease-out);
-}
-
-.launch-docs-nav-folder-btn:hover {
-  background: var(--wash);
-  color: var(--ink);
 }
 
 .launch-docs-nav-toggle-icon {
@@ -472,13 +467,10 @@ body {
   background: transparent;
   color: var(--ink-tertiary);
   cursor: pointer;
-  transition:
-    background-color var(--motion-duration-fast) var(--motion-ease-out),
-    color var(--motion-duration-fast) var(--motion-ease-out);
+  transition: color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .launch-docs-nav-toggle:hover {
-  background: var(--wash);
   color: var(--ink);
 }
 
@@ -496,8 +488,9 @@ body {
   transform: rotate(90deg);
 }
 
+/* Each level sits 14px further in, its highlight with it. */
 .launch-docs-nav-children {
-  margin: 1px 0 4px;
+  margin: 1px 0 4px 14px;
 }
 
 .launch-docs-sidebar-section {

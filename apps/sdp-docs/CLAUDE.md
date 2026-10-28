@@ -154,10 +154,11 @@ Sidebar icons are optional and opt-in per page/folder. Set `icon: <LucideName>` 
 | `.launch-docs-nav-item` | Page link: `--font-size-body`, `--ink-secondary`, `--wash` on hover |
 | `.launch-docs-nav-item.is-active` | Active page: `--wash-strong` bg, `--ink`, weight 500 |
 | `.launch-docs-nav-folder` | Folder container |
+| `.launch-docs-nav-folder-row` | A folder's row and its one highlight, toggle included: `--wash` on hover, `--wash-strong` (`.is-active`) on the folder's own page |
 | `.launch-docs-nav-folder-btn` | Non-linked folder label that toggles the folder: `--ink`, weight 500 |
-| `.launch-docs-nav-folder-link` | Linked folder: `--ink`, weight 500 |
+| `.launch-docs-nav-folder-link` | Linked folder: `--ink`, weight 500; a click opens the folder, or toggles it from the folder's own page |
 | `.launch-docs-nav-toggle` | Expand/collapse chevron button, 28px |
-| `.launch-docs-nav-children` | Indented children container |
+| `.launch-docs-nav-children` | Children container, 14px further in per level, highlights included |
 | `.launch-docs-sidebar-section` | Section label: `--font-size-meta`, `--ink-tertiary`, sentence case |
 | `.launch-docs-sidebar-separator` | Plain 1px `--rule-faint` rule |
 | `.launch-docs-sidebar-status` | Footer: status rows (`.launch-docs-status-list`, ending in the `llms.txt` link) and the theme switch |
