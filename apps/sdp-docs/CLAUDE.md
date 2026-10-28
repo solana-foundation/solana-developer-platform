@@ -122,7 +122,7 @@ Popovers (`fumadocs-ui/components/ui/popover`) render in a portal outside `.sdp-
 | `.launch-mdx-td` | Table cell: 14px |
 | `.launch-docs-action-links` | `<ActionLinks>`: a page's action links as raised chips (`--chip` + `--chip-ring`); a `download` link leads with a download icon, a JSON link with braces |
 
-`DocsBreadcrumb` (`breadcrumb.tsx`) links each folder above the page to its landing page: its index, or else its first page, so a section whose meta lists its overview as a child still links. A folder with no page is a quieter label.
+`DocsBreadcrumb` (`breadcrumb.tsx`) links each folder above the page to its landing page: its index, or else its first page, so a section whose meta lists its overview as a child still links. A folder whose index is the page ends the trail (an API family's table shows Reference > API > Payments), and a step that is the page itself, or a folder with no page, is a quieter label.
 
 ---
 

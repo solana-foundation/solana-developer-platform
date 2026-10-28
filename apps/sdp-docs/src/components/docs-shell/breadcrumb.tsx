@@ -10,13 +10,13 @@ type FolderNode = Extract<PageTreeNode, { type: "folder" }>;
 
 /**
  * The folders above the page at `url`, outermost first, or null when no page has it. A folder
- * whose index is the page is the page itself, so it is left out, as Fumadocs' breadcrumb does.
+ * whose index is the page ends the trail: on a family's table, the family is the last step.
  */
 function foldersAbove(nodes: PageTreeNode[], url: string): FolderNode[] | null {
   for (const node of nodes) {
     if (node.type === "page" && node.url === url) return [];
     if (node.type !== "folder") continue;
-    if (node.index?.url === url) return [];
+    if (node.index?.url === url) return [node];
     const inner = foldersAbove(node.children, url);
     if (inner !== null) return [node, ...inner];
   }
