@@ -682,9 +682,6 @@ export async function confirmSubscriptionSignature(
   }
 }
 
-/** The allowance `InitSubscriptionAuthority` approves its PDA for on the source token account. */
-const SUBSCRIPTION_AUTHORITY_ALLOWANCE = 2n ** 64n - 1n;
-
 /**
  * Prepares the source wallet's token account and its `SubscriptionAuthority` for a subscription,
  * with the fee payer funding the rent. Each create is its own sponsored transaction, confirmed
@@ -694,7 +691,7 @@ const SUBSCRIPTION_AUTHORITY_ALLOWANCE = 2n ** 64n - 1n;
  *
  * Whether the init is sent is decided from the token account's state at `confirmed`, not from
  * whether the authority exists: it is sent unless the authority exists and the token account
- * names its PDA as delegate for the full allowance. A missing token account has no delegate, so
+ * names its PDA as delegate with allowance left. A missing token account has no delegate, so
  * its create is always followed by the init. On an existing authority the init pays no rent and
  * re-approves the delegate. The delegate check is what makes a crash between the token account's
  * create and the init resumable: the retry finds the token account without the delegate and sends
@@ -747,7 +744,7 @@ export async function prepareSubscriptionAuthority(input: {
     if (
       existingAuthority.exists &&
       unwrapOption(sourceToken.data.delegate) === input.subscriptionAuthorityAddress &&
-      sourceToken.data.delegatedAmount === SUBSCRIPTION_AUTHORITY_ALLOWANCE
+      sourceToken.data.delegatedAmount > 0n
     ) {
       return existingAuthority;
     }
