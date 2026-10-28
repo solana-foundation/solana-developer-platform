@@ -349,7 +349,7 @@ function statusBand({
     case "expired":
       return { tone: "neutral", state, body: t("DashboardPayments.recurring.stateExpiredBody") };
     default:
-      // Activating, updating, canceling, resuming: the network has the schedule.
+      // Activating, updating, canceling: the network has the schedule.
       return { tone: "info", state, body: t("DashboardPayments.recurring.stateWorkingBody") };
   }
 }

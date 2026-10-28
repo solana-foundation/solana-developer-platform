@@ -253,14 +253,14 @@ export function movementAllowsWalletPurpose(
  * A recurring payment is a mandate (APE-343): the scheduler signs for it as
  * the mandate, not as whoever created or activated it. Each movement it may
  * sign, and the recurring-payment statuses that admit it: a scheduled
- * collection needs an `active` mandate; the job's recovery of an activation or
- * a resume needs the row still in that operation. Anything else, `canceled`
- * above all, refuses. A key's revocation does not stop its mandates.
+ * collection needs an `active` mandate; the job's recovery of an activation
+ * needs the row still `activating`. Anything else, `canceled` above all,
+ * refuses: resume signs nothing and only a request resumes, so no mandate
+ * starts one. A key's revocation does not stop its mandates.
  */
 export const MANDATE_MOVEMENT_STATUSES = {
   "recurring.collect": ["active"],
   "recurring.activate": ["activating"],
-  "recurring.resume": ["resuming"],
 } as const satisfies Partial<Record<StartMovementId, readonly PaymentRecurringPaymentStatus[]>>;
 
 /**

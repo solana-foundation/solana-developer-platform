@@ -250,14 +250,16 @@ export type RecurringPaymentActivator =
   | { apiKeyId: string; userId: null }
   | { apiKeyId: null; userId: string };
 
-export interface ClaimPaymentRecurringPaymentLifecycleInput {
+/**
+ * A cancel's claim: a running or paused schedule, or a `canceling` one last touched at or before
+ * `staleBefore`, moves to `canceling`.
+ */
+export interface ClaimPaymentRecurringPaymentCancelInput {
   recurringPaymentId: string;
   organizationId: string;
   projectId: string;
-  operation: PaymentRecurringPaymentLifecycleOperation;
   updatedAt: string;
-  staleBefore?: string;
-  activatedBy: RecurringPaymentActivator | null;
+  staleBefore: string;
 }
 
 export interface ClaimPaymentRecurringPaymentUpdateInput {
@@ -616,8 +618,8 @@ export interface PaymentRecurringPaymentsRepository {
   updateRecurringPaymentDestinationTokenAccount(
     input: UpdatePaymentRecurringPaymentDestinationTokenAccountInput
   ): Promise<PaymentRecurringPaymentRow | null>;
-  claimRecurringPaymentLifecycle(
-    input: ClaimPaymentRecurringPaymentLifecycleInput
+  claimRecurringPaymentCancel(
+    input: ClaimPaymentRecurringPaymentCancelInput
   ): Promise<PaymentRecurringPaymentRow | null>;
   claimRecurringPaymentUpdate(
     input: ClaimPaymentRecurringPaymentUpdateInput

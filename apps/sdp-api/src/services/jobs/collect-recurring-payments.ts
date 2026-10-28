@@ -1,8 +1,8 @@
 import { currentClusterScope } from "@sdp/rpc/scope";
 import {
   isActivatingRecurringPaymentStatus,
+  isCancelingRecurringPaymentStatus,
   RECURRING_PAYMENT_COLLECTION_CONFIG,
-  recurringPaymentInFlightLifecycleOperation,
 } from "@sdp/types/payments";
 import { getDb } from "@/db/client";
 import type {
@@ -31,10 +31,7 @@ import {
   journalAutomatedCollectionFailure,
   skipRefusedRecurringCollectionPeriod,
 } from "@/services/payments/recurring-payments/collection";
-import {
-  cancelRecurringPayment,
-  resumeRecurringPayment,
-} from "@/services/payments/recurring-payments/lifecycle";
+import { cancelRecurringPayment } from "@/services/payments/recurring-payments/lifecycle";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 
@@ -260,18 +257,9 @@ async function recoverLifecycleRow(
       });
       return "ok";
     }
-    const operation = recurringPaymentInFlightLifecycleOperation(row.status);
-    if (operation === "cancel") {
+    if (isCancelingRecurringPaymentStatus(row.status)) {
       // An exit: never refused, for deleted and unentitled organizations alike.
       await cancelRecurringPayment(input);
-      return "ok";
-    }
-    if (operation === "resume") {
-      const { scope, context, subject } = admissionFor(row, "recurring.resume");
-      await resumeRecurringPayment({
-        ...input,
-        admitStart: () => assertMoneyStartAdmitted(env, scope, context, subject),
-      });
       return "ok";
     }
     throw internalError(`Unhandled lifecycle status ${row.status}`);
@@ -279,7 +267,7 @@ async function recoverLifecycleRow(
     if (!(error instanceof Error)) throw error;
     // The operation's own failure path already failed the attempt and reset
     // the row to a status the job does not select (activation:
-    // `pending_activation`, resume: `canceled`).
+    // `pending_activation`, cancel: the status it claimed from).
     if (error instanceof MoneyMovementRefusedError) {
       return "refused";
     }

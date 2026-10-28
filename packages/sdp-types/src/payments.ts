@@ -870,8 +870,8 @@ export const COLLECTABLE_RECURRING_PAYMENT_STATUSES = [
 ] as const satisfies readonly PaymentRecurringPaymentStatus[];
 /**
  * A recurring payment that collects, or will once resumed from a pause or once
- * its activation, update or resume in flight finishes, or once a cancel in
- * flight fails back:
+ * its activation or update in flight finishes, or once a cancel in flight fails
+ * back:
  * revoke-and-cancel must see all of them, or one mid-way would become active
  * after the revoke that was meant to stop it.
  */
@@ -881,7 +881,6 @@ export const LIVE_RECURRING_PAYMENT_STATUSES = [
   "activating",
   "updating",
   "canceling",
-  "resuming",
 ] as const satisfies readonly PaymentRecurringPaymentStatus[];
 export function isCollectableRecurringPaymentStatus(
   status: PaymentRecurringPaymentStatus
@@ -990,20 +989,27 @@ export const PAYMENT_SUBSCRIPTION_STATUSES_AWAITING_AUTHORIZATION = [
 export const RECURRING_PAYMENT_STATUSES_CLAIMING_AUTHORITY = [
   "activating",
   "updating",
-  "resuming",
 ] as const satisfies readonly PaymentRecurringPaymentStatus[];
 export function isInFlightRecurringPaymentAttemptStatus(
   status: PaymentRecurringPaymentAttemptStatus
 ): boolean {
   return IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES.some((candidate) => candidate === status);
 }
-export const RECURRING_PAYMENT_STATUSES_IN_FLIGHT_LIFECYCLE = [
-  "canceling",
-  "resuming",
-] as const satisfies readonly PaymentRecurringPaymentStatus[];
+/**
+ * The status a cancel holds a schedule in while its on-chain cancel is in
+ * flight. It is the only lifecycle operation with one: resume is a database
+ * transition (HOO-2340), so nothing writes `resuming`, which stays in
+ * {@link PAYMENT_RECURRING_PAYMENT_STATUSES} only until a migration drops it
+ * from the table's CHECK.
+ */
+export const RECURRING_PAYMENT_CANCEL_PROCESSING_STATUS =
+  "canceling" as const satisfies PaymentRecurringPaymentStatus;
+export function isCancelingRecurringPaymentStatus(status: PaymentRecurringPaymentStatus): boolean {
+  return status === RECURRING_PAYMENT_CANCEL_PROCESSING_STATUS;
+}
 export const RECURRING_PAYMENT_STATUSES_RECOVERABLE_BY_CRON = [
   "activating",
-  ...RECURRING_PAYMENT_STATUSES_IN_FLIGHT_LIFECYCLE,
+  RECURRING_PAYMENT_CANCEL_PROCESSING_STATUS,
 ] as const satisfies readonly PaymentRecurringPaymentStatus[];
 export const RECURRING_PAYMENT_STATUSES_WITH_RECOVERABLE_COLLECTION = [
   "active",
@@ -1022,21 +1028,17 @@ export function hasRecoverableRecurringPaymentCollection(
 /**
  * A cancel is terminal (HOO-2339): nothing claims `canceled`, so a canceled
  * schedule never collects or resumes again. Cancel claims a running or paused
- * schedule. Resume only brings back a schedule SDP paused (HOO-2340), whose
- * delegation is still on chain, so it is a database transition that never
- * passes through `resuming`.
+ * schedule and holds it in {@link RECURRING_PAYMENT_CANCEL_PROCESSING_STATUS}
+ * while its on-chain cancel lands. Resume only brings back a schedule SDP
+ * paused (HOO-2340), whose delegation is still on chain, so it is a database
+ * transition with no processing status.
  */
 export const RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS = {
-  cancel: {
-    processingStatus: "canceling",
-    claimableStatuses: ["active", "paused"],
-    finalStatus: "canceled",
-  },
-  resume: { processingStatus: "resuming", claimableStatuses: ["paused"], finalStatus: "active" },
+  cancel: { claimableStatuses: ["active", "paused"], finalStatus: "canceled" },
+  resume: { claimableStatuses: ["paused"], finalStatus: "active" },
 } as const satisfies Record<
   PaymentRecurringPaymentLifecycleOperation,
   {
-    processingStatus: PaymentRecurringPaymentStatus;
     claimableStatuses: readonly PaymentRecurringPaymentStatus[];
     finalStatus: PaymentRecurringPaymentStatus;
   }
@@ -1127,17 +1129,6 @@ export function isMoneyMovementInFlight(status: MoneyMovementStatus): boolean {
 
 export function isCanceledRecurringPaymentStatus(status: PaymentRecurringPaymentStatus): boolean {
   return status === RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS.cancel.finalStatus;
-}
-
-export function recurringPaymentInFlightLifecycleOperation(
-  status: PaymentRecurringPaymentStatus
-): PaymentRecurringPaymentLifecycleOperation | null {
-  for (const operation of PAYMENT_RECURRING_PAYMENT_LIFECYCLE_OPERATIONS) {
-    if (status === RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS[operation].processingStatus) {
-      return operation;
-    }
-  }
-  return null;
 }
 
 export interface PaymentSubscriptionPlan {

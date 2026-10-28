@@ -10,6 +10,7 @@ import {
   PAYMENT_RECURRING_PAYMENT_UPDATE_ATTEMPT_MODES,
   PAYMENT_RECURRING_PAYMENT_UPDATE_ATTEMPT_STAGES,
   RECURRING_PAYMENT_ATTEMPT_STATUSES_ANSWERING_IDEMPOTENCY_KEY,
+  RECURRING_PAYMENT_CANCEL_PROCESSING_STATUS,
   RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS,
   RECURRING_PAYMENT_STATUSES_RECOVERABLE_BY_CRON,
   RECURRING_PAYMENT_STATUSES_WITH_RECOVERABLE_COLLECTION,
@@ -18,7 +19,7 @@ import { z } from "zod";
 import type { DatabaseExecutor } from "@/db/client";
 import { AppError } from "@/lib/errors";
 import type {
-  ClaimPaymentRecurringPaymentLifecycleInput,
+  ClaimPaymentRecurringPaymentCancelInput,
   ClaimPaymentRecurringPaymentUpdateInput,
   ClearPaymentRecurringPaymentStepSignatureInput,
   CollectibleRecurringPaymentRow,
@@ -800,36 +801,30 @@ export function createPostgresPaymentRecurringPaymentsRepository(
       return row ? mapRecurringPaymentRow(row) : null;
     },
 
-    async claimRecurringPaymentLifecycle(input: ClaimPaymentRecurringPaymentLifecycleInput) {
-      const { processingStatus, claimableStatuses } =
-        RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS[input.operation];
-      const staleBefore = input.staleBefore ?? null;
+    async claimRecurringPaymentCancel(input: ClaimPaymentRecurringPaymentCancelInput) {
       const row = await db
         .prepare(
           `UPDATE payment_recurring_payments
               SET status = ?,
-                  updated_at = ?,
-                  ${ACTIVATED_BY_ASSIGNMENTS}
+                  updated_at = ?
             WHERE id = ?
               AND organization_id = ?
               AND project_id = ?
               AND (
                 status = ANY(?::text[])
-                OR (status = ? AND ?::text IS NOT NULL AND updated_at <= ?)
+                OR (status = ? AND updated_at <= ?)
               )
           RETURNING *`
         )
         .bind(
-          processingStatus,
+          RECURRING_PAYMENT_CANCEL_PROCESSING_STATUS,
           input.updatedAt,
-          ...activatedByBindings(input.activatedBy),
           input.recurringPaymentId,
           input.organizationId,
           input.projectId,
-          [...claimableStatuses],
-          processingStatus,
-          staleBefore,
-          staleBefore
+          [...RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS.cancel.claimableStatuses],
+          RECURRING_PAYMENT_CANCEL_PROCESSING_STATUS,
+          input.staleBefore
         )
         .first<Record<string, unknown>>();
 

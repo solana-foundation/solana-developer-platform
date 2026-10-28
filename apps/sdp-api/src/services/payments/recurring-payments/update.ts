@@ -16,10 +16,10 @@ import {
   IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
   isActivatingRecurringPaymentStatus,
   isCanceledRecurringPaymentStatus,
+  isCancelingRecurringPaymentStatus,
   isPendingActivationRecurringPaymentStatus,
   isUpdatingRecurringPaymentStatus,
   type PaymentRecurringPaymentUpdateAttemptMode,
-  recurringPaymentInFlightLifecycleOperation,
   type UpdatePaymentRecurringPaymentRequest,
 } from "@sdp/types/payments";
 import {
@@ -299,9 +299,8 @@ function assertRecurringPaymentUpdateStatus(row: PaymentRecurringPaymentRow, now
       if (isActivatingRecurringPaymentStatus(row.status)) {
         throw conflict("Recurring payment activation is already processing");
       }
-      const lifecycleOperation = recurringPaymentInFlightLifecycleOperation(row.status);
-      if (lifecycleOperation) {
-        throw conflict(`Recurring payment ${lifecycleOperation} is already processing`);
+      if (isCancelingRecurringPaymentStatus(row.status)) {
+        throw conflict("Recurring payment cancel is already processing");
       }
       if (
         doesRecurringPaymentStatusRequireReactivation(row.status) ||

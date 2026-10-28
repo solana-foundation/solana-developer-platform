@@ -1,7 +1,6 @@
 import {
-  decideRecurringPaymentLifecycleTransition,
+  decideRecurringPaymentCancelTransition,
   firstRecurringPaymentDueAfter,
-  getRecurringPaymentLifecycleStatuses,
   getRecurringPaymentOperationStaleBefore,
   nextRecurringPaymentCollectionDueAt,
   type RecurringPaymentLifecycleOperation,
@@ -14,6 +13,7 @@ import {
   isRecurringPaymentLifecycleClaimableStatus,
   type PaymentRecurringPaymentLifecycleAttemptStage,
   type PaymentRecurringPaymentStatus,
+  RECURRING_PAYMENT_CANCEL_PROCESSING_STATUS,
   RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS,
 } from "@sdp/types/payments";
 import type { Address, MaybeAccount, Signature } from "@solana/kit";
@@ -72,16 +72,14 @@ const cancelAttemptMetadataSchema = z.object({
   claimedFrom: z.enum(RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS.cancel.claimableStatuses),
 });
 
-function assertLifecyclePreconditions(input: {
-  operation: RecurringPaymentLifecycleOperation;
+function assertCancelPreconditions(input: {
   recurringPayment: PaymentRecurringPaymentRow;
   sourceWallet: CustodyWallet;
   nowIso: string;
 }): void {
   assertRecurringPaymentSourceWallet(input.recurringPayment, input.sourceWallet);
 
-  const transition = decideRecurringPaymentLifecycleTransition({
-    operation: input.operation,
+  const transition = decideRecurringPaymentCancelTransition({
     status: input.recurringPayment.status,
     updatedAt: input.recurringPayment.updated_at,
     nowIso: input.nowIso,
@@ -94,11 +92,9 @@ function assertLifecyclePreconditions(input: {
     return;
   }
   if (transition === "processing") {
-    throw conflict(`Recurring payment ${input.operation} is already processing`);
+    throw conflict("Recurring payment cancel is already processing");
   }
-  throw conflict(
-    `Recurring payment cannot be ${input.operation === "cancel" ? "canceled" : "resumed"} from this status`
-  );
+  throw conflict("Recurring payment cannot be canceled from this status");
 }
 
 /**
@@ -262,7 +258,7 @@ async function recordCancelFailure(input: {
       organizationId: input.organizationId,
       projectId: input.projectId,
       status: claimedFrom,
-      expectedStatus: RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS.cancel.processingStatus,
+      expectedStatus: RECURRING_PAYMENT_CANCEL_PROCESSING_STATUS,
       updatedAt: input.failedAt,
     });
     if (updatedRecurringPayment === null)
@@ -327,8 +323,7 @@ async function finalizeRecurringPaymentCancel(input: {
   signature: Signature | null;
 }): Promise<PaymentRecurringPaymentRow> {
   const finalizedAt = new Date().toISOString();
-  const { finalStatus: recurringStatus, processingStatus } =
-    getRecurringPaymentLifecycleStatuses("cancel");
+  const recurringStatus = RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS.cancel.finalStatus;
   const subscriptionStatus = "canceled";
 
   return getDb(input.env).transaction(async (tx) => {
@@ -349,7 +344,7 @@ async function finalizeRecurringPaymentCancel(input: {
       organizationId: input.organizationId,
       projectId: input.projectId,
       status: recurringStatus,
-      expectedStatus: processingStatus,
+      expectedStatus: RECURRING_PAYMENT_CANCEL_PROCESSING_STATUS,
       updatedAt: finalizedAt,
     });
     const updatedAttempt = await recurringRepo.updateLifecycleAttempt({
@@ -436,9 +431,9 @@ async function runRecurringPaymentCancel(input: {
   );
   const nowIso = new Date().toISOString();
 
-  assertLifecyclePreconditions({ ...input, operation: "cancel", nowIso });
+  assertCancelPreconditions({ ...input, nowIso });
   if (
-    input.recurringPayment.status === getRecurringPaymentLifecycleStatuses("cancel").finalStatus
+    input.recurringPayment.status === RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS.cancel.finalStatus
   ) {
     return answerFinalLifecycle({
       ...input,
@@ -456,15 +451,12 @@ async function runRecurringPaymentCancel(input: {
 
   const claimResult = await getDb(input.env).transaction(async (tx) => {
     const transactionRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
-    const claimed = await transactionRepo.claimRecurringPaymentLifecycle({
+    const claimed = await transactionRepo.claimRecurringPaymentCancel({
       recurringPaymentId: input.recurringPayment.id,
       organizationId: input.organizationId,
       projectId: input.projectId,
-      operation: "cancel",
       updatedAt: new Date().toISOString(),
       staleBefore: getRecurringPaymentOperationStaleBefore(nowIso),
-      // A cancel records nobody.
-      activatedBy: null,
     });
     if (!claimed) return null;
     const attempt = await getOrCreateCancelAttempt({
@@ -800,7 +792,7 @@ export async function resumeRecurringPayment(input: {
 }): Promise<PaymentRecurringPaymentRow> {
   const { recurringPayment } = input;
   assertRecurringPaymentSourceWallet(recurringPayment, input.sourceWallet);
-  if (recurringPayment.status === getRecurringPaymentLifecycleStatuses("resume").finalStatus) {
+  if (recurringPayment.status === RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS.resume.finalStatus) {
     return answerFinalLifecycle({
       ...input,
       operation: "resume",

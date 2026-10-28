@@ -90,7 +90,7 @@ const STATUS_COLUMNS = `?::text[] AS subscription_released, ?::text[] AS payment
  *   after the caller's own authorization lands.
  * - Every recurring payment still on it is released.
  * - Nothing may be about to use one of the wallet's authorities before recording it: no recurring
- *   payment from the wallet is activating, updating or resuming, and no update in flight is moving
+ *   payment from the wallet is activating or updating, and no update in flight is moving
  *   a recurring payment onto the wallet.
  * - No revoke of it holds it, none failed within the retry window, and none has confirmed since
  *   the last change on it.
