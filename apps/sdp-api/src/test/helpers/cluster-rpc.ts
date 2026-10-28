@@ -214,10 +214,13 @@ const signatureStatusesParamsSchema = z.union([
   z.tuple([z.array(z.string()), z.object({ searchTransactionHistory: z.literal(true) })]),
 ]);
 
-/** What a responder answers one request with: a `result`, or a JSON-RPC `error` body. */
+/**
+ * What a responder answers one request with: a `result`, or a JSON-RPC `error` body, whose `data`
+ * kit reads as the error's context (a `-32016` carries the answering node's `contextSlot`).
+ */
 export type ClusterRpcReply =
   | { result: JsonRpcResult }
-  | { error: { code: number; message: string } };
+  | { error: { code: number; message: string; data?: JsonRpcResult } };
 
 /** One signature's status as a stubbed `getSignatureStatuses` serves it. */
 export interface StubSignatureStatus {
@@ -252,6 +255,17 @@ export interface ClusterRpcResponder extends ClusterRpcStub {
    * @param verdict - The status of one signature in one request, or null when the cluster has none.
    */
   respondSignatureStatuses(
+    verdict: (signature: string, read: SignatureStatusesRead) => StubSignatureStatus | null
+  ): void;
+  /**
+   * {@link ClusterRpcResponder.respondSignatureStatuses} from a node that has processed through
+   * `contextSlot`, for reads floored with `minContextSlot`.
+   *
+   * @param contextSlot - The slot the answering node reports its view at.
+   * @param verdict - The status of one signature in one request, or null when the cluster has none.
+   */
+  respondSignatureStatusesAt(
+    contextSlot: number,
     verdict: (signature: string, read: SignatureStatusesRead) => StubSignatureStatus | null
   ): void;
 }
@@ -325,6 +339,18 @@ export function installClusterRpcResponder(): ClusterRpcResponder {
   const calls: ClusterRpcCall[] = [];
   const requests: ClusterRpcRequest[] = [];
   const replies = new Map<string, (request: ClusterRpcRequest) => ClusterRpcReply>();
+  const respondSignatureStatusesAt: ClusterRpcResponder["respondSignatureStatusesAt"] = (
+    contextSlot,
+    verdict
+  ) => {
+    replies.set("getSignatureStatuses", (request) => {
+      const read = signatureStatusesRead(request);
+      return signatureStatusesReplyAt(
+        contextSlot,
+        read.signatures.map((signature) => verdict(signature, read))
+      );
+    });
+  };
 
   beforeEach(() => {
     const stubbedFetch = globalThis.fetch;
@@ -359,11 +385,9 @@ export function installClusterRpcResponder(): ClusterRpcResponder {
       replies.set(method, reply);
     },
     respondSignatureStatuses(verdict) {
-      replies.set("getSignatureStatuses", (request) => {
-        const read = signatureStatusesRead(request);
-        return signatureStatusesReply(read.signatures.map((signature) => verdict(signature, read)));
-      });
+      respondSignatureStatusesAt(1, verdict);
     },
+    respondSignatureStatusesAt,
   };
 }
 
