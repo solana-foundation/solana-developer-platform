@@ -4,6 +4,7 @@ import {
   isPartiallyFailedTransferBatchStatus,
   type PaymentTransferBatchRequest,
 } from "@sdp/types/payments";
+import { z } from "zod";
 import { MOVEMENT_READ_PATHS, settleWhenMovementFinal } from "@/lib/dashboard-fetch";
 import {
   canonicalDecimalAmount,
@@ -94,11 +95,35 @@ export function transferBatchRequestFingerprint(request: PaymentTransferBatchReq
   ]);
 }
 
+/** Where a blank Reference's generated payout run name is kept, per batch content. */
+const DEFAULT_REFERENCE_STORE_PREFIX = "sdp:payments:transfer-batch:reference:v1:";
+/** How long a generated name outlives an unsettled send: past any recovery. */
+const DEFAULT_REFERENCE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const storedReferenceSchema = z.object({ reference: z.string(), savedAt: z.number() });
+
+/**
+ * `localStorage`, not the key store's `sessionStorage`: the run's name has to
+ * survive a closed tab, a reload and a new day (HOO-2335), or a send whose
+ * answer was lost would be named a new run when the wizard is reopened.
+ */
+function referenceStorage(): Storage | null {
+  try {
+    return typeof window === "undefined" ? null : window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+function referenceStoreName(unnamed: PaymentTransferBatchRequest): string {
+  const { externalId: _ignored, ...rest } = unnamed;
+  return `${DEFAULT_REFERENCE_STORE_PREFIX}${storageFingerprint(transferBatchRequestFingerprint(rest))}`;
+}
+
 /**
  * The payout run reference the dashboard sends when the user leaves Reference
- * blank (HOO-2335): the UTC day plus a digest of the wallet, token and recipients
- * with their amounts. The same batch sent again that day, from any browser or
- * by another operator, names the same run, so the API answers it with the
+ * blank (HOO-2335): the UTC day plus a digest of the wallet, token and
+ * recipients with their amounts. The same batch sent again, from any browser
+ * or by another operator, names the same run, so the API answers it with the
  * first batch or refuses it (409) instead of paying everyone again. A real
  * second identical payout the same day needs a reference of its own.
  *
@@ -111,6 +136,49 @@ export function defaultTransferBatchReference(
 ): string {
   const { externalId: _ignored, ...rest } = request;
   return `batch-${day}-${storageFingerprint(transferBatchRequestFingerprint(rest))}`;
+}
+
+/**
+ * The default reference for this batch, minted on its first send and kept
+ * until that send is settled, so a send whose answer was lost and is tried
+ * again after midnight, in another tab or after a reload still names the same
+ * run. A storage that refuses falls back to the day's name.
+ */
+export function claimDefaultTransferBatchReference(
+  unnamed: PaymentTransferBatchRequest,
+  now: Date = new Date()
+): string {
+  const storage = referenceStorage();
+  const name = referenceStoreName(unnamed);
+  try {
+    const raw = storage?.getItem(name);
+    const stored = raw ? storedReferenceSchema.safeParse(JSON.parse(raw)) : null;
+    if (stored?.success && now.getTime() - stored.data.savedAt < DEFAULT_REFERENCE_TTL_MS) {
+      return stored.data.reference;
+    }
+  } catch {
+    // An unreadable entry is replaced below.
+  }
+  const reference = defaultTransferBatchReference(unnamed, now.toISOString().slice(0, 10));
+  try {
+    storage?.setItem(name, JSON.stringify({ reference, savedAt: now.getTime() }));
+  } catch {
+    // Kept for this send only; the day's name still dedupes it today.
+  }
+  return reference;
+}
+
+/** Forgets a settled send's default reference, so the next identical batch is a new run. */
+function releaseDefaultTransferBatchReference(sent: PaymentTransferBatchRequest): void {
+  const storage = referenceStorage();
+  const name = referenceStoreName(sent);
+  try {
+    const raw = storage?.getItem(name);
+    const stored = raw ? storedReferenceSchema.safeParse(JSON.parse(raw)) : null;
+    if (stored?.success && stored.data.reference === sent.externalId) storage?.removeItem(name);
+  } catch {
+    // Left to expire.
+  }
 }
 
 /**
@@ -146,17 +214,28 @@ export async function sendTransferBatchUnderKey(
   request: PaymentTransferBatchRequest,
   t: Translate
 ): Promise<CreateTransferBatchResult> {
-  // Sent in the form it is keyed by, whatever form the caller passed.
-  const canonical = canonicalTransferBatchRequest(request);
+  // Sent in the form it is keyed by, whatever form the caller passed, and
+  // always naming its payout run: a blank Reference gets the durable default.
+  const unnamed = canonicalTransferBatchRequest(request);
+  const canonical =
+    unnamed.externalId === undefined
+      ? { ...unnamed, externalId: claimDefaultTransferBatchReference(unnamed) }
+      : unnamed;
   const fingerprint = transferBatchRequestFingerprint(canonical);
   const { key, persisted } = store.claim(fingerprint);
+  const settleKey = () => {
+    store.release(fingerprint, key);
+    releaseDefaultTransferBatchReference(canonical);
+  };
   let result: CreateTransferBatchResult;
   try {
     result = await createTransferBatch(canonical, t, { value: key, persisted });
   } catch (error) {
     if (error instanceof TransferBatchRequestError) {
       const answer = { status: error.status, replayed: error.replayed, code: error.code };
-      settleMoneyIdempotencyKey(store, fingerprint, key, answer);
+      if (settleMoneyIdempotencyKey(store, fingerprint, key, answer)) {
+        releaseDefaultTransferBatchReference(canonical);
+      }
       const uncertain = uncertainMoneyAnswerMessage(answer);
       if (uncertain !== null) {
         // The key is kept, so the next press is answered under it: send nothing new.
@@ -177,13 +256,15 @@ export async function sendTransferBatchUnderKey(
     code: null,
     movementStatus: result.batch.status,
   });
+  if (settled) {
+    releaseDefaultTransferBatchReference(canonical);
+    return result;
+  }
   // A replay repeats the first answer verbatim, so only a read of the batch's
   // current state can show it final and settle the key.
-  if (!settled) {
-    settleWhenMovementFinal(MOVEMENT_READ_PATHS.batch(result.batch.id), (status) => {
-      if (!isPartiallyFailedTransferBatchStatus(status)) store.release(fingerprint, key);
-    });
-  }
+  settleWhenMovementFinal(MOVEMENT_READ_PATHS.batch(result.batch.id), (status) => {
+    if (!isPartiallyFailedTransferBatchStatus(status)) settleKey();
+  });
   return result;
 }
 

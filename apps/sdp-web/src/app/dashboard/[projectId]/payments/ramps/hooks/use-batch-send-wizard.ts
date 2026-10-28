@@ -39,7 +39,6 @@ import {
 import { walletBalanceAssetOptions } from "@/app/dashboard/[projectId]/payments/ramps/wallet-options";
 import {
   canonicalTransferBatchRequest,
-  defaultTransferBatchReference,
   retryTransferBatchUnderKey,
   sendTransferBatchUnderKey,
 } from "@/app/dashboard/[projectId]/payments/transfer-batch-idempotency";
@@ -142,14 +141,6 @@ function retryFailureCopy(
   }
   const fallback = t("DashboardPayments.batchSend.retryRequestFailed");
   return { title: fallback, description: error instanceof Error ? error.message : fallback };
-}
-
-/**
- * The UTC calendar day as `YYYY-MM-DD`: one boundary for every operator, so
- * two browsers in different time zones name the same batch the same run.
- */
-function utcCalendarDay(date: Date): string {
-  return date.toISOString().slice(0, 10);
 }
 
 /**
@@ -350,8 +341,6 @@ export function useBatchSendWizard({
   const [walletId, setWalletId] = useState("");
   const [asset, setAsset] = useState("");
   const [externalId, setExternalId] = useState("");
-  // Fixed for the session, so a retry after midnight still names the same run.
-  const [referenceDay] = useState(() => utcCalendarDay(new Date()));
   const { entries, setEntries, setRecipientAmount, toggleRecipient, setManySelected } =
     useBatchRecipientEntries();
   const [submitting, setSubmitting] = useState(false);
@@ -493,27 +482,22 @@ export function useBatchSendWizard({
 
   // Canonical form, not the order the recipients were assembled in: the API
   // fingerprints recipients IN ORDER, so a retry that reorders the same set
-  // has to send the same bytes or it is refused as a key conflict. Every batch
-  // names its payout run: a blank Reference gets the day's default, so the
-  // same batch sent again from another browser is never paid twice (HOO-2335).
-  const request = useMemo(() => {
-    const unnamed = canonicalTransferBatchRequest({
-      sourceCustodyWalletId: walletId,
-      token: asset,
-      recipients: recipients.map((r) => ({
-        counterpartyId: r.counterpartyId,
-        counterpartyAccountId: r.counterpartyAccountId,
-        amount: r.amount,
-      })),
-    });
-    return {
-      ...unnamed,
-      externalId:
-        trimmedExternalId.length > 0
-          ? trimmedExternalId
-          : defaultTransferBatchReference(unnamed, referenceDay),
-    };
-  }, [walletId, asset, recipients, trimmedExternalId, referenceDay]);
+  // has to send the same bytes or it is refused as a key conflict. A blank
+  // Reference is named at send time, durably (sendTransferBatchUnderKey).
+  const request = useMemo(
+    () =>
+      canonicalTransferBatchRequest({
+        ...(trimmedExternalId.length > 0 ? { externalId: trimmedExternalId } : {}),
+        sourceCustodyWalletId: walletId,
+        token: asset,
+        recipients: recipients.map((r) => ({
+          counterpartyId: r.counterpartyId,
+          counterpartyAccountId: r.counterpartyAccountId,
+          amount: r.amount,
+        })),
+      }),
+    [walletId, asset, recipients, trimmedExternalId]
+  );
   const recipientsValid = batchSendSchema.safeParse({
     walletId,
     asset,
