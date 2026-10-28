@@ -1,8 +1,11 @@
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import { type Address, blockhash, createNoopSigner } from "@solana/kit";
 import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
-import type { SplTokenContext } from "@/routes/payments/transfer-batches/transaction";
-import type { RecentBlockhash, ResolvedRecipient } from "@/routes/payments/transfer-batches/types";
+import type {
+  RecentBlockhash,
+  ResolvedRecipient,
+  SplTokenContext,
+} from "@/routes/payments/transfer-batches/types";
 import { syntheticAddress } from "@/test/helpers/parsed-transactions";
 
 /** A legacy SPL Token batch of a synthetic six-decimal mint. */

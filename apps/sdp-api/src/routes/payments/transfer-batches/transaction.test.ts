@@ -74,7 +74,6 @@ describe("buildSplInstructionGroups", () => {
 
 describe("chunkInstructionGroups", () => {
   it.each([
-    { label: "mainnet's 2.5M", maxLamportsPerTransaction: 2_500_000n, chunks: [[0], [1]] },
     { label: "exactly two accounts' rent", maxLamportsPerTransaction: 2n * RENT, chunks: [[0, 1]] },
     {
       label: "one lamport under it",

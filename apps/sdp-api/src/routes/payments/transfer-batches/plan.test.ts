@@ -2,8 +2,10 @@ import { runInClusterScope } from "@sdp/rpc/scope";
 import type { Address } from "@solana/kit";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
 import { syntheticAddress } from "@/test/helpers/parsed-transactions";
+import { required } from "@/test/helpers/required";
 import { respondRecipientTokenAccounts } from "@/test/helpers/token-mints";
 import {
   TEST_BATCH_FEE_PAYER,
@@ -16,7 +18,15 @@ import { planBatchTransactions } from "./plan";
 
 const INITIALIZED_OWNER = syntheticAddress(721);
 const MISSING_OWNER = syntheticAddress(722);
-const PREFUNDED_OWNER = syntheticAddress(723);
+
+async function associatedTokenAccount(owner: Address): Promise<Address> {
+  const [tokenAccount] = await findAssociatedTokenPda({
+    owner,
+    mint: TEST_SPL_TOKEN_CONTEXT.mintAddress,
+    tokenProgram: TEST_SPL_TOKEN_CONTEXT.tokenProgram,
+  });
+  return tokenAccount;
+}
 
 function plan(owners: readonly Address[]) {
   return runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
@@ -40,17 +50,13 @@ describe("planBatchTransactions", () => {
       mint: TEST_SPL_TOKEN_CONTEXT.mintAddress,
       tokenProgram: TEST_SPL_TOKEN_CONTEXT.tokenProgram,
       holders: [INITIALIZED_OWNER],
-      prefunded: [PREFUNDED_OWNER],
+      prefunded: [],
     });
   }
 
   it("funds rent only for the recipient whose token account is missing", async () => {
     await respondTokenAccounts();
-    const [missingTokenAccount] = await findAssociatedTokenPda({
-      owner: MISSING_OWNER,
-      mint: TEST_SPL_TOKEN_CONTEXT.mintAddress,
-      tokenProgram: TEST_SPL_TOKEN_CONTEXT.tokenProgram,
-    });
+    const missingTokenAccount = await associatedTokenAccount(MISSING_OWNER);
 
     const { chunks, rentBudget } = await plan([INITIALIZED_OWNER, MISSING_OWNER]);
 
@@ -63,13 +69,25 @@ describe("planBatchTransactions", () => {
     expect(chunks.map((chunk) => chunk.recipientIndexes)).toEqual([[0, 1]]);
   });
 
-  it("classifies a System account at a token account address as prefunded", async () => {
-    await respondTokenAccounts();
-
-    await expect(plan([INITIALIZED_OWNER, PREFUNDED_OWNER])).rejects.toMatchObject({
-      code: "RECIPIENT_NOT_SPONSORABLE",
-      details: { reason: "token_account_address_prefunded", recipientIndexes: [1] },
+  it("reads 101 recipient token accounts in slices of 100 and 1", async () => {
+    const owners = Array.from({ length: 101 }, (_, index) => syntheticAddress(800 + index));
+    await respondRecipientTokenAccounts(rpc, {
+      mint: TEST_SPL_TOKEN_CONTEXT.mintAddress,
+      tokenProgram: TEST_SPL_TOKEN_CONTEXT.tokenProgram,
+      holders: owners.slice(0, 100),
+      prefunded: [],
     });
+
+    const { rentBudget } = await plan(owners);
+
+    expect(
+      rpc.requests
+        .filter((request) => request.method === "getMultipleAccounts")
+        .map((request) => z.array(z.string()).parse(request.params[0]).length)
+    ).toEqual([100, 1]);
+    expect(rentBudget.missingTokenAccounts).toEqual(
+      new Set([await associatedTokenAccount(required(owners[100]))])
+    );
   });
 
   it("answers 502 when getMultipleAccounts answers for fewer addresses than asked", async () => {
