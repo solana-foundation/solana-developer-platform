@@ -3,15 +3,21 @@ import { CLUSTER_BY_SDP_ENVIRONMENT, WELL_KNOWN_TOKENS } from "@sdp/types/well-k
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { seedRotatedApiKeyRow } from "@/test/helpers/api-keys";
 import { seedProjectCryptoWalletCounterparty } from "@/test/helpers/counterparties";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { seedUnreadPrivyWallet } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
-import { seedRecurringDatabaseTenant, testSignature } from "@/test/helpers/recurring-payments";
+import {
+  seedActiveRecurringPayment,
+  seedRecurringDatabaseTenant,
+  testSignature,
+} from "@/test/helpers/recurring-payments";
 import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { createPostgresCounterpartiesRepository } from "./counterparty.repository.postgres";
 import { createPostgresCounterpartyAccountsRepository } from "./counterparty-account.repository.postgres";
+import type { PaymentPrincipalFilter } from "./payment-principal-filter";
 import type {
   PaymentRecurringPaymentsRepository,
   RecurringPaymentStepSignatureSlot,
@@ -563,5 +569,133 @@ describe("PaymentRecurringPaymentsRepository collection job reads (postgres)", (
 
       expect(rows.map((row) => row.id)).toEqual([recurringPaymentId(environment)]);
     });
+  });
+});
+
+describe("PaymentRecurringPaymentsRepository principal filters (postgres)", () => {
+  const PRODUCTION_PROJECT_ID = `${TEST_PROJECT_ID}_production`;
+  const MEMBER = { kind: "member", userId: TEST_USER.id } as const;
+  let repo: PaymentRecurringPaymentsRepository;
+
+  afterAll(async () => {
+    await seedTestDatabase(env);
+  });
+
+  beforeEach(async () => {
+    await seedTestDatabase(env);
+    await seedRecurringDatabaseTenant({
+      organizationId: TEST_ORG.id,
+      organizationName: TEST_ORG.name,
+      organizationSlug: TEST_ORG.slug,
+      userId: TEST_USER.id,
+      userEmail: TEST_USER.email,
+      projectId: TEST_PROJECT_ID,
+      custodyConfigId: "cfg_recurring_payments_principal",
+      custodyWalletId: TEST_CUSTODY_WALLET_ID,
+      providerWalletId: TEST_PROVIDER_WALLET_ID,
+      publicKey: TEST_SOURCE_ADDRESS,
+    });
+    repo = createPostgresPaymentRecurringPaymentsRepository(getDb(env));
+  });
+
+  function seedActive(id: string, projectId: string, activatedBy: PaymentPrincipalFilter) {
+    return seedActiveRecurringPayment({
+      id,
+      organizationId: TEST_ORG.id,
+      projectId,
+      createdBy: TEST_USER.id,
+      source: {
+        custodyWalletId: TEST_CUSTODY_WALLET_ID,
+        walletId: TEST_PROVIDER_WALLET_ID,
+        address: TEST_SOURCE_ADDRESS,
+      },
+      activatedBy,
+    });
+  }
+
+  async function listedIds(activatedBy: PaymentPrincipalFilter): Promise<string[]> {
+    const { rows } = await repo.listRecurringPayments({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      activatedBy,
+      limit: 50,
+      offset: 0,
+    });
+    return rows.map((row) => row.id).sort();
+  }
+
+  it("matches a key with the keys it was rotated from, never another key's", async () => {
+    for (const [id, rotatedFrom] of [
+      ["key_recurring_repo_old", null],
+      ["key_recurring_repo_new", "key_recurring_repo_old"],
+    ] as const) {
+      await seedRotatedApiKeyRow(getDb(env), {
+        id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        createdBy: TEST_USER.id,
+        rotatedFrom,
+      });
+    }
+    await seedActive("recpay_repo_by_old", TEST_PROJECT_ID, {
+      kind: "api_key",
+      apiKeyId: "key_recurring_repo_old",
+    });
+    await seedActive("recpay_repo_by_new", TEST_PROJECT_ID, {
+      kind: "api_key",
+      apiKeyId: "key_recurring_repo_new",
+    });
+    await seedActive("recpay_repo_by_other", TEST_PROJECT_ID, {
+      kind: "api_key",
+      apiKeyId: "key_recurring_repo_other",
+    });
+    await seedActive("recpay_repo_by_member", TEST_PROJECT_ID, MEMBER);
+
+    expect(await listedIds({ kind: "api_key", apiKeyId: "key_recurring_repo_new" })).toEqual([
+      "recpay_repo_by_new",
+      "recpay_repo_by_old",
+    ]);
+    expect(await listedIds({ kind: "api_key", apiKeyId: "key_recurring_repo_old" })).toEqual([
+      "recpay_repo_by_old",
+    ]);
+    expect(await listedIds(MEMBER)).toEqual(["recpay_repo_by_member"]);
+  });
+
+  it("counts active payments per project as the active list totals them", async () => {
+    await seedActive("recpay_repo_sandbox_a", TEST_PROJECT_ID, MEMBER);
+    await seedActive("recpay_repo_sandbox_b", TEST_PROJECT_ID, MEMBER);
+    await seedActive("recpay_repo_production", PRODUCTION_PROJECT_ID, MEMBER);
+    await seedActive("recpay_repo_canceled", TEST_PROJECT_ID, MEMBER);
+    await getDb(env)
+      .prepare("UPDATE payment_recurring_payments SET status = 'canceled' WHERE id = ?")
+      .bind("recpay_repo_canceled")
+      .run();
+
+    const counts = await repo.countActiveRecurringPaymentsByProject({
+      organizationId: TEST_ORG.id,
+      activatedBy: MEMBER,
+    });
+    const totals = await Promise.all(
+      [TEST_PROJECT_ID, PRODUCTION_PROJECT_ID].map(async (projectId) => ({
+        projectId,
+        count: (
+          await repo.listRecurringPayments({
+            organizationId: TEST_ORG.id,
+            projectId,
+            status: "active",
+            activatedBy: MEMBER,
+            limit: 50,
+            offset: 0,
+          })
+        ).total,
+      }))
+    );
+
+    expect(totals).toEqual([
+      { projectId: TEST_PROJECT_ID, count: 2 },
+      { projectId: PRODUCTION_PROJECT_ID, count: 1 },
+    ]);
+    expect(counts).toHaveLength(2);
+    expect(counts).toEqual(expect.arrayContaining(totals));
   });
 });
