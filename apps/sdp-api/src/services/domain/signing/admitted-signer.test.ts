@@ -1,11 +1,23 @@
+import { SigningError } from "@sdp/custody/signing";
 import {
+  assertIsMessageModifyingSigner,
+  assertIsMessagePartialSigner,
+  assertIsTransactionModifyingSigner,
+  assertIsTransactionPartialSigner,
+  assertIsTransactionSendingSigner,
   generateKeyPairSigner,
   isMessagePartialSigner,
   isTransactionPartialSigner,
   isTransactionSendingSigner,
+  type MessageModifyingSigner,
+  type MessagePartialSigner,
+  type TransactionModifyingSigner,
+  type TransactionPartialSigner,
+  type TransactionSendingSigner,
   type TransactionSigner,
 } from "@solana/kit";
 import { describe, expect, it, vi } from "vitest";
+import { AppError } from "@/lib/errors";
 import { type MoneyAdmissionDecision, MoneyMovementRefusedError } from "@/lib/money-admission";
 import * as moneyPathEvents from "@/runtime/money-path-events";
 import { admittedSigner } from "./admitted-signer";
@@ -113,5 +125,93 @@ describe("admittedSigner", () => {
     admittedSigner(signer, decide, CONTEXT);
 
     expect(decide).not.toHaveBeenCalled();
+  });
+});
+
+function signTransactions(signer: TransactionSigner) {
+  assertIsTransactionPartialSigner(signer);
+  return signer.signTransactions([]);
+}
+
+function modifyAndSignTransactions(signer: TransactionSigner) {
+  assertIsTransactionModifyingSigner(signer);
+  return signer.modifyAndSignTransactions([]);
+}
+
+function signAndSendTransactions(signer: TransactionSigner) {
+  assertIsTransactionSendingSigner(signer);
+  return signer.signAndSendTransactions([]);
+}
+
+function signMessages(signer: TransactionSigner) {
+  assertIsMessagePartialSigner(signer);
+  return signer.signMessages([]);
+}
+
+function modifyAndSignMessages(signer: TransactionSigner) {
+  assertIsMessageModifyingSigner(signer);
+  return signer.modifyAndSignMessages([]);
+}
+
+async function signerRejectingWith(
+  error: Error
+): Promise<
+  TransactionPartialSigner &
+    TransactionModifyingSigner &
+    TransactionSendingSigner &
+    MessagePartialSigner &
+    MessageModifyingSigner
+> {
+  const { address } = await generateKeyPairSigner();
+  const reject = async () => {
+    throw error;
+  };
+  return {
+    address,
+    signTransactions: reject,
+    modifyAndSignTransactions: reject,
+    signAndSendTransactions: reject,
+    signMessages: reject,
+    modifyAndSignMessages: reject,
+  };
+}
+
+describe("admittedSigner custody policy refusals (HOO-2333)", () => {
+  it.each([
+    ["signTransactions", signTransactions],
+    ["modifyAndSignTransactions", modifyAndSignTransactions],
+    ["signAndSendTransactions", signAndSendTransactions],
+    ["signMessages", signMessages],
+    ["modifyAndSignMessages", modifyAndSignMessages],
+  ] as const)(
+    "raises a policy refusal from %s as CUSTODY_POLICY_REFUSED, keeping the refusal as its cause",
+    async (_method, sign) => {
+      const refusal = new SigningError("Privy policy refused", "POLICY_REFUSED");
+      const signer = admittedSigner(
+        await signerRejectingWith(refusal),
+        async () => ADMITTED,
+        CONTEXT
+      );
+
+      const failure = await sign(signer).catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(AppError);
+      expect(failure).toMatchObject({
+        code: "CUSTODY_POLICY_REFUSED",
+        statusCode: 422,
+        cause: refusal,
+      });
+    }
+  );
+
+  it("rethrows any other signing failure unchanged", async () => {
+    const unavailable = new SigningError("Privy unreachable", "NETWORK_ERROR");
+    const signer = admittedSigner(
+      await signerRejectingWith(unavailable),
+      async () => ADMITTED,
+      CONTEXT
+    );
+
+    await expect(signTransactions(signer)).rejects.toBe(unavailable);
   });
 });
