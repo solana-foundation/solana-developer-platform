@@ -8,7 +8,7 @@ import {
 import { formatDecimalAmount } from "@sdp/solana/amount";
 import { SOL_DECIMALS } from "@sdp/types/well-known-tokens";
 import type { Address } from "@solana/kit";
-import { amountBelowRentMinimum } from "@/lib/errors";
+import { amountBelowRentMinimum, internalError } from "@/lib/errors";
 
 /**
  * Native SOL transfers the chain refuses for rent (HOO-2375), checked before
@@ -58,10 +58,10 @@ export interface SolMovement {
   /** Each payment, by its index in the request. */
   payments: readonly { index: number; destination: Address; lamports: bigint }[];
   /**
-   * Lamports per transaction, when the payments are split across transactions
-   * submitted concurrently; omitted for a single transaction.
+   * The payment indexes each transaction carries, when the payments are split
+   * across transactions submitted concurrently; omitted for a single transaction.
    */
-  transactionLamports?: readonly bigint[];
+  transactions?: readonly (readonly number[])[];
 }
 
 /** What the chain would refuse in a movement, and the minimum it misses. */
@@ -98,18 +98,35 @@ async function readLamports(addresses: readonly Address[]): Promise<Map<Address,
  * 0) is safe only when every transaction moves at least the minimum.
  */
 function sourceRemainderBelowMinimum(
+  source: Address,
   balance: bigint,
   movement: SolMovement,
   minimum: bigint
 ): bigint | null {
-  const total = movement.payments.reduce((sum, payment) => sum + payment.lamports, 0n);
+  // A payment back to the source moves nothing out of it.
+  const outflow = new Map(
+    movement.payments.map((payment) => [
+      payment.index,
+      payment.destination === source ? 0n : payment.lamports,
+    ])
+  );
+  const total = [...outflow.values()].reduce((sum, lamports) => sum + lamports, 0n);
   // Not enough to send at all: the funding checks answer that, not rent.
   if (balance < total) return null;
   const remainder = balance - total;
   if (remainder > 0n && remainder < minimum) return remainder;
-  const transactions = movement.transactionLamports ?? [];
+  const transactions = movement.transactions ?? [];
   if (remainder === 0n && transactions.length > 1) {
-    const smallest = transactions.reduce((low, lamports) => (lamports < low ? lamports : low));
+    const sent = transactions.map((indexes) =>
+      indexes.reduce((sum, index) => {
+        const lamports = outflow.get(index);
+        if (lamports === undefined) {
+          throw internalError(`SOL movement transaction names unknown payment ${index}`);
+        }
+        return sum + lamports;
+      }, 0n)
+    );
+    const smallest = sent.reduce((low, lamports) => (lamports < low ? lamports : low));
     if (smallest < minimum) return smallest;
   }
   return null;
@@ -140,9 +157,9 @@ export async function findSolRentShortfall(
     .sort((a, b) => a - b);
   const sourceBalance = movement.source === null ? undefined : lamports.get(movement.source);
   const sourceRemainderLamports =
-    sourceBalance === undefined
+    movement.source === null || sourceBalance === undefined
       ? null
-      : sourceRemainderBelowMinimum(sourceBalance, movement, minimumLamports);
+      : sourceRemainderBelowMinimum(movement.source, sourceBalance, movement, minimumLamports);
   if (recipientIndexes.length === 0 && sourceRemainderLamports === null) return null;
   return {
     recipientIndexes,

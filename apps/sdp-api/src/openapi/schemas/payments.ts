@@ -2,6 +2,7 @@ import { COUNTERPARTY_ENTITY_TYPES } from "@sdp/types/counterparties";
 import { OFFRAMP_CRYPTO_RAILS, ONRAMP_CRYPTO_RAILS } from "@sdp/types/payment-rails";
 import {
   paymentSubscriptionCollectionAttemptMetadataSchema,
+  paymentTransferBatchEstimateWarningSchema,
   RAMP_DELIVERY_MISMATCH_REASONS,
   RAMPS_MEMO_LIMITS,
 } from "@sdp/types/payments";
@@ -632,48 +633,9 @@ const transferBatchEstimateSchema = z
       .openapi({ description: "Estimated fee components." }),
     warnings: z
       .array(
-        z
-          .discriminatedUnion("code", [
-            z
-              .object({
-                code: z.literal("AMOUNT_BELOW_RENT_MINIMUM").openapi({
-                  description:
-                    "A native SOL recipient's address holds no account and its amount is below the rent-exempt minimum.",
-                }),
-                recipientIndex: z.number().int().openapi({
-                  description: "Zero-based index of the recipient in the request.",
-                  example: 0,
-                }),
-                minimumAmount: z.string().openapi({
-                  description:
-                    "The smallest SOL amount the address can receive while it has no account.",
-                  example: "0.00089088",
-                }),
-                message: z.string().openapi({ description: "Human-readable warning." }),
-              })
-              .openapi({ description: "A recipient the batch could not pay as requested." }),
-            z
-              .object({
-                code: z.literal("SOURCE_BELOW_RENT_MINIMUM").openapi({
-                  description:
-                    "The source wallet would be left holding more than nothing but less than the rent-exempt minimum, at the end or after some order of the batch's concurrent transactions.",
-                }),
-                sourceRemainder: z.string().openapi({
-                  description: "The SOL the source wallet would be left with.",
-                  example: "0.0003",
-                }),
-                minimumAmount: z.string().openapi({
-                  description: "The rent-exempt minimum for a SOL wallet.",
-                  example: "0.00089088",
-                }),
-                message: z.string().openapi({ description: "Human-readable warning." }),
-              })
-              .openapi({ description: "The source wallet would fall below the rent minimum." }),
-          ])
-          .openapi({
-            description:
-              "Something create would refuse with 409 AMOUNT_BELOW_RENT_MINIMUM until it is fixed.",
-          })
+        paymentTransferBatchEstimateWarningSchema.describe(
+          "Something create would refuse with 409 AMOUNT_BELOW_RENT_MINIMUM until it is fixed."
+        )
       )
       .openapi({
         description:
