@@ -1,9 +1,10 @@
 import { refreshThemeProps } from "@sdp/design-tokens";
 import { SOLANA_CLUSTER_LABELS, type SolanaCluster } from "@sdp/types/well-known-tokens";
 import { Badge } from "@sdp/ui/badge";
-import { ArrowUpRightIcon, CheckCircle2Icon, ClockIcon, XIcon } from "lucide-react";
+import { Callout } from "@sdp/ui/callout";
+import { ArrowUpRightIcon } from "lucide-react";
 import { notFound } from "next/navigation";
-import type { ReactNode } from "react";
+import type { ComponentProps } from "react";
 import {
   formatDisplayAmount,
   formatTimestamp,
@@ -28,7 +29,8 @@ interface PayRequest {
 }
 
 interface StatusPanel {
-  icon: ReactNode;
+  /** The status colour: green once paid, red when the sender canceled, none when it lapsed. */
+  variant: NonNullable<ComponentProps<typeof Callout>["variant"]>;
   title: string;
   body: string;
 }
@@ -36,17 +38,17 @@ interface StatusPanel {
 function getStatusPanels(t: Awaited<ReturnType<typeof getTranslations>>) {
   return {
     paid: {
-      icon: <CheckCircle2Icon className="size-12 text-success" />,
+      variant: "success",
       title: t("Shared.pay.paymentReceived"),
       body: t("Shared.pay.paymentReceivedDescription"),
     },
     expired: {
-      icon: <ClockIcon className="size-12 text-tertiary" />,
+      variant: "neutral",
       title: t("Shared.pay.linkExpired"),
       body: t("Shared.pay.linkExpiredDescription"),
     },
     canceled: {
-      icon: <XIcon className="size-12 text-error" />,
+      variant: "danger",
       title: t("Shared.pay.requestCanceled"),
       body: t("Shared.pay.requestCanceledDescription"),
     },
@@ -135,11 +137,9 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
               </a>
             </div>
           ) : statusPanel ? (
-            <div className="mt-7 flex flex-col items-center gap-3 py-6 text-center">
-              {statusPanel.icon}
-              <p className="text-subheading font-medium text-primary">{statusPanel.title}</p>
-              <p className="max-w-xs text-body text-secondary">{statusPanel.body}</p>
-            </div>
+            <Callout variant={statusPanel.variant} title={statusPanel.title} className="mt-7">
+              {statusPanel.body}
+            </Callout>
           ) : null}
 
           <div className="mt-8 space-y-3 border-t border-border-default pt-6 text-body">
