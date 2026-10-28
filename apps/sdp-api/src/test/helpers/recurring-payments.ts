@@ -9,9 +9,6 @@ import {
 import { beforeEach, expect, vi } from "vitest";
 import type { z } from "zod";
 import { getDb } from "@/db/client";
-import type { PaymentPrincipalFilter } from "@/db/repositories/payment-principal-filter";
-import { createPostgresPaymentRecurringPaymentsRepository } from "@/db/repositories/payment-recurring-payments.repository.postgres";
-import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories/payment-subscriptions.repository.postgres";
 import { app as baseApp } from "@/index";
 import { successResponseSchema } from "@/openapi/schemas/base";
 import {
@@ -20,7 +17,6 @@ import {
 } from "@/openapi/schemas/payments";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
-import { seedProjectCryptoWalletCounterparty } from "@/test/helpers/counterparties";
 import { env } from "@/test/helpers/env";
 import {
   createKoraAdapterMock,
@@ -367,116 +363,6 @@ export async function seedRecurringDatabaseTenant(options: {
         options.publicKey
       ),
   ]);
-}
-
-/**
- * Seed an active recurring payment straight into the database, with the counterparty, plan and
- * subscription an active row requires, recording `activatedBy` as the principal that activated it.
- *
- * @param seed - The payment to seed.
- * @param seed.id - The recurring payment id; the rows it needs derive their ids from it.
- * @param seed.organizationId - The Organization that owns the project.
- * @param seed.projectId - The project every row belongs to.
- * @param seed.createdBy - The user recorded as every row's creator.
- * @param seed.source - The custody wallet the payment collects from.
- * @param seed.activatedBy - The API key or member recorded as its activator.
- * @returns Resolves once every row is seeded.
- */
-export async function seedActiveRecurringPayment(seed: {
-  id: string;
-  organizationId: string;
-  projectId: string;
-  createdBy: string;
-  source: { custodyWalletId: string; walletId: string; address: string };
-  activatedBy: PaymentPrincipalFilter;
-}): Promise<void> {
-  const db = getDb(env);
-  const tenant = { organizationId: seed.organizationId, projectId: seed.projectId };
-  const counterpartyId = `cpty_${seed.id}`;
-  const counterpartyAccountId = `cpa_${seed.id}`;
-  const planId = `psp_${seed.id}`;
-  const subscriptionId = `psub_${seed.id}`;
-  const at = "2026-06-29T12:00:00.000Z";
-  await seedProjectCryptoWalletCounterparty(db, {
-    ...tenant,
-    createdBy: seed.createdBy,
-    counterpartyId,
-    counterpartyAccountId,
-    walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
-  });
-  const subscriptions = createPostgresPaymentSubscriptionsRepository(db);
-  await subscriptions.createPlan({
-    ...tenant,
-    id: planId,
-    ownerWalletId: seed.source.walletId,
-    ownerAddress: seed.source.address,
-    token: DEVNET_USDC_MINT,
-    amount: "10.00",
-    periodHours: 24,
-    programPlanId: seed.id,
-    planPda: null,
-    destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
-    pullerWalletId: null,
-    pullerAddress: null,
-    metadataUri: null,
-    status: "active",
-    createdBy: seed.createdBy,
-    createdAt: at,
-    updatedAt: at,
-  });
-  await subscriptions.createSubscription({
-    ...tenant,
-    id: subscriptionId,
-    planId,
-    counterpartyId,
-    subscriberAddress: seed.source.address,
-    subscriberTokenAccount: null,
-    subscriptionPda: null,
-    subscriptionAuthorityAddress: null,
-    authorizationSignature: null,
-    status: "active",
-    currentPeriodStartAt: at,
-    nextCollectionDueAt: at,
-    createdBy: seed.createdBy,
-    createdAt: at,
-    updatedAt: at,
-  });
-  await createPostgresPaymentRecurringPaymentsRepository(db).createRecurringPayment({
-    ...tenant,
-    id: seed.id,
-    sourceCustodyWalletId: seed.source.custodyWalletId,
-    sourceWalletId: seed.source.walletId,
-    sourceAddress: seed.source.address,
-    counterpartyId,
-    counterpartyAccountId,
-    destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
-    token: DEVNET_USDC_MINT,
-    amount: "10.00",
-    periodHours: 24,
-    firstCollectionAt: null,
-    metadataUri: null,
-    createdBy: seed.createdBy,
-    createdAt: at,
-    updatedAt: at,
-    idempotencyKey: null,
-    idempotencyFingerprint: null,
-  });
-  await db
-    .prepare(
-      `UPDATE payment_recurring_payments
-          SET status = 'active', plan_id = ?, subscription_id = ?, next_collection_due_at = ?,
-              activated_by_api_key_id = ?, activated_by_user_id = ?
-        WHERE id = ?`
-    )
-    .bind(
-      planId,
-      subscriptionId,
-      at,
-      seed.activatedBy.kind === "api_key" ? seed.activatedBy.apiKeyId : null,
-      seed.activatedBy.kind === "member" ? seed.activatedBy.userId : null,
-      seed.id
-    )
-    .run();
 }
 
 export const DEFAULT_RECURRING_FIXTURE = {

@@ -7,7 +7,6 @@ import {
 } from "@/db/repositories/repository-factory";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
-import { seedRotatedApiKeyRow } from "@/test/helpers/api-keys";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
 import {
@@ -21,7 +20,6 @@ import {
 } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
-import type { PaymentPrincipalFilter } from "./payment-principal-filter";
 import type {
   CancelPaymentRequestInput,
   CreatePaymentRequestInput,
@@ -280,7 +278,6 @@ describe("PaymentRequestsRepository (postgres)", () => {
       const { rows, total } = await repo.listPaymentRequests({
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
-        createdBy: null,
         limit: 50,
         offset: 0,
       });
@@ -296,7 +293,6 @@ describe("PaymentRequestsRepository (postgres)", () => {
           repo.listPaymentRequests({
             organizationId: TEST_ORG.id,
             projectId,
-            createdBy: null,
             limit: 50,
             offset: 0,
           }),
@@ -314,7 +310,6 @@ describe("PaymentRequestsRepository (postgres)", () => {
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
         status: "awaiting_payment",
-        createdBy: null,
         limit: 50,
         offset: 0,
       });
@@ -501,84 +496,49 @@ describe("PaymentRequestsRepository (postgres)", () => {
     });
   });
 
-  describe("principal filters", () => {
-    const MEMBER = { kind: "member", userId: TEST_USER.id } as const;
-
-    async function listedIds(createdBy: PaymentPrincipalFilter): Promise<string[]> {
-      const { rows } = await repo.listPaymentRequests({
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-        createdBy,
-        limit: 50,
-        offset: 0,
-      });
-      return rows.map((row) => row.id).sort();
+  describe("listOpenPaymentRequestsCreatedByApiKey", () => {
+    async function insertApiKey(id: string, rotatedFrom: string | null) {
+      await getDb(env)
+        .prepare(
+          `INSERT INTO api_keys
+             (id, organization_id, project_id, created_by, name, key_prefix, key_hash, grants, status, rotated_from)
+           VALUES (?, ?, ?, ?, ?, 'sk_test_prq', ?, '{}', 'active', ?)`
+        )
+        .bind(id, TEST_ORG.id, TEST_PROJECT_ID, TEST_USER.id, id, `hash_${id}`, rotatedFrom)
+        .run();
     }
 
-    it("matches a key with the keys it was rotated from, and a member only where no key acted", async () => {
-      for (const [id, rotatedFrom] of [
-        ["key_preq_repo_old", null],
-        ["key_preq_repo_new", "key_preq_repo_old"],
-        ["key_preq_repo_other", null],
-      ] as const) {
-        await seedRotatedApiKeyRow(getDb(env), {
-          id,
-          organizationId: TEST_ORG.id,
-          projectId: TEST_PROJECT_ID,
-          createdBy: TEST_USER.id,
-          rotatedFrom,
-        });
-      }
+    function listCreatedBy(apiKeyId: string) {
+      return repo.listOpenPaymentRequestsCreatedByApiKey({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        apiKeyId,
+      });
+    }
+
+    it("lists the open requests of a key and the keys it was rotated from, oldest first", async () => {
+      await insertApiKey("key_preq_repo_old", null);
+      await insertApiKey("key_preq_repo_new", "key_preq_repo_old");
+      await insertApiKey("key_preq_repo_other", null);
       const byOld = await repo.createPaymentRequest(
         createInput({ createdByApiKeyId: "key_preq_repo_old" })
       );
       const byNew = await repo.createPaymentRequest(
         createInput({ createdByApiKeyId: "key_preq_repo_new" })
       );
+      await setPaymentRequestColumns(env, byOld.id, { created_at: ago(2 * DAY) });
+      await setPaymentRequestColumns(env, byNew.id, { created_at: ago(DAY) });
       await repo.createPaymentRequest(createInput({ createdByApiKeyId: "key_preq_repo_other" }));
-      const byMember = await repo.createPaymentRequest(createInput({}));
-
-      expect(await listedIds({ kind: "api_key", apiKeyId: "key_preq_repo_new" })).toEqual(
-        [byOld.id, byNew.id].sort()
+      await repo.createPaymentRequest(createInput({ createdByApiKeyId: null }));
+      await repo.createPaymentRequest(
+        createInput({ createdByApiKeyId: "key_preq_repo_new", expiresAt: PAST })
       );
-      expect(await listedIds({ kind: "api_key", apiKeyId: "key_preq_repo_old" })).toEqual([
+
+      expect((await listCreatedBy("key_preq_repo_new")).map((row) => row.id)).toEqual([
         byOld.id,
+        byNew.id,
       ]);
-      expect(await listedIds(MEMBER)).toEqual([byMember.id]);
-    });
-
-    it("counts open requests per project as the awaiting_payment list totals them", async () => {
-      await repo.createPaymentRequest(createInput({}));
-      await repo.createPaymentRequest(createInput({}));
-      await repo.createPaymentRequest(createInput({ expiresAt: PAST }));
-      await repo.createPaymentRequest(createInput({ projectId: projects.production.id }));
-
-      const counts = await repo.countOpenPaymentRequestsByProject({
-        organizationId: TEST_ORG.id,
-        createdBy: MEMBER,
-      });
-      const totals = await Promise.all(
-        [projects.sandbox.id, projects.production.id].map(async (projectId) => ({
-          projectId,
-          count: (
-            await repo.listPaymentRequests({
-              organizationId: TEST_ORG.id,
-              projectId,
-              status: "awaiting_payment",
-              createdBy: MEMBER,
-              limit: 50,
-              offset: 0,
-            })
-          ).total,
-        }))
-      );
-
-      expect(totals).toEqual([
-        { projectId: projects.sandbox.id, count: 2 },
-        { projectId: projects.production.id, count: 1 },
-      ]);
-      expect(counts).toHaveLength(2);
-      expect(counts).toEqual(expect.arrayContaining(totals));
+      expect((await listCreatedBy("key_preq_repo_old")).map((row) => row.id)).toEqual([byOld.id]);
     });
   });
 

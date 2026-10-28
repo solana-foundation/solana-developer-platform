@@ -57,7 +57,6 @@ describe("human-only routes", () => {
       "GET /v1/api-keys",
       "GET /v1/api-keys/:keyId",
       "GET /v1/members",
-      "GET /v1/members/:memberId/linked-payments",
       "GET /v1/members/me",
       "GET /v1/projects/:projectId/api-keys",
       "GET /v1/projects/:projectId/members",

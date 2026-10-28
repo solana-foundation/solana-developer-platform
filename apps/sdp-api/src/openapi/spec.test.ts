@@ -131,7 +131,6 @@ describe("OpenAPI spec", () => {
       ["/v1/members/invitations/{invitationId}", "delete"],
       ["/v1/members/{memberId}", "patch"],
       ["/v1/members/{memberId}", "delete"],
-      ["/v1/members/{memberId}/linked-payments", "get"],
       ["/v1/organizations/{orgId}", "patch"],
       ["/v1/organizations", "post"],
     ] as const) {
