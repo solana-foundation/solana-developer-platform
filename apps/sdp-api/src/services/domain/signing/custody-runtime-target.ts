@@ -45,7 +45,6 @@ import {
 } from "@/services/custody/provisioning";
 import { assertCustodyProviderCanCreateWallet } from "@/services/custody-provider-lifecycle.service";
 import { admittedSigner } from "@/services/domain/signing/admitted-signer";
-import { translateCustodyPolicyRefusals } from "@/services/domain/signing/custody-policy-refusal";
 import {
   createFireblocksAdapterFromCredential,
   createPrivyAdapterFromCredential,
@@ -733,7 +732,7 @@ export class CustodyRuntimeTargets {
     // live rows in one statement; an exit with no principal reads nothing.
     const subject = { custodyWalletId };
     return admittedSigner(
-      translateCustodyPolicyRefusals(signer),
+      signer,
       async () =>
         decideMovement(
           movement,

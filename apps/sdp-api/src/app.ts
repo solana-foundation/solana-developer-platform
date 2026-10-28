@@ -22,13 +22,7 @@ import { prettyJSON } from "hono/pretty-json";
 import { routePath } from "hono/route";
 import { secureHeaders } from "hono/secure-headers";
 import { DatabaseUnavailableError } from "@/db/client";
-import {
-  AppError,
-  badRequest,
-  custodyPolicyRefused,
-  payloadTooLarge,
-  serviceUnavailable,
-} from "@/lib/errors";
+import { AppError, badRequest, payloadTooLarge, serviceUnavailable } from "@/lib/errors";
 import { appErrorResponse, mapErrorStatusCode } from "@/lib/response";
 import { corsMiddleware } from "@/middleware/cors";
 import { databaseIdentityBoundary } from "@/middleware/database-identity";
@@ -243,25 +237,6 @@ function getFireblocksBlockedError(err: Error): {
   };
 }
 
-/**
- * The `AppError` an error the app maps itself stands for, or the error unchanged. Hono core throws
- * `HTTPException(400)` for malformed JSON bodies before route-level body validation runs. A custody
- * policy refusal is already an `AppError` at the signer waist; one from a path that signs outside
- * it answers the same, as a backstop.
- *
- * @param err - The error the handler threw.
- * @returns The `AppError` to answer with, or `err`.
- */
-function normalizeToAppError(err: Error): Error {
-  if (err instanceof HTTPException && err.status === 400) {
-    return badRequest(err.message);
-  }
-  if (err instanceof SigningError && err.code === "POLICY_REFUSED") {
-    return custodyPolicyRefused(err);
-  }
-  return err;
-}
-
 /** How long a client is told to wait after the database could not take its request. */
 const DATABASE_UNAVAILABLE_RETRY_AFTER_SECONDS = 2;
 
@@ -448,7 +423,10 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
         ...describeError(err),
       });
 
-    const normalizedError = normalizeToAppError(err);
+    // Hono core throws HTTPException(400) for malformed JSON bodies before
+    // route-level body validation runs; normalize it into the AppError envelope.
+    const normalizedError =
+      err instanceof HTTPException && err.status === 400 ? badRequest(err.message) : err;
 
     if (normalizedError instanceof AppError) {
       return appErrorResponse(c, normalizedError);
