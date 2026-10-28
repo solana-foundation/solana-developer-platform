@@ -823,6 +823,142 @@ describe("payment transfer batches", () => {
     });
   });
 
+  it("refuses a stopped batch before its row and retries under the same key", async () => {
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerForCustodyWalletMock.mockResolvedValueOnce(sourceSigner);
+    const counterpartyId = await seedCounterparty("batch_disabled_counterparty");
+    const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+    const request = {
+      method: "POST",
+      headers: {
+        "Idempotency-Key": "disabled-project-batch",
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      },
+      body: JSON.stringify({
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        token: "SOL",
+        recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
+        options: { preflight: false },
+      }),
+    };
+    await getDb(env)
+      .prepare("UPDATE projects SET disabled_movements = ?::text[] WHERE id = ?")
+      .bind(["payments.transfer_batch"], TEST_PROJECT.id)
+      .run();
+
+    const stopped = await app.request("/v1/payments/transfer-batches", request, env);
+    expect(stopped.status).toBe(403);
+    expect(await stopped.json()).toMatchObject({
+      error: { code: "FORBIDDEN", details: { reason: "movement_disabled" } },
+    });
+    expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
+    expect(sendTransactionMock).not.toHaveBeenCalled();
+    const count = () =>
+      getDb(env)
+        .prepare("SELECT COUNT(*)::int AS count FROM payment_transfer_batches WHERE project_id = ?")
+        .bind(TEST_PROJECT.id)
+        .first<{ count: number }>();
+    expect(await count()).toEqual({ count: 0 });
+
+    await getDb(env)
+      .prepare("UPDATE projects SET disabled_movements = ARRAY[]::text[] WHERE id = ?")
+      .bind(TEST_PROJECT.id)
+      .run();
+    const retried = await app.request("/v1/payments/transfer-batches", request, env);
+    expect(retried.status).toBe(200);
+    expect(retried.headers.get("Idempotent-Replayed")).toBeNull();
+    expect(await count()).toEqual({ count: 1 });
+  });
+
+  it("refuses the next chunk when a project is stopped after the first sponsor signs", async () => {
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerForCustodyWalletMock.mockResolvedValueOnce(sourceSigner);
+
+    let unblockSecondSimulation = () => {};
+    const secondSimulation = new Promise<void>((resolve) => {
+      unblockSecondSimulation = resolve;
+    });
+    let simulationCount = 0;
+    const simulationSpy = vi
+      .spyOn(solanaRpc, "simulateTransaction")
+      .mockImplementation(async () => {
+        simulationCount += 1;
+        if (simulationCount === 2) await secondSimulation;
+        return { success: true, logs: [], unitsConsumed: null, error: null };
+      });
+    const signingOutcomeMock = vi.fn(async () => {
+      await getDb(env)
+        .prepare("UPDATE projects SET disabled_movements = ?::text[] WHERE id = ?")
+        .bind(["payments.transfer_batch"], TEST_PROJECT.id)
+        .run();
+      unblockSecondSimulation();
+      return FIRST_SIGNATURE;
+    });
+    createKoraAdapterMock.mockReturnValueOnce(ownedSubmissionAdapter(signingOutcomeMock));
+
+    try {
+      const counterpartyId = await seedCounterparty("batch_stopped_between_chunks");
+      const firstAccountId = await seedCryptoWalletCounterpartyAccount({
+        counterpartyId,
+        walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+      });
+      const secondAccountId = await seedCryptoWalletCounterpartyAccount({
+        counterpartyId,
+        walletAddress: TEST_SOLANA_ADDRESSES.wallet3,
+      });
+      const response = await app.request(
+        "/v1/payments/transfer-batches",
+        {
+          method: "POST",
+          headers: {
+            "Idempotency-Key": crypto.randomUUID(),
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            token: "SOL",
+            recipients: [
+              { counterpartyId, counterpartyAccountId: firstAccountId, amount: "0.1" },
+              { counterpartyId, counterpartyAccountId: secondAccountId, amount: "0.2" },
+            ],
+            options: { preflight: true, maxRecipientsPerTransaction: 1 },
+          }),
+        },
+        env
+      );
+
+      expect(response.status).toBe(200);
+      const body = z
+        .object({
+          data: z.object({
+            recipients: z.array(z.object({ status: z.string(), error: z.string().nullable() })),
+            transfers: z.array(z.object({ status: z.string() })),
+          }),
+        })
+        .parse(await response.json());
+      expect(body.data.recipients.map((recipient) => recipient.status).sort()).toEqual([
+        "failed",
+        "processing",
+      ]);
+      expect(
+        body.data.recipients.find((recipient) => recipient.status === "failed")?.error
+      ).toContain("disabled");
+      expect(body.data.transfers).toHaveLength(2);
+      expect(signingOutcomeMock).toHaveBeenCalledOnce();
+      expect(sendTransactionMock).toHaveBeenCalledOnce();
+    } finally {
+      unblockSecondSimulation();
+      simulationSpy.mockRestore();
+    }
+  });
+
   it("creates a SOL transfer batch and records chunk transfers", async () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
