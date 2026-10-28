@@ -52,6 +52,10 @@ export type ActionOwner = SdpModule | "core";
  * private_channels, helius_rings, onramp, offramp, ramp_transfers) carry
  * a coarse mapping: GET is `read`, a mutation is `manage`, `execute` or
  * `configure` by the rule above. Review each before its module is promoted.
+ *
+ * The beta `subscriptions` module (direct subscription plans and subscriptions)
+ * borrows `recurring.*`. Before it is promoted to stable, give it its own action
+ * module or record a deliberate decision to keep the reuse.
  */
 export const ACTION_MODULES = {
   // Payments (V1)
