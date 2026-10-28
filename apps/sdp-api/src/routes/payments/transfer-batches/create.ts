@@ -12,7 +12,6 @@ import { success } from "@/lib/response";
 import { type AuthorizeInput, getAuthorized } from "@/middleware/authorize";
 import {
   getIdempotencyFingerprint,
-  getIdempotencyRecordKey,
   IDEMPOTENT_REPLAYED_HEADER,
   idempotencyFingerprintMatches,
   markIdempotencyCommitted,
@@ -55,19 +54,12 @@ async function respondToTransferBatchReplay(
 }
 
 /**
- * The key a batch row is recorded under (ADR 0009). A batch that names its
- * payout run with `externalId` is recorded under the run (project, source
- * wallet, externalId) rather than the request's key, so a resend of the run
+ * The key a batch row is recorded under (ADR 0009): its payout run (project,
+ * source wallet, externalId), never the request's key, so a resend of the run
  * under any Idempotency-Key finds the same row and pays nobody again
- * (HOO-2335, SDP-021 SA-2). Without `externalId`, the credential-bound record
- * key.
+ * (HOO-2335, SDP-021 SA-2).
  */
-function transferBatchRowKey(
-  authorized: AuthorizedBatchRequest,
-  externalId: string | undefined,
-  recordKey: string
-): string {
-  if (externalId === undefined) return recordKey;
+function transferBatchRunKey(authorized: AuthorizedBatchRequest, externalId: string): string {
   return deriveProviderRequestId(
     [
       "transfer_batch_run",
@@ -113,8 +105,7 @@ function assertSamePayoutRun(
 async function answerLostBatchInsert(
   c: AppContext,
   authorized: AuthorizedBatchRequest,
-  idempotencyKey: string,
-  externalId: string | null
+  idempotencyKey: string
 ): Promise<Response | null> {
   const replay = await getPaymentTransferBatchesRepository(c).findTransferBatchByIdempotency({
     organizationId: authorized.scope.auth.organizationId,
@@ -122,17 +113,7 @@ async function answerLostBatchInsert(
     idempotencyKey,
   });
   if (replay) {
-    if (externalId !== null) {
-      assertSamePayoutRun(c, replay, authorized);
-    } else if (
-      replay.idempotency_fingerprint === null ||
-      !idempotencyFingerprintMatches(c, replay.idempotency_fingerprint)
-    ) {
-      // Another request's row: refused unstored, so that request's own retry
-      // is still answered from it.
-      markIdempotencyRecordMismatch(c);
-      throw new AppError("IDEMPOTENCY_KEY_REUSED");
-    }
+    assertSamePayoutRun(c, replay, authorized);
     // The batch already existed: marked as a replay, as replayFromRecord
     // marks one, so the client retires its key on it.
     const answered = await respondToTransferBatchReplay(
@@ -225,11 +206,10 @@ export async function findTransferBatchRecordReplay(
       respond: () => respondToTransferBatchReplay(c, settled, organizationId, authorized.projectId),
     };
   }
-  if (body.externalId === undefined) return null;
   const run = await repository.findTransferBatchByIdempotency({
     organizationId,
     projectId: authorized.projectId,
-    idempotencyKey: transferBatchRowKey(authorized, body.externalId, recordKey),
+    idempotencyKey: transferBatchRunKey(authorized, body.externalId),
   });
   if (run === null || run.idempotency_fingerprint === null) return null;
   assertSamePayoutRun(c, run, authorized);
@@ -268,14 +248,11 @@ export async function createTransferBatch(
   const body = c.req.valid("json");
   const authorized = getAuthorized<AuthorizedBatchRequest>(c);
   const resolved = await resolveBatchMovement(body, authorized);
-  // The row's key (the payout run's, or the credential-bound record key; never
-  // the raw client key) and the key layer's fingerprint, which canonicalizes
-  // the batch body.
-  const recordKey = getIdempotencyRecordKey(c);
-  const idempotencyKey =
-    recordKey === undefined ? null : transferBatchRowKey(authorized, body.externalId, recordKey);
+  // The row's key (the payout run's, never the raw client key) and the key
+  // layer's fingerprint, which canonicalizes the batch body.
+  const externalId = body.externalId;
+  const idempotencyKey = transferBatchRunKey(authorized, externalId);
   const idempotencyFingerprint = getIdempotencyFingerprint(c) ?? null;
-  const externalId = body.externalId === undefined ? null : body.externalId;
 
   const feePayment = createSponsorshipFeePayment(
     c.env,
@@ -361,7 +338,7 @@ export async function createTransferBatch(
   } catch (error) {
     const answered =
       idempotencyKey && isPostgresUniqueViolation(error)
-        ? await answerLostBatchInsert(c, authorized, idempotencyKey, externalId)
+        ? await answerLostBatchInsert(c, authorized, idempotencyKey)
         : null;
     if (answered === null) throw error;
     return answered;

@@ -459,7 +459,7 @@ export const createTransferBatchRequestSchema = createTransferBatchSchemaBase
     }),
     externalId: withOpenApi(createTransferBatchSchemaBase.shape.externalId, {
       description:
-        "Your ID for this payout run, unique per project and source wallet. Derive it from your own data so a restarted worker computes the same value (for example `payroll-2026-05`); never generate it at random, which gives no protection. Sending the same request again with this `externalId`, from the same credential, under any Idempotency-Key returns the existing batch; a different request with it returns `409 TRANSFER_BATCH_RUN_EXISTS` with the existing batch's `batchId` in `error.details`. Neither pays anyone again. New recipients go in a new run with a new `externalId`. Optional, but without it nothing on the server stops a resend under a new Idempotency-Key from paying the same recipients twice.",
+        "Your ID for this payout run, unique per project and source wallet. Derive it from your own data so a restarted worker computes the same value (for example `payroll-2026-05`); never generate it at random, which gives no protection. Sending the same request again with this `externalId`, from the same credential, under any Idempotency-Key returns the existing batch; a different request with it returns `409 TRANSFER_BATCH_RUN_EXISTS` with the existing batch's `batchId` in `error.details`. Neither pays anyone again. New recipients go in a new run with a new `externalId`. Required: it is what stops a resend under a new Idempotency-Key from paying the same recipients twice.",
       example: "payroll_2026_06_30",
     }),
     sourceCustodyWalletId: withOpenApi(createTransferBatchSchemaBase.shape.sourceCustodyWalletId, {
@@ -497,7 +497,11 @@ export const createTransferBatchRequestSchema = createTransferBatchSchemaBase
   });
 
 export const estimateTransferBatchRequestSchema = estimateTransferBatchSchemaBase
-  .extend(createTransferBatchRequestSchema.shape)
+  .extend({
+    ...createTransferBatchRequestSchema.shape,
+    // An estimate moves nothing, so it needs no payout run name.
+    externalId: createTransferBatchRequestSchema.shape.externalId.optional(),
+  })
   .openapi({
     description: "Estimate transaction chunking and fees for a transfer batch.",
   });
