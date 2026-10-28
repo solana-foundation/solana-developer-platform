@@ -115,12 +115,16 @@ const run = async () => {
       .map((fileName) => fs.rm(path.join(outputDir, fileName), { force: true }))
   );
 
-  const tagPages = [];
-  for (const family of families) {
-    const tagSlug = slugify(family.name);
-    await fs.writeFile(path.join(outputDir, `${tagSlug}.mdx`), renderFamilyPage(family), "utf8");
-    tagPages.push({ title: family.name, slug: tagSlug });
-  }
+  const tagPages = families.map((family) => ({ title: family.name, slug: slugify(family.name) }));
+  await Promise.all(
+    families.map((family, index) =>
+      fs.writeFile(
+        path.join(outputDir, `${tagPages[index].slug}.mdx`),
+        renderFamilyPage(family),
+        "utf8"
+      )
+    )
+  );
   const exposedOperationsCount = families.reduce(
     (total, family) => total + family.operations.length,
     0
