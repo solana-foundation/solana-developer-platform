@@ -1,7 +1,11 @@
 "use client";
 
 import type { CustodyWalletTokenBalance } from "@sdp/types/custody";
-import type { CounterpartyAccountSummary, PaymentsDashboardWallet } from "@sdp/types/payments";
+import type {
+  CounterpartyAccountSummary,
+  PaymentsDashboardWallet,
+  PaymentTransferBatchEstimateWarning,
+} from "@sdp/types/payments";
 import {
   isWellKnownTokenSymbol,
   type SolanaCluster,
@@ -239,6 +243,37 @@ function batchCanProceed({
   );
 }
 
+/** How often an estimate with warnings is re-read while the review is open. */
+const ESTIMATE_WARNING_RECHECK_MS = 10_000;
+
+/**
+ * The minimum SOL amount of each recipient the estimate says create would
+ * refuse (HOO-2375), by counterparty account. Warnings name recipients by
+ * index into the canonical request, which may be reordered.
+ */
+export function belowRentMinimumByAccount(
+  warnings: readonly PaymentTransferBatchEstimateWarning[] | undefined,
+  requestRecipients: readonly { counterpartyAccountId: string }[]
+): Map<string, string> {
+  const byAccount = new Map<string, string>();
+  for (const warning of warnings ?? []) {
+    if (warning.code !== "AMOUNT_BELOW_RENT_MINIMUM") continue;
+    const recipient = requestRecipients[warning.recipientIndex];
+    if (recipient) byAccount.set(recipient.counterpartyAccountId, warning.minimumAmount);
+  }
+  return byAccount;
+}
+
+/** The source wallet's rent warning, if the estimate gave one (HOO-2375). */
+export function sourceBelowRentMinimum(
+  warnings: readonly PaymentTransferBatchEstimateWarning[] | undefined
+): { sourceRemainder: string; minimumAmount: string } | null {
+  const warning = warnings?.find((entry) => entry.code === "SOURCE_BELOW_RENT_MINIMUM");
+  return warning?.code === "SOURCE_BELOW_RENT_MINIMUM"
+    ? { sourceRemainder: warning.sourceRemainder, minimumAmount: warning.minimumAmount }
+    : null;
+}
+
 /** The fee estimate's failure as a sentence, or null while it has not failed. */
 function estimateErrorMessage(error: unknown, t: Translate): string | null {
   if (!error) {
@@ -440,8 +475,28 @@ export function useBatchSendWizard({
       ? paymentsQueryKeys.batchEstimate({ serializedRequest: JSON.stringify(request) })
       : null,
     () => estimateTransferBatch(request, t),
-    { revalidateOnFocus: false }
+    {
+      revalidateOnFocus: false,
+      // A flagged address may be funded elsewhere: recheck until it clears,
+      // so Send re-enables without the request changing (HOO-2375).
+      refreshInterval: (latest) =>
+        latest?.warnings && latest.warnings.length > 0 ? ESTIMATE_WARNING_RECHECK_MS : 0,
+    }
   );
+  const belowRentMinimum = useMemo(
+    () => belowRentMinimumByAccount(estimate?.warnings, request.recipients),
+    [estimate, request]
+  );
+  const sourceRentShortfall = useMemo(() => sourceBelowRentMinimum(estimate?.warnings), [estimate]);
+  // Create would refuse the batch (409): nothing to send until it is fixed.
+  // Review sends only once the estimate has answered (or failed, as before)
+  // and named no recipient create would refuse.
+  const estimateSettled = estimate !== undefined || estimateError !== undefined;
+  const canSend =
+    canProceed &&
+    (currentStepId !== "REVIEW" ||
+      batchResult !== null ||
+      (estimateSettled && belowRentMinimum.size === 0 && sourceRentShortfall === null));
 
   const submitBatch = async () => {
     setSubmitting(true);
@@ -494,7 +549,7 @@ export function useBatchSendWizard({
   };
 
   const handlePrimary = async () => {
-    if (!canProceed) {
+    if (!canSend) {
       return;
     }
     if (isLastStep) {
@@ -527,7 +582,7 @@ export function useBatchSendWizard({
     stepIndex,
     currentStepId,
     isLastStep,
-    canProceed,
+    canProceed: canSend,
     liveWallets,
     walletsLoading,
     liveWalletsError,
@@ -563,6 +618,8 @@ export function useBatchSendWizard({
     setRecipientAmount,
     bulkImport,
     estimate: estimate ?? null,
+    belowRentMinimum,
+    sourceRentShortfall,
     estimateError: estimateErrorMessage(estimateError, t),
     submitting,
     batchResult,

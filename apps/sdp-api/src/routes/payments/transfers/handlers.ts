@@ -117,6 +117,7 @@ import {
 } from "@/services/payments/fireblocks-transfer";
 import { signWithFreshBlockhash } from "@/services/payments/sign-with-fresh-blockhash";
 import { createTransferSignedSubmissionStore } from "@/services/payments/signed-submission";
+import { assertNoSolRentShortfall } from "@/services/payments/sol-rent-minimum";
 import { loadPaymentMint, parseStaticPaymentAmount } from "@/services/payments/token-amount";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
@@ -972,6 +973,23 @@ export async function createTransfer(c: ValidatedBodyContext<typeof createTransf
   await parseStaticPaymentAmount(operation.amount, assertValidAddress(operation.token, "token"));
   if (fireblocks && body.transferId)
     throw badRequest("Fireblocks native transfers currently support direct wallet payments only");
+  // Before the row, so the refusal is unstored and the same key runs again once it clears.
+  // Fireblocks builds and sends its own native transfers; SDP reads no chain state for them.
+  if (!fireblocks && isNativePaymentToken(operation.token)) {
+    await assertNoSolRentShortfall(
+      {
+        source: assertValidAddress(operation.sourceWallet.publicKey, "source"),
+        payments: [
+          {
+            index: 0,
+            destination: operation.destinationAddress,
+            lamports: parseTokenAmount(operation.amount, SOL_DECIMALS),
+          },
+        ],
+      },
+      "transfer"
+    );
+  }
 
   const rampClaim = rampTransfer
     ? await updateOnchainTransferForRamp(c, {

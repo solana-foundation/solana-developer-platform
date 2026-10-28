@@ -702,6 +702,43 @@ export interface ListProjectCounterpartyAccountsEnvelope {
   };
 }
 
+/** What a batch estimate says create would refuse for rent (HOO-2375). */
+export const paymentTransferBatchEstimateWarningSchema = z.discriminatedUnion("code", [
+  z
+    .object({
+      code: z
+        .literal("AMOUNT_BELOW_RENT_MINIMUM")
+        .describe(
+          "A native SOL recipient's address holds no account and its amount is below the rent-exempt minimum."
+        ),
+      recipientIndex: z
+        .number()
+        .int()
+        .describe("Zero-based index of the recipient in the request."),
+      minimumAmount: z
+        .string()
+        .describe("The smallest SOL amount the address can receive while it has no account."),
+      message: z.string().describe("Human-readable warning."),
+    })
+    .describe("A recipient the batch could not pay as requested."),
+  z
+    .object({
+      code: z
+        .literal("SOURCE_BELOW_RENT_MINIMUM")
+        .describe(
+          "The source wallet would be left holding more than nothing but less than the rent-exempt minimum, at the end or after some order of the batch's concurrent transactions."
+        ),
+      sourceRemainder: z.string().describe("The SOL the source wallet would be left with."),
+      minimumAmount: z.string().describe("The rent-exempt minimum for a SOL wallet."),
+      message: z.string().describe("Human-readable warning."),
+    })
+    .describe("The source wallet would fall below the rent minimum."),
+]);
+
+export type PaymentTransferBatchEstimateWarning = z.infer<
+  typeof paymentTransferBatchEstimateWarningSchema
+>;
+
 export interface PaymentTransferBatchEstimate {
   recipientCount: number;
   transactionCount: number;
@@ -711,6 +748,8 @@ export interface PaymentTransferBatchEstimate {
     tokenAccountRentLamports: string;
     sponsored: boolean;
   };
+  /** Absent from an API older than HOO-2375. */
+  warnings?: PaymentTransferBatchEstimateWarning[];
 }
 
 export interface PaymentTransferBatchEnvelope {

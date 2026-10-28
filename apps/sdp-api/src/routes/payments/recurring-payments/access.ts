@@ -2,7 +2,11 @@ import type { MovementId } from "@sdp/types/movements";
 import type { PaymentRecurringPaymentRow } from "@/db/repositories/payment-recurring-payments.repository";
 import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, notFound, walletNotFound } from "@/lib/errors";
-import { assertWalletPurposeAdmitted } from "@/lib/money-admission";
+import {
+  assertCallerMaySignWith,
+  assertCallerWalletInScope,
+  assertWalletPurposeAdmitted,
+} from "@/lib/money-admission";
 import type { AuthorizeInput } from "@/middleware/authorize";
 import {
   type AppContext,
@@ -21,12 +25,16 @@ import type { CustodyWallet } from "@/services/stores/custody-config.store";
 /**
  * Access checks for the recurring-payment routes (HOO-1918, ADR 0009). They
  * run before the Idempotency-Key step, so a replay passes exactly these checks:
- * every id the request names, in the caller's project. Project-scoped: whether
- * a key may sign with the source wallet is the custody signer's decision, and
- * a start it may not make is refused before its attempt is claimed (HOO-2099).
- * Access, never state: a wallet deactivated
- * since, or a schedule whose source wallet is unresolved, still passes here,
- * and the handler and services refuse new work on it.
+ * every id the request names, in the caller's project, and every source
+ * wallet the write touches inside the caller's wallet scope. Every route here
+ * writes, so a key scoped to other wallets may not create, edit, cancel or
+ * start a schedule on this one, whether or not the write signs (HOO-2337):
+ * an in-scope activator would otherwise sign terms an out-of-scope key set.
+ * Reads and lists stay project-wide and never come here. A dashboard session
+ * holds every wallet, so the scope only ever narrows an API key. The custody
+ * signer still decides every signature. Access, never state: a wallet
+ * deactivated since, or a schedule whose source wallet is unresolved, still
+ * passes here, and the handler and services refuse new work on it.
  */
 
 export interface AuthorizedRecurringPayment {
@@ -120,7 +128,7 @@ export async function authorizeRecurringPaymentCreate(
   };
   const scope = await resolveScope(c, body.sourceCustodyWalletId);
   const sourceWallet = resolveWalletByCustodyWalletId(scope.wallets, body.sourceCustodyWalletId);
-  assertWalletPurposeAdmitted(scope.auth, sourceWallet, "recurring.activate");
+  assertCallerMaySignWith(scope.auth, sourceWallet, "recurring.activate");
   // Every id the caller names is checked before the key is claimed: a
   // counterparty account from another tenant never reaches the service.
   await assertCounterpartyAccountInProject(c, {
@@ -146,16 +154,22 @@ async function authorizeExistingRecurringPayment(
     throw new AppError("NOT_FOUND", "Recurring payment not found");
   }
   const custodyWalletId = recurringPayment.source_custody_wallet_id;
-  const scope = await resolveScope(c, custodyWalletId);
   if (custodyWalletId === null) {
-    // An unresolved pin is state; the handler refuses it (409).
-    return { scope, recurringPayment, sourceWallet: null };
+    // An unresolved pin is state, and names no wallet to scope; the handler
+    // refuses it (409), so nothing on it changes.
+    return { scope: await resolveScope(c, null), recurringPayment, sourceWallet: null };
   }
+  // Before the wallet read: a refusal needs only the pinned id.
+  assertCallerWalletInScope(access, custodyWalletId);
+  const scope = await resolveScope(c, custodyWalletId);
   const sourceWallet = resolveWalletByCustodyWalletId(scope.wallets, custodyWalletId);
   return { scope, recurringPayment, sourceWallet };
 }
 
-/** An action on an existing schedule: the schedule and its pinned source wallet. */
+/**
+ * A write to an existing schedule (cancel, and the base of every other one):
+ * the schedule, and its pinned source wallet inside the caller's wallet scope.
+ */
 export async function authorizeRecurringPayment(
   c: AppContext,
   input: AuthorizeInput
@@ -166,8 +180,8 @@ export async function authorizeRecurringPayment(
 /**
  * A start on an existing schedule (activate, collect, resume): as
  * {@link authorizeRecurringPayment}, and the pinned source wallet's purpose
- * may sign the movement. Cancel is an exit and never asks, so a schedule can
- * always be unwound.
+ * may sign the movement. Cancel is an exit and never asks the purpose, so a
+ * caller whose scope holds the wallet can always unwind the schedule.
  *
  * @param c - Request context.
  * @param input - The validated request.
@@ -188,7 +202,9 @@ export async function authorizeRecurringPaymentStart(
 
 /**
  * Update: the schedule, its source wallet, the wallet the body moves it to,
- * and the counterparty account it points it at, all in the project.
+ * and the counterparty account it points it at, all in the project. Both
+ * wallets are inside the caller's scope, for every update shape: a pending
+ * edit that signs nothing sets the terms its activator later signs.
  */
 export async function authorizeRecurringPaymentUpdate(
   c: AppContext,
@@ -208,7 +224,7 @@ export async function authorizeRecurringPaymentUpdate(
     if (!named) {
       throw walletNotFound();
     }
-    assertWalletPurposeAdmitted(access, named, "recurring.update");
+    assertCallerMaySignWith(access, named, "recurring.update");
     nextSourceWallet = named;
   } else if (authorized.sourceWallet !== null) {
     assertWalletPurposeAdmitted(access, authorized.sourceWallet, "recurring.update");
