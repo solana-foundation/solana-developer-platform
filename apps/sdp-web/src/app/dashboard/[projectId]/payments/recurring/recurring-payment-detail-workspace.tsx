@@ -701,11 +701,9 @@ export function RecurringPaymentDetailWorkspace({
     selectedCustodyWalletId: recurringPayment.sourceCustodyWalletId,
   });
   const status = recurringPayment.status;
-  const tokenLabel = resolveTokenByMint(
-    recurringPayment.token,
-    issuedTokensByMint,
-    resolveTokenLabel(recurringPayment.token, wallets)
-  ).tokenName;
+  const tokenLabelForMint = (mint: string) =>
+    resolveTokenByMint(mint, issuedTokensByMint, resolveTokenLabel(mint, wallets)).tokenName;
+  const tokenLabel = tokenLabelForMint(recurringPayment.token);
   const scheduleTitle = t("DashboardPayments.recurring.amountToCounterparty", {
     amount: formatDisplayAmount(recurringPayment.amount, tokenLabel, locale),
     counterparty: counterpartyLabel,
@@ -832,7 +830,7 @@ export function RecurringPaymentDetailWorkspace({
             <RecurringPaymentRunHistory
               attempts={collectionAttempts}
               error={collectionAttemptsError}
-              tokenLabel={tokenLabel}
+              tokenLabelForMint={tokenLabelForMint}
               pendingActivation={status === "pending_activation"}
             />
           </RecordBlock>
