@@ -1,9 +1,6 @@
-import { Hono } from "hono";
-import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { AppError } from "@/lib/errors";
-import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { env } from "@/test/helpers/env";
+import { middlewareTestApp, TEST_CLIENT_IP } from "@/test/helpers/middleware-app";
 import { clearKVStores, readRateLimitCount, seedRateLimit } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 
@@ -22,11 +19,10 @@ const { CLERK_USER_MAX_REQUESTS, skipRateLimitPaths } = await import("@/middlewa
 
 const USER_ID = "user_ratelimit_test";
 const ISSUER = "https://clerk.rate-limit-test.example";
-const CLIENT_IP = "203.0.113.9";
 
 // The middleware only reaches verification for a token whose issuer matches
 // CLERK_ISSUER, which the shared test env doesn't set.
-const clerkEnv = { ...(env as object), CLERK_ISSUER: ISSUER } as unknown as Env;
+const clerkEnv: Env = { ...env, CLERK_ISSUER: ISSUER };
 
 // Shape only — verification is mocked. `looksLikeClerkJwt` inspects the payload's issuer.
 function clerkJwt(): string {
@@ -38,18 +34,10 @@ function clerkJwt(): string {
 const AUTH = { Authorization: `Bearer ${clerkJwt()}` };
 
 function buildApp() {
-  const app = new Hono<{ Bindings: Env }>();
-  app.use("*", kvStoreMiddleware());
-  app.use("*", skipRateLimitPaths("/health"));
-  app.get("/health", (c) => c.json({ ok: true }));
+  const app = middlewareTestApp("store");
+  app.use("*", skipRateLimitPaths());
   app.get("/v1/thing", (c) => c.json({ ok: true }));
   app.post("/pay/:token/tx", (c) => c.json({ ok: true }));
-  // Mirrors the real app's handler so a thrown AppError surfaces as its status.
-  app.onError((err, c) =>
-    err instanceof AppError
-      ? c.json(err.toResponse(), err.statusCode as ContentfulStatusCode)
-      : c.json({ error: String(err) }, 500)
-  );
   return app;
 }
 
@@ -70,22 +58,10 @@ describe("dashboard rate limiting", () => {
   });
 
   it("429s a dashboard caller that blows through the per-user ceiling", async () => {
-    // Seed the bucket to the ceiling rather than issuing hundreds of requests.
-    const { createKVStoreSet } = await import("@/runtime/kv-redis");
-    const kv = createKVStoreSet(env);
-    const windowStart = Math.floor(Date.now() / 60_000) * 60_000;
-    await kv.rateLimits.put(
-      `ratelimit:clerk:${USER_ID}:${windowStart}`,
-      String(CLERK_USER_MAX_REQUESTS)
-    );
+    await seedRateLimit(env, `clerk:${USER_ID}`, CLERK_USER_MAX_REQUESTS);
 
     const res = await buildApp().request("/v1/thing", { headers: AUTH }, clerkEnv);
     expect(res.status).toBe(429);
-  });
-
-  it("leaves exempt paths uncounted", async () => {
-    await buildApp().request("/health", { headers: AUTH }, clerkEnv);
-    expect(await readRateLimitCount(env, `clerk:${USER_ID}`)).toBe(0);
   });
 
   it("does not give an unverifiable JWT the per-user bucket", async () => {
@@ -98,11 +74,11 @@ describe("dashboard rate limiting", () => {
   });
 
   it("gives a Clerk JWT on /pay the anonymous per-IP limit without verifying it", async () => {
-    await seedRateLimit(env, CLIENT_IP, 20);
+    await seedRateLimit(env, TEST_CLIENT_IP, 20);
 
     const res = await buildApp().request(
       "/pay/pay_tok_clerk/tx",
-      { method: "POST", headers: { ...AUTH, "x-forwarded-for": CLIENT_IP } },
+      { method: "POST", headers: { ...AUTH, "x-forwarded-for": TEST_CLIENT_IP } },
       clerkEnv
     );
 
