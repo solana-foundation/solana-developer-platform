@@ -45,44 +45,29 @@ function cancelState(row: PaymentRequestRow): "canceled" | "open" {
 }
 
 /**
- * The live-claim floor for cancelling a request, read from the cluster only when it holds a
- * sponsored transaction claim.
- *
- * @param row - The request about to be canceled.
- * @returns The floor, or null when the row holds no claim.
- * @throws AppError `SOLANA_RPC_ERROR` when the cluster cannot be read; no cancel proceeds
- *   without the check.
- */
-export async function readLiveClaimFloorFor(row: PaymentRequestRow): Promise<bigint | null> {
-  return row.sponsored_tx_last_valid_block_height === null ? null : readLiveClaimFloor();
-}
-
-/**
  * Cancel an open payment request, so its `/pay` link stops building transactions. Compare-and-
  * set from `awaiting_payment`, with its audit record in the same transaction. A request that is
- * already canceled answers with its row.
+ * already canceled answers with its row before any chain read, so a retry needs no RPC.
  *
  * A request holding a sponsored transaction that can still land stays open: that transaction is
- * a bearer instrument until its blockhash expires. The caller reads the live-claim floor once
- * ({@link readLiveClaimFloorFor}), only when the row holds a claim. A lagging node reads a lower
- * height, so the hold lasts longer: the safe direction. Without a floor, any claim holds. A
- * payment signed before the cancel and landed after it is recorded by the late watch as paid.
+ * a bearer instrument until its blockhash expires. The live-claim floor is read once, only when
+ * the row holds a claim. A lagging node reads a lower height, so the hold lasts longer: the safe
+ * direction. A payment signed before the cancel and landed after it is recorded by the late
+ * watch as paid.
  *
- * @param c - The request context: its tenant scope, database identity and audit actor.
  * Who canceled is the key or member that authenticated the request, read from the ambient money
  * principal, so no caller can name another.
  *
- * @param params - The request to cancel and the floor read for it.
- * @param params.row - The request as read in the caller's Project; the compare-and-set decides.
- * @param params.liveClaimFloor - The live-claim floor, or null when the row read held no claim.
+ * @param c - The request context: its tenant scope, database identity and audit actor.
+ * @param row - The request as read in the caller's Project; the compare-and-set decides.
  * @returns The canceled request.
  * @throws AppError `CONFLICT` when it is paid or expired, or a sponsored transaction can land.
+ * @throws AppError `SOLANA_RPC_ERROR` when the row holds a claim and the cluster cannot be read.
  */
 export async function cancelOpenPaymentRequest(
   c: Context<{ Bindings: Env }>,
-  params: { row: PaymentRequestRow; liveClaimFloor: bigint | null }
+  row: PaymentRequestRow
 ): Promise<PaymentRequestRow> {
-  const { row, liveClaimFloor } = params;
   const canceledBy = currentMandateActivator();
   if (canceledBy === null) {
     throw internalError("A payment request cancel runs without an authenticated key or member");
@@ -93,9 +78,10 @@ export async function cancelOpenPaymentRequest(
     organizationId: row.organization_id,
     projectId: row.project_id,
   };
+  const claimHeight = row.sponsored_tx_last_valid_block_height;
+  const liveClaimFloor = claimHeight === null ? null : await readLiveClaimFloor();
   const scope = getRequestTenantScope(c);
 
-  const claimHeight = row.sponsored_tx_last_valid_block_height;
   if (claimHeight !== null && (liveClaimFloor === null || claimHeight >= liveClaimFloor)) {
     throw conflict(LIVE_CLAIM_MESSAGE);
   }

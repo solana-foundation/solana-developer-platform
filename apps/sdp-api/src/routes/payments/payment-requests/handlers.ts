@@ -17,10 +17,7 @@ import type { ValidatedBodyContext } from "@/middleware/validate";
 import type { AppContext } from "@/routes/payments/context";
 import { resolveScope, resolveWallet } from "@/routes/payments/wallets";
 import { normalizePaymentToken } from "@/services/payment-operation.service";
-import {
-  cancelOpenPaymentRequest,
-  readLiveClaimFloorFor,
-} from "@/services/payments/payment-request-cancel";
+import { cancelOpenPaymentRequest } from "@/services/payments/payment-request-cancel";
 import { isPaymentRequestExpired } from "@/services/payments/payment-requests";
 import { parseStaticPaymentAmount } from "@/services/payments/token-amount";
 import { type createPaymentRequestSchema, listPaymentRequestsQuerySchema } from "./schemas";
@@ -147,10 +144,6 @@ export async function createPaymentRequest(
  * @returns The canceled payment request.
  */
 export async function cancelPaymentRequest(c: AppContext) {
-  const authorized = getAuthorized<PaymentRequestRow>(c);
-  const row = await cancelOpenPaymentRequest(c, {
-    row: authorized,
-    liveClaimFloor: await readLiveClaimFloorFor(authorized),
-  });
+  const row = await cancelOpenPaymentRequest(c, getAuthorized<PaymentRequestRow>(c));
   return success(c, mapPaymentRequest(row));
 }

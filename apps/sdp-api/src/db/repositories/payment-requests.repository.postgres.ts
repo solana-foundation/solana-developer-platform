@@ -1,4 +1,8 @@
-import type { PaymentRequestLifecycleEvent, PaymentRequestStatus } from "@sdp/types/payments";
+import type {
+  ClosedUnpaidPaymentRequestStatus,
+  PaymentRequestLifecycleEvent,
+  PaymentRequestStatus,
+} from "@sdp/types/payments";
 import { z } from "zod";
 import type { DatabaseClient as AppDb } from "@/db/client";
 import { internalError } from "@/lib/errors";
@@ -88,7 +92,7 @@ function mapPaymentRequestRow(row: Record<string, unknown>): PaymentRequestRow {
 async function markClosedPaymentRequestPaid(
   db: AppDb,
   input: MarkClosedPaymentRequestPaidInput,
-  from: "expired" | "canceled"
+  from: ClosedUnpaidPaymentRequestStatus
 ): Promise<PaymentRequestRow | null> {
   const row = await db
     .prepare(
