@@ -54,8 +54,9 @@ service. Use a dedicated Sandbox project and a second project in the same
 organization; do not disable the shared stage smoke project. Use devnet wallets
 and test amounts only. The operator CLI needs the stage runtime database role
 and network access to stage Postgres. Verify the injected `DATABASE_URL` targets
-stage and uses that role before running it; do not infer this from the Doppler
-config name.
+stage and differs from production before running it. On 2026-10-28, the `stg`
+and `prd` Doppler configs had identical database URLs, so neither is a safe
+source for this drill until that configuration is corrected.
 
 1. Record the SHA, organization and project ids, both `status` outputs, and the
    control version before the stop.
