@@ -114,11 +114,7 @@ function RequestPaymentLink({
 
   async function downloadQrCode() {
     if (demo) return demoOnly();
-    await downloadSolanaQrCode({
-      url: payLink,
-      size: 512,
-      fileName: `payment-request-${request.id}`,
-    });
+    await downloadSolanaQrCode({ url: payLink, fileName: `payment-request-${request.id}` });
   }
 
   return (
@@ -231,9 +227,12 @@ function RequestCancelFooter({ requestId }: { requestId: string }) {
       >
         <div className="space-y-4 p-6">
           <h2 className="font-medium text-lg text-primary">{title}</h2>
-          <Callout variant="warning" title={t("DashboardPayments.requestDetail.cancelConfirmHead")}>
-            {t("DashboardPayments.requestDetail.cancelConfirmBody")}
+          <Callout variant="warning">
+            {t("DashboardPayments.requestDetail.cancelConfirmHead")}
           </Callout>
+          <p className="text-sm text-secondary">
+            {t("DashboardPayments.requestDetail.cancelConfirmBody")}
+          </p>
           <div className="flex justify-end gap-2">
             <Button
               type="button"

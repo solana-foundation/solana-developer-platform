@@ -5,6 +5,12 @@ import { useEffect, useRef } from "react";
 
 const QR_FOREGROUND = "#1c1c1d";
 const QR_BACKGROUND = "#ffffff";
+/**
+ * Every code is drawn at this size and scaled to fit. The library rounds each dot to a whole
+ * pixel and places the logo from a different rounding, so a code drawn small sets the logo off
+ * centre; at this size the slack is under a pixel at any display size.
+ */
+const QR_DRAW_SIZE = 512;
 
 function solanaQrOptions(url: string, size: number): Partial<Options> {
   return {
@@ -29,7 +35,7 @@ function solanaQrOptions(url: string, size: number): Partial<Options> {
  *
  * @param props - What to encode and how big.
  * @param props.url - The link the code opens.
- * @param props.size - Its width and height in px.
+ * @param props.size - Its displayed width and height in px.
  * @param props.label - Its accessible name.
  * @returns The code.
  */
@@ -43,7 +49,7 @@ export function SolanaQrCode({ url, size, label }: { url: string; size: number; 
     let active = true;
     void import("@solana/qr-code-styling").then(({ default: QRCodeStyling }) => {
       if (!active) return;
-      const qr = new QRCodeStyling(solanaQrOptions(url, size));
+      const qr = new QRCodeStyling(solanaQrOptions(url, QR_DRAW_SIZE));
       container.replaceChildren();
       qr.append(container);
     });
@@ -52,10 +58,16 @@ export function SolanaQrCode({ url, size, label }: { url: string; size: number; 
       active = false;
       container.replaceChildren();
     };
-  }, [url, size]);
+  }, [url]);
 
   return (
-    <div ref={containerRef} role="img" aria-label={label} style={{ width: size, height: size }} />
+    <div
+      ref={containerRef}
+      role="img"
+      aria-label={label}
+      className="[&_svg]:size-full"
+      style={{ width: size, height: size }}
+    />
   );
 }
 
@@ -64,16 +76,14 @@ export function SolanaQrCode({ url, size, label }: { url: string; size: number; 
  *
  * @param params - What to encode and where to save it.
  * @param params.url - The link the code opens.
- * @param params.size - Its width and height in px.
  * @param params.fileName - The file name, without its extension.
  * @returns Once the browser has been handed the file.
  */
 export async function downloadSolanaQrCode(params: {
   url: string;
-  size: number;
   fileName: string;
 }): Promise<void> {
   const { default: QRCodeStyling } = await import("@solana/qr-code-styling");
-  const qr = new QRCodeStyling({ ...solanaQrOptions(params.url, params.size), type: "canvas" });
+  const qr = new QRCodeStyling({ ...solanaQrOptions(params.url, QR_DRAW_SIZE), type: "canvas" });
   await qr.download({ name: params.fileName, extension: "png" });
 }
