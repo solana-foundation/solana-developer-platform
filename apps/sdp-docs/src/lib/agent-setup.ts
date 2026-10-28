@@ -23,11 +23,11 @@ export const MODULE_SKILLS: readonly ModuleSkill[] = [
   { name: "sdp-tokenization", module: "issuance", listed: false },
 ];
 
+const RELEASED_MODULES: ReadonlySet<SdpModule> = new Set(SDP_RELEASE_CHANNELS.stable);
+
 /** The module skills the menu offers: listed, and their module released (stable). */
 export function offeredModuleSkills(skills: readonly ModuleSkill[]): readonly ModuleSkill[] {
-  return skills.filter(
-    (skill) => skill.listed && SDP_RELEASE_CHANNELS.stable.includes(skill.module)
-  );
+  return skills.filter((skill) => skill.listed && RELEASED_MODULES.has(skill.module));
 }
 
 export type AgentSetupOption = {
