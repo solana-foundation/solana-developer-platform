@@ -5,9 +5,11 @@ import type { SdpEnvironment } from "@sdp/types/api-keys";
 import {
   isCollectableRecurringPaymentStatus,
   PAYMENT_RECURRING_PAYMENT_LIFECYCLE_OPERATIONS,
+  type PaymentRecurringPaymentActivationAttemptStage,
   type PaymentRecurringPaymentAttemptStatus,
   type PaymentRecurringPaymentLifecycleAttemptStage,
   type PaymentRecurringPaymentLifecycleOperation,
+  type PaymentRecurringPaymentStatus,
   type PaymentRecurringPaymentUpdateAttemptStage,
   type PaymentSubscriptionCollectionAttemptMetadata,
   RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS,
@@ -2526,10 +2528,10 @@ describe("Payments routes — recurring", () => {
         )
         .bind(created.id)
         .first<{
-          status: string;
-          stage: string;
+          status: PaymentRecurringPaymentAttemptStatus;
+          stage: PaymentRecurringPaymentActivationAttemptStage;
           authorization_setup_signature: string | null;
-          schedule_status: string;
+          schedule_status: PaymentRecurringPaymentStatus;
         }>()
     ).toEqual({
       status: "failed",
