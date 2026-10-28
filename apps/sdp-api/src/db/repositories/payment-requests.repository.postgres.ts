@@ -32,6 +32,8 @@ const reconcilerColumnsSchema = z.object({
   signature_scan_stuck_signature: z.string().nullable(),
   signature_scan_stuck_since: z.string().nullable(),
   canceled_at: z.string().nullable(),
+  canceled_by_api_key_id: z.string().nullable(),
+  canceled_by_user_id: z.string().nullable(),
   sponsored_tx_last_valid_block_height: z.coerce.bigint().nullable(),
 });
 
@@ -55,7 +57,8 @@ function mapPaymentRequestRow(row: Record<string, unknown>): PaymentRequestRow {
     status: row.status as PaymentRequestStatus,
     expires_at: row.expires_at as string | null,
     fulfilled_by_transfer_id: row.fulfilled_by_transfer_id as string | null,
-    canceled_by: row.canceled_by as string | null,
+    canceled_by_api_key_id: reconciler.canceled_by_api_key_id,
+    canceled_by_user_id: reconciler.canceled_by_user_id,
     canceled_at: reconciler.canceled_at,
     lifecycle: row.lifecycle as PaymentRequestLifecycleEvent[],
     created_by: row.created_by as string | null,
@@ -231,7 +234,8 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
           // request stays open while one can still land, as the expiry lane holds a lapsed one.
           `UPDATE payment_requests
              SET status = 'canceled',
-                 canceled_by = ?,
+                 canceled_by_api_key_id = ?,
+                 canceled_by_user_id = ?,
                  canceled_at = sdp_iso_now(),
                  lifecycle = lifecycle || jsonb_build_array(
                    jsonb_build_object('status', 'canceled', 'at', sdp_iso_now())
@@ -249,7 +253,8 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
            RETURNING *`
         )
         .bind(
-          input.canceledBy,
+          input.canceledBy.apiKeyId,
+          input.canceledBy.userId,
           input.requestId,
           input.organizationId,
           input.projectId,

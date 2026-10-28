@@ -364,7 +364,8 @@ function applyRequest(world: DemoWorld, op: DemoOpOf<"request">): void {
     expiresAt: op.expires,
     fulfilledByTransferId: null,
     paidLate: false,
-    canceledBy: null,
+    canceledByApiKeyId: null,
+    canceledByUserId: null,
     canceledAt: null,
     lifecycle: [{ status: "awaiting_payment", at: createdAt }],
     createdBy: CREATED_BY,
@@ -378,7 +379,7 @@ function applyRequestCancel(world: DemoWorld, op: DemoOpOf<"request-cancel">): v
   if (request?.status !== "awaiting_payment") return;
   const canceledAt = iso(op.at);
   request.status = "canceled";
-  request.canceledBy = CREATED_BY;
+  request.canceledByUserId = CREATED_BY;
   request.canceledAt = canceledAt;
   request.lifecycle = [...request.lifecycle, { status: "canceled", at: canceledAt }];
   request.updatedAt = canceledAt;

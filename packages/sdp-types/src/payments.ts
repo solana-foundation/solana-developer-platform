@@ -1296,7 +1296,10 @@ export interface PaymentRequest {
   fulfilledByTransferId: string | null;
   paidLate: boolean;
   lastCheckedAt?: string | null;
-  canceledBy: string | null;
+  /** The API key that canceled it; null when a member did or it is not canceled. */
+  canceledByApiKeyId: string | null;
+  /** The member who canceled it; null when an API key did or it is not canceled. */
+  canceledByUserId: string | null;
   canceledAt: string | null;
   lifecycle: PaymentRequestLifecycleEvent[];
   createdBy: string | null;

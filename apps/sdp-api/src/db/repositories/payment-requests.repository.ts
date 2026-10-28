@@ -35,7 +35,8 @@ export interface PaymentRequestRow {
   status: PaymentRequestStatus;
   expires_at: string | null;
   fulfilled_by_transfer_id: string | null;
-  canceled_by: string | null;
+  canceled_by_api_key_id: string | null;
+  canceled_by_user_id: string | null;
   canceled_at: string | null;
   lifecycle: PaymentRequestLifecycleEvent[];
   created_by: string | null;
@@ -100,12 +101,16 @@ export interface MarkPaymentRequestInput {
   chainRead: boolean;
 }
 
+/** Who canceled a request: the API key or the member that authenticated the cancel, never both. */
+export type PaymentRequestCanceler =
+  | { apiKeyId: string; userId: null }
+  | { apiKeyId: null; userId: string };
+
 export interface CancelPaymentRequestInput {
   requestId: string;
   organizationId: string;
   projectId: string;
-  /** The acting principal, in the identifier format `created_by` uses. */
-  canceledBy: string;
+  canceledBy: PaymentRequestCanceler;
   /**
    * The lowest last valid block height a sponsored transaction may hold and still land, read from
    * the cluster when the request had a claim. Null when it had none: a claim written since then

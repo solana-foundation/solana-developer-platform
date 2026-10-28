@@ -6,6 +6,7 @@ import {
   createTransactionalPaymentRequestsRepository,
 } from "@/db/repositories/repository-factory";
 import { conflict, internalError } from "@/lib/errors";
+import { currentMandateActivator } from "@/lib/money-principal";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { logEvent } from "@/runtime/money-path-events";
 import { AuditService } from "@/services/audit.service";
@@ -68,18 +69,24 @@ export async function readLiveClaimFloorFor(row: PaymentRequestRow): Promise<big
  * payment signed before the cancel and landed after it is recorded by the late watch as paid.
  *
  * @param c - The request context: its tenant scope, database identity and audit actor.
- * @param params - The request to cancel, who cancels it, and the floor read for it.
+ * Who canceled is the key or member that authenticated the request, read from the ambient money
+ * principal, so no caller can name another.
+ *
+ * @param params - The request to cancel and the floor read for it.
  * @param params.row - The request as read in the caller's Project; the compare-and-set decides.
- * @param params.canceledBy - The acting principal, in the identifier format `created_by` uses.
  * @param params.liveClaimFloor - The live-claim floor, or null when the row read held no claim.
  * @returns The canceled request.
  * @throws AppError `CONFLICT` when it is paid or expired, or a sponsored transaction can land.
  */
 export async function cancelOpenPaymentRequest(
   c: Context<{ Bindings: Env }>,
-  params: { row: PaymentRequestRow; canceledBy: string; liveClaimFloor: bigint | null }
+  params: { row: PaymentRequestRow; liveClaimFloor: bigint | null }
 ): Promise<PaymentRequestRow> {
-  const { row, canceledBy, liveClaimFloor } = params;
+  const { row, liveClaimFloor } = params;
+  const canceledBy = currentMandateActivator();
+  if (canceledBy === null) {
+    throw internalError("A payment request cancel runs without an authenticated key or member");
+  }
   if (cancelState(row) === "canceled") return row;
   const key = {
     requestId: row.id,

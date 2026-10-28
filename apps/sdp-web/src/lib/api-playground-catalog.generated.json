@@ -1916,7 +1916,8 @@
             "fulfilledByTransferId": "fulfilledbytransfer_example",
             "paidLate": false,
             "lastCheckedAt": "2025-01-01T00:00:00.000Z",
-            "canceledBy": "example",
+            "canceledByApiKeyId": "canceledbyapikey_example",
+            "canceledByUserId": "canceledbyuser_example",
             "canceledAt": "2025-01-01T00:00:00.000Z",
             "lifecycle": [
               {

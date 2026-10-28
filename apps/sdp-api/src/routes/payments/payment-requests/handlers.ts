@@ -46,7 +46,8 @@ function mapPaymentRequest(row: PaymentRequestRow): PaymentRequest {
     fulfilledByTransferId: row.fulfilled_by_transfer_id,
     paidLate: row.paid_late,
     lastCheckedAt: row.last_verified_at,
-    canceledBy: row.canceled_by,
+    canceledByApiKeyId: row.canceled_by_api_key_id,
+    canceledByUserId: row.canceled_by_user_id,
     canceledAt: row.canceled_at,
     lifecycle: row.lifecycle,
     createdBy: row.created_by,
@@ -149,7 +150,6 @@ export async function cancelPaymentRequest(c: AppContext) {
   const authorized = getAuthorized<PaymentRequestRow>(c);
   const row = await cancelOpenPaymentRequest(c, {
     row: authorized,
-    canceledBy: await resolveCreatorUserId(c),
     liveClaimFloor: await readLiveClaimFloorFor(authorized),
   });
   return success(c, mapPaymentRequest(row));

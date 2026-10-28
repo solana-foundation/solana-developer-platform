@@ -709,8 +709,13 @@ export const paymentRequestSchema = z
     lastCheckedAt: isoDateTimeSchema
       .nullable()
       .openapi({ description: "When SDP last read the chain for the payment." }),
-    canceledBy: z.string().nullable().openapi({
-      description: "User ID of the member, or of the API key's creator, who canceled.",
+    canceledByApiKeyId: z.string().nullable().openapi({
+      description:
+        "The API key that canceled the request; null when a member did, or it is not canceled.",
+    }),
+    canceledByUserId: z.string().nullable().openapi({
+      description:
+        "User ID of the member who canceled the request; null when an API key did, or it is not canceled.",
     }),
     canceledAt: isoDateTimeSchema.nullable().openapi({ description: "When it was canceled." }),
     lifecycle: z
