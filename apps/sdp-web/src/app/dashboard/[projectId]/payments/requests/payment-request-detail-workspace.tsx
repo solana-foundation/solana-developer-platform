@@ -4,10 +4,8 @@ import { isPaymentRequestPayableAt, type PaymentRequest } from "@sdp/types/payme
 import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
 import { Button } from "@sdp/ui/button";
 import { CopyIcon, DownloadIcon, Loader2Icon, Share2Icon } from "lucide-react";
-import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import QRCode from "qrcode";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { shortenAddress } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
@@ -24,6 +22,7 @@ import {
   RecordStateBand,
 } from "@/app/dashboard/[projectId]/payments/payments-record";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
+import { downloadSolanaQrCode, SolanaQrCode } from "@/components/solana-qr-code";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
@@ -54,24 +53,6 @@ function requestWhy(
     : t("DashboardPayments.requestDetail.why.expired");
 }
 
-const QR_COLORS = { dark: "#0f0f12", light: "#ffffff" };
-
-/** The link drawn as a QR code, as a data URL once it is drawn; null before and without a link. */
-function useQrDataUrl(text: string, width: number): string | null {
-  const [dataUrl, setDataUrl] = useState<string | null>(null);
-  useEffect(() => {
-    if (!text) return;
-    let current = true;
-    void QRCode.toDataURL(text, { margin: 0, width, color: QR_COLORS }).then((drawn) => {
-      if (current) setDataUrl(drawn);
-    });
-    return () => {
-      current = false;
-    };
-  }, [text, width]);
-  return text ? dataUrl : null;
-}
-
 /**
  * The request's pay link on this origin, as the design lays it out: its QR code on a 128px tile,
  * the link beside it, and the copy, share and QR download under the link. A demo request lives
@@ -94,7 +75,6 @@ function RequestPaymentLink({
   const [origin, setOrigin] = useState("");
   useEffect(() => setOrigin(window.location.origin), []);
   const payLink = origin ? `${origin}/pay/${publicToken}` : "";
-  const qrDataUrl = useQrDataUrl(demo ? "" : payLink, 256);
   const amount = `${formatDecimalAmount(request.amount, locale)} ${symbol}`;
 
   const demoOnly = () => toast.info(t("DashboardPayments.demo.noPayLink"));
@@ -132,11 +112,11 @@ function RequestPaymentLink({
 
   async function downloadQrCode() {
     if (demo) return demoOnly();
-    const file = await QRCode.toDataURL(payLink, { margin: 2, width: 512, color: QR_COLORS });
-    const anchor = document.createElement("a");
-    anchor.href = file;
-    anchor.download = `payment-request-${request.id}.png`;
-    anchor.click();
+    await downloadSolanaQrCode({
+      url: payLink,
+      size: 512,
+      fileName: `payment-request-${request.id}`,
+    });
   }
 
   return (
@@ -146,14 +126,11 @@ function RequestPaymentLink({
           no link to draw. */}
       {demo ? null : (
         <div className="size-32 shrink-0 rounded-xs bg-white p-4">
-          {qrDataUrl ? (
-            <Image
-              src={qrDataUrl}
-              alt={t("DashboardPayments.requestDetail.qrCodeAlt")}
-              width={96}
-              height={96}
-              unoptimized
-              className="size-full"
+          {payLink ? (
+            <SolanaQrCode
+              url={payLink}
+              size={96}
+              label={t("DashboardPayments.requestDetail.qrCodeAlt")}
             />
           ) : (
             <div className="size-full animate-pulse rounded-xs bg-fill" />

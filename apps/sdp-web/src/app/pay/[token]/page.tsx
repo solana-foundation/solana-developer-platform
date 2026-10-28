@@ -8,8 +8,8 @@ import {
   shortenAddress,
 } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
 import { resolvePlaygroundApiBaseUrl } from "@/app/dashboard/[projectId]/playground-api-data";
+import { SolanaQrCode } from "@/components/solana-qr-code";
 import { getRequestLocale, getTranslations } from "@/i18n/server";
-import { PayQrCode } from "./pay-qr-code";
 
 export const dynamic = "force-dynamic";
 
@@ -138,7 +138,7 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
           {payUrl ? (
             <div className="mt-7 flex flex-col items-center gap-5">
               <div className="rounded-2xl border border-border-default bg-[white] p-4 shadow-[0_2px_12px_rgba(28,28,29,0.05)]">
-                <PayQrCode url={payUrl} size={208} />
+                <SolanaQrCode url={payUrl} size={208} label={t("Shared.pay.qrCode")} />
               </div>
               <p className="text-sm text-secondary">{t("Shared.pay.scanWallet")}</p>
               <a

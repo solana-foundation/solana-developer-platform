@@ -2,7 +2,6 @@
 
 import type { Options } from "@solana/qr-code-styling";
 import { useEffect, useRef } from "react";
-import { useTranslations } from "@/i18n/provider";
 
 const QR_FOREGROUND = "#1c1c1d";
 const QR_BACKGROUND = "#ffffff";
@@ -24,8 +23,17 @@ function solanaQrOptions(url: string, size: number): Partial<Options> {
   };
 }
 
-export function PayQrCode({ url, size }: { url: string; size: number }) {
-  const t = useTranslations();
+/**
+ * A Solana-styled QR code for a payment link, drawn in the browser: the one code every pay link
+ * shows, on the public pay page and wherever the dashboard shares the link.
+ *
+ * @param props - What to encode and how big.
+ * @param props.url - The link the code opens.
+ * @param props.size - Its width and height in px.
+ * @param props.label - Its accessible name.
+ * @returns The code.
+ */
+export function SolanaQrCode({ url, size, label }: { url: string; size: number; label: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -47,11 +55,25 @@ export function PayQrCode({ url, size }: { url: string; size: number }) {
   }, [url, size]);
 
   return (
-    <div
-      ref={containerRef}
-      role="img"
-      aria-label={t("Shared.pay.qrCode")}
-      style={{ width: size, height: size }}
-    />
+    <div ref={containerRef} role="img" aria-label={label} style={{ width: size, height: size }} />
   );
+}
+
+/**
+ * Download a link's Solana-styled QR code as a PNG, drawn as {@link SolanaQrCode} draws it.
+ *
+ * @param params - What to encode and where to save it.
+ * @param params.url - The link the code opens.
+ * @param params.size - Its width and height in px.
+ * @param params.fileName - The file name, without its extension.
+ * @returns Once the browser has been handed the file.
+ */
+export async function downloadSolanaQrCode(params: {
+  url: string;
+  size: number;
+  fileName: string;
+}): Promise<void> {
+  const { default: QRCodeStyling } = await import("@solana/qr-code-styling");
+  const qr = new QRCodeStyling({ ...solanaQrOptions(params.url, params.size), type: "canvas" });
+  await qr.download({ name: params.fileName, extension: "png" });
 }
