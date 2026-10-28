@@ -9,10 +9,12 @@ import { parseDecimalAmount } from "@sdp/solana/amount";
 import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { getBase58Codec } from "@solana/codecs";
 import {
+  type Account,
   address,
   createNoopSigner,
   getSignatureFromTransaction,
   getTransactionDecoder,
+  lamports,
   type Signature,
 } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
@@ -88,11 +90,24 @@ export const fetchMaybeSubscriptionAuthorityMock = vi.spyOn(
   "fetchMaybeSubscriptionAuthority"
 );
 
-export const TEST_SUBSCRIPTION_AUTHORITY = {
+export const TEST_SUBSCRIPTION_AUTHORITY: Account<subscriptionsProgram.SubscriptionAuthority> & {
+  readonly exists: true;
+} = {
   exists: true,
   address: address(TEST_SOLANA_ADDRESSES.wallet3),
-  data: { initId: 1n },
-} as Awaited<ReturnType<typeof subscriptionsProgram.fetchMaybeSubscriptionAuthority>>;
+  executable: false,
+  lamports: lamports(1_628_640n),
+  programAddress: subscriptionsProgram.SUBSCRIPTIONS_PROGRAM_ADDRESS,
+  space: 106n,
+  data: {
+    discriminator: 0,
+    user: address(TEST_SOLANA_ADDRESSES.wallet1),
+    tokenMint: address(TEST_SOLANA_ADDRESSES.wallet2),
+    payer: TEST_MOCK_FEE_PAYER,
+    bump: 255,
+    initId: 1n,
+  },
+};
 
 export const fetchMaybeSubscriptionDelegationMock = vi.spyOn(
   subscriptionsProgram,
