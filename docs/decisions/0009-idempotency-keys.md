@@ -140,7 +140,7 @@ A partial failure is finished with `POST /transfer-batches/:batchId/retry` (HOO-
 It sends only `failed` recipients, which were definitely not paid. Before it sends, it claims them
 back to `pending` with no transfer under the batch lock, all or nothing, so a concurrent retry gets
 409. A chunk links a recipient only while it is still pending with no transfer, so a recipient that
-another writer failed or claimed first rolls the chunk back before it is signed. The claim writes a
+another writer failed or claimed first rolls the chunk back before it is sent. The claim writes a
 `payment_transfer_batch_retries` row under the retry's record key in the same transaction (migration
 0184), so the route runs like create (`serverErrors: "rerun"`, `recovery: "record"`): a rerun after a
 5xx or a takeover is answered from that row with the batch as it stands, and claims nothing again.

@@ -22,7 +22,7 @@ import {
 } from "./resolve";
 import { buildTransferBatchResponse } from "./respond";
 import { prepareBatchChunks, runBatchChunks } from "./run";
-import { transferBatchOptionsSchema } from "./schemas";
+import { MAX_TRANSFER_BATCH_RECIPIENTS, transferBatchOptionsSchema } from "./schemas";
 import type { CreateTransferBatchInput } from "./types";
 
 /** The batch a retry names, and the access check of everything it pays. */
@@ -72,7 +72,7 @@ export async function authorizeTransferBatchRetry(
     batchId,
     organizationId,
     projectId,
-    limit: 500,
+    limit: MAX_TRANSFER_BATCH_RECIPIENTS,
     offset: 0,
   });
   const authorized = await authorizeBatchRequest(
@@ -86,11 +86,14 @@ export async function authorizeTransferBatchRetry(
 /**
  * Answers a retry from the row its claim recorded under the key (HOO-2343,
  * ADR 0009): a rerun after a 5xx, a takeover of a crashed retry, or a retry of
- * the key once its record expired. Its recipients were claimed, and are sent,
- * linked or failed by now, or still pending if that request died before
- * sending them; nothing is claimed again. It answers the batch as it stands
- * and settles nothing: the stranded-batch job fails a dead claim's unsent
- * recipients once they are past any request's lifetime.
+ * the key once its record expired. Nothing is claimed again. It runs only once
+ * the request that claimed is presumed dead (the key layer took the key over,
+ * or it expired), so its recipients still pending with no chunk transfer will
+ * never be sent: a chunk's transfer row and links commit before its
+ * broadcast. They are failed, and the batch settles, before it answers, so
+ * they can be retried at once. The claim wrote them in the retry row's
+ * transaction, so `updated_at` up to the row's `created_at` names exactly
+ * them, and never a later retry's claim.
  */
 export async function findTransferBatchRetryReplay(
   c: AppContext,
@@ -112,10 +115,20 @@ export async function findTransferBatchRetryReplay(
     // Another request's retry under this key: the step refuses it (422).
     return { fingerprint: retry.idempotency_fingerprint, respond: () => success(c, {}) };
   }
+  const settled =
+    batch.status === "processing"
+      ? await getPaymentTransferBatchesRepository(c).failUnsentTransferRecipients({
+          batchId: batch.id,
+          organizationId,
+          projectId,
+          error: "The retry request ended before this recipient's transfer was sent",
+          attemptedBefore: new Date(Date.parse(retry.created_at) + 1).toISOString(),
+        })
+      : batch;
   return {
     fingerprint: retry.idempotency_fingerprint,
     respond: async () =>
-      success(c, await buildTransferBatchResponse(c, batch, organizationId, projectId)),
+      success(c, await buildTransferBatchResponse(c, settled, organizationId, projectId)),
   };
 }
 
@@ -175,7 +188,7 @@ export async function retryTransferBatch(c: AppContext) {
     organizationId,
     projectId,
     status: "failed",
-    limit: 500,
+    limit: MAX_TRANSFER_BATCH_RECIPIENTS,
     offset: 0,
   });
   if (failed.rows.length === 0) {

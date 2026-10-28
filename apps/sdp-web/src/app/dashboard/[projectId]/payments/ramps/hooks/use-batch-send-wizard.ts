@@ -41,6 +41,7 @@ import {
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import type { TranslationValues } from "@/i18n/translate";
+import { MOVEMENT_POLL_INTERVAL_MS } from "@/lib/dashboard-fetch";
 import { isMovementInFlight } from "@/lib/idempotency";
 import { DEMO_PREFILL_AMOUNTS } from "@/lib/payments-demo/demo-prefill";
 import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
@@ -103,9 +104,6 @@ export interface UseBatchSendWizardProps {
   cluster: SolanaCluster;
   onExit: () => void;
 }
-
-/** How often a submitted batch is read while its recipients are still settling. */
-const TRANSFER_BATCH_REFRESH_MS = 3000;
 
 /**
  * One page of the contacts a batch can pay, filtered by the search box. A new search starts
@@ -523,7 +521,7 @@ export function useBatchSendWizard({
       revalidateOnFocus: false,
       refreshInterval: (latest) =>
         isMovementInFlight((latest ?? batchResult)?.batch.status ?? null)
-          ? TRANSFER_BATCH_REFRESH_MS
+          ? MOVEMENT_POLL_INTERVAL_MS
           : 0,
     }
   );

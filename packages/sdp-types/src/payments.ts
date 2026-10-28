@@ -618,7 +618,7 @@ export type PaymentTransferBatchStatus = (typeof PAYMENT_TRANSFER_BATCH_STATUSES
  * Sending it again would pay the paid ones twice; its failed recipients are
  * finished with a retry instead.
  */
-export function isPartiallyFailedTransferBatchStatus(status: string): boolean {
+export function isPartiallyFailedTransferBatchStatus(status: MoneyMovementStatus): boolean {
   return status === "partially_failed";
 }
 

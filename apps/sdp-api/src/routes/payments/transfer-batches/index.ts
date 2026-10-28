@@ -67,11 +67,12 @@ transferBatches.post(
   validateParams(transferBatchIdParamsSchema),
   validateBody(retryTransferBatchSchema),
   authorize(authorizeTransferBatchRetry),
-  meteredQuota(TRANSFER_BATCH_QUOTA),
   // The claim records the retry under its key before anything is signed, so a
   // rerun after a 5xx or a crash is answered from that row (HOO-2343).
   idempotent({ key: "required", serverErrors: "rerun", recovery: "record", leaseSeconds: 300 }),
   replayFromRecord(findTransferBatchRetryReplay),
+  // Meters only new retries, as for create.
+  meteredQuota(TRANSFER_BATCH_QUOTA),
   admit(admitTransferBatchRetryExecution),
   retryTransferBatch
 );

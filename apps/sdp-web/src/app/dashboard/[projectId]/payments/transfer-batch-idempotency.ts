@@ -32,14 +32,6 @@ import {
 const store = createIdempotencyKeyStore("sdp:payments:transfer-batch:idempotency:v1");
 const retryStore = createIdempotencyKeyStore("sdp:payments:transfer-batch-retry:idempotency:v1");
 
-/**
- * A batch that ends partially failed keeps its key (APE-462): sending the same
- * batch again is answered with this one instead of paying the recipients who
- * were paid. Its failed recipients are finished with a retry
- * ({@link retryTransferBatchUnderKey}).
- */
-const batchKeepsKey = isPartiallyFailedTransferBatchStatus;
-
 /** @internal Test-only: clear the module-scope tiers so specs are order-independent. */
 export function resetTransferBatchIdempotencyStateForTests(): void {
   resetIdempotencyKeyStoresForTests();
@@ -153,8 +145,9 @@ export async function sendTransferBatchUnderKey(
   // The batch row exists, so once it is final the key is spent and the next
   // identical batch is a new intent. While it is still processing the key is
   // kept, so that send is answered by the replay (APE-461); a partially failed
-  // batch keeps it for good (APE-462).
-  if (batchKeepsKey(result.batch.status)) return result;
+  // batch keeps it for good (APE-462): sending it again would pay the paid
+  // recipients twice, so its failed ones are finished with a retry.
+  if (isPartiallyFailedTransferBatchStatus(result.batch.status)) return result;
   const settled = settleMoneyIdempotencyKey(store, fingerprint, key, {
     status: 200,
     replayed: false,
@@ -165,7 +158,7 @@ export async function sendTransferBatchUnderKey(
   // current state can show it final and settle the key.
   if (!settled) {
     settleWhenMovementFinal(MOVEMENT_READ_PATHS.batch(result.batch.id), (status) => {
-      if (!batchKeepsKey(status)) store.release(fingerprint, key);
+      if (!isPartiallyFailedTransferBatchStatus(status)) store.release(fingerprint, key);
     });
   }
   return result;

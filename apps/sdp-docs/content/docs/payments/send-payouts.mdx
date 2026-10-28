@@ -52,7 +52,7 @@ curl -X POST https://api.solana.com/v1/payments/transfer-batches/{batchId}/retry
 
 The retry sends only the batch's `failed` recipients, to the addresses the batch recorded for them, from the same wallet with the batch's options, and returns the batch with those recipients `processing` again. Recipients still `pending` or `processing` may still land, so they are never sent again. Each resent recipient keeps its row in the batch and links to its new transfer.
 
-- The same `Idempotency-Key` returns that retry as recorded without sending again, including after a timeout or a server error, so retry a lost answer under the same key.
+- The same `Idempotency-Key` returns the batch's current state without sending again, including after a timeout or a server error, so retry a lost answer under the same key.
 - A batch with nothing `failed` returns `409 CONFLICT`, as does a retry that loses to a concurrent one. Nothing is sent.
 - A failed recipient whose counterparty account changed its address since the batch was sent is not paid either address: the retry returns `409 CONFLICT` naming it in `error.details.recipientIds`, and nothing is sent. Send that recipient in a new batch.
 - Only recipients that are still `failed` are ever sent, so a retry under a new key never pays anyone twice.

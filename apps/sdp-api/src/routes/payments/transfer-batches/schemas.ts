@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { paymentAmountSchema, paymentTokenSchema } from "@/routes/payments/schemas";
 
+/** The most recipients one batch holds; retry reads a whole batch at this size. */
+export const MAX_TRANSFER_BATCH_RECIPIENTS = 500;
+
 const priorityFeeSchema = z.enum(["none", "low", "medium", "high", "auto"]);
 
 export const transferBatchIdParamsSchema = z.object({
@@ -42,7 +45,7 @@ export const createTransferBatchSchema = z.strictObject({
   externalId: z.string().min(1).max(256).optional(),
   sourceCustodyWalletId: z.string().min(1),
   token: paymentTokenSchema,
-  recipients: z.array(transferBatchRecipientSchema).min(1).max(500),
+  recipients: z.array(transferBatchRecipientSchema).min(1).max(MAX_TRANSFER_BATCH_RECIPIENTS),
   options: transferBatchOptionsSchema.optional(),
 });
 

@@ -2277,7 +2277,7 @@ describe("payment transfer batches", () => {
       const key = crypto.randomUUID();
       expect((await retry(batch.id, key)).status).toBe(200);
       // The key's stored answer is gone (expired, or lost to a crash before it was stored).
-      await clearKVStores(env);
+      await getDb(env).execute("DELETE FROM idempotency_keys");
       vi.clearAllMocks();
 
       const rerun = await retry(batch.id, key);
@@ -2286,6 +2286,40 @@ describe("payment transfer batches", () => {
       expect(rerun.headers.get("Idempotent-Replayed")).toBe("true");
       expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
       expect(sendTransactionMock).not.toHaveBeenCalled();
+    });
+
+    it("fails a crashed retry's unsent recipients on a same-key rerun, so they can be retried", async () => {
+      const { batch, failed } = await seedPartiallyFailedBatch();
+      vi.clearAllMocks();
+      const key = crypto.randomUUID();
+      expect((await retry(batch.id, key)).status).toBe(200);
+      // The state a crash right after the claim leaves: the claimed recipient
+      // pending and unlinked, written in the retry row's transaction.
+      await getDb(env)
+        .prepare(
+          `UPDATE payment_transfer_recipients r
+              SET status = 'pending', transfer_id = NULL, error = NULL,
+                  updated_at = (SELECT created_at FROM payment_transfer_batch_retries WHERE batch_id = r.batch_id)
+            WHERE id = ?`
+        )
+        .bind(failed.id)
+        .run();
+      await getDb(env)
+        .prepare("UPDATE payment_transfer_batches SET status = 'processing' WHERE id = ?")
+        .bind(batch.id)
+        .run();
+      await getDb(env).execute("DELETE FROM idempotency_keys");
+      vi.clearAllMocks();
+
+      const rerun = await retry(batch.id, key);
+
+      expect(rerun.status).toBe(200);
+      const body = await readBatch(rerun);
+      expect(body.data.recipients.find((r) => r.id === failed.id)?.status).toBe("failed");
+      expect(sendTransactionMock).not.toHaveBeenCalled();
+      // Failed again, so a new retry can send it.
+      expect((await retry(batch.id)).status).toBe(200);
+      expect(sendTransactionMock).toHaveBeenCalledTimes(1);
     });
 
     it("refuses a retry whose recipient's account changed address, signing nothing", async () => {

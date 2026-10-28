@@ -193,7 +193,7 @@ export async function executeChunk(params: {
       status: "processing",
       error: null,
       // A recipient another writer failed or claimed first rolls the chunk
-      // back before it is signed or sent.
+      // back before it is sent; its signature is discarded.
       requireUnsent: true,
     });
 
