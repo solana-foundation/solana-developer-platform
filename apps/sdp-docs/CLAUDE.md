@@ -220,6 +220,11 @@ Gates follow module declarations, never sentences:
 
 API reference pages are different: they are generated from the public OpenAPI document, one page per tag, so a family appears and disappears with that document (`EARN_PUBLIC_SURFACE_PUBLISHED` in `apps/sdp-api/src/openapi/spec.ts` is the one such switch). The docs keep no list of families of their own, and an untagged operation fails `generate:api`.
 
+- `openapi:generate` also writes the channel's reference model (`apps/sdp-api/generated/api-reference.json`, gitignored; the contract is `@sdp/api-catalog/reference`, built by `apps/sdp-api/src/openapi/reference.ts`). A schema keyword the model cannot carry fails the build there.
+- `generate-api-docs.mjs` parses it and renders each family with `scripts/lib/api-reference-page.ts`: one `##` section per operation anchored by its operationId (`#createWallet`), parameters, request body, responses, a cURL, TypeScript and Python sample (`tab=` fences, from `@sdp/api-catalog/snippets`) and an example per status. It fails if a page misses an operation or a sample.
+- The pages are Markdown, so `.md`, `llms-full.txt` and search carry everything. The one component, `<ApiEndpoint />`, has its Markdown form in `expandDocsBlocks` and its search text in `remarkDocsBlocks`; a new reference component needs both.
+- `apiReference: true` frontmatter keeps a page's table of contents to its operations and scopes the `.is-api-reference` styles in `globals.css`.
+
 Currently unpublished: the whole Earn family, guide and API reference, until PRO-2038.
 
 ---

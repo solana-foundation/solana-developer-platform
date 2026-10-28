@@ -3,12 +3,18 @@ export const SNIPPET_LANGUAGES = ["curl", "ts", "py"] as const;
 
 export type SnippetLanguage = (typeof SNIPPET_LANGUAGES)[number];
 
+/** `apiKey` sends the key from `SDP_API_KEY` as a bearer token; `none` is a public route. */
+export const SNIPPET_AUTH_MODES = ["apiKey", "none"] as const;
+
+export type SnippetAuth = (typeof SNIPPET_AUTH_MODES)[number];
+
 export interface SnippetRequest {
   method: string;
   /** The full URL, host and resolved path. */
   url: string;
   /** The JSON body, or null for a call without one. */
   body: unknown | null;
+  auth: SnippetAuth;
 }
 
 const API_KEY_VARIABLE = "SDP_API_KEY";
@@ -51,53 +57,50 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
-function curlSnippet({ method, url, body }: SnippetRequest): string {
-  const lines = [
-    `curl ${method === "GET" ? "" : `-X ${method} `}${shellQuote(url)} \\`,
-    `  -H "Authorization: Bearer $${API_KEY_VARIABLE}"`,
-  ];
-  if (isWrite(method)) {
-    lines[lines.length - 1] += " \\";
-    lines.push('  -H "Idempotency-Key: $(uuidgen)"');
-  }
+function curlSnippet({ method, url, body, auth }: SnippetRequest): string {
+  const lines = [`curl ${method === "GET" ? "" : `-X ${method} `}${shellQuote(url)}`];
+  if (auth === "apiKey") lines.push(`  -H "Authorization: Bearer $${API_KEY_VARIABLE}"`);
+  if (isWrite(method)) lines.push('  -H "Idempotency-Key: $(uuidgen)"');
   if (body !== null) {
-    lines[lines.length - 1] += " \\";
     lines.push(
-      '  -H "Content-Type: application/json" \\',
+      '  -H "Content-Type: application/json"',
       `  -d ${shellQuote(nestedJson(body, "  "))}`
     );
   }
-  return lines.join("\n");
+  return lines.join(" \\\n");
 }
 
-function typeScriptSnippet({ method, url, body }: SnippetRequest): string {
-  const headers = [`    Authorization: \`Bearer \${process.env.${API_KEY_VARIABLE}}\``];
+function typeScriptSnippet({ method, url, body, auth }: SnippetRequest): string {
+  const headers: string[] = [];
+  if (auth === "apiKey") {
+    headers.push(`    Authorization: \`Bearer \${process.env.${API_KEY_VARIABLE}}\``);
+  }
   if (isWrite(method)) headers.push('    "Idempotency-Key": crypto.randomUUID()');
   if (body !== null) headers.push('    "Content-Type": "application/json"');
-  const lines = [
-    `const res = await fetch(${JSON.stringify(url)}, {`,
-    `  method: "${method}",`,
-    "  headers: {",
-    headers.join(",\n"),
-    body === null ? "  }" : "  },",
-  ];
-  if (body !== null) lines.push(`  body: JSON.stringify(${nestedJson(body, "  ")})`);
-  lines.push("});");
-  return lines.join("\n");
+  const options = [`  method: "${method}"`];
+  if (headers.length > 0) options.push(["  headers: {", headers.join(",\n"), "  }"].join("\n"));
+  if (body !== null) options.push(`  body: JSON.stringify(${nestedJson(body, "  ")})`);
+  return [`const res = await fetch(${JSON.stringify(url)}, {`, options.join(",\n"), "});"].join(
+    "\n"
+  );
 }
 
-function pythonSnippet({ method, url, body }: SnippetRequest): string {
-  const idempotency = isWrite(method) ? ', "Idempotency-Key": str(uuid.uuid4())' : "";
-  const call = [
-    `r = requests.${method.toLowerCase()}(${JSON.stringify(url)},`,
-    `  headers={"Authorization": f"Bearer {os.environ['${API_KEY_VARIABLE}']}"${idempotency}}`,
-  ];
-  if (body !== null) {
-    call[call.length - 1] += ",";
-    call.push(`  json=${pythonLiteral(body).replace(/\n/g, "\n  ")}`);
-  }
-  const imports = isWrite(method) ? "import os, requests, uuid" : "import os, requests";
-  return [imports, "", `${call.join("\n")})`].join("\n");
+function pythonSnippet({ method, url, body, auth }: SnippetRequest): string {
+  const headers: string[] = [];
+  if (auth === "apiKey")
+    headers.push(`"Authorization": f"Bearer {os.environ['${API_KEY_VARIABLE}']}"`);
+  if (isWrite(method)) headers.push('"Idempotency-Key": str(uuid.uuid4())');
+  const args = [JSON.stringify(url)];
+  if (headers.length > 0) args.push(`headers={${headers.join(", ")}}`);
+  if (body !== null) args.push(`json=${pythonLiteral(body).replace(/\n/g, "\n  ")}`);
+  const modules = ["requests"];
+  if (auth === "apiKey") modules.unshift("os");
+  if (isWrite(method)) modules.push("uuid");
+  return [
+    `import ${modules.join(", ")}`,
+    "",
+    `r = requests.${method.toLowerCase()}(${args.join(",\n  ")})`,
+  ].join("\n");
 }
 
 /**

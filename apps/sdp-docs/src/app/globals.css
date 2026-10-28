@@ -1501,6 +1501,135 @@ body {
   overflow-wrap: break-word;
 }
 
+/* ── API reference ── */
+/* The generated reference pages (scripts/lib/api-reference-page.ts): each operation is an h2
+   with its endpoint, then field lists whose first line names the field, its type and facts. */
+.is-api-reference .launch-mdx-heading-2 {
+  margin-top: 64px;
+  padding-top: 40px;
+  border-top: 1px solid var(--rule-faint);
+}
+
+.is-api-reference > .launch-mdx-heading-2:first-child {
+  margin-top: 8px;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.is-api-reference .launch-mdx-heading-3 {
+  margin: 30px 0 8px;
+  font-size: var(--font-size-field);
+  line-height: var(--line-height-field);
+}
+
+/* The path wraps beside its method on a phone rather than dropping below it. */
+.launch-api-endpoint {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0 0 18px;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-meta);
+}
+
+.launch-api-endpoint code {
+  min-width: 0;
+  padding: 2px 0 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font-size: var(--font-size-body);
+  overflow-wrap: break-word;
+}
+
+.launch-api-path-param {
+  color: var(--ink-tertiary);
+}
+
+/* Method colours follow the dashboard playground's badges. */
+.launch-api-method {
+  flex: none;
+  padding: 3px 7px;
+  border-radius: var(--corner-control-inner);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--positive);
+  background: var(--positive-wash);
+  box-shadow: inset 0 0 0 1px var(--positive-rule);
+}
+
+.launch-api-method[data-method="POST"] {
+  color: var(--attention);
+  background: var(--attention-wash);
+  box-shadow: inset 0 0 0 1px var(--attention-rule);
+}
+
+.launch-api-method:is([data-method="PUT"], [data-method="PATCH"]) {
+  color: var(--progress);
+  background: var(--progress-wash);
+  box-shadow: inset 0 0 0 1px var(--progress-rule);
+}
+
+.launch-api-method[data-method="DELETE"] {
+  color: var(--critical);
+  background: var(--critical-wash);
+  box-shadow: inset 0 0 0 1px var(--critical-rule);
+}
+
+.is-api-reference .launch-mdx-unordered-list {
+  gap: 0;
+  margin: 4px 0 20px;
+  padding-left: 0;
+  list-style: none;
+}
+
+.is-api-reference .launch-mdx-unordered-list > .launch-mdx-list-item {
+  padding: 12px 0;
+  border-top: 1px solid var(--rule-faint);
+  font-size: var(--font-size-body);
+  line-height: 1.6;
+}
+
+/* Nested fields hang off their parent on a guide rule. */
+.is-api-reference .launch-mdx-list-item .launch-mdx-unordered-list {
+  margin: 10px 0 0;
+  padding-left: 16px;
+  border-left: 1px solid var(--rule);
+}
+
+.is-api-reference
+  .launch-mdx-list-item
+  .launch-mdx-unordered-list
+  > .launch-mdx-list-item:first-child {
+  border-top: 0;
+  padding-top: 4px;
+}
+
+.is-api-reference .launch-mdx-list-item > .launch-mdx-paragraph {
+  margin: 4px 0 0;
+  font-size: var(--font-size-body);
+  line-height: 1.6;
+}
+
+/* The first line: field name, type and facts. */
+.is-api-reference .launch-mdx-list-item > .launch-mdx-paragraph:first-child {
+  margin-top: 0;
+  color: var(--ink-tertiary);
+  font-size: var(--font-size-meta);
+}
+
+/* The field or status name, set apart from the inline code chips beside it. */
+.is-api-reference .launch-mdx-list-item > .launch-mdx-strong:first-child > code,
+.is-api-reference .launch-mdx-paragraph:first-child > .launch-mdx-strong:first-child > code {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-body);
+}
+
 /* ── Docs Home page ── */
 .launch-home {
   margin-top: -16px;

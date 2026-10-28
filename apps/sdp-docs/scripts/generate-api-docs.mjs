@@ -1,111 +1,38 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { escapeMarkdownTableCell } from "./lib/markdown-escaping.mjs";
-import { getOperationFamily, POSTMAN_COLLECTION_ROUTE, slugify } from "./lib/public-openapi.mjs";
+import { apiReferenceSchema } from "@sdp/api-catalog/reference";
+import { renderFamilyPage, SAMPLE_TAB_MARKERS } from "./lib/api-reference-page.ts";
+import { POSTMAN_COLLECTION_ROUTE, slugify } from "./lib/public-openapi.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const generatedSpecPath = path.resolve(__dirname, "../../sdp-api/generated/openapi.json");
-// What the build's release channel publishes, written by openapi:generate beside
-// the spec. Committed at experimental like the other generated docs files.
+// The reference model `openapi:generate` builds from the channel's public OpenAPI document
+// (apps/sdp-api/src/openapi/reference.ts), with what that channel publishes beside it. The
+// surface is committed at experimental like the other generated docs files.
+const generatedReferencePath = path.resolve(
+  __dirname,
+  "../../sdp-api/generated/api-reference.json"
+);
 const generatedSurfacePath = path.resolve(__dirname, "../../sdp-api/generated/public-surface.json");
 const surfacePath = path.resolve(__dirname, "../src/generated/public-surface.json");
 const outputDir = path.resolve(__dirname, "../content/docs/reference/api");
 const rootMetaPath = path.resolve(__dirname, "../content/docs/meta.json");
 
-const HTTP_METHODS = new Set(["get", "post", "put", "patch", "delete", "head", "options"]);
-const SOURCE_PATH = "apps/sdp-api/generated/openapi.json";
-const renderOperationRow = (operation) =>
-  `| \`${operation.method}\` | \`${operation.path}\` | ${escapeMarkdownTableCell(operation.summary || "-")} |`;
+const SOURCE_PATH = "apps/sdp-api/generated/api-reference.json";
 
-const parseJsonSpec = (spec) => {
-  const tagDescriptions = new Map();
-  for (const tag of spec.tags || []) {
-    if (!tag?.name) {
-      continue;
-    }
-    tagDescriptions.set(tag.name, tag.description || "");
-  }
-
-  const operations = [];
-  const paths = spec.paths || {};
-
-  for (const [routePath, pathItem] of Object.entries(paths)) {
-    if (!pathItem || typeof pathItem !== "object") {
-      continue;
-    }
-
-    for (const method of HTTP_METHODS) {
-      const operation = pathItem[method];
-      if (!operation || typeof operation !== "object") {
-        continue;
-      }
-
-      const summary = operation.summary || operation.operationId || "-";
-      const tags = Array.isArray(operation.tags)
-        ? operation.tags.map((tag) => String(tag)).filter(Boolean)
-        : [];
-
-      operations.push({
-        method: method.toUpperCase(),
-        path: routePath,
-        summary,
-        tags,
-      });
-    }
-  }
-
-  return { tagDescriptions, operations };
-};
-
-const loadSpecData = async () => {
+const loadReference = async () => {
   let json;
-
   try {
-    json = await fs.readFile(generatedSpecPath, "utf8");
+    json = await fs.readFile(generatedReferencePath, "utf8");
   } catch (error) {
     throw new Error(
-      `Missing generated OpenAPI spec at ${SOURCE_PATH}. Run "pnpm -C apps/sdp-api run openapi:generate" first.`,
+      `Missing ${SOURCE_PATH}. Run "pnpm -C apps/sdp-api run openapi:generate" first.`,
       { cause: error }
     );
   }
-
-  let spec;
-  try {
-    spec = JSON.parse(json);
-  } catch (error) {
-    throw new Error(`Invalid JSON in ${SOURCE_PATH}.`, { cause: error });
-  }
-
-  const parsed = parseJsonSpec(spec);
-  if (parsed.operations.length === 0) {
-    throw new Error(`No API operations found in ${SOURCE_PATH}.`);
-  }
-
-  return parsed;
-};
-
-const renderTagPage = ({ tagName, description, operations }) => {
-  const sortedOperations = [...operations].sort((left, right) => {
-    if (left.path === right.path) {
-      return left.method.localeCompare(right.method);
-    }
-    return left.path.localeCompare(right.path);
-  });
-
-  const rows = sortedOperations.map(renderOperationRow).join("\n");
-
-  return `---
-title: ${tagName}
-description: ${description || `${tagName} API endpoints`}
----
-
-| Method | Endpoint | Summary |
-| --- | --- | --- |
-${rows}
-`;
+  return apiReferenceSchema.parse(JSON.parse(json));
 };
 
 const renderIndexPage = ({ tagPages }) => {
@@ -132,104 +59,46 @@ const writeJson = async (filePath, value) => {
   await fs.writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 };
 
-const extractRenderedRows = (content) => {
-  const body = content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
-
-  return body
-    .split(/\r?\n/)
-    .filter(
-      (line) => line.startsWith("| ") && !line.startsWith("| Method") && !line.startsWith("| ---")
-    );
-};
-
 // Families every release channel runs, so every build must render them.
 const ALWAYS_PUBLIC_TAG_SLUGS = ["health", "wallets", "projects"];
 
-const validateGeneratedTagPages = async ({
-  outputDir,
-  tagPages,
-  groupedOperations,
-  tagDescriptions,
-}) => {
-  const generatedSlugs = new Set(tagPages.map((tagPage) => tagPage.slug));
-  // The OpenAPI document is already narrowed to the build's release channel
-  // (SDP_RELEASE_CHANNEL), so every public family it declares needs a page.
-  const declaredSlugs = new Set([...tagDescriptions.keys()].map(slugify));
-  const requiredSlugs = [...new Set([...ALWAYS_PUBLIC_TAG_SLUGS, ...declaredSlugs])];
-  const missingPublicPages = requiredSlugs.filter((slug) => !generatedSlugs.has(slug));
-
+/**
+ * Every family page holds one section per operation, anchored by its operationId, and each
+ * section the three request samples: the reference's coverage, checked on what was written.
+ */
+const validateGeneratedTagPages = async ({ outputDir, families }) => {
+  const generatedSlugs = new Set(families.map((family) => slugify(family.name)));
+  const missingPublicPages = ALWAYS_PUBLIC_TAG_SLUGS.filter((slug) => !generatedSlugs.has(slug));
   if (missingPublicPages.length > 0) {
     throw new Error(
       `Generated API docs are missing required public sections: ${missingPublicPages.join(", ")}`
     );
   }
 
-  const renderedPages = await Promise.all(
-    tagPages.map(async (tagPage) => ({
-      tagPage,
-      source: await fs.readFile(path.join(outputDir, `${tagPage.slug}.mdx`), "utf8"),
-    }))
-  );
-
-  for (const { tagPage, source } of renderedPages) {
-    const actualRows = extractRenderedRows(source);
-    const actualRowSet = new Set(actualRows);
-    const expectedRows = (groupedOperations.get(tagPage.title) || [])
-      .slice()
-      .sort((left, right) => {
-        if (left.path === right.path) {
-          return left.method.localeCompare(right.method);
-        }
-        return left.path.localeCompare(right.path);
-      })
-      .map(renderOperationRow);
-
-    if (actualRows.length !== expectedRows.length) {
+  for (const family of families) {
+    const source = await fs.readFile(path.join(outputDir, `${slugify(family.name)}.mdx`), "utf8");
+    const sections = source.split(/^## /m).slice(1);
+    const anchors = sections.map((section) => /\[#([^\]]+)\]\n/.exec(section)?.[1]);
+    const expected = family.operations.map((operation) => operation.operationId);
+    if (JSON.stringify(anchors) !== JSON.stringify(expected)) {
       throw new Error(
-        `Generated API docs for ${tagPage.title} document ${actualRows.length} operations, expected ${expectedRows.length}`
+        `Generated API docs for ${family.name} have sections ${anchors.join(", ")}, expected ${expected.join(", ")}`
       );
     }
-
-    for (const row of expectedRows) {
-      if (!actualRowSet.has(row)) {
-        throw new Error(`Generated API docs for ${tagPage.title} are missing row: ${row}`);
+    for (const [index, section] of sections.entries()) {
+      const missing = SAMPLE_TAB_MARKERS.filter((marker) => !section.includes(marker));
+      if (missing.length > 0) {
+        throw new Error(`${family.name} ${expected[index]} is missing ${missing.join(", ")}`);
       }
     }
   }
 };
 
 const run = async () => {
-  const { tagDescriptions, operations } = await loadSpecData();
+  const { families } = await loadReference();
 
   await fs.mkdir(path.dirname(surfacePath), { recursive: true });
   await fs.copyFile(generatedSurfacePath, surfacePath);
-
-  const groupedOperations = new Map();
-  for (const operation of operations) {
-    const family = getOperationFamily(operation, `${operation.method} ${operation.path}`);
-    if (!groupedOperations.has(family)) {
-      groupedOperations.set(family, []);
-    }
-    groupedOperations.get(family).push(operation);
-  }
-
-  const orderedTags = [];
-
-  for (const knownTag of tagDescriptions.keys()) {
-    if (groupedOperations.has(knownTag)) {
-      orderedTags.push(knownTag);
-    }
-  }
-
-  const additionalTags = [...groupedOperations.keys()]
-    .filter((tag) => !tagDescriptions.has(tag))
-    .sort((left, right) => left.localeCompare(right));
-
-  orderedTags.push(...additionalTags);
-  const exposedOperationsCount = [...groupedOperations.values()].reduce(
-    (total, operationsInTag) => total + operationsInTag.length,
-    0
-  );
 
   await fs.mkdir(outputDir, { recursive: true });
 
@@ -241,21 +110,15 @@ const run = async () => {
   );
 
   const tagPages = [];
-
-  for (const tagName of orderedTags) {
-    const tagSlug = slugify(tagName);
-    const tagOps = groupedOperations.get(tagName) || [];
-    const description = tagDescriptions.get(tagName) || "";
-
-    const tagContent = renderTagPage({
-      tagName,
-      description,
-      operations: tagOps,
-    });
-
-    await fs.writeFile(path.join(outputDir, `${tagSlug}.mdx`), tagContent, "utf8");
-    tagPages.push({ title: tagName, slug: tagSlug });
+  for (const family of families) {
+    const tagSlug = slugify(family.name);
+    await fs.writeFile(path.join(outputDir, `${tagSlug}.mdx`), renderFamilyPage(family), "utf8");
+    tagPages.push({ title: family.name, slug: tagSlug });
   }
+  const exposedOperationsCount = families.reduce(
+    (total, family) => total + family.operations.length,
+    0
+  );
 
   const indexContent = renderIndexPage({
     tagPages,
@@ -342,12 +205,7 @@ const run = async () => {
     pages: newPages,
   });
 
-  await validateGeneratedTagPages({
-    outputDir,
-    tagPages,
-    groupedOperations,
-    tagDescriptions,
-  });
+  await validateGeneratedTagPages({ outputDir, families });
 
   console.log(
     `Generated ${exposedOperationsCount} endpoints across ${tagPages.length} API sections from ${SOURCE_PATH}`

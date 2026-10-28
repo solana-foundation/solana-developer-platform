@@ -95,6 +95,7 @@
   },
   "devDependencies": {
     "@asteasolutions/zod-to-openapi": "9.1.0",
+    "@sdp/api-catalog": "workspace:*",
     "@testcontainers/postgresql": "12.1.0",
     "@testcontainers/redis": "12.1.0",
     "@types/node": "26.6.2",

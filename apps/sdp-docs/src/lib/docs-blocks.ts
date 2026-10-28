@@ -1,8 +1,10 @@
+import type { ApiMethod } from "@sdp/api-catalog/reference";
 import type { Parent, Root, RootContent } from "mdast";
 import remarkGfm from "remark-gfm";
 import remarkMdx from "remark-mdx";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
+import { z } from "zod";
 import {
   DOCS_ACTION_MODULES,
   DOCS_MODULES,
@@ -104,6 +106,57 @@ function blockOf(node: RootContent, where: string): { name: BlockName } | undefi
   return { name: node.name };
 }
 
+// Every API method, checked against the package's list by the compiler. source.config.ts loads
+// this file without a TypeScript resolver, so workspace packages are imported for types only.
+const API_METHOD_NAMES = {
+  GET: true,
+  POST: true,
+  PUT: true,
+  PATCH: true,
+  DELETE: true,
+} as const satisfies Record<ApiMethod, true>;
+
+const apiEndpointSchema = z
+  .object({
+    method: z.custom<ApiMethod>(
+      (value) => typeof value === "string" && Object.hasOwn(API_METHOD_NAMES, value)
+    ),
+    path: z.string().startsWith("/"),
+  })
+  .strict();
+
+/**
+ * Components the API reference places (scripts/lib/api-reference-page.ts). Unlike a block, the
+ * page renders the component itself (mdx-components.tsx); each one's text is what
+ * `expandDocsBlocks` writes, in a code span, and what search indexes.
+ */
+const ELEMENTS = {
+  ApiEndpoint: (attributes) => {
+    const { method, path } = apiEndpointSchema.parse(attributes);
+    return `${method} ${path}`;
+  },
+} satisfies Record<string, (attributes: Record<string, string>) => string>;
+
+type ElementName = keyof typeof ELEMENTS;
+
+function isElementName(name: string | null): name is ElementName {
+  return name !== null && Object.hasOwn(ELEMENTS, name);
+}
+
+/** A reference component's text, or undefined for any other node. */
+function elementTextOf(node: RootContent, where: string): string | undefined {
+  if (node.type !== "mdxJsxFlowElement" || !isElementName(node.name)) return undefined;
+  const attributes: Record<string, string> = {};
+  for (const attribute of node.attributes) {
+    if (attribute.type !== "mdxJsxAttribute" || typeof attribute.value !== "string") {
+      throw new Error(`${where}: <${node.name} /> takes string attributes only`);
+    }
+    attributes[attribute.name] = attribute.value;
+  }
+  if (node.children.length > 0) throw new Error(`${where}: <${node.name} /> takes no children`);
+  return ELEMENTS[node.name](attributes);
+}
+
 /** A node's source offsets; the parser sets them on every node it produces. */
 function spanOf(node: RootContent, where: string): { start: number; end: number } {
   const start = node.position?.start.offset;
@@ -125,6 +178,12 @@ export function remarkDocsBlocks(options: { surface?: PublicSurface } = {}) {
       parent.children = parent.children.flatMap((child) => {
         const block = blockOf(child, where);
         if (block) return parser.parse(BLOCKS[block.name](surface)).children;
+        const elementText = elementTextOf(child, where);
+        if (elementText !== undefined) {
+          // Fumadocs' search (remark-structure) indexes `_stringify.text` for the element.
+          child.data = { ...child.data, _stringify: { text: elementText } };
+          return [child];
+        }
         if ("children" in child) walk(child);
         return [child];
       });
@@ -148,6 +207,7 @@ export function expandDocsBlocks(
   const walk = (parent: Parent) => {
     for (const child of parent.children) {
       const block = blockOf(child, where);
+      const elementText = elementTextOf(child, where);
       if (child.type === "code" && child.meta?.includes("rotate-providers") && leadProvider) {
         // The page rotates this fence's provider; text names the first published one.
         const span = spanOf(child, where);
@@ -157,6 +217,8 @@ export function expandDocsBlocks(
         blocks.push({ ...span, markdown });
       } else if (block) {
         blocks.push({ ...spanOf(child, where), markdown: BLOCKS[block.name](surface) });
+      } else if (elementText !== undefined) {
+        blocks.push({ ...spanOf(child, where), markdown: `\`${elementText}\`` });
       } else if ("children" in child) {
         walk(child);
       }

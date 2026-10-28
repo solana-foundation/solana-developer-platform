@@ -25,6 +25,8 @@ type DocsData = {
   toc?: Parameters<typeof DocsPage>[0]["toc"];
   full?: Parameters<typeof DocsPage>[0]["full"];
   steps?: string[];
+  /** Set by generate:api on each API reference page (scripts/lib/api-reference-page.ts). */
+  apiReference?: boolean;
 };
 
 type DocsPageProps = {
@@ -56,6 +58,12 @@ function resolvePage(slug?: string[]): ResolvedPage | null {
   return null;
 }
 
+/** A page's headings; an API reference page lists its operations, not their parts. */
+function headingsToc(data: DocsData) {
+  const toc = data.toc ?? [];
+  return data.apiReference ? toc.filter((item) => item.depth === 2) : toc;
+}
+
 export default async function Page({ params }: DocsPageProps) {
   const { slug } = await params;
 
@@ -85,7 +93,7 @@ export default async function Page({ params }: DocsPageProps) {
     : undefined;
 
   const isHome = resolvedPage.pageSlug.length === 0;
-  const baseToc = isHome ? HOME_TOC : (data.toc ?? []);
+  const baseToc = isHome ? HOME_TOC : headingsToc(data);
   const steps = data.steps ?? [];
   let toc = baseToc;
   if (steps.length > 0) {
@@ -113,7 +121,7 @@ export default async function Page({ params }: DocsPageProps) {
         />
       </div>
       {!data.hideTitle && <DocsDescription>{data.description}</DocsDescription>}
-      <DocsBody prev={prev} next={next} bare={data.hideTitle}>
+      <DocsBody prev={prev} next={next} bare={data.hideTitle} apiReference={data.apiReference}>
         <MDX components={mdxComponents} />
       </DocsBody>
     </DocsPage>

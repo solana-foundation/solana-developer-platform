@@ -1277,6 +1277,8 @@ function useApiPlaygroundState({
           activeEndpoint && requestBody && hasRequestBody(activeEndpoint.method)
             ? requestBody
             : null,
+        // The playground offers only operations an API key can call (generate-playground-catalog.ts).
+        auth: "apiKey",
       }),
     [activeEndpoint, effectiveApiBaseUrl, requestBody, resolvedPath]
   );
