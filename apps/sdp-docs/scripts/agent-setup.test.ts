@@ -3,48 +3,35 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
 import { parse as parseYaml } from "yaml";
+import { z } from "zod";
 import { DOCS_SKILL_NAME, getAgentSetupOptions } from "@/lib/agent-setup";
-import type { PublicSurface } from "@/lib/release-channel";
+import { isModulePublished } from "@/lib/release-channel";
 
-const SURFACE: Omit<PublicSurface, "releaseChannel" | "modules"> = {
-  rampProviders: [],
-  grantableActions: [],
-  allModules: ["custody", "payments", "issuance"],
-  allRampProviders: [],
-};
-
-const STABLE: PublicSurface = { ...SURFACE, releaseChannel: "stable", modules: ["payments"] };
-const EXPERIMENTAL: PublicSurface = {
-  ...SURFACE,
-  releaseChannel: "experimental",
-  modules: ["payments", "issuance"],
-};
-
+// Checked against the build's own release channel: the committed surface is experimental,
+// and a stable build of the docs runs the same assertions.
 describe("Agent setup commands", () => {
-  it("install only the docs skill where issuance is unpublished", () => {
-    for (const option of getAgentSetupOptions(STABLE)) {
-      assert.match(option.command, / --skill sdp-docs(?: |$)/);
-      assert.doesNotMatch(option.command, /sdp-tokenization/);
-    }
-  });
+  const options = getAgentSetupOptions();
 
-  it("add the tokenization skill where issuance is published", () => {
-    for (const option of getAgentSetupOptions(EXPERIMENTAL)) {
-      assert.match(option.command, / --skill sdp-docs sdp-tokenization(?: |$)/);
+  it("offer the tokenization skill exactly where issuance is published", () => {
+    for (const option of options) {
+      assert.match(option.command, / --skill sdp-docs(?: |$)/);
+      assert.equal(option.command.includes("sdp-tokenization"), isModulePublished("issuance"));
     }
   });
 
   it("name each agent the skills CLI installs for", () => {
-    const agents = getAgentSetupOptions(STABLE).map(
-      (option) => option.command.match(/--agent (\S+)$/)?.[1]
-    );
+    const agents = options.map((option) => option.command.match(/--agent (\S+)$/)?.[1]);
     assert.deepEqual(agents, ["claude-code", "codex", "cursor", undefined]);
   });
 
   it("hide the MCP tab until the docs MCP has a command", () => {
-    const ids = getAgentSetupOptions(EXPERIMENTAL).map((option) => option.id);
-    assert.ok(!ids.includes("mcp"));
+    assert.ok(!options.some((option) => option.id === "mcp"));
   });
+});
+
+const skillFrontmatterSchema = z.object({
+  name: z.literal(DOCS_SKILL_NAME),
+  description: z.string().min(1).max(1024),
 });
 
 describe("Docs skill", () => {
@@ -62,12 +49,6 @@ describe("Docs skill", () => {
   it("has the frontmatter `npx skills add --skill` matches", () => {
     const frontmatter = installed.match(/^---\n([\s\S]*?)\n---\n/)?.[1];
     assert.ok(frontmatter, "SKILL.md opens with a frontmatter block");
-    const { name, description } = parseYaml(frontmatter) as {
-      name?: unknown;
-      description?: unknown;
-    };
-    assert.equal(name, DOCS_SKILL_NAME);
-    assert.equal(typeof description, "string");
-    assert.ok(String(description).length <= 1024, "a skill description is at most 1024 characters");
+    skillFrontmatterSchema.parse(parseYaml(frontmatter));
   });
 });

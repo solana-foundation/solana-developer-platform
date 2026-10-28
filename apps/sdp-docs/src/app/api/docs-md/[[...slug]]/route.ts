@@ -2,13 +2,13 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { expandDocsBlocks } from "@/lib/docs-blocks";
 import { renderDocsIndexMarkdown } from "@/lib/docs-index-markdown";
-import { aiLlmsUrl, aiSkillUrl } from "@/lib/site";
+import { aiLlmsUrl, aiSkillUrl, getDocsMarkdownUrl } from "@/lib/site";
 import { source } from "@/lib/source";
 
 export const runtime = "nodejs";
 
 // Opens every page's Markdown, so an agent that lands on one page can find the rest.
-const AGENT_CONTEXT = `> Solana Developer Platform docs, served as Markdown. Every page is listed in [llms.txt](${aiLlmsUrl}), and [SKILL.md](${aiSkillUrl}) has the rules for building on SDP.`;
+const AGENT_CONTEXT = `> Solana Developer Platform docs, served as Markdown. The [docs index](${getDocsMarkdownUrl("")}) lists every page and [llms.txt](${aiLlmsUrl}) the key ones; [SKILL.md](${aiSkillUrl}) has the rules for building on SDP.`;
 
 function stripMdxShell(source: string): string {
   // Remove frontmatter

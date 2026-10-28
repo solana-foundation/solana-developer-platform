@@ -1,6 +1,6 @@
 import type { SdpModule } from "@sdp/types/release-channels";
 import { SDP_GITHUB_REPO_URL } from "@sdp/types/site";
-import { isModulePublished, publicSurface } from "@/lib/release-channel";
+import { isModulePublished } from "@/lib/release-channel";
 
 /** The docs skill `generate:ai` writes to public/SKILL.md and skills/<name>/SKILL.md. */
 export const DOCS_SKILL_NAME = "sdp-docs";
@@ -21,6 +21,9 @@ export type AgentSetupOption = {
   command: string;
 };
 
+/** Never empty: the skills CLI tabs are always there. */
+export type AgentSetupOptions = readonly [AgentSetupOption, ...AgentSetupOption[]];
+
 // The "owner/repo" source `npx skills add` takes.
 const repository = new URL(SDP_GITHUB_REPO_URL).pathname.slice(1);
 
@@ -32,15 +35,16 @@ const DOCS_MCP_COMMAND: string | null = null;
  * One copyable install command per coding agent, then the agent-neutral one, which asks
  * which agents to install for. Server-only: the menu receives the commands, not the gate.
  */
-export function getAgentSetupOptions(surface = publicSurface): AgentSetupOption[] {
-  const skills = PUBLIC_SKILLS.filter((skill) => isModulePublished(skill.module, surface));
+export function getAgentSetupOptions(): AgentSetupOptions {
+  const skills = PUBLIC_SKILLS.filter((skill) => isModulePublished(skill.module));
   const add = `npx skills add ${repository} --skill ${skills.map((skill) => skill.name).join(" ")}`;
-  const options = [
+  const mcp =
+    DOCS_MCP_COMMAND === null ? [] : [{ id: "mcp", label: "MCP", command: DOCS_MCP_COMMAND }];
+  return [
     { id: "claude-code", label: "Claude Code", command: `${add} --agent claude-code` },
     { id: "codex", label: "Codex", command: `${add} --agent codex` },
     { id: "cursor", label: "Cursor", command: `${add} --agent cursor` },
     { id: "skills", label: "Skills", command: add },
-    { id: "mcp", label: "MCP", command: DOCS_MCP_COMMAND },
+    ...mcp,
   ];
-  return options.filter((option): option is AgentSetupOption => option.command !== null);
 }

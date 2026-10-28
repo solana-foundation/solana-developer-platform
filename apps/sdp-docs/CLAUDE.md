@@ -98,7 +98,7 @@ import { DocsPage, DocsTitle, DocsDescription, DocsBody } from "@/components/doc
 
 ### Page actions and the Markdown agents get
 
-`[[...slug]]/page.tsx` puts the title in `.launch-docs-header` beside `PageActions` (`page-actions.tsx`): **Copy page**, with View as Markdown and Open in ChatGPT or Claude behind its chevron. Copy page fetches the page's `.md` and copies that response, so it always matches what agents get; below 640px it drops its label. The `.md` route (`src/app/api/docs-md`) opens every page, the home included, with a one-line context block linking `llms.txt` and `SKILL.md`, then the page's title and description.
+`[[...slug]]/page.tsx` puts the title in `.launch-docs-header` beside `PageActions` (`page-actions.tsx`): **Copy page**, with View as Markdown and Open in ChatGPT or Claude behind its chevron. Copy page fetches the page's `.md` and copies that response, so it always matches what agents get; below 640px it drops its label. The `.md` route (`src/app/api/docs-md`) opens every page, the home included, with a one-line context block linking the docs index (`/docs.md`, every page), `llms.txt` (the key pages) and `SKILL.md`, then the page's title and description.
 
 Popovers (`fumadocs-ui/components/ui/popover`) render in a portal outside `.sdp-docs-shell`: give their content `.launch-popover`, which sets the type, surface, `--elevation-popover` and the motion-token animation.
 

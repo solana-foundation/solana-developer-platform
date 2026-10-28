@@ -9,7 +9,8 @@ Read the published SDP docs before you answer or write code. This skill only rea
 
 ## Where to read
 
-- [llms.txt](https://platform.solana.com/docs/ai/llms.txt): every published page, one line each. Find the page for the task here.
+- [Docs index](https://platform.solana.com/docs.md): every published page, with a line on each. Find the page for the task here.
+- [llms.txt](https://platform.solana.com/docs/ai/llms.txt): the key pages and the API reference.
 - Any docs page as Markdown: add `.md` to its URL, as in https://platform.solana.com/docs/developing-with-sdp/idempotency.md.
 - [llms-full.txt](https://platform.solana.com/docs/ai/llms-full.txt): every page in one file.
 - [OpenAPI](https://api.solana.com/openapi.json): every public route, field and error code. Take paths, fields and enum values from it, never from memory.

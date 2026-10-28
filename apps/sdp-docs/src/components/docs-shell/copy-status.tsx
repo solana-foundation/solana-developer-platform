@@ -7,10 +7,7 @@ export type CopyStatus = "idle" | "copied" | "failed";
 
 const RESET_AFTER_MS = 2000;
 
-/**
- * The state of a copy button: `run` performs a copy and shows its outcome for two seconds,
- * `reset` clears it (when the thing to copy changes).
- */
+/** The state of a copy button: `run` performs a copy and shows its outcome for two seconds. */
 export function useCopyStatus() {
   const [status, setStatus] = useState<CopyStatus>("idle");
   const timer = useRef<number | undefined>(undefined);
@@ -29,12 +26,22 @@ export function useCopyStatus() {
       });
   }, []);
 
-  const reset = useCallback(() => {
-    window.clearTimeout(timer.current);
-    setStatus("idle");
-  }, []);
+  return { status, run };
+}
 
-  return { status, run, reset };
+function announcementFor(status: CopyStatus, copied: string, failed: string): string {
+  switch (status) {
+    case "idle":
+      return "";
+    case "copied":
+      return copied;
+    case "failed":
+      return failed;
+    default: {
+      const unreachable: never = status;
+      throw new Error(`Unhandled copy status ${String(unreachable)}`);
+    }
+  }
 }
 
 /** Copy, check and alert icons stacked in one box, so the swap morphs in place. */
@@ -60,7 +67,7 @@ export function CopyStatusAnnouncement({
 }) {
   return (
     <span className="visually-hidden" aria-live="polite">
-      {status === "copied" ? copied : status === "failed" ? failed : ""}
+      {announcementFor(status, copied, failed)}
     </span>
   );
 }

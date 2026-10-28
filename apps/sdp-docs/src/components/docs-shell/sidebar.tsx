@@ -7,7 +7,7 @@ import { ArrowUpRight, FileText, Menu, Search, X } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useState } from "react";
-import type { AgentSetupOption } from "@/lib/agent-setup";
+import type { AgentSetupOptions } from "@/lib/agent-setup";
 import { aiLlmsPath } from "@/lib/site";
 import { AgentSetup } from "./agent-setup";
 import { NavigationNode } from "./navigation-node";
@@ -15,7 +15,7 @@ import { NavigationNode } from "./navigation-node";
 type DocsSidebarProps = {
   tree: Root;
   dashboardUrl: string | null;
-  agentSetup: readonly AgentSetupOption[];
+  agentSetup: AgentSetupOptions;
 };
 
 function getNodeKey(node: Root["children"][number]) {

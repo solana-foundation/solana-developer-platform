@@ -3,8 +3,11 @@
 import { Popover, PopoverContent, PopoverTrigger } from "fumadocs-ui/components/ui/popover";
 import { ChevronDown } from "lucide-react";
 import { Fragment, type KeyboardEvent, useId, useState } from "react";
-import type { AgentSetupOption } from "@/lib/agent-setup";
+import type { AgentSetupOption, AgentSetupOptions } from "@/lib/agent-setup";
 import { CopyStatusAnnouncement, CopyStatusIcon, useCopyStatus } from "./copy-status";
+
+// Left and Right move between tabs and select, as the WAI-ARIA tabs pattern does.
+const TAB_KEY_STEPS: Partial<Record<string, 1 | -1>> = { ArrowRight: 1, ArrowLeft: -1 };
 
 /**
  * A command that wraps only between words and after a slash, never inside `--agent` or
@@ -29,33 +32,64 @@ function Command({ text }: { text: string }) {
   });
 }
 
+/** One tab's panel: its command and a copy button with its own copy state. */
+function CommandPanel({
+  option,
+  tabId,
+  panelId,
+  hidden,
+}: {
+  option: AgentSetupOption;
+  tabId: string;
+  panelId: string;
+  hidden: boolean;
+}) {
+  const copy = useCopyStatus();
+  return (
+    <div
+      role="tabpanel"
+      id={panelId}
+      aria-labelledby={tabId}
+      hidden={hidden}
+      className="launch-agent-setup-panel"
+    >
+      <code className="launch-agent-setup-command">
+        <Command text={option.command} />
+      </code>
+      <button
+        type="button"
+        className="launch-agent-setup-copy"
+        aria-label={`Copy the ${option.label} command`}
+        onClick={() => copy.run(() => navigator.clipboard.writeText(option.command))}
+      >
+        <CopyStatusIcon status={copy.status} />
+      </button>
+      <CopyStatusAnnouncement
+        status={copy.status}
+        copied="Command copied"
+        failed="Couldn't copy the command"
+      />
+    </div>
+  );
+}
+
 /**
  * The sidebar's Agent setup menu: one tab per coding agent, each a copyable command that
  * installs the docs skill. The layout builds the commands for its release channel.
  */
-export function AgentSetup({ options }: { options: readonly AgentSetupOption[] }) {
-  const [selectedId, setSelectedId] = useState(options[0]?.id);
-  const copy = useCopyStatus();
+export function AgentSetup({ options }: { options: AgentSetupOptions }) {
+  const [selectedIndex, setSelectedIndex] = useState(0);
   const id = useId();
-  const selected = options.find((option) => option.id === selectedId) ?? options[0];
+  const tabId = (index: number) => `${id}-tab-${index}`;
+  const panelId = (index: number) => `${id}-panel-${index}`;
 
-  if (!selected) return null;
-
-  const select = (option: AgentSetupOption) => {
-    setSelectedId(option.id);
-    copy.reset();
-  };
-
-  // Left and Right move between tabs and select, as the WAI-ARIA tabs pattern does.
   const onTabKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    const step = { ArrowRight: 1, ArrowLeft: -1 }[event.key];
-    if (!step) return;
+    const step = TAB_KEY_STEPS[event.key];
+    if (step === undefined) return;
     event.preventDefault();
-    const index = options.indexOf(selected);
-    const next = options[(index + step + options.length) % options.length];
-    if (!next) return;
-    select(next);
-    document.getElementById(`${id}-tab-${next.id}`)?.focus();
+    const next = (selectedIndex + step + options.length) % options.length;
+    setSelectedIndex(next);
+    document.getElementById(tabId(next))?.focus();
   };
 
   return (
@@ -76,45 +110,31 @@ export function AgentSetup({ options }: { options: readonly AgentSetupOption[] }
           className="launch-agent-setup-tabs"
           onKeyDown={onTabKeyDown}
         >
-          {options.map((option) => (
+          {options.map((option, index) => (
             <button
               key={option.id}
               type="button"
               role="tab"
-              id={`${id}-tab-${option.id}`}
-              aria-selected={option.id === selected.id}
-              aria-controls={`${id}-panel`}
-              tabIndex={option.id === selected.id ? 0 : -1}
+              id={tabId(index)}
+              aria-selected={index === selectedIndex}
+              aria-controls={panelId(index)}
+              tabIndex={index === selectedIndex ? 0 : -1}
               className="launch-agent-setup-tab"
-              onClick={() => select(option)}
+              onClick={() => setSelectedIndex(index)}
             >
               {option.label}
             </button>
           ))}
         </div>
-        <div
-          role="tabpanel"
-          id={`${id}-panel`}
-          aria-labelledby={`${id}-tab-${selected.id}`}
-          className="launch-agent-setup-panel"
-        >
-          <code className="launch-agent-setup-command">
-            <Command text={selected.command} />
-          </code>
-          <button
-            type="button"
-            className="launch-agent-setup-copy"
-            aria-label={`Copy the ${selected.label} command`}
-            onClick={() => copy.run(() => navigator.clipboard.writeText(selected.command))}
-          >
-            <CopyStatusIcon status={copy.status} />
-          </button>
-        </div>
-        <CopyStatusAnnouncement
-          status={copy.status}
-          copied="Command copied"
-          failed="Couldn't copy the command"
-        />
+        {options.map((option, index) => (
+          <CommandPanel
+            key={option.id}
+            option={option}
+            tabId={tabId(index)}
+            panelId={panelId(index)}
+            hidden={index !== selectedIndex}
+          />
+        ))}
       </PopoverContent>
     </Popover>
   );
