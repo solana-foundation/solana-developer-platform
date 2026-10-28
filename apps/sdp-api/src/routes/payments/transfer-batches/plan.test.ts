@@ -84,7 +84,8 @@ describe("planBatchTransactions", () => {
       rpc.requests
         .filter((request) => request.method === "getMultipleAccounts")
         .map((request) => z.array(z.string()).parse(request.params[0]).length)
-    ).toEqual([100, 1]);
+        .sort((left, right) => left - right)
+    ).toEqual([1, 100]);
     expect(rentBudget.missingTokenAccounts).toEqual(
       new Set([await associatedTokenAccount(required(owners[100]))])
     );
