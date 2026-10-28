@@ -395,7 +395,7 @@ describe("Recurring Payment lifecycle actions", () => {
         screen.getByRole("button", { name: "Resume schedule" }).getAttribute("data-variant")
       ).toBe("default");
       expect(
-        screen.getByRole("button", { name: "Cancel payment" }).getAttribute("data-variant")
+        screen.getByRole("button", { name: "Cancel schedule" }).getAttribute("data-variant")
       ).toBe("outline");
     }
   );
@@ -406,6 +406,6 @@ describe("Recurring Payment lifecycle actions", () => {
       await screen.findByText("This schedule will not run again. Its past runs keep their record.")
     ).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Resume schedule" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Cancel payment" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Cancel schedule" })).toBeNull();
   });
 });
