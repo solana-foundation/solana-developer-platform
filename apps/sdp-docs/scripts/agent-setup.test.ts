@@ -11,9 +11,13 @@ import {
   MODULE_SKILLS,
   offeredModuleSkills,
 } from "@/lib/agent-setup";
+import { publicSurface } from "@/lib/release-channel";
 
 describe("Agent setup commands", () => {
   const options = getAgentSetupOptions();
+  const released = SDP_RELEASE_CHANNELS.stable[0];
+  const unreleased = SDP_MODULES.find((module) => !SDP_RELEASE_CHANNELS.stable.includes(module));
+  assert.ok(released && unreleased, "the stable channel holds some modules and not others");
 
   it("install the docs skill and the offered module skills, on every deployment", () => {
     const skills = [DOCS_SKILL_NAME, ...offeredModuleSkills(MODULE_SKILLS).map((s) => s.name)];
@@ -23,15 +27,23 @@ describe("Agent setup commands", () => {
   });
 
   it("offer a module skill only while it is listed and its module is stable", () => {
-    const released = SDP_RELEASE_CHANNELS.stable[0];
-    const unreleased = SDP_MODULES.find((module) => !SDP_RELEASE_CHANNELS.stable.includes(module));
-    assert.ok(released && unreleased, "the stable channel holds some modules and not others");
     const offered = offeredModuleSkills([
       { name: "listed-released", module: released, listed: true },
       { name: "listed-unreleased", module: unreleased, listed: true },
       { name: "unlisted-released", module: released, listed: false },
     ]).map((skill) => skill.name);
     assert.deepEqual(offered, ["listed-released"]);
+  });
+
+  // The committed surface publishes the released module, so this swaps in a deployment that doesn't.
+  it("hide a released module's skill where the deployment doesn't publish the module", (t) => {
+    t.mock.property(
+      publicSurface,
+      "modules",
+      publicSurface.modules.filter((module) => module !== released)
+    );
+    const skill = { name: "listed-released", module: released, listed: true };
+    assert.deepEqual(offeredModuleSkills([skill]), []);
   });
 
   it("name each agent the skills CLI installs for", () => {

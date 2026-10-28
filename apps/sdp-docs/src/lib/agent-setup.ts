@@ -1,5 +1,6 @@
 import { SDP_RELEASE_CHANNELS, type SdpModule } from "@sdp/types/release-channels";
 import { SDP_GITHUB_REPO_URL } from "@sdp/types/site";
+import { isModulePublished } from "@/lib/release-channel";
 
 /** The docs skill `generate:ai` writes to public/SKILL.md and skills/<name>/SKILL.md. */
 export const DOCS_SKILL_NAME = "sdp-docs";
@@ -25,9 +26,14 @@ export const MODULE_SKILLS: readonly ModuleSkill[] = [
 
 const RELEASED_MODULES: ReadonlySet<SdpModule> = new Set(SDP_RELEASE_CHANNELS.stable);
 
-/** The module skills the menu offers: listed, and their module released (stable). */
+/**
+ * The module skills the menu offers: listed, their module released (stable), and published by
+ * this deployment, which also applies a module's publication hold.
+ */
 export function offeredModuleSkills(skills: readonly ModuleSkill[]): readonly ModuleSkill[] {
-  return skills.filter((skill) => skill.listed && RELEASED_MODULES.has(skill.module));
+  return skills.filter(
+    (skill) => skill.listed && RELEASED_MODULES.has(skill.module) && isModulePublished(skill.module)
+  );
 }
 
 export type AgentSetupOption = {
