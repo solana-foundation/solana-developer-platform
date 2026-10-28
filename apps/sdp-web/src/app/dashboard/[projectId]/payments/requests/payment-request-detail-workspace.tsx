@@ -3,10 +3,12 @@
 import { isPaymentRequestPayableAt, type PaymentRequest } from "@sdp/types/payments";
 import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
 import { Button } from "@sdp/ui/button";
+import { Callout } from "@sdp/ui/callout";
+import { Modal } from "@sdp/ui/modal";
 import { CopyIcon, DownloadIcon, Loader2Icon, Share2Icon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { shortenAddress } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
 import {
@@ -189,21 +191,15 @@ function RequestPaymentLink({
 
 /**
  * The footer under a rule while the request is open, for a member who may manage payment
- * requests: Cancel request, then the inline question it asks before it acts, as the recurring
- * page asks. Every control is disabled while the cancel is in flight; the page reads the request
- * again once it settles either way.
+ * requests: Cancel request, which asks in a modal before it acts. The modal cannot be closed and
+ * its controls are disabled while the cancel is in flight; the page reads the request again once
+ * it settles either way.
  */
 function RequestCancelFooter({ requestId }: { requestId: string }) {
   const t = useTranslations();
   const router = useRouter();
   const [confirming, setConfirming] = useState(false);
   const [canceling, setCanceling] = useState(false);
-  const panelRef = useRef<HTMLFieldSetElement>(null);
-  useEffect(() => {
-    if (!confirming) return;
-    panelRef.current?.querySelector<HTMLButtonElement>("button:not([disabled])")?.focus();
-    panelRef.current?.scrollIntoView({ block: "nearest" });
-  }, [confirming]);
 
   async function cancel() {
     setCanceling(true);
@@ -220,36 +216,28 @@ function RequestCancelFooter({ requestId }: { requestId: string }) {
     router.refresh();
   }
 
-  const head = t("DashboardPayments.requestDetail.cancelConfirmHead");
+  const title = t("DashboardPayments.requestDetail.cancelRequest");
   return (
-    <div className="flex flex-col gap-4 border-t border-border-default pt-4">
-      <div className="flex justify-end">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={canceling}
-          aria-expanded={confirming}
-          onClick={() => setConfirming((open) => !open)}
-        >
-          {t("DashboardPayments.requestDetail.cancelRequest")}
-        </Button>
-      </div>
-      {confirming ? (
-        <fieldset
-          ref={panelRef}
-          aria-label={head}
-          className="min-w-0 rounded-card border border-error/32 bg-error/8 p-4 text-body"
-        >
-          <p className="max-w-xl text-secondary">
-            <b className="mb-1 block font-medium text-error">{head}</b>
+    <div className="flex justify-end border-t border-border-default pt-4">
+      <Button type="button" variant="outline" size="sm" onClick={() => setConfirming(true)}>
+        {title}
+      </Button>
+      <Modal
+        isOpen={confirming}
+        ariaLabel={title}
+        onClose={() => setConfirming(false)}
+        closeDisabled={canceling}
+        size="sm"
+      >
+        <div className="space-y-4 p-6">
+          <h2 className="font-medium text-lg text-primary">{title}</h2>
+          <Callout variant="warning" title={t("DashboardPayments.requestDetail.cancelConfirmHead")}>
             {t("DashboardPayments.requestDetail.cancelConfirmBody")}
-          </p>
-          <div className="mt-3 flex flex-wrap items-center justify-end gap-4">
+          </Callout>
+          <div className="flex justify-end gap-2">
             <Button
               type="button"
-              variant="ghost"
-              size="sm"
+              variant="secondary"
               disabled={canceling}
               onClick={() => setConfirming(false)}
             >
@@ -258,20 +246,17 @@ function RequestCancelFooter({ requestId }: { requestId: string }) {
             <Button
               type="button"
               variant="destructive"
-              size="sm"
               disabled={canceling}
               iconLeft={
                 canceling ? <Loader2Icon className="size-4 shrink-0 animate-spin" /> : undefined
               }
               onClick={() => void cancel()}
             >
-              {canceling
-                ? t("DashboardPayments.requestDetail.canceling")
-                : t("DashboardPayments.requestDetail.cancelRequest")}
+              {canceling ? t("DashboardPayments.requestDetail.canceling") : title}
             </Button>
           </div>
-        </fieldset>
-      ) : null}
+        </div>
+      </Modal>
     </div>
   );
 }
