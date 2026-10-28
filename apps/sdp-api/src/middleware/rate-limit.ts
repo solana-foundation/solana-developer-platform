@@ -32,7 +32,7 @@ export const DASHBOARD_ACTOR_MAX_REQUESTS = 300;
 
 /**
  * Per-IP ceiling for requests that present an API key on a path where API-key
- * authentication runs (API_KEY_AUTHENTICATED_PATHS). Keyed traffic gets its
+ * authentication runs (AUTHENTICATED_PATHS). Keyed traffic gets its
  * real limit per key id after auth (enforceRateLimit in the auth middleware),
  * so the anonymous limit must not apply — it would cap every tier at 20/min
  * per IP. The key is unverified at this point, so a high IP ceiling still
@@ -42,14 +42,18 @@ export const DASHBOARD_ACTOR_MAX_REQUESTS = 300;
 export const KEYED_IP_BACKSTOP_MAX_REQUESTS = Math.max(...Object.values(RATE_LIMIT_TIERS)) * 5;
 
 /**
- * The mounts whose routers run API-key authentication (`unifiedAuthMiddleware`
- * and the gates built on it), matched as segment prefixes by matchesFreePath.
- * Only here does the auth middleware's per-key limit stand behind the keyed IP
- * backstop; on every other path (`/pay` above all, which makes the fee payer
- * sign for anyone) a key-shaped header is unverified decoration, and the
- * anonymous limit applies whatever headers are sent.
+ * The mounts whose routers authenticate the caller, matched as segment
+ * prefixes by matchesFreePath: API keys and Clerk sessions through
+ * `unifiedAuthMiddleware` and the gates built on it, and Clerk sessions alone
+ * through the onboarding and organization-signup middlewares under `/v1`.
+ * Only here does a credential choose a tier: a verified Clerk session its
+ * per-user limit, an API key the keyed IP backstop with the auth middleware's
+ * per-key limit behind it. On every other path (`/pay` above all, which makes
+ * the fee payer sign for anyone) no credential is ever checked, so none is
+ * read: the anonymous limit applies whatever headers are sent, and no JWKS
+ * verification runs.
  */
-export const API_KEY_AUTHENTICATED_PATHS = ["/v1", "/internal/dashboard", "/admin/allowlist"];
+export const AUTHENTICATED_PATHS = ["/v1", "/internal/dashboard", "/admin/allowlist"];
 
 /**
  * Per-key-hash flood guard the auth middleware applies before it reads the
@@ -443,11 +447,11 @@ export async function enforceRateLimit(
  * Pre-auth rate limiting middleware. Paths matching an exempt pattern pass
  * straight through (exact, segment-prefix, or single-segment `*` wildcard —
  * see matchesFreePath; bare `startsWith` would mis-skip the whole API when
- * `/` is listed). For everything else: verified Clerk dashboard JWTs get a
- * generous per-user limit (not an exemption — see CLERK_USER_MAX_REQUESTS),
- * requests presenting an API key on an API_KEY_AUTHENTICATED_PATHS mount get
- * the high per-IP backstop (their real limit is enforced per key after auth
- * via enforceRateLimit), and everything else, a key-shaped header on any other
+ * `/` is listed). For everything else, on an AUTHENTICATED_PATHS mount:
+ * verified Clerk dashboard JWTs get a generous per-user limit (not an
+ * exemption — see CLERK_USER_MAX_REQUESTS), and requests presenting an API key
+ * get the high per-IP backstop (their real limit is enforced per key after
+ * auth via enforceRateLimit). Everything else, any credential on any other
  * path included, gets the anonymous per-IP limit.
  *
  * The anonymous limit fails closed: it guards unauthenticated work (the
@@ -471,8 +475,14 @@ export function skipRateLimitPaths(...paths: string[]) {
       return;
     }
 
+    const authenticatedPath = matchesFreePath(c.req.path, AUTHENTICATED_PATHS);
     const bearerToken = extractBearerToken(c);
-    if (bearerToken && looksLikeJwt(bearerToken) && looksLikeClerkJwt(bearerToken, c.env)) {
+    if (
+      authenticatedPath &&
+      bearerToken &&
+      looksLikeJwt(bearerToken) &&
+      looksLikeClerkJwt(bearerToken, c.env)
+    ) {
       const clerkUserId = await verifiedClerkUserId(c, bearerToken);
       if (clerkUserId) {
         // Per user, not per IP: an office behind one NAT address is many people, and
@@ -486,7 +496,7 @@ export function skipRateLimitPaths(...paths: string[]) {
     }
 
     const clientIp = getClientIp(c) ?? "unknown";
-    if (matchesFreePath(c.req.path, API_KEY_AUTHENTICATED_PATHS) && presentsApiKey(c)) {
+    if (authenticatedPath && presentsApiKey(c)) {
       await enforceRateLimit(c, clientIp, KEYED_IP_BACKSTOP_MAX_REQUESTS, {
         fallback: keyedIpBackstopFallback,
       });
