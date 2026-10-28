@@ -39,6 +39,11 @@ const recurringPaymentResponseSchema = z.object({
     }),
   }),
 });
+const tokenApprovalResponseSchema = z.object({
+  data: z.object({
+    tokenApproval: z.object({ status: z.string(), sharedWith: z.array(z.unknown()) }),
+  }),
+});
 const counterpartyResponseSchema = z.object({
   data: z.object({ counterparty: z.object({ id: z.string() }) }),
 });
@@ -181,10 +186,12 @@ describe.skipIf(!RUN_INTEGRATION_TESTS)("recurring payment authority revocation 
 
     const first = await activeSchedule(scheduler);
     const second = await activeSchedule(scheduler);
+    // The program's setup approves u64::MAX; activation sets it back to 0 (HOO-2339).
     expect(await readSubscriptionDelegation(walletAddress, USDC)).toEqual({
       authority,
       authorityOpen: true,
       delegate: authority,
+      delegatedAmount: 0n,
     });
 
     await scheduleCall(scheduler, `/v1/payments/recurring-payments/${first}/cancel`);
@@ -202,6 +209,7 @@ describe.skipIf(!RUN_INTEGRATION_TESTS)("recurring payment authority revocation 
       authority,
       authorityOpen: false,
       delegate: null,
+      delegatedAmount: 0n,
     });
     expect(
       await getDb(env).queryMany<{ status: string; signature: string | null }>(
@@ -220,6 +228,42 @@ describe.skipIf(!RUN_INTEGRATION_TESTS)("recurring payment authority revocation 
     const third = await activeSchedule(api);
     expect((await readSubscriptionDelegation(walletAddress, USDC)).delegate).toBe(authority);
     await scheduleCall(api, `/v1/payments/recurring-payments/${third}/cancel`);
+  });
+
+  it("lets each collection spend exactly its own amount, and a cancel ends the plan and its approval", {
+    timeout: TEST_TIMEOUT_MS,
+  }, async () => {
+    const id = await activeSchedule(api);
+    expect(await readSubscriptionDelegation(walletAddress, USDC)).toMatchObject({
+      authorityOpen: true,
+      delegatedAmount: 0n,
+    });
+    // Due now: the first period is open on chain from the subscribe.
+    const dueAt = new Date(Date.now() - 60_000).toISOString();
+    await getDb(env).execute(
+      "UPDATE payment_recurring_payments SET next_collection_due_at = ? WHERE id = ?",
+      [dueAt, id]
+    );
+    await getDb(env).execute(
+      `UPDATE payment_subscriptions SET next_collection_due_at = ?
+        WHERE id = (SELECT subscription_id FROM payment_recurring_payments WHERE id = ?)`,
+      [dueAt, id]
+    );
+
+    await postJson(api, `/v1/payments/recurring-payments/${id}/collect`, {}, 200);
+
+    // The collection approved 1 USDC and pulled it, so nothing is left to spend.
+    expect((await readSubscriptionDelegation(walletAddress, USDC)).delegatedAmount).toBe(0n);
+
+    const canceled = await postJson(api, `/v1/payments/recurring-payments/${id}/cancel`, {}, 200);
+    expect(
+      tokenApprovalResponseSchema.parse(await canceled.json()).data.tokenApproval
+    ).toMatchObject({ status: "revoked", sharedWith: [] });
+    expect(await readSubscriptionDelegation(walletAddress, USDC)).toMatchObject({
+      authorityOpen: false,
+      delegate: null,
+    });
+    await postJson(api, `/v1/payments/recurring-payments/${id}/collect`, {}, 409);
   });
 
   it("refuses to activate on a wallet whose delegation is being revoked", {

@@ -137,6 +137,8 @@ export const apiTestSupport = {
         authority,
         authorityOpen: authorityAccount.exists,
         delegate: token.exists ? unwrapOption(token.data.delegate) : null,
+        /** What the delegate may still spend (HOO-2339: 0 between collections). */
+        delegatedAmount: token.exists ? token.data.delegatedAmount : null,
       };
     }),
   trackPendingTransfers: (env: Env) => runInEachClusterScope(() => trackPendingTransfers(env)),
