@@ -1015,9 +1015,14 @@ export function hasRecoverableRecurringPaymentCollection(
     (candidate) => candidate === status
   );
 }
+/**
+ * A cancel is terminal (HOO-2339): nothing claims `canceled`, so a canceled
+ * schedule never collects or resumes again. Resume only brings back a schedule
+ * SDP paused, whose delegation is still on chain.
+ */
 export const RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS = {
   cancel: { processingStatus: "canceling", claimableStatus: "active", finalStatus: "canceled" },
-  resume: { processingStatus: "resuming", claimableStatus: "canceled", finalStatus: "active" },
+  resume: { processingStatus: "resuming", claimableStatus: "paused", finalStatus: "active" },
 } as const satisfies Record<
   PaymentRecurringPaymentLifecycleOperation,
   {

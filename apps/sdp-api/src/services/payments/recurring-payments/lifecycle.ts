@@ -38,6 +38,7 @@ import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import { isDefiniteSubmissionError } from "@/services/sponsorship-submission";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
+import { revokeSubscriptionAuthorityAfterCancel } from "./authority-revocation";
 import { recoverOrBlockLifecycleCollection } from "./collection";
 import {
   assertRecurringPaymentSourceWallet,
@@ -411,6 +412,39 @@ async function finalizeRecurringPaymentLifecycle(input: {
 }
 
 /**
+ * Finalizes a lifecycle operation that landed. After a cancel, which is terminal (HOO-2339), it
+ * revokes the subscription authority the schedule used when no other live schedule on the same
+ * wallet and mint needs it; otherwise the authority stays for the sweep. The revoke runs once the
+ * cancel has committed and never fails it.
+ *
+ * @param input - What {@link finalizeRecurringPaymentLifecycle} takes, plus the source wallet that
+ *   signs the revoke.
+ * @param input.sourceWallet - The schedule's custody wallet, which granted the authority.
+ * @param input.tokenMint - The mint the authority is for.
+ * @returns The finalized recurring payment.
+ */
+async function finalizeLifecycleOperation(
+  input: Parameters<typeof finalizeRecurringPaymentLifecycle>[0] & {
+    sourceWallet: CustodyWallet;
+    tokenMint: Address;
+  }
+): Promise<PaymentRecurringPaymentRow> {
+  const finalized = await finalizeRecurringPaymentLifecycle(input);
+  const authorityAddress = input.subscription.subscription_authority_address;
+  if (input.operation === "cancel" && authorityAddress !== null) {
+    await revokeSubscriptionAuthorityAfterCancel(input.env, {
+      organization_id: input.organizationId,
+      project_id: input.projectId,
+      custody_wallet_id: input.sourceWallet.id,
+      wallet_address: input.sourceWallet.publicKey,
+      token: input.tokenMint,
+      subscription_authority_address: authorityAddress,
+    });
+  }
+  return finalized;
+}
+
+/**
  * Resume starts money movement again, so it runs money admission (HOO-1955)
  * before it signs. Cancel is an exit and money admission never refuses it
  * (ADR 0002); an API key's wallet scope bounds it at the route's authorize
@@ -629,7 +663,7 @@ async function runRecurringPaymentLifecycle(
       });
       if (step.kind === "landed") {
         confirmedOnChain = true;
-        return await finalizeRecurringPaymentLifecycle({
+        return await finalizeLifecycleOperation({
           env: input.env,
           organizationId: input.organizationId,
           projectId: input.projectId,
@@ -638,6 +672,8 @@ async function runRecurringPaymentLifecycle(
           subscription,
           attempt,
           signature,
+          sourceWallet: input.sourceWallet,
+          tokenMint,
         });
       }
       onChainSubscription = step.account;
@@ -734,7 +770,7 @@ async function runRecurringPaymentLifecycle(
     await confirmSubscriptionSignature(signature, lifecycleConfirmationMessage(input.operation));
     confirmedOnChain = true;
 
-    return finalizeRecurringPaymentLifecycle({
+    return finalizeLifecycleOperation({
       env: input.env,
       organizationId: input.organizationId,
       projectId: input.projectId,
@@ -743,6 +779,8 @@ async function runRecurringPaymentLifecycle(
       subscription,
       attempt,
       signature,
+      sourceWallet: input.sourceWallet,
+      tokenMint,
     });
   } catch (error) {
     if (!(error instanceof Error)) throw error;

@@ -19,9 +19,10 @@ import type { DatabaseExecutor } from "@/db/client";
  */
 
 /**
- * How long after a subscription's or recurring payment's last change its authority stays: one
- * billing period plus this margin. Cancel ends a subscription at the end of its current period, at
- * most one period after the cancel, and resume needs the authority until then.
+ * How long after a standalone subscription's last change its authority stays: one billing period
+ * plus this margin. A canceled standalone subscription can still be resumed by its subscriber
+ * (`prepare-resume`) until the end of its current period, which needs the authority. A recurring
+ * payment's cancel is terminal (HOO-2339), so its subscriptions hold nothing once released.
  */
 const SUBSCRIPTION_AUTHORITY_IDLE_MARGIN_HOURS = 1;
 
@@ -79,13 +80,15 @@ const STATUS_COLUMNS = `?::text[] AS subscription_released, ?::text[] AS payment
  *
  * - Every subscription SDP recorded on it, in any project of the environment, is released (a
  *   recurring payment's earlier subscriptions included: an update that moves its wallet or token
- *   leaves the old one here), and its last change is more than its plan's period plus the margin
- *   ago, so none can still be resumed. A recurring payment's subscription still awaiting
- *   authorization counts as released once nothing can authorize it: no unreleased recurring
+ *   leaves the old one here). A standalone subscription also waits out its plan's period plus the
+ *   margin after its last change, so its subscriber can still resume it; a recurring payment's
+ *   (named by the payment or by an update attempt) never waits. A recurring payment's
+ *   subscription still awaiting authorization counts as released once nothing can authorize it:
+ *   no unreleased recurring
  *   payment names it and no update in flight is creating it. A failed activation or update leaves
  *   it so. A standalone subscription awaiting authorization always holds: its row stays pending
  *   after the caller's own authorization lands.
- * - Every recurring payment still on it is released and as long past its period.
+ * - Every recurring payment still on it is released.
  * - Nothing may be about to use one of the wallet's authorities before recording it: no recurring
  *   payment from the wallet is activating, updating or resuming, and no update in flight is moving
  *   a recurring payment onto the wallet.
@@ -115,18 +118,20 @@ const AUTHORITY_IDLE_PREDICATE = `
                         SELECT 1 FROM payment_recurring_payment_update_attempts creating
                          WHERE creating.new_subscription_id = other.id
                            AND creating.status = ANY(authority_ref.attempt_in_flight))))
-            OR COALESCE(other.canceled_at, other.updated_at)::timestamptz
-                 + make_interval(hours => other_plan.period_hours + ${SUBSCRIPTION_AUTHORITY_IDLE_MARGIN_HOURS})
-               > authority_ref.idle_before::timestamptz))
+            OR (NOT EXISTS (SELECT 1 FROM payment_recurring_payments owned_by
+                             WHERE owned_by.subscription_id = other.id)
+                AND NOT EXISTS (SELECT 1 FROM payment_recurring_payment_update_attempts linked_by
+                                 WHERE linked_by.new_subscription_id = other.id
+                                    OR linked_by.old_subscription_id = other.id)
+                AND COALESCE(other.canceled_at, other.updated_at)::timestamptz
+                      + make_interval(hours => other_plan.period_hours + ${SUBSCRIPTION_AUTHORITY_IDLE_MARGIN_HOURS})
+                    > authority_ref.idle_before::timestamptz)))
   AND NOT EXISTS (
     SELECT 1 FROM payment_recurring_payments payment
       JOIN projects payment_project ON payment_project.id = payment.project_id
      WHERE payment.subscription_authority_address = authority_ref.authority
        AND payment_project.environment = authority_ref.environment
-       AND (payment.status <> ALL(authority_ref.payment_released)
-            OR payment.updated_at::timestamptz
-                 + make_interval(hours => payment.period_hours + ${SUBSCRIPTION_AUTHORITY_IDLE_MARGIN_HOURS})
-               > authority_ref.idle_before::timestamptz))
+       AND payment.status <> ALL(authority_ref.payment_released))
   AND NOT EXISTS (
     SELECT 1 FROM payment_recurring_payments claiming
       JOIN projects claiming_project ON claiming_project.id = claiming.project_id

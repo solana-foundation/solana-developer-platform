@@ -901,9 +901,9 @@ function scheduleActionRefusal(
         ? null
         : error(409, "This schedule is not running.", "conflict");
     case "resume":
-      return schedule.status === "canceled" && schedule.subscriptionId
+      return schedule.status === "paused"
         ? null
-        : error(409, "Only a canceled schedule that has run can be resumed.", "conflict");
+        : error(409, "Only a paused schedule can be resumed.", "conflict");
   }
 }
 

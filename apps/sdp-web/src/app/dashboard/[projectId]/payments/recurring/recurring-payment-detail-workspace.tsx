@@ -156,10 +156,6 @@ function footerActionIds(
       return ["activate", "cancel"];
     case "active":
       return dueNow ? ["collect", "cancel"] : ["cancel"];
-    case "canceled":
-      // Only a schedule that ran on chain has a subscription to resume; one canceled before
-      // activation has to be created again.
-      return recurringPayment.subscriptionId ? ["resume"] : [];
     default:
       return [];
   }

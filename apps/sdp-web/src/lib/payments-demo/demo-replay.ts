@@ -481,7 +481,7 @@ function applyScheduleAction(world: DemoWorld, op: DemoOpOf<"schedule-action">):
       }
       break;
     case "resume":
-      if (schedule.status === "canceled" && schedule.subscriptionId) {
+      if (schedule.status === "paused") {
         schedule.status = "active";
         schedule.nextCollectionDueAt = iso(op.at + schedule.periodHours * HOUR_MS);
       }
