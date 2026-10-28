@@ -16,7 +16,6 @@ import {
   IDEMPOTENT_REPLAYED_HEADER,
   idempotencyFingerprintMatches,
   markIdempotencyCommitted,
-  markIdempotencyRecordMismatch,
 } from "@/middleware/idempotency";
 import type { MovementStepInput, RecordAnswer } from "@/middleware/movement-steps";
 import type { ValidatedBodyContext } from "@/middleware/validate";
