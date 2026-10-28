@@ -2417,7 +2417,7 @@ describe("payment transfer batches", () => {
     it("settles a crashed run on a resend under a new key once the chain passes its attempt", async () => {
       const { send, signingOutcomeMock, sourceSigner } =
         await seedOneRecipientBatch("payroll_crash");
-      const first = await send("batch-external-id-crash-first");
+      const first = await send("batch-external-id-crash-first", ORIGINAL);
       expect(first.status).toBe(200);
       const firstId = await batchIdOf(first);
       // The state a crash right after the batch commit leaves: the recipient
@@ -2440,13 +2440,13 @@ describe("payment transfer batches", () => {
 
       // The attempt could still land: the resend answers the batch as it stands.
       rpc.answer("getBlockHeight", 100);
-      const early = await send("batch-external-id-crash-early");
+      const early = await send("batch-external-id-crash-early", ORIGINAL);
       expect(early.status).toBe(200);
       expect((await readRecipients(firstId)).map((r) => r.status)).toEqual(["pending"]);
 
       // Past it: nothing that attempt built can land, so the recipient fails.
       rpc.answer("getBlockHeight", 101);
-      const late = await send("batch-external-id-crash-late");
+      const late = await send("batch-external-id-crash-late", ORIGINAL);
       expect(late.status).toBe(200);
       expect(await batchIdOf(late)).toBe(firstId);
       expect((await readRecipients(firstId)).map((r) => r.status)).toEqual(["failed"]);
