@@ -89,6 +89,7 @@ describe("Rate limiting", () => {
 
   afterEach(async () => {
     vi.restoreAllMocks();
+    vi.useRealTimers();
     anonymousFallback.resetForTesting();
     await clearKVStores(env);
   });
@@ -588,6 +589,8 @@ describe("Rate limiting", () => {
     });
 
     it("counts /pay per IP in memory while the store is down", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-01-01T00:00:30.000Z"));
       const app = new Hono<{ Bindings: Env }>();
       app.onError((err, c) =>
         err instanceof AppError
