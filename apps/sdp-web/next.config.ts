@@ -64,9 +64,17 @@ const nextConfig: NextConfig = {
       {
         // Baseline hardening for every route. nosniff and the referrer
         // default are safe universally; HSTS is ignored over plain HTTP, so
-        // self-hosted plain-HTTP deployments are unaffected.
+        // self-hosted plain-HTTP deployments are unaffected. The CSP closes
+        // the two sinks no page here legitimately uses — a <base> tag and
+        // plugin content (<object>/<embed>) — so a future injection on this
+        // money-movement surface cannot use them to exfiltrate, while script,
+        // style and connect sources stay as flexible as Next.js needs.
         source: "/:path*",
         headers: [
+          {
+            key: "Content-Security-Policy",
+            value: "base-uri 'none'; object-src 'none'",
+          },
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
           { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains" },
@@ -75,13 +83,29 @@ const nextConfig: NextConfig = {
       {
         // Clickjacking protection where the money-movement actions live.
         // Scoped to the dashboard and the BFF: the public /pay/:token request
-        // page stays embeddable for issuers.
+        // page stays embeddable for issuers. Next.js lets the last matching
+        // rule for a header key win, so this repeats the baseline directives
+        // instead of relying on the two policies combining, and adds
+        // frame-ancestors (the modern directive, covering paths
+        // X-Frame-Options misses); the legacy header stays for older clients.
         source: "/dashboard/:path*",
-        headers: [{ key: "X-Frame-Options", value: "SAMEORIGIN" }],
+        headers: [
+          {
+            key: "Content-Security-Policy",
+            value: "base-uri 'none'; object-src 'none'; frame-ancestors 'self'",
+          },
+          { key: "X-Frame-Options", value: "SAMEORIGIN" },
+        ],
       },
       {
         source: "/api/:path*",
-        headers: [{ key: "X-Frame-Options", value: "SAMEORIGIN" }],
+        headers: [
+          {
+            key: "Content-Security-Policy",
+            value: "base-uri 'none'; object-src 'none'; frame-ancestors 'self'",
+          },
+          { key: "X-Frame-Options", value: "SAMEORIGIN" },
+        ],
       },
     ];
   },
