@@ -3,7 +3,7 @@
 ## Stack
 
 - **Next.js 16** (App Router) + **Fumadocs** (`fumadocs-core`, `fumadocs-ui`) for the docs framework
-- **Tailwind v4** via `src/styles/solana-design-system.css`
+- **Tailwind v4**, imported at the top of `src/app/globals.css`; `dark:` follows the `.dark` class the theme switch sets
 - **`@sdp/design-tokens`** for every color, type size, radius, control height, motion value and font, so the docs match the dashboard's refresh design. `globals.css` imports `tokens.css` and `theme.css`; `<html>` carries `refreshThemeProps`
 - **Custom CSS** in `src/app/globals.css`: all layout classes are prefixed `launch-docs-*`
 - **Lucide React** for icons
