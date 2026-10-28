@@ -10,10 +10,9 @@ import { CHECK_VIOLATION, seedOrgProject } from "@/test/helpers/migration-db";
 const migrationsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "postgres");
 const cancelSql = readFileSync(path.join(migrationsDir, "0186_payment_request_cancel.sql"), "utf8");
 const validateSql = readFileSync(
-  path.join(migrationsDir, "0188_payment_request_cancel_validate.sql"),
+  path.join(migrationsDir, "0189_payment_request_cancel_validate.sql"),
   "utf8"
 );
-const CANCEL_SHAPE = "payment_requests_cancel_shape";
 const CANCELED_BY_STATUS = "payment_requests_canceled_by_only_when_canceled";
 const TRANSFER_ID = "xfr_0186";
 const CANCELED_AT = "2026-10-28T00:00:00.000Z";
@@ -38,12 +37,11 @@ async function insertRequest(id: string, row: RequestRow) {
   );
 }
 
-async function validationOfCancelChecks() {
-  const constraints = await client.query<{ conname: string; convalidated: boolean }>(
-    `SELECT conname, convalidated FROM pg_constraint
-      WHERE conrelid = 'payment_requests'::regclass AND conname IN ($1, $2)
-      ORDER BY conname COLLATE "C"`,
-    [CANCEL_SHAPE, CANCELED_BY_STATUS]
+async function validationOfCanceledByCheck() {
+  const constraints = await client.query<{ convalidated: boolean }>(
+    `SELECT convalidated FROM pg_constraint
+      WHERE conrelid = 'payment_requests'::regclass AND conname = $1`,
+    [CANCELED_BY_STATUS]
   );
   return constraints.rows;
 }
@@ -61,7 +59,6 @@ beforeEach(async () => {
   await client.query("BEGIN");
   await client.query(
     `ALTER TABLE payment_requests
-       DROP CONSTRAINT payment_requests_cancel_shape,
        DROP CONSTRAINT payment_requests_canceled_by_only_when_canceled,
        DROP COLUMN canceled_at,
        DROP COLUMN created_by_api_key_id,
@@ -84,21 +81,13 @@ afterEach(async () => {
 });
 
 describe("0186 payment request cancel", () => {
-  it.each<[...RequestRow, string]>([
-    ["canceled", null, null, null, CANCEL_SHAPE],
-    ["paid", TRANSFER_ID, "user_0186", null, CANCEL_SHAPE],
-    ["paid", TRANSFER_ID, null, CANCELED_AT, CANCEL_SHAPE],
-    ["awaiting_payment", null, "user_0186", CANCELED_AT, CANCELED_BY_STATUS],
-  ])(
-    "refuses %s (transfer %s) with canceled_by %s and canceled_at %s through %s",
-    async (status, fulfilledByTransferId, canceledBy, canceledAt, constraint) => {
-      await client.query(cancelSql);
+  it("refuses canceled_by on an awaiting_payment request", async () => {
+    await client.query(cancelSql);
 
-      await expect(
-        insertRequest("pr_0186_refused", [status, fulfilledByTransferId, canceledBy, canceledAt])
-      ).rejects.toMatchObject({ code: CHECK_VIOLATION, constraint });
-    }
-  );
+    await expect(
+      insertRequest("pr_0186_refused", ["awaiting_payment", null, "user_0186", CANCELED_AT])
+    ).rejects.toMatchObject({ code: CHECK_VIOLATION, constraint: CANCELED_BY_STATUS });
+  });
 
   it("accepts a paid request that keeps who canceled it and when", async () => {
     await client.query(cancelSql);
@@ -113,7 +102,7 @@ describe("0186 payment request cancel", () => {
     ]);
   });
 
-  it("adds both checks NOT VALID and 0188 validates them over a request from before 0186", async () => {
+  it("adds the canceled_by check NOT VALID and 0189 validates it over a request from before 0186", async () => {
     await client.query(
       `INSERT INTO payment_requests (
          id, organization_id, project_id, wallet_id, destination_address, token, amount,
@@ -124,15 +113,9 @@ describe("0186 payment request cancel", () => {
     );
 
     await client.query(cancelSql);
-    expect(await validationOfCancelChecks()).toEqual([
-      { conname: CANCEL_SHAPE, convalidated: false },
-      { conname: CANCELED_BY_STATUS, convalidated: false },
-    ]);
+    expect(await validationOfCanceledByCheck()).toEqual([{ convalidated: false }]);
 
     await client.query(validateSql);
-    expect(await validationOfCancelChecks()).toEqual([
-      { conname: CANCEL_SHAPE, convalidated: true },
-      { conname: CANCELED_BY_STATUS, convalidated: true },
-    ]);
+    expect(await validationOfCanceledByCheck()).toEqual([{ convalidated: true }]);
   });
 });
