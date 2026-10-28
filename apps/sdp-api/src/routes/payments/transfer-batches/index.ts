@@ -33,9 +33,6 @@ transferBatches.post(
   requireAction("transfer_batches.execute"),
   validateBody(createTransferBatchSchema),
   authorize(authorizeTransferBatch),
-  // Signs and broadcasts up to one transaction per chunk. Before the key is
-  // claimed, so a refusal is never stored under it (ADR 0009).
-  meteredQuota(TRANSFER_BATCH_QUOTA),
   // Batches run longer than one transfer, recipient order does not change what
   // moves, and the batch row is written under its key first (HOO-1918).
   idempotent({
@@ -47,6 +44,9 @@ transferBatches.post(
     previousCanonicalize: previousCanonicalTransferBatchBody,
   }),
   replayFromRecord(findTransferBatchRecordReplay),
+  // Meters only new sends: a replay, an in-flight poll or a record answer has
+  // exited by now. A 429 is never stored under the key (ADR 0009).
+  meteredQuota(TRANSFER_BATCH_QUOTA),
   admit(admitTransferBatchExecution),
   createTransferBatch
 );
