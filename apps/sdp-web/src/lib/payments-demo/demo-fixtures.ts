@@ -1146,6 +1146,7 @@ function buildRequest(
     expiresAt,
     fulfilledByTransferId: spec.status === "paid" ? (spec.paidByTransferId ?? null) : null,
     canceledBy: spec.status === "canceled" ? CREATED_BY : null,
+    canceledAt: spec.status === "canceled" ? (closedAt ?? null) : null,
     lifecycle: [
       { status: "awaiting_payment", at: createdAt },
       ...(closedAt === undefined ? [] : [{ status: spec.status, at: closedAt }]),

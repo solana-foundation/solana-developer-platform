@@ -765,6 +765,32 @@ function createRequest({ body, world, now }: WriteContext): DemoWriteResult {
   );
 }
 
+/** A request's cancel, refused as the API refuses it: paid, expired, or past its expiry. */
+function cancelRequest({ segments, world, now }: WriteContext): DemoWriteResult {
+  const id = segments[2] ?? "";
+  const request = world.requests.find((candidate) => candidate.id === id);
+  if (!request) return error(404, "Payment request not found.", "not_found");
+  const answer = (after: DemoWorld) => {
+    const current = after.requests.find((candidate) => candidate.id === id);
+    if (!current) return error(404, "Payment request not found.", "not_found").answer(after);
+    const { publicToken: _publicToken, ...read } = current;
+    return ok({ data: read });
+  };
+  switch (request.status) {
+    case "canceled":
+      return record([], answer);
+    case "paid":
+      return error(409, "Payment request is already paid", "conflict");
+    case "expired":
+      return error(409, "Payment request has expired", "conflict");
+    case "awaiting_payment":
+      if (request.expiresAt !== null && Date.parse(request.expiresAt) <= now.getTime()) {
+        return error(409, "Payment request has expired", "conflict");
+      }
+      return record([{ k: "request-cancel", id, at: now.getTime() }], answer);
+  }
+}
+
 // ─── Schedules ───────────────────────────────────────────────────────────────
 
 const periodSchema = z.number().int().min(1, "Repeat at least every hour.").max(8760);
@@ -937,6 +963,7 @@ const WRITE_ROUTES: ReadonlyArray<[method: string, shape: string, handler: Handl
   ["POST", "payments/ramps/transfers/cancel", cancelRamp],
   ["POST", "payments/ramps/*/events", () => record([], () => ({ status: 204 }))],
   ["POST", "payments/requests", createRequest],
+  ["POST", "payments/requests/*/cancel", cancelRequest],
   ["POST", "payments/recurring-payments", createSchedule],
   ["PATCH", "payments/recurring-payments/*", updateSchedule],
   ["POST", "payments/recurring-payments/*/*", runScheduleAction],

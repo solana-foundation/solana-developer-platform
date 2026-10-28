@@ -71,6 +71,7 @@ const demoOpSchema = z.discriminatedUnion("k", [
     amount: text,
     expires: text.nullable(),
   }),
+  z.object({ k: z.literal("request-cancel"), id, at }),
   z.object({
     k: z.literal("schedule"),
     id,
