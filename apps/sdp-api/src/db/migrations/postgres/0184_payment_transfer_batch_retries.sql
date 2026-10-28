@@ -17,7 +17,8 @@ CREATE TABLE payment_transfer_batch_retries (
 );
 
 CREATE UNIQUE INDEX payment_transfer_batch_retries_org_project_key
-    ON payment_transfer_batch_retries (organization_id, project_id, idempotency_key);
+    ON payment_transfer_batch_retries (organization_id, project_id, idempotency_key)
+    WHERE status = 'active';
 
 ALTER TABLE payment_transfer_batch_retries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE payment_transfer_batch_retries FORCE ROW LEVEL SECURITY;

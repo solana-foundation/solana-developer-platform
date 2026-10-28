@@ -364,10 +364,15 @@ export interface PaymentTransferBatchesRepository {
    * @param input.batchId - Batch whose unsent recipients are failed.
    * @param input.error - Failure detail recorded on each failed recipient.
    * @param input.attemptedBefore - Only recipients written before this instant.
+   * @param input.recipientIds - Only these recipients, when the caller knows which ones it wrote.
    * @returns The batch row after the recompute.
    */
   failUnsentTransferRecipients(
-    input: RecomputeTransferBatchStatusInput & { error: string; attemptedBefore: string }
+    input: RecomputeTransferBatchStatusInput & {
+      error: string;
+      attemptedBefore: string;
+      recipientIds?: string[];
+    }
   ): Promise<PaymentTransferBatchRow>;
   /**
    * Takes failed recipients back to pending with no chunk transfer for a

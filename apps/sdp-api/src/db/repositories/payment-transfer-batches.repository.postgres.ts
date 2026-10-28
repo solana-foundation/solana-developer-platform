@@ -875,14 +875,16 @@ export function createPostgresPaymentTransferBatchesRepository(
                 AND project_id = ?
                 AND status = 'pending'
                 AND transfer_id IS NULL
-                AND updated_at < ?`
+                AND updated_at < ?
+                ${recipientIdClause(input.recipientIds)}`
           )
           .bind(
             input.error,
             input.batchId,
             input.organizationId,
             input.projectId,
-            input.attemptedBefore
+            input.attemptedBefore,
+            ...(input.recipientIds ?? [])
           )
           .run();
         return recomputeBatchStatusInTransaction(tx, input);
@@ -969,6 +971,13 @@ function mapPaymentTransferBatchRetryRow(
     recipient_ids: retryRecipientIdsSchema.parse(parsePostgresJson<unknown>(row.recipient_ids)),
     created_at: String(row.created_at),
   };
+}
+
+/** Limits a recipient update to the named ids; none named matches none. */
+function recipientIdClause(recipientIds: string[] | undefined): string {
+  if (recipientIds === undefined) return "";
+  if (recipientIds.length === 0) return "AND FALSE";
+  return `AND id IN (${recipientIds.map(() => "?").join(", ")})`;
 }
 
 /** Rolls a partial claim back: another resend took one of the recipients. */

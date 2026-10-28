@@ -2532,7 +2532,7 @@ describe("payment transfer batches", () => {
     });
 
     it("fails a crashed retry's unsent recipients on a same-key rerun, so they can be retried", async () => {
-      const { batch, failed } = await seedPartiallyFailedBatch();
+      const { batch, failed, sent } = await seedPartiallyFailedBatch();
       vi.clearAllMocks();
       const key = crypto.randomUUID();
       expect((await retry(batch.id, key)).status).toBe(200);
@@ -2547,6 +2547,13 @@ describe("payment transfer batches", () => {
         )
         .bind(failed.id)
         .run();
+      // Another request (the create) still sending a different recipient.
+      await getDb(env)
+        .prepare(
+          "UPDATE payment_transfer_recipients SET status = 'pending', transfer_id = NULL, updated_at = ? WHERE id = ?"
+        )
+        .bind(new Date(Date.now() - 60 * 60 * 1000).toISOString(), sent.id)
+        .run();
       await getDb(env)
         .prepare("UPDATE payment_transfer_batches SET status = 'processing' WHERE id = ?")
         .bind(batch.id)
@@ -2559,6 +2566,8 @@ describe("payment transfer batches", () => {
       expect(rerun.status).toBe(200);
       const body = await readBatch(rerun);
       expect(body.data.recipients.find((r) => r.id === failed.id)?.status).toBe("failed");
+      // Not this retry's: left to the request that is sending it.
+      expect(body.data.recipients.find((r) => r.id === sent.id)?.status).toBe("pending");
       expect(sendTransactionMock).not.toHaveBeenCalled();
       // Failed again, so a new retry can send it.
       expect((await retry(batch.id)).status).toBe(200);

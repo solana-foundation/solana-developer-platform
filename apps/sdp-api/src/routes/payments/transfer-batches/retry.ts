@@ -93,9 +93,10 @@ export async function authorizeTransferBatchRetry(
  * or it expired), so its recipients still pending with no chunk transfer will
  * never be sent: a chunk's transfer row and links commit before its
  * broadcast. They are failed, and the batch settles, before it answers, so
- * they can be retried at once. The claim wrote them in the retry row's
- * transaction, so `updated_at` up to the row's `created_at` names exactly
- * them, and never a later retry's claim.
+ * they can be retried at once. Only the recipients the row recorded, and only
+ * as the claim left them (`updated_at` up to the row's `created_at`): another
+ * request may still be sending the batch's other recipients, and a later
+ * retry may have claimed these again.
  */
 export async function findTransferBatchRetryReplay(
   c: AppContext,
@@ -125,6 +126,9 @@ export async function findTransferBatchRetryReplay(
           projectId,
           error: "The retry request ended before this recipient's transfer was sent",
           attemptedBefore: new Date(Date.parse(retry.created_at) + 1).toISOString(),
+          // Only what this retry claimed: the create, or another retry, may
+          // still be sending other recipients of the batch.
+          recipientIds: retry.recipient_ids,
         })
       : batch;
   return {
