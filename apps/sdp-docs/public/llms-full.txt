@@ -2674,9 +2674,9 @@ One request creates a durable batch, chunks its recipients into Solana transacti
 curl -X POST https://api.solana.com/v1/payments/transfer-batches \
   -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
-  -H "Idempotency-Key: payroll-2026-05-14" \
+  -H "Idempotency-Key: 3f0c9e7a-5b1d-4c2e-9a8f-6d4b2e1c0a97" \
   -d '{
-    "externalId": "payroll_2026-05-14",
+    "externalId": "payroll-2026-05",
     "sourceCustodyWalletId": "cwlt_123",
     "token": "9aBCd...4eEf",
     "recipients": [
@@ -2690,14 +2690,19 @@ curl -X POST https://api.solana.com/v1/payments/transfer-batches \
   }'
 ```
 
-`Idempotency-Key` is required. Reuse the same key for retries of that exact request; recipient order does not change the request. Use `GET /v1/payments/transfer-batches/{batchId}` to inspect recipient and chunk outcomes.
+The two ids do different jobs:
+
+- **`Idempotency-Key`** (required) identifies this one request. Reuse it to retry that exact request after a timeout; recipient order does not change the request. Any unique value works, such as a UUID.
+- **`externalId`** (recommended) identifies the payout run. Derive it from your own data, such as the pay period, so every attempt at the run carries the same value; see [One batch per payout run](#one-batch-per-payout-run).
+
+Use `GET /v1/payments/transfer-batches/{batchId}` to inspect recipient and chunk outcomes.
 
 ### One batch per payout run
 
 The batch `externalId` names the payout run, and it is unique per project and source wallet. Whatever `Idempotency-Key` it carries, a batch with an `externalId` already used on that wallet never pays anyone again:
 
 - The same request, from the same API key, returns the existing batch as it stands. A worker that restarts with a fresh key gets the original run back.
-- Any other request (different recipients, amounts or options, or another API key) returns `409 TRANSFER_BATCH_RUN_EXISTS` with the existing batch in `error.details.batchId`.
+- Any other request (different recipients, amounts or options, or another API key) returns `409 TRANSFER_BATCH_RUN_EXISTS` with the existing batch in `error.details.batchId`. A replay only goes to the API key that sent the run, so after a key rotation the new key gets the 409: read the batch by its id instead of resending.
 
 Derive the `externalId` from data you already have, so a worker that crashes and restarts computes the same value without storing anything: `payroll-2026-05`, `invoice-run-8812`. Never generate it at random: a random value is new on every attempt and protects nothing. New recipients go in a new run with a new `externalId`, never in a renamed copy of a run that was already sent.
 
