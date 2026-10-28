@@ -35,6 +35,7 @@ import { deriveProviderRequestId } from "@/lib/idempotency";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { deriveIdempotencyRecordKey, requestFingerprint } from "@/middleware/idempotency";
 import { canonicalizeTransferBatchBody } from "@/routes/payments/transfer-batches/idempotency";
+import type { CreateTransferBatchInput } from "@/routes/payments/transfer-batches/types";
 import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
 import { rootLogger } from "@/runtime/logger";
 import { SigningService } from "@/services/domain/signing.service";
@@ -2161,6 +2162,8 @@ describe("payment transfer batches", () => {
   });
 
   describe("batch externalId (HOO-2335)", () => {
+    /** What each test's first send pays, from which key; a test that sends otherwise says so. */
+    const ORIGINAL = { amount: "0.1", apiKey: TEST_API_KEY.raw };
     const batchIdResponseSchema = z.object({
       data: z.object({ batch: z.object({ id: z.string() }) }),
     });
@@ -2182,7 +2185,7 @@ describe("payment transfer batches", () => {
       });
       const send = (
         idempotencyKey: string,
-        { amount = "0.1", apiKey = TEST_API_KEY.raw }: { amount?: string; apiKey?: string } = {}
+        { amount, apiKey }: { amount: string; apiKey: string }
       ) =>
         app.request(
           "/v1/payments/transfer-batches",
@@ -2262,12 +2265,12 @@ describe("payment transfer batches", () => {
     it("answers the same batch resent under a new key with the original, paying no one again", async () => {
       const { send, signingOutcomeMock } = await seedOneRecipientBatch("payroll_resent");
 
-      const first = await send("batch-external-id-first");
+      const first = await send("batch-external-id-first", ORIGINAL);
       expect(first.status).toBe(200);
       const firstId = await batchIdOf(first);
       vi.clearAllMocks();
 
-      const resend = await send("batch-external-id-resend");
+      const resend = await send("batch-external-id-resend", ORIGINAL);
 
       expect(resend.status).toBe(200);
       expect(resend.headers.get("Idempotent-Replayed")).toBe("true");
@@ -2278,7 +2281,7 @@ describe("payment transfer batches", () => {
 
     it("answers a resent run even after its wallet stops admitting new work", async () => {
       const { send, signingOutcomeMock } = await seedOneRecipientBatch("payroll_wallet_down");
-      const first = await send("batch-external-id-before-outage");
+      const first = await send("batch-external-id-before-outage", ORIGINAL);
       expect(first.status).toBe(200);
       const firstId = await batchIdOf(first);
       vi.clearAllMocks();
@@ -2290,7 +2293,7 @@ describe("payment transfer batches", () => {
           })
         );
       try {
-        const resend = await send("batch-external-id-during-outage");
+        const resend = await send("batch-external-id-during-outage", ORIGINAL);
 
         expect(resend.status).toBe(200);
         expect(await batchIdOf(resend)).toBe(firstId);
@@ -2304,12 +2307,12 @@ describe("payment transfer batches", () => {
     it("refuses a different batch reusing an externalId with the existing batch, signing nothing", async () => {
       const { send, signingOutcomeMock } = await seedOneRecipientBatch("payroll_reused");
 
-      const first = await send("batch-external-id-original");
+      const first = await send("batch-external-id-original", ORIGINAL);
       expect(first.status).toBe(200);
       const firstId = await batchIdOf(first);
       vi.clearAllMocks();
 
-      const changed = await send("batch-external-id-changed", { amount: "0.2" });
+      const changed = await send("batch-external-id-changed", { ...ORIGINAL, amount: "0.2" });
 
       expect(changed.status).toBe(409);
       expect(await changed.json()).toMatchObject({
@@ -2322,7 +2325,7 @@ describe("payment transfer batches", () => {
       expect(await countBatches()).toBe(1);
 
       // The refusal is not stored: the key still sends the run's own body.
-      const again = await send("batch-external-id-changed");
+      const again = await send("batch-external-id-changed", ORIGINAL);
       expect(again.status).toBe(200);
       expect(await batchIdOf(again)).toBe(firstId);
     });
@@ -2335,12 +2338,12 @@ describe("payment transfer batches", () => {
         id: "key_batch_payments_other",
       });
 
-      const first = await send("batch-external-id-own-key");
+      const first = await send("batch-external-id-own-key", ORIGINAL);
       expect(first.status).toBe(200);
       const firstId = await batchIdOf(first);
       vi.clearAllMocks();
 
-      const other = await send("batch-external-id-other-key", { apiKey: otherKey });
+      const other = await send("batch-external-id-other-key", { ...ORIGINAL, apiKey: otherKey });
 
       expect(other.status).toBe(409);
       expect(await other.json()).toMatchObject({
@@ -2353,8 +2356,8 @@ describe("payment transfer batches", () => {
     it("still replays a same-key retry of a batch with an externalId", async () => {
       const { send, signingOutcomeMock } = await seedOneRecipientBatch("payroll_replayed");
 
-      const first = await send("batch-external-id-replay");
-      const retry = await send("batch-external-id-replay");
+      const first = await send("batch-external-id-replay", ORIGINAL);
+      const retry = await send("batch-external-id-replay", ORIGINAL);
 
       expect(first.status).toBe(200);
       expect(retry.status).toBe(200);
@@ -2377,7 +2380,7 @@ describe("payment transfer batches", () => {
         return sourceSigner;
       });
 
-      const response = await send("batch-external-id-raced");
+      const response = await send("batch-external-id-raced", ORIGINAL);
 
       expect(response.status).toBe(409);
       expect(await response.json()).toMatchObject({
@@ -2396,12 +2399,12 @@ describe("payment transfer batches", () => {
       createOrgSignerForCustodyWalletMock.mockImplementation(async () => {
         if (winner === undefined) {
           createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
-          winner = await send("batch-external-id-twin-winner");
+          winner = await send("batch-external-id-twin-winner", ORIGINAL);
         }
         return sourceSigner;
       });
 
-      const loser = await send("batch-external-id-twin-loser");
+      const loser = await send("batch-external-id-twin-loser", ORIGINAL);
 
       expect(required(winner).status).toBe(200);
       expect(loser.status).toBe(200);
@@ -2456,8 +2459,8 @@ describe("payment transfer batches", () => {
       await insertBatchRow(sourceSigner.address, "payroll_legacy", "legacy-request-key-1");
       await insertBatchRow(sourceSigner.address, "payroll_legacy", "legacy-request-key-2");
 
-      const first = await send("batch-external-id-after-legacy");
-      const resend = await send("batch-external-id-after-legacy-resend");
+      const first = await send("batch-external-id-after-legacy", ORIGINAL);
+      const resend = await send("batch-external-id-after-legacy-resend", ORIGINAL);
 
       expect(first.status).toBe(200);
       expect(resend.status).toBe(200);
@@ -2467,7 +2470,7 @@ describe("payment transfer batches", () => {
 
     it("still answers a batch recorded before run keys on a same-key retry after its record expires", async () => {
       const { send, sourceSigner, signingOutcomeMock } = await seedOneRecipientBatch("payroll_old");
-      const first = await send("batch-external-id-old-key");
+      const first = await send("batch-external-id-old-key", ORIGINAL);
       expect(first.status).toBe(200);
       const firstId = await batchIdOf(first);
       // As a batch recorded before run keys: under the request's own record key.
@@ -2487,7 +2490,7 @@ describe("payment transfer batches", () => {
       vi.clearAllMocks();
       createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
 
-      const again = await send("batch-external-id-old-key");
+      const again = await send("batch-external-id-old-key", ORIGINAL);
 
       expect(again.status).toBe(200);
       expect(again.headers.get("Idempotent-Replayed")).toBe("true");
@@ -2513,7 +2516,7 @@ describe("payment transfer batches", () => {
         recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
         options: { preflight: false },
       };
-      const send = (idempotencyKey: string, body: object) =>
+      const send = (idempotencyKey: string, body: CreateTransferBatchInput) =>
         app.request(
           "/v1/payments/transfer-batches",
           {
@@ -2569,7 +2572,7 @@ describe("payment transfer batches", () => {
     it("refuses a batch that names no payout run before reading anything", async () => {
       const { send, signingOutcomeMock } = await seedOneRecipientBatch(undefined);
 
-      const response = await send("batch-no-external-id");
+      const response = await send("batch-no-external-id", ORIGINAL);
 
       expect(response.status).toBe(400);
       expect(signingOutcomeMock).not.toHaveBeenCalled();
