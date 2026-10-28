@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { authorize } from "@/middleware/authorize";
 import { idempotent } from "@/middleware/idempotency";
+import { meteredQuota } from "@/middleware/metered-quota";
 import { admit, replayFromRecord } from "@/middleware/movement-steps";
 import { requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
@@ -22,6 +23,9 @@ transferBatches.post(
   "/estimate",
   requireAction("transfer_batches.read"),
   validateBody(estimateTransferBatchSchema),
+  // Each estimate reads Kora's configuration, every recipient token account and the fee of every
+  // chunk, so it is metered like a ramp estimate.
+  meteredQuota({ name: "transfer-batch-estimate", actorMax: 30, orgMax: 120 }),
   estimateTransferBatch
 );
 transferBatches.post(
