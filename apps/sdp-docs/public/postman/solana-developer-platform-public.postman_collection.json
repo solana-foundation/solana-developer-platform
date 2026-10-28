@@ -1031,7 +1031,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/payments/transfer-batches/estimate",
-            "description": "Validates an exact-wallet transfer batch request and estimates transaction chunking and fees.",
+            "description": "Validates an exact-wallet transfer batch request and estimates transaction chunking and fees, planning chunks exactly as create does. Returns `422 RECIPIENT_NOT_SPONSORABLE` for recipients the fee sponsor can never fund: `details.reason` is `token_account_address_prefunded` (the recipient's token account address holds lamports without being a token account) or `rent_exceeds_limit` (its new token account alone costs more rent than the sponsor funds per transaction), and `details.recipientIndexes` names them. Metered: `429` when the caller exceeds the estimate quota.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"cpa_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
@@ -1069,7 +1069,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/payments/transfer-batches",
-            "description": "Executes an outbound transfer batch from one exact SDP Wallet ID, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records. Requires an Idempotency-Key: a retry with the same key and request returns the original batch without another on-chain submission. Recipient order does not change the request.",
+            "description": "Executes an outbound transfer batch from one exact SDP Wallet ID, chunks recipients into Solana transactions, and returns the batch, recipient, and transfer records. Requires an Idempotency-Key: a retry with the same key and request returns the original batch without another on-chain submission. Recipient order does not change the request. Recipients the fee sponsor can never fund refuse the batch with `422 RECIPIENT_NOT_SPONSORABLE` before anything is stored: `details.reason` is `token_account_address_prefunded` or `rent_exceeds_limit`, and `details.recipientIndexes` names them.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"projectId\": \"prj_example\",\n  \"externalId\": \"payroll_2026_06_30\",\n  \"sourceCustodyWalletId\": \"cwlt_example\",\n  \"token\": \"SOL\",\n  \"recipients\": [\n    {\n      \"externalId\": \"payroll_row_001\",\n      \"counterpartyId\": \"cpty_example\",\n      \"counterpartyAccountId\": \"cpa_example\",\n      \"amount\": \"25.00\"\n    }\n  ],\n  \"options\": {\n    \"maxRecipientsPerTransaction\": 20,\n    \"priorityFee\": \"auto\",\n    \"preflight\": true\n  }\n}",
