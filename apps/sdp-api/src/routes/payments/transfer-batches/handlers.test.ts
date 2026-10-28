@@ -1921,7 +1921,7 @@ describe("payment transfer batches", () => {
               "Idempotency-Key": idempotencyKey,
             },
             body: JSON.stringify({
-              ...(externalId === undefined ? {} : { externalId }),
+              externalId,
               sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
               token: "SOL",
               recipients: [{ counterpartyId, counterpartyAccountId, amount }],
