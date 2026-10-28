@@ -163,6 +163,24 @@ async function getSubscriptionWithPlan(
   return { plan, subscription };
 }
 
+/**
+ * Refuses a subscription paid from one of the organization's SDP wallets (HOO-2339). Its payer's
+ * authorization approves the program for u64::MAX, which for a custody wallet would leave SDP-held
+ * funds unbounded and share the per-mint approval a recurring payment keeps at 0 between
+ * collections. A custody wallet pays on a schedule through a recurring payment. One database read.
+ *
+ * @param c - The request.
+ * @param subscriberAddress - The subscription's payer.
+ * @throws AppError `CONFLICT` when the payer is one of the organization's SDP wallets.
+ */
+async function refuseCustodyWalletSubscriber(c: AppContext, subscriberAddress: string) {
+  if (await isOrganizationCustodyWalletAddress(c, subscriberAddress)) {
+    throw conflict(
+      "The subscriber is one of this organization's SDP wallets. Use a recurring payment to pay from an SDP wallet."
+    );
+  }
+}
+
 export const createSubscription = async (
   c: ValidatedBodyContext<typeof createSubscriptionSchema>
 ) => {
@@ -183,15 +201,7 @@ export const createSubscription = async (
   if (counterparty.status !== "active") {
     throw new AppError("NOT_FOUND", "Counterparty not found");
   }
-  // A subscription's payer approves the program for u64::MAX from its own wallet. For one of the
-  // organization's custody wallets that would leave SDP-held funds unbounded and share the
-  // per-mint approval a recurring payment keeps at 0 between collections (HOO-2339): a custody
-  // wallet pays on a schedule through a recurring payment.
-  if (await isOrganizationCustodyWalletAddress(c, body.subscriberAddress)) {
-    throw conflict(
-      "The subscriber is one of this organization's SDP wallets. Use a recurring payment to pay from an SDP wallet."
-    );
-  }
+  await refuseCustodyWalletSubscriber(c, body.subscriberAddress);
 
   const existing = await repo.listSubscriptions({
     organizationId: auth.organizationId,
@@ -247,6 +257,9 @@ export const prepareSubscriptionAuthorization = async (
   const body = c.req.valid("json");
 
   const { plan, subscription } = await getSubscriptionWithPlan(c, params.data.subscriptionId);
+  // One created before the create route refused it: refused here, before its authorization can
+  // approve anything.
+  await refuseCustodyWalletSubscriber(c, subscription.subscriber_address);
   if (plan.status !== "active") {
     throw badRequest("Subscription plan must be active before authorization");
   }

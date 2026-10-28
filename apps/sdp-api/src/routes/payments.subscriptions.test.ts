@@ -323,6 +323,48 @@ describe("Payments routes — subscriptions", () => {
       env
     );
     expect((await listRes.json()).data.total).toBe(0);
+
+    // One created before the check: its authorization is refused before it approves anything.
+    const legacyRes = await app.request(
+      "/v1/payments/subscriptions",
+      {
+        method: "POST",
+        headers: SUBSCRIPTION_HEADERS,
+        body: JSON.stringify({
+          planId,
+          counterpartyId,
+          subscriberAddress: TEST_SOLANA_ADDRESSES.wallet2,
+        }),
+      },
+      env
+    );
+    expect(legacyRes.status).toBe(201);
+    const legacyId = successResponseSchema(paymentSubscriptionResponseSchema).parse(
+      await legacyRes.json()
+    ).data.subscription.id;
+    await getDb(env)
+      .prepare("UPDATE payment_subscriptions SET subscriber_address = ? WHERE id = ?")
+      .bind(TEST_SOLANA_ADDRESSES.wallet1, legacyId)
+      .run();
+
+    const authorizeRes = await app.request(
+      `/v1/payments/subscriptions/${legacyId}/prepare-authorization`,
+      {
+        method: "POST",
+        headers: SUBSCRIPTION_HEADERS,
+        body: JSON.stringify({
+          expectedSubscriptionAuthorityInitId: "0",
+          subscriberTokenAccount: TEST_SOLANA_ADDRESSES.wallet3,
+          expectedPlanCreatedAt: "1700000000",
+        }),
+      },
+      env
+    );
+
+    expect(authorizeRes.status).toBe(409);
+    expect(errorResponseSchema.parse(await authorizeRes.json()).error.message).toContain(
+      "Use a recurring payment"
+    );
   });
 
   it("exercises the recurring subscription lifecycle through SDP API routes", async () => {
