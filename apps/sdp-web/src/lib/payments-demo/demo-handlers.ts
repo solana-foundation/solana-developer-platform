@@ -683,6 +683,7 @@ function estimateBatch({ body, world }: WriteContext): DemoWriteResult {
             tokenAccountRentLamports: "0",
             sponsored: false,
           },
+          warnings: [],
         },
       },
     })

@@ -376,6 +376,47 @@ describe("Public payment request routes", () => {
       }
     );
 
+    it("refuses with 409 before claiming or signing when the payer would keep less than the rent minimum (HOO-2375)", async () => {
+      stubSponsorship();
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+      // 1.5003 SOL held, 1.5 SOL owed: 0.0003 SOL left, below the 0.00089088 minimum.
+      rpc.answer("getMultipleAccounts", {
+        context: { slot: 1 },
+        value: [
+          {
+            data: ["", "base64"],
+            executable: false,
+            lamports: 1_500_300_000,
+            owner: "11111111111111111111111111111111",
+            rentEpoch: 0,
+            space: 0,
+          },
+        ],
+      });
+
+      const res = await postTransaction(request.public_token);
+
+      expect(res.status).toBe(409);
+      expect(await res.json()).toMatchObject({
+        error: { code: "AMOUNT_BELOW_RENT_MINIMUM", details: { sourceRemainder: "0.0003" } },
+      });
+      // Refused before the claim: once the payer can afford the minimum, it is served.
+      rpc.answer("getMultipleAccounts", {
+        context: { slot: 1 },
+        value: [
+          {
+            data: ["", "base64"],
+            executable: false,
+            lamports: 2_000_000_000,
+            owner: "11111111111111111111111111111111",
+            rentEpoch: 0,
+            space: 0,
+          },
+        ],
+      });
+      expect((await postTransaction(request.public_token)).status).toBe(200);
+    });
+
     it("signs once per window and replays the stored transaction for the same account", async () => {
       const sponsorship = stubSponsorship();
       const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);

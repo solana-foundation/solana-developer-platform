@@ -35,6 +35,7 @@ import { badRequest, rateLimited } from "@/lib/errors";
 import { buildSplTransferInstructions } from "@/routes/payments/token-accounts";
 import { AuditService } from "@/services/audit.service";
 import { isPaymentRequestExpired } from "@/services/payments/payment-requests";
+import { assertNoSolRentShortfall } from "@/services/payments/sol-rent-minimum";
 import { loadPaymentMint } from "@/services/payments/token-amount";
 import {
   createSponsorshipFeePayment,
@@ -264,7 +265,8 @@ export async function issuePaymentRequestTransaction(
  * @param params.blockhash - The lifetime blockhash.
  * @param params.lastValidBlockHeight - The block height the blockhash expires after.
  * @returns The compiled, unsigned transaction as base64.
- * @throws AppError `BAD_REQUEST` when a SOL request's amount is not positive.
+ * @throws AppError `BAD_REQUEST` when a SOL request's amount is not positive, and
+ *   `AMOUNT_BELOW_RENT_MINIMUM` when the chain would refuse it for rent.
  */
 async function buildPaymentTransaction(params: {
   request: PaymentRequestRow;
@@ -288,6 +290,14 @@ async function buildPaymentTransaction(params: {
     if (lamports <= 0n) {
       throw badRequest("Transfer amount must be greater than zero");
     }
+    // The payer would sign a transaction the chain refuses (HOO-2375).
+    await assertNoSolRentShortfall(
+      {
+        source: params.payer,
+        payments: [{ index: 0, destination: recipient, lamports }],
+      },
+      "transfer"
+    );
     const transferInstruction = getTransferSolInstruction({
       source: payerSigner,
       destination: recipient,

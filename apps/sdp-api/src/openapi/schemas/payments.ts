@@ -2,6 +2,7 @@ import { COUNTERPARTY_ENTITY_TYPES } from "@sdp/types/counterparties";
 import { OFFRAMP_CRYPTO_RAILS, ONRAMP_CRYPTO_RAILS } from "@sdp/types/payment-rails";
 import {
   paymentSubscriptionCollectionAttemptMetadataSchema,
+  paymentTransferBatchEstimateWarningSchema,
   RAMP_DELIVERY_MISMATCH_REASONS,
   RAMPS_MEMO_LIMITS,
 } from "@sdp/types/payments";
@@ -630,6 +631,16 @@ const transferBatchEstimateSchema = z
         }),
       })
       .openapi({ description: "Estimated fee components." }),
+    warnings: z
+      .array(
+        paymentTransferBatchEstimateWarningSchema.describe(
+          "Something create would refuse with 409 AMOUNT_BELOW_RENT_MINIMUM until it is fixed."
+        )
+      )
+      .openapi({
+        description:
+          "What would make the batch fail. Empty when the batch can be sent as estimated.",
+      }),
   })
   .openapi({ description: "Transfer batch estimate." });
 
