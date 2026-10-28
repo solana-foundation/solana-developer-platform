@@ -62,8 +62,8 @@ import { resolveSolanaCounterpartyAccount } from "@/services/payments/counterpar
 import { loadPaymentMint, parseStaticPaymentAmount } from "@/services/payments/token-amount";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
-  createSponsorshipFeePayment,
   resolveProjectSponsorshipScope,
+  resolveSponsoredFeePayer,
 } from "@/services/sponsorship.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
@@ -1593,27 +1593,19 @@ async function runReplacementUpdate(input: {
         updatedAt: new Date().toISOString(),
       })
     );
-    const feePayment = createSponsorshipFeePayment(
+    const feePayer = await resolveSponsoredFeePayer(
       input.env,
       await resolveProjectSponsorshipScope(input.env, {
         organizationId: input.organizationId,
         projectId: input.projectId,
         actor: { type: "wallet", id: input.resolved.sourceWallet.walletId },
-      }),
-      "recurring.update",
-      { custodyWalletId: input.resolved.sourceWallet.id }
+      })
     );
-    const feePayer = await feePayment.getFeePayer();
     const payer = createNoopSigner(feePayer);
     const subscriptionAuthority = await prepareSubscriptionAuthority({
       rpc,
       sourceSigner,
       sourceTokenAccount,
-      subscriptionAuthority: await subscriptionsProgram.fetchMaybeSubscriptionAuthority(
-        rpc,
-        subscriptionAuthorityAddress,
-        { commitment: "confirmed" }
-      ),
       subscriptionAuthorityAddress,
       owner,
       mint,
@@ -1656,11 +1648,6 @@ async function runReplacementUpdate(input: {
           }),
         }),
     });
-    if (!subscriptionAuthority.exists) {
-      throw new ResumedStepUnsettledError(
-        "Subscription authority is not visible on-chain yet; retry"
-      );
-    }
 
     const subscribeInstruction = await subscriptionsProgram.getSubscribeOverlayInstructionAsync({
       expectedAmount: amountBaseUnits,

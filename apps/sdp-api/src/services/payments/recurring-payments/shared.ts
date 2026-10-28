@@ -7,6 +7,7 @@ import type { MovementId } from "@sdp/types/movements";
 import type { PreparedPaymentSubscriptionTransaction } from "@sdp/types/payments";
 import { SOL_MINT, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import {
+  type Account,
   type Address,
   addSignersToTransactionMessage,
   appendTransactionMessageInstructions,
@@ -676,15 +677,17 @@ export async function confirmSubscriptionSignature(
  * missing, with the fee payer funding the rent. Each create is its own sponsored transaction,
  * confirmed before the next is sent: Kora refuses a transaction whose fee-payer outflow exceeds
  * its `max_allowed_lamports`, and on mainnet the two rents together exceed it. The authority's
- * init reads the token account, so the token account lands first. Both creates are idempotent on
- * chain, so a run that resumes after a crash sends only what is still missing and pays no rent
- * twice.
+ * init reads the token account, so the token account lands first, and a run that creates the
+ * token account always sends the init: on an existing authority it pays no rent and approves the
+ * authority as delegate on the new token account. Both creates are idempotent on chain, so a run
+ * that resumes after a crash sends only what is still missing and pays no rent twice. A node that
+ * has not yet seen the token account's confirmation can refuse the init with a 422; the retry then
+ * sends only the init.
  *
  * @param input - The source wallet's setup accounts and the sender for one setup transaction.
- * @param input.rpc - Cluster RPC for the authority read after its init lands.
+ * @param input.rpc - Cluster RPC for the authority reads before setup and after its init lands.
  * @param input.sourceSigner - The source wallet's signer, the authority's owner.
  * @param input.sourceTokenAccount - The source wallet's token account and whether it exists.
- * @param input.subscriptionAuthority - The source wallet's authority as read before setup.
  * @param input.subscriptionAuthorityAddress - The authority's PDA.
  * @param input.owner - The source wallet's address, the token account's owner.
  * @param input.mint - The schedule's mint.
@@ -693,13 +696,12 @@ export async function confirmSubscriptionSignature(
  * @param input.failureMessage - The error a setup transaction failing on chain raises.
  * @param input.sendSetup - Sends one setup instruction as its own sponsored transaction, saving
  *   its signature before the send.
- * @returns The source wallet's `SubscriptionAuthority`, read at `confirmed` when this run created it.
+ * @returns The source wallet's `SubscriptionAuthority`, read at `confirmed`.
  */
 export async function prepareSubscriptionAuthority(input: {
   rpc: SolanaRpc;
   sourceSigner: TransactionSigner;
   sourceTokenAccount: { tokenAccount: Address; exists: boolean };
-  subscriptionAuthority: MaybeAccount<SubscriptionAuthority>;
   subscriptionAuthorityAddress: Address;
   owner: Address;
   mint: Address;
@@ -707,9 +709,18 @@ export async function prepareSubscriptionAuthority(input: {
   feePayer: Address;
   failureMessage: string;
   sendSetup: (instruction: Instruction) => Promise<Signature>;
-}): Promise<MaybeAccount<SubscriptionAuthority>> {
+}): Promise<Account<SubscriptionAuthority>> {
   const payer = createNoopSigner(input.feePayer);
-  if (!input.sourceTokenAccount.exists) {
+  if (input.sourceTokenAccount.exists) {
+    const existingAuthority = await fetchMaybeSubscriptionAuthority(
+      input.rpc,
+      input.subscriptionAuthorityAddress,
+      { commitment: "confirmed" }
+    );
+    if (existingAuthority.exists) {
+      return existingAuthority;
+    }
+  } else {
     const createSourceAtaSignature = await input.sendSetup(
       getCreateAssociatedTokenIdempotentInstruction({
         payer,
@@ -720,9 +731,6 @@ export async function prepareSubscriptionAuthority(input: {
       })
     );
     await confirmSubscriptionSignature(createSourceAtaSignature, input.failureMessage);
-  }
-  if (input.subscriptionAuthority.exists) {
-    return input.subscriptionAuthority;
   }
 
   const initAuthoritySignature = await input.sendSetup(

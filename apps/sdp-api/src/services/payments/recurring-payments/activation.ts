@@ -46,8 +46,8 @@ import { parseU64String } from "@/services/payment-operation.service";
 import { loadPaymentMint } from "@/services/payments/token-amount";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
-  createSponsorshipFeePayment,
   resolveProjectSponsorshipScope,
+  resolveSponsoredFeePayer,
 } from "@/services/sponsorship.service";
 import { isDefiniteSubmissionError } from "@/services/sponsorship-submission";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
@@ -912,28 +912,20 @@ export async function activateRecurringPayment(input: {
     if (!onChainSubscription) {
       sendMayLand = false;
       const authorizationSigner = await signerForNewSend();
-      const feePayment = createSponsorshipFeePayment(
+      const feePayer = await resolveSponsoredFeePayer(
         input.env,
         await resolveProjectSponsorshipScope(input.env, {
           organizationId: input.organizationId,
           projectId: input.projectId,
           actor: { type: "wallet", id: input.sourceWallet.walletId },
-        }),
-        "recurring.activate",
-        { custodyWalletId: input.sourceWallet.id }
+        })
       );
-      const feePayer = await feePayment.getFeePayer();
       const payer = createNoopSigner(feePayer);
 
       const subscriptionAuthority = await prepareSubscriptionAuthority({
         rpc,
         sourceSigner: authorizationSigner,
         sourceTokenAccount,
-        subscriptionAuthority: await subscriptionsProgram.fetchMaybeSubscriptionAuthority(
-          rpc,
-          subscriptionAuthorityAddress,
-          { commitment: "confirmed" }
-        ),
         subscriptionAuthorityAddress,
         owner,
         mint,
@@ -975,11 +967,6 @@ export async function activateRecurringPayment(input: {
             }),
           }),
       });
-      if (!subscriptionAuthority.exists) {
-        throw new ResumedStepUnsettledError(
-          "Subscription authority is not visible on-chain yet; retry"
-        );
-      }
 
       const subscribeInstruction = await subscriptionsProgram.getSubscribeOverlayInstructionAsync({
         expectedAmount: amountBaseUnits,
