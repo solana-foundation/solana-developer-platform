@@ -66,6 +66,8 @@ curl -X POST https://api.solana.com/v1/wallets \
 <Step>
 ### Wallet Custody
 
+SDP orchestrates transactions through connected wallet providers; it does not act as a wallet custodian.
+
 Provision signing wallets through integrated custody providers, so your team never handles private keys. Hosted keys never leave the provider's MPC or TEE infrastructure and SDP only handles the signed transaction. Local development keys are encrypted at rest with `AES-256-GCM` using per-organization derived keys, and every signing request passes authentication, permission and allowed-operation checks before it executes.
 
 - **Built on `@solana/keychain`**

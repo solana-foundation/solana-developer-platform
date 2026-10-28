@@ -96,6 +96,7 @@ A change that triggers one of these must handle it.
 
 ## API (`apps/sdp-api`)
 
+- Endpoint documentation describes signing responsibilities: the caller signs, or SDP requests signing through a connected provider. Never describe SDP as the wallet custodian or label a flow "SDP-custody." Explain SDP's non-custody model in overview, introduction, or FAQ content, not individual endpoint descriptions. Keep existing API field names and enum values accurate.
 - A new resource is its own module: repository, `schemas.ts`, and handlers/route under `routes/<resource>/`. Child resources too: mount under the parent (`counterparties.route("/:counterpartyId/accounts", accountsApp)`), but never add the child's methods or schemas to the parent's files.
 - Provider-specific code (request builders, mappers, id generators) lives in provider files; handlers keep orchestration and database access only.
 - **Soft delete only:** `status = 'archived'` with partial indexes on active rows. No hard-delete paths or indexes built for cascade deletes. New tables get a `status` column with a `CHECK`; keep `ON DELETE CASCADE` foreign keys as correctness insurance, just don't index for them.

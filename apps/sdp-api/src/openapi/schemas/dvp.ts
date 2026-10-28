@@ -58,7 +58,7 @@ export const listDvpTradesQuerySchema = listDvpTradesQuerySchemaBase
 
 export const fundDvpTradeRequestSchema = withOpenApi(fundDvpTradeSchemaBase, {
   description:
-    "Names the leg to fund and, optionally, which of the caller's custody wallets pays from. The right to fund a side is holding an active custody wallet whose public key is that side's party address — derived at act time, never stored on the trade. An explicit walletId only narrows: it must hold the named side's address.",
+    "Names the leg to fund and, optionally, which of the caller's connected wallets pays from. The right to fund a side is holding an active connected wallet whose public key is that side's party address — derived at act time, never stored on the trade. An explicit walletId only narrows: it must hold the named side's address.",
 });
 
 const dvpTradeStatusSchema = z.enum(DVP_TRADE_STATUSES).openapi({
@@ -81,14 +81,14 @@ const dvpLegOutcomeSchema = z.enum(DVP_LEG_OUTCOMES).openapi({
 const dvpCallerWalletSchema = z
   .object({
     id: z.string().openapi({
-      description: "The custody wallet record id holding this address.",
+      description: "The connected wallet record id holding this address.",
     }),
     name: z.string().nullable().openapi({
       description: "The wallet's display name, or null when none was set.",
     }),
   })
   .nullable()
-  .openapi({ description: "The custody wallet, or null." });
+  .openapi({ description: "The connected wallet, or null." });
 
 const dvpTradePartySchema = z
   .object({
@@ -112,7 +112,7 @@ const dvpTradePartySchema = z
       }),
     wallet: dvpCallerWalletSchema.openapi({
       description:
-        "The caller's custody wallet holding this address, or null when the caller custodies nothing for it. Truthy = the caller custodies this party. Derived per caller from the same custody map discovery and funding authorize against; never stored.",
+        "The caller's connected wallet for this address, or null when none is accessible. A non-null value means the caller can act for this party. Derived per caller from the same wallet map used for discovery and funding authorization; never stored.",
     }),
   })
   .openapi({ description: "One party of the trade, as the caller may see it." });
@@ -219,7 +219,7 @@ const dvpTradeSchema = z
     legs: z.object({ a: dvpTradeLegSchema, b: dvpTradeLegSchema }),
     kind: z.enum(["agent", "principal", "bilateral"]).openapi({
       description:
-        "The caller's standing on this trade, derived per caller and never stored. Display copy only: how many sides the caller holds an active custody wallet for — 0 is an agent trade (the terms were set for two other parties), 1 is a principal trade, 2 is bilateral. Follows the same custody map discovery and funding authorize against, so a wallet-scoped key's kind reflects its own bindings.",
+        "The caller's standing on this trade, derived per caller and never stored. Display copy only: how many sides the caller holds an active connected wallet for — 0 is an agent trade (the terms were set for two other parties), 1 is a principal trade, 2 is bilateral. Follows the same wallet map discovery and funding authorize against, so a wallet-scoped key's kind reflects its own bindings.",
     }),
     nonce: z.string().openapi({
       description:

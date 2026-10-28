@@ -418,7 +418,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     tags: ["Issuance"],
     summary: "Deploy token",
     operationId: "deployToken",
-    description: "Deploys the token to Solana using custody signing.",
+    description: "Deploys the token to Solana using the connected provider for signing.",
     security: [{ apiKeyAuth: [] }],
     request: {
       params: z.object({
@@ -467,10 +467,10 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/issuance/tokens/{tokenId}/deploy/confirm",
     tags: ["Issuance"],
-    summary: "Confirm non-custodial deploy",
+    summary: "Confirm a caller-signed deployment",
     operationId: "confirmDeploy",
     description:
-      "Records the mint after the client signs and submits a prepared (non-custodial) deploy transaction. Verifies the transaction landed on-chain, then marks the token deployed.",
+      "Records the mint after the client signs and submits a prepared deploy transaction. Verifies the transaction landed on-chain, then marks the token deployed.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -498,7 +498,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     summary: "Prepare metadata-URI follow-up transaction",
     operationId: "prepareDeployMetadata",
     description:
-      "Follow-up step for the non-custodial deploy flow. When prepareDeploy returns `metadataUriFollowUp.required` (the inline URI overflowed the create transaction), the client calls this after deploy/confirm to fetch an unsigned transaction that sets the metadata URI on-chain. Signs with the wallet pinned on the token at deploy/prepare (a body `signingWalletId` is ignored); the request is rejected with 400 when the token has none. Returns a null transaction when the on-chain URI already matches.",
+      "Follow-up step for the caller-signed deploy flow. When prepareDeploy returns `metadataUriFollowUp.required` (the inline URI overflowed the create transaction), the client calls this after deploy/confirm to fetch an unsigned transaction that sets the metadata URI on-chain. Signs with the wallet pinned on the token at deploy/prepare (a body `signingWalletId` is ignored); the request is rejected with 400 when the token has none. Returns a null transaction when the on-chain URI already matches.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -549,7 +549,8 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     tags: ["Issuance"],
     summary: "Execute mint",
     operationId: "executeMint",
-    description: "Mints tokens using custody signing and submission.",
+    description:
+      "Mints tokens by requesting a signature from the connected provider, then submitting the transaction.",
     security: [{ apiKeyAuth: [] }],
     request: {
       params: z.object({
@@ -604,7 +605,8 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     tags: ["Issuance"],
     summary: "Execute burn",
     operationId: "executeBurn",
-    description: "Burns tokens using custody signing and submission.",
+    description:
+      "Burns tokens by requesting a signature from the connected provider, then submitting the transaction.",
     security: [{ apiKeyAuth: [] }],
     request: {
       params: z.object({
@@ -766,7 +768,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     tags: ["Issuance"],
     summary: "Execute authority update",
     operationId: "executeUpdateAuthority",
-    description: "Updates token authorities using custody signing.",
+    description: "Updates token authorities using the connected provider for signing.",
     security: [{ apiKeyAuth: [] }],
     request: {
       params: z.object({

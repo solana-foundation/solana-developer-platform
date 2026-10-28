@@ -112,7 +112,7 @@ export function registerEarnTreasuryPaths(
     "post",
     "vault-deposits",
     "createEarnVaultDeposit",
-    "Deposit from a custody wallet",
+    "Deposit from a connected wallet",
     deposit,
     {
       body: requests.earnVaultDepositSchema
@@ -125,7 +125,7 @@ export function registerEarnTreasuryPaths(
     "get",
     "vault-deposits",
     "listEarnVaultDeposits",
-    "List custody deposits",
+    "List wallet deposits",
     envelope({ deposits: z.array(earnVaultDepositRecordSchema), ...pageFields }),
     { query: requests.earnVaultDepositsQuerySchema }
   );
@@ -133,7 +133,7 @@ export function registerEarnTreasuryPaths(
     "get",
     "vault-deposits/{movementId}",
     "getEarnVaultDeposit",
-    "Read one custody deposit",
+    "Read one wallet deposit",
     depositRecord,
     { params: requests.earnVaultDepositParamsSchema }
   );
@@ -141,7 +141,7 @@ export function registerEarnTreasuryPaths(
     "get",
     "vault-positions",
     "listEarnVaultPositions",
-    "List live custody positions",
+    "List live wallet positions",
     envelope({
       positions: z.array(earnVaultPositionSchema),
       balanceReadContext: earnBalanceReadContextSchema.optional(),
@@ -150,14 +150,14 @@ export function registerEarnTreasuryPaths(
     {
       query: requests.earnVaultPositionsQuerySchema,
       description:
-        "Requires `earn.read`. Optional afterMovementIds is a comma-separated list of up to 100 visible custody movement IDs. Each affected position must be read at or after its movements' maximum confirmed slot; unrelated positions are not constrained. balanceReadContext acknowledges that bound; unavailable or stale provider values remain absent. confirmed is optimistic chain commitment; finalized or provider settlement supplies final amounts.",
+        "Requires `earn.read`. Optional afterMovementIds is a comma-separated list of up to 100 visible wallet movement IDs. Each affected position must be read at or after its movements' maximum confirmed slot; unrelated positions are not constrained. balanceReadContext acknowledges that bound; unavailable or stale provider values remain absent. confirmed is optimistic chain commitment; finalized or provider settlement supplies final amounts.",
     }
   );
   route(
     "post",
     "vault-withdrawals",
     "createEarnVaultWithdrawal",
-    "Withdraw from a custody position",
+    "Withdraw from a wallet position",
     withdrawal,
     {
       body: requests.earnVaultWithdrawalSchema
@@ -170,7 +170,7 @@ export function registerEarnTreasuryPaths(
     "get",
     "vault-withdrawals",
     "listEarnVaultWithdrawals",
-    "List custody withdrawals",
+    "List wallet withdrawals",
     envelope({ withdrawals: z.array(earnVaultWithdrawalSchema), ...pageFields }),
     { query: requests.earnVaultWithdrawalsQuerySchema }
   );
@@ -178,7 +178,7 @@ export function registerEarnTreasuryPaths(
     "get",
     "vault-withdrawals/{movementId}",
     "getEarnVaultWithdrawal",
-    "Read one custody withdrawal",
+    "Read one wallet withdrawal",
     withdrawal,
     { params: requests.earnVaultWithdrawalParamsSchema }
   );
@@ -186,7 +186,7 @@ export function registerEarnTreasuryPaths(
     "post",
     "vault-withdrawal-previews",
     "createEarnVaultWithdrawalPreview",
-    "Preview a custody withdrawal",
+    "Preview a wallet withdrawal",
     earnVaultWithdrawalPreviewResponse,
     { body: requests.earnVaultWithdrawalPreviewSchema }
   );
@@ -194,7 +194,7 @@ export function registerEarnTreasuryPaths(
     "post",
     "vault-withdrawal-options",
     "getEarnVaultWithdrawalOptions",
-    "Discover custody withdrawal routes",
+    "Discover wallet withdrawal routes",
     earnVaultWithdrawalOptionsResponse,
     { body: requests.earnVaultWithdrawalOptionsSchema }
   );
@@ -202,7 +202,7 @@ export function registerEarnTreasuryPaths(
     "post",
     "vault-queued-withdrawal-previews",
     "createEarnVaultQueuedWithdrawalPreview",
-    "Preview a queued custody withdrawal",
+    "Preview a queued wallet withdrawal",
     earnVaultQueuedWithdrawalPreviewResponse,
     { body: requests.earnVaultQueuedWithdrawalPreviewSchema }
   );
@@ -210,7 +210,7 @@ export function registerEarnTreasuryPaths(
     "post",
     "vault-withdrawal-requests",
     "createEarnVaultWithdrawalRequest",
-    "Request a queued custody withdrawal",
+    "Request a queued wallet withdrawal",
     earnExternalWalletWithdrawalRequestResponse,
     {
       body: z
@@ -228,7 +228,7 @@ export function registerEarnTreasuryPaths(
     "get",
     "vault-withdrawal-requests",
     "listEarnVaultWithdrawalRequests",
-    "List custody withdrawal requests",
+    "List wallet withdrawal requests",
     earnExternalWalletWithdrawalRequestsResponse,
     { query: requests.earnVaultWithdrawalRequestsQuerySchema }
   );
@@ -236,7 +236,7 @@ export function registerEarnTreasuryPaths(
     "get",
     "vault-withdrawal-requests/{withdrawalRequestId}",
     "getEarnVaultWithdrawalRequest",
-    "Read a custody withdrawal request",
+    "Read a wallet withdrawal request",
     earnExternalWalletWithdrawalRequestResponse,
     { params: requests.earnVaultWithdrawalRequestParamsSchema }
   );

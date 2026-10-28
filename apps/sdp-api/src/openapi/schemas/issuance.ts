@@ -904,7 +904,7 @@ export const updateTokenRequestSchema = updateTokenSchemaBase
   .extend({
     signingCustodyWalletId: withOpenApi(updateTokenSchemaBase.shape.signingCustodyWalletId, {
       description:
-        "Optional exact SDP Wallet ID. On an undeployed pending draft, updates the deployment wallet. After deployment, selects the signer only for this on-chain metadata update and does not change deployment attribution. A request containing only this field after deployment returns 400; include the token changes to apply. Database-only edits need no signer. For on-chain metadata updates, the selected wallet must control the current metadata authority; omission requires exactly one matching in-scope custody record, otherwise returns 409.",
+        "Optional exact SDP Wallet ID. On an undeployed pending draft, updates the deployment wallet. After deployment, selects the signer only for this on-chain metadata update and does not change deployment attribution. A request containing only this field after deployment returns 400; include the token changes to apply. Database-only edits need no signer. For on-chain metadata updates, the selected wallet must control the current metadata authority; omission requires exactly one matching in-scope wallet record, otherwise returns 409.",
       example: "cwlt_example",
     }),
     name: withOpenApi(updateTokenSchemaBase.shape.name, {
@@ -1016,7 +1016,7 @@ export const confirmDeployRequestSchema = confirmDeploySchemaBase
       example: "privy_wallet_123",
     }),
   })
-  .openapi({ description: "Confirm non-custodial deploy request body." });
+  .openapi({ description: "Confirm a caller-signed deployment request body." });
 
 const burnOperationSchema = burnSchemaBase.shape.burn
   .extend({
@@ -1150,7 +1150,7 @@ export const pauseTokenRequestSchema = pauseTokenSchemaBase
   .extend({
     signingCustodyWalletId: withOpenApi(pauseTokenSchemaBase.shape.signingCustodyWalletId, {
       description:
-        "Optional exact SDP Wallet ID controlling the current pause authority. Omission requires exactly one matching in-scope custody record; multiple matches return 409. Replay must retain the original wallet.",
+        "Optional exact SDP Wallet ID controlling the current pause authority. Omission requires exactly one matching in-scope wallet record; multiple matches return 409. Replay must retain the original wallet.",
       example: "cwlt_example",
     }),
     options: withOpenApi(pauseTokenSchemaBase.shape.options, {
@@ -1198,7 +1198,7 @@ export const addTokenAllowlistRequestSchema = addTokenAllowlistSchemaBase
   .extend({
     signingCustodyWalletId: withOpenApi(addTokenAllowlistSchemaBase.shape.signingCustodyWalletId, {
       description:
-        "Optional exact SDP Wallet ID controlling the live list authority. Omission requires exactly one matching in-scope custody record; multiple matches return 409. Database-only lists do not require a signer.",
+        "Optional exact SDP Wallet ID controlling the live list authority. Omission requires exactly one matching in-scope wallet record; multiple matches return 409. Database-only lists do not require a signer.",
       example: "cwlt_example",
     }),
     address: withOpenApi(addTokenAllowlistSchemaBase.shape.address, {
@@ -1215,7 +1215,7 @@ export const addTokenAllowlistRequestSchema = addTokenAllowlistSchemaBase
 export const removeTokenAllowlistQuerySchema = removeAllowlistQuerySchemaBase.extend({
   signingCustodyWalletId: withOpenApi(removeAllowlistQuerySchemaBase.shape.signingCustodyWalletId, {
     description:
-      "Optional exact SDP Wallet ID controlling the live list authority. Omission requires exactly one matching in-scope custody record; multiple matches return 409. Database-only lists do not require a signer.",
+      "Optional exact SDP Wallet ID controlling the live list authority. Omission requires exactly one matching in-scope wallet record; multiple matches return 409. Database-only lists do not require a signer.",
     example: "cwlt_example",
   }),
 });

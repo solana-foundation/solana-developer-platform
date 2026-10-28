@@ -145,7 +145,7 @@ export const earnStrategyResponse = successResponseSchema(
 
 // ---------------------------------------------------------------------------
 // External-wallet (caller-signed) vault flows (PRO-1722): SDP builds an
-// unsigned transaction for a wallet it does not custody, and the caller submits
+// unsigned transaction for the wallet owner to sign, and the caller submits
 // it back for durable tracking and SDP broadcast.
 // ---------------------------------------------------------------------------
 
@@ -159,8 +159,8 @@ const earnOwnerAddressSchema = z
   .regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/)
   .openapi({
     description:
-      "The external wallet: the customer's own Solana address. It signs and owns the shares; " +
-      "SDP holds no key for it. It also pays the network fee unless an authenticated build " +
+      "The external wallet: the customer's own Solana address. It signs and owns the shares. " +
+      "It also pays the network fee unless an authenticated build " +
       "names a `feePayer`. The pattern is necessary but not " +
       "sufficient — the string must additionally decode to a 32-byte public key, which no " +
       "pattern can express, so a well-shaped base58 string that does not decode still " +
@@ -401,7 +401,7 @@ export const earnVaultShareReconciliationResponse = successResponseSchema(
       )
       .openapi({
         description:
-          "Share balances the custody wallet holds for catalogued vaults with no recorded " +
+          "Share balances the connected wallet holds for catalogued vaults with no recorded " +
           "open position behind them (for example, shares acquired by signing outside SDP).",
       }),
     unbackedPositions: z
@@ -1267,7 +1267,7 @@ const earnExternalWalletTokenEarningsSchema = z
       description:
         "`currentValue + totalWithdrawn − totalDeposited`, stated only when exact and never " +
         "coerced to zero. Live hydration reads the owner's whole vault balance, so shares " +
-        "acquired outside SDP inflate this figure (a documented property of non-custodial reads).",
+        "acquired outside SDP inflate this figure.",
     }),
     earnedUnavailableReason: z
       .enum([

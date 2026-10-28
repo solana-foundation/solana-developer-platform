@@ -82,6 +82,8 @@ curl -X POST https://api.solana.com/v1/wallets \
 <Step>
 ### Wallet Custody
 
+SDP orchestrates transactions through connected wallet providers; it does not act as a wallet custodian.
+
 Provision signing wallets through integrated custody providers, so your team never handles private keys. Hosted keys never leave the provider's MPC or TEE infrastructure and SDP only handles the signed transaction. Local development keys are encrypted at rest with `AES-256-GCM` using per-organization derived keys, and every signing request passes authentication, permission and allowed-operation checks before it executes.
 
 - **Built on `@solana/keychain`**
@@ -5249,7 +5251,7 @@ Source: https://platform.solana.com/docs/reference/api/issuance
 | `POST` | `/v1/issuance/tokens/{tokenId}/burn` | Execute burn |
 | `POST` | `/v1/issuance/tokens/{tokenId}/burn/prepare` | Prepare burn transaction |
 | `POST` | `/v1/issuance/tokens/{tokenId}/deploy` | Deploy token |
-| `POST` | `/v1/issuance/tokens/{tokenId}/deploy/confirm` | Confirm non-custodial deploy |
+| `POST` | `/v1/issuance/tokens/{tokenId}/deploy/confirm` | Confirm a caller-signed deployment |
 | `POST` | `/v1/issuance/tokens/{tokenId}/deploy/prepare` | Prepare token deploy transaction |
 | `POST` | `/v1/issuance/tokens/{tokenId}/deploy/prepare-metadata` | Prepare metadata-URI follow-up transaction |
 | `POST` | `/v1/issuance/tokens/{tokenId}/force-burn` | Execute force burn |
@@ -5310,7 +5312,7 @@ Source: https://platform.solana.com/docs/reference/api/payments
 | `GET` | `/v1/payments/transfer-batches/{batchId}` | Get transfer batch |
 | `POST` | `/v1/payments/transfer-batches/estimate` | Estimate transfer batch |
 | `GET` | `/v1/payments/transfers` | List transfers |
-| `POST` | `/v1/payments/transfers` | Execute transfer (custody) |
+| `POST` | `/v1/payments/transfers` | Execute a provider-signed transfer |
 | `GET` | `/v1/payments/transfers/{transferId}` | Get transfer |
 | `GET` | `/v1/payments/wallets/{walletId}/balances` | Get wallet balances |
 | `GET` | `/v1/transactions` | List transactions |

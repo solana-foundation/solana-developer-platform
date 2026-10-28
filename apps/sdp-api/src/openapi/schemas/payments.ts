@@ -138,7 +138,7 @@ const walletBalancesSchema = z
   })
   .openapi({
     description:
-      "Balance payload for a custody-managed wallet. Use /v1/wallets for wallet provisioning and listing.",
+      "Balance payload for a provider-connected wallet. Use /v1/wallets for wallet provisioning and listing.",
   });
 
 export const createTransferRequestSchema = createTransferSchemaBase
@@ -174,7 +174,7 @@ export const createTransferRequestSchema = createTransferSchemaBase
   })
   .openapi({
     description:
-      "Create transfer request payload for a custody-managed source wallet. This endpoint does not provision wallets.",
+      "Create transfer request payload for a provider-connected source wallet. This endpoint does not provision wallets.",
     example: {
       projectId: "prj_example",
       sourceCustodyWalletId: "cwlt_example",
@@ -488,7 +488,7 @@ export const createTransferBatchRequestSchema = createTransferBatchSchemaBase
     }),
   })
   .openapi({
-    description: "Create a custody-executed outbound transfer batch.",
+    description: "Create an outbound transfer batch.",
   });
 
 export const estimateTransferBatchRequestSchema = estimateTransferBatchSchemaBase
@@ -582,7 +582,7 @@ export const transferBatchSchema = z
       description: "Source Provider wallet ID retained as evidence.",
     }),
     sourceAddress: solanaAddressSchema.openapi({
-      description: "Source custody wallet address.",
+      description: "Source connected wallet address.",
     }),
     token: z.string().openapi({ description: "Token symbol or mint address.", example: "SOL" }),
     status: paymentTransferBatchStatusSchema,
@@ -727,7 +727,7 @@ export const createRecurringPaymentRequestSchema = createRecurringPaymentSchemaB
   })
   .openapi({
     description:
-      "Creates an SDP-custody outbound recurring payment intent. Activation and collection are added by follow-up endpoints.",
+      "Creates an outbound recurring payment intent. Activation and collection are added by follow-up endpoints.",
   });
 
 export const updateRecurringPaymentRequestSchema = updateRecurringPaymentSchemaBase
@@ -861,7 +861,7 @@ const paymentRecurringPaymentSchema = z
     createdAt: isoDateTimeSchema,
     updatedAt: isoDateTimeSchema,
   })
-  .openapi({ description: "SDP-custody outbound recurring payment record." });
+  .openapi({ description: "Outbound recurring payment record." });
 
 export const paymentRecurringPaymentResponseSchema = z
   .object({
@@ -889,7 +889,7 @@ export const paymentRecurringPaymentListResponseSchema = z
 export const createSubscriptionPlanRequestSchema = createSubscriptionPlanSchemaBase
   .extend({
     ownerWalletId: withOpenApi(createSubscriptionPlanSchemaBase.shape.ownerWalletId, {
-      description: "Custody wallet that owns the Solana subscription plan.",
+      description: "Connected wallet that owns the Solana subscription plan.",
       example: "wal_merchant",
     }),
     token: withOpenApi(createSubscriptionPlanSchemaBase.shape.token, {
@@ -919,7 +919,7 @@ export const createSubscriptionPlanRequestSchema = createSubscriptionPlanSchemaB
       example: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
     }),
     pullerWalletId: withOpenApi(createSubscriptionPlanSchemaBase.shape.pullerWalletId, {
-      description: "Optional SDP custody wallet allowed to pull subscription payments.",
+      description: "Optional connected wallet allowed to pull subscription payments.",
       example: "wal_collector",
     }),
     metadataUri: withOpenApi(createSubscriptionPlanSchemaBase.shape.metadataUri, {
@@ -1262,7 +1262,7 @@ export const createOnrampQuoteRequestSchema = createOnrampQuoteSchemaBase
       createOnrampQuoteSchemaBase.shape.destinationCustodyWalletId,
       {
         description:
-          "Custody wallet ID (the `id` returned by the wallets API) for purchased crypto.",
+          "Connected wallet ID (the `id` returned by the wallets API) for purchased crypto.",
         example: "cwlt_example",
       }
     ),

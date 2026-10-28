@@ -24,7 +24,7 @@ export const initializeSigningRequestSchema = withOpenApi(initializeSigningSchem
 
 export const signerCheckRequestSchema = withOpenApi(signerCheckSchemaBase, {
   description:
-    "walletId is the Provider wallet ID to check, required. Ambiguous Provider IDs are rejected; the check uses the resolved exact custody wallet record, and an API key may check only a wallet within its wallet scope.",
+    "walletId is the Provider wallet ID to check, required. Ambiguous Provider IDs are rejected; the check uses the resolved exact connected wallet record, and an API key may check only a wallet within its wallet scope.",
   example: { walletId: "privy_wallet_123" },
 });
 
@@ -274,7 +274,7 @@ export const custodyWalletByIdResponseSchema = z
     wallet: custodyWalletBaseSchema
       .extend({
         provider: orgCustodyProviderSchema.openapi({
-          description: "Wallet custody provider.",
+          description: "Wallet signing provider.",
           example: "privy",
         }),
         balance: z
@@ -377,7 +377,7 @@ export const signerCheckResponseSchema = z
     }),
     signature: z.string().openapi({
       description:
-        "The custody wallet's Ed25519 signature over the check message, base58. Verified server-side and exercised in RPC simulation only — the check never broadcasts, so this signature does not exist on chain.",
+        "The connected wallet's Ed25519 signature over the check message, base58. Verified server-side and exercised in RPC simulation only — the check never broadcasts, so this signature does not exist on chain.",
       example: "sig_example",
     }),
     simulated: z.literal(true).openapi({

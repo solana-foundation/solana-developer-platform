@@ -32,13 +32,13 @@ const apiKeyEnvironmentSchema = z
 
 const apiKeyWalletScopeSchema = z.enum(API_KEY_WALLET_SCOPES).openapi({
   description:
-    "Which custody wallets the key may sign with: `all` wallets in its project, or only the `selected` ones in `walletIds`. A `selected` key with no wallets signs with no custody wallet (the fee sponsor is outside wallet scope). The scope applies when SDP signs; it also narrows the key's wallet list and wallet detail reads, while every other read covers the whole project.",
+    "Which connected wallets the key may sign with: `all` wallets in its project, or only the `selected` ones in `walletIds`. A `selected` key with no wallets signs with no connected wallet (the fee sponsor is outside wallet scope). The scope applies when SDP requests a provider signature; it also narrows the key's wallet list and wallet detail reads, while every other read covers the whole project.",
   example: "selected",
 });
 
 const apiKeyWalletIdsSchema = z.array(z.string()).openapi({
   description:
-    "The custody wallets (`id` from `GET /v1/wallets`, `cwlt_...`) a `selected` key may sign with. Empty for `all`.",
+    "The connected wallets (`id` from `GET /v1/wallets`, `cwlt_...`) a `selected` key may sign with. Empty for `all`.",
   example: ["cwlt_0f2c8c1e"],
 });
 
@@ -247,12 +247,12 @@ export const createApiKeyRequestSchema = apiKeyCreateSchemaBase
     }),
     walletScope: withOpenApi(apiKeyCreateSchemaBase.shape.walletScope, {
       description:
-        "Which custody wallets the key may sign with: `all` in its project, or only the `selected` ones in `walletIds`. Required.",
+        "Which connected wallets the key may sign with: `all` in its project, or only the `selected` ones in `walletIds`. Required.",
       example: "selected",
     }),
     walletIds: withOpenApi(apiKeyCreateSchemaBase.shape.walletIds, {
       description:
-        "Custody wallet ids (`id` from `GET /v1/wallets`) a `selected` key may sign with. Not allowed with `all`. Omitted or empty, a `selected` key signs with no custody wallet.",
+        "Connected wallet ids (`id` from `GET /v1/wallets`) a `selected` key may sign with. Not allowed with `all`. Omitted or empty, a `selected` key signs with no connected wallet.",
       example: ["cwlt_0f2c8c1e"],
     }),
     allowedIps: withOpenApi(apiKeyCreateSchemaBase.shape.allowedIps, {
@@ -291,7 +291,7 @@ export const updateApiKeyRequestSchema = apiKeyUpdateSchemaBase
       example: "selected",
     }),
     walletIds: withOpenApi(apiKeyUpdateSchemaBase.shape.walletIds, {
-      description: 'Custody wallet ids for a `selected` key. Requires `walletScope: "selected"`.',
+      description: 'Connected wallet ids for a `selected` key. Requires `walletScope: "selected"`.',
       example: ["cwlt_0f2c8c1e"],
     }),
     allowedIps: withOpenApi(apiKeyUpdateSchemaBase.shape.allowedIps, {
