@@ -75,22 +75,14 @@ export async function GET(_req: Request, { params }: { params: Promise<{ slug?: 
     return new Response("Not Found", { status: 404 });
   }
 
+  // The page's own file, which a `(group)` folder keeps apart from its slug.
   const contentDir = path.resolve(process.cwd(), "content/docs");
-  const contentDirPrefix = contentDir + path.sep;
-
-  const candidates = [
-    path.resolve(contentDir, `${path.join(...slug)}.mdx`),
-    path.resolve(contentDir, ...slug, "index.mdx"),
-  ];
-
-  for (const filePath of candidates) {
-    if (!filePath.startsWith(contentDirPrefix)) continue;
-    try {
-      const raw = await readFile(filePath, "utf8");
-      const body = stripMdxShell(expandDocsBlocks(raw, filePath), filePath);
-      return markdownResponse(pageMarkdown(page.data, body), `/docs/${slug.join("/")}`);
-    } catch {}
+  const filePath = path.resolve(contentDir, page.path);
+  if (!filePath.startsWith(contentDir + path.sep)) {
+    return new Response("Not Found", { status: 404 });
   }
 
-  return new Response("Not Found", { status: 404 });
+  const raw = await readFile(filePath, "utf8");
+  const body = stripMdxShell(expandDocsBlocks(raw, filePath), filePath);
+  return markdownResponse(pageMarkdown(page.data, body), `/docs/${slug.join("/")}`);
 }

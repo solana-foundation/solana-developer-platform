@@ -6,9 +6,11 @@ import remarkParse from "remark-parse";
 import { unified } from "unified";
 import { expandDocsBlocks, remarkDocsBlocks, stripMdxEsm } from "@/lib/docs-blocks";
 import { publicSurface } from "@/lib/release-channel";
+import { docsPageSlugOf } from "@/lib/site";
 import {
   codeSpan,
   mdxText,
+  operationGroups,
   renderFamilyIndex,
   renderOperation,
   renderOperationPage,
@@ -47,6 +49,7 @@ const CREATE_WIDGET: ApiOperation = {
   action: "wallets.manage",
   auth: "apiKey",
   summary: "Create widget",
+  group: null,
   description: "Creates a widget. Then it shapes it {once}, with `{braces}` in code.",
   deprecated: false,
   parameters: [
@@ -154,6 +157,16 @@ describe("renderOperation", () => {
     assert.ok(markdown.includes("- **`tags`** · `string[]` · each one of `a`, `b`"));
   });
 
+  it("names a single allowed value as what the field always is", () => {
+    const [widgetId] = CREATE_WIDGET.parameters;
+    assert.ok(widgetId);
+    const page = renderOperation({
+      ...CREATE_WIDGET,
+      parameters: [{ ...widgetId, schema: schema({ enum: ["fixed"] }) }],
+    });
+    assert.ok(page.includes("- **`widgetId`** · `string` · required · always `fixed`"));
+  });
+
   it("lists every status, and gives each JSON answer a response tab", () => {
     assert.ok(
       markdown.includes("- **`201`** Created it\n- **`204`** No body\n- **`404`** Not Found")
@@ -206,6 +219,69 @@ describe("renderOperationPage", () => {
   it("drops code ticks from the description, which nothing renders as Markdown", () => {
     const page = renderOperationPage({ ...CREATE_WIDGET, description: "Reads `id` values." });
     assert.ok(page.includes("description: Reads id values.\n"));
+  });
+});
+
+describe("operation groups", () => {
+  const widget = (operationId: string, group: string | null): ApiOperation => ({
+    ...CREATE_WIDGET,
+    operationId,
+    endpointId: operationId,
+    summary: operationId,
+    group,
+  });
+  const family = (operations: ApiOperation[]) => ({
+    name: "Widgets",
+    description: "Widget endpoints.",
+    operations,
+  });
+
+  it("groups a family's operations in the order it first names each group", () => {
+    const groups = operationGroups(
+      family([widget("a", "Shapes"), widget("b", "Colours"), widget("c", "Shapes")])
+    );
+    assert.deepEqual(
+      groups.map(({ title, operations }) => [title, operations.map((each) => each.operationId)]),
+      [
+        ["Shapes", ["a", "c"]],
+        ["Colours", ["b"]],
+      ]
+    );
+  });
+
+  it("keeps a family flat when it names no group or only one", () => {
+    for (const operations of [
+      [widget("a", null), widget("b", null)],
+      [widget("a", "Shapes"), widget("b", "Shapes")],
+    ]) {
+      assert.deepEqual(
+        operationGroups(family(operations)).map(({ title }) => title),
+        [null]
+      );
+    }
+  });
+
+  it("gives each group its heading and table on the family's page", () => {
+    const page = renderFamilyIndex(
+      family([widget("a", "Shapes"), widget("b", "Colours")]),
+      (operation) => `/docs/reference/api/widgets/${operation.endpointId}`
+    );
+    assert.ok(
+      page.includes(
+        "## Shapes\n\n<ApiOperationTable>\n\n| Method | Endpoint | Summary |\n| --- | --- | --- |\n| `POST` | `/v1/widgets/{widgetId}` | [a](/docs/reference/api/widgets/a) |\n\n</ApiOperationTable>\n\n## Colours\n\n<ApiOperationTable>"
+      )
+    );
+  });
+
+  it("leaves a group's folder out of its pages' URLs, as Fumadocs does", () => {
+    assert.equal(
+      docsPageSlugOf("reference/api/payments/(transfers)/list-payment-transfers.mdx"),
+      "reference/api/payments/list-payment-transfers"
+    );
+    assert.equal(
+      docsPageSlugOf("reference/api/payments/index.mdx"),
+      "reference/api/payments/index"
+    );
   });
 });
 
@@ -318,6 +394,37 @@ describe("<ApiEndpoint />", () => {
     assert.throws(() =>
       expandDocsBlocks('<ApiEndpoint method="TRACE" path="/health" />\n', "bad.mdx")
     );
+  });
+});
+
+describe("fact separators", () => {
+  const facts = "- **`page`** · `integer` · greater than 0\n";
+  const compiled = (path: string) => {
+    const tree = unified().use(remarkParse).use(remarkMdx).parse(facts);
+    remarkDocsBlocks({ surface: publicSurface })(tree, { path });
+    return JSON.stringify(tree);
+  };
+
+  it("sets each dot apart on a generated reference page, and only there", () => {
+    const page = compiled("/repo/apps/sdp-docs/content/docs/reference/api/widgets/list.mdx");
+    assert.equal(page.match(/launch-api-separator/g)?.length, 2);
+    const guide = compiled("/repo/apps/sdp-docs/content/docs/guides/widgets.mdx");
+    assert.ok(!guide.includes("launch-api-separator"));
+  });
+
+  it("keeps the dots as text in the Markdown agents get", () => {
+    assert.equal(expandDocsBlocks(facts, "content/docs/reference/api/widgets/list.mdx"), facts);
+  });
+});
+
+describe("<ActionLinks>", () => {
+  it("is its links alone in the Markdown agents get", () => {
+    const links = [
+      '<a href="/docs/postman/collection.json" download>Download Postman collection</a>',
+      '<a href="/docs/postman/collection.json">Open raw JSON</a>',
+    ];
+    const page = `<ActionLinks>\n  ${links[0]}\n  ${links[1]}\n</ActionLinks>\n`;
+    assert.equal(expandDocsBlocks(page, "postman-collection.mdx"), `${links[0]}\n  ${links[1]}\n`);
   });
 });
 

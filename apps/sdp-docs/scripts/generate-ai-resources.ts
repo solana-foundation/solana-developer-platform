@@ -12,7 +12,7 @@ import {
   isPageSourcePublished,
   pageGateOf,
 } from "@/lib/release-channel";
-import { canonicalSite } from "@/lib/site";
+import { canonicalSite, docsPageSlugOf, isDocsFolderGroup } from "@/lib/site";
 
 const {
   aiGuideUrl,
@@ -134,8 +134,7 @@ async function listFiles(dirPath: string): Promise<string[]> {
 }
 
 function toPageSlug(filePath: string): string {
-  const relativePath = path.relative(docsContentDir, filePath).replace(/\\/g, "/");
-  return relativePath.replace(/\.mdx$/, "");
+  return docsPageSlugOf(path.relative(docsContentDir, filePath).replace(/\\/g, "/"));
 }
 
 /** Pages a `module:` tag leaves out of this release channel. */
@@ -235,18 +234,20 @@ function buildSections(
       return;
     }
 
+    // The entry's path, `(name)` folders included, and the slug its page would have.
     const fullSlug = slugPrefix ? `${slugPrefix}/${entry}` : entry;
+    const pageSlug = docsPageSlugOf(fullSlug);
 
-    const page = pages.get(fullSlug);
+    const page = pages.get(pageSlug);
     if (page) {
-      if (!emitted.has(fullSlug)) {
+      if (!emitted.has(pageSlug)) {
         currentSection.pages.push(page);
-        emitted.add(fullSlug);
+        emitted.add(pageSlug);
       }
       return;
     }
 
-    if (excludedSlugs.has(fullSlug)) {
+    if (excludedSlugs.has(pageSlug)) {
       return;
     }
 
@@ -257,11 +258,17 @@ function buildSections(
     }
 
     flush();
-    const sectionTitle = folderMeta.title || entry;
+    // A `(name)` folder groups its parent's pages (an API family's operations), so its section
+    // names the parent too, and it has no index of its own.
+    const group = isDocsFolderGroup(entry);
+    const sectionTitle =
+      group && parentLabel
+        ? `${parentLabel}: ${folderMeta.title || entry}`
+        : folderMeta.title || entry;
     currentSection = { title: sectionTitle, pages: [] };
     // A folder's index is the folder's own page even where its meta lists only the rest, as an
     // API family lists its operations.
-    const folderIndex = pages.get(`${fullSlug}/index`);
+    const folderIndex = group ? undefined : pages.get(docsPageSlugOf(`${fullSlug}/index`));
     if (
       folderIndex &&
       !(folderMeta.pages ?? []).includes("index") &&

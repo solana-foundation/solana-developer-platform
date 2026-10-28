@@ -31,6 +31,7 @@ import {
   updateTokenRequestSchema,
 } from "@/openapi/schemas/issuance";
 import {
+  DOCS_GROUP,
   errorResponses,
   jsonContent,
   projectScopeHeaders,
@@ -66,6 +67,19 @@ import {
   tokenTransactionsResponse,
 } from "./responses";
 
+/** Where each Issuance operation sits in the API reference (`DOCS_GROUP`). */
+export const ISSUANCE_GROUPS = {
+  templates: "Templates",
+  tokens: "Tokens",
+  activity: "Activity",
+  deploy: "Deploy",
+  mintAndBurn: "Mint and burn",
+  enforcement: "Enforcement",
+  authority: "Authority",
+  allowlist: "Allowlist",
+  holders: "Holders",
+} as const;
+
 const tokenTransactionTypeQuerySchema = z
   .enum(TOKEN_TRANSACTION_TYPES)
   .openapi({ description: "Filter by token transaction type.", example: "burn" });
@@ -90,6 +104,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/issuance/templates",
     tags: ["Issuance"],
+    [DOCS_GROUP]: ISSUANCE_GROUPS.templates,
     summary: "List token templates",
     operationId: "listTokenTemplates",
     description:
@@ -111,6 +126,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/issuance/templates/{templateId}",
     tags: ["Issuance"],
+    [DOCS_GROUP]: ISSUANCE_GROUPS.templates,
     summary: "Get token template",
     operationId: "getTokenTemplate",
     description:
@@ -139,6 +155,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/issuance/tokens",
     tags: ["Issuance"],
+    [DOCS_GROUP]: ISSUANCE_GROUPS.tokens,
     summary: "Create token",
     operationId: "createToken",
     description: "Creates a token record that can later be deployed to Solana.",
@@ -163,6 +180,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/issuance/tokens",
     tags: ["Issuance"],
+    [DOCS_GROUP]: ISSUANCE_GROUPS.tokens,
     summary: "List tokens",
     operationId: "listTokens",
     description:
@@ -185,6 +203,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/issuance/tokens/facets",
     tags: ["Issuance"],
+    [DOCS_GROUP]: ISSUANCE_GROUPS.tokens,
     summary: "List token filter facets",
     operationId: "listTokenFacets",
     description:
@@ -206,6 +225,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/issuance/transactions",
     tags: ["Issuance"],
+    [DOCS_GROUP]: ISSUANCE_GROUPS.activity,
     summary: "List issuance transactions",
     operationId: "listIssuanceTransactions",
     description:
@@ -247,6 +267,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/issuance/tokens/{tokenId}",
     tags: ["Issuance"],
+    [DOCS_GROUP]: ISSUANCE_GROUPS.tokens,
     summary: "Get token",
     operationId: "getToken",
     description:
@@ -272,6 +293,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/issuance/tokens/{tokenId}/metadata.json",
     tags: ["Issuance"],
+    [DOCS_GROUP]: ISSUANCE_GROUPS.tokens,
     summary: "Get public token metadata JSON",
     operationId: "getTokenMetadataJson",
     description:
@@ -307,6 +329,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/issuance/tokens/{tokenId}/supply/refresh",
     tags: ["Issuance"],
+    [DOCS_GROUP]: ISSUANCE_GROUPS.tokens,
     summary: "Refresh cached token supply",
     operationId: "refreshTokenSupply",
     description: "Fetches the current on-chain supply and refreshes the cached totalSupply value.",
@@ -330,6 +353,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/issuance/tokens/{tokenId}/transactions",
     tags: ["Issuance"],
+    [DOCS_GROUP]: ISSUANCE_GROUPS.activity,
     summary: "List token transactions",
     operationId: "listTokenTransactions",
     description: "Lists token transactions for an issued token.",
@@ -359,6 +383,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/issuance/tokens/{tokenId}/audit",
     tags: ["Issuance"],
+    [DOCS_GROUP]: ISSUANCE_GROUPS.activity,
     summary: "Get asset audit history",
     operationId: "getAssetAuditHistory",
     description:
@@ -388,6 +413,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     method: "patch",
     path: "/v1/issuance/tokens/{tokenId}",
     tags: ["Issuance"],
+    [DOCS_GROUP]: ISSUANCE_GROUPS.tokens,
     summary: "Update token",
     operationId: "updateToken",
     description:
@@ -416,6 +442,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/issuance/tokens/{tokenId}/deploy",
     tags: ["Issuance"],
+    [DOCS_GROUP]: ISSUANCE_GROUPS.deploy,
     summary: "Deploy token",
     operationId: "deployToken",
     description: "Deploys the token to Solana using custody signing.",
@@ -443,6 +470,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/issuance/tokens/{tokenId}/deploy/prepare",
     tags: ["Issuance"],
+    [DOCS_GROUP]: ISSUANCE_GROUPS.deploy,
     summary: "Prepare token deploy transaction",
     operationId: "prepareDeployToken",
     description:
@@ -467,6 +495,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/issuance/tokens/{tokenId}/deploy/confirm",
     tags: ["Issuance"],
+    [DOCS_GROUP]: ISSUANCE_GROUPS.deploy,
     summary: "Confirm non-custodial deploy",
     operationId: "confirmDeploy",
     description:
@@ -495,6 +524,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/issuance/tokens/{tokenId}/deploy/prepare-metadata",
     tags: ["Issuance"],
+    [DOCS_GROUP]: ISSUANCE_GROUPS.deploy,
     summary: "Prepare metadata-URI follow-up transaction",
     operationId: "prepareDeployMetadata",
     description:
@@ -519,6 +549,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/issuance/tokens/{tokenId}/mint/prepare",
     tags: ["Issuance"],
+    [DOCS_GROUP]: ISSUANCE_GROUPS.mintAndBurn,
     summary: "Prepare mint transaction",
     operationId: "prepareMint",
     description:
@@ -547,6 +578,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/issuance/tokens/{tokenId}/mint",
     tags: ["Issuance"],
+    [DOCS_GROUP]: ISSUANCE_GROUPS.mintAndBurn,
     summary: "Execute mint",
     operationId: "executeMint",
     description: "Mints tokens using custody signing and submission.",
@@ -574,6 +606,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/issuance/tokens/{tokenId}/burn/prepare",
     tags: ["Issuance"],
+    [DOCS_GROUP]: ISSUANCE_GROUPS.mintAndBurn,
     summary: "Prepare burn transaction",
     operationId: "prepareBurn",
     description:
@@ -602,6 +635,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/issuance/tokens/{tokenId}/burn",
     tags: ["Issuance"],
+    [DOCS_GROUP]: ISSUANCE_GROUPS.mintAndBurn,
     summary: "Execute burn",
     operationId: "executeBurn",
     description: "Burns tokens using custody signing and submission.",
@@ -629,6 +663,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/issuance/tokens/{tokenId}/seize/prepare",
     tags: ["Issuance"],
+    [DOCS_GROUP]: ISSUANCE_GROUPS.enforcement,
     summary: "Prepare seize transaction",
     operationId: "prepareSeize",
     description: "Builds an unsigned force transfer transaction for client-side signing.",
@@ -656,6 +691,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/issuance/tokens/{tokenId}/seize",
     tags: ["Issuance"],
+    [DOCS_GROUP]: ISSUANCE_GROUPS.enforcement,
     summary: "Execute seize",
     operationId: "executeSeize",
     description: "Forces a transfer using permanent delegate authority.",
@@ -683,6 +719,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/issuance/tokens/{tokenId}/force-burn/prepare",
     tags: ["Issuance"],
+    [DOCS_GROUP]: ISSUANCE_GROUPS.enforcement,
     summary: "Prepare force burn transaction",
     operationId: "prepareForceBurn",
     description: "Builds an unsigned force burn transaction for client-side signing.",
@@ -710,6 +747,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/issuance/tokens/{tokenId}/force-burn",
     tags: ["Issuance"],
+    [DOCS_GROUP]: ISSUANCE_GROUPS.enforcement,
     summary: "Execute force burn",
     operationId: "executeForceBurn",
     description: "Burns tokens using permanent delegate authority.",
@@ -737,6 +775,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/issuance/tokens/{tokenId}/authority/prepare",
     tags: ["Issuance"],
+    [DOCS_GROUP]: ISSUANCE_GROUPS.authority,
     summary: "Prepare authority update",
     operationId: "prepareUpdateAuthority",
     description: "Builds an unsigned authority update transaction for client-side signing.",
@@ -764,6 +803,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/issuance/tokens/{tokenId}/authority",
     tags: ["Issuance"],
+    [DOCS_GROUP]: ISSUANCE_GROUPS.authority,
     summary: "Execute authority update",
     operationId: "executeUpdateAuthority",
     description: "Updates token authorities using custody signing.",
@@ -791,6 +831,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/issuance/tokens/{tokenId}/pause",
     tags: ["Issuance"],
+    [DOCS_GROUP]: ISSUANCE_GROUPS.enforcement,
     summary: "Pause token transfers",
     operationId: "pauseToken",
     description: "Pauses transfers for a token using the pause authority.",
@@ -818,6 +859,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/issuance/tokens/{tokenId}/unpause",
     tags: ["Issuance"],
+    [DOCS_GROUP]: ISSUANCE_GROUPS.enforcement,
     summary: "Unpause token transfers",
     operationId: "unpauseToken",
     description: "Resumes transfers for a token using the pause authority.",
@@ -845,6 +887,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/issuance/tokens/{tokenId}/freeze",
     tags: ["Issuance"],
+    [DOCS_GROUP]: ISSUANCE_GROUPS.enforcement,
     summary: "Freeze account",
     operationId: "freezeAccount",
     description: "Freezes a token account to prevent transfers.",
@@ -872,6 +915,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/issuance/tokens/{tokenId}/unfreeze",
     tags: ["Issuance"],
+    [DOCS_GROUP]: ISSUANCE_GROUPS.enforcement,
     summary: "Unfreeze account",
     operationId: "unfreezeAccount",
     description: "Unfreezes a token account so it can be used again.",
@@ -899,6 +943,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/issuance/tokens/{tokenId}/frozen",
     tags: ["Issuance"],
+    [DOCS_GROUP]: ISSUANCE_GROUPS.enforcement,
     summary: "List frozen accounts",
     operationId: "listFrozenAccounts",
     description: "Lists frozen accounts for a token.",
@@ -926,6 +971,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/issuance/tokens/{tokenId}/allowlist",
     tags: ["Issuance"],
+    [DOCS_GROUP]: ISSUANCE_GROUPS.allowlist,
     summary: "List token allowlist",
     operationId: "listTokenAllowlist",
     description: "Lists allowlist entries for a token.",
@@ -955,6 +1001,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/issuance/tokens/{tokenId}/allowlist/labels",
     tags: ["Issuance"],
+    [DOCS_GROUP]: ISSUANCE_GROUPS.allowlist,
     summary: "List token allowlist labels",
     operationId: "listTokenAllowlistLabels",
     description:
@@ -979,6 +1026,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/issuance/tokens/{tokenId}/allowlist",
     tags: ["Issuance"],
+    [DOCS_GROUP]: ISSUANCE_GROUPS.allowlist,
     summary: "Add token allowlist entry",
     operationId: "addTokenAllowlistEntry",
     description: "Adds an allowlist entry for a token.",
@@ -1006,6 +1054,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     method: "delete",
     path: "/v1/issuance/tokens/{tokenId}/allowlist/{entryId}",
     tags: ["Issuance"],
+    [DOCS_GROUP]: ISSUANCE_GROUPS.allowlist,
     summary: "Remove token allowlist entry",
     operationId: "removeTokenAllowlistEntry",
     description: "Removes an allowlist entry from a token.",
@@ -1053,6 +1102,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/issuance/tokens/{tokenId}/holders",
     tags: ["Issuance"],
+    [DOCS_GROUP]: ISSUANCE_GROUPS.holders,
     summary: "List verified holders",
     operationId: "listHolders",
     description: "Returns the wallets enrolled for this asset (KYC identity + enrollment state).",
@@ -1068,6 +1118,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/issuance/tokens/{tokenId}/holders",
     tags: ["Issuance"],
+    [DOCS_GROUP]: ISSUANCE_GROUPS.holders,
     summary: "Enroll a verified holder",
     operationId: "enrollHolder",
     description:

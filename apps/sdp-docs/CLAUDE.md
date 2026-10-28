@@ -120,6 +120,9 @@ Popovers (`fumadocs-ui/components/ui/popover`) render in a portal outside `.sdp-
 | `.launch-mdx-table` | Full-width table inside the frame |
 | `.launch-mdx-th` | Table header: `--paper-tile` bg, 13px, weight 500 |
 | `.launch-mdx-td` | Table cell: 14px |
+| `.launch-docs-action-links` | `<ActionLinks>`: a page's action links as raised chips (`--chip` + `--chip-ring`); a `download` link leads with a download icon, a JSON link with braces |
+
+`DocsBreadcrumb` (`breadcrumb.tsx`) links each folder above the page to its landing page: its index, or else its first page, so a section whose meta lists its overview as a child still links. A folder with no page is a quieter label.
 
 ---
 
@@ -223,7 +226,9 @@ API reference pages are different: they are generated from the public OpenAPI do
 
 - `openapi:generate` also writes the channel's reference model (`apps/sdp-api/generated/api-reference.json`, gitignored; the contract is `@sdp/api-catalog/reference`, built by `apps/sdp-api/src/openapi/reference.ts`). A schema keyword the model cannot carry fails the build there.
 - `generate-api-docs.mjs` parses it and, with `scripts/lib/api-reference-page.ts`, writes a folder per family (`reference/api/<family>/`): `index.mdx`, the family's table of operations (Method, Endpoint, Summary, each row one link to its operation), and a page per operation named by its `endpointId` (`create-wallet.mdx`), which the folder's `meta.json` lists in document order. An operation page is titled by its summary, described by the description's first sentence, and holds its parameters, request body, responses, a cURL, TypeScript and Python sample (`tab=` fences, from `@sdp/api-catalog/snippets`) and an example per status. The generator fails if a table misses an operation or a page misses a sample.
-- The pages are Markdown, so `.md`, `llms-full.txt` and search carry everything. `expandDocsBlocks` writes `<ApiEndpoint />` as `METHOD /path` in a code span (search gets the same text) and unwraps `<ApiOperationTable>`, pointing each row at its operation's `.md`; a new reference component needs both forms. `check:links` accepts a page's `.md`, and `generate-ai-resources.ts` reads a family folder's index as its first page.
+- A family whose routes name groups (`x-sdp-group`, the model's `group`; two or more) keeps each group's pages in a `(group)` folder with its own `meta.json`: Fumadocs shows it as a collapsible sidebar folder and leaves it out of URLs, so an operation stays at `<family>/<endpointId>`. Its table gets a heading per group. `operationGroups` lays out both; a family with fewer than two groups stays flat. Scripts that read files take slugs from `docsPageSlugOf` (`src/lib/site.ts`), which drops `(group)` folders as Fumadocs does, and the `.md` route reads the page's own file (`page.path`).
+- The pages are Markdown, so `.md`, `llms-full.txt` and search carry everything. `expandDocsBlocks` writes `<ApiEndpoint />` as `METHOD /path` in a code span (search gets the same text) and unwraps the wrappers to their content: `<ApiOperationTable>` also points each row at its operation's `.md`, while `<ActionLinks>` (a page's action links as chips, the Postman download) only lays a page out. A new reference component needs both forms. `check:links` accepts a page's `.md`, and `generate-ai-resources.ts` reads a family folder's index as its first page and names a group's section after its family (`Payments: Transfers`).
+- On a reference page, `remarkDocsBlocks` sets each ` · ` between a field's facts in a `.launch-api-separator` span so the dots get room; the Markdown keeps the plain text.
 - On an operation page, `apiReference: true` keeps the table of contents to its sections and scopes the `.is-api-reference` styles in `globals.css`, and `icon: method:<METHOD>` puts its method beside it in the sidebar (`src/lib/source.ts`).
 
 Currently unpublished: the whole Earn family, guide and API reference, until PRO-2038.

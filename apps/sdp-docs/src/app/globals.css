@@ -584,8 +584,9 @@ body {
   color: var(--ink);
 }
 
+/* A section without a page of its own: a label, quieter than the links beside it. */
 .launch-docs-breadcrumb span {
-  color: var(--ink);
+  color: var(--ink-tertiary);
 }
 
 .launch-docs-breadcrumb svg {
@@ -1351,6 +1352,69 @@ body {
   color: var(--ink);
 }
 
+/* A page's action links (`<ActionLinks>`): raised chips like the page actions, a download led by
+   a download icon and a JSON link by braces. The hover wash is an inset shadow over the chip, so
+   it fades on the motion tokens. */
+.launch-docs-action-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 20px 0 28px;
+}
+
+.launch-docs-action-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: var(--control-height-sm);
+  padding: 0 12px;
+  border-radius: var(--corner-control);
+  background: var(--chip);
+  box-shadow:
+    var(--chip-ring),
+    inset 0 0 0 999px transparent;
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-body);
+  font-weight: 500;
+  text-decoration: none;
+  transition: box-shadow var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.launch-docs-action-links a:hover {
+  box-shadow:
+    var(--chip-ring),
+    inset 0 0 0 999px var(--wash);
+}
+
+.launch-docs-action-links a:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.launch-docs-action-links a::before {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  background: var(--ink-tertiary);
+  mask: center / contain no-repeat;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.launch-docs-action-links a[download]::before {
+  content: "";
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 15V3'/%3E%3Cpath d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E");
+}
+
+.launch-docs-action-links a[href$=".json"]:not([download])::before {
+  content: "";
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5c0 1.1.9 2 2 2h1'/%3E%3Cpath d='M16 21h1a2 2 0 0 0 2-2v-5c0-1.1.9-2 2-2a2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1'/%3E%3C/svg%3E");
+}
+
+.launch-docs-action-links a:hover::before {
+  background: var(--ink);
+}
+
 /* minmax(0, 1fr) holds an item to the column, so a code block inside it scrolls instead of
    widening the page. */
 .launch-mdx-list {
@@ -1731,6 +1795,11 @@ body {
   margin-top: 0;
   color: var(--ink-tertiary);
   font-size: var(--font-size-meta);
+}
+
+/* The dot between two facts, with room on either side (`remarkDocsBlocks` sets it apart). */
+.launch-api-separator {
+  margin: 0 0.3em;
 }
 
 /* The field or status name, set apart from the inline code chips beside it. */

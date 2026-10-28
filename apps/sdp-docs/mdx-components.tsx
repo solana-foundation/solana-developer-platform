@@ -1,5 +1,6 @@
 import { Tab, Tabs } from "fumadocs-ui/components/tabs";
 import defaultMdxComponents from "fumadocs-ui/mdx";
+import { ActionLinks } from "@/components/docs-shell/action-links";
 import { ApiEndpoint } from "@/components/docs-shell/api-endpoint";
 import { ApiOperationTable } from "@/components/docs-shell/api-operation-table";
 import { DocsHome } from "@/components/docs-shell/home";
@@ -41,6 +42,7 @@ function createMDXComponents(components?: MDXComponents): MDXComponents {
     strong: MDXStrong,
     Tabs,
     Tab,
+    ActionLinks,
     ApiEndpoint,
     ApiOperationTable,
     DocsHome,

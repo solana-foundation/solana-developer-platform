@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { expandDocsBlocks } from "@/lib/docs-blocks";
 import { isPageSourcePublished, publicSurface } from "@/lib/release-channel";
-import { getDocsMarkdownPath, getDocsPagePath } from "@/lib/site";
+import { docsPageSlugOf, getDocsMarkdownPath, getDocsPagePath } from "@/lib/site";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -95,8 +95,7 @@ async function listFiles(dirPath: string): Promise<string[]> {
 }
 
 function toPageSlug(filePath: string): string {
-  const relativePath = path.relative(docsContentDir, filePath).replace(/\\/g, "/");
-  return relativePath.replace(/\.mdx$/, "");
+  return docsPageSlugOf(path.relative(docsContentDir, filePath).replace(/\\/g, "/"));
 }
 
 async function loadDocsMeta(): Promise<DocsMeta> {

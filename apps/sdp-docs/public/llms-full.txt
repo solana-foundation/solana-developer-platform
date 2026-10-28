@@ -5168,11 +5168,8 @@ end-user-facing family published there.
 
 Internal-only endpoint families such as `rpc`, `admin`, `onboarding`, `auth`, `organizations`, and `members` are intentionally excluded.
 
-<div>
-  <a href="/docs/postman/collection.json" download>Download Postman collection</a>
-  {" · "}
+<a href="/docs/postman/collection.json" download>Download Postman collection</a>
   <a href="/docs/postman/collection.json">Open raw JSON</a>
-</div>
 
 When you import the collection into Postman, set:
 
@@ -5190,11 +5187,8 @@ Source: https://platform.solana.com/docs/reference/api
 
 > Endpoint index from the repository OpenAPI spec.
 
-<div>
-  <a href="/docs/postman/collection.json" download>Download Postman collection</a>
-  {" · "}
+<a href="/docs/postman/collection.json" download>Download Postman collection</a>
   <a href="/docs/postman/collection.json">Open raw JSON</a>
-</div>
 
 - [Health](/docs/reference/api/health)
 - [Wallets](/docs/reference/api/wallets)
@@ -5383,19 +5377,19 @@ One of:
 
 - **provider: "local"**
 
-  - **`provider`** · `string` · required · one of `local`
+  - **`provider`** · `string` · required · always `local`
 
   - **`walletLabel`** · `string` · max length 100
 
 - **provider: "fireblocks"**
 
-  - **`provider`** · `string` · required · one of `fireblocks`
+  - **`provider`** · `string` · required · always `fireblocks`
 
   - **`walletLabel`** · `string` · max length 100
 
 - **provider: "privy"**
 
-  - **`provider`** · `string` · required · one of `privy`
+  - **`provider`** · `string` · required · always `privy`
 
   - **`requestDelayMs`** · `integer` · min 0 · max 3000
 
@@ -5403,7 +5397,7 @@ One of:
 
 - **provider: "coinbase_cdp"**
 
-  - **`provider`** · `string` · required · one of `coinbase_cdp`
+  - **`provider`** · `string` · required · always `coinbase_cdp`
 
   - **`network`** · `string` · one of `solana`, `solana-devnet`
 
@@ -5413,7 +5407,7 @@ One of:
 
 - **provider: "para"**
 
-  - **`provider`** · `string` · required · one of `para`
+  - **`provider`** · `string` · required · always `para`
 
   - **`requestDelayMs`** · `integer` · min 0 · max 3000
 
@@ -5421,7 +5415,7 @@ One of:
 
 - **provider: "turnkey"**
 
-  - **`provider`** · `string` · required · one of `turnkey`
+  - **`provider`** · `string` · required · always `turnkey`
 
   - **`requestDelayMs`** · `integer` · min 0 · max 3000
 
@@ -5429,7 +5423,7 @@ One of:
 
 - **provider: "dfns"**
 
-  - **`provider`** · `string` · required · one of `dfns`
+  - **`provider`** · `string` · required · always `dfns`
 
   - **`network`** · `string` · one of `Solana`, `SolanaDevnet`
 
@@ -5437,7 +5431,7 @@ One of:
 
 - **provider: "ibm_haven"**
 
-  - **`provider`** · `string` · required · one of `ibm_haven`
+  - **`provider`** · `string` · required · always `ibm_haven`
 
   - **`network`** · `string` · one of `Solana`, `SolanaDevnet`
 
@@ -5445,7 +5439,7 @@ One of:
 
 - **provider: "anchorage"**
 
-  - **`provider`** · `string` · required · one of `anchorage`
+  - **`provider`** · `string` · required · always `anchorage`
 
   - **`walletLabel`** · `string` · max length 100
 
@@ -5453,7 +5447,7 @@ One of:
 
 - **provider: "utila"**
 
-  - **`provider`** · `string` · required · one of `utila`
+  - **`provider`** · `string` · required · always `utila`
 
   - **`walletLabel`** · `string` · max length 100
 
@@ -6061,7 +6055,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `wallet
 
 - **`includeBalances`** · `boolean`
 
-- **`view`** · `string` · one of `summary`
+- **`view`** · `string` · always `summary`
 
 ## Headers
 
@@ -7795,47 +7789,91 @@ Source: https://platform.solana.com/docs/reference/api/issuance
 
 > Token issuance, allowlists, and lifecycle operations.
 
+## Templates
+
 | Method | Endpoint | Summary |
 | --- | --- | --- |
 | `GET` | `/v1/issuance/templates` | [List token templates](/docs/reference/api/issuance/list-token-templates.md) |
 | `GET` | `/v1/issuance/templates/{templateId}` | [Get token template](/docs/reference/api/issuance/get-token-template.md) |
+
+## Tokens
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
 | `POST` | `/v1/issuance/tokens` | [Create token](/docs/reference/api/issuance/create-token.md) |
 | `GET` | `/v1/issuance/tokens` | [List tokens](/docs/reference/api/issuance/list-tokens.md) |
 | `GET` | `/v1/issuance/tokens/facets` | [List token filter facets](/docs/reference/api/issuance/list-token-facets.md) |
-| `GET` | `/v1/issuance/transactions` | [List issuance transactions](/docs/reference/api/issuance/list-issuance-transactions.md) |
 | `GET` | `/v1/issuance/tokens/{tokenId}` | [Get token](/docs/reference/api/issuance/get-token.md) |
 | `PATCH` | `/v1/issuance/tokens/{tokenId}` | [Update token](/docs/reference/api/issuance/update-token.md) |
 | `GET` | `/v1/issuance/tokens/{tokenId}/metadata.json` | [Get public token metadata JSON](/docs/reference/api/issuance/get-token-metadata-json.md) |
 | `POST` | `/v1/issuance/tokens/{tokenId}/supply/refresh` | [Refresh cached token supply](/docs/reference/api/issuance/refresh-token-supply.md) |
+
+## Activity
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
+| `GET` | `/v1/issuance/transactions` | [List issuance transactions](/docs/reference/api/issuance/list-issuance-transactions.md) |
 | `GET` | `/v1/issuance/tokens/{tokenId}/transactions` | [List token transactions](/docs/reference/api/issuance/list-token-transactions.md) |
 | `GET` | `/v1/issuance/tokens/{tokenId}/audit` | [Get asset audit history](/docs/reference/api/issuance/get-asset-audit-history.md) |
+
+## Deploy
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
 | `POST` | `/v1/issuance/tokens/{tokenId}/deploy` | [Deploy token](/docs/reference/api/issuance/deploy-token.md) |
 | `POST` | `/v1/issuance/tokens/{tokenId}/deploy/prepare` | [Prepare token deploy transaction](/docs/reference/api/issuance/prepare-deploy-token.md) |
 | `POST` | `/v1/issuance/tokens/{tokenId}/deploy/confirm` | [Confirm non-custodial deploy](/docs/reference/api/issuance/confirm-deploy.md) |
 | `POST` | `/v1/issuance/tokens/{tokenId}/deploy/prepare-metadata` | [Prepare metadata-URI follow-up transaction](/docs/reference/api/issuance/prepare-deploy-metadata.md) |
+
+## Mint and burn
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
 | `POST` | `/v1/issuance/tokens/{tokenId}/mint/prepare` | [Prepare mint transaction](/docs/reference/api/issuance/prepare-mint.md) |
 | `POST` | `/v1/issuance/tokens/{tokenId}/mint` | [Execute mint](/docs/reference/api/issuance/execute-mint.md) |
 | `POST` | `/v1/issuance/tokens/{tokenId}/burn/prepare` | [Prepare burn transaction](/docs/reference/api/issuance/prepare-burn.md) |
 | `POST` | `/v1/issuance/tokens/{tokenId}/burn` | [Execute burn](/docs/reference/api/issuance/execute-burn.md) |
+
+## Enforcement
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
 | `POST` | `/v1/issuance/tokens/{tokenId}/seize/prepare` | [Prepare seize transaction](/docs/reference/api/issuance/prepare-seize.md) |
 | `POST` | `/v1/issuance/tokens/{tokenId}/seize` | [Execute seize](/docs/reference/api/issuance/execute-seize.md) |
 | `POST` | `/v1/issuance/tokens/{tokenId}/force-burn/prepare` | [Prepare force burn transaction](/docs/reference/api/issuance/prepare-force-burn.md) |
 | `POST` | `/v1/issuance/tokens/{tokenId}/force-burn` | [Execute force burn](/docs/reference/api/issuance/execute-force-burn.md) |
-| `POST` | `/v1/issuance/tokens/{tokenId}/authority/prepare` | [Prepare authority update](/docs/reference/api/issuance/prepare-update-authority.md) |
-| `POST` | `/v1/issuance/tokens/{tokenId}/authority` | [Execute authority update](/docs/reference/api/issuance/execute-update-authority.md) |
 | `POST` | `/v1/issuance/tokens/{tokenId}/pause` | [Pause token transfers](/docs/reference/api/issuance/pause-token.md) |
 | `POST` | `/v1/issuance/tokens/{tokenId}/unpause` | [Unpause token transfers](/docs/reference/api/issuance/unpause-token.md) |
 | `POST` | `/v1/issuance/tokens/{tokenId}/freeze` | [Freeze account](/docs/reference/api/issuance/freeze-account.md) |
 | `POST` | `/v1/issuance/tokens/{tokenId}/unfreeze` | [Unfreeze account](/docs/reference/api/issuance/unfreeze-account.md) |
 | `GET` | `/v1/issuance/tokens/{tokenId}/frozen` | [List frozen accounts](/docs/reference/api/issuance/list-frozen-accounts.md) |
+
+## Authority
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
+| `POST` | `/v1/issuance/tokens/{tokenId}/authority/prepare` | [Prepare authority update](/docs/reference/api/issuance/prepare-update-authority.md) |
+| `POST` | `/v1/issuance/tokens/{tokenId}/authority` | [Execute authority update](/docs/reference/api/issuance/execute-update-authority.md) |
+
+## Allowlist
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
 | `GET` | `/v1/issuance/tokens/{tokenId}/allowlist` | [List token allowlist](/docs/reference/api/issuance/list-token-allowlist.md) |
 | `POST` | `/v1/issuance/tokens/{tokenId}/allowlist` | [Add token allowlist entry](/docs/reference/api/issuance/add-token-allowlist-entry.md) |
 | `GET` | `/v1/issuance/tokens/{tokenId}/allowlist/labels` | [List token allowlist labels](/docs/reference/api/issuance/list-token-allowlist-labels.md) |
 | `DELETE` | `/v1/issuance/tokens/{tokenId}/allowlist/{entryId}` | [Remove token allowlist entry](/docs/reference/api/issuance/remove-token-allowlist-entry.md) |
+
+## Holders
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
 | `GET` | `/v1/issuance/tokens/{tokenId}/holders` | [List verified holders](/docs/reference/api/issuance/list-holders.md) |
 | `POST` | `/v1/issuance/tokens/{tokenId}/holders` | [Enroll a verified holder](/docs/reference/api/issuance/enroll-holder.md) |
 
 ---
+
+## Issuance: Templates
 
 ### List token templates
 Source: https://platform.solana.com/docs/reference/api/issuance/list-token-templates
@@ -8096,6 +8134,8 @@ r = requests.get("https://api.solana.com/v1/issuance/templates/stablecoin",
 
 ---
 
+## Issuance: Tokens
+
 ### Create token
 Source: https://platform.solana.com/docs/reference/api/issuance/create-token
 
@@ -8167,7 +8207,7 @@ Create token request body.
 
       Any of:
 
-      - **boolean** · one of `false`
+      - **boolean** · always `false`
 
       - **object**
 
@@ -8193,7 +8233,7 @@ Create token request body.
 
       Any of:
 
-      - **boolean** · one of `false`
+      - **boolean** · always `false`
 
       - **object**
 
@@ -8211,7 +8251,7 @@ Create token request body.
 
       Any of:
 
-      - **boolean** · one of `false`
+      - **boolean** · always `false`
 
       - **string**
 
@@ -8221,7 +8261,7 @@ Create token request body.
 
       Any of:
 
-      - **boolean** · one of `false`
+      - **boolean** · always `false`
 
       - **object**
 
@@ -8243,7 +8283,7 @@ Create token request body.
 
       Any of:
 
-      - **boolean** · one of `false`
+      - **boolean** · always `false`
 
       - **object**
 
@@ -8269,7 +8309,7 @@ Create token request body.
 
       Any of:
 
-      - **boolean** · one of `false`
+      - **boolean** · always `false`
 
       - **object**
 
@@ -8844,189 +8884,6 @@ r = requests.get("https://api.solana.com/v1/issuance/tokens/facets",
     "details": {
       "action": "issuance.read"
     }
-  },
-  "meta": {
-    "requestId": "req_example"
-  }
-}
-```
-
-```json tab="500"
-{
-  "error": {
-    "code": "INTERNAL_ERROR",
-    "message": "An internal error occurred"
-  },
-  "meta": {
-    "requestId": "req_example"
-  }
-}
-```
-
----
-
-### List issuance transactions
-Source: https://platform.solana.com/docs/reference/api/issuance/list-issuance-transactions
-
-> Lists issuance transactions across tokens for the current organization or project.
-
-`GET /v1/issuance/transactions`
-
-Use repeated type query parameters, for example type=burn&type=force_burn, to request multiple transaction types. custodyWalletId and walletId cannot be combined.
-
-Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuance.read` action.
-
-## Query parameters
-
-- **`custodyWalletId`** · `string` · min length 1 · example `cwlt_example`
-
-  Filter to transactions where this exact SDP wallet's address participated. This is participant history, not a signer-only filter.
-
-- **`walletId`** · `string` · min length 1 · example `privy_wallet_123`
-
-  Legacy Provider wallet ID filter. Cannot be combined with custodyWalletId.
-
-- **`type`** · `string[]` · each one of `mint`, `burn`, `freeze`, `unfreeze`, `seize`, `force_burn`, `update_authority`, `pause`, `unpause`, `deploy` · each example `burn`
-
-  Filter by transaction type. Repeat this query parameter for multiple values, for example type=burn&type=force_burn.
-
-- **`status`** · `string` · one of `pending`, `processing`, `confirmed`, `finalized`, `failed` · example `confirmed`
-
-  Filter by token transaction status.
-
-- **`page`** · `integer` · greater than 0 · example `1`
-
-  Page number (1-based).
-
-- **`pageSize`** · `integer` · greater than 0 · example `50`
-
-  Number of items per page.
-
-## Headers
-
-- **`x-project-id`** · `string` · min length 1 · example `prj_example`
-
-  Selects the active project for this request. Required for Clerk (dashboard) callers. Ignored when authenticating with an API key, whose scope is fixed to the key's project.
-
-## Responses
-
-- **`200`** Issuance transaction list
-- **`400`** Bad Request
-- **`401`** Unauthorized
-- **`403`** Forbidden. Requires the `issuance.read` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
-- **`404`** Not Found
-- **`500`** Internal Server Error
-
-## Example request
-
-```bash tab="cURL"
-curl 'https://api.solana.com/v1/issuance/transactions' \
-  -H "Authorization: Bearer $SDP_API_KEY"
-```
-
-```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/issuance/transactions", {
-  method: "GET",
-  headers: {
-    Authorization: `Bearer ${process.env.SDP_API_KEY}`
-  }
-});
-```
-
-```python tab="Python"
-import os, requests
-
-r = requests.get("https://api.solana.com/v1/issuance/transactions",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
-```
-
-## Example responses
-
-```json tab="200"
-{
-  "data": [
-    {
-      "token": {
-        "id": "tok_example",
-        "name": "Example Token",
-        "symbol": "EXM",
-        "mintAddress": null
-      },
-      "transaction": {
-        "id": "ttx_example",
-        "tokenId": "tok_example",
-        "organizationId": "org_example",
-        "type": "mint",
-        "status": "confirmed",
-        "signature": "sig_example",
-        "idempotencyKey": "idem_example_12345",
-        "idempotencyFingerprint": "4f2d9c7a5e6f1c...",
-        "serializedTx": "AQID",
-        "params": {},
-        "slot": 123456,
-        "blockTime": "2025-01-01T00:00:00.000Z",
-        "fee": 5000,
-        "error": "Signature failed",
-        "initiatedByKeyId": "key_example",
-        "createdAt": "2025-01-01T00:00:00.000Z",
-        "updatedAt": "2025-01-02T00:00:00.000Z"
-      }
-    }
-  ],
-  "meta": {
-    "total": 1,
-    "page": 1,
-    "pageSize": 1,
-    "hasMore": false,
-    "requestId": "req_example"
-  }
-}
-```
-
-```json tab="400"
-{
-  "error": {
-    "code": "BAD_REQUEST",
-    "message": "Invalid request"
-  },
-  "meta": {
-    "requestId": "req_example"
-  }
-}
-```
-
-```json tab="401"
-{
-  "error": {
-    "code": "UNAUTHORIZED",
-    "message": "Authentication required"
-  },
-  "meta": {
-    "requestId": "req_example"
-  }
-}
-```
-
-```json tab="403"
-{
-  "error": {
-    "code": "INSUFFICIENT_PERMISSIONS",
-    "message": "Missing action: issuance.read",
-    "details": {
-      "action": "issuance.read"
-    }
-  },
-  "meta": {
-    "requestId": "req_example"
-  }
-}
-```
-
-```json tab="404"
-{
-  "error": {
-    "code": "NOT_FOUND",
-    "message": "Resource not found"
   },
   "meta": {
     "requestId": "req_example"
@@ -9827,6 +9684,191 @@ r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/supply/
 
 ---
 
+## Issuance: Activity
+
+### List issuance transactions
+Source: https://platform.solana.com/docs/reference/api/issuance/list-issuance-transactions
+
+> Lists issuance transactions across tokens for the current organization or project.
+
+`GET /v1/issuance/transactions`
+
+Use repeated type query parameters, for example type=burn&type=force_burn, to request multiple transaction types. custodyWalletId and walletId cannot be combined.
+
+Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuance.read` action.
+
+## Query parameters
+
+- **`custodyWalletId`** · `string` · min length 1 · example `cwlt_example`
+
+  Filter to transactions where this exact SDP wallet's address participated. This is participant history, not a signer-only filter.
+
+- **`walletId`** · `string` · min length 1 · example `privy_wallet_123`
+
+  Legacy Provider wallet ID filter. Cannot be combined with custodyWalletId.
+
+- **`type`** · `string[]` · each one of `mint`, `burn`, `freeze`, `unfreeze`, `seize`, `force_burn`, `update_authority`, `pause`, `unpause`, `deploy` · each example `burn`
+
+  Filter by transaction type. Repeat this query parameter for multiple values, for example type=burn&type=force_burn.
+
+- **`status`** · `string` · one of `pending`, `processing`, `confirmed`, `finalized`, `failed` · example `confirmed`
+
+  Filter by token transaction status.
+
+- **`page`** · `integer` · greater than 0 · example `1`
+
+  Page number (1-based).
+
+- **`pageSize`** · `integer` · greater than 0 · example `50`
+
+  Number of items per page.
+
+## Headers
+
+- **`x-project-id`** · `string` · min length 1 · example `prj_example`
+
+  Selects the active project for this request. Required for Clerk (dashboard) callers. Ignored when authenticating with an API key, whose scope is fixed to the key's project.
+
+## Responses
+
+- **`200`** Issuance transaction list
+- **`400`** Bad Request
+- **`401`** Unauthorized
+- **`403`** Forbidden. Requires the `issuance.read` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
+- **`404`** Not Found
+- **`500`** Internal Server Error
+
+## Example request
+
+```bash tab="cURL"
+curl 'https://api.solana.com/v1/issuance/transactions' \
+  -H "Authorization: Bearer $SDP_API_KEY"
+```
+
+```ts tab="TypeScript"
+const res = await fetch("https://api.solana.com/v1/issuance/transactions", {
+  method: "GET",
+  headers: {
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`
+  }
+});
+```
+
+```python tab="Python"
+import os, requests
+
+r = requests.get("https://api.solana.com/v1/issuance/transactions",
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
+```
+
+## Example responses
+
+```json tab="200"
+{
+  "data": [
+    {
+      "token": {
+        "id": "tok_example",
+        "name": "Example Token",
+        "symbol": "EXM",
+        "mintAddress": null
+      },
+      "transaction": {
+        "id": "ttx_example",
+        "tokenId": "tok_example",
+        "organizationId": "org_example",
+        "type": "mint",
+        "status": "confirmed",
+        "signature": "sig_example",
+        "idempotencyKey": "idem_example_12345",
+        "idempotencyFingerprint": "4f2d9c7a5e6f1c...",
+        "serializedTx": "AQID",
+        "params": {},
+        "slot": 123456,
+        "blockTime": "2025-01-01T00:00:00.000Z",
+        "fee": 5000,
+        "error": "Signature failed",
+        "initiatedByKeyId": "key_example",
+        "createdAt": "2025-01-01T00:00:00.000Z",
+        "updatedAt": "2025-01-02T00:00:00.000Z"
+      }
+    }
+  ],
+  "meta": {
+    "total": 1,
+    "page": 1,
+    "pageSize": 1,
+    "hasMore": false,
+    "requestId": "req_example"
+  }
+}
+```
+
+```json tab="400"
+{
+  "error": {
+    "code": "BAD_REQUEST",
+    "message": "Invalid request"
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+```json tab="401"
+{
+  "error": {
+    "code": "UNAUTHORIZED",
+    "message": "Authentication required"
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+```json tab="403"
+{
+  "error": {
+    "code": "INSUFFICIENT_PERMISSIONS",
+    "message": "Missing action: issuance.read",
+    "details": {
+      "action": "issuance.read"
+    }
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+```json tab="404"
+{
+  "error": {
+    "code": "NOT_FOUND",
+    "message": "Resource not found"
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+```json tab="500"
+{
+  "error": {
+    "code": "INTERNAL_ERROR",
+    "message": "An internal error occurred"
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+---
+
 ### List token transactions
 Source: https://platform.solana.com/docs/reference/api/issuance/list-token-transactions
 
@@ -10145,6 +10187,8 @@ r = requests.get("https://api.solana.com/v1/issuance/tokens/tok_example/audit",
 ```
 
 ---
+
+## Issuance: Deploy
 
 ### Deploy token
 Source: https://platform.solana.com/docs/reference/api/issuance/deploy-token
@@ -11065,6 +11109,8 @@ r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/deploy/
 ```
 
 ---
+
+## Issuance: Mint and burn
 
 ### Prepare mint transaction
 Source: https://platform.solana.com/docs/reference/api/issuance/prepare-mint
@@ -12103,6 +12149,8 @@ r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/burn",
 ```
 
 ---
+
+## Issuance: Enforcement
 
 ### Prepare seize transaction
 Source: https://platform.solana.com/docs/reference/api/issuance/prepare-seize
@@ -13178,504 +13226,6 @@ r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/force-b
 
 ---
 
-### Prepare authority update
-Source: https://platform.solana.com/docs/reference/api/issuance/prepare-update-authority
-
-> Builds an unsigned authority update transaction for client-side signing.
-
-`POST /v1/issuance/tokens/{tokenId}/authority/prepare`
-
-Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuance.authority` action.
-
-## Path parameters
-
-- **`tokenId`** · `string` · required · min length 1 · example `tok_example`
-
-  Token identifier.
-
-## Headers
-
-- **`x-project-id`** · `string` · min length 1 · example `prj_example`
-
-  Selects the active project for this request. Required for Clerk (dashboard) callers. Ignored when authenticating with an API key, whose scope is fixed to the key's project.
-
-## Request body
-
-`application/json` · required
-
-Update authority request body.
-
-- **`signingCustodyWalletId`** · `string` · min length 1 · example `cwlt_example`
-
-  Optional exact SDP Wallet ID. When supplied, it must control the authority being changed.
-
-- **`authority`** · `object` · required
-
-  Authority update details.
-
-  - **`role`** · `string` · required · one of `mint`, `freeze`, `permanentDelegate`, `metadata`
-
-  - **`currentAuthority`** · `string` · min length 32 · max length 44
-
-  - **`newAuthority`** · `string | null` · required · min length 32 · max length 44
-
-- **`options`** · `object`
-
-  Authority update options.
-
-  - **`priorityFee`** · `string | integer`
-
-    Any of:
-
-    - **string** · one of `none`, `low`, `medium`, `high`
-
-    - **integer** · min 0
-
-  - **`simulate`** · `boolean`
-
-## Responses
-
-- **`200`** Prepared authority update
-- **`400`** Bad Request
-- **`401`** Unauthorized
-- **`403`** Forbidden. Requires the `issuance.authority` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
-- **`404`** Not Found
-- **`409`** Conflict
-- **`500`** Internal Server Error
-
-## Example request
-
-```bash tab="cURL"
-curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/authority/prepare' \
-  -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "signingCustodyWalletId": "cwlt_example",
-    "authority": {
-      "role": "mint",
-      "newAuthority": "So11111111111111111111111111111111111111112"
-    },
-    "options": {
-      "priorityFee": "low",
-      "simulate": true
-    }
-  }'
-```
-
-```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/authority/prepare", {
-  method: "POST",
-  headers: {
-    Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
-    "Content-Type": "application/json"
-  },
-  body: JSON.stringify({
-    "signingCustodyWalletId": "cwlt_example",
-    "authority": {
-      "role": "mint",
-      "newAuthority": "So11111111111111111111111111111111111111112"
-    },
-    "options": {
-      "priorityFee": "low",
-      "simulate": true
-    }
-  })
-});
-```
-
-```python tab="Python"
-import os, requests, uuid
-
-r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/authority/prepare",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
-  json={
-    "signingCustodyWalletId": "cwlt_example",
-    "authority": {
-      "role": "mint",
-      "newAuthority": "So11111111111111111111111111111111111111112"
-    },
-    "options": {
-      "priorityFee": "low",
-      "simulate": True
-    }
-  })
-```
-
-## Example responses
-
-```json tab="200"
-{
-  "data": {
-    "transaction": {
-      "id": "ttx_example",
-      "tokenId": "tok_example",
-      "organizationId": "org_example",
-      "type": "mint",
-      "status": "confirmed",
-      "signature": "sig_example",
-      "idempotencyKey": "idem_example_12345",
-      "idempotencyFingerprint": "4f2d9c7a5e6f1c...",
-      "serializedTx": "AQID",
-      "params": {},
-      "slot": 123456,
-      "blockTime": "2025-01-01T00:00:00.000Z",
-      "fee": 5000,
-      "error": "Signature failed",
-      "initiatedByKeyId": "key_example",
-      "createdAt": "2025-01-01T00:00:00.000Z",
-      "updatedAt": "2025-01-02T00:00:00.000Z"
-    },
-    "preparedTransaction": {
-      "serialized": "AQID",
-      "blockhash": "blockhash_example",
-      "lastValidBlockHeight": "123456"
-    },
-    "simulation": {
-      "success": true,
-      "logs": [
-        "Program log: success"
-      ],
-      "unitsConsumed": 20000,
-      "error": "Insufficient funds"
-    }
-  },
-  "meta": {
-    "requestId": "req_example",
-    "timestamp": "2025-01-01T00:00:00.000Z"
-  }
-}
-```
-
-```json tab="400"
-{
-  "error": {
-    "code": "BAD_REQUEST",
-    "message": "Invalid request"
-  },
-  "meta": {
-    "requestId": "req_example"
-  }
-}
-```
-
-```json tab="401"
-{
-  "error": {
-    "code": "UNAUTHORIZED",
-    "message": "Authentication required"
-  },
-  "meta": {
-    "requestId": "req_example"
-  }
-}
-```
-
-```json tab="403"
-{
-  "error": {
-    "code": "INSUFFICIENT_PERMISSIONS",
-    "message": "Missing action: issuance.authority",
-    "details": {
-      "action": "issuance.authority"
-    }
-  },
-  "meta": {
-    "requestId": "req_example"
-  }
-}
-```
-
-```json tab="404"
-{
-  "error": {
-    "code": "NOT_FOUND",
-    "message": "Resource not found"
-  },
-  "meta": {
-    "requestId": "req_example"
-  }
-}
-```
-
-```json tab="409"
-{
-  "error": {
-    "code": "CONFLICT",
-    "message": "Resource already exists"
-  },
-  "meta": {
-    "requestId": "req_example"
-  }
-}
-```
-
-```json tab="500"
-{
-  "error": {
-    "code": "INTERNAL_ERROR",
-    "message": "An internal error occurred"
-  },
-  "meta": {
-    "requestId": "req_example"
-  }
-}
-```
-
----
-
-### Execute authority update
-Source: https://platform.solana.com/docs/reference/api/issuance/execute-update-authority
-
-> Updates token authorities using custody signing.
-
-`POST /v1/issuance/tokens/{tokenId}/authority`
-
-Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuance.authority` action.
-
-## Path parameters
-
-- **`tokenId`** · `string` · required · min length 1 · example `tok_example`
-
-  Token identifier.
-
-## Headers
-
-- **`x-project-id`** · `string` · min length 1 · example `prj_example`
-
-  Selects the active project for this request. Required for Clerk (dashboard) callers. Ignored when authenticating with an API key, whose scope is fixed to the key's project.
-
-- **`Idempotency-Key`** · `string` · pattern `^[\x20-\x7e]{1,255}$` · example `idempotency_example_12345`
-
-  Idempotency key for safely retrying mutating requests. 1-255 printable ASCII characters; echoed back on the response.
-
-## Request body
-
-`application/json` · required
-
-Update authority request body.
-
-- **`signingCustodyWalletId`** · `string` · min length 1 · example `cwlt_example`
-
-  Optional exact SDP Wallet ID. When supplied, it must control the authority being changed.
-
-- **`authority`** · `object` · required
-
-  Authority update details.
-
-  - **`role`** · `string` · required · one of `mint`, `freeze`, `permanentDelegate`, `metadata`
-
-  - **`currentAuthority`** · `string` · min length 32 · max length 44
-
-  - **`newAuthority`** · `string | null` · required · min length 32 · max length 44
-
-- **`options`** · `object`
-
-  Authority update options.
-
-  - **`priorityFee`** · `string | integer`
-
-    Any of:
-
-    - **string** · one of `none`, `low`, `medium`, `high`
-
-    - **integer** · min 0
-
-  - **`simulate`** · `boolean`
-
-## Responses
-
-- **`200`** Authority updated
-- **`400`** Bad Request
-- **`401`** Unauthorized
-- **`403`** Forbidden. Requires the `issuance.authority` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
-- **`404`** Not Found
-- **`409`** Conflict
-- **`422`** Unprocessable Entity
-- **`500`** Internal Server Error
-
-## Example request
-
-```bash tab="cURL"
-curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/authority' \
-  -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "signingCustodyWalletId": "cwlt_example",
-    "authority": {
-      "role": "mint",
-      "newAuthority": "So11111111111111111111111111111111111111112"
-    },
-    "options": {
-      "priorityFee": "low",
-      "simulate": true
-    }
-  }'
-```
-
-```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/authority", {
-  method: "POST",
-  headers: {
-    Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID(),
-    "Content-Type": "application/json"
-  },
-  body: JSON.stringify({
-    "signingCustodyWalletId": "cwlt_example",
-    "authority": {
-      "role": "mint",
-      "newAuthority": "So11111111111111111111111111111111111111112"
-    },
-    "options": {
-      "priorityFee": "low",
-      "simulate": true
-    }
-  })
-});
-```
-
-```python tab="Python"
-import os, requests, uuid
-
-r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/authority",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
-  json={
-    "signingCustodyWalletId": "cwlt_example",
-    "authority": {
-      "role": "mint",
-      "newAuthority": "So11111111111111111111111111111111111111112"
-    },
-    "options": {
-      "priorityFee": "low",
-      "simulate": True
-    }
-  })
-```
-
-## Example responses
-
-```json tab="200"
-{
-  "data": {
-    "transaction": {
-      "id": "ttx_example",
-      "tokenId": "tok_example",
-      "organizationId": "org_example",
-      "type": "mint",
-      "status": "confirmed",
-      "signature": "sig_example",
-      "idempotencyKey": "idem_example_12345",
-      "idempotencyFingerprint": "4f2d9c7a5e6f1c...",
-      "serializedTx": "AQID",
-      "params": {},
-      "slot": 123456,
-      "blockTime": "2025-01-01T00:00:00.000Z",
-      "fee": 5000,
-      "error": "Signature failed",
-      "initiatedByKeyId": "key_example",
-      "createdAt": "2025-01-01T00:00:00.000Z",
-      "updatedAt": "2025-01-02T00:00:00.000Z"
-    }
-  },
-  "meta": {
-    "requestId": "req_example",
-    "timestamp": "2025-01-01T00:00:00.000Z"
-  }
-}
-```
-
-```json tab="400"
-{
-  "error": {
-    "code": "BAD_REQUEST",
-    "message": "Invalid request"
-  },
-  "meta": {
-    "requestId": "req_example"
-  }
-}
-```
-
-```json tab="401"
-{
-  "error": {
-    "code": "UNAUTHORIZED",
-    "message": "Authentication required"
-  },
-  "meta": {
-    "requestId": "req_example"
-  }
-}
-```
-
-```json tab="403"
-{
-  "error": {
-    "code": "INSUFFICIENT_PERMISSIONS",
-    "message": "Missing action: issuance.authority",
-    "details": {
-      "action": "issuance.authority"
-    }
-  },
-  "meta": {
-    "requestId": "req_example"
-  }
-}
-```
-
-```json tab="404"
-{
-  "error": {
-    "code": "NOT_FOUND",
-    "message": "Resource not found"
-  },
-  "meta": {
-    "requestId": "req_example"
-  }
-}
-```
-
-```json tab="409"
-{
-  "error": {
-    "code": "CONFLICT",
-    "message": "Resource already exists"
-  },
-  "meta": {
-    "requestId": "req_example"
-  }
-}
-```
-
-```json tab="422"
-{
-  "error": {
-    "code": "IDEMPOTENCY_KEY_REUSED",
-    "message": "This Idempotency-Key was already used for a different request"
-  },
-  "meta": {
-    "requestId": "req_example"
-  }
-}
-```
-
-```json tab="500"
-{
-  "error": {
-    "code": "INTERNAL_ERROR",
-    "message": "An internal error occurred"
-  },
-  "meta": {
-    "requestId": "req_example"
-  }
-}
-```
-
----
-
 ### Pause token transfers
 Source: https://platform.solana.com/docs/reference/api/issuance/pause-token
 
@@ -14687,6 +14237,508 @@ r = requests.get("https://api.solana.com/v1/issuance/tokens/tok_example/frozen",
 
 ---
 
+## Issuance: Authority
+
+### Prepare authority update
+Source: https://platform.solana.com/docs/reference/api/issuance/prepare-update-authority
+
+> Builds an unsigned authority update transaction for client-side signing.
+
+`POST /v1/issuance/tokens/{tokenId}/authority/prepare`
+
+Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuance.authority` action.
+
+## Path parameters
+
+- **`tokenId`** · `string` · required · min length 1 · example `tok_example`
+
+  Token identifier.
+
+## Headers
+
+- **`x-project-id`** · `string` · min length 1 · example `prj_example`
+
+  Selects the active project for this request. Required for Clerk (dashboard) callers. Ignored when authenticating with an API key, whose scope is fixed to the key's project.
+
+## Request body
+
+`application/json` · required
+
+Update authority request body.
+
+- **`signingCustodyWalletId`** · `string` · min length 1 · example `cwlt_example`
+
+  Optional exact SDP Wallet ID. When supplied, it must control the authority being changed.
+
+- **`authority`** · `object` · required
+
+  Authority update details.
+
+  - **`role`** · `string` · required · one of `mint`, `freeze`, `permanentDelegate`, `metadata`
+
+  - **`currentAuthority`** · `string` · min length 32 · max length 44
+
+  - **`newAuthority`** · `string | null` · required · min length 32 · max length 44
+
+- **`options`** · `object`
+
+  Authority update options.
+
+  - **`priorityFee`** · `string | integer`
+
+    Any of:
+
+    - **string** · one of `none`, `low`, `medium`, `high`
+
+    - **integer** · min 0
+
+  - **`simulate`** · `boolean`
+
+## Responses
+
+- **`200`** Prepared authority update
+- **`400`** Bad Request
+- **`401`** Unauthorized
+- **`403`** Forbidden. Requires the `issuance.authority` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
+- **`404`** Not Found
+- **`409`** Conflict
+- **`500`** Internal Server Error
+
+## Example request
+
+```bash tab="cURL"
+curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/authority/prepare' \
+  -H "Authorization: Bearer $SDP_API_KEY" \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "signingCustodyWalletId": "cwlt_example",
+    "authority": {
+      "role": "mint",
+      "newAuthority": "So11111111111111111111111111111111111111112"
+    },
+    "options": {
+      "priorityFee": "low",
+      "simulate": true
+    }
+  }'
+```
+
+```ts tab="TypeScript"
+const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/authority/prepare", {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`,
+    "Idempotency-Key": crypto.randomUUID(),
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    "signingCustodyWalletId": "cwlt_example",
+    "authority": {
+      "role": "mint",
+      "newAuthority": "So11111111111111111111111111111111111111112"
+    },
+    "options": {
+      "priorityFee": "low",
+      "simulate": true
+    }
+  })
+});
+```
+
+```python tab="Python"
+import os, requests, uuid
+
+r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/authority/prepare",
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  json={
+    "signingCustodyWalletId": "cwlt_example",
+    "authority": {
+      "role": "mint",
+      "newAuthority": "So11111111111111111111111111111111111111112"
+    },
+    "options": {
+      "priorityFee": "low",
+      "simulate": True
+    }
+  })
+```
+
+## Example responses
+
+```json tab="200"
+{
+  "data": {
+    "transaction": {
+      "id": "ttx_example",
+      "tokenId": "tok_example",
+      "organizationId": "org_example",
+      "type": "mint",
+      "status": "confirmed",
+      "signature": "sig_example",
+      "idempotencyKey": "idem_example_12345",
+      "idempotencyFingerprint": "4f2d9c7a5e6f1c...",
+      "serializedTx": "AQID",
+      "params": {},
+      "slot": 123456,
+      "blockTime": "2025-01-01T00:00:00.000Z",
+      "fee": 5000,
+      "error": "Signature failed",
+      "initiatedByKeyId": "key_example",
+      "createdAt": "2025-01-01T00:00:00.000Z",
+      "updatedAt": "2025-01-02T00:00:00.000Z"
+    },
+    "preparedTransaction": {
+      "serialized": "AQID",
+      "blockhash": "blockhash_example",
+      "lastValidBlockHeight": "123456"
+    },
+    "simulation": {
+      "success": true,
+      "logs": [
+        "Program log: success"
+      ],
+      "unitsConsumed": 20000,
+      "error": "Insufficient funds"
+    }
+  },
+  "meta": {
+    "requestId": "req_example",
+    "timestamp": "2025-01-01T00:00:00.000Z"
+  }
+}
+```
+
+```json tab="400"
+{
+  "error": {
+    "code": "BAD_REQUEST",
+    "message": "Invalid request"
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+```json tab="401"
+{
+  "error": {
+    "code": "UNAUTHORIZED",
+    "message": "Authentication required"
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+```json tab="403"
+{
+  "error": {
+    "code": "INSUFFICIENT_PERMISSIONS",
+    "message": "Missing action: issuance.authority",
+    "details": {
+      "action": "issuance.authority"
+    }
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+```json tab="404"
+{
+  "error": {
+    "code": "NOT_FOUND",
+    "message": "Resource not found"
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+```json tab="409"
+{
+  "error": {
+    "code": "CONFLICT",
+    "message": "Resource already exists"
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+```json tab="500"
+{
+  "error": {
+    "code": "INTERNAL_ERROR",
+    "message": "An internal error occurred"
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+---
+
+### Execute authority update
+Source: https://platform.solana.com/docs/reference/api/issuance/execute-update-authority
+
+> Updates token authorities using custody signing.
+
+`POST /v1/issuance/tokens/{tokenId}/authority`
+
+Requires an [API key](/docs/developing-with-sdp/authentication) with the `issuance.authority` action.
+
+## Path parameters
+
+- **`tokenId`** · `string` · required · min length 1 · example `tok_example`
+
+  Token identifier.
+
+## Headers
+
+- **`x-project-id`** · `string` · min length 1 · example `prj_example`
+
+  Selects the active project for this request. Required for Clerk (dashboard) callers. Ignored when authenticating with an API key, whose scope is fixed to the key's project.
+
+- **`Idempotency-Key`** · `string` · pattern `^[\x20-\x7e]{1,255}$` · example `idempotency_example_12345`
+
+  Idempotency key for safely retrying mutating requests. 1-255 printable ASCII characters; echoed back on the response.
+
+## Request body
+
+`application/json` · required
+
+Update authority request body.
+
+- **`signingCustodyWalletId`** · `string` · min length 1 · example `cwlt_example`
+
+  Optional exact SDP Wallet ID. When supplied, it must control the authority being changed.
+
+- **`authority`** · `object` · required
+
+  Authority update details.
+
+  - **`role`** · `string` · required · one of `mint`, `freeze`, `permanentDelegate`, `metadata`
+
+  - **`currentAuthority`** · `string` · min length 32 · max length 44
+
+  - **`newAuthority`** · `string | null` · required · min length 32 · max length 44
+
+- **`options`** · `object`
+
+  Authority update options.
+
+  - **`priorityFee`** · `string | integer`
+
+    Any of:
+
+    - **string** · one of `none`, `low`, `medium`, `high`
+
+    - **integer** · min 0
+
+  - **`simulate`** · `boolean`
+
+## Responses
+
+- **`200`** Authority updated
+- **`400`** Bad Request
+- **`401`** Unauthorized
+- **`403`** Forbidden. Requires the `issuance.authority` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
+- **`404`** Not Found
+- **`409`** Conflict
+- **`422`** Unprocessable Entity
+- **`500`** Internal Server Error
+
+## Example request
+
+```bash tab="cURL"
+curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/authority' \
+  -H "Authorization: Bearer $SDP_API_KEY" \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "signingCustodyWalletId": "cwlt_example",
+    "authority": {
+      "role": "mint",
+      "newAuthority": "So11111111111111111111111111111111111111112"
+    },
+    "options": {
+      "priorityFee": "low",
+      "simulate": true
+    }
+  }'
+```
+
+```ts tab="TypeScript"
+const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/authority", {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`,
+    "Idempotency-Key": crypto.randomUUID(),
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    "signingCustodyWalletId": "cwlt_example",
+    "authority": {
+      "role": "mint",
+      "newAuthority": "So11111111111111111111111111111111111111112"
+    },
+    "options": {
+      "priorityFee": "low",
+      "simulate": true
+    }
+  })
+});
+```
+
+```python tab="Python"
+import os, requests, uuid
+
+r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/authority",
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  json={
+    "signingCustodyWalletId": "cwlt_example",
+    "authority": {
+      "role": "mint",
+      "newAuthority": "So11111111111111111111111111111111111111112"
+    },
+    "options": {
+      "priorityFee": "low",
+      "simulate": True
+    }
+  })
+```
+
+## Example responses
+
+```json tab="200"
+{
+  "data": {
+    "transaction": {
+      "id": "ttx_example",
+      "tokenId": "tok_example",
+      "organizationId": "org_example",
+      "type": "mint",
+      "status": "confirmed",
+      "signature": "sig_example",
+      "idempotencyKey": "idem_example_12345",
+      "idempotencyFingerprint": "4f2d9c7a5e6f1c...",
+      "serializedTx": "AQID",
+      "params": {},
+      "slot": 123456,
+      "blockTime": "2025-01-01T00:00:00.000Z",
+      "fee": 5000,
+      "error": "Signature failed",
+      "initiatedByKeyId": "key_example",
+      "createdAt": "2025-01-01T00:00:00.000Z",
+      "updatedAt": "2025-01-02T00:00:00.000Z"
+    }
+  },
+  "meta": {
+    "requestId": "req_example",
+    "timestamp": "2025-01-01T00:00:00.000Z"
+  }
+}
+```
+
+```json tab="400"
+{
+  "error": {
+    "code": "BAD_REQUEST",
+    "message": "Invalid request"
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+```json tab="401"
+{
+  "error": {
+    "code": "UNAUTHORIZED",
+    "message": "Authentication required"
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+```json tab="403"
+{
+  "error": {
+    "code": "INSUFFICIENT_PERMISSIONS",
+    "message": "Missing action: issuance.authority",
+    "details": {
+      "action": "issuance.authority"
+    }
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+```json tab="404"
+{
+  "error": {
+    "code": "NOT_FOUND",
+    "message": "Resource not found"
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+```json tab="409"
+{
+  "error": {
+    "code": "CONFLICT",
+    "message": "Resource already exists"
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+```json tab="422"
+{
+  "error": {
+    "code": "IDEMPOTENCY_KEY_REUSED",
+    "message": "This Idempotency-Key was already used for a different request"
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+```json tab="500"
+{
+  "error": {
+    "code": "INTERNAL_ERROR",
+    "message": "An internal error occurred"
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+---
+
+## Issuance: Allowlist
+
 ### List token allowlist
 Source: https://platform.solana.com/docs/reference/api/issuance/list-token-allowlist
 
@@ -15321,6 +15373,8 @@ r = requests.delete("https://api.solana.com/v1/issuance/tokens/tok_example/allow
 
 ---
 
+## Issuance: Holders
+
 ### List verified holders
 Source: https://platform.solana.com/docs/reference/api/issuance/list-holders
 
@@ -15601,30 +15655,63 @@ Source: https://platform.solana.com/docs/reference/api/payments
 
 > Wallet balances, transfers, and payment flows.
 
+## Balances and transactions
+
 | Method | Endpoint | Summary |
 | --- | --- | --- |
 | `GET` | `/v1/payments/wallets/{walletId}/balances` | [Get wallet balances](/docs/reference/api/payments/get-payment-wallet-balances.md) |
+| `GET` | `/v1/transactions` | [List transactions](/docs/reference/api/payments/list-unified-transactions.md) |
+
+## Transfers
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
 | `POST` | `/v1/payments/transfers` | [Execute transfer (custody)](/docs/reference/api/payments/create-payment-transfer.md) |
 | `GET` | `/v1/payments/transfers` | [List transfers](/docs/reference/api/payments/list-payment-transfers.md) |
 | `GET` | `/v1/payments/transfers/{transferId}` | [Get transfer](/docs/reference/api/payments/get-payment-transfer.md) |
+
+## Transfer batches
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
 | `POST` | `/v1/payments/transfer-batches/estimate` | [Estimate transfer batch](/docs/reference/api/payments/estimate-payment-transfer-batch.md) |
 | `POST` | `/v1/payments/transfer-batches` | [Create transfer batch](/docs/reference/api/payments/create-payment-transfer-batch.md) |
 | `GET` | `/v1/payments/transfer-batches` | [List transfer batches](/docs/reference/api/payments/list-payment-transfer-batches.md) |
 | `GET` | `/v1/payments/transfer-batches/{batchId}` | [Get transfer batch](/docs/reference/api/payments/get-payment-transfer-batch.md) |
+
+## Recurring payments
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
 | `POST` | `/v1/payments/recurring-payments` | [Create recurring payment](/docs/reference/api/payments/create-payment-recurring-payment.md) |
 | `GET` | `/v1/payments/recurring-payments` | [List recurring payments](/docs/reference/api/payments/list-payment-recurring-payments.md) |
 | `PATCH` | `/v1/payments/recurring-payments/{id}` | [Update recurring payment](/docs/reference/api/payments/update-payment-recurring-payment.md) |
 | `GET` | `/v1/payments/recurring-payments/{id}` | [Get recurring payment](/docs/reference/api/payments/get-payment-recurring-payment.md) |
 | `POST` | `/v1/payments/recurring-payments/{id}/activate` | [Activate recurring payment](/docs/reference/api/payments/activate-payment-recurring-payment.md) |
 | `POST` | `/v1/payments/recurring-payments/{id}/cancel` | [Cancel recurring payment](/docs/reference/api/payments/cancel-payment-recurring-payment.md) |
-| `POST` | `/v1/payments/requests/{paymentRequestId}/cancel` | [Cancel payment request](/docs/reference/api/payments/cancel-payment-request.md) |
 | `POST` | `/v1/payments/recurring-payments/{id}/collect` | [Collect recurring payment](/docs/reference/api/payments/collect-payment-recurring-payment.md) |
 | `POST` | `/v1/payments/recurring-payments/{id}/resume` | [Resume recurring payment](/docs/reference/api/payments/resume-payment-recurring-payment.md) |
+
+## Payment requests
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
+| `POST` | `/v1/payments/requests/{paymentRequestId}/cancel` | [Cancel payment request](/docs/reference/api/payments/cancel-payment-request.md) |
+
+## Subscription plans
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
 | `POST` | `/v1/payments/subscription-plans` | [Create subscription plan](/docs/reference/api/payments/create-payment-subscription-plan.md) |
 | `GET` | `/v1/payments/subscription-plans` | [List subscription plans](/docs/reference/api/payments/list-payment-subscription-plans.md) |
 | `POST` | `/v1/payments/subscription-plans/{planId}/prepare-create` | [Prepare subscription plan creation](/docs/reference/api/payments/prepare-payment-subscription-plan-create.md) |
 | `GET` | `/v1/payments/subscription-plans/{planId}` | [Get subscription plan](/docs/reference/api/payments/get-payment-subscription-plan.md) |
 | `PATCH` | `/v1/payments/subscription-plans/{planId}` | [Update subscription plan](/docs/reference/api/payments/update-payment-subscription-plan.md) |
+
+## Subscriptions
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
 | `POST` | `/v1/payments/subscriptions` | [Create subscription](/docs/reference/api/payments/create-payment-subscription.md) |
 | `GET` | `/v1/payments/subscriptions` | [List subscriptions](/docs/reference/api/payments/list-payment-subscriptions.md) |
 | `POST` | `/v1/payments/subscriptions/{subscriptionId}/prepare-authorization` | [Prepare subscription authorization](/docs/reference/api/payments/prepare-payment-subscription-authorization.md) |
@@ -15633,13 +15720,19 @@ Source: https://platform.solana.com/docs/reference/api/payments
 | `POST` | `/v1/payments/subscriptions/{subscriptionId}/prepare-collection` | [Prepare subscription collection](/docs/reference/api/payments/prepare-payment-subscription-collection.md) |
 | `GET` | `/v1/payments/subscriptions/{subscriptionId}` | [Get subscription](/docs/reference/api/payments/get-payment-subscription.md) |
 | `GET` | `/v1/payments/subscriptions/{subscriptionId}/collection-attempts` | [List subscription collection attempts](/docs/reference/api/payments/list-payment-subscription-collection-attempts.md) |
+
+## Ramps
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
 | `GET` | `/v1/payments/ramps/onramp/currency` | [List on-ramp currency support](/docs/reference/api/payments/list-payment-onramp-currencies.md) |
 | `GET` | `/v1/payments/ramps/offramp/currency` | [List off-ramp currency support](/docs/reference/api/payments/list-payment-offramp-currencies.md) |
 | `POST` | `/v1/payments/ramps/onramp/quote` | [Create on-ramp quote](/docs/reference/api/payments/create-payment-onramp-quote.md) |
 | `POST` | `/v1/payments/ramps/sandbox/simulate` | [Simulate sandbox transfer](/docs/reference/api/payments/simulate-sandbox-transfer.md) |
-| `GET` | `/v1/transactions` | [List transactions](/docs/reference/api/payments/list-unified-transactions.md) |
 
 ---
+
+## Payments: Balances and transactions
 
 ### Get wallet balances
 Source: https://platform.solana.com/docs/reference/api/payments/get-payment-wallet-balances
@@ -15822,6 +15915,190 @@ r = requests.get("https://api.solana.com/v1/payments/wallets/privy_wallet_123/ba
 ```
 
 ---
+
+### List transactions
+Source: https://platform.solana.com/docs/reference/api/payments/list-unified-transactions
+
+> Lists the project's transactions across SDP modules with stable cursor pagination.
+
+`GET /v1/transactions`
+
+Requires `transactions.read`. Every row also needs the `read` action of the module it comes from (which its `manage` or `execute` includes): a Payments row needs `transfers.read` for a transfer or deposit, `transfer_batches.read` for a batch item, `recurring.read` for a recurring collection, `payment_requests.read` for a payment request's fulfilment, and `onramp.read` or `offramp.read` for a ramp transfer; every other module's rows need that module's `read`. Rows the caller cannot read are left out. Requesting a module, or a Payments `kind`, without its action returns 403 INSUFFICIENT_PERMISSIONS naming it. `search` matches transaction id, module id, or signature as a prefix, not a substring. The endpoint is metered (60/min per credential, 240/min per organization); exceeding the quota returns 429, and 503 indicates the quota backend was unavailable.
+
+Requires an [API key](/docs/developing-with-sdp/authentication) with the `transactions.read` action.
+
+## Query parameters
+
+- **`module`** · `string` · one of `payments`, `dvp`, `private_channels`, `issuance`, `rings`
+
+- **`kind`** · `string`
+
+- **`status`** · `string` · one of `pending`, `succeeded`, `failed`, `canceled`
+
+- **`custodyWalletId`** · `string` · max length 128
+
+- **`counterpartyId`** · `string` · max length 128
+
+- **`token`** · `string` · max length 128
+
+- **`search`** · `string` · min length 3 · max length 200
+
+  Prefix match against transaction id, module id, or signature — not a substring search.
+
+- **`createdAtFrom`** · `string` · format `date-time`
+
+- **`createdAtTo`** · `string` · format `date-time`
+
+- **`cursor`** · `string`
+
+- **`limit`** · `integer` · min 1 · max 100 · default `50`
+
+## Headers
+
+- **`x-project-id`** · `string` · min length 1 · example `prj_example`
+
+  Selects the active project for this request. Required for Clerk (dashboard) callers. Ignored when authenticating with an API key, whose scope is fixed to the key's project.
+
+## Responses
+
+- **`200`** Unified transactions
+- **`400`** Bad Request
+- **`401`** Unauthorized
+- **`403`** Forbidden. Requires the `transactions.read` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
+- **`429`** Too Many Requests
+- **`500`** Internal Server Error
+- **`503`** Service Unavailable
+
+## Example request
+
+```bash tab="cURL"
+curl 'https://api.solana.com/v1/transactions' \
+  -H "Authorization: Bearer $SDP_API_KEY"
+```
+
+```ts tab="TypeScript"
+const res = await fetch("https://api.solana.com/v1/transactions", {
+  method: "GET",
+  headers: {
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`
+  }
+});
+```
+
+```python tab="Python"
+import os, requests
+
+r = requests.get("https://api.solana.com/v1/transactions",
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
+```
+
+## Example responses
+
+```json tab="200"
+{
+  "data": {
+    "transactions": [
+      {
+        "id": "_example",
+        "moduleId": "module_example",
+        "status": "pending",
+        "organizationId": "organization_example",
+        "projectId": "project_example",
+        "custodyWalletId": "custodywallet_example",
+        "custodyWalletLabel": "example",
+        "token": "example",
+        "amount": "example",
+        "counterpartyId": "counterparty_example",
+        "signature": "example",
+        "createdAt": "example",
+        "module": "payments",
+        "kind": "pay",
+        "moduleStatus": "pending"
+      }
+    ],
+    "nextCursor": "example"
+  }
+}
+```
+
+```json tab="400"
+{
+  "error": {
+    "code": "BAD_REQUEST",
+    "message": "Invalid request"
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+```json tab="401"
+{
+  "error": {
+    "code": "UNAUTHORIZED",
+    "message": "Authentication required"
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+```json tab="403"
+{
+  "error": {
+    "code": "INSUFFICIENT_PERMISSIONS",
+    "message": "Missing action: transactions.read",
+    "details": {
+      "action": "transactions.read"
+    }
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+```json tab="429"
+{
+  "error": {
+    "code": "RATE_LIMITED",
+    "message": "Too many requests"
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+```json tab="500"
+{
+  "error": {
+    "code": "INTERNAL_ERROR",
+    "message": "An internal error occurred"
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+```json tab="503"
+{
+  "error": {
+    "code": "SERVICE_UNAVAILABLE",
+    "message": "Service temporarily unavailable"
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+---
+
+## Payments: Transfers
 
 ### Execute transfer (custody)
 Source: https://platform.solana.com/docs/reference/api/payments/create-payment-transfer
@@ -16601,6 +16878,8 @@ r = requests.get("https://api.solana.com/v1/payments/transfers/xfr_example",
 ```
 
 ---
+
+## Payments: Transfer batches
 
 ### Estimate transfer batch
 Source: https://platform.solana.com/docs/reference/api/payments/estimate-payment-transfer-batch
@@ -17628,6 +17907,8 @@ r = requests.get("https://api.solana.com/v1/payments/transfer-batches/xbatch_exa
 ```
 
 ---
+
+## Payments: Recurring payments
 
 ### Create recurring payment
 Source: https://platform.solana.com/docs/reference/api/payments/create-payment-recurring-payment
@@ -18857,209 +19138,6 @@ r = requests.post("https://api.solana.com/v1/payments/recurring-payments/prp_exa
 
 ---
 
-### Cancel payment request
-Source: https://platform.solana.com/docs/reference/api/payments/cancel-payment-request
-
-> Cancels an open payment request, so its payment link stops building and sponsoring transactions.
-
-`POST /v1/payments/requests/{paymentRequestId}/cancel`
-
-Requires `payment_requests.manage`. Canceling a request that is already canceled returns it unchanged. A paid or expired request returns 409, and so does one whose fee-sponsored transaction can still land: retry once that transaction's blockhash expires. A payer who signed before the cancel can still land the payment; SDP records it as paid, with `paidLate` set when it landed after the cancel.
-
-Requires an [API key](/docs/developing-with-sdp/authentication) with the `payment_requests.manage` action.
-
-## Path parameters
-
-- **`paymentRequestId`** · `string` · required · min length 1 · example `preq_example`
-
-  SDP payment request ID.
-
-## Headers
-
-- **`x-project-id`** · `string` · min length 1 · example `prj_example`
-
-  Selects the active project for this request. Required for Clerk (dashboard) callers. Ignored when authenticating with an API key, whose scope is fixed to the key's project.
-
-- **`Idempotency-Key`** · `string` · pattern `^[\x20-\x7e]{1,255}$` · example `idempotency_example_12345`
-
-  Optional, and honored when sent. 1-255 printable ASCII characters; send a UUID per logical operation and reuse it on every retry. Within 24 hours, a retry with the same key and the same request returns the stored status and body with the response header `Idempotent-Replayed: true`. Keys are scoped to the credential: within 24 hours, the same key with a different request, or from a different credential, returns 422 `IDEMPOTENCY_KEY_REUSED`; after that, the same key from a different credential runs as a new request. A rotated API key is a new credential, so after any rotation read the resource with GET to see whether the original request ran, and never resend a money request under the new credential without checking first. A key whose original request is still running returns 409 `IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`. A 400, 401, 403, 409 or 429 refusal is not stored, so the same key runs again once the cause is fixed. Access is checked before the key on every request, so a refused request never claims the key, and a credential that has since lost access to the named resource gets 403 instead of the stored response. A replay is a snapshot of the original response: read the current state with GET instead of sending the request again. If the original request never recorded its outcome (it crashed), a same-key retry gets 409 `IDEMPOTENCY_KEY_IN_FLIGHT` until 15 minutes plus the route's lease have passed since the original was sent (about 16 minutes, or about 20 for transfer batches), then 409 `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` with no `Retry-After`, as does every later retry with that key: read the resource with GET to see whether it ran, then send again with a new key. After a 5xx, a retry with the same key runs again and answers from the original record instead of acting twice; that answer also carries `Idempotent-Replayed: true`.
-
-## Responses
-
-- **`200`** Payment request canceled
-- **`400`** Bad Request
-- **`401`** Unauthorized
-- **`403`** Forbidden. Requires the `payment_requests.manage` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
-- **`404`** Not Found
-- **`409`** Conflict
-- **`422`** Unprocessable Entity
-- **`500`** Internal Server Error
-- **`502`** Bad Gateway
-
-## Example request
-
-```bash tab="cURL"
-curl -X POST 'https://api.solana.com/v1/payments/requests/preq_example/cancel' \
-  -H "Authorization: Bearer $SDP_API_KEY" \
-  -H "Idempotency-Key: $(uuidgen)"
-```
-
-```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/payments/requests/preq_example/cancel", {
-  method: "POST",
-  headers: {
-    Authorization: `Bearer ${process.env.SDP_API_KEY}`,
-    "Idempotency-Key": crypto.randomUUID()
-  }
-});
-```
-
-```python tab="Python"
-import os, requests, uuid
-
-r = requests.post("https://api.solana.com/v1/payments/requests/preq_example/cancel",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())})
-```
-
-## Example responses
-
-```json tab="200"
-{
-  "data": {
-    "id": "preq_example",
-    "organizationId": "organization_example",
-    "projectId": "project_example",
-    "walletId": "wallet_example",
-    "destinationAddress": "So11111111111111111111111111111111111111112",
-    "token": "example",
-    "amount": "100.00",
-    "reference": "So11111111111111111111111111111111111111112",
-    "status": "canceled",
-    "expiresAt": "2025-01-01T00:00:00.000Z",
-    "fulfilledByTransferId": "fulfilledbytransfer_example",
-    "paidLate": false,
-    "lastCheckedAt": "2025-01-01T00:00:00.000Z",
-    "canceledByApiKeyId": "canceledbyapikey_example",
-    "canceledByUserId": "canceledbyuser_example",
-    "canceledAt": "2025-01-01T00:00:00.000Z",
-    "lifecycle": [
-      {
-        "status": "canceled",
-        "at": "2025-01-01T00:00:00.000Z"
-      }
-    ],
-    "createdBy": "example",
-    "createdAt": "2025-01-01T00:00:00.000Z",
-    "updatedAt": "2025-01-01T00:00:00.000Z"
-  },
-  "meta": {
-    "requestId": "req_example",
-    "timestamp": "2025-01-01T00:00:00.000Z"
-  }
-}
-```
-
-```json tab="400"
-{
-  "error": {
-    "code": "BAD_REQUEST",
-    "message": "Invalid request"
-  },
-  "meta": {
-    "requestId": "req_example"
-  }
-}
-```
-
-```json tab="401"
-{
-  "error": {
-    "code": "UNAUTHORIZED",
-    "message": "Authentication required"
-  },
-  "meta": {
-    "requestId": "req_example"
-  }
-}
-```
-
-```json tab="403"
-{
-  "error": {
-    "code": "INSUFFICIENT_PERMISSIONS",
-    "message": "Missing action: payment_requests.manage",
-    "details": {
-      "action": "payment_requests.manage"
-    }
-  },
-  "meta": {
-    "requestId": "req_example"
-  }
-}
-```
-
-```json tab="404"
-{
-  "error": {
-    "code": "NOT_FOUND",
-    "message": "Resource not found"
-  },
-  "meta": {
-    "requestId": "req_example"
-  }
-}
-```
-
-```json tab="409"
-{
-  "error": {
-    "code": "CONFLICT",
-    "message": "Resource already exists"
-  },
-  "meta": {
-    "requestId": "req_example"
-  }
-}
-```
-
-```json tab="422"
-{
-  "error": {
-    "code": "IDEMPOTENCY_KEY_REUSED",
-    "message": "This Idempotency-Key was already used for a different request"
-  },
-  "meta": {
-    "requestId": "req_example"
-  }
-}
-```
-
-```json tab="500"
-{
-  "error": {
-    "code": "INTERNAL_ERROR",
-    "message": "An internal error occurred"
-  },
-  "meta": {
-    "requestId": "req_example"
-  }
-}
-```
-
-```json tab="502"
-{
-  "error": {
-    "code": "SOLANA_RPC_ERROR",
-    "message": "Error communicating with Solana RPC"
-  },
-  "meta": {
-    "requestId": "req_example"
-  }
-}
-```
-
----
-
 ### Collect recurring payment
 Source: https://platform.solana.com/docs/reference/api/payments/collect-payment-recurring-payment
 
@@ -19541,6 +19619,213 @@ r = requests.post("https://api.solana.com/v1/payments/recurring-payments/prp_exa
 ```
 
 ---
+
+## Payments: Payment requests
+
+### Cancel payment request
+Source: https://platform.solana.com/docs/reference/api/payments/cancel-payment-request
+
+> Cancels an open payment request, so its payment link stops building and sponsoring transactions.
+
+`POST /v1/payments/requests/{paymentRequestId}/cancel`
+
+Requires `payment_requests.manage`. Canceling a request that is already canceled returns it unchanged. A paid or expired request returns 409, and so does one whose fee-sponsored transaction can still land: retry once that transaction's blockhash expires. A payer who signed before the cancel can still land the payment; SDP records it as paid, with `paidLate` set when it landed after the cancel.
+
+Requires an [API key](/docs/developing-with-sdp/authentication) with the `payment_requests.manage` action.
+
+## Path parameters
+
+- **`paymentRequestId`** · `string` · required · min length 1 · example `preq_example`
+
+  SDP payment request ID.
+
+## Headers
+
+- **`x-project-id`** · `string` · min length 1 · example `prj_example`
+
+  Selects the active project for this request. Required for Clerk (dashboard) callers. Ignored when authenticating with an API key, whose scope is fixed to the key's project.
+
+- **`Idempotency-Key`** · `string` · pattern `^[\x20-\x7e]{1,255}$` · example `idempotency_example_12345`
+
+  Optional, and honored when sent. 1-255 printable ASCII characters; send a UUID per logical operation and reuse it on every retry. Within 24 hours, a retry with the same key and the same request returns the stored status and body with the response header `Idempotent-Replayed: true`. Keys are scoped to the credential: within 24 hours, the same key with a different request, or from a different credential, returns 422 `IDEMPOTENCY_KEY_REUSED`; after that, the same key from a different credential runs as a new request. A rotated API key is a new credential, so after any rotation read the resource with GET to see whether the original request ran, and never resend a money request under the new credential without checking first. A key whose original request is still running returns 409 `IDEMPOTENCY_KEY_IN_FLIGHT` with `Retry-After`. A 400, 401, 403, 409 or 429 refusal is not stored, so the same key runs again once the cause is fixed. Access is checked before the key on every request, so a refused request never claims the key, and a credential that has since lost access to the named resource gets 403 instead of the stored response. A replay is a snapshot of the original response: read the current state with GET instead of sending the request again. If the original request never recorded its outcome (it crashed), a same-key retry gets 409 `IDEMPOTENCY_KEY_IN_FLIGHT` until 15 minutes plus the route's lease have passed since the original was sent (about 16 minutes, or about 20 for transfer batches), then 409 `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN` with no `Retry-After`, as does every later retry with that key: read the resource with GET to see whether it ran, then send again with a new key. After a 5xx, a retry with the same key runs again and answers from the original record instead of acting twice; that answer also carries `Idempotent-Replayed: true`.
+
+## Responses
+
+- **`200`** Payment request canceled
+- **`400`** Bad Request
+- **`401`** Unauthorized
+- **`403`** Forbidden. Requires the `payment_requests.manage` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
+- **`404`** Not Found
+- **`409`** Conflict
+- **`422`** Unprocessable Entity
+- **`500`** Internal Server Error
+- **`502`** Bad Gateway
+
+## Example request
+
+```bash tab="cURL"
+curl -X POST 'https://api.solana.com/v1/payments/requests/preq_example/cancel' \
+  -H "Authorization: Bearer $SDP_API_KEY" \
+  -H "Idempotency-Key: $(uuidgen)"
+```
+
+```ts tab="TypeScript"
+const res = await fetch("https://api.solana.com/v1/payments/requests/preq_example/cancel", {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`,
+    "Idempotency-Key": crypto.randomUUID()
+  }
+});
+```
+
+```python tab="Python"
+import os, requests, uuid
+
+r = requests.post("https://api.solana.com/v1/payments/requests/preq_example/cancel",
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())})
+```
+
+## Example responses
+
+```json tab="200"
+{
+  "data": {
+    "id": "preq_example",
+    "organizationId": "organization_example",
+    "projectId": "project_example",
+    "walletId": "wallet_example",
+    "destinationAddress": "So11111111111111111111111111111111111111112",
+    "token": "example",
+    "amount": "100.00",
+    "reference": "So11111111111111111111111111111111111111112",
+    "status": "canceled",
+    "expiresAt": "2025-01-01T00:00:00.000Z",
+    "fulfilledByTransferId": "fulfilledbytransfer_example",
+    "paidLate": false,
+    "lastCheckedAt": "2025-01-01T00:00:00.000Z",
+    "canceledByApiKeyId": "canceledbyapikey_example",
+    "canceledByUserId": "canceledbyuser_example",
+    "canceledAt": "2025-01-01T00:00:00.000Z",
+    "lifecycle": [
+      {
+        "status": "canceled",
+        "at": "2025-01-01T00:00:00.000Z"
+      }
+    ],
+    "createdBy": "example",
+    "createdAt": "2025-01-01T00:00:00.000Z",
+    "updatedAt": "2025-01-01T00:00:00.000Z"
+  },
+  "meta": {
+    "requestId": "req_example",
+    "timestamp": "2025-01-01T00:00:00.000Z"
+  }
+}
+```
+
+```json tab="400"
+{
+  "error": {
+    "code": "BAD_REQUEST",
+    "message": "Invalid request"
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+```json tab="401"
+{
+  "error": {
+    "code": "UNAUTHORIZED",
+    "message": "Authentication required"
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+```json tab="403"
+{
+  "error": {
+    "code": "INSUFFICIENT_PERMISSIONS",
+    "message": "Missing action: payment_requests.manage",
+    "details": {
+      "action": "payment_requests.manage"
+    }
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+```json tab="404"
+{
+  "error": {
+    "code": "NOT_FOUND",
+    "message": "Resource not found"
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+```json tab="409"
+{
+  "error": {
+    "code": "CONFLICT",
+    "message": "Resource already exists"
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+```json tab="422"
+{
+  "error": {
+    "code": "IDEMPOTENCY_KEY_REUSED",
+    "message": "This Idempotency-Key was already used for a different request"
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+```json tab="500"
+{
+  "error": {
+    "code": "INTERNAL_ERROR",
+    "message": "An internal error occurred"
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+```json tab="502"
+{
+  "error": {
+    "code": "SOLANA_RPC_ERROR",
+    "message": "Error communicating with Solana RPC"
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+---
+
+## Payments: Subscription plans
 
 ### Create subscription plan
 Source: https://platform.solana.com/docs/reference/api/payments/create-payment-subscription-plan
@@ -20533,6 +20818,8 @@ r = requests.patch("https://api.solana.com/v1/payments/subscription-plans/psp_ex
 ```
 
 ---
+
+## Payments: Subscriptions
 
 ### Create subscription
 Source: https://platform.solana.com/docs/reference/api/payments/create-payment-subscription
@@ -21959,6 +22246,8 @@ r = requests.get("https://api.solana.com/v1/payments/subscriptions/psub_example/
 
 ---
 
+## Payments: Ramps
+
 ### List on-ramp currency support
 Source: https://platform.solana.com/docs/reference/api/payments/list-payment-onramp-currencies
 
@@ -22705,188 +22994,6 @@ r = requests.post("https://api.solana.com/v1/payments/ramps/sandbox/simulate",
 
 ---
 
-### List transactions
-Source: https://platform.solana.com/docs/reference/api/payments/list-unified-transactions
-
-> Lists the project's transactions across SDP modules with stable cursor pagination.
-
-`GET /v1/transactions`
-
-Requires `transactions.read`. Every row also needs the `read` action of the module it comes from (which its `manage` or `execute` includes): a Payments row needs `transfers.read` for a transfer or deposit, `transfer_batches.read` for a batch item, `recurring.read` for a recurring collection, `payment_requests.read` for a payment request's fulfilment, and `onramp.read` or `offramp.read` for a ramp transfer; every other module's rows need that module's `read`. Rows the caller cannot read are left out. Requesting a module, or a Payments `kind`, without its action returns 403 INSUFFICIENT_PERMISSIONS naming it. `search` matches transaction id, module id, or signature as a prefix, not a substring. The endpoint is metered (60/min per credential, 240/min per organization); exceeding the quota returns 429, and 503 indicates the quota backend was unavailable.
-
-Requires an [API key](/docs/developing-with-sdp/authentication) with the `transactions.read` action.
-
-## Query parameters
-
-- **`module`** · `string` · one of `payments`, `dvp`, `private_channels`, `issuance`, `rings`
-
-- **`kind`** · `string`
-
-- **`status`** · `string` · one of `pending`, `succeeded`, `failed`, `canceled`
-
-- **`custodyWalletId`** · `string` · max length 128
-
-- **`counterpartyId`** · `string` · max length 128
-
-- **`token`** · `string` · max length 128
-
-- **`search`** · `string` · min length 3 · max length 200
-
-  Prefix match against transaction id, module id, or signature — not a substring search.
-
-- **`createdAtFrom`** · `string` · format `date-time`
-
-- **`createdAtTo`** · `string` · format `date-time`
-
-- **`cursor`** · `string`
-
-- **`limit`** · `integer` · min 1 · max 100 · default `50`
-
-## Headers
-
-- **`x-project-id`** · `string` · min length 1 · example `prj_example`
-
-  Selects the active project for this request. Required for Clerk (dashboard) callers. Ignored when authenticating with an API key, whose scope is fixed to the key's project.
-
-## Responses
-
-- **`200`** Unified transactions
-- **`400`** Bad Request
-- **`401`** Unauthorized
-- **`403`** Forbidden. Requires the `transactions.read` action: an API key must hold it (a module's `manage` or `execute` also covers its `read`), and a signed-in member's organization role must include it. Without it the error is INSUFFICIENT_PERMISSIONS and `error.details.action` names the action. Any other 403 names its own reason.
-- **`429`** Too Many Requests
-- **`500`** Internal Server Error
-- **`503`** Service Unavailable
-
-## Example request
-
-```bash tab="cURL"
-curl 'https://api.solana.com/v1/transactions' \
-  -H "Authorization: Bearer $SDP_API_KEY"
-```
-
-```ts tab="TypeScript"
-const res = await fetch("https://api.solana.com/v1/transactions", {
-  method: "GET",
-  headers: {
-    Authorization: `Bearer ${process.env.SDP_API_KEY}`
-  }
-});
-```
-
-```python tab="Python"
-import os, requests
-
-r = requests.get("https://api.solana.com/v1/transactions",
-  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
-```
-
-## Example responses
-
-```json tab="200"
-{
-  "data": {
-    "transactions": [
-      {
-        "id": "_example",
-        "moduleId": "module_example",
-        "status": "pending",
-        "organizationId": "organization_example",
-        "projectId": "project_example",
-        "custodyWalletId": "custodywallet_example",
-        "custodyWalletLabel": "example",
-        "token": "example",
-        "amount": "example",
-        "counterpartyId": "counterparty_example",
-        "signature": "example",
-        "createdAt": "example",
-        "module": "payments",
-        "kind": "pay",
-        "moduleStatus": "pending"
-      }
-    ],
-    "nextCursor": "example"
-  }
-}
-```
-
-```json tab="400"
-{
-  "error": {
-    "code": "BAD_REQUEST",
-    "message": "Invalid request"
-  },
-  "meta": {
-    "requestId": "req_example"
-  }
-}
-```
-
-```json tab="401"
-{
-  "error": {
-    "code": "UNAUTHORIZED",
-    "message": "Authentication required"
-  },
-  "meta": {
-    "requestId": "req_example"
-  }
-}
-```
-
-```json tab="403"
-{
-  "error": {
-    "code": "INSUFFICIENT_PERMISSIONS",
-    "message": "Missing action: transactions.read",
-    "details": {
-      "action": "transactions.read"
-    }
-  },
-  "meta": {
-    "requestId": "req_example"
-  }
-}
-```
-
-```json tab="429"
-{
-  "error": {
-    "code": "RATE_LIMITED",
-    "message": "Too many requests"
-  },
-  "meta": {
-    "requestId": "req_example"
-  }
-}
-```
-
-```json tab="500"
-{
-  "error": {
-    "code": "INTERNAL_ERROR",
-    "message": "An internal error occurred"
-  },
-  "meta": {
-    "requestId": "req_example"
-  }
-}
-```
-
-```json tab="503"
-{
-  "error": {
-    "code": "SERVICE_UNAVAILABLE",
-    "message": "Service temporarily unavailable"
-  },
-  "meta": {
-    "requestId": "req_example"
-  }
-}
-```
-
----
-
 ## Compliance
 
 ### Compliance
@@ -23102,6 +23209,8 @@ Source: https://platform.solana.com/docs/reference/api/counterparties
 
 > Counterparty (customer/beneficiary) identity records.
 
+## Counterparties
+
 | Method | Endpoint | Summary |
 | --- | --- | --- |
 | `GET` | `/v1/counterparties/metadata` | [Get counterparty field options](/docs/reference/api/counterparties/get-counterparty-field-options.md) |
@@ -23111,6 +23220,11 @@ Source: https://platform.solana.com/docs/reference/api/counterparties
 | `PATCH` | `/v1/counterparties/{counterpartyId}` | [Update counterparty](/docs/reference/api/counterparties/update-counterparty.md) |
 | `DELETE` | `/v1/counterparties/{counterpartyId}` | [Archive counterparty](/docs/reference/api/counterparties/archive-counterparty.md) |
 | `GET` | `/v1/counterparties/{counterpartyId}/requirements` | [Get counterparty ramp requirements](/docs/reference/api/counterparties/get-counterparty-requirements.md) |
+
+## Accounts
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
 | `GET` | `/v1/counterparties/{counterpartyId}/accounts` | [List counterparty accounts](/docs/reference/api/counterparties/list-counterparty-accounts.md) |
 | `POST` | `/v1/counterparties/{counterpartyId}/accounts` | [Create counterparty account](/docs/reference/api/counterparties/create-counterparty-account.md) |
 | `GET` | `/v1/counterparties/{counterpartyId}/provider-accounts` | [List counterparty provider accounts](/docs/reference/api/counterparties/list-counterparty-provider-accounts.md) |
@@ -23119,6 +23233,8 @@ Source: https://platform.solana.com/docs/reference/api/counterparties
 | `DELETE` | `/v1/counterparties/{counterpartyId}/accounts/{counterpartyAccountId}` | [Archive counterparty account](/docs/reference/api/counterparties/archive-counterparty-account.md) |
 
 ---
+
+## Counterparties: Counterparties
 
 ### Get counterparty field options
 Source: https://platform.solana.com/docs/reference/api/counterparties/get-counterparty-field-options
@@ -24087,7 +24203,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `counte
 
   - **string** · one of `moonpay`, `stripe`
 
-  - **string** · one of `moonpay`
+  - **string** · always `moonpay`
 
 - **`direction`** · `string` · required · one of `onramp`, `offramp` · example `onramp`
 
@@ -24224,6 +24340,8 @@ r = requests.get("https://api.solana.com/v1/counterparties/cpty_example/requirem
 
 ---
 
+## Counterparties: Accounts
+
 ### List counterparty accounts
 Source: https://platform.solana.com/docs/reference/api/counterparties/list-counterparty-accounts
 
@@ -24255,7 +24373,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `counte
 
   Include archived counterparty accounts in results.
 
-- **`accountKind`** · `string` · one of `crypto_wallet` · example `crypto_wallet`
+- **`accountKind`** · `string` · always `crypto_wallet` · example `crypto_wallet`
 
   Filter accounts by account kind.
 
@@ -24429,7 +24547,7 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `counte
 
 Create counterparty account request body.
 
-- **`accountKind`** · `string` · required · one of `crypto_wallet` · example `crypto_wallet`
+- **`accountKind`** · `string` · required · always `crypto_wallet` · example `crypto_wallet`
 
   Counterparty account kind.
 
@@ -25758,7 +25876,7 @@ Create token + asset profile request body: the token-create fields plus the asse
 
       Any of:
 
-      - **boolean** · one of `false`
+      - **boolean** · always `false`
 
       - **object**
 
@@ -25784,7 +25902,7 @@ Create token + asset profile request body: the token-create fields plus the asse
 
       Any of:
 
-      - **boolean** · one of `false`
+      - **boolean** · always `false`
 
       - **object**
 
@@ -25802,7 +25920,7 @@ Create token + asset profile request body: the token-create fields plus the asse
 
       Any of:
 
-      - **boolean** · one of `false`
+      - **boolean** · always `false`
 
       - **string**
 
@@ -25812,7 +25930,7 @@ Create token + asset profile request body: the token-create fields plus the asse
 
       Any of:
 
-      - **boolean** · one of `false`
+      - **boolean** · always `false`
 
       - **object**
 
@@ -25834,7 +25952,7 @@ Create token + asset profile request body: the token-create fields plus the asse
 
       Any of:
 
-      - **boolean** · one of `false`
+      - **boolean** · always `false`
 
       - **object**
 
@@ -25860,7 +25978,7 @@ Create token + asset profile request body: the token-create fields plus the asse
 
       Any of:
 
-      - **boolean** · one of `false`
+      - **boolean** · always `false`
 
       - **object**
 

@@ -138,7 +138,8 @@ function schemaFacts(schema: ApiSchema): string[] {
   if (schema.format !== null) facts.push(`format ${codeSpan(schema.format)}`);
   facts.push(...schema.constraints.map(constraintText));
   if (schema.enum !== null) {
-    facts.push(`one of ${schema.enum.map((value) => codeSpan(String(value))).join(", ")}`);
+    const values = schema.enum.map((value) => codeSpan(String(value)));
+    facts.push(values.length === 1 ? `always ${values[0]}` : `one of ${values.join(", ")}`);
   }
   const defaultValue = schema.default === undefined ? null : scalarCode(schema.default);
   if (defaultValue !== null) facts.push(`default ${defaultValue}`);
@@ -369,8 +370,31 @@ export function tableCell(markdown: string): string {
   return markdown.replace(/(?<!\\)((?:\\\\)*)\|/g, "$1\\|");
 }
 
+/** Some of a family's operations: one of its groups, or all of them when it has none. */
+export type OperationGroup = {
+  /** The group's name (`x-sdp-group`), or null for a family with fewer than two groups. */
+  title: string | null;
+  operations: ApiOperation[];
+};
+
 /**
- * A family's page: a table of its operations, each row linking to the operation's page.
+ * A family's operations by the group each names, groups in the order the family first names
+ * them, operations in document order. A family naming fewer than two groups is one untitled
+ * group, shown flat. The family's table and its folders both lay out from this.
+ */
+export function operationGroups(family: ApiFamily): OperationGroup[] {
+  const byTitle = new Map<string, ApiOperation[]>();
+  for (const operation of family.operations) {
+    if (operation.group === null) return [{ title: null, operations: family.operations }];
+    byTitle.set(operation.group, [...(byTitle.get(operation.group) ?? []), operation]);
+  }
+  if (byTitle.size < 2) return [{ title: null, operations: family.operations }];
+  return [...byTitle].map(([title, operations]) => ({ title, operations }));
+}
+
+/**
+ * A family's page: a table of its operations, each row linking to the operation's page, under a
+ * heading per group when it has groups.
  *
  * @param family - The family.
  * @param href - The URL of an operation's page.
@@ -379,21 +403,26 @@ export function renderFamilyIndex(
   family: ApiFamily,
   href: (operation: ApiOperation) => string
 ): string {
-  const rows = family.operations.map(
-    (operation) =>
-      `| ${codeSpan(operation.method)} | ${codeSpan(operation.path)} | [${tableCell(mdxText(operation.summary))}](${href(operation)}) |`
+  const tables = operationGroups(family).map(({ title, operations }) =>
+    [
+      ...(title === null ? [] : [`## ${mdxText(title)}`, ""]),
+      // biome-ignore lint/security/noSecrets: an MDX component tag, not a secret.
+      "<ApiOperationTable>",
+      "",
+      "| Method | Endpoint | Summary |",
+      "| --- | --- | --- |",
+      ...operations.map(
+        (operation) =>
+          `| ${codeSpan(operation.method)} | ${codeSpan(operation.path)} | [${tableCell(mdxText(operation.summary))}](${href(operation)}) |`
+      ),
+      "",
+      "</ApiOperationTable>",
+    ].join("\n")
   );
   return [
     frontmatter({ title: family.name, description: family.description }),
     "",
-    // biome-ignore lint/security/noSecrets: an MDX component tag, not a secret.
-    "<ApiOperationTable>",
-    "",
-    "| Method | Endpoint | Summary |",
-    "| --- | --- | --- |",
-    ...rows,
-    "",
-    "</ApiOperationTable>",
+    tables.join("\n\n"),
     "",
   ].join("\n");
 }

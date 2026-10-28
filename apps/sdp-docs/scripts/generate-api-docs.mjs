@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { apiReferenceSchema } from "@sdp/api-catalog/reference";
 import {
+  operationGroups,
   renderFamilyIndex,
   renderOperationPage,
   SAMPLE_TAB_MARKERS,
@@ -49,11 +50,10 @@ title: API Reference
 description: Endpoint index from the repository OpenAPI spec.
 ---
 
-<div>
+<ActionLinks>
   <a href="${POSTMAN_COLLECTION_ROUTE}" download>Download Postman collection</a>
-  {" · "}
   <a href="${POSTMAN_COLLECTION_ROUTE}">Open raw JSON</a>
-</div>
+</ActionLinks>
 
 ${links}
 `;
@@ -69,6 +69,25 @@ const ALWAYS_PUBLIC_TAG_SLUGS = ["health", "wallets", "projects"];
 /** An operation's page, beside its family's table: `/docs/reference/api/<family>/<endpointId>`. */
 const operationHref = (familySlug, operation) =>
   `/docs/reference/api/${familySlug}/${operation.endpointId}`;
+
+/**
+ * Where a family's operation pages sit in its folder: each group's in a `(group)` folder, which
+ * Fumadocs shows in the sidebar but leaves out of the pages' URLs, or all of them in the
+ * family's folder when it has no groups.
+ */
+const familyLayout = (family) => {
+  const groups = operationGroups(family).map((group) => {
+    if (group.title === null) return { ...group, folder: "" };
+    const slug = slugify(group.title);
+    if (slug === "") throw new Error(`${family.name}'s group "${group.title}" has no slug`);
+    return { ...group, folder: `(${slug})` };
+  });
+  const folders = groups.map((group) => group.folder);
+  if (new Set(folders).size !== folders.length) {
+    throw new Error(`${family.name} has two groups in one folder: ${folders.join(", ")}`);
+  }
+  return groups;
+};
 
 /**
  * Every family's table links each of its operations, and every operation has its page with the
@@ -92,10 +111,15 @@ const validateGeneratedTagPages = async ({ outputDir, families }) => {
           slug,
           table: source,
         })),
-        ...family.operations.map((operation) =>
-          fs
-            .readFile(path.join(outputDir, slug, `${operation.endpointId}.mdx`), "utf8")
-            .then((source) => ({ family, operation, source }))
+        ...familyLayout(family).flatMap((group) =>
+          group.operations.map((operation) =>
+            fs
+              .readFile(
+                path.join(outputDir, slug, group.folder, `${operation.endpointId}.mdx`),
+                "utf8"
+              )
+              .then((source) => ({ family, operation, source }))
+          )
         ),
       ];
     })
@@ -143,13 +167,18 @@ const run = async () => {
   if (index !== undefined) {
     throw new Error(`The ${index.title} family's folder would replace the API reference index`);
   }
-  // A folder per family: its table as the folder's index, then a page per operation, which the
-  // folder's meta.json lists in document order for the sidebar and the previous and next links.
+  // A folder per family: its table as the folder's index, then a page per operation, in its
+  // group's folder when the family has groups. Each meta.json lists its pages (or the family's
+  // its groups) in document order for the sidebar and the previous and next links.
   await Promise.all(
     families.map(async (family, position) => {
       const { slug } = tagPages[position];
       const familyDir = path.join(outputDir, slug);
-      await fs.mkdir(familyDir, { recursive: true });
+      const groups = familyLayout(family);
+      await Promise.all(
+        groups.map((group) => fs.mkdir(path.join(familyDir, group.folder), { recursive: true }))
+      );
+      const endpointIds = (group) => group.operations.map((operation) => operation.endpointId);
       await Promise.all([
         fs.writeFile(
           path.join(familyDir, "index.mdx"),
@@ -158,15 +187,27 @@ const run = async () => {
         ),
         writeJson(path.join(familyDir, "meta.json"), {
           title: family.name,
-          pages: family.operations.map((operation) => operation.endpointId),
+          pages: groups.flatMap((group) =>
+            group.title === null ? endpointIds(group) : [group.folder]
+          ),
         }),
-        ...family.operations.map((operation) =>
-          fs.writeFile(
-            path.join(familyDir, `${operation.endpointId}.mdx`),
-            renderOperationPage(operation),
-            "utf8"
-          )
-        ),
+        ...groups.flatMap((group) => [
+          ...(group.title === null
+            ? []
+            : [
+                writeJson(path.join(familyDir, group.folder, "meta.json"), {
+                  title: group.title,
+                  pages: endpointIds(group),
+                }),
+              ]),
+          ...group.operations.map((operation) =>
+            fs.writeFile(
+              path.join(familyDir, group.folder, `${operation.endpointId}.mdx`),
+              renderOperationPage(operation),
+              "utf8"
+            )
+          ),
+        ]),
       ]);
     })
   );

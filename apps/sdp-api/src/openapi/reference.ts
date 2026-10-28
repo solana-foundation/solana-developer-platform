@@ -35,6 +35,7 @@ import {
   sampleFromSchema,
   toEndpointId,
 } from "@/openapi/document-reader";
+import { DOCS_GROUP } from "@/openapi/paths/helpers";
 import routeActionsJson from "@/openapi/route-actions.generated.json";
 import { routeActionKey } from "@/routes/route-actions";
 import { routeOwnerOf } from "@/routes/route-modules";
@@ -475,6 +476,16 @@ function authOf(
   return "apiKey";
 }
 
+/** The group an operation names within its tag (`DOCS_GROUP`), or null when it names none. */
+function docsGroupOf(operation: OperationObject, where: string): string | null {
+  const group: unknown = operation[DOCS_GROUP];
+  if (group === undefined) return null;
+  if (typeof group !== "string" || group.trim() === "") {
+    throw new Error(`${where}: ${DOCS_GROUP} must name a group`);
+  }
+  return group;
+}
+
 function toApiOperation(
   path: string,
   method: HttpMethod,
@@ -508,6 +519,7 @@ function toApiOperation(
     action,
     auth: authOf(operation.security, document, where),
     summary,
+    group: docsGroupOf(operation, where),
     description: operation.description ?? null,
     deprecated: operation.deprecated === true,
     parameters: parameters
@@ -548,6 +560,12 @@ export function buildApiReference(document: OpenAPIObject): ApiReference {
     const operations = operationsByTag.get(tag.name);
     if (operations === undefined) return [];
     if (tag.description === undefined) throw new Error(`Tag ${tag.name} has no description`);
+    const grouped = operations.filter((operation) => operation.group !== null).length;
+    if (grouped !== 0 && grouped !== operations.length) {
+      throw new Error(
+        `${tag.name}: ${grouped} of ${operations.length} operations name a ${DOCS_GROUP}; name one on each or none`
+      );
+    }
     return [{ name: tag.name, description: tag.description, operations }];
   });
   return { families };

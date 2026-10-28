@@ -155,6 +155,11 @@ export const apiOperationSchema = z.object({
   /** How the route authenticates, which is how its samples do. */
   auth: z.enum(SNIPPET_AUTH_MODES),
   summary: z.string().min(1),
+  /**
+   * The group the operation sits in within its family (the document's `x-sdp-group`), or null
+   * for a family that groups none. A family's operations name one each or none.
+   */
+  group: z.string().min(1).nullable(),
   description: z.string().nullable(),
   deprecated: z.boolean(),
   parameters: z.array(apiParameterSchema),

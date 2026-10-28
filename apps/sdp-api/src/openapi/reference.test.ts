@@ -6,6 +6,7 @@ import type { OpenAPIObject } from "openapi3-ts/oas30";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { AppError, type ErrorCode, isErrorCode } from "@/lib/errors";
+import { DOCS_GROUP } from "./paths/helpers";
 import { buildApiReference, exampleErrorCode } from "./reference";
 import { createPublicOpenApiDocument } from "./spec";
 
@@ -170,6 +171,38 @@ describe("buildApiReference", () => {
   it("fails the build on an operation with no operationId", () => {
     expect(() => buildApiReference(documentWith({ summary: "Health" }))).toThrow(
       "needs an operationId and a summary"
+    );
+  });
+
+  it("carries each operation's docs group, and fails a family that groups only some", () => {
+    const healthChecks = (live: string | undefined, ready: string | undefined): OpenAPIObject => {
+      const operation = (operationId: string, group: string | undefined) => ({
+        tags: ["Health"],
+        operationId,
+        summary: "Check",
+        responses: { "200": { description: "OK" } },
+        ...(group === undefined ? {} : { [DOCS_GROUP]: group }),
+      });
+      return {
+        openapi: "3.0.3",
+        info: { title: "Test", version: "0" },
+        tags: [{ name: "Health", description: "Health checks." }],
+        paths: {
+          "/health": { get: operation("live", live) },
+          "/health/ready": { get: operation("ready", ready) },
+        },
+      };
+    };
+    const [family] = buildApiReference(healthChecks("Liveness", "Readiness")).families;
+    expect(family?.operations.map((operation) => operation.group)).toEqual([
+      "Liveness",
+      "Readiness",
+    ]);
+    expect(() => buildApiReference(healthChecks("Liveness", undefined))).toThrow(
+      `Health: 1 of 2 operations name a ${DOCS_GROUP}`
+    );
+    expect(() => buildApiReference(healthChecks("", ""))).toThrow(
+      `${DOCS_GROUP} must name a group`
     );
   });
 });

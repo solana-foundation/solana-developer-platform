@@ -142,20 +142,30 @@ function isElementName(name: string | null): name is ElementName {
 }
 
 /**
- * Wrappers the reference lays its Markdown out with: `<ApiOperationTable>` holds a family's table
- * of operations. On the page each row links to its operation's page; in Markdown the wrapper
- * goes and each link points at that page's `.md`, so an agent reading a family reads on in
- * Markdown.
+ * Wrappers a page lays its Markdown out with. In Markdown each one goes and its content stays.
+ * `<ApiOperationTable>` holds a family's table of operations: on the page each row links to its
+ * operation's page, and in Markdown to that page's `.md`, so an agent reading a family reads on
+ * in Markdown. The others only lay a page out: `<ActionLinks>` sets its links as chips.
  */
-const WRAPPERS: ReadonlySet<string> = new Set(["ApiOperationTable"]);
+const WRAPPERS = {
+  ApiOperationTable: "links",
+  ActionLinks: "layout",
+} as const satisfies Record<string, "links" | "layout">;
 
-/** The wrapper element a node is, or undefined for any other node. */
-function wrapperOf(node: RootContent, where: string) {
-  if (node.type !== "mdxJsxFlowElement" || node.name === null || !WRAPPERS.has(node.name)) {
-    return undefined;
-  }
+type Wrapper = {
+  element: Extract<RootContent, { type: "mdxJsxFlowElement" }>;
+  kind: (typeof WRAPPERS)[keyof typeof WRAPPERS];
+};
+
+function isWrapperName(name: string | null): name is keyof typeof WRAPPERS {
+  return name !== null && Object.hasOwn(WRAPPERS, name);
+}
+
+/** The wrapper a node is, with its kind, or undefined for any other node. */
+function wrapperOf(node: RootContent, where: string): Wrapper | undefined {
+  if (node.type !== "mdxJsxFlowElement" || !isWrapperName(node.name)) return undefined;
   if (node.attributes.length > 0) throw new Error(`${where}: <${node.name}> takes no attributes`);
-  return node;
+  return { element: node, kind: WRAPPERS[node.name] };
 }
 
 /** Every link inside a node, however deep. */
@@ -164,33 +174,37 @@ function linksIn(node: RootContent): Extract<RootContent, { type: "link" }>[] {
   return "children" in node ? node.children.flatMap(linksIn) : [];
 }
 
-/** A wrapper's Markdown, as edits to its source: its tags go, and each link inside gains `.md`. */
+/**
+ * A wrapper's Markdown, as edits to its source: its tags go, and in a `links` wrapper each link
+ * gains `.md`. The caller walks its content like the page's own.
+ */
 function unwrap(
-  wrapper: Extract<RootContent, { type: "mdxJsxFlowElement" }>,
+  { element, kind }: Wrapper,
   source: string,
   where: string
 ): { start: number; end: number; markdown: string }[] {
-  const span = spanOf(wrapper, where);
-  const [first] = wrapper.children;
-  const last = wrapper.children.at(-1);
+  const span = spanOf(element, where);
+  const [first] = element.children;
+  const last = element.children.at(-1);
   if (first === undefined || last === undefined) {
-    throw new Error(`${where}: <${wrapper.name}> holds nothing`);
+    throw new Error(`${where}: <${element.name}> holds nothing`);
   }
-  const links = wrapper.children.flatMap(linksIn).map((link) => {
+  const tags = [
+    { start: span.start, end: spanOf(first, where).start, markdown: "" },
+    { start: spanOf(last, where).end, end: span.end, markdown: "" },
+  ];
+  if (kind === "layout") return tags;
+  const links = element.children.flatMap(linksIn).map((link) => {
     // Each row links an operation's page inline: `[Summary](/docs/...)`.
     const linkSpan = spanOf(link, where);
     const text = source.slice(linkSpan.start, linkSpan.end);
     const target = `](${link.url})`;
     if (!/^\/docs\/[^#?]+$/.test(link.url) || !text.endsWith(target)) {
-      throw new Error(`${where}: <${wrapper.name}> links ${text}, not a docs page inline`);
+      throw new Error(`${where}: <${element.name}> links ${text}, not a docs page inline`);
     }
     return { ...linkSpan, markdown: `${text.slice(0, -target.length)}](${link.url}.md)` };
   });
-  return [
-    { start: span.start, end: spanOf(first, where).start, markdown: "" },
-    ...links,
-    { start: spanOf(last, where).end, end: span.end, markdown: "" },
-  ];
+  return [...tags, ...links];
 }
 
 /** A reference component's text, or undefined for any other node. */
@@ -224,6 +238,7 @@ export function remarkDocsBlocks(options: { surface?: PublicSurface } = {}) {
   const surface = options.surface ?? publicSurface;
   return (tree: Root, file: { path?: string }) => {
     const where = file.path ?? "MDX page";
+    const spacesFacts = REFERENCE_PAGE.test(where);
     const walk = (parent: Parent) => {
       parent.children = parent.children.flatMap((child) => {
         const block = blockOf(child, where);
@@ -234,12 +249,43 @@ export function remarkDocsBlocks(options: { surface?: PublicSurface } = {}) {
           child.data = { ...child.data, _stringify: { text: elementText } };
           return [child];
         }
+        if (spacesFacts && child.type === "text" && child.value.includes(FACT_SEPARATOR)) {
+          return spacedFacts(child.value);
+        }
         if ("children" in child) walk(child);
         return [child];
       });
     };
     walk(tree);
   };
+}
+
+/** What separates a field's facts on a generated reference page (scripts/lib/api-reference-page.ts). */
+const FACT_SEPARATOR = " · ";
+
+/** The generated API reference's pages. */
+const REFERENCE_PAGE = /[\\/]content[\\/]docs[\\/]reference[\\/]api[\\/]/;
+
+/**
+ * Text with its fact separators as spans, so the page can give the dots room (globals.css). The
+ * Markdown agents get keeps ` · `.
+ */
+function spacedFacts(value: string): RootContent[] {
+  return value.split(FACT_SEPARATOR).flatMap((part, index): RootContent[] => {
+    const text: RootContent[] = part === "" ? [] : [{ type: "text", value: part }];
+    if (index === 0) return text;
+    return [
+      { type: "text", value: " " },
+      {
+        type: "mdxJsxTextElement",
+        name: "span",
+        attributes: [{ type: "mdxJsxAttribute", name: "className", value: "launch-api-separator" }],
+        children: [{ type: "text", value: "·" }],
+      },
+      { type: "text", value: " " },
+      ...text,
+    ];
+  });
 }
 
 /**
@@ -288,7 +334,9 @@ export function expandDocsBlocks(
       } else if (elementText !== undefined) {
         blocks.push({ ...spanOf(child, where), markdown: `\`${elementText}\`` });
       } else if (wrapper !== undefined) {
+        // Its content is the page's own Markdown, with its own components and wrappers.
         blocks.push(...unwrap(wrapper, source, where));
+        walk(wrapper.element);
       } else if ("children" in child) {
         walk(child);
       }
