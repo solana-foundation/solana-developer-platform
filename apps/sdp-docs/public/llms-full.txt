@@ -5197,7 +5197,7 @@ Every route follows the same rules, so learn them once:
 - [Rate limits](/docs/reference/conventions/rate-limits): each API key gets a set number of requests per minute.
 - [Versioning](/docs/reference/conventions/versioning): the version is in the path, and a breaking change gets a new one.
 
-A successful response wraps its payload in `data`, with `meta.requestId` beside it. Quote the request ID when you report a problem.
+A successful response wraps its payload in `data`, with `meta.requestId` beside it; the health checks answer with their own bodies. Quote the request ID when you report a problem.
 
 ---
 
@@ -5206,7 +5206,7 @@ Source: https://platform.solana.com/docs/reference/conventions/errors
 
 > A failed request returns an HTTP error status and one error envelope, with a code to branch on.
 
-A failed request returns an error status and this body:
+A failed request returns an error status and this body. The health checks are the exception: each answers with its own body, as its page shows.
 
 ```json
 {
@@ -5243,7 +5243,10 @@ Each operation's page lists the statuses it can return, with an example body for
 
 - `400`, `401`, `403`, `404` and `422`: fix the request before you send it again.
 - `409 CONFLICT`: read the resource's current state, then decide.
-- `409 IDEMPOTENCY_KEY_IN_FLIGHT`, `429` and `5xx`: wait (for `Retry-After` when the response has one), then retry. Send a mutation's retry with the same `Idempotency-Key`; [Idempotency](/docs/developing-with-sdp/idempotency) covers what each retry returns.
+- `409 IDEMPOTENCY_KEY_IN_FLIGHT` and `429`: wait for `Retry-After`, then retry with the same `Idempotency-Key`.
+- `5xx`: most routes store the error and return it again to a same-key retry. Read the resource with `GET` to see whether the request took effect, then retry with a new key. On the routes that move money, a same-key retry runs again and never acts twice.
+
+[Idempotency](/docs/developing-with-sdp/idempotency) covers what each retry returns.
 
 ---
 
@@ -5276,7 +5279,7 @@ A few lists take a `limit` instead and return a `nextCursor` with each page. Sen
 ### Rate limits
 Source: https://platform.solana.com/docs/reference/conventions/rate-limits
 
-> Each API key gets a set number of requests per minute, by its tier, and responses say how many are left.
+> Each API key gets a set number of requests per minute, by its tier, and responses usually say how many are left.
 
 Requests count against a limit per minute. A request with an API key counts against that key's tier; keys start on `standard`. A request without a key counts against its IP address.
 
@@ -5287,7 +5290,7 @@ Requests count against a limit per minute. A request with an API key counts agai
 | An API key on the `unlimited` tier | 10,000 |
 | No API key, per IP address | 20 |
 
-Responses say where you stand:
+Responses usually say where you stand. The headers are left off while SDP's shared counter store is unavailable, so don't depend on them:
 
 | Header | Means |
 | --- | --- |
@@ -5302,9 +5305,9 @@ Past the limit, a request gets `429` with the code `RATE_LIMITED` and a `Retry-A
 ### Versioning
 Source: https://platform.solana.com/docs/reference/conventions/versioning
 
-> The API version is in every path. /v1 is current, and a breaking change ships under a new major version.
+> The API version is in every product route's path. /v1 is current, and a breaking change ships under a new major version.
 
-Every route's path starts with its version: `/v1` is the current contract. A breaking change ships under a new major version, such as `/v2`, never inside `/v1`.
+Every product route's path starts with its version: `/v1` is the current contract. A breaking change ships under a new major version, such as `/v2`, never inside `/v1`. The health checks, `/health` and `/health/ready`, have no version.
 
 The OpenAPI document's `info.version` counts revisions of that document for the current path version. It is not the API's version.
 

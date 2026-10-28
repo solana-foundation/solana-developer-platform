@@ -13,4 +13,4 @@ Every route follows the same rules, so learn them once:
 - [Rate limits](/docs/reference/conventions/rate-limits): each API key gets a set number of requests per minute.
 - [Versioning](/docs/reference/conventions/versioning): the version is in the path, and a breaking change gets a new one.
 
-A successful response wraps its payload in `data`, with `meta.requestId` beside it. Quote the request ID when you report a problem.
+A successful response wraps its payload in `data`, with `meta.requestId` beside it; the health checks answer with their own bodies. Quote the request ID when you report a problem.
