@@ -28,6 +28,7 @@ describe("payments exact wallet contract", () => {
     amount: "1",
   };
   const batch = {
+    externalId: "payroll-2026-05",
     sourceCustodyWalletId: "cwlt_source",
     token: USDC_MINT,
     recipients: [{ counterpartyAccountId: "cpa_test", amount: "1" }],
@@ -44,6 +45,10 @@ describe("payments exact wallet contract", () => {
     ).toBe(false);
 
     expect(createTransferBatchSchema.safeParse(batch).success).toBe(true);
+    // A batch must name its payout run (HOO-2335).
+    expect(createTransferBatchSchema.safeParse({ ...batch, externalId: undefined }).success).toBe(
+      false
+    );
     expect(
       createTransferBatchSchema.safeParse({
         ...batch,

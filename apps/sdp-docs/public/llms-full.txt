@@ -2693,7 +2693,7 @@ curl -X POST https://api.solana.com/v1/payments/transfer-batches \
 The two ids do different jobs:
 
 - **`Idempotency-Key`** (required) identifies this one request. Reuse it to retry that exact request after a timeout; recipient order does not change the request. Any unique value works, such as a UUID.
-- **`externalId`** (recommended) identifies the payout run. Derive it from your own data, such as the pay period, so every attempt at the run carries the same value; see [One batch per payout run](#one-batch-per-payout-run).
+- **`externalId`** (required) identifies the payout run. Derive it from your own data, such as the pay period, so every attempt at the run carries the same value; see [One batch per payout run](#one-batch-per-payout-run).
 
 Use `GET /v1/payments/transfer-batches/{batchId}` to inspect recipient and chunk outcomes.
 
@@ -2726,7 +2726,7 @@ if (response.ok) {
 }
 ```
 
-`externalId` is optional. A batch without one gets no such guard: only its `Idempotency-Key` stops a resend from paying the same recipients again. Send one for every payout run.
+`externalId` is required, and a batch without one is refused with `400`. It only protects you if every attempt at the run sends the same value, so derive it rather than generating it.
 
 ### Recovering from a partial failure
 

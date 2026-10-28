@@ -40,16 +40,26 @@ export const transferBatchOptionsSchema = z.object({
   preflight: z.boolean().optional(),
 });
 
-export const createTransferBatchSchema = z.strictObject({
+const transferBatchMovementSchema = z.strictObject({
   projectId: z.string().min(1).optional(),
-  externalId: z.string().min(1).max(256).optional(),
   sourceCustodyWalletId: z.string().min(1),
   token: paymentTokenSchema,
   recipients: z.array(transferBatchRecipientSchema).min(1).max(MAX_TRANSFER_BATCH_RECIPIENTS),
   options: transferBatchOptionsSchema.optional(),
 });
 
-export const estimateTransferBatchSchema = createTransferBatchSchema;
+/**
+ * A batch names its payout run (HOO-2335): the run key that keeps a resend
+ * under a new Idempotency-Key from paying anyone twice is derived from it.
+ */
+export const createTransferBatchSchema = transferBatchMovementSchema.extend({
+  externalId: z.string().min(1).max(256),
+});
+
+/** An estimate moves nothing, so it needs no run name; one sent is accepted. */
+export const estimateTransferBatchSchema = transferBatchMovementSchema.extend({
+  externalId: z.string().min(1).max(256).optional(),
+});
 
 /** A retry names its batch in the path and carries no body. */
 export const retryTransferBatchSchema = z.strictObject({});

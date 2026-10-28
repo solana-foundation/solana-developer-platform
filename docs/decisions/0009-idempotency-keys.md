@@ -126,15 +126,16 @@ answers; the pending-transfers job does the same for a batch over an hour old th
 Neither resumes or re-sends: a recipient with a transfer row is settled from that row as before.
 
 The key dedupes one request; a batch's `externalId` dedupes the payout run (HOO-2335, SDP-021
-SA-2). A batch that carries one is recorded under the run's key, derived from the project, source
+SA-2). A batch is recorded under its run's key, derived from the project, source
 wallet and `externalId`, instead of the credential-bound record key: the HTTP key step is
 unchanged, only the row's identity is. So `replayFromRecord` finds the run under any new key,
 before admission: the same request from the same credential is answered with the batch as it
 stands (never settled there, since its own request may still be running), and any other gets
 `409 TRANSFER_BATCH_RUN_EXISTS` with the batch's id, unstored. The batch key index (migration 0026) lets one of two
 concurrent sends win. No migration was needed: batches recorded before this keep their request
-keys, so earlier duplicate `externalId`s never collide. `externalId` is optional: a caller who
-omits it gets no server-side guard against paying a run twice beyond the key.
+keys, so earlier duplicate `externalId`s never collide. `externalId` is required on create (HOO-2335): every batch names its run, so no caller is left
+without the guard. It protects only callers who send the same value on every attempt at a run, which
+is why the docs say to derive it from the caller's own data and never generate it at random.
 
 A partial failure is finished with `POST /transfer-batches/:batchId/retry` (HOO-2343), not a resend.
 It sends only `failed` recipients, which were definitely not paid. Before it sends, it claims them

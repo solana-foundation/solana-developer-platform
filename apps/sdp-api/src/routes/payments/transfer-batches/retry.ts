@@ -25,19 +25,19 @@ import { buildTransferBatchResponse } from "./respond";
 import { prepareBatchChunks, runBatchChunks } from "./run";
 import { MAX_TRANSFER_BATCH_RECIPIENTS, transferBatchOptionsSchema } from "./schemas";
 import { solBatchMovement } from "./sol-movement";
-import type { CreateTransferBatchInput } from "./types";
+import type { TransferBatchMovementInput } from "./types";
 
 /** The batch a retry names, and the access check of everything it pays. */
 export interface AuthorizedBatchRetry extends AuthorizedBatchRequest {
   batch: PaymentTransferBatchRow;
 }
 
-/** The batch's recipients as a create body, for the shared access check and resolve. */
+/** The batch's recipients as a batch movement, for the shared access check and resolve. */
 function asBatchInput(
   batch: PaymentTransferBatchRow,
   sourceCustodyWalletId: string,
   recipients: PaymentTransferRecipientRow[]
-): CreateTransferBatchInput {
+): TransferBatchMovementInput {
   return {
     sourceCustodyWalletId,
     token: batch.token,
