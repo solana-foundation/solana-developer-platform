@@ -34,7 +34,7 @@ import { isDemoRampRail, railAsset } from "./demo-ramp-assets";
  */
 
 /** How long after its pay-in a ramp shows as settling before it completes. */
-export const DEMO_SETTLE_MS = 5_000;
+const DEMO_SETTLE_MS = 5_000;
 /** Recipients per transaction in a demo batch, as the API packs them. */
 export const DEMO_BATCH_RECIPIENTS_PER_TRANSACTION = 8;
 
@@ -270,12 +270,12 @@ function applyBatch(world: DemoWorld, op: DemoOpOf<"batch">): void {
 }
 
 /** Where the demo provider asks an off-ramp's crypto to be sent. */
-export function rampDepositAddress(rampId: string): string {
+function rampDepositAddress(rampId: string): string {
   return demoAddress(`ramp-deposit:${rampId}`);
 }
 
 /** How each provider hands a ramp over, and the prefix of the reference it gives it. */
-export const DEMO_RAMP_PROVIDERS: Record<
+const DEMO_RAMP_PROVIDERS: Record<
   RampProviderId,
   { deliveryMode: PaymentRampQuoteDeliveryMode; reference: string }
 > = {
@@ -284,7 +284,7 @@ export const DEMO_RAMP_PROVIDERS: Record<
 };
 
 /** The reference a provider shows for a demo quote. */
-export function rampReference(provider: RampProviderId, quoteId: string): string {
+function rampReference(provider: RampProviderId, quoteId: string): string {
   return `${DEMO_RAMP_PROVIDERS[provider].reference}-${quoteId.slice(-10).toUpperCase()}`;
 }
 

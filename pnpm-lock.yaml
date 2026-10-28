@@ -426,9 +426,6 @@ importers:
       qrcode:
         specifier: 1.5.4
         version: 1.5.4
-      radix-ui:
-        specifier: 1.6.7
-        version: 1.6.7(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       react:
         specifier: 19.3.0
         version: 19.3.0

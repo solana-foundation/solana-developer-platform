@@ -44,7 +44,7 @@ export interface RecurringPaymentCreateInput {
   counterpartiesResult: CounterpartiesResult;
 }
 
-export type RecurringPaymentCreateStepId = "payment" | "when" | "review";
+type RecurringPaymentCreateStepId = "payment" | "when" | "review";
 
 export type SchedulePreset = PaymentRecurringPaymentSchedulePreset;
 

@@ -27,7 +27,7 @@ import { setIdempotencyKeyScope } from "@/lib/idempotency-key-store";
 import { useDashboardPathname, useProjectId } from "@/lib/use-dashboard-project";
 import { shouldClearDashboardTabAfterPathnameChange } from "./dashboard-workspace-url-state";
 
-export type IssuanceWorkspaceTab = "tokens" | "playground";
+type IssuanceWorkspaceTab = "tokens" | "playground";
 
 type DashboardWorkspaceContextValue = {
   initialQuickStartStatus: import("@/lib/dashboard-quick-start").QuickStartStatus | null;

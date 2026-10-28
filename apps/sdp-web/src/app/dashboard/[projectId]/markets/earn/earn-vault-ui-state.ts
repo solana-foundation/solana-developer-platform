@@ -40,7 +40,7 @@ export function earnVaultWithdrawalUiState(
   return WITHDRAWAL_UI_STATE[status];
 }
 
-export function earnVaultPositionStatusDisplay(
+function earnVaultPositionStatusDisplay(
   status: EarnVaultPositionUiStatus,
   pendingLabel: string,
   activeLabel: string

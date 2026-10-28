@@ -44,7 +44,7 @@ export type RampWizardStep<TId extends string = string> = {
   title: string;
 };
 
-export interface RampQuotePayloadArgs {
+interface RampQuotePayloadArgs {
   fields: RampFields;
   selectedWallet: PaymentsDashboardWallet;
   provider: RampProviderId;
@@ -476,5 +476,3 @@ export function useRampWizard<TId extends string>(
     handleCounterpartyCreated,
   };
 }
-
-export type RampWizard = ReturnType<typeof useRampWizard>;

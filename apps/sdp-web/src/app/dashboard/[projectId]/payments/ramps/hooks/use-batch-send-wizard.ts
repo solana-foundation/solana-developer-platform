@@ -52,7 +52,7 @@ import type { RampWizardStep } from "./use-ramp-wizard";
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 export type BatchSendStepId = "RECIPIENTS" | "REVIEW";
 
-export function getBatchSendSteps(t: Translate): readonly RampWizardStep<BatchSendStepId>[] {
+function getBatchSendSteps(t: Translate): readonly RampWizardStep<BatchSendStepId>[] {
   return [
     // The rows form speaks for itself; the step header already says "Details".
     { id: "RECIPIENTS", label: t("DashboardPayments.onchainSend.details"), title: "" },
@@ -92,7 +92,7 @@ export interface BatchRecipientDraft {
   amount: string;
 }
 
-export interface BatchRecipientEntry {
+interface BatchRecipientEntry {
   recipient: BatchEligibleRecipient;
   amount: string;
 }

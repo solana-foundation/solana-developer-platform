@@ -103,7 +103,7 @@ const demoOpSchema = z.discriminatedUnion("k", [
 ]);
 
 export type DemoOp = z.infer<typeof demoOpSchema>;
-export type DemoOpKind = DemoOp["k"];
+type DemoOpKind = DemoOp["k"];
 export type DemoOpOf<K extends DemoOpKind> = Extract<DemoOp, { k: K }>;
 
 /** The session's log back from JSON, keeping only records that still read as actions. */
