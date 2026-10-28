@@ -41,6 +41,7 @@ import type {
   RecoverableCollectionRecurringPaymentRow,
   RecurringPaymentActivator,
   RecurringPaymentStepSignatureSlot,
+  ResumePausedRecurringPaymentInput,
   StalePaymentRecurringPaymentUpdateRow,
   UpdatePaymentRecurringPaymentActivationAttemptInput,
   UpdatePaymentRecurringPaymentActivationInput,
@@ -800,7 +801,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
     },
 
     async claimRecurringPaymentLifecycle(input: ClaimPaymentRecurringPaymentLifecycleInput) {
-      const { processingStatus, claimableStatus } =
+      const { processingStatus, claimableStatuses } =
         RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS[input.operation];
       const staleBefore = input.staleBefore ?? null;
       const row = await db
@@ -813,7 +814,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
               AND organization_id = ?
               AND project_id = ?
               AND (
-                status = ?
+                status = ANY(?::text[])
                 OR (status = ? AND ?::text IS NOT NULL AND updated_at <= ?)
               )
           RETURNING *`
@@ -825,7 +826,7 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.recurringPaymentId,
           input.organizationId,
           input.projectId,
-          claimableStatus,
+          [...claimableStatuses],
           processingStatus,
           staleBefore,
           staleBefore
@@ -885,6 +886,35 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.organizationId,
           input.projectId,
           input.expectedStatus
+        )
+        .first<Record<string, unknown>>();
+
+      return row ? mapRecurringPaymentRow(row) : null;
+    },
+
+    async resumePausedRecurringPayment(input: ResumePausedRecurringPaymentInput) {
+      const row = await db
+        .prepare(
+          `UPDATE payment_recurring_payments
+              SET status = 'active',
+                  next_collection_due_at = ?,
+                  updated_at = ?,
+                  ${ACTIVATED_BY_ASSIGNMENTS}
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND status = 'paused'
+              AND next_collection_due_at = ?
+          RETURNING *`
+        )
+        .bind(
+          input.nextCollectionDueAt,
+          input.updatedAt,
+          ...activatedByBindings(input.activatedBy),
+          input.recurringPaymentId,
+          input.organizationId,
+          input.projectId,
+          input.currentCollectionDueAt
         )
         .first<Record<string, unknown>>();
 

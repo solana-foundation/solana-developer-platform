@@ -1,4 +1,5 @@
 import {
+  isRecurringPaymentLifecycleClaimableStatus,
   type PaymentRecurringPaymentLifecycleOperation,
   type PaymentRecurringPaymentStatus,
   type PaymentRecurringPaymentTransitionResult,
@@ -49,7 +50,7 @@ export function getRecurringPaymentLifecycleStatuses(
   operation: RecurringPaymentLifecycleOperation
 ): {
   processingStatus: PaymentRecurringPaymentStatus;
-  claimableStatus: PaymentRecurringPaymentStatus;
+  claimableStatuses: readonly PaymentRecurringPaymentStatus[];
   finalStatus: PaymentRecurringPaymentStatus;
 } {
   return RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS[operation];
@@ -61,14 +62,14 @@ export function decideRecurringPaymentLifecycleTransition(input: {
   updatedAt: string;
   nowIso: string;
 }): RecurringPaymentTransition {
-  const { claimableStatus, finalStatus, processingStatus } = getRecurringPaymentLifecycleStatuses(
-    input.operation
-  );
+  const { finalStatus, processingStatus } = getRecurringPaymentLifecycleStatuses(input.operation);
   if (input.status === finalStatus) return "already_final";
   if (input.status === processingStatus) {
     return isRecurringPaymentOperationStale(input) ? "recoverable" : "processing";
   }
-  return input.status === claimableStatus ? "claimable" : "invalid";
+  return isRecurringPaymentLifecycleClaimableStatus(input.operation, input.status)
+    ? "claimable"
+    : "invalid";
 }
 
 export function decideRecurringPaymentActivationTransition(input: {

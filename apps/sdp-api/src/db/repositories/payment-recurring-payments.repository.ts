@@ -282,6 +282,20 @@ export interface UpdatePaymentRecurringPaymentLifecycleInput {
   updatedAt: string;
 }
 
+/**
+ * A paused schedule's resume (HOO-2340): `paused` to `active` under compare-and-set, recording who
+ * resumed it as its activator and the due date it collects next.
+ */
+export interface ResumePausedRecurringPaymentInput {
+  recurringPaymentId: string;
+  organizationId: string;
+  projectId: string;
+  currentCollectionDueAt: string;
+  nextCollectionDueAt: string;
+  activatedBy: RecurringPaymentActivator | null;
+  updatedAt: string;
+}
+
 export interface CreatePaymentRecurringPaymentUpdateAttemptInput {
   id: string;
   organizationId: string;
@@ -610,6 +624,10 @@ export interface PaymentRecurringPaymentsRepository {
   ): Promise<PaymentRecurringPaymentRow | null>;
   updateRecurringPaymentLifecycle(
     input: UpdatePaymentRecurringPaymentLifecycleInput
+  ): Promise<PaymentRecurringPaymentRow | null>;
+  /** Null when the schedule is no longer paused at that due date. */
+  resumePausedRecurringPayment(
+    input: ResumePausedRecurringPaymentInput
   ): Promise<PaymentRecurringPaymentRow | null>;
   createActivationAttempt(
     input: CreatePaymentRecurringPaymentActivationAttemptInput

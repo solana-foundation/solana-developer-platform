@@ -1,8 +1,9 @@
 import type { Counterparty, CounterpartyAccount } from "@sdp/types/counterparties";
-import type {
-  PaymentRampQuoteDeliveryMode,
-  PaymentRecurringPayment,
-  PaymentTransferRecipient,
+import {
+  isRecurringPaymentLifecycleClaimableStatus,
+  type PaymentRampQuoteDeliveryMode,
+  type PaymentRecurringPayment,
+  type PaymentTransferRecipient,
 } from "@sdp/types/payments";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import {
@@ -475,13 +476,16 @@ function applyScheduleAction(world: DemoWorld, op: DemoOpOf<"schedule-action">):
       if (schedule.status === "active") collect(world, schedule, op.at);
       break;
     case "cancel":
-      if (schedule.status === "pending_activation" || schedule.status === "active") {
+      if (
+        schedule.status === "pending_activation" ||
+        isRecurringPaymentLifecycleClaimableStatus("cancel", schedule.status)
+      ) {
         schedule.status = "canceled";
         schedule.nextCollectionDueAt = null;
       }
       break;
     case "resume":
-      if (schedule.status === "paused") {
+      if (isRecurringPaymentLifecycleClaimableStatus("resume", schedule.status)) {
         schedule.status = "active";
         schedule.nextCollectionDueAt = iso(op.at + schedule.periodHours * HOUR_MS);
       }

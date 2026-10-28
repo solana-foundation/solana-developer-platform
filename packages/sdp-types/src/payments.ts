@@ -21,6 +21,8 @@ export const RECURRING_PAYMENT_COLLECTION_CONFIG = {
   maxBatchSize: 100,
   retryAfterMinutes: 30,
   staleAfterMs: 15 * 60 * 1000,
+  /** Failed attempts at one due period, since the last resume, that pause the schedule (HOO-2340). */
+  maxFailedAttemptsBeforePause: 5,
 } as const satisfies Record<string, number>;
 
 export function assertNever(value: never): never {
@@ -867,13 +869,15 @@ export const COLLECTABLE_RECURRING_PAYMENT_STATUSES = [
   "active",
 ] as const satisfies readonly PaymentRecurringPaymentStatus[];
 /**
- * A recurring payment that collects, or will once its activation, update or
- * resume in flight finishes, or once a cancel in flight fails back to active:
+ * A recurring payment that collects, or will once resumed from a pause or once
+ * its activation, update or resume in flight finishes, or once a cancel in
+ * flight fails back:
  * revoke-and-cancel must see all of them, or one mid-way would become active
  * after the revoke that was meant to stop it.
  */
 export const LIVE_RECURRING_PAYMENT_STATUSES = [
   ...COLLECTABLE_RECURRING_PAYMENT_STATUSES,
+  "paused",
   "activating",
   "updating",
   "canceling",
@@ -1017,20 +1021,40 @@ export function hasRecoverableRecurringPaymentCollection(
 }
 /**
  * A cancel is terminal (HOO-2339): nothing claims `canceled`, so a canceled
- * schedule never collects or resumes again. Resume only brings back a schedule
- * SDP paused, whose delegation is still on chain.
+ * schedule never collects or resumes again. Cancel claims a running or paused
+ * schedule. Resume only brings back a schedule SDP paused (HOO-2340), whose
+ * delegation is still on chain, so it is a database transition that never
+ * passes through `resuming`.
  */
 export const RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS = {
-  cancel: { processingStatus: "canceling", claimableStatus: "active", finalStatus: "canceled" },
-  resume: { processingStatus: "resuming", claimableStatus: "paused", finalStatus: "active" },
+  cancel: {
+    processingStatus: "canceling",
+    claimableStatuses: ["active", "paused"],
+    finalStatus: "canceled",
+  },
+  resume: { processingStatus: "resuming", claimableStatuses: ["paused"], finalStatus: "active" },
 } as const satisfies Record<
   PaymentRecurringPaymentLifecycleOperation,
   {
     processingStatus: PaymentRecurringPaymentStatus;
-    claimableStatus: PaymentRecurringPaymentStatus;
+    claimableStatuses: readonly PaymentRecurringPaymentStatus[];
     finalStatus: PaymentRecurringPaymentStatus;
   }
 >;
+
+/** A status a lifecycle operation claims from. */
+export type RecurringPaymentLifecycleClaimableStatus =
+  (typeof RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS)[PaymentRecurringPaymentLifecycleOperation]["claimableStatuses"][number];
+
+/** Whether `operation` may claim a recurring payment in `status`. */
+export function isRecurringPaymentLifecycleClaimableStatus(
+  operation: PaymentRecurringPaymentLifecycleOperation,
+  status: PaymentRecurringPaymentStatus
+): status is RecurringPaymentLifecycleClaimableStatus {
+  const claimable: readonly PaymentRecurringPaymentStatus[] =
+    RECURRING_PAYMENT_LIFECYCLE_TRANSITIONS[operation].claimableStatuses;
+  return claimable.some((candidate) => candidate === status);
+}
 
 export const RECURRING_PAYMENT_ACTIVATION_TRANSITION = {
   processingStatus: "activating",

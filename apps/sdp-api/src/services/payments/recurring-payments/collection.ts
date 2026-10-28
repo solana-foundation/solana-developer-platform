@@ -1,3 +1,4 @@
+import { SigningError } from "@sdp/custody/signing";
 import {
   firstRecurringPaymentDueAfter,
   hasRecurringPaymentAdvancedPastDueAt,
@@ -610,6 +611,138 @@ async function lockOpenCollectionCycle(
   return activeAttempt === null;
 }
 
+/** Why SDP paused a schedule (HOO-2340). */
+type RecurringPaymentPauseReason = "custody_policy_refused" | "failed_attempts";
+
+interface RecurringPaymentPause {
+  reason: RecurringPaymentPauseReason;
+  /** Failed attempts at the due period since the schedule last resumed, this one included. */
+  failedAttempts: number;
+}
+
+/**
+ * Inside a collection failure's transaction, after the failed attempt is written, pauses the
+ * schedule when retrying cannot help (HOO-2340): at once on a custody policy refusal, which is
+ * deterministic, or once the due period has failed
+ * `RECURRING_PAYMENT_COLLECTION_CONFIG.maxFailedAttemptsBeforePause` times since the schedule last
+ * resumed from a pause. The count is derived from the period's failed attempts, and the pause is a
+ * compare-and-set from `active`, so a schedule canceled, being updated or already paused is left
+ * alone. The cron selects only active schedules, so a paused one stops retrying until resumed.
+ *
+ * @param tx - The failure's transaction.
+ * @param input.organizationId - Tenant organization.
+ * @param input.projectId - Tenant project.
+ * @param input.recurringPaymentId - The schedule.
+ * @param input.subscriptionId - Its subscription, which the attempts name.
+ * @param input.dueAt - The due period that failed.
+ * @param input.error - The failure.
+ * @param input.pausedAt - The failure's time.
+ * @returns The pause, or null when the schedule keeps retrying.
+ */
+async function pauseFailingRecurringPayment(
+  tx: DatabaseExecutor,
+  input: {
+    organizationId: string;
+    projectId: string;
+    recurringPaymentId: string;
+    subscriptionId: string;
+    dueAt: string;
+    error: Error;
+    pausedAt: string;
+  }
+): Promise<RecurringPaymentPause | null> {
+  const counted = await tx
+    .prepare(
+      `SELECT count(*)::int AS failed
+         FROM payment_subscription_collection_attempts attempt
+        WHERE attempt.organization_id = ?
+          AND attempt.project_id = ?
+          AND attempt.subscription_id = ?
+          AND attempt.due_at = ?
+          AND attempt.status = ANY(?::text[])
+          AND attempt.created_at > COALESCE((
+            SELECT max(resume.updated_at)
+              FROM payment_recurring_payment_lifecycle_attempts resume
+             WHERE resume.recurring_payment_id = ?
+               AND resume.organization_id = ?
+               AND resume.project_id = ?
+               AND resume.operation = 'resume'
+               AND resume.status = 'confirmed'
+               AND resume.metadata->>'resumedFrom' = 'paused'), '')`
+    )
+    .bind(
+      input.organizationId,
+      input.projectId,
+      input.subscriptionId,
+      input.dueAt,
+      [...FAILED_COLLECTION_ATTEMPT_STATUSES],
+      input.recurringPaymentId,
+      input.organizationId,
+      input.projectId
+    )
+    .first<{ failed: number }>();
+  if (counted === null) {
+    throw internalError("Failed to count failed recurring payment collection attempts");
+  }
+  const policyRefused =
+    input.error instanceof SigningError && input.error.code === "POLICY_REFUSED";
+  if (
+    !policyRefused &&
+    counted.failed < RECURRING_PAYMENT_COLLECTION_CONFIG.maxFailedAttemptsBeforePause
+  ) {
+    return null;
+  }
+  const paused = await tx
+    .prepare(
+      `UPDATE payment_recurring_payments
+          SET status = 'paused',
+              updated_at = ?
+        WHERE id = ?
+          AND organization_id = ?
+          AND project_id = ?
+          AND status = 'active'
+      RETURNING id`
+    )
+    .bind(input.pausedAt, input.recurringPaymentId, input.organizationId, input.projectId)
+    .first<{ id: string }>();
+  if (paused === null) return null;
+  return {
+    reason: policyRefused ? "custody_policy_refused" : "failed_attempts",
+    failedAttempts: counted.failed,
+  };
+}
+
+/**
+ * Logs a pause once its transaction has committed.
+ *
+ * @param pause - The pause, or null when none happened.
+ * @param context - The ids that locate it.
+ */
+function logRecurringPaymentPaused(
+  pause: RecurringPaymentPause | null,
+  context: {
+    organizationId: string;
+    projectId: string;
+    recurringPaymentId: string;
+    subscriptionId: string;
+    attemptId: string;
+    dueAt: string;
+  }
+): void {
+  if (pause === null) return;
+  logEvent("warn", {
+    event: "sdp_recurring_payment_paused",
+    reason: pause.reason,
+    failed_attempts: pause.failedAttempts,
+    organization_id: context.organizationId,
+    project_id: context.projectId,
+    recurring_payment_id: context.recurringPaymentId,
+    subscription_id: context.subscriptionId,
+    attempt_id: context.attemptId,
+    due_at: context.dueAt,
+  });
+}
+
 async function createCollectionAttemptUnderRecurringLock(input: {
   env: Env;
   organizationId: string;
@@ -620,7 +753,15 @@ async function createCollectionAttemptUnderRecurringLock(input: {
   error: string | null;
   metadata: PaymentSubscriptionCollectionAttemptMetadata;
   enforceCooldown: boolean;
-}): Promise<PaymentSubscriptionCollectionAttemptRow | null> {
+  /** Run in the same transaction once the attempt is written; null when none was. */
+  afterCreate: (
+    tx: DatabaseExecutor,
+    attempt: PaymentSubscriptionCollectionAttemptRow
+  ) => Promise<RecurringPaymentPause | null>;
+}): Promise<{
+  attempt: PaymentSubscriptionCollectionAttemptRow;
+  pause: RecurringPaymentPause | null;
+} | null> {
   const subscriptionId = input.recurringPayment.subscription_id;
   const dueAt = input.recurringPayment.next_collection_due_at;
 
@@ -632,7 +773,7 @@ async function createCollectionAttemptUnderRecurringLock(input: {
       return null;
     }
 
-    return subscriptionsRepo.createCollectionAttempt({
+    const attempt = await subscriptionsRepo.createCollectionAttempt({
       id: `psca_${crypto.randomUUID()}`,
       organizationId: input.organizationId,
       projectId: input.projectId,
@@ -649,6 +790,8 @@ async function createCollectionAttemptUnderRecurringLock(input: {
       createdAt: input.attemptedAt,
       updatedAt: input.attemptedAt,
     });
+    if (!attempt) return null;
+    return { attempt, pause: await input.afterCreate(tx, attempt) };
   });
 }
 
@@ -866,7 +1009,7 @@ export async function journalAutomatedCollectionFailure(input: {
 }): Promise<void> {
   const attemptedAt = new Date().toISOString();
   const message = recurringPaymentErrorMessage(input.error);
-  await createCollectionAttemptUnderRecurringLock({
+  const journaled = await createCollectionAttemptUnderRecurringLock({
     ...input,
     attemptedAt,
     status: "failed",
@@ -881,7 +1024,27 @@ export async function journalAutomatedCollectionFailure(input: {
       ...collectionRetryMetadata(input.error),
     }),
     enforceCooldown: true,
+    afterCreate: (tx, attempt) =>
+      pauseFailingRecurringPayment(tx, {
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        recurringPaymentId: input.recurringPayment.id,
+        subscriptionId: attempt.subscription_id,
+        dueAt: attempt.due_at,
+        error: input.error,
+        pausedAt: attemptedAt,
+      }),
   });
+  if (journaled !== null) {
+    logRecurringPaymentPaused(journaled.pause, {
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPaymentId: input.recurringPayment.id,
+      subscriptionId: journaled.attempt.subscription_id,
+      attemptId: journaled.attempt.id,
+      dueAt: journaled.attempt.due_at,
+    });
+  }
 }
 
 /**
@@ -909,7 +1072,7 @@ async function markRecurringPaymentCollectionFailedAtomically(input: {
     ...collectionRetryMetadata(input.error),
   });
 
-  await getDb(input.env).transaction(async (tx) => {
+  const pause = await getDb(input.env).transaction(async (tx) => {
     let confirmedTransferSignature: Signature | null = null;
 
     if (input.transfer) {
@@ -1013,6 +1176,24 @@ async function markRecurringPaymentCollectionFailedAtomically(input: {
     if (attemptRows === 0) {
       throw internalError("Failed to mark collection attempt failed");
     }
+    if (attemptStatus !== "failed") return null;
+    return pauseFailingRecurringPayment(tx, {
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPaymentId: input.recurringPaymentId,
+      subscriptionId: input.attempt.subscription_id,
+      dueAt: input.attempt.due_at,
+      error: input.error,
+      pausedAt: failedAt,
+    });
+  });
+  logRecurringPaymentPaused(pause, {
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    recurringPaymentId: input.recurringPaymentId,
+    subscriptionId: input.attempt.subscription_id,
+    attemptId: input.attempt.id,
+    dueAt: input.attempt.due_at,
   });
 }
 

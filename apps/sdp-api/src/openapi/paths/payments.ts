@@ -1,4 +1,5 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
+import { RECURRING_PAYMENT_COLLECTION_CONFIG } from "@sdp/types/payments";
 import { z } from "zod";
 import { errorResponseSchema } from "@/openapi/schemas/base";
 
@@ -385,7 +386,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Cancel recurring payment",
     operationId: "cancelPaymentRecurringPayment",
     description:
-      "Stops future collections for an active SDP-custody recurring payment by submitting the Solana subscriptions cancellation transaction. A collection already in processing may still settle independently.",
+      "Permanently stops an active or paused SDP-custody recurring payment by submitting the Solana subscriptions cancellation transaction. A canceled recurring payment never collects or resumes again. When no other live recurring payment uses the same wallet and token, the token approval it relied on is revoked right after the cancel; otherwise the approval stays for the schedules that still use it. A collection already in processing may still settle independently.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: keyRequiredRerunHeaders,
@@ -428,8 +429,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     tags: ["Payments"],
     summary: "Resume recurring payment",
     operationId: "resumePaymentRecurringPayment",
-    description:
-      "Resumes a canceled SDP-custody recurring payment by submitting the Solana subscriptions resume transaction and restoring the recurring payment to active status.",
+    description: `Resumes a paused SDP-custody recurring payment. SDP pauses a recurring payment when a due period fails ${RECURRING_PAYMENT_COLLECTION_CONFIG.maxFailedAttemptsBeforePause} times, or at once when the custody provider's policy refuses to sign a collection. Its on-chain subscription is still in place, so nothing is signed: the recurring payment returns to active, the failure count starts again, and a due period that has already ended moves to the next one. A canceled recurring payment cannot be resumed.`,
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: keyRequiredRerunHeaders,

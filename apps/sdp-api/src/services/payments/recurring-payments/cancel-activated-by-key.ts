@@ -1,4 +1,4 @@
-import { isCollectableRecurringPaymentStatus } from "@sdp/types/payments";
+import { isRecurringPaymentLifecycleClaimableStatus } from "@sdp/types/payments";
 import { getDb } from "@/db/client";
 import { createPostgresPaymentRecurringPaymentsRepository } from "@/db/repositories/payment-recurring-payments.repository.postgres";
 import { getLogger } from "@/runtime/logger";
@@ -12,8 +12,8 @@ export interface CancelActivatedByKeyResult {
 }
 
 /**
- * The compromised-key path (APE-343): cancel every active recurring payment a
- * key activated or last resumed, under its own id or one it was rotated from.
+ * The compromised-key path (APE-343): cancel every running or paused recurring
+ * payment a key activated or last resumed, under its own id or one it was rotated from.
  * Revoking a key never does this on its own, because a mandate outlives the
  * key that set it up; a person asks for it on revoke, and each cancel signs as
  * that person. Each runs on its own: one that fails is reported and leaves the
@@ -31,7 +31,7 @@ export async function cancelRecurringPaymentsActivatedByKey(
   const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
   const result: CancelActivatedByKeyResult = { canceled: [], failed: [] };
   for (const recurringPayment of rows) {
-    if (!isCollectableRecurringPaymentStatus(recurringPayment.status)) {
+    if (!isRecurringPaymentLifecycleClaimableStatus("cancel", recurringPayment.status)) {
       getLogger().warn(
         {
           event: "sdp_recurring_cancel_on_revoke_in_flight",

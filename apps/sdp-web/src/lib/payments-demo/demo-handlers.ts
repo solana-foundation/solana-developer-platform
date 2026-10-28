@@ -1,9 +1,10 @@
 import { OFFRAMP_SUPPORT, ONRAMP_SUPPORT } from "@sdp/types/generated/ramp";
 import { type CryptoRailId, getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
-import type {
-  PaymentRampEstimate,
-  PaymentRampQuote,
-  RampProviderEstimateResult,
+import {
+  isRecurringPaymentLifecycleClaimableStatus,
+  type PaymentRampEstimate,
+  type PaymentRampQuote,
+  type RampProviderEstimateResult,
 } from "@sdp/types/payments";
 import type { RampProviderId } from "@sdp/types/provider-access";
 import { z } from "zod";
@@ -897,11 +898,12 @@ function scheduleActionRefusal(
       return notEnough ? error(400, notEnough, "insufficient_funds") : null;
     }
     case "cancel":
-      return schedule.status === "pending_activation" || schedule.status === "active"
+      return schedule.status === "pending_activation" ||
+        isRecurringPaymentLifecycleClaimableStatus("cancel", schedule.status)
         ? null
         : error(409, "This schedule is not running.", "conflict");
     case "resume":
-      return schedule.status === "paused"
+      return isRecurringPaymentLifecycleClaimableStatus("resume", schedule.status)
         ? null
         : error(409, "Only a paused schedule can be resumed.", "conflict");
   }
