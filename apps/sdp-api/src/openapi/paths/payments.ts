@@ -590,7 +590,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Create subscription",
     operationId: "createPaymentSubscription",
     description:
-      "Creates a recurring-payment subscription record tied to a counterparty. The customer must still sign the Solana subscription authorization transaction.",
+      "Creates a recurring-payment subscription record tied to a counterparty. The customer must still sign the Solana subscription authorization transaction. The subscriber must be the customer's own wallet: a subscriber that is one of the organization's SDP wallets answers 409, because to pay on a schedule from an SDP wallet you create a recurring payment, which keeps the wallet's token approval bounded.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: keyAcceptedHeaders,

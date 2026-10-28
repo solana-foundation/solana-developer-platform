@@ -34,7 +34,11 @@ import { getAuthorized } from "@/middleware/authorize";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { type AppContext, getPaymentSubscriptionsRepository } from "@/routes/payments/context";
 import { mapCollectionAttemptRow } from "@/routes/payments/mappers";
-import { resolveScope, resolveWallet } from "@/routes/payments/wallets";
+import {
+  isOrganizationCustodyWalletAddress,
+  resolveScope,
+  resolveWallet,
+} from "@/routes/payments/wallets";
 import { parseI64String, parseU64String } from "@/services/payment-operation.service";
 import {
   assertSubscriptionTokenMint,
@@ -178,6 +182,15 @@ export const createSubscription = async (
   // An inactive counterparty reads as missing, as the active-only lookup answered.
   if (counterparty.status !== "active") {
     throw new AppError("NOT_FOUND", "Counterparty not found");
+  }
+  // A subscription's payer approves the program for u64::MAX from its own wallet. For one of the
+  // organization's custody wallets that would leave SDP-held funds unbounded and share the
+  // per-mint approval a recurring payment keeps at 0 between collections (HOO-2339): a custody
+  // wallet pays on a schedule through a recurring payment.
+  if (await isOrganizationCustodyWalletAddress(c, body.subscriberAddress)) {
+    throw conflict(
+      "The subscriber is one of this organization's SDP wallets. Use a recurring payment to pay from an SDP wallet."
+    );
   }
 
   const existing = await repo.listSubscriptions({

@@ -27,6 +27,34 @@ export function findRetainedPaymentWalletByWalletId(
   return findProjectPaymentWallet(c, "wallet_id", walletId);
 }
 
+/**
+ * Whether an address is one of the organization's custody wallets, in any project and any status:
+ * a key SDP holds for it. One database read.
+ *
+ * @param c - The request, for its organization.
+ * @param address - The Solana address.
+ * @returns Whether the organization holds a custody wallet at that address.
+ */
+export async function isOrganizationCustodyWalletAddress(
+  c: AppContext,
+  address: string
+): Promise<boolean> {
+  const { organizationId } = getAuth(c);
+  const row = await getDb(c.env)
+    .prepare(
+      `SELECT 1 AS held
+       FROM custody_wallets w
+       LEFT JOIN custody_configs cfg ON cfg.id = w.custody_config_id
+       LEFT JOIN custody_connections conn ON conn.id = w.custody_connection_id
+       WHERE w.public_key = ?
+         AND (cfg.organization_id = ? OR conn.organization_id = ?)
+       LIMIT 1`
+    )
+    .bind(address, organizationId, organizationId)
+    .first<{ held: number }>();
+  return row !== null;
+}
+
 async function findProjectPaymentWallet(
   c: AppContext,
   column: "id" | "wallet_id",
