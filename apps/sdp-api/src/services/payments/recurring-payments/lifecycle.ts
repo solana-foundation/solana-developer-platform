@@ -601,6 +601,17 @@ async function runRecurringPaymentCancel(input: {
     const rpc = createClusterRpc();
     const readDelegation = (commitment: "finalized" | "confirmed") =>
       subscriptionsProgram.fetchMaybeSubscriptionDelegation(rpc, subscriptionPda, { commitment });
+    const isCanceled = (delegation: MaybeAccount<SubscriptionDelegation>) =>
+      delegation.exists && isSubscriptionDelegationCanceled(delegation);
+    // The program refuses a cancel once the subscription is canceled: by an earlier cancel, or one
+    // the wallet's owner signed outside SDP. When this send cannot have landed, the chain decides,
+    // and a canceled delegation finalizes instead of rolling back. An unreadable chain keeps the
+    // send's own failure.
+    const canceledElsewhere = async (sendError: Error) => {
+      if (signature !== null && !isDefiniteSubmissionError(sendError)) return false;
+      const delegation = await readDelegation("finalized").catch(() => null);
+      return delegation !== null && isCanceled(delegation);
+    };
     const lifecycleStep = {
       env: input.env,
       organizationId: input.organizationId,
@@ -611,8 +622,7 @@ async function runRecurringPaymentCancel(input: {
       const step = await readRecurringPaymentStep({
         rpc,
         read: readDelegation,
-        landed: (delegation: MaybeAccount<SubscriptionDelegation>) =>
-          delegation.exists && isSubscriptionDelegationCanceled(delegation),
+        landed: isCanceled,
         savedSend: savedStepSend(signature, attempt.last_valid_block_height),
         step: lifecycleStep,
         failureMessage: CANCEL_FAILED_MESSAGE,
@@ -666,37 +676,42 @@ async function runRecurringPaymentCancel(input: {
       subscriptionPda,
     });
 
-    signature = await sendSubscriptionInstructions({
-      movement: CANCEL_MOVEMENT,
-      env: input.env,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      sourceWallet: input.sourceWallet,
-      sourceSigner,
-      instructions: [instruction],
-      submissionStore: createSubscriptionStepStore({
-        ...lifecycleStep,
-        save: async (send) => {
-          const updatedAttempt = await recurringRepo.updateLifecycleAttempt({
-            attemptId: attempt.id,
-            organizationId: input.organizationId,
-            projectId: input.projectId,
-            stage: currentStage,
-            signature: send.signature,
-            lastValidBlockHeight: send.lastValidBlockHeight,
-            error: null,
-            updatedAt: new Date().toISOString(),
-          });
-          if (updatedAttempt === null) {
-            throw conflict("Recurring payment lifecycle attempt changed concurrently");
-          }
-          attempt = updatedAttempt;
-          signature = send.signature;
-        },
-      }),
-    });
+    try {
+      signature = await sendSubscriptionInstructions({
+        movement: CANCEL_MOVEMENT,
+        env: input.env,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        sourceWallet: input.sourceWallet,
+        sourceSigner,
+        instructions: [instruction],
+        submissionStore: createSubscriptionStepStore({
+          ...lifecycleStep,
+          save: async (send) => {
+            const updatedAttempt = await recurringRepo.updateLifecycleAttempt({
+              attemptId: attempt.id,
+              organizationId: input.organizationId,
+              projectId: input.projectId,
+              stage: currentStage,
+              signature: send.signature,
+              lastValidBlockHeight: send.lastValidBlockHeight,
+              error: null,
+              updatedAt: new Date().toISOString(),
+            });
+            if (updatedAttempt === null) {
+              throw conflict("Recurring payment lifecycle attempt changed concurrently");
+            }
+            attempt = updatedAttempt;
+            signature = send.signature;
+          },
+        }),
+      });
 
-    await confirmSubscriptionSignature(signature, CANCEL_FAILED_MESSAGE);
+      await confirmSubscriptionSignature(signature, CANCEL_FAILED_MESSAGE);
+    } catch (sendError) {
+      if (!(sendError instanceof Error) || !(await canceledElsewhere(sendError))) throw sendError;
+      signature = null;
+    }
     confirmedOnChain = true;
 
     return finalizeCancelAndReleaseAuthority({

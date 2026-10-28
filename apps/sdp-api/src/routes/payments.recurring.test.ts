@@ -2634,6 +2634,35 @@ describe("Payments routes — recurring", () => {
     expect(sendTransactionMock).toHaveBeenCalledTimes(4);
   });
 
+  it("finalizes a cancel whose send is refused because the subscription was canceled outside SDP", async () => {
+    const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    fetchMaybeSubscriptionDelegationMock.mockResolvedValue(delegation(1_800_000_000n));
+    sendTransactionMock.mockRejectedValueOnce(sendTransactionPreflightError());
+
+    const cancelRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/cancel`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+
+    expect(cancelRes.status).toBe(200);
+    expect((await parseRecurringResponse(cancelRes)).data.recurringPayment).toMatchObject({
+      id: activated.id,
+      status: "canceled",
+    });
+    expect((await recurringPaymentDueAt(activated.id)).status).toBe("canceled");
+    expect(
+      await getDb(env)
+        .prepare(
+          `SELECT status, signature
+             FROM payment_recurring_payment_lifecycle_attempts
+            WHERE recurring_payment_id = ? AND operation = 'cancel'`
+        )
+        .bind(activated.id)
+        .first<{ status: string; signature: string | null }>()
+    ).toEqual({ status: "confirmed", signature: null });
+  });
+
   it("keeps a cancel whose send outcome is unknown in flight with its signature saved", async () => {
     const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
     sendTransactionMock.mockRejectedValueOnce(new Error("RPC response lost"));
