@@ -39,7 +39,6 @@ export interface PaymentRequestRow {
   canceled_at: string | null;
   lifecycle: PaymentRequestLifecycleEvent[];
   created_by: string | null;
-  created_by_api_key_id: string | null;
   created_at: string;
   updated_at: string;
   last_checked_at: string | null;
@@ -63,8 +62,6 @@ export interface CreatePaymentRequestInput {
   amount: string;
   expiresAt: string | null;
   createdBy: string | null;
-  /** The API key that created the request, so revoking it can cancel what it left open. */
-  createdByApiKeyId: string | null;
 }
 
 /** Why a request cannot be settled until its mint or amount changes; checks skip the chain. */
@@ -168,15 +165,6 @@ export interface PaymentRequestsRepository {
    * Compare-and-set from `awaiting_payment`; null when the row was not in that state.
    */
   cancelPaymentRequest(input: CancelPaymentRequestInput): Promise<PaymentRequestRow | null>;
-  /**
-   * The open, unexpired requests an API key created, under its own id or one it was rotated
-   * from, in one Project, oldest first.
-   */
-  listOpenPaymentRequestsCreatedByApiKey(params: {
-    organizationId: string;
-    projectId: string;
-    apiKeyId: string;
-  }): Promise<PaymentRequestRow[]>;
   getPaymentRequestById(params: {
     requestId: string;
     organizationId: string;

@@ -32,7 +32,6 @@ const reconcilerColumnsSchema = z.object({
   signature_scan_stuck_signature: z.string().nullable(),
   signature_scan_stuck_since: z.string().nullable(),
   canceled_at: z.string().nullable(),
-  created_by_api_key_id: z.string().nullable(),
   sponsored_tx_last_valid_block_height: z.coerce.bigint().nullable(),
 });
 
@@ -60,7 +59,6 @@ function mapPaymentRequestRow(row: Record<string, unknown>): PaymentRequestRow {
     canceled_at: reconciler.canceled_at,
     lifecycle: row.lifecycle as PaymentRequestLifecycleEvent[],
     created_by: row.created_by as string | null,
-    created_by_api_key_id: reconciler.created_by_api_key_id,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
     last_checked_at: reconciler.last_checked_at,
@@ -163,10 +161,9 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
              reference,
              expires_at,
              created_by,
-             created_by_api_key_id,
              lifecycle
            ) VALUES (
-             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
              jsonb_build_array(jsonb_build_object('status', 'awaiting_payment', 'at', sdp_iso_now()))
            )
            RETURNING *`
@@ -183,8 +180,7 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
           input.amount,
           reference,
           input.expiresAt,
-          input.createdBy,
-          input.createdByApiKeyId
+          input.createdBy
         )
         .first<Record<string, unknown>>();
 
@@ -263,42 +259,6 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
         )
         .first<Record<string, unknown>>();
       return row ? mapPaymentRequestRow(row) : null;
-    },
-
-    async listOpenPaymentRequestsCreatedByApiKey(params) {
-      const result = await db
-        .prepare(
-          // The key and every predecessor it was rotated from, in this project.
-          `WITH RECURSIVE lineage(id, rotated_from) AS (
-             SELECT id, rotated_from FROM api_keys
-              WHERE id = ? AND organization_id = ? AND project_id = ?
-             UNION
-             SELECT ak.id, ak.rotated_from
-               FROM api_keys ak
-               JOIN lineage ON ak.id = lineage.rotated_from
-              WHERE ak.organization_id = ? AND ak.project_id = ?
-           )
-           SELECT pr.*
-             FROM payment_requests pr
-            WHERE pr.organization_id = ?
-              AND pr.project_id = ?
-              AND pr.created_by_api_key_id IS NOT NULL
-              AND pr.created_by_api_key_id IN (SELECT id FROM lineage)
-              AND pr.status = 'awaiting_payment'
-              AND (pr.expires_at IS NULL OR pr.expires_at > sdp_iso_now())
-            ORDER BY pr.created_at ASC, pr.id ASC`
-        )
-        .bind(
-          params.apiKeyId,
-          params.organizationId,
-          params.projectId,
-          params.organizationId,
-          params.projectId,
-          params.organizationId,
-          params.projectId
-        )
-        .all<Record<string, unknown>>();
-      return result.results.map(mapPaymentRequestRow);
     },
 
     async getPaymentRequestById(params) {

@@ -124,7 +124,6 @@ export async function createPaymentRequest(
     amount: body.amount,
     expiresAt: body.expiresAt,
     createdBy: await resolveCreatorUserId(c),
-    createdByApiKeyId: scope.auth.apiKeyId,
   });
 
   const response: CreatedPaymentRequest = {
@@ -151,7 +150,7 @@ export async function cancelPaymentRequest(c: AppContext) {
   const row = await cancelOpenPaymentRequest(c, {
     row: authorized,
     canceledBy: await resolveCreatorUserId(c),
-    liveClaimFloor: await readLiveClaimFloorFor([authorized]),
+    liveClaimFloor: await readLiveClaimFloorFor(authorized),
   });
   return success(c, mapPaymentRequest(row));
 }

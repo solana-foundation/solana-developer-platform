@@ -23,7 +23,6 @@ interface DeleteApiKeyModalProps {
 const deleteApiKeyFormSchema = z.object({
   confirmation: z.string(),
   cancelRecurringPayments: z.boolean(),
-  cancelPaymentRequests: z.boolean(),
 });
 
 export function DeleteApiKeyModal({
@@ -129,7 +128,6 @@ function DeleteApiKeyForm({
   const form = useZodForm(deleteApiKeyFormSchema, {
     confirmation: "",
     cancelRecurringPayments: false,
-    cancelPaymentRequests: false,
   });
   const canSubmit = form.values.confirmation.trim() === keyName.trim();
 
@@ -150,7 +148,6 @@ function DeleteApiKeyForm({
       keyName,
       confirmation: parsed.data.confirmation,
       cancelRecurringPayments: parsed.data.cancelRecurringPayments,
-      cancelPaymentRequests: parsed.data.cancelPaymentRequests,
     }).catch((error) => ({
       ok: false,
       message: error instanceof Error ? error.message : t("DashboardCustody.deleteApiKey"),
@@ -199,22 +196,6 @@ function DeleteApiKeyForm({
             {t("DashboardCustody.apiKeyCancelRecurringPayments")}
           </span>
           {t("DashboardCustody.apiKeyCancelRecurringPaymentsHelp")}
-        </span>
-      </label>
-
-      <label className="flex items-start gap-2 text-sm text-secondary">
-        <input
-          type="checkbox"
-          className="mt-0.5"
-          checked={form.values.cancelPaymentRequests}
-          onChange={(event) => form.setField("cancelPaymentRequests", event.currentTarget.checked)}
-          disabled={isSubmitting}
-        />
-        <span>
-          <span className="block text-primary">
-            {t("DashboardCustody.apiKeyCancelPaymentRequests")}
-          </span>
-          {t("DashboardCustody.apiKeyCancelPaymentRequestsHelp")}
         </span>
       </label>
 

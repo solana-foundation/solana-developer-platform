@@ -113,8 +113,7 @@ async function deactivateApiKeyRequest(input: {
   keyId: string;
   keyName: string;
   confirmation: string;
-  cancelRecurringPayments: boolean;
-  cancelPaymentRequests: boolean;
+  cancelRecurringPayments?: boolean;
 }): Promise<{ ok: true; message: string } | { ok: false; message: string }> {
   const t = await getTranslations();
   const { keyId, keyName, confirmation } = normalizeDeactivateApiKeyInput(input);
@@ -149,37 +148,28 @@ async function deactivateApiKeyRequest(input: {
 
   try {
     const client = await createSdpApiClient();
-    const { cancelRecurringPayments, cancelPaymentRequests } = input;
+    const cancelRecurringPayments = input.cancelRecurringPayments === true;
     const response = await client.fetch<{
       recurringPayments: { canceled: string[]; failed: string[] } | null;
-      paymentRequests: { canceled: string[]; failed: string[] } | null;
     }>(`/v1/api-keys/${encodeURIComponent(keyId)}`, {
       method: "DELETE",
-      body: JSON.stringify({ confirmation, cancelRecurringPayments, cancelPaymentRequests }),
+      body: JSON.stringify({ confirmation, cancelRecurringPayments }),
     });
 
-    // The key is revoked either way; anything that could not be canceled is
-    // reported so it can be canceled on its own.
+    const deactivated = t("DashboardCustody.apiKeyDeactivated", { name: keyName });
     const recurring = response.recurringPayments;
-    const paymentRequests = response.paymentRequests;
-    const message = [
-      t("DashboardCustody.apiKeyDeactivated", { name: keyName }),
-      cancelRecurringPayments && recurring
-        ? t("DashboardCustody.apiKeyRecurringCanceled", {
-            canceled: recurring.canceled.length,
-            failed: recurring.failed.length,
-          })
-        : null,
-      cancelPaymentRequests && paymentRequests
-        ? t("DashboardCustody.apiKeyPaymentRequestsCanceled", {
-            canceled: paymentRequests.canceled.length,
-            failed: paymentRequests.failed.length,
-          })
-        : null,
-    ]
-      .filter((part) => part !== null)
-      .join(" ");
-    return { ok: true, message };
+    if (!cancelRecurringPayments || !recurring) {
+      return { ok: true, message: deactivated };
+    }
+    // The key is revoked either way; a payment that could not be canceled is
+    // reported so it can be canceled on its own.
+    return {
+      ok: true,
+      message: `${deactivated} ${t("DashboardCustody.apiKeyRecurringCanceled", {
+        canceled: recurring.canceled.length,
+        failed: recurring.failed.length,
+      })}`,
+    };
   } catch (error) {
     return {
       ok: false,
@@ -341,8 +331,6 @@ export async function deactivateApiKeyAction(formData: FormData) {
     keyId: String(formData.get("keyId") ?? ""),
     keyName: String(formData.get("keyName") ?? ""),
     confirmation: String(formData.get("confirmation") ?? ""),
-    cancelRecurringPayments: false,
-    cancelPaymentRequests: false,
   });
 
   await setFlash({
@@ -358,8 +346,7 @@ export async function deactivateApiKeyInlineAction(input: {
   keyId: string;
   keyName: string;
   confirmation: string;
-  cancelRecurringPayments: boolean;
-  cancelPaymentRequests: boolean;
+  cancelRecurringPayments?: boolean;
 }): Promise<{ ok: true; message: string } | { ok: false; message: string }> {
   const result = await deactivateApiKeyRequest(input);
   if (result.ok) {

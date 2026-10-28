@@ -128,8 +128,6 @@ export interface RevokeApiKeyRequest {
   confirmation?: string; // The key's name
   /** Also cancel the active recurring payments this key activated (the compromised-key path). */
   cancelRecurringPayments?: boolean;
-  /** Also cancel the open payment requests this key created (the compromised-key path). */
-  cancelPaymentRequests?: boolean;
 }
 
 export interface RevokeApiKeyResponse {
@@ -137,6 +135,4 @@ export interface RevokeApiKeyResponse {
   revokedAt: string;
   /** Null unless the revoke asked to cancel the key's recurring payments. */
   recurringPayments: { canceled: string[]; failed: string[] } | null;
-  /** Null unless the revoke asked to cancel the key's open payment requests. */
-  paymentRequests: { canceled: string[]; failed: string[] } | null;
 }
