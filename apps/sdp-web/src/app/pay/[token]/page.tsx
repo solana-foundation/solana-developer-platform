@@ -1,7 +1,7 @@
 import { refreshThemeProps } from "@sdp/design-tokens";
 import { SOLANA_CLUSTER_LABELS, type SolanaCluster } from "@sdp/types/well-known-tokens";
 import { Badge } from "@sdp/ui/badge";
-import { ArrowUpRightIcon, CheckCircle2Icon, ClockIcon, XCircleIcon } from "lucide-react";
+import { ArrowUpRightIcon, CheckCircle2Icon, ClockIcon, XIcon } from "lucide-react";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import {
@@ -46,7 +46,7 @@ function getStatusPanels(t: Awaited<ReturnType<typeof getTranslations>>) {
       body: t("Shared.pay.linkExpiredDescription"),
     },
     canceled: {
-      icon: <XCircleIcon className="size-12 text-error" />,
+      icon: <XIcon className="size-12 text-error" />,
       title: t("Shared.pay.requestCanceled"),
       body: t("Shared.pay.requestCanceledDescription"),
     },
