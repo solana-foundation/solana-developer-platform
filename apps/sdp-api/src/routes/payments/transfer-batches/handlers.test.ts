@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
-import type {
-  PaymentTransferBatchRecipientStatus,
-  PaymentTransferBatchStatus,
+import {
+  PAYMENT_TRANSFER_BATCH_RECIPIENT_STATUSES,
+  PAYMENT_TRANSFER_BATCH_STATUSES,
 } from "@sdp/types/payments";
 import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import {
@@ -2132,17 +2132,24 @@ describe("payment transfer batches", () => {
   });
 
   describe("retry failed recipients (HOO-2343)", () => {
-    type BatchBody = {
-      data: {
-        batch: { id: string; status: PaymentTransferBatchStatus; transactionCount: number };
-        recipients: Array<{
-          id: string;
-          status: PaymentTransferBatchRecipientStatus;
-          transferId: string | null;
-        }>;
-        transfers: Array<{ id: string; status: string }>;
-      };
-    };
+    const batchBodySchema = z.object({
+      data: z.object({
+        batch: z.object({
+          id: z.string(),
+          status: z.enum(PAYMENT_TRANSFER_BATCH_STATUSES),
+          transactionCount: z.number(),
+        }),
+        recipients: z.array(
+          z.object({
+            id: z.string(),
+            status: z.enum(PAYMENT_TRANSFER_BATCH_RECIPIENT_STATUSES),
+            transferId: z.string().nullable(),
+          })
+        ),
+        transfers: z.array(z.object({ id: z.string(), status: z.string() })),
+      }),
+    });
+    const readBatch = async (response: Response) => batchBodySchema.parse(await response.json());
 
     /** Two recipients in two chunks; the first chunk sent is rejected, so it never lands. */
     async function seedPartiallyFailedBatch() {
@@ -2185,7 +2192,7 @@ describe("payment transfer batches", () => {
         env
       );
       expect(created.status).toBe(200);
-      const body = (await created.json()) as BatchBody;
+      const body = await readBatch(created);
       // The chunk that was sent settles later, so the batch is still processing.
       expect(body.data.batch.status).toBe("processing");
       const failed = required(body.data.recipients.find((r) => r.status === "failed"));
@@ -2214,7 +2221,7 @@ describe("payment transfer batches", () => {
       const response = await retry(batch.id);
 
       expect(response.status).toBe(200);
-      const body = (await response.json()) as BatchBody;
+      const body = await readBatch(response);
       expect(sendTransactionMock).toHaveBeenCalledTimes(1);
       const resent = required(body.data.recipients.find((r) => r.id === failed.id));
       expect(resent.status).toBe("processing");
@@ -2237,9 +2244,7 @@ describe("payment transfer batches", () => {
 
       expect(first.status).toBe(200);
       expect(again.status).toBe(200);
-      expect(((await again.json()) as BatchBody).data).toEqual(
-        ((await first.json()) as BatchBody).data
-      );
+      expect((await readBatch(again)).data).toEqual((await readBatch(first)).data);
       expect(sendTransactionMock).toHaveBeenCalledTimes(1);
     });
 
@@ -2357,9 +2362,9 @@ describe("payment transfer batches", () => {
       const response = await retry(batch.id);
 
       expect(response.status).toBe(409);
-      expect(((await response.json()) as { error: { message: string } }).error.message).toContain(
-        "claimed its failed recipients first"
-      );
+      expect(await response.json()).toMatchObject({
+        error: { message: expect.stringContaining("claimed its failed recipients first") },
+      });
       expect(sendTransactionMock).not.toHaveBeenCalled();
     });
 

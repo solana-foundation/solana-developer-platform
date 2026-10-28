@@ -1,6 +1,9 @@
 "use client";
 
-import type { MoneyMovementStatus, PaymentTransferBatchRequest } from "@sdp/types/payments";
+import {
+  isPartiallyFailedTransferBatchStatus,
+  type PaymentTransferBatchRequest,
+} from "@sdp/types/payments";
 import { MOVEMENT_READ_PATHS, settleWhenMovementFinal } from "@/lib/dashboard-fetch";
 import { canonicalDecimalAmount, uncertainMoneyAnswerMessage } from "@/lib/idempotency";
 import {
@@ -35,9 +38,7 @@ const retryStore = createIdempotencyKeyStore("sdp:payments:transfer-batch-retry:
  * were paid. Its failed recipients are finished with a retry
  * ({@link retryTransferBatchUnderKey}).
  */
-function batchKeepsKey(status: MoneyMovementStatus): boolean {
-  return status === "partially_failed";
-}
+const batchKeepsKey = isPartiallyFailedTransferBatchStatus;
 
 /** @internal Test-only: clear the module-scope tiers so specs are order-independent. */
 export function resetTransferBatchIdempotencyStateForTests(): void {
