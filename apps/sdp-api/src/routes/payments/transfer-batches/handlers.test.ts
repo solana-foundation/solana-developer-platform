@@ -17,6 +17,7 @@ import {
   TRANSFER_CHECKED_DISCRIMINATOR,
 } from "@solana-program/token-2022";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db/client";
 import * as batchesRepositoryPostgres from "@/db/repositories/payment-transfer-batches.repository.postgres";
 import * as paymentsRepositoryPostgres from "@/db/repositories/payments.repository.postgres";
@@ -26,6 +27,7 @@ import {
 } from "@/db/repositories/repository-factory";
 import { app } from "@/index";
 import { AppError } from "@/lib/errors";
+import { deriveProviderRequestId } from "@/lib/idempotency";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
 import { rootLogger } from "@/runtime/logger";
@@ -1880,13 +1882,21 @@ describe("payment transfer batches", () => {
   });
 
   describe("batch externalId (HOO-2335)", () => {
-    async function seedOneRecipientBatch(externalId: string) {
+    const batchIdResponseSchema = z.object({
+      data: z.object({ batch: z.object({ id: z.string() }) }),
+    });
+
+    async function batchIdOf(response: Response): Promise<string> {
+      return batchIdResponseSchema.parse(await response.json()).data.batch.id;
+    }
+
+    async function seedOneRecipientBatch(externalId: string | undefined) {
       const sourceSigner = await generateKeyPairSigner();
       await updateSeededWalletPublicKey(sourceSigner.address);
       createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
       const signingOutcomeMock = vi.fn().mockResolvedValue(FIRST_SIGNATURE);
       createKoraAdapterMock.mockReturnValue(ownedSubmissionAdapter(signingOutcomeMock));
-      const counterpartyId = await seedCounterparty(`batch_external_id_${externalId}`);
+      const counterpartyId = await seedCounterparty(`batch_external_id_${externalId ?? "none"}`);
       const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
         counterpartyId,
         walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
@@ -1905,7 +1915,7 @@ describe("payment transfer batches", () => {
               "Idempotency-Key": idempotencyKey,
             },
             body: JSON.stringify({
-              externalId,
+              ...(externalId === undefined ? {} : { externalId }),
               sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
               token: "SOL",
               recipients: [{ counterpartyId, counterpartyAccountId, amount }],
@@ -1927,6 +1937,31 @@ describe("payment transfer batches", () => {
       return required(row).count;
     }
 
+    function insertBatchRow(sourceAddress: string, externalId: string, idempotencyKey: string) {
+      return batchesRepositoryPostgres
+        .createPostgresPaymentTransferBatchesRepository(getDb(env))
+        .createTransferBatchWithRecipients({
+          batch: {
+            organizationId: TEST_ORG.id,
+            projectId: TEST_PROJECT.id,
+            externalId,
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            sourceWalletId: TEST_WALLET_ID,
+            sourceAddress,
+            token: "SOL",
+            status: "processing",
+            totalAmount: "0.1",
+            recipientCount: 0,
+            transactionCount: 0,
+            options: {},
+            initiatedByKeyId: null,
+            idempotencyKey,
+            idempotencyFingerprint: "another-request-fingerprint",
+          },
+          recipients: [],
+        });
+    }
+
     function expectNothingSigned(signingOutcomeMock: ReturnType<typeof vi.fn>) {
       // Answered before any chain read, signer or broadcast.
       expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
@@ -1940,16 +1975,41 @@ describe("payment transfer batches", () => {
 
       const first = await send("batch-external-id-first");
       expect(first.status).toBe(200);
-      const firstBody = (await first.json()) as { data: { batch: { id: string } } };
+      const firstId = await batchIdOf(first);
       vi.clearAllMocks();
 
       const resend = await send("batch-external-id-resend");
 
       expect(resend.status).toBe(200);
-      const resendBody = (await resend.json()) as { data: { batch: { id: string } } };
-      expect(resendBody.data.batch.id).toBe(firstBody.data.batch.id);
+      expect(resend.headers.get("Idempotent-Replayed")).toBe("true");
+      expect(await batchIdOf(resend)).toBe(firstId);
       expectNothingSigned(signingOutcomeMock);
       expect(await countBatches()).toBe(1);
+    });
+
+    it("answers a resent run even after its wallet stops admitting new work", async () => {
+      const { send, signingOutcomeMock } = await seedOneRecipientBatch("payroll_wallet_down");
+      const first = await send("batch-external-id-before-outage");
+      expect(first.status).toBe(200);
+      const firstId = await batchIdOf(first);
+      vi.clearAllMocks();
+      const admission = vi
+        .spyOn(SigningService.prototype, "admitRuntimeExecution")
+        .mockRejectedValue(
+          new AppError("CONFLICT", "Custody wallet is unavailable", {
+            reason: "runtime_execution_unavailable",
+          })
+        );
+      try {
+        const resend = await send("batch-external-id-during-outage");
+
+        expect(resend.status).toBe(200);
+        expect(await batchIdOf(resend)).toBe(firstId);
+        expect(admission).not.toHaveBeenCalled();
+        expectNothingSigned(signingOutcomeMock);
+      } finally {
+        admission.mockRestore();
+      }
     });
 
     it("refuses a different batch reusing an externalId with the existing batch, signing nothing", async () => {
@@ -1957,20 +2017,22 @@ describe("payment transfer batches", () => {
 
       const first = await send("batch-external-id-original");
       expect(first.status).toBe(200);
-      const firstBody = (await first.json()) as { data: { batch: { id: string } } };
+      const firstId = await batchIdOf(first);
       vi.clearAllMocks();
 
       const changed = await send("batch-external-id-changed", { amount: "0.2" });
 
       expect(changed.status).toBe(409);
       expect(await changed.json()).toMatchObject({
-        error: {
-          code: "CONFLICT",
-          details: { batchId: firstBody.data.batch.id, externalId: "payroll_reused" },
-        },
+        error: { code: "CONFLICT", details: { batchId: firstId, externalId: "payroll_reused" } },
       });
       expectNothingSigned(signingOutcomeMock);
       expect(await countBatches()).toBe(1);
+
+      // The refusal is not stored: the key still sends the run's own body.
+      const again = await send("batch-external-id-changed");
+      expect(again.status).toBe(200);
+      expect(await batchIdOf(again)).toBe(firstId);
     });
 
     it("refuses the same batch from another credential instead of replaying it", async () => {
@@ -1983,14 +2045,14 @@ describe("payment transfer batches", () => {
 
       const first = await send("batch-external-id-own-key");
       expect(first.status).toBe(200);
-      const firstBody = (await first.json()) as { data: { batch: { id: string } } };
+      const firstId = await batchIdOf(first);
       vi.clearAllMocks();
 
       const other = await send("batch-external-id-other-key", { apiKey: otherKey });
 
       expect(other.status).toBe(409);
       expect(await other.json()).toMatchObject({
-        error: { code: "CONFLICT", details: { batchId: firstBody.data.batch.id } },
+        error: { code: "CONFLICT", details: { batchId: firstId } },
       });
       expectNothingSigned(signingOutcomeMock);
       expect(await countBatches()).toBe(1);
@@ -2004,42 +2066,22 @@ describe("payment transfer batches", () => {
 
       expect(first.status).toBe(200);
       expect(retry.status).toBe(200);
-      expect(((await retry.json()) as { data: unknown }).data).toEqual(
-        ((await first.json()) as { data: unknown }).data
-      );
+      expect(await batchIdOf(retry)).toBe(await batchIdOf(first));
       expect(signingOutcomeMock).toHaveBeenCalledTimes(1);
       expect(await countBatches()).toBe(1);
     });
 
-    it("refuses an externalId another batch takes after the early check, sending nothing", async () => {
+    it("refuses a run another request records after the early check, sending nothing", async () => {
       const { send, signingOutcomeMock, sourceSigner } =
         await seedOneRecipientBatch("payroll_raced");
       let racer: { id: string } | undefined;
-      // The other request commits between this request's check and its insert.
+      // The other request commits the run between this request's check and its insert.
       createOrgSignerForCustodyWalletMock.mockImplementation(async () => {
-        const created = await batchesRepositoryPostgres
-          .createPostgresPaymentTransferBatchesRepository(getDb(env))
-          .createTransferBatchWithRecipients({
-            batch: {
-              organizationId: TEST_ORG.id,
-              projectId: TEST_PROJECT.id,
-              externalId: "payroll_raced",
-              sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-              sourceWalletId: TEST_WALLET_ID,
-              sourceAddress: sourceSigner.address,
-              token: "SOL",
-              status: "processing",
-              totalAmount: "0.1",
-              recipientCount: 0,
-              transactionCount: 0,
-              options: {},
-              initiatedByKeyId: null,
-              idempotencyKey: "another-request-key",
-              idempotencyFingerprint: "another-request-fingerprint",
-            },
-            recipients: [],
-          });
-        racer = created.batch;
+        const runKey = deriveProviderRequestId(
+          ["transfer_batch_run", TEST_ORG.id, TEST_PROJECT.id, TEST_CUSTODY_WALLET_ID],
+          "payroll_raced"
+        );
+        racer = (await insertBatchRow(sourceSigner.address, "payroll_raced", runKey)).batch;
         return sourceSigner;
       });
 
@@ -2052,6 +2094,34 @@ describe("payment transfer batches", () => {
       expect(signingOutcomeMock).not.toHaveBeenCalled();
       expect(sendTransactionMock).not.toHaveBeenCalled();
       expect(await countBatches()).toBe(1);
+    });
+
+    it("leaves batches recorded before run keys out of the run", async () => {
+      const { send, sourceSigner } = await seedOneRecipientBatch("payroll_legacy");
+      // Two earlier batches share the externalId under their own request keys.
+      await insertBatchRow(sourceSigner.address, "payroll_legacy", "legacy-request-key-1");
+      await insertBatchRow(sourceSigner.address, "payroll_legacy", "legacy-request-key-2");
+
+      const first = await send("batch-external-id-after-legacy");
+      const resend = await send("batch-external-id-after-legacy-resend");
+
+      expect(first.status).toBe(200);
+      expect(resend.status).toBe(200);
+      expect(await batchIdOf(resend)).toBe(await batchIdOf(first));
+      expect(await countBatches()).toBe(3);
+    });
+
+    it("guards nothing across keys for a batch without an externalId", async () => {
+      const { send, signingOutcomeMock } = await seedOneRecipientBatch(undefined);
+
+      const first = await send("batch-no-external-id-first");
+      const second = await send("batch-no-external-id-second");
+
+      expect(first.status).toBe(200);
+      expect(second.status).toBe(200);
+      expect(await batchIdOf(second)).not.toBe(await batchIdOf(first));
+      expect(signingOutcomeMock).toHaveBeenCalledTimes(2);
+      expect(await countBatches()).toBe(2);
     });
   });
 

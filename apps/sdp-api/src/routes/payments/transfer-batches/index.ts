@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { authorize } from "@/middleware/authorize";
 import { idempotent } from "@/middleware/idempotency";
+import { meteredQuota } from "@/middleware/metered-quota";
 import { admit, replayFromRecord } from "@/middleware/movement-steps";
 import { requireAction } from "@/middleware/require-action";
 import { validateBody } from "@/middleware/validate";
@@ -16,6 +17,9 @@ import type { Env } from "@/types/env";
 import { canonicalizeTransferBatchBody, previousCanonicalTransferBatchBody } from "./idempotency";
 import { createTransferBatchSchema, estimateTransferBatchSchema } from "./schemas";
 
+/** Batch sends and retries share one quota per actor and organization. */
+export const TRANSFER_BATCH_QUOTA = { name: "transfer-batch", actorMax: 10, orgMax: 30 };
+
 export const transferBatches = new Hono<{ Bindings: Env }>();
 
 transferBatches.post(
@@ -29,6 +33,9 @@ transferBatches.post(
   requireAction("transfer_batches.execute"),
   validateBody(createTransferBatchSchema),
   authorize(authorizeTransferBatch),
+  // Signs and broadcasts up to one transaction per chunk. Before the key is
+  // claimed, so a refusal is never stored under it (ADR 0009).
+  meteredQuota(TRANSFER_BATCH_QUOTA),
   // Batches run longer than one transfer, recipient order does not change what
   // moves, and the batch row is written under its key first (HOO-1918).
   idempotent({

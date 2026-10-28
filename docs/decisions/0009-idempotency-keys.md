@@ -126,11 +126,15 @@ answers; the pending-transfers job does the same for a batch over an hour old th
 Neither resumes or re-sends: a recipient with a transfer row is settled from that row as before.
 
 The key dedupes one request; a batch's `externalId` dedupes the payout run (HOO-2335, SDP-021
-SA-2). It is unique per project and source wallet (migration 0184), so a run resent under a new
-key never pays its recipients again: the same request from the same credential is answered with
-the existing batch, and any other with `409 CONFLICT` and that batch's id. The handler checks it before any chain read or signer, and the index
-catches a race. `externalId` is optional: a caller who omits it gets no server-side guard against
-paying a run twice beyond the key.
+SA-2). A batch that carries one is recorded under the run's key, derived from the project, source
+wallet and `externalId`, instead of the credential-bound record key: the HTTP key step is
+unchanged, only the row's identity is. So `replayFromRecord` finds the run under any new key,
+before admission: the same request from the same credential is answered with the batch as it
+stands (never settled there, since its own request may still be running), and any other gets
+`409 CONFLICT` with the batch's id, unstored. The batch key index (migration 0026) lets one of two
+concurrent sends win. No migration was needed: batches recorded before this keep their request
+keys, so earlier duplicate `externalId`s never collide. `externalId` is optional: a caller who
+omits it gets no server-side guard against paying a run twice beyond the key.
 
 Recurring payments carve this out: their cron resumes and completes a half-finished row (an
 `activating`, `canceling` or `resuming` schedule, or a collection in flight) from the signature
