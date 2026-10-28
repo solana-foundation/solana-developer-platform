@@ -17,6 +17,7 @@ import {
   getCurrentMember,
   inviteMember,
   leaveOrganization,
+  listMemberApiKeys,
   listMembers,
   removeMember,
   revokeInvitation,
@@ -62,6 +63,7 @@ members.delete(
   ),
   leaveOrganization
 );
+members.get("/:memberId/api-keys", requireAction("members.manage"), listMemberApiKeys);
 members.patch(
   "/:memberId",
   projectContextMiddleware(),

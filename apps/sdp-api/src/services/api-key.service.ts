@@ -6,9 +6,15 @@
 
 // biome-ignore-all lint/security/noSecrets: service operation identifiers are not credentials
 import { type Action, expandStoredGrants, normalizeGrants } from "@sdp/types/actions";
-import type { ApiKeyEnvironment, ApiKeyStatus, ApiKeyWalletScope } from "@sdp/types/api-keys";
+import {
+  type ApiKeyEnvironment,
+  type ApiKeyStatus,
+  type ApiKeyWalletScope,
+  SDP_ENVIRONMENTS,
+} from "@sdp/types/api-keys";
 import type { OrganizationRole } from "@sdp/types/roles";
 import { z } from "zod";
+import type { DatabaseExecutor } from "@/db/client";
 import { parseOptionalPostgresJson } from "@/db/postgres-utils";
 import { hashApiKey } from "@/lib/api-key-hash";
 import { apiKeyRowRefusal } from "@/lib/api-key-rotation";
@@ -177,6 +183,68 @@ const WALLET_IDS_COLUMN = `ARRAY(
 /** API form of the column: aliases expanded, unknown strings dropped. */
 export function parseGrantsColumn(value: unknown): Action[] {
   return expandStoredGrants(storedGrantsSchema.parse(value));
+}
+
+export interface CreatedApiKey {
+  id: string;
+  name: string;
+  keyPrefix: string;
+  projectId: string;
+  projectName: string;
+  environment: ApiKeyEnvironment;
+  createdAt: string;
+}
+
+const createdApiKeyRowSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  key_prefix: z.string(),
+  project_id: z.string(),
+  project_name: z.string(),
+  environment: z.enum(SDP_ENVIRONMENTS),
+  created_at: z.string(),
+});
+
+/**
+ * The keys a person created that still work, across every project of the
+ * organization, so an admin removing them can decide what to revoke: keys are
+ * the organization's and outlive their creator (HOO-2301). A rotated key keeps
+ * its original creator. Same status filter as a project's key list.
+ *
+ * @param db - The database.
+ * @param params.organizationId - The organization.
+ * @param params.createdByUserId - The person, as `users.id`.
+ * @returns The keys, newest first.
+ */
+export async function listActiveApiKeysCreatedBy(
+  db: DatabaseExecutor,
+  params: { organizationId: string; createdByUserId: string }
+): Promise<CreatedApiKey[]> {
+  const result = await db
+    .prepare(
+      `SELECT ak.id, ak.name, ak.key_prefix, ak.project_id, p.name AS project_name,
+              p.environment, ak.created_at
+         FROM api_keys ak
+         JOIN projects p ON p.id = ak.project_id
+        WHERE ak.organization_id = ?
+          AND ak.created_by = ?
+          AND ak.status NOT IN ('revoked', 'deactivated')
+        ORDER BY ak.created_at DESC`
+    )
+    .bind(params.organizationId, params.createdByUserId)
+    .all<Record<string, unknown>>();
+  return z
+    .array(createdApiKeyRowSchema)
+    .parse(result.results)
+    .map((row) => ({
+      id: row.id,
+      name: row.name,
+      keyPrefix: row.key_prefix,
+      projectId: row.project_id,
+      projectName: row.project_name,
+      environment: row.environment,
+      createdAt: row.created_at,
+    }));
 }
 
 type RotationTargetRow = {

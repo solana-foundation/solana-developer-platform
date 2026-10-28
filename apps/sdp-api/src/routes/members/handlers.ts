@@ -18,6 +18,7 @@ import { getAuthorized } from "@/middleware/authorize";
 import { requireHumanActor } from "@/middleware/human-session";
 import { callerMayPerform } from "@/middleware/require-action";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { listActiveApiKeysCreatedBy } from "@/services/api-key.service";
 import { AuditService } from "@/services/audit.service";
 import { findClerkOrganizationId } from "@/services/clerk-organization-provisioning.service";
 import {
@@ -529,6 +530,25 @@ export const removeMember = async (c: AppContext) => {
   }
   await removeClerkMembership(c, organizationId, removed.userId);
   return noContent(c);
+};
+
+/** The active keys a member created, which removing them leaves working (HOO-2301). */
+export const listMemberApiKeys = async (c: AppContext) => {
+  const { organizationId } = resolveActor(c);
+  const { memberId } = c.req.param();
+  const db = getDb(c.env);
+  const member = await db
+    .prepare("SELECT user_id FROM organization_members WHERE id = ? AND organization_id = ?")
+    .bind(memberId, organizationId)
+    .first<{ user_id: string }>();
+  if (!member) {
+    throw notFound("Member");
+  }
+  const apiKeys = await listActiveApiKeysCreatedBy(db, {
+    organizationId,
+    createdByUserId: member.user_id,
+  });
+  return success(c, { apiKeys });
 };
 
 export const leaveOrganization = async (c: AppContext) => {

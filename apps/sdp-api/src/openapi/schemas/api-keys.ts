@@ -76,6 +76,19 @@ export const apiKeyListItemSchema = z
   })
   .openapi({ description: "API key list item." });
 
+export const memberApiKeysResponseSchema = z
+  .object({
+    apiKeys: z.array(
+      apiKeyListItemSchema
+        .pick({ id: true, name: true, keyPrefix: true, environment: true, createdAt: true })
+        .extend({
+          projectId: projectIdParamSchema,
+          projectName: z.string().openapi({ description: "Project name.", example: "Payments" }),
+        })
+    ),
+  })
+  .openapi({ description: "The active API keys a member created, newest first." });
+
 export const apiKeyDetailSchema = z
   .object({
     id: apiKeyIdParamSchema,

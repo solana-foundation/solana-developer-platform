@@ -13,8 +13,12 @@ import { MoreHorizontalIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { changeMemberRole, removeMember } from "@/app/members/actions";
+import useSWR from "swr";
+import { API_KEYS_PAGE_PATH } from "@/app/dashboard/[projectId]/api-keys/api-key-flash";
+import { changeMemberRole, listMemberApiKeys, removeMember } from "@/app/members/actions";
+import { EntityLink } from "@/components/entity-link";
 import { useTranslations } from "@/i18n/provider";
+import { projectHref } from "@/lib/dashboard-project-path";
 import { useActionIdempotencyKey } from "@/lib/use-action-idempotency-key";
 
 export function MemberActions({
@@ -143,6 +147,7 @@ export function MemberActions({
           <p className="text-secondary text-sm">
             {t("Shared.members.removeConfirm", { member: label })}
           </p>
+          {isConfirmOpen ? <MemberApiKeys memberId={memberId} label={label} /> : null}
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setConfirmOpen(false)} disabled={isPending}>
               {t("Shared.members.cancel")}
@@ -154,5 +159,50 @@ export function MemberActions({
         </div>
       </Modal>
     </>
+  );
+}
+
+/**
+ * The member's active keys, which the removal leaves working. Each links to
+ * its own project's key page, in a new tab so this dialog stays open; SWR
+ * reads the list again when the admin comes back from revoking.
+ */
+function MemberApiKeys({ memberId, label }: { memberId: string; label: string }) {
+  const t = useTranslations();
+  const { data: apiKeys, error } = useSWR(["member-api-keys", memberId], ([, id]) =>
+    listMemberApiKeys(id)
+  );
+
+  if (error) {
+    return <p className="text-secondary text-sm">{t("Shared.members.apiKeysLoadFailed")}</p>;
+  }
+  if (!apiKeys || apiKeys.length === 0) {
+    return null;
+  }
+  return (
+    <div className="space-y-2">
+      <p className="text-secondary text-sm">
+        {t("Shared.members.apiKeysStayActive", { member: label })}
+      </p>
+      <ul className="divide-y divide-border-subtle rounded-md border border-border-default text-sm">
+        {apiKeys.map((apiKey) => (
+          <li key={apiKey.id} className="flex items-center gap-3 px-3 py-2">
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-primary">{apiKey.name}</p>
+              <p className="truncate text-tertiary text-xs">
+                {apiKey.keyPrefix}… · {apiKey.projectName}
+              </p>
+            </div>
+            <EntityLink
+              href={projectHref(apiKey.projectId, API_KEYS_PAGE_PATH)}
+              target="_blank"
+              className="shrink-0"
+            >
+              {t("Shared.members.revokeApiKey")}
+            </EntityLink>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
