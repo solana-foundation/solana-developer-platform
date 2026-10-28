@@ -389,12 +389,13 @@ export function exampleErrorCode(
 const errorEnvelopeSampleSchema = z.object({ error: z.json() }).catchall(z.json());
 
 /** The codes an error envelope's schema allows, or null when the schema is not the envelope. */
-function envelopeCodes(schema: SchemaObject, document: OpenAPIObject): readonly unknown[] | null {
+function envelopeCodes(schema: SchemaObject, document: OpenAPIObject): ReadonlySet<string> | null {
   const error = schema.properties?.error;
   if (error === undefined) return null;
   const code = dereferenceSchema(error, document).properties?.code;
   if (code === undefined) return null;
-  return dereferenceSchema(code, document).enum ?? null;
+  const codes = dereferenceSchema(code, document).enum;
+  return codes === undefined ? null : new Set(z.array(z.string()).parse(codes));
 }
 
 /**
@@ -415,7 +416,7 @@ function errorExample(
     status === "403" && action !== null
       ? missingAction(action)
       : new AppError(exampleErrorCode(status, takesIdempotencyKey, where));
-  if (String(error.statusCode) !== status || !codes.includes(error.code)) {
+  if (String(error.statusCode) !== status || !codes.has(error.code)) {
     throw new Error(`${where}: ${error.code} is not an answer the document allows for a ${status}`);
   }
   const envelope = errorEnvelopeSampleSchema.parse(sampleFromSchema(schema, document));

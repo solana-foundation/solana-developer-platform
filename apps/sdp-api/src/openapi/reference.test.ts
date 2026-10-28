@@ -114,6 +114,14 @@ describe("buildApiReference", () => {
     });
   });
 
+  it("shows a not-ready body for the readiness probe's 503", () => {
+    const readiness = buildApiReference(createPublicOpenApiDocument({ releaseChannel: "stable" }))
+      .families.flatMap((family) => family.operations)
+      .find((operation) => operation.path === "/health/ready");
+    const notReady = readiness?.responses.find((response) => response.status === "503")?.body;
+    expect(notReady).toMatchObject({ kind: "json", example: { status: "not_ready" } });
+  });
+
   it("titles variants by the value they pin, and keeps a `not` as the properties it excludes", () => {
     const operations = buildApiReference(
       createPublicOpenApiDocument({ releaseChannel: "stable" })

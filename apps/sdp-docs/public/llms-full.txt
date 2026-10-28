@@ -60,6 +60,7 @@ const wallet = await response.json();
 </Tab>
 <Tab value="Python">
 ```python title="create_wallet.py"
+import requests
 
 response = requests.post(
     "https://api.solana.com/v1/wallets",
@@ -833,6 +834,7 @@ const result = await response.json();
 </Tab>
 <Tab value="Python">
 ```python title="compliance_action.py" rotate-token-ops
+import requests
 
 response = requests.post(
     "https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze",
@@ -3165,6 +3167,7 @@ const quote = await response.json();
 </Tab>
 <Tab value="Python">
 ```python title="onramp_quote.py" rotate-providers
+import requests
 
 response = requests.post(
     "https://api.solana.com/v1/payments/ramps/onramp/quote",
@@ -5234,6 +5237,7 @@ const res = await fetch("https://api.solana.com/health", {
 ```
 
 ```python tab="Python"
+import requests
 
 r = requests.get("https://api.solana.com/health")
 ```
@@ -5276,6 +5280,7 @@ const res = await fetch("https://api.solana.com/health/ready", {
 ```
 
 ```python tab="Python"
+import requests
 
 r = requests.get("https://api.solana.com/health/ready")
 ```
@@ -5298,13 +5303,13 @@ r = requests.get("https://api.solana.com/health/ready")
 
 ```json tab="503"
 {
-  "status": "ready",
+  "status": "not_ready",
   "timestamp": "2025-01-01T00:00:00.000Z",
   "revision": "sdp-prod-api-public-00042-abc",
   "commit": "0123456789abcdef0123456789abcdef01234567",
   "checks": {
     "database": "ok",
-    "redis": "ok",
+    "redis": "error",
     "egress": "ok"
   }
 }
@@ -5458,6 +5463,7 @@ const res = await fetch("https://api.solana.com/v1/wallets/initialize", {
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/wallets/initialize",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -5672,6 +5678,7 @@ const res = await fetch("https://api.solana.com/v1/wallets", {
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/wallets",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -5878,6 +5885,7 @@ const res = await fetch("https://api.solana.com/v1/wallets", {
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.delete("https://api.solana.com/v1/wallets",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -6039,6 +6047,7 @@ const res = await fetch("https://api.solana.com/v1/wallets", {
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/wallets",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -6172,6 +6181,7 @@ const res = await fetch("https://api.solana.com/v1/wallets/configs", {
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/wallets/configs",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -6286,6 +6296,7 @@ const res = await fetch("https://api.solana.com/v1/wallets/aggregate", {
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/wallets/aggregate",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -6440,6 +6451,7 @@ const res = await fetch("https://api.solana.com/v1/wallets/public-key?walletId=p
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/wallets/public-key?walletId=privy_wallet_123",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -6594,6 +6606,7 @@ const res = await fetch("https://api.solana.com/v1/wallets/signer-check", {
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/wallets/signer-check",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -6786,6 +6799,7 @@ const res = await fetch("https://api.solana.com/v1/wallets/privy_wallet_123", {
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/wallets/privy_wallet_123",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -6963,6 +6977,7 @@ const res = await fetch("https://api.solana.com/v1/wallets/privy_wallet_123", {
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.patch("https://api.solana.com/v1/wallets/privy_wallet_123",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -7128,6 +7143,7 @@ const res = await fetch("https://api.solana.com/v1/projects", {
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/projects",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -7244,6 +7260,7 @@ const res = await fetch("https://api.solana.com/v1/projects/prj_example", {
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/projects/prj_example",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -7413,6 +7430,7 @@ const res = await fetch("https://api.solana.com/v1/projects/prj_example", {
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.patch("https://api.solana.com/v1/projects/prj_example",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -7558,6 +7576,7 @@ const res = await fetch("https://api.solana.com/v1/projects/prj_example/provider
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/projects/prj_example/provider-availability",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -7715,6 +7734,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/templates", {
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/issuance/templates",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -7839,6 +7859,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/templates/stablecoin
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/issuance/templates/stablecoin",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -8202,6 +8223,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens", {
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/issuance/tokens",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -8446,6 +8468,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens", {
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/issuance/tokens",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -8612,6 +8635,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/facets", {
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/issuance/tokens/facets",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -8747,6 +8771,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/transactions", {
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/issuance/transactions",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -8923,6 +8948,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example",
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/issuance/tokens/tok_example",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -9183,6 +9209,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example",
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.patch("https://api.solana.com/v1/issuance/tokens/tok_example",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -9378,6 +9405,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/m
 ```
 
 ```python tab="Python"
+import requests
 
 r = requests.get("https://api.solana.com/v1/issuance/tokens/tok_example/metadata.json")
 ```
@@ -9464,6 +9492,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/s
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/supply/refresh",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())})
@@ -9681,6 +9710,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/t
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/issuance/tokens/tok_example/transactions",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -9843,6 +9873,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/a
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/issuance/tokens/tok_example/audit",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -10025,6 +10056,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/d
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/deploy",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -10261,6 +10293,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/d
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/deploy/prepare",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())})
@@ -10472,6 +10505,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/d
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/deploy/confirm",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -10705,6 +10739,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/d
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/deploy/prepare-metadata",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())})
@@ -10939,6 +10974,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/m
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/mint/prepare",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -11197,6 +11233,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/m
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/mint",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -11449,6 +11486,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/b
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/burn/prepare",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -11706,6 +11744,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/b
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/burn",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -11969,6 +12008,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/s
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/seize/prepare",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -12240,6 +12280,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/s
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/seize",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -12499,6 +12540,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/f
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/force-burn/prepare",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -12763,6 +12805,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/f
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/force-burn",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -13007,6 +13050,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/a
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/authority/prepare",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -13255,6 +13299,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/a
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/authority",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -13484,6 +13529,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/p
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/pause",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -13709,6 +13755,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/u
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/unpause",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -13924,6 +13971,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/f
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/freeze",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -14123,6 +14171,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/u
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/unfreeze",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -14298,6 +14347,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/f
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/issuance/tokens/tok_example/frozen",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -14445,6 +14495,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/a
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/issuance/tokens/tok_example/allowlist",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -14619,6 +14670,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/a
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/allowlist",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -14784,6 +14836,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/a
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/issuance/tokens/tok_example/allowlist/labels",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -14917,6 +14970,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/a
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.delete("https://api.solana.com/v1/issuance/tokens/tok_example/allowlist/al_example",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())})
@@ -15044,6 +15098,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/h
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/issuance/tokens/tok_example/holders",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -15181,6 +15236,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/h
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/holders",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -15323,6 +15379,7 @@ const res = await fetch("https://api.solana.com/v1/payments/wallets/privy_wallet
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/payments/wallets/privy_wallet_123/balances",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -15546,6 +15603,7 @@ const res = await fetch("https://api.solana.com/v1/payments/transfers", {
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/payments/transfers",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -15854,6 +15912,7 @@ const res = await fetch("https://api.solana.com/v1/payments/transfers", {
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/payments/transfers",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -16068,6 +16127,7 @@ const res = await fetch("https://api.solana.com/v1/payments/transfers/xfr_exampl
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/payments/transfers/xfr_example",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -16336,6 +16396,7 @@ const res = await fetch("https://api.solana.com/v1/payments/transfer-batches/est
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/payments/transfer-batches/estimate",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -16586,6 +16647,7 @@ const res = await fetch("https://api.solana.com/v1/payments/transfer-batches", {
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/payments/transfer-batches",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -16884,6 +16946,7 @@ const res = await fetch("https://api.solana.com/v1/payments/transfer-batches", {
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/payments/transfer-batches",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -17041,6 +17104,7 @@ const res = await fetch("https://api.solana.com/v1/payments/transfer-batches/xba
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/payments/transfer-batches/xbatch_example",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -17325,6 +17389,7 @@ const res = await fetch("https://api.solana.com/v1/payments/recurring-payments",
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/payments/recurring-payments",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -17523,6 +17588,7 @@ const res = await fetch("https://api.solana.com/v1/payments/recurring-payments",
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/payments/recurring-payments",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -17747,6 +17813,7 @@ const res = await fetch("https://api.solana.com/v1/payments/recurring-payments/p
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.patch("https://api.solana.com/v1/payments/recurring-payments/prp_example",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -17938,6 +18005,7 @@ const res = await fetch("https://api.solana.com/v1/payments/recurring-payments/p
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/payments/recurring-payments/prp_example",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -18091,6 +18159,7 @@ const res = await fetch("https://api.solana.com/v1/payments/recurring-payments/p
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/payments/recurring-payments/prp_example/activate",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())})
@@ -18280,6 +18349,7 @@ const res = await fetch("https://api.solana.com/v1/payments/recurring-payments/p
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/payments/recurring-payments/prp_example/cancel",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())})
@@ -18470,6 +18540,7 @@ const res = await fetch("https://api.solana.com/v1/payments/requests/preq_exampl
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/payments/requests/preq_example/cancel",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())})
@@ -18666,6 +18737,7 @@ const res = await fetch("https://api.solana.com/v1/payments/recurring-payments/p
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/payments/recurring-payments/prp_example/collect",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())})
@@ -18949,6 +19021,7 @@ const res = await fetch("https://api.solana.com/v1/payments/recurring-payments/p
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/payments/recurring-payments/prp_example/resume",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())})
@@ -19204,6 +19277,7 @@ const res = await fetch("https://api.solana.com/v1/payments/subscription-plans",
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/payments/subscription-plans",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -19390,6 +19464,7 @@ const res = await fetch("https://api.solana.com/v1/payments/subscription-plans",
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/payments/subscription-plans",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -19576,6 +19651,7 @@ const res = await fetch("https://api.solana.com/v1/payments/subscription-plans/p
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/payments/subscription-plans/psp_example/prepare-create",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -19741,6 +19817,7 @@ const res = await fetch("https://api.solana.com/v1/payments/subscription-plans/p
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/payments/subscription-plans/psp_example",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -19922,6 +19999,7 @@ const res = await fetch("https://api.solana.com/v1/payments/subscription-plans/p
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.patch("https://api.solana.com/v1/payments/subscription-plans/psp_example",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -20130,6 +20208,7 @@ const res = await fetch("https://api.solana.com/v1/payments/subscriptions", {
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/payments/subscriptions",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -20315,6 +20394,7 @@ const res = await fetch("https://api.solana.com/v1/payments/subscriptions", {
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/payments/subscriptions",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -20487,6 +20567,7 @@ const res = await fetch("https://api.solana.com/v1/payments/subscriptions/psub_e
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/payments/subscriptions/psub_example/prepare-authorization",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -20661,6 +20742,7 @@ const res = await fetch("https://api.solana.com/v1/payments/subscriptions/psub_e
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/payments/subscriptions/psub_example/prepare-cancel",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -20829,6 +20911,7 @@ const res = await fetch("https://api.solana.com/v1/payments/subscriptions/psub_e
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/payments/subscriptions/psub_example/prepare-resume",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -21005,6 +21088,7 @@ const res = await fetch("https://api.solana.com/v1/payments/subscriptions/psub_e
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/payments/subscriptions/psub_example/prepare-collection",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -21183,6 +21267,7 @@ const res = await fetch("https://api.solana.com/v1/payments/subscriptions/psub_e
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/payments/subscriptions/psub_example",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -21328,6 +21413,7 @@ const res = await fetch("https://api.solana.com/v1/payments/subscriptions/psub_e
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/payments/subscriptions/psub_example/collection-attempts",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -21488,6 +21574,7 @@ const res = await fetch("https://api.solana.com/v1/payments/ramps/onramp/currenc
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/payments/ramps/onramp/currency",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -21651,6 +21738,7 @@ const res = await fetch("https://api.solana.com/v1/payments/ramps/offramp/curren
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/payments/ramps/offramp/currency",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -21854,6 +21942,7 @@ const res = await fetch("https://api.solana.com/v1/payments/ramps/onramp/quote",
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/payments/ramps/onramp/quote",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -22060,6 +22149,7 @@ const res = await fetch("https://api.solana.com/v1/payments/ramps/sandbox/simula
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/payments/ramps/sandbox/simulate",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -22224,6 +22314,7 @@ const res = await fetch("https://api.solana.com/v1/transactions", {
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/transactions",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -22417,6 +22508,7 @@ const res = await fetch("https://api.solana.com/v1/compliance/address-screenings
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/compliance/address-screenings",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -22576,6 +22668,7 @@ const res = await fetch("https://api.solana.com/v1/counterparties/metadata", {
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/counterparties/metadata",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -22697,6 +22790,7 @@ const res = await fetch("https://api.solana.com/v1/counterparties", {
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/counterparties",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -22860,6 +22954,7 @@ const res = await fetch("https://api.solana.com/v1/counterparties", {
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/counterparties",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -23015,6 +23110,7 @@ const res = await fetch("https://api.solana.com/v1/counterparties/cpty_example",
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/counterparties/cpty_example",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -23180,6 +23276,7 @@ const res = await fetch("https://api.solana.com/v1/counterparties/cpty_example",
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.patch("https://api.solana.com/v1/counterparties/cpty_example",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -23356,6 +23453,7 @@ const res = await fetch("https://api.solana.com/v1/counterparties/cpty_example",
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.delete("https://api.solana.com/v1/counterparties/cpty_example",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())})
@@ -23524,6 +23622,7 @@ const res = await fetch("https://api.solana.com/v1/counterparties/cpty_example/r
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/counterparties/cpty_example/requirements?provider=moonpay&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -23672,6 +23771,7 @@ const res = await fetch("https://api.solana.com/v1/counterparties/cpty_example/a
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/counterparties/cpty_example/accounts",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -23874,6 +23974,7 @@ const res = await fetch("https://api.solana.com/v1/counterparties/cpty_example/a
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/counterparties/cpty_example/accounts",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -24065,6 +24166,7 @@ const res = await fetch("https://api.solana.com/v1/counterparties/cpty_example/p
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/counterparties/cpty_example/provider-accounts",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -24234,6 +24336,7 @@ const res = await fetch("https://api.solana.com/v1/counterparties/cpty_example/a
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/counterparties/cpty_example/accounts/cpa_example",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -24417,6 +24520,7 @@ const res = await fetch("https://api.solana.com/v1/counterparties/cpty_example/a
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.patch("https://api.solana.com/v1/counterparties/cpty_example/accounts/cpa_example",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -24604,6 +24708,7 @@ const res = await fetch("https://api.solana.com/v1/counterparties/cpty_example/a
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.delete("https://api.solana.com/v1/counterparties/cpty_example/accounts/cpa_example",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())})
@@ -24743,6 +24848,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/asset-profiles/field
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/issuance/asset-profiles/field-options",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -24877,6 +24983,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/asset-profiles", {
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/issuance/asset-profiles",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -25388,6 +25495,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/asset-profiles", {
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.post("https://api.solana.com/v1/issuance/asset-profiles",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -25665,6 +25773,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/asset-profiles/by-to
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/issuance/asset-profiles/by-token/tok_example",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -25843,6 +25952,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/asset-profiles/asset
 ```
 
 ```python tab="Python"
+import os, requests
 
 r = requests.get("https://api.solana.com/v1/issuance/asset-profiles/asset_profile_example",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}"})
@@ -26180,6 +26290,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/asset-profiles/asset
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.patch("https://api.solana.com/v1/issuance/asset-profiles/asset_profile_example",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
@@ -26417,6 +26528,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/asset-profiles/asset
 ```
 
 ```python tab="Python"
+import os, requests, uuid
 
 r = requests.delete("https://api.solana.com/v1/issuance/asset-profiles/asset_profile_example",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())})

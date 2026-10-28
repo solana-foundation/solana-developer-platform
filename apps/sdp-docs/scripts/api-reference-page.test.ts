@@ -4,7 +4,7 @@ import type { ApiOperation, ApiSchema } from "@sdp/api-catalog/reference";
 import remarkMdx from "remark-mdx";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
-import { expandDocsBlocks, remarkDocsBlocks } from "@/lib/docs-blocks";
+import { expandDocsBlocks, remarkDocsBlocks, stripMdxEsm } from "@/lib/docs-blocks";
 import { publicSurface } from "@/lib/release-channel";
 import {
   codeSpan,
@@ -231,5 +231,25 @@ describe("<ApiEndpoint />", () => {
     assert.throws(() =>
       expandDocsBlocks('<ApiEndpoint method="TRACE" path="/health" />\n', "bad.mdx")
     );
+  });
+});
+
+describe("stripMdxEsm", () => {
+  it("drops the page's imports and keeps an import inside a code fence", () => {
+    const page = [
+      'import { Tab } from "fumadocs-ui/components/tabs";',
+      "",
+      "Call it:",
+      "",
+      '```python tab="Python"',
+      "import os, requests",
+      "",
+      'r = requests.get("https://api.solana.com/health")',
+      "```",
+      "",
+    ].join("\n");
+    const markdown = stripMdxEsm(page, "page.mdx");
+    assert.ok(!markdown.includes("fumadocs-ui"));
+    assert.ok(markdown.includes("import os, requests\n\nr = requests.get"));
   });
 });

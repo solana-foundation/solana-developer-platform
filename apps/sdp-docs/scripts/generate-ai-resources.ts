@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DOCS_SKILL_NAME } from "@/lib/agent-setup";
-import { expandDocsBlocks } from "@/lib/docs-blocks";
+import { expandDocsBlocks, stripMdxEsm } from "@/lib/docs-blocks";
 import { DOCS_MODULES } from "@/lib/docs-catalog";
 import {
   frontmatterOf,
@@ -94,9 +94,9 @@ function normalizeLine(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
 
-function stripMdxContent(source: string): string {
+function stripMdxContent(source: string, where: string): string {
   let content = source.replace(/^---\n[\s\S]*?\n---\n?/, "");
-  content = content.replace(/^import\s+[^\n]*\n?/gm, "");
+  content = stripMdxEsm(content, where);
   return content.replace(/\n{3,}/g, "\n\n").trim();
 }
 
@@ -158,7 +158,7 @@ async function loadPages(): Promise<Map<string, DocsPage>> {
       title: title || slug.split("/").at(-1)?.replace(/-/g, " ") || slug,
       description,
       url: getDocsPageUrl(slug),
-      content: stripMdxContent(source),
+      content: stripMdxContent(source, filePath),
       shared: pageGateOf(frontmatterOf(raw, filePath).data, filePath) === undefined,
     });
   }

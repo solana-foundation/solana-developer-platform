@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { expandDocsBlocks } from "@/lib/docs-blocks";
+import { expandDocsBlocks, stripMdxEsm } from "@/lib/docs-blocks";
 import { renderDocsIndexMarkdown } from "@/lib/docs-index-markdown";
 import { aiLlmsUrl, aiSkillUrl, getDocsMarkdownUrl } from "@/lib/site";
 import { source } from "@/lib/source";
@@ -10,11 +10,10 @@ export const runtime = "nodejs";
 // Opens every page's Markdown, so an agent that lands on one page can find the rest.
 const AGENT_CONTEXT = `> Solana Developer Platform docs, served as Markdown. The [docs index](${getDocsMarkdownUrl("")}) lists every page and [llms.txt](${aiLlmsUrl}) the key ones; [SKILL.md](${aiSkillUrl}) has the rules for building on SDP.`;
 
-function stripMdxShell(source: string): string {
+function stripMdxShell(source: string, where: string): string {
   // Remove frontmatter
   let content = source.replace(/^---\n[\s\S]*?\n---\n?/, "");
-  // Remove import lines
-  content = content.replace(/^import\s+[^\n]*\n?/gm, "");
+  content = stripMdxEsm(content, where);
   // Collapse excessive blank lines
   return content.replace(/\n{3,}/g, "\n\n").trim();
 }
@@ -88,7 +87,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ slug?: 
     if (!filePath.startsWith(contentDirPrefix)) continue;
     try {
       const raw = await readFile(filePath, "utf8");
-      const body = stripMdxShell(expandDocsBlocks(raw, filePath));
+      const body = stripMdxShell(expandDocsBlocks(raw, filePath), filePath);
       return markdownResponse(pageMarkdown(page.data, body), `/docs/${slug.join("/")}`);
     } catch {}
   }

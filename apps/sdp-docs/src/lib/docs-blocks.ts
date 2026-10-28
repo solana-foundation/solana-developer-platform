@@ -190,6 +190,23 @@ export function remarkDocsBlocks(options: { surface?: PublicSurface } = {}) {
   };
 }
 
+/**
+ * Markdown without the page's ESM `import` and `export` statements, for the Markdown route and
+ * the llms files. The parser finds them, so a line in a code fence that starts with `import` (a
+ * Python sample's `import os, requests`) stays.
+ */
+export function stripMdxEsm(markdown: string, where: string): string {
+  const statements = parser
+    .parse(markdown)
+    .children.filter((node) => node.type === "mdxjsEsm")
+    .map((node) => spanOf(node, where));
+  let result = markdown;
+  for (const span of statements.sort((left, right) => right.start - left.start)) {
+    result = result.slice(0, span.start) + result.slice(span.end);
+  }
+  return result;
+}
+
 /** Expands a page's generated blocks in its raw MDX, keeping everything else byte for byte. */
 export function expandDocsBlocks(
   source: string,
