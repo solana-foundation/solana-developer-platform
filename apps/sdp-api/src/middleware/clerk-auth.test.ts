@@ -113,7 +113,7 @@ describe("Clerk auth request cache", () => {
       cachedAfterAuth = after.payload;
     });
     app.use("*", unifiedAuthMiddleware());
-    app.get("/protected", requireAction("organizations.read"), (c) => {
+    app.get("/v1/protected", requireAction("organizations.read"), (c) => {
       return c.json({
         organizationId: getClerkAuth(c).organizationId,
         email: getClerkAuth(c).email,
@@ -203,7 +203,7 @@ describe("Clerk auth request cache", () => {
     const { app, token, cachedPayloads } = await createProtectedApp(payload);
 
     const res = await app.request(
-      "/protected",
+      "/v1/protected",
       {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -232,7 +232,7 @@ describe("Clerk auth request cache", () => {
     const { app, token } = await createProtectedApp(payload);
 
     const res = await app.request(
-      "/protected",
+      "/v1/protected",
       { headers: { Authorization: `Bearer ${token}` } },
       env
     );
@@ -256,7 +256,7 @@ describe("Clerk auth request cache", () => {
     );
 
     const res = await app.request(
-      "/protected",
+      "/v1/protected",
       { headers: { Authorization: `Bearer ${token}` } },
       env
     );
@@ -282,7 +282,7 @@ describe("Clerk auth request cache", () => {
     const { app, token } = await createProtectedApp(payload);
 
     const res = await app.request(
-      "/protected",
+      "/v1/protected",
       { headers: { Authorization: `Bearer ${token}` } },
       env
     );
@@ -339,7 +339,7 @@ describe("Clerk auth request cache", () => {
     const { app, token } = await createProtectedApp(payload);
 
     const unverified = await app.request(
-      "/protected",
+      "/v1/protected",
       { headers: { Authorization: `Bearer ${token}` } },
       env
     );
@@ -357,7 +357,7 @@ describe("Clerk auth request cache", () => {
 
     verificationStatus = "verified";
     const verified = await app.request(
-      "/protected",
+      "/v1/protected",
       { headers: { Authorization: `Bearer ${token}` } },
       env
     );
@@ -405,7 +405,7 @@ describe("Clerk auth request cache", () => {
 
     const { app, token } = await createProtectedApp(cachedUserPayload());
     const res = await app.request(
-      "/protected",
+      "/v1/protected",
       { headers: { Authorization: `Bearer ${token}` } },
       env
     );
@@ -431,7 +431,7 @@ describe("Clerk auth request cache", () => {
 
     const { app, token } = await createProtectedApp(cachedUserPayload());
     const res = await app.request(
-      "/protected",
+      "/v1/protected",
       { headers: { Authorization: `Bearer ${token}` } },
       env
     );
@@ -461,7 +461,7 @@ describe("Clerk auth request cache", () => {
 
     const { app, token } = await createProtectedApp(cachedUserPayload());
     const res = await app.request(
-      "/protected",
+      "/v1/protected",
       { headers: { Authorization: `Bearer ${token}` } },
       env
     );
@@ -486,7 +486,7 @@ describe("Clerk auth request cache", () => {
 
     const { app, token } = await createProtectedApp(cachedUserPayload());
     const res = await app.request(
-      "/protected",
+      "/v1/protected",
       { headers: { Authorization: `Bearer ${token}` } },
       env
     );
@@ -516,7 +516,7 @@ describe("Clerk auth request cache", () => {
 
     const { app, token } = await createProtectedApp(cachedUserPayload());
     const res = await app.request(
-      "/protected",
+      "/v1/protected",
       { headers: { Authorization: `Bearer ${token}` } },
       env
     );
@@ -529,7 +529,7 @@ describe("Clerk auth request cache", () => {
 
     const { app, token } = await createProtectedApp(cachedUserPayload());
     const res = await app.request(
-      "/protected",
+      "/v1/protected",
       { headers: { Authorization: `Bearer ${token}` } },
       env
     );

@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AppError } from "@/lib/errors";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { env } from "@/test/helpers/env";
-import { clearKVStores, readRateLimitCount } from "@/test/mocks/kv";
+import { clearKVStores, readRateLimitCount, seedRateLimit } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 
 // Signature verification itself is covered elsewhere; what matters here is that a
@@ -22,6 +22,7 @@ const { CLERK_USER_MAX_REQUESTS, skipRateLimitPaths } = await import("@/middlewa
 
 const USER_ID = "user_ratelimit_test";
 const ISSUER = "https://clerk.rate-limit-test.example";
+const CLIENT_IP = "203.0.113.9";
 
 // The middleware only reaches verification for a token whose issuer matches
 // CLERK_ISSUER, which the shared test env doesn't set.
@@ -42,6 +43,7 @@ function buildApp() {
   app.use("*", skipRateLimitPaths("/health"));
   app.get("/health", (c) => c.json({ ok: true }));
   app.get("/v1/thing", (c) => c.json({ ok: true }));
+  app.post("/pay/:token/tx", (c) => c.json({ ok: true }));
   // Mirrors the real app's handler so a thrown AppError surfaces as its status.
   app.onError((err, c) =>
     err instanceof AppError
@@ -93,5 +95,18 @@ describe("dashboard rate limiting", () => {
 
     // Falls through to the anonymous per-IP limit, which is what bounds signature spray.
     expect(await readRateLimitCount(env, `clerk:${USER_ID}`)).toBe(0);
+  });
+
+  it("gives a Clerk JWT on /pay the anonymous per-IP limit without verifying it", async () => {
+    await seedRateLimit(env, CLIENT_IP, 20);
+
+    const res = await buildApp().request(
+      "/pay/pay_tok_clerk/tx",
+      { method: "POST", headers: { ...AUTH, "x-forwarded-for": CLIENT_IP } },
+      clerkEnv
+    );
+
+    expect(res.status).toBe(429);
+    expect(verifyClerkJwtForRequest).not.toHaveBeenCalled();
   });
 });

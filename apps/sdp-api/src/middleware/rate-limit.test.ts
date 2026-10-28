@@ -6,6 +6,7 @@ import { currentDatabaseIdentity } from "@/db/identity";
 import { app } from "@/index";
 import { AppError, rateLimited } from "@/lib/errors";
 import * as organizationAccess from "@/lib/organization-access";
+import { mapErrorStatusCode } from "@/lib/response";
 import { apiKeyFloodGuardFallback, authMiddleware, optionalAuth } from "@/middleware/auth";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import {
@@ -270,6 +271,24 @@ describe("Rate limiting", () => {
 
       expect(res.status).not.toBe(429);
     });
+
+    it.each(["sk_test_pay_header", "sf_pay_header"])(
+      "caps /pay at the anonymous limit when it presents %s",
+      async (key) => {
+        await seedRateLimit(env, CLIENT_IP, 20);
+
+        const res = await app.request(
+          "/pay/pay_tok_ratelimit/tx",
+          {
+            method: "POST",
+            headers: { Authorization: `Bearer ${key}`, "x-forwarded-for": CLIENT_IP },
+          },
+          env
+        );
+
+        expect(res.status).toBe(429);
+      }
+    );
 
     it("still caps keyed requests at the per-IP backstop", async () => {
       await seedApiKeyRow(env, validKeyHash, TEST_SEEDED_API_KEY);
@@ -542,10 +561,10 @@ describe("Rate limiting", () => {
       });
       app.use("*", skipRateLimitPaths());
       app.use("*", authMiddleware());
-      app.get("/resource", (c) => c.text("ok"));
+      app.get("/v1/resource", (c) => c.text("ok"));
       const request = (key: string) =>
         app.request(
-          "/resource",
+          "/v1/resource",
           { headers: { Authorization: `Bearer ${key}`, "x-forwarded-for": CLIENT_IP } },
           env
         );
@@ -567,6 +586,35 @@ describe("Rate limiting", () => {
       read.mockClear();
       expect((await request("sk_test_spray_three")).status).toBe(429);
       expect(read).not.toHaveBeenCalled();
+    });
+
+    it("refuses /pay with a 503 before its handler while the store is down", async () => {
+      const handler = vi.fn();
+      const app = new Hono<{ Bindings: Env }>();
+      app.onError((err, c) =>
+        err instanceof AppError
+          ? c.json(err.toResponse(), mapErrorStatusCode(err.statusCode))
+          : c.text("error", 500)
+      );
+      app.use("*", async (c, next) => {
+        c.set("kv", unavailableKvStoreSet());
+        await next();
+      });
+      app.use("*", skipRateLimitPaths());
+      app.post("/pay/:token/tx", (c) => {
+        handler();
+        return c.text("ok");
+      });
+
+      const res = await app.request(
+        "/pay/pay_tok_store_down/tx",
+        { method: "POST", headers: { "x-forwarded-for": CLIENT_IP } },
+        env
+      );
+
+      expect(res.status).toBe(503);
+      expect(await res.json()).toMatchObject({ error: { code: "SERVICE_UNAVAILABLE" } });
+      expect(handler).not.toHaveBeenCalled();
     });
   });
 });
