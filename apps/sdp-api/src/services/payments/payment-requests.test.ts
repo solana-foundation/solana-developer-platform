@@ -1284,7 +1284,7 @@ describe("payment lateness", () => {
       const canceled = await cancelSeededPaymentRequest(
         env,
         await createRequest({ token: SOL_MINT, expiresAt: null }),
-        TEST_USER.id
+        { apiKeyId: null, userId: TEST_USER.id }
       );
       await setPaymentRequestColumns(env, canceled.id, { canceled_at: PAST });
 
@@ -1294,7 +1294,8 @@ describe("payment lateness", () => {
       expect(settled).toMatchObject({
         status: "paid",
         paid_late: paidLate,
-        canceled_by: TEST_USER.id,
+        canceled_by_api_key_id: null,
+        canceled_by_user_id: TEST_USER.id,
         canceled_at: PAST,
       });
     }

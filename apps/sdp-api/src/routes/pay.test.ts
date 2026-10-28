@@ -206,7 +206,7 @@ describe("Public payment request routes", () => {
     const request = await cancelSeededPaymentRequest(
       env,
       await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET),
-      TEST_USER.id
+      { apiKeyId: null, userId: TEST_USER.id }
     );
 
     const response = await postTransaction(request.public_token);
@@ -516,7 +516,10 @@ describe("Public payment request routes", () => {
         .mockImplementation((bindings) => {
           const repository = systemRepository(bindings);
           vi.spyOn(repository, "claimSponsoredTransactionWindow").mockImplementation(async () => {
-            await cancelSeededPaymentRequest(env, request, TEST_USER.id);
+            await cancelSeededPaymentRequest(env, request, {
+              apiKeyId: null,
+              userId: TEST_USER.id,
+            });
             return false;
           });
           return repository;

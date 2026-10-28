@@ -1,6 +1,7 @@
 import { getDb } from "@/db/client";
 import type {
   CreatePaymentRequestInput,
+  PaymentRequestCanceler,
   PaymentRequestRow,
 } from "@/db/repositories/payment-requests.repository";
 import { createPaymentRequestsRepository } from "@/db/repositories/repository-factory";
@@ -37,14 +38,14 @@ export function seedPaymentRequest(
  *
  * @param env - Test bindings.
  * @param request - The open request.
- * @param canceledBy - The principal recorded as canceling it.
+ * @param canceledBy - The API key or member recorded as canceling it.
  * @returns The canceled request.
  * @throws AssertionError when the request was not open.
  */
 export async function cancelSeededPaymentRequest(
   env: Env,
   request: PaymentRequestRow,
-  canceledBy: string
+  canceledBy: PaymentRequestCanceler
 ): Promise<PaymentRequestRow> {
   return required(
     await tenantRepository(env, {

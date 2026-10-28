@@ -121,7 +121,8 @@ describe("POST /v1/payments/requests/:paymentRequestId/cancel", () => {
         fulfilledByTransferId: null,
         paidLate: false,
         lastCheckedAt: null,
-        canceledBy: TEST_USER.id,
+        canceledByApiKeyId: TEST_API_KEY.id,
+        canceledByUserId: null,
         canceledAt: required(canceled.canceled_at),
         lifecycle: canceled.lifecycle,
         createdBy: TEST_USER.id,
@@ -137,12 +138,11 @@ describe("POST /v1/payments/requests/:paymentRequestId/cancel", () => {
     expect(rpc.calls.map((call) => call.method)).not.toContain("getBlockHeight");
   });
 
-  it("answers an already canceled request with its row unchanged", async () => {
-    const canceled = await cancelSeededPaymentRequest(
-      env,
-      await seedSandboxRequest(),
-      TEST_USER.id
-    );
+  it("answers a request a member already canceled with its row and canceler unchanged", async () => {
+    const canceled = await cancelSeededPaymentRequest(env, await seedSandboxRequest(), {
+      apiKeyId: null,
+      userId: TEST_USER.id,
+    });
 
     const response = await postCancel(canceled.id);
 
@@ -150,6 +150,8 @@ describe("POST /v1/payments/requests/:paymentRequestId/cancel", () => {
     expect(await response.json()).toMatchObject({
       data: {
         status: "canceled",
+        canceledByApiKeyId: null,
+        canceledByUserId: TEST_USER.id,
         canceledAt: canceled.canceled_at,
         updatedAt: canceled.updated_at,
       },
@@ -168,7 +170,7 @@ describe("POST /v1/payments/requests/:paymentRequestId/cancel", () => {
 
       expect(response.status).toBe(409);
       expect(await response.json()).toMatchObject({ error: { code: "CONFLICT" } });
-      expect(await stored(request)).toMatchObject({ canceled_by: null, canceled_at: null });
+      expect(await stored(request)).toMatchObject({ canceled_at: null });
     }
   );
 
@@ -238,7 +240,6 @@ describe("POST /v1/payments/requests/:paymentRequestId/cancel", () => {
     expect(response.status).toBe(500);
     expect(await stored(request)).toMatchObject({
       status: "awaiting_payment",
-      canceled_by: null,
       canceled_at: null,
     });
   });

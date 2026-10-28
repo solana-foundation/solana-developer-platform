@@ -137,7 +137,7 @@ describe("PaymentRequestsRepository (postgres)", () => {
       requestId: request.id,
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
-      canceledBy: TEST_USER.id,
+      canceledBy: { apiKeyId: null, userId: TEST_USER.id },
       liveClaimMinLastValidBlockHeight,
     };
   }
@@ -177,7 +177,6 @@ describe("PaymentRequestsRepository (postgres)", () => {
       expect(row?.custody_wallet_id).toBe(TEST_CUSTODY_WALLET_ID);
       expect(row?.status).toBe("awaiting_payment");
       expect(row?.fulfilled_by_transfer_id).toBeNull();
-      expect(row?.canceled_by).toBeNull();
     });
 
     it("persists an explicitly selected exact wallet", async () => {
@@ -355,7 +354,6 @@ describe("PaymentRequestsRepository (postgres)", () => {
 
       expect(paid?.status).toBe("paid");
       expect(paid?.fulfilled_by_transfer_id).toBe("xfr_settle");
-      expect(paid?.canceled_by).toBeNull();
       expect(paid?.lifecycle[1]).toMatchObject({ status: "paid" });
     });
 
@@ -438,7 +436,11 @@ describe("PaymentRequestsRepository (postgres)", () => {
 
       const canceled = required(await repo.cancelPaymentRequest(cancelInput(open, null)));
 
-      expect(canceled).toMatchObject({ status: "canceled", canceled_by: TEST_USER.id });
+      expect(canceled).toMatchObject({
+        status: "canceled",
+        canceled_by_api_key_id: null,
+        canceled_by_user_id: TEST_USER.id,
+      });
       expect(canceled.canceled_at).toEqual(expect.any(String));
       expect(canceled.lifecycle.map((event) => event.status)).toEqual([
         "awaiting_payment",
@@ -456,7 +458,6 @@ describe("PaymentRequestsRepository (postgres)", () => {
       expect(await repo.cancelPaymentRequest(cancelInput(lapsed, null))).toBeNull();
       expect(await stored(lapsed)).toMatchObject({
         status: "awaiting_payment",
-        canceled_by: null,
         canceled_at: null,
       });
     });
@@ -489,7 +490,6 @@ describe("PaymentRequestsRepository (postgres)", () => {
       ).toBeNull();
       expect(await stored(request)).toMatchObject({
         status: "awaiting_payment",
-        canceled_by: null,
         canceled_at: null,
       });
     });
@@ -1142,7 +1142,11 @@ describe("PaymentRequestsRepository (postgres)", () => {
       });
 
       it("lists canceled requests by when they were canceled, not when they expire", async () => {
-        const canceled = { status: "canceled", canceled_by: TEST_USER.id, expires_at: FUTURE };
+        const canceled = {
+          status: "canceled",
+          canceled_by_user_id: TEST_USER.id,
+          expires_at: FUTURE,
+        };
         const inside = await closedRequest({ ...canceled, canceled_at: ago(6 * DAY) });
         await closedRequest({ ...canceled, canceled_at: ago(8 * DAY) });
 
