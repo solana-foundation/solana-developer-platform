@@ -50,6 +50,8 @@
 ## Machine-readable resources
 - [llms.txt](https://platform.solana.com/docs/ai/llms.txt)
 - [llms-full.txt](https://platform.solana.com/docs/ai/llms-full.txt)
+- [SKILL.md](https://platform.solana.com/SKILL.md): Agent skill with the rules for building on SDP.
+- Any docs page as Markdown: add `.md` to its URL.
 - [OpenAPI](https://api.solana.com/openapi.json)
 - [Swagger UI](https://api.solana.com/docs)
 

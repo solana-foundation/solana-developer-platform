@@ -96,6 +96,12 @@ import { DocsPage, DocsTitle, DocsDescription, DocsBody } from "@/components/doc
 - `<DocsPage toc={toc}>` — renders sticky TOC sidebar at 1180px+ (right column, 230px wide)
 - Article max-width is 760px (760px + gap + 230px TOC = ~1060px inside 1240px container)
 
+### Page actions and the Markdown agents get
+
+`[[...slug]]/page.tsx` puts the title in `.launch-docs-header` beside `PageActions` (`page-actions.tsx`): **Copy page**, with View as Markdown and Open in ChatGPT or Claude behind its chevron. Copy page fetches the page's `.md` and copies that response, so it always matches what agents get; below 640px it drops its label. The `.md` route (`src/app/api/docs-md`) opens every page, the home included, with a one-line context block linking `llms.txt` and `SKILL.md`, then the page's title and description.
+
+Popovers (`fumadocs-ui/components/ui/popover`) render in a portal outside `.sdp-docs-shell`: give their content `.launch-popover`, which sets the type, surface, `--elevation-popover` and the motion-token animation.
+
 ### CSS classes (for custom elements within pages)
 
 | Class | Element |
@@ -119,7 +125,7 @@ import { DocsPage, DocsTitle, DocsDescription, DocsBody } from "@/components/doc
 
 ## Sidebar Components
 
-`src/components/docs-shell/sidebar.tsx`: `"use client"`, receives `tree` (Fumadocs page tree) and optional `dashboardUrl`. The footer holds the network status rows and the Fumadocs `ThemeSwitch` (light, dark, system).
+`src/components/docs-shell/sidebar.tsx`: `"use client"`, receives `tree` (Fumadocs page tree), optional `dashboardUrl` and `agentSetup`. The header chips are Platform, Dashboard and the **Agent setup** menu (`agent-setup.tsx`): one tab per coding agent, each a copyable `npx skills add` command. The layout builds the commands with `getAgentSetupOptions()` (`src/lib/agent-setup.ts`), which offers a module's skill only where that module is published; the menu gets strings, not the gate. Its MCP tab stays hidden until `DOCS_MCP_COMMAND` is set, when the docs MCP ships. The footer holds the network status rows, an `llms.txt` link and the Fumadocs `ThemeSwitch` (light, dark, system).
 
 **Do not add new navigation patterns outside the page tree.** Navigation is auto-generated from `source.pageTree` via Fumadocs. To add pages to the sidebar, add MDX files to `content/docs/` and update `meta.json`.
 
@@ -141,7 +147,7 @@ Sidebar icons are optional and opt-in per page/folder. Set `icon: <LucideName>` 
 | `.launch-docs-sidebar-header` | Logo, action chips and search, border-bottom |
 | `.launch-docs-brand` | Logo link (flex, gap 12px) |
 | `.launch-docs-brand-mark` | 36×36px icon box, `--paper` bg, border-radius 10px |
-| `.launch-docs-sidebar-actions` | One equal-width column per action |
+| `.launch-docs-sidebar-actions` | Two equal columns; an odd last chip (Agent setup beside Platform and Dashboard) takes a full row |
 | `.launch-docs-sidebar-action` | Chip links (`--chip` + `--chip-ring`), `--control-height-sm`, `--font-size-meta` |
 | `.launch-docs-sidebar-search` | Search trigger, `--control-height-md`, `--wash` fill; the `⌘K` keys are chips |
 | `.launch-docs-sidebar-nav` | Scrollable nav area |
@@ -154,7 +160,7 @@ Sidebar icons are optional and opt-in per page/folder. Set `icon: <LucideName>` 
 | `.launch-docs-nav-children` | Indented children container |
 | `.launch-docs-sidebar-section` | Section label: `--font-size-meta`, `--ink-tertiary`, sentence case |
 | `.launch-docs-sidebar-separator` | Plain 1px `--rule-faint` rule |
-| `.launch-docs-sidebar-status` | Footer: status rows (`.launch-docs-status-list`) and the theme switch |
+| `.launch-docs-sidebar-status` | Footer: status rows (`.launch-docs-status-list`, ending in the `llms.txt` link) and the theme switch |
 
 ---
 
@@ -210,6 +216,7 @@ Gates follow module declarations, never sentences:
 - Frontmatter (titles, descriptions) of shared pages must stay module-neutral.
 - `check:links` checks the channel in the manifest; CI runs it on `experimental` and `stable`.
 - Committed generated files (`public/llms*.txt`, Postman, `content/docs/meta.json`, `reference/api/index.mdx`, `src/generated/public-surface.json`) are built at `experimental`; the deployment's build regenerates them for its channel.
+- The docs skill (`public/SKILL.md`, and the same file at the repo's `skills/sdp-docs/SKILL.md`, which `npx skills add` installs from GitHub) is the exception: it names no module, so one copy fits every channel. `generate:ai` links only shared pages from it and fails on a gated or missing one; send readers to `llms.txt` for what a channel publishes.
 
 API reference pages are different: they are generated from the public OpenAPI document, one page per tag, so a family appears and disappears with that document (`EARN_PUBLIC_SURFACE_PUBLISHED` in `apps/sdp-api/src/openapi/spec.ts` is the one such switch). The docs keep no list of families of their own, and an untagged operation fails `generate:api`.
 
@@ -235,6 +242,6 @@ When working on design or frontend changes:
 - Reuse existing templates and typography styles from the codebase rather than creating new ones when something suitable already exists.
 - When adding images, download and store a local copy in the project. Never reference external URLs directly.
 - Raw `<img>` srcs (JSX/TSX or inline `<img>` in MDX) must point at `/docs/images/...`, not `/images/...`. Production traffic arrives through sdp-web's `/docs/:path*` proxy, which never forwards root-level `/images` requests; a rewrite in `next.config.mjs` maps `/docs/images/*` back onto `public/images/*`. Markdown-syntax images (`![](/images/...)`) are exempt: fumadocs-mdx compiles them to static imports that already resolve correctly.
-- sdp-web forwards only `/docs`, `/docs/*`, `/docs.md`, `/llms.txt`, `/llms-full.txt`, `/postman/collection.json` and `/provider-onboarding/*` to this app (`apps/sdp-web/next.config.ts`). Any other root-level route here 404s on platform.solana.com until it gets a rewrite there.
+- sdp-web forwards only `/docs`, `/docs/*`, `/docs.md`, `/llms.txt`, `/llms-full.txt`, `/SKILL.md`, `/postman/collection.json` and `/provider-onboarding/*` to this app (`apps/sdp-web/next.config.ts`). Any other root-level route here 404s on platform.solana.com until it gets a rewrite there.
 - Use proper image sizes relative to their container — do not use oversized images (e.g., 1024px for a 32px container). Use at most 2x the container size for retina support.
 - Run `npm run build` and check for errors before pushing to staging.

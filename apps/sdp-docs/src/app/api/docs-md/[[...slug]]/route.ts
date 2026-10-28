@@ -2,9 +2,13 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { expandDocsBlocks } from "@/lib/docs-blocks";
 import { renderDocsIndexMarkdown } from "@/lib/docs-index-markdown";
+import { aiLlmsUrl, aiSkillUrl } from "@/lib/site";
 import { source } from "@/lib/source";
 
 export const runtime = "nodejs";
+
+// Opens every page's Markdown, so an agent that lands on one page can find the rest.
+const AGENT_CONTEXT = `> Solana Developer Platform docs, served as Markdown. Every page is listed in [llms.txt](${aiLlmsUrl}), and [SKILL.md](${aiSkillUrl}) has the rules for building on SDP.`;
 
 function stripMdxShell(source: string): string {
   // Remove frontmatter
@@ -19,8 +23,21 @@ function isSafeSlugSegment(segment: string): boolean {
   return segment.length > 0 && segment !== ".." && segment !== "." && !/[/\\]/.test(segment);
 }
 
+function singleLine(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+/** A page's frontmatter title and description lead its body, as the page renders them. */
+function pageMarkdown(data: { title?: string; description?: string }, body: string): string {
+  const lead = [
+    data.title && `# ${singleLine(data.title)}`,
+    data.description && singleLine(data.description),
+  ];
+  return [...lead, body].filter(Boolean).join("\n\n");
+}
+
 function markdownResponse(body: string, pageUrl: string): Response {
-  return new Response(body, {
+  return new Response(`${AGENT_CONTEXT}\n\n${body.trim()}\n`, {
     headers: {
       "Content-Type": "text/markdown; charset=utf-8",
       "Cache-Control": "public, max-age=300",
@@ -54,7 +71,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ slug?: 
   }
 
   // A page outside the deployment's release channel is not in `source`.
-  if (!source.getPage(slug) && !source.getPage([...slug, "index"])) {
+  const page = source.getPage(slug) ?? source.getPage([...slug, "index"]);
+  if (!page) {
     return new Response("Not Found", { status: 404 });
   }
 
@@ -71,7 +89,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ slug?: 
     try {
       const raw = await readFile(filePath, "utf8");
       const body = stripMdxShell(expandDocsBlocks(raw, filePath));
-      return markdownResponse(body, `/docs/${slug.join("/")}`);
+      return markdownResponse(pageMarkdown(page.data, body), `/docs/${slug.join("/")}`);
     } catch {}
   }
 
