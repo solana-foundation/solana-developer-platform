@@ -25,7 +25,7 @@
   --color-fd-secondary-foreground: var(--ink);
   --color-fd-accent: var(--wash-strong);
   --color-fd-accent-foreground: var(--ink);
-  --color-fd-ring: var(--rule-strong);
+  --color-fd-ring: var(--ink);
 }
 
 /* Season Sans ships 400 and 500 only; never let the browser fake a bold. */
@@ -46,7 +46,8 @@ body {
 }
 
 /* Tailwind's preflight resets every border to currentColor after Fumadocs' base layer has set it,
-   so put the refresh rule colour back, and give focus outlines the ring. */
+   so put the refresh rule colour back. Focus outlines are the ink ring at half strength, like the
+   dashboard's ring-primary/50. */
 @layer base {
   * {
     border-color: var(--color-fd-border);
