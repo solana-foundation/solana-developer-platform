@@ -109,7 +109,7 @@ function fnv1aHex(input: string): string {
  * second identical payout the same day needs a reference of its own.
  *
  * @param request - The batch without a reference.
- * @param day - The local calendar day, `YYYY-MM-DD`.
+ * @param day - The UTC calendar day, `YYYY-MM-DD`, shared by every operator.
  */
 export function defaultTransferBatchReference(
   request: PaymentTransferBatchRequest,

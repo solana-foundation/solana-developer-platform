@@ -127,11 +127,12 @@ const RETRY_REFUSAL_COPY: Partial<Record<string, { title: MessageKey; descriptio
     },
   };
 
-/** The local calendar day as `YYYY-MM-DD`. */
-function localCalendarDay(date: Date): string {
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${date.getFullYear()}-${month}-${day}`;
+/**
+ * The UTC calendar day as `YYYY-MM-DD`: one boundary for every operator, so
+ * two browsers in different time zones name the same batch the same run.
+ */
+function utcCalendarDay(date: Date): string {
+  return date.toISOString().slice(0, 10);
 }
 
 /**
@@ -333,7 +334,7 @@ export function useBatchSendWizard({
   const [asset, setAsset] = useState("");
   const [externalId, setExternalId] = useState("");
   // Fixed for the session, so a retry after midnight still names the same run.
-  const [referenceDay] = useState(() => localCalendarDay(new Date()));
+  const [referenceDay] = useState(() => utcCalendarDay(new Date()));
   const { entries, setEntries, setRecipientAmount, toggleRecipient, setManySelected } =
     useBatchRecipientEntries();
   const [submitting, setSubmitting] = useState(false);

@@ -507,7 +507,7 @@
       "importing": "Importing…",
       "import": "Import",
       "referencePlaceholder": "Optional: your id for this payout run",
-      "referenceHint": "Sending the same batch again with the same reference returns the first batch instead of paying anyone twice. Leave it blank and the dashboard uses today's date and the recipients. To pay the same recipients again today, give the new batch its own reference.",
+      "referenceHint": "Sending the same batch again with the same reference returns the first batch instead of paying anyone twice. Leave it blank and the dashboard uses today's date (UTC) and the recipients. To pay the same recipients again today, give the new batch its own reference.",
       "rows": "Rows",
       "uploadCsv": "Upload a CSV",
       "pickFromContacts": "Pick from contacts",
