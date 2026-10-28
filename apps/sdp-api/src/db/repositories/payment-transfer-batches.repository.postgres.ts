@@ -782,7 +782,7 @@ export function createPostgresPaymentTransferBatchesRepository(
           .all<{ id: string }>();
 
         if (claimed.results.length === 0) {
-          return;
+          return false;
         }
 
         const recipientStatus = input.transferStatus === "failed" ? "failed" : "confirmed";
@@ -816,6 +816,7 @@ export function createPostgresPaymentTransferBatchesRepository(
           organizationId: input.organizationId,
           projectId: input.projectId,
         });
+        return true;
       });
     },
 

@@ -3,25 +3,32 @@ import type { SdpEnvironment } from "@sdp/types/api-keys";
 import {
   type Signature,
   SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_TRANSACTION_HISTORY_NOT_AVAILABLE,
 } from "@solana/kit";
 import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { getDb } from "@/db/client";
+import { createPostgresPaymentTransferBatchesRepository } from "@/db/repositories/payment-transfer-batches.repository.postgres";
+import * as paymentsRepositoryPostgres from "@/db/repositories/payments.repository.postgres";
 import { createSystemPaymentsRepository } from "@/db/repositories/repository-factory";
 import { runInEachClusterScope } from "@/runtime/cluster-scope-runs";
 import { rootLogger } from "@/runtime/logger";
 import {
   type ClusterRpcReply,
   type ClusterRpcRequest,
+  epochInfoResult,
   installClusterRpcResponder,
+  type JsonRpcResult,
   type SignatureStatusesRead,
   type StubSignatureStatus,
   signatureStatusesRead,
   signatureStatusesReply,
+  signatureStatusesReplyAt,
 } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { seedProcessingBatchChunk } from "@/test/helpers/transfer-batches";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { trackPendingTransfers } from "./track-pending-transfers";
 
@@ -57,6 +64,16 @@ const INTERNAL_ERROR: ClusterRpcReply = {
   error: { code: SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR, message: "Internal error" },
 };
 
+const FLOOR_SLOT = 5_000;
+const LAST_VALID_BLOCK_HEIGHT = 100;
+const HISTORY_HORIZON_BLOCKS = 9_000;
+const SOURCE_ADDRESS = "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ";
+const DESTINATION_ADDRESS = "9dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ";
+
+function finalizedTipAt(blockHeight: number): JsonRpcResult {
+  return epochInfoResult({ absoluteSlot: FLOOR_SLOT, blockHeight });
+}
+
 function trackSandboxTransfers(): Promise<void> {
   return runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
     trackPendingTransfers(env)
@@ -90,8 +107,26 @@ interface TransferSeed {
   confirmedAt?: string;
   signedTransaction?: string;
   lastValidBlockHeight?: string;
-  submissionStartedAt?: string;
+  submissionStartedAt?: string | null;
   type?: string;
+}
+
+function signedSubmission(seed: {
+  id: string;
+  signature: Signature;
+  submissionStartedAt: string | null;
+  updatedAt: string;
+}): TransferSeed {
+  return {
+    id: seed.id,
+    status: "processing",
+    signature: String(seed.signature),
+    signedTransaction: "AQ==",
+    lastValidBlockHeight: String(LAST_VALID_BLOCK_HEIGHT),
+    submissionStartedAt: seed.submissionStartedAt,
+    createdAt: seed.updatedAt,
+    updatedAt: seed.updatedAt,
+  };
 }
 
 async function insertTransfer(params: TransferSeed): Promise<void> {
@@ -112,8 +147,8 @@ async function insertProjectTransfer(projectId: string, params: TransferSeed): P
       TEST_ORG_ID,
       projectId,
       "wal_test",
-      "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
-      "9dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
+      SOURCE_ADDRESS,
+      DESTINATION_ADDRESS,
       "SOL",
       "1.0",
       params.type ?? "transfer",
@@ -146,6 +181,12 @@ function minutesAgo(n: number): string {
   return new Date(Date.now() - n * 60 * 1000).toISOString();
 }
 
+function spyOnLog(level: "warn" | "error") {
+  const log = vi.spyOn(rootLogger, level).mockImplementation(() => undefined);
+  onTestFinished(() => log.mockRestore());
+  return log;
+}
+
 function verdictBySignature(
   statuses: ReadonlyMap<string, StubSignatureStatus | null>
 ): (signature: string) => StubSignatureStatus | null {
@@ -174,15 +215,15 @@ describe("trackPendingTransfers", () => {
       .map(signatureStatusesRead);
   }
 
-  function blockHeightReads(): number {
-    return rpc.calls.filter((call) => call.method === "getBlockHeight").length;
+  function epochInfoReads(): number {
+    return rpc.calls.filter((call) => call.method === "getEpochInfo").length;
   }
 
   beforeEach(async () => {
     await seedTestDatabase(env);
     await seedOrg();
-    rpc.answer("getBlockHeight", 1_000);
-    rpc.respondSignatureStatuses(() => null);
+    rpc.answer("getEpochInfo", finalizedTipAt(1_000));
+    rpc.respondSignatureStatusesAt(FLOOR_SLOT, () => null);
   });
 
   describe("recoverStuckProcessingTransfers", () => {
@@ -227,13 +268,14 @@ describe("trackPendingTransfers", () => {
         err: null,
       }));
 
-      await insertTransfer({
-        id: "xfr_processing_confirmed",
-        status: "processing",
-        signature: String(TEST_SIG_1),
-        createdAt: minutesAgo(1),
-        updatedAt: minutesAgo(1),
-      });
+      await insertTransfer(
+        signedSubmission({
+          id: "xfr_processing_confirmed",
+          signature: TEST_SIG_1,
+          submissionStartedAt: minutesAgo(1),
+          updatedAt: minutesAgo(1),
+        })
+      );
 
       await trackSandboxTransfers();
 
@@ -250,337 +292,450 @@ describe("trackPendingTransfers", () => {
         err: null,
       }));
 
-      await insertTransfer({
-        id: "xfr_processing_finalized",
-        status: "processing",
-        signature: String(TEST_SIG_2),
-        signedTransaction: "AQ==",
-        lastValidBlockHeight: "100",
-        submissionStartedAt: minutesAgo(1),
-        createdAt: minutesAgo(1),
-        updatedAt: minutesAgo(1),
-      });
+      await insertTransfer(
+        signedSubmission({
+          id: "xfr_processing_finalized",
+          signature: TEST_SIG_2,
+          submissionStartedAt: minutesAgo(1),
+          updatedAt: minutesAgo(1),
+        })
+      );
 
       await trackSandboxTransfers();
 
       const updated = await getTransfer("xfr_processing_finalized");
       expect(updated?.status).toBe("finalized");
       expect(updated?.slot).toBe(99999);
-      expect(blockHeightReads()).toBe(0);
+      expect(epochInfoReads()).toBe(0);
     });
 
-    it("marks processing transfer as failed when on-chain status has an error", async () => {
-      rpc.respondSignatureStatuses(() => ({
-        slot: 55555,
-        confirmations: 0,
-        confirmationStatus: "confirmed",
-        err: { InstructionError: [0, "InsufficientFunds"] },
-      }));
+    it.each([
+      { confirmationStatus: "processed", reason: "processed_only" },
+      { confirmationStatus: "confirmed", reason: "error_unfinalized" },
+    ] as const)(
+      "keeps and rotates a transfer whose on-chain error is seen only at $confirmationStatus (APE SOLA9-708)",
+      async ({ confirmationStatus, reason }) => {
+        rpc.respondSignatureStatuses(() => ({
+          slot: 55556,
+          confirmations: 0,
+          confirmationStatus,
+          err: { InstructionError: [0, "InsufficientFunds"] },
+        }));
+        const warn = spyOnLog("warn");
+        const staleAt = minutesAgo(1);
 
-      await insertTransfer({
-        id: "xfr_processing_errored",
-        status: "processing",
-        signature: String(TEST_SIG_1),
-        createdAt: minutesAgo(1),
-        updatedAt: minutesAgo(1),
-      });
-
-      await trackSandboxTransfers();
-
-      const updated = await getTransfer("xfr_processing_errored");
-      expect(updated?.status).toBe("failed");
-      expect(updated?.slot).toBe(55555);
-      expect(updated?.error).toContain("InsufficientFunds");
-    });
-
-    it("keeps a transfer processing when its error is seen only at processed (APE SOLA9-708)", async () => {
-      rpc.respondSignatureStatuses(() => ({
-        slot: 55556,
-        confirmations: 0,
-        confirmationStatus: "processed",
-        err: { InstructionError: [0, "InsufficientFunds"] },
-      }));
-
-      await insertTransfer({
-        id: "xfr_processing_processed_error",
-        status: "processing",
-        signature: String(TEST_SIG_1),
-        createdAt: minutesAgo(1),
-        updatedAt: minutesAgo(1),
-      });
-
-      await trackSandboxTransfers();
-
-      const unchanged = await getTransfer("xfr_processing_processed_error");
-      expect(unchanged?.status).toBe("processing");
-      expect(unchanged?.error).toBeNull();
-    });
-
-    it("marks old processing transfer as failed when signature is absent from transaction history", async () => {
-      await insertTransfer({
-        id: "xfr_processing_not_found",
-        status: "processing",
-        signature: String(TEST_SIG_1),
-        createdAt: minutesAgo(10),
-        updatedAt: minutesAgo(10),
-      });
-
-      await trackSandboxTransfers();
-
-      const updated = await getTransfer("xfr_processing_not_found");
-      expect(updated?.status).toBe("failed");
-      expect(updated?.error).toBe("Transaction not found on chain");
-      expect(statusReads()).toEqual([
-        { cluster: "devnet", signatures: [TEST_SIG_1], searchTransactionHistory: false },
-        { cluster: "devnet", signatures: [TEST_SIG_1], searchTransactionHistory: true },
-      ]);
-    });
-
-    it("finalizes an old processing transfer found in transaction history instead of failing it", async () => {
-      rpc.respondSignatureStatuses((_signature, read) =>
-        read.searchTransactionHistory
-          ? { slot: 77777, confirmations: null, confirmationStatus: "finalized", err: null }
-          : null
-      );
-
-      await insertTransfer({
-        id: "xfr_legacy_in_history",
-        status: "processing",
-        signature: String(TEST_SIG_1),
-        createdAt: minutesAgo(10),
-        updatedAt: minutesAgo(10),
-      });
-
-      await trackSandboxTransfers();
-
-      const updated = await getTransfer("xfr_legacy_in_history");
-      expect(updated?.status).toBe("finalized");
-      expect(updated?.slot).toBe(77777);
-    });
-
-    it("applies archival verdicts to matching legacy transfers in one batch", async () => {
-      const archived = verdictBySignature(
-        new Map<string, StubSignatureStatus | null>([
-          [
-            String(TEST_SIG_1),
-            { slot: 11111, confirmations: null, confirmationStatus: "finalized", err: null },
-          ],
-          [String(TEST_SIG_2), null],
-          [
-            String(TEST_SIG_3),
-            {
-              slot: 22222,
-              confirmations: 0,
-              confirmationStatus: "confirmed",
-              err: { InstructionError: [0, { Custom: 1 }] },
-            },
-          ],
-        ])
-      );
-      rpc.respondSignatureStatuses((signature, read) =>
-        read.searchTransactionHistory ? archived(signature) : null
-      );
-
-      await insertTransfer({
-        id: "xfr_legacy_batch_finalized",
-        status: "processing",
-        signature: String(TEST_SIG_1),
-        createdAt: minutesAgo(10),
-        updatedAt: minutesAgo(10),
-      });
-      await insertTransfer({
-        id: "xfr_legacy_batch_absent",
-        status: "processing",
-        signature: String(TEST_SIG_2),
-        createdAt: minutesAgo(10),
-        updatedAt: minutesAgo(10),
-      });
-      await insertTransfer({
-        id: "xfr_legacy_batch_errored",
-        status: "processing",
-        signature: String(TEST_SIG_3),
-        createdAt: minutesAgo(10),
-        updatedAt: minutesAgo(10),
-      });
-
-      await trackSandboxTransfers();
-
-      const finalized = await getTransfer("xfr_legacy_batch_finalized");
-      expect(finalized?.status).toBe("finalized");
-      expect(finalized?.slot).toBe(11111);
-      const absent = await getTransfer("xfr_legacy_batch_absent");
-      expect(absent?.status).toBe("failed");
-      expect(absent?.error).toBe("Transaction not found on chain");
-      const errored = await getTransfer("xfr_legacy_batch_errored");
-      expect(errored?.status).toBe("failed");
-      expect(errored?.error).toContain("Custom");
-      expect(errored?.slot).toBe(22222);
-    });
-
-    it("keeps and rotates an old processing transfer when the transaction-history lookup is unavailable", async () => {
-      rpc.respond("getSignatureStatuses", failHistoryReads);
-      const staleAt = minutesAgo(10);
-      const warn = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
-
-      try {
-        await insertTransfer({
-          id: "xfr_legacy_history_down",
-          status: "processing",
-          signature: String(TEST_SIG_1),
-          createdAt: staleAt,
-          updatedAt: staleAt,
-        });
+        await insertTransfer(
+          signedSubmission({
+            id: "xfr_processing_unfinalized_error",
+            signature: TEST_SIG_1,
+            submissionStartedAt: staleAt,
+            updatedAt: staleAt,
+          })
+        );
 
         await trackSandboxTransfers();
 
-        const kept = await getTransfer("xfr_legacy_history_down");
-        expect(kept?.status).toBe("processing");
-        expect(kept?.error).toBeNull();
-        expect(kept?.updated_at).not.toBe(staleAt);
+        const unchanged = await getTransfer("xfr_processing_unfinalized_error");
+        expect(unchanged?.status).toBe("processing");
+        expect(unchanged?.error).toBeNull();
+        expect(unchanged?.updated_at).not.toBe(staleAt);
         expect(warn).toHaveBeenCalledWith(
           expect.objectContaining({
             event: "sdp_api_payment_submission_unresolved",
-            flow: "reconciler",
-            reason: "history_unavailable",
-            transfer_id: "xfr_legacy_history_down",
+            reason,
+            transfer_id: "xfr_processing_unfinalized_error",
           }),
-          expect.any(String)
+          "sdp_api_payment_submission_unresolved"
         );
-      } finally {
-        warn.mockRestore();
       }
-    });
+    );
 
-    it("retries a transient getBlockHeight failure instead of rotating the row", async () => {
-      let blockHeightAttempts = 0;
-      rpc.respond("getBlockHeight", () => {
-        blockHeightAttempts += 1;
-        return blockHeightAttempts === 1 ? NODE_UNHEALTHY : { result: 101 };
+    it("retries a transient finalized-height failure instead of rotating the row", async () => {
+      let epochInfoAttempts = 0;
+      rpc.respond("getEpochInfo", () => {
+        epochInfoAttempts += 1;
+        return epochInfoAttempts === 1
+          ? NODE_UNHEALTHY
+          : { result: finalizedTipAt(LAST_VALID_BLOCK_HEIGHT + 1) };
       });
 
-      await insertTransfer({
-        id: "xfr_blockheight_transient",
-        status: "processing",
-        signature: String(TEST_SIG_1),
-        signedTransaction: "AQ==",
-        lastValidBlockHeight: "100",
-        createdAt: minutesAgo(1),
-        updatedAt: minutesAgo(1),
-      });
+      await insertTransfer(
+        signedSubmission({
+          id: "xfr_epoch_info_transient",
+          signature: TEST_SIG_1,
+          submissionStartedAt: null,
+          updatedAt: minutesAgo(1),
+        })
+      );
 
       await trackSandboxTransfers();
 
-      const failed = await getTransfer("xfr_blockheight_transient");
+      const failed = await getTransfer("xfr_epoch_info_transient");
       expect(failed?.status).toBe("failed");
-      expect(blockHeightReads()).toBe(2);
+      expect(epochInfoReads()).toBe(2);
     });
 
-    it("fails an expired signed submission whose broadcast never started", async () => {
-      rpc.answer("getBlockHeight", 101);
-
-      await insertTransfer({
-        id: "xfr_unstarted_outbox_expired",
-        status: "processing",
-        signature: String(TEST_SIG_1),
-        signedTransaction: "AQ==",
-        lastValidBlockHeight: "100",
-        createdAt: minutesAgo(1),
-        updatedAt: minutesAgo(1),
-      });
+    it("fails an expired signed submission whose broadcast never started without reading history", async () => {
+      await insertTransfer(
+        signedSubmission({
+          id: "xfr_unstarted_outbox_expired",
+          signature: TEST_SIG_1,
+          submissionStartedAt: null,
+          updatedAt: minutesAgo(1),
+        })
+      );
 
       await trackSandboxTransfers();
 
       const failed = await getTransfer("xfr_unstarted_outbox_expired");
       expect(failed?.status).toBe("failed");
       expect(failed?.error).toBe("Transaction not found on chain");
-      expect(statusReads()).toHaveLength(1);
+      expect(statusReads()).toEqual([
+        { cluster: "devnet", signatures: [TEST_SIG_1], searchTransactionHistory: false },
+      ]);
     });
 
-    it("keeps and rotates an expired started submission when history is inconclusive", async () => {
-      rpc.answer("getBlockHeight", 101);
-      const staleAt = minutesAgo(10);
-      const warn = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
+    it("proves expiry from the finalized height and floors the history read at its slot", async () => {
+      await insertTransfer(
+        signedSubmission({
+          id: "xfr_started_outbox_floored",
+          signature: TEST_SIG_1,
+          submissionStartedAt: minutesAgo(10),
+          updatedAt: minutesAgo(10),
+        })
+      );
 
-      try {
-        await insertTransfer({
-          id: "xfr_started_outbox_not_found",
-          status: "processing",
-          signature: String(TEST_SIG_1),
-          signedTransaction: "AQ==",
-          lastValidBlockHeight: "100",
-          submissionStartedAt: staleAt,
-          createdAt: staleAt,
-          updatedAt: staleAt,
-        });
+      await trackSandboxTransfers();
+
+      expect(
+        rpc.requests
+          .filter(({ method }) => method !== "getGenesisHash")
+          .map(({ method, params }) => ({ method, params }))
+      ).toEqual([
+        { method: "getSignatureStatuses", params: [[TEST_SIG_1]] },
+        { method: "getEpochInfo", params: [] },
+        {
+          method: "getSignatureStatuses",
+          params: [
+            [TEST_SIG_1],
+            { searchTransactionHistory: true, minContextSlot: FLOOR_SLOT, commitment: "finalized" },
+          ],
+        },
+      ]);
+    });
+
+    it.each([
+      {
+        refusal: "an answer from below the floor",
+        historyReply: signatureStatusesReplyAt(FLOOR_SLOT - 10, [null]),
+      },
+      {
+        refusal: "a served -32016",
+        historyReply: {
+          error: {
+            code: SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
+            message: "Minimum context slot has not been reached",
+            data: { contextSlot: FLOOR_SLOT - 10 },
+          },
+        },
+      },
+    ] satisfies readonly { refusal: string; historyReply: ClusterRpcReply }[])(
+      "keeps and rotates an expired started submission on $refusal, logging both slots",
+      async ({ historyReply }) => {
+        rpc.respond("getSignatureStatuses", (request) =>
+          signatureStatusesRead(request).searchTransactionHistory
+            ? historyReply
+            : signatureStatusesReply([null])
+        );
+        const warn = spyOnLog("warn");
+        const staleAt = minutesAgo(10);
+
+        await insertTransfer(
+          signedSubmission({
+            id: "xfr_started_outbox_node_behind",
+            signature: TEST_SIG_1,
+            submissionStartedAt: staleAt,
+            updatedAt: staleAt,
+          })
+        );
 
         await trackSandboxTransfers();
 
-        const unresolved = await getTransfer("xfr_started_outbox_not_found");
+        const unresolved = await getTransfer("xfr_started_outbox_node_behind");
         expect(unresolved?.status).toBe("processing");
-        expect(unresolved?.error).toBeNull();
         expect(unresolved?.updated_at).not.toBe(staleAt);
-        expect(statusReads().at(-1)).toEqual({
-          cluster: "devnet",
-          signatures: [TEST_SIG_1],
-          searchTransactionHistory: true,
-        });
         expect(warn).toHaveBeenCalledWith(
           expect.objectContaining({
             event: "sdp_api_payment_submission_unresolved",
-            flow: "reconciler",
-            reason: "history_absent",
-            organization_id: TEST_ORG_ID,
-            project_id: TEST_PROJECT_IDS.sandbox,
-            transfer_id: "xfr_started_outbox_not_found",
-            transfer_type: "transfer",
-            signature: TEST_SIG_1,
-            last_valid_block_height: "100",
-            submission_started_at: staleAt,
+            reason: "node_behind_floor",
+            transfer_id: "xfr_started_outbox_node_behind",
+            context_slot: String(FLOOR_SLOT - 10),
+            min_context_slot: String(FLOOR_SLOT),
           }),
           "sdp_api_payment_submission_unresolved"
         );
-      } finally {
-        warn.mockRestore();
       }
+    );
+
+    it("fails an expired started submission absent from history at the floor at the horizon's edge", async () => {
+      rpc.answer("getEpochInfo", finalizedTipAt(LAST_VALID_BLOCK_HEIGHT + HISTORY_HORIZON_BLOCKS));
+      const warn = spyOnLog("warn");
+      const startedAt = minutesAgo(10);
+
+      await insertTransfer(
+        signedSubmission({
+          id: "xfr_started_outbox_not_landed",
+          signature: TEST_SIG_1,
+          submissionStartedAt: startedAt,
+          updatedAt: startedAt,
+        })
+      );
+
+      await trackSandboxTransfers();
+
+      const failed = await getTransfer("xfr_started_outbox_not_landed");
+      expect(failed?.status).toBe("failed");
+      expect(failed?.error).toBe("Transaction not found on chain");
+      expect(warn).toHaveBeenCalledWith(
+        {
+          event: "sdp_api_payment_submission_not_landed",
+          flow: "reconciler",
+          organization_id: TEST_ORG_ID,
+          project_id: TEST_PROJECT_IDS.sandbox,
+          transfer_id: "xfr_started_outbox_not_landed",
+          transfer_type: "transfer",
+          signature: TEST_SIG_1,
+          last_valid_block_height: String(LAST_VALID_BLOCK_HEIGHT),
+          submission_started_at: startedAt,
+          finalized_block_height: String(LAST_VALID_BLOCK_HEIGHT + HISTORY_HORIZON_BLOCKS),
+          min_context_slot: String(FLOOR_SLOT),
+        },
+        "sdp_api_payment_submission_not_landed"
+      );
+    });
+
+    it("fails an expired, unseen batch chunk with its recipients and recomputes the batch", async () => {
+      await insertTransfer({
+        ...signedSubmission({
+          id: "xfr_batch_chunk_not_landed",
+          signature: TEST_SIG_1,
+          submissionStartedAt: minutesAgo(10),
+          updatedAt: minutesAgo(10),
+        }),
+        type: "transfer_batch",
+      });
+      const batchId = await seedProcessingBatchChunk(env, {
+        organizationId: TEST_ORG_ID,
+        projectId: TEST_PROJECT_IDS.sandbox,
+        createdBy: TEST_USER_ID,
+        transferId: "xfr_batch_chunk_not_landed",
+        sourceAddress: SOURCE_ADDRESS,
+        destinationAddress: DESTINATION_ADDRESS,
+      });
+
+      await trackSandboxTransfers();
+
+      const batches = createPostgresPaymentTransferBatchesRepository(getDb(env));
+      const batchKey = {
+        batchId,
+        organizationId: TEST_ORG_ID,
+        projectId: TEST_PROJECT_IDS.sandbox,
+      };
+      await expect(getTransfer("xfr_batch_chunk_not_landed")).resolves.toMatchObject({
+        status: "failed",
+      });
+      await expect(batches.getTransferBatchById(batchKey)).resolves.toMatchObject({
+        status: "failed",
+      });
+      await expect(
+        batches.listTransferRecipientsByBatch({ ...batchKey, limit: 10, offset: 0 })
+      ).resolves.toMatchObject({
+        rows: [{ status: "failed", error: "Transaction not found on chain" }],
+      });
+    });
+
+    it("keeps an expired started submission absent from history past the horizon and alerts", async () => {
+      rpc.answer(
+        "getEpochInfo",
+        finalizedTipAt(LAST_VALID_BLOCK_HEIGHT + HISTORY_HORIZON_BLOCKS + 1)
+      );
+      const error = spyOnLog("error");
+      const startedAt = minutesAgo(10);
+
+      await insertTransfer(
+        signedSubmission({
+          id: "xfr_started_outbox_unprovable",
+          signature: TEST_SIG_1,
+          submissionStartedAt: startedAt,
+          updatedAt: startedAt,
+        })
+      );
+
+      await trackSandboxTransfers();
+
+      const kept = await getTransfer("xfr_started_outbox_unprovable");
+      expect(kept?.status).toBe("processing");
+      expect(kept?.error).toBeNull();
+      expect(kept?.updated_at).not.toBe(startedAt);
+      expect(error).toHaveBeenCalledWith(
+        {
+          event: "sdp_api_payment_verdict_unprovable",
+          flow: "reconciler",
+          organization_id: TEST_ORG_ID,
+          project_id: TEST_PROJECT_IDS.sandbox,
+          transfer_id: "xfr_started_outbox_unprovable",
+          transfer_type: "transfer",
+          signature: TEST_SIG_1,
+          last_valid_block_height: String(LAST_VALID_BLOCK_HEIGHT),
+          submission_started_at: startedAt,
+          finalized_block_height: String(LAST_VALID_BLOCK_HEIGHT + HISTORY_HORIZON_BLOCKS + 1),
+          min_context_slot: String(FLOOR_SLOT),
+        },
+        "sdp_api_payment_verdict_unprovable"
+      );
+    });
+
+    function writeAfterQueueListed(sql: string, transferId: string): void {
+      const createRepository = paymentsRepositoryPostgres.createPostgresPaymentsRepository;
+      const repositorySpy = vi
+        .spyOn(paymentsRepositoryPostgres, "createPostgresPaymentsRepository")
+        .mockImplementation((db, scope) => {
+          const repository = createRepository(db, scope);
+          return {
+            ...repository,
+            listProcessingSignedSubmissions: async (params) => {
+              const queue = await repository.listProcessingSignedSubmissions(params);
+              await getDb(env).prepare(sql).bind(transferId).run();
+              return queue;
+            },
+          };
+        });
+      onTestFinished(() => repositorySpy.mockRestore());
+    }
+
+    it.each([
+      { type: "transfer", seedRecipients: async () => undefined, recipients: [] },
+      {
+        type: "transfer_batch",
+        seedRecipients: async () => {
+          await seedProcessingBatchChunk(env, {
+            organizationId: TEST_ORG_ID,
+            projectId: TEST_PROJECT_IDS.sandbox,
+            createdBy: TEST_USER_ID,
+            transferId: "xfr_confirmed_mid_pass",
+            sourceAddress: SOURCE_ADDRESS,
+            destinationAddress: DESTINATION_ADDRESS,
+          });
+        },
+        recipients: [{ status: "processing" }],
+      },
+    ])(
+      "leaves alone a $type row a request confirmed after the tracker listed it",
+      async ({ type, seedRecipients, recipients }) => {
+        writeAfterQueueListed(
+          "UPDATE payment_transfers SET status = 'confirmed', slot = 4321 WHERE id = ?",
+          "xfr_confirmed_mid_pass"
+        );
+        const warn = spyOnLog("warn");
+        await insertTransfer({
+          ...signedSubmission({
+            id: "xfr_confirmed_mid_pass",
+            signature: TEST_SIG_1,
+            submissionStartedAt: minutesAgo(10),
+            updatedAt: minutesAgo(10),
+          }),
+          type,
+        });
+        await seedRecipients();
+
+        await trackSandboxTransfers();
+
+        await expect(getTransfer("xfr_confirmed_mid_pass")).resolves.toMatchObject({
+          status: "confirmed",
+          slot: 4321,
+          error: null,
+        });
+        const linked = await getDb(env)
+          .prepare("SELECT status FROM payment_transfer_recipients WHERE transfer_id = ?")
+          .bind("xfr_confirmed_mid_pass")
+          .all<{ status: string }>();
+        expect(linked.results).toEqual(recipients);
+        expect(warn).not.toHaveBeenCalledWith(
+          expect.objectContaining({ event: "sdp_api_payment_submission_not_landed" }),
+          "sdp_api_payment_submission_not_landed"
+        );
+      }
+    );
+
+    it("leaves alone a never-started row whose send starts after the tracker listed it", async () => {
+      writeAfterQueueListed(
+        "UPDATE payment_transfers SET submission_started_at = sdp_iso_now() WHERE id = ?",
+        "xfr_started_mid_pass"
+      );
+      const warn = spyOnLog("warn");
+      const staleAt = minutesAgo(10);
+      await insertTransfer(
+        signedSubmission({
+          id: "xfr_started_mid_pass",
+          signature: TEST_SIG_1,
+          submissionStartedAt: null,
+          updatedAt: staleAt,
+        })
+      );
+
+      await trackSandboxTransfers();
+
+      await expect(getTransfer("xfr_started_mid_pass")).resolves.toMatchObject({
+        status: "processing",
+        updated_at: staleAt,
+      });
+      expect(warn).not.toHaveBeenCalledWith(
+        expect.objectContaining({ event: "sdp_api_payment_submission_unresolved" }),
+        "sdp_api_payment_submission_unresolved"
+      );
     });
 
     it("keeps and rotates expired submissions when archival history is unavailable", async () => {
       rpc.respond("getSignatureStatuses", failHistoryReads);
-      rpc.answer("getBlockHeight", 101);
+      const warn = spyOnLog("warn");
       const staleAt = minutesAgo(10);
 
-      await insertTransfer({
-        id: "xfr_started_outbox_archive_unavailable",
-        status: "processing",
-        signature: String(TEST_SIG_1),
-        signedTransaction: "AQ==",
-        lastValidBlockHeight: "100",
-        submissionStartedAt: staleAt,
-        createdAt: staleAt,
-        updatedAt: staleAt,
-      });
+      await insertTransfer(
+        signedSubmission({
+          id: "xfr_started_outbox_archive_unavailable",
+          signature: TEST_SIG_1,
+          submissionStartedAt: staleAt,
+          updatedAt: staleAt,
+        })
+      );
 
       await trackSandboxTransfers();
 
       const unresolved = await getTransfer("xfr_started_outbox_archive_unavailable");
       expect(unresolved?.status).toBe("processing");
       expect(unresolved?.updated_at).not.toBe(staleAt);
+      expect(warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: "sdp_api_payment_submission_unresolved",
+          reason: "history_unavailable",
+          transfer_id: "xfr_started_outbox_archive_unavailable",
+        }),
+        "sdp_api_payment_submission_unresolved"
+      );
     });
 
-    it("keeps and rotates signed submissions when block height is unavailable", async () => {
-      rpc.respond("getBlockHeight", () => INTERNAL_ERROR);
+    it("keeps and rotates signed submissions when the finalized height is unavailable", async () => {
+      rpc.respond("getEpochInfo", () => INTERNAL_ERROR);
       const staleAt = minutesAgo(10);
 
-      await insertTransfer({
-        id: "xfr_started_outbox_height_unavailable",
-        status: "processing",
-        signature: String(TEST_SIG_1),
-        signedTransaction: "AQ==",
-        lastValidBlockHeight: "100",
-        submissionStartedAt: staleAt,
-        createdAt: staleAt,
-        updatedAt: staleAt,
-      });
+      await insertTransfer(
+        signedSubmission({
+          id: "xfr_started_outbox_height_unavailable",
+          signature: TEST_SIG_1,
+          submissionStartedAt: staleAt,
+          updatedAt: staleAt,
+        })
+      );
 
       await trackSandboxTransfers();
 
@@ -605,8 +760,8 @@ describe("trackPendingTransfers", () => {
             String(TEST_SIG_3),
             {
               slot: 303,
-              confirmations: 0,
-              confirmationStatus: "confirmed",
+              confirmations: null,
+              confirmationStatus: "finalized",
               err: { InstructionError: [0, "InsufficientFunds"] },
             },
           ],
@@ -616,10 +771,9 @@ describe("trackPendingTransfers", () => {
           ],
         ])
       );
-      rpc.respondSignatureStatuses((signature, read) =>
+      rpc.respondSignatureStatusesAt(FLOOR_SLOT, (signature, read) =>
         read.searchTransactionHistory ? archived(signature) : null
       );
-      rpc.answer("getBlockHeight", 101);
       const staleAt = minutesAgo(10);
       const rows = [
         ["xfr_archive_a_confirmed", TEST_SIG_1],
@@ -628,16 +782,9 @@ describe("trackPendingTransfers", () => {
         ["xfr_archive_d_processed", TEST_SIG_4],
       ] as const;
       for (const [id, signature] of rows) {
-        await insertTransfer({
-          id,
-          status: "processing",
-          signature: String(signature),
-          signedTransaction: "AQ==",
-          lastValidBlockHeight: "100",
-          submissionStartedAt: staleAt,
-          createdAt: staleAt,
-          updatedAt: staleAt,
-        });
+        await insertTransfer(
+          signedSubmission({ id, signature, submissionStartedAt: staleAt, updatedAt: staleAt })
+        );
       }
 
       await trackSandboxTransfers();
@@ -670,12 +817,13 @@ describe("trackPendingTransfers", () => {
       const staleAt = minutesAgo(10);
 
       await insertTransfer({
-        id: "xfr_batch_verdict_write_failed",
+        ...signedSubmission({
+          id: "xfr_batch_verdict_write_failed",
+          signature: TEST_SIG_1,
+          submissionStartedAt: staleAt,
+          updatedAt: staleAt,
+        }),
         type: "transfer_batch",
-        status: "processing",
-        signature: String(TEST_SIG_1),
-        createdAt: staleAt,
-        updatedAt: staleAt,
       });
 
       await trackSandboxTransfers();
@@ -685,70 +833,23 @@ describe("trackPendingTransfers", () => {
       expect(unresolved?.updated_at).not.toBe(staleAt);
     });
 
-    it("uses block height rather than row age to expire a signed submission", async () => {
-      rpc.answer("getBlockHeight", 100);
+    it("uses the finalized height rather than row age to expire a signed submission", async () => {
+      rpc.answer("getEpochInfo", finalizedTipAt(LAST_VALID_BLOCK_HEIGHT));
 
-      await insertTransfer({
-        id: "xfr_started_outbox_not_expired",
-        status: "processing",
-        signature: String(TEST_SIG_1),
-        signedTransaction: "AQ==",
-        lastValidBlockHeight: "100",
-        submissionStartedAt: minutesAgo(10),
-        createdAt: minutesAgo(10),
-        updatedAt: minutesAgo(10),
-      });
+      await insertTransfer(
+        signedSubmission({
+          id: "xfr_started_outbox_not_expired",
+          signature: TEST_SIG_1,
+          submissionStartedAt: minutesAgo(10),
+          updatedAt: minutesAgo(10),
+        })
+      );
 
       await trackSandboxTransfers();
 
       const unchanged = await getTransfer("xfr_started_outbox_not_expired");
       expect(unchanged?.status).toBe("processing");
       expect(statusReads()).toHaveLength(1);
-    });
-
-    it("leaves processing transfer alone when signature not found but transfer is recent", async () => {
-      await insertTransfer({
-        id: "xfr_processing_recent_not_found",
-        status: "processing",
-        signature: String(TEST_SIG_1),
-        createdAt: minutesAgo(1),
-        updatedAt: minutesAgo(1),
-      });
-
-      await trackSandboxTransfers();
-
-      const unchanged = await getTransfer("xfr_processing_recent_not_found");
-      expect(unchanged?.status).toBe("processing");
-    });
-
-    it("does not rotate a legacy transfer in 'processed' confirmation status", async () => {
-      rpc.respondSignatureStatuses(() => ({
-        slot: 11111,
-        confirmations: 1,
-        confirmationStatus: "processed",
-        err: null,
-      }));
-      const updatedAt = minutesAgo(1);
-      const warn = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
-
-      try {
-        await insertTransfer({
-          id: "xfr_processing_only_processed",
-          status: "processing",
-          signature: String(TEST_SIG_1),
-          createdAt: updatedAt,
-          updatedAt,
-        });
-
-        await trackSandboxTransfers();
-
-        const unchanged = await getTransfer("xfr_processing_only_processed");
-        expect(unchanged?.status).toBe("processing");
-        expect(unchanged?.updated_at).toBe(updatedAt);
-        expect(warn).not.toHaveBeenCalled();
-      } finally {
-        warn.mockRestore();
-      }
     });
 
     it("reconciles mixed processing rows in one Postgres-backed run", async () => {
@@ -759,13 +860,14 @@ describe("trackPendingTransfers", () => {
         err: null,
       }));
 
-      await insertTransfer({
-        id: "xfr_batch_processing_confirmed",
-        status: "processing",
-        signature: String(TEST_SIG_1),
-        createdAt: minutesAgo(2),
-        updatedAt: minutesAgo(2),
-      });
+      await insertTransfer(
+        signedSubmission({
+          id: "xfr_batch_processing_confirmed",
+          signature: TEST_SIG_1,
+          submissionStartedAt: minutesAgo(2),
+          updatedAt: minutesAgo(2),
+        })
+      );
       await insertTransfer({
         id: "xfr_batch_processing_stuck",
         status: "processing",
@@ -808,20 +910,23 @@ describe("trackPendingTransfers", () => {
           : { slot: 502, confirmations: null, confirmationStatus: "finalized", err: null }
       );
 
-      await insertProjectTransfer(TEST_PROJECT_IDS.production, {
-        id: "xfr_production_processing",
-        status: "processing",
-        signature: String(TEST_SIG_1),
-        createdAt: minutesAgo(1),
-        updatedAt: minutesAgo(1),
-      });
-      await insertTransfer({
-        id: "xfr_sandbox_processing",
-        status: "processing",
-        signature: String(TEST_SIG_2),
-        createdAt: minutesAgo(1),
-        updatedAt: minutesAgo(1),
-      });
+      await insertProjectTransfer(
+        TEST_PROJECT_IDS.production,
+        signedSubmission({
+          id: "xfr_production_processing",
+          signature: TEST_SIG_1,
+          submissionStartedAt: minutesAgo(1),
+          updatedAt: minutesAgo(1),
+        })
+      );
+      await insertTransfer(
+        signedSubmission({
+          id: "xfr_sandbox_processing",
+          signature: TEST_SIG_2,
+          submissionStartedAt: minutesAgo(1),
+          updatedAt: minutesAgo(1),
+        })
+      );
 
       await runInEachClusterScope(() => trackPendingTransfers(env));
 
@@ -863,20 +968,23 @@ describe("trackPendingTransfers", () => {
       });
       const updatedAt = minutesAgo(1);
 
-      await insertProjectTransfer(TEST_PROJECT_IDS.production, {
-        id: "xfr_production_read_failed",
-        status: "processing",
-        signature: String(TEST_SIG_1),
-        createdAt: updatedAt,
-        updatedAt,
-      });
-      await insertTransfer({
-        id: "xfr_sandbox_read_succeeded",
-        status: "processing",
-        signature: String(TEST_SIG_2),
-        createdAt: updatedAt,
-        updatedAt,
-      });
+      await insertProjectTransfer(
+        TEST_PROJECT_IDS.production,
+        signedSubmission({
+          id: "xfr_production_read_failed",
+          signature: TEST_SIG_1,
+          submissionStartedAt: updatedAt,
+          updatedAt,
+        })
+      );
+      await insertTransfer(
+        signedSubmission({
+          id: "xfr_sandbox_read_succeeded",
+          signature: TEST_SIG_2,
+          submissionStartedAt: updatedAt,
+          updatedAt,
+        })
+      );
 
       await runInEachClusterScope(() => trackPendingTransfers(env));
 
@@ -922,14 +1030,8 @@ describe("trackPendingTransfers", () => {
       });
     });
 
-    function spyOnWarn() {
-      const warn = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
-      onTestFinished(() => warn.mockRestore());
-      return warn;
-    }
-
     it("rotates and logs a confirmed transfer whose signature status reads null without touching its status", async () => {
-      const warn = spyOnWarn();
+      const warn = spyOnLog("warn");
       await insertTransfer({
         id: "xfr_confirmed_no_status",
         status: "confirmed",
@@ -1005,7 +1107,7 @@ describe("trackPendingTransfers", () => {
     });
 
     it("leaves and logs a confirmed transfer whose finalized status carries an error", async () => {
-      const warn = spyOnWarn();
+      const warn = spyOnLog("warn");
       rpc.respondSignatureStatuses(() => ({
         slot: 88888,
         confirmations: null,
@@ -1093,13 +1195,14 @@ describe("trackPendingTransfers", () => {
         err: null,
       }));
 
-      await insertTransfer({
-        id: "xfr_regression_confirmed_at",
-        status: "processing",
-        signature: String(TEST_SIG_1),
-        createdAt: minutesAgo(1),
-        updatedAt: minutesAgo(1),
-      });
+      await insertTransfer(
+        signedSubmission({
+          id: "xfr_regression_confirmed_at",
+          signature: TEST_SIG_1,
+          submissionStartedAt: minutesAgo(1),
+          updatedAt: minutesAgo(1),
+        })
+      );
 
       await trackSandboxTransfers();
 

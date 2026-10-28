@@ -85,6 +85,7 @@ import {
   paymentRecurringPaymentCollectionResponseSchema,
   paymentRecurringPaymentListResponseSchema,
   paymentRecurringPaymentResponseSchema,
+  paymentRequestSchema,
   paymentSubscriptionCollectionAttemptListResponseSchema,
   paymentSubscriptionListResponseSchema,
   paymentSubscriptionPlanListResponseSchema,
@@ -285,6 +286,7 @@ export const transferBatchListResponse = paginatedResponseSchema(transferBatchSc
 export const transferBatchEstimateResponse = successResponseSchema(
   transferBatchEstimateResponseSchema
 );
+export const paymentRequestResponse = successResponseSchema(paymentRequestSchema);
 export const paymentRecurringPaymentResponse = successResponseSchema(
   paymentRecurringPaymentResponseSchema
 );

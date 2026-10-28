@@ -370,7 +370,7 @@ export async function provisionWithAdminSession<T>(
  * @param bearerToken - The admin session's bearer token provider.
  * @returns The Sandbox and Production Project ids.
  */
-export async function resolvePlaywrightProjects(
+async function resolvePlaywrightProjects(
   localApiBaseUrl: string,
   bearerToken: BearerTokenProvider
 ): Promise<PlaywrightProjects> {
@@ -598,7 +598,7 @@ async function fundWalletToLamports(
   }
 }
 
-export async function ensureLinkedOrg(
+async function ensureLinkedOrg(
   identity: ClerkTestIdentity,
   options?: EnsureLinkedOrgOptions
 ): Promise<PlaywrightOrganizationFixture> {
@@ -834,5 +834,3 @@ export async function seedCounterpartyWithSolanaAccount(
 export function getBootstrapApiBaseUrl(): string {
   return getPlaywrightApiRuntimeEnv().localApiBaseUrl;
 }
-
-export const seedLocalClerkOrganizationMapping = ensureLinkedOrg;

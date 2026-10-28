@@ -4,7 +4,7 @@
     "command": "pnpm -C apps/sdp-api playground:generate",
     "modules": {
       "wallets": 10,
-      "payments": 35,
+      "payments": 36,
       "counterparties": 13,
       "issuance": 37
     }
@@ -2018,6 +2018,58 @@
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-01T00:00:00.000Z"
             }
+          },
+          "meta": {
+            "requestId": "req_example",
+            "timestamp": "2025-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      {
+        "id": "cancel-payment-request",
+        "operationId": "cancelPaymentRequest",
+        "title": "Cancel payment request",
+        "method": "POST",
+        "path": "/v1/payments/requests/{paymentRequestId}/cancel",
+        "releaseModule": "payments",
+        "shadowedBy": [],
+        "pathFields": [
+          {
+            "key": "paymentRequestId",
+            "label": "{paymentRequestId}",
+            "description": "SDP payment request ID.",
+            "defaultValue": "preq_example",
+            "required": true
+          }
+        ],
+        "bodyFields": [],
+        "expectedResponse": {
+          "data": {
+            "id": "preq_example",
+            "organizationId": "organization_example",
+            "projectId": "project_example",
+            "walletId": "wallet_example",
+            "destinationAddress": "So11111111111111111111111111111111111111112",
+            "token": "example",
+            "amount": "100.00",
+            "reference": "So11111111111111111111111111111111111111112",
+            "status": "canceled",
+            "expiresAt": "2025-01-01T00:00:00.000Z",
+            "fulfilledByTransferId": "fulfilledbytransfer_example",
+            "paidLate": false,
+            "lastCheckedAt": "2025-01-01T00:00:00.000Z",
+            "canceledByApiKeyId": "canceledbyapikey_example",
+            "canceledByUserId": "canceledbyuser_example",
+            "canceledAt": "2025-01-01T00:00:00.000Z",
+            "lifecycle": [
+              {
+                "status": "canceled",
+                "at": "2025-01-01T00:00:00.000Z"
+              }
+            ],
+            "createdBy": "example",
+            "createdAt": "2025-01-01T00:00:00.000Z",
+            "updatedAt": "2025-01-01T00:00:00.000Z"
           },
           "meta": {
             "requestId": "req_example",

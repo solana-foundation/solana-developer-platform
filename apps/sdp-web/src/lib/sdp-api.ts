@@ -51,7 +51,7 @@ function newWebTraceId(): string {
  * contexts get it from `auth()` while the proxy middleware gets it from its
  * `clerkMiddleware` callback.
  */
-export async function acquireClerkToken(getToken: ClerkGetToken): Promise<string> {
+async function acquireClerkToken(getToken: ClerkGetToken): Promise<string> {
   const token = await getToken();
   if (!token) {
     throw new Error("Failed to acquire Clerk token");

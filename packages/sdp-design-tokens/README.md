@@ -2,8 +2,8 @@
 
 Every colour, font, type size, radius and control size SDP UI is built from, as plain CSS
 custom properties, with Tailwind utilities mapped onto them. The
-dashboard (`apps/sdp-web`) consumes the package today. A future Storybook or docs page can
-read the same files without Tailwind.
+dashboard (`apps/sdp-web`) and the docs (`apps/sdp-docs`) consume the package. A future
+Storybook can read the same files without Tailwind.
 
 ## Files
 
@@ -86,12 +86,21 @@ files in `src/assets/fonts` and exposes them under those names. In Next.js, load
 `next/font/local`, set `variable` to that name, and put the font's `variable` class on
 `<html>`. Elsewhere, declare `@font-face` rules for the same files and set the two variables
 on `:root`. Without either, the stack falls back to the installed family name, then the system
-stack. sdp-web loads them with `next/font/local` in `apps/sdp-web/src/app/layout.tsx`.
+stack. sdp-web loads them with `next/font/local` in `apps/sdp-web/src/app/layout.tsx`, and
+sdp-docs the same way in `apps/sdp-docs/src/app/layout.tsx`.
 
 ### Page column
 
 `max-w-page` is the design's content column (852px, which with 24px gutters is the design's
 900px column). `max-w-flow` is the wizard and settings form column (660px).
+
+### Motion
+
+`--motion-duration-fast` (120ms) is hover and press feedback, `--motion-duration-base` (180ms) a small
+reveal such as a menu, tab or disclosure, and `--motion-duration-slow` (240ms) a panel or drawer; pair
+them with `--motion-ease-out`. All three drop to 0ms under `prefers-reduced-motion`. The docs read
+them today. `--motion-duration-default` (250ms) is the duration Tailwind's `transition` utilities use
+(`theme.css`) and is unchanged.
 
 ### Class merging
 

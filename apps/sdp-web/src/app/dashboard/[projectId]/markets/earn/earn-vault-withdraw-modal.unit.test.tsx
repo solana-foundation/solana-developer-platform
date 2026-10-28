@@ -218,7 +218,7 @@ describe("EarnVaultWithdrawModal", () => {
     fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "1" } });
     await user.click(screen.getByRole("button", { name: "Continue" }));
 
-    expect(screen.getByText("The custody wallet signs. SDP covers the network fee.")).toBeTruthy();
+    expect(screen.getByText("SDP covers the network fee.")).toBeTruthy();
     expect(mocks.fetchEarnVaultWithdrawalPreview).not.toHaveBeenCalled();
   });
 
@@ -228,7 +228,7 @@ describe("EarnVaultWithdrawModal", () => {
     fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "1" } });
     await user.click(screen.getByRole("button", { name: "Continue" }));
 
-    expect(screen.getByText("The custody wallet signs and pays the network fee.")).toBeTruthy();
+    expect(screen.getByText("The custody wallet pays the network fee.")).toBeTruthy();
   });
 
   it("disables Max when the withdrawable balance is unavailable", () => {
@@ -295,6 +295,25 @@ describe("EarnVaultWithdrawModal", () => {
     expect(document.querySelector(".earn-processing-modal")).toBeNull();
     expect(document.querySelector('[data-earn-outcome="success"]')).toBeTruthy();
     expect(flowProgress()).toEqual({ step: "Complete", label: "Complete, Step 4 of 4" });
+  });
+
+  it("badges a full exit Closed, not Active", async () => {
+    const exited = { ...withdrawal("finalized"), shares: "10" };
+    mocks.createEarnVaultWithdrawal.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { kind: "withdrawal", withdrawal: exited },
+    });
+    renderModal(vi.fn(), { ...position, withdrawableShares: "10" });
+
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "10" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm withdrawal" }));
+
+    expect(await screen.findByText("Withdrawal complete")).toBeTruthy();
+    expect(screen.getByText("Closed")).toBeTruthy();
+    expect(screen.queryByText("Active")).toBeNull();
+    expect(document.querySelector('[data-earn-outcome="success"]')).toBeTruthy();
   });
 
   it("keeps a finalized provider order visibly pending its separate payout", async () => {

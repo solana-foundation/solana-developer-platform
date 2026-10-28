@@ -35,7 +35,9 @@ export interface PaymentRequestRow {
   status: PaymentRequestStatus;
   expires_at: string | null;
   fulfilled_by_transfer_id: string | null;
-  canceled_by: string | null;
+  canceled_by_api_key_id: string | null;
+  canceled_by_user_id: string | null;
+  canceled_at: string | null;
   lifecycle: PaymentRequestLifecycleEvent[];
   created_by: string | null;
   created_at: string;
@@ -48,6 +50,7 @@ export interface PaymentRequestRow {
   signature_scan_before: string | null;
   signature_scan_stuck_signature: string | null;
   signature_scan_stuck_since: string | null;
+  sponsored_tx_last_valid_block_height: bigint | null;
 }
 
 export interface CreatePaymentRequestInput {
@@ -83,19 +86,40 @@ export interface PaymentRequestCheckStamp {
   outcome: PaymentRequestCheckOutcome;
 }
 
+/**
+ * A background close of an open request. Cancelling is not one: it records who canceled and
+ * holds back for a live sponsored transaction, so it goes through `cancelPaymentRequest`.
+ */
 export interface MarkPaymentRequestInput {
   requestId: string;
   organizationId: string;
   projectId: string;
-  status: Exclude<PaymentRequestStatus, "awaiting_payment">;
+  status: "paid" | "expired";
   fulfilledByTransferId: string | null;
-  canceledBy: string | null;
   paidLate: boolean;
   /** Whether the transition follows a read of the chain; only then does last_verified_at move. */
   chainRead: boolean;
 }
 
-export interface MarkExpiredPaymentRequestPaidInput {
+/** Who canceled a request: the API key or the member that authenticated the cancel, never both. */
+export type PaymentRequestCanceler =
+  | { apiKeyId: string; userId: null }
+  | { apiKeyId: null; userId: string };
+
+export interface CancelPaymentRequestInput {
+  requestId: string;
+  organizationId: string;
+  projectId: string;
+  canceledBy: PaymentRequestCanceler;
+  /**
+   * The lowest last valid block height a sponsored transaction may hold and still land, read from
+   * the cluster when the request had a claim. Null when it had none: a claim written since then
+   * fails the cancel rather than being judged without a height.
+   */
+  liveClaimMinLastValidBlockHeight: bigint | null;
+}
+
+export interface MarkClosedPaymentRequestPaidInput {
   requestId: string;
   organizationId: string;
   projectId: string;
@@ -141,6 +165,11 @@ interface SponsoredTransactionClaim {
 export interface PaymentRequestsRepository {
   createPaymentRequest(input: CreatePaymentRequestInput): Promise<PaymentRequestRow>;
   markPaymentRequest(input: MarkPaymentRequestInput): Promise<PaymentRequestRow | null>;
+  /**
+   * Cancel an open, unexpired request whose sponsored transaction, if any, can no longer land.
+   * Compare-and-set from `awaiting_payment`; null when the row was not in that state.
+   */
+  cancelPaymentRequest(input: CancelPaymentRequestInput): Promise<PaymentRequestRow | null>;
   getPaymentRequestById(params: {
     requestId: string;
     organizationId: string;
@@ -194,15 +223,26 @@ export interface PaymentRequestsRepository {
     liveClaimMinLastValidBlockHeight: bigint;
     limit: number;
   }): Promise<PaymentRequestRow[]>;
-  listExpiredPaymentRequestsForLateCheck(params: {
+  /**
+   * Requests closed without a payment inside the late-payment watch: expired since `closedSince`
+   * by `expires_at`, or canceled since then by `canceled_at`.
+   */
+  listClosedPaymentRequestsForLateCheck(params: {
     environment: SdpEnvironment;
-    expiredSince: string;
+    closedSince: string;
     checkedBefore: string;
     limit: number;
   }): Promise<PaymentRequestRow[]>;
   markPaymentRequestsChecked(checks: readonly PaymentRequestCheckStamp[]): Promise<void>;
   markExpiredPaymentRequestPaid(
-    input: MarkExpiredPaymentRequestPaidInput
+    input: MarkClosedPaymentRequestPaidInput
+  ): Promise<PaymentRequestRow | null>;
+  /**
+   * Settle a canceled request a late payment reached. Compare-and-set from `canceled`; who
+   * canceled it and when stay on the row.
+   */
+  markCanceledPaymentRequestPaid(
+    input: MarkClosedPaymentRequestPaidInput
   ): Promise<PaymentRequestRow | null>;
   advanceSignatureScan(input: AdvanceSignatureScanInput): Promise<boolean>;
   countStaleAwaitingPaymentRequests(params: {
@@ -215,7 +255,7 @@ export interface PaymentRequestsRepository {
   }): Promise<number>;
   countStaleLateWatchPaymentRequests(params: {
     environment: SdpEnvironment;
-    expiredSince: string;
+    closedSince: string;
     checkedBefore: string;
   }): Promise<number>;
 }

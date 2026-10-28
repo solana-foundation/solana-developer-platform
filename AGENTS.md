@@ -109,6 +109,7 @@ Public docs and AI artifacts should mirror the supported public surface only.
 - `.agents/skills/sdp-make-pr/SKILL.md`: explicit-only PR creation workflow with technical before/after behavior, flows or pseudocode, verification, and risk notes.
 - `.agents/skills/sdp-review/SKILL.md`: explicit-only SDP change-set digest and focused review workflow.
 - `.agents/skills/sdp-bug-report/SKILL.md`: explicit-only SDP bug-bash reporting workflow for Linear issue `PRO-1482`.
+- `.agents/skills/sdp-module-alignment/SKILL.md`: internal engineering checklist and scanner (`scripts/scan-module.sh`) for bringing a module onto the current architecture and the refresh design before it is promoted or released, built from Earn's October 2026 alignment.
 
 When updating repo-local skills:
 

@@ -56,7 +56,7 @@ import type { RampWizardStep } from "./use-ramp-wizard";
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 export type BatchSendStepId = "RECIPIENTS" | "REVIEW";
 
-export function getBatchSendSteps(t: Translate): readonly RampWizardStep<BatchSendStepId>[] {
+function getBatchSendSteps(t: Translate): readonly RampWizardStep<BatchSendStepId>[] {
   return [
     // The rows form speaks for itself; the step header already says "Details".
     { id: "RECIPIENTS", label: t("DashboardPayments.onchainSend.details"), title: "" },
@@ -96,7 +96,7 @@ export interface BatchRecipientDraft {
   amount: string;
 }
 
-export interface BatchRecipientEntry {
+interface BatchRecipientEntry {
   recipient: BatchEligibleRecipient;
   amount: string;
 }
@@ -256,23 +256,29 @@ const ESTIMATE_WARNING_RECHECK_MS = 10_000;
  * index into the canonical request, which may be reordered.
  */
 export function belowRentMinimumByAccount(
-  warnings: readonly PaymentTransferBatchEstimateWarning[] | undefined,
+  warnings: readonly PaymentTransferBatchEstimateWarning[],
   requestRecipients: readonly { counterpartyAccountId: string }[]
 ): Map<string, string> {
   const byAccount = new Map<string, string>();
-  for (const warning of warnings ?? []) {
+  for (const warning of warnings) {
     if (warning.code !== "AMOUNT_BELOW_RENT_MINIMUM") continue;
+    // The estimate is keyed by this exact request, so every index is in it.
     const recipient = requestRecipients[warning.recipientIndex];
-    if (recipient) byAccount.set(recipient.counterpartyAccountId, warning.minimumAmount);
+    if (recipient === undefined) {
+      throw new Error(
+        `Estimate warning names recipient ${warning.recipientIndex}, not in the request`
+      );
+    }
+    byAccount.set(recipient.counterpartyAccountId, warning.minimumAmount);
   }
   return byAccount;
 }
 
 /** The source wallet's rent warning, if the estimate gave one (HOO-2375). */
 export function sourceBelowRentMinimum(
-  warnings: readonly PaymentTransferBatchEstimateWarning[] | undefined
+  warnings: readonly PaymentTransferBatchEstimateWarning[]
 ): { sourceRemainder: string; minimumAmount: string } | null {
-  const warning = warnings?.find((entry) => entry.code === "SOURCE_BELOW_RENT_MINIMUM");
+  const warning = warnings.find((entry) => entry.code === "SOURCE_BELOW_RENT_MINIMUM");
   return warning?.code === "SOURCE_BELOW_RENT_MINIMUM"
     ? { sourceRemainder: warning.sourceRemainder, minimumAmount: warning.minimumAmount }
     : null;
@@ -482,17 +488,28 @@ export function useBatchSendWizard({
     () => estimateTransferBatch(request, t),
     {
       revalidateOnFocus: false,
+      // Each estimate belongs to its own request: its warnings index that
+      // request's recipients, and Send waits for it. The dashboard default
+      // keeps the previous request's estimate while the next one loads.
+      keepPreviousData: false,
       // A flagged address may be funded elsewhere: recheck until it clears,
       // so Send re-enables without the request changing (HOO-2375).
       refreshInterval: (latest) =>
-        latest?.warnings && latest.warnings.length > 0 ? ESTIMATE_WARNING_RECHECK_MS : 0,
+        latest !== undefined && latest.warnings.length > 0 ? ESTIMATE_WARNING_RECHECK_MS : 0,
     }
   );
+  // No estimate yet (loading or failed): nothing to flag.
   const belowRentMinimum = useMemo(
-    () => belowRentMinimumByAccount(estimate?.warnings, request.recipients),
+    () =>
+      estimate === undefined
+        ? new Map<string, string>()
+        : belowRentMinimumByAccount(estimate.warnings, request.recipients),
     [estimate, request]
   );
-  const sourceRentShortfall = useMemo(() => sourceBelowRentMinimum(estimate?.warnings), [estimate]);
+  const sourceRentShortfall = useMemo(
+    () => (estimate === undefined ? null : sourceBelowRentMinimum(estimate.warnings)),
+    [estimate]
+  );
   // Create would refuse the batch (409): nothing to send until it is fixed.
   // Review sends only once the estimate has answered (or failed, as before)
   // and named no recipient create would refuse.

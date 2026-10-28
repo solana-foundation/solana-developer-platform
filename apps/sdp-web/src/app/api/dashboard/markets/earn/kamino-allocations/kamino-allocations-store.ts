@@ -215,7 +215,7 @@ let inFlightAllowlist: Promise<ReadonlySet<string>> | undefined;
  * unavailable catalogue REFUSES the allocation read (fail closed) rather than
  * allowing an unlisted one.
  */
-export function resolveAllowedVaults(): Promise<ReadonlySet<string>> {
+function resolveAllowedVaults(): Promise<ReadonlySet<string>> {
   if (allowlistCache && allowlistCache.expiresAt > Date.now()) {
     return Promise.resolve(allowlistCache.vaults);
   }

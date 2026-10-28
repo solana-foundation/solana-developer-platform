@@ -196,6 +196,26 @@ describe("createApp plugin registration", () => {
     expect(body.error.code).toBe("PAYLOAD_TOO_LARGE");
   });
 
+  it("rejects a /pay body above 4 KiB with 413", async () => {
+    const app = createApp({ rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY });
+
+    const res = await app.request(
+      "/pay/pay_tok_body_limit/tx",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "x".repeat(4097),
+      },
+      baseEnv
+    );
+
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({
+      error: { code: "PAYLOAD_TOO_LARGE", message: "Request body is too large" },
+      meta: { requestId: expect.any(String) },
+    });
+  });
+
   it("returns 404 for an unregistered route when no plugins are passed", async () => {
     const app = createApp({ rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY });
 

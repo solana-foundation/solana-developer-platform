@@ -94,6 +94,7 @@ const WALLET_SCOPE_ROUTES = {
     },
   },
   "POST /v1/payments/requests": { exempt: "a `/pay` link: SDP signs only as fee sponsor" },
+  "POST /v1/payments/requests/:paymentRequestId/cancel": { exempt: SIGNS_NOTHING },
   "POST /v1/counterparties": { exempt: SIGNS_NOTHING },
   "PATCH /v1/counterparties/:counterpartyId": { exempt: SIGNS_NOTHING },
   "DELETE /v1/counterparties/:counterpartyId": { exempt: SIGNS_NOTHING },

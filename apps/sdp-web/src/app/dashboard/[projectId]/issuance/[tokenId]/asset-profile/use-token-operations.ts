@@ -4,10 +4,10 @@ import type { PaymentsDashboardWallet } from "@sdp/types/payments";
 import type { Token } from "@sdp/types/tokens";
 import { useState } from "react";
 import { toast } from "sonner";
-import type { FundManagementModalAction } from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-fund-management-section";
 import type {
   ActionExecutionInput,
   AdminAction,
+  FundManagementModalAction,
   PermissionRow,
   RunActionOptions,
 } from "@/app/dashboard/[projectId]/issuance/[tokenId]/token-management-workspace.types";

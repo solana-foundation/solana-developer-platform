@@ -760,8 +760,7 @@ export interface PaymentTransferBatchEstimate {
     tokenAccountRentLamports: string;
     sponsored: boolean;
   };
-  /** Absent from an API older than HOO-2375. */
-  warnings?: PaymentTransferBatchEstimateWarning[];
+  warnings: PaymentTransferBatchEstimateWarning[];
 }
 
 export interface PaymentTransferBatchEnvelope {
@@ -1261,6 +1260,68 @@ export const PAYMENT_REQUEST_STATUSES = [
 ] as const;
 export type PaymentRequestStatus = (typeof PAYMENT_REQUEST_STATUSES)[number];
 
+/**
+ * Whether a payment request in each status can still be paid through its `/pay` link. A payable
+ * status is not enough on its own: an `awaiting_payment` request past its `expiresAt` is not
+ * payable either.
+ */
+export const PAYMENT_REQUEST_STATUS_PAYABLE = {
+  awaiting_payment: true,
+  paid: false,
+  canceled: false,
+  expired: false,
+} as const satisfies Record<PaymentRequestStatus, boolean>;
+
+/** Reports whether a payment request's status still admits a payment through its link. */
+export function isPayablePaymentRequestStatus(status: PaymentRequestStatus): boolean {
+  return PAYMENT_REQUEST_STATUS_PAYABLE[status];
+}
+
+/**
+ * Whether a payment request can still be paid at `now`: a payable status, and not past its
+ * expiry. `/pay` and the dashboard both decide with it.
+ *
+ * @param request - The request's status and expiry.
+ * @param request.status - Its stored status.
+ * @param request.expiresAt - Its expiry, or null for one that never expires.
+ * @param now - The time to judge at, in epoch milliseconds.
+ * @returns True while the request's link can still be paid.
+ */
+export function isPaymentRequestPayableAt(
+  request: { status: PaymentRequestStatus; expiresAt: string | null },
+  now: number
+): boolean {
+  return (
+    isPayablePaymentRequestStatus(request.status) &&
+    (request.expiresAt === null || Date.parse(request.expiresAt) > now)
+  );
+}
+
+/**
+ * Whether each status closes a payment request without a payment: a payer who signed before it
+ * closed can still land the transfer, and the reconciler records that money as a late payment.
+ */
+export const PAYMENT_REQUEST_STATUS_CLOSED_UNPAID = {
+  awaiting_payment: false,
+  paid: false,
+  canceled: true,
+  expired: true,
+} as const satisfies Record<PaymentRequestStatus, boolean>;
+
+/** The statuses that close a payment request without a payment. */
+export type ClosedUnpaidPaymentRequestStatus = {
+  [Status in PaymentRequestStatus]: (typeof PAYMENT_REQUEST_STATUS_CLOSED_UNPAID)[Status] extends true
+    ? Status
+    : never;
+}[PaymentRequestStatus];
+
+/** Reports whether a payment request closed without a payment, so a late one can still settle it. */
+export function isClosedUnpaidPaymentRequestStatus(
+  status: PaymentRequestStatus
+): status is ClosedUnpaidPaymentRequestStatus {
+  return PAYMENT_REQUEST_STATUS_CLOSED_UNPAID[status];
+}
+
 export interface PaymentRequestLifecycleEvent {
   status: PaymentRequestStatus;
   at: string;
@@ -1283,9 +1344,13 @@ export interface PaymentRequest {
   status: PaymentRequestStatus;
   expiresAt: string | null;
   fulfilledByTransferId: string | null;
-  paidLate?: boolean;
+  paidLate: boolean;
   lastCheckedAt?: string | null;
-  canceledBy: string | null;
+  /** The API key that canceled it; null when a member did or it is not canceled. */
+  canceledByApiKeyId: string | null;
+  /** The member who canceled it; null when an API key did or it is not canceled. */
+  canceledByUserId: string | null;
+  canceledAt: string | null;
   lifecycle: PaymentRequestLifecycleEvent[];
   createdBy: string | null;
   createdAt: string;

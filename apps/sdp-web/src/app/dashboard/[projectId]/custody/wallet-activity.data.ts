@@ -14,7 +14,7 @@ import { parseErrorMessage } from "@/lib/api-error";
 import { dashboardRequest } from "@/lib/dashboard-fetch";
 import type { SdpApiClient } from "@/lib/sdp-api";
 
-export type WalletActivitySourceKind = "payments" | "issuance";
+type WalletActivitySourceKind = "payments" | "issuance";
 
 export interface WalletActivityRow {
   id: string;
@@ -103,7 +103,7 @@ function resolveIssuanceAmount(transaction: PublicTokenTransaction): string | un
   return amount === null ? undefined : String(amount);
 }
 
-export function buildWalletActivityRows(
+function buildWalletActivityRows(
   transfers: PaymentTransferSummary[],
   issuanceTransactions: TokenTransactionListItem[],
   t: Translate,
@@ -144,7 +144,7 @@ export function buildWalletActivityRows(
     .slice(0, limit);
 }
 
-export async function fetchWalletIssuanceActivity(
+async function fetchWalletIssuanceActivity(
   request: SdpApiClient["request"],
   custodyWalletId: string,
   t: Translate,

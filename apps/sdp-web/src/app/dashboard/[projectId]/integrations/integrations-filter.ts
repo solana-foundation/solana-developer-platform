@@ -9,7 +9,7 @@ export const INTEGRATION_FAMILIES: IntegrationFamily[] = [
   "privacy",
 ];
 
-export type FamilyFilter = IntegrationFamily | "all";
+type FamilyFilter = IntegrationFamily | "all";
 
 /**
  * What a reader is actually asking when they filter: is this thing on or not.
@@ -19,7 +19,7 @@ export type FamilyFilter = IntegrationFamily | "all";
  */
 export type ConnectionState = "connected" | "not_connected" | "unknown";
 
-export const CONNECTION_STATE_BY_STATUS: Record<IntegrationStatus, ConnectionState> = {
+const CONNECTION_STATE_BY_STATUS: Record<IntegrationStatus, ConnectionState> = {
   active: "connected",
   enabled: "connected",
   available: "not_connected",
@@ -35,9 +35,9 @@ export function connectionState(status: IntegrationStatus): ConnectionState {
  * not a category anyone browses for, and a chip that usually matches nothing
  * reads as broken.
  */
-export const STATUS_FILTERS = ["all", "connected", "not_connected"] as const;
+const STATUS_FILTERS = ["all", "connected", "not_connected"] as const;
 
-export type StatusFilter = (typeof STATUS_FILTERS)[number];
+type StatusFilter = (typeof STATUS_FILTERS)[number];
 
 export interface FilterableIntegration {
   family: IntegrationFamily;
