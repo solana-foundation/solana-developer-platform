@@ -221,6 +221,33 @@ describe("sendTransferBatchUnderKey", () => {
     expect(next).not.toBe(refused);
   });
 
+  it("retries a stopped batch under the same key after re-enable", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>(async () => recorded())
+      .mockResolvedValueOnce(
+        Response.json(
+          {
+            error: {
+              code: "FORBIDDEN",
+              message: "This movement is disabled for the project",
+              details: { reason: "movement_disabled" },
+            },
+          },
+          { status: 403 }
+        )
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(sendTransferBatchUnderKey(batchRequest(), t)).rejects.toThrow(
+      "This movement is disabled for the project"
+    );
+    await sendTransferBatchUnderKey(batchRequest(), t);
+
+    const [refused, retried] = sentKeys(fetchMock);
+    expect(refused).toMatch(/^[0-9a-f-]{36}$/);
+    expect(retried).toBe(refused);
+  });
+
   // A money movement never mints a fresh key while the original may have run:
   // the next press is answered under the same key.
   it("keeps the key on an unknown outcome and resends under it", async () => {
