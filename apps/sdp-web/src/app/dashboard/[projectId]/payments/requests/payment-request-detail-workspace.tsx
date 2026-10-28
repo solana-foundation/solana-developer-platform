@@ -1,6 +1,6 @@
 "use client";
 
-import type { PaymentRequest } from "@sdp/types/payments";
+import { isPaymentRequestPayableAt, type PaymentRequest } from "@sdp/types/payments";
 import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
 import { Button } from "@sdp/ui/button";
 import { CopyIcon, DownloadIcon, Loader2Icon, Share2Icon } from "lucide-react";
@@ -429,7 +429,7 @@ function PaymentRequestRecord({
           </RecordColumns>
         </div>
 
-        {request.status === "awaiting_payment" &&
+        {isPaymentRequestPayableAt(request, Date.now()) &&
         dashboardAccess.capabilities.canManagePaymentRequests ? (
           <RequestCancelFooter requestId={request.id} />
         ) : null}

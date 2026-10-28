@@ -113,8 +113,8 @@ async function deactivateApiKeyRequest(input: {
   keyId: string;
   keyName: string;
   confirmation: string;
-  cancelRecurringPayments?: boolean;
-  cancelPaymentRequests?: boolean;
+  cancelRecurringPayments: boolean;
+  cancelPaymentRequests: boolean;
 }): Promise<{ ok: true; message: string } | { ok: false; message: string }> {
   const t = await getTranslations();
   const { keyId, keyName, confirmation } = normalizeDeactivateApiKeyInput(input);
@@ -149,8 +149,7 @@ async function deactivateApiKeyRequest(input: {
 
   try {
     const client = await createSdpApiClient();
-    const cancelRecurringPayments = input.cancelRecurringPayments === true;
-    const cancelPaymentRequests = input.cancelPaymentRequests === true;
+    const { cancelRecurringPayments, cancelPaymentRequests } = input;
     const response = await client.fetch<{
       recurringPayments: { canceled: string[]; failed: string[] } | null;
       paymentRequests: { canceled: string[]; failed: string[] } | null;
@@ -342,6 +341,8 @@ export async function deactivateApiKeyAction(formData: FormData) {
     keyId: String(formData.get("keyId") ?? ""),
     keyName: String(formData.get("keyName") ?? ""),
     confirmation: String(formData.get("confirmation") ?? ""),
+    cancelRecurringPayments: false,
+    cancelPaymentRequests: false,
   });
 
   await setFlash({
@@ -357,8 +358,8 @@ export async function deactivateApiKeyInlineAction(input: {
   keyId: string;
   keyName: string;
   confirmation: string;
-  cancelRecurringPayments?: boolean;
-  cancelPaymentRequests?: boolean;
+  cancelRecurringPayments: boolean;
+  cancelPaymentRequests: boolean;
 }): Promise<{ ok: true; message: string } | { ok: false; message: string }> {
   const result = await deactivateApiKeyRequest(input);
   if (result.ok) {

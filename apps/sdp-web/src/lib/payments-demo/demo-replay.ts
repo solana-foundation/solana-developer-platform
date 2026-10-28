@@ -363,6 +363,7 @@ function applyRequest(world: DemoWorld, op: DemoOpOf<"request">): void {
     status: "awaiting_payment",
     expiresAt: op.expires,
     fulfilledByTransferId: null,
+    paidLate: false,
     canceledBy: null,
     canceledAt: null,
     lifecycle: [{ status: "awaiting_payment", at: createdAt }],

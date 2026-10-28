@@ -788,6 +788,10 @@ function cancelRequest({ segments, world, now }: WriteContext): DemoWriteResult 
         return error(409, "Payment request has expired", "conflict");
       }
       return record([{ k: "request-cancel", id, at: now.getTime() }], answer);
+    default: {
+      const unreachable: never = request.status;
+      throw new Error(`Unhandled payment request status ${String(unreachable)}`);
+    }
   }
 }
 

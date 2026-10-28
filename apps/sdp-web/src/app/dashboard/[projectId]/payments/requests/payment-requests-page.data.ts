@@ -31,6 +31,7 @@ const paymentRequestDetailResponseSchema = z.object({
     status: z.enum(PAYMENT_REQUEST_STATUSES),
     expiresAt: z.string().nullable(),
     fulfilledByTransferId: z.string().nullable(),
+    paidLate: z.boolean(),
     canceledBy: z.string().nullable(),
     canceledAt: z.string().nullable(),
     lifecycle: z.array(z.object({ status: z.enum(PAYMENT_REQUEST_STATUSES), at: z.string() })),
