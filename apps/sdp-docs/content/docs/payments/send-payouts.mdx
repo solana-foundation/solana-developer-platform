@@ -31,6 +31,8 @@ curl -X POST https://api.solana.com/v1/payments/transfer-batches \
 
 `Idempotency-Key` is required. Reuse the same key for retries of that exact request; recipient order does not change the request. Use `GET /v1/payments/transfer-batches/{batchId}` to inspect recipient and chunk outcomes. `externalId` is a correlation field, not an idempotency key.
 
+SDP sponsors the rent for recipients that don't have a token account for the batch's token yet, and the fee sponsor caps the rent one transaction may fund. A chunk holds up to `options.maxRecipientsPerTransaction` recipients (20 by default), but recipients that need a new token account can be split into more, smaller chunks. Call `POST /v1/payments/transfer-batches/estimate` first to see the transaction count and the rent.
+
 The rest of this page covers the per-recipient alternative for destinations that are not registered counterparty accounts.
 
 ## Designing a payout run

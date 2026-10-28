@@ -311,6 +311,18 @@ export function providerNotConfigured(message?: string): AppError {
 }
 
 /**
+ * The fee sponsor refuses, or would refuse, these exact transaction contents: a retry of the same
+ * request cannot succeed. The same 422 a structured Kora refusal answers with.
+ *
+ * @param message - What the sponsor refuses, for the caller.
+ * @param details - Structured context naming what to change.
+ * @returns The `SIGNING_REJECTED` error.
+ */
+export function signingRejected(message: string, details: Record<string, unknown>): AppError {
+  return new AppError("SIGNING_REJECTED", message, details);
+}
+
+/**
  * ADR 0004 layer 1: the deposit would push SDP-wide holdings in one vault past
  * its cap. A 409 rather than a 400 because nothing about the request is
  * malformed; the vault is full for SDP right now, and the same request may be

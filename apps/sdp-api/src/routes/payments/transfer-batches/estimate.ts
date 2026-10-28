@@ -1,31 +1,22 @@
-import {
-  accountExists,
-  getMinimumBalanceForRentExemption,
-  getRecentBlockhash,
-} from "@sdp/rpc/solana";
+import { getRecentBlockhash } from "@sdp/rpc/solana";
 import {
   compileTransaction,
   createNoopSigner,
   type TransactionMessageBytesBase64,
 } from "@solana/kit";
-import { getTokenSize } from "@solana-program/token-2022";
 import { estimateNotAvailable } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import {
   resolveRequestSponsorshipScope,
   resolveSponsoredFeePayer,
+  resolveSponsoredOutflowLimit,
 } from "@/services/sponsorship.service";
+import { planBatchTransactions } from "./plan";
 import { resolveBatchRequest } from "./resolve";
 import type { estimateTransferBatchSchema } from "./schemas";
-import {
-  buildInstructionGroups,
-  chunkInstructionGroups,
-  DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION,
-  type RecipientInstructionGroup,
-  type TransactionChunk,
-} from "./transaction";
-import type { Rpc, TokenContext } from "./types";
+import { DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION, type TransactionChunk } from "./transaction";
+import type { Rpc } from "./types";
 
 /**
  * Sums the network fee across all chunk transactions via getFeeForMessage.
@@ -51,41 +42,9 @@ async function estimateNetworkFeeLamports(rpc: Rpc, chunks: TransactionChunk[]):
 }
 
 /**
- * Estimates the rent the fee payer would fund for recipient token accounts
- * that do not exist yet. Zero for SOL batches.
- *
- * @param rpc - Solana RPC client.
- * @param groups - Instruction groups with derived destination token accounts.
- * @param tokenContext - Resolved token parameters for the batch.
- * @returns Total rent-exemption lamports for missing token accounts.
- */
-async function estimateMissingAtaRentLamports(
-  rpc: Rpc,
-  groups: RecipientInstructionGroup[],
-  tokenContext: TokenContext
-): Promise<bigint> {
-  if (tokenContext.kind === "sol") {
-    return 0n;
-  }
-
-  const [rentLamports, existence] = await Promise.all([
-    getMinimumBalanceForRentExemption(rpc, getTokenSize()),
-    Promise.all(
-      groups.map((group) =>
-        group.destinationTokenAccount
-          ? accountExists(rpc, group.destinationTokenAccount)
-          : Promise.resolve(true)
-      )
-    ),
-  ]);
-
-  const missing = existence.filter((exists) => !exists).length;
-  return rentLamports * BigInt(missing);
-}
-
-/**
  * POST /transfer-batches/estimate — prices a batch without executing it:
- * transaction count, network fees, and sponsored token-account rent.
+ * transaction count, network fees, and sponsored token-account rent. It plans
+ * chunks exactly as create does, against the same live Kora outflow limit.
  *
  * @param c - Request context.
  * @returns JSON estimate response.
@@ -96,28 +55,25 @@ export async function estimateTransferBatch(
   const body = c.req.valid("json");
   const resolved = await resolveBatchRequest(c, body);
   const sourceSigner = createNoopSigner(resolved.sourceAddress);
-  const [feePayer, lifetime] = await Promise.all([
-    resolveSponsoredFeePayer(c.env, resolveRequestSponsorshipScope(c)),
+  const sponsorshipScope = resolveRequestSponsorshipScope(c);
+  const [feePayer, maxSponsoredLamportsPerTransaction, lifetime] = await Promise.all([
+    resolveSponsoredFeePayer(c.env, sponsorshipScope),
+    resolveSponsoredOutflowLimit(c.env, sponsorshipScope),
     getRecentBlockhash(resolved.rpc, "confirmed"),
   ]);
-  const groups = await buildInstructionGroups({
+  const { chunks, rentBudget } = await planBatchTransactions({
     tokenContext: resolved.tokenContext,
     recipients: resolved.recipients,
-    sourceSigner,
-    feePayer,
-  });
-  const chunks = chunkInstructionGroups({
-    groups,
     sourceSigner,
     feePayer,
     lifetime,
     maxRecipientsPerTransaction:
       body.options?.maxRecipientsPerTransaction ?? DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION,
+    maxSponsoredLamportsPerTransaction,
   });
-  const [networkFeeLamports, tokenAccountRentLamports] = await Promise.all([
-    estimateNetworkFeeLamports(resolved.rpc, chunks),
-    estimateMissingAtaRentLamports(resolved.rpc, groups, resolved.tokenContext),
-  ]);
+  const networkFeeLamports = await estimateNetworkFeeLamports(resolved.rpc, chunks);
+  const tokenAccountRentLamports =
+    rentBudget.rentPerTokenAccount * BigInt(rentBudget.missingTokenAccounts.size);
 
   return success(c, {
     estimate: {

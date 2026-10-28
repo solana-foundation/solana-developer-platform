@@ -194,6 +194,28 @@ export function resolveSponsoredFeePayer(env: Env, scope: SponsorshipScope): Pro
 }
 
 /**
+ * The most lamports Kora lets one sponsored transaction move out of the fee payer
+ * (`max_allowed_lamports`, read live from its `getConfig`), for flows that plan transactions before
+ * a sponsor signs them. Kora counts every outflow its simulation sees, inner `CreateAccount` rent
+ * included, against it; the network fee is checked against the same value separately, never
+ * summed with the outflow. Returns only the number: no way to sponsor-sign escapes it.
+ *
+ * @param env - API environment naming the per-cluster Kora endpoints.
+ * @param scope - Who is sponsored.
+ * @returns The per-transaction fee-payer outflow limit, in lamports.
+ */
+export async function resolveSponsoredOutflowLimit(
+  env: Env,
+  scope: SponsorshipScope
+): Promise<bigint> {
+  const configuration = await instrumentedAdapter(
+    env,
+    buildKoraUserId(scope)
+  ).getSponsorshipConfiguration();
+  return configuration.maxAllowedLamports;
+}
+
+/**
  * Whether a Kora serves the open scope's cluster, so a flow that may degrade to signer-paid fees
  * can decide before it asks for a sponsor.
  *

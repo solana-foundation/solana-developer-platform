@@ -480,7 +480,7 @@ export const createTransferBatchRequestSchema = createTransferBatchSchemaBase
     }),
     options: withOpenApi(createTransferBatchSchemaBase.shape.options, {
       description:
-        "Execution options for transaction chunking, priority fees, and preflight validation.",
+        "Execution options for transaction chunking, priority fees, and preflight validation. `maxRecipientsPerTransaction` caps each chunk from above; a chunk also never funds more rent for new recipient token accounts than the fee sponsor allows in one transaction, so recipients that still need a token account may be split across more chunks. A recipient whose new token account alone costs more rent than that limit is refused with `422 SIGNING_REJECTED` before anything is stored.",
       example: {
         maxRecipientsPerTransaction: 20,
         priorityFee: "auto",
@@ -608,7 +608,8 @@ const transferBatchEstimateSchema = z
   .object({
     recipientCount: z.number().int().openapi({ description: "Requested recipient count." }),
     transactionCount: z.number().int().openapi({
-      description: "Estimated number of Solana transaction chunks.",
+      description:
+        "Estimated number of Solana transaction chunks, planned as create plans them: within `maxRecipientsPerTransaction`, the transaction size limit, and the rent the fee sponsor funds per transaction.",
     }),
     estimatedFees: z
       .object({
@@ -621,7 +622,8 @@ const transferBatchEstimateSchema = z
           example: "0",
         }),
         tokenAccountRentLamports: z.string().openapi({
-          description: "Estimated rent needed for newly-created recipient token accounts.",
+          description:
+            "Estimated rent for recipient token accounts that do not exist yet, sized by the mint's token program and extensions, counted once per distinct account.",
           example: "0",
         }),
         sponsored: z.boolean().openapi({

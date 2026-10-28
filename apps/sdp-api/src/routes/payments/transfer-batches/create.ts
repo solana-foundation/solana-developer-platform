@@ -26,6 +26,7 @@ import {
   resolveRequestSponsorshipScope,
 } from "@/services/sponsorship.service";
 import { applyRecipientRowUpdates, executeChunk, updateRecipientRows } from "./execute";
+import { planBatchTransactions } from "./plan";
 import {
   type AuthorizedBatchRequest,
   authorizeBatchRequest,
@@ -33,11 +34,7 @@ import {
 } from "./resolve";
 import { buildTransferBatchResponse } from "./respond";
 import type { createTransferBatchSchema } from "./schemas";
-import {
-  buildInstructionGroups,
-  chunkInstructionGroups,
-  DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION,
-} from "./transaction";
+import { DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION } from "./transaction";
 import type { CreateTransferBatchInput } from "./types";
 
 async function respondToTransferBatchReplay(
@@ -127,6 +124,9 @@ export async function findTransferBatchRecordReplay(
  * The final batch status comes from the locked repository recompute — never
  * from in-memory state — so a reconciliation run that settles chunks during
  * the request cannot be overwritten with a stale status.
+ * Chunks keep the rent the fee payer funds for new recipient token accounts
+ * within Kora's per-transaction outflow limit; a recipient whose new token
+ * account alone exceeds it refuses the batch (422) before anything is stored.
  * Replays idempotently by Idempotency-Key + payload fingerprint.
  *
  * @param c - Request context.
@@ -149,7 +149,7 @@ export async function createTransferBatch(
     "payments.transfer_batch",
     { custodyWalletId: resolved.sourceWallet.id }
   );
-  const [signer, feePayer, lifetime] = await Promise.all([
+  const [signer, feePayer, sponsorshipConfiguration, lifetime] = await Promise.all([
     createOrgSignerForCustodyWallet(
       c.env,
       resolved.scope.auth.organizationId,
@@ -158,19 +158,15 @@ export async function createTransferBatch(
       "payments.transfer_batch"
     ),
     feePayment.getFeePayer(),
+    feePayment.getSponsorshipConfiguration(),
     getRecentBlockhash(resolved.rpc, "confirmed"),
   ]);
   if (signer.address !== resolved.sourceWallet.publicKey) {
     throw badRequest("Resolved signing wallet does not match source wallet");
   }
-  const groups = await buildInstructionGroups({
+  const { chunks } = await planBatchTransactions({
     tokenContext: resolved.tokenContext,
     recipients: resolved.recipients,
-    sourceSigner: signer,
-    feePayer,
-  });
-  const chunks = chunkInstructionGroups({
-    groups,
     sourceSigner: signer,
     feePayer,
     lifetime,
@@ -178,6 +174,7 @@ export async function createTransferBatch(
       body.options?.maxRecipientsPerTransaction === undefined
         ? DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION
         : body.options.maxRecipientsPerTransaction,
+    maxSponsoredLamportsPerTransaction: sponsorshipConfiguration.maxAllowedLamports,
   });
 
   const batchRepository = getPaymentTransferBatchesRepository(c);

@@ -20,7 +20,7 @@ import {
   getCreateAssociatedTokenIdempotentInstruction,
   getTransferCheckedInstruction,
 } from "@solana-program/token-2022";
-import { badRequest } from "@/lib/errors";
+import { badRequest, signingRejected } from "@/lib/errors";
 import type { RecentBlockhash, ResolvedRecipient, TokenContext } from "./types";
 
 export const DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION = 20;
@@ -35,6 +35,19 @@ export interface TransactionChunk {
   instructions: Instruction[];
   message: ReturnType<typeof buildBatchTransactionMessage>;
   amount: string;
+}
+
+/**
+ * The rent the fee payer funds for recipient token accounts, against Kora's per-transaction
+ * outflow limit. Every recipient token account of one batch shares a mint, so each new one costs
+ * the same rent.
+ */
+export interface SponsoredRentBudget {
+  /** Kora's `max_allowed_lamports`: the most one chunk may move out of the fee payer. */
+  maxLamportsPerTransaction: bigint;
+  rentPerTokenAccount: bigint;
+  /** Recipient token accounts absent when the batch was planned: their idempotent create funds rent. */
+  missingTokenAccounts: ReadonlySet<Address>;
 }
 
 /**
@@ -193,15 +206,70 @@ function assertTransactionFits(chunk: TransactionChunk): void {
 }
 
 /**
+ * The recipient token account a group's idempotent create funds, or null when the group creates
+ * none (SOL) or its account already existed when the batch was planned.
+ *
+ * @param group - The recipient's instruction group.
+ * @param rentBudget - The batch's sponsored rent budget.
+ * @returns The token account whose rent the fee payer funds, or null.
+ */
+function fundedTokenAccount(
+  group: RecipientInstructionGroup,
+  rentBudget: SponsoredRentBudget
+): Address | null {
+  const tokenAccount = group.destinationTokenAccount;
+  return tokenAccount !== undefined && rentBudget.missingTokenAccounts.has(tokenAccount)
+    ? tokenAccount
+    : null;
+}
+
+/**
+ * Refuses a batch with a recipient whose new token account alone costs more rent than Kora lets
+ * one transaction move out of the fee payer: no chunk could carry it, so Kora would refuse it at
+ * signing. Runs before any chunk is built, so nothing is stored or signed for the batch.
+ *
+ * @param groups - Instruction groups in recipient order.
+ * @param rentBudget - The batch's sponsored rent budget.
+ */
+function assertRecipientRentSponsorable(
+  groups: RecipientInstructionGroup[],
+  rentBudget: SponsoredRentBudget
+): void {
+  if (rentBudget.rentPerTokenAccount <= rentBudget.maxLamportsPerTransaction) {
+    return;
+  }
+  const recipientIndexes = groups
+    .filter((group) => fundedTokenAccount(group, rentBudget) !== null)
+    .map((group) => group.index);
+  if (recipientIndexes.length === 0) {
+    return;
+  }
+  throw signingRejected(
+    `recipients.${recipientIndexes[0]} needs a new token account whose rent (${rentBudget.rentPerTokenAccount} lamports) exceeds the ${rentBudget.maxLamportsPerTransaction} lamports the fee sponsor funds per transaction`,
+    {
+      recipientIndexes,
+      rentLamportsPerTokenAccount: rentBudget.rentPerTokenAccount.toString(),
+      maxSponsoredLamportsPerTransaction: rentBudget.maxLamportsPerTransaction.toString(),
+    }
+  );
+}
+
+/**
  * Packs instruction groups into transaction chunks, greedily filling each
- * chunk up to the recipient cap and the Solana transaction size limit.
+ * chunk up to the recipient cap, the Solana transaction size limit, and the
+ * rent Kora lets one transaction move out of the fee payer. Recipients whose
+ * token account already exists fund no rent, so they fill a chunk up to the
+ * other two limits; a token account two recipients share is funded once per
+ * chunk.
  *
  * @param params.groups - Instruction groups in recipient order.
  * @param params.sourceSigner - Signer for the source wallet.
  * @param params.feePayer - Fee payer address.
  * @param params.lifetime - Blockhash lifetime applied to each chunk.
  * @param params.maxRecipientsPerTransaction - Upper bound on recipients per chunk.
- * @returns The chunks to submit, each within transaction size limits.
+ * @param params.rentBudget - The rent the fee payer funds for new recipient token accounts.
+ * @returns The chunks to submit, each within transaction size and sponsored outflow limits.
+ * @throws AppError `SIGNING_REJECTED` when one recipient's new token account alone exceeds the limit.
  */
 export function chunkInstructionGroups(params: {
   groups: RecipientInstructionGroup[];
@@ -209,9 +277,14 @@ export function chunkInstructionGroups(params: {
   feePayer: Address;
   lifetime: RecentBlockhash;
   maxRecipientsPerTransaction: number;
+  rentBudget: SponsoredRentBudget;
 }): TransactionChunk[] {
+  assertRecipientRentSponsorable(params.groups, params.rentBudget);
+
   const chunks: TransactionChunk[] = [];
   let pending: RecipientInstructionGroup[] = [];
+  let pendingRent = 0n;
+  const pendingFundedAccounts = new Set<Address>();
 
   const flush = () => {
     if (pending.length === 0) {
@@ -221,6 +294,8 @@ export function chunkInstructionGroups(params: {
     assertTransactionFits(chunk);
     chunks.push(chunk);
     pending = [];
+    pendingRent = 0n;
+    pendingFundedAccounts.clear();
   };
 
   for (const group of params.groups) {
@@ -228,16 +303,30 @@ export function chunkInstructionGroups(params: {
       flush();
     }
 
+    const funded = fundedTokenAccount(group, params.rentBudget);
+    if (
+      funded !== null &&
+      !pendingFundedAccounts.has(funded) &&
+      pendingRent + params.rentBudget.rentPerTokenAccount >
+        params.rentBudget.maxLamportsPerTransaction
+    ) {
+      flush();
+    }
+
     const candidateGroups = [...pending, group];
     const candidate = buildCandidateChunk(candidateGroups, params);
     if (isTransactionWithinSizeLimit(compileTransaction(candidate.message))) {
       pending = candidateGroups;
-      continue;
+    } else {
+      flush();
+      pending = [group];
+      assertTransactionFits(buildCandidateChunk(pending, params));
     }
 
-    flush();
-    pending = [group];
-    assertTransactionFits(buildCandidateChunk(pending, params));
+    if (funded !== null && !pendingFundedAccounts.has(funded)) {
+      pendingFundedAccounts.add(funded);
+      pendingRent += params.rentBudget.rentPerTokenAccount;
+    }
   }
 
   flush();
