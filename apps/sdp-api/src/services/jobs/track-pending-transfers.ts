@@ -39,6 +39,7 @@ import type {
   ConfirmedTransferPollVerdict,
   PaymentsRepository,
   PaymentTransferRow,
+  SignedSubmissionTransferRow,
   UpdatePaymentTransferInput,
 } from "@/db/repositories/payments.repository";
 import {
@@ -81,11 +82,8 @@ const CONFIRMED_FINALIZATION_WINDOW_MS = 24 * 60 * 60 * 1000;
  */
 const VERDICT_HISTORY_HORIZON_BLOCKS = 9_000n;
 
-type PaymentTransferWithSignature = PaymentTransferRow & { signature: Signature };
-type PaymentTransferWithSignedSubmission = PaymentTransferWithSignature & {
-  signed_transaction: string;
-  last_valid_block_height: string;
-};
+type WithSignature<T extends PaymentTransferRow> = T & { signature: Signature };
+type PaymentTransferWithSignedSubmission = WithSignature<SignedSubmissionTransferRow>;
 
 type FinalizedHeight = Awaited<ReturnType<typeof getChainHeight>>;
 
@@ -103,9 +101,9 @@ type UnresolvedVerdict =
     }
   | { reason: "node_behind_floor"; contextSlot: string; minContextSlot: string };
 
-function hasValidStoredSignature(
-  transfer: PaymentTransferRow
-): transfer is PaymentTransferWithSignature {
+function hasValidStoredSignature<T extends PaymentTransferRow>(
+  transfer: T
+): transfer is WithSignature<T> {
   try {
     if (transfer.signature === null) {
       throw new Error("Stored transfer signature is null");
@@ -124,9 +122,9 @@ function hasValidStoredSignature(
   }
 }
 
-function partitionByValidStoredSignature(transfers: PaymentTransferRow[]) {
-  const valid: PaymentTransferWithSignature[] = [];
-  const invalid: PaymentTransferRow[] = [];
+function partitionByValidStoredSignature<T extends PaymentTransferRow>(transfers: T[]) {
+  const valid: WithSignature<T>[] = [];
+  const invalid: T[] = [];
   for (const transfer of transfers) {
     if (hasValidStoredSignature(transfer)) {
       valid.push(transfer);
@@ -546,28 +544,14 @@ async function syncProcessingTransfersOnChain(
   repo: PaymentsRepository,
   nowIso: string
 ): Promise<void> {
-  const { valid, invalid } = partitionByValidStoredSignature(
-    await repo.listTransfersByStatus({
+  const { valid: processingWithSig, invalid } = partitionByValidStoredSignature(
+    await repo.listProcessingSignedSubmissions({
       environment: currentClusterScope().environment,
-      statuses: ["processing"],
-      types: WALLET_TRANSFER_TYPES,
-      hasSignature: true,
-      fireblocks: false,
       limit: MAX_SIGNATURES_PER_BATCH,
     })
   );
-  const processingWithSig = valid.filter(hasSignedSubmission);
-  // Every writer saves signed bytes before the signature, so a row without them has no expiry to
-  // prove and nothing to judge; it rotates so it cannot pin the oldest-first page.
-  const unsigned = valid.filter((transfer) => !hasSignedSubmission(transfer));
-  for (const transfer of unsigned) {
-    getLogger().error(
-      { transfer_id: transfer.id },
-      "trackPendingTransfers: processing transfer has a signature but no signed submission"
-    );
-  }
 
-  for (const transfer of [...invalid, ...unsigned]) {
+  for (const transfer of invalid) {
     try {
       await repo.updateTransfer({
         transferId: transfer.id,
@@ -824,12 +808,6 @@ function unresolvedReasonForStatus(
   return status.err && commitmentComparator(status.confirmationStatus, "finalized") < 0
     ? "error_unfinalized"
     : "verdict_write_failed";
-}
-
-function hasSignedSubmission(
-  transfer: PaymentTransferWithSignature
-): transfer is PaymentTransferWithSignedSubmission {
-  return transfer.signed_transaction !== null && transfer.last_valid_block_height !== null;
 }
 
 /**

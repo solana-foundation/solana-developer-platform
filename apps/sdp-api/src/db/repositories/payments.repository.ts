@@ -62,6 +62,13 @@ export interface PaymentTransferRow {
 /** A transfer row the repository has proven is a ramp transfer. */
 export type RampPaymentTransferRow = PaymentTransferRow & { type: RampTransferType };
 
+/** A transfer row the repository has proven carries the signed submission saved before its send. */
+export type SignedSubmissionTransferRow = PaymentTransferRow & {
+  signature: string;
+  signed_transaction: string;
+  last_valid_block_height: string;
+};
+
 export function generatePaymentTransferId(): string {
   return `${PAYMENT_TRANSFER_ID_PREFIX}${crypto.randomUUID()}`;
 }
@@ -347,6 +354,20 @@ export interface PaymentsRepository {
     polledAt: string;
   }): Promise<{ transfer: RampPaymentTransferRow; environment: SdpEnvironment } | null>;
   listTransfersByStatus(params: ListTransfersByStatusInput): Promise<PaymentTransferRow[]>;
+  /**
+   * Lists the processing wallet transfers whose signed submission (signature, signed bytes and
+   * last valid block height) is saved, least recently updated first, leaving out Fireblocks rows,
+   * which settle through their provider. System-only.
+   *
+   * @param params - The project environment and the page size.
+   * @param params.environment - Only transfers whose project is in this environment.
+   * @param params.limit - The page size.
+   * @returns The next page of the settlement tracker's queue.
+   */
+  listProcessingSignedSubmissions(params: {
+    environment: SdpEnvironment;
+    limit: number;
+  }): Promise<SignedSubmissionTransferRow[]>;
   /**
    * Lists the page of confirmed transfers whose finalization should be polled
    * next: least-recently-polled first (never-polled rows first), bounded to

@@ -72,7 +72,7 @@ export function createPaymentsRepository(env: Env, scope: TenantScope): Payments
     createPostgresPaymentsRepository(getDb(env), scope),
     scope,
     "PaymentsRepository",
-    ["listTransfersByStatus"]
+    ["listTransfersByStatus", "listProcessingSignedSubmissions"]
   );
 }
 
@@ -88,7 +88,7 @@ export function createTransactionalPaymentsRepository(
     createPostgresPaymentsRepository(db, scope),
     scope,
     "PaymentsRepository",
-    ["listTransfersByStatus"]
+    ["listTransfersByStatus", "listProcessingSignedSubmissions"]
   );
 }
 
