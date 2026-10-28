@@ -39,6 +39,7 @@ const paymentRequest: PaymentRequest = {
   status: "awaiting_payment",
   expiresAt: null,
   fulfilledByTransferId: null,
+  paidLate: false,
   canceledBy: null,
   canceledAt: null,
   lifecycle: [{ status: "awaiting_payment", at: "2026-09-14T00:00:00.000Z" }],
@@ -103,16 +104,30 @@ describe("PaymentRequestDetailWorkspace payment link", () => {
 });
 
 describe("PaymentRequestDetailWorkspace cancel", () => {
-  it.each<{ role: OrganizationRole; status: PaymentRequest["status"]; shown: boolean }>([
-    { role: "member", status: "awaiting_payment", shown: true },
-    { role: "viewer", status: "awaiting_payment", shown: false },
-    { role: "admin", status: "expired", shown: false },
-  ])("offers Cancel request to $role on a $status request: $shown", ({ role, status, shown }) => {
-    workspace.role = role;
-    renderDetail(false, "tok_1", { ...paymentRequest, status });
+  it.each<{
+    role: OrganizationRole;
+    status: PaymentRequest["status"];
+    expiresAt: string | null;
+    shown: boolean;
+  }>([
+    { role: "member", status: "awaiting_payment", expiresAt: null, shown: true },
+    { role: "viewer", status: "awaiting_payment", expiresAt: null, shown: false },
+    { role: "admin", status: "expired", expiresAt: null, shown: false },
+    {
+      role: "admin",
+      status: "awaiting_payment",
+      expiresAt: "2020-01-01T00:00:00.000Z",
+      shown: false,
+    },
+  ])(
+    "offers Cancel request to $role on a $status request expiring $expiresAt: $shown",
+    ({ role, status, expiresAt, shown }) => {
+      workspace.role = role;
+      renderDetail(false, "tok_1", { ...paymentRequest, status, expiresAt });
 
-    expect(screen.queryByRole("button", { name: "Cancel request" }) !== null).toBe(shown);
-  });
+      expect(screen.queryByRole("button", { name: "Cancel request" }) !== null).toBe(shown);
+    }
+  );
 
   it("cancels on confirm, holds every control while it runs, then reads the request again", async () => {
     const pending = Promise.withResolvers<{ ok: true } | { ok: false; error: string }>();

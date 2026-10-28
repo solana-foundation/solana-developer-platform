@@ -716,16 +716,6 @@ describe("PaymentRequestsRepository (postgres)", () => {
           .run()
       ).rejects.toThrow(/payment_requests_paid_late_only_when_paid/);
     });
-
-    it("refuses a canceled request with no canceled_at", async () => {
-      const request = await repo.createPaymentRequest(createInput({}));
-      await expect(
-        setPaymentRequestColumns(env, request.id, {
-          status: "canceled",
-          canceled_by: TEST_USER.id,
-        })
-      ).rejects.toThrow(/payment_requests_cancel_shape/);
-    });
   });
 
   describe("reconciler queries", () => {

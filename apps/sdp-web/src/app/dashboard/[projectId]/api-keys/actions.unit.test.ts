@@ -190,7 +190,11 @@ describe("deactivateApiKeyInlineAction", () => {
   it("revokes without canceling anything the key started unless asked", async () => {
     client.fetch.mockResolvedValue({ recurringPayments: null, paymentRequests: null });
 
-    const result = await deactivateApiKeyInlineAction(revoke);
+    const result = await deactivateApiKeyInlineAction({
+      ...revoke,
+      cancelRecurringPayments: false,
+      cancelPaymentRequests: false,
+    });
 
     expect(client.fetch.mock.calls[0]?.[0]).toBe("/v1/api-keys/key_1");
     expect(lastBody()).toEqual({

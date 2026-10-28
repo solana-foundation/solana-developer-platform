@@ -29,12 +29,16 @@ import { required } from "@/test/helpers/required";
 const PAST = "2020-01-01T00:00:00.000Z";
 const AUDIT_FAILURE_CONSTRAINT = "sdp_test_fail_payment_request_audit";
 
-function postCancel(requestId: string) {
+function postCancelWith(requestId: string, headers: Record<string, string>) {
   return app.request(
     `/v1/payments/requests/${requestId}/cancel`,
-    { method: "POST", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+    { method: "POST", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}`, ...headers } },
     env
   );
+}
+
+function postCancel(requestId: string) {
+  return postCancelWith(requestId, {});
 }
 
 function seedSandboxRequest() {
@@ -197,22 +201,26 @@ describe("POST /v1/payments/requests/:paymentRequestId/cancel", () => {
     expect((await stored(request)).status).toBe("awaiting_payment");
   });
 
-  it("answers 502 and leaves the request open when the block height cannot be read", async () => {
+  it("answers 502 when the block height cannot be read, and cancels on a same-key retry", async () => {
     rpc.respond("getBlockHeight", () => ({
       error: { code: -32603, message: "RPC unavailable" },
     }));
     const request = await seedSandboxRequest();
     await claimWindow(request, "10");
+    const idempotencyKey = { "Idempotency-Key": "cancel-after-rpc-failure" };
 
-    const response = await postCancel(request.id);
+    const failed = await postCancelWith(request.id, idempotencyKey);
 
-    expect(response.status).toBe(502);
-    expect(await response.json()).toMatchObject({ error: { code: "SOLANA_RPC_ERROR" } });
-    expect(await stored(request)).toMatchObject({
-      status: "awaiting_payment",
-      canceled_by: null,
-      canceled_at: null,
-    });
+    expect(failed.status).toBe(502);
+    expect(await failed.json()).toMatchObject({ error: { code: "SOLANA_RPC_ERROR" } });
+    expect(await stored(request)).toMatchObject({ status: "awaiting_payment", canceled_at: null });
+
+    rpc.respond("getBlockHeight", () => ({ result: 900 }));
+    const retried = await postCancelWith(request.id, idempotencyKey);
+
+    expect(retried.status).toBe(200);
+    expect(await retried.json()).toMatchObject({ data: { status: "canceled" } });
+    expect((await stored(request)).status).toBe("canceled");
   });
 
   it("rolls the cancel back when its audit record cannot be written", async () => {

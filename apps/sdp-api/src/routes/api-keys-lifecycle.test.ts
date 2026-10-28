@@ -7,9 +7,10 @@ import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repos
 import { app } from "@/index";
 import { getLogger } from "@/runtime/logger";
 import { authenticateTestClerkUser } from "@/test/helpers/clerk";
+import { installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
 import { env } from "@/test/helpers/env";
-import { seedPaymentRequest } from "@/test/helpers/payment-requests";
+import { seedPaymentRequest, setPaymentRequestColumns } from "@/test/helpers/payment-requests";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -117,7 +118,7 @@ function revokeCancelingPaymentRequests(keyId: string, cancelPaymentRequests: bo
   );
 }
 
-async function seedRequestCreatedByKey(apiKeyId: string): Promise<PaymentRequestRow> {
+async function seedRequestWallet(): Promise<void> {
   await seedTestCustodyRows(env, {
     configs: [
       {
@@ -141,6 +142,9 @@ async function seedRequestCreatedByKey(apiKeyId: string): Promise<PaymentRequest
       },
     ],
   });
+}
+
+function seedRequestCreatedByKey(apiKeyId: string): Promise<PaymentRequestRow> {
   return seedPaymentRequest(env, {
     organizationId: ORGANIZATION_ID,
     projectId: PROJECT_ID,
@@ -412,36 +416,6 @@ describe("API key lifecycle", () => {
       });
     });
 
-    it("cancels the open payment requests the key created when asked, and reports them", async () => {
-      await insertKey({ id: TARGET_KEY_ID });
-      const request = await seedRequestCreatedByKey(TARGET_KEY_ID);
-
-      const response = await revokeCancelingPaymentRequests(TARGET_KEY_ID, true);
-
-      expect(response.status).toBe(200);
-      expect(await response.json()).toEqual({
-        data: {
-          success: true,
-          revokedAt: expect.any(String),
-          recurringPayments: null,
-          paymentRequests: { canceled: [request.id], failed: [] },
-        },
-        meta: { requestId: expect.any(String), timestamp: expect.any(String) },
-      });
-      expect(await paymentRequestStatus(request.id)).toBe("canceled");
-    });
-
-    it("leaves the key's payment requests payable when not asked to cancel them", async () => {
-      await insertKey({ id: TARGET_KEY_ID });
-      const request = await seedRequestCreatedByKey(TARGET_KEY_ID);
-
-      const response = await revokeCancelingPaymentRequests(TARGET_KEY_ID, false);
-
-      expect(response.status).toBe(200);
-      expect(await response.json()).toMatchObject({ data: { paymentRequests: null } });
-      expect(await paymentRequestStatus(request.id)).toBe("awaiting_payment");
-    });
-
     it("answers a repeat revocation with the time it was revoked", async () => {
       await insertKey({ id: TARGET_KEY_ID });
       const first = await revoke(TARGET_KEY_ID);
@@ -503,6 +477,74 @@ describe("API key lifecycle", () => {
       expect((await revocation).status).toBe(200);
       expect((await rotation).status).toBe(404);
       expect(await replacementsOf(TARGET_KEY_ID)).toEqual([]);
+    });
+  });
+
+  describe("revoking with cancelPaymentRequests", () => {
+    const rpc = installClusterRpcResponder();
+
+    beforeEach(async () => {
+      await insertKey({ id: TARGET_KEY_ID });
+      await seedRequestWallet();
+    });
+
+    it("cancels the open payment requests the key created, and reports them", async () => {
+      const request = await seedRequestCreatedByKey(TARGET_KEY_ID);
+
+      const response = await revokeCancelingPaymentRequests(TARGET_KEY_ID, true);
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        data: {
+          success: true,
+          revokedAt: expect.any(String),
+          recurringPayments: null,
+          paymentRequests: { canceled: [request.id], failed: [] },
+        },
+        meta: { requestId: expect.any(String), timestamp: expect.any(String) },
+      });
+      expect(await paymentRequestStatus(request.id)).toBe("canceled");
+    });
+
+    it("reads the claim floor once for every claimed request", async () => {
+      rpc.answer("getBlockHeight", 900);
+      const requests = [
+        await seedRequestCreatedByKey(TARGET_KEY_ID),
+        await seedRequestCreatedByKey(TARGET_KEY_ID),
+      ];
+      for (const request of requests) {
+        await setPaymentRequestColumns(env, request.id, {
+          sponsored_tx_account: "acct",
+          sponsored_tx_unsigned: "tx",
+          sponsored_tx_last_valid_block_height: "10",
+        });
+      }
+
+      const response = await revokeCancelingPaymentRequests(TARGET_KEY_ID, true);
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        data: {
+          paymentRequests: {
+            canceled: expect.arrayContaining(requests.map((request) => request.id)),
+            failed: [],
+          },
+        },
+      });
+      expect(
+        await Promise.all(requests.map((request) => paymentRequestStatus(request.id)))
+      ).toEqual(["canceled", "canceled"]);
+      expect(rpc.calls.filter((call) => call.method === "getBlockHeight")).toHaveLength(1);
+    });
+
+    it("leaves the key's payment requests payable when not asked to cancel them", async () => {
+      const request = await seedRequestCreatedByKey(TARGET_KEY_ID);
+
+      const response = await revokeCancelingPaymentRequests(TARGET_KEY_ID, false);
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ data: { paymentRequests: null } });
+      expect(await paymentRequestStatus(request.id)).toBe("awaiting_payment");
     });
   });
 

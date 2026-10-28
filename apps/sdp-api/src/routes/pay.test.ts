@@ -500,10 +500,7 @@ describe("Public payment request routes", () => {
       const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
       expect((await postTransaction(request.public_token)).status).toBe(200);
 
-      const expiry = vi
-        .spyOn(paymentRequests, "isPaymentRequestExpired")
-        .mockReturnValueOnce(false)
-        .mockReturnValue(true);
+      const expiry = vi.spyOn(paymentRequests, "isPaymentRequestExpired").mockReturnValue(true);
       onTestFinished(() => expiry.mockRestore());
 
       const replay = await postTransaction(request.public_token);
@@ -511,7 +508,7 @@ describe("Public payment request routes", () => {
       expect(await replay.json()).not.toHaveProperty("transaction");
     });
 
-    it("answers no longer payable when the claim is lost to the deadline", async () => {
+    it("answers no longer payable when the claim is lost to a cancel", async () => {
       const sponsorship = stubSponsorship();
       const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
       const systemRepository = repositoryFactory.createSystemPaymentRequestsRepository;
@@ -519,15 +516,13 @@ describe("Public payment request routes", () => {
         .spyOn(repositoryFactory, "createSystemPaymentRequestsRepository")
         .mockImplementation((bindings) => {
           const repository = systemRepository(bindings);
-          vi.spyOn(repository, "claimSponsoredTransactionWindow").mockResolvedValue(false);
+          vi.spyOn(repository, "claimSponsoredTransactionWindow").mockImplementation(async () => {
+            await cancelSeededPaymentRequest(env, request, TEST_USER.id);
+            return false;
+          });
           return repository;
         });
       onTestFinished(() => factory.mockRestore());
-      const expiry = vi
-        .spyOn(paymentRequests, "isPaymentRequestExpired")
-        .mockReturnValueOnce(false)
-        .mockReturnValue(true);
-      onTestFinished(() => expiry.mockRestore());
 
       const response = await postTransaction(request.public_token);
 
