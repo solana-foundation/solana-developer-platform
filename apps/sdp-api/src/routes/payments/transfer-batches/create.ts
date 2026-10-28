@@ -12,6 +12,7 @@ import { type AuthorizeInput, getAuthorized } from "@/middleware/authorize";
 import {
   getIdempotencyFingerprint,
   getIdempotencyRecordKey,
+  IDEMPOTENT_REPLAYED_HEADER,
   idempotencyFingerprintMatches,
   markIdempotencyCommitted,
   markIdempotencyRecordMismatch,
@@ -120,12 +121,18 @@ async function answerLostBatchInsert(
         markIdempotencyRecordMismatch(c);
         throw new AppError("IDEMPOTENCY_KEY_REUSED");
       }
-      return respondToTransferBatchReplay(
+      // The batch already existed: marked as a replay, as replayFromRecord
+      // marks one, so the client retires its key on it.
+      const answered = await respondToTransferBatchReplay(
         c,
         replay,
         authorized.scope.auth.organizationId,
         authorized.projectId
       );
+      // Copied, so the header lands on whatever Response the answer built.
+      const replayed = new Response(answered.body, answered);
+      replayed.headers.set(IDEMPOTENT_REPLAYED_HEADER, "true");
+      return replayed;
     }
   }
   throw error;

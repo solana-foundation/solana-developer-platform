@@ -2102,6 +2102,29 @@ describe("payment transfer batches", () => {
       expect(await countBatches()).toBe(1);
     });
 
+    it("answers the same run sent concurrently under another key as a replay of the winner", async () => {
+      const { send, signingOutcomeMock, sourceSigner } =
+        await seedOneRecipientBatch("payroll_twin");
+      let winner: Response | undefined;
+      // The same request under another key commits the run between this one's check and its insert.
+      createOrgSignerForCustodyWalletMock.mockImplementation(async () => {
+        if (winner === undefined) {
+          createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
+          winner = await send("batch-external-id-twin-winner");
+        }
+        return sourceSigner;
+      });
+
+      const loser = await send("batch-external-id-twin-loser");
+
+      expect(required(winner).status).toBe(200);
+      expect(loser.status).toBe(200);
+      expect(loser.headers.get("Idempotent-Replayed")).toBe("true");
+      expect(await batchIdOf(loser)).toBe(await batchIdOf(required(winner)));
+      expect(signingOutcomeMock).toHaveBeenCalledTimes(1);
+      expect(await countBatches()).toBe(1);
+    });
+
     it("leaves batches recorded before run keys out of the run", async () => {
       const { send, sourceSigner } = await seedOneRecipientBatch("payroll_legacy");
       // Two earlier batches share the externalId under their own request keys.
