@@ -30,24 +30,6 @@ function shortenAddress(address: string, lead = 5, tail = 4): string {
     : address;
 }
 
-// SDP ids are a type prefix plus a uuid ("tok_5485045c-16e5-48c9-851f-e7e7814b487e"),
-// so shortening one like an address spends the whole lead on characters every id of
-// that type shares. Keep the prefix whole — it says what the id names — and take the
-// middle out of the uuid instead: the first group, which is what anyone reads to tell
-// two ids apart, plus a tail to check a copied value against.
-const PREFIXED_ID_LEAD = 8;
-const PREFIXED_ID_TAIL = 4;
-
-export function shortenPrefixedId(
-  id: string,
-  lead = PREFIXED_ID_LEAD,
-  tail = PREFIXED_ID_TAIL
-): string {
-  const prefixEnd = id.indexOf("_") + 1;
-  const prefix = id.slice(0, prefixEnd);
-  return `${prefix}${shortenAddress(id.slice(prefixEnd), lead, tail)}`;
-}
-
 // A `managed` badge spends its detail line on "Provider · key", so the key is
 // clipped hard. The states that show an address alone have the whole line to
 // themselves — spend it, since more characters is exactly what you need when

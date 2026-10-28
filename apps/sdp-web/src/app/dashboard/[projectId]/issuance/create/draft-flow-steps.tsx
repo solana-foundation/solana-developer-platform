@@ -19,12 +19,6 @@ import { useProjectHref } from "@/lib/use-dashboard-project";
 import { type AuthorityKey, type DraftState, isDraftAuthorityInUse } from "./draft-model";
 import type { DraftAccess } from "./local-drafts";
 
-/** The flow's draft: the saved draft's fields, and the access list as the design picks it. */
-export interface FlowDraft {
-  draft: DraftState;
-  access: DraftAccess;
-}
-
 export type UpdateDraft = (changes: Partial<DraftState>) => void;
 
 const CLASSES: {

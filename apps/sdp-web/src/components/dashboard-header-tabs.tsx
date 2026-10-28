@@ -34,7 +34,7 @@ export interface DashboardHeaderTabsConfig {
 
 const EMPTY_HEADER_TAB_COUNTS: Record<string, number> = {};
 
-let headerTabCounts = EMPTY_HEADER_TAB_COUNTS;
+const headerTabCounts = EMPTY_HEADER_TAB_COUNTS;
 const headerTabCountListeners = new Set<() => void>();
 
 function subscribeToHeaderTabCounts(onStoreChange: () => void) {
@@ -42,44 +42,6 @@ function subscribeToHeaderTabCounts(onStoreChange: () => void) {
   return () => {
     headerTabCountListeners.delete(onStoreChange);
   };
-}
-
-function setHeaderTabCount(tabId: string, count: number | undefined) {
-  if (count === undefined) {
-    if (!(tabId in headerTabCounts)) {
-      return;
-    }
-    headerTabCounts = Object.fromEntries(
-      Object.entries(headerTabCounts).filter(([id]) => id !== tabId)
-    );
-  } else {
-    if (headerTabCounts[tabId] === count) {
-      return;
-    }
-    headerTabCounts = { ...headerTabCounts, [tabId]: count };
-  }
-  for (const listener of headerTabCountListeners) {
-    listener();
-  }
-}
-
-/**
- * Publishes a live count onto the route's header tab with the given id, for
- * `DashboardHeaderTabs` to render beside the tab's configured label. The
- * workspace that owns the data calls this; any tab id declared in the route's
- * `headerTabs` config can carry one. A module-scoped store rather than the
- * workspace context, so a count change re-renders only the tab strip.
- *
- * @param tabId - The header tab id from the route's `headerTabs` config.
- * @param count - The count to show, or undefined to show the bare label — the
- * in-flight state, so a loading read never renders as a zero. The entry also
- * clears on unmount, so a count never outlives the workspace that published it.
- */
-export function useHeaderTabCount(tabId: string, count: number | undefined): void {
-  useEffect(() => {
-    setHeaderTabCount(tabId, count);
-    return () => setHeaderTabCount(tabId, undefined);
-  }, [tabId, count]);
 }
 
 function useHeaderTabCounts(): Record<string, number> {

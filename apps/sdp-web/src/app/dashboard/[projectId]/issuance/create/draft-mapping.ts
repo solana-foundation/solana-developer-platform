@@ -218,7 +218,7 @@ const PATH_LABEL_KEYS: Record<string, MessageKey> = {
   "chain.decimals": "DashboardIssuance.create.decimals",
 };
 
-export function pathLabel(path: string, t: Translate): string {
+function pathLabel(path: string, t: Translate): string {
   return t(PATH_LABEL_KEYS[path] ?? "DashboardIssuance.errors.field");
 }
 
@@ -229,7 +229,7 @@ export function getDefaultPublicFields(category: AssetCategory, type: string): s
   return entry ? [...entry.publicProjection] : [];
 }
 
-export function isValidUrl(value: string): boolean {
+function isValidUrl(value: string): boolean {
   const trimmed = value.trim();
   if (!trimmed) {
     return false;
@@ -260,9 +260,7 @@ const DEPLOY_PATH_TO_FIELD: Partial<Record<string, keyof DraftState>> = {
 
 // An enabled setting with a required, still-empty parameter (e.g. a transfer fee
 // toggled on but no basis-points entered). Drives the editor's inline errors.
-export function advancedSettingsHaveMissingParams(
-  advancedSettings: AdvancedSettingsDraft
-): boolean {
+function advancedSettingsHaveMissingParams(advancedSettings: AdvancedSettingsDraft): boolean {
   for (const [key, selection] of Object.entries(advancedSettings)) {
     const setting: AdvancedSetting = ADVANCED_SETTINGS[key as SettingKey];
     if (!setting?.params) {

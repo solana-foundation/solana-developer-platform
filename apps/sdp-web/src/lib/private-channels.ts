@@ -9,7 +9,6 @@ import type {
   PrivateChannelEventListEnvelope,
   PrivateChannelEventReferencesEnvelope,
   PrivateChannelEventStatus,
-  PrivateChannelHealth,
   PrivateChannelInstance,
   PrivateChannelInstanceEnvelope,
   PrivateChannelInstanceOverview,
@@ -30,20 +29,6 @@ export interface FetchPrivateChannelEventsParams {
   status?: PrivateChannelEventStatus;
   limit?: number;
   before?: string;
-}
-
-/**
- * Probe a candidate SPC gateway's health via `GET /v1/private-channels/health`.
- * Always resolves with a `PrivateChannelHealth` DTO (ready/degraded/unreachable);
- * only a missing gateway URL surfaces as a rejection.
- */
-export function probePrivateChannelHealth(
-  client: SdpApiClient,
-  gatewayUrl: string
-): Promise<PrivateChannelHealth> {
-  return client.fetch<PrivateChannelHealth>(
-    `/v1/private-channels/health?gatewayUrl=${encodeURIComponent(gatewayUrl)}`
-  );
 }
 
 /** Fetch this project's connected SPC instance (or `{ instance: null }`). */
@@ -97,16 +82,6 @@ export function deletePrivateChannel(client: SdpApiClient, id: string): Promise<
   });
 }
 
-/** List the project's deposits, newest first. */
-export async function fetchPrivateChannelDeposits(
-  client: SdpApiClient
-): Promise<PrivateChannelDeposit[]> {
-  const { deposits } = await client.fetch<{ deposits: PrivateChannelDeposit[] }>(
-    "/v1/private-channels/deposits"
-  );
-  return deposits;
-}
-
 /** Read one deposit (poll for status transitions). */
 export function fetchPrivateChannelDeposit(
   client: SdpApiClient,
@@ -135,16 +110,6 @@ export function createPrivateChannelDeposit(
     headers: { [IDEMPOTENCY_KEY_HEADER]: idempotencyKey },
     body: JSON.stringify(body),
   });
-}
-
-/** List the project's withdrawals, newest first. */
-export async function fetchPrivateChannelWithdrawals(
-  client: SdpApiClient
-): Promise<PrivateChannelWithdrawal[]> {
-  const { withdrawals } = await client.fetch<{ withdrawals: PrivateChannelWithdrawal[] }>(
-    "/v1/private-channels/withdrawals"
-  );
-  return withdrawals;
 }
 
 /** Read one withdrawal (poll for status transitions). */
