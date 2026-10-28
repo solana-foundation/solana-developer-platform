@@ -82,9 +82,12 @@
       },
       "security": {
         "noDangerouslySetInnerHtml": "error",
+        "noGlobalEval": "error",
         "noSecrets": "error"
       },
-      "nursery": {}
+      "nursery": {
+        "noImpliedEval": "error"
+      }
     }
   },
   "overrides": [
