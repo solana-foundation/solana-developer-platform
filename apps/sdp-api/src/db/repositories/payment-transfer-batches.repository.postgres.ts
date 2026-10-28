@@ -26,6 +26,7 @@ import {
   type PaymentTransferRecipientRow,
   type RecomputeTransferBatchStatusInput,
   type SettlePaymentTransferBatchInput,
+  type StrandedRecipientCutoff,
   type UpdatePaymentTransferBatchInput,
   type UpdatePaymentTransferRecipientInput,
   type UpdatePaymentTransferRecipientsStatusInput,
@@ -204,7 +205,7 @@ async function insertTransferRecipients(
     return [];
   }
 
-  const rowPlaceholder = `(${Array(12).fill("?").join(", ")})`;
+  const rowPlaceholder = `(${Array(13).fill("?").join(", ")})`;
   const values = inputs.flatMap((input) => [
     generatePaymentTransferRecipientId(),
     input.batchId,
@@ -218,6 +219,9 @@ async function insertTransferRecipients(
     input.amount,
     input.status ?? "pending",
     input.error ?? null,
+    input.attemptLastValidBlockHeight === undefined || input.attemptLastValidBlockHeight === null
+      ? null
+      : input.attemptLastValidBlockHeight.toString(),
   ]);
 
   const result = await db
@@ -234,7 +238,8 @@ async function insertTransferRecipients(
          destination_address,
          amount,
          status,
-         error
+         error,
+         attempt_last_valid_block_height
        ) VALUES ${inputs.map(() => rowPlaceholder).join(", ")}
        RETURNING *`
     )
@@ -819,6 +824,7 @@ export function createPostgresPaymentTransferBatchesRepository(
     },
 
     async listStrandedTransferBatches(input) {
+      const strandedCutoff = strandedRecipientCutoff(input);
       const result = await db
         .prepare(
           `SELECT b.id, b.organization_id, b.project_id
@@ -829,18 +835,36 @@ export function createPostgresPaymentTransferBatchesRepository(
               AND EXISTS (
                 SELECT 1 FROM payment_transfer_recipients r
                  WHERE r.batch_id = b.id AND r.status = 'pending' AND r.transfer_id IS NULL
-                   AND r.updated_at < ?
+                   AND ${strandedCutoff.sql("r.")}
               )
             ORDER BY b.created_at
             LIMIT ?`
         )
-        .bind(input.environment, input.attemptedBefore, input.limit)
+        .bind(input.environment, ...strandedCutoff.values, input.limit)
         .all<{ id: string; organization_id: string; project_id: string }>();
       return result.results.map((row) => ({
         batchId: row.id,
         organizationId: row.organization_id,
         projectId: row.project_id,
       }));
+    },
+
+    async lowestUnsentAttemptBlockHeight({ environment }) {
+      const row = await db
+        .prepare(
+          `SELECT MIN(r.attempt_last_valid_block_height)::text AS height
+             FROM payment_transfer_recipients r
+             JOIN payment_transfer_batches b ON b.id = r.batch_id
+             JOIN projects p ON p.id = b.project_id
+            WHERE p.environment = ?
+              AND b.status = 'processing'
+              AND r.status = 'pending'
+              AND r.transfer_id IS NULL
+              AND r.attempt_last_valid_block_height IS NOT NULL`
+        )
+        .bind(environment)
+        .first<{ height: string | null }>();
+      return row?.height == null ? null : BigInt(row.height);
     },
 
     async listSupersededTransferIds({ batchId, organizationId, projectId }) {
@@ -870,6 +894,7 @@ export function createPostgresPaymentTransferBatchesRepository(
     },
 
     async failUnsentTransferRecipients(input) {
+      const strandedCutoff = strandedRecipientCutoff(input);
       return db.transaction(async (tx) => {
         // The batch lock first, as every batch status writer takes it.
         await tx
@@ -889,7 +914,7 @@ export function createPostgresPaymentTransferBatchesRepository(
                 AND project_id = ?
                 AND status = 'pending'
                 AND transfer_id IS NULL
-                AND updated_at < ?
+                AND ${strandedCutoff.sql("")}
                 ${recipientIdClause(input.recipientIds)}`
           )
           .bind(
@@ -897,7 +922,7 @@ export function createPostgresPaymentTransferBatchesRepository(
             input.batchId,
             input.organizationId,
             input.projectId,
-            input.attemptedBefore,
+            ...strandedCutoff.values,
             ...(input.recipientIds ?? [])
           )
           .run();
@@ -925,7 +950,8 @@ export function createPostgresPaymentTransferBatchesRepository(
           const claimed = await tx
             .prepare(
               `UPDATE payment_transfer_recipients r
-                SET status = 'pending', transfer_id = NULL, error = NULL, updated_at = sdp_iso_now()
+                SET status = 'pending', transfer_id = NULL, error = NULL, updated_at = sdp_iso_now(),
+                    attempt_last_valid_block_height = ?
                FROM (
                  SELECT id, transfer_id FROM payment_transfer_recipients
                   WHERE batch_id = ?
@@ -938,7 +964,13 @@ export function createPostgresPaymentTransferBatchesRepository(
               WHERE r.id = previous.id
               RETURNING r.*, previous.transfer_id AS superseded_transfer_id`
             )
-            .bind(input.batchId, input.organizationId, input.projectId, ...input.recipientIds)
+            .bind(
+              input.attemptLastValidBlockHeight.toString(),
+              input.batchId,
+              input.organizationId,
+              input.projectId,
+              ...input.recipientIds
+            )
             .all<Record<string, unknown>>();
           if (claimed.results.length !== input.recipientIds.length) {
             throw new ClaimLostError();
@@ -1002,6 +1034,29 @@ function mapPaymentTransferBatchRetryRow(
     ),
     created_at: String(row.created_at),
   };
+}
+
+/**
+ * The SQL test for a stranded unsent recipient: written before an instant, or
+ * written by an attempt whose lastValidBlockHeight the chain has passed.
+ */
+function strandedRecipientCutoff(cutoff: StrandedRecipientCutoff): {
+  sql: (alias: string) => string;
+  values: string[];
+} {
+  const tests: string[] = [];
+  const values: string[] = [];
+  if (cutoff.attemptedBefore !== undefined) {
+    tests.push("{a}updated_at < ?");
+    values.push(cutoff.attemptedBefore);
+  }
+  if (cutoff.expiredBelowBlockHeight !== undefined) {
+    tests.push(
+      "({a}attempt_last_valid_block_height IS NOT NULL AND {a}attempt_last_valid_block_height < ?)"
+    );
+    values.push(cutoff.expiredBelowBlockHeight.toString());
+  }
+  return { sql: (alias) => `(${tests.join(" OR ").replaceAll("{a}", alias)})`, values };
 }
 
 /** Limits a recipient update to the named ids; none named matches none. */

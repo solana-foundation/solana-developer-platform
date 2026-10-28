@@ -1,3 +1,5 @@
+import { createClusterRpc } from "@sdp/rpc/factory";
+import { withTransientRpcRetry } from "@sdp/rpc/transient";
 import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import type {
@@ -142,6 +144,34 @@ async function answerLostBatchInsert(
 }
 
 /**
+ * Settles a run's batch found under another request's key, as far as the chain
+ * allows: that request may still be sending, so only recipients whose
+ * attempt's lastValidBlockHeight the chain has passed are failed (nothing that
+ * attempt built can land). One block-height read; if the RPC can't answer,
+ * the batch is answered as it stands and the stranded-batch job settles it.
+ */
+async function settleExpiredRunAttempt(
+  c: AppContext,
+  run: PaymentTransferBatchRow
+): Promise<PaymentTransferBatchRow> {
+  let blockHeight: bigint;
+  try {
+    blockHeight = await withTransientRpcRetry(() =>
+      createClusterRpc().getBlockHeight({ commitment: "confirmed" }).send()
+    );
+  } catch {
+    return run;
+  }
+  return getPaymentTransferBatchesRepository(c).failUnsentTransferRecipients({
+    batchId: run.id,
+    organizationId: run.organization_id,
+    projectId: run.project_id,
+    error: "The batch request ended before this recipient's transfer was sent",
+    expiredBelowBlockHeight: blockHeight,
+  });
+}
+
+/**
  * The create-batch access check (HOO-1918, ADR 0009): source wallet access,
  * read fresh, and every named counterparty account in the project. A replay
  * passes exactly these checks.
@@ -177,8 +207,9 @@ export async function admitTransferBatchExecution(
  * instead of replaying a batch stuck in `processing` forever.
  *
  * A row under a payout run's key (`externalId`) may belong to a request still
- * running under another key, so it is answered as it stands and never
- * settled here; the stranded-batch job settles a crashed one. It is this
+ * running under another key, so only recipients the chain proves that request
+ * can no longer send are failed (settleExpiredRunAttempt), at the cost of one
+ * block-height read. It is this
  * request's batch only for the same credential and body; any other is 409.
  */
 export async function findTransferBatchRecordReplay(
@@ -228,9 +259,10 @@ export async function findTransferBatchRecordReplay(
   });
   if (run === null || run.idempotency_fingerprint === null) return null;
   assertSamePayoutRun(c, run, authorized);
+  const settled = run.status === "processing" ? await settleExpiredRunAttempt(c, run) : run;
   return {
     fingerprint: run.idempotency_fingerprint,
-    respond: () => respondToTransferBatchReplay(c, run, organizationId, authorized.projectId),
+    respond: () => respondToTransferBatchReplay(c, settled, organizationId, authorized.projectId),
   };
 }
 
@@ -300,6 +332,7 @@ export async function createTransferBatch(
         amount: recipient.amount,
         status: "pending",
         error: null,
+        attemptLastValidBlockHeight: prepared.lifetime.lastValidBlockHeight,
       })),
     });
     batch = created.batch;

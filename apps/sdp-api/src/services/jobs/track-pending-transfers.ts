@@ -24,6 +24,7 @@ import { currentClusterScope } from "@sdp/rpc/scope";
 import type { SignatureStatusInfo, SolanaRpc } from "@sdp/rpc/solana";
 import { getSignatureStatuses } from "@sdp/rpc/solana";
 import { withTransientRpcRetry } from "@sdp/rpc/transient";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { TransferChainVerdictStatus } from "@sdp/types/payments";
 import { WALLET_TRANSFER_TYPES } from "@sdp/types/payments";
 import { assertIsSignature, commitmentComparator, type Signature } from "@solana/kit";
@@ -245,25 +246,64 @@ const STRANDED_BATCH_PAGE_SIZE = 50;
  * its broadcast), and no transfer row exists for the sweep above to settle, so
  * without a same-key retry the batch would stay processing forever. They are
  * failed and the batch status recomputed, as the record finder does on a retry.
+ *
+ * An unsent recipient is stranded once the chain passes the lastValidBlockHeight
+ * of the attempt that wrote or claimed it: every chunk of that attempt shares
+ * one blockhash, so nothing it built can land any more (HOO-2343). The block
+ * height is read only when some unsent recipient records a height. A recipient
+ * with none, or a block height the RPC can't give, falls back to the hour.
+ * Either way the chunk link's compare-and-swap makes failing a recipient safe:
+ * a chunk links only recipients still unsent, so it is failed or sent, never
+ * both.
  */
 async function failStrandedTransferBatches(env: Env, now: Date): Promise<void> {
   const batches = createSystemPaymentTransferBatchesRepository(env);
+  const environment = currentClusterScope().environment;
   // Aged by each recipient's last write, so a retry that just claimed
   // recipients of an old batch is never failed under it (HOO-2343).
   const attemptedBefore = new Date(
     now.getTime() - TRANSFER_BATCH_ATTEMPT_LIFETIME_MS
   ).toISOString();
+  const expiredBelowBlockHeight = await blockHeightPastAnUnsentAttempt(batches, environment);
+  const cutoff =
+    expiredBelowBlockHeight === null
+      ? { attemptedBefore }
+      : { attemptedBefore, expiredBelowBlockHeight };
   const stranded = await batches.listStrandedTransferBatches({
-    environment: currentClusterScope().environment,
-    attemptedBefore,
+    environment,
     limit: STRANDED_BATCH_PAGE_SIZE,
+    ...cutoff,
   });
   for (const batch of stranded) {
     await batches.failUnsentTransferRecipients({
       ...batch,
       error: "The batch request ended before this recipient's transfer was sent",
-      attemptedBefore,
+      ...cutoff,
     });
+  }
+}
+
+/**
+ * The cluster's current block height, when an unsent batch recipient records
+ * an attempt height it may have passed; otherwise null, without an RPC call.
+ */
+async function blockHeightPastAnUnsentAttempt(
+  batches: ReturnType<typeof createSystemPaymentTransferBatchesRepository>,
+  environment: SdpEnvironment
+): Promise<bigint | null> {
+  const lowest = await batches.lowestUnsentAttemptBlockHeight({ environment });
+  if (lowest === null) return null;
+  try {
+    const height = await withTransientRpcRetry(() =>
+      createClusterRpc().getBlockHeight({ commitment: "confirmed" }).send()
+    );
+    return height > lowest ? height : null;
+  } catch (err) {
+    getLogger().error(
+      { error: err instanceof Error ? err.message : String(err), environment },
+      "trackPendingTransfers: getBlockHeight for stranded batches failed"
+    );
+    return null;
   }
 }
 

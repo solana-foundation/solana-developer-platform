@@ -174,6 +174,8 @@ export interface CreatePaymentTransferRecipientInput {
   amount: string;
   status?: PaymentTransferBatchRecipientStatus;
   error?: string | null;
+  /** The writing attempt's lastValidBlockHeight, for a pending recipient (HOO-2343). */
+  attemptLastValidBlockHeight?: bigint | null;
 }
 
 export interface UpsertPaymentTransferRecipientInput extends CreatePaymentTransferRecipientInput {
@@ -246,6 +248,8 @@ export interface ClaimFailedTransferRecipientsInput extends RecomputeTransferBat
   recipientIds: string[];
   /** Chunks the resend adds to the batch's transaction count. */
   addedTransactionCount: number;
+  /** The resend's lastValidBlockHeight, stored on the claimed recipients. */
+  attemptLastValidBlockHeight: bigint;
   /** The retry's recovery row, written in the claim's transaction (HOO-2343). */
   retry: {
     idempotencyKey: string;
@@ -253,6 +257,14 @@ export interface ClaimFailedTransferRecipientsInput extends RecomputeTransferBat
     initiatedByKeyId: string | null;
   };
 }
+
+/**
+ * When an unsent recipient is stranded (HOO-2343): written before an instant,
+ * or written by an attempt whose lastValidBlockHeight the chain has passed.
+ */
+export type StrandedRecipientCutoff =
+  | { attemptedBefore: string; expiredBelowBlockHeight?: bigint }
+  | { attemptedBefore?: string; expiredBelowBlockHeight: bigint };
 
 /** A retry of a batch's failed recipients, recorded under its key (HOO-2343). */
 export interface PaymentTransferBatchRetryRow {
@@ -365,16 +377,20 @@ export interface PaymentTransferBatchesRepository {
    *
    * @param input.batchId - Batch whose unsent recipients are failed.
    * @param input.error - Failure detail recorded on each failed recipient.
-   * @param input.attemptedBefore - Only recipients written before this instant.
+   * A recipient is failed when it was last written before `attemptedBefore`,
+   * or its attempt's lastValidBlockHeight is below `expiredBelowBlockHeight`
+   * (that attempt can no longer land anything); at least one is given.
+   *
+   * @param input.attemptedBefore - Recipients written before this instant.
+   * @param input.expiredBelowBlockHeight - The cluster's current block height.
    * @param input.recipientIds - Only these recipients, when the caller knows which ones it wrote.
    * @returns The batch row after the recompute.
    */
   failUnsentTransferRecipients(
     input: RecomputeTransferBatchStatusInput & {
       error: string;
-      attemptedBefore: string;
       recipientIds?: string[];
-    }
+    } & StrandedRecipientCutoff
   ): Promise<PaymentTransferBatchRow>;
   /**
    * Takes failed recipients back to pending with no chunk transfer for a
@@ -394,12 +410,19 @@ export interface PaymentTransferBatchesRepository {
    * that just claimed recipients of an old batch is left alone (HOO-2343).
    * System-only (the reconciliation job), oldest first.
    */
-  listStrandedTransferBatches(input: {
-    /** Only batches whose project is in this environment, so one job run settles one cluster's batches. */
-    environment: SdpEnvironment;
-    attemptedBefore: string;
-    limit: number;
-  }): Promise<RecomputeTransferBatchStatusInput[]>;
+  listStrandedTransferBatches(
+    input: {
+      /** Only batches whose project is in this environment, so one job run settles one cluster's batches. */
+      environment: SdpEnvironment;
+      limit: number;
+    } & StrandedRecipientCutoff
+  ): Promise<RecomputeTransferBatchStatusInput[]>;
+  /**
+   * The lowest attempt lastValidBlockHeight among the environment's unsent
+   * recipients of processing batches, or null when none records one: the job
+   * reads the cluster's block height only when this says one may be past it.
+   */
+  lowestUnsentAttemptBlockHeight(input: { environment: SdpEnvironment }): Promise<bigint | null>;
   /**
    * The failed chunk transfers the batch's retries unlinked their recipients
    * from: still the batch's transactions, so its responses keep showing them.

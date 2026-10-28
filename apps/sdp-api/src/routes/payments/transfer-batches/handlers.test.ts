@@ -2177,6 +2177,16 @@ describe("payment transfer batches", () => {
       return { send, signingOutcomeMock, sourceSigner };
     }
 
+    async function readRecipients(batchId: string) {
+      const result = await getDb(env)
+        .prepare(
+          "SELECT status FROM payment_transfer_recipients WHERE batch_id = ? ORDER BY created_at"
+        )
+        .bind(batchId)
+        .all<{ status: string }>();
+      return result.results;
+    }
+
     async function countBatches(): Promise<number> {
       const row = await getDb(env)
         .prepare(
@@ -2370,6 +2380,45 @@ describe("payment transfer batches", () => {
       expect(await batchIdOf(loser)).toBe(await batchIdOf(required(winner)));
       expect(signingOutcomeMock).toHaveBeenCalledTimes(1);
       expect(await countBatches()).toBe(1);
+    });
+
+    it("settles a crashed run on a resend under a new key once the chain passes its attempt", async () => {
+      const { send, signingOutcomeMock, sourceSigner } =
+        await seedOneRecipientBatch("payroll_crash");
+      const first = await send("batch-external-id-crash-first");
+      expect(first.status).toBe(200);
+      const firstId = await batchIdOf(first);
+      // The state a crash right after the batch commit leaves: the recipient
+      // pending and unlinked, written by an attempt valid to block 100.
+      await getDb(env)
+        .prepare(
+          `UPDATE payment_transfer_recipients
+              SET status = 'pending', transfer_id = NULL, error = NULL,
+                  attempt_last_valid_block_height = 100
+            WHERE batch_id = ?`
+        )
+        .bind(firstId)
+        .run();
+      await getDb(env)
+        .prepare("UPDATE payment_transfer_batches SET status = 'processing' WHERE id = ?")
+        .bind(firstId)
+        .run();
+      vi.clearAllMocks();
+      createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
+
+      // The attempt could still land: the resend answers the batch as it stands.
+      rpc.answer("getBlockHeight", 100);
+      const early = await send("batch-external-id-crash-early");
+      expect(early.status).toBe(200);
+      expect((await readRecipients(firstId)).map((r) => r.status)).toEqual(["pending"]);
+
+      // Past it: nothing that attempt built can land, so the recipient fails.
+      rpc.answer("getBlockHeight", 101);
+      const late = await send("batch-external-id-crash-late");
+      expect(late.status).toBe(200);
+      expect(await batchIdOf(late)).toBe(firstId);
+      expect((await readRecipients(firstId)).map((r) => r.status)).toEqual(["failed"]);
+      expect(signingOutcomeMock).not.toHaveBeenCalled();
     });
 
     it("leaves batches recorded before run keys out of the run", async () => {
@@ -2676,6 +2725,43 @@ describe("payment transfer batches", () => {
       expect(sendTransactionMock).not.toHaveBeenCalled();
     });
 
+    it("fails an unsent recipient from the stranded-batch job once the chain passes its attempt", async () => {
+      const { batch, failed } = await seedPartiallyFailedBatch();
+      const repository = batchesRepositoryPostgres.createPostgresPaymentTransferBatchesRepository(
+        getDb(env)
+      );
+      // A retry claimed the recipient moments ago, valid to block 500, then died.
+      await repository.claimFailedTransferRecipients({
+        batchId: batch.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        recipientIds: [failed.id],
+        addedTransactionCount: 1,
+        attemptLastValidBlockHeight: 500n,
+        retry: {
+          idempotencyKey: "dead-retry-record-key",
+          idempotencyFingerprint: "dead-retry-fingerprint",
+          initiatedByKeyId: null,
+        },
+      });
+      const statusOf = async () =>
+        (
+          await repository.getTransferRecipientById({
+            recipientId: failed.id,
+            organizationId: TEST_ORG.id,
+            projectId: TEST_PROJECT.id,
+          })
+        )?.status;
+
+      rpc.answer("getBlockHeight", 500);
+      await runInEachClusterScope(() => trackPendingTransfers(env));
+      expect(await statusOf()).toBe("pending");
+
+      rpc.answer("getBlockHeight", 501);
+      await runInEachClusterScope(() => trackPendingTransfers(env));
+      expect(await statusOf()).toBe("failed");
+    });
+
     it("leaves a retry's just-claimed recipients of an old batch to the retry", async () => {
       const { batch, failed } = await seedPartiallyFailedBatch();
       const repository = batchesRepositoryPostgres.createPostgresPaymentTransferBatchesRepository(
@@ -2688,6 +2774,7 @@ describe("payment transfer batches", () => {
         projectId: TEST_PROJECT.id,
         recipientIds: [failed.id],
         addedTransactionCount: 1,
+        attemptLastValidBlockHeight: 1_000n,
         retry: {
           idempotencyKey: "live-retry-record-key",
           idempotencyFingerprint: "live-retry-fingerprint",
@@ -2739,6 +2826,7 @@ describe("payment transfer batches", () => {
             projectId: TEST_PROJECT.id,
             recipientIds: [failed.id],
             addedTransactionCount: 1,
+            attemptLastValidBlockHeight: 1_000n,
             retry: {
               idempotencyKey: "another-retry-record-key",
               idempotencyFingerprint: "another-retry-fingerprint",

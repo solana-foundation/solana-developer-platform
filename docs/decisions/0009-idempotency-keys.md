@@ -149,7 +149,12 @@ records the failed chunk transfers the claim unlinked, so batch responses keep l
 `transactionCount` counts.
 Unsent recipients age by their own last write, not the batch's: the stranded-batch job and the
 create takeover fail only recipients no live request can still be sending, so a retry's fresh claim
-on an old batch is left to it.
+on an old batch is left to it. Each recipient also records the lastValidBlockHeight of the attempt
+that wrote or claimed it (every chunk of an attempt shares one blockhash and is never re-signed).
+Once the chain passes it, nothing that attempt built can land, so the job fails it in minutes, and
+a resend of a run found under another request's key settles it the same way (one block-height
+read; the hour remains the fallback). The chunk link's compare-and-swap is what makes any of this
+safe: a recipient is linked before broadcast or failed, never both.
 
 Recurring payments carve this out: their cron resumes and completes a half-finished row (an
 `activating`, `canceling` or `resuming` schedule, or a collection in flight) from the signature

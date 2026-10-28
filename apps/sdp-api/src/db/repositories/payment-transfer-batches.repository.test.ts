@@ -272,6 +272,7 @@ describe("PaymentTransferBatchesRepository idempotency (postgres)", () => {
         batchId: batch.id,
         recipientIds,
         addedTransactionCount: 1,
+        attemptLastValidBlockHeight: 1_000n,
         retry: {
           idempotencyKey: `retry-record-key-${++claims}`,
           idempotencyFingerprint: "retry-fingerprint",
