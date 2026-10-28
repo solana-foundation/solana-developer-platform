@@ -90,3 +90,34 @@ describe("MemberActions role choices", () => {
     expect(change.mock.calls[0]?.slice(0, 2)).toEqual(["mem_test_viewer", "viewer"]);
   });
 });
+
+describe("MemberActions removal", () => {
+  it("shows what the member set up, by project, in the confirmation", async () => {
+    const load = vi.spyOn(membersActions, "loadMemberLinkedPaymentsAction").mockResolvedValue({
+      ok: true,
+      linked: {
+        userId: "user_test_1",
+        projects: [
+          {
+            projectId: "prj_test_a",
+            projectName: "Payouts",
+            activeRecurringPayments: 0,
+            openPaymentRequests: 2,
+          },
+        ],
+      },
+    });
+    const user = userEvent.setup();
+    render(row("mem_test_remove", "member"));
+
+    await user.click(screen.getByRole("button", { name: "Actions for Teammate" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Remove member" }));
+
+    const link = await screen.findByRole("link", { name: "Open payment requests: 2" });
+    expect(link.getAttribute("href")).toBe(
+      "/dashboard/prj_test_a/payments/requests?status=awaiting_payment&createdByUserId=user_test_1"
+    );
+    expect(screen.getByText("Payouts")).toBeTruthy();
+    expect(load).toHaveBeenCalledWith("mem_test_remove");
+  });
+});

@@ -25,7 +25,11 @@ vi.mock("@/lib/sdp-api", async (importOriginal) => ({
   createSdpApiClient: mocks.createSdpApiClient,
 }));
 
-import { deactivateApiKeyInlineAction, saveApiKeyAuthoringAction } from "./actions";
+import {
+  deactivateApiKeyInlineAction,
+  loadApiKeyLinkedPaymentsAction,
+  saveApiKeyAuthoringAction,
+} from "./actions";
 import { createApiKeyAuthoringDraft } from "./api-key-authoring";
 
 const client = { fetch: vi.fn() };
@@ -185,47 +189,33 @@ describe("saveApiKeyAuthoringAction: edit", () => {
 });
 
 describe("deactivateApiKeyInlineAction", () => {
-  const revoke = { keyId: "key_1", keyName: "Payouts worker", confirmation: "Payouts worker" };
-
-  it("revokes without canceling anything the key started unless asked", async () => {
-    client.fetch.mockResolvedValue({ recurringPayments: null, paymentRequests: null });
+  it("revokes the key with its confirmation alone", async () => {
+    client.fetch.mockResolvedValue({ success: true });
 
     const result = await deactivateApiKeyInlineAction({
-      ...revoke,
-      cancelRecurringPayments: false,
-      cancelPaymentRequests: false,
+      keyId: "key_1",
+      keyName: "Payouts worker",
+      confirmation: "Payouts worker",
     });
 
     expect(client.fetch.mock.calls[0]?.[0]).toBe("/v1/api-keys/key_1");
-    expect(lastBody()).toEqual({
-      confirmation: "Payouts worker",
-      cancelRecurringPayments: false,
-      cancelPaymentRequests: false,
-    });
+    expect(lastBody()).toEqual({ confirmation: "Payouts worker" });
     expect(result).toEqual({ ok: true, message: "DashboardCustody.apiKeyDeactivated" });
   });
+});
 
-  it("asks the API to cancel what the key started, and reports each outcome", async () => {
-    client.fetch.mockResolvedValue({
-      recurringPayments: { canceled: ["prp_1", "prp_2"], failed: ["prp_3"] },
-      paymentRequests: { canceled: ["preq_1"], failed: [] },
-    });
+describe("loadApiKeyLinkedPaymentsAction", () => {
+  it("counts the key's active schedules and open requests from their filtered lists", async () => {
+    client.fetch.mockImplementation(async (path: string) =>
+      path.startsWith("/v1/payments/recurring-payments") ? { total: 2 } : { total: 5 }
+    );
 
-    const result = await deactivateApiKeyInlineAction({
-      ...revoke,
-      cancelRecurringPayments: true,
-      cancelPaymentRequests: true,
-    });
+    const result = await loadApiKeyLinkedPaymentsAction("key_test_1");
 
-    expect(lastBody()).toEqual({
-      confirmation: "Payouts worker",
-      cancelRecurringPayments: true,
-      cancelPaymentRequests: true,
-    });
-    expect(result).toEqual({
-      ok: true,
-      message:
-        "DashboardCustody.apiKeyDeactivated DashboardCustody.apiKeyRecurringCanceled DashboardCustody.apiKeyPaymentRequestsCanceled",
-    });
+    expect(client.fetch.mock.calls.map(([path]) => path)).toEqual([
+      "/v1/payments/recurring-payments?status=active&activatedByApiKeyId=key_test_1&pageSize=1",
+      "/v1/payments/requests?status=awaiting_payment&createdByApiKeyId=key_test_1&pageSize=1",
+    ]);
+    expect(result).toEqual({ ok: true, activeRecurringPayments: 2, openPaymentRequests: 5 });
   });
 });

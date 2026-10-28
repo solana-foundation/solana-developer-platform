@@ -16,6 +16,7 @@ import {
   changeMemberRole,
   inviteMember,
   listMembers,
+  loadMemberLinkedPaymentsAction,
   removeMember,
   revokeInvitation,
 } from "./actions";
@@ -125,5 +126,26 @@ describe("member actions", () => {
     });
 
     await expect(listMembers(1)).rejects.toThrow(ZodError);
+  });
+});
+
+describe("loadMemberLinkedPaymentsAction", () => {
+  it("reads the member's linked payments across the organization", async () => {
+    const linked = {
+      userId: "user_test_1",
+      projects: [
+        {
+          projectId: "prj_test_a",
+          projectName: "Payouts",
+          activeRecurringPayments: 1,
+          openPaymentRequests: 2,
+        },
+      ],
+    };
+    client.fetch.mockResolvedValue(linked);
+
+    expect(await loadMemberLinkedPaymentsAction("mem_test")).toEqual({ ok: true, linked });
+    expect(sdpApi.createOrgSdpApiClient).toHaveBeenCalledTimes(1);
+    expect(client.fetch.mock.calls).toEqual([["/v1/members/mem_test/linked-payments"]]);
   });
 });

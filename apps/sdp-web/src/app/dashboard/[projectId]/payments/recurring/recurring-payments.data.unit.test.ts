@@ -4,8 +4,10 @@ import { z } from "zod";
 import { IdempotencyOutcomeUnknownError } from "@/lib/idempotency";
 import { setWindowPathname } from "@/test/window-location";
 import {
+  buildRecurringPaymentsQuery,
   createRecurringPayment,
   fetchRecurringPaymentById,
+  parseRecurringPaymentsListParams,
   runRecurringPaymentAction,
   updateRecurringPayment,
 } from "./recurring-payments.data";
@@ -228,5 +230,16 @@ describe("fetchRecurringPaymentById", () => {
       status: null,
       error: "fetch failed",
     });
+  });
+});
+
+describe("recurring list activatedBy filter", () => {
+  it("reads the filter from the URL and writes it into the list query", () => {
+    const { activatedBy } = parseRecurringPaymentsListParams({ activatedByUserId: "user_test_1" });
+
+    expect(activatedBy).toEqual({ kind: "member", userId: "user_test_1" });
+    expect(buildRecurringPaymentsQuery({ status: "active", activatedBy }).toString()).toBe(
+      "status=active&activatedByUserId=user_test_1"
+    );
   });
 });

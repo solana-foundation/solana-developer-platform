@@ -49,7 +49,7 @@ describe("parsePaymentRequestsListParams", () => {
   it("reads the page, its size, the status and the search from the URL", () => {
     expect(
       parsePaymentRequestsListParams({ page: "3", pageSize: "50", status: "paid", search: " ab " })
-    ).toEqual({ page: 3, pageSize: 50, status: "paid", search: "ab" });
+    ).toEqual({ page: 3, pageSize: 50, status: "paid", search: "ab", createdBy: null });
   });
 
   it("falls back on anything missing or malformed, and caps the size at the API's", () => {
@@ -60,6 +60,7 @@ describe("parsePaymentRequestsListParams", () => {
       pageSize: PAYMENT_REQUESTS_LIST_DEFAULT_PAGE_SIZE,
       status: null,
       search: null,
+      createdBy: null,
     });
     expect(parsePaymentRequestsListParams({ pageSize: "1000" }).pageSize).toBe(
       PAYMENT_REQUESTS_PAGE_SIZE
@@ -141,12 +142,10 @@ describe("fetchPaymentRequestLinkToken", () => {
 
 describe("paymentRequestsListHref", () => {
   it("leaves out whatever is at its default", () => {
-    expect(paymentRequestsListHref({ page: 1, pageSize: 25, status: null, search: null })).toBe(
-      "/dashboard/payments/requests"
-    );
-    expect(paymentRequestsListHref({ page: 3, pageSize: 50, status: "paid", search: "jane" })).toBe(
-      "/dashboard/payments/requests?page=3&pageSize=50&status=paid&search=jane"
-    );
+    expect(paymentRequestsListHref(listState())).toBe("/dashboard/payments/requests");
+    expect(
+      paymentRequestsListHref(listState({ page: 3, pageSize: 50, status: "paid", search: "jane" }))
+    ).toBe("/dashboard/payments/requests?page=3&pageSize=50&status=paid&search=jane");
   });
 });
 
@@ -175,8 +174,28 @@ function rowWithStatus(id: string, status: PaymentRequest["status"]): PaymentReq
 }
 
 function listState(changes: Partial<PaymentRequestsListState> = {}): PaymentRequestsListState {
-  return { page: 1, pageSize: 25, status: null, search: null, ...changes };
+  return { page: 1, pageSize: 25, status: null, search: null, createdBy: null, ...changes };
 }
+
+describe("payment requests createdBy filter", () => {
+  it("reads the filter from the URL, keeps it in the list href and sends it to the API", async () => {
+    const { createdBy } = parsePaymentRequestsListParams({ createdByApiKeyId: "key_test_1" });
+    const paths: string[] = [];
+    const request: Parameters<typeof loadPaymentRequestsList>[0] = async (path) => {
+      paths.push(path);
+      return Response.json({ data: { paymentRequests: [], total: 0, page: 1, pageSize: 25 } });
+    };
+
+    expect(createdBy).toEqual({ kind: "api_key", apiKeyId: "key_test_1" });
+    expect(paymentRequestsListHref(listState({ createdBy }))).toBe(
+      "/dashboard/payments/requests?createdByApiKeyId=key_test_1"
+    );
+    await loadPaymentRequestsList(request, listState({ createdBy }));
+    expect(paths).toEqual([
+      "/v1/payments/requests?page=1&pageSize=25&createdByApiKeyId=key_test_1",
+    ]);
+  });
+});
 
 describe("loadPaymentRequestsList", () => {
   it("reads the API's page, size and status, and returns its rows and total", async () => {
