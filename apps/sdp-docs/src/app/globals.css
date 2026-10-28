@@ -1,6 +1,11 @@
-@import "../styles/solana-design-system.css";
+@import "tailwindcss/theme" layer(theme);
+@import "tailwindcss/preflight" layer(base);
+@import "tailwindcss/utilities" layer(utilities);
 @import "@sdp/design-tokens/tokens.css";
 @import "@sdp/design-tokens/theme.css";
+
+/* next-themes puts .dark on <html>, so dark: utilities follow the theme switch, not the OS. */
+@custom-variant dark (&:is(.dark *));
 
 /* Fumadocs reads --color-fd-*. They point at the refresh palette from @sdp/design-tokens, which
    switches with the .dark class on <html>, so one block covers light and dark. */
@@ -20,7 +25,7 @@
   --color-fd-secondary-foreground: var(--ink);
   --color-fd-accent: var(--wash-strong);
   --color-fd-accent-foreground: var(--ink);
-  --color-fd-ring: var(--rule-strong);
+  --color-fd-ring: var(--ink);
 }
 
 /* Season Sans ships 400 and 500 only; never let the browser fake a bold. */
@@ -38,6 +43,16 @@ body {
   color: var(--color-fd-foreground);
   font-family: var(--font-sans);
   min-height: 100%;
+}
+
+/* Tailwind's preflight resets every border to currentColor after Fumadocs' base layer has set it,
+   so put the refresh rule colour back. Focus outlines are the ink ring at half strength, like the
+   dashboard's ring-primary/50. */
+@layer base {
+  * {
+    border-color: var(--color-fd-border);
+    outline-color: color-mix(in oklab, var(--color-fd-ring) 50%, transparent);
+  }
 }
 
 .sdp-docs-shell {
