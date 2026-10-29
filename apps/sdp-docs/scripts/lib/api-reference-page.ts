@@ -17,9 +17,10 @@ import { canonicalSite } from "@/lib/site";
 /**
  * The API reference as Markdown-first MDX: per family, a table of its operations
  * (`<family>/index.mdx`), and per operation, its own page (`<family>/<endpointId>.mdx`) with its
- * parameters, request body, responses, a cURL, TypeScript and Python sample and an example per
- * status. Each page renders, searches and serves as `.md` from the same text; the components it
- * places (`<ApiEndpoint />`, `<ApiOperationTable>`) have their Markdown forms in `expandDocsBlocks`
+ * parameters, request body, responses and their fields, a cURL, TypeScript and Python sample and
+ * an example per status. Each page renders, searches and serves as `.md` from the same text; the
+ * components it places (`<ApiEndpoint />`, and the wrappers `<ApiOperationTable>`,
+ * `<ApiOperation>` and `<ApiPanel>`) have their Markdown forms in `expandDocsBlocks`
  * (`src/lib/docs-blocks.ts`).
  */
 
@@ -87,7 +88,8 @@ function typeLabel(schema: ApiSchema): string {
   }
   if (schema.type !== null) return `${schema.type}${nullable}`;
   const variants = [...new Set(schema.variants.map((variant) => typeLabel(variant.schema)))];
-  return `${variants.length > 0 ? variants.join(" | ") : "any"}${nullable}`;
+  // `any` already includes null.
+  return variants.length > 0 ? `${variants.join(" | ")}${nullable}` : "any";
 }
 
 function constraintText(constraint: ApiConstraint): string {
@@ -112,6 +114,8 @@ function constraintText(constraint: ApiConstraint): string {
       return `min properties ${constraint.value}`;
     case "pattern":
       return `pattern ${codeSpan(constraint.value)}`;
+    case "includes":
+      return `must include ${constraint.value.map(codeSpan).join(", ")}`;
     case "excludes":
       return `must not include ${constraint.value.map(codeSpan).join(", ")}`;
     default: {
@@ -192,9 +196,7 @@ function childLines(schema: ApiSchema, depth: number): string[] {
       )
     );
   }
-  if (schema.items !== null && schema.items.properties.length > 0) {
-    lines.push(...childLines(schema.items, depth));
-  }
+  if (schema.items !== null) lines.push(...childLines(schema.items, depth));
   if (schema.variants.length > 0) {
     lines.push(indented(variantLead(schema.variantMode), depth), "");
     for (const variant of schema.variants) {
@@ -267,6 +269,29 @@ function responseLine(response: ApiResponse): string {
   return `- **${codeSpan(response.status)}** ${mdxText(description).replace(/\n+/g, " ")}`;
 }
 
+/**
+ * Each status, then its body's fields as a field list. A body whose fields an earlier status
+ * already lists points there instead, since most errors share one envelope.
+ */
+function responsesSection(responses: ApiResponse[]): string[] {
+  const listedBy = new Map<string, string>();
+  const lines = ["## Responses", ""];
+  for (const response of responses) {
+    lines.push(responseLine(response), "");
+    if (response.body.kind === "empty") continue;
+    const fields = childLines(response.body.schema, 1);
+    const key = fields.join("\n");
+    const listed = listedBy.get(key);
+    if (listed === undefined) {
+      listedBy.set(key, response.status);
+      lines.push(...fields);
+    } else {
+      lines.push(indented(`Same fields as ${codeSpan(listed)}.`, 1), "");
+    }
+  }
+  return lines;
+}
+
 function authLine(operation: ApiOperation): string {
   switch (operation.auth) {
     case "none":
@@ -314,9 +339,17 @@ export function splitFirstSentence(text: string): { first: string; rest: string 
   return { first, rest };
 }
 
-/** An operation's page body: its endpoint, the rest of its description, then its sections. */
+/**
+ * An operation's page body: its endpoint, the rest of its description and its sections, then
+ * `<ApiPanel>` with the samples and example responses, which a wide page sets beside them.
+ */
 export function renderOperation(operation: ApiOperation): string {
-  const lines = [`<ApiEndpoint method="${operation.method}" path="${operation.path}" />`, ""];
+  const lines = [
+    "<ApiOperation>",
+    "",
+    `<ApiEndpoint method="${operation.method}" path="${operation.path}" />`,
+    "",
+  ];
   if (operation.deprecated) lines.push("**Deprecated.**", "");
   // The description's first sentence is the page's own description, shown under its title.
   const opening =
@@ -325,10 +358,11 @@ export function renderOperation(operation: ApiOperation): string {
   lines.push(authLine(operation), "");
   lines.push(...parameterSections(operation.parameters));
   if (operation.requestBody !== null) lines.push(...requestBodySection(operation.requestBody));
-  lines.push("## Responses", "", ...operation.responses.map(responseLine), "");
-  lines.push("## Example request", "", ...sampleFences(operation));
+  lines.push(...responsesSection(operation.responses));
+  lines.push("<ApiPanel>", "", "## Example request", "", ...sampleFences(operation));
   const examples = exampleResponseFences(operation.responses);
   if (examples.length > 0) lines.push("## Example responses", "", ...examples);
+  lines.push("</ApiPanel>", "", "</ApiOperation>");
   return lines
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
@@ -349,9 +383,9 @@ function plainText(value: string): string {
 }
 
 /**
- * An operation's own page. `apiReference: true` keeps its table of contents to its sections and
- * scopes the reference styles (`src/app/docs/[[...slug]]/page.tsx`); `icon: method:<METHOD>`
- * puts its method beside it in the sidebar (`src/lib/source.ts`).
+ * An operation's own page. `apiReference: true` gives it the full width, its panel taking the
+ * table of contents' column, and scopes the reference styles (`src/app/docs/[[...slug]]/page.tsx`);
+ * `icon: method:<METHOD>` puts its method beside it in the sidebar (`src/lib/source.ts`).
  */
 export function renderOperationPage(operation: ApiOperation): string {
   const fields: Record<string, string | boolean> = { title: operation.summary };
@@ -393,6 +427,26 @@ export function operationGroups(family: ApiFamily): OperationGroup[] {
   return [...byTitle].map(([title, operations]) => ({ title, operations }));
 }
 
+/** The same endpoint table on a family's page and the all-endpoints index. */
+export function renderOperationTable(
+  operations: ApiOperation[],
+  href: (operation: ApiOperation) => string
+): string {
+  return [
+    // biome-ignore lint/security/noSecrets: an MDX component tag, not a secret.
+    "<ApiOperationTable>",
+    "",
+    "| Method | Endpoint | Summary |",
+    "| --- | --- | --- |",
+    ...operations.map(
+      (operation) =>
+        `| ${codeSpan(operation.method)} | ${codeSpan(operation.path)} | [${tableCell(mdxText(operation.summary))}](${href(operation)}) |`
+    ),
+    "",
+    "</ApiOperationTable>",
+  ].join("\n");
+}
+
 /**
  * A family's page: a table of its operations, each row linking to the operation's page, under a
  * heading per group when it has groups.
@@ -407,17 +461,7 @@ export function renderFamilyIndex(
   const tables = operationGroups(family).map(({ title, operations }) =>
     [
       ...(title === null ? [] : [`## ${mdxText(title)}`, ""]),
-      // biome-ignore lint/security/noSecrets: an MDX component tag, not a secret.
-      "<ApiOperationTable>",
-      "",
-      "| Method | Endpoint | Summary |",
-      "| --- | --- | --- |",
-      ...operations.map(
-        (operation) =>
-          `| ${codeSpan(operation.method)} | ${codeSpan(operation.path)} | [${tableCell(mdxText(operation.summary))}](${href(operation)}) |`
-      ),
-      "",
-      "</ApiOperationTable>",
+      renderOperationTable(operations, href),
     ].join("\n")
   );
   return [

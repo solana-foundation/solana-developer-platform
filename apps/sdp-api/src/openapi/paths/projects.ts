@@ -101,7 +101,8 @@ export function registerProjectPaths(registry: OpenAPIRegistry, publishEarn: boo
     tags: ["Projects"],
     summary: "Get project provider availability",
     operationId: "getProjectProviderAvailability",
-    description: `Lists every provider the deployment knows across ${publishEarn ? "custody, compliance, ramps and Earn" : "custody, compliance and ramps"}, with whether this project can use it, counting the deployment's provider credentials for the project's environment. The same rule gates every provider entry point, so a provider reported unavailable is refused there with 403, or 503 when the deployment does not hold its credentials. A project outside the caller's organization, or another project for a project-bound API key, returns 404.`,
+    description:
+      "Lists every provider this deployment's release channel publishes, with whether this project can use it, counting the deployment's provider credentials for the project's environment. The same rule gates every provider entry point, so a provider reported unavailable is refused there with 403, or 503 when the deployment does not hold its credentials. A project outside the caller's organization, or another project for a project-bound API key, returns 404.",
     security: [{ apiKeyAuth: [] }],
     request: {
       params: z.object({

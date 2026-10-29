@@ -21,6 +21,7 @@ import {
   type PublicSurface,
   publicSurface,
 } from "./release-channel";
+import { apiUrl, canonicalSite } from "./site";
 
 /**
  * Generated blocks. A page about one module carries `module:` (or
@@ -31,6 +32,7 @@ import {
  * - `<ModuleCapabilities />`: one capability line per module (the AI guide).
  * - `<RampProviderMatrix />`: the ramp providers, each linking to its page.
  * - `<ApiKeyGrantsTable />`: the actions an API key can be granted, by module.
+ * - `<RateLimitTable />`: the API's rate limits, per API key tier and without a key.
  *
  * Each block is rendered once, to Markdown, from docs-catalog.ts and the
  * build's manifest. `remarkDocsBlocks` swaps it into the MDX tree before
@@ -89,7 +91,23 @@ const BLOCKS = {
         DOCS_ACTION_MODULES[module],
       ])
     ),
+  RateLimitTable: ({ rateLimits }) =>
+    table(
+      ["Caller", `Requests per ${windowLabel(rateLimits.windowSeconds)}`],
+      [
+        ...Object.entries(rateLimits.apiKeyTiers).map(([tier, requests]) => [
+          `An API key on the \`${tier}\` tier`,
+          requests.toLocaleString("en-US"),
+        ]),
+        ["No API key, per IP address", rateLimits.unauthenticatedPerIp.toLocaleString("en-US")],
+      ]
+    ),
 } satisfies Record<string, (surface: PublicSurface) => string>;
+
+/** A rate limit window's length as a table heading reads it: `minute`, or `30 seconds`. */
+function windowLabel(seconds: number): string {
+  return seconds === 60 ? "minute" : `${seconds} seconds`;
+}
 
 type BlockName = keyof typeof BLOCKS;
 
@@ -108,7 +126,8 @@ function blockOf(node: RootContent, where: string): { name: BlockName } | undefi
 }
 
 // Every API method, checked against the package's list by the compiler. source.config.ts loads
-// this file without a TypeScript resolver, so workspace packages are imported for types only.
+// this file without a TypeScript resolver, so workspace packages are imported for types only:
+// Node cannot follow their extensionless imports. `@sdp/types/site` (through `./site`) has none.
 const API_METHOD_NAMES = {
   GET: true,
   POST: true,
@@ -146,11 +165,14 @@ function isElementName(name: string | null): name is ElementName {
  * Wrappers a page lays its Markdown out with. In Markdown each one goes and its content stays.
  * `<ApiOperationTable>` holds a family's table of operations: on the page each row links to its
  * operation's page, and in Markdown to that page's `.md`, so an agent reading a family reads on
- * in Markdown. The others only lay a page out: `<ActionLinks>` sets its links as chips.
+ * in Markdown. The others only lay a page out: `<ActionLinks>` sets its links as chips, and
+ * `<ApiOperation>` an operation's body beside its `<ApiPanel>` of samples.
  */
 const WRAPPERS = {
   ApiOperationTable: "links",
   ActionLinks: "layout",
+  ApiOperation: "layout",
+  ApiPanel: "layout",
 } as const satisfies Record<string, "links" | "layout">;
 
 type Wrapper = {
@@ -234,12 +256,16 @@ function spanOf(node: RootContent, where: string): { start: number; end: number 
 
 const parser = unified().use(remarkParse).use(remarkMdx).use(remarkGfm);
 
-/** Remark plugin for the Fumadocs MDX pipeline; source.config.ts runs it first. */
+/**
+ * Remark plugin for the Fumadocs MDX pipeline; source.config.ts runs it first. On a generated
+ * reference page it also sets a field's facts apart and points the code at this deployment's API
+ * (`apiUrl`, from `NEXT_PUBLIC_SDP_API_URL`), where the Markdown keeps the canonical one.
+ */
 export function remarkDocsBlocks(options: { surface?: PublicSurface } = {}) {
   const surface = options.surface ?? publicSurface;
   return (tree: Root, file: Parameters<typeof embedSource>[0]) => {
     const where = file.path ?? "MDX page";
-    const spacesFacts = REFERENCE_PAGE.test(where);
+    const referencePage = REFERENCE_PAGE.test(where);
     const walk = (parent: Parent) => {
       parent.children = parent.children.flatMap((child) => {
         const block = blockOf(child, where);
@@ -260,8 +286,12 @@ export function remarkDocsBlocks(options: { surface?: PublicSurface } = {}) {
           };
           return [child];
         }
-        if (spacesFacts && child.type === "text" && child.value.includes(FACT_SEPARATOR)) {
+        if (referencePage && child.type === "text" && child.value.includes(FACT_SEPARATOR)) {
           return spacedFacts(child.value);
+        }
+        if (referencePage && child.type === "code") {
+          child.value = child.value.replaceAll(canonicalSite.apiUrl, apiUrl);
+          return [child];
         }
         if ("children" in child) walk(child);
         return [child];
