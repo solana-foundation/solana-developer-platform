@@ -37,13 +37,18 @@ describe("isCredentialKey", () => {
       "secretPayload",
       // Key-material spellings no suffix rule catches: `secretKey` is the
       // literal field a Solana keypair JSON file uses for the 64-byte secret,
-      // and `mnemonic`/`seedPhrase` are the standard recovery-secret names.
+      // and `mnemonic`/`seedPhrase`/`recoveryPhrase` are the standard
+      // recovery-secret names, `passphrase` the word that arms one.
       "secretKey",
       "payerSecretKey",
       "mnemonic",
       "seedMnemonic",
       "seedPhrase",
       "seed_phrase",
+      "recoveryPhrase",
+      "recovery_phrase",
+      "passphrase",
+      "walletPassphrase",
       "signingKey",
       "__clerk_ticket",
       // Normalization strips the separators, so an exact `apikey` rule would

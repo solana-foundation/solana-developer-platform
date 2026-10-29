@@ -59,9 +59,9 @@ const CREDENTIAL_KEY_SUFFIXES = ["secret", "password", "token", "pem", "apikey"]
 
 // Key-material names that no suffix or exact rule above catches. `secretKey`
 // is the literal field a Solana keypair JSON file uses for the full 64-byte
-// secret — the single most damaging object a blockchain telemetry payload can
-// carry — and `mnemonic`/`seedPhrase` are the two standard spellings of the
-// wallet recovery secret. Fragments, so `payerSecretKey` and `seedMnemonic`
+// secret, `mnemonic`/`seedPhrase`/`recoveryPhrase` are the standard spellings
+// of the wallet recovery secret, and `passphrase` is the BIP39 word that arms
+// one. Fragments, so `payerSecretKey`, `seedMnemonic`, and `walletPassphrase`
 // are covered too; nothing in NEVER_REDACTED_KEYS contains any of them.
 const CREDENTIAL_KEY_FRAGMENTS = [
   "privatekey",
@@ -69,6 +69,8 @@ const CREDENTIAL_KEY_FRAGMENTS = [
   "secretkey",
   "mnemonic",
   "seedphrase",
+  "recoveryphrase",
+  "passphrase",
 ];
 
 /** Exact-match PII keys, grouped by the category they belong to. */

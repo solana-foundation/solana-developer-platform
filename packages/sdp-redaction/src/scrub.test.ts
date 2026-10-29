@@ -333,6 +333,63 @@ describe("redactCredentialString: Clerk invitation tickets", () => {
   }
 });
 
+describe("redactCredentialString: recovery secrets", () => {
+  // The custody provisioning path interpolates a scrubbed upstream error body
+  // into a SigningError message (readErrorResponseText). A provider that
+  // echoes the request's recovery material back as TEXT — a template literal,
+  // a pre-stringified JSON field — must not survive that scrub: these are the
+  // exact shapes a body can carry them in, and the object-key rules above
+  // never see them once they are strings.
+  for (const { form, input, redacted } of [
+    {
+      form: "multi-word run to end of line",
+      input: "upstream said: mnemonic: option sulfur require bass",
+      redacted: "upstream said: mnemonic: [REDACTED]",
+    },
+    {
+      form: "assignment (equals)",
+      input: "RECOVERY_PHRASE=option sulfur require bass",
+      redacted: "RECOVERY_PHRASE=[REDACTED]",
+    },
+    {
+      form: "space-separated spelling",
+      input: "seed phrase: option sulfur require bass",
+      redacted: "seed phrase: [REDACTED]",
+    },
+    {
+      form: "quoted JSON field",
+      input: '{"mnemonic":"option sulfur require bass","x":1}',
+      redacted: '{"mnemonic":"[REDACTED]","x":1}',
+    },
+    {
+      form: "pre-stringified JSON field",
+      input: '{\\"mnemonic\\":\\"option sulfur require bass\\"}',
+      redacted: '{\\"mnemonic\\":\\"[REDACTED]\\"}',
+    },
+    {
+      form: "passphrase field",
+      input: '{"passphrase":"arms-the-seed"}',
+      redacted: '{"passphrase":"[REDACTED]"}',
+    },
+  ]) {
+    it(`redacts the ${form} recovery secret`, () => {
+      assert.equal(redactCredentialString(input), redacted);
+    });
+  }
+
+  it("keeps a Solana address beside a redacted recovery secret", () => {
+    // The same guard the denylist applies everywhere: only the secret goes.
+    const redacted = redactCredentialString(
+      '{"mnemonic":"option sulfur require bass","mint":"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"}'
+    );
+
+    assert.equal(
+      redacted,
+      '{"mnemonic":"[REDACTED]","mint":"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"}'
+    );
+  });
+});
+
 describe("scrubTelemetryString — pathological input", () => {
   // Regression guard for a quadratic rescan (CodeQL js/polynomial-redos): the
   // email pattern's local part used to be retried at every offset inside one

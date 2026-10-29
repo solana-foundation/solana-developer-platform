@@ -49,6 +49,43 @@ export interface ProviderResponse {
   parsed: unknown;
 }
 
+/** Earn provider bodies are small JSON documents; a larger one is refused. */
+export const PROVIDER_MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
+
+/** A provider body passed its byte cap; `readProviderBody` stopped reading it. */
+class ProviderResponseTooLargeError extends Error {}
+
+/**
+ * Reads a provider body as text, refusing it once it passes the byte cap, so an oversized or
+ * endless answer never fills memory. The same guard the ramps fetch layer applies.
+ *
+ * @param response - The provider's response.
+ * @param maxBytes - The most the body may hold.
+ * @returns The body's text.
+ * @throws ProviderResponseTooLargeError once the body passes `maxBytes`.
+ */
+async function readProviderBody(response: Response, maxBytes: number): Promise<string> {
+  if (response.body === null) {
+    return "";
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let received = 0;
+  let text = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) {
+      return text + decoder.decode();
+    }
+    received += value.byteLength;
+    if (received > maxBytes) {
+      await reader.cancel();
+      throw new ProviderResponseTooLargeError();
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+}
+
 function serializeProviderBody(body: unknown): BodyInit | undefined {
   if (body === undefined) {
     return undefined;
@@ -123,8 +160,19 @@ export async function providerFetch<TBody = never>(
       body: serializeProviderBody(init.body),
       signal,
     });
-    raw = await response.text();
-  } catch {
+    raw = await readProviderBody(response, PROVIDER_MAX_RESPONSE_BYTES);
+  } catch (cause) {
+    // An oversized body is not a transport failure like the rest of this
+    // catch: the provider was reached and answered. It still surfaces as
+    // PROVIDER_UNAVAILABLE — a provider answering too much is a broken
+    // provider — but with the reason a caller can act on.
+    if (cause instanceof ProviderResponseTooLargeError) {
+      throw new SdpEarnError(
+        "PROVIDER_UNAVAILABLE",
+        `The ${provider} API returned a response over ${PROVIDER_MAX_RESPONSE_BYTES} bytes`,
+        { provider }
+      );
+    }
     // A timeout is a provider we could not reach in the time we had, which is
     // the same fact as a refused connection to every caller of this module.
     throw new SdpEarnError(

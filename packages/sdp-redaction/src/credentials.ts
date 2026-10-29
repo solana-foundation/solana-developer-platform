@@ -25,9 +25,17 @@ import { isCredentialKey, REDACTED } from "./policy";
 // backslashes (a body serialized more than once), and the lookbehind starts a
 // token only where its backslash run starts, so a long run is scanned once.
 const SENSITIVE_JSON_FIELD_START =
-  /(?<!\\)(\\*["'])((?:[A-Za-z0-9]+[-_ ])*(?:app[-_ ]?secret|api[-_ ]?secret|api[-_ ]?key|client[-_ ]?secret|wallet[-_ ]?secret|signing[-_ ]?secret|private[-_ ]?key|secret[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|id[-_ ]?token|authorization|password|pem|token|secret|credential))\1\s*:\s*(\\*)(["'])/gi;
+  /(?<!\\)(\\*["'])((?:[A-Za-z0-9]+[-_ ])*(?:app[-_ ]?secret|api[-_ ]?secret|api[-_ ]?key|client[-_ ]?secret|wallet[-_ ]?secret|signing[-_ ]?secret|private[-_ ]?key|secret[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|id[-_ ]?token|authorization|password|pem|token|secret|credential|passphrase|recovery[-_ ]?phrase|seed[-_ ]?phrase|mnemonic))\1\s*:\s*(\\*)(["'])/gi;
 const SENSITIVE_ASSIGNMENT_PATTERN =
-  /\b(app[-_ ]?secret|api[-_ ]?secret|api[-_ ]?key|client[-_ ]?secret|wallet[-_ ]?secret|signing[-_ ]?secret|private[-_ ]?key|secret[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|id[-_ ]?token|authorization|password|pem|token|secret|credential)\b(\s*[:=]\s*)[^,\s}]+/gi;
+  /\b(app[-_ ]?secret|api[-_ ]?secret|api[-_ ]?key|client[-_ ]?secret|wallet[-_ ]?secret|signing[-_ ]?secret|private[-_ ]?key|secret[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|id[-_ ]?token|authorization|password|pem|token|secret|credential|passphrase|recovery[-_ ]?phrase|seed[-_ ]?phrase|mnemonic)\b(\s*[:=]\s*)[^,\s}]+/gi;
+// A BIP39 recovery secret is a RUN of words: unlike a password, its value does
+// not end at the first space, so the one-token assignment rule above would
+// leave all but the first word readable (`mnemonic: option sulfur …` is prose
+// after one word). A recovery secret's words are indistinguishable from prose,
+// so its value runs to the end of the line. The quoted forms are already fully
+// redacted by the JSON field pass; this is the unquoted, free-text shape.
+const RECOVERY_SECRET_ASSIGNMENT_PATTERN =
+  /\b(mnemonic|recovery[-_ ]?phrase|seed[-_ ]?phrase|passphrase)\b(\s*[:=]\s*)[^\n]*/gi;
 // Quantified parts all exclude "-" so the pattern cannot backtrack across the
 // PEM delimiters (keeps the regex linear; PEM bodies are base64 + whitespace).
 const PRIVATE_KEY_PATTERN =
@@ -53,10 +61,15 @@ export function redactCredentialString(value: string): string {
     .replace(AUTH_HEADER_PATTERN, (match, scheme: string, token: string) =>
       isLikelyAuthToken(scheme, token) ? `${scheme} ${REDACTED}` : match
     );
-  return redactSensitiveJsonFields(withoutHeaders).replace(
-    SENSITIVE_ASSIGNMENT_PATTERN,
-    (_match, key: string, separator: string) => `${key}${separator}${REDACTED}`
-  );
+  return redactSensitiveJsonFields(withoutHeaders)
+    .replace(
+      RECOVERY_SECRET_ASSIGNMENT_PATTERN,
+      (_match, key: string, separator: string) => `${key}${separator}${REDACTED}`
+    )
+    .replace(
+      SENSITIVE_ASSIGNMENT_PATTERN,
+      (_match, key: string, separator: string) => `${key}${separator}${REDACTED}`
+    );
 }
 
 /**

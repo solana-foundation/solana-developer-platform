@@ -4,6 +4,7 @@ import { SdpEarnError, type SdpEarnErrorCode } from "./errors";
 import {
   classifyProviderStatus,
   extractProviderErrorMessage,
+  PROVIDER_MAX_RESPONSE_BYTES,
   providerFetch,
   providerFetchJson,
 } from "./fetch";
@@ -245,6 +246,36 @@ describe("providerFetch", () => {
       }),
       earnError("PROVIDER_UNAVAILABLE", /Timed out reaching the kamino API/)
     );
+  });
+
+  it("refuses a body over the byte cap without reading the rest", async () => {
+    // A hostile or compromised provider must not be able to fill the API
+    // instance's memory with an endless or oversized answer.
+    const chunk = new Uint8Array(1024 * 1024);
+    let pulled = 0;
+    mock.method(
+      globalThis,
+      "fetch",
+      async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            pull(controller) {
+              pulled += 1;
+              controller.enqueue(chunk);
+            },
+          }),
+          { status: 200 }
+        )
+    );
+
+    await assert.rejects(
+      providerFetch("veda", "https://veda.test/vaults", { method: "GET" }),
+      earnError(
+        "PROVIDER_UNAVAILABLE",
+        new RegExp(`The veda API returned a response over ${PROVIDER_MAX_RESPONSE_BYTES} bytes`)
+      )
+    );
+    assert.ok(pulled <= PROVIDER_MAX_RESPONSE_BYTES / chunk.byteLength + 2);
   });
 });
 
