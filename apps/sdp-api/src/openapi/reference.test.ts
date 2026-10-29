@@ -187,7 +187,7 @@ describe("buildApiReference", () => {
 
   it("titles a response's variants, nested ones too, and keeps the fields each requires", () => {
     const operations = buildApiReference(
-      createPublicOpenApiDocument({ releaseChannel: "stable" })
+      createPublicOpenApiDocument({ releaseChannel: "experimental" })
     ).families.flatMap((family) => family.operations);
     const responseField = (operationId: string, status: string, ...path: string[]) => {
       const body = operations
