@@ -9,7 +9,8 @@ Every `getTransaction` read across SDP passes
 `MAX_SUPPORTED_TRANSACTION_VERSION` from `@sdp/rpc/transaction-version`.
 It is 1 so external v1 transactions can settle and reconcile; it does not
 change the v0 transactions SDP builds or broadcasts. `pnpm
-check:transaction-reads` runs in CI and rejects a v0-only read option.
+check:transaction-reads` runs in CI and requires the shared option on production
+transaction reads. It rejects an omitted option or an explicit v0-only cap.
 
 ## Outbound pool
 

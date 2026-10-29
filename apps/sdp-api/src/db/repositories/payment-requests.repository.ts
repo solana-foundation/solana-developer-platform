@@ -48,6 +48,8 @@ export interface PaymentRequestRow {
   paid_late: boolean;
   signature_scan_cursor: string | null;
   signature_scan_before: string | null;
+  signature_scan_progress: string | null;
+  signature_scan_cycle_had_retry: boolean;
   signature_scan_stuck_signature: string | null;
   signature_scan_stuck_since: string | null;
   sponsored_tx_last_valid_block_height: bigint | null;
@@ -130,6 +132,8 @@ export interface MarkClosedPaymentRequestPaidInput {
 export interface SignatureScanPosition {
   cursor: string | null;
   before: string | null;
+  progress: string | null;
+  cycleHadRetry: boolean;
   stuckSignature: string | null;
   stuckSince: string | null;
 }

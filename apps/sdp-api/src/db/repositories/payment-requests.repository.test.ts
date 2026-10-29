@@ -1357,7 +1357,15 @@ describe("PaymentRequestsRepository (postgres)", () => {
       }
 
       function scanAt(position: Partial<SignatureScanPosition>): SignatureScanPosition {
-        return { cursor: null, before: null, stuckSignature: null, stuckSince: null, ...position };
+        return {
+          cursor: null,
+          before: null,
+          progress: null,
+          cycleHadRetry: false,
+          stuckSignature: null,
+          stuckSince: null,
+          ...position,
+        };
       }
 
       it("starts with no scan position", async () => {
@@ -1365,6 +1373,8 @@ describe("PaymentRequestsRepository (postgres)", () => {
         expect(created).toMatchObject({
           signature_scan_cursor: null,
           signature_scan_before: null,
+          signature_scan_progress: null,
+          signature_scan_cycle_had_retry: false,
           signature_scan_stuck_signature: null,
           signature_scan_stuck_since: null,
         });
@@ -1379,6 +1389,8 @@ describe("PaymentRequestsRepository (postgres)", () => {
           to: scanAt({
             cursor: "sigA",
             before: "sigB",
+            progress: "sigProgress",
+            cycleHadRetry: true,
             stuckSignature: "sigC",
             stuckSince: PAST,
           }),
@@ -1388,6 +1400,8 @@ describe("PaymentRequestsRepository (postgres)", () => {
         expect(await repo.getPaymentRequestById(scanKey(created))).toMatchObject({
           signature_scan_cursor: "sigA",
           signature_scan_before: "sigB",
+          signature_scan_progress: "sigProgress",
+          signature_scan_cycle_had_retry: true,
           signature_scan_stuck_signature: "sigC",
           signature_scan_stuck_since: PAST,
         });

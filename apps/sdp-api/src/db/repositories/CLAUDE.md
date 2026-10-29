@@ -126,13 +126,16 @@ invariants are in ADR 0002 (`docs/decisions/0002-earn-provider-pluggability.md`)
 
 ## Payment requests: unresolved signatures stay in the late watch
 
-The payment-request scan can close an expired request after one hour of an
-unreadable candidate, but it leaves `signature_scan_cursor` behind that
-signature and retains `signature_scan_stuck_signature`. The late-payment watch
-must continue checking such closed requests past its normal seven-day window
-so a recovered chain read can still settle them. Migration 0190 indexes that
-exception; do not move the cursor past an unreadable candidate or drop the
-exception from the late-watch query without another recovery path.
+The payment-request scan keeps `signature_scan_cursor` behind an unreadable
+candidate while `signature_scan_progress` tracks newer signatures already
+checked. `signature_scan_cycle_had_retry` survives verification-budget and
+pagination pauses. A full pass resets progress so unreadable signatures get
+another chance. An expired request can close after one hour, but it retains
+`signature_scan_stuck_signature`. The late-payment watch must continue checking
+such closed requests past its normal seven-day window so a recovered chain read
+can still settle them. Migration 0190 indexes that exception; migration 0191
+adds scan progress. Do not move the safe cursor past an unreadable candidate or
+drop the late-watch exception without another recovery path.
 
 ## Ramps: one transition table
 

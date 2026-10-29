@@ -1788,7 +1788,10 @@ describe("closeLapsedPaymentRequest while a payment is indexing", () => {
 
     it("restarts the clock when a different signature becomes the first unreadable one", async () => {
       const logSpy = vi.spyOn(moneyPathEvents, "logEvent");
-      mockSignatures(signatureInfo(SIGNATURE, { blockTime: null, err: null }));
+      mockSignatures(
+        signatureInfo(SIGNATURE, { blockTime: null, err: null }),
+        signatureInfo(FAILED_SIGNATURE, { blockTime: null, err: {} })
+      );
       mockStatus(FINALIZED);
       validateTransferSpy.mockRejectedValue(new ValidateTransferError("Transaction not found"));
       const request = await storeScanPosition(
@@ -1800,7 +1803,7 @@ describe("closeLapsedPaymentRequest while a payment is indexing", () => {
 
       expect(result.status).toBe("awaiting_payment");
       const stored = await readStored(request.id);
-      expect(stored.signature_scan_cursor).toBeNull();
+      expect(stored.signature_scan_cursor).toBe(FAILED_SIGNATURE);
       expectRecentlyStuck(stored, SIGNATURE);
       expectNoGiveUp(logSpy);
     });
@@ -1972,8 +1975,23 @@ async function storeScanPosition(request: PaymentRequestRow, to: Partial<Signatu
     requestId: request.id,
     organizationId: TEST_ORG.id,
     projectId: TEST_PROJECT_ID,
-    from: { cursor: null, before: null, stuckSignature: null, stuckSince: null },
-    to: { cursor: null, before: null, stuckSignature: null, stuckSince: null, ...to },
+    from: {
+      cursor: null,
+      before: null,
+      progress: null,
+      cycleHadRetry: false,
+      stuckSignature: null,
+      stuckSince: null,
+    },
+    to: {
+      cursor: null,
+      before: null,
+      progress: null,
+      cycleHadRetry: false,
+      stuckSignature: null,
+      stuckSince: null,
+      ...to,
+    },
   });
   return readStored(request.id);
 }
@@ -2002,6 +2020,71 @@ describe("signature scan cursor", () => {
     expect(second.status).toBe("paid");
     expect(validatedSignatures()).toEqual([...junk.slice(25), REAL]);
     expect(await listInboundTransfers()).toMatchObject([{ signature: REAL }]);
+  });
+
+  it("reaches a valid payment after one unreadable candidate and a full verification budget", async () => {
+    const unreadable = chainSignature(0);
+    const unrelated = chainOf(24, 1);
+    mockChain([unreadable, ...unrelated, REAL]);
+    mockStatus(FINALIZED);
+    validateTransferSpy.mockImplementation(async (sig) => {
+      if (sig === unreadable) throw new ValidateTransferError("Transaction not found");
+      if (sig === REAL) return validatedTransfer(null);
+      throw new ValidateTransferError("wrong amount");
+    });
+    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+
+    await checkOnSandbox(request);
+    const stored = await readStored(request.id);
+    expect(stored).toMatchObject({
+      status: "awaiting_payment",
+      signature_scan_cursor: null,
+      signature_scan_progress: unrelated.at(-1),
+      signature_scan_stuck_signature: unreadable,
+    });
+
+    const settled = await checkOnSandbox(stored);
+    expect(settled.status).toBe("paid");
+    expect(validatedSignatures()).toContain(REAL);
+    expect(await listInboundTransfers()).toMatchObject([{ signature: REAL }]);
+  });
+
+  it("expires after scanning beyond an old unreadable candidate and can settle it later", async () => {
+    const unreadable = chainSignature(0);
+    const unrelated = chainOf(25, 1);
+    mockChain([unreadable, ...unrelated]);
+    mockStatus(FINALIZED);
+    validateTransferSpy.mockImplementation(async (sig) => {
+      if (sig === unreadable) throw new ValidateTransferError("Transaction not found");
+      throw new ValidateTransferError("wrong amount");
+    });
+    const request = await storeScanPosition(
+      await createRequest({ token: SOL_MINT, expiresAt: PAST }),
+      {
+        stuckSignature: unreadable,
+        stuckSince: new Date(Date.now() - 2 * 60 * 60_000).toISOString(),
+      }
+    );
+
+    const first = await onSandbox(() => closeLapsedPaymentRequest(env, request));
+    expect(first.status).toBe("awaiting_payment");
+    expect((await readStored(request.id)).signature_scan_progress).toBe(unrelated[23]);
+
+    const second = await onSandbox(async () =>
+      closeLapsedPaymentRequest(env, await readStored(request.id))
+    );
+    expect(second.status).toBe("expired");
+    expect((await readStored(request.id)).signature_scan_stuck_signature).toBe(unreadable);
+
+    validateTransferSpy.mockImplementation(async (sig) => {
+      if (sig === unreadable) return validatedTransfer(unixTimestamp(PAST_SECONDS));
+      throw new ValidateTransferError("wrong amount");
+    });
+    const late = await onSandbox(async () =>
+      checkClosedPaymentRequestForLatePayment(env, await readStored(request.id))
+    );
+    expect(late.status).toBe("paid");
+    expect(await listInboundTransfers()).toMatchObject([{ signature: unreadable }]);
   });
 
   it("does not store expired while junk older than the payment is still unevaluated", async () => {
@@ -2116,6 +2199,25 @@ describe("signature scan cursor", () => {
   });
 
   describe("when the signature history newer than the cursor exceeds the page cap", () => {
+    it("keeps an older unreadable signature recoverable across pagination", async () => {
+      const unreadable = chainSignature(0);
+      const junk = chainOf(5000, 1);
+      mockChain([unreadable, ...junk, REAL], new Set(junk));
+      mockStatus(FINALIZED);
+      validateTransferSpy.mockImplementation(async (sig) => {
+        if (sig === unreadable) throw new ValidateTransferError("Transaction not found");
+        if (sig === REAL) return validatedTransfer(null);
+        throw new Error(`Unexpected verification of ${sig}`);
+      });
+      const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+
+      const settled = await checkUntilSettled(request, 6);
+
+      expect(settled.status).toBe("paid");
+      expect(validatedSignatures()).toContain(REAL);
+      expect(await listInboundTransfers()).toMatchObject([{ signature: REAL }]);
+    });
+
     it("evaluates nothing, reports truncation and resumes further back on the next check", async () => {
       const logSpy = vi.spyOn(moneyPathEvents, "logEvent");
       const junk = chainOf(5001);

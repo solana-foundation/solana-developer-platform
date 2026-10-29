@@ -33,6 +33,8 @@ const reconcilerColumnsSchema = z.object({
   paid_late: z.boolean(),
   signature_scan_cursor: z.string().nullable(),
   signature_scan_before: z.string().nullable(),
+  signature_scan_progress: z.string().nullable(),
+  signature_scan_cycle_had_retry: z.boolean(),
   signature_scan_stuck_signature: z.string().nullable(),
   signature_scan_stuck_since: z.string().nullable(),
   canceled_at: z.string().nullable(),
@@ -74,6 +76,8 @@ function mapPaymentRequestRow(row: Record<string, unknown>): PaymentRequestRow {
     paid_late: reconciler.paid_late,
     signature_scan_cursor: reconciler.signature_scan_cursor,
     signature_scan_before: reconciler.signature_scan_before,
+    signature_scan_progress: reconciler.signature_scan_progress,
+    signature_scan_cycle_had_retry: reconciler.signature_scan_cycle_had_retry,
     signature_scan_stuck_signature: reconciler.signature_scan_stuck_signature,
     signature_scan_stuck_since: reconciler.signature_scan_stuck_since,
     sponsored_tx_last_valid_block_height: reconciler.sponsored_tx_last_valid_block_height,
@@ -580,6 +584,8 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
           `UPDATE payment_requests
              SET signature_scan_cursor = ?,
                  signature_scan_before = ?,
+                 signature_scan_progress = ?,
+                 signature_scan_cycle_had_retry = ?,
                  signature_scan_stuck_signature = ?,
                  signature_scan_stuck_since = ?
            WHERE id = ?
@@ -587,12 +593,16 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
              AND project_id = ?
              AND signature_scan_cursor IS NOT DISTINCT FROM ?
              AND signature_scan_before IS NOT DISTINCT FROM ?
+             AND signature_scan_progress IS NOT DISTINCT FROM ?
+             AND signature_scan_cycle_had_retry IS NOT DISTINCT FROM ?
              AND signature_scan_stuck_signature IS NOT DISTINCT FROM ?
              AND signature_scan_stuck_since IS NOT DISTINCT FROM ?`
         )
         .bind(
           input.to.cursor,
           input.to.before,
+          input.to.progress,
+          input.to.cycleHadRetry,
           input.to.stuckSignature,
           input.to.stuckSince,
           input.requestId,
@@ -600,6 +610,8 @@ export function createPostgresPaymentRequestsRepository(db: AppDb): PaymentReque
           input.projectId,
           input.from.cursor,
           input.from.before,
+          input.from.progress,
+          input.from.cycleHadRetry,
           input.from.stuckSignature,
           input.from.stuckSince
         )

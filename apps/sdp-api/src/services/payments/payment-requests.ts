@@ -125,10 +125,11 @@ const NOT_STUCK: StuckSignature = { signature: null, since: null };
 
 interface SignatureScanOutcome {
   cursor: Signature | null;
-  exhausted: boolean;
+  progress: Signature | null;
+  scannedAll: boolean;
   found: FoundPayment | null;
   stuck: StuckSignature;
-  agedUnresolved: boolean;
+  hadRetry: boolean;
 }
 
 function trackUnreadableCandidate(
@@ -136,19 +137,21 @@ function trackUnreadableCandidate(
   candidate: SignatureInfo,
   reason: string,
   stuck: StuckSignature
-): { stuck: StuckSignature; aged: boolean } {
+): StuckSignature {
+  // Keep the first unresolved candidate as the late-watch sentinel. Newer
+  // unreadable signatures remain behind the safe cursor and get another scan.
+  if (stuck.signature !== null && stuck.signature !== candidate.signature) {
+    return stuck;
+  }
   const since =
     stuck.signature === candidate.signature && stuck.since !== null
       ? Date.parse(stuck.since)
       : Number.NaN;
   if (Number.isNaN(since)) {
-    return {
-      stuck: { signature: candidate.signature, since: new Date().toISOString() },
-      aged: false,
-    };
+    return { signature: candidate.signature, since: new Date().toISOString() };
   }
   if (Date.now() - since < UNREADABLE_SIGNATURE_GIVE_UP_MS) {
-    return { stuck, aged: false };
+    return stuck;
   }
   if (row.status === "awaiting_payment") {
     logEvent("warn", {
@@ -158,7 +161,7 @@ function trackUnreadableCandidate(
       reason,
     });
   }
-  return { stuck, aged: true };
+  return stuck;
 }
 
 const transferExpectationSchema = z.discriminatedUnion("kind", [
@@ -327,6 +330,8 @@ async function findValidPayment(env: Env, row: PaymentRequestRow): Promise<Payme
   const from: SignatureScanPosition = {
     cursor: row.signature_scan_cursor,
     before: row.signature_scan_before,
+    progress: row.signature_scan_progress,
+    cycleHadRetry: row.signature_scan_cycle_had_retry,
     stuckSignature: row.signature_scan_stuck_signature,
     stuckSince: row.signature_scan_stuck_since,
   };
@@ -344,32 +349,43 @@ async function findValidPayment(env: Env, row: PaymentRequestRow): Promise<Payme
     await advanceSignatureScan(env, row, from, { ...from, before: resumeBefore.signature });
     return { kind: "pending" };
   }
-  const scan = await evaluateOldestFirst(row, expected, [...fetched.newestFirst].reverse(), {
-    signature: from.stuckSignature,
-    since: from.stuckSince,
-  });
-  await advanceSignatureScan(env, row, from, {
-    cursor: scan.cursor ?? from.cursor,
-    before: scan.exhausted ? null : from.before,
-    stuckSignature: scan.stuck.signature,
-    stuckSince: scan.stuck.since,
-  });
+  const scan = await evaluateOldestFirst(row, expected, [...fetched.newestFirst].reverse(), from);
+  const cycleFinished = scan.scannedAll && from.before === null;
+  const cycleHadRetry = from.cycleHadRetry || scan.hadRetry;
+  const hasUnresolved = cycleHadRetry || scan.stuck.signature !== null;
+  const cleanSegment = scan.scannedAll && !hasUnresolved;
+  const latestProgress = scan.progress ?? from.progress;
+  const to: SignatureScanPosition = {
+    cursor: cleanSegment ? (latestProgress ?? from.cursor) : (scan.cursor ?? from.cursor),
+    before: scan.scannedAll ? null : from.before,
+    progress: cycleFinished || cleanSegment ? null : latestProgress,
+    cycleHadRetry: cycleFinished ? false : cycleHadRetry,
+    stuckSignature: cleanSegment ? null : scan.stuck.signature,
+    stuckSince: cleanSegment ? null : scan.stuck.since,
+  };
+  await advanceSignatureScan(env, row, from, to);
   if (scan.found !== null) {
     return { kind: "paid", found: scan.found };
   }
-  // An expired request can close after the unreadable candidate has aged, but
-  // its cursor stays behind that signature so the late watch can settle it later.
-  if (scan.agedUnresolved && from.before === null && isPaymentRequestExpired(row.expires_at)) {
+  // A complete pass can close an expired request after an hour. The safe cursor
+  // stays behind every unreadable candidate, so the late watch can retry them.
+  const stuckSince = to.stuckSince === null ? Number.NaN : Date.parse(to.stuckSince);
+  const agedUnresolved =
+    hasUnresolved &&
+    !Number.isNaN(stuckSince) &&
+    Date.now() - stuckSince >= UNREADABLE_SIGNATURE_GIVE_UP_MS;
+  if (cycleFinished && agedUnresolved && isPaymentRequestExpired(row.expires_at)) {
     return { kind: "none" };
   }
-  return scan.exhausted && from.before === null ? { kind: "none" } : { kind: "pending" };
+  return cycleFinished && !hasUnresolved ? { kind: "none" } : { kind: "pending" };
 }
 
 async function fetchUnscannedSignatures(
   reference: Address,
   from: SignatureScanPosition
 ): Promise<{ newestFirst: SignatureInfo[]; truncated: boolean }> {
-  const until = from.cursor === null ? undefined : signature(from.cursor);
+  const checkedThrough = from.progress ?? from.cursor;
+  const until = checkedThrough === null ? undefined : signature(checkedThrough);
   const newestFirst: SignatureInfo[] = [];
   let before = from.before === null ? undefined : signature(from.before);
   for (let pages = 0; pages < MAX_SIGNATURE_PAGES; pages++) {
@@ -393,58 +409,60 @@ async function evaluateOldestFirst(
   row: PaymentRequestRow,
   expected: PaymentRequestTransferFields,
   oldestFirst: readonly SignatureInfo[],
-  stuckFrom: StuckSignature
+  from: SignatureScanPosition
 ): Promise<SignatureScanOutcome> {
   let cursor: Signature | null = null;
-  let contiguous = true;
+  let progress: Signature | null = null;
   let verified = 0;
-  let stuck = stuckFrom;
-  let agedUnresolved = false;
+  let stuck: StuckSignature = { signature: from.stuckSignature, since: from.stuckSince };
+  let hadRetry = false;
+  let contiguous = stuck.signature === null && !from.cycleHadRetry;
   for (const candidate of oldestFirst) {
     let verdict: CandidateVerdict = { kind: "rejected" };
     if (candidate.err === null) {
       if (verified >= VERIFY_BUDGET) {
-        return { cursor, exhausted: false, found: null, stuck, agedUnresolved: false };
+        return { cursor, progress, scannedAll: false, found: null, stuck, hadRetry };
       }
       verified++;
       verdict = await judgeCandidate(expected, candidate);
     }
-    if (verdict.kind === "retry" && contiguous) {
-      const tracked = trackUnreadableCandidate(row, candidate, verdict.reason, stuck);
-      stuck = tracked.stuck;
-      agedUnresolved = tracked.aged;
-    } else if (verdict.kind !== "retry" && candidate.signature === stuck.signature) {
+    if (verdict.kind === "retry") {
+      hadRetry = true;
+      contiguous = false;
+      stuck = trackUnreadableCandidate(row, candidate, verdict.reason, stuck);
+    } else if (candidate.signature === stuck.signature) {
       stuck = NOT_STUCK;
+      if (!hadRetry && !from.cycleHadRetry && from.progress === null) contiguous = true;
     }
     switch (verdict.kind) {
       case "paid":
         return {
           cursor,
-          exhausted: false,
+          progress,
+          scannedAll: false,
           found: verdict.found,
           stuck: NOT_STUCK,
-          agedUnresolved: false,
+          hadRetry,
         };
       case "retry":
-        contiguous = false;
         break;
       case "rejected":
-        if (contiguous) {
-          cursor = candidate.signature;
-        }
+        if (contiguous) cursor = candidate.signature;
         break;
       default: {
         const unreachable: never = verdict;
         throw internalError(`Unhandled candidate verdict ${String(unreachable)}`);
       }
     }
+    progress = candidate.signature;
   }
   return {
     cursor,
-    exhausted: contiguous,
+    progress,
+    scannedAll: true,
     found: null,
     stuck,
-    agedUnresolved,
+    hadRetry,
   };
 }
 
@@ -536,6 +554,8 @@ async function advanceSignatureScan(
   if (
     from.cursor === to.cursor &&
     from.before === to.before &&
+    from.progress === to.progress &&
+    from.cycleHadRetry === to.cycleHadRetry &&
     from.stuckSignature === to.stuckSignature &&
     from.stuckSince === to.stuckSince
   ) {
