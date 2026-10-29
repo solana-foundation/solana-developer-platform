@@ -143,7 +143,8 @@ test("classifies a kit HTTP error by status with production-stripped messages", 
   process.env.NODE_ENV = "production";
   try {
     const unavailable = await kitHttpError(503, "Service Unavailable");
-    assert.doesNotMatch((unavailable as Error).message, /Service Unavailable/);
+    assert.ok(unavailable instanceof Error);
+    assert.doesNotMatch(unavailable.message, /Service Unavailable/);
     assert.equal(isTransientRpcError(unavailable), true);
     assert.equal(isTransientRpcError(await kitHttpError(401, "Unauthorized")), false);
   } finally {
