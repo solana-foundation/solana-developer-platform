@@ -51,7 +51,6 @@ pnpm --filter @sdp/api recurring:revoke-authority \
 
 It prints the outcome, the authority address and the schedules it broke, and
 exits non-zero unless the outcome is `revoked`:
-
 - `revoked`: the authority is gone from the chain.
 - `pending`: the send's outcome is unknown; the sweep settles it on its next
   run. Check the authority with `solana account <address>` meanwhile.

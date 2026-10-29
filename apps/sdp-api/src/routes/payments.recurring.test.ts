@@ -32,7 +32,13 @@ import {
 } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
 import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
-import { findAssociatedTokenPda, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
+import {
+  findAssociatedTokenPda,
+  getApproveInstructionDataDecoder,
+  identifyToken2022Instruction,
+  TOKEN_2022_PROGRAM_ADDRESS,
+  Token2022Instruction,
+} from "@solana-program/token-2022";
 import pg from "pg";
 import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { z } from "zod";
@@ -170,15 +176,20 @@ function sentApprovals(): { delegate: string; amount: bigint }[] {
     return message.instructions.flatMap((instruction) => {
       const program = message.staticAccounts[instruction.programAddressIndex];
       const data = instruction.data;
-      // Approve: discriminator 4, then the amount as a little-endian u64.
-      if (!program || !tokenPrograms.has(program) || data?.[0] !== 4 || data.length !== 9) {
+      // Token and Token-2022 share Approve's layout, so one decoder reads both.
+      if (
+        !program ||
+        !tokenPrograms.has(program) ||
+        !data ||
+        identifyToken2022Instruction(data) !== Token2022Instruction.Approve
+      ) {
         return [];
       }
       const delegateIndex = required(instruction.accountIndices)[1];
       return [
         {
           delegate: required(message.staticAccounts[required(delegateIndex)]),
-          amount: new DataView(data.buffer, data.byteOffset + 1, 8).getBigUint64(0, true),
+          amount: getApproveInstructionDataDecoder().decode(data).amount,
         },
       ];
     });
