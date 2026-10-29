@@ -4,7 +4,6 @@ The public OpenAPI document produces one reference model for each release channe
 The docs render that model; the dashboard uses a smaller generated projection for
 its existing playground sections. All three apps share the same operation IDs,
 parameters and examples.
-
 - `@sdp/api-catalog/reference` defines every public operation, including Health
   and Projects, with request schemas and per-status response examples.
 - `@sdp/api-catalog/catalog` lists those operations in document order and
