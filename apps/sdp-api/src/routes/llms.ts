@@ -54,7 +54,7 @@ function renderBody(releaseChannel: SdpReleaseChannel): string {
     "## Canonical URLs",
     `- API base URL: ${DEFAULT_SDP_API_URL}`,
     `- OpenAPI: ${DEFAULT_SDP_API_URL}/openapi.json`,
-    `- Interactive API docs: ${DEFAULT_SDP_API_URL}/docs`,
+    `- API reference: ${DEFAULT_SDP_DOCS_URL}/reference/api`,
     `- Product docs: ${DEFAULT_SDP_DOCS_URL}`,
     `- AI guide: ${DEFAULT_SDP_AI_GUIDE_URL}`,
     "",

@@ -58,10 +58,9 @@ function resolvePage(slug?: string[]): ResolvedPage | null {
   return null;
 }
 
-/** A page's headings; an API reference page lists its operations, not their parts. */
+/** A page's headings. An API operation's page has none: its samples take the right column. */
 function headingsToc(data: DocsData) {
-  const toc = data.toc ?? [];
-  return data.apiReference ? toc.filter((item) => item.depth === 2) : toc;
+  return data.apiReference ? [] : (data.toc ?? []);
 }
 
 export default async function Page({ params }: DocsPageProps) {
@@ -112,7 +111,12 @@ export default async function Page({ params }: DocsPageProps) {
   const pageSlug = resolvedPage.pageSlug.join("/");
 
   return (
-    <DocsPage toc={toc} full={data.full} tocFooter={isHome ? <ProviderCallout /> : undefined}>
+    <DocsPage
+      toc={toc}
+      // An API operation's page takes the full width beside its samples (globals.css).
+      full={data.full === true || data.apiReference === true}
+      tocFooter={isHome ? <ProviderCallout /> : undefined}
+    >
       <div className="launch-docs-header">
         {!data.hideTitle && <DocsTitle>{data.title}</DocsTitle>}
         <PageActions

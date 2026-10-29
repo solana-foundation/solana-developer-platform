@@ -128,10 +128,12 @@ const PROJECT_PROVIDER_AVAILABILITY_EXAMPLE_PROVIDERS = [
 /**
  * The documented project provider availability, with or without the Earn
  * family. While `EARN_PUBLIC_SURFACE_PUBLISHED` is false the public document
- * leaves Earn out and the runtime response omits Earn entries to match it.
+ * leaves Earn out and the runtime response omits Earn entries to match it. The
+ * description names no family a release channel can leave out, since the public
+ * document prunes those per channel (openapi/release-channel-values.ts).
  *
  * @param publishEarn - Whether the document carries the Earn family.
- * @returns The response schema, its description and example matching `publishEarn`.
+ * @returns The response schema and its example, matching `publishEarn`.
  */
 export function projectProviderAvailabilityResponseSchema(publishEarn: boolean) {
   const [custodyEntry, complianceEntry, rampsEntry] =
@@ -143,9 +145,8 @@ export function projectProviderAvailabilityResponseSchema(publishEarn: boolean) 
           z.discriminatedUnion("family", [custodyEntry, complianceEntry, rampsEntry])
         ),
       });
-  const nonCustodyFamilies = publishEarn ? "ramps, compliance and Earn" : "ramps and compliance";
   return withOpenApi(schema, {
-    description: `Every provider this deployment's release channel publishes, with whether this project can use it; a provider the channel leaves out is omitted, matching this document. Custody entries list the custody modes the project can set the provider up in (empty when none) in \`modes\`, and each refused mode with the first failed check in \`unavailableModes\`; ${nonCustodyFamilies} entries carry \`available\`, plus \`reason\` naming the first failed check when unavailable. A provider is available only when the deployment's release channel includes it, SDP currently offers it, the organization is entitled to it, and the deployment holds its credentials for the project's environment; the release channel offers the same providers to Sandbox and Production projects. Custody \`modes\` include \`managed\` only in a Sandbox project whose deployment holds the provider's credentials; \`byok\` runs on the organization's own credentials and is the only mode a Production project can use.`,
+    description: `Every provider this deployment's release channel publishes, with whether this project can use it; a provider the channel leaves out is omitted, matching this document. Custody entries list the custody modes the project can set the provider up in (empty when none) in \`modes\`, and each refused mode with the first failed check in \`unavailableModes\`; every other entry carries \`available\`, plus \`reason\` naming the first failed check when unavailable. A provider is available only when the deployment's release channel includes it, SDP currently offers it, the organization is entitled to it, and the deployment holds its credentials for the project's environment; the release channel offers the same providers to Sandbox and Production projects. Custody \`modes\` include \`managed\` only in a Sandbox project whose deployment holds the provider's credentials; \`byok\` runs on the organization's own credentials and is the only mode a Production project can use.`,
     example: {
       projectId: "prj_example",
       environment: "production",
