@@ -8,6 +8,7 @@
 import { type Action, expandStoredGrants, normalizeGrants } from "@sdp/types/actions";
 import {
   API_KEY_ENDED_STATUSES,
+  API_KEY_STATUSES,
   type ApiKeyEnvironment,
   type ApiKeyStatus,
   type ApiKeyWalletScope,
@@ -204,13 +205,18 @@ const createdApiKeyRowSchema = z.object({
   project_name: z.string(),
   environment: z.enum(SDP_ENVIRONMENTS),
   created_at: z.string(),
+  status: z.enum(API_KEY_STATUSES),
+  expires_at: z.string().nullable(),
+  rotation_deadline: z.string().nullable(),
 });
 
 /**
  * The keys a person created that still work, across every project of the
  * organization, so an admin removing them can decide what to revoke: keys are
  * the organization's and outlive their creator (HOO-2301). A rotated key keeps
- * its original creator. Same status filter as a project's key list (`API_KEY_ENDED_STATUSES`).
+ * its original creator. "Still work" is `apiKeyRowRefusal`, the check every
+ * request makes, so an expired or past-deadline key is not listed: it cannot
+ * authenticate and cannot be revoked.
  *
  * @param db - The database.
  * @param params.organizationId - The organization.
@@ -224,19 +230,20 @@ export async function listActiveApiKeysCreatedBy(
   const result = await db
     .prepare(
       `SELECT ak.id, ak.name, ak.key_prefix, ak.project_id, p.name AS project_name,
-              p.environment, ak.created_at
+              p.environment, ak.created_at, ak.status, ak.expires_at, ak.rotation_deadline
          FROM api_keys ak
          JOIN projects p ON p.id = ak.project_id
         WHERE ak.organization_id = ?
           AND ak.created_by = ?
-          AND NOT (ak.status = ANY(?::text[]))
         ORDER BY ak.created_at DESC`
     )
-    .bind(params.organizationId, params.createdByUserId, API_KEY_ENDED_STATUSES)
+    .bind(params.organizationId, params.createdByUserId)
     .all<Record<string, unknown>>();
+  const now = Date.now();
   return z
     .array(createdApiKeyRowSchema)
     .parse(result.results)
+    .filter((row) => apiKeyRowRefusal(row, now) === null)
     .map((row) => ({
       id: row.id,
       name: row.name,

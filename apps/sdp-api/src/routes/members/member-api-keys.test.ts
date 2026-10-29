@@ -22,11 +22,21 @@ const CREATOR = organizationMember("member_keys_creator", "member");
 const FOREIGN_MEMBER = organizationMember("member_keys_foreign", "member");
 const OLDER = "2026-01-01T00:00:00.000Z";
 const NEWER = "2026-02-01T00:00:00.000Z";
+const NEWEST = "2026-03-01T00:00:00.000Z";
+const PAST = "2020-01-01T00:00:00.000Z";
+const FUTURE = "2999-01-01T00:00:00.000Z";
 let expectedKeys: ReturnType<typeof listedKey>[];
 
 type KeyOwner = { organizationId: string; projectId: string; createdBy: string };
+type KeyDeadlines = { expiresAt: string | null; rotationDeadline: string | null };
 
-async function seedKey(id: string, owner: KeyOwner, status: ApiKeyStatus, createdAt: string) {
+async function seedKey(
+  id: string,
+  owner: KeyOwner,
+  status: ApiKeyStatus,
+  createdAt: string,
+  deadlines?: KeyDeadlines
+) {
   const db = getDb(env);
   await seedProjectApiKey(db, env, {
     ...owner,
@@ -37,6 +47,12 @@ async function seedKey(id: string, owner: KeyOwner, status: ApiKeyStatus, create
     .prepare("UPDATE api_keys SET status = ?, created_at = ? WHERE id = ?")
     .bind(status, createdAt, id)
     .run();
+  if (deadlines) {
+    await db
+      .prepare("UPDATE api_keys SET expires_at = ?, rotation_deadline = ? WHERE id = ?")
+      .bind(deadlines.expiresAt, deadlines.rotationDeadline, id)
+      .run();
+  }
 }
 
 function listedKey(id: string, project: SeededProject, createdAt: string) {
@@ -88,9 +104,23 @@ describe("member API keys", () => {
     await seedKey("key_newer", own(production), "active", NEWER);
     await seedKey("key_revoked", own(sandbox), "revoked", NEWER);
     await seedKey("key_deactivated", own(production), "deactivated", NEWER);
+    await seedKey("key_expired", own(sandbox), "expired", NEWER);
+    await seedKey("key_past_expiry", own(sandbox), "active", NEWER, {
+      expiresAt: PAST,
+      rotationDeadline: null,
+    });
+    await seedKey("key_past_rotation", own(production), "active", NEWER, {
+      expiresAt: null,
+      rotationDeadline: PAST,
+    });
+    await seedKey("key_future_expiry", own(sandbox), "active", NEWEST, {
+      expiresAt: FUTURE,
+      rotationDeadline: FUTURE,
+    });
     await seedKey("key_admin", { ...own(sandbox), createdBy: ADMIN.userId }, "active", NEWER);
     await seedKey("key_other_org", own(other.sandbox), "active", NEWER);
     expectedKeys = [
+      listedKey("key_future_expiry", sandbox, NEWEST),
       listedKey("key_newer", production, NEWER),
       listedKey("key_older", sandbox, OLDER),
     ];
