@@ -1277,10 +1277,9 @@ function useApiPlaygroundState({
           activeEndpoint && requestBody && hasRequestBody(activeEndpoint.method)
             ? requestBody
             : null,
-        // The playground offers only operations an API key can call (generate-playground-catalog.ts).
+        // Keep existing dashboard snippets stable; the docs use each route's auth metadata.
         auth: "apiKey",
-        // Its Send keys every write (executePlaygroundRequest), and its catalog does not carry a
-        // route's declared header until it reads the API reference model (PRO-2298).
+        // Send keys every write; the displayed snippets keep their existing body rule.
         takesIdempotencyKey: hasRequestBody(activeEndpoint?.method ?? "GET"),
       }),
     [activeEndpoint, effectiveApiBaseUrl, requestBody, resolvedPath]

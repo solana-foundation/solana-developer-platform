@@ -699,7 +699,10 @@ export const paymentRequestSchema = z
     id: z.string().openapi({ description: "SDP payment request ID.", example: "preq_example" }),
     organizationId: z.string().openapi({ description: "Organization ID." }),
     projectId: z.string().nullable().openapi({ description: "Project ID." }),
-    walletId: z.string().openapi({ description: "Receiving custody wallet's provider ID." }),
+    custodyWalletId: z.string().nullable().openapi({
+      description: "Exact SDP custody wallet ID of the recipient; null for unresolved history.",
+      example: "cwlt_example",
+    }),
     destinationAddress: solanaAddressSchema.openapi({
       description: "Address the payment is sent to.",
     }),
