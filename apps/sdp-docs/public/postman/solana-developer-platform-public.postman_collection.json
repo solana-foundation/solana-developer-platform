@@ -1361,7 +1361,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/payments/subscriptions/{{subscriptionId}}/prepare-authorization",
-            "description": "Prepares the subscriber-signed Solana transaction that initializes the subscription authority and subscribes to the plan. The transaction must still be signed and submitted by the client.",
+            "description": "Prepares the subscriber-signed Solana transaction that initializes the subscription authority and subscribes to the plan. The transaction must still be signed and submitted by the client. A subscriber that is one of the organization's SDP wallets answers 409: pay from an SDP wallet through a recurring payment.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"subscriberTokenAccount\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"expectedPlanCreatedAt\": \"0\",\n  \"expectedSubscriptionAuthorityInitId\": \"0\"\n}",
@@ -1433,7 +1433,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/payments/subscriptions/{{subscriptionId}}/prepare-collection",
-            "description": "Prepares the collector-signed Solana subscriptions transfer transaction for an active subscription. The transaction must still be signed and submitted by the collector/fee-payer flow. A subscription that belongs to a recurring payment answers 409: SDP collects those through the recurring payment.",
+            "description": "Prepares the collector-signed Solana subscriptions transfer transaction for an active subscription. The transaction must still be signed and submitted by the collector/fee-payer flow. A subscription that belongs to a recurring payment, or whose subscriber is one of the organization's SDP wallets, answers 409: SDP collects from an SDP wallet only through a recurring payment.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"receiverTokenAccount\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\"\n}",

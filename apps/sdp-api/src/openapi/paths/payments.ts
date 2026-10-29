@@ -636,7 +636,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Prepare subscription authorization",
     operationId: "preparePaymentSubscriptionAuthorization",
     description:
-      "Prepares the subscriber-signed Solana transaction that initializes the subscription authority and subscribes to the plan. The transaction must still be signed and submitted by the client.",
+      "Prepares the subscriber-signed Solana transaction that initializes the subscription authority and subscribes to the plan. The transaction must still be signed and submitted by the client. A subscriber that is one of the organization's SDP wallets answers 409: pay from an SDP wallet through a recurring payment.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -651,7 +651,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Subscription authorization prepared",
         content: jsonContent(preparePaymentSubscriptionAuthorizationResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 
@@ -714,7 +714,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Prepare subscription collection",
     operationId: "preparePaymentSubscriptionCollection",
     description:
-      "Prepares the collector-signed Solana subscriptions transfer transaction for an active subscription. The transaction must still be signed and submitted by the collector/fee-payer flow. A subscription that belongs to a recurring payment answers 409: SDP collects those through the recurring payment.",
+      "Prepares the collector-signed Solana subscriptions transfer transaction for an active subscription. The transaction must still be signed and submitted by the collector/fee-payer flow. A subscription that belongs to a recurring payment, or whose subscriber is one of the organization's SDP wallets, answers 409: SDP collects from an SDP wallet only through a recurring payment.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
