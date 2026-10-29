@@ -712,7 +712,7 @@ async function executeSponsoredTransfer(
   }
 ): Promise<{ signature: string; slot: number | null; blockTime: string | null }> {
   const auth = getAuth(c);
-  const signer = await createOrgSignerForCustodyWallet(
+  const signer = await createOrgSignerForCustodyWallet<"payments">(
     c.env,
     auth.organizationId,
     requireProjectId(c),
@@ -725,7 +725,7 @@ async function executeSponsoredTransfer(
   }
 
   const rpc = createClusterRpc();
-  const feePayment = createSponsorshipFeePayment(
+  const feePayment = createSponsorshipFeePayment<"payments">(
     c.env,
     resolveRequestSponsorshipScope(c),
     "payments.transfer",

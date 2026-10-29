@@ -6,6 +6,7 @@ import { hashString } from "@sdp/payments/hash";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { parseDecimalAmount } from "@sdp/solana/amount";
+import type { SdpModule } from "@sdp/types/release-channels";
 import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { getBase58Codec } from "@solana/codecs";
 import {
@@ -17,7 +18,7 @@ import {
 } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
-import { afterEach, beforeEach, onTestFinished, vi } from "vitest";
+import { afterEach, beforeEach, type MockInstance, onTestFinished, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { SponsorshipBudgetRepository } from "@/db/repositories/sponsorship-budget.repository";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
@@ -76,10 +77,10 @@ export function testKoraAdapter(
 /** MoonPay's sale cancel, answered here so a route test never reaches MoonPay. */
 export const cancelMoonpaySaleMock = vi.spyOn(RAMP_PROVIDER_CLIENTS.moonpay, "cancelOfframpSale");
 
-export const createOrgSignerForCustodyWalletMock = vi.spyOn(
-  solanaSigner,
-  "createOrgSignerForCustodyWallet"
-);
+/** Typed for every module's movements: the route tests drive several modules' signers. */
+export const createOrgSignerForCustodyWalletMock: MockInstance<
+  typeof solanaSigner.createOrgSignerForCustodyWallet<SdpModule>
+> = vi.spyOn(solanaSigner, "createOrgSignerForCustodyWallet");
 
 const fetchMaybePlanMock = vi.spyOn(subscriptionsProgram, "fetchMaybePlan");
 

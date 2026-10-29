@@ -145,14 +145,14 @@ export async function createTransferBatch(
   const idempotencyKey = getIdempotencyRecordKey(c) ?? null;
   const idempotencyFingerprint = getIdempotencyFingerprint(c) ?? null;
 
-  const feePayment = createSponsorshipFeePayment(
+  const feePayment = createSponsorshipFeePayment<"payments">(
     c.env,
     resolveRequestSponsorshipScope(c),
     "payments.transfer_batch",
     { custodyWalletId: resolved.sourceWallet.id }
   );
   const [signer, feePayer, lifetime] = await Promise.all([
-    createOrgSignerForCustodyWallet(
+    createOrgSignerForCustodyWallet<"payments">(
       c.env,
       resolved.scope.auth.organizationId,
       resolved.projectId,

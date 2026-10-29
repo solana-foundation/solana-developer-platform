@@ -297,7 +297,7 @@ async function executeDvpFunding(
   // revert the whole settlement. Funding a partly funded leg has to top it up
   // exactly.
   const outstanding = amount - held;
-  const signer = await createOrgSignerForCustodyWallet(
+  const signer = await createOrgSignerForCustodyWallet<"dvp">(
     env,
     plan.signer.organizationId,
     plan.signer.projectId,
@@ -370,7 +370,7 @@ async function executeDvpFunding(
     );
   }
 
-  const feePayment = createSponsorshipFeePayment(
+  const feePayment = createSponsorshipFeePayment<"dvp">(
     env,
     await resolveProjectSponsorshipScope(env, {
       organizationId: plan.signer.organizationId,

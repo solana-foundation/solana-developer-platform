@@ -132,7 +132,7 @@ export async function issuePaymentRequestTransaction(
 
   let feePaymentInstance: SponsorshipFeePayment | null = null;
   const getFeePayment = async () => {
-    feePaymentInstance ??= createSponsorshipFeePayment(
+    feePaymentInstance ??= createSponsorshipFeePayment<"payments">(
       c.env,
       await resolveProjectSponsorshipScope(c.env, {
         organizationId: request.organization_id,

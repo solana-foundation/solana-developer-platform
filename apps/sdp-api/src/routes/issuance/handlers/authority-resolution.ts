@@ -412,7 +412,7 @@ async function loadResolvedAuthoritySigner(params: {
   currentAuthority: string;
   movement: IssuanceMovement;
 }): Promise<TransactionSigner> {
-  const signer = await createOrgSignerForCustodyWallet(
+  const signer = await createOrgSignerForCustodyWallet<"issuance">(
     params.env,
     params.auth.organizationId,
     requireAuthProjectId(params.auth),
@@ -515,7 +515,7 @@ export async function createLegacyResolvedAuthoritySigner(params: {
     throw walletNotFound();
   }
 
-  const signer = await createOrgSignerForCustodyWallet(
+  const signer = await createOrgSignerForCustodyWallet<"issuance">(
     env,
     auth.organizationId,
     projectId,
