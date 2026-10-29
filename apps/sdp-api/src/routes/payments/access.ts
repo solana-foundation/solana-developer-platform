@@ -10,7 +10,7 @@ import {
   getCounterpartiesRepository,
   getPaymentSubscriptionsRepository,
 } from "./context";
-import { findRetainedPaymentWalletByWalletId } from "./wallets";
+import { findRetainedPaymentWallet, findRetainedPaymentWalletByWalletId } from "./wallets";
 
 /**
  * Access checks for the payment routes that name wallets, plans and
@@ -71,13 +71,18 @@ export async function authorizeExistingPaymentRequest(
  */
 async function authorizePlanWallets(
   c: AppContext,
-  ownerWalletId: string,
-  pullerWalletId: string | null | undefined
+  ownerCustodyWalletId: string | null,
+  pullerCustodyWalletId: string | null | undefined
 ): Promise<void> {
+  if (ownerCustodyWalletId === null) {
+    throw walletNotFound();
+  }
   const walletIds =
-    typeof pullerWalletId === "string" ? [ownerWalletId, pullerWalletId] : [ownerWalletId];
+    typeof pullerCustodyWalletId === "string"
+      ? [ownerCustodyWalletId, pullerCustodyWalletId]
+      : [ownerCustodyWalletId];
   const wallets = await Promise.all(
-    walletIds.map((walletId) => findRetainedPaymentWalletByWalletId(c, walletId))
+    walletIds.map((walletId) => findRetainedPaymentWallet(c, walletId))
   );
   if (wallets.some((wallet) => wallet === null)) {
     throw walletNotFound();
@@ -86,11 +91,11 @@ async function authorizePlanWallets(
 
 /** Plan create: the owner wallet and any puller wallet the body names. */
 export async function authorizeSubscriptionPlanCreate(c: AppContext, input: AuthorizeInput) {
-  const { ownerWalletId, pullerWalletId } = body<{
-    ownerWalletId: string;
-    pullerWalletId?: string;
+  const { ownerCustodyWalletId, pullerCustodyWalletId } = body<{
+    ownerCustodyWalletId: string;
+    pullerCustodyWalletId?: string;
   }>(input);
-  await authorizePlanWallets(c, ownerWalletId, pullerWalletId);
+  await authorizePlanWallets(c, ownerCustodyWalletId, pullerCustodyWalletId);
 }
 
 /** Plan update: the plan in the caller's project, its owner wallet, and any new puller wallet. */
@@ -103,8 +108,8 @@ export async function authorizeSubscriptionPlanUpdate(c: AppContext, input: Auth
   if (!plan) {
     throw notFound("Subscription plan");
   }
-  const { pullerWalletId } = body<{ pullerWalletId?: string | null }>(input);
-  await authorizePlanWallets(c, plan.owner_wallet_id, pullerWalletId);
+  const { pullerCustodyWalletId } = body<{ pullerCustodyWalletId?: string | null }>(input);
+  await authorizePlanWallets(c, plan.owner_custody_wallet_id, pullerCustodyWalletId);
   return plan;
 }
 

@@ -186,7 +186,7 @@ function useRecurringPaymentLabels({
       ? walletById.get(recurringPayment.sourceCustodyWalletId)
       : undefined;
     return wallet === undefined
-      ? recurringPayment.sourceProviderWalletId
+      ? shortenAddress(recurringPayment.sourceAddress)
       : wallet.label === null
         ? shortenAddress(wallet.publicKey)
         : wallet.label;
@@ -474,6 +474,7 @@ export function RecurringPaymentsWorkspace({
     return [
       labels.getCounterpartyLabel(recurringPayment),
       labels.getWalletLabel(recurringPayment),
+      recurringPayment.sourceAddress,
       labels.getAmountLabel(recurringPayment),
     ]
       .join(" ")

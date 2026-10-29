@@ -255,9 +255,6 @@ export function assertRecurringPaymentSourceWallet(
   if (recurringPayment.source_custody_wallet_id !== sourceWallet.id) {
     throw badRequest("Recurring payment exact source wallet does not match request");
   }
-  if (recurringPayment.source_wallet_id !== sourceWallet.walletId) {
-    throw badRequest("Recurring payment source wallet does not match request");
-  }
   if (recurringPayment.source_address !== sourceWallet.publicKey) {
     throw badRequest("Recurring payment source address does not match wallet");
   }
@@ -296,7 +293,7 @@ export async function sendSubscriptionInstructions(input: {
     await resolveProjectSponsorshipScope(input.env, {
       organizationId: input.organizationId,
       projectId: input.projectId,
-      actor: { type: "wallet", id: input.sourceWallet.walletId },
+      actor: { type: "wallet", id: input.sourceWallet.id },
     }),
     input.movement,
     { custodyWalletId: input.sourceWallet.id }

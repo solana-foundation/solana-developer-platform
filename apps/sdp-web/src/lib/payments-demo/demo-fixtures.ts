@@ -1085,7 +1085,6 @@ function buildSchedule(spec: ScheduleSpec, world: WorldBase, clock: Clock): Sche
       organizationId: ORGANIZATION_ID,
       projectId: PROJECT_ID,
       sourceCustodyWalletId: wallet.id,
-      sourceProviderWalletId: wallet.walletId,
       sourceAddress: wallet.publicKey,
       counterpartyId: world.contacts[spec.contact].id,
       counterpartyAccountId: account.id,

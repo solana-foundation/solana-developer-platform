@@ -58,7 +58,7 @@ import {
   walletLabel,
 } from "./recurring-payments-shared";
 
-type ScheduleRecord = PaymentRecurringPayment & { sourceCustodyWalletId: string };
+type ScheduleRecord = PaymentRecurringPayment;
 
 interface RecurringPaymentDetailWorkspaceProps {
   recurringPayment: ScheduleRecord;
@@ -401,7 +401,7 @@ function SchedulePlan({
   const locale = useLocale();
   const custodyEnabled = useDashboardWorkspace().flags.custody;
   const projectHref = useProjectHref();
-  const sourceWalletLabel = walletLabel(wallet, recurringPayment.sourceProviderWalletId);
+  const sourceWalletLabel = walletLabel(wallet, shortenAddress(recurringPayment.sourceAddress));
   const receivingAccount = counterpartyAccounts.find(
     (account) => account.id === recurringPayment.counterpartyAccountId
   );
@@ -698,7 +698,7 @@ export function RecurringPaymentDetailWorkspace({
     savingPayment: saving,
     sourceWallet: liveSourceWallet,
     selectedWallet: liveSourceWallet,
-    selectedCustodyWalletId: recurringPayment.sourceCustodyWalletId,
+    selectedCustodyWalletId: recurringPayment.sourceCustodyWalletId ?? "",
   });
   const status = recurringPayment.status;
   const tokenLabel = resolveTokenByMint(
@@ -765,7 +765,7 @@ export function RecurringPaymentDetailWorkspace({
           signingUnavailable,
           walletsError: liveWalletsError,
           status,
-          sourceWalletLabel: walletLabel(wallet, recurringPayment.sourceProviderWalletId),
+          sourceWalletLabel: walletLabel(wallet, shortenAddress(recurringPayment.sourceAddress)),
           t,
         })
       : null) ??

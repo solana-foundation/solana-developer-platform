@@ -11,6 +11,7 @@ import {
   installPaymentsRouteTestHooks,
   seedProductionPrivyWallet,
   TEST_API_KEY,
+  TEST_CUSTODY_WALLET_ID,
   TEST_PRODUCTION_PROJECT_ID,
   TEST_PROJECT,
   TEST_WALLET_ID,
@@ -158,7 +159,7 @@ describe("Payments routes — subscription plan wallets before the key", () => {
 
   it("refuses an owner wallet outside the caller's project with 404 and stores nothing", async () => {
     const response = await postPlan(
-      { ownerWalletId: "wal_other_organization" },
+      { ownerCustodyWalletId: "cwlt_other_organization" },
       "plan-foreign-owner"
     );
     expect(response.status).toBe(404);
@@ -167,7 +168,10 @@ describe("Payments routes — subscription plan wallets before the key", () => {
 
   it("refuses a puller wallet outside the caller's project with 404 and stores nothing", async () => {
     const response = await postPlan(
-      { ownerWalletId: TEST_WALLET_ID, pullerWalletId: "wal_other_organization" },
+      {
+        ownerCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        pullerCustodyWalletId: "cwlt_other_organization",
+      },
       "plan-foreign-puller"
     );
     expect(response.status).toBe(404);
@@ -175,9 +179,12 @@ describe("Payments routes — subscription plan wallets before the key", () => {
   });
 
   it("replays a retry that only re-spells the amount (APE SOLA9-759)", async () => {
-    const first = await postPlan({ ownerWalletId: TEST_WALLET_ID, amount: "25" }, "plan-respelled");
+    const first = await postPlan(
+      { ownerCustodyWalletId: TEST_CUSTODY_WALLET_ID, amount: "25" },
+      "plan-respelled"
+    );
     const retry = await postPlan(
-      { ownerWalletId: TEST_WALLET_ID, amount: "25.0" },
+      { ownerCustodyWalletId: TEST_CUSTODY_WALLET_ID, amount: "25.0" },
       "plan-respelled"
     );
 

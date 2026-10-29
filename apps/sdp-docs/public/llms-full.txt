@@ -27378,10 +27378,6 @@ Creates an SDP-custody outbound recurring payment intent. Activation and collect
 
         Exact source SDP Wallet ID, or null for unresolved legacy records.
 
-      - **`sourceProviderWalletId`** · `string` · required · min length 1 · example `privy_wallet_123`
-
-        Source Provider wallet ID retained as evidence.
-
       - **`sourceAddress`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
 
         Source wallet address.
@@ -27601,7 +27597,6 @@ r = requests.post("https://api.solana.com/v1/payments/recurring-payments",
       "organizationId": "org_example",
       "projectId": "prj_example",
       "sourceCustodyWalletId": "cwlt_example",
-      "sourceProviderWalletId": "privy_wallet_123",
       "sourceAddress": "So11111111111111111111111111111111111111112",
       "counterpartyId": "cpty_example",
       "counterpartyAccountId": "cpa_example",
@@ -27777,10 +27772,6 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
       - **`sourceCustodyWalletId`** · `string | null` · required · example `cwlt_example`
 
         Exact source SDP Wallet ID, or null for unresolved legacy records.
-
-      - **`sourceProviderWalletId`** · `string` · required · min length 1 · example `privy_wallet_123`
-
-        Source Provider wallet ID retained as evidence.
 
       - **`sourceAddress`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
 
@@ -27962,7 +27953,6 @@ r = requests.get("https://api.solana.com/v1/payments/recurring-payments",
         "organizationId": "org_example",
         "projectId": "prj_example",
         "sourceCustodyWalletId": "cwlt_example",
-        "sourceProviderWalletId": "privy_wallet_123",
         "sourceAddress": "So11111111111111111111111111111111111111112",
         "counterpartyId": "cpty_example",
         "counterpartyAccountId": "cpa_example",
@@ -28148,10 +28138,6 @@ Updates a recurring payment. Pending payments are edited directly. Active metada
       - **`sourceCustodyWalletId`** · `string | null` · required · example `cwlt_example`
 
         Exact source SDP Wallet ID, or null for unresolved legacy records.
-
-      - **`sourceProviderWalletId`** · `string` · required · min length 1 · example `privy_wallet_123`
-
-        Source Provider wallet ID retained as evidence.
 
       - **`sourceAddress`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
 
@@ -28375,7 +28361,6 @@ r = requests.patch("https://api.solana.com/v1/payments/recurring-payments/prp_ex
       "organizationId": "org_example",
       "projectId": "prj_example",
       "sourceCustodyWalletId": "cwlt_example",
-      "sourceProviderWalletId": "privy_wallet_123",
       "sourceAddress": "So11111111111111111111111111111111111111112",
       "counterpartyId": "cpty_example",
       "counterpartyAccountId": "cpa_example",
@@ -28545,10 +28530,6 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
       - **`sourceCustodyWalletId`** · `string | null` · required · example `cwlt_example`
 
         Exact source SDP Wallet ID, or null for unresolved legacy records.
-
-      - **`sourceProviderWalletId`** · `string` · required · min length 1 · example `privy_wallet_123`
-
-        Source Provider wallet ID retained as evidence.
 
       - **`sourceAddress`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
 
@@ -28723,7 +28704,6 @@ r = requests.get("https://api.solana.com/v1/payments/recurring-payments/prp_exam
       "organizationId": "org_example",
       "projectId": "prj_example",
       "sourceCustodyWalletId": "cwlt_example",
-      "sourceProviderWalletId": "privy_wallet_123",
       "sourceAddress": "So11111111111111111111111111111111111111112",
       "counterpartyId": "cpty_example",
       "counterpartyAccountId": "cpa_example",
@@ -28861,10 +28841,6 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
       - **`sourceCustodyWalletId`** · `string | null` · required · example `cwlt_example`
 
         Exact source SDP Wallet ID, or null for unresolved legacy records.
-
-      - **`sourceProviderWalletId`** · `string` · required · min length 1 · example `privy_wallet_123`
-
-        Source Provider wallet ID retained as evidence.
 
       - **`sourceAddress`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
 
@@ -29053,7 +29029,6 @@ r = requests.post("https://api.solana.com/v1/payments/recurring-payments/prp_exa
       "organizationId": "org_example",
       "projectId": "prj_example",
       "sourceCustodyWalletId": "cwlt_example",
-      "sourceProviderWalletId": "privy_wallet_123",
       "sourceAddress": "So11111111111111111111111111111111111111112",
       "counterpartyId": "cpty_example",
       "counterpartyAccountId": "cpa_example",
@@ -29229,10 +29204,6 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
       - **`sourceCustodyWalletId`** · `string | null` · required · example `cwlt_example`
 
         Exact source SDP Wallet ID, or null for unresolved legacy records.
-
-      - **`sourceProviderWalletId`** · `string` · required · min length 1 · example `privy_wallet_123`
-
-        Source Provider wallet ID retained as evidence.
 
       - **`sourceAddress`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
 
@@ -29421,7 +29392,6 @@ r = requests.post("https://api.solana.com/v1/payments/recurring-payments/prp_exa
       "organizationId": "org_example",
       "projectId": "prj_example",
       "sourceCustodyWalletId": "cwlt_example",
-      "sourceProviderWalletId": "privy_wallet_123",
       "sourceAddress": "So11111111111111111111111111111111111111112",
       "counterpartyId": "cpty_example",
       "counterpartyAccountId": "cpa_example",
@@ -29597,10 +29567,6 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
       - **`sourceCustodyWalletId`** · `string | null` · required · example `cwlt_example`
 
         Exact source SDP Wallet ID, or null for unresolved legacy records.
-
-      - **`sourceProviderWalletId`** · `string` · required · min length 1 · example `privy_wallet_123`
-
-        Source Provider wallet ID retained as evidence.
 
       - **`sourceAddress`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
 
@@ -30167,7 +30133,6 @@ r = requests.post("https://api.solana.com/v1/payments/recurring-payments/prp_exa
       "organizationId": "org_example",
       "projectId": "prj_example",
       "sourceCustodyWalletId": "cwlt_example",
-      "sourceProviderWalletId": "privy_wallet_123",
       "sourceAddress": "So11111111111111111111111111111111111111112",
       "counterpartyId": "cpty_example",
       "counterpartyAccountId": "cpa_example",
@@ -30436,10 +30401,6 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
         Exact source SDP Wallet ID, or null for unresolved legacy records.
 
-      - **`sourceProviderWalletId`** · `string` · required · min length 1 · example `privy_wallet_123`
-
-        Source Provider wallet ID retained as evidence.
-
       - **`sourceAddress`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
 
         Source wallet address.
@@ -30627,7 +30588,6 @@ r = requests.post("https://api.solana.com/v1/payments/recurring-payments/prp_exa
       "organizationId": "org_example",
       "projectId": "prj_example",
       "sourceCustodyWalletId": "cwlt_example",
-      "sourceProviderWalletId": "privy_wallet_123",
       "sourceAddress": "So11111111111111111111111111111111111111112",
       "counterpartyId": "cpty_example",
       "counterpartyAccountId": "cpa_example",
@@ -31109,11 +31069,11 @@ r = requests.post("https://api.solana.com/v1/payments/requests/preq_example/canc
 ### Create subscription plan
 Source: https://platform.solana.com/docs/reference/api/payments/create-payment-subscription-plan
 
-> Creates a recurring-payment subscription plan record.
+> Creates a recurring-payment subscription plan record using ownerCustodyWalletId and optional pullerCustodyWalletId.
 
 `POST /v1/payments/subscription-plans`
 
-This stores SDP backend state and Solana subscriptions program identifiers; it does not by itself create the on-chain plan.
+Provider wallet references are rejected. This stores SDP backend state and Solana subscriptions program identifiers; it does not by itself create the on-chain plan.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurring.manage` action.
 
@@ -31133,9 +31093,9 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
 Creates an SDP subscription plan record. Prepare the on-chain Solana subscriptions program transaction separately with the plan prepare endpoint.
 
-- **`ownerWalletId`** · `string` · required · min length 1 · example `wal_merchant`
+- **`ownerCustodyWalletId`** · `string` · required · min length 1 · example `cwlt_merchant`
 
-  Custody wallet that owns the Solana subscription plan.
+  Exact SDP wallet ID of the plan owner. Provider wallet references are not accepted.
 
 - **`token`** · `string` · required · example `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`
 
@@ -31161,17 +31121,15 @@ Creates an SDP subscription plan record. Prepare the on-chain Solana subscriptio
 
   Optional destination owner address allowed by the on-chain plan.
 
-- **`pullerWalletId`** · `string` · min length 1 · example `wal_collector`
+- **`pullerCustodyWalletId`** · `string` · min length 1 · example `cwlt_collector`
 
-  Optional SDP custody wallet allowed to pull subscription payments.
+  Exact SDP wallet ID of the optional collector. Provider wallet references are not accepted.
 
 - **`metadataUri`** · `string` · format `uri` · max length 128 · example `https://example.com/subscriptions/monthly-usdc.json`
 
   Optional plan metadata URI.
 
-- **`status`** · `string` · one of `draft`, `active`, `archived` · example `active`
-
-  Subscription plan status.
+- **`status`** · `string` · one of `draft`, `active`, `archived` · default `draft`
 
 ## Responses
 
@@ -31197,9 +31155,9 @@ Creates an SDP subscription plan record. Prepare the on-chain Solana subscriptio
 
         Project identifier.
 
-      - **`ownerWalletId`** · `string` · required · min length 1 · example `privy_wallet_123`
+      - **`ownerCustodyWalletId`** · `string | null` · required
 
-        Provider wallet ID — the `walletId` field returned by GET /v1/wallets.
+        Exact SDP owner wallet ID, nullable for unresolved history.
 
       - **`ownerAddress`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
 
@@ -31227,9 +31185,9 @@ Creates an SDP subscription plan record. Prepare the on-chain Solana subscriptio
 
         Allowed destination owner address.
 
-      - **`pullerWalletId`** · `string | null` · required · min length 1 · example `privy_wallet_123`
+      - **`pullerCustodyWalletId`** · `string | null` · required
 
-        Collector wallet ID.
+        Exact SDP collector wallet ID, nullable for an absent or unresolved role.
 
       - **`pullerAddress`** · `string | null` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
 
@@ -31325,16 +31283,12 @@ curl -X POST 'https://api.solana.com/v1/payments/subscription-plans' \
   -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
   -d '{
-    "ownerWalletId": "wal_merchant",
+    "ownerCustodyWalletId": "cwlt_merchant",
+    "pullerCustodyWalletId": "cwlt_collector",
     "token": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     "amount": "25.00",
     "periodHours": 720,
-    "programPlanId": "17014118346046923173",
-    "planPda": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
-    "destinationAddress": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
-    "pullerWalletId": "wal_collector",
-    "metadataUri": "https://example.com/subscriptions/monthly-usdc.json",
-    "status": "active"
+    "destinationAddress": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"
   }'
 ```
 
@@ -31347,16 +31301,12 @@ const res = await fetch("https://api.solana.com/v1/payments/subscription-plans",
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
-    "ownerWalletId": "wal_merchant",
+    "ownerCustodyWalletId": "cwlt_merchant",
+    "pullerCustodyWalletId": "cwlt_collector",
     "token": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     "amount": "25.00",
     "periodHours": 720,
-    "programPlanId": "17014118346046923173",
-    "planPda": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
-    "destinationAddress": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
-    "pullerWalletId": "wal_collector",
-    "metadataUri": "https://example.com/subscriptions/monthly-usdc.json",
-    "status": "active"
+    "destinationAddress": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"
   })
 });
 ```
@@ -31367,16 +31317,12 @@ import os, requests, uuid
 r = requests.post("https://api.solana.com/v1/payments/subscription-plans",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
   json={
-    "ownerWalletId": "wal_merchant",
+    "ownerCustodyWalletId": "cwlt_merchant",
+    "pullerCustodyWalletId": "cwlt_collector",
     "token": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     "amount": "25.00",
     "periodHours": 720,
-    "programPlanId": "17014118346046923173",
-    "planPda": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
-    "destinationAddress": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
-    "pullerWalletId": "wal_collector",
-    "metadataUri": "https://example.com/subscriptions/monthly-usdc.json",
-    "status": "active"
+    "destinationAddress": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"
   })
 ```
 
@@ -31389,7 +31335,7 @@ r = requests.post("https://api.solana.com/v1/payments/subscription-plans",
       "id": "psp_example",
       "organizationId": "org_example",
       "projectId": "prj_example",
-      "ownerWalletId": "privy_wallet_123",
+      "ownerCustodyWalletId": "ownercustodywallet_example",
       "ownerAddress": "So11111111111111111111111111111111111111112",
       "token": "example",
       "amount": "100.00",
@@ -31397,7 +31343,7 @@ r = requests.post("https://api.solana.com/v1/payments/subscription-plans",
       "programPlanId": "17014118346046923173",
       "planPda": "So11111111111111111111111111111111111111112",
       "destinationAddress": "So11111111111111111111111111111111111111112",
-      "pullerWalletId": "privy_wallet_123",
+      "pullerCustodyWalletId": "pullercustodywallet_example",
       "pullerAddress": "So11111111111111111111111111111111111111112",
       "metadataUri": "example",
       "status": "active",
@@ -31549,9 +31495,9 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
         Project identifier.
 
-      - **`ownerWalletId`** · `string` · required · min length 1 · example `privy_wallet_123`
+      - **`ownerCustodyWalletId`** · `string | null` · required
 
-        Provider wallet ID — the `walletId` field returned by GET /v1/wallets.
+        Exact SDP owner wallet ID, nullable for unresolved history.
 
       - **`ownerAddress`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
 
@@ -31579,9 +31525,9 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
         Allowed destination owner address.
 
-      - **`pullerWalletId`** · `string | null` · required · min length 1 · example `privy_wallet_123`
+      - **`pullerCustodyWalletId`** · `string | null` · required
 
-        Collector wallet ID.
+        Exact SDP collector wallet ID, nullable for an absent or unresolved role.
 
       - **`pullerAddress`** · `string | null` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
 
@@ -31696,7 +31642,7 @@ r = requests.get("https://api.solana.com/v1/payments/subscription-plans",
         "id": "psp_example",
         "organizationId": "org_example",
         "projectId": "prj_example",
-        "ownerWalletId": "privy_wallet_123",
+        "ownerCustodyWalletId": "ownercustodywallet_example",
         "ownerAddress": "So11111111111111111111111111111111111111112",
         "token": "example",
         "amount": "100.00",
@@ -31704,7 +31650,7 @@ r = requests.get("https://api.solana.com/v1/payments/subscription-plans",
         "programPlanId": "17014118346046923173",
         "planPda": "So11111111111111111111111111111111111111112",
         "destinationAddress": "So11111111111111111111111111111111111111112",
-        "pullerWalletId": "privy_wallet_123",
+        "pullerCustodyWalletId": "pullercustodywallet_example",
         "pullerAddress": "So11111111111111111111111111111111111111112",
         "metadataUri": "example",
         "status": "active",
@@ -31846,9 +31792,9 @@ Optional overrides used when preparing the Solana subscriptions create-plan tran
 
         Project identifier.
 
-      - **`ownerWalletId`** · `string` · required · min length 1 · example `privy_wallet_123`
+      - **`ownerCustodyWalletId`** · `string | null` · required
 
-        Provider wallet ID — the `walletId` field returned by GET /v1/wallets.
+        Exact SDP owner wallet ID, nullable for unresolved history.
 
       - **`ownerAddress`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
 
@@ -31876,9 +31822,9 @@ Optional overrides used when preparing the Solana subscriptions create-plan tran
 
         Allowed destination owner address.
 
-      - **`pullerWalletId`** · `string | null` · required · min length 1 · example `privy_wallet_123`
+      - **`pullerCustodyWalletId`** · `string | null` · required
 
-        Collector wallet ID.
+        Exact SDP collector wallet ID, nullable for an absent or unresolved role.
 
       - **`pullerAddress`** · `string | null` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
 
@@ -31978,6 +31924,10 @@ Optional overrides used when preparing the Solana subscriptions create-plan tran
 
   Same fields as `400`.
 
+- **`409`** Conflict
+
+  Same fields as `400`.
+
 - **`500`** Internal Server Error
 
   Same fields as `400`.
@@ -32046,7 +31996,7 @@ r = requests.post("https://api.solana.com/v1/payments/subscription-plans/psp_exa
       "id": "psp_example",
       "organizationId": "org_example",
       "projectId": "prj_example",
-      "ownerWalletId": "privy_wallet_123",
+      "ownerCustodyWalletId": "ownercustodywallet_example",
       "ownerAddress": "So11111111111111111111111111111111111111112",
       "token": "example",
       "amount": "100.00",
@@ -32054,7 +32004,7 @@ r = requests.post("https://api.solana.com/v1/payments/subscription-plans/psp_exa
       "programPlanId": "17014118346046923173",
       "planPda": "So11111111111111111111111111111111111111112",
       "destinationAddress": "So11111111111111111111111111111111111111112",
-      "pullerWalletId": "privy_wallet_123",
+      "pullerCustodyWalletId": "pullercustodywallet_example",
       "pullerAddress": "So11111111111111111111111111111111111111112",
       "metadataUri": "example",
       "status": "active",
@@ -32130,6 +32080,18 @@ r = requests.post("https://api.solana.com/v1/payments/subscription-plans/psp_exa
 }
 ```
 
+```json tab="409"
+{
+  "error": {
+    "code": "CONFLICT",
+    "message": "Resource already exists"
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
 ```json tab="500"
 {
   "error": {
@@ -32189,9 +32151,9 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
         Project identifier.
 
-      - **`ownerWalletId`** · `string` · required · min length 1 · example `privy_wallet_123`
+      - **`ownerCustodyWalletId`** · `string | null` · required
 
-        Provider wallet ID — the `walletId` field returned by GET /v1/wallets.
+        Exact SDP owner wallet ID, nullable for unresolved history.
 
       - **`ownerAddress`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
 
@@ -32219,9 +32181,9 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
         Allowed destination owner address.
 
-      - **`pullerWalletId`** · `string | null` · required · min length 1 · example `privy_wallet_123`
+      - **`pullerCustodyWalletId`** · `string | null` · required
 
-        Collector wallet ID.
+        Exact SDP collector wallet ID, nullable for an absent or unresolved role.
 
       - **`pullerAddress`** · `string | null` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
 
@@ -32329,7 +32291,7 @@ r = requests.get("https://api.solana.com/v1/payments/subscription-plans/psp_exam
       "id": "psp_example",
       "organizationId": "org_example",
       "projectId": "prj_example",
-      "ownerWalletId": "privy_wallet_123",
+      "ownerCustodyWalletId": "ownercustodywallet_example",
       "ownerAddress": "So11111111111111111111111111111111111111112",
       "token": "example",
       "amount": "100.00",
@@ -32337,7 +32299,7 @@ r = requests.get("https://api.solana.com/v1/payments/subscription-plans/psp_exam
       "programPlanId": "17014118346046923173",
       "planPda": "So11111111111111111111111111111111111111112",
       "destinationAddress": "So11111111111111111111111111111111111111112",
-      "pullerWalletId": "privy_wallet_123",
+      "pullerCustodyWalletId": "pullercustodywallet_example",
       "pullerAddress": "So11111111111111111111111111111111111111112",
       "metadataUri": "example",
       "status": "active",
@@ -32413,6 +32375,8 @@ Source: https://platform.solana.com/docs/reference/api/payments/update-payment-s
 
 `PATCH /v1/payments/subscription-plans/{planId}`
 
+An omitted pullerCustodyWalletId retains its role; null clears all collector identity. Provider wallet references are rejected.
+
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurring.execute` action.
 
 ## Path parameters
@@ -32445,9 +32409,9 @@ Updates mutable SDP subscription plan fields.
 
   Destination owner address, or null to clear it.
 
-- **`pullerWalletId`** · `string | null` · min length 1 · example `wal_collector`
+- **`pullerCustodyWalletId`** · `string | null` · min length 1 · example `cwlt_collector`
 
-  Collection wallet ID, or null to clear it.
+  Exact SDP collector wallet ID, or null to clear all collector identity. Omission retains the role. Provider wallet references are not accepted.
 
 - **`metadataUri`** · `string | null` · format `uri` · max length 128
 
@@ -32481,9 +32445,9 @@ Updates mutable SDP subscription plan fields.
 
         Project identifier.
 
-      - **`ownerWalletId`** · `string` · required · min length 1 · example `privy_wallet_123`
+      - **`ownerCustodyWalletId`** · `string | null` · required
 
-        Provider wallet ID — the `walletId` field returned by GET /v1/wallets.
+        Exact SDP owner wallet ID, nullable for unresolved history.
 
       - **`ownerAddress`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
 
@@ -32511,9 +32475,9 @@ Updates mutable SDP subscription plan fields.
 
         Allowed destination owner address.
 
-      - **`pullerWalletId`** · `string | null` · required · min length 1 · example `privy_wallet_123`
+      - **`pullerCustodyWalletId`** · `string | null` · required
 
-        Collector wallet ID.
+        Exact SDP collector wallet ID, nullable for an absent or unresolved role.
 
       - **`pullerAddress`** · `string | null` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
 
@@ -32609,8 +32573,7 @@ curl -X PATCH 'https://api.solana.com/v1/payments/subscription-plans/psp_example
   -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
   -d '{
-    "planPda": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
-    "pullerWalletId": "wal_collector",
+    "pullerCustodyWalletId": "cwlt_collector",
     "status": "active"
   }'
 ```
@@ -32624,8 +32587,7 @@ const res = await fetch("https://api.solana.com/v1/payments/subscription-plans/p
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
-    "planPda": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
-    "pullerWalletId": "wal_collector",
+    "pullerCustodyWalletId": "cwlt_collector",
     "status": "active"
   })
 });
@@ -32637,8 +32599,7 @@ import os, requests, uuid
 r = requests.patch("https://api.solana.com/v1/payments/subscription-plans/psp_example",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
   json={
-    "planPda": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
-    "pullerWalletId": "wal_collector",
+    "pullerCustodyWalletId": "cwlt_collector",
     "status": "active"
   })
 ```
@@ -32652,7 +32613,7 @@ r = requests.patch("https://api.solana.com/v1/payments/subscription-plans/psp_ex
       "id": "psp_example",
       "organizationId": "org_example",
       "projectId": "prj_example",
-      "ownerWalletId": "privy_wallet_123",
+      "ownerCustodyWalletId": "ownercustodywallet_example",
       "ownerAddress": "So11111111111111111111111111111111111111112",
       "token": "example",
       "amount": "100.00",
@@ -32660,7 +32621,7 @@ r = requests.patch("https://api.solana.com/v1/payments/subscription-plans/psp_ex
       "programPlanId": "17014118346046923173",
       "planPda": "So11111111111111111111111111111111111111112",
       "destinationAddress": "So11111111111111111111111111111111111111112",
-      "pullerWalletId": "privy_wallet_123",
+      "pullerCustodyWalletId": "pullercustodywallet_example",
       "pullerAddress": "So11111111111111111111111111111111111111112",
       "metadataUri": "example",
       "status": "active",
@@ -34389,11 +34350,11 @@ r = requests.post("https://api.solana.com/v1/payments/subscriptions/psub_example
 ### Prepare subscription collection
 Source: https://platform.solana.com/docs/reference/api/payments/prepare-payment-subscription-collection
 
-> Prepares the collector-signed Solana subscriptions transfer transaction for an active subscription.
+> Prepares the exact collector wallet's Solana subscriptions transfer transaction for an active subscription.
 
 `POST /v1/payments/subscriptions/{subscriptionId}/prepare-collection`
 
-The transaction must still be signed and submitted by the collector/fee-payer flow.
+A genuinely absent collector uses the exact owner; a configured unresolved collector refuses. The transaction must still be signed and submitted by the collector/fee-payer flow.
 
 Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurring.execute` action.
 
@@ -34681,6 +34642,10 @@ Inputs for preparing the collector-signed Solana subscriptions transfer transact
 
   Same fields as `400`.
 
+- **`409`** Conflict
+
+  Same fields as `400`.
+
 - **`500`** Internal Server Error
 
   Same fields as `400`.
@@ -34825,6 +34790,18 @@ r = requests.post("https://api.solana.com/v1/payments/subscriptions/psub_example
   "error": {
     "code": "NOT_FOUND",
     "message": "Resource not found"
+  },
+  "meta": {
+    "requestId": "req_example"
+  }
+}
+```
+
+```json tab="409"
+{
+  "error": {
+    "code": "CONFLICT",
+    "message": "Resource already exists"
   },
   "meta": {
     "requestId": "req_example"

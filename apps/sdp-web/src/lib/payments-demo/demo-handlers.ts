@@ -800,7 +800,7 @@ function cancelRequest({ segments, world, now }: WriteContext): DemoWriteResult 
 
 const periodSchema = z.number().int().min(1, "Repeat at least every hour.").max(8760);
 
-const scheduleSchema = z.object({
+const scheduleSchema = z.strictObject({
   sourceCustodyWalletId: z.string().min(1),
   counterpartyId: z.string().min(1),
   counterpartyAccountId: z.string().min(1),
@@ -808,6 +808,11 @@ const scheduleSchema = z.object({
   amount: amountSchema,
   periodHours: periodSchema,
   firstCollectionAt: z.string().nullish(),
+  metadataUri: z
+    .string()
+    .url({ protocol: /^https?$/ })
+    .max(128)
+    .optional(),
 });
 
 function scheduleAnswer(id: string, status = 200) {
@@ -822,7 +827,7 @@ function createSchedule({ body, world, now }: WriteContext): DemoWriteResult {
   const input = parse(scheduleSchema, body);
   if ("failure" in input) return input.failure;
   const { sourceCustodyWalletId, counterpartyId, counterpartyAccountId } = input.data;
-  if (!findWallet(world, sourceCustodyWalletId)) {
+  if (!Object.values(world.wallets).some((wallet) => wallet.id === sourceCustodyWalletId)) {
     return error(404, "That wallet is not in this project.", "not_found");
   }
   const account = accountById(world, counterpartyAccountId);
@@ -853,12 +858,20 @@ function createSchedule({ body, world, now }: WriteContext): DemoWriteResult {
   );
 }
 
-const updateScheduleSchema = z.object({
+const updateScheduleSchema = z.strictObject({
   amount: amountSchema.optional(),
   token: z.string().min(1).optional(),
   periodHours: periodSchema.optional(),
   sourceCustodyWalletId: z.string().min(1).optional(),
+  counterpartyId: z.string().min(1).optional(),
   counterpartyAccountId: z.string().min(1).optional(),
+  firstCollectionAt: z.string().nullish(),
+  nextCollectionDueAt: z.string().nullish(),
+  metadataUri: z
+    .string()
+    .url({ protocol: /^https?$/ })
+    .max(128)
+    .nullish(),
 });
 
 function updateSchedule({ segments, body, world, now }: WriteContext): DemoWriteResult {
@@ -871,7 +884,10 @@ function updateSchedule({ segments, body, world, now }: WriteContext): DemoWrite
   const input = parse(updateScheduleSchema, body);
   if ("failure" in input) return input.failure;
   const { sourceCustodyWalletId, counterpartyAccountId } = input.data;
-  if (sourceCustodyWalletId !== undefined && !findWallet(world, sourceCustodyWalletId)) {
+  if (
+    sourceCustodyWalletId !== undefined &&
+    !Object.values(world.wallets).some((wallet) => wallet.id === sourceCustodyWalletId)
+  ) {
     return error(404, "That wallet is not in this project.", "not_found");
   }
   if (counterpartyAccountId !== undefined) {

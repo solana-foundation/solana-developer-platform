@@ -34,7 +34,10 @@ import { getAuthorized } from "@/middleware/authorize";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { type AppContext, getPaymentSubscriptionsRepository } from "@/routes/payments/context";
 import { mapCollectionAttemptRow } from "@/routes/payments/mappers";
-import { resolveScope, resolveWallet } from "@/routes/payments/wallets";
+import {
+  hasSubscriptionPlanPuller,
+  resolveSubscriptionPlanRole,
+} from "@/routes/payments/subscription-plans/wallets";
 import { parseI64String, parseU64String } from "@/services/payment-operation.service";
 import {
   assertSubscriptionTokenMint,
@@ -432,8 +435,11 @@ export const prepareSubscriptionCollection = async (
     throw badRequest("Subscription plan must be active before collection");
   }
 
-  const scope = await resolveScope(c);
-  const callerWallet = resolveWallet(scope.wallets, plan.puller_wallet_id ?? plan.owner_wallet_id);
+  const callerWallet = await resolveSubscriptionPlanRole(
+    c,
+    plan,
+    hasSubscriptionPlanPuller(plan) ? "puller" : "owner"
+  );
 
   const { amountBaseUnits, mint, tokenProgram } = await resolvePlanRuntime(plan);
   const { planPda } = await derivePlanAddresses(plan);

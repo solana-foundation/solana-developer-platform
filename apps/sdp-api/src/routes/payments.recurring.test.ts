@@ -719,13 +719,34 @@ describe("Payments routes — recurring", () => {
   });
 
   it("creates, lists, and gets recurring payment records through SDP API routes", async () => {
-    const created = await createRecurringPaymentFixture({
-      ...DEFAULT_RECURRING_FIXTURE,
-      headers: RECURRING_HEADERS,
+    const counterpartyId = await seedCounterparty();
+    const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      address: TEST_SOLANA_ADDRESSES.wallet2,
     });
+    const createRes = await app.request(
+      "/v1/payments/recurring-payments",
+      {
+        method: "POST",
+        headers: RECURRING_HEADERS,
+        body: JSON.stringify({
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          counterpartyId,
+          counterpartyAccountId,
+          token: DEVNET_USDC_MINT,
+          amount: "25.00",
+          periodHours: 720,
+        }),
+      },
+      env
+    );
+    expect(createRes.status).toBe(201);
+    expect((await createRes.clone().json()).data.recurringPayment).not.toHaveProperty(
+      "sourceProviderWalletId"
+    );
+    const created = (await parseRecurringResponse(createRes)).data.recurringPayment;
     expect(created.id).toMatch(/^prp_/);
     expect(created.sourceCustodyWalletId).toBe(TEST_CUSTODY_WALLET_ID);
-    expect(created.sourceProviderWalletId).toBe(TEST_WALLET_ID);
     expect(created.destinationAddress).toBe(TEST_SOLANA_ADDRESSES.wallet2);
     expect(created.token).toBe(DEVNET_USDC_MINT);
     expect(created.amount).toBe("25.00");
@@ -737,9 +758,11 @@ describe("Payments routes — recurring", () => {
       env
     );
     expect(listRes.status).toBe(200);
+    const rawListBody = await listRes.json();
     const listBody = successResponseSchema(paymentRecurringPaymentListResponseSchema).parse(
-      await listRes.json()
+      rawListBody
     );
+    expect(rawListBody.data.recurringPayments[0]).not.toHaveProperty("sourceProviderWalletId");
     expect(listBody.data.total).toBe(1);
     expect(listBody.data.recurringPayments[0]?.id).toBe(created.id);
 
@@ -749,6 +772,8 @@ describe("Payments routes — recurring", () => {
       env
     );
     expect(getRes.status).toBe(200);
+    const rawGetBody = await getRes.clone().json();
+    expect(rawGetBody.data.recurringPayment).not.toHaveProperty("sourceProviderWalletId");
     const getBody = await parseRecurringResponse(getRes);
     expect(getBody.data.recurringPayment.id).toBe(created.id);
     expect(getBody.data.recurringPayment.status).toBe("pending_activation");
@@ -776,6 +801,51 @@ describe("Payments routes — recurring", () => {
     expect(response.status).toBe(409);
     expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledTimes(signerCalls);
   });
+
+  it.each(["sourceWalletId", "sourceProviderWalletId"])(
+    "rejects %s without ignoring it on recurring create or update",
+    async (legacySelector) => {
+      const payment = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const create = await app.request(
+        "/v1/payments/recurring-payments",
+        {
+          method: "POST",
+          headers: RECURRING_HEADERS,
+          body: JSON.stringify({
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            [legacySelector]: TEST_WALLET_ID,
+            counterpartyId: payment.counterpartyId,
+            counterpartyAccountId: payment.counterpartyAccountId,
+            token: DEVNET_USDC_MINT,
+            amount: "26.00",
+            periodHours: 720,
+          }),
+        },
+        env
+      );
+      expect(create.status).toBe(400);
+      const update = await app.request(
+        `/v1/payments/recurring-payments/${payment.id}`,
+        {
+          method: "PATCH",
+          headers: RECURRING_HEADERS,
+          body: JSON.stringify({ amount: "26.00", [legacySelector]: TEST_WALLET_ID }),
+        },
+        env
+      );
+      expect(update.status).toBe(400);
+      const detail = await app.request(
+        `/v1/payments/recurring-payments/${payment.id}`,
+        { headers: RECURRING_HEADERS },
+        env
+      );
+      expect(detail.status).toBe(200);
+      expect((await parseRecurringResponse(detail)).data.recurringPayment).toMatchObject({
+        amount: "25.00",
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+      });
+    }
+  );
 
   it("does not claim activation when runtime admission denies the source wallet", async () => {
     const recurringPaymentId = (
@@ -1576,6 +1646,7 @@ describe("Payments routes — recurring", () => {
       ...DEFAULT_RECURRING_FIXTURE,
       headers: RECURRING_HEADERS,
     });
+    const feePaymentCallsBeforeReplacement = createKoraAdapterMock.mock.calls.length;
     const firstCollectionAt = "2026-07-02T00:00:00.000Z";
     await getDb(env)
       .prepare("UPDATE payment_recurring_payments SET first_collection_at = ? WHERE id = ?")
@@ -1613,6 +1684,31 @@ describe("Payments routes — recurring", () => {
     expect(updateBody.data.recurringPayment.planId).not.toBe(activated.planId);
     expect(updateBody.data.recurringPayment.subscriptionId).not.toBe(activated.subscriptionId);
     expect(sendTransactionMock).toHaveBeenCalledTimes(5);
+    const replacementActors = createKoraAdapterMock.mock.calls
+      .slice(feePaymentCallsBeforeReplacement)
+      .map(([, userId]) => userId);
+    expect(new Set(replacementActors.slice(0, -1))).toEqual(
+      new Set([
+        "sdp:v1:sandbox:org_payments_policy_test:project:prj_test_payments_policy:wallet:cwlt_recurring_replacement",
+      ])
+    );
+    expect(replacementActors.at(-1)).toBe(
+      `sdp:v1:sandbox:org_payments_policy_test:project:prj_test_payments_policy:wallet:${TEST_CUSTODY_WALLET_ID}`
+    );
+    expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledWith(
+      env,
+      TEST_ORG.id,
+      TEST_PROJECT.id,
+      replacementCustodyWalletId,
+      "recurring.update"
+    );
+    expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledWith(
+      env,
+      TEST_ORG.id,
+      TEST_PROJECT.id,
+      TEST_CUSTODY_WALLET_ID,
+      "recurring.update_cancel_old"
+    );
 
     const oldSubscription = await getDb(env)
       .prepare("SELECT status FROM payment_subscriptions WHERE id = ?")
@@ -3526,6 +3622,7 @@ describe("Payments routes — recurring", () => {
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT.id,
       ownerWalletId: TEST_WALLET_ID,
+      ownerCustodyWalletId: TEST_CUSTODY_WALLET_ID,
       ownerAddress: TEST_SOLANA_ADDRESSES.wallet1,
       token: DEVNET_USDC_MINT,
       amount: "25.00",
@@ -4894,6 +4991,10 @@ describe("Payments routes — recurring", () => {
         now,
         now
       )
+      .run();
+    await getDb(env)
+      .prepare("UPDATE payment_subscription_plans SET owner_custody_wallet_id = ? WHERE id = ?")
+      .bind(TEST_CUSTODY_WALLET_ID, planId)
       .run();
     await getDb(env)
       .prepare(
@@ -7447,15 +7548,16 @@ describe("Payments routes — recurring", () => {
         await getDb(env)
           .prepare(
             `INSERT INTO payment_subscription_plans (
-               id, organization_id, project_id, owner_wallet_id, owner_address, token,
+               id, organization_id, project_id, owner_wallet_id, owner_custody_wallet_id, owner_address, token,
                amount, period_hours, program_plan_id, status, created_by, created_at, updated_at
-             ) VALUES (?, ?, ?, ?, ?, ?, '25.00', 24, '1001', ?, ?, ?, ?)`
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, '25.00', 24, '1001', ?, ?, ?, ?)`
           )
           .bind(
             planId,
             TEST_ORG.id,
             TEST_PROJECT.id,
             TEST_WALLET_ID,
+            TEST_CUSTODY_WALLET_ID,
             recurringExecution.sourceSigner().address,
             DEVNET_USDC_MINT,
             status,
@@ -7902,15 +8004,16 @@ describe("Payments routes — recurring", () => {
         await getDb(env)
           .prepare(
             `INSERT INTO payment_subscription_plans (
-               id, organization_id, project_id, owner_wallet_id, owner_address, token,
+               id, organization_id, project_id, owner_wallet_id, owner_custody_wallet_id, owner_address, token,
                amount, period_hours, program_plan_id, status, created_by, created_at, updated_at
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
           )
           .bind(
             planId,
             TEST_ORG.id,
             TEST_PROJECT.id,
             TEST_WALLET_ID,
+            TEST_CUSTODY_WALLET_ID,
             sourceSigner.address,
             DEVNET_USDC_MINT,
             "25.00",

@@ -9,7 +9,7 @@ export interface PaymentSubscriptionPlanRow {
   id: string;
   organization_id: string;
   project_id: string;
-  owner_wallet_id: string;
+  owner_custody_wallet_id: string | null;
   owner_address: string;
   token: string;
   amount: string;
@@ -18,6 +18,7 @@ export interface PaymentSubscriptionPlanRow {
   plan_pda: string | null;
   destination_address: string | null;
   puller_wallet_id: string | null;
+  puller_custody_wallet_id: string | null;
   puller_address: string | null;
   metadata_uri: string | null;
   status: PaymentSubscriptionPlanStatus;
@@ -70,6 +71,7 @@ export interface CreatePaymentSubscriptionPlanInput {
   organizationId: string;
   projectId: string;
   ownerWalletId: string;
+  ownerCustodyWalletId: string;
   ownerAddress: string;
   token: string;
   amount: string;
@@ -78,6 +80,7 @@ export interface CreatePaymentSubscriptionPlanInput {
   planPda: string | null;
   destinationAddress: string | null;
   pullerWalletId: string | null;
+  pullerCustodyWalletId?: string | null;
   pullerAddress: string | null;
   metadataUri: string | null;
   status: PaymentSubscriptionPlanStatus;
@@ -93,6 +96,7 @@ export interface UpdatePaymentSubscriptionPlanInput {
   planPda?: string | null;
   destinationAddress?: string | null;
   pullerWalletId?: string | null;
+  pullerCustodyWalletId?: string | null;
   pullerAddress?: string | null;
   metadataUri?: string | null;
   status?: PaymentSubscriptionPlanStatus;
