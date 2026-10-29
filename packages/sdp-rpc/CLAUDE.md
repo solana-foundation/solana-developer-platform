@@ -3,6 +3,14 @@
 Solana RPC clients, the balance-read context, and the transport helpers every
 provider read path is built from.
 
+## Transaction history versions
+
+Every `getTransaction` read across SDP passes
+`MAX_SUPPORTED_TRANSACTION_VERSION` from `@sdp/rpc/transaction-version`.
+It is 1 so external v1 transactions can settle and reconcile; it does not
+change the v0 transactions SDP builds or broadcasts. `pnpm
+check:transaction-reads` runs in CI and rejects a v0-only read option.
+
 ## Outbound pool
 
 `apps/sdp-api/src/runtime/outbound-dispatcher.ts` installs one undici `Agent`

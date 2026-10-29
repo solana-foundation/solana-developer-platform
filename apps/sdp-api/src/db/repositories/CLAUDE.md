@@ -125,6 +125,16 @@ Architecture and the migration inventory are in
 [`packages/sdp-earn/README.md`](../../../../../packages/sdp-earn/README.md);
 invariants are in ADR 0002 (`docs/decisions/0002-earn-provider-pluggability.md`).
 
+## Payment requests: unresolved signatures stay in the late watch
+
+The payment-request scan can close an expired request after one hour of an
+unreadable candidate, but it leaves `signature_scan_cursor` behind that
+signature and retains `signature_scan_stuck_signature`. The late-payment watch
+must continue checking such closed requests past its normal seven-day window
+so a recovered chain read can still settle them. Migration 0190 indexes that
+exception; do not move the cursor past an unreadable candidate or drop the
+exception from the late-watch query without another recovery path.
+
 ## Ramps: one transition table
 
 `RAMP_TRANSFER_TRANSITIONS` (`@sdp/types`) names each legal ramp transfer
