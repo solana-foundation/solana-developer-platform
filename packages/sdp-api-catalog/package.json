@@ -4,6 +4,16 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./catalog": {
+      "types": "./src/catalog.ts",
+      "import": "./src/catalog.ts",
+      "default": "./src/catalog.ts"
+    },
+    "./playground-catalog": {
+      "types": "./src/generated/playground-catalog.json",
+      "import": "./src/generated/playground-catalog.json",
+      "default": "./src/generated/playground-catalog.json"
+    },
     "./reference": {
       "types": "./src/reference.ts",
       "import": "./src/reference.ts",
