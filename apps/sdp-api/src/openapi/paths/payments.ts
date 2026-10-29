@@ -35,6 +35,7 @@ import {
 } from "@/openapi/schemas/payments";
 import { walletBalancesQuerySchema } from "@/routes/payments/wallet-balances/schemas";
 import {
+  DOCS_GROUP,
   errorResponses,
   jsonContent,
   projectScopeHeaders,
@@ -64,6 +65,18 @@ import {
   transferResponse,
   walletBalancesResponse,
 } from "./responses";
+
+/** Where each Payments operation sits in the API reference (`DOCS_GROUP`). */
+export const PAYMENT_GROUPS = {
+  balances: "Balances and transactions",
+  transfers: "Transfers",
+  transferBatches: "Transfer batches",
+  recurringPayments: "Recurring payments",
+  paymentRequests: "Payment requests",
+  subscriptionPlans: "Subscription plans",
+  subscriptions: "Subscriptions",
+  ramps: "Ramps",
+} as const;
 
 // Each matches the route's `idempotent()` step (ADR 0009); spec.test.ts checks.
 // Transfers and batches store any answer once their row is written.
@@ -96,6 +109,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/payments/wallets/{walletId}/balances",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.balances,
     summary: "Get wallet balances",
     operationId: "getPaymentWalletBalances",
     description:
@@ -133,6 +147,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/payments/transfers",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.transfers,
     summary: "Execute transfer (custody)",
     operationId: "createPaymentTransfer",
     description:
@@ -158,6 +173,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/payments/transfers",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.transfers,
     summary: "List transfers",
     operationId: "listPaymentTransfers",
     description:
@@ -180,6 +196,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/payments/transfers/{transferId}",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.transfers,
     summary: "Get transfer",
     operationId: "getPaymentTransfer",
     description: "Retrieves details for a specific transfer.",
@@ -201,6 +218,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/payments/transfer-batches/estimate",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.transferBatches,
     summary: "Estimate transfer batch",
     operationId: "estimatePaymentTransferBatch",
     description:
@@ -226,6 +244,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/payments/transfer-batches",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.transferBatches,
     summary: "Create transfer batch",
     operationId: "createPaymentTransferBatch",
     description:
@@ -253,6 +272,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/payments/transfer-batches/{batchId}/retry",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.transferBatches,
     summary: "Retry a transfer batch's failed recipients",
     operationId: "retryPaymentTransferBatch",
     description:
@@ -276,6 +296,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/payments/transfer-batches",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.transferBatches,
     summary: "List transfer batches",
     operationId: "listPaymentTransferBatches",
     description: "Lists transfer batches for the authenticated organization or project scope.",
@@ -297,6 +318,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/payments/transfer-batches/{batchId}",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.transferBatches,
     summary: "Get transfer batch",
     operationId: "getPaymentTransferBatch",
     description: "Retrieves a transfer batch with recipient rows and chunk transfer summaries.",
@@ -318,6 +340,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/payments/recurring-payments",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.recurringPayments,
     summary: "Create recurring payment",
     operationId: "createPaymentRecurringPayment",
     description:
@@ -343,6 +366,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/payments/recurring-payments",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.recurringPayments,
     summary: "List recurring payments",
     operationId: "listPaymentRecurringPayments",
     description:
@@ -365,6 +389,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "patch",
     path: "/v1/payments/recurring-payments/{id}",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.recurringPayments,
     summary: "Update recurring payment",
     operationId: "updatePaymentRecurringPayment",
     description:
@@ -391,6 +416,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/payments/recurring-payments/{id}/activate",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.recurringPayments,
     summary: "Activate recurring payment",
     operationId: "activatePaymentRecurringPayment",
     description:
@@ -413,6 +439,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/payments/recurring-payments/{id}/cancel",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.recurringPayments,
     summary: "Cancel recurring payment",
     operationId: "cancelPaymentRecurringPayment",
     description:
@@ -435,6 +462,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/payments/requests/{paymentRequestId}/cancel",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.paymentRequests,
     summary: "Cancel payment request",
     operationId: "cancelPaymentRequest",
     description:
@@ -457,6 +485,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/payments/recurring-payments/{id}/collect",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.recurringPayments,
     summary: "Collect recurring payment",
     operationId: "collectPaymentRecurringPayment",
     description:
@@ -479,6 +508,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/payments/recurring-payments/{id}/resume",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.recurringPayments,
     summary: "Resume recurring payment",
     operationId: "resumePaymentRecurringPayment",
     description:
@@ -501,6 +531,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/payments/recurring-payments/{id}",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.recurringPayments,
     summary: "Get recurring payment",
     operationId: "getPaymentRecurringPayment",
     description: "Retrieves an SDP-custody outbound recurring payment record.",
@@ -522,6 +553,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/payments/subscription-plans",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.subscriptionPlans,
     summary: "Create subscription plan",
     operationId: "createPaymentSubscriptionPlan",
     description:
@@ -547,6 +579,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/payments/subscription-plans",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.subscriptionPlans,
     summary: "List subscription plans",
     operationId: "listPaymentSubscriptionPlans",
     description: "Lists recurring-payment subscription plans.",
@@ -568,6 +601,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/payments/subscription-plans/{planId}/prepare-create",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.subscriptionPlans,
     summary: "Prepare subscription plan creation",
     operationId: "preparePaymentSubscriptionPlanCreate",
     description:
@@ -594,6 +628,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/payments/subscription-plans/{planId}",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.subscriptionPlans,
     summary: "Get subscription plan",
     operationId: "getPaymentSubscriptionPlan",
     description: "Retrieves a recurring-payment subscription plan record.",
@@ -615,6 +650,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "patch",
     path: "/v1/payments/subscription-plans/{planId}",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.subscriptionPlans,
     summary: "Update subscription plan",
     operationId: "updatePaymentSubscriptionPlan",
     description: "Updates mutable subscription plan fields and on-chain identifiers.",
@@ -640,6 +676,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/payments/subscriptions",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.subscriptions,
     summary: "Create subscription",
     operationId: "createPaymentSubscription",
     description:
@@ -665,6 +702,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/payments/subscriptions",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.subscriptions,
     summary: "List subscriptions",
     operationId: "listPaymentSubscriptions",
     description: "Lists recurring-payment subscriptions.",
@@ -686,6 +724,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/payments/subscriptions/{subscriptionId}/prepare-authorization",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.subscriptions,
     summary: "Prepare subscription authorization",
     operationId: "preparePaymentSubscriptionAuthorization",
     description:
@@ -712,6 +751,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/payments/subscriptions/{subscriptionId}/prepare-cancel",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.subscriptions,
     summary: "Prepare subscription cancellation",
     operationId: "preparePaymentSubscriptionCancel",
     description:
@@ -738,6 +778,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/payments/subscriptions/{subscriptionId}/prepare-resume",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.subscriptions,
     summary: "Prepare subscription resume",
     operationId: "preparePaymentSubscriptionResume",
     description:
@@ -764,6 +805,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/payments/subscriptions/{subscriptionId}/prepare-collection",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.subscriptions,
     summary: "Prepare subscription collection",
     operationId: "preparePaymentSubscriptionCollection",
     description:
@@ -790,6 +832,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/payments/subscriptions/{subscriptionId}",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.subscriptions,
     summary: "Get subscription",
     operationId: "getPaymentSubscription",
     description: "Retrieves a recurring-payment subscription record.",
@@ -811,6 +854,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/payments/subscriptions/{subscriptionId}/collection-attempts",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.subscriptions,
     summary: "List subscription collection attempts",
     operationId: "listPaymentSubscriptionCollectionAttempts",
     description: "Lists collection attempts for a recurring-payment subscription.",
@@ -833,6 +877,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/payments/ramps/onramp/currency",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.ramps,
     summary: "List on-ramp currency support",
     operationId: "listPaymentOnrampCurrencies",
     description:
@@ -855,6 +900,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/payments/ramps/offramp/currency",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.ramps,
     summary: "List off-ramp currency support",
     operationId: "listPaymentOfframpCurrencies",
     description:
@@ -877,6 +923,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/payments/ramps/onramp/quote",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.ramps,
     summary: "Create on-ramp quote",
     operationId: "createPaymentOnrampQuote",
     description:
@@ -901,6 +948,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/payments/ramps/sandbox/simulate",
     tags: ["Payments"],
+    [DOCS_GROUP]: PAYMENT_GROUPS.ramps,
     summary: "Simulate sandbox transfer",
     operationId: "simulateSandboxTransfer",
     description:

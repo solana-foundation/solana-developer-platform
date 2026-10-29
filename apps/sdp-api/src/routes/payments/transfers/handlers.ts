@@ -94,7 +94,7 @@ import {
   type SplTransferSource,
 } from "@/routes/payments/token-accounts";
 import {
-  admitPaymentWalletRuntimeExecution,
+  admitPaymentStart,
   type ResolvedScope,
   resolveScope,
   resolveWalletByCustodyWalletId,
@@ -431,7 +431,7 @@ export async function admitTransferExecution(
     // An excluded provider's deposit is never funded.
     assertTransferRampProviderInChannel(c, rampTransfer);
   }
-  await admitPaymentWalletRuntimeExecution(c, input.authorized.operation.sourceWallet);
+  await admitPaymentStart(c, input.authorized.operation.sourceWallet, "payments.transfer");
 }
 
 /**

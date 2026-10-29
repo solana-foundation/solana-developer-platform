@@ -45,6 +45,7 @@ apps/sdp-docs/.cloudflare.*.env
 apps/sdp-web
 packages/*
 !packages/sdp-types
+!packages/sdp-api-catalog
 !packages/sdp-env-config
 !packages/sdp-design-tokens
 !packages/sdp-rpc

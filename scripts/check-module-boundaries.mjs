@@ -20,6 +20,7 @@ const MODULE_METADATA = [
     directory: "apps/sdp-api",
     purpose: "Node.js API and application composition root.",
     allowedDependencies: [
+      "@sdp/api-catalog",
       "@sdp/custody",
       "@sdp/dvp",
       "@sdp/earn",
@@ -48,7 +49,12 @@ const MODULE_METADATA = [
     name: "sdp-docs",
     directory: "apps/sdp-docs",
     purpose: "Public documentation site and generated API reference.",
-    allowedDependencies: ["@sdp/design-tokens", "@sdp/env-config", "@sdp/types"],
+    allowedDependencies: [
+      "@sdp/api-catalog",
+      "@sdp/design-tokens",
+      "@sdp/env-config",
+      "@sdp/types",
+    ],
   },
   {
     name: "sdp-web",
@@ -70,8 +76,9 @@ const MODULE_METADATA = [
   {
     name: "@sdp/api-catalog",
     directory: "packages/sdp-api-catalog",
-    purpose: "The public API's request snippets, shared by the dashboard and the docs.",
-    allowedDependencies: [],
+    purpose:
+      "The public API's reference model and request snippets, shared by the API, the dashboard and the docs.",
+    allowedDependencies: ["@sdp/types"],
   },
   {
     name: "@sdp/api-integration",

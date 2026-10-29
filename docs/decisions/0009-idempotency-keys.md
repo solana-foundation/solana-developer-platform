@@ -143,7 +143,7 @@ back to `pending` with no transfer under the batch lock, all or nothing, so a co
 409. A chunk links a recipient only while it is still pending with no transfer, so a recipient that
 another writer failed or claimed first rolls the chunk back before it is sent. The claim writes a
 `payment_transfer_batch_retries` row under the retry's record key in the same transaction (migration
-0189), so the route runs like create (`serverErrors: "rerun"`, `recovery: "record"`): a rerun after a
+0190), so the route runs like create (`serverErrors: "rerun"`, `recovery: "record"`): a rerun after a
 5xx or a takeover is answered from that row with the batch as it stands, and claims nothing again.
 It pays the address each recipient recorded, and refuses (409) if the account now holds another. The row also
 records the failed chunk transfers the claim unlinked, so batch responses keep listing every chunk

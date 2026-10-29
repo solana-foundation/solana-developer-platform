@@ -45,6 +45,11 @@ const nextConfig: NextConfig = {
         source: "/llms-full.txt",
         destination: `${docsProxyOrigin}/docs/ai/llms-full.txt`,
       },
+      // The docs skill agents install; the docs app serves it from public/.
+      {
+        source: "/SKILL.md",
+        destination: `${docsProxyOrigin}/SKILL.md`,
+      },
       {
         source: "/docs.md",
         destination: `${docsProxyOrigin}/docs.md`,

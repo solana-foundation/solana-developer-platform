@@ -96,6 +96,12 @@ import { DocsPage, DocsTitle, DocsDescription, DocsBody } from "@/components/doc
 - `<DocsPage toc={toc}>` — renders sticky TOC sidebar at 1180px+ (right column, 230px wide)
 - Article max-width is 760px (760px + gap + 230px TOC = ~1060px inside 1240px container)
 
+### Page actions and the Markdown agents get
+
+`[[...slug]]/page.tsx` puts the title in `.launch-docs-header` beside `PageActions` (`page-actions.tsx`): **Copy page**, with View as Markdown and Open in ChatGPT or Claude behind its chevron. Copy page fetches the page's `.md` and copies that response, so it always matches what agents get; below 640px it drops its label. The `.md` route (`src/app/api/docs-md`) opens every page, the home included, with a one-line context block linking the docs index (`/docs.md`, every page), `llms.txt` (the key pages) and `SKILL.md`, then the page's title and description.
+
+Popovers (`fumadocs-ui/components/ui/popover`) render in a portal outside `.sdp-docs-shell`: give their content `.launch-popover`, which sets the type, surface, `--elevation-popover` and the motion-token animation.
+
 ### CSS classes (for custom elements within pages)
 
 | Class | Element |
@@ -114,18 +120,21 @@ import { DocsPage, DocsTitle, DocsDescription, DocsBody } from "@/components/doc
 | `.launch-mdx-table` | Full-width table inside the frame |
 | `.launch-mdx-th` | Table header: `--paper-tile` bg, 13px, weight 500 |
 | `.launch-mdx-td` | Table cell: 14px |
+| `.launch-docs-action-links` | `<ActionLinks>`: a page's action links as raised chips (`--chip` + `--chip-ring`); a `download` link leads with a download icon, a JSON link with braces |
+
+`DocsBreadcrumb` (`breadcrumb.tsx`) links each folder above the page to its landing page: its index, or else its first page, so a section whose meta lists its overview as a child still links. A folder whose index is the page ends the trail (an API family's table shows Reference > API > Payments), and a step that is the page itself, or a folder with no page, is a quieter label.
 
 ---
 
 ## Sidebar Components
 
-`src/components/docs-shell/sidebar.tsx`: `"use client"`, receives `tree` (Fumadocs page tree) and optional `dashboardUrl`. The footer holds the network status rows and the Fumadocs `ThemeSwitch` (light, dark, system).
+`src/components/docs-shell/sidebar.tsx`: `"use client"`, receives `tree` (Fumadocs page tree), optional `dashboardUrl` and `agentSetup`. The header chips are Platform, Dashboard and the **Agent setup** menu (`agent-setup.tsx`): one tab per coding agent, each a copyable `npx skills add` command. The layout builds the commands with `getAgentSetupOptions()` (`src/lib/agent-setup.ts`). Nothing unreleased is offered on any deployment: the docs skill always installs, and a module skill in `MODULE_SKILLS` shows only while its `listed` toggle is true, its module is stable, and the deployment publishes that module (`isModulePublished`, which applies a hold such as Earn's). The MCP tab's toggle is `DOCS_MCP_COMMAND`: null hides it until the docs MCP ships. The footer holds the network status rows, an `llms.txt` link and the Fumadocs `ThemeSwitch` (light, dark, system).
 
 **Do not add new navigation patterns outside the page tree.** Navigation is auto-generated from `source.pageTree` via Fumadocs. To add pages to the sidebar, add MDX files to `content/docs/` and update `meta.json`.
 
 ### Navigation node icons (`navigation-node.tsx`)
 
-Sidebar icons are optional and opt-in per page/folder. Set `icon: <LucideName>` (e.g. `icon: BookOpen`) in a page's MDX frontmatter or a folder's `meta.json`; the loader in `src/lib/source.ts` resolves the name against `lucide-react` exports (unknown names throw at build time) and `NavigationNode` renders it before the label via `.launch-docs-nav-icon`. Pages without an `icon` stay text-only. The folder expand/collapse chevron (`ChevronDown` / `ChevronRight`) is unrelated and always shown.
+Sidebar icons are optional and opt-in per page/folder. Set `icon: <LucideName>` (e.g. `icon: BookOpen`) in a page's MDX frontmatter or a folder's `meta.json`; the loader in `src/lib/source.ts` resolves the name against `lucide-react` exports (unknown names throw at build time) and `NavigationNode` renders it before the label via `.launch-docs-nav-icon`. The one exception is `icon: method:<METHOD>`, which the API reference generator writes on each operation page: it renders the HTTP method in its colour instead of an icon. Pages without an `icon` stay text-only. The folder expand/collapse chevron (one `ChevronRight` that turns to point down while the folder is open, on the motion tokens; the toggle carries `aria-expanded`) is unrelated and always shown.
 
 ### Search
 
@@ -141,20 +150,21 @@ Sidebar icons are optional and opt-in per page/folder. Set `icon: <LucideName>` 
 | `.launch-docs-sidebar-header` | Logo, action chips and search, border-bottom |
 | `.launch-docs-brand` | Logo link (flex, gap 12px) |
 | `.launch-docs-brand-mark` | 36×36px icon box, `--paper` bg, border-radius 10px |
-| `.launch-docs-sidebar-actions` | One equal-width column per action |
+| `.launch-docs-sidebar-actions` | Two equal columns; an odd last chip (Agent setup beside Platform and Dashboard) takes a full row |
 | `.launch-docs-sidebar-action` | Chip links (`--chip` + `--chip-ring`), `--control-height-sm`, `--font-size-meta` |
 | `.launch-docs-sidebar-search` | Search trigger, `--control-height-md`, `--wash` fill; the `⌘K` keys are chips |
 | `.launch-docs-sidebar-nav` | Scrollable nav area |
 | `.launch-docs-nav-item` | Page link: `--font-size-body`, `--ink-secondary`, `--wash` on hover |
 | `.launch-docs-nav-item.is-active` | Active page: `--wash-strong` bg, `--ink`, weight 500 |
 | `.launch-docs-nav-folder` | Folder container |
+| `.launch-docs-nav-folder-row` | A folder's row and its one highlight, toggle included: `--wash` on hover, `--wash-strong` (`.is-active`) on the folder's own page |
 | `.launch-docs-nav-folder-btn` | Non-linked folder label that toggles the folder: `--ink`, weight 500 |
-| `.launch-docs-nav-folder-link` | Linked folder: `--ink`, weight 500 |
+| `.launch-docs-nav-folder-link` | Linked folder: `--ink`, weight 500; a click opens the folder, or toggles it from the folder's own page |
 | `.launch-docs-nav-toggle` | Expand/collapse chevron button, 28px |
-| `.launch-docs-nav-children` | Indented children container |
+| `.launch-docs-nav-children` | Children container, 14px further in per level, highlights included |
 | `.launch-docs-sidebar-section` | Section label: `--font-size-meta`, `--ink-tertiary`, sentence case |
 | `.launch-docs-sidebar-separator` | Plain 1px `--rule-faint` rule |
-| `.launch-docs-sidebar-status` | Footer: status rows (`.launch-docs-status-list`) and the theme switch |
+| `.launch-docs-sidebar-status` | Footer: status rows (`.launch-docs-status-list`, ending in the `llms.txt` link) and the theme switch |
 
 ---
 
@@ -210,8 +220,16 @@ Gates follow module declarations, never sentences:
 - Frontmatter (titles, descriptions) of shared pages must stay module-neutral.
 - `check:links` checks the channel in the manifest; CI runs it on `experimental` and `stable`.
 - Committed generated files (`public/llms*.txt`, Postman, `content/docs/meta.json`, `reference/api/index.mdx`, `src/generated/public-surface.json`) are built at `experimental`; the deployment's build regenerates them for its channel.
+- The docs skill (`public/SKILL.md`, and the same file at the repo's `skills/sdp-docs/SKILL.md`, which `npx skills add` installs from GitHub) is the exception: it names no module, so one copy fits every channel. `generate:ai` links only shared pages from it and fails on a gated or missing one; send readers to `llms.txt` for what a channel publishes.
 
-API reference pages are different: they are generated from the public OpenAPI document, one page per tag, so a family appears and disappears with that document (`EARN_PUBLIC_SURFACE_PUBLISHED` in `apps/sdp-api/src/openapi/spec.ts` is the one such switch). The docs keep no list of families of their own, and an untagged operation fails `generate:api`.
+API reference pages are different: they are generated from the public OpenAPI document, a folder per tag, so a family appears and disappears with that document (`EARN_PUBLIC_SURFACE_PUBLISHED` in `apps/sdp-api/src/openapi/spec.ts` is the one such switch). The docs keep no list of families of their own, and an untagged operation fails `generate:api`.
+
+- `openapi:generate` also writes the channel's reference model (`apps/sdp-api/generated/api-reference.json`, gitignored; the contract is `@sdp/api-catalog/reference`, built by `apps/sdp-api/src/openapi/reference.ts`). A schema keyword the model cannot carry fails the build there.
+- `generate-api-docs.mjs` parses it and, with `scripts/lib/api-reference-page.ts`, writes a folder per family (`reference/api/<family>/`): `index.mdx`, the family's table of operations (Method, Endpoint, Summary, each row one link to its operation), and a page per operation named by its `endpointId` (`create-wallet.mdx`), which the folder's `meta.json` lists in document order. An operation page is titled by its summary, described by the description's first sentence, and holds its parameters, request body, responses, a cURL, TypeScript and Python sample (`tab=` fences, from `@sdp/api-catalog/snippets`, sending an `Idempotency-Key` only where the route declares one) and an example per status. The generator fails if a table misses an operation or a page misses a sample.
+- A family whose routes name groups (`x-sdp-group`, the model's `group`; two or more) keeps each group's pages in a `(group)` folder with its own `meta.json`: Fumadocs shows it as a collapsible sidebar folder and leaves it out of URLs, so an operation stays at `<family>/<endpointId>`. Its table gets a heading per group. `operationGroups` lays out both; a family with fewer than two groups stays flat. Scripts that read files take slugs from `docsPageSlugOf` (`src/lib/site.ts`), which drops `(group)` folders as Fumadocs does, and the `.md` route reads the page's own file (`page.path`).
+- The pages are Markdown, so `.md`, `llms-full.txt` and search carry everything. `expandDocsBlocks` writes `<ApiEndpoint />` as `METHOD /path` in a code span (search gets the same text) and unwraps the wrappers to their content: `<ApiOperationTable>` also points each row at its operation's `.md`, while `<ActionLinks>` (a page's action links as chips, the Postman download) only lays a page out. A new reference component needs both forms. `check:links` accepts a page's `.md`, and `generate-ai-resources.ts` reads a family folder's index as its first page and names a group's section after its family (`Payments: Transfers`).
+- On a reference page, `remarkDocsBlocks` sets each ` · ` between a field's facts in a `.launch-api-separator` span so the dots get room; the Markdown keeps the plain text.
+- On an operation page, `apiReference: true` keeps the table of contents to its sections and scopes the `.is-api-reference` styles in `globals.css`, and `icon: method:<METHOD>` puts its method beside it in the sidebar (`src/lib/source.ts`).
 
 Currently unpublished: the whole Earn family, guide and API reference, until PRO-2038.
 
@@ -235,6 +253,6 @@ When working on design or frontend changes:
 - Reuse existing templates and typography styles from the codebase rather than creating new ones when something suitable already exists.
 - When adding images, download and store a local copy in the project. Never reference external URLs directly.
 - Raw `<img>` srcs (JSX/TSX or inline `<img>` in MDX) must point at `/docs/images/...`, not `/images/...`. Production traffic arrives through sdp-web's `/docs/:path*` proxy, which never forwards root-level `/images` requests; a rewrite in `next.config.mjs` maps `/docs/images/*` back onto `public/images/*`. Markdown-syntax images (`![](/images/...)`) are exempt: fumadocs-mdx compiles them to static imports that already resolve correctly.
-- sdp-web forwards only `/docs`, `/docs/*`, `/docs.md`, `/llms.txt`, `/llms-full.txt`, `/postman/collection.json` and `/provider-onboarding/*` to this app (`apps/sdp-web/next.config.ts`). Any other root-level route here 404s on platform.solana.com until it gets a rewrite there.
+- sdp-web forwards only `/docs`, `/docs/*`, `/docs.md`, `/llms.txt`, `/llms-full.txt`, `/SKILL.md`, `/postman/collection.json` and `/provider-onboarding/*` to this app (`apps/sdp-web/next.config.ts`). Any other root-level route here 404s on platform.solana.com until it gets a rewrite there.
 - Use proper image sizes relative to their container — do not use oversized images (e.g., 1024px for a 32px container). Use at most 2x the container size for retina support.
 - Run `npm run build` and check for errors before pushing to staging.

@@ -500,7 +500,10 @@ export const estimateTransferBatchRequestSchema = estimateTransferBatchSchemaBas
   .extend({
     ...createTransferBatchRequestSchema.shape,
     // An estimate moves nothing, so it needs no payout run name.
-    externalId: createTransferBatchRequestSchema.shape.externalId.optional(),
+    externalId: createTransferBatchRequestSchema.shape.externalId.optional().openapi({
+      description:
+        "Optional: an estimate moves nothing, so it names no payout run. Pass the run's `externalId` to estimate the batch you will create with it.",
+    }),
   })
   .openapi({
     description: "Estimate transaction chunking and fees for a transfer batch.",
