@@ -683,17 +683,17 @@ await sdpAdmin.post(`/v1/issuance/tokens/${tokenId}/unfreeze`, {
 });
 ```
 
-With the freeze cleared, the destination can receive transfers again. Section 8 covers the production transition: what changes between `sk_test_` and `sk_live_`, and which checks your compliance officer signs against before this same code runs on mainnet.
+With the freeze cleared, the destination can receive transfers again. Section 8 covers the production transition: what changes between sandbox and production keys, and which checks your compliance officer signs against before this same code runs on mainnet.
 
 ## 8. Production transition checklist
 
-The work between `sk_test_` and `sk_live_` is not a flag flip. It is the moment your compliance officer signs against the runbook your engineering team has been building since Section 2. Going to production means three things change mechanically and a longer list of things your institution attests to.
+The move from sandbox to production keys is not a flag flip. It is the moment your compliance officer signs against the runbook your engineering team has been building since Section 2. Going to production means three things change mechanically and a longer list of things your institution attests to.
 
 ### 1. What changes mechanically
 
 Your sandbox setup is built around six artifacts that all swap for production equivalents:
 
-- **API keys**. Replace your project-scoped Developer and Admin keys with `sk_live_` keys created in the dashboard in your production project, as in Section 2.
+- **API keys**. Replace your project-scoped Developer and Admin keys with keys created in the dashboard in your production project, as in Section 2.
 - **Custody provider**. Production reads `provider` as your federally chartered custodian (Anchorage Digital Bank for most US institutional issuers), bound to your organization through the Anchorage onboarding flow. The Privy sandbox wallets do not carry over.
 - **Solana network**. Mainnet-beta replaces devnet. The custody address gets funded by your custody bank as part of standard operational support, not by a faucet.
 - **API base URL**. `https://api.solana.com` is the canonical production base.
@@ -702,7 +702,7 @@ Your sandbox setup is built around six artifacts that all swap for production eq
 
 ### 2. What your compliance officer signs off on
 
-Before any `sk_live_` key sees real traffic, the compliance officer needs evidence that the institutional posture from Section 1 is operational, not aspirational. The minimum sign-off list:
+Before any production key sees real traffic, the compliance officer needs evidence that the institutional posture from Section 1 is operational, not aspirational. The minimum sign-off list:
 
 - **GENIUS Section 4(a)(5) capabilities demonstrated**. Screening, freeze, seize, and force-burn each exercised on sandbox with a captured response in the audit trail.
 - **BSA/AML program documented**. Written risk-based policy with internal controls, ongoing customer due diligence, independent testing, and a US-located AML/CFT compliance officer named (proposed 31 CFR § 1033.210 under the FinCEN/OFAC implementing rules).

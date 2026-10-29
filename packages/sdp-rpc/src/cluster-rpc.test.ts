@@ -1,14 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { explicitClusterRpcUrl, resolveClusterRpcUrl, resolveDefaultCluster } from "./config";
+import { explicitClusterRpcUrl, resolveDefaultCluster } from "./config";
 import { createClusterRpc } from "./solana";
 import type { RpcEnv } from "./types";
 
 /**
- * One process may serve both clusters. These pin how a cluster's endpoint is
- * chosen: an explicit `SOLANA_<CLUSTER>_RPC_URL` wins for ANY cluster, the
- * default included; the default cluster otherwise falls back to the process
- * configuration; the other cluster has nothing to fall back to.
+ * One process may serve both clusters. These pin how the deprecated
+ * `createClusterRpc(env, cluster)` chooses a cluster's endpoint: an explicit
+ * `SOLANA_<CLUSTER>_RPC_URL` wins for ANY cluster, the default included; the
+ * default cluster otherwise falls back to the process configuration; the other
+ * cluster has nothing to fall back to.
  */
 describe("cluster RPC selection", () => {
   const devnetDefault: RpcEnv = {
@@ -27,13 +28,11 @@ describe("cluster RPC selection", () => {
       SOLANA_DEVNET_RPC_URL: " https://private-devnet.example ",
     };
     assert.equal(explicitClusterRpcUrl(env, "devnet"), "https://private-devnet.example");
-    assert.equal(resolveClusterRpcUrl(env, "devnet"), "https://private-devnet.example");
     assert.doesNotThrow(() => createClusterRpc(env, "devnet"));
   });
 
   it("falls back to the process configuration for the default cluster only", () => {
-    assert.equal(resolveClusterRpcUrl(devnetDefault, "devnet"), "https://process-default.example");
-    assert.equal(resolveClusterRpcUrl(devnetDefault, "mainnet-beta"), "");
+    assert.doesNotThrow(() => createClusterRpc(devnetDefault, "devnet"));
     assert.equal(explicitClusterRpcUrl(devnetDefault, "mainnet-beta"), undefined);
   });
 

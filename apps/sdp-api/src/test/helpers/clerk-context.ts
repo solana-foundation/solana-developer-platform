@@ -28,6 +28,5 @@ export async function testClerkContext(env: Env): Promise<ClerkAuthContext> {
     clerkOrgId: claims.o.id,
     email: claims.email,
     orgSlug: TEST_ORG.slug,
-    orgRole: "org:admin",
   };
 }

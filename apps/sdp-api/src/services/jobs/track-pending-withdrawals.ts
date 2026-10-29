@@ -182,7 +182,6 @@ export async function trackPendingWithdrawals(env: Env): Promise<void> {
         // Burn is on the gateway (channel chain). No auth here — auth-enabled
         // instances will need to be wired through this call the way
         // withdraw-confirm.ts does.
-        // TODO(auth): plumb resolveMemberGatewayAuth into the cron path once we need it.
         // searchTransactionHistory for the same reason as the deposit reconciler:
         // every path into here is already past the node's short recent-status cache,
         // and promoteSignedPending reaches it strictly AFTER STUCK_AFTER_MS. Without

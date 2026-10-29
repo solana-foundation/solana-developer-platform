@@ -29,10 +29,11 @@ import { issuanceQueryKeys } from "@/app/dashboard/[projectId]/issuance/issuance
 import {
   isOnChain,
   type TokenLifecycle,
-} from "@/app/dashboard/[projectId]/issuance/issuance-token-state.redesign";
+} from "@/app/dashboard/[projectId]/issuance/issuance-token-state";
 import { formatDecimalAmount } from "@/app/dashboard/[projectId]/payments/payments-presentation";
 import { PAYMENTS_TABLE_CELL } from "@/app/dashboard/[projectId]/payments/payments-table";
 import { RecordBlock, RecordStack } from "@/components/refresh-record";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { LockSupplyForm, SupplyOperationForm } from "./supply-operation-form";
@@ -159,12 +160,14 @@ export function TokenOperationsTab({
   onOpenTab,
 }: TokenTabProps & { onOpenTab: (tab: TokenTab) => void }) {
   const t = useTranslations();
+  const { canWrite } = useDashboardWorkspace().dashboardAccess.capabilities;
   const [activeAction, setActiveAction] = useState<OperationAction | null>(null);
   const labels = getOperationLabels(token, t);
   const { supply, transfers, recovery } = getOperationGroups({
     ops,
     token,
     canManageTokenAdmin,
+    canWrite,
     t,
     onSelect: (action) =>
       action === "allowlist" ? onOpenTab("compliance") : setActiveAction(action),

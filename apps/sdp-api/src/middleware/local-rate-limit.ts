@@ -1,4 +1,5 @@
 import type { Context, Next } from "hono";
+import { routePath } from "hono/route";
 import { getClientIp } from "@/lib/client-ip";
 import { rateLimited } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
@@ -65,7 +66,7 @@ export function localRateLimit(options: LocalRateLimitOptions) {
           event: "sdp_api_local_rate_limit_exceeded",
           limiter: options.name,
           identified: key !== UNTRACKED_KEY,
-          path: c.req.path,
+          path: routePath(c, -1) || "unmatched",
         },
         "Local rate limit exceeded"
       );

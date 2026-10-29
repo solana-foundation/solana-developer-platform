@@ -221,6 +221,33 @@ describe("sendTransferBatchUnderKey", () => {
     expect(next).not.toBe(refused);
   });
 
+  it("retries a stopped batch under the same key after re-enable", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>(async () => recorded())
+      .mockResolvedValueOnce(
+        Response.json(
+          {
+            error: {
+              code: "FORBIDDEN",
+              message: "This movement is disabled for the project",
+              details: { reason: "movement_disabled" },
+            },
+          },
+          { status: 403 }
+        )
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(sendTransferBatchUnderKey(batchRequest(), t)).rejects.toThrow(
+      "This movement is disabled for the project"
+    );
+    await sendTransferBatchUnderKey(batchRequest(), t);
+
+    const [refused, retried] = sentKeys(fetchMock);
+    expect(refused).toMatch(/^[0-9a-f-]{36}$/);
+    expect(retried).toBe(refused);
+  });
+
   // A money movement never mints a fresh key while the original may have run:
   // the next press is answered under the same key.
   it("keeps the key on an unknown outcome and resends under it", async () => {
@@ -295,15 +322,23 @@ describe("sendTransferBatchUnderKey", () => {
   });
 });
 
+function refuseSessionStorageWrites() {
+  // SAFETY: This is the runtime prototype of the Storage instance under test.
+  // Spying on Storage.prototype misses this jsdom implementation's setItem.
+  return vi
+    .spyOn(Object.getPrototypeOf(window.sessionStorage) as Storage, "setItem")
+    .mockImplementation(() => {
+      throw new DOMException("QuotaExceededError");
+    });
+}
+
 describe("degraded storage", () => {
   // A batch whose key lives in memory only could be sent twice by a reload and
   // retry, so it is refused like every other money movement.
   it("refuses to send a batch whose key storage refused", async () => {
     const fetchMock = vi.fn<typeof fetch>();
     vi.stubGlobal("fetch", fetchMock);
-    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
-      throw new DOMException("QuotaExceededError");
-    });
+    const setItem = refuseSessionStorageWrites();
     try {
       await expect(sendTransferBatchUnderKey(batchRequest(), t)).rejects.toMatchObject({
         name: "TransferBatchRequestError",
@@ -317,9 +352,7 @@ describe("degraded storage", () => {
   });
 
   it("keeps the key stable in memory when sessionStorage refuses writes", () => {
-    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
-      throw new DOMException("QuotaExceededError");
-    });
+    const setItem = refuseSessionStorageWrites();
     try {
       const fingerprint = "fingerprint-quota";
       const key = claimTransferBatchIdempotencyKey(fingerprint);
@@ -336,9 +369,7 @@ describe("degraded storage", () => {
 
     // The release reached storage; now the NEXT claim's write fails, leaving
     // storage stale while memory holds the fresh key.
-    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
-      throw new DOMException("QuotaExceededError");
-    });
+    const setItem = refuseSessionStorageWrites();
     try {
       const fresh = claimTransferBatchIdempotencyKey(fingerprint);
       expect(fresh).not.toBe(stale);

@@ -43,9 +43,6 @@ export async function paymentRequestScope(
     c.env,
     c.req.param("token")
   );
-  if (projectId === null) {
-    throw notFound("Payment request");
-  }
   const project = await new ProjectService(getDb(c.env)).getProject(projectId);
   if (!project) {
     throw notFound("Payment request");

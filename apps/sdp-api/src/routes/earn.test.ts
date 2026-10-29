@@ -179,10 +179,6 @@ function getEarn(path: string, headers: Record<string, string>) {
   );
 }
 
-function getEarnAnonymously(path: string, headers: Record<string, string>) {
-  return app.request(path, { method: "GET", headers }, env);
-}
-
 async function getEarnAsClerk(path: string, projectId: string) {
   return app.request(
     path,
@@ -385,45 +381,6 @@ describe("Earn routes — environment scoping", () => {
     expect(listBody.data.strategies.map((s) => s.id)).toEqual([sandbox.id]);
   });
 
-  it("lets an anonymous caller pick the shelf, production unless it asks for sandbox", async () => {
-    const sandbox = await seedStrategy({});
-    const production = await seedStrategy({
-      environment: "production",
-      hostCluster: "mainnet-beta",
-    });
-
-    const defaulted = await getEarnAnonymously("/v1/earn/strategies", {});
-    expect(defaulted.status).toBe(200);
-    const defaultedBody = (await defaulted.json()) as {
-      data: { strategies: Array<{ id: string }> };
-    };
-    expect(defaultedBody.data.strategies.map((s) => s.id)).toEqual([production.id]);
-
-    const sandboxShelf = await getEarnAnonymously("/v1/earn/strategies?environment=sandbox", {});
-    expect(sandboxShelf.status).toBe(200);
-    const sandboxBody = (await sandboxShelf.json()) as {
-      data: { strategies: Array<{ id: string }> };
-    };
-    expect(sandboxBody.data.strategies.map((s) => s.id)).toEqual([sandbox.id]);
-
-    expect((await getEarnAnonymously(`/v1/earn/strategies/${sandbox.id}`, {})).status).toBe(200);
-    expect((await getEarnAnonymously(`/v1/earn/strategies/${production.id}`, {})).status).toBe(200);
-  });
-
-  it("refuses a key that names a shelf other than its project's", async () => {
-    await seedAuth();
-    await seedStrategy({});
-
-    const mismatch = await getEarn("/v1/earn/strategies?environment=production", {});
-    expect(mismatch.status).toBe(400);
-    const mismatchBody = (await mismatch.json()) as { error: { code: string; message: string } };
-    expect(mismatchBody.error.code).toBe("BAD_REQUEST");
-    expect(mismatchBody.error.message).toContain("follows the project");
-
-    const same = await getEarn("/v1/earn/strategies?environment=sandbox", {});
-    expect(same.status).toBe(200);
-  });
-
   it("publishes depositSlippage for the caller's environment, the same answer the build gates on", async () => {
     await seedAuth();
     await seedClerkAuth();
@@ -492,58 +449,48 @@ describe("Earn routes — Clerk-caller environment resolution", () => {
 });
 
 describe("Earn routes — strategy catalogue", () => {
-  it("answers anonymous and keyed readers with the same public catalogue", async () => {
+  it("answers the catalogue privately cacheable, with CORS", async () => {
     await seedAuth();
     await seedStrategy({});
-    const corsHeaders = { Origin: "http://localhost:3000" };
 
-    const anonymous = await getEarnAnonymously(
-      "/v1/earn/strategies?environment=sandbox",
-      corsHeaders
-    );
-    const keyed = await getEarn("/v1/earn/strategies", corsHeaders);
+    const keyed = await getEarn("/v1/earn/strategies", { Origin: "http://localhost:3000" });
 
-    expect(anonymous.status).toBe(200);
     expect(keyed.status).toBe(200);
-    const anonymousBody = (await anonymous.json()) as { data: unknown };
-    const keyedBody = (await keyed.json()) as { data: unknown };
-    expect(anonymousBody.data).toEqual(keyedBody.data);
-    expect(anonymous.headers.get("cache-control")).toBe(
-      "public, max-age=30, stale-while-revalidate=30"
-    );
     expect(keyed.headers.get("cache-control")).toBe("private, max-age=30");
-    expect(anonymous.headers.get("access-control-allow-origin")).toBe("http://localhost:3000");
-    expect(keyed.headers.get("access-control-allow-origin")).toBe(
-      anonymous.headers.get("access-control-allow-origin")
-    );
+    expect(keyed.headers.get("access-control-allow-origin")).toBe("http://localhost:3000");
   });
 
-  it("keeps hidden and unsurfaced strategies out of the anonymous catalogue", async () => {
-    const visible = await seedStrategy({ providerReference: "anonymous-visible-usdc" });
+  it("refuses a catalogue read with no credential", async () => {
+    await seedStrategy({});
+
+    const res = await app.request("/v1/earn/strategies", { method: "GET" }, env);
+
+    expect(res.status).toBe(401);
+  });
+
+  it("keeps hidden and unsurfaced strategies out of the catalogue", async () => {
+    await seedAuth();
+    const visible = await seedStrategy({ providerReference: "catalogue-visible-usdc" });
     const hiddenByTerms = await seedStrategy({
-      providerReference: "anonymous-morpho-usdc",
+      providerReference: "catalogue-morpho-usdc",
       name: "Morpho USDC",
       underlyingSource: "morpho",
     });
     const hiddenByProvider = await seedStrategy({
       provider: "upshift",
-      providerReference: "anonymous-upshift-usdc",
+      providerReference: "catalogue-upshift-usdc",
       name: "Upshift USDC",
     });
 
-    const list = await getEarnAnonymously("/v1/earn/strategies?environment=sandbox", {});
+    const list = await getEarn("/v1/earn/strategies", {});
     expect(list.status).toBe(200);
     const body = (await list.json()) as {
       data: { strategies: Array<{ id: string }>; total: number };
     };
     expect(body.data.strategies.map((strategy) => strategy.id)).toEqual([visible.id]);
     expect(body.data.total).toBe(1);
-    expect((await getEarnAnonymously(`/v1/earn/strategies/${hiddenByTerms.id}`, {})).status).toBe(
-      404
-    );
-    expect(
-      (await getEarnAnonymously(`/v1/earn/strategies/${hiddenByProvider.id}`, {})).status
-    ).toBe(404);
+    expect((await getEarn(`/v1/earn/strategies/${hiddenByTerms.id}`, {})).status).toBe(404);
+    expect((await getEarn(`/v1/earn/strategies/${hiddenByProvider.id}`, {})).status).toBe(404);
   });
 
   it("returns the paginated list envelope and omits non-active strategies", async () => {

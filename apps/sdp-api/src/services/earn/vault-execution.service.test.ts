@@ -1,5 +1,7 @@
 import type { EarnVaultTransactionPlan } from "@sdp/earn/types";
 import type { FeePaymentPort } from "@sdp/fee-payment/port";
+import * as factory from "@sdp/rpc/factory";
+import { runInClusterScope } from "@sdp/rpc/scope";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types/well-known-tokens";
 import {
@@ -18,19 +20,24 @@ import {
 } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SponsorMessageMismatchError } from "@/services/sponsorship-integrity";
-import type { Env } from "@/types/env";
-import { resetClusterEndpointProofs } from "./execution-registry";
+import { parseJsonRpcRequest } from "@/test/helpers/cluster-rpc";
 import { createVaultDeadline } from "./vault-deadline";
-import {
-  broadcastVaultTransaction,
-  compileUnsignedVaultTransaction,
-  signVaultPlan,
-  simulateVaultPlan,
-  VaultTransactionTooLargeError,
-} from "./vault-execution.service";
+import * as execution from "./vault-execution.service";
+import { VaultTransactionTooLargeError } from "./vault-execution.service";
 
-const env = {} as Env;
-const rpcUrl = "https://rpc.example.invalid";
+/** Each stage in the cluster scope a Sandbox request opens, as every caller runs it. */
+function inSandbox<TArgs extends unknown[], TResult>(
+  operation: (...args: TArgs) => TResult
+): (...args: TArgs) => TResult {
+  return (...args) =>
+    runInClusterScope({ projectId: null, environment: "sandbox" }, () => operation(...args));
+}
+
+const broadcastVaultTransaction = inSandbox(execution.broadcastVaultTransaction);
+const compileUnsignedVaultTransaction = inSandbox(execution.compileUnsignedVaultTransaction);
+const signVaultPlan = inSandbox(execution.signVaultPlan);
+const simulateVaultPlan = inSandbox(execution.simulateVaultPlan);
+
 const ownerAddress = address("11111111111111111111111111111112");
 const feePayerAddress = address("4YhMUz8xDgHMPAevvfMpnJX9TJmw9DTNDA1sNWPRZG9q");
 const blockhash = "29d2S7vB453rNYFdR5Ycwt7y9haRT5fwVwL9zTmBhfV2" as Blockhash;
@@ -53,13 +60,11 @@ const plan: EarnVaultTransactionPlan = {
   },
 };
 
-const genesisSend = vi.fn();
 const simulateSend = vi.fn();
 const lookupTableSend = vi.fn();
 /** Base64 wire transactions handed to `simulateTransaction`, newest last. */
 const simulatedWire: string[] = [];
 const rpc = {
-  getGenesisHash: () => ({ send: genesisSend }),
   getMultipleAccounts: vi.fn(() => ({ send: lookupTableSend })),
   simulateTransaction: (wire: string) => {
     simulatedWire.push(wire);
@@ -100,12 +105,10 @@ function planForOwner(owner: Address): EarnVaultTransactionPlan {
 
 beforeEach(() => {
   simulatedWire.length = 0;
-  resetClusterEndpointProofs();
-  genesisSend.mockReset().mockResolvedValue(GENESIS_HASH_BY_CLUSTER.devnet);
   simulateSend.mockReset().mockResolvedValue({ value: { err: null, logs: [] } });
   lookupTableSend.mockReset();
   rpc.getMultipleAccounts.mockClear();
-  vi.spyOn(solanaRpc, "createRpc").mockReturnValue(rpc as never);
+  vi.spyOn(factory, "createClusterRpc").mockReturnValue(rpc as never);
   vi.spyOn(solanaRpc, "getRecentBlockhash").mockResolvedValue({
     blockhash,
     lastValidBlockHeight: 100n,
@@ -115,8 +118,36 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
+
+let poolSequence = 0;
+
+/**
+ * Run the real scope client against a devnet pool endpoint no earlier test proved
+ * (the pool's genesis proofs outlive a test) whose genesis probe answers
+ * `genesis`, recording every JSON-RPC method that reaches it.
+ */
+function useRealPoolWithDevnetGenesis(genesis: string): string[] {
+  vi.mocked(factory.createClusterRpc).mockRestore();
+  vi.mocked(solanaRpc.getRecentBlockhash).mockRestore();
+  vi.mocked(solanaRpc.sendTransaction).mockRestore();
+  poolSequence += 1;
+  vi.stubEnv(
+    "SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL",
+    `https://devnet-${poolSequence}.vault-execution.test`
+  );
+  const methods: string[] = [];
+  vi.stubGlobal("fetch", async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    const { id, method } = parseJsonRpcRequest(init);
+    methods.push(method);
+    if (method !== "getGenesisHash") throw new Error(`${method} reached a mismatched endpoint`);
+    return Response.json({ jsonrpc: "2.0", id, result: genesis });
+  });
+  return methods;
+}
 
 describe("vault execution validation", () => {
   it("refuses caller-signed transactions that require any signer besides the owner", async () => {
@@ -134,7 +165,6 @@ describe("vault execution validation", () => {
 
     expect(() =>
       compileUnsignedVaultTransaction({
-        cluster: "devnet",
         deadline: createVaultDeadline(),
         expectedAssetIdentity: externalPlan.assetIdentity,
         plan: externalPlan,
@@ -152,7 +182,6 @@ describe("vault execution validation", () => {
   it("compiles a caller-provided fee payer into slot zero beside the owner", () => {
     const externalPlan = planForOwner(ownerAddress);
     const unsigned = compileUnsignedVaultTransaction({
-      cluster: "devnet",
       deadline: createVaultDeadline(),
       expectedAssetIdentity: externalPlan.assetIdentity,
       plan: externalPlan,
@@ -190,7 +219,6 @@ describe("vault execution validation", () => {
 
     expect(() =>
       compileUnsignedVaultTransaction({
-        cluster: "devnet",
         deadline: createVaultDeadline(),
         expectedAssetIdentity: externalPlan.assetIdentity,
         plan: externalPlan,
@@ -212,7 +240,6 @@ describe("vault execution validation", () => {
     // signer slot; the compile normalizes rather than tripping its own
     // two-slot assertion on a legitimate build.
     const unsigned = compileUnsignedVaultTransaction({
-      cluster: "devnet",
       deadline: createVaultDeadline(),
       expectedAssetIdentity: externalPlan.assetIdentity,
       plan: externalPlan,
@@ -242,13 +269,11 @@ describe("vault execution validation", () => {
     };
 
     await expect(
-      simulateVaultPlan(env, {
-        cluster: "devnet",
+      simulateVaultPlan({
         deadline: createVaultDeadline(),
         expectedAssetIdentity: oversizedPlan.assetIdentity,
         plan: oversizedPlan,
         owner: ownerAddress,
-        rpcUrl,
         fee: { kind: "caller-provided", feePayer: feePayerAddress },
       })
     ).rejects.toBeInstanceOf(VaultTransactionTooLargeError);
@@ -257,55 +282,47 @@ describe("vault execution validation", () => {
 
   it("refuses to sign a caller-provided fee mode", async () => {
     await expect(
-      signVaultPlan(env, {
-        cluster: "devnet",
+      signVaultPlan({
         deadline: createVaultDeadline(),
         expectedAssetIdentity: plan.assetIdentity,
         plan,
         owner: createNoopSigner(ownerAddress),
-        rpcUrl,
         fee: { kind: "caller-provided", feePayer: feePayerAddress },
       })
     ).rejects.toThrow("compile the transaction unsigned");
   });
 
   it("blocks every raw execution path before RPC or signing on wrong genesis", async () => {
-    genesisSend.mockResolvedValue(GENESIS_HASH_BY_CLUSTER["mainnet-beta"]);
+    const methods = useRealPoolWithDevnetGenesis(GENESIS_HASH_BY_CLUSTER["mainnet-beta"]);
     const owner = createNoopSigner(ownerAddress);
 
     await expect(
-      signVaultPlan(env, {
-        cluster: "devnet",
+      signVaultPlan({
         deadline: createVaultDeadline(),
         expectedAssetIdentity: plan.assetIdentity,
         plan,
         owner,
-        rpcUrl,
         fee: { kind: "wallet-pays" },
       })
-    ).rejects.toThrow(/reports genesis/);
+    ).rejects.toMatchObject({ code: "RPC_CLUSTER_MISMATCH" });
     await expect(
-      simulateVaultPlan(env, {
-        cluster: "devnet",
+      simulateVaultPlan({
         deadline: createVaultDeadline(),
         expectedAssetIdentity: plan.assetIdentity,
         plan,
         owner: ownerAddress,
-        rpcUrl,
         fee: { kind: "wallet-pays" },
       })
-    ).rejects.toThrow(/reports genesis/);
+    ).rejects.toMatchObject({ code: "RPC_CLUSTER_MISMATCH" });
     await expect(
-      broadcastVaultTransaction(env, {
-        cluster: "devnet",
+      broadcastVaultTransaction({
         deadline: createVaultDeadline(),
         bytes: new Uint8Array(),
-        rpcUrl,
       })
-    ).rejects.toThrow(/reports genesis/);
+    ).rejects.toMatchObject({ code: "RPC_CLUSTER_MISMATCH" });
 
-    expect(solanaRpc.getRecentBlockhash).not.toHaveBeenCalled();
-    expect(solanaRpc.sendTransaction).not.toHaveBeenCalled();
+    // A mismatch is never cached, so each path re-probed, and nothing else left SDP.
+    expect(methods).toEqual(["getGenesisHash", "getGenesisHash", "getGenesisHash"]);
     expect(simulateSend).not.toHaveBeenCalled();
   });
 
@@ -313,18 +330,16 @@ describe("vault execution validation", () => {
     const mainnetPlan = { ...plan, cluster: "mainnet-beta" } as const;
 
     await expect(
-      signVaultPlan(env, {
-        cluster: "devnet",
+      signVaultPlan({
         deadline: createVaultDeadline(),
         expectedAssetIdentity: plan.assetIdentity,
         plan: mainnetPlan,
         owner: createNoopSigner(ownerAddress),
-        rpcUrl,
         fee: { kind: "wallet-pays" },
       })
     ).rejects.toThrow("Vault plan targets mainnet-beta, not the expected devnet cluster");
 
-    expect(solanaRpc.createRpc).not.toHaveBeenCalled();
+    expect(factory.createClusterRpc).not.toHaveBeenCalled();
   });
 
   it("rejects stale or poisoned asset identity before simulation or signing", async () => {
@@ -334,29 +349,25 @@ describe("vault execution validation", () => {
     };
 
     await expect(
-      signVaultPlan(env, {
-        cluster: "devnet",
+      signVaultPlan({
         deadline: createVaultDeadline(),
         expectedAssetIdentity,
         plan,
         owner: createNoopSigner(ownerAddress),
-        rpcUrl,
         fee: { kind: "wallet-pays" },
       })
     ).rejects.toThrow(/share mint.*does not match/);
     await expect(
-      simulateVaultPlan(env, {
-        cluster: "devnet",
+      simulateVaultPlan({
         deadline: createVaultDeadline(),
         expectedAssetIdentity,
         plan,
         owner: ownerAddress,
-        rpcUrl,
         fee: { kind: "wallet-pays" },
       })
     ).rejects.toThrow(/share mint.*does not match/);
 
-    expect(solanaRpc.createRpc).not.toHaveBeenCalled();
+    expect(factory.createClusterRpc).not.toHaveBeenCalled();
     expect(solanaRpc.getRecentBlockhash).not.toHaveBeenCalled();
   });
 
@@ -369,25 +380,21 @@ describe("vault execution validation", () => {
   it("simulates a sponsored plan as the sponsor, not the owner", async () => {
     const sponsor = address("4YhMUz8xDgHMPAevvfMpnJX9TJmw9DTNDA1sNWPRZG9q");
 
-    const sponsored = await simulateVaultPlan(env, {
-      cluster: "devnet",
+    const sponsored = await simulateVaultPlan({
       deadline: createVaultDeadline(),
       expectedAssetIdentity: plan.assetIdentity,
       plan,
       owner: ownerAddress,
-      rpcUrl,
       fee: { kind: "sponsored", feePayment: feePayment(), sponsor },
     });
     expect(sponsored.ok).toBe(true);
     expect(feePayerOf(simulatedWire.at(-1) ?? "")).toBe(sponsor);
 
-    const walletPays = await simulateVaultPlan(env, {
-      cluster: "devnet",
+    const walletPays = await simulateVaultPlan({
       deadline: createVaultDeadline(),
       expectedAssetIdentity: plan.assetIdentity,
       plan,
       owner: ownerAddress,
-      rpcUrl,
       fee: { kind: "wallet-pays" },
     });
     expect(walletPays.ok).toBe(true);
@@ -395,13 +402,11 @@ describe("vault execution validation", () => {
   });
 
   it("simulates a caller-provided plan as the named fee payer", async () => {
-    const result = await simulateVaultPlan(env, {
-      cluster: "devnet",
+    const result = await simulateVaultPlan({
       deadline: createVaultDeadline(),
       expectedAssetIdentity: plan.assetIdentity,
       plan,
       owner: ownerAddress,
-      rpcUrl,
       fee: { kind: "caller-provided", feePayer: feePayerAddress },
     });
     expect(result.ok).toBe(true);
@@ -413,13 +418,11 @@ describe("vault execution validation", () => {
   it("names the caller-provided fee payer in a fee simulation failure", async () => {
     simulateSend.mockResolvedValueOnce({ value: { err: "AccountNotFound", logs: [] } });
 
-    const result = await simulateVaultPlan(env, {
-      cluster: "devnet",
+    const result = await simulateVaultPlan({
       deadline: createVaultDeadline(),
       expectedAssetIdentity: plan.assetIdentity,
       plan,
       owner: ownerAddress,
-      rpcUrl,
       fee: { kind: "caller-provided", feePayer: feePayerAddress },
     });
 
@@ -432,13 +435,11 @@ describe("vault execution validation", () => {
   it("translates a fee-payer simulation failure into a readable verdict", async () => {
     simulateSend.mockResolvedValueOnce({ value: { err: "AccountNotFound", logs: [] } });
 
-    const result = await simulateVaultPlan(env, {
-      cluster: "devnet",
+    const result = await simulateVaultPlan({
       deadline: createVaultDeadline(),
       expectedAssetIdentity: plan.assetIdentity,
       plan,
       owner: ownerAddress,
-      rpcUrl,
       fee: { kind: "wallet-pays" },
     });
 
@@ -454,13 +455,11 @@ describe("vault execution validation", () => {
   it("marks a sponsored fee-payer failure as SDP's fault", async () => {
     simulateSend.mockResolvedValueOnce({ value: { err: "AccountNotFound", logs: [] } });
 
-    const result = await simulateVaultPlan(env, {
-      cluster: "devnet",
+    const result = await simulateVaultPlan({
       deadline: createVaultDeadline(),
       expectedAssetIdentity: plan.assetIdentity,
       plan,
       owner: ownerAddress,
-      rpcUrl,
       fee: { kind: "sponsored", feePayment: feePayment(), sponsor: feePayerAddress },
     });
 
@@ -486,13 +485,11 @@ describe("vault lookup-table reads", () => {
   };
 
   function simulate() {
-    return simulateVaultPlan(env, {
-      cluster: "devnet",
+    return simulateVaultPlan({
       deadline: createVaultDeadline(),
       expectedAssetIdentity: plan.assetIdentity,
       plan: planWithLookupTable,
       owner: ownerAddress,
-      rpcUrl,
       fee: { kind: "wallet-pays" },
     });
   }
@@ -571,29 +568,27 @@ describe("vault lookup-table reads", () => {
 describe("vault signing lifecycle", () => {
   it("reuses successful simulation preparation for signing", async () => {
     const owner = await generateKeyPairSigner();
-    const simulation = await simulateVaultPlan(env, {
-      cluster: "devnet",
+    const simulation = await simulateVaultPlan({
       deadline: createVaultDeadline(),
       expectedAssetIdentity: plan.assetIdentity,
       plan,
       owner: owner.address,
-      rpcUrl,
       fee: { kind: "wallet-pays" },
     });
     if (!simulation.ok) throw new Error("expected simulation to succeed");
 
-    await signVaultPlan(env, {
-      cluster: "devnet",
+    await signVaultPlan({
       deadline: createVaultDeadline(),
       expectedAssetIdentity: plan.assetIdentity,
       plan,
       owner,
-      rpcUrl,
       fee: { kind: "wallet-pays" },
       prepared: simulation.prepared,
     });
 
-    expect(genesisSend).toHaveBeenCalledTimes(1);
+    // Signing a prepared plan asks the chain nothing: one client, one blockhash.
+    expect(factory.createClusterRpc).toHaveBeenCalledTimes(1);
+    expect(factory.createClusterRpc).toHaveBeenCalledWith();
     expect(solanaRpc.getRecentBlockhash).toHaveBeenCalledTimes(1);
   });
 
@@ -611,13 +606,11 @@ describe("vault signing lifecycle", () => {
     };
 
     await expect(
-      signVaultPlan(env, {
-        cluster: "devnet",
+      signVaultPlan({
         deadline: createVaultDeadline(),
         expectedAssetIdentity: plan.assetIdentity,
         plan: oversizedPlan,
         owner,
-        rpcUrl,
         fee: { kind: "wallet-pays" },
       })
     ).rejects.toThrow("Solana allows at most 1232");
@@ -638,13 +631,11 @@ describe("vault signing lifecycle", () => {
       signAsFeePayer,
     });
 
-    const result = await signVaultPlan(env, {
-      cluster: "devnet",
+    const result = await signVaultPlan({
       deadline: createVaultDeadline(),
       expectedAssetIdentity: plan.assetIdentity,
       plan: planForOwner(owner.address),
       owner,
-      rpcUrl,
       fee: { kind: "sponsored", feePayment: fee, sponsor: sponsor.address },
     });
 
@@ -667,13 +658,11 @@ describe("vault signing lifecycle", () => {
     });
 
     await expect(
-      signVaultPlan(env, {
-        cluster: "devnet",
+      signVaultPlan({
         deadline: createVaultDeadline(),
         expectedAssetIdentity: plan.assetIdentity,
         plan: planForOwner(owner.address),
         owner,
-        rpcUrl,
         fee: { kind: "sponsored", feePayment: fee, sponsor: sponsor.address },
       })
     ).rejects.toBe(refusal);
@@ -684,13 +673,11 @@ describe("vault signing lifecycle", () => {
   it("signs wallet-paid bytes without broadcasting before durable persistence", async () => {
     const owner = await generateKeyPairSigner();
 
-    const result = await signVaultPlan(env, {
-      cluster: "devnet",
+    const result = await signVaultPlan({
       deadline: createVaultDeadline(),
       expectedAssetIdentity: plan.assetIdentity,
       plan: planForOwner(owner.address),
       owner,
-      rpcUrl,
       fee: { kind: "wallet-pays" },
     });
 
@@ -705,13 +692,11 @@ describe("vault execution deadline", () => {
   it("bounds blockhash work with the stage-labelled deadline", async () => {
     vi.useFakeTimers();
     vi.mocked(solanaRpc.getRecentBlockhash).mockReturnValue(new Promise(() => undefined));
-    const result = signVaultPlan(env, {
-      cluster: "devnet",
+    const result = signVaultPlan({
       deadline: createVaultDeadline(25),
       expectedAssetIdentity: plan.assetIdentity,
       plan,
       owner: createNoopSigner(ownerAddress),
-      rpcUrl,
       fee: { kind: "wallet-pays" },
     });
     const rejection = expect(result).rejects.toThrow(
@@ -736,13 +721,11 @@ describe("vault execution deadline", () => {
       return new Uint8Array(getTransactionEncoder().encode(fullySigned));
     });
 
-    const result = await signVaultPlan(env, {
-      cluster: "devnet",
+    const result = await signVaultPlan({
       deadline: createVaultDeadline(),
       expectedAssetIdentity: plan.assetIdentity,
       plan: planForOwner(owner.address),
       owner,
-      rpcUrl,
       fee: {
         kind: "sponsored",
         feePayment: feePayment({ getFeePayer, signAsFeePayer }),
@@ -759,11 +742,9 @@ describe("vault execution deadline", () => {
   it("bounds broadcast with the same stage-labelled deadline", async () => {
     vi.useFakeTimers();
     vi.mocked(solanaRpc.sendTransaction).mockReturnValue(new Promise(() => undefined));
-    const result = broadcastVaultTransaction(env, {
-      cluster: "devnet",
+    const result = broadcastVaultTransaction({
       deadline: createVaultDeadline(25),
       bytes: new Uint8Array([1, 2, 3]),
-      rpcUrl,
     });
     const rejection = expect(result).rejects.toThrow(
       "Broadcasting the vault transaction timed out after 25ms"

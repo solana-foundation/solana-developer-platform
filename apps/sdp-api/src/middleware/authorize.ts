@@ -49,9 +49,9 @@ export type Authorizer<T> = (c: AuthorizeContext, input: AuthorizeInput) => T | 
 export type RouteHandler = (...args: never[]) => unknown;
 
 /** Marks an {@link authorize} handler, for route inventory tests. */
-export const AUTHORIZE_MARKER = Symbol.for("sdp.authorize");
+const AUTHORIZE_MARKER = Symbol.for("sdp.authorize");
 
-export const authorizeDeclarationSchema = z.discriminatedUnion("kind", [
+const authorizeDeclarationSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("checked") }),
   /** The route names no resource beyond the caller's own scope. */
   z.object({ kind: z.literal("none"), reason: z.string() }),

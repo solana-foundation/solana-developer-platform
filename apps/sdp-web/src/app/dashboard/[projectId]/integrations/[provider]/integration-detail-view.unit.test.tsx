@@ -1,8 +1,13 @@
 import { RAMP_PROVIDERS } from "@sdp/types/provider-access";
+import {
+  isModuleInReleaseChannel,
+  SDP_RAMP_PROVIDER_MATURITY,
+  type SdpReleaseChannel,
+} from "@sdp/types/release-channels";
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { prerender } from "react-dom/static";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveIntegrationDetail } from "@/app/dashboard/[projectId]/integrations/integration-detail";
 import { IntegrationDetailSkeleton } from "@/app/dashboard/[projectId]/integrations/integrations-skeleton";
 import {
@@ -10,6 +15,7 @@ import {
   resolveCustodyIntegrations,
   resolveRampIntegrations,
 } from "@/app/dashboard/[projectId]/integrations/integrations-status";
+import { getMessages } from "@/i18n/messages";
 import {
   availableComplianceProviders,
   availableCustodyProviders,
@@ -29,7 +35,8 @@ const AVAILABILITY = projectProviderAvailability({
   custody: [
     { provider: "privy", modes: ["managed", "byok"] },
     { provider: "para", modes: ["managed"] },
-    { provider: "fireblocks", modes: ["managed"] },
+    { provider: "fireblocks", modes: ["managed", "byok"] },
+    { provider: "anchorage", modes: ["managed"] },
   ],
   compliance: ["range"],
   ramps: ["moonpay"],
@@ -50,11 +57,28 @@ async function markupOf(node: ReactNode): Promise<string> {
   return new Response(prelude).text();
 }
 
-async function render(provider: string): Promise<string> {
+async function render(
+  provider: string,
+  releaseChannel: SdpReleaseChannel = "experimental",
+  canManageCustody = true
+): Promise<string> {
   const detail = resolveIntegrationDetail({ provider, ...INPUTS });
   if (!detail) throw new Error(`unknown provider ${provider}`);
-  return markupOf(<IntegrationDetailView detail={detail} />);
+  // The Capabilities read the deployment's release channel themselves.
+  vi.stubEnv("SDP_RELEASE_CHANNEL", releaseChannel);
+  return markupOf(<IntegrationDetailView detail={detail} canManageCustody={canManageCustody} />);
 }
+
+/** The Capabilities section's chips, by visible label. */
+function capabilityChips(markup: string): string[] {
+  return [...markup.matchAll(/<li class="rounded-full[^"]*">([^<]*)<\/li>/g)].map(
+    ([, label]) => label
+  );
+}
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 beforeEach(() => {
   resetRequestProject();
@@ -75,10 +99,16 @@ describe("IntegrationDetailView", () => {
     expect(markup).toContain(`${PROJECT_PATH}/wallets/setup?provider=para`);
   });
 
-  it("routes an available manual provider into setup and says it is by arrangement", async () => {
-    const markup = await render("fireblocks");
+  it("offers no setup action to a member who cannot manage custody", async () => {
+    const markup = await render("para", "experimental", false);
     expect(markup).toContain("Ready to connect");
-    expect(markup).toContain(`${PROJECT_PATH}/wallets/setup?provider=fireblocks`);
+    expect(markup).not.toContain("/wallets/setup");
+  });
+
+  it("routes an available manual provider into setup and says it is by arrangement", async () => {
+    const markup = await render("anchorage");
+    expect(markup).toContain("Ready to connect");
+    expect(markup).toContain(`${PROJECT_PATH}/wallets/setup?provider=anchorage`);
     expect(markup).toContain("Available by arrangement");
   });
 
@@ -90,6 +120,22 @@ describe("IntegrationDetailView", () => {
     const compliance = await render("range");
     expect(compliance).toContain("Enabled");
     expect(compliance).toContain("Provisioned per deployment");
+  });
+
+  it("advertises no capability whose module the release channel leaves out", async () => {
+    // Privy lists Issuance and Compliance; the chips outlived the modules on stable (HOO-1977).
+    const labels = getMessages("en").DashboardCustody;
+    expect(capabilityChips(await render("privy"))).toEqual(
+      expect.arrayContaining([labels.issuance, labels.transfers, labels.compliance])
+    );
+
+    const stable = capabilityChips(await render("privy", "stable"));
+    expect(stable).toContain(labels.transfers);
+    for (const module of ["issuance", "compliance"] as const) {
+      expect(stable.includes(labels[module]), module).toBe(
+        isModuleInReleaseChannel("stable", module, SDP_RAMP_PROVIDER_MATURITY)
+      );
+    }
   });
 
   it("keeps the shared skeleton within one block of every family", async () => {

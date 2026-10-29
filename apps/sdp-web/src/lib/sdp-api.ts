@@ -3,9 +3,13 @@
 // loaders that call it need no `import "server-only"`.
 import { auth } from "@clerk/nextjs/server";
 import type { ListProjectsResponse, Project } from "@sdp/types/projects";
+import { ORGANIZATION_ROLES, type OrganizationRole } from "@sdp/types/roles";
+import { hashWebTraceId } from "@sdp/types/trace-correlation";
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { cache } from "react";
+import { z } from "zod";
+import type { OnboardingStatusResponse } from "@/app/dashboard/[projectId]/onboarding-status";
 import { readApiErrorMessage } from "./api-error";
 import { projectHref } from "./dashboard-project-path";
 import { type ApiAnswer, apiErrorCode, IDEMPOTENCY_KEY_HEADER } from "./idempotency";
@@ -35,6 +39,11 @@ function getApiBaseUrl(): string {
 
 type ClerkGetToken = () => Promise<string | null>;
 
+/** A fresh trace id for a web-originated chain of sdp-api requests. */
+function newWebTraceId(): string {
+  return `web_${crypto.randomUUID().replaceAll("-", "")}`;
+}
+
 /**
  * Acquires the sdp-api bearer token: the Clerk session token, whose custom
  * claims (org_id, org_role, org_slug, email) come from the instance's
@@ -42,7 +51,7 @@ type ClerkGetToken = () => Promise<string | null>;
  * contexts get it from `auth()` while the proxy middleware gets it from its
  * `clerkMiddleware` callback.
  */
-export async function acquireClerkToken(getToken: ClerkGetToken): Promise<string> {
+async function acquireClerkToken(getToken: ClerkGetToken): Promise<string> {
   const token = await getToken();
   if (!token) {
     throw new Error("Failed to acquire Clerk token");
@@ -65,6 +74,14 @@ function roundDuration(durationMs: number): number {
   return Math.round(durationMs * 10) / 10;
 }
 
+function emitApiRequestLog(event: string, payload: Record<string, unknown>): void {
+  try {
+    console.info(JSON.stringify({ event, timestamp: new Date().toISOString(), ...payload }));
+  } catch {
+    // A failed telemetry sink must not change an API request outcome.
+  }
+}
+
 function createTraceRequestId(traceId: string, sequence: number): string {
   const suffix = sequence.toString().padStart(2, "0");
   return `${traceId}:${suffix}`.slice(0, 128);
@@ -81,7 +98,7 @@ function createSdpApiRequest(
     const url = `${getApiBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`;
     requestSequence += 1;
 
-    const traceId = traceContext?.traceId ?? `web_${crypto.randomUUID().replaceAll("-", "")}`;
+    const traceId = traceContext?.traceId ?? newWebTraceId();
     const requestId = createTraceRequestId(traceId, requestSequence);
     const source = traceContext?.source ?? "sdp-web";
     const headers = new Headers(options.headers);
@@ -91,6 +108,8 @@ function createSdpApiRequest(
     if (options.body !== undefined && options.body !== null) {
       headers.set("Content-Type", "application/json");
     }
+    // The API replaces these IDs; its returned X-Request-ID joins this web log
+    // to the API log, while these server-generated values also reach the gateway.
     headers.set(TRACE_ID_HEADER, traceId);
     headers.set(TRACE_SOURCE_HEADER, source);
     headers.set("X-Request-ID", requestId);
@@ -98,18 +117,40 @@ function createSdpApiRequest(
       headers.set(PROJECT_HEADER_NAME, projectId);
     }
     const method = options.method ?? "GET";
-    const startedAt = performance.now();
-    // The query string is caller-supplied and may carry a pasted credential
-    // (e.g. a playground request); the log keeps the route only while the
-    // upstream request still receives the full path.
-    const loggedPath = path.split("?", 1)[0];
-
-    const send = () =>
-      fetch(url, {
-        ...options,
-        headers,
-        cache: "no-store",
-      });
+    const send = async () => {
+      const webTraceHash = await hashWebTraceId(traceId).catch(() => null);
+      const fields = {
+        traceId,
+        source,
+        requestId,
+        method,
+        web_trace_hash: webTraceHash ?? undefined,
+      };
+      emitApiRequestLog("sdp_web_api_attempt", fields);
+      const startedAt = performance.now();
+      try {
+        const response = await fetch(url, {
+          ...options,
+          headers,
+          cache: "no-store",
+        });
+        emitApiRequestLog("sdp_web_api_request", {
+          ...fields,
+          status: response.status,
+          durationMs: roundDuration(performance.now() - startedAt),
+          upstreamRequestId: response.headers.get("X-Request-ID"),
+          upstreamServerTiming: response.headers.get("Server-Timing"),
+        });
+        return response;
+      } catch (error) {
+        emitApiRequestLog("sdp_web_api_request", {
+          ...fields,
+          outcome: "network_failed",
+          durationMs: roundDuration(performance.now() - startedAt),
+        });
+        throw error;
+      }
+    };
 
     // Payments demo mode answers payment reads and writes itself; nothing about them goes out.
     const demoResponse = await paymentsDemoResponse(method, path, projectId, options.body, send);
@@ -117,25 +158,7 @@ function createSdpApiRequest(
       return demoResponse;
     }
 
-    const response = await send();
-
-    console.info(
-      JSON.stringify({
-        event: "sdp_web_api_request",
-        timestamp: new Date().toISOString(),
-        traceId,
-        source,
-        requestId,
-        method,
-        path: loggedPath,
-        status: response.status,
-        durationMs: roundDuration(performance.now() - startedAt),
-        upstreamRequestId: response.headers.get("X-Request-ID"),
-        upstreamServerTiming: response.headers.get("Server-Timing"),
-      })
-    );
-
-    return response;
+    return send();
   };
 }
 
@@ -257,7 +280,7 @@ export interface SdpApiClient {
 const fetchRequestProjects = cache(async (token: string): Promise<Project[]> => {
   const client = assembleSdpApiClient(
     createSdpApiRequest(token, null, {
-      traceId: `web_${crypto.randomUUID().replaceAll("-", "")}`,
+      traceId: newWebTraceId(),
       source: "dashboard.projects.bootstrap",
     })
   );
@@ -271,6 +294,63 @@ const getRequestProjects = cache(
 
 export function listSdpProjects(): Promise<Project[]> {
   return getRequestProjects();
+}
+
+const currentMemberSchema = z.object({ role: z.enum(ORGANIZATION_ROLES) });
+
+const getRequestMemberRole = cache(async (): Promise<OrganizationRole> => {
+  const client = assembleSdpApiClient(
+    createSdpApiRequest(await getRequestClerkToken(), null, {
+      traceId: newWebTraceId(),
+      source: "dashboard.members.me",
+    })
+  );
+  return currentMemberSchema.parse(await client.fetch<unknown>("/v1/members/me")).role;
+});
+
+/**
+ * The signed-in person's Organization Role in the active organization, as SDP
+ * holds it (ADR 0012), read once per request. Every page gate takes it from
+ * here, never from the Clerk session's role claim.
+ *
+ * @returns The caller's Organization Role.
+ */
+export function requestMemberRole(): Promise<OrganizationRole> {
+  return getRequestMemberRole();
+}
+
+const getRequestOnboardingStatus = cache(async (): Promise<OnboardingStatusResponse> => {
+  const client = assembleSdpApiClient(
+    createSdpApiRequest(await getRequestClerkToken(), null, {
+      traceId: newWebTraceId(),
+      source: "dashboard.onboarding.status",
+    })
+  );
+  return client.fetch<OnboardingStatusResponse>("/v1/onboarding/status", {
+    signal: AbortSignal.timeout(10_000),
+  });
+});
+
+/**
+ * The organization's onboarding status, read once per request. The layout's quick start and a
+ * page's own gate (Earn's provider access) render in the same request, so they share this one
+ * call. A failure rejects every caller alike, and each decides what unknown means for it.
+ *
+ * @returns The status as the API answers it.
+ */
+export function requestOnboardingStatus(): Promise<OnboardingStatusResponse> {
+  return getRequestOnboardingStatus();
+}
+
+/**
+ * An org-less SDP API client for a signed-in person with no active
+ * organization: the only call it serves is creating their organization.
+ *
+ * @returns A client bearing the session token, with no organization or project.
+ */
+export async function createSignupSdpApiClient(): Promise<SdpApiClient> {
+  const { getToken } = await getSdpAuth();
+  return assembleSdpApiClient(createSdpApiRequest(await acquireClerkToken(getToken), null));
 }
 
 function assembleSdpApiClient(request: SdpApiRequestFn): SdpApiClient {

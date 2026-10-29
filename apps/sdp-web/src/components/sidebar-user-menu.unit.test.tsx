@@ -9,10 +9,6 @@ import { dashboardRouter, setDashboardUrl } from "@/test/dashboard-navigation";
 import { PRODUCTION_PROJECT } from "@/test/projects";
 import { SidebarUserMenu } from "./sidebar-user-menu";
 
-const design = vi.hoisted(() => ({ newDesign: true }));
-
-vi.mock("@/components/new-design", () => ({ useNewDesign: () => design.newDesign }));
-
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
 vi.mock("@sentry/nextjs", () => ({ getFeedback: () => undefined }));
 vi.mock("@clerk/nextjs", () => ({
@@ -35,7 +31,6 @@ vi.mock("@/contexts/network-debug-context", () => ({
 
 afterEach(() => {
   cleanup();
-  design.newDesign = true;
   document.documentElement.lang = "";
 });
 
@@ -45,7 +40,7 @@ describe("SidebarUserMenu", () => {
     const user = userEvent.setup();
     render(
       <I18nProvider locale="en" messages={getMessages("en")}>
-        <SidebarUserMenu collapsed={false} canManageOrgSettings menuSide="right" />
+        <SidebarUserMenu collapsed={false} menuSide="right" />
       </I18nProvider>
     );
 
@@ -62,18 +57,5 @@ describe("SidebarUserMenu", () => {
 
     expect(document.documentElement.lang).toBe("fr");
     expect(dashboardRouter.refresh).toHaveBeenCalledTimes(1);
-  });
-
-  it("leaves the language to the header with NEW DESIGN off", async () => {
-    design.newDesign = false;
-    const user = userEvent.setup();
-    render(
-      <I18nProvider locale="en" messages={getMessages("en")}>
-        <SidebarUserMenu collapsed={false} canManageOrgSettings menuSide="right" />
-      </I18nProvider>
-    );
-
-    await user.click(screen.getByRole("button", { name: "Account menu" }));
-    expect(screen.queryByRole("menuitem", { name: /Language/ })).toBeNull();
   });
 });

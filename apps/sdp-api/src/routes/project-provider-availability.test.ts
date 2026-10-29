@@ -6,6 +6,7 @@ import {
   type ProjectProviderAvailabilityEntry,
   RAMP_PROVIDERS,
 } from "@sdp/types/provider-access";
+import { SDP_RELEASE_CHANNEL_NAMES } from "@sdp/types/release-channels";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
@@ -22,16 +23,16 @@ import {
   type SeededDefaultProjects,
   seedDefaultProjects,
 } from "@/test/helpers/projects";
-import { providerStages } from "@/test/helpers/provider-stages";
+import { providerMaturity } from "@/test/helpers/provider-maturity";
 import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
 
 vi.mock("@sdp/types/release-channels", async (importOriginal) => {
   const { mockCustodyReleaseChannels } = await import("@/test/helpers/custody-release-channel");
-  const { mockReleaseChannelStages } = await import("@/test/helpers/provider-stages");
+  const { mockReleaseChannelMaturity } = await import("@/test/helpers/provider-maturity");
   const { RAMP_PROVIDERS } = await import("@sdp/types/provider-access");
-  return mockReleaseChannelStages(
+  return mockReleaseChannelMaturity(
     mockCustodyReleaseChannels(
       await importOriginal<typeof import("@sdp/types/release-channels")>()
     ),
@@ -40,7 +41,7 @@ vi.mock("@sdp/types/release-channels", async (importOriginal) => {
 });
 
 vi.mock("@sdp/types/provider-access", async (importOriginal) => {
-  const { mockEarnProviderSurfacing } = await import("@/test/helpers/provider-stages");
+  const { mockEarnProviderSurfacing } = await import("@/test/helpers/provider-maturity");
   return mockEarnProviderSurfacing(
     await importOriginal<typeof import("@sdp/types/provider-access")>()
   );
@@ -161,7 +162,10 @@ const SANDBOX_AVAILABILITY: ProjectProviderAvailability = {
       family: "custody",
       provider: "fireblocks",
       modes: [],
-      unavailableModes: SANDBOX_UNENTITLED_CUSTODY_MODES,
+      unavailableModes: [
+        { mode: "managed", reason: "provider_not_entitled" },
+        { mode: "byok", reason: "provider_not_entitled" },
+      ],
     },
     { family: "custody", provider: "privy", modes: ["managed", "byok"], unavailableModes: [] },
     {
@@ -226,7 +230,10 @@ const PRODUCTION_AVAILABILITY: ProjectProviderAvailability = {
       family: "custody",
       provider: "fireblocks",
       modes: [],
-      unavailableModes: PRODUCTION_UNOFFERED_CUSTODY_MODES,
+      unavailableModes: [
+        { mode: "managed", reason: "custody_mode_not_allowed" },
+        { mode: "byok", reason: "provider_not_entitled" },
+      ],
     },
     {
       family: "custody",
@@ -406,8 +413,8 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
   beforeEach(async () => {
     custodyReleaseChannel.outOfChannelMode = null;
     custodyReleaseChannel.stageOverride = null;
-    providerStages.moduleStageOverride = null;
-    providerStages.surfacedEarnProvider = null;
+    providerMaturity.moduleMaturityOverride = null;
+    providerMaturity.surfacedEarnProvider = null;
     earnPublication.published = true;
     await seedTestDatabase(env);
     await clearKVStores(env);
@@ -458,9 +465,8 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
     );
   });
 
-  it("reports custody and compliance providers the release channel leaves out as unavailable", async () => {
+  it("reports custody providers the release channel leaves out as unavailable", async () => {
     custodyReleaseChannel.outOfChannelMode = "managed";
-    providerStages.moduleStageOverride = { module: "compliance", stage: "experimental" };
 
     const availability = await readAvailability(
       "sandbox",
@@ -473,17 +479,62 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
       modes: ["byok"],
       unavailableModes: [{ mode: "managed", reason: "custody_provider_not_in_release_channel" }],
     });
-    expect(availability.providers).toContainEqual({
-      family: "compliance",
-      provider: "range",
-      available: false,
-      reason: "provider_not_in_release_channel",
-    });
     // The public document for this channel names no ramp or Earn provider it
     // leaves out (openapi/release-channel-values.ts), so the response omits them.
     expect(availability.providers.filter((entry) => entry.family === "ramps")).toEqual([]);
     expect(availability.providers.filter((entry) => entry.family === "earn")).toEqual([]);
   });
+
+  it("omits custody providers when the release channel leaves out Custody", async () => {
+    providerMaturity.moduleMaturityOverride = { module: "custody", stage: "experimental" };
+
+    const availability = await readAvailability(
+      "sandbox",
+      deploymentEnv({ SDP_RELEASE_CHANNEL: "stable" })
+    );
+
+    expect(availability.providers.filter((entry) => entry.family === "custody")).toEqual([]);
+  });
+
+  // Like ramps and Earn: the public document names no compliance provider on a
+  // channel without Compliance, so the response omits them there.
+  it.each(SDP_RELEASE_CHANNEL_NAMES)(
+    "lists compliance providers in %s only when the release channel runs Compliance",
+    async (channel) => {
+      providerMaturity.moduleMaturityOverride = { module: "compliance", stage: "experimental" };
+
+      const availability = await readAvailability(
+        "sandbox",
+        deploymentEnv({ SDP_RELEASE_CHANNEL: channel })
+      );
+
+      expect(availability.providers.filter((entry) => entry.family === "compliance")).toEqual(
+        channel === "experimental" ? COMPLIANCE_AVAILABILITY : []
+      );
+    }
+  );
+
+  it.each(["stable", "beta", "experimental"] as const)(
+    "advertises the actual Fireblocks BYOK stage to the dashboard in %s",
+    async (channel) => {
+      await setProviderOverrides({ custody: { fireblocks: true } });
+      const availability = await readAvailability(
+        "sandbox",
+        deploymentEnv({ SDP_RELEASE_CHANNEL: channel })
+      );
+      const fireblocks = availability.providers.find(
+        (entry) => entry.family === "custody" && entry.provider === "fireblocks"
+      );
+      expect(fireblocks).toMatchObject({
+        modes: channel === "stable" ? [] : ["byok"],
+        unavailableModes: expect.arrayContaining(
+          channel === "stable"
+            ? [{ mode: "byok", reason: "custody_provider_not_in_release_channel" }]
+            : []
+        ),
+      });
+    }
+  );
 
   it.for(EARN_FLAG_OFF_CASES)(
     "reports every Earn provider as outside the release channel while $flag is off",
@@ -548,7 +599,7 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
 
   it("reports below-stable providers the release channel offers the same in a Production project as in a Sandbox one, Managed custody aside", async () => {
     custodyReleaseChannel.stageOverride = { provider: "privy", mode: "byok", stage: "beta" };
-    providerStages.moduleStageOverride = { module: "compliance", stage: "beta" };
+    providerMaturity.moduleMaturityOverride = { module: "compliance", stage: "beta" };
 
     const production = await readAvailability("production", deploymentEnv({}));
     const sandbox = await readAvailability("sandbox", deploymentEnv({}));
@@ -558,7 +609,7 @@ describe("GET /v1/projects/:projectId/provider-availability", () => {
   });
 
   it("reports providers the deployment holds no credentials for as unavailable, except BYOK custody", async () => {
-    providerStages.surfacedEarnProvider = "upshift";
+    providerMaturity.surfacedEarnProvider = "upshift";
     await setProviderOverrides({
       ...FIXTURE_PROVIDER_OVERRIDES,
       earn: { veda: true, upshift: true },

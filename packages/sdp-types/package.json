@@ -209,6 +209,11 @@
       "import": "./src/tokens.ts",
       "default": "./src/tokens.ts"
     },
+    "./trace-correlation": {
+      "types": "./src/trace-correlation.ts",
+      "import": "./src/trace-correlation.ts",
+      "default": "./src/trace-correlation.ts"
+    },
     "./unified-transactions": {
       "types": "./src/unified-transactions.ts",
       "import": "./src/unified-transactions.ts",
@@ -233,6 +238,11 @@
       "types": "./src/wisdomtree-programs.ts",
       "import": "./src/wisdomtree-programs.ts",
       "default": "./src/wisdomtree-programs.ts"
+    },
+    "./fireblocks": {
+      "types": "./src/fireblocks.ts",
+      "import": "./src/fireblocks.ts",
+      "default": "./src/fireblocks.ts"
     }
   },
   "scripts": {
@@ -241,7 +251,7 @@
   },
   "dependencies": {
     "@solana/addresses": "catalog:",
-    "zod": "4.6.5"
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "typescript": "6.0.3"

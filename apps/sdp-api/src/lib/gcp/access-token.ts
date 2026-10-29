@@ -8,7 +8,7 @@ export interface GcpMetadataTokenProviderOptions {
   now?: () => number; // ms
 }
 
-export class GcpAccessTokenError extends Error {
+class GcpAccessTokenError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "GcpAccessTokenError";

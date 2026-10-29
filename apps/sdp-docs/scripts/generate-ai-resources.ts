@@ -1,20 +1,28 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { SdpModule } from "@sdp/types/release-channels";
-import { expandDocsBlocks } from "@/lib/docs-blocks";
+import { parse as parseYaml } from "yaml";
+import { z } from "zod";
+import { DOCS_SKILL_NAME } from "@/lib/agent-setup";
+import { expandDocsBlocks, stripMdxEsm } from "@/lib/docs-blocks";
 import { DOCS_MODULES } from "@/lib/docs-catalog";
-import { isModulePublished, isPageSourcePublished } from "@/lib/release-channel";
-import { canonicalSite } from "@/lib/site";
+import {
+  frontmatterOf,
+  isModulePublished,
+  isPageSourcePublished,
+  pageGateOf,
+} from "@/lib/release-channel";
+import { canonicalSite, docsPageSlugOf, isDocsFolderGroup } from "@/lib/site";
 
 const {
   aiGuideUrl,
   aiLlmsFullUrl,
   aiLlmsUrl,
-  apiDocsUrl,
+  aiSkillUrl,
   apiOpenApiUrl,
   apiUrl,
   docsUrl,
+  getDocsMarkdownUrl,
   getDocsPageUrl,
 } = canonicalSite;
 
@@ -26,6 +34,12 @@ const docsMetaPath = path.resolve(docsContentDir, "meta.json");
 const publicDir = path.resolve(__dirname, "../public");
 const llmsPath = path.resolve(publicDir, "llms.txt");
 const llmsFullPath = path.resolve(publicDir, "llms-full.txt");
+// The same skill twice: public/ is what the docs serve at /SKILL.md, and the repo's skills/
+// is what `npx skills add` installs. The docs image never sees the second copy.
+const skillPaths = [
+  path.resolve(publicDir, "SKILL.md"),
+  path.resolve(__dirname, `../../../skills/${DOCS_SKILL_NAME}/SKILL.md`),
+];
 
 type DocsMeta = {
   title?: string;
@@ -38,6 +52,8 @@ type DocsPage = {
   description: string;
   url: string;
   content: string;
+  /** No `module` or `rampProvider` gate: every release channel publishes it. */
+  shared: boolean;
 };
 
 type Section = {
@@ -52,16 +68,6 @@ type Section = {
 const FEATURE_SUMMARY = DOCS_MODULES.filter(
   (entry) => entry.module === "core" || isModulePublished(entry.module)
 ).map((entry) => entry.capability);
-
-/**
- * Generated API reference pages carry no frontmatter; their family exists only
- * when the release channel runs its module.
- */
-const KEY_PAGE_MODULES: Record<string, SdpModule> = {
-  "reference/api/compliance": "compliance",
-  "reference/api/issuance": "issuance",
-  "reference/api/asset-profiles": "issuance",
-};
 
 const KEY_PAGE_SLUGS = [
   "introduction",
@@ -78,15 +84,8 @@ const KEY_PAGE_SLUGS = [
   "tutorials/end-to-end-payment-flow",
   "reference/provider-onboarding",
   "reference/docs-for-ai",
+  "reference/conventions/index",
   "reference/postman-collection",
-  "reference/api/index",
-  "reference/api/health",
-  "reference/api/wallets",
-  "reference/api/projects",
-  "reference/api/issuance",
-  "reference/api/payments",
-  "reference/api/compliance",
-  "reference/api/asset-profiles",
 ];
 
 function stripMarkdownFormatting(value: string): string {
@@ -97,22 +96,26 @@ function normalizeLine(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
 
-function stripMdxContent(source: string): string {
+function stripMdxContent(source: string, where: string): string {
   let content = source.replace(/^---\n[\s\S]*?\n---\n?/, "");
-  content = content.replace(/^import\s+[^\n]*\n?/gm, "");
+  content = stripMdxEsm(content, where);
   return content.replace(/\n{3,}/g, "\n\n").trim();
 }
 
+const pageFrontmatterSchema = z.object({
+  title: z.string().optional(),
+  description: z.string().optional(),
+});
+
+/** A page's title and description, read as YAML: a generated value may be quoted. */
 function parseFrontmatter(source: string): { title: string; description: string } {
   const match = source.match(/^---\n([\s\S]*?)\n---\n?/);
-  const frontmatter = match?.[1] ?? "";
-
-  const title = stripMarkdownFormatting(frontmatter.match(/^title:\s*(.+)$/m)?.[1] ?? "");
-  const description = stripMarkdownFormatting(
-    frontmatter.match(/^description:\s*(.+)$/m)?.[1] ?? ""
-  );
-
-  return { title, description };
+  if (match?.[1] === undefined) return { title: "", description: "" };
+  const { title, description } = pageFrontmatterSchema.parse(parseYaml(match[1]));
+  return {
+    title: title === undefined ? "" : stripMarkdownFormatting(title),
+    description: description === undefined ? "" : stripMarkdownFormatting(description),
+  };
 }
 
 async function listFiles(dirPath: string): Promise<string[]> {
@@ -131,8 +134,7 @@ async function listFiles(dirPath: string): Promise<string[]> {
 }
 
 function toPageSlug(filePath: string): string {
-  const relativePath = path.relative(docsContentDir, filePath).replace(/\\/g, "/");
-  return relativePath.replace(/\.mdx$/, "");
+  return docsPageSlugOf(path.relative(docsContentDir, filePath).replace(/\\/g, "/"));
 }
 
 /** Pages a `module:` tag leaves out of this release channel. */
@@ -161,7 +163,8 @@ async function loadPages(): Promise<Map<string, DocsPage>> {
       title: title || slug.split("/").at(-1)?.replace(/-/g, " ") || slug,
       description,
       url: getDocsPageUrl(slug),
-      content: stripMdxContent(source),
+      content: stripMdxContent(source, filePath),
+      shared: pageGateOf(frontmatterOf(raw, filePath).data, filePath) === undefined,
     });
   }
 
@@ -231,18 +234,20 @@ function buildSections(
       return;
     }
 
+    // The entry's path, `(name)` folders included, and the slug its page would have.
     const fullSlug = slugPrefix ? `${slugPrefix}/${entry}` : entry;
+    const pageSlug = docsPageSlugOf(fullSlug);
 
-    const page = pages.get(fullSlug);
+    const page = pages.get(pageSlug);
     if (page) {
-      if (!emitted.has(fullSlug)) {
+      if (!emitted.has(pageSlug)) {
         currentSection.pages.push(page);
-        emitted.add(fullSlug);
+        emitted.add(pageSlug);
       }
       return;
     }
 
-    if (excludedSlugs.has(fullSlug)) {
+    if (excludedSlugs.has(pageSlug)) {
       return;
     }
 
@@ -253,8 +258,25 @@ function buildSections(
     }
 
     flush();
-    const sectionTitle = folderMeta.title || entry;
+    // A `(name)` folder groups its parent's pages (an API family's operations), so its section
+    // names the parent too, and it has no index of its own.
+    const group = isDocsFolderGroup(entry);
+    const sectionTitle =
+      group && parentLabel
+        ? `${parentLabel}: ${folderMeta.title || entry}`
+        : folderMeta.title || entry;
     currentSection = { title: sectionTitle, pages: [] };
+    // A folder's index is the folder's own page even where its meta lists only the rest, as an
+    // API family lists its operations.
+    const folderIndex = group ? undefined : pages.get(docsPageSlugOf(`${fullSlug}/index`));
+    if (
+      folderIndex &&
+      !(folderMeta.pages ?? []).includes("index") &&
+      !emitted.has(folderIndex.slug)
+    ) {
+      currentSection.pages.push(folderIndex);
+      emitted.add(folderIndex.slug);
+    }
     for (const subEntry of folderMeta.pages || []) {
       visit(subEntry, fullSlug, sectionTitle);
     }
@@ -270,11 +292,30 @@ function buildSections(
   return sections;
 }
 
-function buildKeyPages(pages: Map<string, DocsPage>): DocsPage[] {
-  const inChannel = KEY_PAGE_SLUGS.filter(
-    (slug) => !excludedSlugs.has(slug) && isModulePublished(KEY_PAGE_MODULES[slug])
+/**
+ * The API reference pages `generate:api` wrote for this release channel, in its
+ * order. They come from the channel's public OpenAPI document, so no module gate
+ * applies to them.
+ */
+function apiReferenceSlugs(folderMetas: Map<string, DocsMeta>): string[] {
+  const pages = folderMetas.get("reference/api")?.pages;
+  if (!pages) {
+    throw new Error('Missing content/docs/reference/api/meta.json; run "pnpm generate:api" first');
+  }
+  // A family is a folder: its table is the folder's index.
+  return pages.map((page) =>
+    folderMetas.has(`reference/api/${page}`)
+      ? `reference/api/${page}/index`
+      : `reference/api/${page}`
   );
-  return inChannel.map((slug) => {
+}
+
+function buildKeyPages(
+  pages: Map<string, DocsPage>,
+  folderMetas: Map<string, DocsMeta>
+): DocsPage[] {
+  const guides = KEY_PAGE_SLUGS.filter((slug) => !excludedSlugs.has(slug));
+  return [...guides, ...apiReferenceSlugs(folderMetas)].map((slug) => {
     const page = pages.get(slug);
     if (!page) {
       throw new Error(`Missing required key docs page "${slug}" for llms.txt generation`);
@@ -292,7 +333,7 @@ function renderLlms(keyPages: DocsPage[]): string {
     "## Canonical URLs",
     `- Docs: ${docsUrl}`,
     `- API: ${apiUrl}`,
-    `- Interactive API docs: ${apiDocsUrl}`,
+    `- API reference: ${getDocsPageUrl("reference/api")}`,
     `- OpenAPI: ${apiOpenApiUrl}`,
     `- AI guide: ${aiGuideUrl}`,
     "",
@@ -308,8 +349,9 @@ function renderLlms(keyPages: DocsPage[]): string {
     "## Machine-readable resources",
     `- [llms.txt](${aiLlmsUrl})`,
     `- [llms-full.txt](${aiLlmsFullUrl})`,
+    `- [SKILL.md](${aiSkillUrl}): Agent skill with the rules for building on SDP.`,
+    `- Any docs page as Markdown: add \`.md\` to its URL.`,
     `- [OpenAPI](${apiOpenApiUrl})`,
-    `- [Swagger UI](${apiDocsUrl})`,
     "",
     "## Scope",
     "- Public AI artifacts intentionally exclude hidden or internal-only API families.",
@@ -338,7 +380,7 @@ function renderLlmsFull(sections: Section[]): string {
     "## Canonical URLs",
     `- Docs: ${docsUrl}`,
     `- API: ${apiUrl}`,
-    `- Interactive API docs: ${apiDocsUrl}`,
+    `- API reference: ${getDocsPageUrl("reference/api")}`,
     `- OpenAPI: ${apiOpenApiUrl}`,
     `- AI guide: ${aiGuideUrl}`,
     "",
@@ -346,6 +388,62 @@ function renderLlmsFull(sections: Section[]): string {
     "",
     "## Notes",
     "- Generated from docs source. Hidden or internal-only APIs are intentionally excluded.",
+    "",
+  ].join("\n");
+}
+
+/**
+ * A page the skill links, as its Markdown URL. It must be a shared page, so the skill reads
+ * the same on every release channel: the repo copy is built at experimental and installed
+ * against any deployment.
+ */
+function skillLink(pages: Map<string, DocsPage>, slug: string, label?: string): string {
+  const page = pages.get(slug);
+  if (!page?.shared) {
+    throw new Error(`SKILL.md links "${slug}", which is not a shared docs page`);
+  }
+  return `[${label ?? page.title}](${getDocsMarkdownUrl(slug)})`;
+}
+
+/**
+ * The read-only docs skill. It names no module (the published ones are in llms.txt), so one
+ * copy is right for every release channel.
+ */
+function renderSkill(pages: Map<string, DocsPage>): string {
+  const overview = (label: string) => skillLink(pages, "developing-with-sdp/index", label);
+  const authentication = skillLink(pages, "developing-with-sdp/authentication");
+  return [
+    "---",
+    `name: ${DOCS_SKILL_NAME}`,
+    "description: Answer questions and write code for Solana Developer Platform (SDP) from its public docs and OpenAPI contract. Use when building against the SDP REST API at api.solana.com, or when asked how SDP environments, API keys, idempotency or transaction signing work.",
+    "---",
+    "",
+    "# Solana Developer Platform docs",
+    "",
+    "Read the published SDP docs before you answer or write code. This skill only reads: it never calls the SDP API or handles an API key, and the user runs every request with their own key.",
+    "",
+    "## Where to read",
+    "",
+    `- [Docs index](${getDocsMarkdownUrl("")}): every published page, with a line on each. Find the page for the task here.`,
+    `- [llms.txt](${aiLlmsUrl}): the key pages and the API reference.`,
+    `- Any docs page as Markdown: add \`.md\` to its URL, as in ${getDocsMarkdownUrl("developing-with-sdp/idempotency")}.`,
+    `- [llms-full.txt](${aiLlmsFullUrl}): every page in one file.`,
+    `- [OpenAPI](${apiOpenApiUrl}): every public route, field and error code. Take paths, fields and enum values from it, never from memory.`,
+    "",
+    "These files list what the platform publishes. A route or page they leave out is not public: don't use it, and don't infer one from SDP's source code.",
+    "",
+    "## Grounding rules",
+    "",
+    `1. **The project picks the network.** A sandbox project runs on devnet and a production project on mainnet-beta. An API key belongs to one project and reaches only its network; no request field or key format names the network. Build against a sandbox key, then go live by swapping in a production key. ${overview("Environments")}`,
+    `2. **Keys hold explicit grants.** Every route performs one action, \`module.verb\`, and a key may call it only when it holds that action: there are no roles and no wildcards. \`manage\` and \`execute\` include the same module's \`read\`, and nothing else implies another action. A missing grant is \`403 INSUFFICIENT_PERMISSIONS\`, with \`error.details.action\` naming it. A key never administers keys, members, the organization or projects, and its wallet scope limits which custody wallets SDP signs with for it. ${skillLink(pages, "developing-with-sdp/manage-api-keys")}, ${authentication}`,
+    `3. **Send an \`Idempotency-Key\` on every mutation that accepts one.** Routes that move money require it (\`400 IDEMPOTENCY_KEY_REQUIRED\`). Make one key per logical operation, store it before the first send and reuse it on every retry; a new operation gets a new key. A different request under the same key is \`422 IDEMPOTENCY_KEY_REUSED\`, and \`409 IDEMPOTENCY_KEY_IN_FLIGHT\` means wait, then retry with the same key. To learn an outcome, read the resource with \`GET\`: never resend a request to find out. ${skillLink(pages, "developing-with-sdp/idempotency")}`,
+    `4. **Execute signs inside SDP; prepare hands you a transaction.** An execute route builds the transaction, signs it with a custody wallet in the project and submits it. A \`prepare\` route returns an unsigned transaction for a signer outside SDP to sign and submit. It carries a recent blockhash and soon expires, so sign and submit it right away, and prepare again instead of reusing an old one. Use execute unless the signer must stay outside SDP. ${overview("Execution model")}`,
+    "",
+    "## API basics",
+    "",
+    `- Base URL \`${apiUrl}\`. Send the key as \`Authorization: Bearer <key>\`; current keys start with \`sf_\`.`,
+    '- A success wraps its payload as `{ "data": ..., "meta": { "requestId": ... } }`, and an error is `{ "error": { "code": ..., "message": ... } }`. Branch on `error.code`, and quote `meta.requestId` when reporting a problem.',
+    "- Keep the key out of code, prompts and logs: read it from an environment variable such as `SDP_API_KEY`.",
     "",
   ].join("\n");
 }
@@ -366,13 +464,20 @@ async function run(): Promise<void> {
     loadFolderMetas(),
   ]);
   const sections = buildSections(meta, pages, folderMetas);
-  const keyPages = buildKeyPages(pages);
+  const keyPages = buildKeyPages(pages, folderMetas);
 
-  await fs.mkdir(publicDir, { recursive: true });
+  const skill = renderSkill(pages);
+
+  await Promise.all(
+    [publicDir, ...skillPaths.map((skillPath) => path.dirname(skillPath))].map((dir) =>
+      fs.mkdir(dir, { recursive: true })
+    )
+  );
 
   await Promise.all([
     writeFileIfChanged(llmsPath, renderLlms(keyPages)),
     writeFileIfChanged(llmsFullPath, renderLlmsFull(sections)),
+    ...skillPaths.map((skillPath) => writeFileIfChanged(skillPath, skill)),
   ]);
 }
 

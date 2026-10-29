@@ -23,7 +23,7 @@ import type { DatabaseExecutor } from "@/db/client";
  * billing period plus this margin. Cancel ends a subscription at the end of its current period, at
  * most one period after the cancel, and resume needs the authority until then.
  */
-export const SUBSCRIPTION_AUTHORITY_IDLE_MARGIN_HOURS = 1;
+const SUBSCRIPTION_AUTHORITY_IDLE_MARGIN_HOURS = 1;
 
 const revocationRowSchema = z.object({
   id: z.string(),

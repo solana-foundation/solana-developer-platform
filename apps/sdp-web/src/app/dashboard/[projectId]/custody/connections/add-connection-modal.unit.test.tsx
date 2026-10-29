@@ -89,7 +89,9 @@ it("keeps an unknown submission open and replays the same payload and key", asyn
   const { submit, complete } = mockApi();
   submit.mockRejectedValueOnce(new TypeError("fetch failed"));
   complete.mockImplementation(async () =>
-    Response.json({ data: { completion: { status: "success" } } })
+    Response.json({
+      data: { providerCredential: { provider: "privy" }, completion: { status: "success" } },
+    })
   );
   const user = userEvent.setup();
   render(<ConnectionLauncher />);

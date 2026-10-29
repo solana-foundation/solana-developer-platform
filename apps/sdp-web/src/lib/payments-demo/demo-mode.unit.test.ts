@@ -1,5 +1,6 @@
 import { RAMP_PROVIDERS, type RampProviderId } from "@sdp/types/provider-access";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { rampProvidersInReleaseChannel } from "@/flags/release-channel";
 
 /*
  * Demo mode end to end: every request is what a Payments screen's route handler would send the
@@ -30,22 +31,12 @@ const browser = vi.hoisted(() => {
     tabDemo: false,
     // The ramp providers the channel-capped flags leave on.
     rampProviders: [] as RampProviderId[],
-    newDesign: true,
     demoMode: true,
-    newDesignModule: undefined as string | undefined,
   };
 });
 
-// Demo mode is part of the new design and has a flag of its own; the flags themselves read
-// Vercel and the request.
 vi.mock("@/flags", () => ({ paymentsDemoMode: async () => browser.demoMode }));
 vi.mock("@/flags/ramps", () => ({ getEnabledRampProviders: async () => browser.rampProviders }));
-vi.mock("@/flags/new-design", () => ({
-  isNewDesignOn: async (designModule?: string) => {
-    browser.newDesignModule = designModule;
-    return browser.newDesign;
-  },
-}));
 
 vi.mock("next/headers", () => ({
   // A fresh store object per request, as Next gives each request its own.
@@ -93,7 +84,6 @@ beforeEach(() => {
   browser.projectHeader = null;
   browser.tabDemo = false;
   browser.rampProviders = [...RAMP_PROVIDERS];
-  browser.newDesign = true;
   browser.demoMode = true;
   upstream.mockClear();
   vi.useFakeTimers();
@@ -113,14 +103,6 @@ describe("scope", () => {
     browser.jar.set("sdp-payments-demo", PROJECT);
     browser.pathname = "/dashboard/prj_sandbox/wallets";
     expect((await call("GET", "/v1/counterparties")).status).toBeNull();
-  });
-
-  it("stays out of the way with the page on the previous design, cookie or not", async () => {
-    browser.newDesign = false;
-    browser.pathname = "/dashboard/prj_sandbox/payments/counterparty";
-    expect((await call("GET", "/v1/counterparties")).status).toBeNull();
-    // The page's own design module decides, not NEW DESIGN alone.
-    expect(browser.newDesignModule).toBe("contacts");
   });
 
   it("stays out of the way with the demo flag off, cookie or not", async () => {
@@ -363,6 +345,24 @@ describe("ramps and the release channel", () => {
     browser.rampProviders = ["moonpay"];
     expect((await quote("stripe")).status).toBe(400);
     expect((await quote("moonpay")).status).toBe(201);
+  });
+
+  it("walks no ramp stable hides: no sample transfer of one and every quote refused", async () => {
+    // The providers stable's capped flags leave on, from the maturity table, not picked here.
+    browser.rampProviders = rampProvidersInReleaseChannel("stable");
+    const hidden = RAMP_PROVIDERS.filter((provider) => !browser.rampProviders.includes(provider));
+    const transfers = await data<{ id: string; provider?: string }[]>(
+      "/v1/payments/transfers?pageSize=100"
+    );
+    expect(transfers.length).toBeGreaterThan(0);
+    expect(
+      transfers.filter(({ provider }) =>
+        hidden.some((hiddenProvider) => hiddenProvider === provider)
+      )
+    ).toEqual([]);
+    for (const provider of hidden) {
+      expect((await quote(provider)).status, provider).toBe(400);
+    }
   });
 
   it("leaves a sample ramp transfer of a hidden provider out of the lists", async () => {

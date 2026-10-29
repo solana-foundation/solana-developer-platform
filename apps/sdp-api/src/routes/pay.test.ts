@@ -1,3 +1,4 @@
+import * as solanaRpc from "@sdp/rpc/solana";
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import {
@@ -13,19 +14,18 @@ import {
   pipe,
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
+  signature,
 } from "@solana/kit";
 import { getTransferSolInstruction } from "@solana-program/system";
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
-import {
-  createPaymentRequestsRepository,
-  createSystemPaymentRequestsRepository,
-} from "@/db/repositories/repository-factory";
+import * as repositoryFactory from "@/db/repositories/repository-factory";
+import { createSystemPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { app } from "@/index";
-import { createTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
+import * as paymentRequests from "@/services/payments/payment-requests";
 import * as sponsorshipService from "@/services/sponsorship.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import {
@@ -36,9 +36,11 @@ import {
 import { seedUnreadPrivyWallet } from "@/test/helpers/custody-connections";
 import { env } from "@/test/helpers/env";
 import { syntheticAddress } from "@/test/helpers/parsed-transactions";
+import { cancelSeededPaymentRequest, seedPaymentRequest } from "@/test/helpers/payment-requests";
 import {
   createKoraAdapterMock,
   getRecentBlockhashMock,
+  getSignaturesForAddressMock,
   installPaymentsRouteTestHooks,
   TEST_CUSTODY_WALLET_ID,
   TEST_ORG,
@@ -127,10 +129,7 @@ describe("Public payment request routes", () => {
   }
 
   function createAwaitingTokenPaymentRequest(wallet: RequestWallet, token: string) {
-    return createPaymentRequestsRepository(
-      env,
-      createTenantScope({ organizationId: TEST_ORG.id, projectId: wallet.projectId })
-    ).createPaymentRequest({
+    return seedPaymentRequest(env, {
       organizationId: TEST_ORG.id,
       projectId: wallet.projectId,
       custodyWalletId: wallet.custodyWalletId,
@@ -185,7 +184,7 @@ describe("Public payment request routes", () => {
   }
 
   it.for(ENVIRONMENT_CLUSTER_CASES)(
-    "reports and reads a $environment request on $cluster only",
+    "reports a $environment request on $cluster from stored state without reading the chain",
     async ({ environment, cluster }) => {
       const request = await createAwaitingPaymentRequest(
         await REQUEST_WALLET_BY_ENVIRONMENT[environment]()
@@ -198,10 +197,26 @@ describe("Public payment request routes", () => {
         status: "awaiting_payment",
         network: cluster,
       });
-      expect(rpc.calls).toContainEqual({ cluster, method: "getSignaturesForAddress" });
-      expect(calledClusters()).toEqual(new Set([cluster]));
+      expect(rpc.calls).toEqual([]);
     }
   );
+
+  it("refuses to build a transaction for a canceled request", async () => {
+    const sponsorship = stubSponsorship();
+    const request = await cancelSeededPaymentRequest(
+      env,
+      await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET),
+      { apiKeyId: null, userId: TEST_USER.id }
+    );
+
+    const response = await postTransaction(request.public_token);
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: { message: "Payment request is no longer payable" },
+    });
+    expect(sponsorship).not.toHaveBeenCalled();
+  });
 
   it("keeps an unresolved legacy request readable but refuses to build its transaction", async () => {
     const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
@@ -359,7 +374,11 @@ describe("Public payment request routes", () => {
           "payments.pay_request",
           { custodyWalletId: null }
         );
-        expect(rpc.calls).toContainEqual({ cluster, method: "getSignaturesForAddress" });
+        expect(
+          new Set(
+            getSignaturesForAddressMock.mock.calls.map(([client]) => clusterOfRpcClient(client))
+          )
+        ).toEqual(new Set([cluster]));
         expect(rpc.calls).toContainEqual({ cluster, method: "getBlockHeight" });
         expect(calledClusters()).toEqual(new Set([cluster]));
         expect(
@@ -367,6 +386,47 @@ describe("Public payment request routes", () => {
         ).toEqual(new Set([cluster]));
       }
     );
+
+    it("refuses with 409 before claiming or signing when the payer would keep less than the rent minimum (HOO-2375)", async () => {
+      stubSponsorship();
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+      // 1.5003 SOL held, 1.5 SOL owed: 0.0003 SOL left, below the 0.00089088 minimum.
+      rpc.answer("getMultipleAccounts", {
+        context: { slot: 1 },
+        value: [
+          {
+            data: ["", "base64"],
+            executable: false,
+            lamports: 1_500_300_000,
+            owner: "11111111111111111111111111111111",
+            rentEpoch: 0,
+            space: 0,
+          },
+        ],
+      });
+
+      const res = await postTransaction(request.public_token);
+
+      expect(res.status).toBe(409);
+      expect(await res.json()).toMatchObject({
+        error: { code: "AMOUNT_BELOW_RENT_MINIMUM", details: { sourceRemainder: "0.0003" } },
+      });
+      // Refused before the claim: once the payer can afford the minimum, it is served.
+      rpc.answer("getMultipleAccounts", {
+        context: { slot: 1 },
+        value: [
+          {
+            data: ["", "base64"],
+            executable: false,
+            lamports: 2_000_000_000,
+            owner: "11111111111111111111111111111111",
+            rentEpoch: 0,
+            space: 0,
+          },
+        ],
+      });
+      expect((await postTransaction(request.public_token)).status).toBe(200);
+    });
 
     it("signs once per window and replays the stored transaction for the same account", async () => {
       const sponsorship = stubSponsorship();
@@ -445,6 +505,75 @@ describe("Public payment request routes", () => {
       );
       expect(other.status).toBe(429);
       expect(Number(other.headers.get("Retry-After"))).toBeGreaterThan(0);
+    });
+
+    it("answers 429 with Retry-After instead of a new transaction while a payment is still confirming", async () => {
+      const sponsorship = stubSponsorship();
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+      getSignaturesForAddressMock.mockResolvedValueOnce([
+        {
+          signature: signature(getBase58Decoder().decode(new Uint8Array(64).fill(5))),
+          slot: 1n,
+          blockTime: null,
+          err: null,
+          confirmationStatus: "confirmed",
+        },
+      ]);
+      const verify = vi
+        .spyOn(solanaRpc, "getSignatureStatuses")
+        .mockResolvedValue([
+          { slot: 1n, confirmations: null, confirmationStatus: "confirmed", err: null },
+        ]);
+      onTestFinished(() => verify.mockRestore());
+
+      const response = await postTransaction(request.public_token);
+
+      expect(response.status).toBe(429);
+      expect(Number(response.headers.get("Retry-After"))).toBeGreaterThan(0);
+      expect(await response.json()).toMatchObject({ error: { code: "RATE_LIMITED" } });
+      expect(verify).toHaveBeenCalledTimes(1);
+      expect(sponsorship).not.toHaveBeenCalled();
+    });
+
+    it("does not replay the stored transaction once the request passes its deadline", async () => {
+      stubSponsorship();
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+      expect((await postTransaction(request.public_token)).status).toBe(200);
+
+      const expiry = vi.spyOn(paymentRequests, "isPaymentRequestExpired").mockReturnValue(true);
+      onTestFinished(() => expiry.mockRestore());
+
+      const replay = await postTransaction(request.public_token);
+      expect(replay.status).toBe(400);
+      expect(await replay.json()).not.toHaveProperty("transaction");
+    });
+
+    it("answers no longer payable when the claim is lost to a cancel", async () => {
+      const sponsorship = stubSponsorship();
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+      const systemRepository = repositoryFactory.createSystemPaymentRequestsRepository;
+      const factory = vi
+        .spyOn(repositoryFactory, "createSystemPaymentRequestsRepository")
+        .mockImplementation((bindings) => {
+          const repository = systemRepository(bindings);
+          vi.spyOn(repository, "claimSponsoredTransactionWindow").mockImplementation(async () => {
+            await cancelSeededPaymentRequest(env, request, {
+              apiKeyId: null,
+              userId: TEST_USER.id,
+            });
+            return false;
+          });
+          return repository;
+        });
+      onTestFinished(() => factory.mockRestore());
+
+      const response = await postTransaction(request.public_token);
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: { message: "Payment request is no longer payable" },
+      });
+      expect(sponsorship).toHaveBeenCalledTimes(1);
     });
 
     it("lets a new account claim after the window expires", async () => {

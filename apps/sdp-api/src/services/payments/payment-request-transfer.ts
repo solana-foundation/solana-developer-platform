@@ -22,7 +22,7 @@ import {
   TokenInstruction,
 } from "@solana-program/token";
 
-interface PaymentRequestTransferFields {
+export interface PaymentRequestTransferFields {
   recipient: Address;
   amount: bigint;
   decimals: number;
@@ -38,7 +38,7 @@ interface PaymentRequestTransferFields {
  *
  * @param signature - The transaction that carries the payment request's reference.
  * @param fields - The request's recipient, exact base-unit amount, mint facts and reference.
- * @returns The confirmed transaction response the transfer was validated against.
+ * @returns The finalized transaction response the transfer was validated against.
  * @throws ValidateTransferError when the transaction fails, or its last instruction is not the
  *   expected transfer, or the recipient received less than the amount.
  */
@@ -48,13 +48,19 @@ export async function validatePaymentRequestTransfer(
 ) {
   const response = await createClusterRpc()
     .getTransaction(signature, {
-      commitment: "confirmed",
+      commitment: "finalized",
       maxSupportedTransactionVersion: 0,
       encoding: "base64",
     })
     .send();
-  if (response === null || response.meta === null || response.meta.err !== null) {
-    throw new ValidateTransferError("Transaction is missing or failed");
+  if (response === null) {
+    throw new ValidateTransferError("Transaction not found");
+  }
+  if (response.meta === null) {
+    throw new ValidateTransferError("Transaction meta missing");
+  }
+  if (response.meta.err !== null) {
+    throw new ValidateTransferError("Transaction failed");
   }
   const { compiledMessage, loadedAddresses } = decodeTransactionFromRpcResponse(response);
   const candidate = getInstructionsFromCompiledTransactionMessage(

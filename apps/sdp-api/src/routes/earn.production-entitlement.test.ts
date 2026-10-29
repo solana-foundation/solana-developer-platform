@@ -6,6 +6,7 @@ import {
 } from "@/db/repositories/earn-movements.repository";
 import { app } from "@/index";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
+import { recordCallScopes } from "@/test/helpers/cluster-scope";
 import {
   seedTestPrivyConnection,
   writeTestPrivyCredentialSecret,
@@ -217,6 +218,7 @@ describe.each([
 
   it("withdraws an existing production position", async () => {
     const positionId = await seedProductionPosition();
+    const scopes = recordCallScopes(withdrawFromVault);
 
     const res = await request(actor, "POST", "/v1/earn/vault-withdrawals", {
       positionId,
@@ -225,9 +227,7 @@ describe.each([
 
     expect(res.status).toBe(200);
     expect(withdrawFromVault).toHaveBeenCalledTimes(1);
-    expect(withdrawFromVault.mock.calls[0]?.[1]).toMatchObject({
-      positionId,
-      environment: "production",
-    });
+    expect(withdrawFromVault.mock.calls[0]?.[1]).toMatchObject({ positionId });
+    expect(scopes).toEqual([expect.objectContaining({ environment: "production" })]);
   });
 });

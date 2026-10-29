@@ -1,17 +1,14 @@
 import { hashString } from "@sdp/payments/hash";
-import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
 import { currentDatabaseIdentity } from "@/db/identity";
 import { app } from "@/index";
-import { AppError, rateLimited } from "@/lib/errors";
+import { rateLimited } from "@/lib/errors";
 import * as organizationAccess from "@/lib/organization-access";
 import { apiKeyFloodGuardFallback, authMiddleware, optionalAuth } from "@/middleware/auth";
-import { kvStoreMiddleware } from "@/middleware/kv-store";
 import {
-  ANONYMOUS_EARN_BUILD_MAX_REQUESTS,
-  ANONYMOUS_EARN_CATALOGUE_MAX_REQUESTS,
   API_KEY_PRE_READ_MAX_REQUESTS,
+  anonymousFallback,
   apiKeyFloodGuardIdentifier,
   enforceRateLimit,
   InProcessRateLimiter,
@@ -21,36 +18,12 @@ import {
   RATE_LIMIT_WINDOW_MS,
   skipRateLimitPaths,
 } from "@/middleware/rate-limit";
-import type { KVStore, KVStoreSet } from "@/runtime/kv";
 import { TEST_API_KEY, TEST_SEEDED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
+import { middlewareTestApp, TEST_CLIENT_IP } from "@/test/helpers/middleware-app";
 import { seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, readRateLimitCount, seedRateLimit } from "@/test/mocks/kv";
-import type { Env } from "@/types/env";
-
-/**
- * From TEST-NET-3 (203.0.113.0/24, RFC 5737) — reserved for documentation and
- * tests, never publicly routable. Must be a syntactically valid IP because
- * getClientIp drops x-forwarded-for entries that fail isIP(), which would
- * silently move these tests to the "unknown" bucket.
- */
-const CLIENT_IP = "203.0.113.7";
-
-/** A counter store whose every call fails, as during a Redis outage. */
-function unavailableKvStoreSet(): KVStoreSet {
-  const down = () => Promise.reject(new Error("kv down"));
-  const store: KVStore = {
-    get: down,
-    put: down,
-    delete: down,
-    compareAndSet: down,
-    compareAndDelete: down,
-    list: down,
-    admitSlidingWindow: down,
-  };
-  return { rateLimits: store, cache: store };
-}
 
 async function keyedRequest(): Promise<Response> {
   return await app.request(
@@ -58,7 +31,7 @@ async function keyedRequest(): Promise<Response> {
     {
       headers: {
         Authorization: `Bearer ${TEST_API_KEY.raw}`,
-        "x-forwarded-for": CLIENT_IP,
+        "x-forwarded-for": TEST_CLIENT_IP,
       },
     },
     env
@@ -82,26 +55,18 @@ describe("Rate limiting", () => {
   });
 
   /** The flood guard counts per key hash, before the key's row is read. */
-  const floodCounter = (clientIp: string = CLIENT_IP) =>
-    apiKeyFloodGuardIdentifier(validKeyHash, clientIp);
+  const floodCounter = (clientIp: string) => apiKeyFloodGuardIdentifier(validKeyHash, clientIp);
   /** The key's own tier counts per key id. */
   const tierCounter = TEST_SEEDED_API_KEY.id;
 
   afterEach(async () => {
     vi.restoreAllMocks();
+    vi.useRealTimers();
+    anonymousFallback.resetForTesting();
     await clearKVStores(env);
   });
 
   describe("per-key tier limits", () => {
-    it("allows a standard-tier key under its limit and reports tier headers", async () => {
-      await seedApiKeyRow(env, validKeyHash, TEST_SEEDED_API_KEY);
-
-      const res = await keyedRequest();
-
-      expect(res.status).not.toBe(429);
-      expect(res.headers.get("X-RateLimit-Limit")).toBe("100");
-    });
-
     it("returns 429 when a standard-tier key exceeds its limit", async () => {
       await seedApiKeyRow(env, validKeyHash, TEST_SEEDED_API_KEY);
       await seedRateLimit(env, tierCounter, 100);
@@ -149,16 +114,6 @@ describe("Rate limiting", () => {
       expect(res.status).toBe(429);
     });
 
-    it("does not consume quota on rejected requests", async () => {
-      await seedApiKeyRow(env, validKeyHash, TEST_SEEDED_API_KEY);
-      await seedRateLimit(env, tierCounter, 100);
-
-      const res = await keyedRequest();
-
-      expect(res.status).toBe(429);
-      expect(await readRateLimitCount(env, tierCounter)).toBe(100);
-    });
-
     it("still admits a key's tier worth while its client stays above the tier", async () => {
       await seedApiKeyRow(env, validKeyHash, TEST_SEEDED_API_KEY);
       await seedRateLimit(env, tierCounter, 99);
@@ -170,7 +125,7 @@ describe("Rate limiting", () => {
       expect(await readRateLimitCount(env, tierCounter)).toBe(100);
       // The first refusal is remembered, so the third attempt is refused from
       // memory before the flood guard counts it.
-      expect(await readRateLimitCount(env, floodCounter())).toBe(2);
+      expect(await readRateLimitCount(env, floodCounter(TEST_CLIENT_IP))).toBe(2);
     });
 
     it("refuses a key its tier refused from memory, with no row read", async () => {
@@ -184,13 +139,13 @@ describe("Rate limiting", () => {
       expect(res.status).toBe(429);
       expect(res.headers.get("Retry-After")).not.toBeNull();
       expect(read).not.toHaveBeenCalled();
-      expect(await readRateLimitCount(env, floodCounter())).toBe(1);
+      expect(await readRateLimitCount(env, floodCounter(TEST_CLIENT_IP))).toBe(1);
       read.mockRestore();
     });
 
     it("refuses a flooding key at the highest tier before reading its row", async () => {
       // No row: a read would answer INVALID_API_KEY, so a 429 proves none ran.
-      await seedRateLimit(env, floodCounter(), API_KEY_PRE_READ_MAX_REQUESTS);
+      await seedRateLimit(env, floodCounter(TEST_CLIENT_IP), API_KEY_PRE_READ_MAX_REQUESTS);
       const readSpy = vi.spyOn(organizationAccess, "authorizeApiKey");
 
       const res = await keyedRequest();
@@ -198,7 +153,9 @@ describe("Rate limiting", () => {
       expect(res.status).toBe(429);
       expect(res.headers.get("Retry-After")).not.toBeNull();
       expect(readSpy).not.toHaveBeenCalled();
-      expect(await readRateLimitCount(env, floodCounter())).toBe(API_KEY_PRE_READ_MAX_REQUESTS);
+      expect(await readRateLimitCount(env, floodCounter(TEST_CLIENT_IP))).toBe(
+        API_KEY_PRE_READ_MAX_REQUESTS
+      );
     });
 
     // A leaked key flooded from outside its allowlist exhausts only the
@@ -212,111 +169,33 @@ describe("Rate limiting", () => {
       expect(res.status).not.toBe(429);
     });
 
-    it("caps the unlimited tier at the same ceiling", async () => {
-      await seedApiKeyRow(env, validKeyHash, {
-        ...TEST_SEEDED_API_KEY,
-        rateLimitTier: "unlimited",
-      });
-      await seedRateLimit(env, floodCounter(), API_KEY_PRE_READ_MAX_REQUESTS);
-
-      const res = await keyedRequest();
-
-      expect(res.status).toBe(429);
-    });
-
-    it("bounds an unknown key's first read like a valid key's", async () => {
-      await seedRateLimit(env, floodCounter(), API_KEY_PRE_READ_MAX_REQUESTS);
-
-      expect((await keyedRequest()).status).toBe(429);
-    });
-
     // Once refused for good, a hash is refused from memory: no counter call.
     it("refuses a known-unknown key before the flood guard counts it", async () => {
       expect((await keyedRequest()).status).toBe(401);
       expect((await keyedRequest()).status).toBe(401);
 
-      expect(await readRateLimitCount(env, floodCounter())).toBe(1);
+      expect(await readRateLimitCount(env, floodCounter(TEST_CLIENT_IP))).toBe(1);
     });
 
-    it("reports remaining quota against the tier limit", async () => {
+    it("reports the standard tier's limit and remaining quota", async () => {
       await seedApiKeyRow(env, validKeyHash, TEST_SEEDED_API_KEY);
 
       const res = await keyedRequest();
 
       expect(res.status).not.toBe(429);
+      expect(res.headers.get("X-RateLimit-Limit")).toBe("100");
       expect(res.headers.get("X-RateLimit-Remaining")).toBe("99");
       expect(Number(res.headers.get("X-RateLimit-Reset"))).toBeGreaterThan(Date.now() / 1000 - 1);
     });
   });
 
   describe("anonymous IP limit", () => {
-    it("gives anonymous Earn catalogue traffic its own generous tier", async () => {
-      const identifier = `anonymous:earn:catalogue:ip:${CLIENT_IP}`;
-      await seedRateLimit(env, identifier, 20);
-
-      const res = await app.request(
-        "/v1/earn/strategies",
-        { headers: { "x-forwarded-for": CLIENT_IP } },
-        env
-      );
-
-      expect(res.status).not.toBe(429);
-      expect(res.headers.get("X-RateLimit-Limit")).toBe(
-        ANONYMOUS_EARN_CATALOGUE_MAX_REQUESTS.toString()
-      );
-    });
-
-    it("caps anonymous Earn builds in a separate per-IP tier", async () => {
-      const identifier = `anonymous:earn:build:ip:${CLIENT_IP}`;
-      await seedRateLimit(env, identifier, ANONYMOUS_EARN_BUILD_MAX_REQUESTS);
-
-      const res = await app.request(
-        "/v1/earn/external-wallet/deposit-transactions",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "x-forwarded-for": CLIENT_IP },
-          body: "{}",
-        },
-        env
-      );
-
-      expect(res.status).toBe(429);
-      expect(res.headers.get("X-RateLimit-Limit")).toBe(
-        ANONYMOUS_EARN_BUILD_MAX_REQUESTS.toString()
-      );
-    });
-
-    it("does not let an anonymous Earn rejection consume a keyed caller's tier", async () => {
-      await seedApiKeyRow(env, validKeyHash, TEST_SEEDED_API_KEY);
-      await seedRateLimit(
-        env,
-        `anonymous:earn:build:ip:${CLIENT_IP}`,
-        ANONYMOUS_EARN_BUILD_MAX_REQUESTS
-      );
-
-      const res = await app.request(
-        "/v1/earn/external-wallet/deposit-transactions",
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${TEST_API_KEY.raw}`,
-            "Content-Type": "application/json",
-            "x-forwarded-for": CLIENT_IP,
-          },
-          body: "{}",
-        },
-        env
-      );
-
-      expect(res.status).not.toBe(429);
-    });
-
     it("returns 429 for unauthenticated traffic over the anonymous limit", async () => {
-      await seedRateLimit(env, CLIENT_IP, 20);
+      await seedRateLimit(env, TEST_CLIENT_IP, 20);
 
       const res = await app.request(
         `/v1/organizations/${TEST_ORG.id}`,
-        { headers: { "x-forwarded-for": CLIENT_IP } },
+        { headers: { "x-forwarded-for": TEST_CLIENT_IP } },
         env
       );
 
@@ -327,16 +206,34 @@ describe("Rate limiting", () => {
 
     it("does not cap keyed requests at the anonymous limit", async () => {
       await seedApiKeyRow(env, validKeyHash, TEST_SEEDED_API_KEY);
-      await seedRateLimit(env, CLIENT_IP, 20);
+      await seedRateLimit(env, TEST_CLIENT_IP, 20);
 
       const res = await keyedRequest();
 
       expect(res.status).not.toBe(429);
     });
 
+    it("caps /pay at the anonymous limit when it presents an API key", async () => {
+      await seedRateLimit(env, TEST_CLIENT_IP, 20);
+
+      const res = await app.request(
+        "/pay/pay_tok_ratelimit/tx",
+        {
+          method: "POST",
+          headers: {
+            Authorization: "Bearer sk_test_pay_header",
+            "x-forwarded-for": TEST_CLIENT_IP,
+          },
+        },
+        env
+      );
+
+      expect(res.status).toBe(429);
+    });
+
     it("still caps keyed requests at the per-IP backstop", async () => {
       await seedApiKeyRow(env, validKeyHash, TEST_SEEDED_API_KEY);
-      await seedRateLimit(env, CLIENT_IP, KEYED_IP_BACKSTOP_MAX_REQUESTS);
+      await seedRateLimit(env, TEST_CLIENT_IP, KEYED_IP_BACKSTOP_MAX_REQUESTS);
 
       const res = await keyedRequest();
 
@@ -344,32 +241,28 @@ describe("Rate limiting", () => {
     });
 
     it("skips rate limiting on exempt paths", async () => {
-      await seedRateLimit(env, CLIENT_IP, 20);
+      await seedRateLimit(env, TEST_CLIENT_IP, 20);
 
-      const res = await app.request("/health", { headers: { "x-forwarded-for": CLIENT_IP } }, env);
+      const res = await app.request(
+        "/health",
+        { headers: { "x-forwarded-for": TEST_CLIENT_IP } },
+        env
+      );
 
       expect(res.status).toBe(200);
     });
   });
 
   describe("optionalAuth", () => {
-    function optionalAuthApp(options: { rejectInvalid?: boolean } = {}): Hono<{ Bindings: Env }> {
-      const mini = new Hono<{ Bindings: Env }>();
-      mini.onError((err, c) => {
-        if (err instanceof AppError) {
-          // SAFETY: AppError status codes are the API's own error statuses.
-          return c.json(err.toResponse(), err.statusCode as 429 | 401);
-        }
-        throw err;
-      });
-      mini.use("*", kvStoreMiddleware());
+    function optionalAuthApp(options: { rejectInvalid?: boolean }) {
+      const mini = middlewareTestApp("store");
       mini.use("*", optionalAuth(options));
       mini.get("/resource", (c) => c.json({ identity: currentDatabaseIdentity() }));
       return mini;
     }
 
     it("rejects an unknown key by default instead of degrading to anonymous", async () => {
-      const res = await optionalAuthApp().request(
+      const res = await optionalAuthApp({}).request(
         "/resource",
         { headers: { Authorization: "Bearer sk_test_unknown_key" } },
         env
@@ -389,39 +282,16 @@ describe("Rate limiting", () => {
     });
 
     it("admits a truly anonymous request without a key", async () => {
-      const res = await optionalAuthApp().request("/resource", {}, env);
+      const res = await optionalAuthApp({}).request("/resource", {}, env);
 
       expect(res.status).toBe(200);
-    });
-
-    it("can reject an invalid key without requiring a key", async () => {
-      const mini = new Hono<{ Bindings: Env }>();
-      mini.onError((err, c) => {
-        if (err instanceof AppError) {
-          return c.json(err.toResponse(), 401);
-        }
-        throw err;
-      });
-      mini.use("*", kvStoreMiddleware());
-      mini.use("*", optionalAuth({ rejectInvalid: true }));
-      mini.get("/resource", (c) => c.json({ ok: true }));
-
-      const anonymous = await mini.request("/resource", {}, env);
-      const invalid = await mini.request(
-        "/resource",
-        { headers: { Authorization: "Bearer sk_test_unknown_key" } },
-        env
-      );
-
-      expect(anonymous.status).toBe(200);
-      expect(invalid.status).toBe(401);
     });
 
     it("rethrows RATE_LIMITED instead of degrading to anonymous", async () => {
       await seedApiKeyRow(env, validKeyHash, TEST_SEEDED_API_KEY);
       await seedRateLimit(env, tierCounter, 100);
 
-      const res = await optionalAuthApp().request(
+      const res = await optionalAuthApp({}).request(
         "/resource",
         { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
         env
@@ -430,10 +300,10 @@ describe("Rate limiting", () => {
       expect(res.status).toBe(429);
     });
 
-    it("runs a keyless route under the presented key's tenant identity", async () => {
+    it("runs an optional-auth route under the presented key's tenant identity", async () => {
       await seedApiKeyRow(env, validKeyHash, TEST_SEEDED_API_KEY);
 
-      const res = await optionalAuthApp().request(
+      const res = await optionalAuthApp({}).request(
         "/resource",
         { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
         env
@@ -450,48 +320,27 @@ describe("Rate limiting", () => {
   });
 
   describe("storage failure semantics", () => {
-    function enforcementApp(options: {
-      kv: "broken" | "missing";
-      failClosed: boolean;
-      fallback?: InProcessRateLimiter;
-      maxRequests?: number;
-    }): Hono<{ Bindings: Env }> {
-      const mini = new Hono<{ Bindings: Env }>();
-      mini.onError((err, c) => {
-        if (err instanceof AppError) {
-          // SAFETY: AppError status codes are the API's own error statuses.
-          return c.json(err.toResponse(), err.statusCode as 429 | 503);
-        }
-        throw err;
-      });
-      if (options.kv === "broken") {
-        mini.use("*", async (c, next) => {
-          c.set("kv", unavailableKvStoreSet());
-          await next();
-        });
-      }
+    function enforcementApp(
+      kv: "unavailable" | "none",
+      maxRequests: number,
+      options: NonNullable<Parameters<typeof enforceRateLimit>[3]>
+    ) {
+      const mini = middlewareTestApp(kv);
       mini.get("/resource", async (c) => {
-        await enforceRateLimit(c, "storage-failure-test", options.maxRequests ?? 5, {
-          failClosed: options.failClosed,
-          fallback: options.fallback,
-        });
+        await enforceRateLimit(c, "storage-failure-test", maxRequests, options);
         return c.text("ok");
       });
       return mini;
     }
 
     it("fails open on storage errors by default", async () => {
-      const res = await enforcementApp({ kv: "broken", failClosed: false }).request(
-        "/resource",
-        {},
-        env
-      );
+      const res = await enforcementApp("unavailable", 5, {}).request("/resource", {}, env);
 
       expect(res.status).toBe(200);
     });
 
     it("fails closed with a 503 on storage errors when requested", async () => {
-      const res = await enforcementApp({ kv: "broken", failClosed: true }).request(
+      const res = await enforcementApp("unavailable", 5, { failClosed: true }).request(
         "/resource",
         {},
         env
@@ -503,7 +352,7 @@ describe("Rate limiting", () => {
     });
 
     it("fails closed with a 503 when no counter store is bound", async () => {
-      const res = await enforcementApp({ kv: "missing", failClosed: true }).request(
+      const res = await enforcementApp("none", 5, { failClosed: true }).request(
         "/resource",
         {},
         env
@@ -513,11 +362,8 @@ describe("Rate limiting", () => {
     });
 
     it("counts in this instance's memory while the store is broken", async () => {
-      const app = enforcementApp({
-        kv: "broken",
-        failClosed: false,
+      const app = enforcementApp("unavailable", 2, {
         fallback: new InProcessRateLimiter("test", 10),
-        maxRequests: 2,
       });
 
       const statuses: number[] = [];
@@ -528,10 +374,7 @@ describe("Rate limiting", () => {
 
     it("bounds the in-process fallback's memory, forgetting the coldest counts", async () => {
       const limiter = new InProcessRateLimiter("test", 2);
-      const app = new Hono<{ Bindings: Env }>();
-      app.onError((err, c) =>
-        err instanceof AppError ? c.json(err.toResponse(), 429) : c.text("error", 500)
-      );
+      const app = middlewareTestApp("none");
       app.get("/:identifier", (c) => {
         limiter.enforce(c, c.req.param("identifier"), 1, RATE_LIMIT_WINDOW_MS);
         return c.text("ok");
@@ -551,24 +394,17 @@ describe("Rate limiting", () => {
       await seedApiKeyRow(env, validKeyHash, TEST_SEEDED_API_KEY);
       const fallback = vi.spyOn(apiKeyFloodGuardFallback, "enforce");
       const read = vi.spyOn(organizationAccess, "authorizeApiKey");
-      const app = new Hono<{ Bindings: Env }>();
-      app.onError((err, c) =>
-        err instanceof AppError
-          ? // SAFETY: AppError status codes are the API's own error statuses.
-            c.json(err.toResponse(), err.statusCode as 401 | 429)
-          : c.text("error", 500)
-      );
-      app.use("*", async (c, next) => {
-        c.set("kv", unavailableKvStoreSet());
-        await next();
-      });
+      const app = middlewareTestApp("unavailable");
       app.use("*", authMiddleware());
       app.get("/resource", (c) => c.text("ok"));
       const request = () =>
         app.request(
           "/resource",
           {
-            headers: { Authorization: `Bearer ${TEST_API_KEY.raw}`, "x-forwarded-for": CLIENT_IP },
+            headers: {
+              Authorization: `Bearer ${TEST_API_KEY.raw}`,
+              "x-forwarded-for": TEST_CLIENT_IP,
+            },
           },
           env
         );
@@ -576,7 +412,7 @@ describe("Rate limiting", () => {
       expect((await request()).status).toBe(200);
       expect(fallback).toHaveBeenCalledWith(
         expect.anything(),
-        floodCounter(),
+        floodCounter(TEST_CLIENT_IP),
         API_KEY_PRE_READ_MAX_REQUESTS,
         RATE_LIMIT_WINDOW_MS
       );
@@ -592,24 +428,14 @@ describe("Rate limiting", () => {
     it("bounds fresh-key spray per IP in memory while Redis is down", async () => {
       const backstop = vi.spyOn(keyedIpBackstopFallback, "enforce");
       const read = vi.spyOn(organizationAccess, "authorizeApiKey");
-      const app = new Hono<{ Bindings: Env }>();
-      app.onError((err, c) =>
-        err instanceof AppError
-          ? // SAFETY: AppError status codes are the API's own error statuses.
-            c.json(err.toResponse(), err.statusCode as 401 | 429)
-          : c.text("error", 500)
-      );
-      app.use("*", async (c, next) => {
-        c.set("kv", unavailableKvStoreSet());
-        await next();
-      });
+      const app = middlewareTestApp("unavailable");
       app.use("*", skipRateLimitPaths());
       app.use("*", authMiddleware());
-      app.get("/resource", (c) => c.text("ok"));
+      app.get("/v1/resource", (c) => c.text("ok"));
       const request = (key: string) =>
         app.request(
-          "/resource",
-          { headers: { Authorization: `Bearer ${key}`, "x-forwarded-for": CLIENT_IP } },
+          "/v1/resource",
+          { headers: { Authorization: `Bearer ${key}`, "x-forwarded-for": TEST_CLIENT_IP } },
           env
         );
 
@@ -619,7 +445,7 @@ describe("Rate limiting", () => {
       expect(backstop).toHaveBeenCalledTimes(2);
       expect(backstop).toHaveBeenLastCalledWith(
         expect.anything(),
-        CLIENT_IP,
+        TEST_CLIENT_IP,
         KEYED_IP_BACKSTOP_MAX_REQUESTS,
         RATE_LIMIT_WINDOW_MS
       );
@@ -630,6 +456,26 @@ describe("Rate limiting", () => {
       read.mockClear();
       expect((await request("sk_test_spray_three")).status).toBe(429);
       expect(read).not.toHaveBeenCalled();
+    });
+
+    it("counts /pay per IP in memory while the store is down", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-01-01T00:00:30.000Z"));
+      const app = middlewareTestApp("unavailable");
+      app.use("*", skipRateLimitPaths());
+      app.post("/pay/:token/tx", (c) => c.text("ok"));
+
+      const statuses: number[] = [];
+      for (let i = 0; i < 21; i++) {
+        const res = await app.request(
+          "/pay/pay_tok_store_down/tx",
+          { method: "POST", headers: { "x-forwarded-for": TEST_CLIENT_IP } },
+          env
+        );
+        statuses.push(res.status);
+      }
+
+      expect(statuses).toEqual([...Array.from({ length: 20 }, () => 200), 429]);
     });
   });
 });

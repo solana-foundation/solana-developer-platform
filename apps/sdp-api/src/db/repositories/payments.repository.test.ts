@@ -3,6 +3,7 @@ import { WALLET_TRANSFER_TYPES } from "@sdp/types/payments";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
+import { createTenantScope, TenantScopeViolationError } from "@/lib/tenant-scope";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { seedProjectCryptoWalletCounterparty } from "@/test/helpers/counterparties";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
@@ -200,13 +201,16 @@ describe("PaymentsRepository transfer writes (postgres)", () => {
         expect(await persistSigned()).not.toBeNull();
       }
       // Observe before the request advances the state the failure depends on.
-      const selected = await repo.listTransfersByStatus({
-        environment: "sandbox",
-        statuses: ["processing"],
-        types: WALLET_TRANSFER_TYPES,
-        hasSignature: guard === "unstarted",
-        limit: 10,
-      });
+      const selected =
+        guard === "unstarted"
+          ? await repo.listProcessingSignedSubmissions({ environment: "sandbox", limit: 10 })
+          : await repo.listTransfersByStatus({
+              environment: "sandbox",
+              statuses: ["processing"],
+              types: WALLET_TRANSFER_TYPES,
+              unsigned: true,
+              limit: 10,
+            });
       expect(selected.map((row) => row.id)).toContain(input.id);
       if (guard === "unstarted") {
         expect(await startSubmission()).not.toBeNull();
@@ -258,6 +262,56 @@ describe("PaymentsRepository transfer writes (postgres)", () => {
       }
     }
   );
+
+  it("reports whether settleTransferBatch claimed the chunk from processing", async () => {
+    const input = { ...transferInput({ suffix: "settle_claim" }), type: "transfer_batch" as const };
+    await repo.createTransfer(input);
+    await seedProjectCryptoWalletCounterparty(getDb(env), {
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      createdBy: TEST_USER.id,
+      counterpartyId: "cpty_settle_claim",
+      counterpartyAccountId: "cpacct_settle_claim",
+      walletAddress: input.destinationAddress,
+    });
+    const batches = createPostgresPaymentTransferBatchesRepository(getDb(env));
+    await batches.createTransferBatchWithRecipients({
+      batch: {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        sourceWalletId: TEST_WALLET_ID,
+        sourceAddress: input.sourceAddress,
+        token: input.token,
+        status: "processing",
+      },
+      recipients: [
+        {
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          transferId: input.id,
+          counterpartyId: "cpty_settle_claim",
+          counterpartyAccountId: "cpacct_settle_claim",
+          destinationAddress: input.destinationAddress,
+          amount: "1",
+          status: "processing",
+        },
+      ],
+    });
+    const settle = () =>
+      batches.settleTransferBatch({
+        transferId: input.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        transferStatus: "failed",
+        error: "Transaction not found on chain",
+        slot: null,
+        updatedAt: new Date().toISOString(),
+      });
+
+    await expect(settle()).resolves.toBe(true);
+    await expect(settle()).resolves.toBe(false);
+  });
 
   it("installs the indexed payment-ledger search plan", async () => {
     const extension = await getDb(env)
@@ -1062,21 +1116,6 @@ describe("PaymentsRepository pending-transfer job reads (postgres)", () => {
   });
 
   it.each(SDP_ENVIRONMENTS)(
-    "selects only %s processing transfers for that environment's run",
-    async (environment) => {
-      const rows = await createPostgresPaymentsRepository(getDb(env)).listTransfersByStatus({
-        environment,
-        statuses: ["processing"],
-        types: WALLET_TRANSFER_TYPES,
-        hasSignature: true,
-        limit: 50,
-      });
-
-      expect(rows.map((row) => row.id)).toEqual([TRANSFER_ID_BY_ENVIRONMENT[environment]]);
-    }
-  );
-
-  it.each(SDP_ENVIRONMENTS)(
     "polls only %s confirmed transfers for that environment's run",
     async (environment) => {
       const confirmedAt = new Date().toISOString();
@@ -1094,4 +1133,128 @@ describe("PaymentsRepository pending-transfer job reads (postgres)", () => {
       expect(rows.map((row) => row.id)).toEqual([TRANSFER_ID_BY_ENVIRONMENT[environment]]);
     }
   );
+});
+
+describe("PaymentsRepository.listProcessingSignedSubmissions (postgres)", () => {
+  const PRODUCTION_PROJECT_ID = `${TEST_PROJECT_ID}_production`;
+  const PRODUCTION_CUSTODY = {
+    custodyWalletId: "cwlt_payments_repo_production",
+    walletId: "wallet_payments_repo_production",
+  };
+  let repo: PaymentsRepository;
+
+  afterAll(async () => {
+    await seedTestDatabase(env);
+  });
+
+  beforeEach(async () => {
+    await seedTestDatabase(env);
+    await resetPaymentFixtures();
+    await seedUnreadPrivyWallet(getDb(env), {
+      organizationId: TEST_ORG.id,
+      projectId: PRODUCTION_PROJECT_ID,
+      createdBy: TEST_USER.id,
+      ...PRODUCTION_CUSTODY,
+      publicKey: "Production111",
+    });
+    repo = createPostgresPaymentsRepository(getDb(env));
+  });
+
+  async function seedSignedSubmission(seed: {
+    suffix: string;
+    projectId: string;
+    custody: { custodyWalletId: string; walletId: string };
+    signedAt: string;
+  }): Promise<string> {
+    const transfer = {
+      ...transferInput({ suffix: seed.suffix, ...seed.custody }),
+      projectId: seed.projectId,
+    };
+    await repo.createTransfer(transfer);
+    await repo.persistSignedTransfer({
+      transferId: transfer.id,
+      organizationId: TEST_ORG.id,
+      projectId: seed.projectId,
+      signature: `sig_${seed.suffix}`,
+      signedTransaction: "AQ==",
+      lastValidBlockHeight: "1000",
+      updatedAt: seed.signedAt,
+    });
+    return transfer.id;
+  }
+
+  const sandboxCustody = { custodyWalletId: TEST_CUSTODY_WALLET_ID, walletId: TEST_WALLET_ID };
+
+  it("selects only the run environment's processing rows with a saved signed submission", async () => {
+    const signedAt = new Date().toISOString();
+    const queued = await seedSignedSubmission({
+      suffix: "queued",
+      projectId: TEST_PROJECT_ID,
+      custody: sandboxCustody,
+      signedAt,
+    });
+    await repo.createTransfer(transferInput({ suffix: "unsigned" }));
+    const settled = await seedSignedSubmission({
+      suffix: "settled",
+      projectId: TEST_PROJECT_ID,
+      custody: sandboxCustody,
+      signedAt,
+    });
+    await repo.updateTransfer({
+      transferId: settled,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      expectedStatus: "processing",
+      status: "confirmed",
+      updatedAt: signedAt,
+    });
+    await seedSignedSubmission({
+      suffix: "production",
+      projectId: PRODUCTION_PROJECT_ID,
+      custody: PRODUCTION_CUSTODY,
+      signedAt,
+    });
+
+    const rows = await repo.listProcessingSignedSubmissions({ environment: "sandbox", limit: 10 });
+
+    expect(rows).toMatchObject([
+      {
+        id: queued,
+        status: "processing",
+        signature: "sig_queued",
+        signed_transaction: "AQ==",
+        last_valid_block_height: "1000",
+      },
+    ]);
+  });
+
+  it("queues the least recently updated row first", async () => {
+    const newer = await seedSignedSubmission({
+      suffix: "newer",
+      projectId: TEST_PROJECT_ID,
+      custody: sandboxCustody,
+      signedAt: new Date().toISOString(),
+    });
+    const older = await seedSignedSubmission({
+      suffix: "older",
+      projectId: TEST_PROJECT_ID,
+      custody: sandboxCustody,
+      signedAt: new Date(Date.now() - 60_000).toISOString(),
+    });
+
+    const rows = await repo.listProcessingSignedSubmissions({ environment: "sandbox", limit: 10 });
+
+    expect(rows.map((row) => row.id)).toEqual([older, newer]);
+  });
+
+  it("refuses a tenant-scoped repository", async () => {
+    const tenantRepo = createPostgresPaymentsRepository(
+      getDb(env),
+      createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID })
+    );
+
+    await expect(
+      tenantRepo.listProcessingSignedSubmissions({ environment: "sandbox", limit: 10 })
+    ).rejects.toThrow(TenantScopeViolationError);
+  });
 });

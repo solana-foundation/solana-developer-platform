@@ -17,6 +17,9 @@
 # Authentication and authorization
 /apps/sdp-api/src/middleware/                           @solana-foundation/foundation-product-team
 /apps/sdp-api/src/lib/auth.ts                           @solana-foundation/foundation-product-team
+/apps/sdp-api/src/routes/members/                       @solana-foundation/foundation-product-team
+/apps/sdp-api/src/routes/onboarding/                    @solana-foundation/foundation-product-team
+/apps/sdp-api/src/services/organization-membership.service.ts @solana-foundation/foundation-product-team
 
 # Database migrations
 /apps/sdp-api/src/db/migrations/                        @solana-foundation/foundation-product-team

@@ -1,6 +1,6 @@
 "use client";
 
-import { useClerk, useOrganization, useOrganizationList } from "@clerk/nextjs";
+import { useOrganization, useOrganizationList } from "@clerk/nextjs";
 import type { Project } from "@sdp/types/projects";
 import { cn } from "@sdp/ui/cn";
 import {
@@ -11,43 +11,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@sdp/ui/dropdown-menu";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@sdp/ui/tooltip";
-import {
-  CheckIcon,
-  ChevronsUpDownIcon,
-  CopyIcon,
-  type LucideIcon,
-  Settings2Icon,
-} from "lucide-react";
+import { TooltipProvider } from "@sdp/ui/tooltip";
+import { CheckIcon, ChevronsUpDownIcon, CopyIcon } from "lucide-react";
 import { useState } from "react";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { useCopy } from "@/lib/use-copy";
-
-function OrganizationHeaderAction({
-  label,
-  icon: Icon,
-  onSelect,
-}: {
-  label: string;
-  icon: LucideIcon;
-  onSelect: () => void;
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <DropdownMenuItem
-          aria-label={label}
-          onSelect={onSelect}
-          className="size-6 justify-center p-0 text-tertiary focus:text-primary"
-        >
-          <Icon className="size-3.5" />
-        </DropdownMenuItem>
-      </TooltipTrigger>
-      <TooltipContent side="top">{label}</TooltipContent>
-    </Tooltip>
-  );
-}
 
 function OrgAvatar({ name, imageUrl }: { name: string; imageUrl: string | null }) {
   if (imageUrl) {
@@ -239,7 +208,6 @@ export function WorkspaceSwitcher({
   const { userMemberships, setActive, isLoaded } = useOrganizationList({
     userMemberships: { infinite: true },
   });
-  const { openOrganizationProfile } = useClerk();
   const { projects, selectedProjectId, selectProject, isProjectSwitching } =
     useDashboardWorkspace();
   const [isOrganizationSwitching, setOrganizationSwitching] = useState(false);
@@ -289,15 +257,6 @@ export function WorkspaceSwitcher({
         <DropdownMenuContent align="start" sideOffset={6} className="w-64">
           <DropdownMenuLabel className="flex items-center justify-between text-xs font-medium normal-case tracking-normal text-secondary">
             <span>{t("Shared.SharedComponents.organizations")}</span>
-            <span className="flex items-center gap-0.5">
-              {activeOrg ? (
-                <OrganizationHeaderAction
-                  label={t("Shared.SharedComponents.manageOrganization")}
-                  icon={Settings2Icon}
-                  onSelect={() => openOrganizationProfile()}
-                />
-              ) : null}
-            </span>
           </DropdownMenuLabel>
           <OrganizationItems
             memberships={memberships}

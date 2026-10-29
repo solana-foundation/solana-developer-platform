@@ -22,29 +22,26 @@ export interface ClerkJwtPayload extends JWTPayload {
 
 export interface ClerkOrganizationClaims {
   organizationId: string | null;
-  organizationRole: string | null;
   organizationSlug: string | null;
 }
 
 /**
  * Read organization context from both Clerk JWT formats.
  *
- * Version 2 session tokens compact the organization fields under `o`, with
- * role values such as `admin` that need the `org:` prefix restored. Older
- * tokens and customized templates expose the long-form `org_*` claims.
+ * Version 2 session tokens compact the organization fields under `o`; older
+ * tokens and customized templates expose the long-form `org_*` claims. The
+ * Clerk role claim is not read: SDP holds the only Organization Role (ADR 0012).
  */
 export function resolveClerkOrganizationClaims(payload: ClerkJwtPayload): ClerkOrganizationClaims {
   if (payload.v === 2 && payload.o) {
     return {
       organizationId: payload.o.id ?? null,
-      organizationRole: payload.o.rol ? `org:${payload.o.rol}` : null,
       organizationSlug: payload.o.slg ?? null,
     };
   }
 
   return {
     organizationId: payload.org_id ?? null,
-    organizationRole: payload.org_role ?? null,
     organizationSlug: payload.org_slug ?? null,
   };
 }
@@ -150,7 +147,7 @@ export function resolveClerkEmail(payload: ClerkJwtPayload): string | null {
   return isPlausibleEmail(first) ? first : null;
 }
 
-export function resolveClerkConfig(env: Env) {
+function resolveClerkConfig(env: Env) {
   const issuer = env.CLERK_ISSUER?.trim();
   const jwksUrl = env.CLERK_JWKS_URL?.trim();
 
@@ -207,6 +204,19 @@ export async function verifyClerkJwtForRequest(
   }
 
   const payload = await verifyClerkJwt(token, c.env);
+  // A session presented alongside a gateway identity must be the session the
+  // gateway authenticated (HOO-2256): its user and its active organization,
+  // where an identity with no organization matches only a session with none.
+  // The gateway limits and meters by that organization, so it must be the
+  // one SDP serves; the role still comes from SDP's own membership row.
+  const gatewayIdentity = c.get("gatewayIdentity");
+  if (
+    gatewayIdentity &&
+    (gatewayIdentity.clerkUserId !== payload.sub ||
+      gatewayIdentity.orgId !== resolveClerkOrganizationClaims(payload).organizationId)
+  ) {
+    throw new Error("Clerk session does not match the gateway identity");
+  }
   c.set("verifiedClerkJwt", { token, payload });
   return payload;
 }

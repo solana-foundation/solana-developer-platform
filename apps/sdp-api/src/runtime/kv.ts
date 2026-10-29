@@ -13,7 +13,7 @@ export interface KVPutOptions {
   expirationTtl?: number;
 }
 
-export interface KVListKey {
+interface KVListKey {
   name: string;
 }
 

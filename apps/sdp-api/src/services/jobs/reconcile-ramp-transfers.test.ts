@@ -1,4 +1,4 @@
-import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
+import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { replayRampWebhookEvents } from "@/services/jobs/replay-ramp-webhook-events";
 import type { Env } from "@/types/env";
@@ -18,7 +18,10 @@ describe("reconcileRampTransfers", () => {
 
     await reconcileRampTransfers(env);
 
-    expect(replayRampWebhookEvents).toHaveBeenCalledExactlyOnceWith(env, SDP_RAMP_PROVIDER_STAGES);
+    expect(replayRampWebhookEvents).toHaveBeenCalledExactlyOnceWith(
+      env,
+      SDP_RAMP_PROVIDER_MATURITY
+    );
   });
 
   it("surfaces a replay failure to the scheduler", async () => {

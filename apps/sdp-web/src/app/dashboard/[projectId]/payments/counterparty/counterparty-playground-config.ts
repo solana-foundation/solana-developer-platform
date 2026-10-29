@@ -119,7 +119,7 @@ export function buildCounterpartyPlaygroundEndpointConfigs(
         {
           key: "externalId",
           label: "externalId",
-          placeholder: t("DashboardPayments.counterparty.externalIdPlaceholder"),
+          placeholder: t("DashboardPayments.newDesign.counterparty.externalIdPlaceholder"),
         },
       ],
       expectedResponse: {
@@ -154,7 +154,7 @@ export function buildCounterpartyPlaygroundEndpointConfigs(
         {
           key: "externalId",
           label: "externalId",
-          placeholder: t("DashboardPayments.counterparty.externalIdPlaceholder"),
+          placeholder: t("DashboardPayments.newDesign.counterparty.externalIdPlaceholder"),
         },
       ],
       expectedResponse: {

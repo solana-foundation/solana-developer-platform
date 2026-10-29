@@ -21,7 +21,7 @@ export async function signSeededClerkMember(
     [userId, organizationId]
   );
   assert(member);
-  assert(member.role === "admin" || member.role === "member");
+  assert(member.role === "admin" || member.role === "member" || member.role === "viewer");
   const clerkUserId = `clerk_user_${userId}`;
   const clerkOrgId = `clerk_org_${organizationId}`;
   await db.batch([
@@ -40,7 +40,8 @@ export async function signSeededClerkMember(
   return signTestClerkJwt({
     clerkUserId,
     clerkOrgId,
-    orgRole: member.role,
+    // Clerk holds only admin and member; SDP reads the role it stores either way.
+    orgRole: member.role === "admin" ? "admin" : "member",
     orgSlug: member.slug,
     email: member.email,
     expiresInSeconds: 300,
@@ -67,8 +68,8 @@ export async function clerkAdminHeaders(
       .bind(`om_admin_${input.userId}`, input.organizationId, input.userId),
     db
       .prepare(
-        `INSERT INTO project_members (id, project_id, user_id, role)
-         VALUES (?, ?, ?, 'admin')
+        `INSERT INTO project_members (id, project_id, user_id)
+         VALUES (?, ?, ?)
          ON CONFLICT DO NOTHING`
       )
       .bind(`pm_admin_${input.projectId}_${input.userId}`, input.projectId, input.userId),

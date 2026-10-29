@@ -295,6 +295,44 @@ describe("redactCredentialString: escaped quotes", () => {
   });
 });
 
+describe("redactCredentialString: Clerk invitation tickets", () => {
+  const ticket = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ0aWNrZXRfc3ludGhldGljIn0.c3ludGhldGljX3NpZw";
+
+  for (const { form, input, redacted } of [
+    {
+      form: "plain",
+      input: `https://dash.example.test/sign-in?__clerk_ticket=${ticket}&x=1`,
+      redacted: "https://dash.example.test/sign-in?__clerk_ticket=[REDACTED]&x=1",
+    },
+    {
+      form: "URL-encoded inside redirect_url",
+      input: `https://dash.example.test/sign-in?redirect_url=https%3A%2F%2Fdash.example.test%2Fdashboard%3F__clerk_ticket%3D${ticket}%26x%3D1`,
+      redacted:
+        "https://dash.example.test/sign-in?redirect_url=https%3A%2F%2Fdash.example.test%2Fdashboard%3F__clerk_ticket%3D[REDACTED]%26x%3D1",
+    },
+    {
+      form: "double-encoded",
+      input: `https://dash.example.test/sign-in?next=%253F__clerk_ticket%253D${ticket}%2526x%253D1`,
+      redacted:
+        "https://dash.example.test/sign-in?next=%253F__clerk_ticket%253D[REDACTED]%2526x%253D1",
+    },
+    {
+      form: "JSON field",
+      input: `{"__clerk_ticket":"${ticket}","x":1}`,
+      redacted: '{"__clerk_ticket":"[REDACTED]","x":1}',
+    },
+    {
+      form: "JSON field escaped inside a JSON string",
+      input: `{"msg":"{\\"__clerk_ticket\\":\\"${ticket}\\",\\"x\\":1}"}`,
+      redacted: '{"msg":"{\\"__clerk_ticket\\":\\"[REDACTED]\\",\\"x\\":1}"}',
+    },
+  ]) {
+    it(`redacts the ${form} ticket and keeps the rest intact`, () => {
+      assert.equal(redactCredentialString(input), redacted);
+    });
+  }
+});
+
 describe("scrubTelemetryString — pathological input", () => {
   // Regression guard for a quadratic rescan (CodeQL js/polynomial-redos): the
   // email pattern's local part used to be retried at every offset inside one

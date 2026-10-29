@@ -542,15 +542,15 @@ export const privateChannelTransferListQuerySchema = z.object({
     }),
 });
 
-export const privateChannelEventFamilySchema = z.enum(PRIVATE_CHANNEL_EVENT_FAMILY_VALUES);
+const privateChannelEventFamilySchema = z.enum(PRIVATE_CHANNEL_EVENT_FAMILY_VALUES);
 
-export const privateChannelEventStatusSchema = z.enum(PRIVATE_CHANNEL_EVENT_STATUS_VALUES);
+const privateChannelEventStatusSchema = z.enum(PRIVATE_CHANNEL_EVENT_STATUS_VALUES);
 
-export const privateChannelEventTypeSchema = z
+const privateChannelEventTypeSchema = z
   .enum(PRIVATE_CHANNEL_EVENT_TYPE_VALUES)
   .openapi({ example: PRIVATE_CHANNEL_EVENT_TYPES.LIFECYCLE_CHANNEL_CREATED });
 
-export const privateChannelEventSchema = z
+const privateChannelEventSchema = z
   .object({
     id: z.string().openapi({ example: "pce_9f1c..." }),
     organizationId: z.string(),

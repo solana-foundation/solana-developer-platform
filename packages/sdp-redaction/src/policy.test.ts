@@ -45,6 +45,7 @@ describe("isCredentialKey", () => {
       "seedPhrase",
       "seed_phrase",
       "signingKey",
+      "__clerk_ticket",
       // Normalization strips the separators, so an exact `apikey` rule would
       // miss the header form. This is the shape that reaches Sentry as
       // `request.headers`.

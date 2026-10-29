@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
+import { formatSfApiKey, generateSfApiKey } from "@/lib/api-key-format";
 import { TERMINAL_REFUSAL_TTL_MS } from "@/lib/api-key-refusal-cache";
 import { isRotationDeadlineReached } from "@/lib/api-key-rotation";
 import { AppError } from "@/lib/errors";
@@ -116,7 +117,7 @@ describe("Auth Middleware", () => {
   });
 
   describe("key validation", () => {
-    it("rejects invalid key format (not sk_test or sk_live)", async () => {
+    it("rejects invalid key format (not sf_, sk_test or sk_live)", async () => {
       const res = await app.request(
         `/v1/organizations/${TEST_SEEDED_API_KEY.organizationId}`,
         {
@@ -347,6 +348,80 @@ describe("Auth Middleware", () => {
       );
 
       expect(res.status).toBe(403);
+    });
+  });
+
+  describe("sf_ keys (HOO-2256)", () => {
+    const sfKey = generateSfApiKey();
+
+    async function seedSfKey(publicId = sfKey.keyId) {
+      await seedApiKeyRow(env, await hashString(sfKey.secret, env.API_KEY_PEPPER), {
+        ...TEST_SEEDED_API_KEY,
+        publicId,
+      });
+    }
+
+    function requestWith(key: string) {
+      return app.request(
+        `/v1/organizations/${TEST_SEEDED_API_KEY.organizationId}`,
+        { headers: { Authorization: `Bearer ${key}` } },
+        env
+      );
+    }
+
+    it("accepts an sf_ key, hashing only its secret", async () => {
+      await seedSfKey();
+
+      const res = await requestWith(sfKey.key);
+
+      expect(res.status).toBe(200);
+    });
+
+    it("rejects an sf_ key whose checksum does not match, before any read", async () => {
+      await seedSfKey();
+      const last = sfKey.key.at(-1) === "0" ? "1" : "0";
+
+      const res = await requestWith(`${sfKey.key.slice(0, -1)}${last}`);
+
+      expect(res.status).toBe(401);
+      // The format refusal, not the unknown-key one the row read gives.
+      expect(errorBodySchema.parse(await res.json()).error).toEqual({
+        code: "INVALID_API_KEY",
+        message: "Invalid API key format",
+      });
+    });
+
+    it("rejects an sf_ secret presented under another key's ID", async () => {
+      await seedSfKey();
+      const otherId = sfKey.keyId === "0".repeat(16) ? "1".repeat(16) : "0".repeat(16);
+
+      const res = await requestWith(formatSfApiKey({ keyId: otherId, secret: sfKey.secret }));
+
+      expect(res.status).toBe(401);
+      expect(errorBodySchema.parse(await res.json()).error.code).toBe("INVALID_API_KEY");
+    });
+
+    it("still accepts the real key right after its secret was refused under another key ID", async () => {
+      await seedSfKey();
+      const otherId = sfKey.keyId === "0".repeat(16) ? "1".repeat(16) : "0".repeat(16);
+
+      const wrong = await requestWith(formatSfApiKey({ keyId: otherId, secret: sfKey.secret }));
+      const right = await requestWith(sfKey.key);
+
+      expect(wrong.status).toBe(401);
+      expect(right.status).toBe(200);
+    });
+
+    it("rejects an sf_ secret seeded without a key ID", async () => {
+      await seedApiKeyRow(
+        env,
+        await hashString(sfKey.secret, env.API_KEY_PEPPER),
+        TEST_SEEDED_API_KEY
+      );
+
+      const res = await requestWith(sfKey.key);
+
+      expect(res.status).toBe(401);
     });
   });
 

@@ -19,13 +19,13 @@ deployment can run.
 
 - A module outside the release channel is disabled in the API, background jobs
   and dashboard, regardless of its flag. Inside it, module flags apply as before.
-- Each module has a maturity stage in code (`SDP_MODULE_STAGES`). A release
+- Each module has a maturity in code (`SDP_MODULE_MATURITY`). A release
   channel runs every module at or above its own level, so each channel contains
   the more mature ones. A test pins each channel's module list.
-- Ramps has no stage of its own. Each ramp provider has one
-  (`SDP_RAMP_PROVIDER_STAGES`), and Ramps is in a release channel when at least
+- Ramps has no maturity of its own. Each ramp provider has one
+  (`SDP_RAMP_PROVIDER_MATURITY`), and Ramps is in a release channel when at least
   one provider is, so providers launch one at a time.
-- Markets has no stage of its own either: it is in a release channel when Earn
+- Markets has no maturity of its own either: it is in a release channel when Earn
   or DvP is, so promoting one sub-module always takes effect.
 - Every deployment must set it: a missing or unknown release channel fails at
   startup in the API, its jobs and the dashboard server. Builds do not read it.
@@ -33,17 +33,23 @@ deployment can run.
 
 | Release channel | Modules                                           | Target deployment                            |
 | --------------- | ------------------------------------------------- | -------------------------------------------- |
-| `stable`        | Custody, Payments, Recurring payments, Compliance | Production                                   |
-| `beta`          | `stable` plus modules in final validation         | Stage                                        |
+| `stable`        | Custody, Payments, Recurring payments, Compliance | Production, stage                            |
+| `beta`          | `stable` plus modules in final validation         | None yet                                     |
 | `experimental`  | All modules                                       | Development, previews, self-hosted           |
 
 Every deployment starts on `experimental`, which matches the behavior before
 release channels. Stage and production move to `beta` and `stable` in a later
 infrastructure change.
 
-A module or ramp provider is promoted by changing its stage: `experimental` to
-`beta` to validate it on stage, then `beta` to `stable` to ship it to
-production. Stages live on `main` and every deployment runs the same code, so
+**Amended 2026-10-23:** stage runs `stable` too. It is the gate every prod
+promotion passes, so it runs what prod runs; on `beta` it checked a superset of
+production's configuration. No deployment runs `beta` until a dedicated beta
+environment exists (HOO-2264); dev's `experimental` covers modules in
+validation meanwhile.
+
+A module or ramp provider is promoted by changing its maturity: `experimental` to
+`beta` while it is validated (on dev until a beta deployment exists), then
+`beta` to `stable` to ship it to stage and production. Maturity levels live on `main` and every deployment runs the same code, so
 the release channel is what keeps a module under validation on stage out of
 production.
 

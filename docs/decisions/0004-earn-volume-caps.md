@@ -80,12 +80,12 @@ stays a small enough fraction of any vault that its customers can always leave.
   them against the catalogue's USD TVL on that same dollar-for-dollar basis.
 - Enforced inside the single admission predicate
   (`assertVaultDepositAdmissible`, `routes/earn/handlers/admission.ts`), so
-  the custody path and both authenticated and anonymous external-wallet builds
-  meet it with no new gate ordering. That admission check is the EARLY half: it
-  runs before anything is built or signed, on a fresh ledger read, but two
-  deposits admitted a moment apart each see the same headroom. The LATE half
-  decides again for custody deposits and authenticated external-wallet submits
-  inside the ledger transaction that records the deposit's `requested` row
+  the custody path and the external-wallet build meet it with no new gate
+  ordering. That admission check is the EARLY half: it runs before anything is
+  built or signed, on a fresh ledger read, but two deposits admitted a moment
+  apart each see the same headroom. The LATE half decides again for custody
+  deposits and external-wallet submits inside the ledger transaction that
+  records the deposit's `requested` row
   (`ledgerVaultExposureGate`, `services/earn/vault-exposure.ts`): the ledger
   takes a per-vault transaction advisory lock that serializes every writer to
   the vault across processes, re-checks the idempotency replay under it (a
@@ -96,14 +96,11 @@ stays a small enough fraction of any vault that its customers can always leave.
   (`earn_vault_deposit_exposure`, migration 0101) that widens its own read to
   the system isolation identity for the duration of the sum, so the
   tenant-stamped transaction needs no second connection while it holds the
-  lock. Anonymous builds deliberately persist nothing and have no SDP submit,
-  so they receive only the early decision and are outside the durable ledger
-  exposure figure. Both halves emit the evaluated event with a `stage`.
+  lock. Both halves emit the evaluated event with a `stage`.
   The figures themselves (`exposure`, `projected`, `limit`) appear ONLY on
   that event: the 409's `details` carry just `vaultAddress` and the preview's
   `blockingIssues` message is a fixed sentence, because the aggregate is every
-  tenant's holdings and the preview and external-wallet build routes are
-  keyless (SOLA9-9).
+  tenant's holdings and must not reach any single tenant (SOLA9-9).
 - Config lives beside `CURATED_VAULTS` in `curation.ts`, keyed by vault
   address, and inherits the CODEOWNERS gate from PRO-1869. A missing entry
   means the platform default applies; `null` means uncapped (explicit, so a
@@ -196,18 +193,16 @@ declares at STRIDE onboarding (PRD §4.4) times a generous multiple.
   deposit; that is verified in the implementation ticket, not assumed.
 - Partners see caps as preview blocking issues, the same channel that already
   carries slippage and liquidity issues.
-- One vault's failure costs authenticated, ledgered SDP customers at most a
-  known number. Anonymous transaction builders are outside this durable bound.
+- One vault's failure costs ledgered SDP customers at most a known number.
 - Caps add two ledger aggregates per ledgered deposit (admission and the ledger
   write), indexed for the aggregate. Admissions read the ledger fresh so an
   enforced verdict never rests on a cached figure; only previews use the short
   in-process cache. The ledger write re-decides under a per-vault lock, so
   concurrent ledgered deposits cannot together overshoot the cap; the cost is
   that a deposit admitted at build time can still be refused at its write when
-  the vault filled in between. On the authenticated external-wallet path that
-  refusal reaches the customer after signing (the transaction is never sent);
-  the ADR takes that over a deposit landing past the cap. Anonymous builds run
-  one admission aggregate because they have no SDP submit or movement row.
+  the vault filled in between. On the external-wallet path that refusal
+  reaches the customer after signing (the transaction is never sent); the ADR
+  takes that over a deposit landing past the cap.
 - Velocity windows count only decided, still-live operations. An operation
   awaiting its own decision does not count, so concurrent requests cannot
   veto each other; the overshoot concurrency can cause is bounded by the

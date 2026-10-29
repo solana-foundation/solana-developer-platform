@@ -7,7 +7,12 @@ import { I18nProvider } from "@/i18n/provider";
 import type { RingsWallet, RingsWalletSync } from "./helius-rings.data";
 import { ShieldedBalanceCard } from "./shielded-balance-card";
 
-const mocks = vi.hoisted(() => ({ syncRingsWallet: vi.fn() }));
+const mocks = vi.hoisted(() => ({ syncRingsWallet: vi.fn(), canWrite: true }));
+
+vi.mock("@/contexts/dashboard-workspace-context", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/contexts/dashboard-workspace-context")>()),
+  useCanWrite: () => mocks.canWrite,
+}));
 
 vi.mock("./helius-rings.data", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./helius-rings.data")>()),
@@ -51,11 +56,24 @@ function renderCard(wallet: RingsWallet = WALLET, refreshTick?: number) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.canWrite = true;
 });
 
 afterEach(cleanup);
 
 describe("ShieldedBalanceCard", () => {
+  it("never syncs for a read-only member, and says why there is no balance", () => {
+    mocks.canWrite = false;
+    renderCard();
+
+    expect(
+      screen.getByText(
+        "Shielded balances are read through a wallet sync, which read-only access can't run."
+      )
+    ).toBeTruthy();
+    expect(mocks.syncRingsWallet).not.toHaveBeenCalled();
+  });
+
   it("auto-syncs on mount and shows the USD total", async () => {
     mocks.syncRingsWallet.mockResolvedValue({ sync: OBSERVED });
     renderCard();

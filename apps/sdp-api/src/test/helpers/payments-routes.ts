@@ -34,7 +34,7 @@ import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sp
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 
-export const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
+const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
 
 export const getAccountInfoMock = vi.spyOn(solanaRpc, "getAccountInfo");
 
@@ -44,7 +44,7 @@ export const confirmTransactionMock = vi.spyOn(solanaRpc, "confirmTransaction");
 
 export const getTransactionMock = vi.spyOn(solanaRpc, "getTransaction");
 
-export const sendAndConfirmTransactionMock = vi.spyOn(solanaRpc, "sendAndConfirmTransaction");
+const sendAndConfirmTransactionMock = vi.spyOn(solanaRpc, "sendAndConfirmTransaction");
 
 export const sendTransactionMock = vi.spyOn(solanaRpc, "sendTransaction");
 
@@ -148,7 +148,7 @@ export const TEST_MOONPAY_API_KEY = "pk_test_moonpay";
 
 export const TEST_MOONPAY_SECRET_KEY = "sk_test_moonpay";
 
-export const TEST_MOONPAY_WEBHOOK_SECRET = "wk_test_moonpay";
+const TEST_MOONPAY_WEBHOOK_SECRET = "wk_test_moonpay";
 
 export const TEST_MOONPAY_ONRAMP_URL = "https://buy-sandbox.moonpay.com";
 

@@ -13,14 +13,14 @@ Use the exact SDP Wallet ID (`id` from `GET /v1/wallets`) in `{walletId}`. Provi
 <Tab value="curl">
 ```bash title="Terminal"
 curl https://api.solana.com/v1/payments/wallets/cwlt_example/balances \
-  -H "Authorization: Bearer sk_test_..."
+  -H "Authorization: Bearer sf_..."
 ```
 </Tab>
 <Tab value="TypeScript">
 ```typescript title="get-wallet-balances.ts"
 const response = await fetch(
   "https://api.solana.com/v1/payments/wallets/cwlt_example/balances",
-  { headers: { Authorization: "Bearer sk_test_..." } }
+  { headers: { Authorization: "Bearer sf_..." } }
 );
 const { data } = await response.json();
 // data.walletBalances.balances: TokenBalance[]
@@ -30,7 +30,7 @@ const { data } = await response.json();
 ```java title="GetWalletBalances.java"
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/payments/wallets/cwlt_example/balances"))
-    .header("Authorization", "Bearer sk_test_...")
+    .header("Authorization", "Bearer sf_...")
     .GET()
     .build();
 ```
@@ -92,9 +92,15 @@ Per-balance fields:
 
 ## Pricing freshness
 
-When USD valuation is populated, the price comes from SDP's configured price source and reflects the most recent quote available. The cadence and source depend on deployment configuration — do not rely on `usdValue` for downstream balance-sheet decisions without confirming the price source's freshness with your operations team. When in doubt, treat `amount` / `uiAmount` as authoritative and convert with your own price feed.
+`usdPrice` is a display estimate from Tokens.xyz. SDP caches successful
+snapshots for up to 60 seconds. Some source snapshots refresh hourly; SDP
+omits snapshots older than two hours or without a timestamp. The snapshot
+timestamp does not prove when its underlying price was observed.
 
-If no price source is configured, the `usdPrice` and `usdValue` fields are absent rather than zero — the omission signals "unknown," not "$0.00," so downstream consumers can decide how to handle the gap.
+Use an executable quote for a trade and an independently verified valuation
+for accounting. The on-chain `amount` and `uiAmount` remain the balance values.
+When pricing is unavailable, `usdPrice` and `usdValue` are absent. The omission
+means "unknown," not "$0.00."
 
 ## Comparison to on-chain RPC
 

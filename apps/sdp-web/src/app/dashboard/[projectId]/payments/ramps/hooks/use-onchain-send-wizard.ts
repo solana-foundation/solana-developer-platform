@@ -3,10 +3,11 @@
 import { compareDecimalAmounts } from "@sdp/solana/amount";
 import type { CounterpartyAccount } from "@sdp/types/counterparties";
 import type { PaymentsDashboardWallet, PaymentTransferSummary } from "@sdp/types/payments";
+import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types/well-known-tokens";
 import { address } from "@solana/kit";
 import { CoinsIcon, DollarSignIcon, WalletIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
@@ -20,23 +21,29 @@ import {
   onchainDetailsSchema,
   onchainSendSchema,
 } from "@/app/dashboard/[projectId]/payments/ramps/schema";
-import { walletBalanceAssetOptions } from "@/app/dashboard/[projectId]/payments/ramps/wallet-options";
+import { onchainPaymentAssetOptions } from "@/app/dashboard/[projectId]/payments/ramps/wallet-options";
 import {
   optionalDetail,
   summaryAmount,
 } from "@/app/dashboard/[projectId]/payments/ramps/wizard-summary";
 import { sendTransferUnderKey } from "@/app/dashboard/[projectId]/payments/transfer-idempotency";
 import type { WizardSummaryDetail } from "@/app/dashboard/[projectId]/payments/wizard-summary-list";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import type { TranslationValues } from "@/i18n/translate";
 import { isMovementInFlight } from "@/lib/idempotency";
+import { DEMO_PREFILL_AMOUNTS } from "@/lib/payments-demo/demo-prefill";
+import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useZodForm } from "@/lib/use-zod-form";
+import { useFireblocksPaymentAdvisory } from "./use-fireblocks-payment-advisory";
 import { usePaymentsActionWallets } from "./use-payments-action-wallets";
 import type { RampWizardStep } from "./use-ramp-wizard";
 
-export const ONCHAIN_SEND_STEP_IDS = ["DESTINATION", "DETAILS", "REVIEW"] as const;
+// One details step (contact, destination, wallet, amount, memo) and a review that also shows the
+// outcome once sent.
+const ONCHAIN_SEND_STEP_IDS = ["DETAILS", "REVIEW"] as const;
 export type OnchainSendStepId = (typeof ONCHAIN_SEND_STEP_IDS)[number];
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
@@ -70,14 +77,9 @@ function submittedTransferDescription(transfer: SubmittedTransfer, t: Translate)
 export function getOnchainSendSteps(t: Translate): readonly RampWizardStep<OnchainSendStepId>[] {
   return [
     {
-      id: "DESTINATION",
-      label: t("DashboardPayments.onchainSend.destination"),
-      title: t("DashboardPayments.onchainSend.destinationTitle"),
-    },
-    {
       id: "DETAILS",
       label: t("DashboardPayments.onchainSend.details"),
-      title: t("DashboardPayments.onchainSend.detailsTitle"),
+      title: t("DashboardPayments.whoAreYouPaying"),
     },
     {
       id: "REVIEW",
@@ -121,12 +123,14 @@ export function canProceedOnchainSend({
   readySubmission: CreateTransferInput | null;
 }): boolean {
   switch (stepId) {
-    case "DESTINATION":
-      return onchainDestinationSchema.safeParse(fields).success && destinationAddress !== null;
     case "DETAILS": {
       const hasMintForSelectedAsset = fields.walletId === "" || selectedMint !== null;
       return (
-        onchainDetailsSchema.safeParse(fields).success && !exceedsBalance && hasMintForSelectedAsset
+        onchainDestinationSchema.safeParse(fields).success &&
+        destinationAddress !== null &&
+        onchainDetailsSchema.safeParse(fields).success &&
+        !exceedsBalance &&
+        hasMintForSelectedAsset
       );
     }
     case "REVIEW":
@@ -145,7 +149,7 @@ export function nextAssetAfterWalletChange(
   return firstAsset === undefined ? "" : firstAsset.value;
 }
 
-export function cryptoWalletAddress(account: CounterpartyAccount): string | null {
+function cryptoWalletAddress(account: CounterpartyAccount): string | null {
   if (account.accountKind !== "crypto_wallet") {
     return null;
   }
@@ -187,6 +191,24 @@ function useOnchainSubmission(signingUnavailable: boolean, t: Translate) {
     try {
       const { transfer } = await sendTransferUnderKey(submission, t);
       setTransferResult(transfer);
+      if (transfer.status === "failed") {
+        toast.error(t("DashboardPayments.onchainSend.transferFailed"), {
+          id: toastId,
+          description: transfer.error ?? undefined,
+        });
+        return;
+      }
+      if (transfer.fireblocks && !transfer.signature) {
+        toast.info(t("DashboardPayments.onchainSend.transferSubmitted"), {
+          id: toastId,
+          description: t(
+            transfer.fireblocks.transactionId
+              ? "DashboardPayments.onchainSend.fireblocksPending"
+              : "DashboardPayments.onchainSend.fireblocksUnknown"
+          ),
+        });
+        return;
+      }
       toast.success(t("DashboardPayments.onchainSend.transferSubmitted"), {
         id: toastId,
         description: submittedTransferDescription(transfer, t),
@@ -213,11 +235,12 @@ function useOnchainAssetSelection(
   selectedWallet: PaymentsDashboardWallet | null,
   fields: OnchainSendFields,
   issuedTokenSymbolsByMint: Record<string, string>,
-  t: Translate
+  t: Translate,
+  cluster: SolanaCluster
 ) {
   const assetOptions = useMemo(
-    () => walletBalanceAssetOptions(selectedWallet, issuedTokenSymbolsByMint, t),
-    [issuedTokenSymbolsByMint, selectedWallet, t]
+    () => onchainPaymentAssetOptions(selectedWallet, issuedTokenSymbolsByMint, t, cluster),
+    [issuedTokenSymbolsByMint, selectedWallet, t, cluster]
   );
   const selectedAsset = useMemo(() => {
     const asset = assetOptions.find((candidate) => candidate.value === fields.asset);
@@ -225,12 +248,16 @@ function useOnchainAssetSelection(
   }, [assetOptions, fields.asset]);
 
   const selectedAssetBalance = useMemo(() => {
-    if (selectedWallet === null || selectedWallet.balances === undefined) {
+    if (
+      selectedAsset === null ||
+      selectedWallet === null ||
+      selectedWallet.balances === undefined
+    ) {
       return null;
     }
     const balance = selectedWallet.balances.find((candidate) => candidate.mint === fields.asset);
     return balance === undefined ? null : balance;
-  }, [selectedWallet, fields.asset]);
+  }, [selectedWallet, fields.asset, selectedAsset]);
 
   let availableAmount: string | null;
   if (selectedWallet === null) {
@@ -256,16 +283,27 @@ export function useOnchainSendWizard({
   const href = useProjectHref();
   const t = useTranslations();
   const locale = useLocale();
+  const { sdpEnvironment } = useDashboardWorkspace();
+  const cluster = CLUSTER_BY_SDP_ENVIRONMENT[sdpEnvironment];
   const steps = getOnchainSendSteps(t);
   const [stepIndex, setStepIndex] = useState(0);
+  const demo = usePaymentsDemo();
   const { values: fields, setField } = useZodForm(onchainSendSchema, {
     accountId: "",
     walletId: "",
     asset: "",
-    amount: "",
+    amount: demo ? DEMO_PREFILL_AMOUNTS.send : "",
     memo: "",
   });
   const [addAccountOpen, setAddAccountOpen] = useState(false);
+
+  // A destination belongs to one contact; picking another contact clears it.
+  const accountCounterpartyRef = useRef(counterpartyId);
+  useEffect(() => {
+    if (accountCounterpartyRef.current === counterpartyId) return;
+    accountCounterpartyRef.current = counterpartyId;
+    setField("accountId", "");
+  }, [counterpartyId, setField]);
 
   const { liveWallets, walletsLoading, liveWalletsError } = usePaymentsActionWallets(
     wallets,
@@ -306,13 +344,24 @@ export function useOnchainSendWizard({
     t
   );
   const { assetOptions, selectedAsset, selectedAssetBalance, availableAmount, exceedsBalance } =
-    useOnchainAssetSelection(selectedWallet, fields, issuedTokenSymbolsByMint, t);
+    useOnchainAssetSelection(selectedWallet, fields, issuedTokenSymbolsByMint, t, cluster);
+  useFireblocksPaymentAdvisory({
+    wallet: selectedWallet,
+    signingUnavailable,
+    submitting,
+    finished,
+    walletId: fields.walletId,
+    counterpartyId,
+    account: selectedAccount,
+    balance: selectedAssetBalance,
+    address: destinationAddress,
+  });
 
   const selectWallet = (walletId: string) => {
     setField("walletId", walletId);
     const matchingWallet = liveWallets.find((wallet) => wallet.id === walletId);
     const nextWallet = matchingWallet === undefined ? null : matchingWallet;
-    const nextAssets = walletBalanceAssetOptions(nextWallet, issuedTokenSymbolsByMint, t);
+    const nextAssets = onchainPaymentAssetOptions(nextWallet, issuedTokenSymbolsByMint, t, cluster);
     const nextAsset = nextAssetAfterWalletChange(fields.asset, nextAssets);
     if (nextAsset !== fields.asset) {
       setField("asset", nextAsset);
@@ -328,7 +377,7 @@ export function useOnchainSendWizard({
   );
   const canProceed =
     finished ||
-    ((currentStepId === "DESTINATION" || !signingUnavailable) &&
+    (!signingUnavailable &&
       canProceedOnchainSend({
         stepId: currentStepId,
         fields,

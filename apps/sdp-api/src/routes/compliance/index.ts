@@ -13,7 +13,7 @@ import { screenAddressSchema } from "./schemas";
 export const compliance = new Hono<{ Bindings: Env }>();
 
 /** Why screening runs `authorizeNone` (the route inventory pins it). */
-export const SCREENS_AN_ADDRESS =
+const SCREENS_AN_ADDRESS =
   "screens an on-chain address the caller supplies; it names no resource of any project";
 
 compliance.use("*", unifiedAuthMiddleware());

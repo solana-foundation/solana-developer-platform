@@ -1,0 +1,46 @@
+---
+title: Errors
+description: A failed request returns an HTTP error status and one error envelope, with a code to branch on.
+---
+
+A failed request returns an error status and this body. The health checks are the exception: each answers with its own body, as its page shows.
+
+```json
+{
+  "error": {
+    "code": "FORBIDDEN",
+    "message": "Access denied"
+  },
+  "meta": { "requestId": "req_..." }
+}
+```
+
+- `code` is stable: branch on it, not on `message`, which is for people and can change.
+- `details`, when present, says more, such as which field failed validation.
+- `meta.requestId` identifies the request. Quote it when you report a problem.
+
+## Statuses
+
+| Status | Means | Common codes |
+| --- | --- | --- |
+| `400` | The request is malformed or fails validation. | `BAD_REQUEST`, `IDEMPOTENCY_KEY_REQUIRED` |
+| `401` | The API key is missing, invalid, expired or revoked. | `UNAUTHORIZED`, `INVALID_API_KEY` |
+| `403` | The key lacks the grant or wallet access the request needs, or the call comes from an IP address the key doesn't allow. | `FORBIDDEN`, `INSUFFICIENT_PERMISSIONS` |
+| `404` | Nothing with that ID exists in the project. | `NOT_FOUND` |
+| `409` | The request conflicts with the resource's state, or a request with the same idempotency key is still running. | `CONFLICT`, `IDEMPOTENCY_KEY_IN_FLIGHT` |
+| `422` | The request is well formed but can't go ahead: its idempotency key was used for a different request, or the signing provider refused the transaction. | `IDEMPOTENCY_KEY_REUSED`, `SIGNING_REJECTED` |
+| `429` | Too many requests. See [Rate limits](/docs/reference/conventions/rate-limits). | `RATE_LIMITED` |
+| `500` | Something failed inside SDP. | `INTERNAL_ERROR` |
+| `502` | A Solana RPC call failed. | `SOLANA_RPC_ERROR` |
+| `503` | SDP, or a provider it depends on, is unavailable for now. | `SERVICE_UNAVAILABLE`, `PROVIDER_UNAVAILABLE` |
+
+Each operation's page lists the statuses it can return, with an example body for each.
+
+## Retrying
+
+- `400`, `401`, `403`, `404` and `422`: fix the request before you send it again.
+- `409 CONFLICT`: read the resource's current state, then decide.
+- `409 IDEMPOTENCY_KEY_IN_FLIGHT` and `429`: wait for `Retry-After`, then retry with the same `Idempotency-Key`.
+- `5xx`: most routes store the error and return it again to a same-key retry. Read the resource with `GET` to see whether the request took effect, then retry with a new key. On the routes that move money, a same-key retry runs again and never acts twice.
+
+[Idempotency](/docs/developing-with-sdp/idempotency) covers what each retry returns.

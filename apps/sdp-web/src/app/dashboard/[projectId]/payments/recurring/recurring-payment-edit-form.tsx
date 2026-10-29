@@ -18,7 +18,7 @@ import { z } from "zod";
 import { shortenAddress } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
 import { useTranslations } from "@/i18n/provider";
 import { getRecurringPaymentDetailState } from "./recurring-payment-detail-state";
-import { updateRecurringPayment } from "./recurring-payments.data.redesign";
+import { updateRecurringPayment } from "./recurring-payments.data";
 import {
   accountAddress,
   accountLabel,
@@ -30,7 +30,7 @@ import {
   schedulePresetForPeriodHours,
   type Translate,
   walletLabel,
-} from "./recurring-payments-shared.redesign";
+} from "./recurring-payments-shared";
 import { recurringPaymentAssetOptions } from "./use-recurring-payment-create";
 
 interface EditFields {

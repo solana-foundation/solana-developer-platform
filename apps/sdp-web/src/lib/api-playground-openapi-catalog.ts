@@ -3,7 +3,7 @@ import type { RampProviderId } from "@sdp/types/provider-access";
 import { RAMP_PROVIDERS } from "@sdp/types/provider-access";
 import {
   isRampProviderInReleaseChannel,
-  SDP_RAMP_PROVIDER_STAGES,
+  SDP_RAMP_PROVIDER_MATURITY,
   SDP_RELEASE_CHANNELS,
   type SdpModule,
   type SdpReleaseChannel,
@@ -167,7 +167,7 @@ function publishedIn(releaseChannel: SdpReleaseChannel): Published {
     if ("module" in gate) return modules.has(gate.module);
     return (
       modules.has("ramps") &&
-      isRampProviderInReleaseChannel(releaseChannel, gate.rampProvider, SDP_RAMP_PROVIDER_STAGES)
+      isRampProviderInReleaseChannel(releaseChannel, gate.rampProvider, SDP_RAMP_PROVIDER_MATURITY)
     );
   };
 }

@@ -375,7 +375,11 @@ describe("VedaEarnClient.listStrategies", () => {
     // no-deployment guard; devnet's read path is covered by the
     // `_listVaultStrategies` cases below, against stubbed RPC.
     await assert.rejects(
-      client.listStrategies({ env: { SOLANA_RPC_URL: RPC_URL }, environment: "production" }),
+      client.listStrategies({
+        env: {},
+        environment: "production",
+        catalogueRpcUrl: () => RPC_URL,
+      }),
       {
         code: "PROVIDER_NOT_CONFIGURED",
       }

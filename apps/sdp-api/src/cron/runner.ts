@@ -14,6 +14,9 @@ import { earnMetricsRefreshCron } from "@/cron/earn-metrics-refresh";
 import { earnSplitSwapsCron } from "@/cron/earn-split-swaps";
 import { earnVaultMovementsCron } from "@/cron/earn-vault-movements";
 import { idempotencyKeyPruneCron } from "@/cron/idempotency-keys";
+import { paymentRequestsCron } from "@/cron/payment-requests";
+import { paymentRequestsExpiryCron } from "@/cron/payment-requests-expiry";
+import { paymentRequestsHotCron } from "@/cron/payment-requests-hot";
 import { pendingDepositsCron } from "@/cron/pending-deposits";
 import { pendingTransfersCron } from "@/cron/pending-transfers";
 import { pendingWithdrawalsCron } from "@/cron/pending-withdrawals";
@@ -45,6 +48,9 @@ export interface CronHandle {
 /** Every Cron Definition the Worker runs. */
 export const CRON_DEFINITIONS: readonly CronDefinition[] = [
   pendingTransfersCron,
+  paymentRequestsHotCron,
+  paymentRequestsCron,
+  paymentRequestsExpiryCron,
   sponsorshipBudgetsCron,
   recurringPaymentsCron,
   subscriptionAuthoritiesCron,

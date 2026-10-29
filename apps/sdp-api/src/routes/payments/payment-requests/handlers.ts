@@ -5,27 +5,24 @@ import type {
   PaymentRequest,
   PaymentRequestLink,
 } from "@sdp/types/payments";
+import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
 import { createPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
-import { badRequestParams, badRequestQuery, notFound } from "@/lib/errors";
+import { badRequestQuery } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
+import { getAuthorized } from "@/middleware/authorize";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import type { AppContext } from "@/routes/payments/context";
 import { resolveScope, resolveWallet } from "@/routes/payments/wallets";
 import { normalizePaymentToken } from "@/services/payment-operation.service";
-import {
-  isPaymentRequestExpired,
-  reconcilePaymentRequest,
-} from "@/services/payments/payment-requests";
+import { cancelOpenPaymentRequest } from "@/services/payments/payment-request-cancel";
+import { isPaymentRequestExpired } from "@/services/payments/payment-requests";
+import { assertNoSolRentShortfall } from "@/services/payments/sol-rent-minimum";
 import { parseStaticPaymentAmount } from "@/services/payments/token-amount";
-import {
-  type createPaymentRequestSchema,
-  listPaymentRequestsQuerySchema,
-  paymentRequestParamsSchema,
-} from "./schemas";
+import { type createPaymentRequestSchema, listPaymentRequestsQuerySchema } from "./schemas";
 
 /**
  * A payment request without its public token. The token is the bearer
@@ -46,7 +43,11 @@ function mapPaymentRequest(row: PaymentRequestRow): PaymentRequest {
     status: expired && row.status === "awaiting_payment" ? "expired" : row.status,
     expiresAt: row.expires_at,
     fulfilledByTransferId: row.fulfilled_by_transfer_id,
-    canceledBy: row.canceled_by,
+    paidLate: row.paid_late,
+    lastCheckedAt: row.last_verified_at,
+    canceledByApiKeyId: row.canceled_by_api_key_id,
+    canceledByUserId: row.canceled_by_user_id,
+    canceledAt: row.canceled_at,
     lifecycle: row.lifecycle,
     createdBy: row.created_by,
     createdAt: row.created_at,
@@ -72,12 +73,8 @@ export async function listPaymentRequests(c: AppContext) {
     offset: (page - 1) * pageSize,
   });
 
-  const reconciledRows = await Promise.all(
-    rows.map((row) => reconcilePaymentRequest(c.env, row, { bestEffort: true }))
-  );
-
   const response: ListPaymentRequestsResponse = {
-    paymentRequests: reconciledRows.map(mapPaymentRequest),
+    paymentRequests: rows.map(mapPaymentRequest),
     total,
     page,
     pageSize,
@@ -85,28 +82,8 @@ export async function listPaymentRequests(c: AppContext) {
   return success(c, response);
 }
 
-async function readPaymentRequest(c: AppContext): Promise<PaymentRequestRow> {
-  const auth = getAuth(c);
-  const projectId = requireProjectId(c);
-  const params = paymentRequestParamsSchema.safeParse(c.req.param());
-  if (!params.success) throw badRequestParams();
-
-  const row = await createPaymentRequestsRepository(
-    c.env,
-    getRequestTenantScope(c)
-  ).getPaymentRequestById({
-    requestId: params.data.paymentRequestId,
-    organizationId: auth.organizationId,
-    projectId,
-  });
-  if (!row) throw notFound("Payment request");
-  return row;
-}
-
 export async function getPaymentRequest(c: AppContext) {
-  const row = await readPaymentRequest(c);
-  const reconciled = await reconcilePaymentRequest(c.env, row, { bestEffort: true });
-  return success(c, mapPaymentRequest(reconciled));
+  return success(c, mapPaymentRequest(getAuthorized<PaymentRequestRow>(c)));
 }
 
 /**
@@ -115,7 +92,7 @@ export async function getPaymentRequest(c: AppContext) {
  * the route needs `payment_requests.manage`.
  */
 export async function getPaymentRequestLink(c: AppContext) {
-  const row = await readPaymentRequest(c);
+  const row = getAuthorized<PaymentRequestRow>(c);
 
   const response: PaymentRequestLink = { id: row.id, publicToken: row.public_token };
   return success(c, response);
@@ -132,7 +109,24 @@ export async function createPaymentRequest(
   const scope = await resolveScope(c);
   const wallet = resolveWallet(scope.wallets, body.walletId);
   const token = assertValidAddress(normalizePaymentToken(body.token), "token");
-  await parseStaticPaymentAmount(body.amount, token);
+  const amountBaseUnits = await parseStaticPaymentAmount(body.amount, token);
+  // A SOL request to a wallet with no account below the rent minimum could
+  // never be paid (HOO-2375). The payer's own remainder is checked at /pay.
+  if (token === SOL_MINT) {
+    await assertNoSolRentShortfall(
+      {
+        source: null,
+        payments: [
+          {
+            index: 0,
+            destination: assertValidAddress(wallet.publicKey, "walletId"),
+            lamports: amountBaseUnits,
+          },
+        ],
+      },
+      "transfer"
+    );
+  }
 
   const row = await createPaymentRequestsRepository(
     c.env,
@@ -154,4 +148,21 @@ export async function createPaymentRequest(
     publicToken: row.public_token,
   };
   return created(c, response);
+}
+
+/**
+ * Cancel an open payment request: its `/pay` link stops building and sponsoring transactions.
+ * An exit, so it takes `payment_requests.manage`. A request that is already canceled answers
+ * with its row; a paid or expired one, or one whose sponsored transaction can still land, is a
+ * 409. The response is the record a read returns, never the link token.
+ *
+ * A same-key retry after a 5xx reruns rather than replays (`serverErrors: "rerun"`): the cancel
+ * is a compare-and-set on its own row, a canceled request answers 200, and a 5xx wrote nothing.
+ *
+ * @param c - The request context, after `authorizeExistingPaymentRequest` loaded the request.
+ * @returns The canceled payment request.
+ */
+export async function cancelPaymentRequest(c: AppContext) {
+  const row = await cancelOpenPaymentRequest(c, getAuthorized<PaymentRequestRow>(c));
+  return success(c, mapPaymentRequest(row));
 }

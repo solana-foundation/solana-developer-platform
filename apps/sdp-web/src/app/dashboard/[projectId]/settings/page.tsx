@@ -1,8 +1,10 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import { DashboardQuickStart } from "@/components/dashboard-quick-start.redesign";
+import { DashboardQuickStart } from "@/components/dashboard-quick-start";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
+import { requestMemberRole } from "@/lib/sdp-api";
+import { LeaveOrganizationCard } from "./leave-organization-card";
 import { MembersSection } from "./members-section";
 import { OrganizationAccessSection } from "./organization-access-section";
 
@@ -28,7 +30,7 @@ export default async function SettingsPage({
 }) {
   const membersPage = resolveMembersPage((await searchParams).membersPage);
 
-  const { userId, orgId, orgRole } = await auth();
+  const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
   }
@@ -36,7 +38,7 @@ export default async function SettingsPage({
     redirect("/dashboard");
   }
 
-  const dashboardAccess = resolveDashboardAccess(orgRole);
+  const dashboardAccess = resolveDashboardAccess(await requestMemberRole());
 
   return (
     <div className="w-full flex flex-col gap-6">
@@ -49,6 +51,8 @@ export default async function SettingsPage({
         <MembersSection page={membersPage} />
       ) : null}
       {dashboardAccess.capabilities.canManageOrgSettings ? <OrganizationAccessSection /> : null}
+      {/* Admins cannot leave; another admin removes them. */}
+      {dashboardAccess.role !== "admin" ? <LeaveOrganizationCard /> : null}
     </div>
   );
 }

@@ -2,7 +2,7 @@ import type { EarnProviderId } from "@sdp/types/provider-access";
 import { GENESIS_HASH_BY_CLUSTER, type SolanaCluster } from "@sdp/types/well-known-tokens";
 import { internalError, providerNotConfigured } from "./errors";
 import { providerFetchJson } from "./fetch";
-import type { EarnRuntimeEnvironment } from "./types";
+import type { EarnRuntimeContext } from "./types";
 
 /**
  * Raw Solana JSON-RPC for CATALOGUE reads, shared by every provider whose shelf
@@ -24,30 +24,28 @@ import type { EarnRuntimeEnvironment } from "./types";
 export const CATALOGUE_RPC_TIMEOUT_MS = 20_000;
 
 /**
- * The RPC endpoint a catalogue read should use for `cluster`.
+ * The RPC endpoint a catalogue read should use for `cluster`, as the caller
+ * supplied it on `ctx.catalogueRpcUrl`.
  *
- * `SOLANA_RPC_URL` is the PROCESS endpoint: it serves whichever cluster the
- * deployment is configured for. The catalogue sync walks BOTH environments in
- * that one process, so a provider whose instrument lives on the OTHER cluster
- * can only be read when that cluster has an endpoint of its own. Without one,
- * a mainnet-only provider (Ondo) is invisible to every non-production
- * deployment: its production fetch fails the genesis proof, the sync treats
- * that as a steady-state skip, and the browse-only mirror converges to empty.
+ * The catalogue sync walks BOTH environments in one process, so the endpoint
+ * must be the requested cluster's own: the API hands over that cluster's
+ * managed RPC pool and never a process default, which is what keeps a
+ * mainnet-only provider (Ondo) readable from a deployment whose other traffic
+ * is mostly devnet. `assertRpcServesCluster` still measures the URL that comes
+ * back: an endpoint pointed at the wrong chain is refused by its genesis hash.
  *
- * `SOLANA_MAINNET_RPC_URL` / `SOLANA_DEVNET_RPC_URL` are the same two override
- * keys the API's execution path reads (`resolveClusterRpcUrl`), so one Doppler
- * value serves catalogue and execution alike. Falling back to the process
- * endpoint keeps today's behaviour for every single-cluster deployment, and
- * `assertRpcServesCluster` still measures whatever URL comes back — an
- * override pointed at the wrong chain is refused exactly like the default.
+ * @param ctx - The catalogue runtime context.
+ * @param cluster - The cluster the read targets.
+ * @returns The endpoint to read.
+ * @throws SdpEarnError `PROVIDER_NOT_CONFIGURED` when the caller supplied no
+ * resolver or the cluster has no endpoint, a steady-state skip for the sync.
  */
-export function resolveCatalogueRpcUrl(
-  env: EarnRuntimeEnvironment,
-  cluster: SolanaCluster
-): string {
-  const override = cluster === "devnet" ? env.SOLANA_DEVNET_RPC_URL : env.SOLANA_MAINNET_RPC_URL;
-  if (typeof override === "string" && override.trim() !== "") return override.trim();
-  return env.SOLANA_RPC_URL?.trim() ?? "";
+export function resolveCatalogueRpcUrl(ctx: EarnRuntimeContext, cluster: SolanaCluster): string {
+  const rpcUrl = ctx.catalogueRpcUrl === undefined ? null : ctx.catalogueRpcUrl(cluster);
+  if (rpcUrl === null) {
+    throw providerNotConfigured(`No ${cluster} RPC endpoint is configured for catalogue reads`);
+  }
+  return rpcUrl;
 }
 
 // biome-ignore lint/security/noSecrets: the bitcoin/Solana base58 alphabet
@@ -188,12 +186,12 @@ export async function solanaRpcCall<T>(
  *
  * `EarnRuntimeContext.environment` is a PER-PROJECT attribute while `ctx.env` is
  * the PROCESS environment, and `syncEarnCatalogue` walks both environments
- * inside one process with one env object. A production deployment therefore
- * reaches this code with `SOLANA_RPC_URL` pointing at MAINNET while syncing the
- * sandbox environment. Without this check a devnet program id would be queried
- * against mainnet, return zero accounts, and hand back a confident empty
- * shelf — which is also the shape that makes the sync skip its delist pass, so
- * sandbox would silently freeze on whatever it last held.
+ * inside one process with one env object. A misconfigured pool can therefore
+ * hand this code a MAINNET endpoint while syncing the sandbox environment.
+ * Without this check a devnet program id would be queried against mainnet,
+ * return zero accounts, and hand back a confident empty shelf, which is also
+ * the shape that makes the sync skip its delist pass, so sandbox would silently
+ * freeze on whatever it last held.
  *
  * It is also what makes a snapshot's `hostCluster` a MEASUREMENT rather than a
  * derivation. Migration 0057's whole point is that the environment must never be

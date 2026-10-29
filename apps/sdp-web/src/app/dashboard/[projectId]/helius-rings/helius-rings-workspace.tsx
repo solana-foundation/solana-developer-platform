@@ -3,6 +3,7 @@
 import { Callout } from "@sdp/ui/callout";
 import { Card, CardContent } from "@sdp/ui/card";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { ActivityCard } from "./activity-card";
 import { RingsConfigurationCard } from "./configuration-card";
@@ -37,6 +38,8 @@ export function HeliusRingsWorkspace({
   custodyWallets: CustodyWalletOption[];
 }) {
   const t = useTranslations();
+  // A read-only member sees the rings, wallets and activity but none of the controls that change them.
+  const { canWrite } = useDashboardWorkspace().dashboardAccess.capabilities;
 
   const [health, setHealth] = useState<RingsHealth | null>(null);
   const [setup, setSetup] = useState<RingsSetupStatus | null>(null);
@@ -138,8 +141,9 @@ export function HeliusRingsWorkspace({
         // finds, whereas for a row still waiting on custody the same call
         // concludes that signing died and fails it. Single-pass loop avoids the
         // `.filter().map()` two-pass over the same list.
+        // Completing is an execute, so a read-only member leaves it to the sweep.
         const pending: Promise<unknown>[] = [];
-        for (const operation of operations) {
+        for (const operation of canWrite ? operations : []) {
           if (operation.state !== "indexing") continue;
           pending.push(executeRingsOperation(operation.id).catch(() => undefined));
         }
@@ -149,7 +153,7 @@ export function HeliusRingsWorkspace({
         ticking.current = false;
       }
     };
-  }, [operations, refresh]);
+  }, [canWrite, operations, refresh]);
 
   useEffect(() => {
     if (!settling) return;
@@ -209,7 +213,7 @@ export function HeliusRingsWorkspace({
         <>
           <HealthStrip health={health} alerts={alerts} />
 
-          <RingCard rings={projectRings} onChanged={refreshAll} />
+          <RingCard rings={projectRings} canWrite={canWrite} onChanged={refreshAll} />
 
           <PrivateWalletsCard
             wallets={wallets}
@@ -218,6 +222,7 @@ export function HeliusRingsWorkspace({
             selectedWalletId={selectedWallet?.id ?? null}
             onSelect={setSelectedWalletId}
             balancesTick={balancesTick}
+            canWrite={canWrite}
             onWalletsChanged={refresh}
           />
 
@@ -229,30 +234,37 @@ export function HeliusRingsWorkspace({
             </Card>
           ) : (
             <>
-              <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+              <div
+                className={
+                  canWrite ? "grid grid-cols-1 gap-6 lg:grid-cols-2" : "grid grid-cols-1 gap-6"
+                }
+              >
                 <WalletOverview
                   wallet={selectedWallet}
                   refreshTick={balancesTick}
                   projectRings={projectRings}
                 />
-                <OperationComposer
-                  key={selectedWallet.id}
-                  wallet={selectedWallet}
-                  recipientOptions={wallets.filter(
-                    (wallet) => wallet.id !== selectedWallet.id && wallet.shieldedAddress !== null
-                  )}
-                  custodyPublicKey={
-                    custodyByWalletId.get(selectedWallet.sdpWalletId)?.publicKey ?? null
-                  }
-                  projectRings={projectRings}
-                  gatewayRed={upstreamsRed}
-                  onPrepared={refresh}
-                />
+                {canWrite ? (
+                  <OperationComposer
+                    key={selectedWallet.id}
+                    wallet={selectedWallet}
+                    recipientOptions={wallets.filter(
+                      (wallet) => wallet.id !== selectedWallet.id && wallet.shieldedAddress !== null
+                    )}
+                    custodyPublicKey={
+                      custodyByWalletId.get(selectedWallet.sdpWalletId)?.publicKey ?? null
+                    }
+                    projectRings={projectRings}
+                    gatewayRed={upstreamsRed}
+                    onPrepared={refresh}
+                  />
+                ) : null}
               </div>
 
               <ActivityCard
                 operations={filteredOperations}
                 projectRings={projectRings}
+                canWrite={canWrite}
                 onChanged={refresh}
                 onSelect={setDetailOperationId}
               />

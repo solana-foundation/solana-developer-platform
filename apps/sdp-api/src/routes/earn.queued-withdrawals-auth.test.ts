@@ -13,8 +13,8 @@ beforeEach(async () => {
   await clearKVStores(env);
 });
 
-describe("queued withdrawal route auth tiers", () => {
-  it("never downgrades a presented invalid credential on an optional-auth build route", async () => {
+describe("queued withdrawal route auth", () => {
+  it("refuses a presented invalid credential on route discovery", async () => {
     const response = await app.request(
       "/v1/earn/external-wallet/withdrawal-options",
       {
@@ -23,24 +23,24 @@ describe("queued withdrawal route auth tiers", () => {
           Authorization: "Bearer sk_test_invalid_queued_withdrawal",
           "content-type": "application/json",
         },
-        body: JSON.stringify({ strategyId: "earn_strategy_missing", ownerAddress: OWNER }),
+        body: JSON.stringify({ positionId: "earn_position_missing" }),
       },
       env
     );
     expect(response.status).toBe(401);
   });
 
-  it("keeps discovery anonymous while request builds and tenant reads stay keyed", async () => {
-    const optional = await app.request(
+  it("requires a credential for discovery, request builds and tenant reads", async () => {
+    const discovery = await app.request(
       "/v1/earn/external-wallet/withdrawal-options",
       {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ strategyId: "earn_strategy_missing", ownerAddress: OWNER }),
+        body: JSON.stringify({ positionId: "earn_position_missing" }),
       },
       env
     );
-    expect(optional.status).not.toBe(401);
+    expect(discovery.status).toBe(401);
 
     const requestBuild = await app.request(
       "/v1/earn/external-wallet/withdrawal-request-transactions",

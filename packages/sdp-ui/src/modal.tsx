@@ -12,6 +12,13 @@ import { useEscapeKey } from "./use-escape-key";
 
 type ModalSize = "sm" | "md" | "lg" | "xl";
 
+/**
+ * Where the dialog sits. `center` is the default; `top` pins its top edge a fixed distance
+ * down, so a flow whose steps differ in height grows and shrinks below a still header rather
+ * than re-centring at every step.
+ */
+type ModalPlacement = "center" | "top";
+
 interface ModalProps {
   isOpen: boolean;
   ariaLabel: string;
@@ -22,6 +29,7 @@ interface ModalProps {
   contentClassName?: string;
   showCloseButton?: boolean;
   size?: ModalSize;
+  placement?: ModalPlacement;
 }
 
 const sizeClassNames: Record<ModalSize, string> = {
@@ -30,6 +38,11 @@ const sizeClassNames: Record<ModalSize, string> = {
   lg: "max-w-xl",
   xl: "max-w-2xl",
 };
+
+const placementClassNames = {
+  center: "items-center",
+  top: "items-start pt-[min(12dvh,6rem)]",
+} as const satisfies Record<ModalPlacement, string>;
 
 export function Modal({
   isOpen,
@@ -41,6 +54,7 @@ export function Modal({
   contentClassName,
   showCloseButton = true,
   size = "md",
+  placement = "center",
 }: ModalProps) {
   const t = useUiTranslations();
   const resolvedCloseLabel = closeLabel ?? t("Shared.SharedComponents.closeModal");
@@ -79,7 +93,12 @@ export function Modal({
         <div className="absolute inset-0" />
       )}
 
-      <div className="pointer-events-none relative flex min-h-full items-center justify-center px-4 py-8">
+      <div
+        className={cn(
+          "pointer-events-none relative flex min-h-full justify-center px-4 py-8",
+          placementClassNames[placement]
+        )}
+      >
         <div
           ref={setDialogNode}
           role="dialog"
