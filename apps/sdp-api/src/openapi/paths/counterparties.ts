@@ -14,6 +14,7 @@ import {
   updateCounterpartyRequestSchema,
 } from "@/openapi/schemas/counterparties";
 import {
+  DOCS_GROUP,
   errorResponses,
   jsonContent,
   projectScopeHeaders,
@@ -29,6 +30,12 @@ import {
   listCounterpartyProviderAccountsResponse,
 } from "./responses";
 
+/** Where each Counterparties operation sits in the API reference (`DOCS_GROUP`). */
+export const COUNTERPARTY_GROUPS = {
+  profiles: "Profiles",
+  accounts: "Accounts",
+} as const;
+
 // Matches each route's `idempotent({ key: "accepted", serverErrors: "store" })`
 // step (ADR 0009); spec.test.ts checks.
 const keyAcceptedHeaders = projectScopeWithDeclaredIdempotencyHeaders({
@@ -41,6 +48,7 @@ export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/counterparties/metadata",
     tags: ["Counterparties"],
+    [DOCS_GROUP]: COUNTERPARTY_GROUPS.profiles,
     summary: "Get counterparty field options",
     operationId: "getCounterpartyFieldOptions",
     description:
@@ -62,6 +70,7 @@ export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/counterparties",
     tags: ["Counterparties"],
+    [DOCS_GROUP]: COUNTERPARTY_GROUPS.profiles,
     summary: "List counterparties",
     operationId: "listCounterparties",
     description: "Lists counterparties for the authenticated organization.",
@@ -83,6 +92,7 @@ export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/counterparties",
     tags: ["Counterparties"],
+    [DOCS_GROUP]: COUNTERPARTY_GROUPS.profiles,
     summary: "Create counterparty",
     operationId: "createCounterparty",
     description:
@@ -108,6 +118,7 @@ export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/counterparties/{counterpartyId}",
     tags: ["Counterparties"],
+    [DOCS_GROUP]: COUNTERPARTY_GROUPS.profiles,
     summary: "Get counterparty",
     operationId: "getCounterparty",
     description: "Gets counterparty details by id.",
@@ -131,6 +142,7 @@ export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
     method: "patch",
     path: "/v1/counterparties/{counterpartyId}",
     tags: ["Counterparties"],
+    [DOCS_GROUP]: COUNTERPARTY_GROUPS.profiles,
     summary: "Update counterparty",
     operationId: "updateCounterparty",
     description:
@@ -159,6 +171,7 @@ export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/counterparties/{counterpartyId}/requirements",
     tags: ["Counterparties"],
+    [DOCS_GROUP]: COUNTERPARTY_GROUPS.profiles,
     summary: "Get counterparty ramp requirements",
     operationId: "getCounterpartyRequirements",
     description:
@@ -184,6 +197,7 @@ export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
     method: "delete",
     path: "/v1/counterparties/{counterpartyId}",
     tags: ["Counterparties"],
+    [DOCS_GROUP]: COUNTERPARTY_GROUPS.profiles,
     summary: "Archive counterparty",
     operationId: "archiveCounterparty",
     description: "Archives a counterparty. Archived counterparties are hidden from default lists.",
@@ -206,6 +220,7 @@ export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/counterparties/{counterpartyId}/accounts",
     tags: ["Counterparties"],
+    [DOCS_GROUP]: COUNTERPARTY_GROUPS.accounts,
     summary: "List counterparty accounts",
     operationId: "listCounterpartyAccounts",
     description:
@@ -231,6 +246,7 @@ export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/counterparties/{counterpartyId}/provider-accounts",
     tags: ["Counterparties"],
+    [DOCS_GROUP]: COUNTERPARTY_GROUPS.accounts,
     summary: "List counterparty provider accounts",
     operationId: "listCounterpartyProviderAccounts",
     description:
@@ -256,6 +272,7 @@ export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
     method: "post",
     path: "/v1/counterparties/{counterpartyId}/accounts",
     tags: ["Counterparties"],
+    [DOCS_GROUP]: COUNTERPARTY_GROUPS.accounts,
     summary: "Create counterparty account",
     operationId: "createCounterpartyAccount",
     description:
@@ -284,6 +301,7 @@ export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
     method: "get",
     path: "/v1/counterparties/{counterpartyId}/accounts/{counterpartyAccountId}",
     tags: ["Counterparties"],
+    [DOCS_GROUP]: COUNTERPARTY_GROUPS.accounts,
     summary: "Get counterparty account",
     operationId: "getCounterpartyAccount",
     description: "Gets a counterparty payment account by id.",
@@ -305,6 +323,7 @@ export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
     method: "patch",
     path: "/v1/counterparties/{counterpartyId}/accounts/{counterpartyAccountId}",
     tags: ["Counterparties"],
+    [DOCS_GROUP]: COUNTERPARTY_GROUPS.accounts,
     summary: "Update counterparty account",
     operationId: "updateCounterpartyAccount",
     description: "Updates a counterparty payment account. At least one field must be provided.",
@@ -330,6 +349,7 @@ export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
     method: "delete",
     path: "/v1/counterparties/{counterpartyId}/accounts/{counterpartyAccountId}",
     tags: ["Counterparties"],
+    [DOCS_GROUP]: COUNTERPARTY_GROUPS.accounts,
     summary: "Archive counterparty account",
     operationId: "archiveCounterpartyAccount",
     description:

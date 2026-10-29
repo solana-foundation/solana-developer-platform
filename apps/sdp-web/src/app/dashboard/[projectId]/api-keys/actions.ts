@@ -326,22 +326,6 @@ export async function rotateApiKeyAction(formData: FormData) {
   redirect(await requestProjectHref(API_KEYS_PAGE_PATH));
 }
 
-export async function deactivateApiKeyAction(formData: FormData) {
-  const result = await deactivateApiKeyRequest({
-    keyId: String(formData.get("keyId") ?? ""),
-    keyName: String(formData.get("keyName") ?? ""),
-    confirmation: String(formData.get("confirmation") ?? ""),
-  });
-
-  await setFlash({
-    level: result.ok ? "success" : "error",
-    message: result.message,
-  });
-
-  revalidatePath(await requestProjectHref(API_KEYS_PAGE_PATH), "page");
-  redirect(await requestProjectHref(API_KEYS_PAGE_PATH));
-}
-
 export async function deactivateApiKeyInlineAction(input: {
   keyId: string;
   keyName: string;

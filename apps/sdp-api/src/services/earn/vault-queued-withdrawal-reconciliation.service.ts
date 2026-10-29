@@ -11,6 +11,7 @@ import { currentClusterScope } from "@sdp/rpc/scope";
 import {
   getChainHeight,
   getSignatureStatuses,
+  reReadExpiredStatuses,
   type SignatureStatusInfo,
   type SolanaRpc,
 } from "@sdp/rpc/solana";
@@ -29,7 +30,6 @@ import {
   resolveVaultParRedemptionClient,
   resolveVaultQueuedWithdrawClient,
 } from "@/services/earn/execution-registry";
-import { reReadExpiredStatuses } from "@/services/earn/expired-status-proof";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import { broadcastVaultTransaction } from "@/services/earn/vault-execution.service";
 import type { Env } from "@/types/env";

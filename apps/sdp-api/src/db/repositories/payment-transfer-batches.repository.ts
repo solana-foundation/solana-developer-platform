@@ -298,8 +298,10 @@ export interface PaymentTransferBatchesRepository {
    * @param input.transferId - Chunk transfer that reached a terminal status.
    * @param input.transferStatus - Terminal status the transfer reached.
    * @param input.error - Failure detail applied to failed recipients.
+   * @returns True when this call claimed the chunk from processing and settled it; false when its
+   * guards matched no row (already settled, or a signed or started chunk the input protects).
    */
-  settleTransferBatch(input: SettlePaymentTransferBatchInput): Promise<void>;
+  settleTransferBatch(input: SettlePaymentTransferBatchInput): Promise<boolean>;
   /**
    * Recomputes and writes a batch's status from its recipient rows under the
    * batch row lock. The only sanctioned way to write a batch status after

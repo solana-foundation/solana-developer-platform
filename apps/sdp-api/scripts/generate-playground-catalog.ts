@@ -1,20 +1,25 @@
 import { execFileSync } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  isReferenceObject,
-  type OpenAPIObject,
-  type OperationObject,
-  type ParameterObject,
-  type ReferenceObject,
-  type RequestBodyObject,
-  type ResponseObject,
-  type SchemaObject,
-  type SecurityRequirementObject,
+import type {
+  OpenAPIObject,
+  OperationObject,
+  ParameterObject,
+  ReferenceObject,
+  SecurityRequirementObject,
 } from "openapi3-ts/oas30";
 
+import {
+  dereferenceParameter,
+  dereferenceRequestBody,
+  dereferenceResponse,
+  dereferenceSchema,
+  type HttpMethod,
+  isHttpMethod,
+  sampleFromSchema,
+  toEndpointId,
+} from "@/openapi/document-reader";
 import { valueGates } from "@/openapi/release-channel-values";
 import routeActionsJson from "@/openapi/route-actions.generated.json";
 import { createPublicOpenApiDocument } from "@/openapi/spec";
@@ -59,14 +64,6 @@ interface PlaygroundOperation {
   expectedResponse: unknown;
 }
 
-const HTTP_METHODS = ["get", "post", "put", "patch", "delete"] as const;
-type HttpMethod = (typeof HTTP_METHODS)[number];
-const HTTP_METHOD_SET: ReadonlySet<string> = new Set(HTTP_METHODS);
-
-function isHttpMethod(key: string): key is HttpMethod {
-  return HTTP_METHOD_SET.has(key);
-}
-
 const PLAYGROUND_METHODS: Record<HttpMethod, PlaygroundMethod> = {
   get: "GET",
   post: "POST",
@@ -100,136 +97,6 @@ function acceptsApiKeyAuth(security: SecurityRequirementObject[] | undefined): b
   return security.some(
     (requirement) => "apiKeyAuth" in requirement || Object.keys(requirement).length === 0
   );
-}
-
-/**
- * Resolves a local `#/components/<section>/<name>` reference against the document.
- *
- * @param reference The `$ref` string.
- * @param section The components section the reference must point into.
- * @param document The OpenAPI document.
- * @returns The referenced component.
- */
-function resolveComponent<T>(
-  reference: string,
-  section: ComponentSection,
-  document: OpenAPIObject
-): T | ReferenceObject {
-  const prefix = `#/components/${section}/`;
-  if (!reference.startsWith(prefix)) {
-    throw new Error(`Unsupported $ref outside components.${section}: ${reference}`);
-  }
-  const name = reference.slice(prefix.length).replaceAll("~1", "/").replaceAll("~0", "~");
-  const components = document.components;
-  if (!components) {
-    throw new Error(`Document has no components but ${reference} was referenced`);
-  }
-  const entry = (components[section] as Record<string, T | ReferenceObject> | undefined)?.[name];
-  if (entry === undefined) {
-    throw new Error(`Unresolved $ref: ${reference}`);
-  }
-  return entry;
-}
-
-type ComponentSection = "schemas" | "parameters" | "requestBodies" | "responses";
-
-/**
- * Follows `$ref` chains until a concrete component object is reached.
- *
- * @param value The inline object or a reference to one.
- * @param section The components section the reference must resolve within.
- * @param document The OpenAPI document.
- * @returns The concrete object.
- */
-function dereference<T extends object>(
-  value: T | ReferenceObject,
-  section: ComponentSection,
-  document: OpenAPIObject
-): T {
-  if (!isReferenceObject(value)) return value;
-  return dereference(resolveComponent<T>(value.$ref, section, document), section, document);
-}
-
-const dereferenceSchema = (schema: SchemaObject | ReferenceObject, document: OpenAPIObject) =>
-  dereference<SchemaObject>(schema, "schemas", document);
-const dereferenceParameter = (
-  parameter: ParameterObject | ReferenceObject,
-  document: OpenAPIObject
-) => dereference<ParameterObject>(parameter, "parameters", document);
-const dereferenceRequestBody = (
-  requestBody: RequestBodyObject | ReferenceObject,
-  document: OpenAPIObject
-) => dereference<RequestBodyObject>(requestBody, "requestBodies", document);
-const dereferenceResponse = (response: ResponseObject | ReferenceObject, document: OpenAPIObject) =>
-  dereference<ResponseObject>(response, "responses", document);
-
-function sampleObjectFromSchema(
-  schema: SchemaObject,
-  document: OpenAPIObject
-): Record<string, unknown> {
-  const required = new Set(schema.required ?? []);
-  const sample: Record<string, unknown> = {};
-
-  for (const [name, propertySchema] of Object.entries(schema.properties ?? {})) {
-    const property = dereferenceSchema(propertySchema, document);
-    const hasUsefulSample =
-      required.has(name) ||
-      property.example !== undefined ||
-      property.default !== undefined ||
-      Array.isArray(property.enum) ||
-      property.type === "object" ||
-      property.type === "array" ||
-      Array.isArray(property.oneOf) ||
-      Array.isArray(property.anyOf);
-
-    if (hasUsefulSample) {
-      sample[name] = sampleFromSchema(property, document, name);
-    }
-  }
-
-  return sample;
-}
-
-function sampleFromSchema(
-  input: SchemaObject | ReferenceObject,
-  document: OpenAPIObject,
-  propertyName?: string
-): unknown {
-  const schema = dereferenceSchema(input, document);
-
-  if (schema.example !== undefined) return schema.example;
-  if (schema.default !== undefined) return schema.default;
-  if (Array.isArray(schema.enum) && schema.enum.length > 0) return schema.enum[0];
-
-  if (schema.allOf && schema.allOf.length > 0) {
-    return Object.assign(
-      {},
-      ...schema.allOf.map((variant) => sampleFromSchema(variant, document, propertyName))
-    );
-  }
-  const variant = schema.oneOf?.[0] ?? schema.anyOf?.[0];
-  if (variant) return sampleFromSchema(variant, document, propertyName);
-
-  if (schema.type === "object" || schema.properties !== undefined) {
-    return sampleObjectFromSchema(schema, document);
-  }
-  if (schema.type === "array") {
-    return schema.items ? [sampleFromSchema(schema.items, document, propertyName)] : [];
-  }
-  if (schema.type === "boolean") return false;
-  if (schema.type === "integer" || schema.type === "number") return 1;
-
-  if (schema.format === "date-time") return "2026-01-01T00:00:00.000Z";
-  if (schema.format === "date") return "2026-01-01";
-  if (schema.format === "uri" || schema.format === "url") return "https://example.com";
-
-  if (propertyName?.toLowerCase().endsWith("id")) {
-    return `${propertyName.replace(/Id$/i, "").toLowerCase()}_example`;
-  }
-  if (propertyName?.toLowerCase().includes("address")) {
-    return "11111111111111111111111111111111";
-  }
-  return "example";
 }
 
 function fieldFromParameter(
@@ -316,13 +183,6 @@ function buildExpectedResponse(operation: OperationObject, document: OpenAPIObje
   const response = dereferenceResponse(successEntry[1], document);
   const schema = response.content?.["application/json"]?.schema;
   return schema ? sampleFromSchema(schema, document) : {};
-}
-
-function toEndpointId(operationId: string): string {
-  return operationId
-    .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
-    .replace(/[^a-zA-Z0-9]+/g, "-")
-    .toLowerCase();
 }
 
 interface CatalogEntry {
@@ -467,24 +327,15 @@ function generateCatalog(): string {
   )}\n`;
 }
 
-async function formatCatalog(catalog: string): Promise<string> {
-  const directory = await mkdtemp(path.join(tmpdir(), "sdp-playground-catalog-"));
-  const temporaryPath = path.join(directory, "catalog.json");
-
-  try {
-    await writeFile(temporaryPath, catalog, "utf8");
-    execFileSync(
-      "pnpm",
-      ["--dir", repositoryRoot, "exec", "biome", "format", "--write", temporaryPath],
-      { stdio: "ignore" }
-    );
-    return await readFile(temporaryPath, "utf8");
-  } finally {
-    await rm(directory, { force: true, recursive: true });
-  }
+function formatCatalog(catalog: string): string {
+  return execFileSync(
+    "pnpm",
+    ["--dir", repositoryRoot, "exec", "biome", "format", "--stdin-file-path", outputPath],
+    { input: catalog, encoding: "utf8" }
+  );
 }
 
-const expected = await formatCatalog(generateCatalog());
+const expected = formatCatalog(generateCatalog());
 if (process.argv.includes("--check")) {
   const current = await readFile(outputPath, "utf8").catch(() => "");
   if (current !== expected) {

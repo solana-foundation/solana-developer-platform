@@ -32,7 +32,7 @@ export function getTraceHeaders(context: TraceContext): Record<string, string> {
   };
 }
 
-export function resolveTraceContext(source: string, _request?: Request): TraceContext {
+function resolveTraceContext(source: string, _request?: Request): TraceContext {
   return {
     // A caller-controlled header must not become a log correlation key.
     traceId: `web_${crypto.randomUUID().replaceAll("-", "")}`,

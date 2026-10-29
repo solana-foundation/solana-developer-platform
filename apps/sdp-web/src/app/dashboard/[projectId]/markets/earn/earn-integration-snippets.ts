@@ -127,9 +127,10 @@ function floorForTolerance(quote: string, decimals: number, toleranceBps: number
   const client = `const SDP_API_URL = ${JSON.stringify(apiBaseUrl ?? DEFAULT_SDP_API_URL)};
 const STRATEGY_ID = ${JSON.stringify(strategy.id)};
 
-// Create a Developer API key for this project in the dashboard (it includes
-// earn:read and earn:write) and keep it on your server. The customer's wallet
-// signs in your browser or mobile app; it never sees this key.
+// Create an API key for this project in the dashboard with Earn Read, Execute
+// and Manage (Manage builds queued-withdrawal cancellations) and keep it on your
+// server. The customer's wallet signs in your browser or mobile app; it never
+// sees this key.
 
 function sdpHeaders(extra: Record<string, string> = {}) {
   const apiKey = process.env.SDP_API_KEY;

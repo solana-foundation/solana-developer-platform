@@ -63,6 +63,7 @@ const getAccountInfoMock = vi.spyOn(solanaRpc, "getAccountInfo");
 const getRecentBlockhashMock = vi.spyOn(solanaRpc, "getRecentBlockhash");
 const confirmTransactionMock = vi.spyOn(solanaRpc, "confirmTransaction");
 const getSignatureStatusesMock = vi.spyOn(solanaRpc, "getSignatureStatuses");
+const getMultipleAccountsLamportsMock = vi.spyOn(solanaRpc, "getMultipleAccountsLamports");
 const createOrgSignerForCustodyWalletMock = vi.spyOn(
   solanaSigner,
   "createOrgSignerForCustodyWallet"
@@ -106,6 +107,8 @@ const FIRST_SIGNATURE =
 const SECOND_SIGNATURE =
   "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV";
 const TEST_TOKEN_ACCOUNT = TEST_SOLANA_ADDRESSES.wallet3;
+/** The rent-exempt minimum for a 0-byte account, in lamports (0.00089088 SOL). */
+const SYSTEM_ACCOUNT_RENT_MINIMUM = 890_880;
 
 const labeledSignatures = new Map<string, string>();
 
@@ -413,6 +416,11 @@ describe("payment transfer batches", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     labeledSignatures.clear();
+    rpc.answer("getMinimumBalanceForRentExemption", SYSTEM_ACCOUNT_RENT_MINIMUM);
+    // Every destination is a funded account unless a test says otherwise.
+    getMultipleAccountsLamportsMock.mockImplementation(async (_rpc, addresses) =>
+      addresses.map(() => 1_000_000_000n)
+    );
 
     priceSponsoredTransactionMock.mockResolvedValue(TEST_SPONSORED_PRICE);
     getAccountInfoMock.mockResolvedValue({
@@ -598,6 +606,359 @@ describe("payment transfer batches", () => {
     expect(body.data.estimate.recipientCount).toBe(1);
   });
 
+  describe("native SOL below the rent-exempt minimum (HOO-2375)", () => {
+    const UNFUNDED = TEST_SOLANA_ADDRESSES.wallet3;
+    const FUNDED = TEST_SOLANA_ADDRESSES.wallet2;
+
+    async function seedRentRecipients() {
+      const counterpartyId = await seedCounterparty("batch_rent_minimum_counterparty");
+      const [fundedAccountId, unfundedAccountId, largeAccountId] =
+        await seedCryptoWalletCounterpartyAccounts(counterpartyId, [
+          FUNDED,
+          UNFUNDED,
+          syntheticAddress(41),
+        ]);
+      // 0.0001 SOL is below the 0.00089088 SOL minimum; 0.1 SOL is above it.
+      return [
+        { counterpartyId, counterpartyAccountId: fundedAccountId, amount: "0.0001" },
+        { counterpartyId, counterpartyAccountId: unfundedAccountId, amount: "0.0001" },
+        { counterpartyId, counterpartyAccountId: largeAccountId, amount: "0.1" },
+      ];
+    }
+
+    function answerOnlyFunded() {
+      getMultipleAccountsLamportsMock.mockImplementation(async (_rpc, addresses) =>
+        addresses.map((account) => (account === FUNDED ? 5_000_000n : 0n))
+      );
+    }
+
+    function postBatch(path: string, recipients: unknown[], idempotencyKey: string) {
+      return app.request(
+        path,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "Idempotency-Key": idempotencyKey,
+          },
+          body: JSON.stringify({
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            token: "SOL",
+            recipients,
+          }),
+        },
+        env
+      );
+    }
+
+    it("warns in the estimate, reading only the recipients paid less than the minimum", async () => {
+      rpc.answer("getFeeForMessage", { context: { slot: 1 }, value: 5000 });
+      answerOnlyFunded();
+      const recipients = await seedRentRecipients();
+
+      const res = await postBatch(
+        "/v1/payments/transfer-batches/estimate",
+        recipients,
+        crypto.randomUUID()
+      );
+
+      expect(res.status).toBe(200);
+      // SAFETY: a 200 from the estimate route, whose body the OpenAPI schema fixes.
+      const body = (await res.json()) as { data: { estimate: { warnings: unknown[] } } };
+      expect(body.data.estimate.warnings).toEqual([
+        {
+          code: "AMOUNT_BELOW_RENT_MINIMUM",
+          recipientIndex: 1,
+          minimumAmount: "0.00089088",
+          message: expect.stringContaining("0.00089088 SOL"),
+        },
+      ]);
+      // One batched read: the two small recipients' addresses and the source wallet.
+      expect(getMultipleAccountsLamportsMock).toHaveBeenCalledTimes(1);
+      const read = getMultipleAccountsLamportsMock.mock.calls[0][1];
+      expect(read).toHaveLength(3);
+      expect(read).toEqual(expect.arrayContaining([FUNDED, UNFUNDED]));
+    });
+
+    it("refuses create with an unstored 409 before writing or sending, and runs again once the address is funded", async () => {
+      answerOnlyFunded();
+      const recipients = await seedRentRecipients();
+      const idempotencyKey = crypto.randomUUID();
+
+      const refused = await postBatch("/v1/payments/transfer-batches", recipients, idempotencyKey);
+
+      expect(refused.status).toBe(409);
+      expect(await refused.json()).toMatchObject({
+        error: {
+          code: "AMOUNT_BELOW_RENT_MINIMUM",
+          details: {
+            recipientIndexes: [1],
+            minimumAmount: "0.00089088",
+            minimumLamports: "890880",
+          },
+        },
+      });
+      expect(sendTransactionMock).not.toHaveBeenCalled();
+      expect(
+        await getDb(env)
+          .prepare(
+            "SELECT COUNT(*)::int AS count FROM payment_transfer_batches WHERE organization_id = ? AND project_id = ?"
+          )
+          .bind(TEST_ORG.id, TEST_PROJECT.id)
+          .first<{ count: number }>()
+      ).toEqual({ count: 0 });
+
+      // The address is funded: the same request under the same key now runs.
+      getMultipleAccountsLamportsMock.mockImplementation(async (_rpc, addresses) =>
+        addresses.map(() => 5_000_000n)
+      );
+      const sourceSigner = await generateKeyPairSigner();
+      await updateSeededWalletPublicKey(sourceSigner.address);
+      createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
+      const accepted = await postBatch("/v1/payments/transfer-batches", recipients, idempotencyKey);
+      expect(accepted.status).toBe(200);
+    });
+
+    it("reads only the source when every recipient clears the minimum", async () => {
+      rpc.answer("getFeeForMessage", { context: { slot: 1 }, value: 5000 });
+      const recipients = (await seedRentRecipients()).map((recipient) => ({
+        ...recipient,
+        amount: "0.01",
+      }));
+
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const res = await postBatch(
+          "/v1/payments/transfer-batches/estimate",
+          recipients,
+          crypto.randomUUID()
+        );
+        expect(res.status).toBe(200);
+        // SAFETY: a 200 from the estimate route, whose body the OpenAPI schema fixes.
+        const body = (await res.json()) as { data: { estimate: { warnings: unknown[] } } };
+        expect(body.data.estimate.warnings).toEqual([]);
+      }
+      // One read per request, of the source wallet alone.
+      expect(getMultipleAccountsLamportsMock).toHaveBeenCalledTimes(2);
+      for (const [, addresses] of getMultipleAccountsLamportsMock.mock.calls) {
+        expect(addresses).toHaveLength(1);
+      }
+    });
+
+    it("warns and refuses when the batch would leave the source wallet below the minimum", async () => {
+      rpc.answer("getFeeForMessage", { context: { slot: 1 }, value: 5000 });
+      const recipients = (await seedRentRecipients()).map((recipient) => ({
+        ...recipient,
+        amount: "0.01",
+      }));
+      // 0.0303 SOL held, 0.03 sent: 0.0003 SOL left, below the 0.00089088 minimum.
+      getMultipleAccountsLamportsMock.mockImplementation(async (_rpc, addresses) =>
+        addresses.map(() => 30_300_000n)
+      );
+
+      const estimate = await postBatch(
+        "/v1/payments/transfer-batches/estimate",
+        recipients,
+        crypto.randomUUID()
+      );
+      expect(estimate.status).toBe(200);
+      // SAFETY: a 200 from the estimate route, whose body the OpenAPI schema fixes.
+      const body = (await estimate.json()) as { data: { estimate: { warnings: unknown[] } } };
+      expect(body.data.estimate.warnings).toEqual([
+        {
+          code: "SOURCE_BELOW_RENT_MINIMUM",
+          sourceRemainder: "0.0003",
+          minimumAmount: "0.00089088",
+          message: expect.stringContaining("left with 0.0003 SOL"),
+        },
+      ]);
+
+      const refused = await postBatch(
+        "/v1/payments/transfer-batches",
+        recipients,
+        crypto.randomUUID()
+      );
+      expect(refused.status).toBe(409);
+      expect(await refused.json()).toMatchObject({
+        error: {
+          code: "AMOUNT_BELOW_RENT_MINIMUM",
+          details: { recipientIndexes: [], sourceRemainder: "0.0003" },
+        },
+      });
+      expect(sendTransactionMock).not.toHaveBeenCalled();
+    });
+
+    it("refuses a sweep whose concurrent chunks could leave the source below the minimum", async () => {
+      const recipients = (await seedRentRecipients()).map((recipient, index) => ({
+        ...recipient,
+        amount: index === 0 ? "0.0005" : "0.01",
+      }));
+      // Exactly the total held, one recipient per chunk: the 0.0005 chunk landing last leaves
+      // 0.0005 SOL behind until it does.
+      getMultipleAccountsLamportsMock.mockImplementation(async (_rpc, addresses) =>
+        addresses.map((account) => (account === FUNDED ? 5_000_000n : 20_500_000n))
+      );
+      const res = await app.request(
+        "/v1/payments/transfer-batches",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "Idempotency-Key": crypto.randomUUID(),
+          },
+          body: JSON.stringify({
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            token: "SOL",
+            recipients,
+            options: { maxRecipientsPerTransaction: 1 },
+          }),
+        },
+        env
+      );
+      expect(res.status).toBe(409);
+      expect(await res.json()).toMatchObject({
+        error: { code: "AMOUNT_BELOW_RENT_MINIMUM", details: { sourceRemainder: "0.0005" } },
+      });
+    });
+  });
+
+  it("refuses a stopped batch before its row and retries under the same key", async () => {
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerForCustodyWalletMock.mockResolvedValueOnce(sourceSigner);
+    const counterpartyId = await seedCounterparty("batch_disabled_counterparty");
+    const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+    const request = {
+      method: "POST",
+      headers: {
+        "Idempotency-Key": "disabled-project-batch",
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      },
+      body: JSON.stringify({
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        token: "SOL",
+        recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
+        options: { preflight: false },
+      }),
+    };
+    await getDb(env)
+      .prepare("UPDATE projects SET disabled_movements = ?::text[] WHERE id = ?")
+      .bind(["payments.transfer_batch"], TEST_PROJECT.id)
+      .run();
+
+    const stopped = await app.request("/v1/payments/transfer-batches", request, env);
+    expect(stopped.status).toBe(403);
+    expect(await stopped.json()).toMatchObject({
+      error: { code: "FORBIDDEN", details: { reason: "movement_disabled" } },
+    });
+    expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
+    expect(sendTransactionMock).not.toHaveBeenCalled();
+    const count = () =>
+      getDb(env)
+        .prepare("SELECT COUNT(*)::int AS count FROM payment_transfer_batches WHERE project_id = ?")
+        .bind(TEST_PROJECT.id)
+        .first<{ count: number }>();
+    expect(await count()).toEqual({ count: 0 });
+
+    await getDb(env)
+      .prepare("UPDATE projects SET disabled_movements = ARRAY[]::text[] WHERE id = ?")
+      .bind(TEST_PROJECT.id)
+      .run();
+    const retried = await app.request("/v1/payments/transfer-batches", request, env);
+    expect(retried.status).toBe(200);
+    expect(retried.headers.get("Idempotent-Replayed")).toBeNull();
+    expect(await count()).toEqual({ count: 1 });
+  });
+
+  it("refuses the next chunk when a project is stopped after the first sponsor signs", async () => {
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerForCustodyWalletMock.mockResolvedValueOnce(sourceSigner);
+
+    let unblockSecondSimulation = () => {};
+    const secondSimulation = new Promise<void>((resolve) => {
+      unblockSecondSimulation = resolve;
+    });
+    let simulationCount = 0;
+    const simulationSpy = vi
+      .spyOn(solanaRpc, "simulateTransaction")
+      .mockImplementation(async () => {
+        simulationCount += 1;
+        if (simulationCount === 2) await secondSimulation;
+        return { success: true, logs: [], unitsConsumed: null, error: null };
+      });
+    const signingOutcomeMock = vi.fn(async () => {
+      await getDb(env)
+        .prepare("UPDATE projects SET disabled_movements = ?::text[] WHERE id = ?")
+        .bind(["payments.transfer_batch"], TEST_PROJECT.id)
+        .run();
+      unblockSecondSimulation();
+      return FIRST_SIGNATURE;
+    });
+    createKoraAdapterMock.mockReturnValueOnce(ownedSubmissionAdapter(signingOutcomeMock));
+
+    try {
+      const counterpartyId = await seedCounterparty("batch_stopped_between_chunks");
+      const firstAccountId = await seedCryptoWalletCounterpartyAccount({
+        counterpartyId,
+        walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+      });
+      const secondAccountId = await seedCryptoWalletCounterpartyAccount({
+        counterpartyId,
+        walletAddress: TEST_SOLANA_ADDRESSES.wallet3,
+      });
+      const response = await app.request(
+        "/v1/payments/transfer-batches",
+        {
+          method: "POST",
+          headers: {
+            "Idempotency-Key": crypto.randomUUID(),
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            token: "SOL",
+            recipients: [
+              { counterpartyId, counterpartyAccountId: firstAccountId, amount: "0.1" },
+              { counterpartyId, counterpartyAccountId: secondAccountId, amount: "0.2" },
+            ],
+            options: { preflight: true, maxRecipientsPerTransaction: 1 },
+          }),
+        },
+        env
+      );
+
+      expect(response.status).toBe(200);
+      const body = z
+        .object({
+          data: z.object({
+            recipients: z.array(z.object({ status: z.string(), error: z.string().nullable() })),
+            transfers: z.array(z.object({ status: z.string() })),
+          }),
+        })
+        .parse(await response.json());
+      expect(body.data.recipients.map((recipient) => recipient.status).sort()).toEqual([
+        "failed",
+        "processing",
+      ]);
+      expect(
+        body.data.recipients.find((recipient) => recipient.status === "failed")?.error
+      ).toContain("disabled");
+      expect(body.data.transfers).toHaveLength(2);
+      expect(signingOutcomeMock).toHaveBeenCalledOnce();
+      expect(sendTransactionMock).toHaveBeenCalledOnce();
+    } finally {
+      unblockSecondSimulation();
+      simulationSpy.mockRestore();
+    }
+  });
+
   it("creates a SOL transfer batch and records chunk transfers", async () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
@@ -751,8 +1112,8 @@ describe("payment transfer batches", () => {
       },
       {
         slot: 102n,
-        confirmations: 0n,
-        confirmationStatus: "confirmed",
+        confirmations: null,
+        confirmationStatus: "finalized",
         err: { InstructionError: [0, "InsufficientFunds"] },
       },
     ]);
@@ -2349,8 +2710,8 @@ describe("payment transfer batches", () => {
     getSignatureStatusesMock.mockResolvedValueOnce([
       {
         slot: 104n,
-        confirmations: 0n,
-        confirmationStatus: "confirmed",
+        confirmations: null,
+        confirmationStatus: "finalized",
         err: { InstructionError: [0, "InsufficientFunds"] },
       },
     ]);
@@ -2477,8 +2838,8 @@ describe("payment transfer batches", () => {
             ? { slot: 200n, confirmations: 5n, confirmationStatus: "confirmed", err: null }
             : {
                 slot: 201n,
-                confirmations: 0n,
-                confirmationStatus: "confirmed",
+                confirmations: null,
+                confirmationStatus: "finalized",
                 err: { InstructionError: [0, { Custom: 1 }] },
               }
       )

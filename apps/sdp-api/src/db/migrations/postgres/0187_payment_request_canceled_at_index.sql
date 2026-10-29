@@ -1,0 +1,7 @@
+-- sdp:migration-mode: non-transactional
+--
+-- The late-payment watch scans canceled requests by canceled_at (0186), as it scans expired
+-- ones by expires_at (0170). CONCURRENTLY because payment_requests is live.
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_payment_requests_canceled_canceled_at
+    ON payment_requests (canceled_at)
+    WHERE status = 'canceled';

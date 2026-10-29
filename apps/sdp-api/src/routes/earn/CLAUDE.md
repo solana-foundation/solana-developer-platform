@@ -1091,7 +1091,7 @@ request pool failover can answer the batch statuses from an endpoint behind the
 one that answered the height; a failed re-read leaves those rows unjudged and
 fails the tick. The queued-withdrawal sweep applies the same rule at its
 confirmed height before any expired request or cancel recovery; both share
-`services/earn/expired-status-proof.ts`.
+`reReadExpiredStatuses` (`@sdp/rpc/solana`) with the payments settlement tracker.
 
 When neither status nor history observes the transaction past its window, a
 `requested` row moves conservatively to `submitted` through the guarded writer.
@@ -1345,6 +1345,13 @@ their owners) and replaces the dashboard's old N-per-owner read fanout. The
 dashboard BFF (`sdp-web` `.../positions/summary/route.ts`) is the one caller
 that opts in, pinned by its unit test. Partner docs steer analytics keys to the
 default shape and detailed surfaces to the explicit opt-in.
+
+Every count and total in the summary skips a holding whose live read is
+exactly empty (`isEarnVaultHoldingEmpty`): a deposit that has not landed, or an
+exit whose close-out waits on an unsettled movement, holds nothing and must
+not read as a live $0 position. An unreadable holding still counts, as
+unavailable, never as zero. The per-owner positions read still returns such a
+holding, so a partner's customer view can show it pending.
 
 Simultaneous summary calls for the same organization, project and environment
 share only their in-flight DB scan and live hydration. This is not a cache: the

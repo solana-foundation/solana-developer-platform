@@ -131,7 +131,7 @@ export function validateBulkRows(rows: BulkImportRow[]): {
 }
 
 /** The header row the batch CSV template starts with; `parseBulkCsv` skips it. */
-export const BULK_CSV_HEADER = ["counterparty_wallet_id", "currency_or_mint", "amount"] as const;
+const BULK_CSV_HEADER = ["counterparty_wallet_id", "currency_or_mint", "amount"] as const;
 
 /**
  * The downloadable batch template: the header and one example row, in the same three columns

@@ -41,7 +41,7 @@ export function useTokenActivity(tokenId: string, query: TokenActivityQuery) {
 }
 
 /** How many events the activity tab reads at a time. */
-export const TOKEN_ACTIVITY_WINDOW = 100;
+const TOKEN_ACTIVITY_WINDOW = 100;
 
 /**
  * The token's audit history read 100 events at a time, newest first: the tab searches and
@@ -180,7 +180,7 @@ export function activitySignature(event: Pick<AssetAuditEvent, "metadata">): str
 }
 
 /** How many events the activity tab shows at a time. */
-export const ACTIVITY_PAGE_SIZE = 25;
+const ACTIVITY_PAGE_SIZE = 25;
 
 export interface ActivityFilters {
   action?: string;

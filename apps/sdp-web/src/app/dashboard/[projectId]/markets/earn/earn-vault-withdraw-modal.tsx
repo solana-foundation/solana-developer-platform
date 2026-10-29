@@ -1,7 +1,11 @@
 "use client";
 
 import type { SdpEnvironment } from "@sdp/types/api-keys";
-import type { EarnVaultPosition, EarnVaultWithdrawal } from "@sdp/types/earn";
+import {
+  type EarnVaultPosition,
+  type EarnVaultWithdrawal,
+  isLandedEarnVaultDirectMovementStatus,
+} from "@sdp/types/earn";
 import { earnWithdrawSlippageFloor } from "@sdp/types/provider-access";
 import { CLUSTER_BY_SDP_ENVIRONMENT } from "@sdp/types/well-known-tokens";
 import type { BadgeVariant } from "@sdp/ui/badge";
@@ -55,7 +59,7 @@ import {
 import { VaultQuoteNotices, VaultSlippageSection } from "./earn-vault-slippage-section";
 import {
   earnStatusTextTone,
-  earnVaultPositionStatusLabels,
+  earnVaultWithdrawalPositionStatusLabels,
   earnVaultWithdrawalUiState,
   vaultOutcomeTone,
 } from "./earn-vault-ui-state";
@@ -158,9 +162,7 @@ function withdrawalProgressStep(
 ): number {
   if (settlement === "provider_order") {
     if (!outcome) return step === "review" ? 1 : 0;
-    return outcome.movement.status === "confirmed" || outcome.movement.status === "finalized"
-      ? 3
-      : 2;
+    return isLandedEarnVaultDirectMovementStatus(outcome.movement.status) ? 3 : 2;
   }
   return vaultMovementProgressStep(outcome, step, earnVaultWithdrawalUiState);
 }
@@ -250,8 +252,7 @@ function withdrawalResultCopy(
         statusVariant: "danger",
       };
     }
-    const chainObserved =
-      outcome.movement.status === "confirmed" || outcome.movement.status === "finalized";
+    const chainObserved = isLandedEarnVaultDirectMovementStatus(outcome.movement.status);
     return {
       title: t("DashboardEarn.vaultWithdraw.providerOrderTitle"),
       body: t(
@@ -331,10 +332,7 @@ function WithdrawalResult({
   const sharedStatus =
     settlement === "provider_order"
       ? null
-      : earnVaultPositionStatusLabels(
-          earnVaultWithdrawalUiState(withdrawal.status).positionStatus,
-          t
-        );
+      : earnVaultWithdrawalPositionStatusLabels(withdrawal, position.shares, t);
   const status = sharedStatus?.label ?? copy.status;
   const statusVariant: BadgeVariant = sharedStatus?.variant ?? copy.statusVariant;
   const processing = withdrawal.status === "requested" || withdrawal.status === "submitted";

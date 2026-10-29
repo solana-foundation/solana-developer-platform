@@ -613,5 +613,3 @@ export function ByokCredentialForm({
     </form>
   );
 }
-
-export const PrivyCredentialForm = ByokCredentialForm;

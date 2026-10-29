@@ -30,7 +30,6 @@ import {
   getDisplayedAuthorityAddress,
 } from "./[tokenId]/token-management-workspace.utils";
 import { type AccessControlMode, getTokenAccessControlMode } from "./access-control.utils";
-import type { AuthorityControl, AuthorityGlyphRow } from "./asset-overview-hero";
 import { type DetailFieldKey, detailFieldOptionLabel } from "./create/asset-details-config";
 import { getCategoryPresentation, getSubTypePresentation } from "./create/asset-taxonomy";
 import type { DraftState } from "./create/issuance-draft-wizard.types";
@@ -45,7 +44,24 @@ import { toWalletIdentity, type WalletIdentity } from "./wallet-identity";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
-export interface IssuanceAssetProfileView {
+type AuthorityControl = "sdp" | "external" | "none" | "unknown";
+export type AuthorityRoleKey = "mint" | "freeze" | "metadata" | "permanentDelegate";
+
+interface AuthorityGlyphRow {
+  role: AuthorityRoleKey;
+  /** Whether this authority applies to the token at all (e.g. mintable / freezable
+   *  capability present, or a permanent-delegate extension). Non-applicable roles
+   *  are not drawn. */
+  applicable: boolean;
+  /** The displayed authority address (incl. any pending-signer fallback). */
+  address: string | null;
+  control: AuthorityControl;
+  /** `address` + `control` resolved against the custody wallets, so the popover
+   *  can name the holder instead of showing a bare address. */
+  identity: WalletIdentity;
+}
+
+interface IssuanceAssetProfileView {
   assetCategory: AssetCategory;
   assetType: string;
   assetTypeVersion: number;
@@ -97,11 +113,7 @@ function formatSupply(value: string, locale: string): string {
   }).format(parsed);
 }
 
-export function formatSmartSupply(
-  totalSupply: string,
-  maxSupply: string | null,
-  locale: string
-): string {
+function formatSmartSupply(totalSupply: string, maxSupply: string | null, locale: string): string {
   const max = maxSupply ? formatSupply(maxSupply, locale) : "∞";
   return `${formatSupply(totalSupply, locale)} / ${max}`;
 }
@@ -113,20 +125,6 @@ export function getTokenTypeLabel(template: IssuanceTokenView["template"], t: Tr
   }
 
   return template;
-}
-
-// Mirrors getExplorerHref in the token-management utils; kept local so the list
-// module has no cross-route dependency.
-function explorerHref(mintAddress: string | null): string | null {
-  if (!mintAddress) {
-    return null;
-  }
-  const cluster = process.env.NEXT_PUBLIC_SOLANA_NETWORK?.trim() || "devnet";
-  const clusterQuery =
-    cluster === "mainnet-beta" || cluster === "mainnet"
-      ? ""
-      : `?cluster=${encodeURIComponent(cluster)}`;
-  return `https://explorer.solana.com/address/${mintAddress}${clusterQuery}`;
 }
 
 // ── Classification chips (Stablecoin / Fiat-backed, etc.) ────────────────────
@@ -212,7 +210,7 @@ function viewToProfile(profile: IssuanceAssetProfileView, view: IssuanceTokenVie
 
 const AUTHORITY_ROLES = ["mint", "freeze", "metadata", "permanentDelegate"] as const;
 
-export function buildAuthorityGlyphRows(
+function buildAuthorityGlyphRows(
   token: Token,
   authorityWallets: PaymentsDashboardWallet[],
   controlKnown: boolean,
@@ -245,7 +243,7 @@ export function buildAuthorityGlyphRows(
   });
 }
 
-export function buildWalletIdentityForAuthority(
+function buildWalletIdentityForAuthority(
   address: string | null,
   control: AuthorityControl,
   authorityWallets: PaymentsDashboardWallet[],
@@ -266,18 +264,18 @@ export function buildWalletIdentityForAuthority(
   return { state: control === "external" ? "external" : "unknown", publicKey: address };
 }
 
-export function resolveAccessMode(token: Token, draft: DraftState | null): AccessControlMode {
+function resolveAccessMode(token: Token, draft: DraftState | null): AccessControlMode {
   return draft?.accessControl || getTokenAccessControlMode(token);
 }
 
 // The other half of an access decision: whether holders must be identity-verified as
 // well as listed. Off-chain policy, so it lives on the profile and nowhere on the
 // token — a token with no profile simply doesn't claim it.
-export function resolveVerifiedHolders(draft: DraftState | null): boolean {
+function resolveVerifiedHolders(draft: DraftState | null): boolean {
   return draft?.capacities.kyc.enabled ?? false;
 }
 
-export interface CategoryTile {
+interface CategoryTile {
   icon: LucideIcon;
   label: string;
   value: string;
@@ -376,7 +374,7 @@ function buildCategoryTiles(
     .slice(0, MAX_CATEGORY_TILES);
 }
 
-export function buildWalletIdentityForSigner(
+function buildWalletIdentityForSigner(
   signingCustodyWalletId: string | null | undefined,
   authorityWallets: PaymentsDashboardWallet[],
   t: Translate
@@ -484,8 +482,4 @@ export function buildOverviewHeroData(
     issuer: draft?.issuerName.trim() || null,
     categoryTiles: draft ? buildCategoryTiles(view, draft, t) : [],
   };
-}
-
-export function tokenExplorerHref(mintAddress: string | null): string | null {
-  return explorerHref(mintAddress);
 }

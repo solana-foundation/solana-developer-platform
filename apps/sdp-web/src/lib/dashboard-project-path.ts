@@ -10,7 +10,7 @@ const PROJECT_ID_PREFIX = "prj_";
  * @param segment - First path segment after `/dashboard`.
  * @returns True when the segment has the Project id shape.
  */
-export function isProjectIdSegment(segment: string): boolean {
+function isProjectIdSegment(segment: string): boolean {
   return segment.startsWith(PROJECT_ID_PREFIX);
 }
 

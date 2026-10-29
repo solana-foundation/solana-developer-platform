@@ -377,7 +377,7 @@ export function CounterpartyDetailSkeleton() {
  * A record page (a transaction, a payment request) while it loads: the state band, the amount,
  * and two columns of rows, in the page's 32px rhythm.
  */
-export function RecordPageSkeleton({
+function RecordPageSkeleton({
   layout,
 }: {
   layout: "payment-transaction-detail" | "payment-request-detail";

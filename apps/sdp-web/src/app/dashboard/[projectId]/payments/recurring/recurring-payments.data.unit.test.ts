@@ -112,6 +112,33 @@ describe("recurring payment write requests", () => {
       expect(sent.get("Idempotency-Key")).toMatch(/^[0-9a-f-]{36}$/);
     }
   });
+
+  it("shows a disabled activation refusal but still sends cancellation", async () => {
+    const fetchMock = vi.fn<typeof globalThis.fetch>((_input, init) =>
+      Promise.resolve(
+        init?.method === "POST" && String(_input).endsWith("/cancel")
+          ? Response.json(responseEnvelope)
+          : Response.json(
+              {
+                error: {
+                  code: "FORBIDDEN",
+                  message: "This movement is disabled for the project",
+                  details: { reason: "movement_disabled" },
+                },
+              },
+              { status: 403 }
+            )
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(runRecurringPaymentAction("prp_1", "activate", undefined, t)).rejects.toThrow(
+      "This movement is disabled for the project"
+    );
+    await expect(runRecurringPaymentAction("prp_1", "cancel", undefined, t)).resolves.toEqual(
+      responseEnvelope.data.recurringPayment
+    );
+  });
 });
 
 describe("recurring payment unknown outcomes", () => {

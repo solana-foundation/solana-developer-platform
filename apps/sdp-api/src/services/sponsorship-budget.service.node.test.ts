@@ -795,6 +795,7 @@ describe("BudgetedFeePayment", () => {
       expect(readAdmissionFacts).toHaveBeenCalledWith(
         expect.anything(),
         { organizationId: "org_1", projectId: "project_1" },
+        "payments.transfer",
         { custodyWalletId: "cwlt_1" }
       );
       expect(repository.createReservation).not.toHaveBeenCalled();
