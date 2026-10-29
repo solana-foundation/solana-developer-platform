@@ -81,14 +81,15 @@ function sign(value: bigint): number {
   return 0;
 }
 
-/** What `run` throws, failing the test when it returns. */
-function thrownBy(run: () => unknown): unknown {
+/** The `SdpPaymentsError` that `run` throws, failing the test on a return or any other error. */
+function paymentsErrorThrownBy(run: () => void): SdpPaymentsError {
   try {
     run();
   } catch (error) {
-    return error;
+    if (error instanceof SdpPaymentsError) return error;
+    throw error;
   }
-  throw new Error("expected a throw");
+  throw new Error("expected an SdpPaymentsError");
 }
 
 /** A canonical amount string's base units at `scale`, in unbounded bigint. */
@@ -269,9 +270,7 @@ describe("payment amount conversions (property)", () => {
             expect(parseDecimalAmount(sumDecimalAmounts(texts), scale)).toBe(exact);
             return;
           }
-          const error = thrownBy(() => sumDecimalAmounts(texts));
-          expect(error).toBeInstanceOf(SdpPaymentsError);
-          if (error instanceof SdpPaymentsError) expect(error.statusCode).toBe(400);
+          expect(paymentsErrorThrownBy(() => sumDecimalAmounts(texts)).statusCode).toBe(400);
         }
       ),
       propertyParameters()
