@@ -321,6 +321,43 @@ describe("scrubTelemetryString — prefixed keys in a serialized body", () => {
     assert.ok(publicSeeds.includes('"seeds":["owner","aux"]'));
   });
 
+  it("redacts every word of a space-separated mnemonic or passphrase assignment", () => {
+    // The generic assignment rule's value stops at the first space, which is
+    // exactly where a recovery secret keeps going: an interpolated mnemonic or
+    // passphrase kept every word after the first readable.
+    const scrubbed = scrubTelemetryString(
+      "seed=legal winner thank year wave sausage worth useful legal winner thank yellow"
+    );
+
+    assert.equal(scrubbed, "seed=[REDACTED]");
+
+    const passphrase = scrubTelemetryString("walletPassphrase=correct horse battery staple");
+
+    assert.equal(passphrase, "walletPassphrase=[REDACTED]");
+
+    const mnemonic = scrubTelemetryString("mnemonic=legal winner thank yellow");
+
+    assert.equal(mnemonic, "mnemonic=[REDACTED]");
+  });
+
+  it("ends a space-separated assignment value at the next assignment, not inside it", () => {
+    // The value must not swallow a following pair: the pair's key stays
+    // structured and its own value is still redacted by the generic rule.
+    const scrubbed = scrubTelemetryString("seed=legal winner thank yellow token=sk_live_abc123");
+
+    assert.equal(scrubbed, "seed=[REDACTED] token=[REDACTED]");
+  });
+
+  it("ends a space-separated assignment value at structure", () => {
+    const scrubbed = scrubTelemetryString(
+      "Import failed (walletPassphrase=correct horse battery staple, retrying)"
+    );
+
+    assert.ok(!scrubbed.includes("horse"));
+    assert.ok(!scrubbed.includes("staple"));
+    assert.ok(scrubbed.includes(", retrying)"));
+  });
+
   it("keeps seed exact-only in serialized fields and assignments", () => {
     const body =
       '{"pda_seed":"public-derivation","pda-seed":"public-derivation","seeds":["owner","aux"]}';

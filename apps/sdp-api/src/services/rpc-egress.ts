@@ -33,14 +33,35 @@ function boundedSignal(signal: AbortSignal | undefined): AbortSignal {
 }
 
 /**
+ * The relaxations a destination earned by matching an exact
+ * operator-approved Private Channels egress-allowlist entry. `plaintext`
+ * permits `http:` for an entry written as plaintext (the public sandbox
+ * gateway answers on it); `insecure` dials without the connect-time address
+ * check for an entry written as a private literal. A plaintext entry written
+ * as a NAME keeps the address check — only the scheme is relaxed. Both must
+ * come from the allowlist, never from anything a request can influence.
+ */
+export interface ApprovedEgressOrigin {
+  plaintext: boolean;
+  insecure: boolean;
+}
+
+/**
  * A Solana Kit transport for a customer-supplied RPC URL. Every request is
  * DNS-checked at connect time and re-guarded on each redirect hop, because the
  * customer can point the URL anywhere.
  *
  * @param endpointUrl - The customer's RPC URL.
+ * @param approvedOrigin - The egress-allowlist verdict for this exact origin,
+ *   when it has one. It relaxes the guard no further than the probe path is
+ *   relaxed for the same entry; an unapproved destination keeps the strict
+ *   guard.
  * @returns A Kit transport that posts through the egress guard.
  */
-export function createCustomerRpcTransport(endpointUrl: string): RpcTransport {
+export function createCustomerRpcTransport(
+  endpointUrl: string,
+  approvedOrigin?: ApprovedEgressOrigin
+): RpcTransport {
   return async function rpcTransport<TResponse>({
     payload,
     signal,
@@ -56,6 +77,8 @@ export function createCustomerRpcTransport(endpointUrl: string): RpcTransport {
       maxRedirects: CUSTOMER_RPC_MAX_REDIRECTS,
       maxResponseBytes: CUSTOMER_RPC_MAX_RESPONSE_BYTES,
       rejectOversizeResponse: true,
+      ...(approvedOrigin?.plaintext ? { approvedPlaintextDestination: true } : {}),
+      ...(approvedOrigin?.insecure ? { approvedInsecureDestination: true } : {}),
     });
 
     if (!upstream.ok) {

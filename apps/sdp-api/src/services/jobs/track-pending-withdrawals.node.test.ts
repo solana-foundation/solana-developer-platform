@@ -1,3 +1,4 @@
+import { SANDBOX_DEFAULTS } from "@sdp/private-channels/constants";
 import type { SignatureStatusInfo } from "@sdp/rpc/solana";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { signature } from "@solana/kit";
@@ -80,6 +81,12 @@ const DEV_ENV = { ENVIRONMENT: "development" } as Env;
 // SAFETY: only ENVIRONMENT matters — it must be outside development so the
 // persisted gateway URL is dialed through the guarded egress transport.
 const PROD_ENV = { ENVIRONMENT: "production" } as Env;
+// SAFETY: same as PROD_ENV plus the egress allowlist the gateway approval is
+// resolved from.
+const PROD_ENV_WITH_ALLOWLIST = {
+  ENVIRONMENT: "production",
+  PRIVATE_CHANNEL_EGRESS_ALLOWLIST: "http://127.0.0.1:8899, http://gw-name.test:8899",
+} as Env;
 
 // Development keeps the plain per-URL client — local gateway endpoints
 // legitimately resolve to loopback — so the existing reconciliation tests
@@ -210,8 +217,9 @@ describe("trackPendingWithdrawals", () => {
 
     // A tenant-controlled gateway URL is DNS-checked at connect time and its
     // redirects re-guarded per hop — it never rides the plain transport the
-    // development path keeps for loopback endpoints.
-    expect(createCustomerRpcTransportSpy).toHaveBeenCalledWith("https://gw-live");
+    // development path keeps for loopback endpoints. This one is not on the
+    // Private Channels egress allowlist, so no approval is carried.
+    expect(createCustomerRpcTransportSpy).toHaveBeenCalledWith("https://gw-live", undefined);
     expect(createRpcFromTransport).toHaveBeenCalledExactlyOnceWith(
       createCustomerRpcTransportSpy.mock.results[0].value
     );
@@ -221,6 +229,64 @@ describe("trackPendingWithdrawals", () => {
       ["burnsig"],
       { searchTransactionHistory: true }
     );
+  });
+
+  it("carries the egress allowlist's approval for the built-in sandbox gateway", async () => {
+    // The sandbox answers on plaintext http and its status reads are legitimate:
+    // the job used to refuse every http gateway outside development, stranding
+    // withdrawals that had already burned there.
+    withdrawalRepo.listNonTerminal.mockResolvedValueOnce([
+      withdrawalRow({ id: "w1", status: "submitted" }),
+    ]);
+    instanceRepo.getById.mockResolvedValueOnce(
+      instanceRow({ gateway_url: SANDBOX_DEFAULTS.gatewayUrl })
+    );
+    getSignatureStatuses.mockResolvedValueOnce([signatureStatus({})]);
+
+    await trackPendingWithdrawals(PROD_ENV);
+
+    // A public sandbox host keeps the connect-time address check; only the
+    // plaintext scheme is approved.
+    expect(createCustomerRpcTransportSpy).toHaveBeenCalledWith(SANDBOX_DEFAULTS.gatewayUrl, {
+      plaintext: true,
+      insecure: false,
+    });
+    expect(getSignatureStatuses).toHaveBeenCalledWith(expect.anything(), ["burnsig"], {
+      searchTransactionHistory: true,
+    });
+  });
+
+  it("drops the address check only for an allowlisted private-literal gateway", async () => {
+    const allowlistedLoopback = "http://127.0.0.1:8899";
+    withdrawalRepo.listNonTerminal.mockResolvedValueOnce([
+      withdrawalRow({ id: "w1", status: "submitted" }),
+    ]);
+    instanceRepo.getById.mockResolvedValueOnce(instanceRow({ gateway_url: allowlistedLoopback }));
+    getSignatureStatuses.mockResolvedValueOnce([signatureStatus({})]);
+
+    await trackPendingWithdrawals(PROD_ENV_WITH_ALLOWLIST);
+
+    expect(createCustomerRpcTransportSpy).toHaveBeenCalledWith(allowlistedLoopback, {
+      plaintext: true,
+      insecure: true,
+    });
+  });
+
+  it("keeps the address check for an allowlisted plaintext gateway written as a name", async () => {
+    withdrawalRepo.listNonTerminal.mockResolvedValueOnce([
+      withdrawalRow({ id: "w1", status: "submitted" }),
+    ]);
+    instanceRepo.getById.mockResolvedValueOnce(
+      instanceRow({ gateway_url: "http://gw-name.test:8899" })
+    );
+    getSignatureStatuses.mockResolvedValueOnce([signatureStatus({})]);
+
+    await trackPendingWithdrawals(PROD_ENV_WITH_ALLOWLIST);
+
+    expect(createCustomerRpcTransportSpy).toHaveBeenCalledWith("http://gw-name.test:8899", {
+      plaintext: true,
+      insecure: false,
+    });
   });
 
   it("batches submitted burns sharing a gateway into one getSignatureStatuses call", async () => {

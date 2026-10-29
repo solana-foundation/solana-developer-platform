@@ -57,6 +57,10 @@ import {
 } from "@/db/repositories/repository-factory";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { getLogger } from "@/runtime/logger";
+import {
+  checkPrivateChannelDestination,
+  resolvePrivateChannelEgressAllowlist,
+} from "@/services/private-channels/egress";
 import { knownMintToken } from "@/services/private-channels/mint";
 import {
   loadProjectRpcClient,
@@ -64,6 +68,7 @@ import {
 } from "@/services/private-channels/project-rpc";
 import { describeTransactionErr } from "@/services/private-channels/tx-error";
 import { emitWithdrawalEvent } from "@/services/private-channels/withdraw-events";
+import type { ApprovedEgressOrigin } from "@/services/rpc-egress";
 import { createCustomerRpcTransport } from "@/services/rpc-egress";
 import type { Env } from "@/types/env";
 
@@ -122,11 +127,22 @@ export async function trackPendingWithdrawals(env: Env): Promise<void> {
       // it is dialed through the guarded transport — DNS-checked at connect
       // time, redirects re-guarded per hop — the same egress every other
       // tenant-URL dial uses. Development keeps the plain client: local
-      // gateway endpoints legitimately resolve to loopback.
+      // gateway endpoints legitimately resolve to loopback. An origin the
+      // Private Channels egress allowlist already approved rides it with that
+      // approval carried — the built-in sandbox gateway answers on plaintext
+      // `http://` and a private-literal entry was approved as written — so
+      // its status reads dial instead of being refused; the relaxation is
+      // exactly the probe path's, and a plaintext entry written as a NAME
+      // still resolves through the address guard.
       rpc =
         env.ENVIRONMENT === "development"
           ? createRpc(env, { rpcUrl: instance.gateway_url })
-          : createRpcFromTransport(createCustomerRpcTransport(instance.gateway_url));
+          : createRpcFromTransport(
+              createCustomerRpcTransport(
+                instance.gateway_url,
+                approvedGatewayOrigin(env, instance.gateway_url)
+              )
+            );
       gatewayRpcs.set(instance.gateway_url, rpc);
     }
     return rpc;
@@ -275,6 +291,23 @@ export async function trackPendingWithdrawals(env: Env): Promise<void> {
       }
     })
   );
+}
+
+/**
+ * The allowlist verdict for a persisted gateway URL, or undefined when the URL
+ * is not approved. An unapproved destination keeps the strict guarded
+ * transport — https, address-checked, redirect-guarded — the same answer it
+ * would get anywhere else tenant URLs are dialed.
+ */
+function approvedGatewayOrigin(env: Env, gatewayUrl: string): ApprovedEgressOrigin | undefined {
+  const checked = checkPrivateChannelDestination(
+    gatewayUrl,
+    resolvePrivateChannelEgressAllowlist(env),
+    "Gateway URL"
+  );
+  return checked.ok
+    ? { plaintext: checked.approved.plaintext, insecure: checked.approved.insecure }
+    : undefined;
 }
 
 interface ReleaseGroup {
