@@ -48,17 +48,10 @@ The **Extensions** tab shows the template and each operational flag — Token Ac
 
 Fetch the current token state:
 
-```bash title="Terminal"
-curl https://api.solana.com/v1/issuance/tokens/tok_abc123 \
-  -H "Authorization: Bearer sf_..."
-```
+<ApiExample operation="get-token" />
 
-```typescript title="get-token-settings.ts"
-const { data } = await res.json();
-// data.token.authorities — { mintAuthority, freezeAuthority, permanentDelegate }
-// data.token.extensions  — active extensions on the token
-// data.token.status      — "active" | "paused"
-```
+The response's `data.token` contains `authorities` (mint, freeze, and permanent
+delegate), active `extensions`, and `status` (`active` or `paused`).
 
 </Tab>
 </Tabs>

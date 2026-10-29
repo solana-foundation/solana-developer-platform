@@ -784,7 +784,7 @@
             "description": "Pauses transfers for a token using the pause authority.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+              "raw": "{\n  \"signingCustodyWalletId\": \"cwlt_example\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -808,7 +808,7 @@
             "description": "Resumes transfers for a token using the pause authority.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
+              "raw": "{\n  \"signingCustodyWalletId\": \"cwlt_example\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

@@ -24,42 +24,17 @@ Assets at this scale need regulated custody, enforceable compliance, and auditab
 
 SDP puts one stable API in front of the Solana ecosystem's providers, so you integrate once and swap or add providers without changing your code. The same call works for every custody provider. The `provider` field is the only thing that changes.
 
-<Tabs items={["JavaScript", "Python", "curl"]}>
-<Tab value="JavaScript">
-```javascript title="create-wallet.js"
-const response = await fetch("https://api.solana.com/v1/wallets", {
-  method: "POST",
-  headers: {
-    Authorization: "Bearer sf_...",
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify({
-    provider: "privy",
-    label: "Treasury wallet",
-  }),
-});
-const wallet = await response.json();
-```
+The examples read your project key from `SDP_API_KEY`.
+
+<Tabs items={["TypeScript", "Python", "curl"]}>
+<Tab value="TypeScript">
+<ApiExample operation="create-wallet" language="ts" />
 </Tab>
 <Tab value="Python">
-```python title="create_wallet.py"
-import requests
-
-response = requests.post(
-    "https://api.solana.com/v1/wallets",
-    headers={"Authorization": "Bearer sf_..."},
-    json={"provider": "privy", "label": "Treasury wallet"},
-)
-wallet = response.json()
-```
+<ApiExample operation="create-wallet" language="py" />
 </Tab>
 <Tab value="curl">
-```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/wallets \
-  -H "Authorization: Bearer sf_..." \
-  -H "Content-Type: application/json" \
-  -d '{ "provider": "privy", "label": "Treasury wallet" }'
-```
+<ApiExample operation="create-wallet" />
 </Tab>
 </Tabs>
 </Step>
@@ -83,62 +58,18 @@ Provision signing wallets through integrated custody providers, so your team nev
 <Step>
 ### Onchain Transfers
 
-SDP exposes unified endpoints for onchain transfers, built on official Solana program implementations like [Subscriptions](https://github.com/solana-program/subscriptions) and [Solana Pay](https://github.com/solana-foundation/pay). These power Recurring Payments, Payment Requests, and Batch Transfers within SDP.
+SDP exposes unified endpoints for onchain transfers, recurring payments, and batch transfers.
 
-<Tabs items={["Recurring Payments", "Payment Requests", "Batch Transfers"]}>
+<Tabs items={["Recurring Payments", "Batch Transfers"]}>
 <Tab value="Recurring Payments">
-```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/payments/recurring-payments \
-  -H "Authorization: Bearer sf_..." \
-  -H "Idempotency-Key: recurring-subscriber-42" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "sourceCustodyWalletId": "cwlt_123",
-    "counterpartyId": "cp_...",
-    "counterpartyAccountId": "cpa_...",
-    "token": "USDC",
-    "amount": "25.00",
-    "periodHours": 720
-  }'
-```
-</Tab>
-<Tab value="Payment Requests">
-```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/payments/requests \
-  -H "Authorization: Bearer sf_..." \
-  -H "Content-Type: application/json" \
-  -d '{
-    "walletId": "privy_wallet_123",
-    "token": "USDC",
-    "amount": "25.00",
-    "expiresAt": "2026-08-31T00:00:00.000Z"
-  }'
-```
+<ApiExample operation="create-payment-recurring-payment" />
 </Tab>
 <Tab value="Batch Transfers">
-```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/payments/transfer-batches \
-  -H "Authorization: Bearer sf_..." \
-  -H "Idempotency-Key: payroll-2026-06-30" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "externalId": "payroll_2026_06_30",
-    "sourceCustodyWalletId": "cwlt_example",
-    "token": "USDC",
-    "recipients": [
-      {
-        "externalId": "payroll_row_001",
-        "counterpartyId": "cp_...",
-        "counterpartyAccountId": "cpa_...",
-        "amount": "25.00"
-      }
-    ]
-  }'
-```
+<ApiExample operation="create-payment-transfer-batch" />
 </Tab>
 </Tabs>
 
-See [Payments](/docs/payments) for transfers, batches, and payment requests.
+See [Payments](/docs/payments) for transfers, batches, and recurring payments.
 </Step>
 <Step>
 ### Audit Trails

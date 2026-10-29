@@ -152,18 +152,10 @@ Query parameters:
 
 Search and the label filter run server-side over the whole list, so results aren't limited to the current page.
 
-To populate a label filter, fetch the distinct labels in use (the response also
-includes `total`, the unfiltered entry count, for a summary display):
+To populate a label filter, fetch the distinct labels in use. The response
+returns `data.labels` and the unfiltered `data.total` for a summary display:
 
-```bash
-curl https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist/labels \
-  -H "Authorization: Bearer sf_..."
-```
-
-```typescript
-const { data } = await res.json();
-// data: { labels: ["Market maker", "Treasury"], total: 42 }
-```
+<ApiExample operation="list-token-allowlist-labels" />
 
 </Tab>
 </Tabs>
@@ -184,11 +176,7 @@ In **Operations → Approved recipients**, click **Remove entry** next to the ad
 </Tab>
 <Tab value="API">
 
-```bash title="Terminal"
-curl -X DELETE \
-  https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist/alw_abc123 \
-  -H "Authorization: Bearer sf_..."
-```
+<ApiExample operation="remove-token-allowlist-entry" />
 
 Use the `entry.id` returned when the address was added.
 

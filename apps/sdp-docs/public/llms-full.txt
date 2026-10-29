@@ -41,41 +41,50 @@ Assets at this scale need regulated custody, enforceable compliance, and auditab
 
 SDP puts one stable API in front of the Solana ecosystem's providers, so you integrate once and swap or add providers without changing your code. The same call works for every custody provider. The `provider` field is the only thing that changes.
 
-<Tabs items={["JavaScript", "Python", "curl"]}>
-<Tab value="JavaScript">
-```javascript title="create-wallet.js"
-const response = await fetch("https://api.solana.com/v1/wallets", {
+The examples read your project key from `SDP_API_KEY`.
+
+<Tabs items={["TypeScript", "Python", "curl"]}>
+<Tab value="TypeScript">
+```typescript
+const res = await fetch("https://api.solana.com/v1/wallets", {
   method: "POST",
   headers: {
-    Authorization: "Bearer sf_...",
-    "Content-Type": "application/json",
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`,
+    "Idempotency-Key": crypto.randomUUID(),
+    "Content-Type": "application/json"
   },
   body: JSON.stringify({
-    provider: "privy",
-    label: "Treasury wallet",
-  }),
+    "provider": "privy",
+    "label": "Treasury wallet",
+    "purpose": "transfer"
+  })
 });
-const wallet = await response.json();
 ```
 </Tab>
 <Tab value="Python">
-```python title="create_wallet.py"
-import requests
+```python
+import os, requests, uuid
 
-response = requests.post(
-    "https://api.solana.com/v1/wallets",
-    headers={"Authorization": "Bearer sf_..."},
-    json={"provider": "privy", "label": "Treasury wallet"},
-)
-wallet = response.json()
+r = requests.post("https://api.solana.com/v1/wallets",
+  headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
+  json={
+    "provider": "privy",
+    "label": "Treasury wallet",
+    "purpose": "transfer"
+  })
 ```
 </Tab>
 <Tab value="curl">
-```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/wallets \
-  -H "Authorization: Bearer sf_..." \
+```bash
+curl -X POST 'https://api.solana.com/v1/wallets' \
+  -H "Authorization: Bearer $SDP_API_KEY" \
+  -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
-  -d '{ "provider": "privy", "label": "Treasury wallet" }'
+  -d '{
+    "provider": "privy",
+    "label": "Treasury wallet",
+    "purpose": "transfer"
+  }'
 ```
 </Tab>
 </Tabs>
@@ -100,62 +109,57 @@ Provision signing wallets through integrated custody providers, so your team nev
 <Step>
 ### Onchain Transfers
 
-SDP exposes unified endpoints for onchain transfers, built on official Solana program implementations like [Subscriptions](https://github.com/solana-program/subscriptions) and [Solana Pay](https://github.com/solana-foundation/pay). These power Recurring Payments, Payment Requests, and Batch Transfers within SDP.
+SDP exposes unified endpoints for onchain transfers, recurring payments, and batch transfers.
 
-<Tabs items={["Recurring Payments", "Payment Requests", "Batch Transfers"]}>
+<Tabs items={["Recurring Payments", "Batch Transfers"]}>
 <Tab value="Recurring Payments">
-```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/payments/recurring-payments \
-  -H "Authorization: Bearer sf_..." \
-  -H "Idempotency-Key: recurring-subscriber-42" \
+```bash
+curl -X POST 'https://api.solana.com/v1/payments/recurring-payments' \
+  -H "Authorization: Bearer $SDP_API_KEY" \
+  -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
   -d '{
-    "sourceCustodyWalletId": "cwlt_123",
-    "counterpartyId": "cp_...",
-    "counterpartyAccountId": "cpa_...",
-    "token": "USDC",
+    "sourceCustodyWalletId": "cwlt_example",
+    "counterpartyId": "cpty_example",
+    "counterpartyAccountId": "cpa_example",
+    "token": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     "amount": "25.00",
-    "periodHours": 720
-  }'
-```
-</Tab>
-<Tab value="Payment Requests">
-```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/payments/requests \
-  -H "Authorization: Bearer sf_..." \
-  -H "Content-Type: application/json" \
-  -d '{
-    "walletId": "privy_wallet_123",
-    "token": "USDC",
-    "amount": "25.00",
-    "expiresAt": "2026-08-31T00:00:00.000Z"
+    "periodHours": 720,
+    "firstCollectionAt": "2099-01-01T00:00:00.000Z",
+    "metadataUri": "https://example.com/subscriptions/monthly-usdc.json"
   }'
 ```
 </Tab>
 <Tab value="Batch Transfers">
-```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/payments/transfer-batches \
-  -H "Authorization: Bearer sf_..." \
-  -H "Idempotency-Key: payroll-2026-06-30" \
+```bash
+curl -X POST 'https://api.solana.com/v1/payments/transfer-batches' \
+  -H "Authorization: Bearer $SDP_API_KEY" \
+  -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
   -d '{
+    "projectId": "prj_example",
     "externalId": "payroll_2026_06_30",
     "sourceCustodyWalletId": "cwlt_example",
-    "token": "USDC",
+    "token": "SOL",
     "recipients": [
       {
         "externalId": "payroll_row_001",
-        "counterpartyId": "cp_...",
-        "counterpartyAccountId": "cpa_...",
+        "counterpartyId": "cpty_example",
+        "counterpartyAccountId": "cpa_example",
         "amount": "25.00"
       }
-    ]
+    ],
+    "options": {
+      "maxRecipientsPerTransaction": 20,
+      "priorityFee": "auto",
+      "preflight": true
+    }
   }'
 ```
 </Tab>
 </Tabs>
 
-See [Payments](/docs/payments) for transfers, batches, and payment requests.
+See [Payments](/docs/payments) for transfers, batches, and recurring payments.
 </Step>
 <Step>
 ### Audit Trails
@@ -382,11 +386,11 @@ Source: https://platform.solana.com/docs/developing-with-sdp/authentication
 
 SDP layers independent controls onto a single API key — grants, wallet bindings, and IP allowlist — so a key grants exactly the access its integration needs, and no more.
 
-Authenticated API requests carry an API key in the `Authorization` header:
+Authenticated API requests carry an API key in the `Authorization` header. The example reads it from `SDP_API_KEY`:
 
-```bash title="Terminal"
-curl https://api.solana.com/v1/wallets \
-  -H "Authorization: Bearer sf_..."
+```bash
+curl 'https://api.solana.com/v1/wallets' \
+  -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 The `Bearer` prefix is optional — a raw key in the `Authorization` header is also accepted.
@@ -681,8 +685,11 @@ Initializing a custody provider is provider setup (`wallets.configure`), and no 
 Production projects use BYOK only. `POST /v1/wallets/initialize` sets up Managed custody, so in a Production project it returns `403` with `details.reason` set to `custody_mode_not_allowed`. Connect your own provider account to the project from the dashboard instead, then create wallets in that connection with `connectionId` using an API key that holds `wallets.manage`:
 
 ```bash title="Terminal"
+export IDEMPOTENCY_KEY=$(uuidgen)
+
 curl -X POST https://api.solana.com/v1/wallets \
   -H "Authorization: Bearer sf_..." \
+  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "connectionId": "cconn_123",
@@ -696,9 +703,10 @@ Every wallet names the provider account it lives under: `provider` for the provi
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
-```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/wallets \
-  -H "Authorization: Bearer sf_..." \
+```bash
+curl -X POST 'https://api.solana.com/v1/wallets' \
+  -H "Authorization: Bearer $SDP_API_KEY" \
+  -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
   -d '{
     "provider": "privy",
@@ -708,26 +716,29 @@ curl -X POST https://api.solana.com/v1/wallets \
 ```
 </Tab>
 <Tab value="TypeScript">
-```typescript title="create-wallet.ts"
-const response = await fetch("https://api.solana.com/v1/wallets", {
+```typescript
+const res = await fetch("https://api.solana.com/v1/wallets", {
   method: "POST",
   headers: {
-    "Authorization": "Bearer sf_...",
-    "Content-Type": "application/json",
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`,
+    "Idempotency-Key": crypto.randomUUID(),
+    "Content-Type": "application/json"
   },
   body: JSON.stringify({
-    provider: "privy",
-    label: "Treasury wallet",
-    purpose: "transfer",
-  }),
+    "provider": "privy",
+    "label": "Treasury wallet",
+    "purpose": "transfer"
+  })
 });
 ```
 </Tab>
 <Tab value="Java">
 ```java title="CreateWallet.java"
+String idempotencyKey = java.util.UUID.randomUUID().toString();
 HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/wallets"))
     .header("Authorization", "Bearer sf_...")
+    .header("Idempotency-Key", idempotencyKey)
     .header("Content-Type", "application/json")
     .POST(HttpRequest.BodyPublishers.ofString("""
         {
@@ -741,6 +752,7 @@ HttpRequest request = HttpRequest.newBuilder()
 </Tabs>
 
 The `purpose` field is optional metadata in the API. The current dashboard create-wallet flow does not expose wallet-purpose selection.
+Reuse the same `Idempotency-Key` when retrying a wallet creation.
 
 #### 3. List wallets
 
@@ -824,6 +836,7 @@ const response = await fetch(
     method: "POST",
     headers: {
       Authorization: "Bearer sf_...",
+      "Idempotency-Key": crypto.randomUUID(),
       "Content-Type": "application/json",
     },
     body: JSON.stringify(operationParams),
@@ -835,10 +848,11 @@ const result = await response.json();
 <Tab value="Python">
 ```python title="compliance_action.py" rotate-token-ops
 import requests
+import uuid
 
 response = requests.post(
     "https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze",
-    headers={"Authorization": "Bearer sf_..."},
+    headers={"Authorization": "Bearer sf_...", "Idempotency-Key": str(uuid.uuid4())},
     json=operation_params,
 )
 result = response.json()
@@ -848,6 +862,7 @@ result = response.json()
 ```bash title="Terminal" rotate-token-ops
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze \
   -H "Authorization: Bearer sf_..." \
+  -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
   -d "$OPERATION_PARAMS"
 ```
@@ -963,18 +978,21 @@ Select a template and click **Continue**.
 
 List available templates to see what fields each one pre-configures:
 
-```bash title="Terminal"
-curl https://api.solana.com/v1/issuance/templates \
-  -H "Authorization: Bearer sf_..."
+```bash
+curl 'https://api.solana.com/v1/issuance/templates' \
+  -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
-```typescript title="list-templates.ts"
+```typescript
 const res = await fetch("https://api.solana.com/v1/issuance/templates", {
-  headers: { Authorization: "Bearer sf_..." },
+  method: "GET",
+  headers: {
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`
+  }
 });
-const { data } = await res.json();
-// data[].id — use as the "template" value when creating
 ```
+
+Use a returned template's `id` as the `template` value when creating a token.
 
 </Tab>
 </Tabs>
@@ -1169,16 +1187,16 @@ The **Deploy** button appears in the token header and in the fund management pan
 
 You need the `tokenId` returned when you created the token. If you don't have it, list your tokens:
 
-```bash title="Terminal"
-curl https://api.solana.com/v1/issuance/tokens \
-  -H "Authorization: Bearer sf_..."
+```bash
+curl 'https://api.solana.com/v1/issuance/tokens' \
+  -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 Note the token `id` (e.g., `tok_abc123`) — required for all deploy and post-deploy calls. Also list your wallets and use the wallet record's `id`, not its provider-specific `walletId` or public key:
 
-```bash title="Terminal"
-curl https://api.solana.com/v1/wallets \
-  -H "Authorization: Bearer sf_..."
+```bash
+curl 'https://api.solana.com/v1/wallets' \
+  -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 </Tab>
@@ -1268,9 +1286,9 @@ After deployment, `signingCustodyWalletId` is historical deployment attribution.
 
 Fetch the token at any time to verify:
 
-```bash title="Terminal"
-curl https://api.solana.com/v1/issuance/tokens/tok_abc123 \
-  -H "Authorization: Bearer sf_..."
+```bash
+curl 'https://api.solana.com/v1/issuance/tokens/tok_example' \
+  -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 </Tab>
@@ -1501,9 +1519,9 @@ Reload the token detail page if the displayed supply value appears stale.
 </Tab>
 <Tab value="API">
 
-```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/supply/refresh \
-  -H "Authorization: Bearer sf_..."
+```bash
+curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/supply/refresh' \
+  -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 Safe to include in automated post-mint workflows.
@@ -1666,17 +1684,12 @@ Query parameters:
 
 Search and the label filter run server-side over the whole list, so results aren't limited to the current page.
 
-To populate a label filter, fetch the distinct labels in use (the response also
-includes `total`, the unfiltered entry count, for a summary display):
+To populate a label filter, fetch the distinct labels in use. The response
+returns `data.labels` and the unfiltered `data.total` for a summary display:
 
 ```bash
-curl https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist/labels \
-  -H "Authorization: Bearer sf_..."
-```
-
-```typescript
-const { data } = await res.json();
-// data: { labels: ["Market maker", "Treasury"], total: 42 }
+curl 'https://api.solana.com/v1/issuance/tokens/tok_example/allowlist/labels' \
+  -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 </Tab>
@@ -1698,10 +1711,9 @@ In **Operations → Approved recipients**, click **Remove entry** next to the ad
 </Tab>
 <Tab value="API">
 
-```bash title="Terminal"
-curl -X DELETE \
-  https://api.solana.com/v1/issuance/tokens/tok_abc123/allowlist/alw_abc123 \
-  -H "Authorization: Bearer sf_..."
+```bash
+curl -X DELETE 'https://api.solana.com/v1/issuance/tokens/tok_example/allowlist/al_example' \
+  -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 Use the `entry.id` returned when the address was added.
@@ -1758,22 +1770,19 @@ Enter the wallet address and select the intent (e.g., transfer destination or To
 </Tab>
 <Tab value="API">
 
-```bash title="Terminal"
-curl -X POST https://api.solana.com/v1/compliance/address-screenings \
-  -H "Authorization: Bearer sf_..." \
+```bash
+curl -X POST 'https://api.solana.com/v1/compliance/address-screenings' \
+  -H "Authorization: Bearer $SDP_API_KEY" \
+  -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
   -d '{
-    "address": "8dHEsGLp...hQWRGZ",
+    "address": "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ",
     "network": "solana",
     "intent": "transfer_destination"
   }'
 ```
 
-```typescript title="screen-address.ts"
-const { data } = await res.json();
-// data.screening.providers[]
-// → { provider, status, riskScore, riskLevel, message, evaluatedAt }
-```
+The response's `data.screening.providers[]` lists each provider's status, risk score, risk level, message, and evaluation time.
 
 See the [Compliance API reference](/docs/reference/api/compliance) for the full schema.
 
@@ -1823,6 +1832,7 @@ The "Unfreeze transaction finalized." toast appears and the Frozen Accounts coun
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze \
   -H "Authorization: Bearer sf_..." \
+  -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
   -d '{
     "accountAddress": "3xYZa...2aBc",
@@ -1837,16 +1847,20 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze \
 ```typescript title="unfreeze-account.ts"
 await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/unfreeze", {
   method: "POST",
-  headers: { Authorization: "Bearer sf_...", "Content-Type": "application/json" },
+  headers: {
+    Authorization: "Bearer sf_...",
+    "Idempotency-Key": crypto.randomUUID(),
+    "Content-Type": "application/json",
+  },
   body: JSON.stringify({ accountAddress: "3xYZa...2aBc" }),
 });
 ```
 
 **List frozen accounts:**
 
-```bash title="Terminal"
-curl https://api.solana.com/v1/issuance/tokens/tok_abc123/frozen \
-  -H "Authorization: Bearer sf_..."
+```bash
+curl 'https://api.solana.com/v1/issuance/tokens/tok_example/frozen' \
+  -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 </Tab>
@@ -1884,18 +1898,28 @@ To resume, click **Unpause token** and confirm.
 </Tab>
 <Tab value="API">
 
-```bash title="Terminal"
-# Pause
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/pause \
-  -H "Authorization: Bearer sf_..." \
-  -H "Content-Type: application/json" \
-  -d '{"signingCustodyWalletId":"cwlt_example"}'
+**Pause:**
 
-# Unpause
-curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/unpause \
-  -H "Authorization: Bearer sf_..." \
+```bash
+curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/pause' \
+  -H "Authorization: Bearer $SDP_API_KEY" \
+  -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
-  -d '{"signingCustodyWalletId":"cwlt_example"}'
+  -d '{
+    "signingCustodyWalletId": "cwlt_example"
+  }'
+```
+
+**Unpause:**
+
+```bash
+curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/unpause' \
+  -H "Authorization: Bearer $SDP_API_KEY" \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "signingCustodyWalletId": "cwlt_example"
+  }'
 ```
 
 `signingCustodyWalletId` is optional when exactly one in-scope custody record matches the current pause authority; send `{}` to use that resolution. Multiple matches without a selector return `409`. An explicit choice must control the live authority and pass authorization and runtime checks. Reusing an idempotency key with a different wallet returns `409`.
@@ -1998,17 +2022,13 @@ The **Extensions** tab shows the template and each operational flag — Token Ac
 
 Fetch the current token state:
 
-```bash title="Terminal"
-curl https://api.solana.com/v1/issuance/tokens/tok_abc123 \
-  -H "Authorization: Bearer sf_..."
+```bash
+curl 'https://api.solana.com/v1/issuance/tokens/tok_example' \
+  -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
-```typescript title="get-token-settings.ts"
-const { data } = await res.json();
-// data.token.authorities — { mintAuthority, freezeAuthority, permanentDelegate }
-// data.token.extensions  — active extensions on the token
-// data.token.status      — "active" | "paused"
-```
+The response's `data.token` contains `authorities` (mint, freeze, and permanent
+delegate), active `extensions`, and `status` (`active` or `paused`).
 
 </Tab>
 </Tabs>
@@ -2128,19 +2148,19 @@ Source: https://platform.solana.com/docs/wallet-operations/balances
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
-```bash title="Terminal"
-curl https://api.solana.com/v1/payments/wallets/wal_abc123/balances \
-  -H "Authorization: Bearer sf_..."
+```bash
+curl 'https://api.solana.com/v1/payments/wallets/privy_wallet_123/balances' \
+  -H "Authorization: Bearer $SDP_API_KEY"
 ```
 </Tab>
 <Tab value="TypeScript">
-```typescript title="get-wallet-balances.ts"
-const response = await fetch(
-  "https://api.solana.com/v1/payments/wallets/wal_abc123/balances",
-  { headers: { Authorization: "Bearer sf_..." } }
-);
-const { data } = await response.json();
-// data.walletBalances.balances: TokenBalance[]
+```typescript
+const res = await fetch("https://api.solana.com/v1/payments/wallets/privy_wallet_123/balances", {
+  method: "GET",
+  headers: {
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`
+  }
+});
 ```
 </Tab>
 <Tab value="Java">
@@ -2153,6 +2173,8 @@ HttpRequest request = HttpRequest.newBuilder()
 ```
 </Tab>
 </Tabs>
+
+The response's `data.walletBalances.balances` array contains the token balances.
 
 ## Response shape
 
@@ -2515,9 +2537,9 @@ Click the record to see full details including the Solana Explorer link.
 
 Poll status for async confirmations:
 
-```bash title="Terminal"
-curl https://api.solana.com/v1/payments/transfers/txn_abc123 \
-  -H "Authorization: Bearer sf_..."
+```bash
+curl 'https://api.solana.com/v1/payments/transfers/xfr_example' \
+  -H "Authorization: Bearer $SDP_API_KEY"
 ```
 
 </Tab>
@@ -19164,11 +19186,7 @@ curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/pause' \
   -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
   -d '{
-    "signingCustodyWalletId": "cwlt_example",
-    "options": {
-      "priorityFee": "low",
-      "simulate": true
-    }
+    "signingCustodyWalletId": "cwlt_example"
   }'
 ```
 
@@ -19181,11 +19199,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/p
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
-    "signingCustodyWalletId": "cwlt_example",
-    "options": {
-      "priorityFee": "low",
-      "simulate": true
-    }
+    "signingCustodyWalletId": "cwlt_example"
   })
 });
 ```
@@ -19196,11 +19210,7 @@ import os, requests, uuid
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/pause",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
   json={
-    "signingCustodyWalletId": "cwlt_example",
-    "options": {
-      "priorityFee": "low",
-      "simulate": True
-    }
+    "signingCustodyWalletId": "cwlt_example"
   })
 ```
 
@@ -19526,11 +19536,7 @@ curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/unpause' \
   -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
   -d '{
-    "signingCustodyWalletId": "cwlt_example",
-    "options": {
-      "priorityFee": "low",
-      "simulate": true
-    }
+    "signingCustodyWalletId": "cwlt_example"
   }'
 ```
 
@@ -19543,11 +19549,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens/tok_example/u
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
-    "signingCustodyWalletId": "cwlt_example",
-    "options": {
-      "priorityFee": "low",
-      "simulate": true
-    }
+    "signingCustodyWalletId": "cwlt_example"
   })
 });
 ```
@@ -19558,11 +19560,7 @@ import os, requests, uuid
 r = requests.post("https://api.solana.com/v1/issuance/tokens/tok_example/unpause",
   headers={"Authorization": f"Bearer {os.environ['SDP_API_KEY']}", "Idempotency-Key": str(uuid.uuid4())},
   json={
-    "signingCustodyWalletId": "cwlt_example",
-    "options": {
-      "priorityFee": "low",
-      "simulate": True
-    }
+    "signingCustodyWalletId": "cwlt_example"
   })
 ```
 

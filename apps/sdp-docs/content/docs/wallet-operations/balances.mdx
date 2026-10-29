@@ -9,20 +9,10 @@ description: Per-wallet token balances with optional USD valuation via SDP.
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
-```bash title="Terminal"
-curl https://api.solana.com/v1/payments/wallets/wal_abc123/balances \
-  -H "Authorization: Bearer sf_..."
-```
+<ApiExample operation="get-payment-wallet-balances" />
 </Tab>
 <Tab value="TypeScript">
-```typescript title="get-wallet-balances.ts"
-const response = await fetch(
-  "https://api.solana.com/v1/payments/wallets/wal_abc123/balances",
-  { headers: { Authorization: "Bearer sf_..." } }
-);
-const { data } = await response.json();
-// data.walletBalances.balances: TokenBalance[]
-```
+<ApiExample operation="get-payment-wallet-balances" language="ts" />
 </Tab>
 <Tab value="Java">
 ```java title="GetWalletBalances.java"
@@ -34,6 +24,8 @@ HttpRequest request = HttpRequest.newBuilder()
 ```
 </Tab>
 </Tabs>
+
+The response's `data.walletBalances.balances` array contains the token balances.
 
 ## Response shape
 

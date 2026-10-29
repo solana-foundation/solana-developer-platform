@@ -50,18 +50,11 @@ Select a template and click **Continue**.
 
 List available templates to see what fields each one pre-configures:
 
-```bash title="Terminal"
-curl https://api.solana.com/v1/issuance/templates \
-  -H "Authorization: Bearer sf_..."
-```
+<ApiExample operation="list-token-templates" />
 
-```typescript title="list-templates.ts"
-const res = await fetch("https://api.solana.com/v1/issuance/templates", {
-  headers: { Authorization: "Bearer sf_..." },
-});
-const { data } = await res.json();
-// data[].id — use as the "template" value when creating
-```
+<ApiExample operation="list-token-templates" language="ts" />
+
+Use a returned template's `id` as the `template` value when creating a token.
 
 </Tab>
 </Tabs>

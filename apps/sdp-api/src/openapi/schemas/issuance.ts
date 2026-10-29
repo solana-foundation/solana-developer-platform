@@ -1158,7 +1158,12 @@ export const pauseTokenRequestSchema = pauseTokenSchemaBase
       example: { priorityFee: "low", simulate: true },
     }),
   })
-  .openapi({ description: "Pause token request body." });
+  // Pause and unpause execute directly; their optional `options` are not read
+  // by the handlers, so the public sample shows only the effective selector.
+  .openapi({
+    description: "Pause token request body.",
+    example: { signingCustodyWalletId: "cwlt_example" },
+  });
 
 export const freezeAccountRequestSchema = freezeSchemaBase
   .extend({

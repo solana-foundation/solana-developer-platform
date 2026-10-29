@@ -1,0 +1,117 @@
+{
+  "releaseChannel": "experimental",
+  "operations": {
+    "create-payment-recurring-payment": {
+      "snippets": {
+        "curl": "curl -X POST 'https://api.solana.com/v1/payments/recurring-payments' \\\n  -H \"Authorization: Bearer $SDP_API_KEY\" \\\n  -H \"Idempotency-Key: $(uuidgen)\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\n    \"sourceCustodyWalletId\": \"cwlt_example\",\n    \"counterpartyId\": \"cpty_example\",\n    \"counterpartyAccountId\": \"cpa_example\",\n    \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n    \"amount\": \"25.00\",\n    \"periodHours\": 720,\n    \"firstCollectionAt\": \"2099-01-01T00:00:00.000Z\",\n    \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n  }'",
+        "ts": "const res = await fetch(\"https://api.solana.com/v1/payments/recurring-payments\", {\n  method: \"POST\",\n  headers: {\n    Authorization: `Bearer ${process.env.SDP_API_KEY}`,\n    \"Idempotency-Key\": crypto.randomUUID(),\n    \"Content-Type\": \"application/json\"\n  },\n  body: JSON.stringify({\n    \"sourceCustodyWalletId\": \"cwlt_example\",\n    \"counterpartyId\": \"cpty_example\",\n    \"counterpartyAccountId\": \"cpa_example\",\n    \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n    \"amount\": \"25.00\",\n    \"periodHours\": 720,\n    \"firstCollectionAt\": \"2099-01-01T00:00:00.000Z\",\n    \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n  })\n});",
+        "py": "import os, requests, uuid\n\nr = requests.post(\"https://api.solana.com/v1/payments/recurring-payments\",\n  headers={\"Authorization\": f\"Bearer {os.environ['SDP_API_KEY']}\", \"Idempotency-Key\": str(uuid.uuid4())},\n  json={\n    \"sourceCustodyWalletId\": \"cwlt_example\",\n    \"counterpartyId\": \"cpty_example\",\n    \"counterpartyAccountId\": \"cpa_example\",\n    \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n    \"amount\": \"25.00\",\n    \"periodHours\": 720,\n    \"firstCollectionAt\": \"2099-01-01T00:00:00.000Z\",\n    \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n  })"
+      }
+    },
+    "create-payment-transfer-batch": {
+      "snippets": {
+        "curl": "curl -X POST 'https://api.solana.com/v1/payments/transfer-batches' \\\n  -H \"Authorization: Bearer $SDP_API_KEY\" \\\n  -H \"Idempotency-Key: $(uuidgen)\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\n    \"projectId\": \"prj_example\",\n    \"externalId\": \"payroll_2026_06_30\",\n    \"sourceCustodyWalletId\": \"cwlt_example\",\n    \"token\": \"SOL\",\n    \"recipients\": [\n      {\n        \"externalId\": \"payroll_row_001\",\n        \"counterpartyId\": \"cpty_example\",\n        \"counterpartyAccountId\": \"cpa_example\",\n        \"amount\": \"25.00\"\n      }\n    ],\n    \"options\": {\n      \"maxRecipientsPerTransaction\": 20,\n      \"priorityFee\": \"auto\",\n      \"preflight\": true\n    }\n  }'",
+        "ts": "const res = await fetch(\"https://api.solana.com/v1/payments/transfer-batches\", {\n  method: \"POST\",\n  headers: {\n    Authorization: `Bearer ${process.env.SDP_API_KEY}`,\n    \"Idempotency-Key\": crypto.randomUUID(),\n    \"Content-Type\": \"application/json\"\n  },\n  body: JSON.stringify({\n    \"projectId\": \"prj_example\",\n    \"externalId\": \"payroll_2026_06_30\",\n    \"sourceCustodyWalletId\": \"cwlt_example\",\n    \"token\": \"SOL\",\n    \"recipients\": [\n      {\n        \"externalId\": \"payroll_row_001\",\n        \"counterpartyId\": \"cpty_example\",\n        \"counterpartyAccountId\": \"cpa_example\",\n        \"amount\": \"25.00\"\n      }\n    ],\n    \"options\": {\n      \"maxRecipientsPerTransaction\": 20,\n      \"priorityFee\": \"auto\",\n      \"preflight\": true\n    }\n  })\n});",
+        "py": "import os, requests, uuid\n\nr = requests.post(\"https://api.solana.com/v1/payments/transfer-batches\",\n  headers={\"Authorization\": f\"Bearer {os.environ['SDP_API_KEY']}\", \"Idempotency-Key\": str(uuid.uuid4())},\n  json={\n    \"projectId\": \"prj_example\",\n    \"externalId\": \"payroll_2026_06_30\",\n    \"sourceCustodyWalletId\": \"cwlt_example\",\n    \"token\": \"SOL\",\n    \"recipients\": [\n      {\n        \"externalId\": \"payroll_row_001\",\n        \"counterpartyId\": \"cpty_example\",\n        \"counterpartyAccountId\": \"cpa_example\",\n        \"amount\": \"25.00\"\n      }\n    ],\n    \"options\": {\n      \"maxRecipientsPerTransaction\": 20,\n      \"priorityFee\": \"auto\",\n      \"preflight\": True\n    }\n  })"
+      }
+    },
+    "create-wallet": {
+      "snippets": {
+        "curl": "curl -X POST 'https://api.solana.com/v1/wallets' \\\n  -H \"Authorization: Bearer $SDP_API_KEY\" \\\n  -H \"Idempotency-Key: $(uuidgen)\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\n    \"provider\": \"privy\",\n    \"label\": \"Treasury wallet\",\n    \"purpose\": \"transfer\"\n  }'",
+        "ts": "const res = await fetch(\"https://api.solana.com/v1/wallets\", {\n  method: \"POST\",\n  headers: {\n    Authorization: `Bearer ${process.env.SDP_API_KEY}`,\n    \"Idempotency-Key\": crypto.randomUUID(),\n    \"Content-Type\": \"application/json\"\n  },\n  body: JSON.stringify({\n    \"provider\": \"privy\",\n    \"label\": \"Treasury wallet\",\n    \"purpose\": \"transfer\"\n  })\n});",
+        "py": "import os, requests, uuid\n\nr = requests.post(\"https://api.solana.com/v1/wallets\",\n  headers={\"Authorization\": f\"Bearer {os.environ['SDP_API_KEY']}\", \"Idempotency-Key\": str(uuid.uuid4())},\n  json={\n    \"provider\": \"privy\",\n    \"label\": \"Treasury wallet\",\n    \"purpose\": \"transfer\"\n  })"
+      }
+    },
+    "get-payment-transfer": {
+      "snippets": {
+        "curl": "curl 'https://api.solana.com/v1/payments/transfers/xfr_example' \\\n  -H \"Authorization: Bearer $SDP_API_KEY\"",
+        "ts": "const res = await fetch(\"https://api.solana.com/v1/payments/transfers/xfr_example\", {\n  method: \"GET\",\n  headers: {\n    Authorization: `Bearer ${process.env.SDP_API_KEY}`\n  }\n});",
+        "py": "import os, requests\n\nr = requests.get(\"https://api.solana.com/v1/payments/transfers/xfr_example\",\n  headers={\"Authorization\": f\"Bearer {os.environ['SDP_API_KEY']}\"})"
+      }
+    },
+    "get-payment-wallet-balances": {
+      "snippets": {
+        "curl": "curl 'https://api.solana.com/v1/payments/wallets/privy_wallet_123/balances' \\\n  -H \"Authorization: Bearer $SDP_API_KEY\"",
+        "ts": "const res = await fetch(\"https://api.solana.com/v1/payments/wallets/privy_wallet_123/balances\", {\n  method: \"GET\",\n  headers: {\n    Authorization: `Bearer ${process.env.SDP_API_KEY}`\n  }\n});",
+        "py": "import os, requests\n\nr = requests.get(\"https://api.solana.com/v1/payments/wallets/privy_wallet_123/balances\",\n  headers={\"Authorization\": f\"Bearer {os.environ['SDP_API_KEY']}\"})"
+      }
+    },
+    "get-token": {
+      "snippets": {
+        "curl": "curl 'https://api.solana.com/v1/issuance/tokens/tok_example' \\\n  -H \"Authorization: Bearer $SDP_API_KEY\"",
+        "ts": "const res = await fetch(\"https://api.solana.com/v1/issuance/tokens/tok_example\", {\n  method: \"GET\",\n  headers: {\n    Authorization: `Bearer ${process.env.SDP_API_KEY}`\n  }\n});",
+        "py": "import os, requests\n\nr = requests.get(\"https://api.solana.com/v1/issuance/tokens/tok_example\",\n  headers={\"Authorization\": f\"Bearer {os.environ['SDP_API_KEY']}\"})"
+      }
+    },
+    "list-frozen-accounts": {
+      "snippets": {
+        "curl": "curl 'https://api.solana.com/v1/issuance/tokens/tok_example/frozen' \\\n  -H \"Authorization: Bearer $SDP_API_KEY\"",
+        "ts": "const res = await fetch(\"https://api.solana.com/v1/issuance/tokens/tok_example/frozen\", {\n  method: \"GET\",\n  headers: {\n    Authorization: `Bearer ${process.env.SDP_API_KEY}`\n  }\n});",
+        "py": "import os, requests\n\nr = requests.get(\"https://api.solana.com/v1/issuance/tokens/tok_example/frozen\",\n  headers={\"Authorization\": f\"Bearer {os.environ['SDP_API_KEY']}\"})"
+      }
+    },
+    "list-token-allowlist-labels": {
+      "snippets": {
+        "curl": "curl 'https://api.solana.com/v1/issuance/tokens/tok_example/allowlist/labels' \\\n  -H \"Authorization: Bearer $SDP_API_KEY\"",
+        "ts": "const res = await fetch(\"https://api.solana.com/v1/issuance/tokens/tok_example/allowlist/labels\", {\n  method: \"GET\",\n  headers: {\n    Authorization: `Bearer ${process.env.SDP_API_KEY}`\n  }\n});",
+        "py": "import os, requests\n\nr = requests.get(\"https://api.solana.com/v1/issuance/tokens/tok_example/allowlist/labels\",\n  headers={\"Authorization\": f\"Bearer {os.environ['SDP_API_KEY']}\"})"
+      }
+    },
+    "list-token-templates": {
+      "snippets": {
+        "curl": "curl 'https://api.solana.com/v1/issuance/templates' \\\n  -H \"Authorization: Bearer $SDP_API_KEY\"",
+        "ts": "const res = await fetch(\"https://api.solana.com/v1/issuance/templates\", {\n  method: \"GET\",\n  headers: {\n    Authorization: `Bearer ${process.env.SDP_API_KEY}`\n  }\n});",
+        "py": "import os, requests\n\nr = requests.get(\"https://api.solana.com/v1/issuance/templates\",\n  headers={\"Authorization\": f\"Bearer {os.environ['SDP_API_KEY']}\"})"
+      }
+    },
+    "list-tokens": {
+      "snippets": {
+        "curl": "curl 'https://api.solana.com/v1/issuance/tokens' \\\n  -H \"Authorization: Bearer $SDP_API_KEY\"",
+        "ts": "const res = await fetch(\"https://api.solana.com/v1/issuance/tokens\", {\n  method: \"GET\",\n  headers: {\n    Authorization: `Bearer ${process.env.SDP_API_KEY}`\n  }\n});",
+        "py": "import os, requests\n\nr = requests.get(\"https://api.solana.com/v1/issuance/tokens\",\n  headers={\"Authorization\": f\"Bearer {os.environ['SDP_API_KEY']}\"})"
+      }
+    },
+    "list-wallets": {
+      "snippets": {
+        "curl": "curl 'https://api.solana.com/v1/wallets' \\\n  -H \"Authorization: Bearer $SDP_API_KEY\"",
+        "ts": "const res = await fetch(\"https://api.solana.com/v1/wallets\", {\n  method: \"GET\",\n  headers: {\n    Authorization: `Bearer ${process.env.SDP_API_KEY}`\n  }\n});",
+        "py": "import os, requests\n\nr = requests.get(\"https://api.solana.com/v1/wallets\",\n  headers={\"Authorization\": f\"Bearer {os.environ['SDP_API_KEY']}\"})"
+      }
+    },
+    "pause-token": {
+      "snippets": {
+        "curl": "curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/pause' \\\n  -H \"Authorization: Bearer $SDP_API_KEY\" \\\n  -H \"Idempotency-Key: $(uuidgen)\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\n    \"signingCustodyWalletId\": \"cwlt_example\"\n  }'",
+        "ts": "const res = await fetch(\"https://api.solana.com/v1/issuance/tokens/tok_example/pause\", {\n  method: \"POST\",\n  headers: {\n    Authorization: `Bearer ${process.env.SDP_API_KEY}`,\n    \"Idempotency-Key\": crypto.randomUUID(),\n    \"Content-Type\": \"application/json\"\n  },\n  body: JSON.stringify({\n    \"signingCustodyWalletId\": \"cwlt_example\"\n  })\n});",
+        "py": "import os, requests, uuid\n\nr = requests.post(\"https://api.solana.com/v1/issuance/tokens/tok_example/pause\",\n  headers={\"Authorization\": f\"Bearer {os.environ['SDP_API_KEY']}\", \"Idempotency-Key\": str(uuid.uuid4())},\n  json={\n    \"signingCustodyWalletId\": \"cwlt_example\"\n  })"
+      }
+    },
+    "refresh-token-supply": {
+      "snippets": {
+        "curl": "curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/supply/refresh' \\\n  -H \"Authorization: Bearer $SDP_API_KEY\"",
+        "ts": "const res = await fetch(\"https://api.solana.com/v1/issuance/tokens/tok_example/supply/refresh\", {\n  method: \"POST\",\n  headers: {\n    Authorization: `Bearer ${process.env.SDP_API_KEY}`\n  }\n});",
+        "py": "import os, requests\n\nr = requests.post(\"https://api.solana.com/v1/issuance/tokens/tok_example/supply/refresh\",\n  headers={\"Authorization\": f\"Bearer {os.environ['SDP_API_KEY']}\"})"
+      }
+    },
+    "remove-token-allowlist-entry": {
+      "snippets": {
+        "curl": "curl -X DELETE 'https://api.solana.com/v1/issuance/tokens/tok_example/allowlist/al_example' \\\n  -H \"Authorization: Bearer $SDP_API_KEY\"",
+        "ts": "const res = await fetch(\"https://api.solana.com/v1/issuance/tokens/tok_example/allowlist/al_example\", {\n  method: \"DELETE\",\n  headers: {\n    Authorization: `Bearer ${process.env.SDP_API_KEY}`\n  }\n});",
+        "py": "import os, requests\n\nr = requests.delete(\"https://api.solana.com/v1/issuance/tokens/tok_example/allowlist/al_example\",\n  headers={\"Authorization\": f\"Bearer {os.environ['SDP_API_KEY']}\"})"
+      }
+    },
+    "screen-compliance-address": {
+      "snippets": {
+        "curl": "curl -X POST 'https://api.solana.com/v1/compliance/address-screenings' \\\n  -H \"Authorization: Bearer $SDP_API_KEY\" \\\n  -H \"Idempotency-Key: $(uuidgen)\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\n    \"address\": \"8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ\",\n    \"network\": \"solana\",\n    \"intent\": \"transfer_destination\"\n  }'",
+        "ts": "const res = await fetch(\"https://api.solana.com/v1/compliance/address-screenings\", {\n  method: \"POST\",\n  headers: {\n    Authorization: `Bearer ${process.env.SDP_API_KEY}`,\n    \"Idempotency-Key\": crypto.randomUUID(),\n    \"Content-Type\": \"application/json\"\n  },\n  body: JSON.stringify({\n    \"address\": \"8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ\",\n    \"network\": \"solana\",\n    \"intent\": \"transfer_destination\"\n  })\n});",
+        "py": "import os, requests, uuid\n\nr = requests.post(\"https://api.solana.com/v1/compliance/address-screenings\",\n  headers={\"Authorization\": f\"Bearer {os.environ['SDP_API_KEY']}\", \"Idempotency-Key\": str(uuid.uuid4())},\n  json={\n    \"address\": \"8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ\",\n    \"network\": \"solana\",\n    \"intent\": \"transfer_destination\"\n  })"
+      }
+    },
+    "unpause-token": {
+      "snippets": {
+        "curl": "curl -X POST 'https://api.solana.com/v1/issuance/tokens/tok_example/unpause' \\\n  -H \"Authorization: Bearer $SDP_API_KEY\" \\\n  -H \"Idempotency-Key: $(uuidgen)\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\n    \"signingCustodyWalletId\": \"cwlt_example\"\n  }'",
+        "ts": "const res = await fetch(\"https://api.solana.com/v1/issuance/tokens/tok_example/unpause\", {\n  method: \"POST\",\n  headers: {\n    Authorization: `Bearer ${process.env.SDP_API_KEY}`,\n    \"Idempotency-Key\": crypto.randomUUID(),\n    \"Content-Type\": \"application/json\"\n  },\n  body: JSON.stringify({\n    \"signingCustodyWalletId\": \"cwlt_example\"\n  })\n});",
+        "py": "import os, requests, uuid\n\nr = requests.post(\"https://api.solana.com/v1/issuance/tokens/tok_example/unpause\",\n  headers={\"Authorization\": f\"Bearer {os.environ['SDP_API_KEY']}\", \"Idempotency-Key\": str(uuid.uuid4())},\n  json={\n    \"signingCustodyWalletId\": \"cwlt_example\"\n  })"
+      }
+    }
+  }
+}

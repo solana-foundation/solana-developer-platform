@@ -38,17 +38,11 @@ The **Deploy** button appears in the token header and in the fund management pan
 
 You need the `tokenId` returned when you created the token. If you don't have it, list your tokens:
 
-```bash title="Terminal"
-curl https://api.solana.com/v1/issuance/tokens \
-  -H "Authorization: Bearer sf_..."
-```
+<ApiExample operation="list-tokens" />
 
 Note the token `id` (e.g., `tok_abc123`) — required for all deploy and post-deploy calls. Also list your wallets and use the wallet record's `id`, not its provider-specific `walletId` or public key:
 
-```bash title="Terminal"
-curl https://api.solana.com/v1/wallets \
-  -H "Authorization: Bearer sf_..."
-```
+<ApiExample operation="list-wallets" />
 
 </Tab>
 </Tabs>
@@ -137,10 +131,7 @@ After deployment, `signingCustodyWalletId` is historical deployment attribution.
 
 Fetch the token at any time to verify:
 
-```bash title="Terminal"
-curl https://api.solana.com/v1/issuance/tokens/tok_abc123 \
-  -H "Authorization: Bearer sf_..."
-```
+<ApiExample operation="get-token" />
 
 </Tab>
 </Tabs>
