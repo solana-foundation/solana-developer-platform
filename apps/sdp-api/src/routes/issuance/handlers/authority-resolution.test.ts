@@ -442,19 +442,9 @@ describe("authority-resolution", () => {
 
   it("leaves an unavailable RPC to the API's 503 instead of a 502", async () => {
     const unavailable = rpcHttpError(503);
-    fetchMaybeMintMock.mockRejectedValue(unavailable);
+    getTokenAclMintConfigMock.mockRejectedValue(unavailable);
 
-    await expect(
-      resolveCurrentAuthorityForRole(
-        {
-          SOLANA_RPC_URL: "https://rpc.example.test",
-          SOLANA_NETWORK: "devnet",
-        } as never,
-        { updateTokenAuthorities: vi.fn() } as never,
-        createToken(),
-        "mint"
-      )
-    ).rejects.toBe(unavailable);
+    await expect(resolveFreezeOperationAuthority(testEnv, createToken())).rejects.toBe(unavailable);
   });
 
   it("fails closed when the mint account cannot be found", async () => {

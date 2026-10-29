@@ -74,8 +74,8 @@ export async function readLiveClaimFloor(): Promise<bigint> {
   try {
     blockHeight = await createClusterRpc().getBlockHeight({ commitment: "confirmed" }).send();
   } catch (error) {
-    if (error instanceof SdpRpcError || !isSolanaError(error)) throw error;
     rethrowRpcUnavailable(error);
+    if (error instanceof SdpRpcError || !isSolanaError(error)) throw error;
     logEvent("warn", {
       event: "payment_requests.claim_floor_read_failed",
       ...describeError(error),

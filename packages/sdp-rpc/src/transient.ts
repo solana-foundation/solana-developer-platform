@@ -12,6 +12,7 @@ import {
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_TRANSACTION_HISTORY_NOT_AVAILABLE,
   SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR,
 } from "@solana/kit";
+import { z } from "zod";
 import { RpcHttpStatusError, RpcTimeoutError, SdpRpcError } from "./errors";
 
 // Overloaded-gateway / timeout HTTP statuses worth retrying.
@@ -61,10 +62,13 @@ const TRANSIENT_NETWORK_ERROR_CODES: ReadonlySet<string> = new Set([
   "UND_ERR_BODY_TIMEOUT",
 ]);
 
+/** The string `code` Node and undici errors carry; anything else parses as no code. */
+const errorCodeSchema = z.object({ code: z.string() });
+
 /** The string `code` on `value`, as Node and undici errors carry it. */
 function errorCode(value: unknown): string | undefined {
-  if (typeof value !== "object" || value === null || !("code" in value)) return undefined;
-  return typeof value.code === "string" ? value.code : undefined;
+  const parsed = errorCodeSchema.safeParse(value);
+  return parsed.success ? parsed.data.code : undefined;
 }
 
 /**

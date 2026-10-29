@@ -52,6 +52,12 @@ const genesisProbes = new Map<string, Promise<void>>();
 const genesisMismatches = new Map<string, { error: RpcUnavailableError; expiresAt: number }>();
 
 /**
+ * `<cluster> <endpointUrl>` to the provider's last 401/403 and when it expires, so a refused key is
+ * called once per `ENDPOINT_COOLDOWN_MS`, not on every request, even when no other endpoint serves.
+ */
+const keyRefusals = new Map<string, { error: unknown; expiresAt: number }>();
+
+/**
  * How long an endpoint that failed or reported itself unhealthy stays at the back of its pool's order, so
  * requests return to the preferred provider once it recovers.
  */
@@ -211,6 +217,44 @@ function withGenesisGuard(
   };
 }
 
+/**
+ * Whether a provider's gateway refused SDP's key (HTTP 401 or 403), before any node saw the request.
+ *
+ * @param error - What the endpoint threw.
+ * @returns `true` for kit's HTTP transport error with status 401 or 403.
+ */
+function isKeyRefusal(error: unknown): boolean {
+  return (
+    isSolanaError(error, SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR) &&
+    (error.context.statusCode === 401 || error.context.statusCode === 403)
+  );
+}
+
+/**
+ * Wrap one endpoint's transport so a key refusal is remembered for `ENDPOINT_COOLDOWN_MS`: until
+ * it expires, every request gets the remembered refusal as an unsent request, without a call.
+ *
+ * @param endpointTransport - The endpoint's guarded transport.
+ * @param refusalKey - `<cluster> <endpointUrl>`, shared by every pool holding the endpoint.
+ * @returns A transport that skips a provider that refused its key within the cooldown.
+ */
+function withKeyRefusalMemo(endpointTransport: RpcTransport, refusalKey: string): RpcTransport {
+  return async <TResponse>(rpcRequest: Parameters<RpcTransport>[0]) => {
+    const refusal = keyRefusals.get(refusalKey);
+    if (refusal !== undefined && refusal.expiresAt > Date.now()) {
+      throw new UnsentRequestError(refusal.error);
+    }
+    try {
+      return await endpointTransport<TResponse>(rpcRequest);
+    } catch (cause) {
+      if (isKeyRefusal(cause)) {
+        keyRefusals.set(refusalKey, { error: cause, expiresAt: Date.now() + ENDPOINT_COOLDOWN_MS });
+      }
+      throw cause;
+    }
+  };
+}
+
 function isClusterMismatch(error: unknown): boolean {
   return error instanceof RpcUnavailableError && error.reason === "cluster_mismatch";
 }
@@ -307,12 +351,14 @@ function judgeAttempt<TResponse>(
   if (!outcome.ok) {
     if (rpcRequest.signal?.aborted) return { cooldown: false, tryNext: false };
     if (outcome.cause instanceof UnsentRequestError) return { cooldown: true, tryNext: true };
-    const statusCode = isSolanaError(outcome.cause, SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR)
-      ? outcome.cause.context.statusCode
-      : null;
-    if (statusCode === 401 || statusCode === 403) return { cooldown: true, tryNext: true };
-    if (method === "requestAirdrop" && statusCode === 429)
+    if (isKeyRefusal(outcome.cause)) return { cooldown: true, tryNext: true };
+    if (
+      method === "requestAirdrop" &&
+      isSolanaError(outcome.cause, SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR) &&
+      outcome.cause.context.statusCode === 429
+    ) {
       return { cooldown: false, tryNext: true };
+    }
     if (!isTransientRpcError(outcome.cause)) return { cooldown: false, tryNext: false };
     return { cooldown: true, tryNext: !isSend };
   }
@@ -754,7 +800,7 @@ export async function proveEarnClusterEndpoint(
 
 /**
  * One memoized pool transport per cluster and ordered endpoint list, within one family: every
- * endpoint behind the per-attempt deadline, read socket retry and genesis guard.
+ * endpoint behind the key-refusal memo, per-attempt deadline, read socket retry and genesis guard.
  *
  * @param cluster - The cluster every endpoint must serve.
  * @param endpointUrls - The endpoints in failover order.
@@ -778,14 +824,17 @@ function pooledClusterTransport(
       provider,
       cluster,
       genesisProofKey: `${cluster} ${endpointUrl}`,
-      transport: withTransportDeadline(
-        withGenesisGuard(
-          withReadSocketRetry(createDefaultRpcTransport({ url: endpointUrl })),
-          cluster,
-          endpointUrl
+      transport: withKeyRefusalMemo(
+        withTransportDeadline(
+          withGenesisGuard(
+            withReadSocketRetry(createDefaultRpcTransport({ url: endpointUrl })),
+            cluster,
+            endpointUrl
+          ),
+          DEFAULT_RPC_REQUEST_TIMEOUT_MS,
+          "attempt"
         ),
-        DEFAULT_RPC_REQUEST_TIMEOUT_MS,
-        "attempt"
+        `${cluster} ${endpointUrl}`
       ),
     };
   });

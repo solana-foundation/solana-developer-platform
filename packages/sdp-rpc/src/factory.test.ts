@@ -17,6 +17,7 @@ import {
   SOLANA_ERROR__JSON_RPC__INTERNAL_ERROR,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY,
+  SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR,
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
@@ -461,6 +462,32 @@ describe("createClusterRpc", () => {
       genesisProbe(healthy),
       slotRead(healthy),
       slotRead(healthy),
+    ]);
+  });
+
+  it("calls a provider that refused its key once per cooldown, even with no other endpoint", async () => {
+    mock.timers.enable({ apis: ["Date"], now: 3_000_000 });
+    const unauthorized = "https://devnet-unauthorized-only.example.test";
+    configurePool({ SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: unauthorized });
+    const calls = stubEndpoints({ [unauthorized]: devnetHttpStatus(401) });
+    const rpc = runInClusterScope(SANDBOX, createClusterRpc);
+
+    for (let request = 0; request < 3; request += 1) {
+      await assert.rejects(rpc.getSlot().send(), (error: unknown) =>
+        isSolanaError(error, SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR)
+          ? error.context.statusCode === 401
+          : false
+      );
+    }
+    assert.deepEqual(calls, [genesisProbe(unauthorized), slotRead(unauthorized)]);
+
+    mock.timers.tick(30_000);
+    await assert.rejects(rpc.getSlot().send());
+    assert.deepEqual(calls, [
+      genesisProbe(unauthorized),
+      slotRead(unauthorized),
+      genesisProbe(unauthorized),
+      slotRead(unauthorized),
     ]);
   });
 
@@ -1003,7 +1030,7 @@ describe("managed endpoint URL validation", () => {
         assert.equal(error.code, "RPC_UNAVAILABLE");
         assert.equal(error.reason, "not_configured");
         assert.equal(error.details?.envKey, envKey);
-        assert.match(error.message, new RegExp(`^${envKey} `));
+        assert.ok(error.message.startsWith(`${envKey} `));
         assert.doesNotMatch(JSON.stringify([error.message, error.details]), /secret/);
         return true;
       });
