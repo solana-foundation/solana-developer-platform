@@ -7,6 +7,7 @@
 // biome-ignore-all lint/security/noSecrets: service operation identifiers are not credentials
 import { type Action, expandStoredGrants, normalizeGrants } from "@sdp/types/actions";
 import {
+  API_KEY_ENDED_STATUSES,
   type ApiKeyEnvironment,
   type ApiKeyStatus,
   type ApiKeyWalletScope,
@@ -209,7 +210,7 @@ const createdApiKeyRowSchema = z.object({
  * The keys a person created that still work, across every project of the
  * organization, so an admin removing them can decide what to revoke: keys are
  * the organization's and outlive their creator (HOO-2301). A rotated key keeps
- * its original creator. Same status filter as a project's key list.
+ * its original creator. Same status filter as a project's key list (`API_KEY_ENDED_STATUSES`).
  *
  * @param db - The database.
  * @param params.organizationId - The organization.
@@ -228,10 +229,10 @@ export async function listActiveApiKeysCreatedBy(
          JOIN projects p ON p.id = ak.project_id
         WHERE ak.organization_id = ?
           AND ak.created_by = ?
-          AND ak.status NOT IN ('revoked', 'deactivated')
+          AND NOT (ak.status = ANY(?::text[]))
         ORDER BY ak.created_at DESC`
     )
-    .bind(params.organizationId, params.createdByUserId)
+    .bind(params.organizationId, params.createdByUserId, API_KEY_ENDED_STATUSES)
     .all<Record<string, unknown>>();
   return z
     .array(createdApiKeyRowSchema)
@@ -288,10 +289,10 @@ export class ApiKeyService {
          JOIN projects p ON p.id = ak.project_id
          WHERE ak.organization_id = ?
            AND ak.project_id = ?
-           AND ak.status NOT IN ('revoked', 'deactivated')
+           AND NOT (ak.status = ANY(?::text[]))
          ORDER BY ak.created_at DESC`
       )
-      .bind(this.scope.organizationId, this.scope.projectId)
+      .bind(this.scope.organizationId, this.scope.projectId, API_KEY_ENDED_STATUSES)
       .all<ApiKeyListRow>();
 
     return result.results.map((row) => this.mapListRow(row));

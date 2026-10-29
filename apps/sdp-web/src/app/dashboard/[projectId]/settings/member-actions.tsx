@@ -20,6 +20,7 @@ import { EntityLink } from "@/components/entity-link";
 import { useTranslations } from "@/i18n/provider";
 import { projectHref } from "@/lib/dashboard-project-path";
 import { useActionIdempotencyKey } from "@/lib/use-action-idempotency-key";
+import { membersQueryKeys } from "./members-query-key";
 
 export function MemberActions({
   memberId,
@@ -169,7 +170,7 @@ export function MemberActions({
  */
 function MemberApiKeys({ memberId, label }: { memberId: string; label: string }) {
   const t = useTranslations();
-  const { data: apiKeys, error } = useSWR(["member-api-keys", memberId], ([, id]) =>
+  const { data: apiKeys, error } = useSWR(membersQueryKeys.memberApiKeys({ memberId }), ([, id]) =>
     listMemberApiKeys(id)
   );
 

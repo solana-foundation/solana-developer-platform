@@ -1,5 +1,5 @@
 import { API_KEY_GRANTABLE_ACTIONS } from "@sdp/types/actions";
-import { API_KEY_WALLET_SCOPES } from "@sdp/types/api-keys";
+import { API_KEY_STATUSES, API_KEY_WALLET_SCOPES } from "@sdp/types/api-keys";
 import { z } from "zod";
 import {
   apiKeyCreateSchema as apiKeyCreateSchemaBase,
@@ -43,7 +43,7 @@ const apiKeyWalletIdsSchema = z.array(z.string()).openapi({
 });
 
 const apiKeyStatusSchema = z
-  .enum(["active", "revoked", "expired", "deactivated"])
+  .enum(API_KEY_STATUSES)
   .openapi({ description: "API key status.", example: "active" });
 
 export const apiKeyListItemSchema = z
