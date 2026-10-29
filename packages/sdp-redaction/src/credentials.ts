@@ -31,8 +31,19 @@ const SENSITIVE_JSON_FIELD_START =
 // A cookie header is a credential container, not one credential: every
 // `name=value` pair after `Cookie:` is a session, and they are separated by
 // spaces — exactly where the generic assignment pattern's value stops. Consume
-// the whole header value to the end of the line instead.
-const COOKIE_ASSIGNMENT_PATTERN = /\b(cookies?)\b(\s*[:=]\s*)[^\n\r]*/gi;
+// the whole header value: to the end of the line for a raw header, to the end
+// of the containing string for one embedded in serialized data. The tempered
+// value ends at an unescaped quote that opens structure — a `,`/`}`/`]` run
+// followed either by a quoted key with a colon (`","status":502`) or by
+// nothing but structure to the end. Cookie syntax has no quoted keys, so a raw
+// header — quoted values like `session="abc", refresh="def"` included — still
+// consumes its line, and an escaped quote inside the value (`\"`) never ends
+// it. Without the boundary, redacting
+// `{"message":"Cookie: session=abc","status":502}` erased `status` and the
+// closing quotes along with the header. The token stays linear: the lookahead
+// only runs its structure scan past a quote, never per character.
+const COOKIE_ASSIGNMENT_PATTERN =
+  /\b(cookies?)\b(\s*[:=]\s*)(?:(?!(?<!\\)["']\s*[,}\]][\s,}\]]*(?:["'][^"'\n\r]*["']\s*:|$))[^\n\r])*/gi;
 // Do not start the exact-only seed alternative after an identifier separator.
 const SENSITIVE_ASSIGNMENT_PATTERN =
   /\b(app[-_ ]?secret|api[-_ ]?secret|api[-_ ]?key|client[-_ ]?secret|wallet[-_ ]?secret|signing[-_ ]?secret|private[-_ ]?key|secret[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|id[-_ ]?token|authorization|passphrase|password|pem|(?<![A-Za-z0-9_-])seed|credential|secret|token|wallet[-_ ]?passphrase|seed[-_ ]?phrase)\b(\s*[:=]\s*)[^,\s}]+/gi;
