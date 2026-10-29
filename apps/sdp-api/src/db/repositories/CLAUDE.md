@@ -17,7 +17,6 @@ The mechanism-split predecessors
 longer have writers, and their code is retired.
 
 Things that will bite:
-
 - **Legal source states come from `EARN_MOVEMENT_TRANSITIONS` (`@sdp/types`),
   never from the caller.** Terminal regression is unrepresentable rather than
   merely refused. The guard is applied as a compare-and-swap in the same
@@ -139,7 +138,6 @@ exception from the late-watch query without another recovery path.
 
 `RAMP_TRANSFER_TRANSITIONS` (`@sdp/types`) names each legal ramp transfer
 status change, with its source statuses, target and ramp types (HOO-2033).
-
 - **Sources come from the table, never the caller.**
   `PaymentsRepository.transitionRampTransfer` applies the named entry as a
   compare-and-swap on status and type, so an illegal source matches zero rows,
@@ -189,7 +187,6 @@ status change, with its source statuses, target and ramp types (HOO-2033).
 ## Ramps: status pull queue
 
 The `sweep-ramp-transfer-statuses` cron recovers missed webhooks (HOO-2040).
-
 - **One claim per row.** `claimRampTransferForStatusPull` selects and stamps
   `provider_status_last_polled_at` in one statement (`FOR UPDATE SKIP
   LOCKED`), so overlapping sweeps never ask about the same row. It leaves
@@ -232,7 +229,6 @@ deposit signature untouched, and withdraws the instruction for review.
 
 A removed ramp provider's id moves from `RAMP_PROVIDERS` to
 `RETIRED_RAMP_PROVIDERS` (`@sdp/types/provider-access`) and is never reused.
-
 - **Reads parse, writes stay live.** `mapTransferRow`, the provider-account row
   schema and the `ramp_webhook_events` row parse `provider` against
   `PERSISTED_RAMP_PROVIDERS`, so a retired provider's rows still read; an id

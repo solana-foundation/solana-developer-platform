@@ -16,7 +16,6 @@ check:transaction-reads` runs in CI and rejects a v0-only read option.
 `apps/sdp-api/src/runtime/outbound-dispatcher.ts` installs one undici `Agent`
 as the global dispatcher at API and job boot, so every `fetch` (kit, web3.js,
 REST) shares it:
-
 - `keepAliveTimeout` 19 s: past the ~16 s Treasury refresh and under a Solana
   RPC node's 20 s idle close, so steady refreshes reuse sockets (each closed
   socket holds a Cloud NAT port for 120 s).
@@ -35,7 +34,6 @@ seams) re-send one JSON-RPC request once, at once, to the same URL, and only
 when `fetch` rejected because the socket closed or reset before any response
 (`UND_ERR_SOCKET`, `ECONNRESET`, "other side closed"). That is a pooled
 keep-alive socket the server closed as it was reused.
-
 - Re-sent: the plain reads in `READ_METHODS` (accounts, balances, blocks,
   slots, signatures, token reads).
 - Never re-sent: `sendTransaction`, `simulateTransaction`, `requestAirdrop`,
@@ -65,7 +63,6 @@ a shared or re-sent path.
 The API supplies `setRpcTelemetrySink` from `@sdp/rpc/telemetry`. Sink failures
 cannot change an RPC result. Events name the configured provider, cluster and
 method; they never include endpoint URLs or request payloads.
-
 - `managed_pool` counts one logical endpoint attempt, which may include a
   genesis proof or socket retry. These are not billed request counts.
 - `earn_pinned` counts physical transport calls inside
@@ -119,7 +116,6 @@ their own transports from a URL and pin one endpoint per operation, until they
 take clients (HOO-1881) and `withConsistentRpcReads` (HOO-2025). `factory.ts`
 therefore exports two Earn-only functions, fenced by Biome to
 `apps/sdp-api/src/services/earn/cluster-rpc.ts`:
-
 - `earnClusterEndpointUrls(cluster)`: the scope's pool URLs in failover order,
   or none.
 - `proveEarnClusterEndpoint(cluster, url)`: the pool's own genesis probe and
