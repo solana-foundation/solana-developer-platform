@@ -498,7 +498,7 @@ export async function createDvpTrade(
   // validation and after the durable claim has won the idempotency race.
   let signed = false;
   try {
-    const feePayment = createSponsorshipFeePayment(
+    const feePayment = createSponsorshipFeePayment<"dvp">(
       env,
       await resolveProjectSponsorshipScope(env, {
         organizationId: input.organizationId,

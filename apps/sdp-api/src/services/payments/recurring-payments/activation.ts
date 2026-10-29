@@ -758,7 +758,7 @@ export async function activateRecurringPayment(input: {
     if (recoveringStaleActivation) {
       await input.admitStart();
     }
-    const signer = await createOrgSignerForCustodyWallet(
+    const signer = await createOrgSignerForCustodyWallet<"recurring_payments">(
       input.env,
       input.organizationId,
       input.projectId,
@@ -1014,7 +1014,7 @@ export async function activateRecurringPayment(input: {
         subscriptionAuthorityAddress,
         { commitment: "confirmed" }
       );
-      const feePayment = createSponsorshipFeePayment(
+      const feePayment = createSponsorshipFeePayment<"recurring_payments">(
         input.env,
         await resolveProjectSponsorshipScope(input.env, {
           organizationId: input.organizationId,

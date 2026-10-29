@@ -37,7 +37,7 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic custom min
   });
 
   it("creates a custom mint through the sponsored Mosaic service", { timeout: 60000 }, async () => {
-    const signer = await createOrgSignerForCustodyWallet(
+    const signer = await createOrgSignerForCustodyWallet<"issuance">(
       env as ApiTestEnv,
       TEST_ORG.id,
       TEST_PROJECT.id,
