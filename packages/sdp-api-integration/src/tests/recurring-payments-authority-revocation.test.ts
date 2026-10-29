@@ -1,5 +1,8 @@
 import { apiTestSupport } from "@sdp/api/test-support";
-import { PAYMENT_RECURRING_PAYMENT_STATUSES } from "@sdp/types/payments";
+import {
+  PAYMENT_RECURRING_PAYMENT_STATUSES,
+  RECURRING_PAYMENT_TOKEN_APPROVAL_STATUSES,
+} from "@sdp/types/payments";
 import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { type Address, address, generateKeyPairSigner } from "@solana/kit";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -41,7 +44,10 @@ const recurringPaymentResponseSchema = z.object({
 });
 const tokenApprovalResponseSchema = z.object({
   data: z.object({
-    tokenApproval: z.object({ status: z.string(), sharedWith: z.array(z.unknown()) }),
+    tokenApproval: z.object({
+      status: z.enum(RECURRING_PAYMENT_TOKEN_APPROVAL_STATUSES),
+      sharedWith: z.array(z.unknown()),
+    }),
   }),
 });
 const counterpartyResponseSchema = z.object({
