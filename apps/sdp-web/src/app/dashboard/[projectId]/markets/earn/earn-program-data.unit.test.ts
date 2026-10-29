@@ -15,6 +15,7 @@ import {
   appendVaultPositionsRead,
   createEarnVaultDeposit,
   createEarnVaultWithdrawalRequest,
+  createEarnWithdrawal,
   type EarnVaultPositionsRead,
   earnExternalWalletSummaryRefreshInterval,
   earnLedgerRefreshInterval,
@@ -692,6 +693,52 @@ describe("createEarnVaultDeposit", () => {
 
     expect(result.ok).toBe(false);
     expect(result).toMatchObject({ error: "Invalid vault deposit response", status: 201 });
+  });
+});
+
+describe("createEarnWithdrawal", () => {
+  it("sends the key only as a header and allowlists the JSON body", async () => {
+    // The withdrawal create resolves the caller's key from body `requestId`
+    // XOR the header and REFUSES both (sdp-api `program.ts`), so the dashboard
+    // contract is the header alone. The auto-attached per-action key of
+    // `dashboardRequest` must therefore never fire here (a caller-set header
+    // suppresses it), and the body must carry nothing but the intent.
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(
+          JSON.stringify({
+            data: {
+              withdrawal: {
+                withdrawalRef: "wref_1",
+                status: "processing",
+                destinationAddress: "22222222222222222222222222222222",
+                createdAt: TIMESTAMP,
+              },
+            },
+          }),
+          { status: 201, headers: { "Content-Type": "application/json" } }
+        )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const untypedInput = {
+      amountUsd: "10",
+      token: "usdc",
+      destinationAddress: "22222222222222222222222222222222",
+      requestId: "must-not-be-forwarded",
+    } as unknown as Parameters<typeof createEarnWithdrawal>[1] & { requestId: string };
+
+    await createEarnWithdrawal("program_1", untypedInput, "withdrawal-key");
+
+    const [, options] = fetchMock.mock.calls[0] ?? [];
+    const headers = new Headers(options?.headers);
+    expect(headers.get("Idempotency-Key")).toBe("withdrawal-key");
+    expect(headers.get("x-project-id")).toBe("prj_test_sandbox");
+    expect(JSON.parse(String(options?.body))).toEqual({
+      amountUsd: "10",
+      token: "usdc",
+      destinationAddress: "22222222222222222222222222222222",
+    });
+    expect(String(options?.body)).not.toContain("requestId");
   });
 });
 

@@ -1750,16 +1750,34 @@ export function previewEarnWithdrawal(
 }
 
 export interface EarnWithdrawalCreateInput extends EarnWithdrawalPreviewInput {
-  /** Client-minted UUIDv4 so a retried confirm can never double-withdraw. */
-  requestId: string;
   destinationAddress: string;
 }
 
+/**
+ * Creates the withdrawal under the caller's Idempotency-Key, sent as the
+ * HEADER and never copied into the JSON body. The route resolves the caller's
+ * key from body `requestId` XOR this header and refuses both (`program.ts` in
+ * sdp-api), so a client must pick one form and keep it stable: the dashboard's
+ * is the header, minted from the modal's persisted per-intent key store, the
+ * same contract as every other dashboard mutation (HOO-1918).
+ */
 export function createEarnWithdrawal(
   programId: string,
-  input: EarnWithdrawalCreateInput
+  input: EarnWithdrawalCreateInput,
+  idempotencyKey: string
 ): Promise<DashboardFetchResult<{ data: EarnProgramWithdrawalResponse }>> {
-  return dashboardFetch(programPath(programId, "/withdrawals"), { method: "POST", body: input });
+  // Rebuild the body field-by-field so even an untyped caller cannot smuggle
+  // the idempotency key (or anything else) into this value-moving request.
+  const body: EarnWithdrawalCreateInput = {
+    amountUsd: input.amountUsd,
+    token: input.token,
+    destinationAddress: input.destinationAddress,
+  };
+  return dashboardFetch(programPath(programId, "/withdrawals"), {
+    method: "POST",
+    headers: { [IDEMPOTENCY_KEY_HEADER]: idempotencyKey },
+    body,
+  });
 }
 
 function fetchEarnWithdrawal(

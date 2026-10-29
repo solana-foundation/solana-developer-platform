@@ -17,14 +17,18 @@ import { Select, SelectItem } from "@sdp/ui/select";
 import { StatusText } from "@sdp/ui/status-text";
 import { Loader2Icon } from "lucide-react";
 import { type ChangeEvent, useCallback, useEffect, useRef, useState } from "react";
+import { useSWRConfig } from "swr";
 import { BASE58_ADDRESS_PATTERN } from "@/app/dashboard/[projectId]/markets/base58-address";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { fetchResultAnswer, uncertainMoneyAnswerMessage } from "@/lib/idempotency";
+import { createIdempotencyKeyStore, settleMoneyIdempotencyKey } from "@/lib/idempotency-key-store";
 import { useModalFocus } from "@/lib/use-modal-focus";
 import { compareUnsignedDecimals, isPositiveDecimal, parseUnsignedDecimal } from "./earn-decimal";
 import { formatDurationRange, formatUsd, isoDurationDays } from "./earn-format";
 import { EARN_TRANSACTION_MODAL_FRAME } from "./earn-modal";
 import { createEarnWithdrawal, previewEarnWithdrawal } from "./earn-program-data";
+import { earnQueryKeys } from "./earn-query-key";
 import { earnStatusTextTone } from "./earn-vault-ui-state";
 
 export function isPositiveUsdAmount(value: string): boolean {
@@ -52,43 +56,34 @@ export function withdrawalRequestSignature(
 }
 
 /**
- * The idempotency key identifies ONE intended withdrawal, so it is bound to
- * the parameters that define it. Retrying an unchanged confirm reuses the key
- * (the provider collapses the duplicate instead of paying twice); changing the
- * amount, token, or destination after a failed attempt mints a new key, so a
- * corrected withdrawal can never be answered with the cached result of the
- * one the user just fixed — which would settle funds to the old address while
- * reporting success. "Changing the amount" means its VALUE: the signature is
- * canonical (see `withdrawalRequestSignature`), so re-spelling the same value
- * after an ambiguous failure replays the original key instead of paying twice.
+ * The withdrawal's idempotency key identifies ONE intended withdrawal, so it
+ * is bound to the parameters that define it via
+ * {@link withdrawalRequestSignature}. Retrying an unchanged confirm reuses
+ * the key (the API replays it and the provider collapses the duplicate
+ * instead of paying twice); changing the amount, token, or destination after
+ * a failed attempt mints a new key, so a corrected withdrawal can never be
+ * answered with the cached result of the one the user just fixed — which
+ * would settle funds to the old address while reporting success. "Changing
+ * the amount" means its VALUE: the signature is canonical (see
+ * `withdrawalRequestSignature`), so re-spelling the same value after an
+ * ambiguous failure replays the original key instead of paying twice.
  *
- * A ref, not `useMemo`: React may discard a memo cache and recompute, which
- * would hand the same parameters a fresh key and reintroduce the
- * double-withdraw risk on retry.
+ * The key lives in the persisted per-tab store, NOT a React ref: a ref dies
+ * with the modal and with the page load, and a reload after an ambiguous
+ * failure would mint a fresh key for the same intent — a second payout. The
+ * store keeps the key from claim until an answer retires it, so the reload's
+ * retry is answered by the API's replay. A store that refuses writes refuses
+ * the send (`DashboardEarn.intentStorageUnavailable`): a money movement never
+ * goes out under a key a reload could not recover.
  *
  * `programId` is part of the signature because one modal instance can be
  * re-pointed at another program without unmounting. Without it, a key minted
  * for a withdrawal from program A would be carried into an identical-looking
  * withdrawal from program B.
  */
-function useWithdrawalRequestId(
-  programId: string,
-  amountUsd: string,
-  token: EarnPortfolioToken | undefined,
-  destinationAddress: string
-): string {
-  const requestSignature = withdrawalRequestSignature(
-    programId,
-    amountUsd,
-    token,
-    destinationAddress
-  );
-  const requestRef = useRef<{ signature: string; id: string } | null>(null);
-  if (requestRef.current?.signature !== requestSignature) {
-    requestRef.current = { signature: requestSignature, id: crypto.randomUUID() };
-  }
-  return requestRef.current.id;
-}
+const earnWithdrawalIdempotencyKeyStore = createIdempotencyKeyStore(
+  "sdp:earn:program-withdrawal:idempotency:v1"
+);
 
 const PREVIEW_DEBOUNCE_MS = 400;
 
@@ -574,6 +569,7 @@ export function EarnWithdrawModal({
   const [preview, setPreview] = useState<PreviewState>({ phase: "idle" });
   const [laneLiquidity, setLaneLiquidity] = useState<LaneLiquidity>({ phase: "loading" });
   const [submitting, setSubmitting] = useState(false);
+  const { mutate } = useSWRConfig();
   // Same lock the vault modals use: a ref read BEFORE the first await, so a
   // second click that lands before the re-render commits cannot re-enter with
   // the stale `submitting === false` closure and send a second POST.
@@ -609,8 +605,6 @@ export function EarnWithdrawModal({
     (laneCeiling === undefined || compareUnsignedDecimals(amount, laneCeiling) !== 1);
   const destination = destinationInput.trim();
   const destinationValid = BASE58_ADDRESS_PATTERN.test(destination);
-
-  const requestId = useWithdrawalRequestId(programId, amount, token, destination);
 
   useEffect(() => {
     if (submitting) contentRef.current?.focus();
@@ -740,15 +734,37 @@ export function EarnWithdrawModal({
     submittingRef.current = true;
     setSubmitting(true);
     setSubmitError(null);
-    const result = await createEarnWithdrawal(programId, {
-      requestId,
-      amountUsd: amount,
-      token,
-      destinationAddress: destination,
-    });
-    submittingRef.current = false;
-    setSubmitting(false);
-    if (!result.ok) {
+    try {
+      // One persisted key per intended withdrawal (see the store above). An
+      // unknown outcome or a reused key KEEPS the key, so the next press is
+      // answered under it instead of paying a second time.
+      const fingerprint = withdrawalRequestSignature(programId, amount, token, destination);
+      const { key, persisted } = earnWithdrawalIdempotencyKeyStore.claim(fingerprint);
+      if (!persisted) {
+        setSubmitError(t("DashboardEarn.intentStorageUnavailable"));
+        return;
+      }
+      const result = await createEarnWithdrawal(
+        programId,
+        { amountUsd: amount, token, destinationAddress: destination },
+        key
+      );
+      const answer = fetchResultAnswer(result);
+      settleMoneyIdempotencyKey(earnWithdrawalIdempotencyKeyStore, fingerprint, key, answer);
+      const uncertain = uncertainMoneyAnswerMessage(answer);
+      if (result.ok) {
+        setCreated({ withdrawal: result.data.data.withdrawal, token });
+        onWithdrawalCreated(result.data.data.withdrawal.withdrawalRef);
+        return;
+      }
+      if (uncertain !== null) {
+        // The outcome is unknown or still under way: the key stays kept, the
+        // reader is sent to the ledger list, and the list is refreshed so the
+        // accepted withdrawal (if any) shows up.
+        setSubmitError(t(uncertain));
+        void mutate(earnQueryKeys.programWithdrawals({ programId }));
+        return;
+      }
       // A create can still lose a race with a rebalance between preview and
       // confirm. When the refusal names the lane ceiling, answer with SDP copy
       // carrying that number and correct the available line — echoing the
@@ -772,10 +788,10 @@ export function EarnWithdrawModal({
           amount: formatUsd(laneCeilingUsd, locale),
         })
       );
-      return;
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
     }
-    setCreated({ withdrawal: result.data.data.withdrawal, token });
-    onWithdrawalCreated(result.data.data.withdrawal.withdrawalRef);
   };
 
   if (created) {

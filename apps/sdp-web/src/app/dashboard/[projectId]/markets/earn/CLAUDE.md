@@ -109,12 +109,14 @@ one grows — and the API already answers an unknown value with an empty page, w
 is the honest result.
 
 `proxyToSdpApi` never copies the inbound header bag — auth, project scope and
-tracing stay server-owned — so a client-set `Idempotency-Key` never reaches the
-API on its own. A route forwards one deliberately, per header, through the
-optional `upstreamHeaders` argument, spelling it `IDEMPOTENCY_KEY_HEADER`
-(`src/lib/idempotency.ts`). `vault-deposits/`, `vault-withdrawals/`, and the
-queued request create/cancel routes opt in, forwarding that single header and
-nothing else; the program create still sends the body `requestId` form.
+tracing stay server-owned. It forwards exactly one client header on every
+mutation: the caller's `Idempotency-Key` (`withForwardedIdempotencyKey`,
+HOO-1918), so a keyed request is keyed end to end without the route's
+involvement. The key never enters a JSON body: the earn routes accept body
+`requestId` XOR the header and refuse both (`program.ts` in sdp-api), and the
+dashboard's side of that contract is the header — vault movements from their
+per-flow key stores, the custodial program withdrawal from the withdraw
+modal's persisted store (`earn-withdraw-modal.tsx`).
 
 ## Routes
 
