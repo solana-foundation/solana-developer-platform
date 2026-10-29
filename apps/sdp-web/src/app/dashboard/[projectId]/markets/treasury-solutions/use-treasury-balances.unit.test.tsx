@@ -14,6 +14,9 @@ const mocks = vi.hoisted(() => ({
   error: undefined as Error | undefined,
 }));
 vi.mock("@/app/dashboard/[projectId]/markets/earn/earn-program-data", () => ({
+  // Mirrors VAULT_BALANCE_READ_BATCH_SIZE from the real module; the mocked
+  // module is kept dependency-free on purpose.
+  VAULT_BALANCE_READ_BATCH_SIZE: 100,
   useEarnVaultPositions: () => ({
     reads: mocks.reads,
     positions: mocks.positions,

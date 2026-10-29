@@ -49,8 +49,13 @@ export type DvpPartySlot = z.infer<typeof partySlotSchema>;
 
 export { partySlotSchema };
 
-/** One party on the wire: the exact union the create endpoint takes. */
-export type DvpPartyRef =
+/** One party on the wire: the exact union the create endpoint takes.
+ *
+ * Named for the wire, not "party reference" outright, because the module's
+ * read side (`dvp-trade.ts`) exports a different resolved-party shape also
+ * called a party reference — one name for one shape keeps the two from being
+ * misread for each other. */
+export type DvpPartyWireRef =
   | { walletId: string }
   | { counterpartyAccountId: string }
   | { address: string };
@@ -62,12 +67,12 @@ export type DvpPartyRef =
  * to its address through the offering lists.
  */
 export interface DvpPartyWire {
-  ref: DvpPartyRef;
+  ref: DvpPartyWireRef;
   address: string;
 }
 
 /** The party as the request wants it, from an already-valid slot. */
-export function partyRefFor(slot: DvpPartySlot): DvpPartyRef {
+export function partyRefFor(slot: DvpPartySlot): DvpPartyWireRef {
   switch (slot.mode) {
     case "wallet":
       return { walletId: slot.walletId };
@@ -102,7 +107,7 @@ export interface DvpParties {
   /** Both slots resolve to the SAME address: the program refuses one party. */
   sameAddress: boolean;
   /** The parties as the request wants them, or null while incomplete. */
-  request: { partyA: DvpPartyRef; partyB: DvpPartyRef } | null;
+  request: { partyA: DvpPartyWireRef; partyB: DvpPartyWireRef } | null;
   /** The parties with their resolved addresses, for the idempotency key. */
   wire: { a: DvpPartyWire; b: DvpPartyWire } | null;
   resolved: { a: DvpPartyResolved; b: DvpPartyResolved };
@@ -182,25 +187,13 @@ export function deriveDvpParties(
  * "" is not a fallback: it leaves the payout unusable and blocks submit, which
  * beats carrying the previous party's address into a trade it no longer names.
  *
+ * The same resolver the parties step renders with (`resolveSlot`), so a wallet
+ * means the same address on both sides of the form and neither can drift.
+ *
  * @param slot - The party slot to resolve.
  * @param context - The wallets and counterparty accounts a slot can reference.
  * @returns The party's address, or "".
  */
 export function resolvePartySlotAddress(slot: DvpPartySlot, context: DvpCreateContext): string {
-  switch (slot.mode) {
-    case "wallet":
-      return context.wallets.find((candidate) => candidate.id === slot.walletId)?.address ?? "";
-    case "counterparty":
-      return (
-        context.counterpartyAccounts.find(
-          (candidate) => candidate.counterpartyAccountId === slot.counterpartyAccountId
-        )?.address ?? ""
-      );
-    case "address":
-      return slot.address;
-    default: {
-      const exhausted: never = slot;
-      return exhausted;
-    }
-  }
+  return resolveSlot(slot, context).address ?? "";
 }

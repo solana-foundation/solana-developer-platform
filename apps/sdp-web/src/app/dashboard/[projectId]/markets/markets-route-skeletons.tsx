@@ -13,6 +13,10 @@ import {
 } from "@/components/dashboard-workspace-panel";
 import { RecordStack } from "@/components/refresh-record";
 import type { DashboardFlags } from "@/flags/dashboard";
+import {
+  DVP_TRADE_DETAIL_COLUMN_CLASS,
+  DVP_TRADE_DETAIL_FRAME_CLASS,
+} from "./dvp/dvp-trade-detail-frame";
 import { EARN_TABLE, EARN_TABLE_FRAME, type EarnTableColumns } from "./earn/earn-table-layout";
 import { EMBEDDED_YIELD_STRATEGY_COLUMNS } from "./earn/embedded-yield-layout";
 import {
@@ -441,10 +445,10 @@ export function DvpTradeDetailSkeleton() {
   return (
     <DashboardWorkspaceOverviewPanel
       aria-busy="true"
-      className="px-4 pt-6 pb-8 md:px-8 xl:px-16"
+      className={DVP_TRADE_DETAIL_FRAME_CLASS}
       data-loading-layout="dvp-trade-detail"
     >
-      <div className="mx-auto flex w-full max-w-[63rem] flex-col gap-8">
+      <div className={cn(DVP_TRADE_DETAIL_COLUMN_CLASS, "flex flex-col gap-8")}>
         {/* Status badge and the created / expires facts, then whose move it is. */}
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-center justify-between gap-3">

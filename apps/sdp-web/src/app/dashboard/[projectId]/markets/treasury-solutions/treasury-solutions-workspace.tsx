@@ -9,11 +9,11 @@ import type {
   EarnVaultPosition,
   EarnVaultWithdrawal,
 } from "@sdp/types/earn";
-import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import { Modal } from "@sdp/ui/modal";
 import { Loader2Icon } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { isUsdStableMint } from "@/app/dashboard/[projectId]/markets/earn/earn-format";
 import { EARN_TRANSACTION_MODAL_FRAME } from "@/app/dashboard/[projectId]/markets/earn/earn-modal";
 import {
   EarnVaultDepositOutcomeTracker,
@@ -262,13 +262,13 @@ function treasuryShareMints(
 ): VaultShareMintVocabulary {
   const known = new Set<string>();
   for (const position of positions ?? []) {
-    if (!WELL_KNOWN_TOKEN_BY_MINT.get(position.shareMint)?.isUsdStable) {
+    if (!isUsdStableMint(position.shareMint)) {
       known.add(position.shareMint);
     }
   }
   for (const strategy of strategies ?? []) {
     const shareMint = strategy.shareMint;
-    if (shareMint && !WELL_KNOWN_TOKEN_BY_MINT.get(shareMint)?.isUsdStable) {
+    if (shareMint && !isUsdStableMint(shareMint)) {
       known.add(shareMint);
     }
   }

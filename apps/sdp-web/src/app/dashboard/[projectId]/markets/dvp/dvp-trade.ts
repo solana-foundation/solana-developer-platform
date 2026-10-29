@@ -43,6 +43,20 @@ export const dvpActionWalletSchema = z.object({
 type DvpActionWallet = z.infer<typeof dvpActionWalletSchema>;
 
 /**
+ * May a fund or reclaim click sign with this action wallet? Custody policy
+ * gates runtime execution per wallet, and every gate on a money-adjacent
+ * button — the disable, the "signing disabled" warning and the double-checked
+ * `onClick` — reads this one predicate, so the buttons cannot drift out of the
+ * custody contract one spelling at a time. A type predicate so a `true` answer
+ * also narrows the wallet for the `wallet.id` the click hands the API.
+ */
+export function canSignWith(
+  wallet: { isRuntimeExecutionAllowed: boolean } | null | undefined
+): wallet is { isRuntimeExecutionAllowed: true } {
+  return wallet?.isRuntimeExecutionAllowed === true;
+}
+
+/**
  * A DvP endpoint's refusal envelope. Only the message — and, when the refusal
  * is a structured one, its reason code — is ever read by the dashboard;
  * everything else the API attached is stripped.

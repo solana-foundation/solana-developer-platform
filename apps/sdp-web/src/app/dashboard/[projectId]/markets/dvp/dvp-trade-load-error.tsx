@@ -1,6 +1,10 @@
 import { Callout } from "@sdp/ui/callout";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { getTranslations } from "@/i18n/server";
+import {
+  DVP_TRADE_DETAIL_COLUMN_CLASS,
+  DVP_TRADE_DETAIL_FRAME_CLASS,
+} from "./dvp-trade-detail-frame";
 
 /**
  * Shown when the trade could not be read, as distinct from not existing.
@@ -17,8 +21,8 @@ import { getTranslations } from "@/i18n/server";
 export async function DvpTradeLoadError({ message }: { message?: string | null }) {
   const t = await getTranslations();
   return (
-    <DashboardWorkspaceOverviewPanel className="px-4 pt-6 pb-8 md:px-8 xl:px-16">
-      <div className="mx-auto w-full max-w-[63rem]">
+    <DashboardWorkspaceOverviewPanel className={DVP_TRADE_DETAIL_FRAME_CLASS}>
+      <div className={DVP_TRADE_DETAIL_COLUMN_CLASS}>
         <Callout live title={t("DashboardMarkets.dvp.loadErrorTitle")} variant="danger">
           <p>{t("DashboardMarkets.dvp.loadErrorDescription")}</p>
           <p className="mt-2 font-mono text-xs opacity-80">

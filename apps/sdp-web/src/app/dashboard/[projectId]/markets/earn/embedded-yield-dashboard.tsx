@@ -6,7 +6,7 @@ import type {
   EarnExternalWalletStrategyTotal,
   EarnStrategy,
 } from "@sdp/types/earn";
-import { type SolanaCluster, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { Button } from "@sdp/ui/button";
 import { Callout } from "@sdp/ui/callout";
 import { cn } from "@sdp/ui/cn";
@@ -41,6 +41,7 @@ import {
   formatProviderAmount,
   formatTokenValue,
   formatUsd,
+  isUsdStableMint,
 } from "./earn-format";
 import {
   earnMintAsset,
@@ -100,7 +101,7 @@ function portfolioLiveValue(summary: EarnExternalWalletPositionSummary): Portfol
   const values: string[] = [];
   for (const total of summary.totalsByToken) {
     if (total.tokenValue === undefined) return { kind: "withheld" };
-    if (!WELL_KNOWN_TOKEN_BY_MINT.get(total.tokenMint)?.isUsdStable) return { kind: "not_dollar" };
+    if (!isUsdStableMint(total.tokenMint)) return { kind: "not_dollar" };
     values.push(total.tokenValue);
   }
   const value = sumDecimalStrings(values);

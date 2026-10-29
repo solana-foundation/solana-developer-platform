@@ -40,6 +40,7 @@ import { DvpCloseActions } from "./dvp-close-actions";
 import { DvpNextStep } from "./dvp-next-step";
 import { DvpStatusBadge } from "./dvp-status";
 import {
+  canSignWith,
   type DvpLegTransfer,
   type DvpPartyRef,
   type DvpTrade,
@@ -56,6 +57,10 @@ import {
   legTransfers,
   overFundedLegs,
 } from "./dvp-trade";
+import {
+  DVP_TRADE_DETAIL_COLUMN_CLASS,
+  DVP_TRADE_DETAIL_FRAME_CLASS,
+} from "./dvp-trade-detail-frame";
 import { useDvpTradeActions } from "./use-dvp-trade-actions";
 
 /**
@@ -557,7 +562,7 @@ function LegCard({
           {/* Next to the party, not the button: the restriction belongs to the
               wallet, and the disabled button already says the action is off. */}
           {(action !== undefined || reclaim !== undefined) &&
-          leg.party.actionWallet?.isRuntimeExecutionAllowed !== true ? (
+          !canSignWith(leg.party.actionWallet) ? (
             <span className="text-warning text-xs">
               {t("DashboardCustody.signingDisabledTitle")}
             </span>
@@ -1009,10 +1014,10 @@ export function DvpTradeDetailWorkspace({
        reserved for destroying something (HOO-1230). */
     return (
       <Button
-        disabled={funding || wallet?.isRuntimeExecutionAllowed !== true}
+        disabled={funding || !canSignWith(wallet)}
         iconLeft={funding ? <Loader2Icon aria-hidden className="animate-spin" /> : undefined}
         onClick={() => {
-          if (wallet?.isRuntimeExecutionAllowed === true) {
+          if (canSignWith(wallet)) {
             void act("fund", { side, walletId: wallet.id, symbol: trade.legs[side].symbol });
           }
         }}
@@ -1032,9 +1037,9 @@ export function DvpTradeDetailWorkspace({
         className="text-[11px] text-secondary leading-4 underline-offset-2 hover:text-primary hover:underline disabled:pointer-events-none disabled:opacity-40"
         // Any action in flight, not only this leg's: a reclaim racing a settle
         // or cancel can only make one of them fail.
-        disabled={pending.size > 0 || wallet?.isRuntimeExecutionAllowed !== true}
+        disabled={pending.size > 0 || !canSignWith(wallet)}
         onClick={() => {
-          if (wallet?.isRuntimeExecutionAllowed === true) {
+          if (canSignWith(wallet)) {
             void act("reclaim", { side, walletId: wallet.id, symbol: trade.legs[side].symbol });
           }
         }}
@@ -1080,8 +1085,8 @@ export function DvpTradeDetailWorkspace({
   const sides: DvpTradeSide[] = custodiedB && !custodiedA ? ["b", "a"] : ["a", "b"];
 
   return (
-    <DashboardWorkspaceOverviewPanel className="px-4 pt-6 pb-8 md:px-8 xl:px-16">
-      <div className="mx-auto flex w-full max-w-[63rem] flex-col gap-8">
+    <DashboardWorkspaceOverviewPanel className={DVP_TRADE_DETAIL_FRAME_CLASS}>
+      <div className={cn(DVP_TRADE_DETAIL_COLUMN_CLASS, "flex flex-col gap-8")}>
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <DvpStatusBadge

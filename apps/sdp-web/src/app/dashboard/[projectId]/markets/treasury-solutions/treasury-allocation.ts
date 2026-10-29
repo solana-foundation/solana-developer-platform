@@ -5,9 +5,11 @@ import {
   parseDecimalAmount,
 } from "@sdp/solana/amount";
 import { type EarnVaultPositionIntermediate, isEarnVaultHoldingEmpty } from "@sdp/types/earn";
-import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types/well-known-tokens";
 import { compareUnsignedDecimals } from "@/app/dashboard/[projectId]/markets/earn/earn-decimal";
-import { isIntlDecimalLiteral } from "@/app/dashboard/[projectId]/markets/earn/earn-format";
+import {
+  isIntlDecimalLiteral,
+  isUsdStableMint,
+} from "@/app/dashboard/[projectId]/markets/earn/earn-format";
 import {
   earnStrategyReferenceKey,
   sumDecimalStrings,
@@ -158,7 +160,7 @@ export interface TreasuryAllocation {
  * the decimal string: no `Number` touches an amount.
  */
 function isUsdStableBalance(balance: TreasuryAllocationBalance): boolean {
-  return WELL_KNOWN_TOKEN_BY_MINT.get(balance.mint)?.isUsdStable === true || balance.usdPrice === 1;
+  return isUsdStableMint(balance.mint) || balance.usdPrice === 1;
 }
 
 /**
@@ -374,7 +376,7 @@ function deployedVaultValue(
   for (const position of positions.filter(isOpenVaultPosition)) {
     const value = earnVaultHoldingValue(position);
     if (value === undefined) return undefined;
-    if (!WELL_KNOWN_TOKEN_BY_MINT.get(position.tokenMint)?.isUsdStable) return undefined;
+    if (!isUsdStableMint(position.tokenMint)) return undefined;
     amounts.push(value);
   }
   return amounts.length === 0 ? "0" : sumDecimalStrings(amounts);

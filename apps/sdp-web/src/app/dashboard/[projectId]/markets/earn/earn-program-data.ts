@@ -451,15 +451,23 @@ export interface EarnVaultPositionsRead {
 }
 
 /**
- * Keep each position's evidence together. A position with more than 100
- * movements gets its own batches, so their minimum slots can be compared
- * without borrowing the slot of an unrelated position.
+ * The most movement ids one vault-balance read may carry. The treasury balance
+ * refresh reads the same bound (`use-treasury-balances`) so it knows when to
+ * thread the movement→position map instead of trusting one unbatched read.
+ */
+export const VAULT_BALANCE_READ_BATCH_SIZE = 100;
+
+/**
+ * Keep each position's evidence together. A position with more than
+ * `VAULT_BALANCE_READ_BATCH_SIZE` movements gets its own batches, so their
+ * minimum slots can be compared without borrowing the slot of an unrelated
+ * position.
  */
 function vaultBalanceReadBatches(
   movementIds: readonly string[],
   positionIds?: ReadonlyMap<string, string>
 ): string[][] {
-  if (movementIds.length <= 100) return [[...movementIds]];
+  if (movementIds.length <= VAULT_BALANCE_READ_BATCH_SIZE) return [[...movementIds]];
   const byPosition = new Map<string, string[]>();
   for (const id of movementIds) {
     const positionId = positionIds?.get(id);
@@ -471,13 +479,13 @@ function vaultBalanceReadBatches(
   const batches: string[][] = [];
   let batch: string[] = [];
   for (const group of byPosition.values()) {
-    if (batch.length + group.length > 100) {
+    if (batch.length + group.length > VAULT_BALANCE_READ_BATCH_SIZE) {
       if (batch.length > 0) batches.push(batch);
       batch = [];
     }
-    if (group.length > 100) {
-      for (let index = 0; index < group.length; index += 100)
-        batches.push(group.slice(index, index + 100));
+    if (group.length > VAULT_BALANCE_READ_BATCH_SIZE) {
+      for (let index = 0; index < group.length; index += VAULT_BALANCE_READ_BATCH_SIZE)
+        batches.push(group.slice(index, index + VAULT_BALANCE_READ_BATCH_SIZE));
     } else batch.push(...group);
   }
   if (batch.length > 0) batches.push(batch);
@@ -771,6 +779,18 @@ const earnVaultDepositOutcomeSchema = z
 export type EarnVaultDepositOutcome = z.infer<typeof earnVaultDepositOutcomeSchema>;
 
 /**
+ * The answer when a create's body does not parse as its own outcome: refused
+ * whole, under the route's own name for what was invalid, rather than shown
+ * in part.
+ */
+function invalidEarnResponse(
+  message: string,
+  result: { status: number; data: unknown }
+): { ok: false; error: string; status: number; body: unknown } {
+  return { ok: false, error: message, status: result.status, body: result.data };
+}
+
+/**
  * Deposits from an SDP custody wallet into a non-custodial vault. The caller's
  * idempotency key is transport metadata and is never copied into the JSON body.
  */
@@ -799,15 +819,8 @@ export async function createEarnVaultDeposit(
 
   if (!result.ok) return result;
 
-  const invalid = {
-    ok: false,
-    error: "Invalid vault deposit response",
-    status: result.status,
-    body: result.data,
-  } as const;
-
   const parsed = earnVaultDepositOutcomeSchema.safeParse(result.data);
-  if (!parsed.success) return invalid;
+  if (!parsed.success) return invalidEarnResponse("Invalid vault deposit response", result);
 
   return { ok: true, status: result.status, data: parsed.data };
 }
@@ -1232,15 +1245,8 @@ export async function createEarnVaultWithdrawal(
 
   if (!result.ok) return result;
 
-  const invalid = {
-    ok: false,
-    error: "Invalid vault withdrawal response",
-    status: result.status,
-    body: result.data,
-  } as const;
-
   const parsed = earnVaultWithdrawalOutcomeSchema.safeParse(result.data);
-  if (!parsed.success) return invalid;
+  if (!parsed.success) return invalidEarnResponse("Invalid vault withdrawal response", result);
 
   return { ok: true, status: result.status, data: parsed.data };
 }
@@ -1569,12 +1575,7 @@ export async function createEarnVaultWithdrawalRequest(
   if (!result.ok) return result;
   const parsed = earnVaultQueuedWithdrawalOutcomeSchema.safeParse(result.data);
   if (!parsed.success) {
-    return {
-      ok: false,
-      error: "Invalid queued withdrawal response",
-      status: result.status,
-      body: result.data,
-    };
+    return invalidEarnResponse("Invalid queued withdrawal response", result);
   }
   if (
     (input.mechanism === "operatorRedemption" &&
@@ -1582,12 +1583,7 @@ export async function createEarnVaultWithdrawalRequest(
     (input.mechanism !== "operatorRedemption" &&
       parsed.data.withdrawalRequest.mechanism === "operatorRedemption")
   ) {
-    return {
-      ok: false,
-      error: "Invalid queued withdrawal response",
-      status: result.status,
-      body: result.data,
-    };
+    return invalidEarnResponse("Invalid queued withdrawal response", result);
   }
   return { ok: true, status: result.status, data: parsed.data };
 }
@@ -1607,12 +1603,7 @@ export async function cancelEarnVaultWithdrawalRequest(
   if (!result.ok) return result;
   const parsed = queuedMutationEnvelopeSchema.safeParse(result.data);
   if (!parsed.success) {
-    return {
-      ok: false,
-      error: "Invalid queued withdrawal cancellation response",
-      status: result.status,
-      body: result.data,
-    };
+    return invalidEarnResponse("Invalid queued withdrawal cancellation response", result);
   }
   return { ok: true, status: result.status, data: parsed.data.data.withdrawalRequest };
 }

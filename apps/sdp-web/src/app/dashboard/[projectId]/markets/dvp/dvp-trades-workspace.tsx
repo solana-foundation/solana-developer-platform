@@ -28,6 +28,7 @@ import {
   ArrowLeftRightIcon,
   ArrowUpRightIcon,
   ChevronRightIcon,
+  type LucideIcon,
   PlusIcon,
   TriangleAlertIcon,
 } from "lucide-react";
@@ -64,6 +65,8 @@ import {
 import { DVP_TRADES_PAGE_SIZE, type DvpInboundTrade } from "./dvp-trades.data";
 import { resolveTradesListState } from "./dvp-trades-list-state";
 import {
+  DVP_TRADES_SEARCH_MAX_LENGTH,
+  DVP_TRADES_SEARCH_MIN_LENGTH,
   type DvpTradesUrlStatus,
   type StatusFilter,
   serializeDvpTradesFilters,
@@ -133,8 +136,8 @@ function tradesHref(state: DvpTradesUrlState): string {
 const DVP_TRADES_QUERY_ADAPTER: UrlTableQueryAdapter<DvpTradesUrlState> = {
   read: (state) => state.query,
   write: (state, query) => ({ ...state, query }),
-  minLength: 2,
-  maxLength: 100,
+  minLength: DVP_TRADES_SEARCH_MIN_LENGTH,
+  maxLength: DVP_TRADES_SEARCH_MAX_LENGTH,
 };
 
 /**
@@ -155,9 +158,14 @@ function LegCell({
   mine: boolean;
 }) {
   const t = useTranslations();
-  const direction = mine
-    ? { Icon: ArrowUpRightIcon, key: closed ? "youDelivered" : "youDeliver" }
-    : { Icon: ArrowDownLeftIcon, key: closed ? "youReceived" : "youReceive" };
+  const direction = (
+    mine
+      ? { Icon: ArrowUpRightIcon, key: closed ? "youDelivered" : "youDeliver" }
+      : { Icon: ArrowDownLeftIcon, key: closed ? "youReceived" : "youReceive" }
+  ) satisfies {
+    Icon: LucideIcon;
+    key: "youDeliver" | "youDelivered" | "youReceive" | "youReceived";
+  };
 
   return (
     <div className="flex min-w-0 items-center gap-2">
@@ -172,7 +180,7 @@ function LegCell({
         aria-hidden
         className={cn("h-3.5 w-3.5 shrink-0", mine ? "text-tertiary" : "text-success")}
       />
-      <span className="sr-only">{t(`DashboardMarkets.dvp.${direction.key}` as MessageKey)}</span>
+      <span className="sr-only">{t(`DashboardMarkets.dvp.${direction.key}`)}</span>
       {/* The mark resolves a logo only for a mint in the well-known registry,
           and falls back to a monogram of the SYMBOL — which it can only do if
           it is given one. Passing the mint alone left every issued asset

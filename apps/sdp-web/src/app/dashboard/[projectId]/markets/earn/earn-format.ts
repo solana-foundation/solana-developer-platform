@@ -120,6 +120,18 @@ export function formatTokenQuantity(
 }
 
 /**
+ * Does the static well-known-token catalogue classify this mint as a
+ * USD-stable token? One spelling of the test for every surface that must
+ * agree on which mints are dollars (balances, live values, deployed totals).
+ * The catalogue is not an authority on price — an API `usdPrice` of exactly 1
+ * classifies too, where one exists (the treasury allocation's cash rule) —
+ * but it is the one witness of "this mint is a dollar" they all share.
+ */
+export function isUsdStableMint(tokenMint: string): boolean {
+  return WELL_KNOWN_TOKEN_BY_MINT.get(tokenMint)?.isUsdStable === true;
+}
+
+/**
  * A deposit-token amount for display: a position's `tokenValue`, a wallet's
  * balance in the deposit token, a withdrawal ceiling or quote. Every Earn
  * deposit token is a USD stablecoin (`EARN_DEPOSIT_TOKEN_SYMBOLS`), so a
@@ -136,7 +148,7 @@ export function formatTokenValue(
   locale: string
 ): string {
   if (tokenMint === undefined) return formatProviderAmount(value, locale);
-  return WELL_KNOWN_TOKEN_BY_MINT.get(tokenMint)?.isUsdStable
+  return isUsdStableMint(tokenMint)
     ? formatUsd(value, locale)
     : formatTokenQuantity(value, locale, tokenSymbol(tokenMint));
 }

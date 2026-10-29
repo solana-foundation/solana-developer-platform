@@ -18,8 +18,12 @@ import {
 import {
   earnVaultParRedemptionStatusPresentation,
   isEarnVaultParRedemptionCancelable,
+  isEarnVaultParRedemptionTerminal,
 } from "./earn-vault-par-redemption-presentation";
-import { earnVaultQueuedWithdrawalStatusPresentation } from "./earn-vault-queued-withdrawal-presentation";
+import {
+  earnVaultQueuedWithdrawalStatusPresentation,
+  isEarnVaultQueuedWithdrawalTerminal,
+} from "./earn-vault-queued-withdrawal-presentation";
 import { earnStatusTextTone } from "./earn-vault-ui-state";
 
 function freshestRequest(
@@ -27,7 +31,14 @@ function freshestRequest(
   local: EarnVaultWithdrawalRequestRecord | undefined
 ): EarnVaultWithdrawalRequestRecord {
   if (!local) return server;
-  if (["fulfilled", "cancelled", "failed"].includes(server.status)) return server;
+  // A server answer that can no longer change outranks whatever a local cancel
+  // returned — terminal is the status presentations' own notion, per mechanism,
+  // not a second hand-rolled list that can forget a status.
+  const serverTerminal =
+    server.mechanism === "operatorRedemption"
+      ? isEarnVaultParRedemptionTerminal(server.status)
+      : isEarnVaultQueuedWithdrawalTerminal(server.status);
+  if (serverTerminal) return server;
   return Date.parse(local.updatedAt) >= Date.parse(server.updatedAt) ? local : server;
 }
 

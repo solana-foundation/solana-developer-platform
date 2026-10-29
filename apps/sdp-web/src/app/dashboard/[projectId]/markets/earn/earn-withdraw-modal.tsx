@@ -25,6 +25,7 @@ import { compareUnsignedDecimals, isPositiveDecimal, parseUnsignedDecimal } from
 import { formatDurationRange, formatUsd, isoDurationDays } from "./earn-format";
 import { EARN_TRANSACTION_MODAL_FRAME } from "./earn-modal";
 import { createEarnWithdrawal, previewEarnWithdrawal } from "./earn-program-data";
+import { VAULT_QUOTE_DEBOUNCE_MS } from "./earn-vault-slippage";
 import { earnStatusTextTone } from "./earn-vault-ui-state";
 
 export function isPositiveUsdAmount(value: string): boolean {
@@ -89,8 +90,6 @@ function useWithdrawalRequestId(
   }
   return requestRef.current.id;
 }
-
-const PREVIEW_DEBOUNCE_MS = 400;
 
 const WITHDRAWAL_STATUS_BADGES = {
   processing: { variant: "warning", key: "DashboardEarn.withdraw.statusProcessing" },
@@ -621,7 +620,7 @@ export function EarnWithdrawModal({
    *
    * BOTH previews report the lane's `withdrawableUsd`, and they race: the
    * on-open liquidity read is undebounced while the amount-specific one waits
-   * out `PREVIEW_DEBOUNCE_MS`. A reader who types immediately can therefore have
+   * out `VAULT_QUOTE_DEBOUNCE_MS`. A reader who types immediately can therefore have
    * the FIRST request land second — and a provider takes ~500ms on this
    * endpoint, so
    * that ordering is real, not theoretical. Left alone, a stale response
@@ -728,7 +727,7 @@ export function EarnWithdrawModal({
       if (laneCeilingUsd !== undefined) {
         commitLaneLiquidity(seq, { phase: "ready", withdrawableUsd: laneCeilingUsd });
       }
-    }, PREVIEW_DEBOUNCE_MS);
+    }, VAULT_QUOTE_DEBOUNCE_MS);
     return () => {
       controller.abort();
       window.clearTimeout(timer);

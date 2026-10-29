@@ -118,6 +118,13 @@ function ReviewPartySide({
 export function ReviewStep({ form }: { form: DvpCreateForm }) {
   const t = useTranslations();
 
+  // Where the leg pays: the redirected destination when one is set, else the
+  // party's own address. One rule for both sides.
+  const paidAt = (side: "a" | "b"): string =>
+    form.destinations[side].resolved === ""
+      ? (form.resolved[side].address ?? "")
+      : form.destinations[side].resolved;
+
   return (
     <div className="grid gap-4">
       <div className="grid items-start gap-4 sm:grid-cols-2">
@@ -147,22 +154,14 @@ export function ReviewStep({ form }: { form: DvpCreateForm }) {
       <div className="grid divide-y divide-border-default rounded-xl border border-border-default bg-surface-raised sm:grid-cols-2 sm:divide-x sm:divide-y-0">
         <ReviewPartySide
           delivers={form.asset}
-          paidAt={
-            form.destinations.a.resolved === ""
-              ? (form.resolved.a.address ?? "")
-              : form.destinations.a.resolved
-          }
+          paidAt={paidAt("a")}
           receives={form.cash}
           resolved={form.resolved.a}
           title={t("DashboardMarkets.dvp.fieldPartyA")}
         />
         <ReviewPartySide
           delivers={form.cash}
-          paidAt={
-            form.destinations.b.resolved === ""
-              ? (form.resolved.b.address ?? "")
-              : form.destinations.b.resolved
-          }
+          paidAt={paidAt("b")}
           receives={form.asset}
           resolved={form.resolved.b}
           title={t("DashboardMarkets.dvp.fieldPartyB")}

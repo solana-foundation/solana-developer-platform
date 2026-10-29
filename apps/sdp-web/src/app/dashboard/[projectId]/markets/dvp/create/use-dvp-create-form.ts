@@ -25,9 +25,9 @@ import { useDvpCreateSubmit } from "./use-dvp-create-submit";
 import { type DvpDestinations, useDvpDestinations } from "./use-dvp-destinations";
 import { type DvpLeg, useDvpLeg } from "./use-dvp-leg";
 import {
-  type DvpPartyRef,
   type DvpPartyResolved,
   type DvpPartyWire,
+  type DvpPartyWireRef,
   deriveDvpParties,
   partySlotSchema,
 } from "./use-dvp-parties";
@@ -94,7 +94,7 @@ export interface DvpCreateForm {
   /** Both slots resolve to the SAME address: the program refuses one party. */
   sameAddress: boolean;
   /** The parties as the request wants them, or null while incomplete. */
-  request: { partyA: DvpPartyRef; partyB: DvpPartyRef } | null;
+  request: { partyA: DvpPartyWireRef; partyB: DvpPartyWireRef } | null;
   /** The parties with their resolved addresses, for the idempotency key. */
   wire: { a: DvpPartyWire; b: DvpPartyWire } | null;
   resolved: { a: DvpPartyResolved; b: DvpPartyResolved };

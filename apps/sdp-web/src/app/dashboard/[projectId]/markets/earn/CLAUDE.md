@@ -109,12 +109,14 @@ one grows — and the API already answers an unknown value with an empty page, w
 is the honest result.
 
 `proxyToSdpApi` never copies the inbound header bag — auth, project scope and
-tracing stay server-owned — so a client-set `Idempotency-Key` never reaches the
-API on its own. A route forwards one deliberately, per header, through the
-optional `upstreamHeaders` argument, spelling it `IDEMPOTENCY_KEY_HEADER`
-(`src/lib/idempotency.ts`). `vault-deposits/`, `vault-withdrawals/`, and the
-queued request create/cancel routes opt in, forwarding that single header and
-nothing else; the program create still sends the body `requestId` form.
+tracing stay server-owned. The one exception is deliberate (HOO-1918): every
+mutation forwards the caller's `Idempotency-Key` automatically
+(`withForwardedIdempotencyKey` in `src/lib/sdp-api.ts`), because without it a
+retried request is a new one upstream, and reads forward nothing. A route can
+still select endpoint-specific metadata per header through the optional
+`upstreamHeaders` argument, spelling it `IDEMPOTENCY_KEY_HEADER`
+(`src/lib/idempotency.ts`); a route-selected key wins over the inbound one. The
+program create still sends the body `requestId` form.
 
 ## Routes
 

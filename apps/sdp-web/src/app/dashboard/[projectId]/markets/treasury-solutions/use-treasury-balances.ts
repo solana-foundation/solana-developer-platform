@@ -3,7 +3,10 @@
 import type { EarnVaultPosition } from "@sdp/types/earn";
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
 import { useEarnFundingWallets } from "@/app/dashboard/[projectId]/markets/earn/deposit/earn-funding-wallets";
-import { useEarnVaultPositions } from "@/app/dashboard/[projectId]/markets/earn/earn-program-data";
+import {
+  useEarnVaultPositions,
+  VAULT_BALANCE_READ_BATCH_SIZE,
+} from "@/app/dashboard/[projectId]/markets/earn/earn-program-data";
 import {
   displayedVaultBalance,
   hasUnconfirmedVaultMovement,
@@ -93,8 +96,11 @@ export function useTreasuryBalances(activities: readonly VaultActivity[]) {
       }
       try {
         const ids = [...request.movementIds];
+        // Past the balance reader's batch size the read needs the
+        // movement→position map, so batches can be verified per position;
+        // below it one unbatched read carries the evidence itself.
         const positionRead = Promise.resolve(
-          ids.length > 100
+          ids.length > VAULT_BALANCE_READ_BATCH_SIZE
             ? vaults.refresh(
                 ids,
                 new Map(

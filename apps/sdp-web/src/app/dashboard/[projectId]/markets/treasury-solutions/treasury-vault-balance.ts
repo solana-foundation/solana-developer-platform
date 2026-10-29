@@ -1,4 +1,7 @@
-import type { EarnVaultPosition } from "@sdp/types/earn";
+import {
+  EARN_LANDED_VAULT_DIRECT_MOVEMENT_STATUSES,
+  type EarnVaultPosition,
+} from "@sdp/types/earn";
 import { earnVaultHoldingValue } from "@/app/dashboard/[projectId]/markets/earn/earn-vault-holding";
 
 type VaultMovementKind = "deposit" | "withdrawal";
@@ -29,9 +32,25 @@ export interface VaultActivity<Movement extends TrackedVaultMovement = TrackedVa
   movement: Movement;
 }
 
+/** Whether the chain has committed the movement's transaction — the shared
+ * "landed" rule for vault-direct movements (`EARN_LANDED_VAULT_DIRECT_MOVEMENT_
+ * STATUSES`), which every earn surface reports settlement by. */
 export function isCommittedVaultMovement(movement: Pick<TrackedVaultMovement, "status">): boolean {
-  return movement.status === "confirmed" || movement.status === "finalized";
+  return EARN_LANDED_VAULT_DIRECT_MOVEMENT_STATUSES.some((landed) => landed === movement.status);
 }
+
+/**
+ * Statuses a vault movement can still move on from, spelled across BOTH wire
+ * vocabularies the tracked movements arrive in: the legacy 0059 `pending` and
+ * the unified ledger's `requested`, plus the `submitted` both share. One list,
+ * named, so the next in-flight status question reads this rather than a fourth
+ * hand-rolled spelling against an untyped status string.
+ */
+const UNCONFIRMED_VAULT_MOVEMENT_STATUSES: readonly string[] = [
+  "pending",
+  "requested",
+  "submitted",
+];
 
 export function hasUnconfirmedVaultMovement(
   activities: readonly VaultActivity[],
@@ -40,7 +59,7 @@ export function hasUnconfirmedVaultMovement(
   return activities.some(
     ({ movement }) =>
       (positionId === undefined || movement.positionId === positionId) &&
-      ["pending", "requested", "submitted"].includes(movement.status)
+      UNCONFIRMED_VAULT_MOVEMENT_STATUSES.includes(movement.status)
   );
 }
 

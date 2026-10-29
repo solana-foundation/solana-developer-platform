@@ -24,7 +24,7 @@ import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loadi
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { AddressWithCopy } from "./dvp-party-cell";
-import { type DvpPartyRef, dvpTimestampToIso, formatLegAmount } from "./dvp-trade";
+import { canSignWith, type DvpPartyRef, dvpTimestampToIso, formatLegAmount } from "./dvp-trade";
 import type { DvpInboundLeg, DvpInboundTrade } from "./dvp-trades.data";
 import { useDvpTradeActions } from "./use-dvp-trade-actions";
 
@@ -79,7 +79,7 @@ function InboundFundAction({
   const canWrite = useCanWrite();
   const wallet = party.actionWallet;
   const shownWallet = wallet ?? party.wallet;
-  const unavailable = wallet?.isRuntimeExecutionAllowed !== true;
+  const unavailable = !canSignWith(wallet);
 
   return (
     <span className="relative z-10 flex flex-col items-end gap-1">
@@ -101,7 +101,7 @@ function InboundFundAction({
           // offering to waste a signature and a fee.
           disabled={unavailable || frozen || pending.has(`fund:${side}`)}
           onClick={() => {
-            if (wallet?.isRuntimeExecutionAllowed === true) {
+            if (canSignWith(wallet)) {
               void act("fund", { side, walletId: wallet.id, symbol });
             }
           }}

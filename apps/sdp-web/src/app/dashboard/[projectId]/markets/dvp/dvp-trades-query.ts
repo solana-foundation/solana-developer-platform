@@ -39,6 +39,16 @@ const STATUS_FILTERS = {
 export type StatusFilter = keyof typeof STATUS_FILTERS;
 
 /**
+ * The search contract both ends of the list agree on: shorter text stays in
+ * the input and out of the fetch, longer text is cut to what both the URL and
+ * the API take. The URL adapter (`dvp-trades-workspace`) reads these rather
+ * than restating them, so the query the user sees is the query the API
+ * receives.
+ */
+export const DVP_TRADES_SEARCH_MIN_LENGTH = 2;
+export const DVP_TRADES_SEARCH_MAX_LENGTH = 100;
+
+/**
  * A status the URL can carry; `waiting` is client state, never in the URL.
  */
 export type DvpTradesUrlStatus = Exclude<StatusFilter, "waiting">;
@@ -75,7 +85,10 @@ export function parseDvpTradesFilters(
 
   const rawQ = Array.isArray(searchParams.q) ? searchParams.q[0] : searchParams.q;
   const trimmed = rawQ === undefined ? "" : rawQ.trim();
-  const q = trimmed.length >= 2 ? trimmed.slice(0, 100) : null;
+  const q =
+    trimmed.length >= DVP_TRADES_SEARCH_MIN_LENGTH
+      ? trimmed.slice(0, DVP_TRADES_SEARCH_MAX_LENGTH)
+      : null;
 
   return {
     status,
