@@ -6,7 +6,7 @@
  */
 
 import { MosaicService } from "@sdp/issuance/mosaic/service";
-import type { MovementId } from "@sdp/types/movements";
+import type { MovementOf } from "@sdp/types/movements";
 import type { TransactionSigner } from "@solana/kit";
 import { badRequest, transactionFailed } from "@/lib/errors";
 import { createIssuanceSponsor } from "@/services/issuance/sponsored-submitter";
@@ -21,7 +21,7 @@ export type MosaicFee =
   | {
       mode: "sponsored";
       scope: SponsorshipScope;
-      movement: MovementId;
+      movement: MovementOf<"issuance">;
       /** The custody wallet that signs; the sponsor decides the principal's scope on it. */
       custodyWalletId: string;
     };

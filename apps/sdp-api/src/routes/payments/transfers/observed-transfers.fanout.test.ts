@@ -2,7 +2,7 @@ import { runInClusterScope } from "@sdp/rpc/scope";
 import type { SignatureInfo } from "@sdp/rpc/solana";
 import { formatDecimalAmount } from "@sdp/solana/amount";
 import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import {
   parsedSystemTransfer,
@@ -14,6 +14,7 @@ import {
 } from "@/test/helpers/parsed-transactions";
 import {
   buildObservedTransfersForSignatures,
+  clearObservedTransferCaches,
   SIGNATURE_HISTORY_LOOKUP_CONCURRENCY,
 } from "./observed-transfers";
 
@@ -46,6 +47,10 @@ function buildOnSandbox(signatures: SignatureInfo[]) {
 
 describe("buildObservedTransfersForSignatures", () => {
   const rpc = installClusterRpcStub();
+
+  beforeEach(() => {
+    clearObservedTransferCaches();
+  });
 
   afterEach(() => {
     vi.restoreAllMocks();
@@ -133,6 +138,32 @@ describe("buildObservedTransfersForSignatures", () => {
         destination: WALLET_ADDRESS,
         fee: 5000,
       },
+    ]);
+  });
+
+  it("includes an inbound v1 transfer in the observed list", async () => {
+    const observed = signatureHistoryEntry(0, "finalized");
+    rpc.answer(
+      "getTransaction",
+      parsedTransactionResult({
+        signature: observed.signature,
+        slot: 42,
+        blockTime: 1700000000,
+        version: 1,
+        accountKeys: [PAYER, WALLET_ADDRESS],
+        instructions: [
+          parsedSystemTransfer({ source: PAYER, destination: WALLET_ADDRESS, lamports: 1_000_000 }),
+        ],
+        innerInstructions: [],
+        preTokenBalances: [],
+        postTokenBalances: [],
+      })
+    );
+
+    const rows = await buildOnSandbox([observed]);
+
+    expect(rows).toMatchObject([
+      { direction: "inbound", destination_address: WALLET_ADDRESS, signature: observed.signature },
     ]);
   });
 

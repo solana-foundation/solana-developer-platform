@@ -18,7 +18,7 @@ import { type ApiPlaygroundEndpointConfig, ApiPlaygroundShell } from "./api-play
 
 interface ShellTestMocks {
   replaceSearchParams: ReturnType<typeof vi.fn>;
-  searchParamGet: ReturnType<typeof vi.fn<() => string | null>>;
+  searchParamGet: ReturnType<typeof vi.fn<(key: string) => string | null>>;
   /** The dashboard workspace the shell reads its release channel and access from; none by default. */
   workspace:
     | {
@@ -31,7 +31,7 @@ interface ShellTestMocks {
 const mocks = vi.hoisted(
   (): ShellTestMocks => ({
     replaceSearchParams: vi.fn(),
-    searchParamGet: vi.fn<() => string | null>(() => null),
+    searchParamGet: vi.fn<(key: string) => string | null>(() => null),
     workspace: undefined,
   })
 );
@@ -75,6 +75,29 @@ describe("ApiPlaygroundShell", () => {
     mocks.workspace = undefined;
     restoreWindowLocation();
     vi.unstubAllGlobals();
+  });
+
+  it("selects a curated form from its generated reference deep link", async () => {
+    mocks.searchParamGet.mockImplementation((key) =>
+      key === "endpoint" ? "create-payment-transfer" : null
+    );
+    const curated: ApiPlaygroundEndpointConfig = {
+      ...endpoint,
+      id: "execute-transfer",
+      referenceEndpointId: "create-payment-transfer",
+      title: "Execute transfer",
+      method: "POST",
+      path: "/v1/payments/transfers",
+    };
+    render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApiPlaygroundShell endpoints={[endpoint, curated]} productName="Test product" />
+      </I18nProvider>
+    );
+
+    await waitFor(() =>
+      expect(mocks.replaceSearchParams).toHaveBeenCalledWith({ endpoint: "execute-transfer" })
+    );
   });
 
   it("runs as the dashboard session for the tab's Project, and never renders a failure's text", async () => {
@@ -395,33 +418,39 @@ describe("ApiPlaygroundShell", () => {
       async (_input: RequestInfo | URL, _init: RequestInit) => new Response("{}")
     );
     vi.stubGlobal("fetch", fetchMock);
-    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
-      throw new DOMException("quota exceeded", "QuotaExceededError");
-    });
-    try {
-      const transferEndpoint: ApiPlaygroundEndpointConfig = {
-        ...endpoint,
-        id: "post-transfer",
-        method: "POST",
-        path: "/v1/payments/transfers",
-      };
-      const view = render(
-        <I18nProvider locale="en" messages={getMessages("en")}>
-          <ApiPlaygroundShell endpoints={[transferEndpoint]} productName="Test product" />
-        </I18nProvider>
-      );
-      await waitFor(() =>
-        expect(view.getByRole("button", { name: "Run request" }).hasAttribute("disabled")).toBe(
-          false
-        )
-      );
-      fireEvent.click(view.getByRole("button", { name: "Run request" }));
+    // jsdom's Storage proxy bypasses setItem spies, so replace the property.
+    vi.stubGlobal(
+      "sessionStorage",
+      new Proxy(window.sessionStorage, {
+        get(target, property) {
+          if (property === "setItem") {
+            return () => {
+              throw new DOMException("quota exceeded", "QuotaExceededError");
+            };
+          }
+          const value = Reflect.get(target, property, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      })
+    );
+    const transferEndpoint: ApiPlaygroundEndpointConfig = {
+      ...endpoint,
+      id: "post-transfer",
+      method: "POST",
+      path: "/v1/payments/transfers",
+    };
+    const view = render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApiPlaygroundShell endpoints={[transferEndpoint]} productName="Test product" />
+      </I18nProvider>
+    );
+    await waitFor(() =>
+      expect(view.getByRole("button", { name: "Run request" }).hasAttribute("disabled")).toBe(false)
+    );
+    fireEvent.click(view.getByRole("button", { name: "Run request" }));
 
-      expect(await view.findByText(/isn’t keeping the request’s retry key/)).toBeTruthy();
-      expect(fetchMock).not.toHaveBeenCalled();
-    } finally {
-      setItem.mockRestore();
-    }
+    expect(await view.findByText(/isn’t keeping the request’s retry key/)).toBeTruthy();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   // Jina (#2333): the unsettled key lived only in module memory, so a reload
@@ -627,9 +656,7 @@ describe("ApiPlaygroundShell refresh layout", () => {
         </ThemeScopeProvider>
       </I18nProvider>
     );
-    expect((view.getByRole("button", { name: /Run request/ }) as HTMLButtonElement).disabled).toBe(
-      false
-    );
+    expect((view.getByRole("button", { name: "Run" }) as HTMLButtonElement).disabled).toBe(false);
     expect(view.queryByRole("link", { name: "Create an API key" })).toBeNull();
   });
 

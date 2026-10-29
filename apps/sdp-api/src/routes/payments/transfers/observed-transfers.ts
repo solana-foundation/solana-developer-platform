@@ -2,6 +2,7 @@
 import { createClusterHistoryRpc } from "@sdp/rpc/factory";
 import { currentClusterScope } from "@sdp/rpc/scope";
 import type { getSignaturesForAddress, SolanaRpc } from "@sdp/rpc/solana";
+import { MAX_SUPPORTED_TRANSACTION_VERSION } from "@sdp/rpc/transaction-version";
 import { formatDecimalAmount } from "@sdp/solana/amount";
 import type { PaymentTransferStatus as TransferStatus } from "@sdp/types/payments";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
@@ -415,7 +416,7 @@ async function fetchParsedTransactionFromRpc(
     .getTransaction(signature, {
       encoding: "jsonParsed",
       commitment: "confirmed",
-      maxSupportedTransactionVersion: 0,
+      maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
     })
     .send();
   // SAFETY: kit types each parsed instruction's `info` as `object`; it is the RPC's open

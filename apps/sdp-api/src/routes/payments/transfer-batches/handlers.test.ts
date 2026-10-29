@@ -56,7 +56,11 @@ import { seedDefaultProjects } from "@/test/helpers/projects";
 import { required } from "@/test/helpers/required";
 import { sendTransactionPreflightError } from "@/test/helpers/rpc-errors";
 import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
-import { respondMintAccounts, scaledUiAmountConfig } from "@/test/helpers/token-mints";
+import {
+  respondMintAccounts,
+  respondTokenAccounts,
+  scaledUiAmountConfig,
+} from "@/test/helpers/token-mints";
 import { type SeededApiKey, seedApiKeyRow, seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 
@@ -423,6 +427,8 @@ describe("payment transfer batches", () => {
     vi.clearAllMocks();
     labeledSignatures.clear();
     rpc.answer("getMinimumBalanceForRentExemption", SYSTEM_ACCOUNT_RENT_MINIMUM);
+    // Every recipient token account exists unless a test says otherwise (HOO-2024).
+    respondTokenAccounts(rpc, { tokenProgram: address(SPL_TOKEN_PROGRAMS["spl-token"]) });
     // Every destination is a funded account unless a test says otherwise.
     getMultipleAccountsLamportsMock.mockImplementation(async (_rpc, addresses) =>
       addresses.map(() => 1_000_000_000n)
@@ -2761,6 +2767,7 @@ describe("payment transfer batches", () => {
       ]),
       clockUnixTimestamp: 1_750_000_000n,
     });
+    respondTokenAccounts(rpc, { tokenProgram: TOKEN_2022_PROGRAM_ADDRESS });
     const signingOutcomeMock = vi
       .fn<(transactionBytes: Uint8Array) => Promise<string>>()
       .mockResolvedValueOnce(FIRST_SIGNATURE);

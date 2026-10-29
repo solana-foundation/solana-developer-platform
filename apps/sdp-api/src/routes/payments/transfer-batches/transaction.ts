@@ -20,7 +20,7 @@ import {
   getCreateAssociatedTokenIdempotentInstruction,
   getTransferCheckedInstruction,
 } from "@solana-program/token-2022";
-import { badRequest } from "@/lib/errors";
+import { badRequest, internalError, sponsoredRentOverCap } from "@/lib/errors";
 import type { RecentBlockhash, ResolvedRecipient, TokenContext } from "./types";
 
 export const DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION = 20;
@@ -28,6 +28,18 @@ export const DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION = 20;
 export interface RecipientInstructionGroup extends ResolvedRecipient {
   instructions: Instruction[];
   destinationTokenAccount?: Address;
+}
+
+/**
+ * What the sponsor funds per transaction beyond the network fee (HOO-2024): rent for each
+ * recipient token account a chunk creates, under Kora's `max_allowed_lamports`. Kora counts that
+ * rent against the cap and not the network fee (sdp-infra `kora/cloud-run/kora.mainnet.toml`).
+ */
+export interface SponsoredRentLimit {
+  /** Rent in lamports, by destination token account the batch would create. */
+  rentByTokenAccount: ReadonlyMap<Address, bigint>;
+  /** The scope's Kora `max_allowed_lamports`; null when the batch creates nothing. */
+  capLamports: bigint | null;
 }
 
 export interface TransactionChunk {
@@ -193,15 +205,39 @@ function assertTransactionFits(chunk: TransactionChunk): void {
 }
 
 /**
- * Packs instruction groups into transaction chunks, greedily filling each
- * chunk up to the recipient cap and the Solana transaction size limit.
+ * The rent the sponsor funds for a chunk of these groups: each distinct token account it creates,
+ * counted once. Chunks are submitted concurrently, so an account two chunks name counts in both.
+ */
+function sponsoredRentOf(
+  groups: readonly RecipientInstructionGroup[],
+  limit: SponsoredRentLimit
+): bigint {
+  const created = new Map<Address, bigint>();
+  for (const group of groups) {
+    if (group.destinationTokenAccount === undefined) continue;
+    // Absent from the map: the account exists, so the chunk creates nothing for it.
+    const rent = limit.rentByTokenAccount.get(group.destinationTokenAccount);
+    if (rent !== undefined) created.set(group.destinationTokenAccount, rent);
+  }
+  let total = 0n;
+  for (const rent of created.values()) total += rent;
+  return total;
+}
+
+/**
+ * Packs instruction groups into transaction chunks, greedily filling each chunk up to the
+ * recipient cap, the Solana transaction size limit and the sponsor's per-transaction rent cap.
+ * A recipient whose own token account rent exceeds the cap is refused before any chunk is built,
+ * so nothing is stored or sent.
  *
  * @param params.groups - Instruction groups in recipient order.
  * @param params.sourceSigner - Signer for the source wallet.
  * @param params.feePayer - Fee payer address.
  * @param params.lifetime - Blockhash lifetime applied to each chunk.
  * @param params.maxRecipientsPerTransaction - Upper bound on recipients per chunk.
- * @returns The chunks to submit, each within transaction size limits.
+ * @param params.sponsoredRent - Rent each created token account costs the sponsor, and its cap.
+ * @returns The chunks to submit, each within transaction size limits and the rent cap.
+ * @throws AppError `SPONSORED_RENT_OVER_CAP` when one recipient's rent alone exceeds the cap.
  */
 export function chunkInstructionGroups(params: {
   groups: RecipientInstructionGroup[];
@@ -209,7 +245,27 @@ export function chunkInstructionGroups(params: {
   feePayer: Address;
   lifetime: RecentBlockhash;
   maxRecipientsPerTransaction: number;
+  sponsoredRent: SponsoredRentLimit;
 }): TransactionChunk[] {
+  const { sponsoredRent } = params;
+  const capLamports =
+    sponsoredRent.rentByTokenAccount.size === 0 ? null : sponsoredRent.capLamports;
+  if (sponsoredRent.rentByTokenAccount.size > 0 && capLamports === null) {
+    throw internalError("A batch that creates token accounts was planned without the rent cap");
+  }
+  if (capLamports !== null) {
+    for (const group of params.groups) {
+      const rentLamports = sponsoredRentOf([group], sponsoredRent);
+      if (rentLamports > capLamports) {
+        throw sponsoredRentOverCap({
+          recipientIndex: group.index,
+          rentLamports: rentLamports.toString(),
+          capLamports: capLamports.toString(),
+        });
+      }
+    }
+  }
+
   const chunks: TransactionChunk[] = [];
   let pending: RecipientInstructionGroup[] = [];
 
@@ -229,6 +285,11 @@ export function chunkInstructionGroups(params: {
     }
 
     const candidateGroups = [...pending, group];
+    if (capLamports !== null && sponsoredRentOf(candidateGroups, sponsoredRent) > capLamports) {
+      flush();
+      pending = [group];
+      continue;
+    }
     const candidate = buildCandidateChunk(candidateGroups, params);
     if (isTransactionWithinSizeLimit(compileTransaction(candidate.message))) {
       pending = candidateGroups;

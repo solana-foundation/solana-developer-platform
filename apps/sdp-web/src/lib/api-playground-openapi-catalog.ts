@@ -281,12 +281,23 @@ export function mergeOpenApiPlaygroundEndpoints(
   module: PlaygroundModule,
   curatedEndpoints: ApiPlaygroundEndpointConfig[]
 ): ApiPlaygroundEndpointConfig[] {
+  const generatedByKey = new Map(
+    catalog.modules[module].map((endpoint) => [operationKey(endpoint), endpoint])
+  );
   const curatedKeys = new Set(curatedEndpoints.map(operationKey));
   const missingEndpoints = catalog.modules[module].filter(
     (endpoint) => !curatedKeys.has(operationKey(endpoint))
   );
 
-  return [...curatedEndpoints, ...missingEndpoints];
+  return [
+    ...curatedEndpoints.map((endpoint) => {
+      const referenceEndpointId = generatedByKey.get(operationKey(endpoint))?.id;
+      return referenceEndpointId && referenceEndpointId !== endpoint.id
+        ? { ...endpoint, referenceEndpointId }
+        : endpoint;
+    }),
+    ...missingEndpoints,
+  ];
 }
 
 export function getOpenApiPlaygroundEndpoints(

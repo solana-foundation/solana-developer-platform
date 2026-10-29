@@ -1,5 +1,6 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
 import * as solanaRpc from "@sdp/rpc/solana";
+import { MAX_SUPPORTED_TRANSACTION_VERSION } from "@sdp/rpc/transaction-version";
 import { formatDecimalAmount } from "@sdp/solana/amount";
 import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import {
@@ -19,6 +20,8 @@ import {
   lamports,
   pipe,
   type Signature,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_UNSUPPORTED_TRANSACTION_VERSION,
+  SolanaError,
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
   signature,
@@ -54,6 +57,7 @@ import * as repositoryFactory from "@/db/repositories/repository-factory";
 import {
   createPaymentRequestsRepository,
   createPaymentsRepository,
+  createSystemPaymentRequestsRepository,
 } from "@/db/repositories/repository-factory";
 import { badRequest } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
@@ -911,6 +915,7 @@ async function exactTransferResponse(params: {
   rawAmount: bigint;
   reference: Address;
   lookupTable: Address | null;
+  version?: 0 | 1;
 }): Promise<Awaited<ReturnType<typeof paymentRequestTransfer.validatePaymentRequestTransfer>>> {
   const { token, rawAmount, reference, lookupTable } = params;
   const owner = address(TEST_CUSTODY_PUBLIC_KEY);
@@ -953,13 +958,32 @@ async function exactTransferResponse(params: {
       ),
     (message) => appendTransactionMessageInstructions([referenced], message)
   );
-  const transaction = compileTransaction(
-    lookupTable === null
-      ? message
-      : compressTransactionMessageUsingAddressLookupTables(message, {
-          [lookupTable]: [destination],
-        })
-  );
+  // Kit 7 can encode and decode v1, but createTransactionMessage does not type v1 yet.
+  // This fixture uses the same static-account message with v1's mandatory limits.
+  let transaction: ReturnType<typeof compileTransaction>;
+  switch (params.version) {
+    case 1:
+      transaction = compileTransaction({
+        ...message,
+        version: 1 as const,
+        config: { computeUnitLimit: 200_000, loadedAccountsDataSizeLimit: 64 * 1024 },
+      });
+      break;
+    case 0:
+    case undefined:
+      transaction = compileTransaction(
+        lookupTable === null
+          ? message
+          : compressTransactionMessageUsingAddressLookupTables(message, {
+              [lookupTable]: [destination],
+            })
+      );
+      break;
+    default: {
+      const exhaustive: never = params.version;
+      throw new Error(`Unsupported transaction version: ${exhaustive}`);
+    }
+  }
   const compiled = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
   const loadedWritable = lookupTable === null ? [] : [destination];
   const accountKeys = [...compiled.staticAccounts, ...loadedWritable];
@@ -979,7 +1003,7 @@ async function exactTransferResponse(params: {
   return {
     slot: 1n,
     blockTime: null,
-    version: 0,
+    version: params.version === 1 ? 1 : 0,
     meta: {
       err: null,
       fee: lamports(5_000n),
@@ -1083,6 +1107,26 @@ describe("exact transfer validation", () => {
     expect(rpc.requests.filter((request) => request.method === "getTransaction")).toHaveLength(1);
   });
 
+  it("settles an inbound v1 payment without broadcasting v1", async () => {
+    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+    mockExactCandidate();
+    const response = await exactTransferResponse({
+      token: SOL_MINT,
+      rawAmount: 1_500_000_000n,
+      reference: address(request.reference),
+      lookupTable: null,
+      version: 1,
+    });
+    rpc.answer("getTransaction", asRpcJson(response));
+
+    expect((await onSandbox(() => checkAwaitingPaymentRequest(env, request))).status).toBe("paid");
+    expect(await listInboundTransfers()).toMatchObject([{ signature: SIGNATURE }]);
+    expect(rpc.requests.find((call) => call.method === "getTransaction")?.params).toEqual([
+      SIGNATURE,
+      { encoding: "base64", maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION },
+    ]);
+  });
+
   it("reads the transfer at finalized commitment", async () => {
     const request = await createRequest({ token: SOL_MINT, expiresAt: null });
     mockExactCandidate();
@@ -1103,7 +1147,7 @@ describe("exact transfer validation", () => {
     // Kit omits the commitment from the request when it is the RPC default, finalized.
     expect(rpc.requests.find((request) => request.method === "getTransaction")?.params).toEqual([
       SIGNATURE,
-      { encoding: "base64", maxSupportedTransactionVersion: 0 },
+      { encoding: "base64", maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION },
     ]);
   });
 
@@ -1371,6 +1415,62 @@ describe("settlement atomicity", () => {
 
     expect(await listInboundTransfers()).toHaveLength(0);
     expect(await readStored(request.id)).toMatchObject({ status: "awaiting_payment" });
+  });
+
+  it("keeps an old closed request in the late watch until settlement commits", async () => {
+    const request = await storeScanPosition(
+      await createRequest({ token: SOL_MINT, expiresAt: PAST }),
+      { stuckSignature: SIGNATURE, stuckSince: PAST }
+    );
+    await storeExpired(request.id);
+    mockSettlementSucceeds(PAST_SECONDS);
+    const real = repositoryFactory.createTransactionalPaymentRequestsRepository;
+    let failOnce = true;
+    vi.spyOn(repositoryFactory, "createTransactionalPaymentRequestsRepository").mockImplementation(
+      (db, scope) => {
+        const repository = real(db, scope);
+        if (failOnce) {
+          failOnce = false;
+          vi.spyOn(repository, "markExpiredPaymentRequestPaid").mockRejectedValueOnce(
+            new Error("settlement temporarily unavailable")
+          );
+        }
+        return repository;
+      }
+    );
+    const lateWatch = () =>
+      createSystemPaymentRequestsRepository(env).listClosedPaymentRequestsForLateCheck({
+        environment: "sandbox",
+        closedSince: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+        checkedBefore: new Date(Date.now() + 60_000).toISOString(),
+        limit: 10,
+      });
+
+    await expect(
+      onSandbox(async () =>
+        checkClosedPaymentRequestForLatePayment(env, await readStored(request.id))
+      )
+    ).rejects.toThrow("settlement temporarily unavailable");
+
+    expect(await readStored(request.id)).toMatchObject({
+      status: "expired",
+      signature_scan_stuck_signature: SIGNATURE,
+      signature_scan_stuck_since: PAST,
+    });
+    expect(await listInboundTransfers()).toHaveLength(0);
+    expect((await lateWatch()).map((row) => row.id)).toContain(request.id);
+
+    const paid = await onSandbox(async () =>
+      checkClosedPaymentRequestForLatePayment(env, await readStored(request.id))
+    );
+
+    expect(paid).toMatchObject({
+      status: "paid",
+      signature_scan_stuck_signature: null,
+      signature_scan_stuck_since: null,
+    });
+    expect(await listInboundTransfers()).toMatchObject([{ signature: SIGNATURE }]);
+    expect((await lateWatch()).map((row) => row.id)).not.toContain(request.id);
   });
 });
 
@@ -1651,6 +1751,17 @@ describe("closeLapsedPaymentRequest while a payment is indexing", () => {
           );
         },
       },
+      {
+        reason: "unsupported_transaction_version",
+        setup: () => {
+          mockStatus(FINALIZED);
+          validateTransferSpy.mockRejectedValue(
+            new SolanaError(SOLANA_ERROR__JSON_RPC__SERVER_ERROR_UNSUPPORTED_TRANSACTION_VERSION, {
+              __serverMessage: "Transaction version unsupported",
+            })
+          );
+        },
+      },
     ];
 
     function expectNoGiveUp(logSpy: MockInstance<typeof moneyPathEvents.logEvent>) {
@@ -1692,7 +1803,7 @@ describe("closeLapsedPaymentRequest while a payment is indexing", () => {
     );
 
     it.for(unreadableVerdicts)(
-      "gives up on a signature that stayed $reason for over an hour and stores expired",
+      "expires after an hour of $reason while keeping the candidate recoverable",
       async ({ reason, setup }) => {
         const logSpy = vi.spyOn(moneyPathEvents, "logEvent");
         mockSignatures(signatureInfo(SIGNATURE, { blockTime: null, err: null }));
@@ -1707,9 +1818,8 @@ describe("closeLapsedPaymentRequest while a payment is indexing", () => {
         expect(result).toMatchObject({ status: "expired", paid_late: false });
         expect(await readStored(request.id)).toMatchObject({
           status: "expired",
-          signature_scan_cursor: SIGNATURE,
-          signature_scan_stuck_signature: null,
-          signature_scan_stuck_since: null,
+          signature_scan_cursor: null,
+          signature_scan_stuck_signature: SIGNATURE,
         });
         expect(logSpy).toHaveBeenCalledWith("warn", {
           event: "payment_requests.signature_unreadable",
@@ -1745,7 +1855,10 @@ describe("closeLapsedPaymentRequest while a payment is indexing", () => {
 
     it("restarts the clock when a different signature becomes the first unreadable one", async () => {
       const logSpy = vi.spyOn(moneyPathEvents, "logEvent");
-      mockSignatures(signatureInfo(SIGNATURE, { blockTime: null, err: null }));
+      mockSignatures(
+        signatureInfo(SIGNATURE, { blockTime: null, err: null }),
+        signatureInfo(FAILED_SIGNATURE, { blockTime: null, err: {} })
+      );
       mockStatus(FINALIZED);
       validateTransferSpy.mockRejectedValue(new ValidateTransferError("Transaction not found"));
       const request = await storeScanPosition(
@@ -1757,7 +1870,7 @@ describe("closeLapsedPaymentRequest while a payment is indexing", () => {
 
       expect(result.status).toBe("awaiting_payment");
       const stored = await readStored(request.id);
-      expect(stored.signature_scan_cursor).toBeNull();
+      expect(stored.signature_scan_cursor).toBe(FAILED_SIGNATURE);
       expectRecentlyStuck(stored, SIGNATURE);
       expectNoGiveUp(logSpy);
     });
@@ -1795,7 +1908,7 @@ describe("closeLapsedPaymentRequest while a payment is indexing", () => {
       });
     });
 
-    it("starts the clock on the next unreadable signature after giving up on one", async () => {
+    it("expires with multiple unreadable candidates while retaining the scan cursor", async () => {
       mockSignatures(
         signatureInfo(LATER_SIGNATURE, { blockTime: null, err: null }),
         signatureInfo(SIGNATURE, { blockTime: null, err: null })
@@ -1809,13 +1922,13 @@ describe("closeLapsedPaymentRequest while a payment is indexing", () => {
 
       const result = await onSandbox(() => closeLapsedPaymentRequest(env, request));
 
-      expect(result.status).toBe("awaiting_payment");
+      expect(result.status).toBe("expired");
       const stored = await readStored(request.id);
-      expect(stored.signature_scan_cursor).toBe(SIGNATURE);
-      expectRecentlyStuck(stored, LATER_SIGNATURE);
+      expect(stored.signature_scan_cursor).toBeNull();
+      expect(stored.signature_scan_stuck_signature).toBe(SIGNATURE);
     });
 
-    it("settles a valid payment listed after an abandoned unreadable signature", async () => {
+    it("settles a valid payment listed after an older unreadable signature", async () => {
       mockSignatures(
         signatureInfo(LATER_SIGNATURE, { blockTime: null, err: null }),
         signatureInfo(SIGNATURE, { blockTime: null, err: null })
@@ -1831,9 +1944,32 @@ describe("closeLapsedPaymentRequest while a payment is indexing", () => {
       expect(result.status).toBe("paid");
       expect(await listInboundTransfers()).toMatchObject([{ signature: LATER_SIGNATURE }]);
       expect(await readStored(request.id)).toMatchObject({
-        signature_scan_cursor: SIGNATURE,
+        signature_scan_cursor: null,
         signature_scan_stuck_signature: null,
       });
+    });
+
+    it("settles a previously unreadable payment after expiry", async () => {
+      mockSignatures(signatureInfo(SIGNATURE, { blockTime: PAST_SECONDS, err: null }));
+      mockStatus(FINALIZED);
+      validateTransferSpy.mockRejectedValue(new ValidateTransferError("Transaction not found"));
+      const request = await storeScanPosition(
+        await createRequest({ token: SOL_MINT, expiresAt: PAST }),
+        { stuckSignature: SIGNATURE, stuckSince: isoAgo(2 * HOUR_MS) }
+      );
+
+      const expired = await onSandbox(() => closeLapsedPaymentRequest(env, request));
+      expect(expired.status).toBe("expired");
+      expect((await readStored(request.id)).signature_scan_stuck_signature).toBe(SIGNATURE);
+
+      validateTransferSpy.mockResolvedValue(validatedTransfer(unixTimestamp(PAST_SECONDS)));
+      const paid = await onSandbox(async () =>
+        checkClosedPaymentRequestForLatePayment(env, await readStored(request.id))
+      );
+
+      expect(paid).toMatchObject({ status: "paid", paid_late: false });
+      expect((await readStored(request.id)).signature_scan_stuck_signature).toBeNull();
+      expect(await listInboundTransfers()).toMatchObject([{ signature: SIGNATURE }]);
     });
   });
 
@@ -1906,8 +2042,23 @@ async function storeScanPosition(request: PaymentRequestRow, to: Partial<Signatu
     requestId: request.id,
     organizationId: TEST_ORG.id,
     projectId: TEST_PROJECT_ID,
-    from: { cursor: null, before: null, stuckSignature: null, stuckSince: null },
-    to: { cursor: null, before: null, stuckSignature: null, stuckSince: null, ...to },
+    from: {
+      cursor: null,
+      before: null,
+      progress: null,
+      cycleHadRetry: false,
+      stuckSignature: null,
+      stuckSince: null,
+    },
+    to: {
+      cursor: null,
+      before: null,
+      progress: null,
+      cycleHadRetry: false,
+      stuckSignature: null,
+      stuckSince: null,
+      ...to,
+    },
   });
   return readStored(request.id);
 }
@@ -1936,6 +2087,71 @@ describe("signature scan cursor", () => {
     expect(second.status).toBe("paid");
     expect(validatedSignatures()).toEqual([...junk.slice(25), REAL]);
     expect(await listInboundTransfers()).toMatchObject([{ signature: REAL }]);
+  });
+
+  it("reaches a valid payment after one unreadable candidate and a full verification budget", async () => {
+    const unreadable = chainSignature(0);
+    const unrelated = chainOf(24, 1);
+    mockChain([unreadable, ...unrelated, REAL]);
+    mockStatus(FINALIZED);
+    validateTransferSpy.mockImplementation(async (sig) => {
+      if (sig === unreadable) throw new ValidateTransferError("Transaction not found");
+      if (sig === REAL) return validatedTransfer(null);
+      throw new ValidateTransferError("wrong amount");
+    });
+    const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+
+    await checkOnSandbox(request);
+    const stored = await readStored(request.id);
+    expect(stored).toMatchObject({
+      status: "awaiting_payment",
+      signature_scan_cursor: null,
+      signature_scan_progress: unrelated.at(-1),
+      signature_scan_stuck_signature: unreadable,
+    });
+
+    const settled = await checkOnSandbox(stored);
+    expect(settled.status).toBe("paid");
+    expect(validatedSignatures()).toContain(REAL);
+    expect(await listInboundTransfers()).toMatchObject([{ signature: REAL }]);
+  });
+
+  it("expires after scanning beyond an old unreadable candidate and can settle it later", async () => {
+    const unreadable = chainSignature(0);
+    const unrelated = chainOf(25, 1);
+    mockChain([unreadable, ...unrelated]);
+    mockStatus(FINALIZED);
+    validateTransferSpy.mockImplementation(async (sig) => {
+      if (sig === unreadable) throw new ValidateTransferError("Transaction not found");
+      throw new ValidateTransferError("wrong amount");
+    });
+    const request = await storeScanPosition(
+      await createRequest({ token: SOL_MINT, expiresAt: PAST }),
+      {
+        stuckSignature: unreadable,
+        stuckSince: new Date(Date.now() - 2 * 60 * 60_000).toISOString(),
+      }
+    );
+
+    const first = await onSandbox(() => closeLapsedPaymentRequest(env, request));
+    expect(first.status).toBe("awaiting_payment");
+    expect((await readStored(request.id)).signature_scan_progress).toBe(unrelated[23]);
+
+    const second = await onSandbox(async () =>
+      closeLapsedPaymentRequest(env, await readStored(request.id))
+    );
+    expect(second.status).toBe("expired");
+    expect((await readStored(request.id)).signature_scan_stuck_signature).toBe(unreadable);
+
+    validateTransferSpy.mockImplementation(async (sig) => {
+      if (sig === unreadable) return validatedTransfer(unixTimestamp(PAST_SECONDS));
+      throw new ValidateTransferError("wrong amount");
+    });
+    const late = await onSandbox(async () =>
+      checkClosedPaymentRequestForLatePayment(env, await readStored(request.id))
+    );
+    expect(late.status).toBe("paid");
+    expect(await listInboundTransfers()).toMatchObject([{ signature: unreadable }]);
   });
 
   it("does not store expired while junk older than the payment is still unevaluated", async () => {
@@ -2050,6 +2266,25 @@ describe("signature scan cursor", () => {
   });
 
   describe("when the signature history newer than the cursor exceeds the page cap", () => {
+    it("keeps an older unreadable signature recoverable across pagination", async () => {
+      const unreadable = chainSignature(0);
+      const junk = chainOf(5000, 1);
+      mockChain([unreadable, ...junk, REAL], new Set(junk));
+      mockStatus(FINALIZED);
+      validateTransferSpy.mockImplementation(async (sig) => {
+        if (sig === unreadable) throw new ValidateTransferError("Transaction not found");
+        if (sig === REAL) return validatedTransfer(null);
+        throw new Error(`Unexpected verification of ${sig}`);
+      });
+      const request = await createRequest({ token: SOL_MINT, expiresAt: null });
+
+      const settled = await checkUntilSettled(request, 6);
+
+      expect(settled.status).toBe("paid");
+      expect(validatedSignatures()).toContain(REAL);
+      expect(await listInboundTransfers()).toMatchObject([{ signature: REAL }]);
+    });
+
     it("evaluates nothing, reports truncation and resumes further back on the next check", async () => {
       const logSpy = vi.spyOn(moneyPathEvents, "logEvent");
       const junk = chainOf(5001);

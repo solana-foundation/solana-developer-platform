@@ -1702,7 +1702,8 @@ body {
 
 /* The path wraps beside its method on a phone rather than dropping below it. */
 .launch-api-endpoint {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: flex-start;
   gap: 10px;
   margin: 0 0 18px;
@@ -1723,6 +1724,45 @@ body {
 
 .launch-api-path-param {
   color: var(--ink-tertiary);
+}
+
+.launch-api-playground-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: var(--control-height-sm);
+  padding: 0 12px;
+  border-radius: var(--corner-control);
+  background: var(--chip);
+  box-shadow:
+    var(--chip-ring),
+    inset 0 0 0 999px transparent;
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-meta);
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: box-shadow var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.launch-api-playground-link:hover {
+  box-shadow:
+    var(--chip-ring),
+    inset 0 0 0 999px var(--wash);
+}
+
+.launch-api-playground-link:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+@media (max-width: 640px) {
+  .launch-api-playground-link {
+    grid-column: 2;
+    justify-self: start;
+  }
 }
 
 /* Method colours follow the dashboard playground's badges. */

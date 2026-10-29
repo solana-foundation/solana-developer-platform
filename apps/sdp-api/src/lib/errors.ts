@@ -60,6 +60,8 @@ export type ErrorCode =
   | "AMOUNT_BELOW_RENT_MINIMUM"
   // A batch's externalId names a payout run another batch already sent (HOO-2335)
   | "TRANSFER_BATCH_RUN_EXISTS"
+  // A recipient token account whose rent exceeds the sponsor's per-transaction cap (HOO-2024)
+  | "SPONSORED_RENT_OVER_CAP"
   // Idempotency-Key (HOO-1918, draft-ietf-httpapi-idempotency-key-header)
   | IdempotencyErrorCode;
 
@@ -130,6 +132,7 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   AMOUNT_BELOW_RENT_MINIMUM: 409,
   // 409, never stored: the existing batch is in details.batchId.
   TRANSFER_BATCH_RUN_EXISTS: 409,
+  SPONSORED_RENT_OVER_CAP: 409,
   // Idempotency-Key (HOO-1918)
   IDEMPOTENCY_KEY_REQUIRED: 400,
   IDEMPOTENCY_KEY_REUSED: 422,
@@ -194,6 +197,8 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
     "A SOL amount sent to an address with no account must be at least the rent-exempt minimum",
   TRANSFER_BATCH_RUN_EXISTS:
     "A different transfer batch with this externalId already exists for this source wallet",
+  SPONSORED_RENT_OVER_CAP:
+    "A recipient's token account would cost more rent than the sponsor funds in one transaction",
   // Idempotency-Key (HOO-1918)
   IDEMPOTENCY_KEY_REQUIRED: "This operation requires an Idempotency-Key header",
   IDEMPOTENCY_KEY_REUSED: "This Idempotency-Key was already used for a different request",
@@ -346,6 +351,19 @@ export function amountBelowRentMinimum(
   details?: Record<string, unknown>
 ): AppError {
   return new AppError("AMOUNT_BELOW_RENT_MINIMUM", message, details);
+}
+
+/**
+ * A recipient whose token account rent alone exceeds the sponsor's per-transaction outflow cap
+ * (Kora `max_allowed_lamports`, HOO-2024): no chunk could carry it, so the batch is refused
+ * before anything is stored or sent. Creating the recipient's token account first clears it.
+ */
+export function sponsoredRentOverCap(details?: Record<string, unknown>): AppError {
+  return new AppError(
+    "SPONSORED_RENT_OVER_CAP",
+    "A recipient's token account would cost more rent than the sponsor funds in one transaction; create the recipient's token account first",
+    details
+  );
 }
 
 export function providerUnavailable(message?: string, details?: Record<string, unknown>): AppError {

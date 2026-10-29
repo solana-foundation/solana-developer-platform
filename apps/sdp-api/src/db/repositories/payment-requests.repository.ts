@@ -48,6 +48,8 @@ export interface PaymentRequestRow {
   paid_late: boolean;
   signature_scan_cursor: string | null;
   signature_scan_before: string | null;
+  signature_scan_progress: string | null;
+  signature_scan_cycle_had_retry: boolean;
   signature_scan_stuck_signature: string | null;
   signature_scan_stuck_since: string | null;
   sponsored_tx_last_valid_block_height: bigint | null;
@@ -130,6 +132,8 @@ export interface MarkClosedPaymentRequestPaidInput {
 export interface SignatureScanPosition {
   cursor: string | null;
   before: string | null;
+  progress: string | null;
+  cycleHadRetry: boolean;
   stuckSignature: string | null;
   stuckSince: string | null;
 }
@@ -224,8 +228,8 @@ export interface PaymentRequestsRepository {
     limit: number;
   }): Promise<PaymentRequestRow[]>;
   /**
-   * Requests closed without a payment inside the late-payment watch: expired since `closedSince`
-   * by `expires_at`, or canceled since then by `canceled_at`.
+   * Requests closed without a payment inside the late-payment watch, plus older requests that
+   * still have an unresolved chain signature. Those remain recoverable after the normal window.
    */
   listClosedPaymentRequestsForLateCheck(params: {
     environment: SdpEnvironment;
