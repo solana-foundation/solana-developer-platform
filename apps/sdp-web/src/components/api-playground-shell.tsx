@@ -58,6 +58,8 @@ export interface ApiPlaygroundFieldConfig {
 
 export interface ApiPlaygroundEndpointConfig {
   id: string;
+  /** The generated reference ID, when a curated form uses an older ID. */
+  referenceEndpointId?: string;
   title: string;
   method: ApiPlaygroundMethod;
   path: string;
@@ -1203,9 +1205,10 @@ function useApiPlaygroundState({
   const endpointsRef = useRef(endpoints);
   const endpointParam = searchParams.get("endpoint");
 
-  const activeEndpointId = endpoints.some((endpoint) => endpoint.id === endpointParam)
-    ? (endpointParam ?? "")
-    : initialEndpointId;
+  const activeEndpointId =
+    endpoints.find((endpoint) => endpoint.id === endpointParam)?.id ??
+    endpoints.find((endpoint) => endpoint.referenceEndpointId === endpointParam)?.id ??
+    initialEndpointId;
   const activeEndpoint =
     endpoints.find((endpoint) => endpoint.id === activeEndpointId) ?? initialEndpoint;
   const effectiveApiBaseUrl = useMemo(
