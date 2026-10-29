@@ -84,8 +84,6 @@ All in `src/components/docs-shell/page.tsx`. Use these for every docs page.
 import { DocsPage, DocsTitle, DocsDescription, DocsBody } from "@/components/docs-shell/page";
 
 <DocsPage toc={toc}>
-  {" "}
-  // toc?: TocItem[] — omit if no TOC needed
   <DocsTitle>Page Title</DocsTitle>
   <DocsDescription>Optional subtitle.</DocsDescription>
   <DocsBody>{/* MDX content or custom content */}</DocsBody>
