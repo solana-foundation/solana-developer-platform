@@ -3,18 +3,15 @@ import * as solanaRpc from "@sdp/rpc/solana";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db/client";
-import {
-  createPaymentRequestsRepository,
-  createSystemPaymentRequestsRepository,
-} from "@/db/repositories/repository-factory";
+import { createSystemPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { badRequest } from "@/lib/errors";
-import { createTenantScope } from "@/lib/tenant-scope";
 import * as moneyPathEvents from "@/runtime/money-path-events";
 import * as paymentAmounts from "@/services/payments/token-amount";
 import { TEST_CUSTODY_PUBLIC_KEY } from "@/test/fixtures/custody";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { type ClusterRpcStub, installClusterRpcStub } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
+import { seedPaymentRequest, setPaymentRequestColumns } from "@/test/helpers/payment-requests";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import {
@@ -35,21 +32,8 @@ function ago(ms: number): string {
   return new Date(Date.now() - ms).toISOString();
 }
 
-async function updateRow(id: string, fields: Record<string, string | null>) {
-  const columns = Object.keys(fields);
-  await getDb(env)
-    .prepare(
-      `UPDATE payment_requests SET ${columns.map((column) => `${column} = ?`).join(", ")} WHERE id = ?`
-    )
-    .bind(...Object.values(fields), id)
-    .run();
-}
-
 async function createRequest(params: { token: string; expiresAt: string | null }) {
-  return createPaymentRequestsRepository(
-    env,
-    createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID })
-  ).createPaymentRequest({
+  return seedPaymentRequest(env, {
     organizationId: TEST_ORG.id,
     projectId: TEST_PROJECT_ID,
     custodyWalletId: TEST_CUSTODY_WALLET_ID,
@@ -268,7 +252,7 @@ describe("reconcilePaymentRequests", () => {
     vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);
     const request = await createRequest({ token: SOL_MINT, expiresAt: null });
     await createRequest({ token: SOL_MINT, expiresAt: PAST });
-    await updateRow(request.id, { created_at: PAST, last_checked_at: PAST });
+    await setPaymentRequestColumns(env, request.id, { created_at: PAST, last_checked_at: PAST });
 
     await onSandbox(() => reconcilePaymentRequests(env));
 
@@ -302,11 +286,11 @@ describe("reconcilePaymentRequests", () => {
       badRequest("Token mint account does not exist")
     );
     const request = await createRequest({ token: SOL_MINT, expiresAt: null });
-    await updateRow(request.id, { created_at: PAST, last_checked_at: PAST });
+    await setPaymentRequestColumns(env, request.id, { created_at: PAST, last_checked_at: PAST });
 
     await onSandbox(() => reconcilePaymentRequests(env));
     log.mockClear();
-    await updateRow(request.id, { last_checked_at: PAST });
+    await setPaymentRequestColumns(env, request.id, { last_checked_at: PAST });
     await onSandbox(() => reconcilePaymentRequests(env));
 
     expect(log).not.toHaveBeenCalledWith(
@@ -323,7 +307,7 @@ describe("reconcilePaymentRequests", () => {
     const log = vi.spyOn(moneyPathEvents, "logEvent");
     vi.spyOn(solanaRpc, "getSignaturesForAddress").mockRejectedValue(new Error("rpc down"));
     const request = await createRequest({ token: SOL_MINT, expiresAt: null });
-    await updateRow(request.id, {
+    await setPaymentRequestColumns(env, request.id, {
       created_at: PAST,
       last_checked_at: PAST,
       settlement_blocked_reason: "mint_not_admitted",
@@ -331,7 +315,7 @@ describe("reconcilePaymentRequests", () => {
 
     await expect(onSandbox(() => reconcilePaymentRequests(env))).rejects.toThrow(/checks failed/);
     log.mockClear();
-    await updateRow(request.id, { last_checked_at: PAST });
+    await setPaymentRequestColumns(env, request.id, { last_checked_at: PAST });
     await expect(onSandbox(() => reconcilePaymentRequests(env))).rejects.toThrow(/checks failed/);
 
     expect((await getRow(request.id)).settlement_blocked_reason).toBeNull();
@@ -344,7 +328,9 @@ describe("reconcilePaymentRequests", () => {
   it("clears the block once the chain can be read again", async () => {
     vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);
     const request = await createRequest({ token: SOL_MINT, expiresAt: null });
-    await updateRow(request.id, { settlement_blocked_reason: "mint_not_admitted" });
+    await setPaymentRequestColumns(env, request.id, {
+      settlement_blocked_reason: "mint_not_admitted",
+    });
 
     await onSandbox(() => reconcilePaymentRequests(env));
 
@@ -357,7 +343,7 @@ describe("reconcilePaymentRequests", () => {
     const log = vi.spyOn(moneyPathEvents, "logEvent");
     vi.spyOn(solanaRpc, "getSignaturesForAddress").mockRejectedValue(new Error("rpc down"));
     const request = await createRequest({ token: SOL_MINT, expiresAt: null });
-    await updateRow(request.id, { created_at: PAST, last_checked_at: PAST });
+    await setPaymentRequestColumns(env, request.id, { created_at: PAST, last_checked_at: PAST });
 
     await expect(onSandbox(() => reconcilePaymentRequests(env))).rejects.toThrow(/checks failed/);
     log.mockClear();
@@ -374,7 +360,7 @@ describe("reconcilePaymentRequests", () => {
     const log = vi.spyOn(moneyPathEvents, "logEvent");
     vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);
     const request = await createRequest({ token: SOL_MINT, expiresAt: null });
-    await updateRow(request.id, {
+    await setPaymentRequestColumns(env, request.id, {
       created_at: ago(2 * DAY),
       last_checked_at: ago(11 * MINUTE),
       last_verified_at: ago(11 * MINUTE),
@@ -393,8 +379,11 @@ describe("reconcilePaymentRequests", () => {
     const young = await createRequest({ token: SOL_MINT, expiresAt: null });
     const aged = await createRequest({ token: SOL_MINT, expiresAt: null });
     const lastChecked = ago(MINUTE);
-    await updateRow(young.id, { last_checked_at: lastChecked });
-    await updateRow(aged.id, { created_at: ago(2 * DAY), last_checked_at: lastChecked });
+    await setPaymentRequestColumns(env, young.id, { last_checked_at: lastChecked });
+    await setPaymentRequestColumns(env, aged.id, {
+      created_at: ago(2 * DAY),
+      last_checked_at: lastChecked,
+    });
 
     await onSandbox(() => reconcilePaymentRequests(env));
 
@@ -498,12 +487,12 @@ describe("expirePaymentRequests", () => {
     vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);
     const live = await createRequest({ token: SOL_MINT, expiresAt: PAST });
     const passed = await createRequest({ token: SOL_MINT, expiresAt: PAST });
-    await updateRow(live.id, {
+    await setPaymentRequestColumns(env, live.id, {
       sponsored_tx_account: "acct",
       sponsored_tx_unsigned: "tx",
       sponsored_tx_last_valid_block_height: "900",
     });
-    await updateRow(passed.id, {
+    await setPaymentRequestColumns(env, passed.id, {
       sponsored_tx_account: "acct",
       sponsored_tx_unsigned: "tx",
       sponsored_tx_last_valid_block_height: "849",
@@ -519,7 +508,7 @@ describe("expirePaymentRequests", () => {
     const log = vi.spyOn(moneyPathEvents, "logEvent");
     const lapsed = await createRequest({ token: SOL_MINT, expiresAt: PAST });
     const watched = await createRequest({ token: SOL_MINT, expiresAt: null });
-    await updateRow(watched.id, {
+    await setPaymentRequestColumns(env, watched.id, {
       status: "expired",
       expires_at: ago(DAY),
       last_checked_at: PAST,
@@ -547,7 +536,7 @@ describe("expirePaymentRequests", () => {
 
   it("fails the run when every late-watch check failed", async () => {
     const watched = await createRequest({ token: SOL_MINT, expiresAt: null });
-    await updateRow(watched.id, {
+    await setPaymentRequestColumns(env, watched.id, {
       status: "expired",
       expires_at: ago(DAY),
       last_checked_at: PAST,
@@ -563,12 +552,12 @@ describe("expirePaymentRequests", () => {
     const findReference = vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);
     const outside = await createRequest({ token: SOL_MINT, expiresAt: null });
     const inside = await createRequest({ token: SOL_MINT, expiresAt: null });
-    await updateRow(outside.id, {
+    await setPaymentRequestColumns(env, outside.id, {
       status: "expired",
       expires_at: ago(8 * DAY),
       last_checked_at: PAST,
     });
-    await updateRow(inside.id, {
+    await setPaymentRequestColumns(env, inside.id, {
       status: "expired",
       expires_at: ago(6 * DAY),
       last_checked_at: PAST,
@@ -586,7 +575,7 @@ describe("expirePaymentRequests", () => {
     vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);
     const stale = await createRequest({ token: SOL_MINT, expiresAt: PAST });
     await createRequest({ token: SOL_MINT, expiresAt: ago(MINUTE) });
-    await updateRow(stale.id, { last_checked_at: ago(DAY) });
+    await setPaymentRequestColumns(env, stale.id, { last_checked_at: ago(DAY) });
 
     await onSandbox(() => expirePaymentRequests(env));
 
@@ -601,7 +590,10 @@ describe("expirePaymentRequests", () => {
     const log = vi.spyOn(moneyPathEvents, "logEvent");
     vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);
     const request = await createRequest({ token: SOL_MINT, expiresAt: PAST });
-    await updateRow(request.id, { last_checked_at: ago(MINUTE), last_verified_at: ago(MINUTE) });
+    await setPaymentRequestColumns(env, request.id, {
+      last_checked_at: ago(MINUTE),
+      last_verified_at: ago(MINUTE),
+    });
 
     await onSandbox(() => expirePaymentRequests(env));
 
@@ -615,7 +607,7 @@ describe("expirePaymentRequests", () => {
     const log = vi.spyOn(moneyPathEvents, "logEvent");
     vi.spyOn(solanaRpc, "getSignaturesForAddress").mockResolvedValue([]);
     const request = await createRequest({ token: SOL_MINT, expiresAt: null });
-    await updateRow(request.id, {
+    await setPaymentRequestColumns(env, request.id, {
       status: "expired",
       expires_at: ago(DAY),
       last_checked_at: PAST,

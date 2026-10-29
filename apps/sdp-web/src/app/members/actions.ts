@@ -1,5 +1,6 @@
 "use server";
 
+import { SDP_ENVIRONMENTS } from "@sdp/types/api-keys";
 import { MEMBER_STATUSES } from "@sdp/types/organizations";
 import { ORGANIZATION_ROLES, type OrganizationRole } from "@sdp/types/roles";
 import { revalidatePath } from "next/cache";
@@ -176,6 +177,37 @@ export async function listMembers(page: number): Promise<MemberDirectory> {
   return memberDirectorySchema.parse(
     await client.fetch<unknown>(`/v1/members?${query.toString()}`)
   );
+}
+
+const memberApiKeysSchema = z.object({
+  apiKeys: z.array(
+    z.object({
+      id: z.string(),
+      name: z.string(),
+      keyPrefix: z.string(),
+      projectId: z.string(),
+      projectName: z.string(),
+      environment: z.enum(SDP_ENVIRONMENTS),
+      createdAt: z.string(),
+    })
+  ),
+});
+
+export type MemberApiKey = z.infer<typeof memberApiKeysSchema>["apiKeys"][number];
+
+/**
+ * The active keys a member created, in every project: removing the member
+ * leaves them working, so the removal dialog lists them.
+ *
+ * @param memberId - The member.
+ * @returns The keys, newest first.
+ */
+export async function listMemberApiKeys(memberId: string): Promise<MemberApiKey[]> {
+  const client = await createOrgSdpApiClient();
+  const response = await client.fetch<unknown>(
+    `/v1/members/${encodeURIComponent(idSchema.parse(memberId))}/api-keys`
+  );
+  return memberApiKeysSchema.parse(response).apiKeys;
 }
 
 export type InviteMemberResult =

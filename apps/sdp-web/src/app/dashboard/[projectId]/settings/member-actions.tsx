@@ -13,9 +13,19 @@ import { MoreHorizontalIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { changeMemberRole, removeMember } from "@/app/members/actions";
+import useSWR from "swr";
+import { API_KEYS_PAGE_PATH } from "@/app/dashboard/[projectId]/api-keys/api-key-flash";
+import {
+  changeMemberRole,
+  listMemberApiKeys,
+  type MemberApiKey,
+  removeMember,
+} from "@/app/members/actions";
+import { EntityLink } from "@/components/entity-link";
 import { useTranslations } from "@/i18n/provider";
+import { projectHref } from "@/lib/dashboard-project-path";
 import { useActionIdempotencyKey } from "@/lib/use-action-idempotency-key";
+import { membersQueryKeys } from "./members-query-key";
 
 export function MemberActions({
   memberId,
@@ -76,6 +86,22 @@ export function MemberActions({
     blockedReason = t("Shared.members.cannotRemoveSelf");
   } else if (isLastAdmin) {
     blockedReason = t("Shared.members.cannotRemoveLastAdmin");
+  }
+
+  // Removal waits for the member's key list, so no admin confirms before
+  // seeing which keys survive; a failed read turns the button into an
+  // explicit "remove anyway". SWR reads it again on focus, after a revoke.
+  const { data: apiKeys, error: apiKeysError } = useSWR(
+    isConfirmOpen ? membersQueryKeys.memberApiKeys({ memberId }) : null,
+    ([, id]) => listMemberApiKeys(id)
+  );
+  const isApiKeysLoading = isConfirmOpen && !apiKeys && !apiKeysError;
+  const isApiKeysFailed = !apiKeys && Boolean(apiKeysError);
+  let removeLabel = t("Shared.members.removeMember");
+  if (isPending) {
+    removeLabel = t("Shared.members.removing");
+  } else if (isApiKeysFailed) {
+    removeLabel = t("Shared.members.removeAnyway");
   }
 
   const confirmRemove = () => {
@@ -143,16 +169,61 @@ export function MemberActions({
           <p className="text-secondary text-sm">
             {t("Shared.members.removeConfirm", { member: label })}
           </p>
+          {isApiKeysLoading ? (
+            <p className="text-secondary text-sm">{t("Shared.members.apiKeysLoading")}</p>
+          ) : null}
+          {isApiKeysFailed ? (
+            <p className="text-secondary text-sm">{t("Shared.members.apiKeysLoadFailed")}</p>
+          ) : null}
+          {apiKeys && apiKeys.length > 0 ? <MemberApiKeys apiKeys={apiKeys} label={label} /> : null}
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setConfirmOpen(false)} disabled={isPending}>
               {t("Shared.members.cancel")}
             </Button>
-            <Button variant="destructive" onClick={confirmRemove} disabled={isPending}>
-              {isPending ? t("Shared.members.removing") : t("Shared.members.removeMember")}
+            <Button
+              variant="destructive"
+              onClick={confirmRemove}
+              disabled={isPending || isApiKeysLoading}
+            >
+              {removeLabel}
             </Button>
           </div>
         </div>
       </Modal>
     </>
+  );
+}
+
+/**
+ * The member's active keys, which the removal leaves working. Each links to
+ * its own project's key page, in a new tab so this dialog stays open.
+ */
+function MemberApiKeys({ apiKeys, label }: { apiKeys: MemberApiKey[]; label: string }) {
+  const t = useTranslations();
+  return (
+    <div className="space-y-2">
+      <p className="text-secondary text-sm">
+        {t("Shared.members.apiKeysStayActive", { member: label })}
+      </p>
+      <ul className="divide-y divide-border-subtle rounded-md border border-border-default text-sm">
+        {apiKeys.map((apiKey) => (
+          <li key={apiKey.id} className="flex items-center gap-3 px-3 py-2">
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-primary">{apiKey.name}</p>
+              <p className="truncate text-tertiary text-xs">
+                {apiKey.keyPrefix}… · {apiKey.projectName}
+              </p>
+            </div>
+            <EntityLink
+              href={projectHref(apiKey.projectId, API_KEYS_PAGE_PATH)}
+              target="_blank"
+              className="shrink-0"
+            >
+              {t("Shared.members.revokeApiKey")}
+            </EntityLink>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }

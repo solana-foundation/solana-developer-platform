@@ -46,7 +46,7 @@ export type OnrampStepId = "DEPOSIT" | "MEMO" | "REVIEW" | "PROVIDER" | "REQUIRE
  * provider's estimate, and completion. Nothing is persisted before completion: the quote, and
  * the transfer it records, are created when the wizard lands on the last step.
  */
-export function getOnrampSteps(t: Translate): readonly RampWizardStep<OnrampStepId>[] {
+function getOnrampSteps(t: Translate): readonly RampWizardStep<OnrampStepId>[] {
   return [
     { id: "DEPOSIT", label: t("DashboardPayments.onchainSend.details"), title: "" },
     {

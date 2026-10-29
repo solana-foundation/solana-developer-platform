@@ -13,6 +13,7 @@ import {
   ENVIRONMENT_CLUSTER_CASES,
   epochInfoResult,
   installClusterRpcResponder,
+  type StubSignatureStatus,
 } from "@/test/helpers/cluster-rpc";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -87,6 +88,16 @@ const FINALIZED_SLOT = 5_000;
  */
 function finalizedHeightIs(blockHeight: number): void {
   clusterRpc.answer("getEpochInfo", epochInfoResult({ absoluteSlot: FINALIZED_SLOT, blockHeight }));
+}
+
+/**
+ * Answer every expiry re-read from a node at {@link FINALIZED_SLOT}, with `status` for each
+ * requested signature.
+ *
+ * @param status - The status the node holds for each signature, or null when it has none.
+ */
+function historyAtFinalizedSlotIs(status: StubSignatureStatus | null): void {
+  clusterRpc.respondSignatureStatusesAt(FINALIZED_SLOT, () => status);
 }
 
 /** Fail every finalized height read, as an RPC outage does. */
@@ -1092,6 +1103,7 @@ describe("reconcileEarnVaultMovements", () => {
         });
       getSignatureStatuses.mockResolvedValue([null]);
       finalizedHeightIs(101);
+      historyAtFinalizedSlotIs(null);
       return seeded;
     }
 
@@ -1188,6 +1200,7 @@ describe("reconcileEarnVaultMovements", () => {
     const seeded = await seedMovement("100");
     getSignatureStatuses.mockResolvedValue([null]);
     finalizedHeightIs(101);
+    historyAtFinalizedSlotIs(null);
 
     await sweep("sandbox");
     await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
@@ -1217,6 +1230,7 @@ describe("reconcileEarnVaultMovements", () => {
       const seeded = await seedSubmitted("100");
       getSignatureStatuses.mockResolvedValue([null]);
       finalizedHeightIs(101);
+      historyAtFinalizedSlotIs(null);
 
       await sweep("sandbox");
 
@@ -1240,6 +1254,7 @@ describe("reconcileEarnVaultMovements", () => {
       const seeded = await seedSubmitted("100");
       getSignatureStatuses.mockResolvedValue([null]);
       finalizedHeightIs(101);
+      historyAtFinalizedSlotIs(null);
       await sweep("sandbox");
       await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({ status: "submitted" });
 
@@ -1260,13 +1275,21 @@ describe("reconcileEarnVaultMovements", () => {
       const seeded = await seedSubmitted("100");
       getSignatureStatuses.mockResolvedValue([null]);
       finalizedHeightIs(101);
+      historyAtFinalizedSlotIs(null);
 
       await sweep("sandbox");
 
-      expect(getSignatureStatuses).toHaveBeenLastCalledWith(
-        expect.anything(),
-        [seeded.movement.signature],
-        { searchTransactionHistory: true, minContextSlot: BigInt(FINALIZED_SLOT) }
+      expect(clusterRpc.requests.filter(({ method }) => method === "getSignatureStatuses")).toEqual(
+        [
+          {
+            cluster: "devnet",
+            method: "getSignatureStatuses",
+            params: [
+              [seeded.movement.signature],
+              { searchTransactionHistory: true, minContextSlot: FINALIZED_SLOT },
+            ],
+          },
+        ]
       );
     });
 
@@ -1274,15 +1297,17 @@ describe("reconcileEarnVaultMovements", () => {
       const seeded = await seedSubmitted("100");
       getSignatureStatuses.mockResolvedValue([null]);
       finalizedHeightIs(101);
+      historyAtFinalizedSlotIs(null);
       await sweep("sandbox");
 
       // The batch read comes from an endpoint behind the finalized height; the re-read, from a
       // node at that height's slot, finds the transaction.
-      getSignatureStatuses
-        .mockResolvedValueOnce([null])
-        .mockResolvedValueOnce([
-          { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
-        ]);
+      historyAtFinalizedSlotIs({
+        slot: 1,
+        confirmations: null,
+        err: null,
+        confirmationStatus: "finalized",
+      });
       await sweep("sandbox");
 
       await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
@@ -1296,11 +1321,10 @@ describe("reconcileEarnVaultMovements", () => {
       const seeded = await seedSubmitted("100");
       getSignatureStatuses.mockResolvedValue([null]);
       finalizedHeightIs(101);
+      historyAtFinalizedSlotIs(null);
       await sweep("sandbox");
 
-      getSignatureStatuses
-        .mockResolvedValueOnce([null])
-        .mockRejectedValueOnce(new Error("Solana RPC answered from a slot below minContextSlot"));
+      clusterRpc.respondSignatureStatusesAt(FINALIZED_SLOT - 1, () => null);
       await expect(sweep("sandbox")).rejects.toThrow();
 
       await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
@@ -1314,6 +1338,7 @@ describe("reconcileEarnVaultMovements", () => {
       const seeded = await seedSubmitted("100");
       getSignatureStatuses.mockResolvedValue([null]);
       finalizedHeightIs(101);
+      historyAtFinalizedSlotIs(null);
       await sweep("sandbox");
 
       // Exit safety (ADR 0002): an unavailable read is not a second observation.

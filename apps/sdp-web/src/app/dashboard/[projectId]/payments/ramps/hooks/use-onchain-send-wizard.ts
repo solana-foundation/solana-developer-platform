@@ -43,7 +43,7 @@ import type { RampWizardStep } from "./use-ramp-wizard";
 
 // One details step (contact, destination, wallet, amount, memo) and a review that also shows the
 // outcome once sent.
-export const ONCHAIN_SEND_STEP_IDS = ["DETAILS", "REVIEW"] as const;
+const ONCHAIN_SEND_STEP_IDS = ["DETAILS", "REVIEW"] as const;
 export type OnchainSendStepId = (typeof ONCHAIN_SEND_STEP_IDS)[number];
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
@@ -149,7 +149,7 @@ export function nextAssetAfterWalletChange(
   return firstAsset === undefined ? "" : firstAsset.value;
 }
 
-export function cryptoWalletAddress(account: CounterpartyAccount): string | null {
+function cryptoWalletAddress(account: CounterpartyAccount): string | null {
   if (account.accountKind !== "crypto_wallet") {
     return null;
   }

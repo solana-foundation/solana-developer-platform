@@ -28,7 +28,7 @@ export const THEME_PREFERENCES = ["system", "light", "dark"] as const satisfies 
 ];
 
 /** localStorage key holding the user's explicit choice. */
-export const THEME_STORAGE_KEY = "sdp-theme";
+const THEME_STORAGE_KEY = "sdp-theme";
 
 type ThemeContextValue = {
   theme: Theme;

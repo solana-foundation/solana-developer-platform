@@ -15,7 +15,7 @@ import {
 // The metadata keys the edit form owns per namespace. The clobber-safe merge
 // only overwrites/deletes these; every other key an integration may have
 // written into the profile is carried through untouched.
-export const ASSET_OWNED_KEYS = [
+const ASSET_OWNED_KEYS = [
   "name",
   "description",
   "website",
@@ -46,9 +46,9 @@ export const ASSET_OWNED_KEYS = [
   "documents",
 ] as const;
 
-export const COMPLIANCE_OWNED_KEYS = ["accessControl", "capacities"] as const;
+const COMPLIANCE_OWNED_KEYS = ["accessControl", "capacities"] as const;
 
-export const CHAIN_OWNED_KEYS = ["decimals"] as const;
+const CHAIN_OWNED_KEYS = ["decimals"] as const;
 
 export interface UpdateAssetProfileActionInput {
   tokenId: string;

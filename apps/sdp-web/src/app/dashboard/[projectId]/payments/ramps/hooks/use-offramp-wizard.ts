@@ -44,7 +44,7 @@ import { type RampWizardStep, type UseRampWizardProps, useRampWizard } from "./u
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 export type OfframpStepId = "WALLET" | "WITHDRAW" | "MEMO" | "COMPLETE" | "REQUIREMENTS";
 
-export function getOfframpSteps(t: Translate): readonly RampWizardStep<OfframpStepId>[] {
+function getOfframpSteps(t: Translate): readonly RampWizardStep<OfframpStepId>[] {
   return [
     {
       id: "WALLET",

@@ -31,7 +31,7 @@ function shouldHideUnresolvedMintLabel(
   return displayToken.trim().toUpperCase() === mint.toUpperCase();
 }
 
-export function findWalletBalanceForToken(
+function findWalletBalanceForToken(
   wallet: PaymentsDashboardWallet | null,
   token: string
 ): WalletBalance | null {

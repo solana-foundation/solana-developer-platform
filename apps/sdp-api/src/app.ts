@@ -112,6 +112,11 @@ const KV_FREE_PATHS = [
 // subset, and no public /v1 route accepts file uploads.
 const MAX_API_BODY_BYTES = 1024 * 1024;
 
+// Bound for any /pay request body. The only body /pay reads is the Solana Pay
+// transaction request (`transactionRequestBodySchema`: one account address),
+// tens of bytes; the unauthenticated surface gets no more room than that needs.
+const MAX_PAY_BODY_BYTES = 4 * 1024;
+
 function mapSigningError(err: SigningError): {
   status: 400 | 404 | 409 | 502 | 504;
   code: string;
@@ -301,6 +306,15 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
     "/v1/*",
     bodyLimit({
       maxSize: MAX_API_BODY_BYTES,
+      onError: () => {
+        throw payloadTooLarge();
+      },
+    })
+  );
+  app.use(
+    "/pay/*",
+    bodyLimit({
+      maxSize: MAX_PAY_BODY_BYTES,
       onError: () => {
         throw payloadTooLarge();
       },

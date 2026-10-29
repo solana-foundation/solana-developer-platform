@@ -30,17 +30,18 @@ const EARN_PATH_SKELETON_IDS = ["treasury", "program"];
 const DVP_PATH_SKELETON_IDS = ["dvp"];
 
 /**
- * The guide intro's lines, each hidden from the work-area width where the English copy rewraps
- * to fewer. Measured from 360px to 1440px: six lines at 360, five to 412, four to tablet widths,
- * three at 1024, two from 1100.
+ * The guide intro's lines, each hidden from the paragraph width where the English copy rewraps
+ * to fewer: six lines below 329px, five below 398px, four below 515px, three below 765px, then
+ * two. They query their own width, since the page's padding steps with the viewport. Measured
+ * in Chrome from 360px to 1440px.
  */
 const GUIDE_INTRO_LINES = [
   { id: "one", hidden: undefined },
   { id: "two", hidden: undefined },
-  { id: "three", hidden: "@3xl:hidden" },
-  { id: "four", hidden: "@xl:hidden" },
-  { id: "five", hidden: "@min-[26.875rem]:hidden" },
-  { id: "six", hidden: "@min-[23rem]:hidden" },
+  { id: "three", hidden: "@min-[47.8125rem]:hidden" },
+  { id: "four", hidden: "@min-[32.1875rem]:hidden" },
+  { id: "five", hidden: "@min-[24.875rem]:hidden" },
+  { id: "six", hidden: "@min-[20.5625rem]:hidden" },
 ] as const satisfies readonly { id: string; hidden: string | undefined }[];
 
 /** A landing group: its 24px heading line, then a tile per path, two to a row. */
@@ -253,7 +254,7 @@ export function EarnIntegrationGuideSkeleton() {
   return (
     <DashboardWorkspaceOverviewPanel aria-busy="true" data-embedded-yield-loading="integrate">
       <div className="flex min-w-0 flex-col gap-8">
-        <div>
+        <div className="@container">
           {GUIDE_INTRO_LINES.map((line) => (
             <div className={cn("flex h-5 items-center", line.hidden)} key={line.id}>
               <SkeletonBlock className="h-3.5 w-full" />
@@ -274,9 +275,12 @@ export function EarnIntegrationGuideSkeleton() {
             {/* Copy all code wraps under the title on the narrowest phones, its 30px button set
                 in the title row's 24px line by -4px margins. */}
             <SkeletonBlock className="-my-1 h-7.5 w-33 rounded-control @min-[23rem]:hidden" />
-            {/* The API key callout: three lines on a phone, two from a 448px work area, one from
-                768px, in 16px padding and a 1px border. */}
-            <SkeletonBlock className="h-23.5 w-full rounded-card @md:h-18.5 @3xl:h-13.5" />
+            {/* The API key callout: three lines below a 398px callout, two below 720px, one from
+                there, in 16px padding and a 1px border. It queries its own width: the page's
+                padding steps with the viewport, so no work-area breakpoint fits both layouts. */}
+            <div className="@container">
+              <SkeletonBlock className="h-23.5 w-full rounded-card @min-[24.875rem]:h-18.5 @min-[45rem]:h-13.5" />
+            </div>
             <SkeletonBlock className="h-7 w-full rounded-control @2xl:w-96" />
             <div className="flex min-w-0 flex-col gap-3">
               <div>

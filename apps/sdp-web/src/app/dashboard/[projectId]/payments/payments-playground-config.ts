@@ -10,7 +10,7 @@ import type { TranslationValues } from "@/i18n/translate";
 import { mergeOpenApiPlaygroundEndpoints } from "@/lib/api-playground-openapi-catalog";
 import { getRampProviderLabel } from "@/lib/ramps";
 
-export interface PaymentsPlaygroundWalletView {
+interface PaymentsPlaygroundWalletView {
   id: string;
   label: string | null;
   publicKey: string;

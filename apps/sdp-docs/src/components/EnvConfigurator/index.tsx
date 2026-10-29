@@ -68,18 +68,18 @@ function initialValues(): Values {
 
 const STYLES = `
 .sdp-cfg {
-  --cfg-ink: var(--launch-ink, #1a1a1a);
-  --cfg-text: var(--launch-text, #44413c);
-  --cfg-muted: var(--launch-muted, #8a857d);
-  --cfg-border: var(--launch-border, #e4dfd6);
-  --cfg-border-strong: var(--launch-border-strong, #cfc8bb);
-  --cfg-bg: var(--launch-white, #ffffff);
-  --cfg-surface: var(--launch-bg, #faf8f4);
-  --cfg-accent: var(--launch-ink, #1a1a1a);
-  --cfg-danger: #c0392b;
-  --cfg-success: #1f7a4d;
+  --cfg-ink: var(--ink);
+  --cfg-text: var(--ink-secondary);
+  --cfg-muted: var(--ink-tertiary);
+  --cfg-border: var(--rule);
+  --cfg-border-strong: var(--rule-strong);
+  --cfg-bg: var(--paper-card);
+  --cfg-surface: var(--paper-tile);
+  --cfg-accent: var(--ink);
+  --cfg-danger: var(--critical);
+  --cfg-success: var(--positive);
   color: var(--cfg-text);
-  font-family: var(--font-sans, system-ui, -apple-system, "Segoe UI", sans-serif);
+  font-family: var(--font-sans);
   font-size: 14px;
   line-height: 1.5;
 }
@@ -181,7 +181,7 @@ const STYLES = `
 .sdp-cfg-panel-title {
   margin: 0;
   color: var(--cfg-ink);
-  font-family: var(--font-abc-diatype, var(--font-sans, inherit));
+  font-family: var(--font-sans);
   font-size: 22px;
   line-height: 1.2;
 }
@@ -212,7 +212,7 @@ const STYLES = `
   font-size: 15px;
   font-weight: 700;
   color: var(--cfg-ink);
-  font-family: var(--font-abc-diatype, var(--font-sans, inherit));
+  font-family: var(--font-sans);
 }
 .sdp-cfg-section-body {
   display: flex;
@@ -227,7 +227,7 @@ const STYLES = `
   font-size: 15px;
   font-weight: 700;
   color: var(--cfg-ink);
-  font-family: var(--font-abc-diatype, var(--font-sans, inherit));
+  font-family: var(--font-sans);
   list-style: revert;
 }
 .sdp-cfg-field {
@@ -382,7 +382,7 @@ const STYLES = `
 }
 .sdp-cfg-code {
   overflow-wrap: anywhere;
-  font-family: var(--font-berkeley-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-family: var(--font-mono);
   font-size: 12px;
 }
 .sdp-cfg-note {
@@ -407,7 +407,7 @@ const STYLES = `
   border-radius: 4px;
   background: var(--cfg-bg);
   border: 1px solid var(--cfg-border);
-  font-family: var(--font-berkeley-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-family: var(--font-mono);
   font-size: 11.5px;
 }
 .sdp-cfg-pre {
@@ -419,7 +419,7 @@ const STYLES = `
   border-radius: 8px;
   background: var(--cfg-surface);
   color: var(--cfg-ink);
-  font-family: var(--font-berkeley-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-family: var(--font-mono);
   font-size: 12.5px;
   line-height: 1.6;
   white-space: pre;
