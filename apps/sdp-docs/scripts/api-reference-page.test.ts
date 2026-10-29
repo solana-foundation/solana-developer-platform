@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ApiOperation, ApiSchema } from "@sdp/api-catalog/reference";
+import { structure } from "fumadocs-core/mdx-plugins/remark-structure";
 import remarkMdx from "remark-mdx";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
@@ -389,14 +390,20 @@ describe("<ApiEndpoint />", () => {
   });
 
   it("stays a component on the page, with the same text for search", () => {
-    const tree = unified()
+    const body = page.replace(/^---[\s\S]*?---\n/, "");
+    const processor = unified()
       .use(remarkParse)
       .use(remarkMdx)
-      .parse(page.replace(/^---[\s\S]*?---\n/, ""));
-    remarkDocsBlocks({ surface: publicSurface })(tree, { path: "widgets.mdx" });
+      .use(remarkDocsBlocks, { surface: publicSurface });
+    const tree = processor.parse(body);
+    processor.runSync(tree);
     const [element] = tree.children;
     assert.equal(element?.type, "mdxJsxFlowElement");
-    assert.deepEqual(element?.data?._stringify, { text: "GET /v1/widgets/{widgetId}" });
+    const search = structure(body, [remarkMdx, [remarkDocsBlocks, { surface: publicSurface }]]);
+    assert.deepEqual(
+      search.contents.map(({ content }) => content),
+      ["GET /v1/widgets/{widgetId}"]
+    );
   });
 
   it("refuses a method the API does not use", () => {
@@ -409,9 +416,11 @@ describe("<ApiEndpoint />", () => {
 describe("fact separators", () => {
   const facts = "- **`page`** · `integer` · greater than 0\n";
   const compiled = (path: string) => {
-    const tree = unified().use(remarkParse).use(remarkMdx).parse(facts);
-    remarkDocsBlocks({ surface: publicSurface })(tree, { path });
-    return JSON.stringify(tree);
+    const processor = unified()
+      .use(remarkParse)
+      .use(remarkMdx)
+      .use(remarkDocsBlocks, { surface: publicSurface });
+    return JSON.stringify(processor.runSync(processor.parse(facts), { path }));
   };
 
   it("sets each dot apart on a generated reference page, and only there", () => {

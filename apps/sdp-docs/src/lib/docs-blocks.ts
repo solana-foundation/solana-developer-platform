@@ -1,4 +1,5 @@
 import type { ApiMethod } from "@sdp/api-catalog/reference";
+import { embedSource } from "fumadocs-core/mdx-plugins/stringifier";
 import type { Parent, Root, RootContent } from "mdast";
 import remarkGfm from "remark-gfm";
 import remarkMdx from "remark-mdx";
@@ -236,17 +237,27 @@ const parser = unified().use(remarkParse).use(remarkMdx).use(remarkGfm);
 /** Remark plugin for the Fumadocs MDX pipeline; source.config.ts runs it first. */
 export function remarkDocsBlocks(options: { surface?: PublicSurface } = {}) {
   const surface = options.surface ?? publicSurface;
-  return (tree: Root, file: { path?: string }) => {
+  return (tree: Root, file: Parameters<typeof embedSource>[0]) => {
     const where = file.path ?? "MDX page";
     const spacesFacts = REFERENCE_PAGE.test(where);
     const walk = (parent: Parent) => {
       parent.children = parent.children.flatMap((child) => {
         const block = blockOf(child, where);
-        if (block) return parser.parse(BLOCKS[block.name](surface)).children;
+        if (block) {
+          // Fumadocs' search slices each node's Markdown from the page's source by position; the
+          // block's nodes are positioned in its own Markdown, so that source is embedded.
+          const markdown = BLOCKS[block.name](surface);
+          const content = parser.parse(markdown).children;
+          embedSource(file, child, markdown, content);
+          return content;
+        }
         const elementText = elementTextOf(child, where);
         if (elementText !== undefined) {
-          // Fumadocs' search (remark-structure) indexes `_stringify.text` for the element.
-          child.data = { ...child.data, _stringify: { text: elementText } };
+          // Fumadocs' search (remark-structure) indexes `structuredData` in place of the element.
+          child.data = {
+            ...child.data,
+            structuredData: { contents: [{ heading: undefined, content: elementText }] },
+          };
           return [child];
         }
         if (spacesFacts && child.type === "text" && child.value.includes(FACT_SEPARATOR)) {
