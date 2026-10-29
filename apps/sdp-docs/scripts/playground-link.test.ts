@@ -1,9 +1,30 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { after, before, describe, it } from "node:test";
 import type { ApiMethod } from "@sdp/api-catalog/reference";
 import { getPlaygroundHref } from "@/lib/playground-link";
 
 describe("API reference playground links", () => {
+  const original = {
+    url: process.env.NEXT_PUBLIC_SDP_WEB_URL,
+    vercelEnv: process.env.VERCEL_ENV,
+    related: process.env.VERCEL_RELATED_PROJECTS,
+  };
+  before(() => {
+    process.env.NEXT_PUBLIC_SDP_WEB_URL = "https://dashboard.example.com/docs";
+    delete process.env.VERCEL_ENV;
+    delete process.env.VERCEL_RELATED_PROJECTS;
+  });
+  after(() => {
+    for (const [key, value] of [
+      ["NEXT_PUBLIC_SDP_WEB_URL", original.url],
+      ["VERCEL_ENV", original.vercelEnv],
+      ["VERCEL_RELATED_PROJECTS", original.related],
+    ] as const) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
   const examples: {
     method: ApiMethod;
     path: string;
@@ -32,7 +53,7 @@ describe("API reference playground links", () => {
   ];
   for (const { method, path, returnTo } of examples) {
     it(`lands ${method} ${path} on its selected endpoint after sign-in`, () => {
-      const href = getPlaygroundHref(method, path, "https://dashboard.example.com/docs");
+      const href = getPlaygroundHref(method, path);
       assert.ok(href);
       const landing = new URL(href);
       assert.equal(landing.origin, "https://dashboard.example.com");
@@ -42,11 +63,16 @@ describe("API reference playground links", () => {
   }
 
   it("omits operations outside the dashboard catalog", () => {
-    assert.equal(getPlaygroundHref("GET", "/health", "https://dashboard.example.com"), null);
-    assert.equal(getPlaygroundHref("GET", "/v1/projects", "https://dashboard.example.com"), null);
+    assert.equal(getPlaygroundHref("GET", "/health"), null);
+    assert.equal(getPlaygroundHref("GET", "/v1/projects"), null);
   });
 
   it("hides the action when no dashboard URL is configured", () => {
-    assert.equal(getPlaygroundHref("GET", "/v1/wallets", null), null);
+    process.env.VERCEL_ENV = "preview";
+    try {
+      assert.equal(getPlaygroundHref("GET", "/v1/wallets"), null);
+    } finally {
+      delete process.env.VERCEL_ENV;
+    }
   });
 });

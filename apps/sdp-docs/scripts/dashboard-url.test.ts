@@ -19,4 +19,17 @@ test("docs link to the matching dashboard deployment", () => {
   assert.equal(resolveDashboardUrl({ ...preview, VERCEL_RELATED_PROJECTS: undefined }), null);
   assert.equal(resolveDashboardUrl({ NODE_ENV: "production" }), "https://platform.solana.com/");
   assert.equal(resolveDashboardUrl({ NODE_ENV: "development" }), "http://localhost:3000/");
+  assert.throws(
+    () => resolveDashboardUrl({ NODE_ENV: "production", NEXT_PUBLIC_SDP_WEB_URL: "not-a-url" }),
+    /NEXT_PUBLIC_SDP_WEB_URL must be an absolute HTTP URL/
+  );
+  assert.throws(
+    () =>
+      resolveDashboardUrl({
+        NODE_ENV: "production",
+        VERCEL_ENV: "preview",
+        VERCEL_RELATED_PROJECTS: "invalid",
+      }),
+    /VERCEL_RELATED_PROJECTS must be valid JSON/
+  );
 });

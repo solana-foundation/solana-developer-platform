@@ -1,7 +1,6 @@
 import type { ApiMethod } from "@sdp/api-catalog/reference";
 import { ArrowRight } from "lucide-react";
 import { Fragment } from "react";
-import { resolveDashboardUrl } from "@/lib/dashboard-url";
 import { getPlaygroundHref } from "@/lib/playground-link";
 
 /**
@@ -36,7 +35,7 @@ function PathSegment({ text }: { text: string }) {
  * and search indexes the same text.
  */
 export function ApiEndpoint({ method, path }: { method: ApiMethod; path: string }) {
-  const playgroundHref = getPlaygroundHref(method, path, resolveDashboardUrl());
+  const playgroundHref = getPlaygroundHref(method, path);
   return (
     <p className="launch-api-endpoint">
       <span className="launch-api-method" data-method={method}>
