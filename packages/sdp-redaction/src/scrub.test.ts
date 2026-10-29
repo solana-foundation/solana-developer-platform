@@ -358,6 +358,23 @@ describe("scrubTelemetryString — prefixed keys in a serialized body", () => {
     assert.ok(scrubbed.includes(", retrying)"));
   });
 
+  it("keeps punctuation that continues a value inside the redaction", () => {
+    // The value must not stop where the generic rule's punctuation stopped:
+    // `password=alpha;bravo` used to redact whole, and the word-list form
+    // reintroducing `;`, `)` and `]` as boundaries would leave those tails
+    // readable for a value that contains them.
+    for (const tail of [";", ")", "]", '"']) {
+      const scrubbed = scrubTelemetryString(`password=alpha${tail}bravo baz`);
+
+      assert.ok(!scrubbed.includes("alpha"), tail);
+      assert.ok(!scrubbed.includes("bravo"), tail);
+    }
+
+    const semicolonPair = scrubTelemetryString("seed=jZ2ZCg8BfJqknAfG; token=sk_live_abc123");
+
+    assert.equal(semicolonPair, "seed=[REDACTED] token=[REDACTED]");
+  });
+
   it("keeps seed exact-only in serialized fields and assignments", () => {
     const body =
       '{"pda_seed":"public-derivation","pda-seed":"public-derivation","seeds":["owner","aux"]}';
