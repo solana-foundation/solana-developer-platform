@@ -1,6 +1,6 @@
 ---
 title: API Reference
-description: Endpoint index from the repository OpenAPI spec.
+description: Every public API endpoint, grouped by family and generated from OpenAPI.
 ---
 
 <ActionLinks>
@@ -10,11 +10,185 @@ description: Endpoint index from the repository OpenAPI spec.
 
 Every operation follows the [API conventions](/docs/reference/conventions): authentication, environments, idempotency, errors, pagination, rate limits and versioning.
 
-- [Health](/docs/reference/api/health)
-- [Wallets](/docs/reference/api/wallets)
-- [Projects](/docs/reference/api/projects)
-- [Issuance](/docs/reference/api/issuance)
-- [Payments](/docs/reference/api/payments)
-- [Compliance](/docs/reference/api/compliance)
-- [Counterparties](/docs/reference/api/counterparties)
-- [Asset Profiles](/docs/reference/api/asset-profiles)
+Browse 109 endpoints across 8 API families. Select an operation to see its parameters, request body, responses and examples.
+
+## Health
+
+<ApiOperationTable>
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
+| `GET` | `/health` | [Health check](/docs/reference/api/health/health-check) |
+| `GET` | `/health/ready` | [Readiness check](/docs/reference/api/health/health-readiness) |
+
+</ApiOperationTable>
+
+## Wallets
+
+<ApiOperationTable>
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
+| `POST` | `/v1/wallets/initialize` | [Initialize wallet signing](/docs/reference/api/wallets/initialize-wallet-signing) |
+| `POST` | `/v1/wallets` | [Create wallet](/docs/reference/api/wallets/create-wallet) |
+| `DELETE` | `/v1/wallets` | [Delete wallet](/docs/reference/api/wallets/delete-wallet) |
+| `GET` | `/v1/wallets` | [List wallets](/docs/reference/api/wallets/list-wallets) |
+| `GET` | `/v1/wallets/configs` | [List wallet signing configs](/docs/reference/api/wallets/list-wallet-configs) |
+| `GET` | `/v1/wallets/aggregate` | [Aggregate wallet balances](/docs/reference/api/wallets/aggregate-wallet-balances) |
+| `GET` | `/v1/wallets/public-key` | [Get wallet public key](/docs/reference/api/wallets/get-wallet-public-key) |
+| `POST` | `/v1/wallets/signer-check` | [Check signer via simulated memo transaction](/docs/reference/api/wallets/check-wallet-signer) |
+| `GET` | `/v1/wallets/{walletId}` | [Get wallet by ID](/docs/reference/api/wallets/get-wallet-by-id) |
+| `PATCH` | `/v1/wallets/{walletId}` | [Update wallet](/docs/reference/api/wallets/update-wallet) |
+
+</ApiOperationTable>
+
+## Projects
+
+<ApiOperationTable>
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
+| `GET` | `/v1/projects` | [List projects](/docs/reference/api/projects/list-projects) |
+| `GET` | `/v1/projects/{projectId}` | [Get project](/docs/reference/api/projects/get-project) |
+| `PATCH` | `/v1/projects/{projectId}` | [Update project](/docs/reference/api/projects/update-project) |
+| `GET` | `/v1/projects/{projectId}/provider-availability` | [Get project provider availability](/docs/reference/api/projects/get-project-provider-availability) |
+
+</ApiOperationTable>
+
+## Issuance
+
+<ApiOperationTable>
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
+| `GET` | `/v1/issuance/templates` | [List token templates](/docs/reference/api/issuance/list-token-templates) |
+| `GET` | `/v1/issuance/templates/{templateId}` | [Get token template](/docs/reference/api/issuance/get-token-template) |
+| `POST` | `/v1/issuance/tokens` | [Create token](/docs/reference/api/issuance/create-token) |
+| `GET` | `/v1/issuance/tokens` | [List tokens](/docs/reference/api/issuance/list-tokens) |
+| `GET` | `/v1/issuance/tokens/facets` | [List token filter facets](/docs/reference/api/issuance/list-token-facets) |
+| `GET` | `/v1/issuance/transactions` | [List issuance transactions](/docs/reference/api/issuance/list-issuance-transactions) |
+| `GET` | `/v1/issuance/tokens/{tokenId}` | [Get token](/docs/reference/api/issuance/get-token) |
+| `PATCH` | `/v1/issuance/tokens/{tokenId}` | [Update token](/docs/reference/api/issuance/update-token) |
+| `GET` | `/v1/issuance/tokens/{tokenId}/metadata.json` | [Get public token metadata JSON](/docs/reference/api/issuance/get-token-metadata-json) |
+| `POST` | `/v1/issuance/tokens/{tokenId}/supply/refresh` | [Refresh cached token supply](/docs/reference/api/issuance/refresh-token-supply) |
+| `GET` | `/v1/issuance/tokens/{tokenId}/transactions` | [List token transactions](/docs/reference/api/issuance/list-token-transactions) |
+| `GET` | `/v1/issuance/tokens/{tokenId}/audit` | [Get asset audit history](/docs/reference/api/issuance/get-asset-audit-history) |
+| `POST` | `/v1/issuance/tokens/{tokenId}/deploy` | [Deploy token](/docs/reference/api/issuance/deploy-token) |
+| `POST` | `/v1/issuance/tokens/{tokenId}/deploy/prepare` | [Prepare token deploy transaction](/docs/reference/api/issuance/prepare-deploy-token) |
+| `POST` | `/v1/issuance/tokens/{tokenId}/deploy/confirm` | [Confirm non-custodial deploy](/docs/reference/api/issuance/confirm-deploy) |
+| `POST` | `/v1/issuance/tokens/{tokenId}/deploy/prepare-metadata` | [Prepare metadata-URI follow-up transaction](/docs/reference/api/issuance/prepare-deploy-metadata) |
+| `POST` | `/v1/issuance/tokens/{tokenId}/mint/prepare` | [Prepare mint transaction](/docs/reference/api/issuance/prepare-mint) |
+| `POST` | `/v1/issuance/tokens/{tokenId}/mint` | [Execute mint](/docs/reference/api/issuance/execute-mint) |
+| `POST` | `/v1/issuance/tokens/{tokenId}/burn/prepare` | [Prepare burn transaction](/docs/reference/api/issuance/prepare-burn) |
+| `POST` | `/v1/issuance/tokens/{tokenId}/burn` | [Execute burn](/docs/reference/api/issuance/execute-burn) |
+| `POST` | `/v1/issuance/tokens/{tokenId}/seize/prepare` | [Prepare seize transaction](/docs/reference/api/issuance/prepare-seize) |
+| `POST` | `/v1/issuance/tokens/{tokenId}/seize` | [Execute seize](/docs/reference/api/issuance/execute-seize) |
+| `POST` | `/v1/issuance/tokens/{tokenId}/force-burn/prepare` | [Prepare force burn transaction](/docs/reference/api/issuance/prepare-force-burn) |
+| `POST` | `/v1/issuance/tokens/{tokenId}/force-burn` | [Execute force burn](/docs/reference/api/issuance/execute-force-burn) |
+| `POST` | `/v1/issuance/tokens/{tokenId}/authority/prepare` | [Prepare authority update](/docs/reference/api/issuance/prepare-update-authority) |
+| `POST` | `/v1/issuance/tokens/{tokenId}/authority` | [Execute authority update](/docs/reference/api/issuance/execute-update-authority) |
+| `POST` | `/v1/issuance/tokens/{tokenId}/pause` | [Pause token transfers](/docs/reference/api/issuance/pause-token) |
+| `POST` | `/v1/issuance/tokens/{tokenId}/unpause` | [Unpause token transfers](/docs/reference/api/issuance/unpause-token) |
+| `POST` | `/v1/issuance/tokens/{tokenId}/freeze` | [Freeze account](/docs/reference/api/issuance/freeze-account) |
+| `POST` | `/v1/issuance/tokens/{tokenId}/unfreeze` | [Unfreeze account](/docs/reference/api/issuance/unfreeze-account) |
+| `GET` | `/v1/issuance/tokens/{tokenId}/frozen` | [List frozen accounts](/docs/reference/api/issuance/list-frozen-accounts) |
+| `GET` | `/v1/issuance/tokens/{tokenId}/allowlist` | [List token allowlist](/docs/reference/api/issuance/list-token-allowlist) |
+| `POST` | `/v1/issuance/tokens/{tokenId}/allowlist` | [Add token allowlist entry](/docs/reference/api/issuance/add-token-allowlist-entry) |
+| `GET` | `/v1/issuance/tokens/{tokenId}/allowlist/labels` | [List token allowlist labels](/docs/reference/api/issuance/list-token-allowlist-labels) |
+| `DELETE` | `/v1/issuance/tokens/{tokenId}/allowlist/{entryId}` | [Remove token allowlist entry](/docs/reference/api/issuance/remove-token-allowlist-entry) |
+| `GET` | `/v1/issuance/tokens/{tokenId}/holders` | [List verified holders](/docs/reference/api/issuance/list-holders) |
+| `POST` | `/v1/issuance/tokens/{tokenId}/holders` | [Enroll a verified holder](/docs/reference/api/issuance/enroll-holder) |
+
+</ApiOperationTable>
+
+## Payments
+
+<ApiOperationTable>
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
+| `GET` | `/v1/payments/wallets/{walletId}/balances` | [Get wallet balances](/docs/reference/api/payments/get-payment-wallet-balances) |
+| `POST` | `/v1/payments/transfers` | [Execute transfer (custody)](/docs/reference/api/payments/create-payment-transfer) |
+| `GET` | `/v1/payments/transfers` | [List transfers](/docs/reference/api/payments/list-payment-transfers) |
+| `GET` | `/v1/payments/transfers/{transferId}` | [Get transfer](/docs/reference/api/payments/get-payment-transfer) |
+| `POST` | `/v1/payments/transfer-batches/estimate` | [Estimate transfer batch](/docs/reference/api/payments/estimate-payment-transfer-batch) |
+| `POST` | `/v1/payments/transfer-batches` | [Create transfer batch](/docs/reference/api/payments/create-payment-transfer-batch) |
+| `GET` | `/v1/payments/transfer-batches` | [List transfer batches](/docs/reference/api/payments/list-payment-transfer-batches) |
+| `GET` | `/v1/payments/transfer-batches/{batchId}` | [Get transfer batch](/docs/reference/api/payments/get-payment-transfer-batch) |
+| `POST` | `/v1/payments/recurring-payments` | [Create recurring payment](/docs/reference/api/payments/create-payment-recurring-payment) |
+| `GET` | `/v1/payments/recurring-payments` | [List recurring payments](/docs/reference/api/payments/list-payment-recurring-payments) |
+| `PATCH` | `/v1/payments/recurring-payments/{id}` | [Update recurring payment](/docs/reference/api/payments/update-payment-recurring-payment) |
+| `GET` | `/v1/payments/recurring-payments/{id}` | [Get recurring payment](/docs/reference/api/payments/get-payment-recurring-payment) |
+| `POST` | `/v1/payments/recurring-payments/{id}/activate` | [Activate recurring payment](/docs/reference/api/payments/activate-payment-recurring-payment) |
+| `POST` | `/v1/payments/recurring-payments/{id}/cancel` | [Cancel recurring payment](/docs/reference/api/payments/cancel-payment-recurring-payment) |
+| `POST` | `/v1/payments/requests/{paymentRequestId}/cancel` | [Cancel payment request](/docs/reference/api/payments/cancel-payment-request) |
+| `POST` | `/v1/payments/recurring-payments/{id}/collect` | [Collect recurring payment](/docs/reference/api/payments/collect-payment-recurring-payment) |
+| `POST` | `/v1/payments/recurring-payments/{id}/resume` | [Resume recurring payment](/docs/reference/api/payments/resume-payment-recurring-payment) |
+| `POST` | `/v1/payments/subscription-plans` | [Create subscription plan](/docs/reference/api/payments/create-payment-subscription-plan) |
+| `GET` | `/v1/payments/subscription-plans` | [List subscription plans](/docs/reference/api/payments/list-payment-subscription-plans) |
+| `POST` | `/v1/payments/subscription-plans/{planId}/prepare-create` | [Prepare subscription plan creation](/docs/reference/api/payments/prepare-payment-subscription-plan-create) |
+| `GET` | `/v1/payments/subscription-plans/{planId}` | [Get subscription plan](/docs/reference/api/payments/get-payment-subscription-plan) |
+| `PATCH` | `/v1/payments/subscription-plans/{planId}` | [Update subscription plan](/docs/reference/api/payments/update-payment-subscription-plan) |
+| `POST` | `/v1/payments/subscriptions` | [Create subscription](/docs/reference/api/payments/create-payment-subscription) |
+| `GET` | `/v1/payments/subscriptions` | [List subscriptions](/docs/reference/api/payments/list-payment-subscriptions) |
+| `POST` | `/v1/payments/subscriptions/{subscriptionId}/prepare-authorization` | [Prepare subscription authorization](/docs/reference/api/payments/prepare-payment-subscription-authorization) |
+| `POST` | `/v1/payments/subscriptions/{subscriptionId}/prepare-cancel` | [Prepare subscription cancellation](/docs/reference/api/payments/prepare-payment-subscription-cancel) |
+| `POST` | `/v1/payments/subscriptions/{subscriptionId}/prepare-resume` | [Prepare subscription resume](/docs/reference/api/payments/prepare-payment-subscription-resume) |
+| `POST` | `/v1/payments/subscriptions/{subscriptionId}/prepare-collection` | [Prepare subscription collection](/docs/reference/api/payments/prepare-payment-subscription-collection) |
+| `GET` | `/v1/payments/subscriptions/{subscriptionId}` | [Get subscription](/docs/reference/api/payments/get-payment-subscription) |
+| `GET` | `/v1/payments/subscriptions/{subscriptionId}/collection-attempts` | [List subscription collection attempts](/docs/reference/api/payments/list-payment-subscription-collection-attempts) |
+| `GET` | `/v1/payments/ramps/onramp/currency` | [List on-ramp currency support](/docs/reference/api/payments/list-payment-onramp-currencies) |
+| `GET` | `/v1/payments/ramps/offramp/currency` | [List off-ramp currency support](/docs/reference/api/payments/list-payment-offramp-currencies) |
+| `POST` | `/v1/payments/ramps/onramp/quote` | [Create on-ramp quote](/docs/reference/api/payments/create-payment-onramp-quote) |
+| `POST` | `/v1/payments/ramps/sandbox/simulate` | [Simulate sandbox transfer](/docs/reference/api/payments/simulate-sandbox-transfer) |
+| `GET` | `/v1/transactions` | [List transactions](/docs/reference/api/payments/list-unified-transactions) |
+
+</ApiOperationTable>
+
+## Compliance
+
+<ApiOperationTable>
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
+| `POST` | `/v1/compliance/address-screenings` | [Screen an address across configured compliance providers](/docs/reference/api/compliance/screen-compliance-address) |
+
+</ApiOperationTable>
+
+## Counterparties
+
+<ApiOperationTable>
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
+| `GET` | `/v1/counterparties/metadata` | [Get counterparty field options](/docs/reference/api/counterparties/get-counterparty-field-options) |
+| `GET` | `/v1/counterparties` | [List counterparties](/docs/reference/api/counterparties/list-counterparties) |
+| `POST` | `/v1/counterparties` | [Create counterparty](/docs/reference/api/counterparties/create-counterparty) |
+| `GET` | `/v1/counterparties/{counterpartyId}` | [Get counterparty](/docs/reference/api/counterparties/get-counterparty) |
+| `PATCH` | `/v1/counterparties/{counterpartyId}` | [Update counterparty](/docs/reference/api/counterparties/update-counterparty) |
+| `DELETE` | `/v1/counterparties/{counterpartyId}` | [Archive counterparty](/docs/reference/api/counterparties/archive-counterparty) |
+| `GET` | `/v1/counterparties/{counterpartyId}/requirements` | [Get counterparty ramp requirements](/docs/reference/api/counterparties/get-counterparty-requirements) |
+| `GET` | `/v1/counterparties/{counterpartyId}/accounts` | [List counterparty accounts](/docs/reference/api/counterparties/list-counterparty-accounts) |
+| `POST` | `/v1/counterparties/{counterpartyId}/accounts` | [Create counterparty account](/docs/reference/api/counterparties/create-counterparty-account) |
+| `GET` | `/v1/counterparties/{counterpartyId}/provider-accounts` | [List counterparty provider accounts](/docs/reference/api/counterparties/list-counterparty-provider-accounts) |
+| `GET` | `/v1/counterparties/{counterpartyId}/accounts/{counterpartyAccountId}` | [Get counterparty account](/docs/reference/api/counterparties/get-counterparty-account) |
+| `PATCH` | `/v1/counterparties/{counterpartyId}/accounts/{counterpartyAccountId}` | [Update counterparty account](/docs/reference/api/counterparties/update-counterparty-account) |
+| `DELETE` | `/v1/counterparties/{counterpartyId}/accounts/{counterpartyAccountId}` | [Archive counterparty account](/docs/reference/api/counterparties/archive-counterparty-account) |
+
+</ApiOperationTable>
+
+## Asset Profiles
+
+<ApiOperationTable>
+
+| Method | Endpoint | Summary |
+| --- | --- | --- |
+| `GET` | `/v1/issuance/asset-profiles/field-options` | [Get asset profile field options](/docs/reference/api/asset-profiles/get-asset-profile-field-options) |
+| `GET` | `/v1/issuance/asset-profiles` | [List asset profiles](/docs/reference/api/asset-profiles/list-asset-profiles) |
+| `POST` | `/v1/issuance/asset-profiles` | [Create token with asset profile](/docs/reference/api/asset-profiles/create-token-with-asset-profile) |
+| `GET` | `/v1/issuance/asset-profiles/by-token/{tokenId}` | [Get asset profile by token](/docs/reference/api/asset-profiles/get-asset-profile-by-token) |
+| `GET` | `/v1/issuance/asset-profiles/{profileId}` | [Get asset profile](/docs/reference/api/asset-profiles/get-asset-profile) |
+| `PATCH` | `/v1/issuance/asset-profiles/{profileId}` | [Update asset profile](/docs/reference/api/asset-profiles/update-asset-profile) |
+| `DELETE` | `/v1/issuance/asset-profiles/{profileId}` | [Archive asset profile](/docs/reference/api/asset-profiles/archive-asset-profile) |
+
+</ApiOperationTable>

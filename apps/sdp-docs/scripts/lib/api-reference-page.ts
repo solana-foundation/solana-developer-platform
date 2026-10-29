@@ -427,6 +427,26 @@ export function operationGroups(family: ApiFamily): OperationGroup[] {
   return [...byTitle].map(([title, operations]) => ({ title, operations }));
 }
 
+/** The same endpoint table on a family's page and the all-endpoints index. */
+export function renderOperationTable(
+  operations: ApiOperation[],
+  href: (operation: ApiOperation) => string
+): string {
+  return [
+    // biome-ignore lint/security/noSecrets: an MDX component tag, not a secret.
+    "<ApiOperationTable>",
+    "",
+    "| Method | Endpoint | Summary |",
+    "| --- | --- | --- |",
+    ...operations.map(
+      (operation) =>
+        `| ${codeSpan(operation.method)} | ${codeSpan(operation.path)} | [${tableCell(mdxText(operation.summary))}](${href(operation)}) |`
+    ),
+    "",
+    "</ApiOperationTable>",
+  ].join("\n");
+}
+
 /**
  * A family's page: a table of its operations, each row linking to the operation's page, under a
  * heading per group when it has groups.
@@ -441,17 +461,7 @@ export function renderFamilyIndex(
   const tables = operationGroups(family).map(({ title, operations }) =>
     [
       ...(title === null ? [] : [`## ${mdxText(title)}`, ""]),
-      // biome-ignore lint/security/noSecrets: an MDX component tag, not a secret.
-      "<ApiOperationTable>",
-      "",
-      "| Method | Endpoint | Summary |",
-      "| --- | --- | --- |",
-      ...operations.map(
-        (operation) =>
-          `| ${codeSpan(operation.method)} | ${codeSpan(operation.path)} | [${tableCell(mdxText(operation.summary))}](${href(operation)}) |`
-      ),
-      "",
-      "</ApiOperationTable>",
+      renderOperationTable(operations, href),
     ].join("\n")
   );
   return [
