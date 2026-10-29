@@ -851,6 +851,7 @@ describe("payment transfer batches", () => {
         Authorization: `Bearer ${TEST_API_KEY.raw}`,
       },
       body: JSON.stringify({
+        externalId: testRunId(),
         sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
         token: "SOL",
         recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
@@ -933,6 +934,7 @@ describe("payment transfer batches", () => {
             Authorization: `Bearer ${TEST_API_KEY.raw}`,
           },
           body: JSON.stringify({
+            externalId: testRunId(),
             sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
             token: "SOL",
             recipients: [
