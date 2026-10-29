@@ -251,7 +251,6 @@ export interface PaymentsRepository {
     organizationId: string;
     projectId: string;
     custodyWalletId: string;
-    walletId: string;
     sourceAddress: string;
     destinationAddress: string;
     token: string;

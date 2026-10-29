@@ -459,6 +459,80 @@ describe("payment transfer batches", () => {
     await clearKVStores(env);
   });
 
+  it.each(["source", "sourceWalletId", "sourceProviderWalletId"])(
+    "rejects retired %s selectors on batch create and estimate, including mixed inputs",
+    async (selector) => {
+      for (const path of [
+        "/v1/payments/transfer-batches",
+        "/v1/payments/transfer-batches/estimate",
+      ]) {
+        for (const includeExact of [false, true]) {
+          const response = await app.request(
+            path,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                sourceCustodyWalletId: includeExact ? TEST_CUSTODY_WALLET_ID : undefined,
+                [selector]: TEST_WALLET_ID,
+                token: "SOL",
+                recipients: [{ counterpartyAccountId: "cpa_retired_selector", amount: "0.1" }],
+              }),
+            },
+            env
+          );
+          expect(response.status).toBe(400);
+        }
+      }
+      expect(getRecentBlockhashMock).not.toHaveBeenCalled();
+      expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
+      expect(sendTransactionMock).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(["/v1/payments/transfer-batches", "/v1/payments/transfer-batches/estimate"])(
+    "rejects a provider reference in the exact batch selector at %s",
+    async (path) => {
+      const response = await app.request(
+        path,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            sourceCustodyWalletId: TEST_WALLET_ID,
+            token: "SOL",
+            recipients: [{ counterpartyAccountId: "cpa_provider_selector", amount: "0.1" }],
+          }),
+        },
+        env
+      );
+      expect(response.status).toBe(404);
+      expect(getRecentBlockhashMock).not.toHaveBeenCalled();
+      expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
+    }
+  );
+
+  it("rejects retired batch history filters even alongside the exact filter", async () => {
+    for (const includeExact of [false, true]) {
+      const query = new URLSearchParams({
+        wallet: TEST_WALLET_ID,
+      });
+      if (includeExact) query.set("sourceCustodyWalletId", TEST_CUSTODY_WALLET_ID);
+      const response = await app.request(
+        `/v1/payments/transfer-batches?${query}`,
+        { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
+      expect(response.status).toBe(400);
+    }
+  });
+
   it.each(
     ["/v1/payments/transfer-batches", "/v1/payments/transfer-batches/estimate"].flatMap(
       (endpoint) => [
@@ -1044,10 +1118,14 @@ describe("payment transfer batches", () => {
       recipientCount: 2,
       transactionCount: 2,
     });
+    expect(body.data.batch).not.toHaveProperty("sourceProviderWalletId");
     expect(body.data.recipients).toHaveLength(2);
     expect(body.data.recipients.every((recipient) => recipient.status === "processing")).toBe(true);
     expect(body.data.recipients.every((recipient) => Boolean(recipient.transferId))).toBe(true);
     expect(body.data.transfers).toHaveLength(2);
+    for (const transfer of body.data.transfers) {
+      expect(transfer).not.toHaveProperty("providerWalletId");
+    }
     expect(body.data.transfers.map((transfer) => transfer.signature).sort()).toEqual(
       [actualSignature(FIRST_SIGNATURE), actualSignature(SECOND_SIGNATURE)].sort()
     );
@@ -1153,13 +1231,23 @@ describe("payment transfer batches", () => {
     const detailBody = z
       .object({
         data: z.object({
+          batch: z.object({ sourceCustodyWalletId: z.string() }).loose(),
           recipients: z.array(z.unknown()),
-          transfers: z.array(z.object({ signature: z.string().min(1), serializedTx: z.null() })),
+          transfers: z.array(
+            z.object({ signature: z.string().min(1), serializedTx: z.null() }).loose()
+          ),
         }),
       })
       .parse(await detailRes.json());
     expect(detailBody.data.recipients).toHaveLength(2);
     expect(detailBody.data.transfers).toHaveLength(2);
+    expect(detailBody.data).toMatchObject({
+      batch: { sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID },
+    });
+    expect(detailBody.data).not.toHaveProperty("batch.sourceProviderWalletId");
+    for (const transfer of detailBody.data.transfers) {
+      expect(transfer).not.toHaveProperty("providerWalletId");
+    }
 
     const listRes = await app.request(
       "/v1/payments/transfer-batches",
@@ -1174,6 +1262,48 @@ describe("payment transfer batches", () => {
     expect(listRes.status).toBe(200);
     const listBody = (await listRes.json()) as { data: Array<{ id: string }> };
     expect(listBody.data.map((batch) => batch.id)).toContain(body.data.batch.id);
+    for (const batch of listBody.data) {
+      expect(batch).not.toHaveProperty("sourceProviderWalletId");
+    }
+  });
+
+  it("refuses an estimate for an exact wallet outside the key's selected signing scope", async () => {
+    await seedConnectionOwnedDuplicateProviderWallet();
+    const keyHash = await hashString(TEST_API_KEY.raw, env.API_KEY_PEPPER);
+    await seedApiKeyRow(env, keyHash, {
+      ...TEST_SEEDED_API_KEY,
+      grants: ["transfer_batches.read"],
+      walletScope: "selected",
+      walletIds: [TEST_DUPLICATE_CUSTODY_WALLET_ID],
+    });
+    const counterpartyId = await seedCounterparty("batch_estimate_read_scope");
+    const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+    const response = await app.request(
+      "/v1/payments/transfer-batches/estimate",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          token: "SOL",
+          recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
+        }),
+      },
+      env
+    );
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      error: { details: { reason: "wallet_out_of_scope" } },
+    });
+    expect(getRecentBlockhashMock).not.toHaveBeenCalled();
+    expect(createOrgSignerForCustodyWalletMock).not.toHaveBeenCalled();
+    expect(sendTransactionMock).not.toHaveBeenCalled();
   });
 
   // HOO-2099: the custody signer refuses a wallet outside a selected key's

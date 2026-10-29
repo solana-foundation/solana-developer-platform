@@ -2288,7 +2288,7 @@ SDP payments move value between Solana accounts: a custody wallet sends tokens t
 
 Every SDP payment is anchored to a **custody wallet** — an SDP-managed Solana wallet, scoped to an organization and (optionally) a project. The wallet's key is held and signed for by a custody provider; SDP presents a stable Solana address and routes signing to whichever provider holds the key. Wallets sign outbound transfers on your behalf and contribute to balances for the addresses you control. To limit what an API key may do with them, choose the key's [grants](/docs/developing-with-sdp/manage-api-keys#grants-by-module) and [wallet scope](/docs/developing-with-sdp/manage-api-keys#wallet-access).
 
-You provision custody wallets up front (see [Set Up Wallets](/docs/guides/setup-wallets)). Transfer requests use the exact SDP Wallet `id` (`cwlt_…`) as `sourceCustodyWalletId`; responses expose it as `custodyWalletId` and retain the provider's identifier separately as `providerWalletId` evidence. The **destination** remains the recipient's on-chain Solana address.
+You provision custody wallets up front (see [Set Up Wallets](/docs/guides/setup-wallets)). Transfer requests use the exact SDP Wallet `id` (`cwlt_…`) as `sourceCustodyWalletId`; responses expose it as `custodyWalletId`. Provider wallet references remain internal to custody and saved payment evidence. The **destination** remains the recipient's on-chain Solana address.
 
 ## Tokens and token accounts
 
@@ -4103,7 +4103,6 @@ A successful response includes the on-chain signature once the transaction confi
       "direction": "outbound",
       "status": "confirmed",
       "custodyWalletId": "cwlt_123",
-      "providerWalletId": "privy_jfxdbsq4bg6dxzsd7imgon3j",
       "signature": "ekNe4HK67AXptsx6krYATZd5xYeq8wYQShmN9oHUdAipVJVFELGwiLhdJNCAbyN2TPv9SwzBTNz6igoAfWTdCYP",
       "source": "ASy986dzvVqHHV2Ftfe9ZKshKZhEEQwuAoPoKMc64A9X",
       "destination": "2H2w3hSxAPTybuTL7LkhPbyk6bWYi94x2J4aqBhhyJL2",
@@ -23476,10 +23475,6 @@ Create transfer request payload for a custody-managed source wallet. This endpoi
 
         Exact SDP Wallet ID associated with the persisted transfer, or null for unresolved legacy and observed rows.
 
-      - **`providerWalletId`** · `string` · required · min length 1 · example `privy_wallet_123`
-
-        Provider wallet ID retained as evidence; not an execution selector.
-
       - **`projectId`** · `string` · min length 1 · example `prj_example`
 
         Project identifier for the transfer.
@@ -23846,7 +23841,6 @@ r = requests.post("https://api.solana.com/v1/payments/transfers",
       "id": "xfr_example",
       "organizationId": "org_example",
       "custodyWalletId": "cwlt_example",
-      "providerWalletId": "privy_wallet_123",
       "projectId": "prj_example",
       "type": "transfer",
       "kind": "pay",
@@ -24133,10 +24127,6 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
     - **`custodyWalletId`** · `string | null` · required · example `cwlt_example`
 
       Exact SDP Wallet ID associated with the persisted transfer, or null for unresolved legacy and observed rows.
-
-    - **`providerWalletId`** · `string` · required · min length 1 · example `privy_wallet_123`
-
-      Provider wallet ID retained as evidence; not an execution selector.
 
     - **`projectId`** · `string` · min length 1 · example `prj_example`
 
@@ -24483,7 +24473,6 @@ r = requests.get("https://api.solana.com/v1/payments/transfers",
       "id": "xfr_example",
       "organizationId": "org_example",
       "custodyWalletId": "cwlt_example",
-      "providerWalletId": "privy_wallet_123",
       "projectId": "prj_example",
       "type": "transfer",
       "kind": "pay",
@@ -24689,10 +24678,6 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
       - **`custodyWalletId`** · `string | null` · required · example `cwlt_example`
 
         Exact SDP Wallet ID associated with the persisted transfer, or null for unresolved legacy and observed rows.
-
-      - **`providerWalletId`** · `string` · required · min length 1 · example `privy_wallet_123`
-
-        Provider wallet ID retained as evidence; not an execution selector.
 
       - **`projectId`** · `string` · min length 1 · example `prj_example`
 
@@ -25019,7 +25004,6 @@ r = requests.get("https://api.solana.com/v1/payments/transfers/xfr_example",
       "id": "xfr_example",
       "organizationId": "org_example",
       "custodyWalletId": "cwlt_example",
-      "providerWalletId": "privy_wallet_123",
       "projectId": "prj_example",
       "type": "transfer",
       "kind": "pay",
@@ -25618,10 +25602,6 @@ Create a custody-executed outbound transfer batch.
 
         Exact source SDP Wallet ID, or null for unresolved legacy batches.
 
-      - **`sourceProviderWalletId`** · `string` · required · min length 1 · example `privy_wallet_123`
-
-        Source Provider wallet ID retained as evidence.
-
       - **`sourceAddress`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
 
         Source custody wallet address.
@@ -25731,10 +25711,6 @@ Create a custody-executed outbound transfer batch.
       - **`custodyWalletId`** · `string | null` · required · example `cwlt_example`
 
         Exact SDP Wallet ID associated with the persisted transfer, or null for unresolved legacy and observed rows.
-
-      - **`providerWalletId`** · `string` · required · min length 1 · example `privy_wallet_123`
-
-        Provider wallet ID retained as evidence; not an execution selector.
 
       - **`projectId`** · `string` · min length 1 · example `prj_example`
 
@@ -26131,7 +26107,6 @@ r = requests.post("https://api.solana.com/v1/payments/transfer-batches",
       "projectId": "prj_example",
       "externalId": "payroll_2026_06_30",
       "sourceCustodyWalletId": "cwlt_example",
-      "sourceProviderWalletId": "privy_wallet_123",
       "sourceAddress": "So11111111111111111111111111111111111111112",
       "token": "SOL",
       "status": "processing",
@@ -26167,7 +26142,6 @@ r = requests.post("https://api.solana.com/v1/payments/transfer-batches",
         "id": "xfr_example",
         "organizationId": "org_example",
         "custodyWalletId": "cwlt_example",
-        "providerWalletId": "privy_wallet_123",
         "projectId": "prj_example",
         "type": "transfer",
         "kind": "pay",
@@ -26396,10 +26370,6 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
       Exact source SDP Wallet ID, or null for unresolved legacy batches.
 
-    - **`sourceProviderWalletId`** · `string` · required · min length 1 · example `privy_wallet_123`
-
-      Source Provider wallet ID retained as evidence.
-
     - **`sourceAddress`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
 
       Source custody wallet address.
@@ -26536,7 +26506,6 @@ r = requests.get("https://api.solana.com/v1/payments/transfer-batches",
       "projectId": "prj_example",
       "externalId": "payroll_2026_06_30",
       "sourceCustodyWalletId": "cwlt_example",
-      "sourceProviderWalletId": "privy_wallet_123",
       "sourceAddress": "So11111111111111111111111111111111111111112",
       "token": "SOL",
       "status": "processing",
@@ -26687,10 +26656,6 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
 
         Exact source SDP Wallet ID, or null for unresolved legacy batches.
 
-      - **`sourceProviderWalletId`** · `string` · required · min length 1 · example `privy_wallet_123`
-
-        Source Provider wallet ID retained as evidence.
-
       - **`sourceAddress`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
 
         Source custody wallet address.
@@ -26800,10 +26765,6 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `transf
       - **`custodyWalletId`** · `string | null` · required · example `cwlt_example`
 
         Exact SDP Wallet ID associated with the persisted transfer, or null for unresolved legacy and observed rows.
-
-      - **`providerWalletId`** · `string` · required · min length 1 · example `privy_wallet_123`
-
-        Provider wallet ID retained as evidence; not an execution selector.
 
       - **`projectId`** · `string` · min length 1 · example `prj_example`
 
@@ -27127,7 +27088,6 @@ r = requests.get("https://api.solana.com/v1/payments/transfer-batches/xbatch_exa
       "projectId": "prj_example",
       "externalId": "payroll_2026_06_30",
       "sourceCustodyWalletId": "cwlt_example",
-      "sourceProviderWalletId": "privy_wallet_123",
       "sourceAddress": "So11111111111111111111111111111111111111112",
       "token": "SOL",
       "status": "processing",
@@ -27163,7 +27123,6 @@ r = requests.get("https://api.solana.com/v1/payments/transfer-batches/xbatch_exa
         "id": "xfr_example",
         "organizationId": "org_example",
         "custodyWalletId": "cwlt_example",
-        "providerWalletId": "privy_wallet_123",
         "projectId": "prj_example",
         "type": "transfer",
         "kind": "pay",
@@ -29828,10 +29787,6 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `recurr
 
         Exact SDP Wallet ID associated with the persisted transfer, or null for unresolved legacy and observed rows.
 
-      - **`providerWalletId`** · `string` · required · min length 1 · example `privy_wallet_123`
-
-        Provider wallet ID retained as evidence; not an execution selector.
-
       - **`projectId`** · `string` · min length 1 · example `prj_example`
 
         Project identifier for the transfer.
@@ -30222,7 +30177,6 @@ r = requests.post("https://api.solana.com/v1/payments/recurring-payments/prp_exa
       "id": "xfr_example",
       "organizationId": "org_example",
       "custodyWalletId": "cwlt_example",
-      "providerWalletId": "privy_wallet_123",
       "projectId": "prj_example",
       "type": "transfer",
       "kind": "pay",

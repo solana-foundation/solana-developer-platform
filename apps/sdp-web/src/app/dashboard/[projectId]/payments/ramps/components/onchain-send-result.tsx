@@ -9,7 +9,12 @@ import { explorerTxUrl } from "@/lib/explorer";
 import { useProjectHref } from "@/lib/use-dashboard-project";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 
-function resultMessage(transfer: PaymentTransferSummary, t: ReturnType<typeof useTranslations>) {
+type TransferResult = Pick<
+  PaymentTransferSummary,
+  "id" | "status" | "signature" | "error" | "fireblocks"
+>;
+
+function resultMessage(transfer: TransferResult, t: ReturnType<typeof useTranslations>) {
   let kind: "failed" | "fireblocksPending" | "fireblocksUnknown" | "pending" | "confirmed" =
     transfer.signature === null ? "pending" : "confirmed";
   if (transfer.fireblocks && transfer.signature === null) {
@@ -36,7 +41,7 @@ export function OnchainSendResult({
   transferResult,
   summary,
 }: {
-  transferResult: PaymentTransferSummary;
+  transferResult: TransferResult;
   summary: ReactNode;
 }) {
   const t = useTranslations();

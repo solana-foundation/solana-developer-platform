@@ -235,10 +235,10 @@ export async function paymentsDemoResponse(
     if (resource === "organizations" && parts.segments[2] === "provider-access") {
       return demoProviderAccess(upstream, rampProviders);
     }
-    const fixture = demoWorldBody(world, path);
-    if (fixture !== undefined) return Response.json(fixture);
     const flow = demoFlowRead(parts.segments, parts.params, world, now);
     if (flow) return respond(flow);
+    const fixture = demoWorldBody(world, path);
+    if (fixture !== undefined) return Response.json(fixture);
     return DEMO_RESOURCES.has(resource) || path.includes("demo_") ? notInDemo() : null;
   }
 

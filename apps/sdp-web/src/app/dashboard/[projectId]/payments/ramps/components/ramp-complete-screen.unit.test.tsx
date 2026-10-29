@@ -27,7 +27,6 @@ function sale(overrides: Partial<PaymentTransferSummary> = {}): PaymentTransferS
   return {
     id: "xfr_receipt",
     custodyWalletId: "cwlt_receipt",
-    providerWalletId: "wallet_receipt",
     status: "completed",
     signature: DELIVERY,
     rampsMemo: {},

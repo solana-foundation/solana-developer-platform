@@ -50,16 +50,18 @@ import { seedRateLimit } from "@/test/mocks/kv";
 
 const observedTransfersResponseSchema = z.object({
   data: z.array(
-    z.object({
-      id: z.string(),
-      signature: z.string().nullable(),
-      amount: z.string(),
-      direction: z.string(),
-      status: z.enum(PAYMENT_TRANSFER_STATUSES),
-      token: z.string(),
-      source: z.string(),
-      destination: z.string(),
-    })
+    z
+      .object({
+        id: z.string(),
+        signature: z.string().nullable(),
+        amount: z.string(),
+        direction: z.string(),
+        status: z.enum(PAYMENT_TRANSFER_STATUSES),
+        token: z.string(),
+        source: z.string(),
+        destination: z.string(),
+      })
+      .loose()
   ),
   meta: z.object({ total: z.number() }),
 });
@@ -175,6 +177,25 @@ describe("Payments routes — list transfers", () => {
     expect(res.status).toBe(200);
     return observedTransfersResponseSchema.parse(await res.json());
   }
+
+  it.each(["wallet", "walletId", "providerWalletId"])(
+    "rejects retired %s history filters even alongside the exact filter",
+    async (selector) => {
+      for (const includeExact of [false, true]) {
+        const query = new URLSearchParams({
+          [selector]: TEST_WALLET_ID,
+        });
+        if (includeExact) query.set("custodyWalletId", TEST_CUSTODY_WALLET_ID);
+        const response = await app.request(
+          `/v1/payments/transfers?${query}`,
+          { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+          env
+        );
+        expect(response.status).toBe(400);
+      }
+      expect(getSignaturesForAddressMock).not.toHaveBeenCalled();
+    }
+  );
 
   beforeEach(async () => {
     await seedProjectApiKey(getDb(env), env, {
@@ -403,6 +424,9 @@ describe("Payments routes — list transfers", () => {
       const body = await listObservedTransfers(TEST_CUSTODY_WALLET_ID);
 
       expect(body.meta.total).toBe(2);
+      for (const transfer of body.data) {
+        expect(transfer).not.toHaveProperty("providerWalletId");
+      }
       expect(body.data).toHaveLength(2);
       const statuses = body.data.map((t) => t.status).sort();
       expect(statuses).toEqual(["confirmed", "pending"]);
@@ -1136,17 +1160,17 @@ describe("Payments routes — list transfers", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
-        data: Array<{ custodyWalletId: string | null; id: string; providerWalletId: string }>;
+        data: Array<{ custodyWalletId: string | null; id: string }>;
         meta: { total: number; page: number; pageSize: number; hasMore: boolean };
       };
       expect(body.data).toHaveLength(1);
       expect(body.data[0]).toMatchObject({
         id: "xfr_search_new",
         custodyWalletId: TEST_CUSTODY_WALLET_ID,
-        providerWalletId: TEST_WALLET_ID,
         counterpartyId,
         counterpartyDisplayName: "MoonPay Test Counterparty",
       });
+      expect(body.data[0]).not.toHaveProperty("providerWalletId");
       expect(body.meta).toMatchObject({ total: 2, page: 2, pageSize: 1, hasMore: false });
     });
 
@@ -1356,7 +1380,6 @@ describe("Payments routes — list transfers", () => {
         id: "xfr_single_1",
         organizationId: TEST_ORG.id,
         custodyWalletId: TEST_CUSTODY_WALLET_ID,
-        providerWalletId: TEST_WALLET_ID,
         projectId: TEST_PROJECT.id,
         type: "transfer",
         kind: "pay",

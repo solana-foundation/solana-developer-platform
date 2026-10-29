@@ -30,12 +30,25 @@ describe("Payments write requests", () => {
     token: address("So11111111111111111111111111111111111111112"),
     amount: "1",
   };
+  const recordedTransfer = {
+    id: "trf_1",
+    custodyWalletId: "cwlt_1",
+    status: "pending",
+    signature: null,
+  };
+  const recordedBatch = {
+    id: "batch_1",
+    sourceCustodyWalletId: "cwlt_1",
+    status: "pending",
+    recipientCount: 0,
+    transactionCount: 0,
+  };
 
   it("sends the exact custody wallet id, the tab's Project, and the caller's key or one per action", async () => {
     const fetch = vi
       .fn()
       .mockImplementation(async () =>
-        jsonResponse({ data: { transfer: { id: "trf_1", status: "pending", signature: null } } })
+        jsonResponse({ data: { transfer: { ...recordedTransfer, rampsMemo: {} } } })
       );
     vi.stubGlobal("fetch", fetch);
 
@@ -60,6 +73,32 @@ describe("Payments write requests", () => {
     const unkeyedHeaders = new Headers(unkeyed);
     expect(unkeyedHeaders.get("x-project-id")).toBe("prj_test_sandbox");
     expect(unkeyedHeaders.get("Idempotency-Key")).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("accepts a recorded transfer without comparing its source or requiring ramps memo metadata", async () => {
+    const transfer = { ...recordedTransfer, custodyWalletId: "cwlt_echo" };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ data: { transfer } })));
+
+    expect(
+      await createTransfer(transferInput, t, { value: "idem_transfer_1", persisted: true })
+    ).toEqual(transfer);
+  });
+
+  it("refuses a successful transfer with an invalid result status", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse({
+          data: {
+            transfer: { ...recordedTransfer, status: 42 },
+          },
+        })
+      )
+    );
+
+    await expect(
+      createTransfer(transferInput, t, { value: "idem_transfer_1", persisted: true })
+    ).rejects.toThrow("DashboardPayments.workspace.transferMissing");
   });
 
   it("treats a 202 SIGNING_PENDING body like any other unexpected response", async () => {
@@ -101,10 +140,22 @@ describe("Payments write requests", () => {
   it("uses the exact custody wallet id for batch estimate and create", async () => {
     const fetch = vi
       .fn()
-      .mockResolvedValueOnce(jsonResponse({ data: { estimate: { transactionCount: 1 } } }))
+      .mockResolvedValueOnce(
+        jsonResponse({ data: { estimate: { transactionCount: 1, warnings: [] } } })
+      )
       .mockResolvedValueOnce(
         jsonResponse({
-          data: { batch: { id: "batch_1" }, recipients: [], transfers: [] },
+          data: {
+            batch: { ...recordedBatch, sourceCustodyWalletId: "cwlt_batch_echo" },
+            recipients: [],
+            transfers: [
+              {
+                ...recordedTransfer,
+                id: "trf_chunk",
+                custodyWalletId: "cwlt_chunk_echo",
+              },
+            ],
+          },
         })
       );
     vi.stubGlobal("fetch", fetch);
@@ -114,8 +165,16 @@ describe("Payments write requests", () => {
       recipients: [{ counterpartyId: "cp_1", counterpartyAccountId: "acct_1", amount: "1" }],
     };
 
-    await estimateTransferBatch(request, t);
-    await createTransferBatch(request, t, { value: "idem_batch_1", persisted: true });
+    await expect(estimateTransferBatch(request, t)).resolves.toMatchObject({
+      transactionCount: 1,
+      warnings: [],
+    });
+    await expect(
+      createTransferBatch(request, t, { value: "idem_batch_1", persisted: true })
+    ).resolves.toMatchObject({
+      batch: { sourceCustodyWalletId: "cwlt_batch_echo" },
+      transfers: [{ custodyWalletId: "cwlt_chunk_echo" }],
+    });
 
     for (const [, init] of fetch.mock.calls) {
       expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({
@@ -123,6 +182,49 @@ describe("Payments write requests", () => {
       });
       expect(JSON.parse(String((init as RequestInit).body))).not.toHaveProperty("source");
     }
+  });
+
+  it("refuses a successful batch with an invalid recipient amount", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse({
+          data: {
+            batch: {
+              ...recordedBatch,
+              status: "confirmed",
+              recipientCount: 1,
+              transactionCount: 1,
+            },
+            recipients: [
+              {
+                id: "recipient_1",
+                transferId: "trf_chunk",
+                counterpartyAccountId: "acct_1",
+                amount: 42,
+                destination: "destination",
+                status: "confirmed",
+              },
+            ],
+            transfers: [
+              {
+                ...recordedTransfer,
+                id: "trf_chunk",
+                status: "confirmed",
+                signature: "sig_1",
+              },
+            ],
+          },
+        })
+      )
+    );
+
+    await expect(
+      createTransferBatch({ sourceCustodyWalletId: "cwlt_1", token: "mint", recipients: [] }, t, {
+        value: "idem_batch_1",
+        persisted: true,
+      })
+    ).rejects.toThrow("DashboardPayments.workspace.batchTransferMissing");
   });
 
   it("surfaces a disabled batch movement with the API's actionable refusal", async () => {

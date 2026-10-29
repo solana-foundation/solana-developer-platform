@@ -17,18 +17,17 @@ import {
 import {
   type ListProjectCounterpartyAccountsEnvelope,
   type ListProjectCounterpartyAccountsResponse,
+  PAYMENT_TRANSFER_BATCH_RECIPIENT_STATUSES,
+  PAYMENT_TRANSFER_BATCH_STATUSES,
+  PAYMENT_TRANSFER_STATUSES,
   type PaymentsWalletAggregateEnvelope,
-  type PaymentTransferBatch,
-  type PaymentTransferBatchEnvelope,
   type PaymentTransferBatchEstimate,
   type PaymentTransferBatchEstimateEnvelope,
   type PaymentTransferBatchRequest,
-  type PaymentTransferRecipient,
   RAMP_AMOUNT_LIMIT_REASONS,
   RAMP_DIRECTIONS,
   type RampDirection,
   type RampProviderEstimateResult,
-  type PaymentTransferEnvelope as TransferEnvelope,
   type PaymentTransferSummary as TransferRecord,
   type PaymentsDashboardWallet as WalletRecord,
   type PaymentsDashboardWalletsEnvelope as WalletsEnvelope,
@@ -494,6 +493,27 @@ function parseRefusalBody(text: string): ApiErrorBody {
   return parsed.success ? parsed.data : {};
 }
 
+const createdTransferSchema = z.looseObject({
+  id: z.string(),
+  custodyWalletId: z.string(),
+  status: z.enum(PAYMENT_TRANSFER_STATUSES),
+  signature: z.string().nullable(),
+  error: z.string().nullish(),
+  fireblocks: z
+    .object({
+      transactionId: z.string().nullable(),
+      status: z.string(),
+      subStatus: z.string().nullable(),
+    })
+    .optional(),
+});
+
+const createdTransferResponseSchema = z.object({
+  data: z.object({ transfer: createdTransferSchema }),
+});
+
+export type CreatedTransfer = z.infer<typeof createdTransferSchema>;
+
 /**
  * Creates one transfer.
  *
@@ -506,7 +526,7 @@ export async function createTransfer(
   input: CreateTransferInput,
   t: Translate,
   idempotencyKey: CallerIdempotencyKey | null
-): Promise<TransferRecord> {
+): Promise<CreatedTransfer> {
   const path = "/api/dashboard/payments/transfers";
   const init: RequestInit = {
     method: "POST",
@@ -542,15 +562,16 @@ export async function createTransfer(
     );
   }
 
-  const body: unknown = await response.json().catch(() => null);
-  // SAFETY: the transfer endpoint's success envelope is `PaymentTransferEnvelope`
-  // (`@sdp/types`); only the presence of the transfer is checked here, as before.
-  const envelope = body as TransferEnvelope | null;
-  if (!envelope?.data?.transfer) {
+  const parsed = createdTransferResponseSchema.safeParse(
+    await response.json().catch((cause: unknown) => {
+      throw new Error(t("DashboardPayments.workspace.transferMissing"), { cause });
+    })
+  );
+  if (!parsed.success) {
     throw new Error(t("DashboardPayments.workspace.transferMissing"));
   }
 
-  return envelope.data.transfer;
+  return parsed.data.data.transfer;
 }
 
 export async function fetchBatchRecipients(
@@ -616,11 +637,30 @@ export async function estimateTransferBatch(
   return body.data.estimate;
 }
 
-export interface CreateTransferBatchResult {
-  batch: PaymentTransferBatch;
-  recipients: PaymentTransferRecipient[];
-  transfers: TransferRecord[];
-}
+const createdTransferBatchResponseSchema = z.object({
+  data: z.object({
+    batch: z.looseObject({
+      id: z.string(),
+      sourceCustodyWalletId: z.string(),
+      status: z.enum(PAYMENT_TRANSFER_BATCH_STATUSES),
+      recipientCount: z.number(),
+      transactionCount: z.number(),
+    }),
+    recipients: z.array(
+      z.looseObject({
+        id: z.string(),
+        transferId: z.string().nullable(),
+        counterpartyAccountId: z.string(),
+        amount: z.string(),
+        destination: z.string(),
+        status: z.enum(PAYMENT_TRANSFER_BATCH_RECIPIENT_STATUSES),
+      })
+    ),
+    transfers: z.array(createdTransferSchema),
+  }),
+});
+
+export type CreateTransferBatchResult = z.infer<typeof createdTransferBatchResponseSchema>["data"];
 
 /**
  * An HTTP refusal from the batch endpoint, carrying the status and the replay
@@ -680,15 +720,15 @@ export async function createTransferBatch(
       code
     );
   }
-  const body = (await response.json().catch(() => ({}))) as PaymentTransferBatchEnvelope;
-  if (!body.data?.batch || !body.data.recipients || !body.data.transfers) {
+  const parsed = createdTransferBatchResponseSchema.safeParse(
+    await response.json().catch((cause: unknown) => {
+      throw new Error(t("DashboardPayments.workspace.batchTransferMissing"), { cause });
+    })
+  );
+  if (!parsed.success) {
     throw new Error(t("DashboardPayments.workspace.batchTransferMissing"));
   }
-  return {
-    batch: body.data.batch,
-    recipients: body.data.recipients,
-    transfers: body.data.transfers,
-  };
+  return parsed.data.data;
 }
 
 export async function fetchCounterpartyAccounts(

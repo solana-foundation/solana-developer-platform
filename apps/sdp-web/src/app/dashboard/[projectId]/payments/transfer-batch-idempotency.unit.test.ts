@@ -144,7 +144,19 @@ describe("claim / release", () => {
 
 describe("sendTransferBatchUnderKey", () => {
   const recorded = () =>
-    Response.json({ data: { batch: { id: "batch_1" }, recipients: [], transfers: [] } });
+    Response.json({
+      data: {
+        batch: {
+          id: "batch_1",
+          sourceCustodyWalletId: "cwlt_1",
+          status: "confirmed",
+          recipientCount: 2,
+          transactionCount: 1,
+        },
+        recipients: [],
+        transfers: [],
+      },
+    });
 
   function sentKeys(fetchMock: ReturnType<typeof vi.fn<typeof fetch>>): (string | null)[] {
     return fetchMock.mock.calls.map(([, init]) =>
@@ -168,6 +180,49 @@ describe("sendTransferBatchUnderKey", () => {
     expect(second).not.toBe(first);
   });
 
+  it.each([
+    [
+      "missing batch fields",
+      () =>
+        Response.json({
+          data: {
+            batch: { id: "batch_1", sourceCustodyWalletId: "cwlt_1" },
+            recipients: [],
+            transfers: [],
+          },
+        }),
+    ],
+    ["invalid JSON", () => new Response("{", { status: 200 })],
+    [
+      "an unreadable body",
+      () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.error(new TypeError("network error"));
+            },
+          }),
+          { status: 200 }
+        ),
+    ],
+  ])("keeps the key for '%s' and reuses it for the corrected retry", async (_label, response) => {
+    const fetchMock = vi.fn<typeof fetch>(async () => recorded()).mockResolvedValueOnce(response());
+    vi.stubGlobal("fetch", fetchMock);
+    const fingerprint = transferBatchRequestFingerprint(batchRequest());
+
+    await expect(sendTransferBatchUnderKey(batchRequest(), t)).rejects.toThrow(
+      "DashboardPayments.workspace.batchTransferMissing"
+    );
+    const [originalKey] = sentKeys(fetchMock);
+    expect(originalKey).toMatch(/^[0-9a-f-]{36}$/);
+    expect(claimTransferBatchIdempotencyKey(fingerprint)).toBe(originalKey);
+
+    const result = await sendTransferBatchUnderKey(batchRequest(), t);
+    expect(result.batch.id).toBe("batch_1");
+    expect(sentKeys(fetchMock)).toEqual([originalKey, originalKey]);
+    expect(claimTransferBatchIdempotencyKey(fingerprint)).not.toBe(originalKey);
+  });
+
   // APE-461: the same rule as a single transfer, on a batch still processing:
   // the stale replay keeps the key, and a GET showing the batch final retires it.
   it("keeps the key through a stale replay and retires it once a GET shows the batch final", async () => {
@@ -181,7 +236,13 @@ describe("sendTransferBatchUnderKey", () => {
       return Response.json(
         {
           data: {
-            batch: { id: "batch_1", status: "processing" },
+            batch: {
+              id: "batch_1",
+              sourceCustodyWalletId: "cwlt_1",
+              status: "processing",
+              recipientCount: 2,
+              transactionCount: 1,
+            },
             recipients: [],
             transfers: [],
           },

@@ -322,9 +322,6 @@ export const transferSchema = z
         "Exact SDP Wallet ID associated with the persisted transfer, or null for unresolved legacy and observed rows.",
       example: "cwlt_example",
     }),
-    providerWalletId: walletIdParamSchema.openapi({
-      description: "Provider wallet ID retained as evidence; not an execution selector.",
-    }),
     projectId: projectIdParamSchema
       .optional()
       .openapi({ description: "Project identifier for the transfer." }),
@@ -582,9 +579,6 @@ export const transferBatchSchema = z
     sourceCustodyWalletId: z.string().nullable().openapi({
       description: "Exact source SDP Wallet ID, or null for unresolved legacy batches.",
       example: "cwlt_example",
-    }),
-    sourceProviderWalletId: walletIdParamSchema.openapi({
-      description: "Source Provider wallet ID retained as evidence.",
     }),
     sourceAddress: solanaAddressSchema.openapi({
       description: "Source custody wallet address.",

@@ -78,7 +78,7 @@ import {
 } from "@/app/dashboard/[projectId]/payments/transactions/transactions-page.data";
 import { parseTransactionFilters } from "@/app/dashboard/[projectId]/payments/transactions/transactions-query";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
-import { paymentsDemoBody } from "./demo-fixtures";
+import { buildWorld, demoWorldBody, paymentsDemoBody } from "./demo-fixtures";
 
 /*
  * Every demo body goes through the parsers the Payments screens use: the server pages and data
@@ -396,6 +396,73 @@ describe("demo world", () => {
 });
 
 describe("Payments overview", () => {
+  it.each([
+    [
+      "/v1/payments/transfers/demo_xfr_acme_inv_20931",
+      "data.transfer.custodyWalletId",
+      "data.transfer.providerWalletId",
+    ],
+    ["/v1/payments/transfers", "data.0.custodyWalletId", "data.0.providerWalletId"],
+    [
+      "/v1/payments/transfer-batches",
+      "data.0.sourceCustodyWalletId",
+      "data.0.sourceProviderWalletId",
+    ],
+  ])("omits provider wallet identity from %s", (path, custodyField, providerField) => {
+    const body = paymentsDemoBody(path, RAMP_PROVIDERS, NOW);
+    expect(body).toHaveProperty(custodyField);
+    expect(body).not.toHaveProperty(providerField);
+  });
+
+  it("filters batch history by exact source before counting and paging", () => {
+    const world = buildWorld(NOW, RAMP_PROVIDERS);
+    const wallet = world.wallets.payroll;
+    if (!wallet) throw new Error("Missing demo wallet");
+    const before = structuredClone(world);
+    expect(
+      demoWorldBody(
+        world,
+        `/v1/payments/transfer-batches?sourceCustodyWalletId=${wallet.id}&pageSize=1`
+      )
+    ).toMatchObject({
+      data: [{ sourceCustodyWalletId: wallet.id }],
+      meta: { total: 1, hasMore: false },
+    });
+    expect(
+      demoWorldBody(world, `/v1/payments/transfer-batches?sourceCustodyWalletId=${wallet.walletId}`)
+    ).toMatchObject({ data: [], meta: { total: 0 } });
+    expect(world).toEqual(before);
+  });
+
+  it("selects exact transfer history despite provider namespace collisions", () => {
+    const world = buildWorld(NOW, RAMP_PROVIDERS);
+    const original = world.wallets.treasury;
+    const selected = world.wallets.payroll;
+    if (!original || !selected) throw new Error("Missing demo wallets");
+    original.walletId = selected.id;
+    const before = structuredClone(world);
+    const transfers = demoWorldBody(world, `/v1/payments/transfers?custodyWalletId=${selected.id}`);
+    expect(transfers).toHaveProperty("data.0.custodyWalletId", selected.id);
+    expect(world).toEqual(before);
+  });
+
+  it("preserves NULL wallet pins and saved history when reading transfer and batch DTOs", () => {
+    const world = buildWorld(NOW, RAMP_PROVIDERS);
+    const transfer = world.transfers[0]?.transfer;
+    const batch = world.batches[0]?.batch;
+    if (!transfer || !batch) throw new Error("Missing demo history");
+    transfer.custodyWalletId = null;
+    batch.sourceCustodyWalletId = null;
+    const before = structuredClone(world);
+    const transferBody = demoWorldBody(world, `/v1/payments/transfers/${transfer.id}`);
+    const batchBody = demoWorldBody(world, `/v1/payments/transfer-batches/${batch.id}`);
+    expect(transferBody).toHaveProperty("data.transfer.custodyWalletId", null);
+    expect(transferBody).not.toHaveProperty("data.transfer.providerWalletId");
+    expect(batchBody).toHaveProperty("data.batch.sourceCustodyWalletId", null);
+    expect(batchBody).not.toHaveProperty("data.batch.sourceProviderWalletId");
+    expect(world).toEqual(before);
+  });
+
   it("answers the balance with the sum of the wallets", async () => {
     const wallets = await fetchPaymentsWallets(harness.request, { includeBalances: true });
     expect(wallets.ok).toBe(true);

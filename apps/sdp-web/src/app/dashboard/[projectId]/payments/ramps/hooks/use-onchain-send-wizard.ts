@@ -11,7 +11,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 import { paymentsQueryKeys } from "@/app/dashboard/[projectId]/payments/payments-query-key";
-import type { CreateTransferInput } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
+import type {
+  CreatedTransfer,
+  CreateTransferInput,
+} from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import { fetchCounterpartyAccounts } from "@/app/dashboard/[projectId]/payments/payments-workspace.data";
 import {
   cryptoWalletAccountDetailsSchema,
@@ -179,7 +182,7 @@ export interface UseOnchainSendWizardProps {
 
 function useOnchainSubmission(signingUnavailable: boolean, t: Translate) {
   const [submitting, setSubmitting] = useState(false);
-  const [transferResult, setTransferResult] = useState<PaymentTransferSummary | null>(null);
+  const [transferResult, setTransferResult] = useState<CreatedTransfer | null>(null);
   const finished = transferResult !== null;
 
   const submitTransfer = async (submission: CreateTransferInput) => {

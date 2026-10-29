@@ -390,7 +390,7 @@ describe("PaymentsRepository transfer writes (postgres)", () => {
     expect(await readStatus("xfr_guard_ok")).toBe("canceled");
   });
 
-  it("claims an unoccupied off-ramp row for its on-chain deposit", async () => {
+  it("claims an unoccupied off-ramp row once across concurrent deposit attempts", async () => {
     const depositAddress = "DepositAddress111";
     const transfer = await repo.createTransfer({
       ...transferInput({ suffix: "ramp-onchain" }),
@@ -410,7 +410,6 @@ describe("PaymentsRepository transfer writes (postgres)", () => {
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
         custodyWalletId: "cwlt_other",
-        walletId: TEST_WALLET_ID,
         sourceAddress: "Sourceramp-onchain",
         destinationAddress: depositAddress,
         token: "SOL",
@@ -421,12 +420,11 @@ describe("PaymentsRepository transfer writes (postgres)", () => {
       })
     ).resolves.toBeNull();
 
-    const updated = await repo.updateOnchainTransferForRamp({
+    const claim = {
       transferId: transfer.id,
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
       custodyWalletId: TEST_CUSTODY_WALLET_ID,
-      walletId: TEST_WALLET_ID,
       sourceAddress: "Sourceramp-onchain",
       destinationAddress: depositAddress,
       token: "SOL",
@@ -434,10 +432,18 @@ describe("PaymentsRepository transfer writes (postgres)", () => {
       initiatedByKeyId: "key_ramp_onchain",
       idempotency: null,
       updatedAt: "2026-08-31T10:00:00.000Z",
-    });
+    };
+    const claims = await Promise.all([
+      repo.updateOnchainTransferForRamp(claim),
+      repo.updateOnchainTransferForRamp(claim),
+    ]);
+    expect(claims.filter((row) => row === null)).toHaveLength(1);
+    const updated = claims.find((row) => row !== null);
 
     expect(updated).toMatchObject({
       id: transfer.id,
+      custody_wallet_id: TEST_CUSTODY_WALLET_ID,
+      wallet_id: TEST_WALLET_ID,
       destination_address: depositAddress,
       initiated_by_key_id: "key_ramp_onchain",
       status: "processing",
@@ -465,7 +471,6 @@ describe("PaymentsRepository transfer writes (postgres)", () => {
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT_ID,
         custodyWalletId: TEST_CUSTODY_WALLET_ID,
-        walletId: TEST_WALLET_ID,
         sourceAddress: "Sourceramp-occupied",
         destinationAddress: depositAddress,
         token: "SOL",

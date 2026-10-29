@@ -15,6 +15,7 @@ import {
   demoAddress,
   demoSignature,
   findWallet,
+  findWalletByCustodyWalletId,
   fromBaseUnits,
   HOUR_MS,
   newestFirst,
@@ -82,13 +83,11 @@ export function walletHolding(wallet: DemoWallet, mint: string): string {
 }
 
 function adjustBalance(
-  world: DemoWorld,
-  walletId: string,
+  wallet: DemoWallet | undefined,
   mint: string,
   amount: string,
   sign: 1 | -1
 ): void {
-  const wallet = findWallet(world, walletId);
   const key = tokenKeyForMint(mint);
   if (!wallet || !key || !DECIMAL.test(amount)) return;
   const { decimals } = DEMO_TOKENS[key];
@@ -111,7 +110,6 @@ function outboundTransfer(
     organizationId: ORGANIZATION_ID,
     projectId: PROJECT_ID,
     custodyWalletId: wallet.id,
-    providerWalletId: wallet.walletId,
     type: "transfer",
     kind: "pay",
     direction: "outbound",
@@ -175,7 +173,7 @@ function applyAddress(world: DemoWorld, op: DemoOpOf<"address">): void {
 }
 
 function applySend(world: DemoWorld, op: DemoOpOf<"send">): void {
-  const wallet = findWallet(world, op.wallet);
+  const wallet = findWalletByCustodyWalletId(world, op.wallet);
   if (!wallet) return;
   const account = Object.values(world.accounts).find(
     (candidate) => candidate.details.address === op.to
@@ -190,7 +188,7 @@ function applySend(world: DemoWorld, op: DemoOpOf<"send">): void {
     }),
     observed: false,
   });
-  adjustBalance(world, wallet.id, op.token, op.amount, -1);
+  adjustBalance(wallet, op.token, op.amount, -1);
 }
 
 function sum(amounts: readonly string[], mint: string): string {
@@ -204,7 +202,7 @@ function sum(amounts: readonly string[], mint: string): string {
 }
 
 function applyBatch(world: DemoWorld, op: DemoOpOf<"batch">): void {
-  const wallet = findWallet(world, op.wallet);
+  const wallet = findWalletByCustodyWalletId(world, op.wallet);
   if (!wallet) return;
   const createdAt = iso(op.at);
   const recipients: PaymentTransferRecipient[] = [];
@@ -254,7 +252,6 @@ function applyBatch(world: DemoWorld, op: DemoOpOf<"batch">): void {
       projectId: PROJECT_ID,
       externalId: op.ext,
       sourceCustodyWalletId: wallet.id,
-      sourceProviderWalletId: wallet.walletId,
       sourceAddress: wallet.publicKey,
       token: op.token,
       status: "confirmed",
@@ -266,7 +263,7 @@ function applyBatch(world: DemoWorld, op: DemoOpOf<"batch">): void {
     },
     recipients,
   });
-  adjustBalance(world, wallet.id, op.token, totalAmount, -1);
+  adjustBalance(wallet, op.token, totalAmount, -1);
 }
 
 /** Where the demo provider asks an off-ramp's crypto to be sent. */
@@ -289,7 +286,7 @@ function rampReference(provider: RampProviderId, quoteId: string): string {
 }
 
 function applyRamp(world: DemoWorld, op: DemoOpOf<"ramp">): void {
-  const wallet = findWallet(world, op.wallet);
+  const wallet = findWalletByCustodyWalletId(world, op.wallet);
   const tokenKey = tokenKeyForRail(op.rail);
   if (!wallet || !tokenKey) return;
   const onramp = op.dir === "onramp";
@@ -324,6 +321,8 @@ function applyRamp(world: DemoWorld, op: DemoOpOf<"ramp">): void {
 function applyRampPaid(world: DemoWorld, op: DemoOpOf<"ramp-paid">, now: number): void {
   const transfer = transferById(world, op.id);
   if (transfer?.status !== "awaiting_payment" || !transfer.custodyWalletId) return;
+  const wallet = findWalletByCustodyWalletId(world, transfer.custodyWalletId);
+  if (!wallet) return;
   const settled = now - op.at >= DEMO_SETTLE_MS;
   transfer.status = settled ? "completed" : "settling";
   transfer.signature = demoSignature(`${op.id}:paid`);
@@ -332,9 +331,9 @@ function applyRampPaid(world: DemoWorld, op: DemoOpOf<"ramp-paid">, now: number)
   const token = transfer.token ?? DEMO_TOKENS.USDC.mint;
   const amount = transfer.amount ?? "0";
   if (transfer.direction === "outbound") {
-    adjustBalance(world, transfer.custodyWalletId, token, amount, -1);
+    adjustBalance(wallet, token, amount, -1);
   } else if (settled) {
-    adjustBalance(world, transfer.custodyWalletId, token, amount, 1);
+    adjustBalance(wallet, token, amount, 1);
   }
 }
 
@@ -475,7 +474,7 @@ function collect(world: DemoWorld, schedule: PaymentRecurringPayment, at: number
     updatedAt: iso(at + 2_000),
   });
   schedule.nextCollectionDueAt = iso(Date.parse(dueAt) + schedule.periodHours * HOUR_MS);
-  adjustBalance(world, wallet.id, schedule.token, schedule.amount, -1);
+  adjustBalance(findWallet(world, wallet.id), schedule.token, schedule.amount, -1);
 }
 
 function applyScheduleAction(world: DemoWorld, op: DemoOpOf<"schedule-action">): void {
