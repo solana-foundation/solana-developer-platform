@@ -70,7 +70,7 @@ describe("Auth Middleware", () => {
         env
       );
 
-      expect(res.status).not.toBe(401);
+      expect(res.status).toBe(200);
     });
 
     it("accepts raw key format", async () => {
@@ -86,7 +86,7 @@ describe("Auth Middleware", () => {
         env
       );
 
-      expect(res.status).not.toBe(401);
+      expect(res.status).toBe(200);
     });
 
     it("rejects requests without Authorization header", async () => {
