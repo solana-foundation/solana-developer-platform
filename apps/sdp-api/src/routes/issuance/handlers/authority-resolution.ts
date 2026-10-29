@@ -11,6 +11,7 @@ import { getDb } from "@/db/client";
 import { type ApiKeyContext, requireAuthProjectId } from "@/lib/auth";
 import { AppError, badRequest, conflict, walletNotFound } from "@/lib/errors";
 import { assertCallerWalletInScope } from "@/lib/money-admission";
+import { rethrowRpcUnavailable } from "@/lib/rpc-unavailable";
 import { createSigningService } from "@/services/domain/signing.service";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
@@ -180,6 +181,7 @@ export async function resolvePermanentDelegateAuthority(
 
     return permanentDelegate;
   } catch (error) {
+    rethrowRpcUnavailable(error);
     throw new AppError(
       "SOLANA_RPC_ERROR",
       error instanceof Error ? error.message : "Failed to resolve permanent delegate authority"
@@ -207,6 +209,7 @@ export async function resolveMetadataAuthority(
     // failed read. Do not restore stale stored authority after revocation.
     return metadataAuthority;
   } catch (error) {
+    rethrowRpcUnavailable(error);
     throw new AppError(
       "SOLANA_RPC_ERROR",
       error instanceof Error ? error.message : "Failed to resolve metadata authority"
@@ -240,6 +243,7 @@ export async function resolveFreezeOperationAuthority(
     const { freezeAuthority } = await fetchMintAuthorities(env, token.mintAddress);
     return freezeAuthority;
   } catch (error) {
+    rethrowRpcUnavailable(error);
     throw new AppError(
       "SOLANA_RPC_ERROR",
       error instanceof Error ? error.message : "Failed to resolve freeze authority"
@@ -269,6 +273,7 @@ export async function resolveCurrentAuthorityForRole(
         const { mintAuthority } = await fetchMintAuthorities(env, token.mintAddress);
         currentAuthority = mintAuthority;
       } catch (error) {
+        rethrowRpcUnavailable(error);
         throw new AppError(
           "SOLANA_RPC_ERROR",
           error instanceof Error ? error.message : "Failed to resolve mint authority"

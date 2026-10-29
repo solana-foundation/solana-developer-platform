@@ -201,7 +201,7 @@ describe("POST /v1/payments/requests/:paymentRequestId/cancel", () => {
     expect((await stored(request)).status).toBe("awaiting_payment");
   });
 
-  it("answers 502 when the block height cannot be read, and cancels on a same-key retry", async () => {
+  it("answers 503 RPC_UNAVAILABLE when the block height cannot be read, and cancels on a same-key retry", async () => {
     rpc.respond("getBlockHeight", () => ({
       error: { code: -32603, message: "RPC unavailable" },
     }));
@@ -211,8 +211,11 @@ describe("POST /v1/payments/requests/:paymentRequestId/cancel", () => {
 
     const failed = await postCancelWith(request.id, idempotencyKey);
 
-    expect(failed.status).toBe(502);
-    expect(await failed.json()).toMatchObject({ error: { code: "SOLANA_RPC_ERROR" } });
+    expect(failed.status).toBe(503);
+    expect(failed.headers.get("Retry-After")).toBe("2");
+    expect(await failed.json()).toMatchObject({
+      error: { code: "RPC_UNAVAILABLE", details: { reason: "upstream_unavailable" } },
+    });
     expect(await stored(request)).toMatchObject({ status: "awaiting_payment", canceled_at: null });
 
     rpc.respond("getBlockHeight", () => ({ result: 900 }));

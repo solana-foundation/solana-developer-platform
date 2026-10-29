@@ -22,9 +22,10 @@ export class SdpRpcError extends Error {
   constructor(
     public readonly code: SdpRpcErrorCode,
     message: string,
-    public readonly details?: Record<string, unknown>
+    public readonly details?: Record<string, unknown>,
+    options?: ErrorOptions
   ) {
-    super(message);
+    super(message, options);
     this.name = "SdpRpcError";
     this.statusCode = ERROR_STATUS_CODES[code];
   }
@@ -42,13 +43,15 @@ export class RpcUnavailableError extends SdpRpcError {
    * @param reason - Why RPC is unavailable.
    * @param message - What failed, never quoting an endpoint URL.
    * @param details - The cluster, plus any reason-specific facts.
+   * @param options - The failure this one wraps, if any.
    */
   constructor(
     public readonly reason: RpcUnavailableReason,
     message: string,
-    details: { cluster: SolanaCluster } & Record<string, unknown>
+    details: { cluster: SolanaCluster } & Record<string, unknown>,
+    options?: ErrorOptions
   ) {
-    super("RPC_UNAVAILABLE", message, { reason, ...details });
+    super("RPC_UNAVAILABLE", message, { reason, ...details }, options);
     this.name = "RpcUnavailableError";
     this.cluster = details.cluster;
   }

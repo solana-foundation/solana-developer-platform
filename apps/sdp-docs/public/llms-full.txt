@@ -5234,7 +5234,7 @@ A failed request returns an error status and this body. The health checks are th
 | `422` | The request is well formed but can't go ahead: its idempotency key was used for a different request, or the signing provider refused the transaction. | `IDEMPOTENCY_KEY_REUSED`, `SIGNING_REJECTED` |
 | `429` | Too many requests. See [Rate limits](/docs/reference/conventions/rate-limits). | `RATE_LIMITED` |
 | `500` | Something failed inside SDP. | `INTERNAL_ERROR` |
-| `502` | A Solana RPC call failed. | `SOLANA_RPC_ERROR` |
+| `502` | Solana RPC answered, but with an error SDP could not use. | `SOLANA_RPC_ERROR` |
 | `503` | SDP, or a provider it depends on, is unavailable for now. | `SERVICE_UNAVAILABLE`, `PROVIDER_UNAVAILABLE`, `RPC_UNAVAILABLE` |
 
 Each operation's page lists the statuses it can return, with an example body for each.

@@ -31,6 +31,7 @@ import {
   createTransactionalPaymentsRepository,
 } from "@/db/repositories/repository-factory";
 import { AppError, internalError, rateLimited, solanaRpcError } from "@/lib/errors";
+import { rethrowRpcUnavailable } from "@/lib/rpc-unavailable";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
 import { describeError, logEvent } from "@/runtime/money-path-events";
@@ -65,8 +66,8 @@ const SPONSORED_CLAIM_BLOCK_MARGIN = 150n;
  * longer, which is the safe direction.
  *
  * @returns The height below which a sponsored transaction can no longer land.
- * @throws AppError `SOLANA_RPC_ERROR` when the cluster answers with a Solana error; an SDP RPC
- *   error passes through as it is.
+ * @throws AppError `SOLANA_RPC_ERROR` when the cluster answers with a persistent Solana error; an
+ *   SDP RPC error or a transient one passes through, for the API's `503 RPC_UNAVAILABLE`.
  */
 export async function readLiveClaimFloor(): Promise<bigint> {
   let blockHeight: bigint;
@@ -74,6 +75,7 @@ export async function readLiveClaimFloor(): Promise<bigint> {
     blockHeight = await createClusterRpc().getBlockHeight({ commitment: "confirmed" }).send();
   } catch (error) {
     if (error instanceof SdpRpcError || !isSolanaError(error)) throw error;
+    rethrowRpcUnavailable(error);
     logEvent("warn", {
       event: "payment_requests.claim_floor_read_failed",
       ...describeError(error),
