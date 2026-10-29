@@ -217,6 +217,11 @@ Gates follow module declarations, never sentences:
 - The docs skill (`public/SKILL.md`, and the same file at the repo's `skills/sdp-docs/SKILL.md`, which `npx skills add` installs from GitHub) is the exception: it names no module, so one copy fits every channel. `generate:ai` links only shared pages from it and fails on a gated or missing one; send readers to `llms.txt` for what a channel publishes.
 
 API reference pages are different: they are generated from the public OpenAPI document, a folder per tag, so a family appears and disappears with that document (`EARN_PUBLIC_SURFACE_PUBLISHED` in `apps/sdp-api/src/openapi/spec.ts` is the one such switch). The docs keep no list of families of their own, and an untagged operation fails `generate:api`.
+`generate:ai` reads that channel's generated `apps/sdp-api/generated/openapi.json`
+after `generate:api`. `@sdp/api-catalog/ai-discovery` renders both the docs
+`llms.txt` and API `/llms.txt`, so their public endpoint family lists come from
+the same tags, including the Earn publication hold. Change that shared
+generator when changing family discovery, not either output alone.
 The generated API Reference index lists every published operation, grouped by
 family, with a direct link to its operation page. It reuses the family page's
 `<ApiOperationTable>` renderer, so both tables have the same responsive layout
