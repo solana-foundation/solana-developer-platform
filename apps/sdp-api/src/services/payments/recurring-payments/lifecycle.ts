@@ -20,6 +20,7 @@ import type {
   PaymentRecurringPaymentLifecycleAttemptRow,
   PaymentRecurringPaymentRow,
   PaymentRecurringPaymentsRepository,
+  RecurringPaymentLease,
 } from "@/db/repositories/payment-recurring-payments.repository";
 import { createPostgresPaymentRecurringPaymentsRepository } from "@/db/repositories/payment-recurring-payments.repository.postgres";
 import type { PaymentSubscriptionRow } from "@/db/repositories/payment-subscriptions.repository";
@@ -50,6 +51,7 @@ import {
   ResumedStepUnsettledError,
   readRecurringPaymentStep,
   recurringPaymentErrorMessage,
+  recurringPaymentLease,
   refuseWhileSubscriptionAuthorityRevokes,
   type SubscriptionStep,
   savedStepSend,
@@ -265,9 +267,12 @@ async function recordLifecycleFailure(input: {
   error: Error;
   failedAt: string;
   resetClaim: boolean;
+  /** A run another one took over writes nothing: the schedule is that run's now. */
+  lease: RecurringPaymentLease;
 }): Promise<void> {
   await getDb(input.env).transaction(async (tx) => {
     const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
+    await recurringRepo.assertRecurringPaymentLease(input.lease);
     const updatedAttempt = await recurringRepo.updateLifecycleAttempt({
       attemptId: input.attempt.id,
       organizationId: input.organizationId,
@@ -299,7 +304,8 @@ async function recordLifecycleFailure(input: {
 }
 
 async function preserveRecoverableLifecycleAttempt(input: {
-  recurringRepo: PaymentRecurringPaymentsRepository;
+  env: Env;
+  lease: RecurringPaymentLease;
   attempt: PaymentRecurringPaymentLifecycleAttemptRow;
   operation: RecurringPaymentLifecycleOperation;
   organizationId: string;
@@ -313,14 +319,19 @@ async function preserveRecoverableLifecycleAttempt(input: {
   confirmedOnChain: boolean;
 }): Promise<void> {
   try {
-    await input.recurringRepo.updateLifecycleAttempt({
-      attemptId: input.attempt.id,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      stage: input.stage,
-      signature: input.signature,
-      error: recurringPaymentErrorMessage(input.error),
-      updatedAt: input.failedAt,
+    // A run another one took over writes nothing: the attempt is that run's now.
+    await getDb(input.env).transaction(async (tx) => {
+      const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
+      await recurringRepo.assertRecurringPaymentLease(input.lease);
+      await recurringRepo.updateLifecycleAttempt({
+        attemptId: input.attempt.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        stage: input.stage,
+        signature: input.signature,
+        error: recurringPaymentErrorMessage(input.error),
+        updatedAt: input.failedAt,
+      });
     });
   } catch (journalError) {
     if (!(journalError instanceof Error)) throw journalError;
@@ -355,6 +366,7 @@ async function finalizeRecurringPaymentLifecycle(input: {
   attempt: PaymentRecurringPaymentLifecycleAttemptRow;
   /** Null when an earlier run's send landed before it saved the signature. */
   signature: Signature | null;
+  lease: RecurringPaymentLease;
 }): Promise<PaymentRecurringPaymentRow> {
   const finalizedAt = new Date().toISOString();
   const { finalStatus: recurringStatus, processingStatus } = getRecurringPaymentLifecycleStatuses(
@@ -365,6 +377,7 @@ async function finalizeRecurringPaymentLifecycle(input: {
   return getDb(input.env).transaction(async (tx) => {
     const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
     const subscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
+    await recurringRepo.assertRecurringPaymentLease(input.lease);
 
     const updatedSubscription = await subscriptionsRepo.updateSubscription({
       subscriptionId: input.subscription.id,
@@ -553,6 +566,7 @@ async function runRecurringPaymentLifecycle(
   }
   const { claimed } = claimResult;
   let { attempt } = claimResult;
+  const lease = recurringPaymentLease(claimed, input.operation);
 
   let currentStage: PaymentRecurringPaymentLifecycleAttemptStage = attempt.stage;
   let signature = parseNullableStoredSignature(attempt.signature);
@@ -607,6 +621,7 @@ async function runRecurringPaymentLifecycle(
       env: input.env,
       organizationId: input.organizationId,
       projectId: input.projectId,
+      lease,
       rows: [{ slot: { row: "lifecycle_attempt", column: "signature" }, id: attempt.id }],
     } as const satisfies SubscriptionStep;
     let onChainSubscription: MaybeAccount<SubscriptionDelegation> | null = null;
@@ -638,6 +653,7 @@ async function runRecurringPaymentLifecycle(
           subscription,
           attempt,
           signature,
+          lease,
         });
       }
       onChainSubscription = step.account;
@@ -711,8 +727,10 @@ async function runRecurringPaymentLifecycle(
       instructions: [instruction],
       submissionStore: createSubscriptionStepStore({
         ...lifecycleStep,
-        save: async (send) => {
-          const updatedAttempt = await recurringRepo.updateLifecycleAttempt({
+        save: async (send, tx) => {
+          const updatedAttempt = await createPostgresPaymentRecurringPaymentsRepository(
+            tx
+          ).updateLifecycleAttempt({
             attemptId: attempt.id,
             organizationId: input.organizationId,
             projectId: input.projectId,
@@ -743,6 +761,7 @@ async function runRecurringPaymentLifecycle(
       subscription,
       attempt,
       signature,
+      lease,
     });
   } catch (error) {
     if (!(error instanceof Error)) throw error;
@@ -766,7 +785,8 @@ async function runRecurringPaymentLifecycle(
       !definitelyFailed
     ) {
       await preserveRecoverableLifecycleAttempt({
-        recurringRepo,
+        env: input.env,
+        lease,
         attempt,
         operation: input.operation,
         organizationId: input.organizationId,
@@ -792,6 +812,7 @@ async function runRecurringPaymentLifecycle(
         error,
         failedAt,
         resetClaim: true,
+        lease,
       });
     } catch (resetError) {
       getLogger().error(

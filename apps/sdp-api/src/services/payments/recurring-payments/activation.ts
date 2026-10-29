@@ -25,6 +25,7 @@ import type {
   PaymentRecurringPaymentActivationAttemptRow,
   PaymentRecurringPaymentRow,
   PaymentRecurringPaymentsRepository,
+  RecurringPaymentLease,
 } from "@/db/repositories/payment-recurring-payments.repository";
 import { createPostgresPaymentRecurringPaymentsRepository } from "@/db/repositories/payment-recurring-payments.repository.postgres";
 import type {
@@ -63,6 +64,7 @@ import {
   ResumedStepUnsettledError,
   readRecurringPaymentStepIfResumed,
   recurringPaymentErrorMessage,
+  recurringPaymentLease,
   refuseWhileSubscriptionAuthorityRevokes,
   requireUpdatedAttempt,
   requireUpdatedSubscription,
@@ -204,6 +206,8 @@ async function recordActivationFailure(input: {
   env: Env;
   attempt: PaymentRecurringPaymentActivationAttemptRow;
   claimed: PaymentRecurringPaymentRow;
+  /** A run another one took over writes nothing: the schedule is that run's now. */
+  lease: RecurringPaymentLease;
   organizationId: string;
   projectId: string;
   stage: PaymentRecurringPaymentActivationAttemptStage;
@@ -216,28 +220,25 @@ async function recordActivationFailure(input: {
   // `activating`, so the cron reads it once stale; only a definite refusal or a
   // failure before any send resets, so a reset schedule never has a delegation
   // that could still land.
-  if (
+  const keepInFlight =
     input.error instanceof ResumedStepUnsettledError ||
-    (input.sendMayLand && !isDefiniteSubmissionError(input.error))
-  ) {
-    const recurringRepo = createPaymentRecurringPaymentsRepository(
-      input.env,
-      createTenantScope(input)
-    );
-    requireUpdatedAttempt(
-      await recurringRepo.updateActivationAttempt({
-        attemptId: input.attempt.id,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        stage: input.stage,
-        error: recurringPaymentErrorMessage(input.error),
-        updatedAt: input.failedAt,
-      })
-    );
-    return;
-  }
+    (input.sendMayLand && !isDefiniteSubmissionError(input.error));
   await getDb(input.env).transaction(async (tx) => {
     const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
+    await recurringRepo.assertRecurringPaymentLease(input.lease);
+    if (keepInFlight) {
+      requireUpdatedAttempt(
+        await recurringRepo.updateActivationAttempt({
+          attemptId: input.attempt.id,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          stage: input.stage,
+          error: recurringPaymentErrorMessage(input.error),
+          updatedAt: input.failedAt,
+        })
+      );
+      return;
+    }
     requireUpdatedAttempt(
       await recurringRepo.updateActivationAttempt({
         attemptId: input.attempt.id,
@@ -532,7 +533,7 @@ async function confirmActivationSubscription(input: {
 
 async function prepareSubscriptionAuthorityForActivation(input: {
   env: Env;
-  recurringRepo: PaymentRecurringPaymentsRepository;
+  lease: RecurringPaymentLease;
   attempt: PaymentRecurringPaymentActivationAttemptRow;
   organizationId: string;
   projectId: string;
@@ -588,9 +589,10 @@ async function prepareSubscriptionAuthorityForActivation(input: {
       env: input.env,
       organizationId: input.organizationId,
       projectId: input.projectId,
-      save: async (send) => {
+      lease: input.lease,
+      save: async (send, tx) => {
         requireUpdatedAttempt(
-          await input.recurringRepo.updateActivationAttempt({
+          await createPostgresPaymentRecurringPaymentsRepository(tx).updateActivationAttempt({
             attemptId: input.attempt.id,
             organizationId: input.organizationId,
             projectId: input.projectId,
@@ -730,6 +732,7 @@ export async function activateRecurringPayment(input: {
     throw conflict("Recurring payment activation is already processing");
   }
   const { attempt, claimed } = claimResult;
+  const lease = recurringPaymentLease(claimed, "activation");
 
   let currentStage: PaymentRecurringPaymentActivationAttemptStage = "create_plan";
   let planCreationSignature = parseNullableStoredSignature(
@@ -826,6 +829,7 @@ export async function activateRecurringPayment(input: {
       env: input.env,
       organizationId: input.organizationId,
       projectId: input.projectId,
+      lease,
       rows: [
         { slot: { row: "recurring_payment", column: "plan_creation_signature" }, id: claimed.id },
         { slot: { row: "activation_attempt", column: "plan_creation_signature" }, id: attempt.id },
@@ -877,32 +881,29 @@ export async function activateRecurringPayment(input: {
         instructions: [createPlanInstruction],
         submissionStore: createSubscriptionStepStore({
           ...planStep,
-          save: async (send) => {
-            await getDb(input.env).transaction(async (tx) => {
-              const signatureUpdatedAt = new Date().toISOString();
-              const txRecurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
-              const updatedRecurringPayment =
-                await txRecurringRepo.updateRecurringPaymentActivation({
-                  recurringPaymentId: claimed.id,
-                  organizationId: input.organizationId,
-                  projectId: input.projectId,
-                  planCreationSignature: send.signature,
-                  updatedAt: signatureUpdatedAt,
-                });
-              if (updatedRecurringPayment === null) {
-                throw conflict("Recurring payment activation changed concurrently");
-              }
-              requireUpdatedAttempt(
-                await txRecurringRepo.updateActivationAttempt({
-                  attemptId: attempt.id,
-                  organizationId: input.organizationId,
-                  projectId: input.projectId,
-                  planCreationSignature: send.signature,
-                  lastValidBlockHeight: send.lastValidBlockHeight,
-                  updatedAt: signatureUpdatedAt,
-                })
-              );
+          save: async (send, tx) => {
+            const signatureUpdatedAt = new Date().toISOString();
+            const txRecurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
+            const updatedRecurringPayment = await txRecurringRepo.updateRecurringPaymentActivation({
+              recurringPaymentId: claimed.id,
+              organizationId: input.organizationId,
+              projectId: input.projectId,
+              planCreationSignature: send.signature,
+              updatedAt: signatureUpdatedAt,
             });
+            if (updatedRecurringPayment === null) {
+              throw conflict("Recurring payment activation changed concurrently");
+            }
+            requireUpdatedAttempt(
+              await txRecurringRepo.updateActivationAttempt({
+                attemptId: attempt.id,
+                organizationId: input.organizationId,
+                projectId: input.projectId,
+                planCreationSignature: send.signature,
+                lastValidBlockHeight: send.lastValidBlockHeight,
+                updatedAt: signatureUpdatedAt,
+              })
+            );
             sendMayLand = true;
           },
         }),
@@ -982,6 +983,7 @@ export async function activateRecurringPayment(input: {
       env: input.env,
       organizationId: input.organizationId,
       projectId: input.projectId,
+      lease,
       rows: [
         { slot: { row: "recurring_payment", column: "authorization_signature" }, id: claimed.id },
         { slot: { row: "activation_attempt", column: "authorization_signature" }, id: attempt.id },
@@ -1029,7 +1031,7 @@ export async function activateRecurringPayment(input: {
 
       subscriptionAuthority = await prepareSubscriptionAuthorityForActivation({
         env: input.env,
-        recurringRepo,
+        lease,
         attempt,
         organizationId: input.organizationId,
         projectId: input.projectId,
@@ -1072,32 +1074,29 @@ export async function activateRecurringPayment(input: {
         feePayer,
         submissionStore: createSubscriptionStepStore({
           ...authorizationStep,
-          save: async (send) => {
-            await getDb(input.env).transaction(async (tx) => {
-              const signatureUpdatedAt = new Date().toISOString();
-              const txRecurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
-              const updatedRecurringPayment =
-                await txRecurringRepo.updateRecurringPaymentActivation({
-                  recurringPaymentId: claimed.id,
-                  organizationId: input.organizationId,
-                  projectId: input.projectId,
-                  authorizationSignature: send.signature,
-                  updatedAt: signatureUpdatedAt,
-                });
-              if (updatedRecurringPayment === null) {
-                throw conflict("Recurring payment activation changed concurrently");
-              }
-              requireUpdatedAttempt(
-                await txRecurringRepo.updateActivationAttempt({
-                  attemptId: attempt.id,
-                  organizationId: input.organizationId,
-                  projectId: input.projectId,
-                  authorizationSignature: send.signature,
-                  lastValidBlockHeight: send.lastValidBlockHeight,
-                  updatedAt: signatureUpdatedAt,
-                })
-              );
+          save: async (send, tx) => {
+            const signatureUpdatedAt = new Date().toISOString();
+            const txRecurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
+            const updatedRecurringPayment = await txRecurringRepo.updateRecurringPaymentActivation({
+              recurringPaymentId: claimed.id,
+              organizationId: input.organizationId,
+              projectId: input.projectId,
+              authorizationSignature: send.signature,
+              updatedAt: signatureUpdatedAt,
             });
+            if (updatedRecurringPayment === null) {
+              throw conflict("Recurring payment activation changed concurrently");
+            }
+            requireUpdatedAttempt(
+              await txRecurringRepo.updateActivationAttempt({
+                attemptId: attempt.id,
+                organizationId: input.organizationId,
+                projectId: input.projectId,
+                authorizationSignature: send.signature,
+                lastValidBlockHeight: send.lastValidBlockHeight,
+                updatedAt: signatureUpdatedAt,
+              })
+            );
             sendMayLand = true;
           },
         }),
@@ -1144,6 +1143,7 @@ export async function activateRecurringPayment(input: {
     const finalized = await getDb(input.env).transaction(async (tx) => {
       const txSubscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
       const txRecurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
+      await txRecurringRepo.assertRecurringPaymentLease(lease);
       requireUpdatedSubscription(
         await txSubscriptionsRepo.updateSubscription({
           subscriptionId: subscription.id,
@@ -1210,6 +1210,7 @@ export async function activateRecurringPayment(input: {
         env: input.env,
         attempt,
         claimed,
+        lease,
         organizationId: input.organizationId,
         projectId: input.projectId,
         stage: currentStage,

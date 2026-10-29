@@ -27,7 +27,10 @@ import {
 import { findPlanPda, type SubscriptionDelegation } from "@solana/subscriptions";
 import { type DatabaseExecutor, getDb } from "@/db/client";
 import type {
+  ClaimedRecurringPaymentRow,
   PaymentRecurringPaymentRow,
+  RecurringPaymentLease,
+  RecurringPaymentLeaseOperation,
   RecurringPaymentStepSignatureSlot,
 } from "@/db/repositories/payment-recurring-payments.repository";
 import { createPostgresPaymentRecurringPaymentsRepository } from "@/db/repositories/payment-recurring-payments.repository.postgres";
@@ -327,11 +330,34 @@ export interface SubscriptionStepSignatureRow {
   id: string;
 }
 
+/**
+ * The lease a claimed run holds on its recurring payment, for the fence every write that commits
+ * its progress checks first.
+ *
+ * @param claimed - The row the run's claim returned.
+ * @param operation - What the conflict calls the run's operation.
+ * @returns The lease.
+ */
+export function recurringPaymentLease(
+  claimed: ClaimedRecurringPaymentRow,
+  operation: RecurringPaymentLeaseOperation
+): RecurringPaymentLease {
+  return {
+    recurringPaymentId: claimed.id,
+    organizationId: claimed.organization_id,
+    projectId: claimed.project_id,
+    leaseId: claimed.lease_id,
+    operation,
+  };
+}
+
 /** Where one subscription step's signature is saved: its tenant and every row that holds it. */
 export interface SubscriptionStep {
   env: Env;
   organizationId: string;
   projectId: string;
+  /** The claimed run's lease: its saves and clears write nothing once another run took over. */
+  lease: RecurringPaymentLease;
   rows: readonly SubscriptionStepSignatureRow[];
 }
 
@@ -384,6 +410,7 @@ async function clearSubscriptionStepSignature(
   const updatedAt = new Date().toISOString();
   await getDb(step.env).transaction(async (tx) => {
     const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
+    await recurringRepo.assertRecurringPaymentLease(step.lease);
     for (const row of step.rows) {
       const cleared = await recurringRepo.clearStepSignature({
         ...row,
@@ -412,22 +439,32 @@ async function clearSubscriptionStepSignature(
 
 /**
  * The submission store every subscription step sends with. `save` writes the step's signature and
- * its blockhash's expiry before the send; after a provably refused send, the step's rows are
- * cleared, so a retry sends again instead of waiting on a transaction that never left. Recovery
- * reads the saved send and the chain, so there is no started marker.
+ * its blockhash's expiry before the send, in one transaction that first checks the run still holds
+ * its lease: a run another one took over throws there and never broadcasts. After a provably
+ * refused send, the step's rows are cleared, so a retry sends again instead of waiting on a
+ * transaction that never left. Recovery reads the saved send and the chain, so there is no
+ * started marker.
  *
- * @param step - The step's rows and the writer that saves its send to them.
- * @param step.save - Writes the signature and the block height to the step's rows.
+ * @param step - The step's rows, its lease and the writer that saves its send to them.
+ * @param step.save - Writes the signature and the block height to the step's rows through `tx`.
  * @returns The store.
  */
 export function createSubscriptionStepStore(
   step: SubscriptionStep & {
-    save: (send: { signature: Signature; lastValidBlockHeight: string }) => Promise<void>;
+    save: (
+      send: { signature: Signature; lastValidBlockHeight: string },
+      tx: DatabaseExecutor
+    ) => Promise<void>;
   }
 ): SignedSubmissionStore {
   return {
     persistSigned: ({ signature, lastValidBlockHeight }) =>
-      step.save({ signature, lastValidBlockHeight }),
+      getDb(step.env).transaction(async (tx) => {
+        await createPostgresPaymentRecurringPaymentsRepository(tx).assertRecurringPaymentLease(
+          step.lease
+        );
+        await step.save({ signature, lastValidBlockHeight }, tx);
+      }),
     markStarted: async () => {},
     hasStarted: async () => false,
     clearSigned: (signature) => clearSubscriptionStepSignature(step, signature, "refused"),

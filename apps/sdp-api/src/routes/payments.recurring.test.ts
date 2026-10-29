@@ -3966,6 +3966,102 @@ describe("Payments routes — recurring", () => {
     expect(sendTransactionMock).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps a collection whose send was saved after recovery read it unsent (APE SOLA9-816)", async () => {
+    const sourceSigner = recurringExecution.sourceSigner();
+    const savedSignature = signature(
+      "4hdAMf5sGEHn2UAjViFvX9YtZQdRfeHEGwNEc8GjVKFG5MGNs27jVrNuQXHcr1JAkzjcJtS4Lo6z33Z5fbT2gq13"
+    );
+    const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+    const dueAt = new Date(Date.now() - 60 * 1000).toISOString();
+    const staleAt = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+    const transferId = `xfr_${crypto.randomUUID()}`;
+    const attemptId = `psca_${crypto.randomUUID()}`;
+    await setRecurringCollectionDue({
+      recurringPaymentId: activated.id,
+      subscriptionId: activated.subscriptionId,
+      dueAt,
+    });
+    await seedRecurringCollectionJournal({
+      stage: "submitted",
+      attemptId,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      recurringPaymentId: activated.id,
+      subscriptionId: activated.subscriptionId,
+      collectionDueAt: dueAt,
+      token: DEVNET_USDC_MINT,
+      amount: "25.00",
+      attemptedAt: staleAt,
+      transfer: {
+        id: transferId,
+        walletId: TEST_WALLET_ID,
+        counterpartyId: activated.counterpartyId,
+        sourceAddress: sourceSigner.address,
+        destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
+        signature: savedSignature,
+      },
+    });
+    // A stale run that never saved its send: no signature on the transfer or the attempt.
+    await getDb(env)
+      .prepare("UPDATE payment_transfers SET signature = NULL WHERE id = ?")
+      .bind(transferId)
+      .run();
+    await getDb(env)
+      .prepare("UPDATE payment_subscription_collection_attempts SET signature = NULL WHERE id = ?")
+      .bind(attemptId)
+      .run();
+    // Right after recovery reads the transfer unsent, the original collector saves and starts
+    // its send: the interleaving SOLA9-816 describes.
+    const createPaymentsRepository = paymentsRepositoryPostgres.createPostgresPaymentsRepository;
+    let raced = false;
+    vi.spyOn(paymentsRepositoryPostgres, "createPostgresPaymentsRepository").mockImplementation(
+      (...args) => {
+        const repo = createPaymentsRepository(...args);
+        return {
+          ...repo,
+          getTransferById: async (params) => {
+            const row = await repo.getTransferById(params);
+            if (row?.id === transferId && !raced) {
+              raced = true;
+              await getDb(env)
+                .prepare(
+                  `UPDATE payment_transfers
+                      SET signature = ?, signed_transaction = 'AQ==', last_valid_block_height = '1',
+                          submission_started_at = ?
+                    WHERE id = ?`
+                )
+                .bind(savedSignature, new Date().toISOString(), transferId)
+                .run();
+            }
+            return row;
+          },
+        };
+      }
+    );
+
+    const sendsBeforeCollect = sendTransactionMock.mock.calls.length;
+    const collectRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/collect`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+
+    expect(raced).toBe(true);
+    expect(collectRes.status).toBe(409);
+    const transfer = await getDb(env)
+      .prepare("SELECT status, signature FROM payment_transfers WHERE id = ?")
+      .bind(transferId)
+      .first<{ status: string; signature: string | null }>();
+    expect(transfer).toEqual({ status: "processing", signature: savedSignature });
+    const attempt = await getDb(env)
+      .prepare("SELECT status FROM payment_subscription_collection_attempts WHERE id = ?")
+      .bind(attemptId)
+      .first<{ status: string }>();
+    expect(attempt?.status).toBe("processing");
+    // Recovery sends nothing of its own.
+    expect(sendTransactionMock).toHaveBeenCalledTimes(sendsBeforeCollect);
+  });
+
   it("journals failed recovered recurring payment collection attempts and allows retry", async () => {
     const sourceSigner = recurringExecution.sourceSigner();
     const submittedSignature = signature(
@@ -8451,6 +8547,287 @@ describe("Payments routes — recurring", () => {
 
         expect((await recurringPaymentDueAt(created.id)).status).toBe("active");
         expect(sent).toHaveBeenCalledTimes(1);
+      });
+    });
+  });
+
+  describe("lease fencing (SOLA9-697, SOLA9-732, SOLA9-716)", () => {
+    const TAKEOVER_LEASE = "lease_takeover";
+
+    /**
+     * Another run takes the claim over, as a stale claim's takeover does: a new lease and a
+     * fresh `updated_at` on the row, nothing else. The original run carries on afterwards.
+     */
+    function takeOver(recurringPaymentId: string) {
+      return getDb(env)
+        .prepare("UPDATE payment_recurring_payments SET lease_id = ?, updated_at = ? WHERE id = ?")
+        .bind(TAKEOVER_LEASE, new Date().toISOString(), recurringPaymentId)
+        .run();
+    }
+
+    /** Takes the claim over while the original run builds its next send, before it saves it. */
+    function takeOverBeforeNextSend(recurringPaymentId: string) {
+      const blockhash = required(getRecentBlockhashMock.getMockImplementation());
+      getRecentBlockhashMock.mockImplementationOnce(async (...args) => {
+        await takeOver(recurringPaymentId);
+        return blockhash(...args);
+      });
+    }
+
+    function scheduleState(recurringPaymentId: string) {
+      return getDb(env)
+        .prepare(
+          `SELECT status, lease_id, plan_creation_signature, authorization_signature
+             FROM payment_recurring_payments
+            WHERE id = ?`
+        )
+        .bind(recurringPaymentId)
+        .first<{
+          status: string;
+          lease_id: string | null;
+          plan_creation_signature: string | null;
+          authorization_signature: string | null;
+        }>();
+    }
+
+    async function errorMessage(response: Response) {
+      return errorResponseSchema.parse(await response.json()).error.message;
+    }
+
+    it("refuses an activation's save after a takeover, broadcasting and resetting nothing", async () => {
+      const created = await createRecurringPaymentFixture({
+        ...DEFAULT_RECURRING_FIXTURE,
+        headers: RECURRING_HEADERS,
+      });
+      takeOverBeforeNextSend(created.id);
+      const sendsBefore = sendTransactionMock.mock.calls.length;
+
+      const response = await app.request(
+        `/v1/payments/recurring-payments/${created.id}/activate`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+
+      expect(response.status).toBe(409);
+      expect(await errorMessage(response)).toBe(
+        "Recurring payment activation was taken over by another run"
+      );
+      expect(sendTransactionMock).toHaveBeenCalledTimes(sendsBefore);
+      // The schedule is the new run's: still activating under its lease, no signature saved,
+      // and the attempt it resumes still in flight.
+      expect(await scheduleState(created.id)).toEqual({
+        status: "activating",
+        lease_id: TAKEOVER_LEASE,
+        plan_creation_signature: null,
+        authorization_signature: null,
+      });
+      expect(await activationState(created.id)).toMatchObject({
+        attempt_status: "processing",
+        last_valid_block_height: null,
+      });
+    });
+
+    it("refuses an activation's finalize after a takeover, leaving the schedule activating", async () => {
+      const created = await createRecurringPaymentFixture({
+        ...DEFAULT_RECURRING_FIXTURE,
+        headers: RECURRING_HEADERS,
+      });
+      // The takeover lands once the authorization is sent, while the run confirms it.
+      const confirm = required(confirmTransactionMock.getMockImplementation());
+      confirmTransactionMock
+        .mockImplementationOnce(confirm)
+        .mockImplementationOnce(async (...args) => {
+          await takeOver(created.id);
+          return confirm(...args);
+        });
+
+      const response = await app.request(
+        `/v1/payments/recurring-payments/${created.id}/activate`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+
+      expect(response.status).toBe(409);
+      expect(await errorMessage(response)).toBe(
+        "Recurring payment activation was taken over by another run"
+      );
+      const [planCreationSignature, authorizationSignature] = poolSentSignatures();
+      expect(await scheduleState(created.id)).toEqual({
+        status: "activating",
+        lease_id: TAKEOVER_LEASE,
+        plan_creation_signature: planCreationSignature,
+        authorization_signature: authorizationSignature,
+      });
+      expect((await activationState(created.id))?.attempt_status).toBe("processing");
+    });
+
+    it("refuses an update's save after a takeover, broadcasting and resetting nothing", async () => {
+      const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      takeOverBeforeNextSend(activated.id);
+      const sendsBefore = sendTransactionMock.mock.calls.length;
+
+      const response = await app.request(
+        `/v1/payments/recurring-payments/${activated.id}`,
+        {
+          method: "PATCH",
+          headers: RECURRING_HEADERS,
+          body: JSON.stringify({ metadataUri: "https://example.com/recurring/fenced.json" }),
+        },
+        env
+      );
+
+      expect(response.status).toBe(409);
+      expect(await errorMessage(response)).toBe(
+        "Recurring payment update was taken over by another run"
+      );
+      expect(sendTransactionMock).toHaveBeenCalledTimes(sendsBefore);
+      expect(await scheduleState(activated.id)).toMatchObject({
+        status: "updating",
+        lease_id: TAKEOVER_LEASE,
+      });
+      const attempt = await getDb(env)
+        .prepare(
+          `SELECT status, plan_update_signature, last_valid_block_height, error
+             FROM payment_recurring_payment_update_attempts
+            WHERE recurring_payment_id = ?`
+        )
+        .bind(activated.id)
+        .first();
+      expect(attempt).toEqual({
+        status: "processing",
+        plan_update_signature: null,
+        last_valid_block_height: null,
+        error: null,
+      });
+    });
+
+    it("refuses an update's finalize after a takeover, leaving the schedule updating", async () => {
+      const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const before = required(
+        await getDb(env)
+          .prepare("SELECT metadata_uri FROM payment_recurring_payments WHERE id = ?")
+          .bind(activated.id)
+          .first<{ metadata_uri: string | null }>()
+      );
+      const confirm = required(confirmTransactionMock.getMockImplementation());
+      confirmTransactionMock.mockImplementationOnce(async (...args) => {
+        await takeOver(activated.id);
+        return confirm(...args);
+      });
+
+      const response = await app.request(
+        `/v1/payments/recurring-payments/${activated.id}`,
+        {
+          method: "PATCH",
+          headers: RECURRING_HEADERS,
+          body: JSON.stringify({
+            metadataUri: "https://example.com/recurring/fenced-finalize.json",
+          }),
+        },
+        env
+      );
+
+      expect(response.status).toBe(409);
+      expect(await errorMessage(response)).toBe(
+        "Recurring payment update was taken over by another run"
+      );
+      expect(await scheduleState(activated.id)).toMatchObject({
+        status: "updating",
+        lease_id: TAKEOVER_LEASE,
+      });
+      const after = await getDb(env)
+        .prepare("SELECT metadata_uri FROM payment_recurring_payments WHERE id = ?")
+        .bind(activated.id)
+        .first<{ metadata_uri: string | null }>();
+      expect(after).toEqual(before);
+      const attempt = required(
+        await getDb(env)
+          .prepare(
+            `SELECT status, plan_update_signature, error
+               FROM payment_recurring_payment_update_attempts
+              WHERE recurring_payment_id = ?`
+          )
+          .bind(activated.id)
+          .first<{ status: string; plan_update_signature: string | null; error: string | null }>()
+      );
+      // The send was saved before the takeover; nothing after it was written.
+      expect(attempt.status).toBe("processing");
+      expect(attempt.plan_update_signature).not.toBeNull();
+      expect(attempt.error).toBeNull();
+    });
+
+    it("refuses a cancel's save after a takeover, broadcasting and resetting nothing", async () => {
+      const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      takeOverBeforeNextSend(activated.id);
+      const sendsBefore = sendTransactionMock.mock.calls.length;
+
+      const response = await app.request(
+        `/v1/payments/recurring-payments/${activated.id}/cancel`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+
+      expect(response.status).toBe(409);
+      expect(await errorMessage(response)).toBe(
+        "Recurring payment cancel was taken over by another run"
+      );
+      expect(sendTransactionMock).toHaveBeenCalledTimes(sendsBefore);
+      expect(await scheduleState(activated.id)).toMatchObject({
+        status: "canceling",
+        lease_id: TAKEOVER_LEASE,
+      });
+      const attempt = await getDb(env)
+        .prepare(
+          `SELECT status, signature, last_valid_block_height, error
+             FROM payment_recurring_payment_lifecycle_attempts
+            WHERE recurring_payment_id = ?`
+        )
+        .bind(activated.id)
+        .first();
+      expect(attempt).toEqual({
+        status: "processing",
+        signature: null,
+        last_valid_block_height: null,
+        error: null,
+      });
+    });
+
+    it("refuses a cancel's finalize after a takeover, leaving the schedule canceling", async () => {
+      const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const confirm = required(confirmTransactionMock.getMockImplementation());
+      confirmTransactionMock.mockImplementationOnce(async (...args) => {
+        await takeOver(activated.id);
+        return confirm(...args);
+      });
+
+      const response = await app.request(
+        `/v1/payments/recurring-payments/${activated.id}/cancel`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+
+      expect(response.status).toBe(409);
+      expect(await errorMessage(response)).toBe(
+        "Recurring payment cancel was taken over by another run"
+      );
+      expect(await scheduleState(activated.id)).toMatchObject({
+        status: "canceling",
+        lease_id: TAKEOVER_LEASE,
+      });
+      const attempt = await getDb(env)
+        .prepare(
+          `SELECT status, stage, signature, error
+             FROM payment_recurring_payment_lifecycle_attempts
+            WHERE recurring_payment_id = ?`
+        )
+        .bind(activated.id)
+        .first();
+      // The send was saved before the takeover; nothing after it was written.
+      expect(attempt).toEqual({
+        status: "processing",
+        stage: "submit",
+        signature: poolSentSignatures()[2],
+        error: null,
       });
     });
   });

@@ -225,6 +225,89 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
     ).toEqual(before);
   });
 
+  it("issues a new lease on every claim and holds the row only for the latest lease", async () => {
+    const { account, counterparty } = await seedCounterpartyAccount();
+    const createdAt = "2026-06-29T12:00:00.000Z";
+    const created = required(
+      await repo.createRecurringPayment({
+        id: "recpay_repo_lease",
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        sourceWalletId: TEST_PROVIDER_WALLET_ID,
+        sourceAddress: TEST_SOURCE_ADDRESS,
+        counterpartyId: counterparty.id,
+        counterpartyAccountId: account.id,
+        destinationAddress: "Destination111111111111111111111111111111",
+        token: "USDC",
+        amount: "10.00",
+        periodHours: 24,
+        firstCollectionAt: null,
+        metadataUri: null,
+        createdBy: TEST_USER.id,
+        createdAt,
+        updatedAt: createdAt,
+        idempotencyKey: null,
+        idempotencyFingerprint: null,
+      })
+    );
+    const scope = {
+      recurringPaymentId: created.id,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      operation: "activation",
+    } as const;
+    // Never claimed: no lease is held, so none matches.
+    await expect(
+      repo.assertRecurringPaymentLease({ ...scope, leaseId: "lease_none" })
+    ).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: "Recurring payment activation was taken over by another run",
+    });
+
+    const first = required(
+      await repo.claimRecurringPaymentActivation({
+        recurringPaymentId: created.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        updatedAt: createdAt,
+        activatedBy: null,
+      })
+    );
+    expect(first.lease_id).toMatch(/^lease_/);
+    await expect(
+      repo.assertRecurringPaymentLease({ ...scope, leaseId: first.lease_id })
+    ).resolves.toBeUndefined();
+
+    // A takeover once the claim is stale writes a new lease; the first run's no longer holds.
+    const takenOver = required(
+      await repo.claimRecurringPaymentActivation({
+        recurringPaymentId: created.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        updatedAt: "2026-06-29T12:30:00.000Z",
+        staleBefore: "2026-06-29T12:15:00.000Z",
+        activatedBy: null,
+      })
+    );
+    expect(takenOver.lease_id).toMatch(/^lease_/);
+    expect(takenOver.lease_id).not.toBe(first.lease_id);
+    await expect(
+      repo.assertRecurringPaymentLease({ ...scope, leaseId: first.lease_id })
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(
+      repo.assertRecurringPaymentLease({ ...scope, leaseId: takenOver.lease_id })
+    ).resolves.toBeUndefined();
+    // Another tenant's scope never matches the lease.
+    await expect(
+      repo.assertRecurringPaymentLease({
+        ...scope,
+        projectId: "prj_other",
+        leaseId: takenOver.lease_id,
+      })
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
   it("clears a step's signature only while its slot still holds that signature", async () => {
     const { account, counterparty } = await seedCounterpartyAccount();
     const createdAt = "2026-06-29T12:00:00.000Z";

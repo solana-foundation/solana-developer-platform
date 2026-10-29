@@ -41,6 +41,29 @@ export interface PaymentRecurringPaymentRow {
   updated_at: string;
 }
 
+/**
+ * A recurring payment as an activation, update or lifecycle claim left it: the lease that claim
+ * wrote names the run that holds it, until a takeover writes another.
+ */
+export interface ClaimedRecurringPaymentRow extends PaymentRecurringPaymentRow {
+  lease_id: string;
+}
+
+/** What a run holding a claimed recurring payment calls its operation in a takeover conflict. */
+export type RecurringPaymentLeaseOperation =
+  | "activation"
+  | "update"
+  | PaymentRecurringPaymentLifecycleOperation;
+
+/** The lease a run holds on a claimed recurring payment. */
+export interface RecurringPaymentLease {
+  recurringPaymentId: string;
+  organizationId: string;
+  projectId: string;
+  leaseId: string;
+  operation: RecurringPaymentLeaseOperation;
+}
+
 export interface RecurringPaymentCollectionCycleRow extends PaymentRecurringPaymentRow {
   subscription_id: string;
   next_collection_due_at: string;
@@ -575,7 +598,15 @@ export interface PaymentRecurringPaymentsRepository {
     updatedAt: string;
     staleBefore?: string;
     activatedBy: RecurringPaymentActivator | null;
-  }): Promise<PaymentRecurringPaymentRow | null>;
+  }): Promise<ClaimedRecurringPaymentRow | null>;
+  /**
+   * Locks the recurring payment `FOR UPDATE` while `lease` is still the one its last claim wrote,
+   * so a takeover's claim waits for the caller's transaction. Call it first in the transaction of
+   * every write that commits a claimed run's progress.
+   *
+   * @throws AppError `CONFLICT` when another run took the claim over.
+   */
+  assertRecurringPaymentLease(lease: RecurringPaymentLease): Promise<void>;
   /**
    * Recurring payments a key activated or last resumed that collect, or will
    * once an operation in flight finishes, for revoke-and-cancel: under this
@@ -602,12 +633,14 @@ export interface PaymentRecurringPaymentsRepository {
   updateRecurringPaymentDestinationTokenAccount(
     input: UpdatePaymentRecurringPaymentDestinationTokenAccountInput
   ): Promise<PaymentRecurringPaymentRow | null>;
+  /** Claims under a new lease, fresh or taking over a stale claim. */
   claimRecurringPaymentLifecycle(
     input: ClaimPaymentRecurringPaymentLifecycleInput
-  ): Promise<PaymentRecurringPaymentRow | null>;
+  ): Promise<ClaimedRecurringPaymentRow | null>;
+  /** Claims under a new lease, fresh or taking over a stale claim. */
   claimRecurringPaymentUpdate(
     input: ClaimPaymentRecurringPaymentUpdateInput
-  ): Promise<PaymentRecurringPaymentRow | null>;
+  ): Promise<ClaimedRecurringPaymentRow | null>;
   updateRecurringPaymentLifecycle(
     input: UpdatePaymentRecurringPaymentLifecycleInput
   ): Promise<PaymentRecurringPaymentRow | null>;
