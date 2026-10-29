@@ -3,6 +3,7 @@ import {
   IDEMPOTENCY_REQUIRED_ROUTES,
   INTERNAL_IDEMPOTENCY_REQUIRED_ROUTES,
 } from "@sdp/types/idempotency-required-routes";
+import { COMPLIANCE_PROVIDERS } from "@sdp/types/provider-access";
 import { SDP_RELEASE_CHANNEL_NAMES, SDP_RELEASE_CHANNELS } from "@sdp/types/release-channels";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -747,6 +748,26 @@ describe("OpenAPI spec", () => {
       };
       visit(createPublicOpenApiDocument({ releaseChannel }), false);
       expect([...leaked]).toEqual([]);
+    });
+  }
+
+  // Provider availability lists every family in one response, so a channel
+  // without Compliance must name neither the family nor its providers there,
+  // in values or prose; the runtime response omits those entries to match.
+  for (const releaseChannel of SDP_RELEASE_CHANNEL_NAMES) {
+    it(`${releaseChannel}: names Compliance in provider availability only when the channel runs it`, () => {
+      const operation = createPublicOpenApiDocument({ releaseChannel }).paths?.[
+        "/v1/projects/{projectId}/provider-availability"
+      ]?.get;
+      expect(operation).toBeDefined();
+      const published = JSON.stringify(operation);
+      const runsCompliance = SDP_RELEASE_CHANNELS[releaseChannel].includes("compliance");
+      const complianceValues = ["compliance", ...COMPLIANCE_PROVIDERS];
+
+      expect(complianceValues.filter((value) => published.includes(`"${value}"`))).toEqual(
+        runsCompliance ? complianceValues : []
+      );
+      expect(/compliance/i.test(published)).toBe(runsCompliance);
     });
   }
 

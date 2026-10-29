@@ -7626,7 +7626,7 @@ r = requests.patch("https://api.solana.com/v1/projects/prj_example",
 ### Get project provider availability
 Source: https://platform.solana.com/docs/reference/api/projects/get-project-provider-availability
 
-> Lists every provider the deployment knows across custody, compliance and ramps, with whether this project can use it, counting the deployment's provider credentials for the project's environment.
+> Lists every provider this deployment's release channel publishes, with whether this project can use it, counting the deployment's provider credentials for the project's environment.
 
 `GET /v1/projects/{projectId}/provider-availability`
 
