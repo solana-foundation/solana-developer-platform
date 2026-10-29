@@ -90,6 +90,23 @@ describe("findSolRentShortfall", () => {
     expect(shortfall?.sourceRemainderLamports).toBe(500_000n);
   });
 
+  it("allows a sweep beside a transaction that only pays the source back", async () => {
+    await expect(
+      find(
+        {
+          source: SOURCE,
+          payments: [
+            { index: 0, destination: OTHER, lamports: 1_000_000n },
+            { index: 1, destination: SOURCE, lamports: 500_000n },
+            { index: 2, destination: OTHER, lamports: 9_000_000n },
+          ],
+          transactions: [[0], [1], [2]],
+        },
+        10_000_000n
+      )
+    ).resolves.toBeNull();
+  });
+
   it("allows a sweep in one transaction", async () => {
     await expect(
       find(

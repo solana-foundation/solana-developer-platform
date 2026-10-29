@@ -1,7 +1,6 @@
 import { decimalScale, isDecimalString } from "@sdp/solana/amount";
 import {
   addDecimalFixedPoint,
-  cmpDecimalFixedPoint,
   decimalFixedPoint,
   decimalFixedPointToString,
   divideDecimalFixedPoint,
@@ -23,12 +22,32 @@ function parseAmount(value: string, decimals: number) {
   if (!isDecimalString(normalized)) {
     throw badRequest("Invalid amount format");
   }
-  return decimalFixedPoint("unsigned", DECIMAL_BITS, decimals)(normalized);
+  try {
+    return decimalFixedPoint("unsigned", DECIMAL_BITS, decimals)(normalized);
+  } catch {
+    throw badRequest("Amount is out of range");
+  }
 }
 
+/**
+ * Compares two amount strings exactly at their shared scale. Unbounded bigint
+ * rather than a fixed point: a comparison has no width to stay within, and a
+ * u64 amount at 20+ fractional digits overflows {@link DECIMAL_BITS}.
+ */
 export function compareDecimalAmounts(left: string, right: string): number {
   const scale = Math.max(decimalScale(left), decimalScale(right));
-  return cmpDecimalFixedPoint(parseAmount(left, scale), parseAmount(right, scale));
+  const leftRaw = scaledAmount(left, scale);
+  const rightRaw = scaledAmount(right, scale);
+  return leftRaw === rightRaw ? 0 : leftRaw < rightRaw ? -1 : 1;
+}
+
+function scaledAmount(value: string, scale: number): bigint {
+  const normalized = value.trim();
+  if (!isDecimalString(normalized)) {
+    throw badRequest("Invalid amount format");
+  }
+  const [whole = "", fraction = ""] = normalized.split(".");
+  return BigInt(`${whole || "0"}${fraction.padEnd(scale, "0")}`);
 }
 
 export function sumDecimalAmounts(amounts: string[]): string {

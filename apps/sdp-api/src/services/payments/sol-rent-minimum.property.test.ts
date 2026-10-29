@@ -128,17 +128,10 @@ describe("findSolRentShortfall (property)", () => {
       fc.asyncProperty(movementArb, async ({ movement, sourceLamports, destinationFunded }) => {
         const shortfall = await find(movement, sourceLamports, destinationFunded);
         const refused = shortfall?.sourceRemainderLamports != null;
-        const modelRefused = modelSourceRefused(movement, sourceLamports);
-        // Sound: never admits a movement the chain would refuse.
-        if (modelRefused) expect(refused).toBe(true);
-        // Exact, except where a transaction carries only payments back to the
-        // source: the check counts its 0 lamports out as a sweep transaction
-        // below the minimum and refuses a sweep the chain would accept (PRO-2321).
-        const movesNothingOut = transactionOutflows(movement).some((sent) => sent === 0n);
-        if (!movesNothingOut) expect(refused).toBe(modelRefused);
+        expect(refused).toBe(modelSourceRefused(movement, sourceLamports));
         if (refused) {
           const remainder = shortfall?.sourceRemainderLamports ?? -1n;
-          expect(remainder >= 0n && remainder < MINIMUM).toBe(true);
+          expect(remainder > 0n && remainder < MINIMUM).toBe(true);
         }
       }),
       propertyParameters()

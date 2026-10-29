@@ -2,9 +2,11 @@ import {
   compareDecimalAmounts as comparePaymentAmounts,
   sumDecimalAmounts,
 } from "@sdp/payments/decimal";
+import { SdpPaymentsError } from "@sdp/payments/errors";
 import {
   AmountError,
   compareDecimalAmounts,
+  decimalScale,
   formatDecimalAmount,
   parseDecimalAmount,
   parseTokenAmount,
@@ -27,6 +29,8 @@ const U64_MAX = 2n ** 64n - 1n;
 
 // A mint's decimals is a u8; past 24 digits nothing changes but the padding.
 const decimalsArb = fc.integer({ min: 0, max: 24 });
+// Every decimals a mint can declare, for the comparisons that must hold at any scale.
+const mintDecimalsArb = fc.oneof(decimalsArb, fc.integer({ min: 0, max: 255 }));
 const u64Arb = fc.oneof(
   fc.bigInt({ min: 0n, max: U64_MAX }),
   fc.constantFrom(0n, 1n, U64_MAX - 1n, U64_MAX)
@@ -69,6 +73,12 @@ function spell(raw: bigint, decimals: number, spelling: Spelling): string {
   const text =
     fraction.length > 0 ? `${whole}.${fraction}` : spelling.bareWhole ? `${whole}.` : whole;
   return `${spelling.padding}${text}${spelling.padding}`;
+}
+
+/** A canonical amount string's base units at `scale`, in unbounded bigint. */
+function scaled(text: string, scale: number): bigint {
+  const [whole, fraction = ""] = text.split(".");
+  return BigInt(`${whole}${fraction.padEnd(scale, "0")}`);
 }
 
 /** The canonical spelling `formatDecimalAmount` must produce. */
@@ -210,9 +220,9 @@ describe("payment amount conversions (property)", () => {
     fc.assert(
       fc.property(
         u64Arb,
-        decimalsArb,
+        mintDecimalsArb,
         u64Arb,
-        decimalsArb,
+        mintDecimalsArb,
         (left, leftDecimals, right, rightDecimals) => {
           // left / 10^ld vs right / 10^rd, cross-multiplied in bigint.
           const difference =
@@ -220,11 +230,31 @@ describe("payment amount conversions (property)", () => {
           const expected = difference === 0n ? 0 : difference > 0n ? 1 : -1;
           const leftText = formatDecimalAmount(left, leftDecimals);
           const rightText = formatDecimalAmount(right, rightDecimals);
-          expect(compareDecimalAmounts(leftText, rightText)).toBe(expected);
-          // `@sdp/payments` compares in 128 bits: a u64 amount scaled to 20+ fractional
-          // digits overflows it and throws a raw SolanaError, so check it where it fits.
-          if (Math.max(leftDecimals, rightDecimals) <= 19) {
-            expect(Math.sign(comparePaymentAmounts(leftText, rightText))).toBe(expected);
+          expect(comparePaymentAmounts(leftText, rightText)).toBe(expected);
+          // The 256-bit `@sdp/solana` comparison covers every scale a u64 fits at.
+          if (Math.max(leftDecimals, rightDecimals) <= 57) {
+            expect(compareDecimalAmounts(leftText, rightText)).toBe(expected);
+          }
+        }
+      ),
+      propertyParameters()
+    );
+  });
+
+  it("refuses provider arithmetic past 128 bits as a bad request, never a raw error", () => {
+    fc.assert(
+      fc.property(
+        fc.array(fc.tuple(u64Arb, mintDecimalsArb), { minLength: 1, maxLength: 8 }),
+        (entries) => {
+          const texts = entries.map(([raw, decimals]) => formatDecimalAmount(raw, decimals));
+          const scale = Math.max(...texts.map(decimalScale));
+          const exact = texts.reduce((sum, text) => sum + scaled(text, scale), 0n);
+          try {
+            expect(parseDecimalAmount(sumDecimalAmounts(texts), scale)).toBe(exact);
+          } catch (error) {
+            expect(error).toBeInstanceOf(SdpPaymentsError);
+            expect((error as SdpPaymentsError).statusCode).toBe(400);
+            expect(exact).toBeGreaterThan(2n ** 128n - 1n);
           }
         }
       ),
