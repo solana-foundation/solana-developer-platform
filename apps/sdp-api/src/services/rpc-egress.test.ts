@@ -31,6 +31,51 @@ describe("createCustomerRpcTransport", () => {
     await expect(transport({ payload })).rejects.toBeInstanceOf(guardedEgress.EgressBlockedError);
   });
 
+  it("carries an approved origin's relaxations to the guard", async () => {
+    const guardedFetch = vi
+      .spyOn(guardedEgress, "guardedFetch")
+      .mockImplementation(() =>
+        Promise.resolve(jsonResponse({ jsonrpc: "2.0", id: "probe", result: null }))
+      );
+
+    // The built-in sandbox shape: an operator-approved plaintext private
+    // literal — both relaxations travel with the dial.
+    const literal = createCustomerRpcTransport("http://34.71.147.163:8899", {
+      plaintext: true,
+      insecure: true,
+    });
+    await literal({ payload });
+
+    const [, literalInit] = guardedFetch.mock.calls[0];
+    expect(literalInit.approvedPlaintextDestination).toBe(true);
+    expect(literalInit.approvedInsecureDestination).toBe(true);
+
+    // A plaintext entry written as a NAME relaxes the scheme only; the
+    // connect-time address check stays.
+    const named = createCustomerRpcTransport("http://gw.example.com/", {
+      plaintext: true,
+      insecure: false,
+    });
+    await named({ payload });
+
+    const [, namedInit] = guardedFetch.mock.calls[1];
+    expect(namedInit.approvedPlaintextDestination).toBe(true);
+    expect(namedInit.approvedInsecureDestination).toBeUndefined();
+  });
+
+  it("keeps the strict guard when no origin is approved", async () => {
+    const guardedFetch = vi
+      .spyOn(guardedEgress, "guardedFetch")
+      .mockResolvedValue(jsonResponse({ jsonrpc: "2.0", id: "probe", result: null }));
+
+    const transport = createCustomerRpcTransport("https://rpc.example.com/");
+    await transport({ payload });
+
+    const [, init] = guardedFetch.mock.calls[0];
+    expect(init.approvedPlaintextDestination).toBeUndefined();
+    expect(init.approvedInsecureDestination).toBeUndefined();
+  });
+
   it("posts through the guard with the redirect, size and time bounds", async () => {
     const guardedFetch = vi
       .spyOn(guardedEgress, "guardedFetch")
