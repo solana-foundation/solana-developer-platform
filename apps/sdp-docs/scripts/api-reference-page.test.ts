@@ -120,7 +120,7 @@ describe("renderOperation", () => {
   it("leads with the endpoint, then the description after its first sentence", () => {
     assert.ok(
       markdown.startsWith(
-        '<ApiEndpoint method="POST" path="/v1/widgets/{widgetId}" />\n\nThen it shapes it'
+        '<ApiOperation>\n\n<ApiEndpoint method="POST" path="/v1/widgets/{widgetId}" />\n\nThen it shapes it'
       )
     );
     assert.ok(!markdown.includes("Creates a widget."));
@@ -208,6 +208,27 @@ describe("renderOperation", () => {
   });
 });
 
+describe("the operation's panel", () => {
+  const markdown = renderOperation(CREATE_WIDGET);
+
+  it("holds the samples and example responses, after the responses list", () => {
+    const panel = markdown.slice(markdown.indexOf("<ApiPanel>"), markdown.indexOf("</ApiPanel>"));
+    assert.ok(markdown.indexOf("## Responses") < markdown.indexOf("<ApiPanel>"));
+    for (const part of ["## Example request", 'tab="cURL"', "## Example responses", 'tab="404"']) {
+      assert.ok(panel.includes(part), part);
+    }
+    assert.ok(markdown.endsWith("</ApiPanel>\n\n</ApiOperation>"));
+  });
+
+  it("unwraps into the Markdown it holds, links and all", () => {
+    const expanded = expandDocsBlocks(`${markdown}\n`, "widgets/create-widget.mdx");
+    assert.ok(!/<\/?Api(Operation|Panel|Endpoint)/.test(expanded));
+    assert.ok(expanded.startsWith("`POST /v1/widgets/{widgetId}`\n\nThen it shapes it"));
+    assert.ok(expanded.includes("## Example request\n\n```bash"));
+    assert.ok(expanded.includes("[API key](/docs/developing-with-sdp/authentication) with"));
+  });
+});
+
 describe("renderOperationPage", () => {
   it("titles the page by its summary and describes it by its first sentence", () => {
     assert.ok(
@@ -219,6 +240,8 @@ describe("renderOperationPage", () => {
           "icon: method:POST",
           "apiReference: true",
           "---",
+          "",
+          "<ApiOperation>",
           "",
           '<ApiEndpoint method="POST"',
         ].join("\n")
