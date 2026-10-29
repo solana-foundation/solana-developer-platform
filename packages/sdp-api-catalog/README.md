@@ -8,6 +8,9 @@ parameters and examples.
   and Projects, with request schemas and per-status response examples.
 - `@sdp/api-catalog/catalog` lists those operations in document order and
   projects the existing dashboard playground forms from them.
+- `@sdp/api-catalog/ai-discovery` renders both docs and API `llms.txt` from
+  the release channel's public OpenAPI document. The docs build reads the
+  generated document after `generate:api`; the API uses its runtime document.
 - `@sdp/api-catalog/playground-catalog` is generated at `experimental` by
   `pnpm generate:api-playground`. It carries the dashboard's four existing
   sections and proxy allowlist. The dashboard filters them by release channel.

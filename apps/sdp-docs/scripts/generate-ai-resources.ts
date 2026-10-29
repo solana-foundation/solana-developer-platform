@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { aiDiscoveryDocumentSchema, renderLlmsTxt } from "@sdp/api-catalog/ai-discovery";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { DOCS_SKILL_NAME } from "@/lib/agent-setup";
@@ -18,7 +19,6 @@ const {
   aiGuideUrl,
   aiLlmsFullUrl,
   aiLlmsUrl,
-  aiSkillUrl,
   apiOpenApiUrl,
   apiUrl,
   docsUrl,
@@ -34,6 +34,7 @@ const docsMetaPath = path.resolve(docsContentDir, "meta.json");
 const publicDir = path.resolve(__dirname, "../public");
 const llmsPath = path.resolve(publicDir, "llms.txt");
 const llmsFullPath = path.resolve(publicDir, "llms-full.txt");
+const openApiPath = path.resolve(__dirname, "../../sdp-api/generated/openapi.json");
 // The same skill twice: public/ is what the docs serve at /SKILL.md, and the repo's skills/
 // is what `npx skills add` installs. The docs image never sees the second copy.
 const skillPaths = [
@@ -90,10 +91,6 @@ const KEY_PAGE_SLUGS = [
 
 function stripMarkdownFormatting(value: string): string {
   return value.replace(/[`*_]/g, "").trim();
-}
-
-function normalizeLine(value: string): string {
-  return value.replace(/\s+/g, " ").trim();
 }
 
 function stripMdxContent(source: string, where: string): string {
@@ -199,11 +196,6 @@ async function loadFolderMetas(): Promise<Map<string, DocsMeta>> {
 
   await walk(docsContentDir);
   return result;
-}
-
-function renderLink(page: DocsPage): string {
-  const description = page.description ? `: ${normalizeLine(page.description)}` : "";
-  return `- [${page.title}](${page.url})${description}`;
 }
 
 function buildSections(
@@ -324,39 +316,10 @@ function buildKeyPages(
   });
 }
 
-function renderLlms(keyPages: DocsPage[]): string {
-  return [
-    "# Solana Developer Platform",
-    "",
-    "> Public documentation and API discovery resources for Solana Developer Platform.",
-    "",
-    "## Canonical URLs",
-    `- Docs: ${docsUrl}`,
-    `- API: ${apiUrl}`,
-    `- API reference: ${getDocsPageUrl("reference/api")}`,
-    `- OpenAPI: ${apiOpenApiUrl}`,
-    `- AI guide: ${aiGuideUrl}`,
-    "",
-    "## Supported surfaces",
-    ...FEATURE_SUMMARY.map((feature) => `- ${feature}`),
-    "",
-    "## Start here",
-    ...keyPages.map(renderLink),
-    "",
-    "## AI guide",
-    `- [Docs for AI](${aiGuideUrl}): Human-readable landing page for machine-readable SDP docs resources, usage guidance, and public AI scope.`,
-    "",
-    "## Machine-readable resources",
-    `- [llms.txt](${aiLlmsUrl})`,
-    `- [llms-full.txt](${aiLlmsFullUrl})`,
-    `- [SKILL.md](${aiSkillUrl}): Agent skill with the rules for building on SDP.`,
-    `- Any docs page as Markdown: add \`.md\` to its URL.`,
-    `- [OpenAPI](${apiOpenApiUrl})`,
-    "",
-    "## Scope",
-    "- Public AI artifacts intentionally exclude hidden or internal-only API families.",
-    "",
-  ].join("\n");
+async function loadAiDiscoveryDocument() {
+  const source = await fs.readFile(openApiPath, "utf8");
+  const parsed: unknown = JSON.parse(source);
+  return aiDiscoveryDocumentSchema.parse(parsed);
 }
 
 function renderPageFull(page: DocsPage): string {
@@ -458,10 +421,11 @@ async function writeFileIfChanged(filePath: string, content: string): Promise<vo
 }
 
 async function run(): Promise<void> {
-  const [meta, pages, folderMetas] = await Promise.all([
+  const [meta, pages, folderMetas, document] = await Promise.all([
     loadMeta(),
     loadPages(),
     loadFolderMetas(),
+    loadAiDiscoveryDocument(),
   ]);
   const sections = buildSections(meta, pages, folderMetas);
   const keyPages = buildKeyPages(pages, folderMetas);
@@ -475,7 +439,15 @@ async function run(): Promise<void> {
   );
 
   await Promise.all([
-    writeFileIfChanged(llmsPath, renderLlms(keyPages)),
+    writeFileIfChanged(
+      llmsPath,
+      renderLlmsTxt({
+        audience: "docs",
+        document,
+        supportedSurfaces: FEATURE_SUMMARY,
+        startHere: keyPages,
+      })
+    ),
     writeFileIfChanged(llmsFullPath, renderLlmsFull(sections)),
     ...skillPaths.map((skillPath) => writeFileIfChanged(skillPath, skill)),
   ]);

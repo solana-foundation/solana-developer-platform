@@ -4,6 +4,11 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./ai-discovery": {
+      "types": "./src/ai-discovery.ts",
+      "import": "./src/ai-discovery.ts",
+      "default": "./src/ai-discovery.ts"
+    },
     "./catalog": {
       "types": "./src/catalog.ts",
       "import": "./src/catalog.ts",
