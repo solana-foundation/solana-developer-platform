@@ -5281,7 +5281,7 @@ Source: https://platform.solana.com/docs/reference/conventions/rate-limits
 
 > Each API key gets a set number of requests per minute, by its tier, and responses usually say how many are left.
 
-Requests count against a limit per minute. A request with an API key counts against that key's tier; keys start on `standard`. A request without a key counts against its IP address.
+Requests count against a limit per minute. Under `/v1`, a request with an API key counts against that key's tier (keys start on `standard`), and one without a key counts against its IP address. Outside `/v1`, every request counts against its IP address, even one that sends a key. The health checks and a few public reads aren't limited.
 
 | Caller | Requests per minute |
 | --- | --- |
