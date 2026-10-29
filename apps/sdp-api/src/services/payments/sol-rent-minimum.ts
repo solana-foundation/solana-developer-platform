@@ -128,11 +128,7 @@ function sourceRemainderBelowMinimum(
         return sum + lamports;
       }, 0n)
     );
-    // A transaction that moves nothing out (every payment back to the source)
-    // never changes what the sender holds, so it cannot strand it.
-    const moving = sent.filter((lamports) => lamports > 0n);
-    if (moving.length === 0) return null;
-    const smallest = moving.reduce((low, lamports) => (lamports < low ? lamports : low));
+    const smallest = sent.reduce((low, lamports) => (lamports < low ? lamports : low));
     if (smallest < minimum) return smallest;
   }
   return null;

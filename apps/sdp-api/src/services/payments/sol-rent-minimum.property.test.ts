@@ -15,7 +15,8 @@ import { findSolRentShortfall, type SolMovement } from "./sol-rent-minimum";
  * Property tests (STRIDE P5.4) for the native SOL rent check (HOO-2375): its
  * verdict on the source wallet must match a brute-force model of the chain,
  * which refuses any transaction that leaves the sender holding more than
- * nothing but less than the rent-exempt minimum. Concurrent transactions
+ * nothing but less than the rent-exempt minimum, or that pays the sender
+ * back after it has been emptied. Concurrent transactions
  * land in any order, so the model checks the sender after every non-empty
  * subset of them has landed.
  */
@@ -86,7 +87,10 @@ function transactionOutflows(movement: SolMovement): bigint[] {
   return transactions.map((indexes) => indexes.reduce((sum, i) => sum + outflow(i), 0n));
 }
 
-/** Whether some order of landing leaves the sender in the (0, minimum) band. */
+/**
+ * Whether some order of landing leaves the sender in the (0, minimum) band,
+ * or empty before a transaction that pays it back.
+ */
 function modelSourceRefused(movement: SolMovement, balance: bigint): boolean {
   const sent = transactionOutflows(movement);
   const total = sent.reduce((sum, lamports) => sum + lamports, 0n);
@@ -100,7 +104,9 @@ function modelSourceRefused(movement: SolMovement, balance: bigint): boolean {
     );
     if (held > 0n && held < MINIMUM) return true;
   }
-  return false;
+  // A transaction that only pays the source back still needs those lamports
+  // in it, so in a concurrent sweep it fails when it lands after the rest.
+  return balance === total && sent.length > 1 && sent.some((lamports) => lamports === 0n);
 }
 
 /** What an account holds: the source its balance, every other wallet the minimum or nothing. */
@@ -132,7 +138,7 @@ describe("findSolRentShortfall (property)", () => {
         const shortfall = await find(movement, sourceLamports, destinationFunded);
         const remainder = shortfall === null ? null : shortfall.sourceRemainderLamports;
         expect(remainder !== null).toBe(modelSourceRefused(movement, sourceLamports));
-        if (remainder !== null) expect(remainder > 0n && remainder < MINIMUM).toBe(true);
+        if (remainder !== null) expect(remainder >= 0n && remainder < MINIMUM).toBe(true);
       }),
       propertyParameters()
     );
