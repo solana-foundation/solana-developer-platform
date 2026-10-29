@@ -48,23 +48,27 @@ const COOKIE_ASSIGNMENT_PATTERN =
 const SENSITIVE_ASSIGNMENT_PATTERN =
   /\b(app[-_ ]?secret|api[-_ ]?secret|api[-_ ]?key|client[-_ ]?secret|wallet[-_ ]?secret|signing[-_ ]?secret|private[-_ ]?key|secret[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|id[-_ ]?token|authorization|pem|credential|secret|token)\b(\s*[:=]\s*)[^,\s}]+/gi;
 // The recovery-secret keys take values whose canonical form is
-// space-separated — a BIP-39 mnemonic is `word word word` and a passphrase is
+// whitespace-separated — a BIP-39 mnemonic is `word word word` and a passphrase is
 // free text — so the generic rule above, whose value stops at the first
 // space, left every word after the first readable in an interpolated message:
 // `seed=word1 word2 word3` redacted to `seed=[REDACTED] word2 word3`. These
-// keys' values continue across spaces instead, up to a clear boundary: a
-// comma or brace (the containing-structure delimiters the generic rule also
-// stops at), or a `name=` assignment following the value — the next pair's
-// key must not be swallowed into this redaction, both so the structure after
-// the value survives and so that pair's own value is still redacted by the
-// generic rule. Punctuation stays INSIDE the value exactly as the generic
+// keys' values continue across runs of horizontal whitespace instead — a
+// double space or a tab between words is just formatting, and stopping there
+// exposed the rest of the secret (`seed=legal  winner thank` kept `winner
+// thank`) — up to a clear boundary: a comma or brace (the containing-structure
+// delimiters the generic rule also stops at), a newline (the value never
+// crosses lines), or a `name=` assignment following the value — the next
+// pair's key must not be swallowed into this redaction, both so the structure
+// after the value survives and so that pair's own value is still redacted by
+// the generic rule. Punctuation stays INSIDE the value exactly as the generic
 // rule keeps it: `password=alpha;bravo` is one value, and a `;`, `)`, `]` or
 // quote that follows a word is that word's tail while the `=` that opens the
 // next assignment is not. Every quantified part has one forced parse — the
-// lookahead rejects every shorter prefix of a continuation run — so the scan
-// stays linear.
+// whitespace and word classes are disjoint, so their split cannot move, and
+// the lookahead rejects every shorter prefix of a continuation run — so the
+// scan stays linear.
 const SENSITIVE_WORD_ASSIGNMENT_PATTERN =
-  /\b(passphrase|password|wallet[-_ ]?passphrase|seed[-_ ]?phrase|(?:seed[-_ ]?)?mnemonic|(?<![A-Za-z0-9_-])seed)\b(\s*[:=]\s*)[^,\s}]+(?:[ ][^,\s}=]+(?![\w=-]))*/gi;
+  /\b(passphrase|password|wallet[-_ ]?passphrase|seed[-_ ]?phrase|(?:seed[-_ ]?)?mnemonic|(?<![A-Za-z0-9_-])seed)\b(\s*[:=]\s*)[^,\s}]+(?:[^\S\n\r]+[^,\s}=]+(?![\w=-]))*/gi;
 // Quantified parts all exclude "-" so the pattern cannot backtrack across the
 // PEM delimiters (keeps the regex linear; PEM bodies are base64 + whitespace).
 const PRIVATE_KEY_PATTERN =

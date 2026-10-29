@@ -340,6 +340,28 @@ describe("scrubTelemetryString — prefixed keys in a serialized body", () => {
     assert.equal(mnemonic, "mnemonic=[REDACTED]");
   });
 
+  it("redacts every word across runs of whitespace — double spaces and tabs", () => {
+    // The continuation between words was one literal space, so a value
+    // formatted with a double space or a tab — exactly how a formatted
+    // mnemonic or passphrase renders — stopped redacting at the wide
+    // separator and left the words after it readable.
+    const doubleSpaced = scrubTelemetryString("seed=legal  winner thank year");
+
+    assert.equal(doubleSpaced, "seed=[REDACTED]");
+
+    const passphrase = scrubTelemetryString("walletPassphrase=correct  horse battery staple");
+
+    assert.equal(passphrase, "walletPassphrase=[REDACTED]");
+
+    const tabbed = scrubTelemetryString("walletPassphrase=correct\thorse battery staple");
+
+    assert.equal(tabbed, "walletPassphrase=[REDACTED]");
+
+    const mixed = scrubTelemetryString("passphrase=alpha\t beta  gamma");
+
+    assert.equal(mixed, "passphrase=[REDACTED]");
+  });
+
   it("ends a space-separated assignment value at the next assignment, not inside it", () => {
     // The value must not swallow a following pair: the pair's key stays
     // structured and its own value is still redacted by the generic rule.
