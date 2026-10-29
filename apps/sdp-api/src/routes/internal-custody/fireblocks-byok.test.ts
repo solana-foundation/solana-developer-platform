@@ -612,6 +612,10 @@ describe("Fireblocks CSR security", () => {
       testEnv
     );
     expect(unauthenticated.status).toBe(401);
+    // The setup CSR may have landed in a different rate-limit window.
+    await clearKVStores(env);
+    vi.spyOn(Date, "now").mockReturnValue(Date.now());
+    await newRegistration();
     await newRegistration();
     await newRegistration();
     expect((await request("/fireblocks/csr", {})).status).toBe(429);
