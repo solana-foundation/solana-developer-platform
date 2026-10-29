@@ -103,6 +103,9 @@ importers:
       '@hono/node-server':
         specifier: 2.1.5
         version: 2.1.5(hono@4.13.13)
+      '@sdp/api-catalog':
+        specifier: workspace:*
+        version: link:../../packages/sdp-api-catalog
       '@sdp/custody':
         specifier: workspace:*
         version: link:../../packages/sdp-custody
@@ -239,9 +242,6 @@ importers:
       '@asteasolutions/zod-to-openapi':
         specifier: 9.1.0
         version: 9.1.0(zod@4.6.7)
-      '@sdp/api-catalog':
-        specifier: workspace:*
-        version: link:../../packages/sdp-api-catalog
       '@solana/keychain-core':
         specifier: 1.4.0
         version: 1.4.0(@solana/addresses@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/codecs-core@8.6.0(typescript@6.0.3))(@solana/codecs-strings@8.6.0(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/keys@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/signers@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))(@solana/transactions@7.1.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3))

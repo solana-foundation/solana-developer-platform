@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { app } from "@/index";
 import { env } from "@/test/helpers/env";
@@ -7,6 +8,14 @@ async function llmsBody(releaseChannel: string): Promise<string> {
   expect(res.status).toBe(200);
   expect(res.headers.get("content-type")).toContain("text/plain");
   return res.text();
+}
+
+function familySection(body: string): string {
+  const sections = body.split("## Public endpoint families\n");
+  expect(sections).toHaveLength(2);
+  const section = sections[1];
+  if (section === undefined) throw new Error("Missing public endpoint families section");
+  return section.split("\n\n")[0];
 }
 
 describe("GET /llms.txt", () => {
@@ -38,5 +47,13 @@ describe("GET /llms.txt", () => {
     for (const releaseChannel of ["experimental", "beta", "stable"]) {
       expect(await llmsBody(releaseChannel)).not.toMatch(/earn/i);
     }
+  });
+
+  it("matches the committed docs family list on experimental", async () => {
+    const docs = await readFile(
+      new URL("../../../sdp-docs/public/llms.txt", import.meta.url),
+      "utf8"
+    );
+    expect(familySection(docs)).toBe(familySection(await llmsBody("experimental")));
   });
 });
