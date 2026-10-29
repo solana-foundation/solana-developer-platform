@@ -1,3 +1,4 @@
+import { RpcTimeoutError } from "@sdp/rpc/errors";
 import { readFloor, readStamp, withRpcReadContext } from "@sdp/rpc/read-context";
 import { withReadSocketRetry } from "@sdp/rpc/socket-retry";
 import { markRpcAttemptDeadline } from "@sdp/rpc/telemetry";
@@ -36,9 +37,9 @@ export function withKaminoRpcTimeout(
       return await scopedTransport<TResponse>({ ...config, signal });
     } catch (cause) {
       if (signal.aborted && signal.reason === deadlineReason) {
-        // "timed out" deliberately matches the API's transient-error
-        // classifier: a deadline is retryable, never a permanent vault fact.
-        throw new Error(`Kamino RPC request timed out after ${timeoutMs}ms`, { cause });
+        // Typed so the API's transient-error classifier retries it: a deadline
+        // is retryable, never a permanent vault fact.
+        throw new RpcTimeoutError(timeoutMs, { label: "Kamino RPC", cause });
       }
       throw cause;
     } finally {

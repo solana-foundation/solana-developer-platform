@@ -80,3 +80,16 @@ export function jsonParsedTransactionResponse(params: {
     version: 0,
   };
 }
+
+/**
+ * The `TypeError` undici's `fetch` rejects with when it can't connect, classified by its cause's
+ * `code`. `ECONNREFUSED` by default, which the dead-socket re-send leaves alone.
+ *
+ * @param code - The Node/undici error code on the cause.
+ * @returns The fetch rejection.
+ */
+export function fetchFailedError(code = "ECONNREFUSED"): TypeError {
+  return new TypeError("fetch failed", {
+    cause: Object.assign(new Error(`connect ${code}`), { code }),
+  });
+}

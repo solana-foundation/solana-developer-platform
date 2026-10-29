@@ -1,3 +1,4 @@
+import type { OrganizationRpcProvider } from "@sdp/types/organizations";
 import {
   GENESIS_HASH_BY_CLUSTER,
   SOLANA_CLUSTERS,
@@ -11,15 +12,15 @@ import {
   isJsonRpcPayload,
   isSolanaError,
   type RpcTransport,
-  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_BLOCK_STATUS_NOT_AVAILABLE_YET,
-  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_LONG_TERM_STORAGE_UNREACHABLE,
-  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY,
-  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_TRANSACTION_HISTORY_NOT_AVAILABLE,
   SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR,
 } from "@solana/kit";
 import { RpcTimeoutError, SdpRpcError } from "./errors";
-import { MANAGED_RPC_ENV_KEYS } from "./managed-rpc-env-keys";
+import {
+  MANAGED_RPC_ENV_KEYS,
+  MANAGED_RPC_HOSTS,
+  PUBLIC_CLUSTER_HOSTS,
+} from "./managed-rpc-env-keys";
 import { currentClusterScope } from "./scope";
 import { withReadSocketRetry } from "./socket-retry";
 import { DEFAULT_RPC_REQUEST_TIMEOUT_MS, type SolanaRpc } from "./solana";
@@ -30,26 +31,13 @@ import {
   rpcFailureOutcome,
   rpcProviderForEndpoint,
 } from "./telemetry";
-import { isTransientRpcError } from "./transient";
+import { isTransientRpcError, transientJsonRpcVerdict } from "./transient";
 
 /** How long a genesis match is trusted before re-probing: the node behind a URL can be repointed. */
 const GENESIS_PROOF_TTL_MS = 30_000;
 
 /** The probe's own deadline; it never runs under a caller's signal, since its result is shared. */
 const GENESIS_PROBE_TIMEOUT_MS = 10_000;
-
-/**
- * JSON-RPC errors a node answers with HTTP 200 when it can't serve the request yet (unhealthy,
- * behind the requested slot, missing history or block status). Kit's HTTP transport only throws
- * on non-2xx, so the pool reads these from the body and asks the next endpoint.
- */
-const FAILOVER_JSON_RPC_ERROR_CODES = [
-  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY,
-  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
-  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_BLOCK_STATUS_NOT_AVAILABLE_YET,
-  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_TRANSACTION_HISTORY_NOT_AVAILABLE,
-  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_LONG_TERM_STORAGE_UNREACHABLE,
-] as const;
 
 /** `<cluster> <endpointUrl>` to the time its last genesis match expires; only matches are recorded. */
 const genesisProofExpiry = new Map<string, number>();
@@ -263,14 +251,14 @@ function servedJsonRpcError(response: unknown) {
  * | Answered "node unhealthy"                  | yes      | reads    |
  * | `sendTransaction` answered anything else   | no       | no       |
  * | `requestAirdrop` answered another error    | no       | yes      |
- * | Read answered another failover code        | no       | yes      |
+ * | Read answered another `failover` code      | no       | yes      |
  * | Read answered anything else                | no       | no       |
  *
  * A send stops once it left SDP: the failure may arrive after the leader got the transaction, and
  * resubmitting is the send primitive's decision. Only "node unhealthy" cools a node down; the other
- * `FAILOVER_JSON_RPC_ERROR_CODES` (behind the caller's `minContextSlot`, missing history or block
- * status) are about this request, not the node, and a cooldown applies to every request on the
- * cluster. An airdrop the node answered with an error did not happen, so the next provider's
+ * `failover` codes in `TRANSIENT_JSON_RPC_ERROR_VERDICTS` (behind the caller's `minContextSlot`,
+ * missing history or block status) are about this request, not the node, and a cooldown applies to
+ * every request on the cluster. An airdrop the node answered with an error did not happen, so the next provider's
  * faucet may try; the refusal is about that faucet (dry, rate-limited), not the node's health.
  * A faucet that rate-limits with HTTP 429 instead of a served error is the same refusal.
  *
@@ -304,10 +292,7 @@ function judgeAttempt<TResponse>(
   if (isSend) return { cooldown: false, tryNext: false };
   if (method === "requestAirdrop" && servedError !== null)
     return { cooldown: false, tryNext: true };
-  const cannotServe = FAILOVER_JSON_RPC_ERROR_CODES.some((code) =>
-    isSolanaError(servedError, code)
-  );
-  return { cooldown: false, tryNext: cannotServe };
+  return { cooldown: false, tryNext: transientJsonRpcVerdict(servedError) === "failover" };
 }
 
 /**
@@ -425,12 +410,122 @@ function createPoolTransport(endpoints: readonly RpcEndpoint[]) {
  *
  * @param cluster - The cluster whose pool to read.
  * @returns Every non-empty `SOLANA_RPC_<PROVIDER>_<CLUSTER>_API_KEY_URL` value, possibly none.
+ * @throws SdpRpcError `RPC_NOT_CONFIGURED` when a value isn't an https URL on its slot's host.
  */
 function configuredEndpointUrls(cluster: SolanaCluster): string[] {
-  return Object.values(MANAGED_RPC_ENV_KEYS[cluster]).flatMap((envKey) => {
+  const envKeys = MANAGED_RPC_ENV_KEYS[cluster];
+  const providers = Object.keys(envKeys).filter((provider): provider is keyof typeof envKeys =>
+    Object.hasOwn(envKeys, provider)
+  );
+  return providers.flatMap((provider) => {
+    const envKey = envKeys[provider];
     const endpointUrl = process.env[envKey];
-    return endpointUrl ? [endpointUrl] : [];
+    if (!endpointUrl) return [];
+    assertManagedEndpointUrl(cluster, provider, envKey, endpointUrl);
+    return [endpointUrl];
   });
+}
+
+/** `<envKey> <endpointUrl>` pairs that passed `assertManagedEndpointUrl`, so each is parsed once. */
+const validatedEndpointUrls = new Set<string>();
+
+/**
+ * Whether `host` matches a `MANAGED_RPC_HOSTS` rule: equal, or one label before a `*.` suffix.
+ *
+ * @param host - The URL's lowercase hostname.
+ * @param rule - An exact host or `*.<suffix>`.
+ * @returns Whether the host matches.
+ */
+function hostMatchesRule(host: string, rule: string): boolean {
+  if (!rule.startsWith("*.")) return host === rule;
+  const suffix = rule.slice(1);
+  if (!host.endsWith(suffix)) return false;
+  const label = host.slice(0, -suffix.length);
+  return label.length > 0 && !label.includes(".");
+}
+
+/** Hosts no provider can own (RFC 6761 `.test`, `localhost`), for tests and local validators. */
+function isReservedHost(host: string): boolean {
+  return (
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host.endsWith(".test") ||
+    host === "127.0.0.1" ||
+    host === "[::1]"
+  );
+}
+
+/**
+ * Why `endpointUrl` can't serve `provider`'s slot on `cluster`, or `null` when it can. The reason
+ * never quotes the URL, which carries the provider's API key.
+ *
+ * @param cluster - The slot's cluster.
+ * @param provider - The slot's provider.
+ * @param endpointUrl - The configured value.
+ * @returns The reason, or `null`.
+ */
+function managedEndpointUrlProblem(
+  cluster: SolanaCluster,
+  provider: OrganizationRpcProvider,
+  endpointUrl: string
+): string | null {
+  let url: URL;
+  try {
+    url = new URL(endpointUrl);
+  } catch {
+    return "the value is not a URL";
+  }
+  const host = url.hostname.toLowerCase();
+  const isLoopback = host === "localhost" || host === "127.0.0.1" || host === "[::1]";
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && isLoopback)) {
+    return "the URL must use https";
+  }
+  if (isReservedHost(host)) return null;
+  const rule = MANAGED_RPC_HOSTS[cluster][provider];
+  if (rule !== null) {
+    return hostMatchesRule(host, rule) ? null : `the host is not ${provider}'s ${cluster} host`;
+  }
+  const servesOtherCluster = SOLANA_CLUSTERS.some(
+    (otherCluster) =>
+      otherCluster !== cluster &&
+      (Object.values(MANAGED_RPC_HOSTS[otherCluster]).some(
+        (otherRule) => otherRule !== null && hostMatchesRule(host, otherRule)
+      ) ||
+        PUBLIC_CLUSTER_HOSTS[otherCluster].some((otherHost) => otherHost === host))
+  );
+  return servesOtherCluster ? "the host serves another cluster" : null;
+}
+
+/**
+ * Refuse a managed endpoint URL that isn't https or whose host belongs to another provider or
+ * cluster, naming the env key and cluster but never the URL.
+ *
+ * @param cluster - The slot's cluster.
+ * @param provider - The slot's provider.
+ * @param envKey - The slot's env key.
+ * @param endpointUrl - The configured value.
+ * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the URL can't serve the slot.
+ */
+function assertManagedEndpointUrl(
+  cluster: SolanaCluster,
+  provider: OrganizationRpcProvider,
+  envKey: string,
+  endpointUrl: string
+): void {
+  const validatedKey = `${envKey} ${endpointUrl}`;
+  if (validatedEndpointUrls.has(validatedKey)) return;
+  const problem = managedEndpointUrlProblem(cluster, provider, endpointUrl);
+  if (problem !== null) {
+    throw new SdpRpcError(
+      "RPC_NOT_CONFIGURED",
+      `${envKey} is not a ${cluster} endpoint: ${problem}`,
+      {
+        cluster,
+        envKey,
+      }
+    );
+  }
+  validatedEndpointUrls.add(validatedKey);
 }
 
 /**

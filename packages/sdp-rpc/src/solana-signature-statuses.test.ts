@@ -7,6 +7,7 @@ import {
   signature,
 } from "@solana/kit";
 import { getSignatureStatuses, type SolanaRpc } from "./solana";
+import { fetchFailedError } from "./test-fixtures";
 
 const SIG = "sig111" as Signature;
 const SECOND_SIG = signature(getBase58Decoder().decode(new Uint8Array(64).fill(2)));
@@ -25,7 +26,7 @@ function flakyRpc(failures: number): { rpc: SolanaRpc; calls: () => number } {
       send: async () => {
         calls += 1;
         if (calls <= failures) {
-          throw new TypeError("fetch failed");
+          throw fetchFailedError();
         }
         return { value: [STATUS] };
       },

@@ -20,7 +20,9 @@ import {
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
+import { SdpRpcError } from "./errors";
 import {
+  assertManagedRpcConfigured,
   createClusterHistoryRpc,
   createClusterRpc,
   createKoraUpstreamRpc,
@@ -30,6 +32,7 @@ import {
 import { runInClusterScope } from "./scope";
 import { DEFAULT_RPC_REQUEST_TIMEOUT_MS } from "./solana";
 import { type RpcTelemetryEvent, setRpcTelemetrySink } from "./telemetry";
+import { fetchFailedError } from "./test-fixtures";
 import type { ManagedRpcEnv } from "./types";
 
 type Answer =
@@ -155,10 +158,10 @@ function stubEndpoints(endpoints: Readonly<Record<string, Endpoint>>): RpcCall[]
     calls.push({ url: request.url, method: request.method });
     const endpoint = endpoints[request.url];
     if (request.method === "getGenesisHash") {
-      if (endpoint.genesis.kind === "fetchFailed") throw new TypeError("fetch failed");
+      if (endpoint.genesis.kind === "fetchFailed") throw fetchFailedError();
       return respond(request.id, { result: endpoint.genesis.genesisHash });
     }
-    if (endpoint.answer.kind === "fetchFailed") throw new TypeError("fetch failed");
+    if (endpoint.answer.kind === "fetchFailed") throw fetchFailedError();
     if (endpoint.answer.kind === "httpStatus") {
       return new Response("Too Many Requests", { status: endpoint.answer.status });
     }
@@ -854,6 +857,86 @@ describe("createClusterRpc", () => {
       genesisProbe(proven),
       { url: proven, method: "sendTransaction" },
     ]);
+  });
+});
+
+describe("managed endpoint URL validation", () => {
+  beforeEach(isolateRpcEnv);
+
+  afterEach(restoreRpcEnv);
+
+  const VALID_URLS: ManagedRpcEnv = {
+    SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: "https://sdp-1.devnet.rpcpool.com/secret",
+    SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL: "https://devnet.helius-rpc.com/?api-key=secret",
+    SOLANA_RPC_ALCHEMY_DEVNET_API_KEY_URL: "https://solana-devnet.g.alchemy.com/v2/secret",
+    SOLANA_RPC_QUICKNODE_DEVNET_API_KEY_URL: "https://sdp.solana-devnet.quiknode.pro/secret/",
+    SOLANA_RPC_VALIDATIONCLOUD_DEVNET_API_KEY_URL:
+      "https://devnet.solana.validationcloud.io/v1/secret",
+    SOLANA_RPC_NODIT_DEVNET_API_KEY_URL: "https://solana-devnet.nodit.io/secret",
+    SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL: "https://rpc.self-hosted.example.com",
+    SOLANA_RPC_TRITON_MAINNET_API_KEY_URL: "https://sdp-1.mainnet.rpcpool.com/secret",
+    SOLANA_RPC_HELIUS_MAINNET_API_KEY_URL: "https://mainnet.helius-rpc.com/?api-key=secret",
+    SOLANA_RPC_ALCHEMY_MAINNET_API_KEY_URL: "https://solana-mainnet.g.alchemy.com/v2/secret",
+    SOLANA_RPC_QUICKNODE_MAINNET_API_KEY_URL: "https://sdp.solana-mainnet.quiknode.pro/secret/",
+    SOLANA_RPC_VALIDATIONCLOUD_MAINNET_API_KEY_URL:
+      "https://mainnet.solana.validationcloud.io/v1/secret",
+    SOLANA_RPC_NODIT_MAINNET_API_KEY_URL: "https://solana-mainnet.nodit.io/secret",
+    SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL: "https://api.mainnet-beta.solana.com",
+  };
+
+  it("loads every provider's own host on each cluster", () => {
+    configurePool(VALID_URLS);
+
+    assert.doesNotThrow(assertManagedRpcConfigured);
+  });
+
+  const INVALID_URLS: ReadonlyArray<[keyof ManagedRpcEnv, string]> = [
+    ["SOLANA_RPC_HELIUS_MAINNET_API_KEY_URL", "https://devnet.helius-rpc.com/?api-key=secret"],
+    ["SOLANA_RPC_TRITON_MAINNET_API_KEY_URL", "https://sdp-1.devnet.rpcpool.com/secret"],
+    ["SOLANA_RPC_TRITON_MAINNET_API_KEY_URL", "https://a.b.mainnet.rpcpool.com/secret"],
+    ["SOLANA_RPC_QUICKNODE_MAINNET_API_KEY_URL", "https://solana-mainnet.quiknode.pro/secret"],
+    ["SOLANA_RPC_ALCHEMY_MAINNET_API_KEY_URL", "https://mainnet.helius-rpc.com/?api-key=secret"],
+    ["SOLANA_RPC_NODIT_MAINNET_API_KEY_URL", "http://solana-mainnet.nodit.io/secret"],
+    ["SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL", "https://api.devnet.solana.com/?secret"],
+    ["SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL", "https://devnet.helius-rpc.com/?api-key=secret"],
+    ["SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL", "http://rpc.self-hosted.example.com/secret"],
+    ["SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL", "secret"],
+  ];
+
+  for (const [envKey, endpointUrl] of INVALID_URLS) {
+    it(`refuses ${endpointUrl.split("/")[2] ?? "a non-URL"} in ${envKey} without quoting it`, () => {
+      configurePool({ ...VALID_URLS, [envKey]: endpointUrl });
+
+      assert.throws(assertManagedRpcConfigured, (error: unknown) => {
+        assert.ok(error instanceof SdpRpcError);
+        assert.equal(error.code, "RPC_NOT_CONFIGURED");
+        assert.equal(error.details?.envKey, envKey);
+        assert.match(error.message, new RegExp(`^${envKey} `));
+        assert.doesNotMatch(JSON.stringify([error.message, error.details]), /secret/);
+        return true;
+      });
+    });
+  }
+
+  it("refuses a misconfigured slot before sending any request", async () => {
+    configurePool({
+      SOLANA_RPC_HELIUS_MAINNET_API_KEY_URL: "https://devnet.helius-rpc.com/?api-key=secret",
+    });
+    const calls = stubEndpoints({});
+
+    assert.throws(() => runInClusterScope(PRODUCTION, createClusterRpc), {
+      code: "RPC_NOT_CONFIGURED",
+    });
+    assert.deepEqual(calls, []);
+  });
+
+  it("accepts loopback http and reserved test hosts in any slot", () => {
+    configurePool({
+      SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL: "http://127.0.0.1:8899",
+      SOLANA_RPC_HELIUS_MAINNET_API_KEY_URL: "https://mainnet.example.test",
+    });
+
+    assert.doesNotThrow(assertManagedRpcConfigured);
   });
 });
 

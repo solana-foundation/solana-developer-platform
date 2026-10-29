@@ -1,3 +1,4 @@
+import { RpcTimeoutError } from "@sdp/rpc/errors";
 import { withRpcReadContext } from "@sdp/rpc/read-context";
 import { withReadSocketRetry } from "@sdp/rpc/socket-retry";
 import { markRpcAttemptDeadline } from "@sdp/rpc/telemetry";
@@ -43,7 +44,7 @@ function withTimeout(transport: RpcTransport, timeoutMs: number): RpcTransport {
       return await scopedTransport<TResponse>({ ...config, signal });
     } catch (cause) {
       if (signal.aborted && signal.reason === deadlineReason) {
-        throw new Error(`WisdomTree RPC request timed out after ${timeoutMs}ms`, { cause });
+        throw new RpcTimeoutError(timeoutMs, { label: "WisdomTree RPC", cause });
       }
       throw cause;
     } finally {
