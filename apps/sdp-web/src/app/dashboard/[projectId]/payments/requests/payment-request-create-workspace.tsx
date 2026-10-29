@@ -299,7 +299,7 @@ function PaymentRequestCreateForm({ wallets, walletsError }: PaymentRequestCreat
   const defaultToken =
     tokens.find((token) => token.symbol === DEFAULT_TOKEN_SYMBOL) ?? tokens.at(0) ?? null;
   const token = tokens.find((option) => option.mintAddress === pickedToken) ?? defaultToken;
-  const wallet = wallets.find((option) => option.walletId === pickedWallet) ?? null;
+  const wallet = wallets.find((option) => option.id === pickedWallet) ?? null;
 
   const canCreate = isValidAmount(amount) && token !== null && wallet !== null && !busy;
 
@@ -310,7 +310,7 @@ function PaymentRequestCreateForm({ wallets, walletsError }: PaymentRequestCreat
     setSubmitting(true);
     let created: CreatedPaymentRequest | undefined;
     try {
-      const input = JSON.stringify([wallet.walletId, token.mintAddress, amount.trim(), expiry]);
+      const input = JSON.stringify([wallet.id, token.mintAddress, amount.trim(), expiry]);
       // Read from the clock once per action, so a retry resends the same body
       // under the first attempt's key.
       const expiresAt = expiresAtForAction(input, () => resolveExpiryDate(expiry));
@@ -325,7 +325,7 @@ function PaymentRequestCreateForm({ wallets, walletsError }: PaymentRequestCreat
         {
           method: "POST",
           body: {
-            walletId: wallet.walletId,
+            custodyWalletId: wallet.id,
             token: token.mintAddress,
             amount: amount.trim(),
             expiresAt,
@@ -410,10 +410,10 @@ function PaymentRequestCreateForm({ wallets, walletsError }: PaymentRequestCreat
               className="-my-px text-secondary"
             />
           }
-          value={wallet ? wallet.walletId : null}
+          value={wallet ? wallet.id : null}
           onChange={setPickedWallet}
           options={wallets.map((option) => ({
-            value: option.walletId,
+            value: option.id,
             label: option.label ?? shortenAddress(option.publicKey),
             description: shortenAddress(option.publicKey),
           }))}

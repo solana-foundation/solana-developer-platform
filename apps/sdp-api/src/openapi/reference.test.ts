@@ -6,6 +6,7 @@ import type { OpenAPIObject, OperationObject } from "openapi3-ts/oas30";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { AppError, type ErrorCode, isErrorCode } from "@/lib/errors";
+import { required } from "@/test/helpers/required";
 import { DOCS_GROUP } from "./paths/helpers";
 import { buildApiReference, exampleErrorCode } from "./reference";
 import { createPublicOpenApiDocument } from "./spec";
@@ -132,6 +133,30 @@ describe("buildApiReference", () => {
       });
     });
   }
+
+  it("documents canceled Requests with a nullable internal recipient ID and no link token", () => {
+    const reference = buildApiReference(
+      createPublicOpenApiDocument({ releaseChannel: "experimental" })
+    );
+    const operation = required(
+      reference.families
+        .flatMap((family) => family.operations)
+        .find(({ operationId }) => operationId === "cancelPaymentRequest")
+    );
+    const response = required(operation.responses.find(({ status }) => status === "200"));
+    if (response.body.kind !== "json") throw new Error("Request cancel must return JSON");
+    const data = required(response.body.schema.properties.find(({ name }) => name === "data"));
+
+    expect(data.schema.properties).toContainEqual(
+      expect.objectContaining({
+        name: "custodyWalletId",
+        required: true,
+        schema: expect.objectContaining({ type: "string", nullable: true }),
+      })
+    );
+    expect(data.schema.properties.map(({ name }) => name)).not.toContain("walletId");
+    expect(data.schema.properties.map(({ name }) => name)).not.toContain("publicToken");
+  });
 
   it("keys a write's samples by the header the route declares, not by its method", () => {
     const operations = buildApiReference(

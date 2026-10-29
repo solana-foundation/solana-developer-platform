@@ -114,6 +114,8 @@ describe("payment request public tokens", () => {
       .object({ data: z.object({ paymentRequests: z.array(z.record(z.string(), z.unknown())) }) })
       .parse(await res.json());
     expect(body.data.paymentRequests).toHaveLength(1);
+    expect(body.data.paymentRequests[0]).toMatchObject({ custodyWalletId: "cwlt_request_token" });
+    expect(body.data.paymentRequests[0]).not.toHaveProperty("walletId");
     expect(body.data.paymentRequests[0]).not.toHaveProperty("publicToken");
     expect(JSON.stringify(body)).not.toContain(publicToken);
   });
@@ -124,6 +126,8 @@ describe("payment request public tokens", () => {
     expect(res.status).toBe(200);
     const body = z.object({ data: z.record(z.string(), z.unknown()) }).parse(await res.json());
     expect(body.data.id).toBe(requestId);
+    expect(body.data.custodyWalletId).toBe("cwlt_request_token");
+    expect(body.data).not.toHaveProperty("walletId");
     expect(body.data).not.toHaveProperty("publicToken");
   });
 
@@ -153,7 +157,7 @@ describe("payment request public tokens", () => {
         method: "POST",
         headers: { Authorization: `Bearer ${READ_KEY.raw}`, "Content-Type": "application/json" },
         body: JSON.stringify({
-          walletId: "wlt_request_token",
+          custodyWalletId: "cwlt_request_token",
           token: DEVNET_USDC,
           amount: "1.00",
         }),

@@ -125,7 +125,7 @@ curl -X POST https://api.solana.com/v1/payments/requests \
   -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -d '{
-    "walletId": "privy_wallet_123",
+    "custodyWalletId": "cwlt_123",
     "token": "USDC",
     "amount": "25.00",
     "expiresAt": "2026-08-31T00:00:00.000Z"
@@ -30798,9 +30798,9 @@ Requires an [API key](/docs/developing-with-sdp/authentication) with the `paymen
 
       Project ID.
 
-    - **`walletId`** · `string` · required
+    - **`custodyWalletId`** · `string | null` · required · example `cwlt_example`
 
-      Receiving custody wallet's provider ID.
+      Exact SDP custody wallet ID of the recipient; null for unresolved history.
 
     - **`destinationAddress`** · `string` · required · min length 32 · max length 44 · example `So11111111111111111111111111111111111111112`
 
@@ -30973,7 +30973,7 @@ r = requests.post("https://api.solana.com/v1/payments/requests/preq_example/canc
     "id": "preq_example",
     "organizationId": "organization_example",
     "projectId": "project_example",
-    "walletId": "wallet_example",
+    "custodyWalletId": "cwlt_example",
     "destinationAddress": "So11111111111111111111111111111111111111112",
     "token": "example",
     "amount": "100.00",

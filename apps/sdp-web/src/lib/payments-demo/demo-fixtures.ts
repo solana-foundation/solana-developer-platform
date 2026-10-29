@@ -1145,7 +1145,7 @@ function buildRequest(
     publicToken: `demo_pt_${demoAddress(`request-token:${spec.key}`).slice(0, 22)}`,
     organizationId: ORGANIZATION_ID,
     projectId: PROJECT_ID,
-    walletId: wallet.walletId,
+    custodyWalletId: wallet.id,
     destinationAddress: wallet.publicKey,
     token: DEMO_TOKENS.USDC.mint,
     amount: spec.amount,

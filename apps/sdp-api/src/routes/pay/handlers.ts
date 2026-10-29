@@ -92,7 +92,7 @@ export async function createSponsoredTransaction(
   ) {
     throw badRequest("Payment request is no longer payable");
   }
-  if (!request.project_id) {
+  if (!request.project_id || request.custody_wallet_id === null) {
     throw badRequest("Payment request is not eligible for sponsored fees");
   }
   // `/pay` sponsors without an authenticated actor, so it admits the money
@@ -107,7 +107,11 @@ export async function createSponsoredTransaction(
   );
 
   const sponsored = await issuePaymentRequestTransaction(c, {
-    request: { ...request, project_id: request.project_id },
+    request: {
+      ...request,
+      project_id: request.project_id,
+      custody_wallet_id: request.custody_wallet_id,
+    },
     payer: assertValidAddress(c.req.valid("json").account, "account"),
     recipient: assertValidAddress(request.destination_address, "destinationAddress"),
     reference: assertValidAddress(request.reference, "reference"),

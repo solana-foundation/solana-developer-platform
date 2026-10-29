@@ -1922,7 +1922,7 @@
             "id": "preq_example",
             "organizationId": "organization_example",
             "projectId": "project_example",
-            "walletId": "wallet_example",
+            "custodyWalletId": "cwlt_example",
             "destinationAddress": "So11111111111111111111111111111111111111112",
             "token": "example",
             "amount": "100.00",

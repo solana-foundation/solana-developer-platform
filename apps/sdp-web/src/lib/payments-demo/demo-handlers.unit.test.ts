@@ -443,7 +443,7 @@ describe("transfers and batches", () => {
 describe("requests", () => {
   const request = (body: Record<string, unknown>) =>
     write("POST", "/v1/payments/requests", {
-      walletId: TREASURY,
+      custodyWalletId: TREASURY,
       token: USDC,
       amount: "40",
       ...body,
@@ -451,7 +451,7 @@ describe("requests", () => {
 
   it("refuses a request the API would", () => {
     expect(request({ amount: "" })?.status).toBe(400);
-    expect(request({ walletId: "demo_cwlt_nobody" })?.status).toBe(404);
+    expect(request({ custodyWalletId: "demo_cwlt_nobody" })?.status).toBe(404);
     expect(request({ expiresAt: "2026-09-01T00:00:00.000Z" })?.status).toBe(400);
     expect(request({ expiresAt: "not a date" })?.status).toBe(400);
     expect(ops).toEqual([]);
@@ -461,8 +461,12 @@ describe("requests", () => {
     const created = request({ expiresAt: "2026-10-28T00:00:00.000Z" });
     expect(created?.status).toBe(201);
     expect(created?.body.data).toEqual(
-      expect.objectContaining({ expiresAt: "2026-10-28T00:00:00.000Z" })
+      expect.objectContaining({
+        custodyWalletId: TREASURY,
+        expiresAt: "2026-10-28T00:00:00.000Z",
+      })
     );
+    expect(created?.body.data).not.toHaveProperty("walletId");
   });
 
   it("cancels an open request once, and refuses a paid one", () => {

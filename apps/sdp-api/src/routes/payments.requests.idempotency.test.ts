@@ -11,11 +11,11 @@ import {
   installPaymentsRouteTestHooks,
   seedProductionPrivyWallet,
   TEST_API_KEY,
+  TEST_CUSTODY_WALLET_ID,
   TEST_PRODUCTION_PROJECT_ID,
   TEST_PROJECT,
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
-import { required } from "@/test/helpers/required";
 
 function postPaymentRequest(body: Record<string, unknown>, idempotencyKey: string) {
   return app.request(
@@ -47,7 +47,7 @@ describe("Payments routes — payment request access before the key", () => {
 
   it("refuses a wallet outside the caller's project with 404 and stores nothing under the key", async () => {
     const response = await postPaymentRequest(
-      { walletId: "wal_other_organization", token: DEVNET_USDC_MINT, amount: "1" },
+      { custodyWalletId: "cwlt_other_organization", token: DEVNET_USDC_MINT, amount: "1" },
       "payreq-foreign-wallet"
     );
 
@@ -57,7 +57,7 @@ describe("Payments routes — payment request access before the key", () => {
 
   it("still creates a request for the project's own wallet", async () => {
     const response = await postPaymentRequest(
-      { walletId: TEST_WALLET_ID, token: DEVNET_USDC_MINT, amount: "1" },
+      { custodyWalletId: TEST_CUSTODY_WALLET_ID, token: DEVNET_USDC_MINT, amount: "1" },
       "payreq-own-wallet"
     );
 
@@ -67,11 +67,11 @@ describe("Payments routes — payment request access before the key", () => {
 
   it("replays a retry that only re-spells the amount (APE SOLA9-734)", async () => {
     const first = await postPaymentRequest(
-      { walletId: TEST_WALLET_ID, token: DEVNET_USDC_MINT, amount: "1" },
+      { custodyWalletId: TEST_CUSTODY_WALLET_ID, token: DEVNET_USDC_MINT, amount: "1" },
       "payreq-respelled"
     );
     const retry = await postPaymentRequest(
-      { walletId: TEST_WALLET_ID, token: DEVNET_USDC_MINT, amount: "1.00" },
+      { custodyWalletId: TEST_CUSTODY_WALLET_ID, token: DEVNET_USDC_MINT, amount: "1.00" },
       "payreq-respelled"
     );
 
@@ -92,15 +92,12 @@ describe("Payments routes — payment request token cluster", () => {
       custodyWalletId: "cwlt_payment_request_production",
       publicKey: TEST_SOLANA_ADDRESSES.wallet3,
     });
-    const productionWallet = required(
-      await getDb(env)
-        .prepare("SELECT wallet_id FROM custody_wallets WHERE id = ?")
-        .bind("cwlt_payment_request_production")
-        .first<{ wallet_id: string }>()
-    );
-
     const response = await postPaymentRequest(
-      { walletId: productionWallet.wallet_id, token: DEVNET_USDC_MINT, amount: "1" },
+      {
+        custodyWalletId: "cwlt_payment_request_production",
+        token: DEVNET_USDC_MINT,
+        amount: "1",
+      },
       "payreq-devnet-mint-on-production"
     );
 
@@ -122,7 +119,7 @@ describe("Payments routes — payment request token cluster", () => {
     "refuses invalid USDC amount %s and stores no request",
     async (amount) => {
       const response = await postPaymentRequest(
-        { walletId: TEST_WALLET_ID, token: DEVNET_USDC_MINT, amount },
+        { custodyWalletId: TEST_CUSTODY_WALLET_ID, token: DEVNET_USDC_MINT, amount },
         "payreq-too-precise-amount"
       );
 
@@ -194,7 +191,7 @@ describe("Payments routes — SOL payment requests below the rent minimum (HOO-2
   it("refuses a SOL request below the minimum to a wallet with no account, storing nothing", async () => {
     rpc.answer("getMultipleAccounts", { context: { slot: 1 }, value: [null] });
     const response = await postPaymentRequest(
-      { walletId: TEST_WALLET_ID, token: SOL_MINT, amount: "0.0001" },
+      { custodyWalletId: TEST_CUSTODY_WALLET_ID, token: SOL_MINT, amount: "0.0001" },
       "payreq-sol-below-rent"
     );
 
@@ -207,7 +204,7 @@ describe("Payments routes — SOL payment requests below the rent minimum (HOO-2
 
   it("creates a SOL request at or above the minimum without reading the wallet", async () => {
     const response = await postPaymentRequest(
-      { walletId: TEST_WALLET_ID, token: SOL_MINT, amount: "0.001" },
+      { custodyWalletId: TEST_CUSTODY_WALLET_ID, token: SOL_MINT, amount: "0.001" },
       "payreq-sol-above-rent"
     );
 

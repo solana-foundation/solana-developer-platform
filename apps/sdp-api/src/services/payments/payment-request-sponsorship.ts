@@ -47,7 +47,10 @@ import { sponsoredMessageDigest } from "@/services/sponsorship-budget.service";
 import type { Env } from "@/types/env";
 
 /** A payment request whose Project is known: the only kind `/pay` sponsors. */
-export type PayablePaymentRequest = PaymentRequestRow & { project_id: string };
+export type PayablePaymentRequest = PaymentRequestRow & {
+  project_id: string;
+  custody_wallet_id: string;
+};
 
 /**
  * What a payer scanning a payment request gets: the sponsored transaction to sign, or how long
@@ -137,7 +140,8 @@ export async function issuePaymentRequestTransaction(
       await resolveProjectSponsorshipScope(c.env, {
         organizationId: request.organization_id,
         projectId: request.project_id,
-        actor: { type: "wallet", id: request.wallet_id },
+        // Drain legacy unsigned claims before switching this accounting identity.
+        actor: { type: "wallet", id: request.custody_wallet_id },
       }),
       "payments.pay_request",
       // No custody wallet signs a `/pay` transaction: the payer signs it.
@@ -168,6 +172,7 @@ export async function issuePaymentRequestTransaction(
         tokenMint: request.token,
         destination: request.destination_address,
         walletId: request.wallet_id,
+        custodyWalletId: request.custody_wallet_id,
         transactionDigest: sponsoredMessageDigest(
           getTransactionDecoder().decode(unsignedBytes).messageBytes
         ),
