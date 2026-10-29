@@ -77,8 +77,8 @@ export function createCustomerRpcTransport(
       maxRedirects: CUSTOMER_RPC_MAX_REDIRECTS,
       maxResponseBytes: CUSTOMER_RPC_MAX_RESPONSE_BYTES,
       rejectOversizeResponse: true,
-      ...(approvedOrigin?.plaintext ? { approvedPlaintextDestination: true } : {}),
-      ...(approvedOrigin?.insecure ? { approvedInsecureDestination: true } : {}),
+      approvedPlaintextDestination: approvedOrigin?.plaintext ?? false,
+      approvedInsecureDestination: approvedOrigin?.insecure ?? false,
     });
 
     if (!upstream.ok) {

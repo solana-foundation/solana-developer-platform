@@ -52,18 +52,19 @@ const SENSITIVE_ASSIGNMENT_PATTERN =
 // free text — so the generic rule above, whose value stops at the first
 // space, left every word after the first readable in an interpolated message:
 // `seed=word1 word2 word3` redacted to `seed=[REDACTED] word2 word3`. These
-// keys' values continue across spaces instead, up to a clear boundary: comma,
-// semicolon, brace/bracket/parenthesis, or a `name=` assignment following the
-// value — the next pair's key must not be swallowed into this redaction, both
-// so the structure after the value survives and so that pair's own value is
-// still redacted by the generic rule. The first token may carry `=` runs
-// (base64 padding) and otherwise any non-boundary byte, quotes included, so a
-// quoted value loses nothing; the words after a space are word characters
-// only, and a word directly followed by `=` ends the value. Every quantified
-// part has one forced parse — the first run cannot cross `=`, and the
-// lookahead rejects every shorter prefix of a word — so the scan stays linear.
+// keys' values continue across spaces instead, up to a clear boundary: a
+// comma or brace (the containing-structure delimiters the generic rule also
+// stops at), or a `name=` assignment following the value — the next pair's
+// key must not be swallowed into this redaction, both so the structure after
+// the value survives and so that pair's own value is still redacted by the
+// generic rule. Punctuation stays INSIDE the value exactly as the generic
+// rule keeps it: `password=alpha;bravo` is one value, and a `;`, `)`, `]` or
+// quote that follows a word is that word's tail while the `=` that opens the
+// next assignment is not. Every quantified part has one forced parse — the
+// lookahead rejects every shorter prefix of a continuation run — so the scan
+// stays linear.
 const SENSITIVE_WORD_ASSIGNMENT_PATTERN =
-  /\b(passphrase|password|wallet[-_ ]?passphrase|seed[-_ ]?phrase|(?:seed[-_ ]?)?mnemonic|(?<![A-Za-z0-9_-])seed)\b(\s*[:=]\s*)(?:[^\s=,;}\])]+(?:=[^\s=,;}\])]+)*(?:[ ][\w-]+(?![\w=-]))*)/gi;
+  /\b(passphrase|password|wallet[-_ ]?passphrase|seed[-_ ]?phrase|(?:seed[-_ ]?)?mnemonic|(?<![A-Za-z0-9_-])seed)\b(\s*[:=]\s*)[^,\s}]+(?:[ ][^,\s}=]+(?![\w=-]))*/gi;
 // Quantified parts all exclude "-" so the pattern cannot backtrack across the
 // PEM delimiters (keeps the regex linear; PEM bodies are base64 + whitespace).
 const PRIVATE_KEY_PATTERN =

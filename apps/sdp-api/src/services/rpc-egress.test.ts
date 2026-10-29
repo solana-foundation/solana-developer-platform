@@ -60,7 +60,7 @@ describe("createCustomerRpcTransport", () => {
 
     const [, namedInit] = guardedFetch.mock.calls[1];
     expect(namedInit.approvedPlaintextDestination).toBe(true);
-    expect(namedInit.approvedInsecureDestination).toBeUndefined();
+    expect(namedInit.approvedInsecureDestination).toBe(false);
   });
 
   it("keeps the strict guard when no origin is approved", async () => {
@@ -72,8 +72,8 @@ describe("createCustomerRpcTransport", () => {
     await transport({ payload });
 
     const [, init] = guardedFetch.mock.calls[0];
-    expect(init.approvedPlaintextDestination).toBeUndefined();
-    expect(init.approvedInsecureDestination).toBeUndefined();
+    expect(init.approvedPlaintextDestination).toBe(false);
+    expect(init.approvedInsecureDestination).toBe(false);
   });
 
   it("posts through the guard with the redirect, size and time bounds", async () => {
@@ -99,6 +99,8 @@ describe("createCustomerRpcTransport", () => {
       maxRedirects: 3,
       maxResponseBytes: 10 * 1024 * 1024,
       rejectOversizeResponse: true,
+      approvedPlaintextDestination: false,
+      approvedInsecureDestination: false,
     });
   });
 
