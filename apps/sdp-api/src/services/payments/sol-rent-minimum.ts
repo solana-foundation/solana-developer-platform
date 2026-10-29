@@ -1,14 +1,10 @@
 import { createClusterRpc } from "@sdp/rpc/factory";
-import { currentClusterScope } from "@sdp/rpc/scope";
-import {
-  GET_MULTIPLE_ACCOUNTS_LIMIT,
-  getMinimumBalanceForRentExemption,
-  getMultipleAccountsLamports,
-} from "@sdp/rpc/solana";
+import { GET_MULTIPLE_ACCOUNTS_LIMIT, getMultipleAccountsLamports } from "@sdp/rpc/solana";
 import { formatDecimalAmount } from "@sdp/solana/amount";
 import { SOL_DECIMALS } from "@sdp/types/well-known-tokens";
 import type { Address } from "@solana/kit";
 import { amountBelowRentMinimum, internalError } from "@/lib/errors";
+import { readRentExemptMinimum } from "./rent-exempt-minimum";
 
 /**
  * Native SOL transfers the chain refuses for rent (HOO-2375), checked before
@@ -23,27 +19,9 @@ import { amountBelowRentMinimum, internalError } from "@/lib/errors";
  * recipient's or sender's rent, so neither can be fixed by the fee payer.
  */
 
-/** Rent parameters are cluster state that almost never changes; re-read hourly. */
-const RENT_MINIMUM_TTL_MS = 60 * 60 * 1000;
-
-const rentMinimumByCluster = new Map<string, { expiresAt: number; lamports: Promise<bigint> }>();
-
-/**
- * The rent-exempt minimum for a 0-byte account (a plain SOL wallet), read
- * from the open cluster scope's chain and kept per cluster for an hour.
- * Concurrent reads share one request, and a failed read is never kept.
- */
+/** The rent-exempt minimum for a 0-byte account (a plain SOL wallet), cached per cluster. */
 function readSystemAccountRentMinimum(): Promise<bigint> {
-  const cluster = currentClusterScope().cluster;
-  const cached = rentMinimumByCluster.get(cluster);
-  if (cached && cached.expiresAt > Date.now()) return cached.lamports;
-  const lamports = getMinimumBalanceForRentExemption(createClusterRpc(), 0);
-  const entry = { expiresAt: Date.now() + RENT_MINIMUM_TTL_MS, lamports };
-  rentMinimumByCluster.set(cluster, entry);
-  lamports.catch(() => {
-    if (rentMinimumByCluster.get(cluster) === entry) rentMinimumByCluster.delete(cluster);
-  });
-  return lamports;
+  return readRentExemptMinimum(0);
 }
 
 /** The SOL a movement sends, as the rent check reads it. */

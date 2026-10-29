@@ -35,6 +35,7 @@ import {
 import { buildTransferBatchResponse } from "./respond";
 import type { createTransferBatchSchema } from "./schemas";
 import { solBatchMovement } from "./sol-movement";
+import { readSponsoredRentLimit } from "./sponsored-rent";
 import {
   buildInstructionGroups,
   chunkInstructionGroups,
@@ -171,11 +172,17 @@ export async function createTransferBatch(
     sourceSigner: signer,
     feePayer,
   });
+  const sponsoredRent = await readSponsoredRentLimit({
+    groups,
+    tokenContext: resolved.tokenContext,
+    readConfiguration: () => feePayment.getSponsorshipConfiguration(),
+  });
   const chunks = chunkInstructionGroups({
     groups,
     sourceSigner: signer,
     feePayer,
     lifetime,
+    sponsoredRent,
     maxRecipientsPerTransaction:
       body.options?.maxRecipientsPerTransaction === undefined
         ? DEFAULT_MAX_RECIPIENTS_PER_TRANSACTION
