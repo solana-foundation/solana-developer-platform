@@ -23,7 +23,8 @@ import {
 import type {
   confirmDeploySchema,
   deployTokenSchema,
-  legacyDeployTokenSchema,
+  prepareDeployMetadataSchema,
+  prepareDeploySchema,
 } from "@/routes/issuance/schemas";
 import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
@@ -182,6 +183,7 @@ async function recordConfirmedDeploy(params: {
   initiatedByKeyId: string;
   token: NonNullable<Awaited<ReturnType<TokenService["getToken"]>>>;
   tokenId: string;
+  custodyWalletId: string;
   mint: Address;
   custodyAddress: Address;
   freezeAuthority: Address | null;
@@ -196,6 +198,7 @@ async function recordConfirmedDeploy(params: {
     initiatedByKeyId,
     token,
     tokenId,
+    custodyWalletId,
     mint,
     custodyAddress,
     freezeAuthority,
@@ -218,6 +221,7 @@ async function recordConfirmedDeploy(params: {
     const { transaction: tx } = await tokenService.createTransaction({
       tokenId,
       organizationId,
+      custodyWalletId,
       type: "deploy",
       params: {
         operation: "deploy",
@@ -730,7 +734,7 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
   }
 };
 
-export const prepareDeploy = async (c: ValidatedBodyContext<typeof legacyDeployTokenSchema>) => {
+export const prepareDeploy = async (c: ValidatedBodyContext<typeof prepareDeploySchema>) => {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
   const body = c.req.valid("json");
@@ -757,34 +761,29 @@ export const prepareDeploy = async (c: ValidatedBodyContext<typeof legacyDeployT
     throw badRequest("Token already has a mint address");
   }
 
-  const signingWalletId = body.signingWalletId ?? token.signingWalletId;
+  const signingCustodyWalletId = body.signingCustodyWalletId ?? token.signingCustodyWalletId;
 
-  if (token.signingCustodyWalletId && signingWalletId !== token.signingWalletId) {
+  if (token.signingCustodyWalletId && signingCustodyWalletId !== token.signingCustodyWalletId) {
     throw new AppError(
       "CONFLICT",
-      "Legacy deploy prepare must use the provider wallet pinned on the token"
+      "Deploy prepare must use the custody wallet pinned on the token"
     );
   }
 
-  // This legacy client-signed flow intentionally remains Config-only. Validate
-  // the exact pin and load the Config signer before mutating the provider mirror.
+  // Client-signed deployment remains Config-only, with no provider/address fallback.
   const authority = await createLegacyResolvedAuthoritySigner({
     movement: "issuance.authority",
     env: c.env,
     auth,
-    walletId: signingWalletId,
-    expectedCustodyWalletId: token.signingCustodyWalletId,
+    custodyWalletId: signingCustodyWalletId,
   });
   const signer = authority.signer;
 
-  // Pin the resolved signing wallet on the token so confirmDeploy derives the
-  // SAME custody address — and thus the same mint/metadata authorities and ABL
-  // list PDA. Without this, a caller that passes a custom signingWalletId here
-  // but omits it in confirmDeploy would fall back to a different wallet and
-  // silently record wrong authorities. This is the one piece of state prepare
-  // must persist; everything else it hands the client to sign.
-  if (signingWalletId !== token.signingWalletId) {
-    await tokenService.updateToken(tokenId, { signingWalletId });
+  // Confirm and metadata preparation use only this persisted exact selection.
+  if (authority.custodyWalletId !== token.signingCustodyWalletId) {
+    await tokenService.updateToken(tokenId, {
+      signingCustodyWalletId: authority.custodyWalletId,
+    });
   }
 
   const custodyAddress = signer.address;
@@ -991,13 +990,6 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
       throw badRequest("Deploy transaction did not create this mint");
     }
 
-    // Use the signing wallet prepareDeploy resolved and persisted, NOT the request
-    // body. A body value that diverged from prepare's would derive a different
-    // custody address and silently record the wrong mint/metadata authorities —
-    // and, for ABL tokens, the wrong list PDA. claimed.signingWalletId is the
-    // source of truth; the custody signer decides whether this caller may sign.
-    const signingWalletId = claimed.signingWalletId;
-
     // Recompute the authorities the deploy used (custody signer === mint &
     // metadata authority, matching prepareDeploy) rather than trusting the
     // request, so a recorded mint can't claim authorities the caller lacks.
@@ -1005,8 +997,7 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
       movement: "issuance.authority",
       env: c.env,
       auth,
-      walletId: signingWalletId,
-      expectedCustodyWalletId: claimed.signingCustodyWalletId,
+      custodyWalletId: claimed.signingCustodyWalletId,
     });
     const signer = authority.signer;
     const custodyAddress = signer.address;
@@ -1063,6 +1054,7 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
       initiatedByKeyId: auth.id,
       token: claimed,
       tokenId,
+      custodyWalletId: authority.custodyWalletId,
       mint,
       custodyAddress,
       freezeAuthority,
@@ -1105,7 +1097,7 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
  * server key is involved.
  */
 export const prepareDeployMetadata = async (
-  c: ValidatedBodyContext<typeof legacyDeployTokenSchema>
+  c: ValidatedBodyContext<typeof prepareDeployMetadataSchema>
 ) => {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
@@ -1129,14 +1121,11 @@ export const prepareDeployMetadata = async (
   // matching confirmDeploy. The follow-up tx is signed by the mint's metadata
   // update authority; a body override would resolve a different wallet and
   // produce a tx that can never succeed against the on-chain authority.
-  const signingWalletId = token.signingWalletId;
-
   const authority = await createLegacyResolvedAuthoritySigner({
     movement: "issuance.authority",
     env: c.env,
     auth,
-    walletId: signingWalletId,
-    expectedCustodyWalletId: token.signingCustodyWalletId,
+    custodyWalletId: token.signingCustodyWalletId,
   });
 
   const signer = authority.signer;

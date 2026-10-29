@@ -56,9 +56,10 @@ import {
   deployTokenSchema,
   forceBurnSchema,
   freezeSchema,
-  legacyDeployTokenSchema,
   mintSchema,
   pauseTokenSchema,
+  prepareDeployMetadataSchema,
+  prepareDeploySchema,
   seizeSchema,
   unfreezeSchema,
   updateAuthoritySchema,
@@ -131,7 +132,7 @@ issuance.post(
 issuance.post(
   "/tokens/:tokenId/deploy/prepare",
   requireAction("issuance.execute"),
-  validateBody(legacyDeployTokenSchema),
+  validateBody(prepareDeploySchema),
   meteredQuota(ISSUANCE_PREPARE_QUOTA),
   prepareDeploy
 );
@@ -150,7 +151,7 @@ issuance.post(
 issuance.post(
   "/tokens/:tokenId/deploy/prepare-metadata",
   requireAction("issuance.execute"),
-  validateBody(legacyDeployTokenSchema),
+  validateBody(prepareDeployMetadataSchema),
   meteredQuota(ISSUANCE_PREPARE_QUOTA),
   prepareDeployMetadata
 );

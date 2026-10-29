@@ -713,14 +713,13 @@ describe("authority-resolution", () => {
         movement: "issuance.authority",
         env: testEnv,
         auth: createAuth(),
-        walletId: "wal_connection",
-        expectedCustodyWalletId: "cwlt_connection",
+        custodyWalletId: "cwlt_connection",
       })
-    ).rejects.toMatchObject({ code: "CONFLICT", statusCode: 409 });
+    ).rejects.toMatchObject({ code: "NOT_FOUND", statusCode: 404 });
     expect(exactSigner).not.toHaveBeenCalled();
   });
 
-  it("rejects a divergent legacy provider mirror before loading secrets", async () => {
+  it("refuses a provider reference as an internal selector before loading secrets", async () => {
     await resetScope();
     await seedConfigWallet({ id: "cwlt_pinned", walletId: "wal_pinned" });
     const exactSigner = vi.spyOn(solanaSigner, "createOrgSignerForCustodyWallet");
@@ -730,10 +729,9 @@ describe("authority-resolution", () => {
         movement: "issuance.authority",
         env: testEnv,
         auth: createAuth(),
-        walletId: "wal_other",
-        expectedCustodyWalletId: "cwlt_pinned",
+        custodyWalletId: "wal_pinned",
       })
-    ).rejects.toMatchObject({ code: "CONFLICT", statusCode: 409 });
+    ).rejects.toMatchObject({ code: "NOT_FOUND", statusCode: 404 });
     expect(exactSigner).not.toHaveBeenCalled();
   });
 

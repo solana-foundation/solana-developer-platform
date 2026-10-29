@@ -5,8 +5,9 @@ import {
   createTokenSchema,
   deployTokenSchema,
   issuanceTransactionWalletFilterSchema,
-  legacyDeployTokenSchema,
   mintSchema,
+  prepareDeployMetadataSchema,
+  prepareDeploySchema,
 } from "./schemas";
 
 const ADDRESS = "So11111111111111111111111111111111111111112";
@@ -31,22 +32,49 @@ describe("Issuance exact wallet request schemas", () => {
     ).toBe(false);
   });
 
-  it("uses the exact selector for direct deploy while preserving the legacy prepare contract", () => {
+  it("uses exact selectors for direct and client-signed deployment", () => {
     expect(deployTokenSchema.safeParse({ signingCustodyWalletId: "cwlt_example" }).success).toBe(
       true
     );
     expect(deployTokenSchema.safeParse({ signingWalletId: "privy_example" }).success).toBe(false);
 
-    expect(legacyDeployTokenSchema.safeParse({ signingWalletId: "privy_example" }).success).toBe(
-      true
-    );
+    expect(prepareDeploySchema.parse({ signingCustodyWalletId: "cwlt_example" })).toMatchObject({
+      signingCustodyWalletId: "cwlt_example",
+      feePayment: "sponsored",
+    });
+    expect(prepareDeploySchema.parse({})).toEqual({ feePayment: "sponsored" });
+    expect(prepareDeploySchema.safeParse({ signingWalletId: "privy_example" }).success).toBe(false);
+  });
+
+  it("rejects retired deployment inputs and preserves unrelated ignored fields", () => {
+    for (const schema of [prepareDeploySchema, prepareDeployMetadataSchema, confirmDeploySchema]) {
+      for (const signingWalletId of ["privy_example", "", null]) {
+        expect(
+          schema.safeParse({
+            signature: SIGNATURE,
+            mint: ADDRESS,
+            signingCustodyWalletId: "cwlt_example",
+            signingWalletId,
+          }).success
+        ).toBe(false);
+      }
+    }
     expect(
-      confirmDeploySchema.safeParse({
+      confirmDeploySchema.parse({
         signature: SIGNATURE,
         mint: ADDRESS,
-        signingWalletId: "privy_example",
-      }).success
-    ).toBe(true);
+        listAddress: ADDRESS,
+        signingCustodyWalletId: "cwlt_ignored",
+        unrelated: "ignored",
+      })
+    ).toEqual({ signature: SIGNATURE, mint: ADDRESS, listAddress: ADDRESS });
+    expect(
+      prepareDeployMetadataSchema.parse({
+        signingCustodyWalletId: "cwlt_ignored",
+        listAddress: ADDRESS,
+        feePayment: "wallet",
+      })
+    ).toEqual({ feePayment: "wallet" });
   });
 
   it("requires an exact source wallet for burn and keeps authority-based selectors optional", () => {
@@ -64,13 +92,14 @@ describe("Issuance exact wallet request schemas", () => {
 });
 
 describe("Issuance participant-history wallet filter", () => {
-  it("accepts either exact or legacy identity, but never both", () => {
+  it("accepts exact identity or no filter and rejects retired wallet selectors", () => {
     expect(
       issuanceTransactionWalletFilterSchema.safeParse({ custodyWalletId: "cwlt_example" }).success
     ).toBe(true);
-    expect(
-      issuanceTransactionWalletFilterSchema.safeParse({ walletId: "privy_example" }).success
-    ).toBe(true);
+    expect(issuanceTransactionWalletFilterSchema.safeParse({}).success).toBe(true);
+    for (const walletId of ["privy_example", "", " "]) {
+      expect(issuanceTransactionWalletFilterSchema.safeParse({ walletId }).success).toBe(false);
+    }
     expect(
       issuanceTransactionWalletFilterSchema.safeParse({
         custodyWalletId: "cwlt_example",

@@ -9,16 +9,14 @@ import type { Address } from "@solana/addresses";
 import { findAssociatedTokenPda, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import type { Context } from "hono";
 import { z } from "zod";
-import { getDb } from "@/db/client";
-import { getAuth, requireProjectId } from "@/lib/auth";
-import { badRequest, badRequestQuery, notFound, walletNotFound } from "@/lib/errors";
+import { getAuth } from "@/lib/auth";
+import { badRequest, badRequestQuery, notFound } from "@/lib/errors";
 import { paginated } from "@/lib/response";
 import { getTenantTokenService, requireProjectScope } from "@/routes/issuance/helpers";
 import {
   issuanceTransactionWalletFilterSchema,
   listTokenTransactionsQuerySchema,
 } from "@/routes/issuance/schemas";
-import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import type { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import { resolveIssuanceWallet } from "./authority-resolution";
@@ -80,28 +78,6 @@ function parseTransactionStatus(value: string | undefined): TokenTransactionStat
   }
 
   return value as TokenTransactionStatus;
-}
-
-async function resolveWalletFilter(
-  c: AppContext,
-  walletId: string
-): Promise<{ publicKey: string }> {
-  const auth = getAuth(c);
-  const wallet = await new CustodyRuntimeTargets(
-    getDb(c.env),
-    c.env,
-    new Map()
-  ).findOperationalWallet({
-    organizationId: auth.organizationId,
-    projectId: requireProjectId(c),
-    walletId,
-  });
-
-  if (!wallet) {
-    throw walletNotFound();
-  }
-
-  return { publicKey: wallet.publicKey };
 }
 
 async function deriveTokenAccountMatches(
@@ -173,10 +149,10 @@ async function buildWalletTransactionScope(
 async function resolveWalletTransactionScope(
   c: AppContext,
   tokenService: TokenService,
-  selectors: { custodyWalletId?: string; walletId?: string }
+  selectors: { custodyWalletId?: string }
 ): Promise<WalletTransactionScope | undefined> {
   const auth = getAuth(c);
-  const { custodyWalletId, walletId } = selectors;
+  const { custodyWalletId } = selectors;
 
   if (custodyWalletId) {
     const wallet = await resolveIssuanceWallet({
@@ -184,15 +160,6 @@ async function resolveWalletTransactionScope(
       auth,
       custodyWalletId,
     });
-    return buildWalletTransactionScope(tokenService, {
-      organizationId: auth.organizationId,
-      projectId: auth.projectId,
-      publicKeys: [wallet.publicKey],
-    });
-  }
-
-  if (walletId) {
-    const wallet = await resolveWalletFilter(c, walletId);
     return buildWalletTransactionScope(tokenService, {
       organizationId: auth.organizationId,
       projectId: auth.projectId,

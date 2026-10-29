@@ -8,6 +8,7 @@ import { MosaicService } from "@sdp/issuance/mosaic/service";
 import { MintMetadataUpdateError } from "@sdp/issuance/mosaic/types";
 import { hashString } from "@sdp/payments/hash";
 import * as SolanaRpc from "@sdp/rpc/solana";
+import type { TokenTransactionStatus } from "@sdp/types/tokens";
 import type { Address } from "@solana/addresses";
 import { address, getBase58Decoder } from "@solana/kit";
 import * as MosaicSdk from "@solana/mosaic-sdk";
@@ -1561,7 +1562,7 @@ describe("Issuance Routes", () => {
       });
     }
 
-    it("filters participant history by exact custody wallet id", async () => {
+    it("filters participant history using an internal custody wallet id", async () => {
       await seedIssuedToken();
       const wallet = await seedIssuanceActivityWallet(
         "wal_exact_history",
@@ -1596,21 +1597,29 @@ describe("Issuance Routes", () => {
       expect(body.data[0].transaction).not.toHaveProperty("custodyWalletId");
     });
 
-    it("rejects exact and legacy wallet filters together", async () => {
-      const wallet = await seedIssuanceActivityWallet(
-        "wal_issuance_activity",
-        TEST_SOLANA_ADDRESSES.wallet1
-      );
-      const res = await app.request(
-        `/v1/issuance/transactions?custodyWalletId=${wallet.custodyWalletId}&walletId=${wallet.walletId}`,
-        {
-          headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
-        },
-        env
-      );
+    it.each(["legacy", "empty legacy", "mixed", "empty mixed"])(
+      "rejects %s wallet filters without broadening history",
+      async (selector) => {
+        const wallet = await seedIssuanceActivityWallet(
+          "wal_issuance_activity",
+          TEST_SOLANA_ADDRESSES.wallet1
+        );
+        const query = new URLSearchParams({
+          walletId: selector.startsWith("empty") ? "" : wallet.walletId,
+        });
+        if (selector.endsWith("mixed")) {
+          query.set("custodyWalletId", wallet.custodyWalletId);
+        }
+        const res = await app.request(
+          `/v1/issuance/transactions?${query}`,
+          { headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` } },
+          env
+        );
 
-      expect(res.status).toBe(400);
-    });
+        expect(res.status).toBe(400);
+        expect(await res.json()).toMatchObject({ error: { code: "BAD_REQUEST" } });
+      }
+    );
 
     it("returns matching wallet transactions across all types when type is omitted", async () => {
       const token = await seedIssuedToken();
@@ -1659,7 +1668,7 @@ describe("Issuance Routes", () => {
       });
 
       const res = await app.request(
-        `/v1/issuance/transactions?walletId=${wallet.walletId}&page=1&pageSize=10`,
+        `/v1/issuance/transactions?custodyWalletId=${wallet.custodyWalletId}&page=1&pageSize=10`,
         {
           method: "GET",
           headers: {
@@ -1688,7 +1697,7 @@ describe("Issuance Routes", () => {
       });
     });
 
-    it("keeps unrestricted project keys org/project scoped when walletId is omitted", async () => {
+    it("keeps unfiltered history and wallet selection org/project scoped", async () => {
       const token = await seedIssuedToken();
       await seedOrganization({
         id: "org_issuance_other",
@@ -1752,6 +1761,27 @@ describe("Issuance Routes", () => {
       const body = await res.json();
       expect(body.meta.total).toBe(1);
       expect(body.data[0].transaction.id).toBe("ttx_current_project");
+
+      const walletHistoryPath = `/v1/issuance/transactions?custodyWalletId=${DEFAULT_ISSUANCE_CUSTODY_WALLET_ID}`;
+      const otherProject = await app.request(
+        walletHistoryPath,
+        { headers: { Authorization: `Bearer ${TEST_PRODUCTION_API_KEY.raw}` } },
+        env
+      );
+      expect(otherProject.status).toBe(404);
+
+      await getDb(env)
+        .prepare(
+          "UPDATE custody_configs SET organization_id = ?, project_id = ? WHERE id = 'cust_cfg_issuance_activity'"
+        )
+        .bind("org_issuance_other", "prj_issuance_other_org")
+        .run();
+      const otherOrg = await app.request(
+        walletHistoryPath,
+        { headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` } },
+        env
+      );
+      expect(otherOrg.status).toBe(404);
     });
 
     it("does not match force-burn rows by delegate authority", async () => {
@@ -1780,7 +1810,7 @@ describe("Issuance Routes", () => {
       });
 
       const authorityRes = await app.request(
-        `/v1/issuance/transactions?walletId=${authorityWallet.walletId}&type=force_burn&page=1&pageSize=10`,
+        `/v1/issuance/transactions?custodyWalletId=${authorityWallet.custodyWalletId}&type=force_burn&page=1&pageSize=10`,
         {
           method: "GET",
           headers: {
@@ -1796,7 +1826,7 @@ describe("Issuance Routes", () => {
       expect(authorityBody.data).toEqual([]);
 
       const sourceRes = await app.request(
-        `/v1/issuance/transactions?walletId=${sourceWallet.walletId}&type=force_burn&page=1&pageSize=10`,
+        `/v1/issuance/transactions?custodyWalletId=${sourceWallet.custodyWalletId}&type=force_burn&page=1&pageSize=10`,
         {
           method: "GET",
           headers: {
@@ -1871,7 +1901,7 @@ describe("Issuance Routes", () => {
 
       const fetchPage = async (page: number) => {
         const res = await app.request(
-          `/v1/issuance/transactions?walletId=${wallet.walletId}&type=burn&page=${page}&pageSize=5`,
+          `/v1/issuance/transactions?custodyWalletId=${wallet.custodyWalletId}&type=burn&page=${page}&pageSize=5`,
           {
             method: "GET",
             headers: {
@@ -1929,7 +1959,7 @@ describe("Issuance Routes", () => {
 
       const fetchPage = async (page: number) => {
         const res = await app.request(
-          `/v1/issuance/transactions?walletId=${wallet.walletId}&type=burn&page=${page}&pageSize=3`,
+          `/v1/issuance/transactions?custodyWalletId=${wallet.custodyWalletId}&type=burn&page=${page}&pageSize=3`,
           {
             method: "GET",
             headers: {
@@ -1982,7 +2012,7 @@ describe("Issuance Routes", () => {
       });
 
       const res = await app.request(
-        `/v1/issuance/transactions?walletId=${wallet.walletId}&type=force_burn&page=1&pageSize=10`,
+        `/v1/issuance/transactions?custodyWalletId=${wallet.custodyWalletId}&type=force_burn&page=1&pageSize=10`,
         {
           method: "GET",
           headers: {
@@ -2083,7 +2113,7 @@ describe("Issuance Routes", () => {
       });
 
       const res = await app.request(
-        `/v1/issuance/transactions?walletId=${wallet.walletId}&type=burn&page=1&pageSize=10`,
+        `/v1/issuance/transactions?custodyWalletId=${wallet.custodyWalletId}&type=burn&page=1&pageSize=10`,
         {
           method: "GET",
           headers: {
@@ -2099,23 +2129,26 @@ describe("Issuance Routes", () => {
       expect(body.data[0].transaction.id).toBe("ttx_explicit_wallet_bound");
     });
 
-    it("returns 404 when the requested wallet does not exist", async () => {
-      const res = await app.request(
-        "/v1/issuance/transactions?walletId=wal_missing_issuance_transactions&type=burn",
-        {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+    it.each(["cwlt_missing_issuance_transactions", DEFAULT_ISSUANCE_PROVIDER_WALLET_ID])(
+      "returns 404 for custody selector %s without a provider fallback",
+      async (custodyWalletId) => {
+        const res = await app.request(
+          `/v1/issuance/transactions?custodyWalletId=${custodyWalletId}&type=burn`,
+          {
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
           },
-        },
-        env
-      );
+          env
+        );
 
-      expect(res.status).toBe(404);
-      const body = await res.json();
-      expect(body.error.code).toBe("NOT_FOUND");
-      expect(body.error.message).toMatch(/^Wallet not found\./);
-    });
+        expect(res.status).toBe(404);
+        const body = await res.json();
+        expect(body.error.code).toBe("NOT_FOUND");
+        expect(body.error.message).toMatch(/^Wallet not found\./);
+      }
+    );
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -8222,7 +8255,104 @@ describe("Issuance Routes", () => {
     });
 
     describe("POST /v1/issuance/tokens/:tokenId/deploy/prepare", () => {
-      it("rejects a provider override that diverges from an exact pin before writes or secrets", async () => {
+      it.each(["missing", "inactive"])(
+        "refuses a %s exact wallet without substituting its active sibling",
+        async (state) => {
+          await getDb(env)
+            .prepare(
+              `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
+               VALUES ('cwlt_prepare_sibling', 'cust_cfg_issuance_activity', 'wal_sibling', ?, 'active')`
+            )
+            .bind(TEST_ACTIVE_TOKEN.mintAuthority)
+            .run();
+          if (state === "inactive") {
+            await getDb(env)
+              .prepare("UPDATE custody_wallets SET status = 'inactive' WHERE id = ?")
+              .bind(DEFAULT_ISSUANCE_CUSTODY_WALLET_ID)
+              .run();
+          }
+          const selected =
+            state === "missing" ? "cwlt_missing" : DEFAULT_ISSUANCE_CUSTODY_WALLET_ID;
+          const token = await seedIssuedToken({
+            id: "tok_prepare_exact_unavailable",
+            mintAddress: null,
+            status: "pending",
+            signingCustodyWalletId: state === "missing" ? null : selected,
+            signingWalletId: DEFAULT_ISSUANCE_PROVIDER_WALLET_ID,
+          });
+          const signer = vi.mocked(solanaSigner.createOrgSignerForCustodyWallet);
+          signer.mockClear();
+          const response = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy/prepare`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({ signingCustodyWalletId: selected }),
+            },
+            env
+          );
+          expect(response.status).toBe(404);
+          expect(signer).not.toHaveBeenCalled();
+          expect(
+            await new TokenService(getDb(env)).getToken({
+              tokenId: token.id,
+              organizationId: TEST_ORG.id,
+              projectId: TEST_PROJECT.id,
+            })
+          ).toMatchObject({
+            signingCustodyWalletId: state === "missing" ? null : selected,
+            status: "pending",
+            mintAddress: null,
+          });
+        }
+      );
+
+      it("refuses preparation outside the API key's wallet scope without pinning or building", async () => {
+        const token = await seedIssuedToken({
+          id: "tok_prepare_out_of_scope",
+          mintAddress: null,
+          status: "pending",
+          signingCustodyWalletId: null,
+          signingWalletId: null,
+        });
+        await seedApiKeyRow(env, apiKeyHash, {
+          ...TEST_PROJECT_CACHED_KEY,
+          walletScope: "selected",
+          walletIds: [],
+        });
+        // Exercise the real signer authorization rather than the suite's signer mock.
+        vi.mocked(solanaSigner.createOrgSignerForCustodyWallet).mockRestore();
+        const update = vi.spyOn(TokenService.prototype, "updateToken");
+        const prepare = vi.spyOn(MosaicService.prototype, "prepareCreateToken");
+        try {
+          const response = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy/prepare`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({ signingCustodyWalletId: DEFAULT_ISSUANCE_CUSTODY_WALLET_ID }),
+            },
+            env
+          );
+          expect(response.status).toBe(403);
+          expect(await response.json()).toMatchObject({
+            error: { details: { reason: "wallet_out_of_scope" } },
+          });
+          expect(update).not.toHaveBeenCalled();
+          expect(prepare).not.toHaveBeenCalled();
+        } finally {
+          update.mockRestore();
+          prepare.mockRestore();
+        }
+      });
+
+      it("rejects an internal override that diverges from an exact pin before writes or secrets", async () => {
         const token = await seedIssuedToken({
           id: "tok_prepare_exact_pin_divergence",
           mintAddress: null,
@@ -8243,7 +8373,7 @@ describe("Issuance Routes", () => {
                 "Content-Type": "application/json",
                 Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
               },
-              body: JSON.stringify({ signingWalletId: "wal_divergent" }),
+              body: JSON.stringify({ signingCustodyWalletId: "cwlt_divergent" }),
             },
             env
           );
@@ -8253,6 +8383,48 @@ describe("Issuance Routes", () => {
           expect(signerSpy).not.toHaveBeenCalled();
         } finally {
           updateTokenSpy.mockRestore();
+        }
+      });
+
+      it("does not prepare a transaction when saving the exact wallet fails", async () => {
+        const token = await seedIssuedToken({
+          id: "tok_prepare_pin_failure",
+          mintAddress: null,
+          status: "pending",
+          signingCustodyWalletId: null,
+          signingWalletId: null,
+          requiresAllowlist: false,
+        });
+        const updateToken = vi.spyOn(TokenService.prototype, "updateToken");
+        updateToken.mockRejectedValueOnce(new Error("pin write failed"));
+        const prepare = vi.spyOn(MosaicService.prototype, "prepareCreateToken");
+        try {
+          const response = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy/prepare`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                signingCustodyWalletId: DEFAULT_ISSUANCE_CUSTODY_WALLET_ID,
+              }),
+            },
+            env
+          );
+          expect(response.status).toBe(500);
+          expect(prepare).not.toHaveBeenCalled();
+          expect(
+            await new TokenService(getDb(env)).getToken({
+              tokenId: token.id,
+              organizationId: TEST_ORG.id,
+              projectId: TEST_PROJECT.id,
+            })
+          ).toMatchObject({ signingCustodyWalletId: null, status: "pending" });
+        } finally {
+          updateToken.mockRestore();
+          prepare.mockRestore();
         }
       });
 
@@ -8288,7 +8460,7 @@ describe("Issuance Routes", () => {
           expect(await res.json()).toMatchObject({
             error: {
               code: "BAD_REQUEST",
-              message: "signingWalletId is required for the legacy issuance prepare flow",
+              message: "signingCustodyWalletId is required for client-signed deployment",
             },
           });
           expect(updateTokenSpy).not.toHaveBeenCalled();
@@ -8298,7 +8470,7 @@ describe("Issuance Routes", () => {
         }
       });
 
-      it("falls back to the SDP-hosted metadata URL when the token has no uri", async () => {
+      it("prepares without a body from the saved internal wallet and uses the hosted metadata URL", async () => {
         if (!(env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL) {
           (env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL = "https://rpc.invalid.test";
         }
@@ -8308,7 +8480,7 @@ describe("Issuance Routes", () => {
           mintAddress: null,
           status: "pending",
           uri: null,
-          signingWalletId: DEFAULT_ISSUANCE_PROVIDER_WALLET_ID,
+          signingWalletId: null,
           requiresAllowlist: false,
         });
 
@@ -8339,7 +8511,6 @@ describe("Issuance Routes", () => {
                 "Content-Type": "application/json",
                 Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
               },
-              body: JSON.stringify({}),
             },
             env
           );
@@ -8442,66 +8613,74 @@ describe("Issuance Routes", () => {
     });
 
     describe("POST /v1/issuance/tokens/:tokenId/deploy/prepare-metadata", () => {
-      it("prepares the metadata-uri follow-up tx for a deployed token", async () => {
-        if (!(env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL) {
-          (env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL = "https://rpc.invalid.test";
-        }
+      it.each([true, false])(
+        "prepares metadata only when its URI needs updating (changed: %s)",
+        async (changed) => {
+          if (!(env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL) {
+            (env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL = "https://rpc.invalid.test";
+          }
 
-        const token = await seedIssuedToken({
-          id: "tok_prepare_metadata_followup",
-          mintAddress: TEST_SOLANA_ADDRESSES.mint,
-          status: "active",
-          uri: null,
-          signingWalletId: DEFAULT_ISSUANCE_PROVIDER_WALLET_ID,
-          requiresAllowlist: false,
-        });
+          const token = await seedIssuedToken({
+            id: "tok_prepare_metadata_followup",
+            signingCustodyWalletId: DEFAULT_ISSUANCE_CUSTODY_WALLET_ID,
+            mintAddress: TEST_SOLANA_ADDRESSES.mint,
+            status: "active",
+            uri: null,
+            signingWalletId: DEFAULT_ISSUANCE_PROVIDER_WALLET_ID,
+            requiresAllowlist: false,
+          });
 
-        const prepareUpdateMetadataSpy = vi
-          .spyOn(MosaicService.prototype, "prepareUpdateMetadata")
-          .mockResolvedValueOnce({
-            serializedTx: "ZmFrZS1tZXRhZGF0YS10eA",
-            blockhash: "11111111111111111111111111111111",
-            lastValidBlockHeight: 0n,
-            requiredSigners: [],
-          } as never);
-        const simulateTransactionSpy = vi
-          .spyOn(SolanaRpc, "simulateTransaction")
-          .mockResolvedValueOnce({ success: true, logs: [], unitsConsumed: 0n, error: null });
+          const prepareUpdateMetadataSpy = vi
+            .spyOn(MosaicService.prototype, "prepareUpdateMetadata")
+            .mockResolvedValueOnce({
+              serializedTx: "ZmFrZS1tZXRhZGF0YS10eA",
+              blockhash: "11111111111111111111111111111111",
+              lastValidBlockHeight: 0n,
+              requiredSigners: [],
+            } as never);
+          if (!changed) prepareUpdateMetadataSpy.mockReset().mockResolvedValueOnce(null);
+          const simulateTransactionSpy = vi
+            .spyOn(SolanaRpc, "simulateTransaction")
+            .mockResolvedValueOnce({ success: true, logs: [], unitsConsumed: 0n, error: null });
 
-        try {
-          const res = await app.request(
-            `/v1/issuance/tokens/${token.id}/deploy/prepare-metadata`,
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          try {
+            const res = await app.request(
+              `/v1/issuance/tokens/${token.id}/deploy/prepare-metadata`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+                },
+                body: JSON.stringify({}),
               },
-              body: JSON.stringify({}),
-            },
-            env
-          );
+              env
+            );
 
-          expect(res.status).toBe(200);
-          const payload = (await res.json()) as {
-            data: { transaction: { serialized: string } | null; uri: string };
-          };
+            expect(res.status).toBe(200);
+            const payload = (await res.json()) as {
+              data: { transaction: { serialized: string } | null; uri: string };
+            };
 
-          expect(prepareUpdateMetadataSpy).toHaveBeenCalledWith(
-            expect.objectContaining({
-              mint: TEST_SOLANA_ADDRESSES.mint,
-              uri: expectedMetadataUrl(token.id),
-            })
-          );
-          expect(payload.data.transaction?.serialized).toBe("ZmFrZS1tZXRhZGF0YS10eA");
-          expect(payload.data.uri).toBe(expectedMetadataUrl(token.id));
-        } finally {
-          prepareUpdateMetadataSpy.mockRestore();
-          simulateTransactionSpy.mockRestore();
+            expect(prepareUpdateMetadataSpy).toHaveBeenCalledWith(
+              expect.objectContaining({
+                mint: TEST_SOLANA_ADDRESSES.mint,
+                uri: expectedMetadataUrl(token.id),
+              })
+            );
+            expect(payload.data.transaction).toEqual(
+              changed ? expect.objectContaining({ serialized: "ZmFrZS1tZXRhZGF0YS10eA" }) : null
+            );
+            if (!changed) expect(simulateTransactionSpy).not.toHaveBeenCalled();
+            expect(payload.data.uri).toBe(expectedMetadataUrl(token.id));
+          } finally {
+            prepareUpdateMetadataSpy.mockRestore();
+            simulateTransactionSpy.mockRestore();
+          }
         }
-      });
+      );
 
-      it("ignores a request-body signingWalletId, using the wallet pinned at deploy/prepare", async () => {
+      it("uses the saved internal wallet for metadata and ignores unrelated body fields", async () => {
         if (!(env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL) {
           (env as { SOLANA_RPC_URL?: string }).SOLANA_RPC_URL = "https://rpc.invalid.test";
         }
@@ -8509,6 +8688,7 @@ describe("Issuance Routes", () => {
         await seedIssuanceActivityWallet("wallet_pinned", TEST_SOLANA_ADDRESSES.wallet2);
         const token = await seedIssuedToken({
           id: "tok_prepare_metadata_wallet_pin",
+          signingCustodyWalletId: "cwlt_issuance_activity_wallet_pinned",
           mintAddress: TEST_SOLANA_ADDRESSES.mint,
           status: "active",
           uri: null,
@@ -8539,7 +8719,10 @@ describe("Issuance Routes", () => {
                 "Content-Type": "application/json",
                 Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
               },
-              body: JSON.stringify({ signingWalletId: "wallet_body_ignored" }),
+              body: JSON.stringify({
+                signingCustodyWalletId: "cwlt_body_ignored",
+                listAddress: TEST_SOLANA_ADDRESSES.wallet1,
+              }),
             },
             env
           );
@@ -8567,7 +8750,7 @@ describe("Issuance Routes", () => {
           status: "active",
           uri: null,
           signingCustodyWalletId: null,
-          signingWalletId: null,
+          signingWalletId: DEFAULT_ISSUANCE_PROVIDER_WALLET_ID,
           requiresAllowlist: false,
         });
         const prepareUpdateMetadataSpy = vi.spyOn(MosaicService.prototype, "prepareUpdateMetadata");
@@ -8592,11 +8775,23 @@ describe("Issuance Routes", () => {
           expect(await res.json()).toMatchObject({
             error: {
               code: "BAD_REQUEST",
-              message: "signingWalletId is required for the legacy issuance prepare flow",
+              message: "signingCustodyWalletId is required for client-signed deployment",
             },
           });
           expect(signerSpy).not.toHaveBeenCalled();
           expect(prepareUpdateMetadataSpy).not.toHaveBeenCalled();
+          expect(
+            await new TokenService(getDb(env)).getToken({
+              tokenId: token.id,
+              organizationId: TEST_ORG.id,
+              projectId: TEST_PROJECT.id,
+            })
+          ).toMatchObject({
+            signingCustodyWalletId: null,
+            signingWalletId: DEFAULT_ISSUANCE_PROVIDER_WALLET_ID,
+            status: "active",
+            mintAddress: TEST_SOLANA_ADDRESSES.mint,
+          });
         } finally {
           prepareUpdateMetadataSpy.mockRestore();
         }
@@ -8635,110 +8830,158 @@ describe("Issuance Routes", () => {
         }
       };
 
-      it("records the mint, marks the token active, and unblocks prepare-metadata", async () => {
-        ensureRpcUrl();
+      it.each([true, false])(
+        "confirms only with a saved internal pin and preserves old evidence (saved: %s)",
+        async (saved) => {
+          ensureRpcUrl();
 
-        const token = await seedIssuedToken({
-          id: "tok_deploy_confirm",
-          mintAddress: null,
-          status: "pending",
-          uri: null,
-          signingWalletId: DEFAULT_ISSUANCE_PROVIDER_WALLET_ID,
-          requiresAllowlist: false,
-        });
+          const token = await seedIssuedToken({
+            id: "tok_deploy_confirm",
+            signingCustodyWalletId: saved ? DEFAULT_ISSUANCE_CUSTODY_WALLET_ID : null,
+            mintAddress: null,
+            status: "pending",
+            uri: null,
+            signingWalletId: DEFAULT_ISSUANCE_PROVIDER_WALLET_ID,
+            requiresAllowlist: false,
+          });
 
-        const exactSignerSpy = vi
-          .spyOn(solanaSigner, "createOrgSignerForCustodyWallet")
-          .mockResolvedValue({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
-        const getSignatureStatusesSpy = vi
-          .spyOn(SolanaRpc, "getSignatureStatuses")
-          .mockResolvedValueOnce([
-            { slot: 100n, confirmations: 10n, confirmationStatus: "confirmed", err: null },
-          ]);
-        const accountExistsSpy = vi.spyOn(SolanaRpc, "accountExists").mockResolvedValueOnce(true);
-        const getTransactionSpy = vi.spyOn(SolanaRpc, "getTransaction").mockResolvedValueOnce({
-          slot: 100n,
-          accountKeys: [TEST_SOLANA_ADDRESSES.wallet2],
-          executionResultKnown: true,
-          err: null,
-          instructions: [
-            {
-              programId: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
-              accounts: [],
-              parsedType: "initializeMint2",
-              info: {
-                mint: TEST_SOLANA_ADDRESSES.mint,
-                mintAuthority: TEST_SOLANA_ADDRESSES.wallet2,
-                freezeAuthority: TEST_SOLANA_ADDRESSES.wallet2,
+          await seedIssuanceTransaction({
+            id: "ttx_prior_deploy_evidence",
+            tokenId: token.id,
+            type: "deploy",
+            status: "failed",
+            signature: "original-evidence",
+            params: { retainedEvidence: true },
+          });
+
+          const exactSignerSpy = vi
+            .spyOn(solanaSigner, "createOrgSignerForCustodyWallet")
+            .mockResolvedValue({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+          const getSignatureStatusesSpy = vi
+            .spyOn(SolanaRpc, "getSignatureStatuses")
+            .mockResolvedValueOnce([
+              { slot: 100n, confirmations: 10n, confirmationStatus: "confirmed", err: null },
+            ]);
+          const accountExistsSpy = vi.spyOn(SolanaRpc, "accountExists").mockResolvedValueOnce(true);
+          const getTransactionSpy = vi.spyOn(SolanaRpc, "getTransaction").mockResolvedValueOnce({
+            slot: 100n,
+            accountKeys: [TEST_SOLANA_ADDRESSES.wallet2],
+            executionResultKnown: true,
+            err: null,
+            instructions: [
+              {
+                programId: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+                accounts: [],
+                parsedType: "initializeMint2",
+                info: {
+                  mint: TEST_SOLANA_ADDRESSES.mint,
+                  mintAuthority: TEST_SOLANA_ADDRESSES.wallet2,
+                  freezeAuthority: TEST_SOLANA_ADDRESSES.wallet2,
+                },
               },
-            },
-          ],
-        });
-
-        try {
-          const res = await app.request(
-            `/v1/issuance/tokens/${token.id}/deploy/confirm`,
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
-              },
-              body: JSON.stringify({
-                signature: testSignature("5testSigHOO466Confirm"),
-                mint: TEST_SOLANA_ADDRESSES.mint,
-              }),
-            },
-            env
-          );
-
-          expect(res.status).toBe(200);
-          const payload = (await res.json()) as {
-            data: { token: { mintAddress: string | null; status: string } };
-          };
-          expect(payload.data.token.mintAddress).toBe(TEST_SOLANA_ADDRESSES.mint);
-          expect(payload.data.token.status).toBe("active");
-
-          // The recorded mint unblocks the metadata follow-up, which previously
-          // 400'd for every non-custodial caller (mintAddress was never set).
-          const prepareUpdateMetadataSpy = vi
-            .spyOn(MosaicService.prototype, "prepareUpdateMetadata")
-            .mockResolvedValueOnce({
-              serializedTx: "ZmFrZS1tZXRhZGF0YS10eA",
-              blockhash: "11111111111111111111111111111111",
-              lastValidBlockHeight: 0n,
-              requiredSigners: [],
-            } as never);
-          const simulateTransactionSpy = vi
-            .spyOn(SolanaRpc, "simulateTransaction")
-            .mockResolvedValueOnce({ success: true, logs: [], unitsConsumed: 0n, error: null });
+            ],
+          });
 
           try {
-            const followUp = await app.request(
-              `/v1/issuance/tokens/${token.id}/deploy/prepare-metadata`,
+            const res = await app.request(
+              `/v1/issuance/tokens/${token.id}/deploy/confirm`,
               {
                 method: "POST",
                 headers: {
                   "Content-Type": "application/json",
                   Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
                 },
-                body: JSON.stringify({}),
+                body: JSON.stringify({
+                  signature: testSignature("5testSigHOO466Confirm"),
+                  mint: TEST_SOLANA_ADDRESSES.mint,
+                }),
               },
               env
             );
 
-            expect(followUp.status).toBe(200);
+            if (!saved) {
+              expect(res.status).toBe(400);
+              expect(await res.json()).toMatchObject({
+                error: {
+                  message: "signingCustodyWalletId is required for client-signed deployment",
+                },
+              });
+              expect(exactSignerSpy).not.toHaveBeenCalled();
+              expect(
+                await new TokenService(getDb(env)).getToken({
+                  tokenId: token.id,
+                  organizationId: TEST_ORG.id,
+                  projectId: TEST_PROJECT.id,
+                })
+              ).toMatchObject({
+                signingCustodyWalletId: null,
+                signingWalletId: DEFAULT_ISSUANCE_PROVIDER_WALLET_ID,
+                status: "pending",
+                mintAddress: null,
+              });
+              const evidence = await getDb(env)
+                .prepare(
+                  "SELECT id, signature, status FROM issuance_transactions WHERE token_id = ?"
+                )
+                .bind(token.id)
+                .all<{ id: string; signature: string; status: TokenTransactionStatus }>();
+              expect(evidence.results).toEqual([
+                {
+                  id: "ttx_prior_deploy_evidence",
+                  signature: "original-evidence",
+                  status: "failed",
+                },
+              ]);
+              return;
+            }
+            expect(res.status).toBe(200);
+            const payload = (await res.json()) as {
+              data: { token: { mintAddress: string | null; status: string } };
+            };
+            expect(payload.data.token.mintAddress).toBe(TEST_SOLANA_ADDRESSES.mint);
+            expect(payload.data.token.status).toBe("active");
+
+            // The recorded mint unblocks the metadata follow-up, which previously
+            // 400'd for every non-custodial caller (mintAddress was never set).
+            const prepareUpdateMetadataSpy = vi
+              .spyOn(MosaicService.prototype, "prepareUpdateMetadata")
+              .mockResolvedValueOnce({
+                serializedTx: "ZmFrZS1tZXRhZGF0YS10eA",
+                blockhash: "11111111111111111111111111111111",
+                lastValidBlockHeight: 0n,
+                requiredSigners: [],
+              } as never);
+            const simulateTransactionSpy = vi
+              .spyOn(SolanaRpc, "simulateTransaction")
+              .mockResolvedValueOnce({ success: true, logs: [], unitsConsumed: 0n, error: null });
+
+            try {
+              const followUp = await app.request(
+                `/v1/issuance/tokens/${token.id}/deploy/prepare-metadata`,
+                {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+                  },
+                  body: JSON.stringify({}),
+                },
+                env
+              );
+
+              expect(followUp.status).toBe(200);
+            } finally {
+              prepareUpdateMetadataSpy.mockRestore();
+              simulateTransactionSpy.mockRestore();
+            }
           } finally {
-            prepareUpdateMetadataSpy.mockRestore();
-            simulateTransactionSpy.mockRestore();
+            exactSignerSpy.mockRestore();
+            getSignatureStatusesSpy.mockRestore();
+            accountExistsSpy.mockRestore();
+            getTransactionSpy.mockRestore();
           }
-        } finally {
-          exactSignerSpy.mockRestore();
-          getSignatureStatusesSpy.mockRestore();
-          accountExistsSpy.mockRestore();
-          getTransactionSpy.mockRestore();
         }
-      });
+      );
 
       it("still returns 200 with the token active when post-deploy bookkeeping fails", async () => {
         ensureRpcUrl();
@@ -9131,7 +9374,10 @@ describe("Issuance Routes", () => {
       it("pins the signing wallet from prepareDeploy so confirmDeploy can't diverge", async () => {
         ensureRpcUrl();
 
-        await seedIssuanceActivityWallet("wallet_custom_pin", TEST_SOLANA_ADDRESSES.wallet2);
+        const wallet = await seedIssuanceActivityWallet(
+          "wallet_custom_pin",
+          TEST_SOLANA_ADDRESSES.wallet2
+        );
         const token = await seedIssuedToken({
           id: "tok_deploy_confirm_wallet_pin",
           mintAddress: null,
@@ -9192,7 +9438,7 @@ describe("Issuance Routes", () => {
                 "Content-Type": "application/json",
                 Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
               },
-              body: JSON.stringify({ signingWalletId: "wallet_custom_pin" }),
+              body: JSON.stringify({ signingCustodyWalletId: wallet.custodyWalletId }),
             },
             env
           );
@@ -9203,11 +9449,10 @@ describe("Issuance Routes", () => {
             organizationId: TEST_PROJECT.organizationId,
             projectId: TEST_PROJECT.id,
           });
-          expect(afterPrepare?.signingWalletId).toBe("wallet_custom_pin");
+          expect(afterPrepare?.signingCustodyWalletId).toBe(wallet.custodyWalletId);
+          expect(afterPrepare?.signingWalletId).toBeNull();
 
-          // 2. confirmDeploy with a DIVERGENT signingWalletId in the body — it
-          // must be ignored in favor of the wallet prepareDeploy pinned, or the
-          // custody address (and recorded authorities) would silently differ.
+          // The follow-up ignores unrelated fields and uses only the saved internal pin.
           exactSignerSpy.mockClear();
           const confirmRes = await app.request(
             `/v1/issuance/tokens/${token.id}/deploy/confirm`,
@@ -9220,7 +9465,8 @@ describe("Issuance Routes", () => {
               body: JSON.stringify({
                 signature: testSignature("5walletPinSig"),
                 mint: TEST_SOLANA_ADDRESSES.mint,
-                signingWalletId: "wallet_body_divergent_ignored",
+                signingCustodyWalletId: "cwlt_body_ignored",
+                listAddress: TEST_SOLANA_ADDRESSES.wallet1,
               }),
             },
             env
@@ -9233,6 +9479,21 @@ describe("Issuance Routes", () => {
             "cwlt_issuance_activity_wallet_custom_pin",
             "issuance.authority"
           );
+          const operation = await getDb(env)
+            .prepare(
+              "SELECT custody_wallet_id, status, signature FROM issuance_transactions WHERE token_id = ?"
+            )
+            .bind(token.id)
+            .first<{
+              custody_wallet_id: string;
+              status: TokenTransactionStatus;
+              signature: string;
+            }>();
+          expect(operation).toEqual({
+            custody_wallet_id: wallet.custodyWalletId,
+            status: "confirmed",
+            signature: testSignature("5walletPinSig"),
+          });
         } finally {
           exactSignerSpy.mockRestore();
           prepareCreateTokenSpy.mockRestore();

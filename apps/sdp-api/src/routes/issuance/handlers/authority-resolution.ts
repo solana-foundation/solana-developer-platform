@@ -14,7 +14,6 @@ import { assertCallerWalletInScope } from "@/lib/money-admission";
 import { rethrowRpcUnavailable } from "@/lib/rpc-unavailable";
 import { createSigningService } from "@/services/domain/signing.service";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
-import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 import type { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 
@@ -468,58 +467,33 @@ export async function createResolvedAuthoritySigner(params: {
   };
 }
 
-/**
- * Load the Config signer for the legacy client-signed issuance flows (deploy
- * prepare, confirm, prepare-metadata). Every call names its signing wallet: the
- * request's or token's `signingWalletId`, or the API key's own binding.
- *
- * @param params - The legacy signer request.
- * @param params.env - API process environment.
- * @param params.auth - The authenticated API key context.
- * @param params.walletId - The resolved provider signing wallet ID, or null when none was named.
- * @param params.currentAuthority - When set, the authority the signer must control.
- * @param params.expectedCustodyWalletId - The exact Config wallet row pinned on the token, if any.
- * @returns The signer for the named Config wallet.
- * @throws 400 when no signing wallet was named.
- */
+/** Load the exact active Config wallet for the client-signed deployment chain. */
 export async function createLegacyResolvedAuthoritySigner(params: {
   env: Env;
   auth: ApiKeyContext;
-  walletId: string | null;
+  custodyWalletId: string | null;
   currentAuthority?: string | null;
-  expectedCustodyWalletId?: string | null;
   movement: IssuanceMovement;
 }): Promise<IssuanceAuthority> {
-  const { env, auth, walletId, currentAuthority, expectedCustodyWalletId, movement } = params;
-  if (walletId === null) {
-    throw badRequest("signingWalletId is required for the legacy issuance prepare flow");
+  const { env, auth, custodyWalletId, currentAuthority, movement } = params;
+  if (custodyWalletId === null) {
+    throw badRequest("signingCustodyWalletId is required for client-signed deployment");
   }
-  const custodyStore = new CustodyConfigStore(getDb(env), env);
   const projectId = requireAuthProjectId(auth);
-  const expectedWallet = expectedCustodyWalletId
-    ? await custodyStore.findActiveWalletByIdentifier(
-        auth.organizationId,
-        projectId,
-        expectedCustodyWalletId
-      )
-    : null;
-
-  if (expectedCustodyWalletId && !expectedWallet) {
-    throw conflict("Legacy issuance prepare flow requires a Config wallet");
-  }
-
-  if (expectedWallet && expectedWallet.walletId !== walletId) {
-    throw conflict("Legacy issuance provider wallet does not match its exact Config wallet");
-  }
-
-  const wallet =
-    expectedWallet ??
-    (await custodyStore.findActiveWalletByIdentifier(auth.organizationId, projectId, walletId));
-
+  const wallet = await getDb(env)
+    .prepare(
+      `SELECT w.id FROM custody_wallets w
+       JOIN custody_configs c ON c.id = w.custody_config_id
+       WHERE w.id = ? AND c.organization_id = ? AND c.project_id = ?
+         AND w.status = 'active' AND c.status = 'active'`
+    )
+    .bind(custodyWalletId, auth.organizationId, projectId)
+    .first<{ id: string }>();
   if (!wallet) {
     throw walletNotFound();
   }
 
+  assertCallerWalletInScope(auth, wallet.id);
   const signer = await createOrgSignerForCustodyWallet<"issuance">(
     env,
     auth.organizationId,

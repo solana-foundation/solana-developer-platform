@@ -283,18 +283,21 @@ export const deployTokenSchema = z
   })
   .strict();
 
-export const legacyDeployTokenSchema = z.object({
-  signingWalletId: z.string().min(1).optional(),
+export const prepareDeploySchema = z.object({
+  signingCustodyWalletId: z.string().min(1).optional(),
+  signingWalletId: z.never().optional(),
   feePayment: z.enum(["sponsored", "wallet"]).default("sponsored"),
+});
+
+export const prepareDeployMetadataSchema = prepareDeploySchema.omit({
+  signingCustodyWalletId: true,
 });
 
 // Records a confirmed non-custodial deploy: the client sends the `mint` it
 // received from `deploy/prepare` plus the signature of the create tx it
 // submitted, so the server can verify the tx landed and persist the mint.
-// `listAddress` and `signingWalletId` are accepted for backward compatibility
-// but ignored — the server re-derives the ABL list PDA from the mint authority
-// and uses the signing wallet pinned at deploy/prepare, so neither can be
-// changed at confirm time.
+// `listAddress` remains accepted but ignored: the server re-derives the ABL
+// list PDA and uses the internal signing wallet pinned at deploy/prepare.
 export const confirmDeploySchema = z.object({
   // Parsed here rather than asserted at the call site: these are the client's
   // claim about what it submitted, and everything downstream — signature
@@ -302,7 +305,7 @@ export const confirmDeploySchema = z.object({
   signature: z.string().refine(isSignature, "Invalid transaction signature"),
   mint: z.string().refine(isAddress, "Invalid mint address"),
   listAddress: z.string().min(32).max(44).optional(),
-  signingWalletId: z.string().min(1).optional(),
+  signingWalletId: z.never().optional(),
 });
 
 export const pauseTokenSchema = z.object({
@@ -360,14 +363,10 @@ export const listTokenTransactionsQuerySchema = z.object({
   type: z.enum(TOKEN_TRANSACTION_TYPES).optional(),
 });
 
-export const issuanceTransactionWalletFilterSchema = z
-  .object({
-    custodyWalletId: z.string().trim().min(1).optional(),
-    walletId: z.string().trim().min(1).optional(),
-  })
-  .refine(({ custodyWalletId, walletId }) => !(custodyWalletId && walletId), {
-    message: "custodyWalletId and walletId cannot be combined",
-  });
+export const issuanceTransactionWalletFilterSchema = z.object({
+  custodyWalletId: z.string().trim().min(1).optional(),
+  walletId: z.never().optional(),
+});
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Token List Query
