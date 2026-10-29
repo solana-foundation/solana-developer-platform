@@ -287,7 +287,7 @@ function rpcUnavailableResponse(
           reason === "upstream_unavailable"
             ? "Solana RPC is temporarily unavailable. Retry after the Retry-After delay."
             : "Solana RPC is not available for this environment.",
-        details: { reason, ...(cluster && { cluster }) },
+        details: { reason, cluster },
       },
       meta: { requestId: c.get("requestId") },
     },
