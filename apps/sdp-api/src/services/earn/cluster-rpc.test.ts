@@ -129,7 +129,7 @@ describe("assertClusterEndpoint", () => {
     expect(requests).toEqual([]);
   });
 
-  it("refuses an endpoint that serves another cluster, re-probing every time", async () => {
+  it("refuses an endpoint that serves another cluster, probing it once per cooldown", async () => {
     vi.stubEnv("SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL", endpoint("devnet-pool"));
     genesisFor.mockReturnValue(GENESIS_HASH_BY_CLUSTER["mainnet-beta"]);
 
@@ -143,7 +143,7 @@ describe("assertClusterEndpoint", () => {
         ),
       });
     }
-    expect(requests).toHaveLength(2);
+    expect(requests).toHaveLength(1);
   });
 
   it("evicts a failed probe so the endpoint can recover, then trusts the proof", async () => {

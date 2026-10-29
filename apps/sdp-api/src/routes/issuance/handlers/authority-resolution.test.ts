@@ -6,6 +6,7 @@ import * as solanaSigner from "@/services/solana/signer";
 import { env as testEnv } from "@/test/helpers/env";
 import { createTokenTransaction } from "@/test/helpers/factories";
 import { seedDefaultProjects } from "@/test/helpers/projects";
+import { rpcHttpError } from "@/test/helpers/rpc-errors";
 import { seedTestDatabase } from "@/test/mocks/db";
 import {
   createLegacyResolvedAuthoritySigner,
@@ -437,6 +438,13 @@ describe("authority-resolution", () => {
         "mint"
       )
     ).rejects.toMatchObject({ code: "SOLANA_RPC_ERROR", statusCode: 502 });
+  });
+
+  it("leaves an unavailable RPC to the API's 503 instead of a 502", async () => {
+    const unavailable = rpcHttpError(503);
+    getTokenAclMintConfigMock.mockRejectedValue(unavailable);
+
+    await expect(resolveFreezeOperationAuthority(testEnv, createToken())).rejects.toBe(unavailable);
   });
 
   it("fails closed when the mint account cannot be found", async () => {

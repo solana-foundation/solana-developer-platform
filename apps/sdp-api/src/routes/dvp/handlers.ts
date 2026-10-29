@@ -19,6 +19,7 @@ import {
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, notFound, solanaRpcError } from "@/lib/errors";
 import { success } from "@/lib/response";
+import { rethrowRpcUnavailable } from "@/lib/rpc-unavailable";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import { callerMayPerform } from "@/middleware/require-action";
@@ -981,8 +982,9 @@ export const inspectMint = async (c: AppContext) => {
   let inspection: Awaited<ReturnType<typeof inspectDvpMint>>;
   try {
     inspection = await inspectDvpMint(createRpc(c.env), parsed);
-  } catch {
+  } catch (error) {
     // The read failed, so nothing is known about the mint: retryable, never "not found".
+    rethrowRpcUnavailable(error);
     throw solanaRpcError("Could not read the mint from Solana. Try again.");
   }
   if (!inspection) {

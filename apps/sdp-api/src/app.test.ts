@@ -1,7 +1,7 @@
 import { SigningError } from "@sdp/custody/signing";
 import { FeePaymentError } from "@sdp/fee-payment/port";
 import { SdpPaymentsError } from "@sdp/payments/errors";
-import { SdpRpcError } from "@sdp/rpc/errors";
+import { RpcTimeoutError, RpcUnavailableError, SdpRpcError } from "@sdp/rpc/errors";
 import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -11,6 +11,7 @@ import { AppError } from "@/lib/errors";
 import { type ValidatedBodyContext, validateBody } from "@/middleware/validate";
 import { rootLogger } from "@/runtime/logger";
 import { env as baseEnv } from "@/test/helpers/env";
+import { rpcHttpError } from "@/test/helpers/rpc-errors";
 import { clearKVStores } from "@/test/mocks/kv";
 
 const THROW_PATH = "/__internal_error_test_throw";
@@ -30,6 +31,11 @@ const FEE_RATE_LIMITED_PATH = "/__fee_rate_limited_test_throw";
 const PII_UNEXPECTED_ERROR_PATH = "/__pii_unexpected_error_test_throw";
 const IDEMPOTENCY_REUSED_PATH = "/__idempotency_reused_test_throw";
 const DATABASE_UNAVAILABLE_PATH = "/__database_unavailable_test_throw";
+const RPC_RATE_LIMITED_PATH = "/__rpc_rate_limited_test_throw";
+const RPC_TIMEOUT_PATH = "/__rpc_timeout_test_throw";
+const RPC_UNAUTHORIZED_PATH = "/__rpc_unauthorized_test_throw";
+const RPC_NOT_CONFIGURED_PATH = "/__rpc_not_configured_test_throw";
+const RPC_CLUSTER_MISMATCH_PATH = "/__rpc_cluster_mismatch_test_throw";
 
 function buildApp() {
   const app = createApp({ rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY });
@@ -97,6 +103,30 @@ function buildApp() {
       totalCount: 10,
       idleCount: 0,
       waitingCount: 42,
+    });
+  });
+  app.all(RPC_RATE_LIMITED_PATH, (c) => {
+    c.set("projectEnvironment", "production");
+    throw rpcHttpError(429);
+  });
+  app.all(RPC_TIMEOUT_PATH, () => {
+    throw new RpcTimeoutError(30_000);
+  });
+  app.all(RPC_UNAUTHORIZED_PATH, () => {
+    throw rpcHttpError(401);
+  });
+  app.all(RPC_NOT_CONFIGURED_PATH, (c) => {
+    c.set("projectEnvironment", "sandbox");
+    throw new RpcUnavailableError(
+      "not_configured",
+      "SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL is not a devnet endpoint",
+      { cluster: "devnet", envKey: "SOLANA_RPC_HELIUS_DEVNET_API_KEY_URL" }
+    );
+  });
+  app.all(RPC_CLUSTER_MISMATCH_PATH, () => {
+    throw new RpcUnavailableError("cluster_mismatch", "serves a different cluster", {
+      cluster: "mainnet-beta",
+      genesisHash: "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
     });
   });
   app.all(FEE_REJECTED_PATH, () => {
@@ -304,6 +334,39 @@ describe("createApp onError", () => {
     expect(JSON.parse(text)).toMatchObject({ error: { code: "SERVICE_UNAVAILABLE" } });
     // The pool's own wording stays in the logs, not in the response.
     expect(text).not.toContain("timeout exceeded");
+  });
+
+  // HOO-1886: every way RPC can be unavailable is one 503 with a reason.
+  it.each([
+    [RPC_RATE_LIMITED_PATH, { reason: "upstream_unavailable", cluster: "mainnet-beta" }, "2"],
+    [RPC_TIMEOUT_PATH, { reason: "upstream_unavailable" }, "2"],
+    [RPC_NOT_CONFIGURED_PATH, { reason: "not_configured", cluster: "devnet" }, null],
+    [RPC_CLUSTER_MISMATCH_PATH, { reason: "cluster_mismatch", cluster: "mainnet-beta" }, null],
+  ])("answers %s with 503 RPC_UNAVAILABLE and its reason", async (path, details, retryAfter) => {
+    const app = buildApp();
+
+    const res = await app.request(path, {}, baseEnv);
+
+    expect(res.status).toBe(503);
+    expect(res.headers.get("Retry-After")).toBe(retryAfter);
+    const text = await res.text();
+    const body = z
+      .object({ error: z.object({ code: z.string(), details: z.record(z.string(), z.unknown()) }) })
+      .parse(JSON.parse(text));
+    expect(body.error.code).toBe("RPC_UNAVAILABLE");
+    expect(body.error.details).toEqual(details);
+    // Env keys and genesis hashes stay in the logs.
+    expect(text).not.toContain("SOLANA_RPC_");
+    expect(text).not.toContain("EtWTRABZ");
+  });
+
+  it("leaves a persistent RPC error out of RPC_UNAVAILABLE", async () => {
+    const app = buildApp();
+
+    const res = await app.request(RPC_UNAUTHORIZED_PATH, {}, baseEnv);
+
+    expect(res.status).toBe(500);
+    expect(res.headers.get("Retry-After")).toBeNull();
   });
 
   // HOO-1918: the IETF draft's 422 for a reused Idempotency-Key must reach the

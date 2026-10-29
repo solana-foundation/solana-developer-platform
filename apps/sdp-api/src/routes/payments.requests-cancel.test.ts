@@ -25,6 +25,7 @@ import {
   TEST_WALLET_ID,
 } from "@/test/helpers/payments-routes";
 import { required } from "@/test/helpers/required";
+import { fetchFailedError } from "@/test/helpers/rpc-errors";
 
 const PAST = "2020-01-01T00:00:00.000Z";
 const AUDIT_FAILURE_CONSTRAINT = "sdp_test_fail_payment_request_audit";
@@ -201,7 +202,27 @@ describe("POST /v1/payments/requests/:paymentRequestId/cancel", () => {
     expect((await stored(request)).status).toBe("awaiting_payment");
   });
 
-  it("answers 502 when the block height cannot be read, and cancels on a same-key retry", async () => {
+  it("answers 503 RPC_UNAVAILABLE when no RPC provider accepts a connection", async () => {
+    rpc.respond("getBlockHeight", () => {
+      throw fetchFailedError();
+    });
+    const request = await seedSandboxRequest();
+    await claimWindow(request, "10");
+
+    const failed = await postCancel(request.id);
+
+    expect(failed.status).toBe(503);
+    expect(failed.headers.get("Retry-After")).toBe("2");
+    expect(await failed.json()).toMatchObject({
+      error: {
+        code: "RPC_UNAVAILABLE",
+        details: { reason: "upstream_unavailable", cluster: "devnet" },
+      },
+    });
+    expect((await stored(request)).status).toBe("awaiting_payment");
+  });
+
+  it("answers 503 RPC_UNAVAILABLE when the block height cannot be read, and cancels on a same-key retry", async () => {
     rpc.respond("getBlockHeight", () => ({
       error: { code: -32603, message: "RPC unavailable" },
     }));
@@ -211,8 +232,11 @@ describe("POST /v1/payments/requests/:paymentRequestId/cancel", () => {
 
     const failed = await postCancelWith(request.id, idempotencyKey);
 
-    expect(failed.status).toBe(502);
-    expect(await failed.json()).toMatchObject({ error: { code: "SOLANA_RPC_ERROR" } });
+    expect(failed.status).toBe(503);
+    expect(failed.headers.get("Retry-After")).toBe("2");
+    expect(await failed.json()).toMatchObject({
+      error: { code: "RPC_UNAVAILABLE", details: { reason: "upstream_unavailable" } },
+    });
     expect(await stored(request)).toMatchObject({ status: "awaiting_payment", canceled_at: null });
 
     rpc.respond("getBlockHeight", () => ({ result: 900 }));

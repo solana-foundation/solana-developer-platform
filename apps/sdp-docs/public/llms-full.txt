@@ -5238,8 +5238,8 @@ A failed request returns an error status and this body. The health checks are th
 | `422` | The request is well formed but can't go ahead: its idempotency key was used for a different request, or the signing provider refused the transaction. | `IDEMPOTENCY_KEY_REUSED`, `SIGNING_REJECTED` |
 | `429` | Too many requests. See [Rate limits](/docs/reference/conventions/rate-limits). | `RATE_LIMITED` |
 | `500` | Something failed inside SDP. | `INTERNAL_ERROR` |
-| `502` | A Solana RPC call failed. | `SOLANA_RPC_ERROR` |
-| `503` | SDP, or a provider it depends on, is unavailable for now. | `SERVICE_UNAVAILABLE`, `PROVIDER_UNAVAILABLE` |
+| `502` | Solana RPC answered, but with an error SDP could not use. | `SOLANA_RPC_ERROR` |
+| `503` | SDP, or a provider it depends on, is unavailable for now. | `SERVICE_UNAVAILABLE`, `PROVIDER_UNAVAILABLE`, `RPC_UNAVAILABLE` |
 
 Each operation's page lists the statuses it can return, with an example body for each.
 
@@ -5248,6 +5248,7 @@ Each operation's page lists the statuses it can return, with an example body for
 - `400`, `401`, `403`, `404` and `422`: fix the request before you send it again.
 - `409 CONFLICT`: read the resource's current state, then decide.
 - `409 IDEMPOTENCY_KEY_IN_FLIGHT` and `429`: wait for `Retry-After`, then retry with the same `Idempotency-Key`.
+- `503 RPC_UNAVAILABLE`: `details.reason` says why Solana RPC was unavailable. `upstream_unavailable` is temporary: wait for `Retry-After`, then retry as the `5xx` rule below says. `not_configured` and `cluster_mismatch` are SDP configuration problems that a retry won't fix; quote `meta.requestId` when you report one.
 - `5xx`: most routes store the error and return it again to a same-key retry. Read the resource with `GET` to see whether the request took effect, then retry with a new key. On the routes that move money, a same-key retry runs again and never acts twice.
 
 [Idempotency](/docs/developing-with-sdp/idempotency) covers what each retry returns.

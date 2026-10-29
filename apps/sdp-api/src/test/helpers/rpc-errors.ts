@@ -52,3 +52,17 @@ export function sendTransactionPreflightError(customProgramErrorCode?: number): 
     ...(cause === undefined ? {} : { cause }),
   });
 }
+
+/**
+ * The `TypeError` undici's `fetch` rejects with when it can't connect. `@sdp/rpc` classifies it
+ * by its cause's `code`, never by message, so a fixture must carry the code a real one does.
+ * `ECONNREFUSED` by default, which the dead-socket re-send leaves alone.
+ *
+ * @param code - The Node/undici error code on the cause.
+ * @returns The fetch rejection.
+ */
+export function fetchFailedError(code = "ECONNREFUSED"): TypeError {
+  return new TypeError("fetch failed", {
+    cause: Object.assign(new Error(`connect ${code}`), { code }),
+  });
+}

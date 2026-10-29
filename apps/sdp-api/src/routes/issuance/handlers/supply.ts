@@ -3,6 +3,7 @@ import type { Context } from "hono";
 import { getDb } from "@/db/client";
 import { AppError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
+import { rethrowRpcUnavailable } from "@/lib/rpc-unavailable";
 import { getTenantTokenService, requireProjectScope } from "@/routes/issuance/helpers";
 import { AuditService } from "@/services/audit.service";
 import type { Env } from "@/types/env";
@@ -76,6 +77,7 @@ export const refreshTokenSupply = async (c: AppContext) => {
     const { rpcUrl } = getSolanaConfig(c.env);
     supplyBaseUnits = await fetchTokenSupplyBaseUnits(rpcUrl, token.mintAddress);
   } catch (error) {
+    rethrowRpcUnavailable(error);
     throw new AppError(
       "SOLANA_RPC_ERROR",
       error instanceof Error ? error.message : "Failed to refresh token supply"
