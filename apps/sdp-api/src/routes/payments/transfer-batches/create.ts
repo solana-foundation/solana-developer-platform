@@ -19,7 +19,7 @@ import {
 import type { MovementStepInput, RecordAnswer } from "@/middleware/movement-steps";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { type AppContext, getPaymentTransferBatchesRepository } from "@/routes/payments/context";
-import { admitPaymentWalletRuntimeExecution } from "@/routes/payments/wallets";
+import { admitPaymentStart } from "@/routes/payments/wallets";
 import { assertNoSolRentShortfall } from "@/services/payments/sol-rent-minimum";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import {
@@ -148,7 +148,7 @@ export async function admitTransferBatchExecution(
   c: AppContext,
   input: MovementStepInput<AuthorizedBatchRequest>
 ): Promise<void> {
-  await admitPaymentWalletRuntimeExecution(c, input.authorized.sourceWallet);
+  await admitPaymentStart(c, input.authorized.sourceWallet, "payments.transfer_batch");
 }
 
 /**

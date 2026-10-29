@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
-import type { Root } from "mdast";
+import { structure } from "fumadocs-core/mdx-plugins/remark-structure";
 import remarkGfm from "remark-gfm";
 import remarkMdx from "remark-mdx";
 import remarkParse from "remark-parse";
@@ -53,14 +53,20 @@ const PAGE = [
   "After",
 ].join("\n");
 
+const bodyOf = (source: string) => source.replace(/^---[\s\S]*?---\r?\n/, "");
+
 function compiledText(source: string, surface: PublicSurface): string {
-  const tree = unified()
+  const processor = unified()
     .use(remarkParse)
     .use(remarkMdx)
     .use(remarkGfm)
-    .parse(source.replace(/^---[\s\S]*?---\r?\n/, "")) as Root;
-  remarkDocsBlocks({ surface })(tree, { path: "page.mdx" });
-  return JSON.stringify(tree);
+    .use(remarkDocsBlocks, { surface });
+  return JSON.stringify(processor.runSync(processor.parse(bodyOf(source))));
+}
+
+function searchText(source: string, surface: PublicSurface): string {
+  const search = structure(bodyOf(source), [remarkMdx, [remarkDocsBlocks, { surface }]]);
+  return search.contents.map(({ content }) => content).join("\n");
 }
 
 describe("docs follow the release channel", () => {
@@ -94,6 +100,12 @@ describe("docs follow the release channel", () => {
     assert.doesNotMatch(compiledText(PAGE, STABLE), /Issuance|Stripe/);
     assert.match(compiledText(PAGE, EXPERIMENTAL), /Issuance/);
     assert.match(compiledText(PAGE, EXPERIMENTAL), /Stripe/);
+  });
+
+  it("indexes the blocks' rows for search", () => {
+    assert.match(searchText(PAGE, EXPERIMENTAL), /\*\*Issuance\*\*/);
+    assert.match(searchText(PAGE, EXPERIMENTAL), /`transfers\.execute`/);
+    assert.doesNotMatch(searchText(PAGE, STABLE), /Issuance|Stripe/);
   });
 
   it("leaves no sentence-level gates in the content", () => {

@@ -173,10 +173,14 @@ body {
 
 .launch-docs-sidebar-actions {
   display: grid;
-  grid-auto-columns: minmax(0, 1fr);
-  grid-auto-flow: column;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   margin-top: 18px;
+}
+
+/* Three chips don't fit one 272px row: the odd one out, Agent setup, takes a row of its own. */
+.launch-docs-sidebar-actions > :last-child:nth-child(odd) {
+  grid-column: 1 / -1;
 }
 
 .launch-docs-sidebar-action {
@@ -188,20 +192,34 @@ body {
   border-radius: var(--corner-control);
   background: var(--chip);
   box-shadow: var(--chip-ring);
+  border: 0;
   color: var(--ink-secondary);
   font-family: var(--font-sans);
   font-size: var(--font-size-meta);
   text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
   transition: color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
-.launch-docs-sidebar-action:hover {
+.launch-docs-sidebar-action:hover,
+.launch-docs-sidebar-action[data-state="open"] {
   color: var(--ink);
 }
 
 .launch-docs-sidebar-action svg {
   width: 13px;
   height: 13px;
+  flex: none;
+}
+
+/* A menu trigger's chevron turns over while its menu is open. */
+.launch-chevron {
+  transition: transform var(--motion-duration-base) var(--motion-ease-out);
+}
+
+[data-state="open"] > .launch-chevron {
+  transform: rotate(180deg);
 }
 
 .launch-docs-sidebar-search {
@@ -308,6 +326,24 @@ body {
   box-shadow: none;
 }
 
+.launch-docs-status-link {
+  text-decoration: none;
+  transition: color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.launch-docs-status-link:hover {
+  color: var(--ink);
+}
+
+/* The icon sits in the 7px dot column, so its label lines up with the status rows'. */
+.launch-docs-status-link svg {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  margin: 0 -3px;
+  color: var(--ink-tertiary);
+}
+
 /* ── Badge — shared pill for "Coming soon"-style annotations ── */
 .launch-badge {
   display: inline-block;
@@ -358,18 +394,19 @@ body {
 }
 
 .launch-docs-nav-item.is-active .launch-docs-nav-icon,
-.launch-docs-nav-folder-link.is-active .launch-docs-nav-icon {
+.launch-docs-nav-folder-row.is-active .launch-docs-nav-icon {
   color: var(--ink);
 }
 
+/* A row's highlight: a folder's row is one, its toggle included. */
 .launch-docs-nav-item:hover,
-.launch-docs-nav-folder-link:hover {
+.launch-docs-nav-folder-row:hover {
   background: var(--wash);
   color: var(--ink);
 }
 
 .launch-docs-nav-item.is-active,
-.launch-docs-nav-folder-link.is-active {
+.launch-docs-nav-folder-row.is-active {
   background: var(--wash-strong);
   color: var(--ink);
   font-weight: 500;
@@ -382,6 +419,8 @@ body {
 .launch-docs-nav-folder-row {
   display: flex;
   align-items: center;
+  border-radius: var(--corner-control);
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .launch-docs-nav-folder-btn {
@@ -401,14 +440,6 @@ body {
   line-height: var(--line-height-body);
   cursor: pointer;
   text-align: left;
-  transition:
-    background-color var(--motion-duration-fast) var(--motion-ease-out),
-    color var(--motion-duration-fast) var(--motion-ease-out);
-}
-
-.launch-docs-nav-folder-btn:hover {
-  background: var(--wash);
-  color: var(--ink);
 }
 
 .launch-docs-nav-toggle-icon {
@@ -436,13 +467,10 @@ body {
   background: transparent;
   color: var(--ink-tertiary);
   cursor: pointer;
-  transition:
-    background-color var(--motion-duration-fast) var(--motion-ease-out),
-    color var(--motion-duration-fast) var(--motion-ease-out);
+  transition: color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .launch-docs-nav-toggle:hover {
-  background: var(--wash);
   color: var(--ink);
 }
 
@@ -451,8 +479,18 @@ body {
   height: 12px;
 }
 
+/* A folder's chevron turns from right to down as it opens, like the menu chevrons. */
+.launch-docs-nav-chevron {
+  transition: transform var(--motion-duration-base) var(--motion-ease-out);
+}
+
+[aria-expanded="true"] > .launch-docs-nav-chevron {
+  transform: rotate(90deg);
+}
+
+/* Each level sits 14px further in, its highlight with it. */
 .launch-docs-nav-children {
-  margin: 1px 0 4px;
+  margin: 1px 0 4px 14px;
 }
 
 .launch-docs-sidebar-section {
@@ -546,8 +584,9 @@ body {
   color: var(--ink);
 }
 
+/* A section without a page of its own: a label, quieter than the links beside it. */
 .launch-docs-breadcrumb span {
-  color: var(--ink);
+  color: var(--ink-tertiary);
 }
 
 .launch-docs-breadcrumb svg {
@@ -702,6 +741,364 @@ body {
 .launch-docs-body {
   color: var(--ink-secondary);
   font-family: var(--font-sans);
+}
+
+/* ── Page header: the title, with the page actions on its first line ── */
+.launch-docs-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.launch-docs-header .launch-docs-title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Copy page, with the other page actions behind its chevron: one raised chip split by a rule.
+   The top margin centres it on the title's first line, from the title's size and line height. */
+.launch-page-actions {
+  display: inline-flex;
+  flex: none;
+  height: var(--control-height-sm);
+  margin: calc((clamp(30px, 3.4vw, 36px) * 1.15 - var(--control-height-sm)) / 2) 0 0 auto;
+  border-radius: var(--corner-control);
+  background: var(--chip);
+  box-shadow: var(--chip-ring);
+}
+
+.launch-page-actions-copy,
+.launch-page-actions-more {
+  display: inline-flex;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--ink-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-meta);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease-out),
+    color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.launch-page-actions-copy {
+  gap: 6px;
+  padding: 0 10px;
+  border-radius: var(--corner-control) 0 0 var(--corner-control);
+}
+
+.launch-page-actions-more {
+  justify-content: center;
+  width: 28px;
+  border-left: 1px solid var(--rule-faint);
+  border-radius: 0 var(--corner-control) var(--corner-control) 0;
+}
+
+.launch-page-actions-copy:hover,
+.launch-page-actions-more:hover,
+.launch-page-actions-more[data-state="open"] {
+  background: var(--wash);
+  color: var(--ink);
+}
+
+.launch-page-actions-more svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* Both labels share one grid cell, so the chip stays as wide as "Copy page" when it says Copied. */
+.launch-page-actions-label {
+  display: grid;
+}
+
+.launch-page-actions-label > span {
+  grid-area: 1 / 1;
+  transition:
+    opacity var(--motion-duration-base) var(--motion-ease-out),
+    visibility var(--motion-duration-base) var(--motion-ease-out);
+}
+
+.launch-page-actions-label .is-copied,
+.launch-page-actions-copy[data-status="copied"] .is-idle {
+  visibility: hidden;
+  opacity: 0;
+}
+
+.launch-page-actions-copy[data-status="copied"] .is-copied {
+  visibility: visible;
+  opacity: 1;
+}
+
+/* On a phone Copy page drops its label (the menu still names every action), so the title keeps
+   its width. */
+@media (max-width: 639px) {
+  .launch-docs-header {
+    gap: 12px;
+  }
+
+  .launch-page-actions-copy {
+    justify-content: center;
+    width: var(--control-height-sm);
+    padding: 0;
+  }
+
+  .launch-page-actions-label {
+    display: none;
+  }
+}
+
+/* Copy, check and alert stacked in one box: the outcome morphs in place. */
+.launch-copy-icon {
+  display: inline-grid;
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+
+.launch-copy-icon svg {
+  grid-area: 1 / 1;
+  width: 14px;
+  height: 14px;
+  opacity: 0;
+  transform: scale(0.5);
+  transition:
+    opacity var(--motion-duration-base) var(--motion-ease-out),
+    transform var(--motion-duration-base) var(--motion-ease-out);
+}
+
+.launch-copy-icon-copied {
+  color: var(--positive);
+}
+
+.launch-copy-icon-failed {
+  color: var(--critical);
+}
+
+.launch-copy-icon[data-status="idle"] .launch-copy-icon-idle,
+.launch-copy-icon[data-status="copied"] .launch-copy-icon-copied,
+.launch-copy-icon[data-status="failed"] .launch-copy-icon-failed {
+  opacity: 1;
+  transform: scale(1);
+}
+
+/* Popovers render in a portal outside .sdp-docs-shell, so they set their own type and surface,
+   and replace Fumadocs' frosted panel and fixed 100ms animation with the motion tokens. */
+.launch-popover {
+  padding: 6px;
+  border: 1px solid var(--rule);
+  border-radius: var(--corner-card);
+  background: var(--paper-card);
+  backdrop-filter: none;
+  box-shadow: var(--elevation-popover);
+  color: var(--ink);
+  font-family: var(--font-sans);
+}
+
+.launch-popover[data-state="open"] {
+  animation: launch-popover-in var(--motion-duration-base) var(--motion-ease-out);
+}
+
+.launch-popover[data-state="closed"] {
+  animation: launch-popover-out var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+@keyframes launch-popover-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.97);
+  }
+}
+
+@keyframes launch-popover-out {
+  to {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.97);
+  }
+}
+
+.launch-menu {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  width: 268px;
+}
+
+.launch-menu-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--corner-control);
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--font-sans);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.launch-menu-item:hover,
+.launch-menu-item:focus-visible {
+  background: var(--wash);
+}
+
+.launch-menu-item:focus-visible {
+  outline: none;
+}
+
+.launch-menu-item-icon {
+  display: grid;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: var(--corner-control);
+  background: var(--chip);
+  box-shadow: var(--chip-ring);
+  color: var(--ink-secondary);
+}
+
+.launch-menu-item-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.launch-menu-item-text {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 1px;
+  min-width: 0;
+}
+
+.launch-menu-item-title {
+  font-size: var(--font-size-body);
+  font-weight: 500;
+  line-height: 20px;
+}
+
+.launch-menu-item-description {
+  color: var(--ink-tertiary);
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-meta);
+}
+
+.launch-menu-item-external {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  margin-top: 4px;
+  color: var(--ink-tertiary);
+}
+
+/* ── Agent setup menu (sidebar) ── */
+.launch-agent-setup {
+  width: min(400px, calc(100vw - 32px));
+  padding: 16px;
+}
+
+.launch-agent-setup-title {
+  margin: 0;
+  font-size: var(--font-size-body);
+  font-weight: 500;
+  line-height: 20px;
+}
+
+.launch-agent-setup-description {
+  margin: 4px 0 14px;
+  color: var(--ink-secondary);
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-meta);
+}
+
+.launch-agent-setup-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--corner-control);
+  background: var(--wash);
+}
+
+.launch-agent-setup-tab {
+  flex: 1 1 0;
+  min-height: 26px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--corner-control-inner);
+  background: transparent;
+  color: var(--ink-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-meta);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease-out),
+    box-shadow var(--motion-duration-fast) var(--motion-ease-out),
+    color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.launch-agent-setup-tab:hover {
+  color: var(--ink);
+}
+
+.launch-agent-setup-tab[aria-selected="true"] {
+  background: var(--chip);
+  box-shadow: var(--chip-ring);
+  color: var(--ink);
+}
+
+.launch-agent-setup-panel {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px 10px 10px 12px;
+  border: 1px solid var(--rule-faint);
+  border-radius: var(--corner-control);
+  background: var(--paper-tile);
+  color: var(--ink);
+}
+
+/* Not the inline code chip (`:not(pre) > code`): the panel is already the frame. */
+.launch-agent-setup-command {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.launch-agent-setup-word {
+  white-space: nowrap;
+}
+
+.launch-agent-setup-copy {
+  display: grid;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  margin: -3px -4px -3px 0;
+  place-items: center;
+  border: 0;
+  border-radius: var(--corner-control-inner);
+  background: transparent;
+  color: var(--ink-tertiary);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease-out),
+    color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.launch-agent-setup-copy:hover {
+  background: var(--wash-strong);
+  color: var(--ink);
 }
 
 .page-feedback {
@@ -955,6 +1352,69 @@ body {
   color: var(--ink);
 }
 
+/* A page's action links (`<ActionLinks>`): raised chips like the page actions, a download led by
+   a download icon and a JSON link by braces. The hover wash is an inset shadow over the chip, so
+   it fades on the motion tokens. */
+.launch-docs-action-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 20px 0 28px;
+}
+
+.launch-docs-action-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: var(--control-height-sm);
+  padding: 0 12px;
+  border-radius: var(--corner-control);
+  background: var(--chip);
+  box-shadow:
+    var(--chip-ring),
+    inset 0 0 0 999px transparent;
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-body);
+  font-weight: 500;
+  text-decoration: none;
+  transition: box-shadow var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.launch-docs-action-links a:hover {
+  box-shadow:
+    var(--chip-ring),
+    inset 0 0 0 999px var(--wash);
+}
+
+.launch-docs-action-links a:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.launch-docs-action-links a::before {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  background: var(--ink-tertiary);
+  mask: center / contain no-repeat;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.launch-docs-action-links a[download]::before {
+  content: "";
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 15V3'/%3E%3Cpath d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E");
+}
+
+.launch-docs-action-links a[href$=".json"]:not([download])::before {
+  content: "";
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5c0 1.1.9 2 2 2h1'/%3E%3Cpath d='M16 21h1a2 2 0 0 0 2-2v-5c0-1.1.9-2 2-2a2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1'/%3E%3C/svg%3E");
+}
+
+.launch-docs-action-links a:hover::before {
+  background: var(--ink);
+}
+
 /* minmax(0, 1fr) holds an item to the column, so a code block inside it scrolls instead of
    widening the page. */
 .launch-mdx-list {
@@ -1096,6 +1556,261 @@ body {
   padding: 0.125rem 0.375rem;
   font-size: 0.875em;
   overflow-wrap: break-word;
+}
+
+/* ── API reference ── */
+/* The generated reference (scripts/lib/api-reference-page.ts). A family's page is its table of
+   operations, each row one link to the operation's page; an operation's page leads with its
+   endpoint, then sections whose field lists name the field, its type and facts on one line. */
+.is-api-reference .launch-mdx-heading-2 {
+  margin: 40px 0 10px;
+  font-size: var(--font-size-subheading);
+  line-height: var(--line-height-subheading);
+}
+
+/* A row is one link: the summary's link covers it, so the whole row opens the operation. */
+.launch-api-operation-table .launch-mdx-table tbody tr {
+  position: relative;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.launch-api-operation-table .launch-mdx-table tbody tr:hover {
+  background: var(--wash);
+}
+
+.launch-api-operation-table .launch-mdx-td:last-child {
+  padding-right: 40px;
+}
+
+/* A path stays on one line; a table too wide for a phone scrolls in its frame. */
+.launch-api-operation-table code {
+  white-space: nowrap;
+}
+
+.launch-api-operation-table .launch-mdx-link {
+  color: inherit;
+  font-weight: 400;
+  text-decoration: none;
+}
+
+.launch-api-operation-table .launch-mdx-link::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+}
+
+.launch-api-operation-table .launch-mdx-link:focus-visible {
+  outline: none;
+}
+
+.launch-api-operation-table .launch-mdx-link:focus-visible::after {
+  outline: 2px solid var(--ink);
+  outline-offset: -2px;
+}
+
+/* The chevron: drawn from the row's text colour, it moves a little toward the page on hover. */
+.launch-api-operation-table .launch-mdx-td:last-child::after {
+  position: absolute;
+  top: 50%;
+  right: 14px;
+  width: 14px;
+  height: 14px;
+  margin-top: -7px;
+  background: var(--ink-tertiary);
+  content: "";
+  mask:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 18 6-6-6-6'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  pointer-events: none;
+  transition:
+    transform var(--motion-duration-fast) var(--motion-ease-out),
+    background-color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.launch-api-operation-table .launch-mdx-table tbody tr:hover .launch-mdx-td:last-child::after {
+  background: var(--ink);
+  transform: translateX(3px);
+}
+
+/* On a phone each row stacks: method and path on one line, the summary below. */
+@media (max-width: 639px) {
+  .launch-api-operation-table .launch-mdx-table,
+  .launch-api-operation-table .launch-mdx-table tbody,
+  .launch-api-operation-table .launch-mdx-table tr,
+  .launch-api-operation-table .launch-mdx-td {
+    display: block;
+  }
+
+  .launch-api-operation-table .launch-mdx-table thead {
+    display: none;
+  }
+
+  .launch-api-operation-table .launch-mdx-table tbody tr {
+    padding: 12px 40px 12px 14px;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .launch-api-operation-table .launch-mdx-table tbody tr:last-child {
+    border-bottom: 0;
+  }
+
+  .launch-api-operation-table .launch-mdx-td,
+  .launch-api-operation-table .launch-mdx-td:last-child {
+    padding: 0;
+    border-bottom: 0;
+  }
+
+  .launch-api-operation-table .launch-mdx-td:first-child {
+    display: inline-block;
+    margin-right: 8px;
+  }
+
+  .launch-api-operation-table .launch-mdx-td:nth-child(2) {
+    display: inline;
+  }
+
+  .launch-api-operation-table .launch-mdx-td:last-child {
+    margin-top: 6px;
+  }
+
+  .launch-api-operation-table code {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}
+
+/* An operation's method beside its name in the sidebar (`icon: method:<METHOD>`). */
+.launch-docs-nav-method {
+  width: 3.9em;
+  color: var(--positive);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-meta);
+  font-weight: 500;
+}
+
+.launch-docs-nav-method[data-method="POST"] {
+  color: var(--attention);
+}
+
+.launch-docs-nav-method:is([data-method="PUT"], [data-method="PATCH"]) {
+  color: var(--progress);
+}
+
+.launch-docs-nav-method[data-method="DELETE"] {
+  color: var(--critical);
+}
+
+/* The path wraps beside its method on a phone rather than dropping below it. */
+.launch-api-endpoint {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0 0 18px;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-meta);
+}
+
+.launch-api-endpoint code {
+  min-width: 0;
+  padding: 2px 0 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font-size: var(--font-size-body);
+  overflow-wrap: break-word;
+}
+
+.launch-api-path-param {
+  color: var(--ink-tertiary);
+}
+
+/* Method colours follow the dashboard playground's badges. */
+.launch-api-method {
+  flex: none;
+  padding: 3px 7px;
+  border-radius: var(--corner-control-inner);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--positive);
+  background: var(--positive-wash);
+  box-shadow: inset 0 0 0 1px var(--positive-rule);
+}
+
+.launch-api-method[data-method="POST"] {
+  color: var(--attention);
+  background: var(--attention-wash);
+  box-shadow: inset 0 0 0 1px var(--attention-rule);
+}
+
+.launch-api-method:is([data-method="PUT"], [data-method="PATCH"]) {
+  color: var(--progress);
+  background: var(--progress-wash);
+  box-shadow: inset 0 0 0 1px var(--progress-rule);
+}
+
+.launch-api-method[data-method="DELETE"] {
+  color: var(--critical);
+  background: var(--critical-wash);
+  box-shadow: inset 0 0 0 1px var(--critical-rule);
+}
+
+.is-api-reference .launch-mdx-unordered-list {
+  gap: 0;
+  margin: 4px 0 20px;
+  padding-left: 0;
+  list-style: none;
+}
+
+.is-api-reference .launch-mdx-unordered-list > .launch-mdx-list-item {
+  padding: 12px 0;
+  border-top: 1px solid var(--rule-faint);
+  font-size: var(--font-size-body);
+  line-height: 1.6;
+}
+
+/* Nested fields hang off their parent on a guide rule. */
+.is-api-reference .launch-mdx-list-item .launch-mdx-unordered-list {
+  margin: 10px 0 0;
+  padding-left: 16px;
+  border-left: 1px solid var(--rule);
+}
+
+.is-api-reference
+  .launch-mdx-list-item
+  .launch-mdx-unordered-list
+  > .launch-mdx-list-item:first-child {
+  border-top: 0;
+  padding-top: 4px;
+}
+
+.is-api-reference .launch-mdx-list-item > .launch-mdx-paragraph {
+  margin: 4px 0 0;
+  font-size: var(--font-size-body);
+  line-height: 1.6;
+}
+
+/* The first line: field name, type and facts. */
+.is-api-reference .launch-mdx-list-item > .launch-mdx-paragraph:first-child {
+  margin-top: 0;
+  color: var(--ink-tertiary);
+  font-size: var(--font-size-meta);
+}
+
+/* The dot between two facts, with room on either side (`remarkDocsBlocks` sets it apart). */
+.launch-api-separator {
+  margin: 0 0.3em;
+}
+
+/* The field or status name, set apart from the inline code chips beside it. */
+.is-api-reference .launch-mdx-list-item > .launch-mdx-strong:first-child > code,
+.is-api-reference .launch-mdx-paragraph:first-child > .launch-mdx-strong:first-child > code {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-body);
 }
 
 /* ── Docs Home page ── */
@@ -1751,8 +2466,9 @@ a.rounded-lg.border.p-4 > p.truncate {
   display: none;
 }
 
-/* ── Tab panels — white card on beige background (matches dashboard cards) ── */
-[role="tabpanel"] {
+/* ── Tab panels: white card on beige background (matches dashboard cards). Scoped to the page,
+   so a tab panel in a portaled popover (the Agent setup menu) keeps its own surface. ── */
+.sdp-docs-shell [role="tabpanel"] {
   background-color: var(--color-fd-card);
   color: var(--color-fd-card-foreground);
   border: 1px solid var(--color-fd-border);

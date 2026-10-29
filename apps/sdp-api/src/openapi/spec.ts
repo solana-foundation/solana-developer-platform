@@ -75,7 +75,8 @@ const OPENAPI_TAG = {
   COMPLIANCE: { name: "Compliance", description: "Risk and compliance screening endpoints." },
   COUNTERPARTIES: {
     name: "Counterparties",
-    description: "Counterparty (customer/beneficiary) identity records.",
+    description:
+      "A counterparty is a person or business you pay or get paid by. You save their details and payment accounts once, then reuse them in payouts and ramps.",
   },
   ASSET_PROFILES: {
     name: "Asset Profiles",

@@ -375,6 +375,35 @@ describe("Payments routes — signed submission", () => {
       expect(row.error).toContain("Sponsorship preflight is unavailable");
     });
 
+    it("refuses a stopped project before its row and lets the same key run after re-enable", async () => {
+      const { signAsFeePayer } = await mockSignedSubmissionAdapter();
+      await getDb(env)
+        .prepare("UPDATE projects SET disabled_movements = ?::text[] WHERE id = ?")
+        .bind(["payments.transfer"], TEST_PROJECT.id)
+        .run();
+
+      const key = "disabled-project-transfer";
+      const first = await transferRequest("0.001", key);
+      expect(first.status).toBe(403);
+      expect((await readErrorResponse(first)).error).toMatchObject({
+        code: "FORBIDDEN",
+        details: { reason: "movement_disabled" },
+      });
+      expect(sendTransactionMock).not.toHaveBeenCalled();
+      expect(signAsFeePayer).not.toHaveBeenCalled();
+      expect(await listTransferRows()).toHaveLength(0);
+
+      await getDb(env)
+        .prepare("UPDATE projects SET disabled_movements = ARRAY[]::text[] WHERE id = ?")
+        .bind(TEST_PROJECT.id)
+        .run();
+      const replay = await transferRequest("0.001", key);
+      expect(replay.status).toBe(200);
+      expect(replay.headers.get("Idempotent-Replayed")).toBeNull();
+      expect(sendTransactionMock).toHaveBeenCalledOnce();
+      expect(await listTransferRows()).toHaveLength(1);
+    });
+
     it("journals a definite on-chain failure as failed with the submitted signature", async () => {
       await mockSignedSubmissionAdapter();
       confirmTransactionMock.mockResolvedValueOnce({

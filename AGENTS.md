@@ -10,14 +10,14 @@ This file is the canonical agent guide for this repository.
 - `packages/sdp-types`: shared runtime types and shared product constants
 - `packages/sdp-design-tokens`: shared design tokens (CSS custom properties, Tailwind theme mapping) and the `refresh` theme scope; see its README
 - `packages/sdp-ui`: the dashboard's UI primitives (`@sdp/ui`) over `@solana/design-system` and the design tokens; `apps/sdp-web/src/components/ui/*` re-exports them; see its README
-- `packages/sdp-api-catalog`: what the dashboard and the docs share about the public API (`@sdp/api-catalog`), today the request snippets; see its README
+- `packages/sdp-api-catalog`: what the API, the dashboard and the docs share about the public API (`@sdp/api-catalog`): the API reference model and the request snippets; see its README
 
 ## Source of truth
 
 - Public API contract: `apps/sdp-api/src/openapi/**`
 - Public docs navigation: `apps/sdp-docs/content/docs/meta.json`
 - Generated API docs: `apps/sdp-docs/content/docs/reference/api/**`
-- AI discovery resources: `apps/sdp-docs/public/llms.txt` and `apps/sdp-docs/public/llms-full.txt`
+- AI discovery resources: `apps/sdp-docs/public/llms.txt`, `apps/sdp-docs/public/llms-full.txt` and the docs skill `apps/sdp-docs/public/SKILL.md` (served at `/SKILL.md`; the same file is `skills/sdp-docs/SKILL.md`)
 
 ## Generated files
 
@@ -27,7 +27,7 @@ Do not hand-edit generated artifacts. Regenerate them with the owning script.
 - Route actions inventory (`apps/sdp-api/src/openapi/route-actions.generated.json`): `pnpm -C apps/sdp-api route-actions:generate`
 - API playground catalog: `pnpm generate:api-playground`
 - API reference docs: `pnpm -C apps/sdp-docs generate:api`
-- AI discovery resources: `pnpm -C apps/sdp-docs generate:ai`
+- AI discovery resources and the docs skill (both `SKILL.md` copies): `pnpm -C apps/sdp-docs generate:ai`
 
 ## Public vs internal surfaces
 
@@ -55,6 +55,7 @@ Public docs and AI artifacts should mirror the supported public surface only.
 ## Implementation guidance
 
 - **Every route declares one action.** `requireAction("module.verb")` (`apps/sdp-api/src/middleware/require-action.ts`) from the registry in `packages/sdp-types/src/actions.ts`, or `publicRoute(reason)`; `route-actions.test.ts` fails a route that declares neither. API keys hold explicit grants (no role, no wildcard) and can never hold key, member, organization or project administration or any `configure`.
+- **A route in a grouped API family names its docs group.** Payments, Issuance and Counterparties routes set `[DOCS_GROUP]: <FAMILY>_GROUPS.<group>` beside their `tags` (`apps/sdp-api/src/openapi/paths/helpers.ts`); the API reference shows each group as a folder of its family. `openapi:generate` fails a family that names groups on some routes but not all.
 
 - Follow `docs/contributing/code-standards.md` (correctness, concurrency, TypeScript, API, and dashboard rules). Reviews enforce it.
 - Every new ramp provider and ramp settlement change follows
@@ -102,7 +103,8 @@ Public docs and AI artifacts should mirror the supported public surface only.
 
 ## Repo-local skills
 
-- `skills/sdp-tokenization/SKILL.md`: consumer-facing skill for explaining how to tokenize assets with SDP using the supported public docs and API surface.
+- `skills/sdp-docs/SKILL.md`: generated, consumer-facing, read-only docs skill: where the public docs live and SDP's grounding rules (environments, API key grants, Idempotency-Key, prepare vs execute). `generate:ai` writes it with `apps/sdp-docs/public/SKILL.md`; it names no module, so one copy fits every release channel. The docs sidebar's Agent setup menu installs it with `npx skills add`.
+- `skills/sdp-tokenization/SKILL.md`: consumer-facing skill for explaining how to tokenize assets with SDP using the supported public docs and API surface. Unlisted in the docs' Agent setup menu (`MODULE_SKILLS` in `apps/sdp-docs/src/lib/agent-setup.ts`) until Issuance ships and its references move off repo paths.
 - `.agents/skills/sdp-ui-designer/SKILL.md`: SDP UI design skill for designing, prototyping, reviewing, or implementing payments, wallets, counterparty, and issuance UI. Its bundle ships the canonical token reference (`sdp-design-system.css`) and the UI handoff rules (`AGENTS.md`) alongside the skill; treat those as the design source of truth for UI work.
 - `.agents/skills/integrate-ramp-provider/SKILL.md`: explicit-only Payments/Ramps integration router; its sibling skills cover provider registration, rail discovery, estimates, counterparty requirements, on-ramp, off-ramp, and webhooks.
 - `.agents/skills/sdp-concise/SKILL.md`: explicit-only, action-first output contract shared by SDP workflows.
