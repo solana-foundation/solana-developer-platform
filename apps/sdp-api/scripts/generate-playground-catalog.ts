@@ -1,6 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
@@ -328,24 +327,15 @@ function generateCatalog(): string {
   )}\n`;
 }
 
-async function formatCatalog(catalog: string): Promise<string> {
-  const directory = await mkdtemp(path.join(tmpdir(), "sdp-playground-catalog-"));
-  const temporaryPath = path.join(directory, "catalog.json");
-
-  try {
-    await writeFile(temporaryPath, catalog, "utf8");
-    execFileSync(
-      "pnpm",
-      ["--dir", repositoryRoot, "exec", "biome", "format", "--write", temporaryPath],
-      { stdio: "ignore" }
-    );
-    return await readFile(temporaryPath, "utf8");
-  } finally {
-    await rm(directory, { force: true, recursive: true });
-  }
+function formatCatalog(catalog: string): string {
+  return execFileSync(
+    "pnpm",
+    ["--dir", repositoryRoot, "exec", "biome", "format", "--stdin-file-path", outputPath],
+    { input: catalog, encoding: "utf8" }
+  );
 }
 
-const expected = await formatCatalog(generateCatalog());
+const expected = formatCatalog(generateCatalog());
 if (process.argv.includes("--check")) {
   const current = await readFile(outputPath, "utf8").catch(() => "");
   if (current !== expected) {
