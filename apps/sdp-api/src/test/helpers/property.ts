@@ -6,14 +6,11 @@ import type { Parameters } from "fast-check";
  * failure prints its seed and path; replay it with `FC_SEED=<seed>` (and
  * `FC_PATH=<path>` to jump straight to the shrunk counterexample).
  */
-export function propertyParameters<T>(overrides: Parameters<T> = {}): Parameters<T> {
-  const seed = process.env.FC_SEED;
-  const path = process.env.FC_PATH;
-  const numRuns = process.env.FC_NUM_RUNS;
-  return {
-    ...overrides,
-    ...(seed ? { seed: Number(seed) } : {}),
-    ...(path ? { path } : {}),
-    ...(numRuns ? { numRuns: Number(numRuns) } : {}),
-  };
+export function propertyParameters<T>(overrides?: Parameters<T>): Parameters<T> {
+  const parameters: Parameters<T> = { ...overrides };
+  const { FC_SEED: seed, FC_PATH: path, FC_NUM_RUNS: numRuns } = process.env;
+  if (seed) parameters.seed = Number(seed);
+  if (path) parameters.path = path;
+  if (numRuns) parameters.numRuns = Number(numRuns);
+  return parameters;
 }

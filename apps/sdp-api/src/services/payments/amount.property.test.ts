@@ -70,9 +70,25 @@ function spell(raw: bigint, decimals: number, spelling: Spelling): string {
   );
   whole = "0".repeat(spelling.extraLeadingZeros) + whole;
   if (spelling.bareFraction && /^0+$/.test(whole) && fraction.length > 0) whole = "";
-  const text =
-    fraction.length > 0 ? `${whole}.${fraction}` : spelling.bareWhole ? `${whole}.` : whole;
+  const text = fraction.length > 0 || spelling.bareWhole ? `${whole}.${fraction}` : whole;
   return `${spelling.padding}${text}${spelling.padding}`;
+}
+
+/** The sign of a bigint, as a comparator returns it. */
+function sign(value: bigint): number {
+  if (value < 0n) return -1;
+  if (value > 0n) return 1;
+  return 0;
+}
+
+/** What `run` throws, failing the test when it returns. */
+function thrownBy(run: () => unknown): unknown {
+  try {
+    run();
+  } catch (error) {
+    return error;
+  }
+  throw new Error("expected a throw");
 }
 
 /** A canonical amount string's base units at `scale`, in unbounded bigint. */
@@ -227,7 +243,7 @@ describe("payment amount conversions (property)", () => {
           // left / 10^ld vs right / 10^rd, cross-multiplied in bigint.
           const difference =
             left * 10n ** BigInt(rightDecimals) - right * 10n ** BigInt(leftDecimals);
-          const expected = difference === 0n ? 0 : difference > 0n ? 1 : -1;
+          const expected = sign(difference);
           const leftText = formatDecimalAmount(left, leftDecimals);
           const rightText = formatDecimalAmount(right, rightDecimals);
           expect(comparePaymentAmounts(leftText, rightText)).toBe(expected);
@@ -249,13 +265,13 @@ describe("payment amount conversions (property)", () => {
           const texts = entries.map(([raw, decimals]) => formatDecimalAmount(raw, decimals));
           const scale = Math.max(...texts.map(decimalScale));
           const exact = texts.reduce((sum, text) => sum + scaled(text, scale), 0n);
-          try {
+          if (exact <= 2n ** 128n - 1n) {
             expect(parseDecimalAmount(sumDecimalAmounts(texts), scale)).toBe(exact);
-          } catch (error) {
-            expect(error).toBeInstanceOf(SdpPaymentsError);
-            expect((error as SdpPaymentsError).statusCode).toBe(400);
-            expect(exact).toBeGreaterThan(2n ** 128n - 1n);
+            return;
           }
+          const error = thrownBy(() => sumDecimalAmounts(texts));
+          expect(error).toBeInstanceOf(SdpPaymentsError);
+          if (error instanceof SdpPaymentsError) expect(error.statusCode).toBe(400);
         }
       ),
       propertyParameters()

@@ -1,6 +1,6 @@
 import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import { MEMO_PROGRAM_ADDRESS } from "@sdp/types/well-known-programs";
-import { SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
+import { SOL_MINT, SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
 import {
   type Address,
   address,
@@ -20,6 +20,7 @@ import {
 import {
   ASSOCIATED_TOKEN_PROGRAM_ADDRESS,
   AssociatedTokenInstruction,
+  findAssociatedTokenPda,
   getTransferCheckedInstructionDataDecoder,
   identifyAssociatedTokenInstruction,
   identifyToken2022Instruction,
@@ -61,7 +62,7 @@ const addressArb: fc.Arbitrary<Address> = fc
 const tokenContextArb: fc.Arbitrary<TokenContext> = fc.oneof(
   fc.constant<TokenContext>({
     kind: "sol",
-    token: "So11111111111111111111111111111111111111112",
+    token: SOL_MINT,
     decimals: 9,
     toBaseUnits: () => {
       throw new Error("not used by the builder");
@@ -129,6 +130,15 @@ interface DecodedTransfer {
   amount: bigint;
 }
 
+/** An instruction's accounts and data, which every instruction the builder emits carries. */
+function parts(instruction: Instruction) {
+  const { accounts, data } = instruction;
+  if (accounts === undefined || data === undefined) {
+    throw new Error(`${instruction.programAddress} instruction without accounts or data`);
+  }
+  return { accounts, data };
+}
+
 /**
  * Reads every value-moving instruction back from its bytes and accounts, and
  * fails on any instruction the batch builder has no reason to emit.
@@ -139,8 +149,7 @@ function decodeTransfers(
 ): DecodedTransfer[] {
   const transfers: DecodedTransfer[] = [];
   for (const instruction of instructions) {
-    const data = instruction.data ?? new Uint8Array();
-    const accounts = instruction.accounts ?? [];
+    const { accounts, data } = parts(instruction);
     if (instruction.programAddress === MEMO_PROGRAM_ADDRESS) {
       expect(accounts).toHaveLength(0);
       continue;
@@ -174,9 +183,36 @@ function decodeTransfers(
   return transfers;
 }
 
-/** Where a recipient's value lands: its wallet for SOL, its associated token account for SPL. */
-function landingAddress(group: RecipientInstructionGroup): Address {
-  return group.destinationTokenAccount ?? group.destinationAddress;
+/** The token accounts the instructions create: `[{ account, owner, mint }]`, in order. */
+function decodeCreatedAccounts(instructions: readonly Instruction[]) {
+  return instructions
+    .filter((instruction) => instruction.programAddress === ASSOCIATED_TOKEN_PROGRAM_ADDRESS)
+    .map((instruction) => {
+      // payer, ata, owner, mint, system program, token program
+      const { accounts } = parts(instruction);
+      return {
+        account: accounts[1].address,
+        owner: accounts[2].address,
+        mint: accounts[3].address,
+      };
+    });
+}
+
+/**
+ * Where a recipient's value must land, derived from the request rather than
+ * the builder: its wallet for SOL, the wallet's associated token account for SPL.
+ */
+async function expectedLanding(
+  recipient: ResolvedRecipient,
+  tokenContext: TokenContext
+): Promise<Address> {
+  if (tokenContext.kind === "sol") return recipient.destinationAddress;
+  const [account] = await findAssociatedTokenPda({
+    owner: recipient.destinationAddress,
+    mint: tokenContext.mintAddress,
+    tokenProgram: tokenContext.tokenProgram,
+  });
+  return account;
 }
 
 function build(params: {
@@ -203,8 +239,8 @@ function chunk(groups: RecipientInstructionGroup[], maxRecipientsPerTransaction:
 function wireForm(instructions: readonly Instruction[]) {
   return instructions.map((instruction) => ({
     programAddress: instruction.programAddress,
-    accounts: (instruction.accounts ?? []).map(({ address, role }) => ({ address, role })),
-    data: [...(instruction.data ?? [])],
+    accounts: parts(instruction).accounts.map(({ address, role }) => ({ address, role })),
+    data: [...parts(instruction).data],
   }));
 }
 
@@ -228,10 +264,16 @@ describe("batch transfer builder (property)", () => {
         const groups = await build({ tokenContext, recipients });
         expect(groups.map((group) => group.index)).toEqual(recipients.map((r) => r.index));
         for (const [position, group] of groups.entries()) {
-          const transfers = decodeTransfers(group.instructions, tokenContext);
-          expect(transfers).toEqual([
-            { destination: landingAddress(group), amount: recipients[position].amountBaseUnits },
+          const recipient = recipients[position];
+          const landing = await expectedLanding(recipient, tokenContext);
+          expect(decodeTransfers(group.instructions, tokenContext)).toEqual([
+            { destination: landing, amount: recipient.amountBaseUnits },
           ]);
+          expect(decodeCreatedAccounts(group.instructions)).toEqual(
+            tokenContext.kind === "sol"
+              ? []
+              : [{ account: landing, owner: recipient.destinationAddress, mint: MINT }]
+          );
         }
       }),
       propertyParameters()
@@ -266,7 +308,20 @@ describe("batch transfer builder (property)", () => {
         batchArb,
         async ({ tokenContext, recipients, maxRecipientsPerTransaction }) => {
           const groups = await build({ tokenContext, recipients });
-          const byIndex = new Map(groups.map((group) => [group.index, group]));
+          const expected = new Map(
+            await Promise.all(
+              recipients.map(
+                async (recipient) =>
+                  [
+                    recipient.index,
+                    {
+                      destination: await expectedLanding(recipient, tokenContext),
+                      amount: recipient.amountBaseUnits,
+                    },
+                  ] as const
+              )
+            )
+          );
           const chunks = chunk(groups, maxRecipientsPerTransaction);
 
           let batchMoved = 0n;
@@ -276,9 +331,9 @@ describe("batch transfer builder (property)", () => {
             expect(c.message.instructions).toEqual(c.instructions);
             expect(transfers).toEqual(
               c.recipientIndexes.map((index) => {
-                const group = byIndex.get(index);
-                if (group === undefined) throw new Error(`unknown recipient ${index}`);
-                return { destination: landingAddress(group), amount: group.amountBaseUnits };
+                const transfer = expected.get(index);
+                if (transfer === undefined) throw new Error(`unknown recipient ${index}`);
+                return transfer;
               })
             );
             const moved = transfers.reduce((sum, transfer) => sum + transfer.amount, 0n);

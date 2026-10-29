@@ -38,7 +38,9 @@ export function compareDecimalAmounts(left: string, right: string): number {
   const scale = Math.max(decimalScale(left), decimalScale(right));
   const leftRaw = scaledAmount(left, scale);
   const rightRaw = scaledAmount(right, scale);
-  return leftRaw === rightRaw ? 0 : leftRaw < rightRaw ? -1 : 1;
+  if (leftRaw < rightRaw) return -1;
+  if (leftRaw > rightRaw) return 1;
+  return 0;
 }
 
 function scaledAmount(value: string, scale: number): bigint {

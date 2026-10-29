@@ -69,11 +69,9 @@ const movementArb = fc
       .slice(1)
       .map((end, position) => payments.slice(bounds[position], end).map((p) => p.index))
       .filter((indexes) => indexes.length > 0);
-    const movement: SolMovement = {
-      source: SOURCE,
-      payments,
-      ...(transactions.length > 1 ? { transactions } : {}),
-    };
+    // A single transaction is the movement's default: `transactions` is omitted.
+    const movement: SolMovement = { source: SOURCE, payments };
+    if (transactions.length > 1) movement.transactions = transactions;
     return { movement, sourceLamports, destinationFunded };
   });
 
@@ -105,11 +103,16 @@ function modelSourceRefused(movement: SolMovement, balance: bigint): boolean {
   return false;
 }
 
+/** What an account holds: the source its balance, every other wallet the minimum or nothing. */
+function balanceOf(account: Address, sourceLamports: bigint, destinationFunded: boolean): bigint {
+  if (account === SOURCE) return sourceLamports;
+  if (destinationFunded) return MINIMUM;
+  return 0n;
+}
+
 function find(movement: SolMovement, sourceLamports: bigint, destinationFunded: boolean) {
   getMultipleAccountsLamportsMock.mockImplementation(async (_rpc, addresses) =>
-    addresses.map((account: Address) =>
-      account === SOURCE ? sourceLamports : destinationFunded ? MINIMUM : 0n
-    )
+    addresses.map((account: Address) => balanceOf(account, sourceLamports, destinationFunded))
   );
   return runInClusterScope({ projectId: null, environment: "sandbox" }, () =>
     findSolRentShortfall(movement)
@@ -127,12 +130,9 @@ describe("findSolRentShortfall (property)", () => {
     await fc.assert(
       fc.asyncProperty(movementArb, async ({ movement, sourceLamports, destinationFunded }) => {
         const shortfall = await find(movement, sourceLamports, destinationFunded);
-        const refused = shortfall?.sourceRemainderLamports != null;
-        expect(refused).toBe(modelSourceRefused(movement, sourceLamports));
-        if (refused) {
-          const remainder = shortfall?.sourceRemainderLamports ?? -1n;
-          expect(remainder > 0n && remainder < MINIMUM).toBe(true);
-        }
+        const remainder = shortfall === null ? null : shortfall.sourceRemainderLamports;
+        expect(remainder !== null).toBe(modelSourceRefused(movement, sourceLamports));
+        if (remainder !== null) expect(remainder > 0n && remainder < MINIMUM).toBe(true);
       }),
       propertyParameters()
     );
@@ -145,15 +145,10 @@ describe("findSolRentShortfall (property)", () => {
         const expected = movement.payments
           .filter((payment) => payment.lamports < MINIMUM)
           .filter(
-            (payment) =>
-              (payment.destination === SOURCE
-                ? sourceLamports
-                : destinationFunded
-                  ? MINIMUM
-                  : 0n) === 0n
+            (payment) => balanceOf(payment.destination, sourceLamports, destinationFunded) === 0n
           )
           .map((payment) => payment.index);
-        expect(shortfall?.recipientIndexes ?? []).toEqual(expected);
+        expect(shortfall === null ? [] : shortfall.recipientIndexes).toEqual(expected);
       }),
       propertyParameters()
     );
