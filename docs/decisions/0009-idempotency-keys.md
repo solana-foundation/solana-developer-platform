@@ -8,7 +8,6 @@ apply the step to routes.
 
 `Idempotency-Key` is optional on every `/v1` route. In the `stable` modules, only transfers and
 transfer batches act on it. Each module that does handle keys has its own implementation:
-
 - Payments, issuance, DvP, Earn and private channels each keep a keyed row with a hand-written
   fingerprint.
 - A key reused with a different request returns 409.
@@ -22,7 +21,6 @@ SDP launches on mainnet on Nov 2 with keys required on the routes that move mone
 
 One route step, `idempotent({ key })` in `apps/sdp-api/src/middleware/idempotency.ts`, backed by
 one table, `idempotency_keys` (migration 0133). It follows three sources:
-
 - [draft-ietf-httpapi-idempotency-key-header](https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/)
   for the header and the 400/422/409 codes.
 - [Stripe](https://docs.stripe.com/api/idempotent_requests) for snapshot replays, 24h retention,
@@ -34,13 +32,11 @@ one table, `idempotency_keys` (migration 0133). It follows three sources:
 the step refuses to run without it (`project_id` is NOT NULL). The operation is the HTTP method
 plus the Hono route pattern, read with `routePath(c)`, so it needs no shared vocabulary that could
 drift from `OPERATION_TYPES`.
-
 - The step must sit in a route's own chain. It throws if the pattern is a `use("*")` wildcard.
 - Renaming a path resets that route's keys, which is acceptable with 24h retention.
 
 **Fingerprint.** SHA-256 over canonical JSON (keys sorted by code unit) of the parts below. The
 credential is recorded on the row and compared in plain text rather than hashed:
-
 - the operation, path parameters, query parameters (repeated values in order) and the body as the
   route's validator left it (defaults applied, values normalised), so two spellings the schema
   treats as one request match;
@@ -56,7 +52,6 @@ decimal amounts (`"1.0"` and `"1"`) on the money routes, and an empty batch `opt
 
 **Order.** Authentication → project context → `requirePermissions` → Allowed Operations →
 validation → **`authorize`** → **this step** → replay from the domain row → admission → handler.
-
 - **Authorize, then dedupe.** `authorize(fn)` (`middleware/authorize.ts`) checks that the caller may
   act on every resource the request names, in tenant scope, and hands what it loaded to the
   handler. It runs before this step, so a replay passes exactly the checks a new request passes,
@@ -92,7 +87,6 @@ validation → **`authorize`** → **this step** → replay from the domain row 
 **Two layers.** This step is HTTP idempotency: one attempt per key, a stored answer for 24 hours,
 and a guard against concurrent duplicates. It does no foreign dedupe. The route's domain row is the
 recovery point:
-
 - it is written under a **credential-bound record key** (`getIdempotencyRecordKey`: SHA-256 over
   the scope, organization, project, credential and key, as `deriveProviderRequestId` derives), never
   the raw client key. Past the key record's 24 hours the row is what answers a retry, and a replay
@@ -227,23 +221,22 @@ records its outcome after all, which is then replayed). A released claim (a refu
 
 **Outcomes.**
 
-| Case | Stored? | Answer |
-|---|---|---|
-| No key on a `required` route | No, nothing claimed | 400 `IDEMPOTENCY_KEY_REQUIRED` |
-| Malformed key (not 1-255 printable ASCII) | No, nothing claimed | 400 `BAD_REQUEST` |
-| Same key, different fingerprint | No | 422 `IDEMPOTENCY_KEY_REUSED` |
-| Original still holds its lease | No | 409 `IDEMPOTENCY_KEY_IN_FLIGHT` + `Retry-After` |
-| Original's lease lapsed unreleased, within `claimed_at` + renewal cap + lease | No | 409 `IDEMPOTENCY_KEY_IN_FLIGHT` + `Retry-After` (time left, at most 60s) |
-| Lapsed unreleased past that window, `rerun` or `recovery: "record"` | Taken over | Answered from the domain row (or run again on `rerun`) |
-| Lapsed unreleased past that window, other `store` route | No; the claim is left as is | 409 `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN`, no `Retry-After`; terminal, retry with a new key |
-| Domain row exists, different fingerprint (`replayFromRecord`) | No | 422 `IDEMPOTENCY_KEY_REUSED` |
-| Domain row exists, same fingerprint (`replayFromRecord`) | Yes | The row's answer + `Idempotent-Replayed: true` |
-| 400, 401, 403, 409, 429 (validation, admission, permissions, conflicts) | No, unless the handler called `markIdempotencyCommitted`: a fresh claim is deleted, a taken-over one unlocked | Live; the same key runs again |
-| Any status once the handler has written its domain row (`markIdempotencyCommitted`), such as a 400 `TRANSACTION_FAILED` after the transfer row | Yes, 24h | Same status and body + `Idempotent-Replayed: true`; past 24h the failed row answers with the same status and code, and its message says to retry with a new key |
-| 5xx, `serverErrors: "store"` | Yes, like Stripe | Replayed; retry with a new key |
-| 5xx, `serverErrors: "rerun"` | No: unlocked, still bound to its fingerprint | A same-key retry runs again |
-| 2xx and other 4xx | Yes, 24h | Same status and body + `Idempotent-Replayed: true` |
-
+| Case                                                                                                                                           | Stored?                                                                                                       | Answer                                                                                                                                                          |
+| ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| No key on a `required` route                                                                                                                   | No, nothing claimed                                                                                           | 400 `IDEMPOTENCY_KEY_REQUIRED`                                                                                                                                  |
+| Malformed key (not 1-255 printable ASCII)                                                                                                      | No, nothing claimed                                                                                           | 400 `BAD_REQUEST`                                                                                                                                               |
+| Same key, different fingerprint                                                                                                                | No                                                                                                            | 422 `IDEMPOTENCY_KEY_REUSED`                                                                                                                                    |
+| Original still holds its lease                                                                                                                 | No                                                                                                            | 409 `IDEMPOTENCY_KEY_IN_FLIGHT` + `Retry-After`                                                                                                                 |
+| Original's lease lapsed unreleased, within `claimed_at` + renewal cap + lease                                                                  | No                                                                                                            | 409 `IDEMPOTENCY_KEY_IN_FLIGHT` + `Retry-After` (time left, at most 60s)                                                                                        |
+| Lapsed unreleased past that window, `rerun` or `recovery: "record"`                                                                            | Taken over                                                                                                    | Answered from the domain row (or run again on `rerun`)                                                                                                          |
+| Lapsed unreleased past that window, other `store` route                                                                                        | No; the claim is left as is                                                                                   | 409 `IDEMPOTENCY_KEY_OUTCOME_UNKNOWN`, no `Retry-After`; terminal, retry with a new key                                                                         |
+| Domain row exists, different fingerprint (`replayFromRecord`)                                                                                  | No                                                                                                            | 422 `IDEMPOTENCY_KEY_REUSED`                                                                                                                                    |
+| Domain row exists, same fingerprint (`replayFromRecord`)                                                                                       | Yes                                                                                                           | The row's answer + `Idempotent-Replayed: true`                                                                                                                  |
+| 400, 401, 403, 409, 429 (validation, admission, permissions, conflicts)                                                                        | No, unless the handler called `markIdempotencyCommitted`: a fresh claim is deleted, a taken-over one unlocked | Live; the same key runs again                                                                                                                                   |
+| Any status once the handler has written its domain row (`markIdempotencyCommitted`), such as a 400 `TRANSACTION_FAILED` after the transfer row | Yes, 24h                                                                                                      | Same status and body + `Idempotent-Replayed: true`; past 24h the failed row answers with the same status and code, and its message says to retry with a new key |
+| 5xx, `serverErrors: "store"`                                                                                                                   | Yes, like Stripe                                                                                              | Replayed; retry with a new key                                                                                                                                  |
+| 5xx, `serverErrors: "rerun"`                                                                                                                   | No: unlocked, still bound to its fingerprint                                                                  | A same-key retry runs again                                                                                                                                     |
+| 2xx and other 4xx                                                                                                                              | Yes, 24h                                                                                                      | Same status and body + `Idempotent-Replayed: true`                                                                                                              |
 - A request that wrote its domain row has spent its key, whatever it answered: the retry gets the
   same answer, never a different one from the row (a 400 first, then a 200 `status: "failed"`). To
   try again after fixing the cause, send a new key. Recurring-payment attempts differ: their
@@ -296,7 +289,6 @@ both log at error level for alerting.
 
 **Declaration.** The step carries `Symbol.for("sdp.idempotency")` with its mode. `IdempotencyKeyMode`
 lives in `@sdp/types`.
-
 - A route mounts the step itself, directly after its `authorize` step. A future composite route
   declaration can call the exported `runIdempotency` in the same position.
 - `recovery: "record"` is carried as `Symbol.for("sdp.idempotency.recovery")`, `replayFromRecord`
