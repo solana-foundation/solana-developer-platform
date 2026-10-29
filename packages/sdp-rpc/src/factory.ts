@@ -15,7 +15,7 @@ import {
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY,
   SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR,
 } from "@solana/kit";
-import { RpcTimeoutError, SdpRpcError } from "./errors";
+import { RpcTimeoutError, RpcUnavailableError, SdpRpcError } from "./errors";
 import {
   MANAGED_RPC_ENV_KEYS,
   MANAGED_RPC_HOSTS,
@@ -123,7 +123,7 @@ function withTransportDeadline(
  * @param cluster - The cluster the endpoint is configured for.
  * @param genesisProofKey - The endpoint's proof cache key.
  * @returns Resolves once the endpoint's genesis hash matches `cluster`.
- * @throws SdpRpcError `RPC_CLUSTER_MISMATCH` when the endpoint serves another cluster.
+ * @throws RpcUnavailableError `cluster_mismatch` when the endpoint serves another cluster.
  */
 function proveGenesis(
   endpointTransport: RpcTransport,
@@ -139,8 +139,8 @@ function proveGenesis(
       .getGenesisHash()
       .send();
     if (servedGenesisHash !== GENESIS_HASH_BY_CLUSTER[cluster]) {
-      throw new SdpRpcError(
-        "RPC_CLUSTER_MISMATCH",
+      throw new RpcUnavailableError(
+        "cluster_mismatch",
         `An RPC endpoint configured for ${cluster} serves a different cluster`,
         { cluster, genesisHash: servedGenesisHash }
       );
@@ -410,7 +410,7 @@ function createPoolTransport(endpoints: readonly RpcEndpoint[]) {
  *
  * @param cluster - The cluster whose pool to read.
  * @returns Every non-empty `SOLANA_RPC_<PROVIDER>_<CLUSTER>_API_KEY_URL` value, possibly none.
- * @throws SdpRpcError `RPC_NOT_CONFIGURED` when a value isn't an https URL on its slot's host.
+ * @throws RpcUnavailableError `not_configured` when a value isn't an https URL on its slot's host.
  */
 function configuredEndpointUrls(cluster: SolanaCluster): string[] {
   const envKeys = MANAGED_RPC_ENV_KEYS[cluster];
@@ -504,7 +504,7 @@ function managedEndpointUrlProblem(
  * @param provider - The slot's provider.
  * @param envKey - The slot's env key.
  * @param endpointUrl - The configured value.
- * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the URL can't serve the slot.
+ * @throws RpcUnavailableError `not_configured` when the URL can't serve the slot.
  */
 function assertManagedEndpointUrl(
   cluster: SolanaCluster,
@@ -516,8 +516,8 @@ function assertManagedEndpointUrl(
   if (validatedEndpointUrls.has(validatedKey)) return;
   const problem = managedEndpointUrlProblem(cluster, provider, endpointUrl);
   if (problem !== null) {
-    throw new SdpRpcError(
-      "RPC_NOT_CONFIGURED",
+    throw new RpcUnavailableError(
+      "not_configured",
       `${envKey} is not a ${cluster} endpoint: ${problem}`,
       {
         cluster,
@@ -533,23 +533,27 @@ function assertManagedEndpointUrl(
  *
  * @param cluster - The cluster whose pool to read.
  * @returns Every non-empty `SOLANA_RPC_<PROVIDER>_<CLUSTER>_API_KEY_URL` value.
- * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the cluster has no endpoint configured.
+ * @throws RpcUnavailableError `not_configured` when the cluster has no endpoint configured.
  */
 function managedEndpointUrls(cluster: SolanaCluster): string[] {
   const endpointUrls = configuredEndpointUrls(cluster);
   if (endpointUrls.length === 0) {
-    throw new SdpRpcError("RPC_NOT_CONFIGURED", `No RPC endpoint is configured for ${cluster}`, {
-      cluster,
-    });
+    throw new RpcUnavailableError(
+      "not_configured",
+      `No RPC endpoint is configured for ${cluster}`,
+      {
+        cluster,
+      }
+    );
   }
   return endpointUrls;
 }
 
 /**
  * Boot check for deployments that must serve every cluster: each cluster's managed pool names at
- * least one endpoint, so `createClusterRpc()` never answers `RPC_NOT_CONFIGURED` at request time.
+ * least one endpoint, so `createClusterRpc()` never answers `not_configured` at request time.
  *
- * @throws SdpRpcError `RPC_NOT_CONFIGURED` naming the first cluster with no endpoint.
+ * @throws RpcUnavailableError `not_configured` naming the first cluster with no endpoint.
  */
 export function assertManagedRpcConfigured(): void {
   for (const cluster of SOLANA_CLUSTERS) {
@@ -576,7 +580,7 @@ export type ClusterRpcOptions = Readonly<{
  * @param options.timeoutMs - The end-to-end deadline for each request.
  * @returns The RPC client for the scope's cluster.
  * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
- * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the cluster has no endpoint configured.
+ * @throws RpcUnavailableError `not_configured` when the cluster has no endpoint configured.
  */
 export function createClusterRpc(options?: ClusterRpcOptions): SolanaRpc {
   const { cluster } = currentClusterScope();
@@ -605,7 +609,7 @@ export function createClusterRpc(options?: ClusterRpcOptions): SolanaRpc {
  *
  * @returns The history RPC client for the scope's cluster.
  * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
- * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the cluster has no endpoint configured.
+ * @throws RpcUnavailableError `not_configured` when the cluster has no endpoint configured.
  */
 export function createClusterHistoryRpc(): SolanaRpc {
   const { cluster } = currentClusterScope();
@@ -629,15 +633,15 @@ export function createClusterHistoryRpc(): SolanaRpc {
  *
  * @returns The Kora upstream RPC client for the scope's cluster.
  * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
- * @throws SdpRpcError `RPC_NOT_CONFIGURED` when the cluster's `KORA_<CLUSTER>_RPC_URL` is unset.
+ * @throws RpcUnavailableError `not_configured` when the cluster's `KORA_<CLUSTER>_RPC_URL` is unset.
  */
 export function createKoraUpstreamRpc(): SolanaRpc {
   const { cluster } = currentClusterScope();
   const envKey = KORA_UPSTREAM_RPC_ENV_KEYS[cluster];
   const endpointUrl = process.env[envKey]?.trim();
   if (!endpointUrl) {
-    throw new SdpRpcError(
-      "RPC_NOT_CONFIGURED",
+    throw new RpcUnavailableError(
+      "not_configured",
       `No Kora upstream RPC is configured for ${cluster}: set ${envKey}`,
       { cluster }
     );
@@ -692,8 +696,8 @@ export function earnClusterEndpointUrls(cluster: SolanaCluster): string[] {
  * @returns Resolves once the endpoint holds an unexpired proof.
  * @throws SdpRpcError `CLUSTER_SCOPE_MISSING` outside a cluster scope.
  * @throws SdpRpcError `CLUSTER_SCOPE_CONFLICT` when the scope serves the other cluster.
- * @throws SdpRpcError `RPC_NOT_CONFIGURED` when `endpointUrl` is not in `cluster`'s pool.
- * @throws SdpRpcError `RPC_CLUSTER_MISMATCH` when the endpoint serves another cluster.
+ * @throws RpcUnavailableError `not_configured` when `endpointUrl` is not in `cluster`'s pool.
+ * @throws RpcUnavailableError `cluster_mismatch` when the endpoint serves another cluster.
  */
 export async function proveEarnClusterEndpoint(
   cluster: SolanaCluster,
@@ -701,8 +705,8 @@ export async function proveEarnClusterEndpoint(
 ): Promise<void> {
   assertScopeServes(cluster);
   if (!configuredEndpointUrls(cluster).includes(endpointUrl)) {
-    throw new SdpRpcError(
-      "RPC_NOT_CONFIGURED",
+    throw new RpcUnavailableError(
+      "not_configured",
       `The endpoint is not in the ${cluster} managed pool`,
       { cluster }
     );

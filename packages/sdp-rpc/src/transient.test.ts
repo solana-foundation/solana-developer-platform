@@ -11,6 +11,7 @@ import { RpcHttpStatusError, RpcTimeoutError } from "./errors";
 import { fetchFailedError } from "./test-fixtures";
 import {
   isForbiddenRpcError,
+  isRpcUpstreamUnavailable,
   isTransientRpcError,
   isUnauthorizedRpcError,
   transientJsonRpcVerdict,
@@ -292,4 +293,16 @@ test("does not retry a Kit HTTP 400", async () => {
     (error) => error === badRequest
   );
   assert.equal(calls, 1);
+});
+
+test("names only RPC-sourced transient failures upstream-unavailable", async () => {
+  assert.equal(isRpcUpstreamUnavailable(await kitHttpError(429, "Too Many Requests")), true);
+  assert.equal(isRpcUpstreamUnavailable(new RpcTimeoutError(25)), true);
+  assert.equal(isRpcUpstreamUnavailable(new RpcHttpStatusError(503, "down")), true);
+  const [timeout] = decodedUnder("production", TRANSIENT_JSON_RPC_ERRORS);
+  assert.equal(isRpcUpstreamUnavailable(timeout), true);
+  // Persistent RPC errors and bare network errors (any `fetch` could have thrown) stay out.
+  assert.equal(isRpcUpstreamUnavailable(await kitHttpError(401, "Unauthorized")), false);
+  assert.equal(isRpcUpstreamUnavailable(fetchFailedError()), false);
+  assert.equal(isRpcUpstreamUnavailable(new Error("503")), false);
 });

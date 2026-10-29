@@ -20,7 +20,7 @@ import {
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
 } from "@solana/kit";
-import { SdpRpcError } from "./errors";
+import { RpcUnavailableError } from "./errors";
 import {
   assertManagedRpcConfigured,
   createClusterHistoryRpc,
@@ -369,11 +369,11 @@ describe("createClusterRpc", () => {
     configurePool({ SOLANA_RPC_TRITON_DEVNET_API_KEY_URL: "https://devnet-only.example.test" });
 
     assert.throws(() => runInClusterScope(PRODUCTION, createClusterRpc), {
-      name: "SdpRpcError",
+      name: "RpcUnavailableError",
       message: "No RPC endpoint is configured for mainnet-beta",
-      code: "RPC_NOT_CONFIGURED",
+      code: "RPC_UNAVAILABLE",
       statusCode: 503,
-      details: { cluster: "mainnet-beta" },
+      details: { reason: "not_configured", cluster: "mainnet-beta" },
     });
   });
 
@@ -387,11 +387,15 @@ describe("createClusterRpc", () => {
     const calls = stubEndpoints({ [wrongCluster]: SERVES_MAINNET, [healthy]: SERVES_DEVNET });
 
     await assert.rejects(runInClusterScope(SANDBOX, createClusterRpc).getSlot().send(), {
-      name: "SdpRpcError",
+      name: "RpcUnavailableError",
       message: "An RPC endpoint configured for devnet serves a different cluster",
-      code: "RPC_CLUSTER_MISMATCH",
-      statusCode: 500,
-      details: { cluster: "devnet", genesisHash: GENESIS_HASH_BY_CLUSTER["mainnet-beta"] },
+      code: "RPC_UNAVAILABLE",
+      statusCode: 503,
+      details: {
+        reason: "cluster_mismatch",
+        cluster: "devnet",
+        genesisHash: GENESIS_HASH_BY_CLUSTER["mainnet-beta"],
+      },
     });
     assert.deepEqual(calls, [genesisProbe(wrongCluster)]);
   });
@@ -406,11 +410,15 @@ describe("createClusterRpc", () => {
 
     assert.equal(await runInClusterScope(SANDBOX, createClusterRpc).getSlot().send(), BigInt(SLOT));
     await assert.rejects(runInClusterScope(PRODUCTION, createClusterRpc).getSlot().send(), {
-      name: "SdpRpcError",
+      name: "RpcUnavailableError",
       message: "An RPC endpoint configured for mainnet-beta serves a different cluster",
-      code: "RPC_CLUSTER_MISMATCH",
-      statusCode: 500,
-      details: { cluster: "mainnet-beta", genesisHash: GENESIS_HASH_BY_CLUSTER.devnet },
+      code: "RPC_UNAVAILABLE",
+      statusCode: 503,
+      details: {
+        reason: "cluster_mismatch",
+        cluster: "mainnet-beta",
+        genesisHash: GENESIS_HASH_BY_CLUSTER.devnet,
+      },
     });
     assert.deepEqual(calls, [genesisProbe(url), slotRead(url), genesisProbe(url)]);
   });
@@ -908,8 +916,9 @@ describe("managed endpoint URL validation", () => {
       configurePool({ ...VALID_URLS, [envKey]: endpointUrl });
 
       assert.throws(assertManagedRpcConfigured, (error: unknown) => {
-        assert.ok(error instanceof SdpRpcError);
-        assert.equal(error.code, "RPC_NOT_CONFIGURED");
+        assert.ok(error instanceof RpcUnavailableError);
+        assert.equal(error.code, "RPC_UNAVAILABLE");
+        assert.equal(error.reason, "not_configured");
         assert.equal(error.details?.envKey, envKey);
         assert.match(error.message, new RegExp(`^${envKey} `));
         assert.doesNotMatch(JSON.stringify([error.message, error.details]), /secret/);
@@ -925,7 +934,8 @@ describe("managed endpoint URL validation", () => {
     const calls = stubEndpoints({});
 
     assert.throws(() => runInClusterScope(PRODUCTION, createClusterRpc), {
-      code: "RPC_NOT_CONFIGURED",
+      code: "RPC_UNAVAILABLE",
+      reason: "not_configured",
     });
     assert.deepEqual(calls, []);
   });
@@ -1114,12 +1124,13 @@ describe("Earn's URL helpers", () => {
     await runInClusterScope(SANDBOX, async () => {
       await assert.rejects(
         proveEarnClusterEndpoint("devnet", "https://devnet-earn-stranger.example.test"),
-        { name: "SdpRpcError", code: "RPC_NOT_CONFIGURED" }
+        { name: "RpcUnavailableError", code: "RPC_UNAVAILABLE" }
       );
       assert.deepEqual(calls, []);
       await assert.rejects(proveEarnClusterEndpoint("devnet", pooled), {
-        name: "SdpRpcError",
-        code: "RPC_CLUSTER_MISMATCH",
+        name: "RpcUnavailableError",
+        code: "RPC_UNAVAILABLE",
+        reason: "cluster_mismatch",
       });
     });
     assert.deepEqual(calls, [genesisProbe(pooled)]);
@@ -1252,18 +1263,18 @@ describe("createKoraUpstreamRpc", () => {
     configureKoraUpstreams({ KORA_DEVNET_RPC_URL: "  " });
 
     assert.throws(() => runInClusterScope(SANDBOX, createKoraUpstreamRpc), {
-      name: "SdpRpcError",
+      name: "RpcUnavailableError",
       message: "No Kora upstream RPC is configured for devnet: set KORA_DEVNET_RPC_URL",
-      code: "RPC_NOT_CONFIGURED",
+      code: "RPC_UNAVAILABLE",
       statusCode: 503,
-      details: { cluster: "devnet" },
+      details: { reason: "not_configured", cluster: "devnet" },
     });
     assert.throws(() => runInClusterScope(PRODUCTION, createKoraUpstreamRpc), {
-      name: "SdpRpcError",
+      name: "RpcUnavailableError",
       message: "No Kora upstream RPC is configured for mainnet-beta: set KORA_MAINNET_RPC_URL",
-      code: "RPC_NOT_CONFIGURED",
+      code: "RPC_UNAVAILABLE",
       statusCode: 503,
-      details: { cluster: "mainnet-beta" },
+      details: { reason: "not_configured", cluster: "mainnet-beta" },
     });
   });
 

@@ -1,16 +1,17 @@
+import type { RpcUnavailableReason } from "@sdp/types/rpc";
+import type { SolanaCluster } from "@sdp/types/well-known-tokens";
+
 export type SdpRpcErrorCode =
   | "BAD_REQUEST"
   | "SOLANA_RPC_ERROR"
-  | "RPC_NOT_CONFIGURED"
-  | "RPC_CLUSTER_MISMATCH"
+  | "RPC_UNAVAILABLE"
   | "CLUSTER_SCOPE_MISSING"
   | "CLUSTER_SCOPE_CONFLICT";
 
 const ERROR_STATUS_CODES: Record<SdpRpcErrorCode, number> = {
   BAD_REQUEST: 400,
   SOLANA_RPC_ERROR: 502,
-  RPC_NOT_CONFIGURED: 503,
-  RPC_CLUSTER_MISMATCH: 500,
+  RPC_UNAVAILABLE: 503,
   CLUSTER_SCOPE_MISSING: 500,
   CLUSTER_SCOPE_CONFLICT: 500,
 };
@@ -26,6 +27,30 @@ export class SdpRpcError extends Error {
     super(message);
     this.name = "SdpRpcError";
     this.statusCode = ERROR_STATUS_CODES[code];
+  }
+}
+
+/**
+ * Solana RPC can't serve the request, with `details: { reason, cluster }` saying why (see
+ * `RPC_UNAVAILABLE_REASONS`). Callers branch on `reason`, never on the message.
+ */
+export class RpcUnavailableError extends SdpRpcError {
+  /** The cluster RPC was unavailable for. */
+  public readonly cluster: SolanaCluster;
+
+  /**
+   * @param reason - Why RPC is unavailable.
+   * @param message - What failed, never quoting an endpoint URL.
+   * @param details - The cluster, plus any reason-specific facts.
+   */
+  constructor(
+    public readonly reason: RpcUnavailableReason,
+    message: string,
+    details: { cluster: SolanaCluster } & Record<string, unknown>
+  ) {
+    super("RPC_UNAVAILABLE", message, { reason, ...details });
+    this.name = "RpcUnavailableError";
+    this.cluster = details.cluster;
   }
 }
 

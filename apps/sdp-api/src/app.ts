@@ -14,7 +14,10 @@ import { FeePaymentError } from "@sdp/fee-payment/port";
 import { SdpPaymentsError } from "@sdp/payments/errors";
 import { redactCredentialSecrets, redactCredentialString } from "@sdp/redaction/credentials";
 import { scrubTelemetry } from "@sdp/redaction/scrub";
-import { SdpRpcError } from "@sdp/rpc/errors";
+import { RpcUnavailableError, SdpRpcError } from "@sdp/rpc/errors";
+import { isRpcUpstreamUnavailable } from "@sdp/rpc/transient";
+import type { RpcUnavailableReason } from "@sdp/types/rpc";
+import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types/well-known-tokens";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { HTTPException } from "hono/http-exception";
@@ -242,6 +245,117 @@ function getFireblocksBlockedError(err: Error): {
   };
 }
 
+/** How long a client is told to wait after Solana RPC was unavailable upstream. */
+const RPC_UNAVAILABLE_RETRY_AFTER_SECONDS = 2;
+
+/**
+ * Why `err` means Solana RPC is unavailable, or `null` when it doesn't: the pool's own
+ * `RpcUnavailableError`, or a transient failure from RPC itself (provider 429/5xx, a JSON-RPC
+ * timeout, SDP's attempt deadline) that reached the boundary uncaught.
+ */
+function rpcUnavailableFor(
+  err: Error
+): { reason: RpcUnavailableReason; cluster: SolanaCluster | undefined } | null {
+  if (err instanceof RpcUnavailableError) return { reason: err.reason, cluster: err.cluster };
+  return isRpcUpstreamUnavailable(err)
+    ? { reason: "upstream_unavailable", cluster: undefined }
+    : null;
+}
+
+/**
+ * One `503 RPC_UNAVAILABLE` for every way RPC can be unavailable, with `details: { reason,
+ * cluster }` so a client can tell "retry later" from "this won't work". Only
+ * `upstream_unavailable` is transient, so only it carries `Retry-After`. The body never repeats
+ * the thrown message, which can name env keys and genesis hashes; operators read those in the log.
+ */
+function rpcUnavailableResponse(
+  c: Context<{ Bindings: Env }>,
+  { reason, cluster: thrownCluster }: NonNullable<ReturnType<typeof rpcUnavailableFor>>
+): Response {
+  const environment = c.get("projectEnvironment");
+  const cluster =
+    environment === undefined ? thrownCluster : CLUSTER_BY_SDP_ENVIRONMENT[environment];
+  if (reason === "upstream_unavailable") {
+    c.header("Retry-After", String(RPC_UNAVAILABLE_RETRY_AFTER_SECONDS));
+  }
+  c.header("X-SDP-Trace-ID", c.get("traceId"));
+  return c.json(
+    {
+      error: {
+        code: "RPC_UNAVAILABLE",
+        message:
+          reason === "upstream_unavailable"
+            ? "Solana RPC is temporarily unavailable. Retry after the Retry-After delay."
+            : "Solana RPC is not available for this environment.",
+        details: { reason, ...(cluster && { cluster }) },
+      },
+      meta: { requestId: c.get("requestId") },
+    },
+    503
+  );
+}
+
+/**
+ * The response for an error thrown by an SDP SDK (`@sdp/rpc`, `@sdp/payments`, `@sdp/earn`), or
+ * `null` when `err` is none of theirs. RPC unavailability, including a transient kit error that
+ * reached the boundary uncaught, is one `503 RPC_UNAVAILABLE`; any other SDK error answers its own
+ * code and status.
+ *
+ * @param c - The request context.
+ * @param err - The thrown error.
+ * @param path - The matched route, for the log.
+ * @param logVendorError - Logs the `sdp_api_vendor_error` event for `err`.
+ */
+function sdkErrorResponse(
+  c: Context<{ Bindings: Env }>,
+  err: Error,
+  path: string,
+  logVendorError: (vendor: string, code: string, status: number) => void
+): Response | null {
+  const rpcUnavailable = rpcUnavailableFor(err);
+  if (rpcUnavailable !== null) {
+    logVendorError("rpc", "RPC_UNAVAILABLE", 503);
+    return rpcUnavailableResponse(c, rpcUnavailable);
+  }
+  if (
+    !(err instanceof SdpRpcError || err instanceof SdpPaymentsError || err instanceof SdpEarnError)
+  ) {
+    return null;
+  }
+  const requestId = c.get("requestId");
+  if (err instanceof SdpRpcError) {
+    logVendorError("rpc", err.code, err.statusCode);
+  }
+  // The provider's own wording never reaches the body below; operators read
+  // it here. Its own event, so it stays out of the vendor-error alert, which
+  // leaves ramps to sdp_api_ramp_provider_error.
+  if (err instanceof SdpPaymentsError && err.diagnostics !== undefined) {
+    logEvent(err.statusCode >= 500 ? "error" : "warn", {
+      event: "sdp_api_payments_provider_error",
+      code: err.code,
+      status: err.statusCode,
+      method: c.req.method,
+      path,
+      request_id: requestId,
+      ...describeError(err),
+      error_diagnostics: paymentsErrorDiagnostics(err),
+    });
+  }
+  const details = err.details ? redactCredentialSecrets(err.details) : undefined;
+  c.header("X-SDP-Trace-ID", c.get("traceId"));
+  return c.json(
+    {
+      error: {
+        code: err.code,
+        message: redactCredentialString(err.message),
+        ...(details && { details }),
+      },
+      meta: { requestId },
+    },
+    mapErrorStatusCode(err.statusCode)
+  );
+}
+
 /** How long a client is told to wait after the database could not take its request. */
 const DATABASE_UNAVAILABLE_RETRY_AFTER_SECONDS = 2;
 
@@ -446,43 +560,8 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
       return appErrorResponse(c, normalizedError);
     }
 
-    if (
-      err instanceof SdpRpcError ||
-      err instanceof SdpPaymentsError ||
-      err instanceof SdpEarnError
-    ) {
-      if (err instanceof SdpRpcError) {
-        logVendorError("rpc", err.code, err.statusCode);
-      }
-      // The provider's own wording never reaches the body below; operators read
-      // it here. Its own event, so it stays out of the vendor-error alert, which
-      // leaves ramps to sdp_api_ramp_provider_error.
-      if (err instanceof SdpPaymentsError && err.diagnostics !== undefined) {
-        logEvent(err.statusCode >= 500 ? "error" : "warn", {
-          event: "sdp_api_payments_provider_error",
-          code: err.code,
-          status: err.statusCode,
-          method: c.req.method,
-          path,
-          request_id: requestId,
-          ...describeError(err),
-          error_diagnostics: paymentsErrorDiagnostics(err),
-        });
-      }
-      const details = err.details ? redactCredentialSecrets(err.details) : undefined;
-      c.header("X-SDP-Trace-ID", traceId);
-      return c.json(
-        {
-          error: {
-            code: err.code,
-            message: redactCredentialString(err.message),
-            ...(details && { details }),
-          },
-          meta: { requestId },
-        },
-        mapErrorStatusCode(err.statusCode)
-      );
-    }
+    const sdkResponse = sdkErrorResponse(c, err, path, logVendorError);
+    if (sdkResponse !== null) return sdkResponse;
 
     if (err instanceof SigningError) {
       const mapped = mapSigningError(err);

@@ -12,7 +12,7 @@ import {
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_TRANSACTION_HISTORY_NOT_AVAILABLE,
   SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR,
 } from "@solana/kit";
-import { RpcHttpStatusError, RpcTimeoutError } from "./errors";
+import { RpcHttpStatusError, RpcTimeoutError, SdpRpcError } from "./errors";
 
 // Overloaded-gateway / timeout HTTP statuses worth retrying.
 const TRANSIENT_HTTP_STATUS_CODES: ReadonlySet<number> = new Set([408, 429, 500, 502, 503, 504]);
@@ -109,6 +109,19 @@ export function isTransientRpcError(error: unknown): boolean {
   if (error instanceof RpcHttpStatusError) return TRANSIENT_HTTP_STATUS_CODES.has(error.httpStatus);
   if (transientJsonRpcVerdict(error) !== undefined) return true;
   return isTransientNetworkError(error);
+}
+
+/**
+ * Returns `true` when a transient failure came from Solana RPC itself: a kit `SolanaError`, an SDP
+ * RPC error (the attempt deadline) or an SDP guarded transport's HTTP status. The API answers these
+ * `503 RPC_UNAVAILABLE` with reason `upstream_unavailable`. A bare network error is excluded,
+ * since nothing tells an RPC fetch apart from any other `fetch` once it reaches the boundary.
+ */
+export function isRpcUpstreamUnavailable(error: unknown): boolean {
+  return (
+    (isSolanaError(error) || error instanceof SdpRpcError || error instanceof RpcHttpStatusError) &&
+    isTransientRpcError(error)
+  );
 }
 
 /**

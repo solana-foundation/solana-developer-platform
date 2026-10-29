@@ -1,5 +1,5 @@
 import { providerNotConfigured, type SdpEarnError } from "@sdp/earn/errors";
-import { SdpRpcError } from "@sdp/rpc/errors";
+import { RpcUnavailableError } from "@sdp/rpc/errors";
 // biome-ignore-start lint/style/noRestrictedImports: Earn's provider packages take endpoint URLs until they take clients (HOO-1881)
 import { earnClusterEndpointUrls, proveEarnClusterEndpoint } from "@sdp/rpc/factory";
 // biome-ignore-end lint/style/noRestrictedImports: the URL helpers' one importer ends here
@@ -68,7 +68,7 @@ export async function assertClusterEndpoint(cluster: SolanaCluster, rpcUrl: stri
   try {
     await proveEarnClusterEndpoint(cluster, rpcUrl);
   } catch (cause) {
-    if (cause instanceof SdpRpcError && cause.code === "RPC_CLUSTER_MISMATCH") {
+    if (cause instanceof RpcUnavailableError && cause.reason === "cluster_mismatch") {
       throw providerNotConfigured(
         `The RPC endpoint configured for ${cluster} reports genesis ` +
           `${String(cause.details?.genesisHash)}, not ${GENESIS_HASH_BY_CLUSTER[cluster]}. ` +

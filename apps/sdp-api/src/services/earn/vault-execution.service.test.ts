@@ -305,7 +305,7 @@ describe("vault execution validation", () => {
         owner,
         fee: { kind: "wallet-pays" },
       })
-    ).rejects.toMatchObject({ code: "RPC_CLUSTER_MISMATCH" });
+    ).rejects.toMatchObject({ code: "RPC_UNAVAILABLE", reason: "cluster_mismatch" });
     await expect(
       simulateVaultPlan({
         deadline: createVaultDeadline(),
@@ -314,13 +314,13 @@ describe("vault execution validation", () => {
         owner: ownerAddress,
         fee: { kind: "wallet-pays" },
       })
-    ).rejects.toMatchObject({ code: "RPC_CLUSTER_MISMATCH" });
+    ).rejects.toMatchObject({ code: "RPC_UNAVAILABLE", reason: "cluster_mismatch" });
     await expect(
       broadcastVaultTransaction({
         deadline: createVaultDeadline(),
         bytes: new Uint8Array(),
       })
-    ).rejects.toMatchObject({ code: "RPC_CLUSTER_MISMATCH" });
+    ).rejects.toMatchObject({ code: "RPC_UNAVAILABLE", reason: "cluster_mismatch" });
 
     // A mismatch is never cached, so each path re-probed, and nothing else left SDP.
     expect(methods).toEqual(["getGenesisHash", "getGenesisHash", "getGenesisHash"]);

@@ -288,7 +288,7 @@ describe("guardDepositMints", () => {
         expect.objectContaining({
           event: EARN_DEPOSIT_MINT_GUARD_SKIPPED_EVENT,
           cluster: "mainnet-beta",
-          error_code: "RPC_NOT_CONFIGURED",
+          error_code: "RPC_UNAVAILABLE",
         })
       );
     }

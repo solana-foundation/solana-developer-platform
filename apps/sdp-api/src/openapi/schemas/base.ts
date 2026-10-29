@@ -136,6 +136,7 @@ const errorCodeSchema = z
     "CONFLICT",
     "RATE_LIMITED",
     "SERVICE_UNAVAILABLE",
+    "RPC_UNAVAILABLE",
     "INTERNAL_ERROR",
     "NOT_ALLOWLISTED",
     "INVALID_API_KEY",
