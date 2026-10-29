@@ -125,10 +125,12 @@ export const initializeSigningResponseSchema = z
 const custodyWalletOwnerConstraint = {
   oneOf: [
     {
+      description: "Owned by a Managed config.",
       required: ["custodyConfigId"],
       not: { required: ["custodyConnectionId"] },
     },
     {
+      description: "Owned by a Custody Connection.",
       required: ["custodyConnectionId"],
       not: { required: ["custodyConfigId"] },
     },

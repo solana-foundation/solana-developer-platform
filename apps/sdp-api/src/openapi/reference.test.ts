@@ -1,4 +1,4 @@
-import { apiReferenceSchema } from "@sdp/api-catalog/reference";
+import { type ApiSchema, apiReferenceSchema } from "@sdp/api-catalog/reference";
 import { buildSnippets, SNIPPET_LANGUAGES } from "@sdp/api-catalog/snippets";
 import { SDP_RELEASE_CHANNEL_NAMES } from "@sdp/types/release-channels";
 import { DEFAULT_SDP_API_URL } from "@sdp/types/site";
@@ -77,6 +77,37 @@ describe("buildApiReference", () => {
         }
       });
 
+      it("gives every JSON response its schema, naming each field its example shows", () => {
+        for (const operation of operations) {
+          for (const response of operation.responses) {
+            if (response.body.kind !== "json") continue;
+            const shown = Object.keys(z.record(z.string(), z.json()).parse(response.body.example));
+            const { properties } = response.body.schema;
+            expect(properties.map((property) => property.name)).toEqual(
+              expect.arrayContaining(shown)
+            );
+            expect(shown).toEqual(
+              expect.arrayContaining(
+                properties.filter((property) => property.required).map((property) => property.name)
+              )
+            );
+          }
+        }
+      });
+
+      it("lists no error codes, since the document's list names held modules' too", () => {
+        for (const operation of operations) {
+          for (const response of operation.responses) {
+            if (response.body.kind !== "json") continue;
+            const error = response.body.schema.properties.find(({ name }) => name === "error");
+            const code = error?.schema.properties.find(({ name }) => name === "code");
+            expect(code?.schema.enum ?? null, `${operation.operationId} ${response.status}`).toBe(
+              null
+            );
+          }
+        }
+      });
+
       it("writes three samples per operation, each key only where the route takes it", () => {
         for (const operation of operations) {
           const snippets = buildSnippets({
@@ -121,6 +152,7 @@ describe("buildApiReference", () => {
     expect(createWallet?.action).toBe("wallets.manage");
     expect(createWallet?.responses.find((response) => response.status === "403")?.body).toEqual({
       kind: "json",
+      schema: expect.any(Object),
       example: {
         error: {
           code: "INSUFFICIENT_PERMISSIONS",
@@ -151,6 +183,96 @@ describe("buildApiReference", () => {
     expect(createWallet?.requestBody?.schema.variants[0]?.schema.constraints).toEqual([
       { kind: "excludes", value: ["connectionId"] },
     ]);
+  });
+
+  it("titles a response's variants, nested ones too, and keeps the fields each requires", () => {
+    const operations = buildApiReference(
+      createPublicOpenApiDocument({ releaseChannel: "stable" })
+    ).families.flatMap((family) => family.operations);
+    const responseField = (operationId: string, status: string, ...path: string[]) => {
+      const body = operations
+        .find((operation) => operation.operationId === operationId)
+        ?.responses.find((response) => response.status === status)?.body;
+      if (body?.kind !== "json") throw new Error(`${operationId} ${status} has no JSON body`);
+      return path.reduce((schema: ApiSchema, name) => {
+        const property = schema.properties.find((each) => each.name === name);
+        if (property === undefined) throw new Error(`${operationId} ${status} has no ${name}`);
+        return property.schema;
+      }, body.schema);
+    };
+    const providers = responseField("getProjectProviderAvailability", "200", "data", "providers");
+    expect(providers.items?.variantMode).toBe("oneOf");
+    expect(providers.items?.variants[0]?.title).toBe('family: "custody"');
+    // A family's entry is a oneOf of its own, which both its variants pin to that family.
+    const compliance = providers.items?.variants.find(
+      (variant) => variant.title === 'family: "compliance"'
+    );
+    expect(compliance?.schema.variants.map((variant) => variant.title)).toEqual([
+      "available: true",
+      "available: false",
+    ]);
+    const wallet = responseField("createWallet", "201", "data", "wallet");
+    expect(wallet.variants.map((variant) => [variant.title, variant.schema.constraints])).toEqual([
+      [
+        "Owned by a Managed config.",
+        [
+          { kind: "includes", value: ["custodyConfigId"] },
+          { kind: "excludes", value: ["custodyConnectionId"] },
+        ],
+      ],
+      [
+        "Owned by a Custody Connection.",
+        [
+          { kind: "includes", value: ["custodyConnectionId"] },
+          { kind: "excludes", value: ["custodyConfigId"] },
+        ],
+      ],
+    ]);
+  });
+
+  it("carries the null of a nullable union or enum as `nullable`", () => {
+    const reference = buildApiReference(
+      documentWith({
+        operationId: "getHealth",
+        summary: "Health",
+        responses: {
+          "200": {
+            description: "OK",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    units: { anyOf: [{ type: "number" }, { type: "string" }, { nullable: true }] },
+                    purpose: { type: "string", nullable: true, enum: ["root", null] },
+                  },
+                },
+              },
+            },
+          },
+        },
+      })
+    );
+    const body = reference.families[0]?.operations[0]?.responses[0]?.body;
+    if (body?.kind !== "json") throw new Error("getHealth has no JSON body");
+    const [units, purpose] = body.schema.properties.map((property) => property.schema);
+    expect(units).toMatchObject({
+      nullable: true,
+      variants: [{ title: "number" }, { title: "string" }],
+    });
+    expect(purpose).toMatchObject({ nullable: true, enum: ["root"] });
+  });
+
+  it("fails the build on null in an enum that is not nullable", () => {
+    expect(() =>
+      buildApiReference(
+        documentWith({
+          operationId: "getHealth",
+          summary: "Health",
+          parameters: [{ name: "q", in: "query", schema: { type: "string", enum: ["a", null] } }],
+        })
+      )
+    ).toThrow("null in an enum that is not nullable");
   });
 
   it("turns an OpenAPI 3.0 exclusive minimum into its own bound", () => {

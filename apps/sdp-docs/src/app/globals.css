@@ -1797,6 +1797,17 @@ body {
   font-size: var(--font-size-meta);
 }
 
+/* Under Responses (the generator's `## Responses`), a status leads with its description, which
+   reads as body text; the fields under it keep the field style above. */
+.is-api-reference
+  #responses
+  + .launch-mdx-unordered-list
+  > .launch-mdx-list-item
+  > .launch-mdx-paragraph:first-child {
+  color: var(--ink-secondary);
+  font-size: var(--font-size-body);
+}
+
 /* The dot between two facts, with room on either side (`remarkDocsBlocks` sets it apart). */
 .launch-api-separator {
   margin: 0 0.3em;

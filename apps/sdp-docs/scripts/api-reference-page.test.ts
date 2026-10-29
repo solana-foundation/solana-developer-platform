@@ -41,6 +41,65 @@ const ERROR_EXAMPLE = {
   meta: { requestId: "req_example" },
 };
 
+const ERROR_SCHEMA = schema({
+  type: "object",
+  properties: [
+    {
+      name: "error",
+      required: true,
+      schema: schema({
+        type: "object",
+        properties: [
+          { name: "code", required: true, schema: schema({}) },
+          { name: "message", required: true, schema: schema({}) },
+          {
+            name: "details",
+            required: false,
+            schema: schema({
+              type: "object",
+              additionalProperties: schema({ type: null, nullable: true }),
+            }),
+          },
+        ],
+      }),
+    },
+    {
+      name: "meta",
+      required: false,
+      schema: schema({
+        type: "object",
+        properties: [{ name: "requestId", required: true, schema: schema({}) }],
+      }),
+    },
+  ],
+});
+
+const WIDGET_SCHEMA = schema({
+  type: "object",
+  properties: [
+    {
+      name: "data",
+      required: true,
+      schema: schema({
+        type: "object",
+        description: "The widget.",
+        properties: [
+          { name: "id", required: true, schema: schema({ example: "wdg_1" }) },
+          {
+            name: "owner",
+            required: false,
+            schema: schema({
+              type: "object",
+              nullable: true,
+              properties: [{ name: "name", required: true, schema: schema({}) }],
+            }),
+          },
+        ],
+      }),
+    },
+  ],
+});
+
 const CREATE_WIDGET: ApiOperation = {
   operationId: "createWidget",
   endpointId: "create-widget",
@@ -107,9 +166,26 @@ const CREATE_WIDGET: ApiOperation = {
     }),
   },
   responses: [
-    { status: "201", description: "Created it", body: { kind: "json", example: { id: "wdg_1" } } },
+    {
+      status: "201",
+      description: "Created it",
+      body: { kind: "json", schema: WIDGET_SCHEMA, example: { data: { id: "wdg_1" } } },
+    },
     { status: "204", description: "No body", body: { kind: "empty" } },
-    { status: "404", description: "Error", body: { kind: "json", example: ERROR_EXAMPLE } },
+    {
+      status: "404",
+      description: "Error",
+      body: { kind: "json", schema: ERROR_SCHEMA, example: ERROR_EXAMPLE },
+    },
+    {
+      status: "409",
+      description: "Error",
+      body: {
+        kind: "json",
+        schema: ERROR_SCHEMA,
+        example: { ...ERROR_EXAMPLE, error: { code: "CONFLICT", message: "Conflict" } },
+      },
+    },
   ],
   request: { path: "/v1/widgets/wdg_1", body: { kind: "round" } },
 };
@@ -170,20 +246,142 @@ describe("renderOperation", () => {
   });
 
   it("lists every status, and gives each JSON answer a response tab", () => {
-    assert.ok(
-      markdown.includes("- **`201`** Created it\n- **`204`** No body\n- **`404`** Not Found")
+    const at = ["- **`201`** Created it", "- **`204`** No body", "- **`404`** Not Found"].map(
+      (status) => markdown.indexOf(status)
     );
+    assert.ok(!at.includes(-1), at.join(", "));
+    assert.deepEqual(
+      at,
+      [...at].sort((left, right) => left - right)
+    );
+    assert.ok(markdown.includes("- **`204`** No body\n\n- **`404`** Not Found"));
     for (const tab of [
       'tab="cURL"',
       'tab="TypeScript"',
       'tab="Python"',
       'tab="201"',
       'tab="404"',
+      'tab="409"',
     ]) {
       assert.ok(markdown.includes(tab), tab);
     }
     assert.ok(!markdown.includes('tab="204"'));
     assert.ok(markdown.includes("curl -X POST 'https://api.solana.com/v1/widgets/wdg_1'"));
+  });
+
+  it("nests a JSON response's fields under its status, object in object", () => {
+    assert.ok(
+      markdown.includes(
+        [
+          "- **`201`** Created it",
+          "",
+          "  - **`data`** · `object` · required",
+          "",
+          "    The widget.",
+          "",
+          "    - **`id`** · `string` · required · example `wdg_1`",
+          "",
+          "    - **`owner`** · `object | null`",
+          "",
+          "      - **`name`** · `string` · required",
+          "",
+          "- **`204`** No body",
+        ].join("\n")
+      )
+    );
+    assert.ok(markdown.includes("    - **`details`** · `object`\n\n      - **`*`** · `any`\n"));
+  });
+
+  it("points a status at the first one listing the same fields", () => {
+    assert.ok(markdown.includes("- **`409`** Conflict\n\n  Same fields as `404`."));
+    assert.equal(markdown.match(/\*\*`error`\*\*/g)?.length, 1);
+    // A different example of the same schema changes no field, so it points there too.
+    const [, , notFound] = CREATE_WIDGET.responses;
+    assert.ok(notFound);
+    const page = renderOperation({
+      ...CREATE_WIDGET,
+      responses: [
+        notFound,
+        {
+          status: "503",
+          description: "Error",
+          body: {
+            kind: "json",
+            schema: { ...ERROR_SCHEMA, example: ERROR_EXAMPLE },
+            example: ERROR_EXAMPLE,
+          },
+        },
+      ],
+    });
+    assert.ok(page.includes("- **`503`** Service Unavailable\n\n  Same fields as `404`."));
+  });
+
+  it("lists a oneOf response's variants, an array of them included", () => {
+    const shape = (name: string) => ({
+      name: "shape",
+      required: true,
+      schema: schema({ enum: [name] }),
+    });
+    const page = renderOperation({
+      ...CREATE_WIDGET,
+      responses: [
+        {
+          status: "200",
+          description: "Widgets",
+          body: {
+            kind: "json",
+            schema: schema({
+              type: "object",
+              properties: [
+                {
+                  name: "data",
+                  required: true,
+                  schema: schema({
+                    type: "array",
+                    items: schema({
+                      type: null,
+                      variantMode: "oneOf",
+                      variants: [
+                        {
+                          title: 'shape: "round"',
+                          schema: schema({ type: "object", properties: [shape("round")] }),
+                        },
+                        {
+                          title: "A square.",
+                          schema: schema({
+                            type: "object",
+                            constraints: [{ kind: "includes", value: ["side"] }],
+                            properties: [shape("square")],
+                          }),
+                        },
+                      ],
+                    }),
+                  }),
+                },
+              ],
+            }),
+            example: { data: [{ shape: "round" }] },
+          },
+        },
+      ],
+    });
+    assert.ok(
+      page.includes(
+        [
+          "- **`200`** Widgets",
+          "",
+          "  - **`data`** · `object[]` · required",
+          "",
+          "    One of:",
+          "",
+          '    - **shape: "round"**',
+          "",
+          "      - **`shape`** · `string` · required · always `round`",
+          "",
+          "    - **A square.** · must include `side`",
+        ].join("\n")
+      )
+    );
   });
 
   it("samples a public route without a key", () => {
@@ -217,6 +415,9 @@ describe("the operation's panel", () => {
     for (const part of ["## Example request", 'tab="cURL"', "## Example responses", 'tab="404"']) {
       assert.ok(panel.includes(part), part);
     }
+    // The response fields stay in the body, under Responses.
+    assert.ok(markdown.indexOf("**`data`**") < markdown.indexOf("<ApiPanel>"));
+    assert.ok(!panel.includes("**`data`**"));
     assert.ok(markdown.endsWith("</ApiPanel>\n\n</ApiOperation>"));
   });
 
