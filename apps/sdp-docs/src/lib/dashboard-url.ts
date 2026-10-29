@@ -8,8 +8,13 @@ const relatedProjectsSchema = z.array(
     production: z.object({ alias: z.string().optional(), url: z.string().optional() }),
   })
 );
+const vercelEnvironmentSchema = z.enum(["preview", "production", "development"]).optional();
+type VercelEnvironment = z.infer<typeof vercelEnvironmentSchema>;
 
-function relatedDashboardUrl(env: NodeJS.ProcessEnv): string | null {
+function relatedDashboardUrl(
+  env: NodeJS.ProcessEnv,
+  environment: VercelEnvironment
+): string | null {
   const raw = env.VERCEL_RELATED_PROJECTS;
   if (!raw) return null;
 
@@ -23,12 +28,22 @@ function relatedDashboardUrl(env: NodeJS.ProcessEnv): string | null {
   if (!projects.success) throw new Error("VERCEL_RELATED_PROJECTS has invalid project data");
   const web = projects.data.find(({ project }) => project.name === "sdp-web");
   if (!web) throw new Error("VERCEL_RELATED_PROJECTS must include sdp-web");
-  const host =
-    env.VERCEL_ENV === "preview"
-      ? (web.preview.customEnvironment ?? web.preview.branch)
-      : env.VERCEL_ENV === "production"
-        ? (web.production.alias ?? web.production.url)
-        : null;
+  let host: string | undefined;
+  switch (environment) {
+    case "preview":
+      host = web.preview.customEnvironment ?? web.preview.branch;
+      break;
+    case "production":
+      host = web.production.alias ?? web.production.url;
+      break;
+    case "development":
+    case undefined:
+      return null;
+    default: {
+      const exhaustive: never = environment;
+      return exhaustive;
+    }
+  }
   return host ? `https://${host}` : null;
 }
 
@@ -47,17 +62,14 @@ function normalizeDashboardUrl(candidate: string, setting: string): string {
 
 /** The dashboard deployment paired with this docs build. */
 export function resolveDashboardUrl(env: NodeJS.ProcessEnv = process.env): string | null {
+  const environment = vercelEnvironmentSchema.parse(env.VERCEL_ENV);
   const configured = env.NEXT_PUBLIC_SDP_WEB_URL?.trim();
-  const configuredUrl = configured
-    ? normalizeDashboardUrl(configured, "NEXT_PUBLIC_SDP_WEB_URL")
-    : null;
-  const related = relatedDashboardUrl(env);
+  let configuredUrl: string | null = null;
+  if (configured) configuredUrl = normalizeDashboardUrl(configured, "NEXT_PUBLIC_SDP_WEB_URL");
+  const related = relatedDashboardUrl(env, environment);
   if (related) return normalizeDashboardUrl(related, "VERCEL_RELATED_PROJECTS");
-  if (env.VERCEL_ENV === "preview") return null;
-  return (
-    configuredUrl ??
-    (env.NODE_ENV === "production"
-      ? `${getSdpDocsOrigin(DEFAULT_SDP_DOCS_URL)}/`
-      : "http://localhost:3000/")
-  );
+  if (environment === "preview") return null;
+  if (configuredUrl) return configuredUrl;
+  if (env.NODE_ENV === "production") return `${getSdpDocsOrigin(DEFAULT_SDP_DOCS_URL)}/`;
+  return "http://localhost:3000/";
 }
