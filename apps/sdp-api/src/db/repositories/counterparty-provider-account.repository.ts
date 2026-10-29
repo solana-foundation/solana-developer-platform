@@ -36,7 +36,6 @@ export const counterpartyProviderAccountRowSchema = z.object({
   updated_at: z.string(),
 });
 export type CounterpartyProviderAccountRow = z.infer<typeof counterpartyProviderAccountRowSchema>;
-export type CounterpartyProviderAccountKind = CounterpartyProviderAccountRow["kind"];
 
 export interface UpsertCounterpartyProviderAccountInput {
   organizationId: string;

@@ -5,16 +5,16 @@ import {
   screenAddressSchema as screenAddressSchemaBase,
 } from "@/routes/compliance/schemas";
 
-export const complianceIntentSchema = withOpenApi(complianceIntentSchemaBase, {
+const complianceIntentSchema = withOpenApi(complianceIntentSchemaBase, {
   description: "Business intent for address screening.",
   example: "transfer_destination",
 });
 
-export const complianceProviderNameSchema = z
+const complianceProviderNameSchema = z
   .enum(["range", "elliptic", "trm", "chainalysis"])
   .openapi({ description: "Compliance provider identifier.", example: "range" });
 
-export const complianceProviderStatusSchema = z
+const complianceProviderStatusSchema = z
   .enum(["ok", "pending", "unavailable", "error"])
   .openapi({ description: "Provider response status.", example: "ok" });
 
@@ -35,7 +35,7 @@ export const addressScreeningRequestSchema = screenAddressSchemaBase
   })
   .openapi({ description: "Address compliance screening request payload." });
 
-export const complianceProviderResultSchema = z
+const complianceProviderResultSchema = z
   .object({
     provider: complianceProviderNameSchema,
     status: complianceProviderStatusSchema,
@@ -62,7 +62,7 @@ export const complianceProviderResultSchema = z
   })
   .openapi({ description: "Address screening result for one provider." });
 
-export const addressScreeningSchema = z
+const addressScreeningSchema = z
   .object({
     address: z.string().openapi({
       description: "Address that was screened.",

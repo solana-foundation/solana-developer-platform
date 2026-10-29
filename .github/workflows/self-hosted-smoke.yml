@@ -197,8 +197,8 @@ jobs:
             VALUES ('mem_smoke', 'org_smoke', 'usr_smoke', 'admin', 'active');
           INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
             VALUES ('proj_smoke', 'org_smoke', 'Smoke Test', 'default-sandbox', 'sandbox', 'active', 'usr_smoke');
-          INSERT INTO project_members (id, project_id, user_id, role)
-            VALUES ('pm_smoke', 'proj_smoke', 'usr_smoke', 'admin');
+          INSERT INTO project_members (id, project_id, user_id)
+            VALUES ('pm_smoke', 'proj_smoke', 'usr_smoke');
           INSERT INTO auth_user_identities (id, provider, provider_user_id, user_id, email)
             VALUES ('aui_smoke', 'clerk', 'user_smoke', 'usr_smoke', 'smoke@example.com');
           INSERT INTO auth_organization_identities (id, provider, provider_org_id, organization_id, slug)

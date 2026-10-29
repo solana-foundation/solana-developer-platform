@@ -10,7 +10,7 @@ import { unifiedTransactionsQuerySchema } from "./schemas";
 
 // The list fans out across every module's money table in one view; the quota
 // bounds how much of that shared read cost one credential can drive.
-export const UNIFIED_TRANSACTIONS_QUOTA = {
+const UNIFIED_TRANSACTIONS_QUOTA = {
   name: "unified-transactions",
   actorMax: 60,
   orgMax: 240,

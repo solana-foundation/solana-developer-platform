@@ -40,14 +40,14 @@ You need the `tokenId` returned when you created the token. If you don't have it
 
 ```bash title="Terminal"
 curl https://api.solana.com/v1/issuance/tokens \
-  -H "Authorization: Bearer sk_test_..."
+  -H "Authorization: Bearer sf_..."
 ```
 
 Note the token `id` (e.g., `tok_abc123`) — required for all deploy and post-deploy calls. Also list your wallets and use the wallet record's `id`, not its provider-specific `walletId` or public key:
 
 ```bash title="Terminal"
 curl https://api.solana.com/v1/wallets \
-  -H "Authorization: Bearer sk_test_..."
+  -H "Authorization: Bearer sf_..."
 ```
 
 </Tab>
@@ -79,7 +79,7 @@ SDP submits the transaction to Solana and polls for confirmation. The page updat
 
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/deploy \
-  -H "Authorization: Bearer sk_test_..." \
+  -H "Authorization: Bearer sf_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: deploy-acme-001" \
   -d '{"signingCustodyWalletId":"cwlt_abc123"}'
@@ -91,7 +91,7 @@ const res = await fetch(
   {
     method: "POST",
     headers: {
-      Authorization: "Bearer sk_test_...",
+      Authorization: "Bearer sf_...",
       "Content-Type": "application/json",
       "Idempotency-Key": "deploy-acme-001",
     },
@@ -139,7 +139,7 @@ Fetch the token at any time to verify:
 
 ```bash title="Terminal"
 curl https://api.solana.com/v1/issuance/tokens/tok_abc123 \
-  -H "Authorization: Bearer sk_test_..."
+  -H "Authorization: Bearer sf_..."
 ```
 
 </Tab>

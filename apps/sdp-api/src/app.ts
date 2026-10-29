@@ -1,5 +1,5 @@
 import type { EgressReadiness } from "@sdp/types/health";
-import type { SdpRampProviderStages } from "@sdp/types/release-channels";
+import type { SdpRampProviderMaturity } from "@sdp/types/release-channels";
 /**
  * SDP API — Hono application factory.
  *
@@ -18,14 +18,15 @@ import { SdpRpcError } from "@sdp/rpc/errors";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { HTTPException } from "hono/http-exception";
-import { logger } from "hono/logger";
 import { prettyJSON } from "hono/pretty-json";
+import { routePath } from "hono/route";
 import { secureHeaders } from "hono/secure-headers";
 import { DatabaseUnavailableError } from "@/db/client";
 import { AppError, badRequest, payloadTooLarge, serviceUnavailable } from "@/lib/errors";
 import { appErrorResponse, mapErrorStatusCode } from "@/lib/response";
 import { corsMiddleware } from "@/middleware/cors";
 import { databaseIdentityBoundary } from "@/middleware/database-identity";
+import { gatewayIdentityMiddleware } from "@/middleware/gateway-identity";
 import { idempotencyKeyMiddleware } from "@/middleware/idempotency-key";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { skipRateLimitPaths } from "@/middleware/rate-limit";
@@ -46,6 +47,7 @@ import { earnRoutes as earn } from "@/routes/earn";
 import { health } from "@/routes/health";
 import { heliusRings } from "@/routes/helius-rings";
 import { internalCustody } from "@/routes/internal-custody";
+import { internalFireblocks } from "@/routes/internal-fireblocks";
 import { internalHeliusRings } from "@/routes/internal-helius-rings";
 import { internalNetwork } from "@/routes/internal-network";
 import { issuance } from "@/routes/issuance";
@@ -74,10 +76,10 @@ export interface AppDeps {
   plugins?: SdpPlugin[];
   /**
    * Ramp provider stages to run the release channel against. Production passes
-   * `SDP_RAMP_PROVIDER_STAGES`; tests may put one provider in a release channel and
+   * `SDP_RAMP_PROVIDER_MATURITY`; tests may put one provider in a release channel and
    * leave another out, which today's all-`experimental` stages cannot show.
    */
-  rampProviderStages: SdpRampProviderStages;
+  rampProviderMaturity: SdpRampProviderMaturity;
   /**
    * The Node entrypoint's egress gate, so `/health/ready` keeps a fresh instance
    * out of rotation until it can reach the internet. Absent where nothing gates
@@ -109,6 +111,11 @@ const KV_FREE_PATHS = [
 // smaller; the webhooks router already enforces this same ceiling on its
 // subset, and no public /v1 route accepts file uploads.
 const MAX_API_BODY_BYTES = 1024 * 1024;
+
+// Bound for any /pay request body. The only body /pay reads is the Solana Pay
+// transaction request (`transactionRequestBodySchema`: one account address),
+// tens of bytes; the unauthenticated surface gets no more room than that needs.
+const MAX_PAY_BODY_BYTES = 4 * 1024;
 
 function mapSigningError(err: SigningError): {
   status: 400 | 404 | 409 | 502 | 504;
@@ -271,13 +278,17 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   // ═══════════════════════════════════════════════════════════════════════════
 
   app.use("*", async (c, next) => {
-    c.set("rampProviderStages", deps.rampProviderStages);
+    c.set("rampProviderMaturity", deps.rampProviderMaturity);
     c.set("egressReadiness", deps.egressReadiness);
     await next();
   });
 
   // Request ID for tracing
   app.use("*", requestIdMiddleware());
+
+  // The gateway's signed caller identity, before anything reads the caller or
+  // its address (rate limits, auth, IP allowlists).
+  app.use("*", gatewayIdentityMiddleware());
 
   // Database identity boundary: public surfaces run as named system
   // components, everything else is identity-less until an auth middleware
@@ -300,6 +311,15 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
       },
     })
   );
+  app.use(
+    "/pay/*",
+    bodyLimit({
+      maxSize: MAX_PAY_BODY_BYTES,
+      onError: () => {
+        throw payloadTooLarge();
+      },
+    })
+  );
 
   // Request trace + duration logging
   app.use("*", requestTracingMiddleware());
@@ -317,14 +337,6 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   app.use("*", async (c, next) => {
     if (c.env.ENVIRONMENT === "development") {
       return prettyJSON()(c, next);
-    }
-    return next();
-  });
-
-  // Logger in development
-  app.use("*", async (c, next) => {
-    if (c.env.ENVIRONMENT === "development") {
-      return logger((message) => getLogger().info(message))(c, next);
     }
     return next();
   });
@@ -392,6 +404,8 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   app.route("/internal/dashboard/custody", internalCustody);
   app.use("/internal/dashboard/wallets/*", requireModule("custody"));
   app.route("/internal/dashboard/wallets", internalWallets);
+  app.use("/internal/dashboard/fireblocks/*", requireModule("custody"));
+  app.route("/internal/dashboard/fireblocks", internalFireblocks);
   app.route("/internal/dashboard/helius-rings", internalHeliusRings);
   app.route("/internal/dashboard/network", internalNetwork);
 
@@ -409,6 +423,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
     const requestId = c.get("requestId");
     const traceId = c.get("traceId");
     const requestSource = c.get("requestSource");
+    const path = routePath(c, -1) || "unmatched";
 
     const logVendorError = (vendor: string, code: string, status: number) =>
       logEvent("error", {
@@ -417,7 +432,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
         code,
         status,
         method: c.req.method,
-        path: c.req.path,
+        path,
         request_id: requestId,
         ...describeError(err),
       });
@@ -448,7 +463,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
           code: err.code,
           status: err.statusCode,
           method: c.req.method,
-          path: c.req.path,
+          path,
           request_id: requestId,
           ...describeError(err),
           error_diagnostics: paymentsErrorDiagnostics(err),
@@ -541,7 +556,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
     logEvent("error", {
       event: "sdp_api_internal_error",
       method: c.req.method,
-      path: c.req.path,
+      path,
       request_id: requestId,
       ...describeError(err),
     });

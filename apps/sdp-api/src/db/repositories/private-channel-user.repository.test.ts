@@ -56,7 +56,7 @@ describe("PrivateChannelUserRepository (postgres) — verified_wallet_count", ()
     await seedDefaultProjects(db, {
       organizationId: TEST_ORG.id,
       createdBy: TEST_USER.id,
-      members: [TEST_USER.id],
+      members: [],
       ids: { sandbox: TEST_PROJECT_ID, production: `${TEST_PROJECT_ID}_production` },
     });
     await db
@@ -164,34 +164,6 @@ describe("PrivateChannelUserRepository (postgres) — verified_wallet_count", ()
 
     const [listed] = await repo.listByProject(scope);
     expect(listed.verified_wallet_count).toBe(0);
-  });
-
-  // project_role sources from project_members via LEFT JOIN so orphaned legacy
-  // rows (user removed from project) stay visible for cleanup.
-  it("surfaces the caller's project_members role", async () => {
-    const db = getDb(env);
-    await db
-      .prepare("UPDATE project_members SET role = 'admin' WHERE project_id = ? AND user_id = ?")
-      .bind(TEST_PROJECT_ID, TEST_USER.id)
-      .run();
-
-    const [listed] = await repo.listByProject(scope);
-    expect(listed.project_role).toBe("admin");
-    const fetched = await repo.getByProjectAndUser(scope, TEST_USER.id);
-    expect(fetched?.project_role).toBe("admin");
-  });
-
-  it("keeps the PCU visible with null role when project_members is removed", async () => {
-    const db = getDb(env);
-    await db
-      .prepare("DELETE FROM project_members WHERE project_id = ? AND user_id = ?")
-      .bind(TEST_PROJECT_ID, TEST_USER.id)
-      .run();
-
-    const [listed] = await repo.listByProject(scope);
-    expect(listed.project_role).toBeNull();
-    const fetched = await repo.getByProjectAndUser(scope, TEST_USER.id);
-    expect(fetched?.project_role).toBeNull();
   });
 
   it("does not expose an incomplete default principal as active", async () => {

@@ -13,42 +13,33 @@ import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { revokeInvitation } from "@/app/members/actions";
 import { useTranslations } from "@/i18n/provider";
+import { useActionIdempotencyKey } from "@/lib/use-action-idempotency-key";
 
 export function InvitationActions({
   invitationId,
   email,
-  acceptUrl,
 }: {
   invitationId: string;
   email: string;
-  acceptUrl: string | null;
 }) {
   const t = useTranslations();
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [isRevoking, setIsRevoking] = useState(false);
-
-  const copyLink = async () => {
-    if (!acceptUrl) return;
-
-    try {
-      await navigator.clipboard.writeText(acceptUrl);
-      toast.success(t("Shared.members.inviteLinkCopied"));
-    } catch {
-      // Clipboard access is refused on insecure origins and when the document
-      // is not focused, so say so rather than appearing to do nothing.
-      toast.error(t("Shared.members.inviteLinkCopyFailed"));
-    }
-  };
+  // Kept across retries of one revocation, so a retry finishes its Clerk half.
+  const actionKey = useActionIdempotencyKey(null);
 
   const revoke = () => {
+    const input = JSON.stringify(["revoke", invitationId]);
     setIsRevoking(true);
     startTransition(async () => {
-      const result = await revokeInvitation(invitationId);
+      const key = actionKey.keyFor(input);
+      const result = await revokeInvitation(invitationId, key);
+      actionKey.settled(input, key, result);
       setIsRevoking(false);
 
-      if (!result.ok) {
-        toast.error(t("Shared.members.revokeFailed", { error: result.error }));
+      if (result.status === "error") {
+        toast.error(t("Shared.members.revokeFailed", { error: result.message }));
         return;
       }
 
@@ -70,13 +61,6 @@ export function InvitationActions({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        {/* Absent when Clerk could not be reached; offering a copy action that
-            silently copies nothing would be worse than hiding it. */}
-        {acceptUrl ? (
-          <DropdownMenuItem onSelect={() => void copyLink()}>
-            {t("Shared.members.copyInviteLink")}
-          </DropdownMenuItem>
-        ) : null}
         <DropdownMenuItem onSelect={revoke}>
           {isRevoking ? t("Shared.members.revoking") : t("Shared.members.revokeInvite")}
         </DropdownMenuItem>

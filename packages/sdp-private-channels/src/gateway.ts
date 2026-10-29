@@ -11,10 +11,16 @@
  * (never `process.env`), the same discipline as `config.ts`.
  */
 
-import { createRpc, getAccountInfo, type RpcRequestHeaders, type SolanaRpc } from "@sdp/rpc/solana";
+import {
+  createRpc,
+  createRpcFromTransport,
+  getAccountInfo,
+  type RpcRequestHeaders,
+  type SolanaRpc,
+} from "@sdp/rpc/solana";
 import { isForbiddenRpcError } from "@sdp/rpc/transient";
 import type { RpcEnv } from "@sdp/rpc/types";
-import type { Address } from "@solana/kit";
+import type { Address, RpcTransport } from "@solana/kit";
 import { findAssociatedTokenPda, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 
 export interface GatewayClientOptions {
@@ -24,6 +30,14 @@ export interface GatewayClientOptions {
    * forbidden headers.
    */
   headers?: RpcRequestHeaders;
+  /**
+   * A caller-owned transport factory — the seam through which egress-guarded
+   * callers route the gateway's JSON-RPC leg. It receives the options'
+   * `headers` so JWT-gated methods keep carrying their bearer token, and the
+   * returned transport replaces kit's default HTTP transport entirely (the
+   * default would dial without the connect-time guard).
+   */
+  transportFactory?: (headers: RpcRequestHeaders) => RpcTransport;
 }
 
 /**
@@ -36,6 +50,9 @@ export function createChannelGatewayRpc(
   gatewayUrl: string,
   options?: GatewayClientOptions
 ): SolanaRpc {
+  if (options?.transportFactory) {
+    return createRpcFromTransport(options.transportFactory(options.headers ?? {}));
+  }
   return createRpc(env, { rpcUrl: gatewayUrl, headers: options?.headers });
 }
 

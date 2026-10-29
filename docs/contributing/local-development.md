@@ -60,7 +60,7 @@ pnpm --filter @sdp/api db:postgres:bootstrap
 pnpm dev
 ```
 
-To work on Earn (Treasury and Embedded Yield), also set `MARKETS_ENABLED=true` and `EARN_ENABLED=true` in both `apps/sdp-api/.env.local` and `apps/sdp-web/.env.local`. The API syncs the strategy catalogue once at start-up and hourly after that.
+To work on Earn (Treasury and Embedded Yield), also set `MARKETS_ENABLED=true` and `EARN_ENABLED=true` in both `apps/sdp-api/.env.local` and `apps/sdp-web/.env.local`. Earn reads each cluster's managed RPC pool, never `SOLANA_RPC_URL`, so the API also needs `SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL` (and a `SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL` for the mainnet-only rows). The API syncs the strategy catalogue once at start-up and hourly after that.
 
 Useful local URLs:
 

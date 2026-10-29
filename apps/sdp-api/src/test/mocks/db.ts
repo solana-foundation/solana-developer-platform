@@ -48,6 +48,7 @@ const POSTGRES_TEST_TABLES = [
   "custody_connections",
   "provider_credentials",
   "secret_retirements",
+  "fireblocks_csr_requests",
   "custody_wallets",
   "custody_configs",
   "payment_recurring_payment_update_events",
@@ -207,6 +208,8 @@ export interface SeededApiKey {
   rotationDeadline?: string | null;
   /** Ignored: authentication reads the organization row's own status. */
   organizationStatus?: string;
+  /** `api_keys.public_id`: an `sf_` key's key ID; omit for a legacy `sk_` key. */
+  publicId?: string;
 }
 
 /** Creates the user a seeded key row needs when the suite has none. */
@@ -262,9 +265,9 @@ export async function seedApiKeyRow(env: Env, keyHash: string, data: SeededApiKe
       `INSERT INTO api_keys
          (id, organization_id, project_id, created_by, name, key_prefix, key_hash,
           grants, status, expires_at, rotation_deadline, wallet_scope,
-          allowed_ips, rate_limit_tier)
+          allowed_ips, rate_limit_tier, public_id)
        SELECT ?, p.organization_id, p.id, (SELECT id FROM users ORDER BY id LIMIT 1),
-              'Seeded test key', 'sk_test', ?, ?, ?, ?, ?, ?, ?, ?
+              'Seeded test key', 'sk_test', ?, ?, ?, ?, ?, ?, ?, ?, ?
          FROM projects p
         WHERE p.organization_id = ?
           AND (p.id = ? OR (p.environment = ? AND p.status = 'active'))
@@ -278,7 +281,8 @@ export async function seedApiKeyRow(env: Env, keyHash: string, data: SeededApiKe
          rotation_deadline = EXCLUDED.rotation_deadline,
          wallet_scope = EXCLUDED.wallet_scope,
          allowed_ips = EXCLUDED.allowed_ips,
-         rate_limit_tier = EXCLUDED.rate_limit_tier`
+         rate_limit_tier = EXCLUDED.rate_limit_tier,
+         public_id = EXCLUDED.public_id`
     )
     .bind(
       data.id,
@@ -290,6 +294,7 @@ export async function seedApiKeyRow(env: Env, keyHash: string, data: SeededApiKe
       data.walletScope ?? (data.walletIds === undefined ? "all" : "selected"),
       data.allowedIps === null ? null : JSON.stringify(data.allowedIps),
       data.rateLimitTier,
+      data.publicId ?? null,
       data.organizationId,
       data.projectId,
       data.environment,

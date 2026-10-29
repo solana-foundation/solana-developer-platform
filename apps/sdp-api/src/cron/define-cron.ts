@@ -11,9 +11,9 @@ import type { Env } from "@/types/env";
  *   always true: switching it off would strand money (ADR 0002).
  * - `observes`: reads, reconciles bookkeeping, or cleans up. Moves nothing.
  */
-export const CRON_MONEY_EFFECTS = ["starts", "finishes", "observes"] as const;
+const CRON_MONEY_EFFECTS = ["starts", "finishes", "observes"] as const;
 
-export type CronMoneyEffect = (typeof CRON_MONEY_EFFECTS)[number];
+type CronMoneyEffect = (typeof CRON_MONEY_EFFECTS)[number];
 
 /**
  * One named piece of recurring background work, run by the Worker (ADR 0011).

@@ -2,7 +2,7 @@
 
 import type { CounterpartyAccount } from "@sdp/types/counterparties";
 import type { PaymentsDashboardWallet, PaymentTransferSummary } from "@sdp/types/payments";
-import { SOL_MINT } from "@sdp/types/well-known-tokens";
+import { SOL_MINT, WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { SWRConfig } from "swr";
@@ -24,6 +24,7 @@ vi.mock("@clerk/nextjs", () => ({
   useAuth: () => ({ isLoaded: false, orgId: null, userId: null }),
 }));
 vi.mock("next/navigation", () => import("@/test/next-navigation"));
+
 vi.mock("sonner", () => ({
   toast: {
     error: mocks.toastError,
@@ -91,7 +92,7 @@ function wrapper({ children }: { children: ReactNode }) {
     <I18nProvider locale="en" messages={getMessages("en")}>
       <DashboardWorkspaceProvider
         scopeRefreshFallback={null}
-        dashboardAccess={resolveDashboardAccess("org:admin")}
+        dashboardAccess={resolveDashboardAccess("admin")}
         flags={{
           assetProfiles: false,
           compliance: false,
@@ -115,14 +116,13 @@ function wrapper({ children }: { children: ReactNode }) {
   );
 }
 
-function renderWizard() {
-  const onExit = vi.fn();
+function renderWizard(onExit = vi.fn(), sourceWallets = wallets) {
   return {
     onExit,
     ...renderHook(
       () =>
         useOnchainSendWizard({
-          wallets,
+          wallets: sourceWallets,
           walletsError: null,
           issuedTokenSymbolsByMint: {},
           counterpartyId: "counterparty-test",
@@ -138,12 +138,15 @@ async function resolveAccounts() {
   await act(async () => accountsResponse?.());
 }
 
-async function prepareReview(result: ReturnType<typeof renderWizard>["result"]) {
+async function prepareReview(result: ReturnType<typeof renderWizard>["result"], memo = "") {
   await resolveAccounts();
   act(() => result.current.setField("accountId", cryptoAccount.id));
   await act(async () => result.current.handlePrimary());
   act(() => result.current.selectWallet("wallet-usdc"));
   act(() => result.current.setField("amount", "0.5"));
+  if (memo !== "") {
+    act(() => result.current.setField("memo", memo));
+  }
   await act(async () => result.current.handlePrimary());
 }
 
@@ -192,9 +195,14 @@ beforeEach(() => {
       if (transferStatus === 200) {
         return Promise.resolve(Response.json({ data: { transfer } }));
       }
-      return Promise.resolve(
-        Response.json({ error: { message: "transfer rejected" } }, { status: transferStatus })
-      );
+      const error =
+        transferStatus === 403
+          ? {
+              message: "This movement is disabled for the project",
+              details: { reason: "movement_disabled" },
+            }
+          : { message: "transfer rejected" };
+      return Promise.resolve(Response.json({ error }, { status: transferStatus }));
     }
     return Promise.resolve(Response.json({ data: {} }));
   });
@@ -208,10 +216,60 @@ afterEach(() => {
 });
 
 describe("useOnchainSendWizard", () => {
-  it("loads active crypto destinations and navigates destination steps", async () => {
+  it("resets unsupported assets when switching to Fireblocks BYOK and rejects stale selections", async () => {
+    const balances = [SOL_MINT, WELL_KNOWN_TOKENS.USDC.mints.devnet.address, SECOND_MINT].map(
+      (mint) => ({
+        mint,
+        token: mint === SOL_MINT ? "SOL" : "USDC",
+        amount: "1000000",
+        uiAmount: "1",
+        decimals: 6,
+      })
+    );
+    const sourceWallets: PaymentsDashboardWallet[] = [
+      { ...wallets[0], id: "managed", provider: "fireblocks", balances },
+      {
+        ...wallets[0],
+        id: "byok",
+        provider: "fireblocks",
+        custodyConnectionId: "cconn_fb",
+        balances,
+      },
+    ];
+    const fallback = fetchMock.getMockImplementation();
+    if (!fallback) throw new Error("Missing fetch fixture");
+    fetchMock.mockImplementation((input, init) =>
+      String(input) === "/api/dashboard/wallets?view=summary&includeBalances=true"
+        ? Promise.resolve(Response.json({ data: { wallets: sourceWallets } }))
+        : fallback(input, init)
+    );
+    const { result } = renderWizard(vi.fn(), sourceWallets);
+    await resolveAccounts();
+    act(() => {
+      result.current.setField("accountId", cryptoAccount.id);
+      result.current.selectWallet("managed");
+    });
+    act(() => {
+      result.current.setField("asset", SECOND_MINT);
+      result.current.setField("amount", "0.5");
+    });
+    expect(result.current.readySubmission?.token).toBe(SECOND_MINT);
+    act(() => result.current.selectWallet("byok"));
+    expect(result.current.assetOptions.map((option) => option.value)).toEqual([
+      SOL_MINT,
+      WELL_KNOWN_TOKENS.USDC.mints.devnet.address,
+    ]);
+    expect(result.current.fields.asset).toBe(SOL_MINT);
+    act(() => result.current.setField("asset", SECOND_MINT));
+    expect(result.current.selectedAssetBalance).toBeNull();
+    expect(result.current.readySubmission).toBeNull();
+    expect(transferPosts()).toHaveLength(0);
+  });
+
+  it("loads active crypto destinations and holds the details step until it is complete", async () => {
     const { result, onExit } = renderWizard();
 
-    expect(result.current.currentStepId).toBe("DESTINATION");
+    expect(result.current.currentStepId).toBe("DETAILS");
     expect(result.current.canProceed).toBe(false);
     expect(result.current.accountsLoading).toBe(true);
 
@@ -221,12 +279,11 @@ describe("useOnchainSendWizard", () => {
 
     act(() => result.current.setField("accountId", cryptoAccount.id));
     expect(result.current.destinationAddress).toBe(DESTINATION);
-    expect(result.current.canProceed).toBe(true);
+    // A destination alone is not a payment: the wallet, token and amount share the step.
+    expect(result.current.canProceed).toBe(false);
 
     await act(async () => result.current.handlePrimary());
     expect(result.current.currentStepId).toBe("DETAILS");
-    act(() => result.current.handleSecondary());
-    expect(result.current.currentStepId).toBe("DESTINATION");
     act(() => result.current.handleSecondary());
     expect(onExit).toHaveBeenCalledOnce();
   });
@@ -289,6 +346,28 @@ describe("useOnchainSendWizard", () => {
       amount: "0.5",
     });
     expect(mocks.toastError).toHaveBeenCalledTimes(succeeds ? 0 : 1);
+  });
+
+  it("shows an operator stop at Send and safely retries after re-enable", async () => {
+    transferStatus = 403;
+    const { result } = renderWizard();
+    await prepareReview(result);
+
+    await act(async () => result.current.handlePrimary());
+
+    expect(result.current.currentStepId).toBe("REVIEW");
+    expect(result.current.submitting).toBe(false);
+    expect(result.current.transferResult).toBeNull();
+    expect(mocks.toastError).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ description: "This movement is disabled for the project" })
+    );
+
+    transferStatus = 200;
+    await act(async () => result.current.handlePrimary());
+    expect(result.current.transferResult).toEqual(transfer);
+    const [refused, retried] = sentIdempotencyKeys();
+    expect(retried).toBe(refused);
   });
 
   // A refusal retires a fresh key; after a lost answer it settles nothing about

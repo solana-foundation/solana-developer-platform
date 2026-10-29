@@ -7,7 +7,7 @@ import { paymentsWalletsResponseSchema } from "@/app/dashboard/[projectId]/payme
 import { projectHref } from "@/lib/dashboard-project-path";
 import { getE2EEnv } from "../env";
 import {
-  getClerkBearerToken,
+  createClerkBearerTokenProvider,
   getPlaywrightAdminSession,
   type PlaywrightAdminSession,
 } from "../support/auth-session";
@@ -208,7 +208,7 @@ test.describe
     test("submits the selected internal wallet with balances and transfer details", async ({
       page,
     }) => {
-      await getClerkBearerToken(page);
+      await createClerkBearerTokenProvider(page)();
       await gotoProjectPage(page, projectId, "/dashboard/payments/pay");
       const balance = await page.evaluate(
         async ({ projectId, walletId }) => {
@@ -270,7 +270,7 @@ test.describe
     test("estimates and submits the exact batch, preserving its recipients and chunk pins", async ({
       page,
     }) => {
-      await getClerkBearerToken(page);
+      await createClerkBearerTokenProvider(page)();
       await gotoProjectPage(page, projectId, "/dashboard/payments/pay?tab=batch");
       await selectWallet(page, "From");
       await page.getByRole("button", { name: "Token", exact: true }).click();
@@ -338,7 +338,7 @@ test.describe
     test("reloads a saved ramp and opens its exact wallet while retaining legacy detail", async ({
       page,
     }) => {
-      await getClerkBearerToken(page);
+      await createClerkBearerTokenProvider(page)();
       await gotoProjectPage(page, projectId, "/dashboard/payments");
       const quoteResult = await page.evaluate(
         async ({ projectId, body }) => {

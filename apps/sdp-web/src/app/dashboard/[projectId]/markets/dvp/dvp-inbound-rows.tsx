@@ -18,6 +18,7 @@ import { TableCell } from "@sdp/ui/table";
 import { TableRow } from "@solana/design-system/table";
 import Link from "next/link";
 import { formatTimestamp } from "@/app/dashboard/[projectId]/payments/payments-overview.utils";
+import { useCanWrite } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { useProjectHref } from "@/lib/use-dashboard-project";
@@ -75,6 +76,7 @@ function InboundFundAction({
   const href = useProjectHref();
   const cluster = useSolanaCluster();
   const { act, pending } = useDvpTradeActions(tradeId, cluster);
+  const canWrite = useCanWrite();
   const wallet = party.actionWallet;
   const shownWallet = wallet ?? party.wallet;
   const unavailable = wallet?.isRuntimeExecutionAllowed !== true;
@@ -90,26 +92,28 @@ function InboundFundAction({
           {shownWallet.name ?? t("DashboardMarkets.dvp.partySdpWallet")}
         </Link>
       ) : null}
-      {unavailable ? (
+      {canWrite && unavailable ? (
         <span className="text-warning text-xs">{t("DashboardCustody.signingDisabledTitle")}</span>
       ) : null}
-      <Button
-        // A transfer into a frozen escrow bounces, so offering to send one is
-        // offering to waste a signature and a fee.
-        disabled={unavailable || frozen || pending.has(`fund:${side}`)}
-        onClick={() => {
-          if (wallet?.isRuntimeExecutionAllowed === true) {
-            void act("fund", { side, walletId: wallet.id, symbol });
-          }
-        }}
-        size="sm"
-        type="button"
-        variant="secondary"
-      >
-        {pending.has(`fund:${side}`)
-          ? t("DashboardMarkets.dvp.inboundFunding")
-          : t("DashboardMarkets.dvp.inboundFundAction")}
-      </Button>
+      {canWrite ? (
+        <Button
+          // A transfer into a frozen escrow bounces, so offering to send one is
+          // offering to waste a signature and a fee.
+          disabled={unavailable || frozen || pending.has(`fund:${side}`)}
+          onClick={() => {
+            if (wallet?.isRuntimeExecutionAllowed === true) {
+              void act("fund", { side, walletId: wallet.id, symbol });
+            }
+          }}
+          size="sm"
+          type="button"
+          variant="secondary"
+        >
+          {pending.has(`fund:${side}`)
+            ? t("DashboardMarkets.dvp.inboundFunding")
+            : t("DashboardMarkets.dvp.inboundFundAction")}
+        </Button>
+      ) : null}
     </span>
   );
 }

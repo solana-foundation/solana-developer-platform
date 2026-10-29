@@ -1,4 +1,4 @@
-import { auth } from "@clerk/nextjs/server";
+import { organizationRoleMayPerform } from "@sdp/types/actions";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@sdp/ui/card";
 import { requirePrivateChannelsAccess } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-access";
 import { PrivateChannelsLoadError } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-load-error";
@@ -7,8 +7,7 @@ import {
   loadEvents,
 } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-page.data";
 import { getTranslations } from "@/i18n/server";
-import { dashboardRoleMayPerform } from "@/lib/dashboard-access";
-import { createSdpApiClient, requestProjectId } from "@/lib/sdp-api";
+import { createSdpApiClient, requestMemberRole, requestProjectId } from "@/lib/sdp-api";
 import { EventsList } from "./events-list";
 
 export default async function PrivateChannelsEventsPage() {
@@ -17,13 +16,13 @@ export default async function PrivateChannelsEventsPage() {
   // The same request-scoped resolution the client used: the scope the initial
   // rows were loaded under. Follow-up loads answer for the same URL Project and
   // are checked against it, so the feed can never mix projects.
-  const [t, { orgRole }, client, projectId] = await Promise.all([
+  const [t, role, client, projectId] = await Promise.all([
     getTranslations(),
-    auth(),
+    requestMemberRole(),
     createSdpApiClient(),
     requestProjectId(),
   ]);
-  const canViewRawPayload = dashboardRoleMayPerform(orgRole, "organizations.manage");
+  const canViewRawPayload = organizationRoleMayPerform(role, "organizations.manage");
   const [events, references] = await Promise.all([loadEvents(client), loadEventReferences(client)]);
 
   return (

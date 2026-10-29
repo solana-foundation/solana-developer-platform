@@ -80,7 +80,7 @@ export interface SubscriptionAuthorityChain {
  * @param env - Runtime environment for signer and sponsor construction.
  * @returns The chain.
  */
-export function createClusterSubscriptionAuthorityChain(env: Env): SubscriptionAuthorityChain {
+function createClusterSubscriptionAuthorityChain(env: Env): SubscriptionAuthorityChain {
   return {
     readAuthority: (authority, commitment) =>
       fetchMaybeSubscriptionAuthority(createClusterRpc(), authority, { commitment }),

@@ -20,7 +20,7 @@ export type RingsHealth = Record<RingsHealthComponent, RingsHealthStatus> & {
   detail?: Record<string, string>;
 };
 
-export type RingsWalletStatus = "pending" | "ready" | "paused";
+type RingsWalletStatus = "pending" | "ready" | "paused";
 
 export type ProjectRingStatus = "pending" | "active" | "failed";
 
@@ -87,7 +87,7 @@ export type RingsOperationState =
   | "voided";
 
 /** Mirrors OP_TYPES in @sdp/helius-rings; literal so `activity.opType_*` resolves. */
-export type RingsOperationOpType =
+type RingsOperationOpType =
   | "shield"
   | "transfer_registered"
   | "transfer_anonymous"
@@ -116,7 +116,7 @@ export interface RingsOperationSummary {
   retryOfOperationId: string | null;
 }
 
-export interface RingsOperationEvent {
+interface RingsOperationEvent {
   kind: string;
   createdAt: string;
   /** Redacted server-side; free-form. Consumers must not trust individual keys. */
@@ -219,7 +219,7 @@ export async function createRingsWallet(input: {
   return { wallet: result.data.wallet };
 }
 
-export interface RingsShieldedBalance {
+interface RingsShieldedBalance {
   mint: string;
   symbol: string;
   /**
@@ -294,7 +294,7 @@ export async function rekeyRingsWallet(
 export type RingsIdentityStatus = "unregistered" | "ours" | "foreign";
 
 /** Mirrors RingsIdentityMismatch; literal so `identity.mismatch_*` resolves. */
-export type RingsIdentityMismatch = "owner" | "nullifier_key" | "viewing_key";
+type RingsIdentityMismatch = "owner" | "nullifier_key" | "viewing_key";
 
 export interface RingsWalletIdentity {
   status: RingsIdentityStatus;
@@ -333,7 +333,7 @@ export async function fetchRingsWalletIdentity(
  * rejects anything else on a strict schema, so widening this without widening
  * that one only moves the refusal later.
  */
-export type RingsOpType =
+type RingsOpType =
   | "shield"
   | "withdraw"
   | "transfer_registered"

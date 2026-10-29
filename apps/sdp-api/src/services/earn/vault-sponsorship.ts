@@ -1,6 +1,6 @@
 import type { FeePaymentPort } from "@sdp/fee-payment/port";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import type { MovementOf } from "@sdp/types/movements";
-import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import type { Address } from "@solana/kit";
 import { isEarnVaultSponsorshipEnabled } from "@/lib/feature-flags";
 import {
@@ -62,8 +62,6 @@ export interface ResolveVaultSponsorshipInput {
   projectId: string;
   /** Custody wallet id, used as the sponsorship quota actor. */
   walletId: string;
-  /** Cluster the movement executes on, NOT the process's default network. */
-  cluster: SolanaCluster;
   deadline: VaultDeadline;
 }
 
@@ -75,19 +73,21 @@ export interface ResolveVaultSponsorshipInput {
  * outage; resolving sponsorship first would make a already-signed movement
  * un-returnable exactly when a caller is retrying.
  *
- * Fail-closed by construction: an unset flag, or a cluster with no paymaster
- * configured, answers `wallet-pays`, so turning sponsorship off (or on, per
- * cluster) is a configuration change and never a code change. Provider
- * construction goes through the shared sponsorship boundary rather than a raw
- * adapter, so managed deployments keep the budget reservation and the Kora
- * usage identity that boundary owns; bypassing it would spend the fee payer's
- * lamports without any budget seeing it.
+ * The movement executes on the open cluster scope's cluster, never the
+ * process's default network, and the sponsor reads the same scope. Fail-closed
+ * by construction: an unset flag, or a cluster with no paymaster configured,
+ * answers `wallet-pays`, so turning sponsorship off (or on, per cluster) is a
+ * configuration change and never a code change. Provider construction goes
+ * through the shared sponsorship boundary rather than a raw adapter, so
+ * managed deployments keep the budget reservation and the Kora usage identity
+ * that boundary owns; bypassing it would spend the fee payer's lamports
+ * without any budget seeing it.
  */
 export async function resolveVaultSponsorship(
   env: Env,
   input: ResolveVaultSponsorshipInput
 ): Promise<VaultFeeMode> {
-  if (!isEarnVaultSponsorshipEnabled(env, input.cluster)) {
+  if (!isEarnVaultSponsorshipEnabled(env, currentClusterScope().cluster)) {
     return { kind: "wallet-pays" };
   }
 

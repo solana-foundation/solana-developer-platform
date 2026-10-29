@@ -4,15 +4,15 @@ import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { EarnStrategy } from "@sdp/types/earn";
 import { Button } from "@sdp/ui/button";
 import { Callout } from "@sdp/ui/callout";
-import { Card, CardContent } from "@sdp/ui/card";
 import { ListEmptyState } from "@sdp/ui/list-empty-state";
+import { SegmentedControl } from "@sdp/ui/segmented-control";
 import { Select, SelectItem } from "@sdp/ui/select";
-import { SegmentedControl } from "@solana/design-system/segmented-control";
-import { ArrowLeftIcon, CheckIcon, CopyIcon, InfoIcon } from "lucide-react";
+import { CheckIcon, CopyIcon } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { EarnIntegrationGuideSkeleton } from "@/app/dashboard/[projectId]/markets/markets-route-skeletons";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
+import { RecordBlock, RecordStack } from "@/components/refresh-record";
 import { CodeBlock } from "@/components/ui/code-block";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
@@ -31,7 +31,7 @@ import {
   buildEarnServerIntegration,
   type EarnIntegrationSections,
 } from "./earn-integration-snippets";
-import { EarnDepositAvailabilityBadge, formatProviderApy } from "./earn-market-presentation";
+import { formatProviderApy } from "./earn-market-presentation";
 import { useEarnStrategies } from "./earn-program-data";
 import {
   type EarnProviderAccess,
@@ -42,7 +42,6 @@ import {
 
 type EarnIntegrationGuideProps = {
   apiBaseUrl?: string | null;
-  earnHref: string;
   providerAccess: EarnProviderAccess | null;
   strategyId?: string;
 };
@@ -144,13 +143,11 @@ function useIntegrationCatalogue(sdpEnvironment: SdpEnvironment) {
 
 export function EarnIntegrationGuide({
   apiBaseUrl,
-  earnHref,
   providerAccess,
   strategyId: initialStrategyId,
 }: EarnIntegrationGuideProps) {
   const t = useTranslations();
   const locale = useLocale();
-  const href = useProjectHref();
   const { sdpEnvironment } = useDashboardWorkspace();
   const { strategies, error, isLoading } = useIntegrationCatalogue(sdpEnvironment);
   const [selectedStrategyId, setSelectedStrategyId] = useState<string | null>(
@@ -175,14 +172,11 @@ export function EarnIntegrationGuide({
       : undefined;
   const initialStrategyMissing = Boolean(initialStrategyId && !requestedStrategy);
 
+  // The way back and the title are the shell's; the page opens with what the integration does.
   return (
     <DashboardWorkspaceOverviewPanel>
-      <div className="mx-auto w-full max-w-5xl space-y-6">
-        <Button asChild className="-ml-2" iconLeft={<ArrowLeftIcon />} size="sm" variant="ghost">
-          <Link href={href(earnHref)}>{t("DashboardMarkets.earnProgram.back")}</Link>
-        </Button>
-
-        <p className="text-sm leading-6 text-secondary italic">
+      <div className="flex min-w-0 flex-col gap-8">
+        <p className="text-body text-pretty text-secondary">
           {t("DashboardMarkets.earnProgram.guideIntro")}
         </p>
 
@@ -237,7 +231,6 @@ function CatalogueContent({
     return (
       <ListEmptyState
         description={t("DashboardMarkets.earnProgram.catalogueErrorDescription")}
-        icon={<InfoIcon aria-hidden="true" className="size-5" />}
         message={t("DashboardMarkets.earnProgram.catalogueErrorTitle")}
       />
     );
@@ -246,30 +239,33 @@ function CatalogueContent({
     return (
       <ListEmptyState
         description={t("DashboardMarkets.earnProgram.catalogueEmptyDescription")}
-        icon={<InfoIcon aria-hidden="true" className="size-5" />}
         message={t("DashboardMarkets.earnProgram.catalogueEmptyTitle")}
       />
     );
   }
 
   const selectedStrategy = selectedOption?.strategy;
-  const showIntegration = Boolean(selectedStrategy && selectedOption?.selectable);
 
   return (
-    <>
-      <section className="flex flex-col gap-4">
-        <StepHeading>{t("DashboardMarkets.earnProgram.stepChooseStrategy")}</StepHeading>
-        <StrategyPickerCard
-          initialStrategyMissing={initialStrategyMissing}
+    <RecordStack>
+      <RecordBlock title={t("DashboardMarkets.earnProgram.stepChooseStrategy")}>
+        <StrategyPicker
           locale={locale}
           onStrategyChange={onStrategyChange}
           options={options}
           selectedOption={selectedOption}
-          selectionIssue={selectionIssue}
         />
-      </section>
+        {selectedStrategy && selectedOption?.selectable ? (
+          <StrategyDetails locale={locale} strategy={selectedStrategy} />
+        ) : (
+          <StrategySelectionEmptyState
+            initialStrategyMissing={initialStrategyMissing}
+            selectionIssue={selectionIssue}
+          />
+        )}
+      </RecordBlock>
 
-      {showIntegration && selectedStrategy ? (
+      {selectedStrategy && selectedOption?.selectable ? (
         <IntegrationReference
           activeSectionId={activeSectionId}
           apiBaseUrl={apiBaseUrl}
@@ -277,76 +273,55 @@ function CatalogueContent({
           strategy={selectedStrategy}
         />
       ) : null}
-    </>
+    </RecordStack>
   );
 }
 
-/** The two numbered section titles share one style so the page reads as one flow. */
-function StepHeading({ children }: { children: string }) {
-  return <h3 className="text-[19px] leading-6 font-medium text-primary">{children}</h3>;
-}
-
-function StrategyPickerCard({
-  initialStrategyMissing,
+/**
+ * Every strategy the catalogue lists, the ones this project cannot fund disabled with the reason
+ * beside their APY.
+ */
+function StrategyPicker({
   locale,
   onStrategyChange,
   options,
   selectedOption,
-  selectionIssue,
 }: {
-  initialStrategyMissing: boolean;
   locale: string;
   onStrategyChange: (strategyId: string | null) => void;
   options: StrategyOption[];
   selectedOption: StrategyOption | undefined;
-  selectionIssue: MessageKey | undefined;
 }) {
   const t = useTranslations();
-  const selectedStrategy = selectedOption?.strategy;
-
   return (
-    <Card>
-      <CardContent className="space-y-4">
-        <Select
-          ariaLabel={t("DashboardMarkets.earnProgram.selectTitle")}
-          onValueChange={onStrategyChange}
-          placeholder={t("DashboardMarkets.earnProgram.selectTitle")}
-          size="xl"
-          value={selectedStrategy?.id ?? null}
-        >
-          {options.map(({ availability, selectable, strategy }) => (
-            <SelectItem disabled={!selectable} key={strategy.id} value={strategy.id}>
-              <span className="flex min-w-0 flex-1 items-center justify-between gap-4">
-                <span className="truncate">{strategy.name}</span>
-                <span className="shrink-0 text-tertiary tabular-nums">
-                  {formatProviderApy(strategy.currentApy, locale)}
-                  {!selectable ? (
-                    <>
-                      {" · "}
-                      {earnDepositAvailabilityLabel(
-                        availability,
-                        PROGRAM_AVAILABILITY_LABELS,
-                        strategy,
-                        t
-                      )}
-                    </>
-                  ) : null}
-                </span>
-              </span>
-            </SelectItem>
-          ))}
-        </Select>
-
-        {selectedStrategy && selectedOption?.selectable ? (
-          <StrategyDetails locale={locale} option={selectedOption} />
-        ) : (
-          <StrategySelectionEmptyState
-            initialStrategyMissing={initialStrategyMissing}
-            selectionIssue={selectionIssue}
-          />
-        )}
-      </CardContent>
-    </Card>
+    <Select
+      ariaLabel={t("DashboardMarkets.earnProgram.selectTitle")}
+      onValueChange={onStrategyChange}
+      placeholder={t("DashboardMarkets.earnProgram.selectTitle")}
+      value={selectedOption?.strategy.id ?? null}
+    >
+      {options.map(({ availability, selectable, strategy }) => (
+        <SelectItem disabled={!selectable} key={strategy.id} value={strategy.id}>
+          <span className="flex min-w-0 flex-1 items-center justify-between gap-4">
+            <span className="truncate">{strategy.name}</span>
+            <span className="shrink-0 text-tertiary tabular-nums">
+              {formatProviderApy(strategy.currentApy, locale)}
+              {!selectable ? (
+                <>
+                  {" · "}
+                  {earnDepositAvailabilityLabel(
+                    availability,
+                    PROGRAM_AVAILABILITY_LABELS,
+                    strategy,
+                    t
+                  )}
+                </>
+              ) : null}
+            </span>
+          </span>
+        </SelectItem>
+      ))}
+    </Select>
   );
 }
 
@@ -368,24 +343,17 @@ function StrategySelectionEmptyState({
     descriptionKey = selectionIssue;
     messageKey = "DashboardMarkets.earnProgram.unavailableStrategyTitle";
   }
-  return (
-    <ListEmptyState
-      description={t(descriptionKey)}
-      icon={<InfoIcon aria-hidden="true" className="size-5" />}
-      message={t(messageKey)}
-    />
-  );
+  return <ListEmptyState description={t(descriptionKey)} message={t(messageKey)} />;
 }
 
 /**
- * One plain line under the dropdown ("Kamino · Instant liquidity · 6.2% APY"),
- * the availability badge, then the strategy ID as a copyable code surface.
- * Reference, not a dashboard: no field labels, no big numbers, and no APY when
- * it is unknown.
+ * One plain line under the dropdown ("Kamino · Instant liquidity · 6.2% APY"), then the
+ * strategy ID as a copyable code surface. Reference, not a dashboard: no field labels, no big
+ * numbers, and no APY when it is unknown. Only a strategy this project can fund gets here, so
+ * no availability is restated.
  */
-function StrategyDetails({ locale, option }: { locale: string; option: StrategyOption }) {
+function StrategyDetails({ locale, strategy }: { locale: string; strategy: EarnStrategy }) {
   const t = useTranslations();
-  const { strategy } = option;
   const liquidity = earnStrategyLiquidityLabel(strategy, t);
   const apy = formatProviderApy(strategy.currentApy, locale);
   const facts = [
@@ -395,15 +363,8 @@ function StrategyDetails({ locale, option }: { locale: string; option: StrategyO
   ].filter((fact): fact is string => Boolean(fact));
 
   return (
-    <div className="flex flex-col gap-4 text-sm">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <p className="text-secondary tabular-nums">{facts.join(" · ")}</p>
-        <EarnDepositAvailabilityBadge
-          availability={option.availability}
-          labels={PROGRAM_AVAILABILITY_LABELS}
-          strategy={strategy}
-        />
-      </div>
+    <div className="flex min-w-0 flex-col gap-4">
+      <p className="text-meta text-secondary tabular-nums">{facts.join(" · ")}</p>
       <CodeBlock code={strategy.id} title={t("DashboardMarkets.earnProgram.strategyId")} />
     </div>
   );
@@ -429,27 +390,26 @@ function IntegrationReference({
     GUIDE_SECTIONS.find(({ id }) => id === activeSectionId) ?? GUIDE_SECTIONS[0];
 
   return (
-    <section className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <StepHeading>{t("DashboardMarkets.earnProgram.stepServerCode")}</StepHeading>
+    <RecordBlock
+      aside={
         <Button
           iconLeft={copied ? <CheckIcon /> : <CopyIcon />}
           onClick={() => void copy(serverModule)}
           size="sm"
           type="button"
-          variant="ghost"
+          variant="outline"
         >
           {t(
             copied ? "Shared.SharedComponents.copied" : "DashboardMarkets.earnProgram.copyAllCode"
           )}
         </Button>
-      </div>
-
-      {/* The one thing the copied module needs that this page cannot generate: a
-          key. Informational rather than a warning, and it links to where the key
-          is made, because a warning with no way to act on it only says "no". The
-          sentence is split around the link since the catalog has no rich-text
-          helper. */}
+      }
+      title={t("DashboardMarkets.earnProgram.stepServerCode")}
+    >
+      {/* The one thing the copied module needs that this page cannot generate: a key.
+          Informational rather than a warning, and it links to where the key is made, because a
+          warning with no way to act on it only says "no". The sentence is split around the link
+          since the catalog has no rich-text helper. */}
       <Callout variant="info">
         {t("DashboardMarkets.earnProgram.apiKeyCalloutBefore")}{" "}
         <Link
@@ -461,13 +421,20 @@ function IntegrationReference({
         {t("DashboardMarkets.earnProgram.apiKeyCalloutAfter")}
       </Callout>
 
+      {/* Five reference sections, not wizard steps: on a phone the segments tighten so all five
+          stay on one row. */}
       <SegmentedControl
-        aria-label={t("DashboardMarkets.earnProgram.guideNavigationTitle")}
-        items={GUIDE_SECTIONS.map(({ id, navigationKey }) => ({
+        ariaLabel={t("DashboardMarkets.earnProgram.guideNavigationTitle")}
+        className="w-full @2xl:w-fit"
+        onChange={(value) => {
+          const section = GUIDE_SECTIONS.find(({ id }) => id === value);
+          if (section) onSectionChange(section.id);
+        }}
+        optionClassName="px-2 @2xl:px-3"
+        options={GUIDE_SECTIONS.map(({ id, navigationKey }) => ({
           value: id,
           label: t(navigationKey),
         }))}
-        onValueChange={(value) => value && onSectionChange(value as keyof EarnIntegrationSections)}
         value={activeSection.id}
       />
 
@@ -476,7 +443,7 @@ function IntegrationReference({
         className="flex min-w-0 flex-col gap-3"
         id={`earn-guide-panel-${activeSection.id}`}
       >
-        <p className="text-sm leading-6">
+        <p className="text-body text-pretty">
           <span className="font-medium text-primary">{t(activeSection.titleKey)}</span>
           <span className="text-secondary">{` · ${t(activeSection.descriptionKey)}`}</span>
         </p>
@@ -487,6 +454,6 @@ function IntegrationReference({
           viewportClassName="max-h-[36rem]"
         />
       </div>
-    </section>
+    </RecordBlock>
   );
 }

@@ -180,12 +180,9 @@ describe("estimateFeeCopy", () => {
     );
   });
 
-  it("says there are no fees for a zero total, and keeps the legacy cards' figures bare", () => {
+  it("says there are no fees for a zero total", () => {
     expect(estimateFeeCopy(t, { currency: "USD", total: "0.00" }, "en")).toBe(
       t("DashboardPayments.ramps.noFees")
-    );
-    expect(estimateFeeCopy(t, { currency: "USD", total: "2" }, "en", 0)).toBe(
-      t("DashboardPayments.ramps.fee", { amount: "2", currency: "USD" })
     );
   });
 });

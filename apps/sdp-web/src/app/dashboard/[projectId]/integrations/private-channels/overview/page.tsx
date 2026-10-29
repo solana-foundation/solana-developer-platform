@@ -17,7 +17,8 @@ import {
 } from "@/app/dashboard/[projectId]/integrations/private-channels/private-channels-view-data";
 import { DashboardWorkspaceCard } from "@/components/dashboard-workspace-panel";
 import { getTranslations } from "@/i18n/server";
-import { createSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
+import { resolveDashboardAccess } from "@/lib/dashboard-access";
+import { createSdpApiClient, requestMemberRole, requestProjectHref } from "@/lib/sdp-api";
 import { ChannelDirectoryRow } from "./channel-directory-row";
 import { CreateChannelButton } from "./create-channel-button";
 
@@ -76,10 +77,39 @@ async function loadDirectory(client: SdpClient, t: Translate) {
   } as const;
 }
 
+/**
+ * The directory header's action: none for a read-only member, a new channel once an instance is
+ * connected, else the way to connect one.
+ */
+function ChannelHeaderAction({
+  canWrite,
+  activeInstanceId,
+  setupHref,
+  setupLabel,
+}: {
+  canWrite: boolean;
+  activeInstanceId: string | null;
+  setupHref: string;
+  setupLabel: string;
+}) {
+  if (!canWrite) return null;
+  if (activeInstanceId !== null) return <CreateChannelButton instanceId={activeInstanceId} />;
+  return (
+    <Button asChild>
+      <Link href={setupHref}>{setupLabel}</Link>
+    </Button>
+  );
+}
+
 export default async function PrivateChannelsOverviewPage() {
   await requirePrivateChannelsAccess();
 
-  const [t, client] = await Promise.all([getTranslations(), createSdpApiClient()]);
+  const [t, client, memberRole] = await Promise.all([
+    getTranslations(),
+    createSdpApiClient(),
+    requestMemberRole(),
+  ]);
+  const { canWrite } = resolveDashboardAccess(memberRole).capabilities;
   const result = await loadDirectory(client, t);
   if (!result.ok) return <PrivateChannelsLoadError message={result.error} />;
   const { activeInstance, rows } = result.data;
@@ -99,15 +129,12 @@ export default async function PrivateChannelsOverviewPage() {
               {t("DashboardPrivateChannels.directory.channelsDescription")}
             </p>
           </div>
-          {activeInstance ? (
-            <CreateChannelButton instanceId={activeInstance.id} />
-          ) : (
-            <Button asChild>
-              <Link href={await requestProjectHref(PRIVATE_CHANNELS_SETUP_PATH)}>
-                {t("DashboardPrivateChannels.directory.setupChannel")}
-              </Link>
-            </Button>
-          )}
+          <ChannelHeaderAction
+            canWrite={canWrite}
+            activeInstanceId={activeInstance?.id ?? null}
+            setupHref={await requestProjectHref(PRIVATE_CHANNELS_SETUP_PATH)}
+            setupLabel={t("DashboardPrivateChannels.directory.setupChannel")}
+          />
         </div>
         <DashboardWorkspaceCard className="grow-0">
           <div className="overflow-x-auto">

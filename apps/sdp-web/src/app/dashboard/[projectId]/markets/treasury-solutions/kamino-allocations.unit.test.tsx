@@ -4,15 +4,14 @@ import { renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { SWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useKaminoVaultAllocations } from "./kamino-allocations";
+import * as dashboardFetchModule from "@/lib/dashboard-fetch";
+import {
+  kaminoAllocationsVault,
+  kaminoAllocationsVaults,
+  useKaminoVaultAllocations,
+} from "./kamino-allocations";
 
-const mocks = vi.hoisted(() => ({
-  fetch: vi.fn(),
-}));
-
-vi.mock("@/lib/dashboard-fetch", () => ({
-  dashboardFetch: mocks.fetch,
-}));
+const mocks = { fetch: vi.fn() };
 
 function payload() {
   return {
@@ -24,59 +23,103 @@ function payload() {
 
 // Each test renders inside an isolated SWR cache so a previous test's data
 // never serves (or suppresses the fetch of) a later read.
-function renderIsolatedHook(
-  vault: string | undefined,
-  cluster: "devnet" | "mainnet-beta" = "mainnet-beta"
-) {
+function renderIsolatedHook(vaults: readonly string[]) {
   const wrapper = ({ children }: { children: ReactNode }) => (
     <SWRConfig value={{ provider: () => new Map() }}>{children}</SWRConfig>
   );
-  return renderHook(() => useKaminoVaultAllocations(vault, cluster), { wrapper });
+  return renderHook(() => useKaminoVaultAllocations(vaults), { wrapper });
 }
+
+const kamino = (providerReference: string, hostCluster: "devnet" | "mainnet-beta") => ({
+  provider: "kamino",
+  providerReference,
+  hostCluster,
+});
+
+describe("kaminoAllocationsVaults", () => {
+  it("lists each mainnet Kamino vault once, sorted, whatever the row order", () => {
+    expect(
+      kaminoAllocationsVaults([
+        kamino("KvaultB", "mainnet-beta"),
+        kamino("KvaultA", "mainnet-beta"),
+        kamino("KvaultB", "mainnet-beta"),
+      ])
+    ).toEqual(["KvaultA", "KvaultB"]);
+  });
+
+  it("leaves out rows the mainnet-only source cannot describe", () => {
+    // A devnet vault is an unsupported read, never a doomed upstream call.
+    expect(kaminoAllocationsVault(kamino("KvaultDevnet", "devnet"))).toBeUndefined();
+    expect(
+      kaminoAllocationsVault({
+        provider: "veda",
+        providerReference: "VedaFund",
+        hostCluster: "mainnet-beta",
+      })
+    ).toBeUndefined();
+    expect(kaminoAllocationsVaults([kamino("KvaultDevnet", "devnet")])).toEqual([]);
+  });
+});
 
 describe("useKaminoVaultAllocations", () => {
   beforeEach(() => {
-    mocks.fetch.mockResolvedValue({ ok: true, data: payload(), status: 200 });
+    vi.spyOn(dashboardFetchModule, "dashboardFetch").mockImplementation(mocks.fetch);
+    mocks.fetch.mockResolvedValue({
+      ok: true,
+      data: { vaults: { Kvault1111: payload(), Kvault2222: payload() } },
+      status: 200,
+    });
   });
 
   afterEach(() => {
-    vi.clearAllMocks();
+    vi.restoreAllMocks();
+    mocks.fetch.mockReset();
   });
 
-  it("reads one vault's allocations through the BFF seam", async () => {
-    const { result } = renderIsolatedHook("Kvault1111");
+  it("reads every vault in one request through the BFF seam", async () => {
+    const { result } = renderIsolatedHook(["Kvault1111", "Kvault2222"]);
 
-    await waitFor(() => expect(result.current.allocations).toBeDefined());
+    await waitFor(() => expect(result.current.allocationsByVault).toBeDefined());
     expect(result.current.error).toBeUndefined();
+    expect(mocks.fetch).toHaveBeenCalledTimes(1);
     expect(mocks.fetch).toHaveBeenCalledWith(
-      "/api/dashboard/markets/earn/kamino-allocations?vault=Kvault1111&cluster=mainnet-beta"
+      "/api/dashboard/markets/earn/kamino-allocations?vaults=Kvault1111,Kvault2222&cluster=mainnet-beta"
     );
-    expect(result.current.allocations?.allocations[0]?.marketName).toBe("SOL/BTC Market");
+    expect(result.current.allocationsByVault?.Kvault2222?.allocations[0]?.marketName).toBe(
+      "SOL/BTC Market"
+    );
   });
 
-  it("issues no request for a row without a vault reference", async () => {
-    const { result } = renderIsolatedHook(undefined);
+  it("splits a list past one batch into reads of at most 100 and merges them", async () => {
+    const vaults = Array.from({ length: 150 }, (_, index) => `Kvault${index}`);
+    const requested = (url: string) =>
+      new URL(url, "https://dashboard.test").searchParams.get("vaults")?.split(",") ?? [];
+    mocks.fetch.mockImplementation(async (url: string) => ({
+      ok: true,
+      data: { vaults: Object.fromEntries(requested(url).map((vault) => [vault, payload()])) },
+      status: 200,
+    }));
 
-    expect(result.current.allocations).toBeUndefined();
+    const { result } = renderIsolatedHook(vaults);
+
+    await waitFor(() => expect(result.current.allocationsByVault).toBeDefined());
+    expect(mocks.fetch.mock.calls.map(([url]) => requested(url).length)).toEqual([100, 50]);
+    expect(Object.keys(result.current.allocationsByVault ?? {})).toHaveLength(150);
+  });
+
+  it("issues no request when no row has a readable vault", async () => {
+    const { result } = renderIsolatedHook([]);
+
+    expect(result.current.allocationsByVault).toBeUndefined();
     expect(result.current.isLoading).toBe(false);
     expect(mocks.fetch).not.toHaveBeenCalled();
   });
 
-  it("issues no request for a cluster the allocations source cannot serve", async () => {
-    // Kamino's allocations REST source is mainnet-only: a devnet vault is an
-    // unsupported read, never a doomed upstream call.
-    const { result } = renderIsolatedHook("Kvault1111", "devnet");
-
-    expect(result.current.allocations).toBeUndefined();
-    expect(result.current.isLoading).toBe(false);
-    expect(mocks.fetch).not.toHaveBeenCalled();
-  });
-
-  it("encodes the vault into the request, never into the URL unescaped", async () => {
-    const { result } = renderIsolatedHook("5YxwKgsv+TdT/not=A RealKey");
-    await waitFor(() => expect(result.current.allocations).toBeDefined());
+  it("encodes each vault into the request, never into the URL unescaped", async () => {
+    const { result } = renderIsolatedHook(["5YxwKgsv+TdT/not=A RealKey"]);
+    await waitFor(() => expect(result.current.allocationsByVault).toBeDefined());
     expect(mocks.fetch).toHaveBeenCalledWith(
-      `/api/dashboard/markets/earn/kamino-allocations?vault=${encodeURIComponent(
+      `/api/dashboard/markets/earn/kamino-allocations?vaults=${encodeURIComponent(
         "5YxwKgsv+TdT/not=A RealKey"
       )}&cluster=mainnet-beta`
     );
@@ -90,22 +133,22 @@ describe("useKaminoVaultAllocations", () => {
       body: null,
     });
 
-    const { result } = renderIsolatedHook("Kvault1111");
+    const { result } = renderIsolatedHook(["Kvault1111"]);
 
     await waitFor(() => expect(result.current.error).toBeDefined());
-    expect(result.current.allocations).toBeUndefined();
+    expect(result.current.allocationsByVault).toBeUndefined();
   });
 
   it("surfaces a malformed BFF payload as an error, never as partial data", async () => {
     mocks.fetch.mockResolvedValue({
       ok: true,
-      data: { allocations: [{ marketName: "SOL/BTC Market" }] },
+      data: { vaults: { Kvault1111: { allocations: [{ marketName: "SOL/BTC Market" }] } } },
       status: 200,
     });
 
-    const { result } = renderIsolatedHook("Kvault1111");
+    const { result } = renderIsolatedHook(["Kvault1111"]);
 
     await waitFor(() => expect(result.current.error).toBeDefined());
-    expect(result.current.allocations).toBeUndefined();
+    expect(result.current.allocationsByVault).toBeUndefined();
   });
 });

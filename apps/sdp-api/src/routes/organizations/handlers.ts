@@ -11,17 +11,19 @@ import { getDb } from "@/db/client";
 import { parsePostgresJson } from "@/db/postgres-utils";
 import { getAuth } from "@/lib/auth";
 import { AppError, badRequest, notFound } from "@/lib/errors";
-import { noContent, success } from "@/lib/response";
+import { projectOrganizationSettings } from "@/lib/organization-access";
+import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
+import { findClerkOrganizationId } from "@/services/clerk-organization-provisioning.service";
+import { ClerkOrganizationsService } from "@/services/clerk-organizations.service";
 import { getProviderAvailability } from "@/services/provider-availability.service";
 import type { Env } from "@/types/env";
 import type { updateOrgSchema } from "./schemas";
 
 type AppContext = Context<{ Bindings: Env }>;
 
-type OrganizationRow = {
+export type OrganizationRow = {
   id: string;
   name: string;
   slug: string;
@@ -38,7 +40,7 @@ function parseOrganizationSettings(raw: string | null): OrganizationSettings | n
   }
 
   try {
-    return parsePostgresJson<OrganizationSettings>(raw);
+    return projectOrganizationSettings(parsePostgresJson<OrganizationSettings>(raw));
   } catch {
     return null;
   }
@@ -64,7 +66,7 @@ function parseOrganizationStatus(value: string): OrganizationStatus {
   throw new AppError("INTERNAL_ERROR", `Organization status '${value}' is invalid`);
 }
 
-function toOrganizationResponse(row: OrganizationRow): Organization {
+export function toOrganizationResponse(row: OrganizationRow): Organization {
   return {
     id: row.id,
     name: row.name,
@@ -185,6 +187,19 @@ export const updateOrganization = async (c: ValidatedBodyContext<typeof updateOr
     metadata: { ...body, ...(settingsPatch ? { settings: settingsPatch } : {}) },
   });
 
+  // SDP owns the name (ADR 0012); Clerk's copy only labels the session's
+  // organization switcher, so it follows the committed rename.
+  if (body.name !== undefined) {
+    const clerkOrganizationId = await findClerkOrganizationId(getDb(c.env), orgId);
+    if (clerkOrganizationId === null) {
+      throw badRequest("Organization is not linked to Clerk");
+    }
+    await new ClerkOrganizationsService(c.env).updateOrganizationName({
+      organizationId: clerkOrganizationId,
+      name: org.name,
+    });
+  }
+
   return success(c, toOrganizationResponse(org));
 };
 
@@ -197,59 +212,7 @@ export const getOrganizationProviderAccess = async (c: AppContext) => {
   }
 
   const response = await getProviderAvailability(c.env, getDb(c.env), orgId, {
-    rampProviderStages: c.get("rampProviderStages"),
+    rampProviderMaturity: c.get("rampProviderMaturity"),
   });
   return success(c, response);
-};
-
-export const deleteOrganization = async (c: AppContext) => {
-  const { orgId } = c.req.param();
-  const auth = getAuth(c);
-  const db = getDb(c.env);
-
-  if (auth?.organizationId !== orgId) {
-    throw new AppError("FORBIDDEN", "Access denied to this organization");
-  }
-
-  await db.batch([
-    db
-      .prepare(
-        `UPDATE organizations SET status = 'deleted', updated_at = datetime('now') WHERE id = ?`
-      )
-      .bind(orgId),
-    // A pending invitation is a way back in: accepting one re-activates a
-    // removed membership in this organization. Invitations lock before
-    // memberships, the same order acceptInvitation takes them, so a
-    // concurrent acceptance cannot deadlock the deletion.
-    db
-      .prepare(
-        "UPDATE invitations SET status = 'revoked' WHERE organization_id = ? AND status = 'pending'"
-      )
-      .bind(orgId),
-    db
-      .prepare("UPDATE organization_members SET status = 'removed' WHERE organization_id = ?")
-      .bind(orgId),
-    db
-      .prepare(
-        `UPDATE api_keys SET status = 'revoked', revoked_at = datetime('now')
-         WHERE organization_id = ? AND status = 'active'`
-      )
-      .bind(orgId),
-  ]);
-
-  // Authentication reads the organization and key rows on every request, so
-  // the committed batch is what stops every credential; nothing is cached.
-  try {
-    await new AuditService(getDb(c.env)).log(c, {
-      action: "delete",
-      resourceType: "organization",
-      resourceId: orgId,
-    });
-  } catch (error) {
-    // A missing audit record does not leave a credential live, so it is
-    // logged rather than retried by the caller.
-    getLogger().error({ error }, "Failed to audit an organization deletion that already committed");
-  }
-
-  return noContent(c);
 };

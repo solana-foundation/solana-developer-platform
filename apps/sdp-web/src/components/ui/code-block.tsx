@@ -1,10 +1,10 @@
 "use client";
 
 import { cn } from "@sdp/ui/cn";
+import { HighlightedCode, isHighlightLanguage } from "@sdp/ui/shiki-code";
 import { Check, Clipboard } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
 import { useTranslations } from "@/i18n/provider";
-import { HighlightedCode, isHighlightLanguage } from "@/lib/shiki-code";
 import { useCopy } from "@/lib/use-copy";
 
 interface CodeBlockProps extends Omit<ComponentProps<"figure">, "children" | "title"> {
@@ -78,11 +78,4 @@ export function CodeBlock({
       </div>
     </figure>
   );
-}
-
-export function JsonCodeBlock({
-  value,
-  ...props
-}: { value: unknown } & Omit<CodeBlockProps, "code">) {
-  return <CodeBlock code={JSON.stringify(value, null, 2)} language="json" {...props} />;
 }

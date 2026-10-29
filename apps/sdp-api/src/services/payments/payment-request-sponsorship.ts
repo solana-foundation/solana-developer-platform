@@ -3,6 +3,7 @@ import { hashString } from "@sdp/payments/hash";
 import { createClusterRpc } from "@sdp/rpc/factory";
 import { getRecentBlockhash } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
+import { isPaymentRequestPayableAt } from "@sdp/types/payments";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import {
   type AccountMeta,
@@ -34,6 +35,8 @@ import { createSystemPaymentRequestsRepository } from "@/db/repositories/reposit
 import { badRequest, rateLimited } from "@/lib/errors";
 import { buildSplTransferInstructions } from "@/routes/payments/token-accounts";
 import { AuditService } from "@/services/audit.service";
+import { isPaymentRequestExpired } from "@/services/payments/payment-requests";
+import { assertNoSolRentShortfall } from "@/services/payments/sol-rent-minimum";
 import { loadPaymentMint } from "@/services/payments/token-amount";
 import {
   createSponsorshipFeePayment,
@@ -56,6 +59,12 @@ const sponsoredPaymentTransactionSchema = z.discriminatedUnion("kind", [
 ]);
 
 export type SponsoredPaymentTransaction = z.infer<typeof sponsoredPaymentTransactionSchema>;
+
+function assertNotExpired(request: PaymentRequestRow): void {
+  if (isPaymentRequestExpired(request.expires_at)) {
+    throw badRequest("Payment request is no longer payable");
+  }
+}
 
 /** Saved claims retain their original sponsor even after the configured signer rotates. */
 function assertSavedPayerIsNotSponsor(payer: Address, unsignedBase64: string): void {
@@ -83,7 +92,8 @@ function assertSavedPayerIsNotSponsor(payer: Address, unsignedBase64: string): v
  * @returns The partially signed transaction, or the hold another payer's live claim places.
  * @throws AppError `RATE_LIMITED` when the claim is lost with no live claim to serve, or a
  *   concurrent claim superseded this one.
- * @throws AppError `BAD_REQUEST` when the payer is the sponsor or a SOL amount is not positive.
+ * @throws AppError `BAD_REQUEST` when the payer is the sponsor, a SOL amount is not positive, or
+ *   the request stopped being payable before its claim (canceled, paid or expired).
  */
 export async function issuePaymentRequestTransaction(
   c: Context<{ Bindings: Env }>,
@@ -104,6 +114,7 @@ export async function issuePaymentRequestTransaction(
     if (claim === null || claim.lastValidBlockHeight < currentBlockHeight) {
       return null;
     }
+    assertNotExpired(request);
     if (claim.account !== payer) {
       const retryAfterSeconds = Math.ceil(
         Number(claim.lastValidBlockHeight - currentBlockHeight) * 0.4
@@ -136,6 +147,7 @@ export async function issuePaymentRequestTransaction(
   };
 
   const signAndStore = async (unsignedBase64: string): Promise<SponsoredPaymentTransaction> => {
+    assertNotExpired(request);
     const feePayment = await getFeePayment();
     const unsignedBytes = new Uint8Array(getBase64Encoder().encode(unsignedBase64));
     // The intent is durable before signAsFeePayer reserves budget and Kora
@@ -195,6 +207,7 @@ export async function issuePaymentRequestTransaction(
         superseding.account === payer &&
         superseding.signedTransaction !== null
       ) {
+        assertNotExpired(request);
         assertSavedPayerIsNotSponsor(payer, superseding.unsignedTransaction);
         return { kind: "signed", transaction: superseding.signedTransaction };
       }
@@ -229,6 +242,22 @@ export async function issuePaymentRequestTransaction(
     currentBlockHeight,
   });
   if (!claimed) {
+    // The claim refuses a request that stopped being open, a cancel above all, as well as one
+    // another payer holds: only a request still open is answered with that payer's hold.
+    const current = await repository.getPaymentRequestById({
+      requestId: request.id,
+      organizationId: request.organization_id,
+      projectId: request.project_id,
+    });
+    if (
+      current === null ||
+      !isPaymentRequestPayableAt(
+        { status: current.status, expiresAt: current.expires_at },
+        Date.now()
+      )
+    ) {
+      throw badRequest("Payment request is no longer payable");
+    }
     const winner = await serveLiveClaim();
     if (winner) {
       return winner;
@@ -253,7 +282,8 @@ export async function issuePaymentRequestTransaction(
  * @param params.blockhash - The lifetime blockhash.
  * @param params.lastValidBlockHeight - The block height the blockhash expires after.
  * @returns The compiled, unsigned transaction as base64.
- * @throws AppError `BAD_REQUEST` when a SOL request's amount is not positive.
+ * @throws AppError `BAD_REQUEST` when a SOL request's amount is not positive, and
+ *   `AMOUNT_BELOW_RENT_MINIMUM` when the chain would refuse it for rent.
  */
 async function buildPaymentTransaction(params: {
   request: PaymentRequestRow;
@@ -277,6 +307,14 @@ async function buildPaymentTransaction(params: {
     if (lamports <= 0n) {
       throw badRequest("Transfer amount must be greater than zero");
     }
+    // The payer would sign a transaction the chain refuses (HOO-2375).
+    await assertNoSolRentShortfall(
+      {
+        source: params.payer,
+        payments: [{ index: 0, destination: recipient, lamports }],
+      },
+      "transfer"
+    );
     const transferInstruction = getTransferSolInstruction({
       source: payerSigner,
       destination: recipient,

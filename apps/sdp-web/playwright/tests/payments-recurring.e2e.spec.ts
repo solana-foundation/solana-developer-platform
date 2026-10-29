@@ -72,9 +72,7 @@ test.describe
       const recurringHref = projectHref(bootstrapProjectId, "/dashboard/payments/recurring");
       await page.goto(projectHref(bootstrapProjectId, "/dashboard/payments"));
 
-      // The sidebar names Schedules after the design: "Schedules" here, "Scheduled" in the branches
-      // under this one, "Recurring" with new-design-activity off.
-      const schedulesLink = page.getByRole("link", { name: /^(Schedules|Scheduled|Recurring)$/ });
+      const schedulesLink = page.getByRole("link", { name: "Schedules", exact: true });
       await expect(schedulesLink).toBeVisible();
       await schedulesLink.click();
       await expect(page).toHaveURL(recurringHref);

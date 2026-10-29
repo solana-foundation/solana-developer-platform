@@ -3,7 +3,6 @@ import type {
   PrivateChannelTransferContext,
   PrivateChannelTransferStatus,
 } from "@sdp/types/private-channels";
-import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export function generatePrivateChannelDepositId(): string {
   return `dep_${crypto.randomUUID()}`;
@@ -77,10 +76,6 @@ export interface UpdateDepositInput {
    * meantime.
    */
   expectedSignatureAbsent?: boolean;
-}
-
-export interface PrivateChannelDepositRepositoryContext {
-  db: RepositoryDbClient;
 }
 
 export interface PrivateChannelDepositRepository {

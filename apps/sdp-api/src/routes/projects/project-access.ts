@@ -12,7 +12,7 @@ type AppContext = Context<{ Bindings: Env }>;
  * their organization-level project permissions and are authorized by the
  * individual handler's existing checks.
  */
-export function assertApiKeyProjectAccess(auth: ApiKeyContext, projectId: string): void {
+function assertApiKeyProjectAccess(auth: ApiKeyContext, projectId: string): void {
   if (auth.authType === "api_key" && auth.projectId !== projectId) {
     throw notFound("Project");
   }

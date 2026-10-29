@@ -165,20 +165,6 @@ export function getHighRiskProviders(snapshot: ComplianceSnapshot): CompliancePr
   return snapshot.providers.filter((result) => resolveRiskTone(result) === "red");
 }
 
-export function riskToneClassName(result: ComplianceProviderResult): string {
-  const tone = resolveRiskTone(result);
-  if (tone === "green") {
-    return "border-success-border bg-success-bg text-success";
-  }
-  if (tone === "yellow") {
-    return "border-warning-border bg-warning-bg text-warning";
-  }
-  if (tone === "red") {
-    return "border-destructive-border bg-destructive-bg text-destructive-strong";
-  }
-  return "border-border-default bg-fill-subtle text-secondary";
-}
-
 export async function fetchWallets(
   options: { signal?: AbortSignal; includeBalances?: boolean },
   t: Translate
@@ -512,6 +498,14 @@ const createdTransferSchema = z.looseObject({
   custodyWalletId: z.string(),
   status: z.enum(PAYMENT_TRANSFER_STATUSES),
   signature: z.string().nullable(),
+  error: z.string().nullish(),
+  fireblocks: z
+    .object({
+      transactionId: z.string().nullable(),
+      status: z.string(),
+      subStatus: z.string().nullable(),
+    })
+    .optional(),
 });
 
 const createdTransferResponseSchema = z.object({

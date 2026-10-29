@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types/api-keys";
 import {
   EARN_EXECUTION_MODELS,
   EARN_MOVEMENT_DIRECTIONS,
@@ -14,6 +15,7 @@ import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import type { EarnRepository } from "./earn.repository";
 import { createPostgresEarnRepository } from "./earn.repository.postgres";
+import { createPostgresEarnExternalWalletTransactionsRepository } from "./earn-external-wallet-transactions.repository";
 import {
   type CreateSignedVaultDepositIntentInput,
   createPostgresEarnMovementsRepository,
@@ -43,8 +45,14 @@ const WALLET = "cw_earn_mv";
 const CONFIG = "cc_earn_mv";
 const TOKEN_MINT = "TokenMint1111111111111111111111111111111111";
 const SHARE_MINT = "ShareMint1111111111111111111111111111111111";
-const VAULT = "VaultAddress11111111111111111111111111111111";
+// Exposure spans organizations, so this vault must be unique to the suite.
+const VAULT = "EarnMovementVault11111111111111111111111111";
 const WALLET_PUBKEY = "DepositorPublicKey11111111111111111111111111";
+const EXTERNAL_OWNER = "3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF";
+const PROJECT_BY_ENVIRONMENT = {
+  sandbox: PROJECT,
+  production: `${PROJECT}_production`,
+} as const satisfies Record<SdpEnvironment, string>;
 
 describe("Unified earn movement ledger (postgres)", () => {
   let ledger: EarnMovementsRepository;
@@ -82,7 +90,12 @@ describe("Unified earn movement ledger (postgres)", () => {
   beforeEach(async () => {
     const db = getDb(env);
 
-    for (const table of ["earn_movements", "earn_positions", "earn_provider_wallets"]) {
+    for (const table of [
+      "earn_external_wallet_transactions",
+      "earn_movements",
+      "earn_positions",
+      "earn_provider_wallets",
+    ]) {
       await db
         .prepare(`DELETE FROM ${table} WHERE organization_id IN (?, ?)`)
         .bind(ORG, ORG_OTHER)
@@ -341,7 +354,9 @@ describe("Unified earn movement ledger (postgres)", () => {
       }
 
       const claimIds = async (limit: number) =>
-        (await ledger.claimUnvaluedKaminoDeposits({ limit, retryBefore })).map((row) => row.id);
+        (
+          await ledger.claimUnvaluedKaminoDeposits({ environment: "sandbox", limit, retryBefore })
+        ).map((row) => row.id);
       expect(new Set(await claimIds(2))).toEqual(new Set(untouched));
       expect(new Set(await claimIds(2))).toEqual(new Set(retried.slice(0, 2)));
       expect(await claimIds(2)).toEqual(retried.slice(2));
@@ -349,6 +364,7 @@ describe("Unified earn movement ledger (postgres)", () => {
       // Failed observations are delayed, never discarded or treated as valued.
       expect(
         await ledger.claimUnvaluedKaminoDeposits({
+          environment: "sandbox",
           limit: 5,
           retryBefore: new Date(Date.now() + 1_000).toISOString(),
         })
@@ -484,6 +500,7 @@ describe("Unified earn movement ledger (postgres)", () => {
         });
         expect(
           await migratedLedger.claimUnvaluedKaminoDeposits({
+            environment: "sandbox",
             limit: 1,
             retryBefore: new Date().toISOString(),
           })
@@ -1294,8 +1311,10 @@ describe("Unified earn movement ledger (postgres)", () => {
         .bind("1900-01-02T00:00:00.000Z", requested.movement.id)
         .run();
 
-      const queued =
-        await createPostgresEarnMovementsRepository(db).claimUnsettledVaultMovements(1);
+      const queued = await createPostgresEarnMovementsRepository(db).claimUnsettledVaultMovements({
+        environment: "sandbox",
+        limit: 1,
+      });
       expect(queued).toHaveLength(1);
       expect(queued[0]).toMatchObject({ id: requested.movement.id, status: "requested" });
     });
@@ -1322,7 +1341,10 @@ describe("Unified earn movement ledger (postgres)", () => {
       // the blockhash-sensitive queue and one is guaranteed to finalization.
       // The former absolute priority returned four requested rows forever.
       const repository = createPostgresEarnMovementsRepository(db);
-      const queued = await repository.claimUnsettledVaultMovements(4);
+      const queued = await repository.claimUnsettledVaultMovements({
+        environment: "sandbox",
+        limit: 4,
+      });
       expect(queued).toHaveLength(4);
       expect(queued.filter((movement) => movement.status === "requested")).toHaveLength(3);
       expect(queued).toContainEqual(expect.objectContaining({ id: confirmed.movement.id }));
@@ -1360,12 +1382,18 @@ describe("Unified earn movement ledger (postgres)", () => {
         movementId: older.movement.id,
         organizationId: ORG,
       });
-      const first = await repository.claimUnsettledVaultMovements(4);
+      const first = await repository.claimUnsettledVaultMovements({
+        environment: "sandbox",
+        limit: 4,
+      });
       expect(first.filter((movement) => movement.status === "requested")).toHaveLength(3);
       expect(first.filter((movement) => movement.status === "confirmed")).toEqual([
         expect.objectContaining({ id: older.movement.id }),
       ]);
-      const second = await repository.claimUnsettledVaultMovements(4);
+      const second = await repository.claimUnsettledVaultMovements({
+        environment: "sandbox",
+        limit: 4,
+      });
       expect(second.filter((movement) => movement.status === "requested")).toHaveLength(3);
       expect(second.filter((movement) => movement.status === "confirmed")).toEqual([
         expect.objectContaining({ id: newer.movement.id }),
@@ -1381,7 +1409,10 @@ describe("Unified earn movement ledger (postgres)", () => {
         toStatus: "confirmed",
         confirmedAt: "2026-08-19T12:02:00.000Z",
       });
-      const third = await repository.claimUnsettledVaultMovements(4);
+      const third = await repository.claimUnsettledVaultMovements({
+        environment: "sandbox",
+        limit: 4,
+      });
       expect(third.filter((movement) => movement.status === "confirmed")).toEqual([
         expect.objectContaining({ id: older.movement.id }),
       ]);
@@ -1391,5 +1422,179 @@ describe("Unified earn movement ledger (postgres)", () => {
       });
       expect(afterClaims?.updated_at).toBe(beforeClaims?.updated_at);
     });
+  });
+
+  describe("environment scope", () => {
+    // Each environment's sweep registration (a `cluster` Cron Definition)
+    // claims and counts only its own rows, so a production movement is never
+    // judged on devnet. Every case seeds rows in both environments, works one,
+    // and proves the other's rows were neither returned nor touched. Owner-signed
+    // movements keep the fixture free of custody: managed custody is
+    // Sandbox-only (ADR 0006), and the claims do not look at the signer.
+
+    function otherThan(environment: SdpEnvironment): SdpEnvironment {
+      return environment === "sandbox" ? "production" : "sandbox";
+    }
+
+    async function attemptedAt(movementId: string): Promise<string | null> {
+      const row = await getDb(env)
+        .prepare("SELECT reconciliation_attempted_at FROM earn_movements WHERE id = ?")
+        .bind(movementId)
+        .first<{ reconciliation_attempted_at: string | null }>();
+      if (row === null) throw new Error(`movement ${movementId} is missing`);
+      return row.reconciliation_attempted_at;
+    }
+
+    /** Finalize with no observed payout: a withdrawal's token amount stays NULL. */
+    async function finalize(movementId: string): Promise<void> {
+      const settledAt = new Date().toISOString();
+      await ledger.advanceVaultMovement({
+        movementId,
+        organizationId: ORG,
+        toStatus: "finalized",
+        confirmedAt: settledAt,
+        settledAt,
+      });
+    }
+
+    async function buildFor(
+      environment: SdpEnvironment,
+      build: { direction: "deposit" | "withdrawal"; vaultAddress: string }
+    ): Promise<string> {
+      const id = `earn_ewt_${crypto.randomUUID()}`;
+      await createPostgresEarnExternalWalletTransactionsRepository(getDb(env)).create({
+        id,
+        organizationId: ORG,
+        projectId: PROJECT_BY_ENVIRONMENT[environment],
+        environment,
+        provider: "kamino",
+        direction: build.direction,
+        ownerAddress: EXTERNAL_OWNER,
+        vaultAddress: build.vaultAddress,
+        tokenMint: TOKEN_MINT,
+        shareMint: SHARE_MINT,
+        label: "USDC vault",
+        denomination: build.direction === "deposit" ? TOKEN_MINT : SHARE_MINT,
+        amountRequested: "1",
+        createsShareAccount: false,
+        unsignedTransaction: "AQ==",
+        lastValidBlockHeight: "100",
+      });
+      return id;
+    }
+
+    /** An owner-signed Kamino deposit in `environment`, still `requested`, into a fresh vault. */
+    async function depositIn(environment: SdpEnvironment) {
+      const vaultAddress = `vault_${crypto.randomUUID()}`;
+      const deposit = await ledger.createSignedExternalWalletDepositIntent({
+        organizationId: ORG,
+        projectId: PROJECT_BY_ENVIRONMENT[environment],
+        environment,
+        provider: "kamino",
+        vaultAddress,
+        ownerAddress: EXTERNAL_OWNER,
+        shareMint: SHARE_MINT,
+        tokenMint: TOKEN_MINT,
+        label: "USDC vault",
+        requestedAmount: "1",
+        signature: `sig_${crypto.randomUUID()}`,
+        signedTransaction: "AQ==",
+        lastValidBlockHeight: "100",
+        requestId: crypto.randomUUID(),
+        idempotencyFingerprint: crypto.randomUUID(),
+        externalWalletTransactionId: await buildFor(environment, {
+          direction: "deposit",
+          vaultAddress,
+        }),
+      });
+      return { ...deposit, vaultAddress };
+    }
+
+    /** A finalized owner-signed withdrawal in `environment` whose payout was never observed. */
+    async function unvaluedWithdrawalIn(environment: SdpEnvironment): Promise<string> {
+      const deposit = await depositIn(environment);
+      await finalize(deposit.movement.id);
+      const { vaultAddress } = deposit;
+      const withdrawal = await ledger.createSignedExternalWalletWithdrawalIntent({
+        organizationId: ORG,
+        projectId: PROJECT_BY_ENVIRONMENT[environment],
+        environment,
+        provider: "kamino",
+        positionId: deposit.position.id,
+        vaultAddress,
+        ownerAddress: EXTERNAL_OWNER,
+        shareMint: SHARE_MINT,
+        requestedShares: "1",
+        signature: `sig_${crypto.randomUUID()}`,
+        signedTransaction: "AQ==",
+        lastValidBlockHeight: "100",
+        requestId: crypto.randomUUID(),
+        idempotencyFingerprint: crypto.randomUUID(),
+        externalWalletTransactionId: await buildFor(environment, {
+          direction: "withdrawal",
+          vaultAddress,
+        }),
+      });
+      await finalize(withdrawal.movement.id);
+      return withdrawal.movement.id;
+    }
+
+    it.each(SDP_ENVIRONMENTS)(
+      "claims and counts only %s unsettled movements",
+      async (environment) => {
+        const own = await depositIn(environment);
+        const others = [
+          await depositIn(otherThan(environment)),
+          await depositIn(otherThan(environment)),
+        ];
+
+        const claimed = await ledger.claimUnsettledVaultMovements({ environment, limit: 256 });
+
+        expect(claimed.map((row) => row.id)).toEqual([own.movement.id]);
+        for (const other of others) {
+          expect(await attemptedAt(other.movement.id)).toBeNull();
+        }
+        await expect(ledger.getUnsettledVaultMovementStats({ environment })).resolves.toMatchObject(
+          {
+            backlog: 1,
+            backlogBlockhashBound: 1,
+          }
+        );
+      }
+    );
+
+    it.each(SDP_ENVIRONMENTS)("claims only %s unvalued withdrawal payouts", async (environment) => {
+      const own = await unvaluedWithdrawalIn(environment);
+      const other = await unvaluedWithdrawalIn(otherThan(environment));
+
+      const claimed = await ledger.claimUnvaluedWithdrawalPayouts({
+        environment,
+        limit: 25,
+        settledAfter: new Date(Date.now() - 60_000).toISOString(),
+        retryBefore: new Date().toISOString(),
+      });
+
+      expect(claimed.map((row) => row.id)).toEqual([own]);
+      expect(await attemptedAt(other)).toBeNull();
+    });
+
+    it.each(SDP_ENVIRONMENTS)(
+      "claims only %s Kamino deposits awaiting a receipt",
+      async (environment) => {
+        const own = await depositIn(environment);
+        const other = await depositIn(otherThan(environment));
+        await finalize(own.movement.id);
+        await finalize(other.movement.id);
+
+        const claimed = await ledger.claimUnvaluedKaminoDeposits({
+          environment,
+          limit: 25,
+          retryBefore: new Date().toISOString(),
+        });
+
+        expect(claimed.map((row) => row.id)).toEqual([own.movement.id]);
+        expect(await attemptedAt(other.movement.id)).toBeNull();
+      }
+    );
   });
 });

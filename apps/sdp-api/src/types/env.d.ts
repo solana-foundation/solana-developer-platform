@@ -2,13 +2,14 @@
 
 import type { WalletAccess } from "@/lib/auth";
 import type { ClerkJwtPayload } from "@/lib/clerk-token";
+import type { GatewayIdentity } from "@/lib/gateway-identity";
 import type { Action } from "@sdp/types/actions";
 import type { ApiKeyEnvironment } from "@sdp/types/api-keys";
 import type { EgressReadiness } from "@sdp/types/health";
 import type { OrganizationEntitlements } from "@sdp/types/organization-entitlements";
 import type { OrganizationRpcProvider } from "@sdp/types/organizations";
 import type { OrganizationRole } from "@sdp/types/roles";
-import type { SdpRampProviderStages } from "@sdp/types/release-channels";
+import type { SdpRampProviderMaturity } from "@sdp/types/release-channels";
 import type { ManagedRpcEnv } from "@sdp/rpc/types";
 import type { RequestGateContext } from "@/middleware/request-gate";
 import type { KVStoreSet } from "@/runtime/kv";
@@ -29,9 +30,6 @@ export interface Env extends ManagedRpcEnv {
 
   // Environment variables
   ENVIRONMENT: "development" | "production";
-  /** Anonymous Earn paid-upstream budget, per client IP. */
-  EARN_ANONYMOUS_RPC_MAX_REQUESTS?: string;
-  EARN_ANONYMOUS_RPC_WINDOW_SECONDS?: string;
   API_VERSION: string;
   /** Build SHA baked into the image; shared by the api and worker services. */
   SDP_BUILD_SHA?: string;
@@ -45,6 +43,10 @@ export interface Env extends ManagedRpcEnv {
   // replaces caller-supplied forwarding headers. Unset: forwarded headers are
   // caller-controlled and no client IP resolves.
   TRUST_PROXY_HEADERS?: string;
+  // The Foundation API gateway's identity issuer and JWKS (HOO-2256). Set
+  // together, or neither: unset, `X-SF-Identity` is ignored.
+  SF_GATEWAY_ISSUER?: string;
+  SF_GATEWAY_JWKS_URL?: string;
 
   // Public-facing origin of this API (e.g. "https://api.example.com"). The
   // SDP-hosted token metadata URL burned into the on-chain MetadataPointer is
@@ -98,14 +100,10 @@ export interface Env extends ManagedRpcEnv {
   // Solana configuration
   SOLANA_RPC_URL?: string;
   /**
-   * Optional PER-CLUSTER overrides for the Earn execution path.
-   *
-   * One API process serves both clusters — sandbox projects are devnet,
-   * production projects are mainnet-beta — so a single `SOLANA_RPC_URL` cannot
-   * be correct for both. Unset falls back to `SOLANA_RPC_URL`, which must then
-   * prove its chain by genesis hash before anything is built against it
-   * (`assertClusterEndpoint`), so a single-cluster deployment keeps working and
-   * a mismatch is a refusal rather than a confidently wrong transaction.
+   * Optional per-cluster pins, read only by the deprecated `createClusterRpc(env, cluster)` in
+   * `@sdp/rpc/solana` (Private Channels, HOO-1879) and the local Kora harness. Earn reads each
+   * cluster's managed pool (`SOLANA_RPC_<PROVIDER>_<CLUSTER>_API_KEY_URL`) instead, through
+   * `services/earn/cluster-rpc.ts`, and never falls back to `SOLANA_RPC_URL`.
    */
   SOLANA_DEVNET_RPC_URL?: string;
   SOLANA_MAINNET_RPC_URL?: string;
@@ -114,9 +112,8 @@ export interface Env extends ManagedRpcEnv {
   SOLANA_RPC_TRITON_API_KEY?: string;
   SOLANA_RPC_HELIUS_URL?: string;
   SOLANA_RPC_HELIUS_API_KEY?: string;
-  /** Defaults to Jupiter's rate-limited lite endpoint; set both to use the keyed tier. */
-  JUPITER_PRICE_API_URL?: string;
-  JUPITER_PRICE_API_KEY?: string;
+  /** Tokens.xyz server key with assets:read; used only for display estimates. */
+  TOKENS_XYZ_API_KEY?: string;
   /**
    * Jupiter Swap API (swap-funded Earn deposits and provider DEX exits). Fail-closed: with no key
    * present, a deposit that names a `sourceTokenMint` is refused before any
@@ -322,10 +319,12 @@ export interface Env extends ManagedRpcEnv {
 // Extend Hono's context with our bindings
 declare module "hono" {
   interface ContextVariableMap {
-    // Set by createApp on every request; see AppDeps.rampProviderStages
-    rampProviderStages: SdpRampProviderStages;
+    // Set by createApp on every request; see AppDeps.rampProviderMaturity
+    rampProviderMaturity: SdpRampProviderMaturity;
     // Set by createApp on every request; see AppDeps.egressReadiness
     egressReadiness?: () => EgressReadiness;
+    // Set by gatewayIdentityMiddleware from a verified X-SF-Identity
+    gatewayIdentity?: GatewayIdentity;
     // API key auth context set by middleware
     projectId?: string;
     projectEnvironment?: ApiKeyEnvironment;
@@ -365,14 +364,19 @@ declare module "hono" {
       clerkOrgId: string;
       email: string | null;
       orgSlug: string | null;
-      orgRole: string | null;
+    };
+    // Set by clerkSignupSessionMiddleware: a verified person with no organization
+    clerkSignup?: {
+      userId: string;
+      clerkUserId: string;
+      email: string;
     };
     clerkOnboarding?: {
       clerkUserId: string;
       clerkOrgId: string;
       orgSlug: string | null;
-      orgRole: string | null;
       email: string;
+      organizationId: string | null;
     };
     verifiedClerkJwt?: {
       token: string;

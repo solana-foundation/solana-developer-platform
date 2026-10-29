@@ -5,7 +5,7 @@ import {
 import { z } from "zod";
 import { paymentAmountSchema, paymentTokenSchema } from "@/routes/payments/schemas";
 
-export const priorityFeeSchema = z.enum(["none", "low", "medium", "high", "auto"]);
+const priorityFeeSchema = z.enum(["none", "low", "medium", "high", "auto"]);
 
 export const transferBatchIdParamsSchema = z.object({
   batchId: z.string().min(1),
@@ -15,7 +15,7 @@ export const transferBatchStatusSchema = z.enum(PAYMENT_TRANSFER_BATCH_STATUSES)
 
 export const transferBatchRecipientStatusSchema = z.enum(PAYMENT_TRANSFER_BATCH_RECIPIENT_STATUSES);
 
-export const transferBatchRecipientSchema = z.object({
+const transferBatchRecipientSchema = z.object({
   externalId: z.string().min(1).max(256).optional(),
   counterpartyId: z.string().min(1).optional(),
   counterpartyAccountId: z.string().min(1),

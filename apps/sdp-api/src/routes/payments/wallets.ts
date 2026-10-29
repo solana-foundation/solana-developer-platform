@@ -1,8 +1,10 @@
 import { badRequest } from "@sdp/payments/errors";
+import type { MovementOf } from "@sdp/types/movements";
 import { isAddress } from "@solana/addresses";
 import { getDb } from "@/db/client";
 import { getAuth, requireProjectId, walletAccessAllows } from "@/lib/auth";
 import { conflict, walletNotFound } from "@/lib/errors";
+import { assertMoneyStartAdmitted } from "@/lib/money-admission";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { createSigningService } from "@/services/domain/signing.service";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
@@ -162,6 +164,21 @@ export async function admitPaymentWalletRuntimeExecution(
     requireProjectId(c),
     wallet.id
   );
+}
+
+/** Refuse a stopped payment before its row, then check live wallet state. */
+export async function admitPaymentStart(
+  c: AppContext,
+  wallet: CustodyWallet,
+  movement: MovementOf<"payments">
+): Promise<void> {
+  await assertMoneyStartAdmitted(
+    c.env,
+    { organizationId: getAuth(c).organizationId, projectId: requireProjectId(c) },
+    { surface: "http", movement, subjectId: wallet.id },
+    { custodyWalletId: wallet.id }
+  );
+  await admitPaymentWalletRuntimeExecution(c, wallet);
 }
 
 export function resolveWalletAddress(

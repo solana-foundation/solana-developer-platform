@@ -55,8 +55,8 @@ import {
 import * as signingServiceModule from "@/services/domain/signing.service";
 import {
   aggregateTrackedWalletBalances,
+  attachDisplayValuesToBalanceMap,
   attachTokenSymbolsToBalanceMap,
-  attachUsdValuesToBalanceMap,
   attachUsdValuesToBalances,
 } from "@/services/helius-das.service";
 import { assertCustodyProviderAvailable } from "@/services/provider-availability.service";
@@ -182,13 +182,11 @@ async function getBalancesByWalletId(
     ])
   );
 
-  const balancesMap = await attachTokenSymbolsToBalanceMap(labeledBalances);
-
   if (options.includeUsdValues === false) {
-    return balancesMap;
+    return attachTokenSymbolsToBalanceMap(labeledBalances);
   }
 
-  return attachUsdValuesToBalanceMap(c.env, balancesMap);
+  return attachDisplayValuesToBalanceMap(c.env, labeledBalances);
 }
 
 /**

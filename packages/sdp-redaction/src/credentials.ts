@@ -36,11 +36,20 @@ const AUTH_HEADER_PATTERN = /\b(Bearer|Basic)\s+([A-Za-z0-9._~+/=-]+)/gi;
 // The path segment itself is the credential on /pay/:token, including /tx
 // and unmatched suffixes. Keep route context without copying the bearer token.
 const PAY_LINK_TOKEN_PATTERN = /\/pay\/[^/\s?#"'<>\\]+/g;
+// A Clerk invitation ticket signs its holder in, so it is a credential wherever
+// a URL carries it: plain, URL-encoded inside another parameter (once or more,
+// `%3D`, `%253D`, ...), or as a serialized JSON field.
+const CLERK_TICKET_PATTERN = /(__clerk_ticket(?:=|%(?:25)*3D))[^&\s"'#%<>]+/gi;
+// Starts only where a backslash run starts (the lookbehind), so a long run is
+// scanned once, as SENSITIVE_JSON_FIELD_START does.
+const CLERK_TICKET_FIELD_PATTERN = /(?<!\\)(\\*["']__clerk_ticket\\*["']\s*:\s*\\*["'])[^"'\\]+/gi;
 
 export function redactCredentialString(value: string): string {
   const withoutHeaders = value
     .replace(PRIVATE_KEY_PATTERN, REDACTED)
     .replace(PAY_LINK_TOKEN_PATTERN, `/pay/${REDACTED}`)
+    .replace(CLERK_TICKET_PATTERN, `$1${REDACTED}`)
+    .replace(CLERK_TICKET_FIELD_PATTERN, `$1${REDACTED}`)
     .replace(AUTH_HEADER_PATTERN, (match, scheme: string, token: string) =>
       isLikelyAuthToken(scheme, token) ? `${scheme} ${REDACTED}` : match
     );

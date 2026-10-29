@@ -16,7 +16,7 @@ import { z } from "zod";
 import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 /** Acting on one leg names a side; closing the trade does not. */
-export type DvpActionRequestKind = "fund" | "reclaim" | "settle" | "cancel";
+type DvpActionRequestKind = "fund" | "reclaim" | "settle" | "cancel";
 
 const dvpLegActionRequestRowSchema = z.object({
   id: z.string(),
@@ -57,7 +57,7 @@ export type DvpLegActionRequest =
       updatedAt: string;
     };
 
-export interface DvpLegActionRequestInsert {
+interface DvpLegActionRequestInsert {
   id: string;
   organizationId: string;
   projectId: string;

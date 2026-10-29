@@ -3,7 +3,6 @@ import type {
   PrivateChannelTransferStatus,
   PrivateChannelWithdrawal,
 } from "@sdp/types/private-channels";
-import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export function generatePrivateChannelWithdrawalId(): string {
   return `wd_${crypto.randomUUID()}`;
@@ -79,10 +78,6 @@ export interface UpdateWithdrawalInput {
    * meantime.
    */
   expectedSignatureAbsent?: boolean;
-}
-
-export interface PrivateChannelWithdrawalRepositoryContext {
-  db: RepositoryDbClient;
 }
 
 export interface PrivateChannelWithdrawalRepository {

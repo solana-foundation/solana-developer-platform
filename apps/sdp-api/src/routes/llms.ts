@@ -54,13 +54,13 @@ function renderBody(releaseChannel: SdpReleaseChannel): string {
     "## Canonical URLs",
     `- API base URL: ${DEFAULT_SDP_API_URL}`,
     `- OpenAPI: ${DEFAULT_SDP_API_URL}/openapi.json`,
-    `- Interactive API docs: ${DEFAULT_SDP_API_URL}/docs`,
+    `- API reference: ${DEFAULT_SDP_DOCS_URL}/reference/api`,
     `- Product docs: ${DEFAULT_SDP_DOCS_URL}`,
     `- AI guide: ${DEFAULT_SDP_AI_GUIDE_URL}`,
     "",
     "## Authentication",
     "- Use `Authorization: Bearer <api_key>`.",
-    "- API keys are issued by SDP and commonly use `sk_test_...` or `sk_live_...` prefixes.",
+    "- API keys are issued by SDP in the shared `sf_<key id>_<secret><checksum>` format; keys issued earlier (`sk_test_...`, `sk_live_...`) are still accepted.",
     ...(earnPublished
       ? [
           "- Earn strategy reads, previews, withdrawal-route discovery, and instant unsigned external-wallet builds may be anonymous; queued action builds, submits, and tenant reads require an API key.",

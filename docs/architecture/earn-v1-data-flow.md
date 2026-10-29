@@ -16,11 +16,11 @@ custodian), see the
 flowchart LR
     subgraph Clients
         DASH["Corporate dashboard<br/>(sdp-web, float sweeping)"]
-        PARTNER["B2B2C partner<br/>(keyless or API key)"]
+        PARTNER["B2B2C partner<br/>(API key)"]
     end
 
     subgraph SDP["sdp-api  /v1/earn"]
-        ROUTES["earn routes<br/>optional auth for catalogue/previews/instant builds<br/>required auth for queued actions and tenant control plane"]
+        ROUTES["earn routes<br/>API key or dashboard session on every route"]
         SVC["@sdp/earn provider clients<br/>(Kamino/Veda/Jupiter Lend/Ondo/Hastra; WisdomTree pre-launch;<br/>Upshift/Perena stubs)"]
         DB[("Postgres<br/>earn_strategies · earn_provider_wallets<br/>earn_movements · earn_positions<br/>earn_vault_withdrawal_requests + actions")]
         CRON["cron: catalogue sync · metrics refresh<br/>movement + queued-withdrawal reconciliation"]
@@ -33,7 +33,7 @@ flowchart LR
     end
 
     DASH -->|BFF proxy| ROUTES
-    PARTNER -->|anonymous or API key| ROUTES
+    PARTNER -->|API key| ROUTES
     ROUTES --> DB
     ROUTES --> SVC
     SVC -->|REST| VAULT
@@ -46,16 +46,15 @@ flowchart LR
 
 Vault-direct execution has two signer surfaces over one provider runtime. The
 treasury flow signs with an organization custody wallet. Embedded Yield returns
-an unsigned transaction for an end-user wallet and, on keyed builds, an
-optional partner fee payer to co-sign. Authenticated submits are recorded before
-SDP broadcasts and converge through the vault-movement reconciler. Queued exits
+an unsigned transaction for an end-user wallet and an optional partner fee
+payer to co-sign. Submits are recorded before SDP broadcasts and converge
+through the vault-movement reconciler. Queued exits
 use a separate durable request/action lifecycle and reconciler because their
 request transactions create provider obligations rather than payouts. Veda
 escrows shares until a verified solver fulfilment or owner cancellation;
 Hastra's par path redeems PRIME to wYLDS and delegates the wYLDS until a verified
 administrator completion or owner cancellation. Only verified completion
-becomes a payout movement. Anonymous instant builds are never persisted; the
-caller broadcasts and tracks them.
+becomes a payout movement.
 
 ## Where each surface gets its data (source of truth)
 
@@ -64,7 +63,7 @@ caller broadcasts and tracks them.
 | Strategy catalogue | `earn_strategies` (DB) | Cron sync ← provider `listStrategies` (curator/risk metadata rides along as `risk_metadata`); snapshots outside the client's `declaredSupport` are skipped fail-closed (`isStrategyWithinDeclaredSupport`, `@sdp/earn/support`) | Hourly (`cron/earn-catalogue-sync.ts`) — identity, mints, liquidity terms and **admission** only |
 | APY + vault TVL/holders | `earn_strategies.current_apy` / `risk_metadata` (DB) + live `getPortfolioYield` for the program-level rate | Metrics refresh ← provider `listStrategyMetrics` (`supportsLiveMetrics`); live provider read | **Every 5 min** (`cron/earn-metrics-refresh.ts`) / real-time |
 | Whether a strategy is fundable *here* | Derived per request from `earn_strategies.host_cluster` vs the caller's environment — the `fundable` field on `GET /strategies` | `isClusterFundableInEnvironment` (`@sdp/earn`) | Real-time (never stored) |
-| Keyless catalogue, previews, and instant builds | `GET /strategies`, `GET /strategies/:id`, deposit/direct-withdrawal previews and builds, withdrawal-route discovery, and queued-withdrawal preview | Caller-selected strategy shelf; no organization, project, entitlement, or persisted build context. Queued request/cancellation builds remain keyed. | Per request; catalogue responses may be publicly cached |
+| Previews and unsigned builds | Live provider quote or plan per request: deposit/direct-withdrawal previews and builds, withdrawal-route discovery, and queued-withdrawal preview | Provider and chain state; an external-wallet build persists `earn_external_wallet_transactions` for its later submit | Per request |
 | Program list | `earn_provider_wallets` (**DB**, oldest first) joined per row with a **live provider snapshot** — `GET /v1/earn/programs` | Rows written by create; snapshots fetched in parallel per listed program | Real-time |
 | Positions & balances | **Live provider snapshot** (`GET /v1/earn/programs/:programId` ← `getPortfolioWallet`) — never persisted | Provider | Real-time |
 | Deposits | **Live provider** (`GET /programs/:programId/deposits` ← provider-observed on-chain deposits) — customer-initiated, so SDP has no intent moment to ledger | Provider | Real-time |
@@ -79,12 +78,11 @@ caller broadcasts and tracks them.
 | Wallet balances (funding) | Existing wallet/custody surfaces | Existing wallet balance and token account reads — nothing Earn-specific | Existing behavior |
 | Provider on/off state | `getProviderAvailability` (existing service, `earn` family already wired) | Org entitlements + env credentials | Real-time |
 
-> **Ledger vs live.** SDP ledgers every movement it signs or accepts through a
-> keyed external-wallet submit, while balances remain live provider or
-> on-chain reads. A queued request or cancellation is an action, not a payout;
-> only a provider-authenticated solver or operator fulfilment projects one
-> withdrawal movement. Anonymous builds are not SDP movements and create no
-> ledger row. A ledger row proves SDP's movement lifecycle, never the current
+> **Ledger vs live.** SDP ledgers every movement it signs or accepts through an
+> external-wallet submit, while balances remain live provider or on-chain
+> reads. A queued request or cancellation is an action, not a payout; only a
+> provider-authenticated solver or operator fulfilment projects one withdrawal
+> movement. A ledger row proves SDP's movement lifecycle, never the current
 > balance.
 
 > **Catalogue vs figures — split by how fast the thing moves (2026-08-13).**
@@ -122,9 +120,9 @@ caller broadcasts and tracks them.
 
 **No new indexer.** The catalogue comes from provider APIs or bounded on-chain
 reads, and holdings are hydrated live. Vault-direct deposits and withdrawals
-are ledgered when SDP signs them from custody or accepts them through a keyed
-external-wallet submit. Anonymous unsigned builds remain outside the ledger.
-Richer per-block history would be an indexer decision for a later product need.
+are ledgered when SDP signs them from custody or accepts them through an
+external-wallet submit. Richer per-block history would be an indexer decision
+for a later product need.
 
 ## Execution era (PRO-1634 — arrived for `vault_direct`)
 
@@ -183,8 +181,8 @@ per-provider movement endpoints or status polling types from git history.
 
 | Existing component | Where | Earn uses it for | Status |
 |---|---|---|---|
-| Auth + API keys + permissions | `lib/auth.ts`, `middleware/auth.ts`, `@sdp/types/permissions` | Optional identity enrichment for catalogue/previews/builds; an authenticated call retains that operation's `earn:read` or `earn:write` scope, while submits and tenant reads require authentication | ✅ two-tier router |
-| Org/project tenancy | `projectContextMiddleware` | Authenticated program, build, movement, position, and withdrawal scoping. Anonymous requests receive no tenant context and write no tenant state. | ✅ wired |
+| Auth + API keys + permissions | `lib/auth.ts`, `middleware/auth.ts`, `@sdp/types/permissions` | Every Earn route requires an API key or dashboard session | ✅ wired |
+| Org/project tenancy | `projectContextMiddleware` | Program, build, movement, position, and withdrawal scoping, plus the request's cluster scope | ✅ wired |
 | Provider entitlements | `services/provider-availability.service.ts` | Per-org enable/disable (override-only: every org needs an explicit `providerOverrides.earn.<id>`), env kill-switch, exit-safe gate | ✅ wired (`earn` family) |
 | Custody + signing | `services/solana`, `@sdp/custody` | Treasury vault deposits and withdrawals sign provider-built instructions with the admitted organization wallet after policy enforcement | ✅ vault-direct treasury paths |
 | Fee sponsorship | `@sdp/fee-payment` (Kora), `services/earn/vault-sponsorship.ts` | Sign-only sponsorship of the network fee **and** share-ATA rent, resolved once per request and applied to the fee payer, the provider's `rentPayer` and the simulation payer together. Kamino exits retain the share ATA and its rent; the account owner can close it separately. For providers that include an authorized close, the recorded rent funder is: `earn_positions.share_ata_rent_funder` (0066), written by whichever movement in either direction actually created the account, or this exit's own rent payer when the exit creates it. Per cluster and off by default: a cluster sponsors when the flag is on AND the deployment has a Kora for it (`KORA_DEVNET_URL` / `KORA_MAINNET_URL`); the movement's cluster selects the Kora, the budget network and the fee-pricing RPC. Deployed devnet carries the Earn ids on its Kora allowlist (sdp-infra#64, asserted by the `Kora / Live Smoke` shard on secret-bearing CI runs); mainnet additionally needs `allow_create_account` opened, `sbp_mainnet_global` enabled and its Kora wired (PRO-1738) | ✅ code · ✅ devnet deploy · ⏸ mainnet |
@@ -197,7 +195,7 @@ per-provider movement endpoints or status polling types from git history.
 | Actions | `requireAction` (API key grants by module, HOO-2099) | Every Earn route declares one action (`earn.read`, `earn.manage`, `earn.execute`) checked once on arrival; external-wallet authorization is the owner's signature | ✅ every route |
 | Audit log | `services/audit.service.ts`, `routes/earn/handlers/movement-audit.ts` | Program configuration, movement, queued request, and cancellation audit events | ✅ wired |
 | Secrets/env plumbing | Doppler → `secret-keys.mjs` → workers | Provider API keys (already registered) | ✅ wired |
-| OpenAPI to docs pipeline | `openapi/spec.ts` to sdp-docs | 21 public Earn operations with exactly eight optional-auth operations; queued action builds, submits, and tenant reads stay keyed | ✅ source and generated artifacts aligned |
+| OpenAPI to docs pipeline | `openapi/spec.ts` to sdp-docs | 21 public Earn operations, every one requiring an API key | ✅ source and generated artifacts aligned |
 
 **Net-new (Earn-only) components:** the provider clients in `@sdp/earn`
 (Kamino, Veda, Jupiter Lend, Ondo, Hastra, and pre-launch WisdomTree carry real

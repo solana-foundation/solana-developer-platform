@@ -6,8 +6,13 @@ import {
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY,
   SolanaError,
 } from "@solana/kit";
-import { RpcTimeoutError } from "./errors";
-import { isTransientRpcError, withTransientRpcRetry } from "./transient";
+import { RpcHttpStatusError, RpcTimeoutError } from "./errors";
+import {
+  isForbiddenRpcError,
+  isTransientRpcError,
+  isUnauthorizedRpcError,
+  withTransientRpcRetry,
+} from "./transient";
 
 async function kitHttpError(status: number, statusText: string): Promise<unknown> {
   const originalFetch = globalThis.fetch;
@@ -54,6 +59,19 @@ test("ignores HTTP status numbers in the text of non-HTTP errors", () => {
   assert.equal(isTransientRpcError(new Error("HTTP error (500): Internal server error")), false);
   assert.equal(isTransientRpcError(new Error("503")), false);
   assert.equal(isTransientRpcError("429"), false);
+});
+
+test("classifies SDP's own guarded-transport status errors like kit's", () => {
+  // The guarded transports (customer RPC, Private Channels gateway) throw
+  // RpcHttpStatusError where kit's transport throws a SolanaError; the
+  // classifiers must treat the two shapes identically.
+  assert.equal(isTransientRpcError(new RpcHttpStatusError(503, "down")), true);
+  assert.equal(isTransientRpcError(new RpcHttpStatusError(429, "slow down")), true);
+  assert.equal(isTransientRpcError(new RpcHttpStatusError(401, "no")), false);
+  assert.equal(isUnauthorizedRpcError(new RpcHttpStatusError(401, "expired token")), true);
+  assert.equal(isUnauthorizedRpcError(new RpcHttpStatusError(403, "forbidden")), false);
+  assert.equal(isForbiddenRpcError(new RpcHttpStatusError(403, "not owned by caller")), true);
+  assert.equal(isForbiddenRpcError(new RpcHttpStatusError(401, "expired token")), false);
 });
 
 test("still classifies network-level failures as transient", () => {

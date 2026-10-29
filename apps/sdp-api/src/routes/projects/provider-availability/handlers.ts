@@ -14,8 +14,10 @@ type AppContext = Context<{ Bindings: Env }>;
  * Narrows a project's provider availability to the entries the deployment's
  * public API document publishes, so a client validating against it accepts the
  * response: Earn entries only when `EARN_PUBLIC_SURFACE_PUBLISHED` is true and
- * the release channel runs Earn, ramp entries only for providers the release
- * channel runs (the document prunes the others; openapi/release-channel-values.ts).
+ * the release channel runs Earn, compliance entries only when the release
+ * channel runs Compliance, ramp entries only for providers the release channel
+ * runs, and other families only when their module runs (the document prunes
+ * the others; openapi/release-channel-values.ts).
  *
  * @param c - Request context, for the deployment's release channel.
  * @param availability - The project's availability across every family.
@@ -25,20 +27,20 @@ function publishedProviderAvailability(
   c: AppContext,
   availability: ProjectProviderAvailability
 ): ProjectProviderAvailability {
-  const earnPublished = EARN_PUBLIC_SURFACE_PUBLISHED && isModuleInChannel(c, "earn");
   return {
     ...availability,
     providers: availability.providers.filter((entry) => {
-      if (entry.family === "earn") return earnPublished;
       if (entry.family === "ramps") return isRampProviderInChannel(c, entry.provider);
-      return true;
+      if (entry.family === "earn" && !EARN_PUBLIC_SURFACE_PUBLISHED) return false;
+      return isModuleInChannel(c, entry.family);
     }),
   };
 }
 
 /**
- * Lists every provider the deployment knows with its availability for the
- * project in the path. A project outside the caller's organization is a 404.
+ * Lists every provider the deployment's public document publishes with its
+ * availability for the project in the path. A project outside the caller's
+ * organization is a 404.
  *
  * @param c - Request context; the projects router has authenticated the caller,
  *   bound API keys to their own project and admitted sessions by membership.

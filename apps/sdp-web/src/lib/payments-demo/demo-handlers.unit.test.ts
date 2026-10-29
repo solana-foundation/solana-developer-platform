@@ -5,13 +5,7 @@ import { buildWorld, DEMO_TOKENS, demoAddress, demoPathParts, tokenBalance } fro
 import { demoFlowRead, demoWrite } from "./demo-handlers";
 import type { DemoOp } from "./demo-ops";
 import { DEMO_RAMP_ASSETS, demoRampPairs, isDemoRampRail } from "./demo-ramp-assets";
-import {
-  applyDemoOps,
-  DEMO_SETTLE_MS,
-  tokenKeyForRail,
-  transferById,
-  walletHolding,
-} from "./demo-replay";
+import { applyDemoOps, tokenKeyForRail, transferById, walletHolding } from "./demo-replay";
 
 /*
  * The demo's write handlers on their own: each refuses what the SDP API would refuse, with the
@@ -594,7 +588,7 @@ describe("transfers and batches", () => {
     applyDemoOps(
       collision,
       [{ k: "ramp-paid", id: ramp.id, at: now.getTime() }],
-      new Date(now.getTime() + DEMO_SETTLE_MS)
+      new Date(now.getTime() + 5_000)
     );
     expect(ramp.status).toBe("completed");
     expect(walletHolding(source, USDC)).toBe("13");
@@ -770,6 +764,20 @@ describe("requests", () => {
     expect(created?.body.data).toEqual(
       expect.objectContaining({ expiresAt: "2026-10-28T00:00:00.000Z" })
     );
+  });
+
+  it("cancels an open request once, and refuses a paid one", () => {
+    const id: string = request({})?.body.data.id;
+    const cancel = (requestId: string) =>
+      write("POST", `/v1/payments/requests/${requestId}/cancel`);
+
+    expect(refusal(cancel("demo_preq_lumen_retainer"))).toEqual([409, "conflict"]);
+    expect(cancel(id)?.body.data).toEqual(
+      expect.objectContaining({ id, status: "canceled", canceledAt: NOW.toISOString() })
+    );
+    expect(cancel(id)?.status).toBe(200);
+    expect(ops.filter((op) => op.k === "request-cancel")).toHaveLength(1);
+    expect(world().requests.find((candidate) => candidate.id === id)?.status).toBe("canceled");
   });
 });
 

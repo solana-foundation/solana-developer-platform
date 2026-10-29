@@ -9,10 +9,9 @@ import type {
 } from "@sdp/types/payments";
 import type { PersistedRampProviderId, RampProviderId } from "@sdp/types/provider-access";
 import type { PaymentTransactionKind } from "@sdp/types/unified-transactions";
-import type { DatabaseClient as RepositoryDbClient } from "@/db/client";
 
 export type PaymentTransferDirection = "inbound" | "outbound";
-export type PaymentTransferDeliveryMode = "hosted" | "manual_instructions" | "session_widget";
+type PaymentTransferDeliveryMode = "hosted" | "manual_instructions" | "session_widget";
 
 export interface PaymentTransferRow {
   id: string;
@@ -63,6 +62,13 @@ export interface PaymentTransferRow {
 /** A transfer row the repository has proven is a ramp transfer. */
 export type RampPaymentTransferRow = PaymentTransferRow & { type: RampTransferType };
 
+/** A transfer row the repository has proven carries the signed submission saved before its send. */
+export type SignedSubmissionTransferRow = PaymentTransferRow & {
+  signature: string;
+  signed_transaction: string;
+  last_valid_block_height: string;
+};
+
 export function generatePaymentTransferId(): string {
   return `${PAYMENT_TRANSFER_ID_PREFIX}${crypto.randomUUID()}`;
 }
@@ -110,6 +116,8 @@ export interface UpdatePaymentTransferInput {
   /** Timeout CAS: only an unsigned row with no submission start may match. */
   requireUnsigned?: true;
   expectedStatus?: PaymentTransferStatus;
+  /** Guard a missing-provider verdict against a concurrent acknowledgement. */
+  expectedProviderReference?: string | null;
   status?: PaymentTransferStatus;
   signature?: string | null;
   serializedTx?: string | null;
@@ -128,7 +136,7 @@ export interface UpdatePaymentTransferInput {
 }
 
 /** Row fields a guarded status change may write alongside the status. */
-export interface TransferStatusChangeFields {
+interface TransferStatusChangeFields {
   sourceAddress?: string | null;
   destinationAddress?: string | null;
   signature?: string | null;
@@ -186,8 +194,10 @@ export interface ListTransfersByStatusInput {
   /** Only transfers whose project is in this environment, so one job run reads one cluster. */
   environment: SdpEnvironment;
   statuses: PaymentTransferStatus[];
+  fireblocks?: boolean;
   types?: readonly PaymentTransferType[];
-  hasSignature?: boolean;
+  /** Only rows that carry no signature yet. */
+  unsigned?: true;
   createdBefore?: string;
   updatedBefore?: string;
   limit: number;
@@ -199,7 +209,7 @@ export interface ListTransfersResult {
   total: number;
 }
 
-export type GetTransferByProviderReferenceInput = {
+type GetTransferByProviderReferenceInput = {
   provider: RampProviderId;
   providerReference: string;
 } & (
@@ -213,11 +223,22 @@ export type GetTransferByProviderReferenceInput = {
     }
 );
 
-export interface PaymentsRepositoryContext {
-  db: RepositoryDbClient;
-}
-
 export interface PaymentsRepository {
+  /** Exactly one provider submission attempt per durable Fireblocks intent. */
+  claimFireblocksTransferSubmission(input: {
+    transferId: string;
+    organizationId: string;
+    projectId: string;
+    now: string;
+  }): Promise<PaymentTransferRow | null>;
+  /** Throttle and serialize provider reads across dashboard requests and cron workers. */
+  claimFireblocksTransferPoll(input: {
+    transferId: string;
+    organizationId: string;
+    projectId: string | null;
+    polledBefore: string;
+    now: string;
+  }): Promise<PaymentTransferRow | null>;
   createTransfer(input: CreatePaymentTransferInput): Promise<PaymentTransferRow | null>;
   /**
    * Claims an awaiting off-ramp row for its crypto deposit transaction through
@@ -333,6 +354,20 @@ export interface PaymentsRepository {
     polledAt: string;
   }): Promise<{ transfer: RampPaymentTransferRow; environment: SdpEnvironment } | null>;
   listTransfersByStatus(params: ListTransfersByStatusInput): Promise<PaymentTransferRow[]>;
+  /**
+   * Lists the processing wallet transfers whose signed submission (signature, signed bytes and
+   * last valid block height) is saved, least recently updated first, leaving out Fireblocks rows,
+   * which settle through their provider. System-only.
+   *
+   * @param params - The project environment and the page size.
+   * @param params.environment - Only transfers whose project is in this environment.
+   * @param params.limit - The page size.
+   * @returns The next page of the settlement tracker's queue.
+   */
+  listProcessingSignedSubmissions(params: {
+    environment: SdpEnvironment;
+    limit: number;
+  }): Promise<SignedSubmissionTransferRow[]>;
   /**
    * Lists the page of confirmed transfers whose finalization should be polled
    * next: least-recently-polled first (never-polled rows first), bounded to

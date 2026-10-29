@@ -14,10 +14,12 @@ Everything the dashboard does is available through the API. Build against the AP
 
 Authenticated environments are a property of the **project**, not of individual requests. Every tenant resource and API key belongs to a project and inherits that project's environment.
 
-| Environment  | Network      | API key prefix |
-| ------------ | ------------ | -------------- |
-| `sandbox`    | devnet       | `sk_test_`     |
-| `production` | mainnet-beta | `sk_live_`     |
+| Environment  | Network      |
+| ------------ | ------------ |
+| `sandbox`    | devnet       |
+| `production` | mainnet-beta |
+
+A key's format does not name its environment: the project it belongs to does.
 
 Both environments expose the same route shapes. Develop and test authenticated integrations against a sandbox project, then switch to production by swapping your API key.
 

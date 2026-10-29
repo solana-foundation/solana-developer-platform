@@ -44,8 +44,6 @@
       "rampEstimateRequestFailed": "Ramp estimate request failed ({status}).",
       "rampEstimateMissing": "Ramp estimate response is missing estimates.",
       "rampEstimateInvalidRate": "The provider's estimate has no usable exchange rate.",
-      "walletBalancesRequestFailed": "Wallet balances request failed ({status}).",
-      "walletBalancesMissing": "Wallet balances response is missing balance details.",
       "transferRequestFailed": "Transfer request failed ({status}).",
       "transferMissing": "Transfer response is missing transfer details.",
       "recipientListRequestFailed": "Recipient list request failed ({status}).",
@@ -397,7 +395,16 @@
       "transferFailed": "Transfer failed.",
       "transferSuccess": "Your transfer was sent successfully.",
       "transferStatus": "Status: {status}",
-      "viewOnExplorer": "View on explorer"
+      "viewOnExplorer": "View on explorer",
+      "fireblocksReview": "Approve this payment in Fireblocks. Your source vault pays the network fee in SOL, including for USDC. The destination must be permitted by your Fireblocks one-time-address policy. The memo is a payment note, not an on-chain memo.",
+      "fireblocksPending": "Payment submitted to Fireblocks. Review and approve it there; SDP will update its status after signing and confirmation.",
+      "fireblocksUnknown": "SDP is checking whether Fireblocks received this payment. Check its transaction details before starting another payment.",
+      "viewTransaction": "View transaction",
+      "fireblocksTransactionId": "Fireblocks transaction ID",
+      "fireblocksStatus": "Fireblocks status",
+      "fireblocks": "Fireblocks",
+      "whitelistWarning": "This address is not whitelisted in Fireblocks.",
+      "whitelistDescription": "Add {address} for {asset} in Fireblocks, or use an allowed one-time transfer. “Don’t show again” applies to this project on this browser."
     },
     "onchainReceive": {
       "wallet": "Wallet",
@@ -457,6 +464,10 @@
       "source": "Source",
       "transactionFees": "Transaction fees",
       "rentFees": "Rent fees",
+      "belowRentMinimum": "Minimum {minimum} SOL for a new address",
+      "belowRentMinimumNoteSingular": "1 recipient's address has no Solana account yet, so Solana refuses an amount below its minimum. Raise the amount, or fund the address first.",
+      "sourceBelowRentMinimumNote": "This batch would leave the source wallet with {remainder} SOL, and Solana refuses to leave a wallet holding less than {minimum} SOL unless it is empty. Send the whole balance, or leave at least {minimum} SOL.",
+      "belowRentMinimumNotePlural": "{count} recipients' addresses have no Solana account yet, so Solana refuses an amount below their minimum. Raise the amounts, or fund the addresses first.",
       "total": "Total",
       "sponsoredFee": "0 SOL",
       "sponsoredBy": "Sponsored by SDP via Kora",
@@ -860,7 +871,6 @@
     "pending": "Pending",
     "expired": "Expired",
     "unknown": "Unknown",
-    "unavailable": "Unavailable",
     "deposit": "Deposit",
     "pay": "Pay",
     "transferDetails": {
@@ -1533,6 +1543,13 @@
       "openPayment": "Open the payment",
       "loadFailedTitle": "Couldn't load this request",
       "loadFailedDescription": "The request did not go through. Nothing was changed. The link itself is unaffected.",
+      "cancelRequest": "Cancel request",
+      "canceling": "Canceling",
+      "keepIt": "Keep it",
+      "cancelConfirmHead": "This link will stop accepting payments.",
+      "cancelConfirmBody": "Anyone who opens it sees the request is canceled. A payer who already signed can still complete the payment; it is recorded as paid late.",
+      "requestCanceled": "Request canceled",
+      "cancelFailed": "Couldn't cancel this request",
       "why": {
         "paid": "Settled to the destination wallet. Nothing further to do.",
         "awaiting": "The link is live and nobody has paid it yet. It does not expire.",
@@ -1585,6 +1602,21 @@
         }
       }
     },
-    "noTransactions": "No transactions found yet."
+    "noTransactions": "No transactions found yet.",
+    "fireblocksPolicy": {
+      "missing": "No matching Fireblocks transfer policy was found. Set up a transfer rule in Fireblocks before sending.",
+      "blocked": "A Fireblocks transfer policy blocks this payment. Review the rule in Fireblocks before sending.",
+      "unknown": "SDP could not determine whether Fireblocks allows this payment. Review your transfer policy in Fireblocks.",
+      "permissions": "Your Fireblocks API user cannot read policies. Check in Fireblocks that a transfer rule allows this payment.",
+      "recheck": "Check again",
+      "openFireblocks": "Open Fireblocks",
+      "configure": "Configure a Transfer policy in Fireblocks for this API user, source vault, destination and asset, with your approvers and a designated human signer. SDP cannot inspect policies using the recommended Editor role."
+    },
+    "fireblocksWarnings": {
+      "suppress": "Don’t show again",
+      "dismiss": "Dismiss",
+      "scope": "Hide these warnings for this project on this browser.",
+      "saveFailed": "Couldn’t save this preference. Check that browser storage is enabled."
+    }
   }
 }

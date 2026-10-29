@@ -5,11 +5,9 @@ import {
   fetchPaymentsIssuedTokenSymbols,
   fetchPaymentsWallets,
 } from "@/app/dashboard/[projectId]/payments/payments-page.data";
-import { withLegacyDesign } from "@/flags/new-design";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
-import { RecurringPaymentsPage as RedesignRecurringPaymentsPage } from "./page.redesign";
 import {
   fetchRecurringPayments,
   parseRecurringPaymentsListParams,
@@ -22,7 +20,7 @@ interface RecurringPaymentsPageProps {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }
 
-async function RecurringPaymentsPage({ searchParams }: RecurringPaymentsPageProps) {
+export default async function RecurringPaymentsPage({ searchParams }: RecurringPaymentsPageProps) {
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -108,5 +106,3 @@ async function RecurringPaymentsPage({ searchParams }: RecurringPaymentsPageProp
     }
   );
 }
-
-export default withLegacyDesign(RedesignRecurringPaymentsPage, RecurringPaymentsPage, "activity");

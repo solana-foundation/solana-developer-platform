@@ -3,6 +3,7 @@
 import { Button } from "@sdp/ui/button";
 import { Input } from "@sdp/ui/input";
 import { Label } from "@sdp/ui/label";
+import { Textarea } from "@sdp/ui/textarea";
 import { EyeIcon, EyeOffIcon } from "lucide-react";
 import { useId, useState } from "react";
 import { useTranslations } from "@/i18n/provider";
@@ -27,6 +28,7 @@ export function SecretField({
   onChange,
   disabled,
   required = true,
+  multiline = false,
 }: {
   name: string;
   label: string;
@@ -35,6 +37,7 @@ export function SecretField({
   onChange: (value: string) => void;
   disabled?: boolean;
   required?: boolean;
+  multiline?: boolean;
 }) {
   const t = useTranslations();
   const fieldId = useId();
@@ -45,18 +48,38 @@ export function SecretField({
     <div className="space-y-2">
       <Label htmlFor={fieldId}>{label}</Label>
       <div className="flex items-center gap-2">
-        <Input
-          id={fieldId}
-          name={name}
-          className="flex-1"
-          type={shown ? "text" : "password"}
-          autoComplete="off"
-          required={required}
-          disabled={disabled}
-          aria-describedby={hint ? hintId : undefined}
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-        />
+        {multiline ? (
+          <Textarea
+            id={fieldId}
+            name={name}
+            className={
+              shown
+                ? "min-h-32 min-w-0 flex-1"
+                : "min-h-32 min-w-0 flex-1 [-webkit-text-security:disc]"
+            }
+            autoComplete="off"
+            autoCapitalize="none"
+            spellCheck={false}
+            required={required}
+            disabled={disabled}
+            aria-describedby={hint ? hintId : undefined}
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+          />
+        ) : (
+          <Input
+            id={fieldId}
+            name={name}
+            className="flex-1"
+            type={shown ? "text" : "password"}
+            autoComplete="off"
+            required={required}
+            disabled={disabled}
+            aria-describedby={hint ? hintId : undefined}
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+          />
+        )}
         <Button
           type="button"
           variant="secondary"

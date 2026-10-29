@@ -151,7 +151,7 @@ async function deactivateApiKeyRequest(input: {
     const cancelRecurringPayments = input.cancelRecurringPayments === true;
     const response = await client.fetch<{
       recurringPayments: { canceled: string[]; failed: string[] } | null;
-    }>(`/v1/api-keys/${keyId}`, {
+    }>(`/v1/api-keys/${encodeURIComponent(keyId)}`, {
       method: "DELETE",
       body: JSON.stringify({ confirmation, cancelRecurringPayments }),
     });
@@ -302,7 +302,7 @@ export async function rotateApiKeyAction(formData: FormData) {
         id: string;
         rotationDeadline: string;
       };
-    }>(`/v1/api-keys/${keyId}/rotate`, {
+    }>(`/v1/api-keys/${encodeURIComponent(keyId)}/rotate`, {
       method: "POST",
       body: JSON.stringify({ gracePeriodHours }),
     });
@@ -321,22 +321,6 @@ export async function rotateApiKeyAction(formData: FormData) {
       message: t("DashboardCustody.apiKeyRotateFailed", { error: extractErrorMessage(error) }),
     });
   }
-
-  revalidatePath(await requestProjectHref(API_KEYS_PAGE_PATH), "page");
-  redirect(await requestProjectHref(API_KEYS_PAGE_PATH));
-}
-
-export async function deactivateApiKeyAction(formData: FormData) {
-  const result = await deactivateApiKeyRequest({
-    keyId: String(formData.get("keyId") ?? ""),
-    keyName: String(formData.get("keyName") ?? ""),
-    confirmation: String(formData.get("confirmation") ?? ""),
-  });
-
-  await setFlash({
-    level: result.ok ? "success" : "error",
-    message: result.message,
-  });
 
   revalidatePath(await requestProjectHref(API_KEYS_PAGE_PATH), "page");
   redirect(await requestProjectHref(API_KEYS_PAGE_PATH));

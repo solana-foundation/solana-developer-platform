@@ -12,15 +12,56 @@
  * treasury vault "Access unavailable").
  */
 
+import type { InvitationStatus, MemberStatus } from "@sdp/types/organizations";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import { app } from "@/index";
-import { ensureTestClerkIssuer, signTestClerkClaims } from "@/test/helpers/clerk";
+import {
+  ensureTestClerkIssuer,
+  seedClerkIdentity,
+  signTestClerkClaims,
+} from "@/test/helpers/clerk";
 import { env } from "@/test/helpers/env";
+import { seedInvitation } from "@/test/helpers/invitations";
+import { organizationMember, seedActiveMemberships } from "@/test/helpers/organization-members";
 import { seedTestDatabase } from "@/test/mocks/db";
+import { ONBOARDING_VERSION } from "./state";
 
 const ORGANIZATION_ID = "org_onboarding_isolation";
 const CLERK_ORG_ID = "org_clerk_onboarding_isolation";
+const SESSION_EMAIL = "onboarding-isolation@example.com";
+const INVITER = organizationMember("onboarding_isolation_inviter", "admin");
+
+function invite(invitation: { email: string; status: InvitationStatus; expiresInDays: number }) {
+  return seedInvitation(getDb(env), {
+    id: "inv_onboarding_isolation",
+    organizationId: ORGANIZATION_ID,
+    role: "member",
+    invitedBy: INVITER.userId,
+    ...invitation,
+  });
+}
+
+async function seedSessionMembership(status: MemberStatus) {
+  const db = getDb(env);
+  await db.execute(
+    "INSERT INTO users (id, email, email_verified, status) VALUES ('usr_onboarding_isolation', ?, 1, 'active')",
+    [SESSION_EMAIL]
+  );
+  await seedClerkIdentity(db, {
+    userId: "usr_onboarding_isolation",
+    email: SESSION_EMAIL,
+    clerkUserId: "user_clerk_onboarding_isolation",
+    organizationId: ORGANIZATION_ID,
+    clerkOrgId: CLERK_ORG_ID,
+    orgSlug: "onboarding-isolation",
+    role: "admin",
+  });
+  await db.execute(
+    "UPDATE organization_members SET status = ? WHERE organization_id = ? AND user_id = 'usr_onboarding_isolation'",
+    [status, ORGANIZATION_ID]
+  );
+}
 
 function clerkPayload(clerkOrgId: string) {
   return {
@@ -28,7 +69,7 @@ function clerkPayload(clerkOrgId: string) {
     org_id: clerkOrgId,
     org_slug: "onboarding-isolation",
     org_role: "org:admin",
-    email: "onboarding-isolation@example.com",
+    email: SESSION_EMAIL,
   };
 }
 
@@ -66,9 +107,24 @@ describe("onboarding status under database tenant isolation", () => {
         )
         .bind(CLERK_ORG_ID, ORGANIZATION_ID),
     ]);
+    await seedActiveMemberships(db, ORGANIZATION_ID, [INVITER]);
   });
 
   it("resolves a linked organization through row-level security", async () => {
+    const db = getDb(env);
+    await db.execute(
+      "INSERT INTO users (id, email, email_verified, status) VALUES ('usr_onboarding_isolation', ?, 1, 'active')",
+      [SESSION_EMAIL]
+    );
+    await seedClerkIdentity(db, {
+      userId: "usr_onboarding_isolation",
+      email: SESSION_EMAIL,
+      clerkUserId: "user_clerk_onboarding_isolation",
+      organizationId: ORGANIZATION_ID,
+      clerkOrgId: CLERK_ORG_ID,
+      orgSlug: "onboarding-isolation",
+      role: "member",
+    });
     const res = await getStatus(CLERK_ORG_ID);
     expect(res.status).toBe(200);
     const body = (await res.json()) as StatusBody;
@@ -83,5 +139,84 @@ describe("onboarding status under database tenant isolation", () => {
     const body = (await res.json()) as StatusBody;
     expect(body.data.linked).toBe(false);
     expect(body.data.organization).toBeNull();
+  });
+
+  it.each([
+    { holding: "no invitation", invitations: [] },
+    {
+      holding: "an expired invitation",
+      invitations: [{ email: SESSION_EMAIL, status: "pending", expiresInDays: -1 }],
+    },
+    {
+      holding: "a revoked invitation",
+      invitations: [{ email: SESSION_EMAIL, status: "revoked", expiresInDays: 7 }],
+    },
+  ] as const)(
+    "refuses a Clerk member SDP never admitted who holds $holding",
+    async ({ invitations }) => {
+      for (const invitation of invitations) {
+        await invite(invitation);
+      }
+
+      const res = await getStatus(CLERK_ORG_ID);
+
+      expect(res.status).toBe(401);
+      expect(await res.json()).toMatchObject({
+        error: { code: "UNAUTHORIZED", message: "No pending invitation to this organization" },
+      });
+    }
+  );
+
+  it.each([
+    { holder: "an invitee SDP never admitted", formerAdmin: false },
+    { holder: "an admin removed since", formerAdmin: true },
+  ])(
+    "answers $holder whose pending invitation names their address in other letter case, without management",
+    async ({ formerAdmin }) => {
+      if (formerAdmin) {
+        await seedSessionMembership("removed");
+      }
+      await invite({ email: SESSION_EMAIL.toUpperCase(), status: "pending", expiresInDays: 7 });
+
+      const res = await getStatus(CLERK_ORG_ID);
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        data: {
+          linked: true,
+          organization: {
+            id: ORGANIZATION_ID,
+            name: "Onboarding isolation",
+            slug: "onboarding-isolation",
+            tier: "individual",
+            status: "active",
+            settings: null,
+            createdAt: expect.any(String),
+            updatedAt: expect.any(String),
+          },
+          setup: {
+            status: "not_started",
+            currentStep: "custody",
+            custodyProviders: [],
+            completedAt: null,
+            version: ONBOARDING_VERSION,
+            canManage: false,
+          },
+        },
+        meta: { requestId: expect.any(String), timestamp: expect.any(String) },
+      });
+    }
+  );
+
+  it("refuses a suspended member even while an invitation to their address is pending", async () => {
+    await seedSessionMembership("suspended");
+    await invite({ email: SESSION_EMAIL, status: "pending", expiresInDays: 7 });
+
+    const res = await getStatus(CLERK_ORG_ID);
+
+    expect(res.status).toBe(401);
+    expect(await res.json()).toMatchObject({
+      error: { code: "UNAUTHORIZED", message: "Organization membership is inactive" },
+    });
   });
 });

@@ -2,10 +2,10 @@
   margin: auto;
   max-width: 380px;
   padding: 22px;
-  border: 1px solid var(--launch-border-strong);
+  border: 1px solid var(--rule-strong);
   border-radius: 12px;
-  background: var(--launch-white);
-  color: var(--launch-text);
+  background: var(--paper-card);
+  color: var(--ink-secondary);
 }
 
 .launch-external-dialog::backdrop {
@@ -20,7 +20,7 @@
 }
 
 .launch-external-dialog-text strong {
-  color: var(--launch-ink);
+  color: var(--ink);
 }
 
 .launch-external-dialog-actions {

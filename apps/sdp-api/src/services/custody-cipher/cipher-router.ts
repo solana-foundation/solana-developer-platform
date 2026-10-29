@@ -16,7 +16,7 @@ export interface CustodyCipher {
   decrypt(orgId: string, ciphertext: string): Promise<string>;
 }
 
-export class CustodyCipherError extends Error {
+class CustodyCipherError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "CustodyCipherError";

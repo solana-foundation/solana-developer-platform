@@ -1,36 +1,31 @@
 // biome-ignore-all lint/security/noSecrets: public Solana mint and authority addresses, verified against chain; not secrets.
-import { SOLANA_CLUSTERS, SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { runInClusterScope } from "@sdp/rpc/scope";
+import type { SdpEnvironment } from "@sdp/types/api-keys";
+import {
+  GENESIS_HASH_BY_CLUSTER,
+  SOLANA_CLUSTERS,
+  SPL_TOKEN_PROGRAMS,
+} from "@sdp/types/well-known-tokens";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
+import { parseJsonRpcRequest } from "@/test/helpers/cluster-rpc";
 import type { Env } from "@/types/env";
 
 const mocks = vi.hoisted(() => ({
   logEvent: vi.fn(),
-  getAccountInfo: vi.fn(),
-  resolveClusterRpcUrl: vi.fn(() => "https://rpc.test"),
-  assertClusterEndpoint: vi.fn(async () => undefined),
 }));
+
+/** `getMultipleAccounts` params: the mint addresses, then the read config. */
+const multipleAccountsParamsSchema = z.tuple([z.array(z.string()), z.unknown()]);
 
 vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/runtime/money-path-events")>()),
   logEvent: mocks.logEvent,
 }));
 
-vi.mock("@sdp/rpc/solana", () => ({
-  createRpc: vi.fn(() => ({
-    getAccountInfo: (...args: unknown[]) => ({ send: () => mocks.getAccountInfo(...args) }),
-  })),
-}));
-
-vi.mock("@sdp/rpc/config", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@sdp/rpc/config")>()),
-  resolveClusterRpcUrl: mocks.resolveClusterRpcUrl,
-}));
-vi.mock("@/services/earn/execution-registry", () => ({
-  assertClusterEndpoint: mocks.assertClusterEndpoint,
-}));
-
 const {
   EARN_DEPOSIT_MINT_DRIFT_EVENT,
+  EARN_DEPOSIT_MINT_GUARD_SKIPPED_EVENT,
   PINNED_TOKEN_2022_DEPOSIT_MINTS,
   detectMintDrift,
   guardDepositMints,
@@ -39,6 +34,12 @@ const {
 } = await import("./deposit-mint-guard");
 
 const env = { DATABASE_URL: "postgres://unit" } as Env;
+const earnEnabledEnv = {
+  ...env,
+  MARKETS_ENABLED: "true",
+  EARN_ENABLED: "true",
+  SDP_RELEASE_CHANNEL: "experimental",
+} as Env;
 const TOKEN_2022 = SPL_TOKEN_PROGRAMS["token-2022"];
 const PYUSD_MAINNET = "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo";
 const PAXOS = "2apBGMsS6ti9RyF5TwQTDswXBWskiJP2LD4cUEDqYJjk";
@@ -72,11 +73,74 @@ function mintAccount(overrides: {
   };
 }
 
+let poolSequence = 0;
+/** Every request of the current test, by endpoint and method, in arrival order. */
+const requests: { url: string; method: string }[] = [];
+/** The jsonParsed account each mint answers with; null is an absent account. */
+const accountFor = vi.fn<(mint: string) => unknown>();
+/** Set to make the next `getMultipleAccounts` answer an HTTP error. */
+let failNextRead = false;
+
+function poolUrl(cluster: "devnet" | "mainnet"): string {
+  return `https://${cluster}-${poolSequence}.mint-guard.test`;
+}
+
+/** How stage and prod run: a devnet process default and no mainnet override. */
+function stubDevnetDefaultProcess(): void {
+  vi.stubEnv("SOLANA_NETWORK", "devnet");
+  vi.stubEnv("SOLANA_RPC_URL", poolUrl("devnet"));
+  vi.stubEnv("SOLANA_MAINNET_RPC_URL", "");
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.resolveClusterRpcUrl.mockReturnValue("https://rpc.test");
-  mocks.assertClusterEndpoint.mockResolvedValue(undefined);
+  poolSequence += 1;
+  requests.length = 0;
+  failNextRead = false;
+  accountFor.mockReset().mockImplementation((mint) => {
+    const pinned = PINNED_TOKEN_2022_DEPOSIT_MINTS[mint];
+    return pinned
+      ? mintAccount({
+          hookProgram: pinned.transferHookProgram,
+          hookAuthority: pinned.transferHookAuthority,
+          delegate: pinned.permanentDelegate,
+        })
+      : null;
+  });
+  vi.stubEnv("SOLANA_RPC_DEFAULT_DEVNET_API_KEY_URL", poolUrl("devnet"));
+  vi.stubEnv("SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL", poolUrl("mainnet"));
+  vi.stubGlobal("fetch", async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    const { id, method, params } = parseJsonRpcRequest(init);
+    const url = String(input);
+    requests.push({ url, method });
+    if (method === "getGenesisHash") {
+      const cluster = url === poolUrl("mainnet") ? "mainnet-beta" : "devnet";
+      return Response.json({ jsonrpc: "2.0", id, result: GENESIS_HASH_BY_CLUSTER[cluster] });
+    }
+    if (failNextRead) {
+      failNextRead = false;
+      return new Response("Too Many Requests", { status: 429 });
+    }
+    return Response.json({
+      jsonrpc: "2.0",
+      id,
+      result: {
+        context: { slot: 1 },
+        value: multipleAccountsParamsSchema.parse(params)[0].map((mint) => accountFor(mint)),
+      },
+    });
+  });
 });
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+});
+
+/** One guard pass, as the metrics refresh runs it: inside the environment's cluster scope. */
+function guardIn(environment: SdpEnvironment, guardEnv: Env): Promise<number> {
+  return runInClusterScope({ projectId: null, environment }, () => guardDepositMints(guardEnv));
+}
 
 describe("pins", () => {
   it.each(SOLANA_CLUSTERS)("cover every Token-2022 deposit mint on %s", (cluster) => {
@@ -156,25 +220,42 @@ describe("detectMintDrift", () => {
 });
 
 describe("guardDepositMints", () => {
-  it("emits nothing when every mainnet mint matches its pin", async () => {
-    mocks.getAccountInfo.mockResolvedValue({ value: mintAccount({}) });
+  it.each([
+    ["sandbox", "devnet", "devnet"],
+    ["production", "mainnet-beta", "mainnet"],
+  ] as const)(
+    "reads every pinned mint of the %s scope's cluster (%s) in one request, from its pool",
+    async (environment, cluster, pool) => {
+      await expect(guardIn(environment, env)).resolves.toBe(0);
 
-    await expect(guardDepositMints(env, "mainnet-beta")).resolves.toBe(0);
+      expect(requests).toEqual([
+        { url: poolUrl(pool), method: "getGenesisHash" },
+        { url: poolUrl(pool), method: "getMultipleAccounts" },
+      ]);
+      expect(accountFor.mock.calls.map(([mint]) => mint)).toEqual(
+        token2022DepositMints(cluster).map(({ mint }) => mint)
+      );
+      expect(mocks.logEvent).not.toHaveBeenCalled();
+    }
+  );
 
-    expect(mocks.getAccountInfo).toHaveBeenCalledTimes(
-      token2022DepositMints("mainnet-beta").length
-    );
+  it("reads mainnet from the mainnet pool on a devnet-default process", async () => {
+    stubDevnetDefaultProcess();
+
+    await expect(guardIn("production", earnEnabledEnv)).resolves.toBe(0);
+
+    expect(new Set(requests.map(({ url }) => url))).toEqual(new Set([poolUrl("mainnet")]));
     expect(mocks.logEvent).not.toHaveBeenCalled();
   });
 
   it("emits one drift event per changed field, naming cluster, symbol and mint", async () => {
-    mocks.getAccountInfo.mockImplementation(async (mint: string) =>
-      String(mint) === PYUSD_MAINNET
-        ? { value: mintAccount({ hookProgram: "Hook111111111111111111111111111111111111111" }) }
-        : { value: mintAccount({}) }
+    accountFor.mockImplementation((mint) =>
+      mint === PYUSD_MAINNET
+        ? mintAccount({ hookProgram: "Hook111111111111111111111111111111111111111" })
+        : mintAccount({})
     );
 
-    await expect(guardDepositMints(env, "mainnet-beta")).resolves.toBe(1);
+    await expect(guardIn("production", env)).resolves.toBe(1);
 
     expect(mocks.logEvent).toHaveBeenCalledTimes(1);
     expect(mocks.logEvent).toHaveBeenCalledWith("error", {
@@ -188,24 +269,37 @@ describe("guardDepositMints", () => {
     });
   });
 
-  it("skips quietly when this deployment has no proven RPC for the cluster", async () => {
-    mocks.resolveClusterRpcUrl.mockReturnValue("");
-    mocks.assertClusterEndpoint.mockRejectedValue(
-      new Error("No Solana RPC endpoint is configured")
-    );
+  it.each([
+    ["error", "enabled", earnEnabledEnv],
+    ["info", "disabled", { ...env, SDP_RELEASE_CHANNEL: "experimental" } as Env],
+    ["error", "unreadable", env],
+  ] as const)(
+    "logs a skip at %s where Earn is %s when the cluster has no pool, never reading another",
+    async (level, _state, guardEnv) => {
+      stubDevnetDefaultProcess();
+      vi.stubEnv("SOLANA_RPC_DEFAULT_MAINNET_API_KEY_URL", "");
 
-    await expect(guardDepositMints(env, "mainnet-beta")).resolves.toBe(0);
+      await expect(guardIn("production", guardEnv)).resolves.toBe(0);
 
-    expect(mocks.getAccountInfo).not.toHaveBeenCalled();
-    expect(mocks.logEvent).not.toHaveBeenCalled();
-  });
+      expect(requests).toEqual([]);
+      expect(mocks.logEvent).toHaveBeenCalledOnce();
+      expect(mocks.logEvent).toHaveBeenCalledWith(
+        level,
+        expect.objectContaining({
+          event: EARN_DEPOSIT_MINT_GUARD_SKIPPED_EVENT,
+          cluster: "mainnet-beta",
+          error_code: "RPC_NOT_CONFIGURED",
+        })
+      );
+    }
+  );
 
   it("treats a failed or unparseable read as a warning, never as drift", async () => {
-    mocks.getAccountInfo
-      .mockRejectedValueOnce(new Error("429 Too Many Requests"))
-      .mockResolvedValueOnce({ value: null });
+    failNextRead = true;
+    await expect(guardIn("production", env)).resolves.toBe(0);
 
-    await expect(guardDepositMints(env, "mainnet-beta")).resolves.toBe(0);
+    accountFor.mockReturnValue(null);
+    await expect(guardIn("production", env)).resolves.toBe(0);
 
     expect(mocks.logEvent).not.toHaveBeenCalled();
   });

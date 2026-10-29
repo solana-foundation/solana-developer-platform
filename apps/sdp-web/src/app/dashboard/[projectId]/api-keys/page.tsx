@@ -17,14 +17,14 @@ import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { createTimedTrace } from "@/lib/request-tracing";
-import { createSdpApiClient, requestProjectHref } from "@/lib/sdp-api";
+import { createSdpApiClient, requestMemberRole, requestProjectHref } from "@/lib/sdp-api";
 import { ApiKeyFlashSurface } from "./api-key-flash-surface";
 import { type ApiKeyRecord, ApiKeysTableClient } from "./api-keys-table-client";
 
 export const dynamic = "force-dynamic";
 
 export default async function ApiKeysPage() {
-  const [t, { userId, orgId, orgRole }] = await Promise.all([getTranslations(), auth()]);
+  const [t, { userId, orgId }] = await Promise.all([getTranslations(), auth()]);
   if (!userId) {
     redirect(await getAuthEntryPath());
   }
@@ -33,7 +33,7 @@ export default async function ApiKeysPage() {
   }
 
   const trace = createTimedTrace("dashboard.api_keys.page");
-  const dashboardAccess = resolveDashboardAccess(orgRole);
+  const dashboardAccess = resolveDashboardAccess(await requestMemberRole());
   let apiKeys: ApiKeyRecord[] = [];
   let wallets: PaymentsDashboardWallet[] = [];
 

@@ -40,7 +40,7 @@ export function resetTransferIdempotencyStateForTests(): void {
  * spelling, as the API fingerprints it, so re-entering `1` for `1.0` after a
  * lost answer is the same payment under the same key, not a second one.
  */
-export function canonicalTransferInput(input: CreateTransferInput): CreateTransferInput {
+function canonicalTransferInput(input: CreateTransferInput): CreateTransferInput {
   return { ...input, amount: canonicalDecimalAmount(input.amount) };
 }
 
@@ -63,11 +63,6 @@ export function transferRequestFingerprint(input: CreateTransferInput): string {
 /** The key for this payment, the same one on every retry until it is released. */
 export function claimTransferIdempotencyKey(fingerprint: string): string {
   return store.claim(fingerprint).key;
-}
-
-/** Retire the key once an answer retires it (`answerRetiresKey`). */
-export function releaseTransferIdempotencyKey(fingerprint: string, key: string): void {
-  store.release(fingerprint, key);
 }
 
 /**

@@ -4,6 +4,8 @@ import type {
   EarnVaultProvider,
   ProviderStrategyMetrics,
 } from "@sdp/earn/types";
+import { runInClusterScope } from "@sdp/rpc/scope";
+import { SDP_ENVIRONMENTS, type SdpEnvironment } from "@sdp/types/api-keys";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "@/types/env";
 import {
@@ -20,7 +22,7 @@ const mocks = vi.hoisted(() => ({
   updateStrategyMetricsBatch: vi.fn(),
   listStrategyFigures: vi.fn(),
   logEvent: vi.fn(),
-  guardDepositMints: vi.fn(async (_env: unknown, _cluster: string) => 0),
+  guardDepositMints: vi.fn(async () => 0),
 }));
 
 vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
@@ -43,12 +45,17 @@ vi.mock("@/db/repositories/repository-factory", async (importOriginal) => ({
 }));
 
 // The deposit-mint guard has its own suite; here it only has to be invoked once
-// per refreshed environment's cluster, after the provider passes.
+// per pass, after the provider passes.
 vi.mock("@/services/earn/deposit-mint-guard", () => ({
   guardDepositMints: mocks.guardDepositMints,
 }));
 
 const env = { DATABASE_URL: "postgres://unit" } as Env;
+
+/** One refresh pass, as the Worker runs it: inside the environment's cluster scope. */
+function refreshIn(environment: SdpEnvironment): Promise<void> {
+  return runInClusterScope({ projectId: null, environment }, () => refreshEarnStrategyMetrics(env));
+}
 
 /** A provider WITHOUT the capability — the base contract and nothing else. */
 function catalogueOnlyProvider(id: string): EarnVaultProvider {
@@ -89,25 +96,34 @@ beforeEach(() => {
 });
 
 describe("refreshEarnStrategyMetrics", () => {
-  it("refreshes every reported strategy, once per environment", async () => {
-    mocks.providerClients.kamino = liveMetricsProvider("kamino", async () => [
-      metrics("vault-a", "0.051"),
-      metrics("vault-b", "0.062"),
-    ]);
-
-    await refreshEarnStrategyMetrics(env);
-
-    expect(mocks.updateStrategyMetrics).toHaveBeenCalledTimes(4);
-    for (const environment of ["sandbox", "production"] as const) {
-      expect(mocks.updateStrategyMetrics).toHaveBeenCalledWith({
-        provider: "kamino",
-        providerReference: "vault-a",
-        environment,
-        currentApy: "0.051",
-        riskMetadata: { tvlUsd: 1_000_000 },
+  it.each(SDP_ENVIRONMENTS)(
+    "refreshes every reported strategy on the %s shelf only",
+    async (environment) => {
+      mocks.providerClients.kamino = liveMetricsProvider("kamino", async (ctx) => {
+        expect(ctx.environment).toBe(environment);
+        return [metrics("vault-a", "0.051"), metrics("vault-b", "0.062")];
       });
+
+      await refreshIn(environment);
+
+      expect(mocks.updateStrategyMetrics.mock.calls.map(([update]) => update)).toEqual([
+        {
+          provider: "kamino",
+          providerReference: "vault-a",
+          environment,
+          currentApy: "0.051",
+          riskMetadata: { tvlUsd: 1_000_000 },
+        },
+        {
+          provider: "kamino",
+          providerReference: "vault-b",
+          environment,
+          currentApy: "0.062",
+          riskMetadata: { tvlUsd: 1_000_000 },
+        },
+      ]);
     }
-  });
+  );
 
   it("emits a figure anomaly on a 10x APY jump against the stored row, and still writes it (PRO-1867)", async () => {
     mocks.listStrategyFigures.mockResolvedValue([
@@ -123,10 +139,9 @@ describe("refreshEarnStrategyMetrics", () => {
       metrics("vault-a", "0.51"),
     ]);
 
-    await refreshEarnStrategyMetrics(env);
+    await refreshIn("production");
 
-    // Once per environment: both refresh passes read the same stored fixture.
-    expect(mocks.logEvent).toHaveBeenCalledTimes(2);
+    expect(mocks.logEvent).toHaveBeenCalledTimes(1);
     expect(mocks.logEvent).toHaveBeenCalledWith("warn", {
       event: "sdp_api_earn_catalogue_figure_anomaly",
       source: "metrics_refresh",
@@ -151,29 +166,27 @@ describe("refreshEarnStrategyMetrics", () => {
       metrics("vault-a", "0.051"),
     ]);
 
-    await refreshEarnStrategyMetrics(env);
+    await refreshIn("sandbox");
 
     expect(mocks.logEvent).not.toHaveBeenCalled();
-    expect(mocks.updateStrategyMetrics).toHaveBeenCalledTimes(2);
+    expect(mocks.updateStrategyMetrics).toHaveBeenCalledTimes(1);
   });
 
-  it("guards the Token-2022 deposit mints on each refreshed environment's cluster, after the provider passes (PRO-1962)", async () => {
+  it("guards the Token-2022 deposit mints once, after the provider passes (PRO-1962)", async () => {
     const order: string[] = [];
     mocks.providerClients.kamino = liveMetricsProvider("kamino", async () => {
       order.push("metrics");
       return [metrics("vault-a", "0.051")];
     });
-    mocks.guardDepositMints.mockImplementation(async (_env: unknown, cluster: string) => {
-      order.push(`guard:${cluster}`);
+    mocks.guardDepositMints.mockImplementation(async () => {
+      order.push("guard");
       return 0;
     });
 
-    await refreshEarnStrategyMetrics(env);
+    await refreshIn("production");
 
-    expect(mocks.guardDepositMints).toHaveBeenCalledTimes(2);
-    expect(mocks.guardDepositMints).toHaveBeenCalledWith(env, "devnet");
-    expect(mocks.guardDepositMints).toHaveBeenCalledWith(env, "mainnet-beta");
-    expect(order).toEqual(["metrics", "metrics", "guard:devnet", "guard:mainnet-beta"]);
+    expect(mocks.guardDepositMints).toHaveBeenCalledWith(env);
+    expect(order).toEqual(["metrics", "guard"]);
   });
 
   it("skips providers without the live-metrics capability", async () => {
@@ -181,7 +194,7 @@ describe("refreshEarnStrategyMetrics", () => {
     // five-minute pass must not re-pay a catalogue cost for the rate alone.
     mocks.providerClients.upshift = catalogueOnlyProvider("upshift");
 
-    await refreshEarnStrategyMetrics(env);
+    await refreshIn("sandbox");
 
     expect(mocks.updateStrategyMetrics).not.toHaveBeenCalled();
   });
@@ -191,7 +204,7 @@ describe("refreshEarnStrategyMetrics", () => {
     // worse than no figure.
     mocks.providerClients.kamino = liveMetricsProvider("kamino", async () => [metrics("vault-a")]);
 
-    await refreshEarnStrategyMetrics(env);
+    await refreshIn("sandbox");
 
     expect(mocks.updateStrategyMetrics).toHaveBeenCalledWith(
       expect.objectContaining({ currentApy: null })
@@ -206,20 +219,19 @@ describe("refreshEarnStrategyMetrics", () => {
       metrics("vault-a", "0.051"),
     ]);
 
-    await expect(refreshEarnStrategyMetrics(env)).resolves.toBeUndefined();
+    await expect(refreshIn("sandbox")).resolves.toBeUndefined();
 
-    expect(mocks.updateStrategyMetrics).toHaveBeenCalledTimes(2);
+    expect(mocks.updateStrategyMetrics).toHaveBeenCalledTimes(1);
     expect(mocks.updateStrategyMetrics).toHaveBeenCalledWith(
       expect.objectContaining({ provider: "kamino" })
     );
   });
 
   /**
-   * The job runs this pass FIRST and awaits it, then runs the catalogue sync,
-   * inside a 120s Cloud Run task. A provider that never answers therefore does
-   * not merely lose its own rates — without a deadline it spends the execution
-   * and the catalogue sync never runs, every tick, for as long as it stays
-   * slow. Fake timers, so this pins the behaviour without a real 20s wait.
+   * A provider that never answers must not hold the pass: without a deadline
+   * it would keep the registration in flight, and the Worker's overlap guard
+   * would skip every later slot for as long as it stays slow. Fake timers, so
+   * this pins the behaviour without a real 20s wait.
    */
   it("gives up on a provider that outruns the deadline and refreshes the rest", async () => {
     vi.useFakeTimers();
@@ -232,12 +244,11 @@ describe("refreshEarnStrategyMetrics", () => {
         metrics("vault-a", "0.051"),
       ]);
 
-      const pass = refreshEarnStrategyMetrics(env);
-      // Two environments × the hung provider — each waits out its own deadline.
-      await vi.advanceTimersByTimeAsync(EARN_PROVIDER_METRICS_DEADLINE_MS * 2 + 1);
+      const pass = refreshIn("sandbox");
+      await vi.advanceTimersByTimeAsync(EARN_PROVIDER_METRICS_DEADLINE_MS + 1);
 
       await expect(pass).resolves.toBeUndefined();
-      expect(mocks.updateStrategyMetrics).toHaveBeenCalledTimes(2);
+      expect(mocks.updateStrategyMetrics).toHaveBeenCalledTimes(1);
       expect(mocks.updateStrategyMetrics).toHaveBeenCalledWith(
         expect.objectContaining({ provider: "kamino" })
       );
@@ -252,7 +263,7 @@ describe("refreshEarnStrategyMetrics", () => {
         throw new SdpEarnError(code, "expected steady state");
       });
 
-      await expect(refreshEarnStrategyMetrics(env)).resolves.toBeUndefined();
+      await expect(refreshIn("sandbox")).resolves.toBeUndefined();
     }
 
     expect(mocks.updateStrategyMetrics).not.toHaveBeenCalled();
@@ -265,13 +276,13 @@ describe("refreshEarnStrategyMetrics", () => {
     ]);
     mocks.updateStrategyMetrics.mockRejectedValueOnce(new Error("deadlock"));
 
-    await expect(refreshEarnStrategyMetrics(env)).resolves.toBeUndefined();
+    await expect(refreshIn("sandbox")).resolves.toBeUndefined();
 
     // The atomic batch falls back to isolated writes, so one bad attempt does
-    // not cost the rest of the shelf its refresh. The fifth call is the failed
+    // not cost the rest of the shelf its refresh. The third call is the failed
     // row observed once inside this test's batch adapter and once in fallback.
-    expect(mocks.updateStrategyMetricsBatch).toHaveBeenCalledTimes(2);
-    expect(mocks.updateStrategyMetrics).toHaveBeenCalledTimes(5);
+    expect(mocks.updateStrategyMetricsBatch).toHaveBeenCalledTimes(1);
+    expect(mocks.updateStrategyMetrics).toHaveBeenCalledTimes(3);
   });
 
   it("tolerates references the catalogue does not hold", async () => {
@@ -287,8 +298,8 @@ describe("refreshEarnStrategyMetrics", () => {
         providerReference === "catalogued"
     );
 
-    await expect(refreshEarnStrategyMetrics(env)).resolves.toBeUndefined();
+    await expect(refreshIn("sandbox")).resolves.toBeUndefined();
 
-    expect(mocks.updateStrategyMetrics).toHaveBeenCalledTimes(4);
+    expect(mocks.updateStrategyMetrics).toHaveBeenCalledTimes(2);
   });
 });

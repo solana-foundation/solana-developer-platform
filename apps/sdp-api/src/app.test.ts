@@ -2,7 +2,7 @@ import { SigningError } from "@sdp/custody/signing";
 import { FeePaymentError } from "@sdp/fee-payment/port";
 import { SdpPaymentsError } from "@sdp/payments/errors";
 import { SdpRpcError } from "@sdp/rpc/errors";
-import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
+import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createApp, type SdpPlugin } from "@/app";
@@ -32,7 +32,7 @@ const IDEMPOTENCY_REUSED_PATH = "/__idempotency_reused_test_throw";
 const DATABASE_UNAVAILABLE_PATH = "/__database_unavailable_test_throw";
 
 function buildApp() {
-  const app = createApp({ rampProviderStages: SDP_RAMP_PROVIDER_STAGES });
+  const app = createApp({ rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY });
   // Mount a route that throws after createApp returns, so we exercise the
   // onError path without modifying the production createApp surface.
   app.all(THROW_PATH, () => {
@@ -158,7 +158,7 @@ describe("createApp plugin registration", () => {
       },
     };
     const app = createApp({
-      rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
+      rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY,
       plugins: [plugin],
     });
 
@@ -177,7 +177,7 @@ describe("createApp plugin registration", () => {
       },
     };
     const app = createApp({
-      rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
+      rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY,
       plugins: [plugin],
     });
 
@@ -196,8 +196,28 @@ describe("createApp plugin registration", () => {
     expect(body.error.code).toBe("PAYLOAD_TOO_LARGE");
   });
 
+  it("rejects a /pay body above 4 KiB with 413", async () => {
+    const app = createApp({ rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY });
+
+    const res = await app.request(
+      "/pay/pay_tok_body_limit/tx",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "x".repeat(4097),
+      },
+      baseEnv
+    );
+
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({
+      error: { code: "PAYLOAD_TOO_LARGE", message: "Request body is too large" },
+      meta: { requestId: expect.any(String) },
+    });
+  });
+
   it("returns 404 for an unregistered route when no plugins are passed", async () => {
-    const app = createApp({ rampProviderStages: SDP_RAMP_PROVIDER_STAGES });
+    const app = createApp({ rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY });
 
     const res = await app.request("/v1/test-plugin", {}, baseEnv);
 
@@ -209,10 +229,36 @@ describe("createApp plugin registration", () => {
 
     expect(() =>
       createApp({
-        rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
+        rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY,
         plugins: [make("dup"), make("dup")],
       })
     ).toThrow(/dup/);
+  });
+});
+
+describe("createApp route log privacy", () => {
+  it("keeps unmatched and dynamic path secrets out of timing and error logs", async () => {
+    const info = vi.spyOn(rootLogger, "info").mockImplementation(() => undefined);
+    const error = vi.spyOn(rootLogger, "error").mockImplementation(() => undefined);
+    try {
+      const app = createApp({ rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY });
+      app.get("/health/fail/:secret", () => {
+        throw new Error("test trigger");
+      });
+      const unmatched = "/health/sk_path_secret?api_key=sk_query_secret";
+      const failed = "/health/fail/sk_path_secret?api_key=sk_query_secret";
+
+      expect((await app.request(unmatched, {}, baseEnv)).status).toBe(404);
+      expect((await app.request(failed, {}, baseEnv)).status).toBe(500);
+
+      const logged = JSON.stringify([info.mock.calls, error.mock.calls]);
+      expect(logged).not.toContain("sk_path_secret");
+      expect(logged).not.toContain("sk_query_secret");
+      expect(error).toHaveBeenCalled();
+    } finally {
+      info.mockRestore();
+      error.mockRestore();
+    }
   });
 });
 

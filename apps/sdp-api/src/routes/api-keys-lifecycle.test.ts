@@ -468,7 +468,7 @@ describe("API key lifecycle", () => {
       );
 
       expect(response.status).toBe(500);
-      expect(await response.text()).not.toMatch(/sk_test_/);
+      expect(await response.text()).not.toMatch(/sf_[0-9a-f]{16}_/);
       expect(
         await getDb(env).queryMany("SELECT id FROM api_keys WHERE name = 'Unaudited key'")
       ).toEqual([]);
@@ -481,7 +481,7 @@ describe("API key lifecycle", () => {
       const response = await rotate(TARGET_KEY_ID);
 
       expect(response.status).toBe(500);
-      expect(await response.text()).not.toMatch(/sk_test_/);
+      expect(await response.text()).not.toMatch(/sf_[0-9a-f]{16}_/);
       expect(await replacementsOf(TARGET_KEY_ID)).toEqual([]);
       expect((await readKey(TARGET_KEY_ID))?.rotation_deadline).toBeNull();
     });

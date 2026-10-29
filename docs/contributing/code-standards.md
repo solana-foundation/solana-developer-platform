@@ -31,7 +31,7 @@ Every on-chain path reads its cluster from the open cluster scope (`currentClust
 
 | Need | Use | Never |
 | -- | -- | -- |
-| Solana reads, builds and sends | `createClusterRpc()` (`@sdp/rpc/factory`) | `createRpc`, kit's `createSolanaRpc`, an RPC URL from env. Legacy `createRpc` survives only in the modules HOO-1879 exempts (Earn, DvP, issuance, Private Channels, Rings) |
+| Solana reads, builds and sends | `createClusterRpc()` (`@sdp/rpc/factory`), or `createClusterRpc({ timeoutMs })` for a client handed to a helper that sends without a signal | `createRpc`, kit's `createSolanaRpc`, an RPC URL from env. Legacy `createRpc` survives only in the modules HOO-1879 exempts (DvP, issuance, Private Channels, Rings) |
 | Wallet signature history | `createClusterHistoryRpc()`, observed transfers only | Reordering the pool anywhere else |
 | Helius DAS | `services/helius-das.service.ts` | A direct Helius call |
 | Open a scope | Project middleware, `/pay` context, the cron runner (`runInClusterScope`; tests may too) | Opening a scope in a service |
@@ -69,7 +69,7 @@ A change that triggers one of these must handle it.
 - **Encryption at rest.** Credentials, key material, and sensitive provider data round-trip through the KMS-backed crypto (`apps/sdp-api/src/lib/gcp/kms-client.ts`; `lib/spc-credential-crypto.ts` is the pattern), never a plaintext column. SSN, CDD, and bank details are never persisted: pass them through to the provider just in time.
 - **Kora budgets.** Anything new that Kora sponsors (fees, ATA rent, a new sponsored instruction) is admitted and debited through `apps/sdp-api/src/services/sponsorship-budget.service.ts`, reached only through the entry points in "RPC and fee payment".
 - **Metered quota.** A route that costs real money or provider calls (signing, provider-backed, RPC-heavy) mounts behind `meteredQuota` (`apps/sdp-api/src/middleware/metered-quota.ts`) like the existing paid routes.
-- **Release-channel gating.** A nav item, tab, filter, chip, or option list naming SDP modules or ramp providers comes from the channel-capped flags (`enabledTransactionModules(flags)`, `getEnabledRampProviders()`, `isModuleInDeploymentReleaseChannel`), never a raw tuple from `@sdp/types` or a copied list. A `*.redesign.tsx` page keeps its legacy twin's gating. A new API route sits behind `requireModule`. CI runs `experimental`, so a gating test renders with stable-capped flags. See `docs/decisions/0005-release-channels.md`.
+- **Release-channel gating.** A nav item, tab, filter, chip, or option list naming SDP modules or ramp providers comes from the channel-capped flags (`enabledTransactionModules(flags)`, `getEnabledRampProviders()`, `isModuleInDeploymentReleaseChannel`), never a raw tuple from `@sdp/types` or a copied list. A new API route sits behind `requireModule`. CI runs `experimental`, so a gating test renders with stable-capped flags. See `docs/decisions/0005-release-channels.md`.
 
 ## TypeScript
 

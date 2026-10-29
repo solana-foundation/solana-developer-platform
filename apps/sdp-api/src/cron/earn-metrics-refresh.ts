@@ -7,7 +7,9 @@
  * and then moves money on, and an hour-old one is not that number. So the
  * volatile figures get their own frequent pass, while identity, mints,
  * liquidity terms and admission to the catalogue stay hourly. It runs every
- * five minutes as a Cron Definition (ADR 0011).
+ * five minutes as a `cluster` Cron Definition (ADR 0011): the Worker registers
+ * it once per environment, and each registration refreshes that environment's
+ * own shelf inside its cluster scope.
  *
  * Two properties keep the two passes from fighting:
  *
@@ -38,7 +40,7 @@ import type {
   EarnRuntimeContext,
   ProviderStrategyMetrics,
 } from "@sdp/earn/types";
-import type { SdpEnvironment } from "@sdp/types/api-keys";
+import { currentClusterScope } from "@sdp/rpc/scope";
 import type { EarnRepository } from "@/db/repositories/earn.repository";
 import { createEarnRepository } from "@/db/repositories/repository-factory";
 import { isEarnEnabled } from "@/lib/feature-flags";
@@ -46,23 +48,22 @@ import { getLogger } from "@/runtime/logger";
 import { logVendorCallFailure } from "@/runtime/vendor-calls";
 import { reportFigureAnomalies } from "@/services/earn/catalogue-anomaly";
 import { guardDepositMints } from "@/services/earn/deposit-mint-guard";
-import { earnClusterFor } from "@/services/earn/execution-registry";
 import type { Env } from "@/types/env";
 import { defineCron } from "./define-cron";
 
 /**
  * Five minutes: the shortest cadence that is
  * unambiguously polite to a public API (Kamino's whole shelf is two requests,
- * so this is 24 requests an hour per environment) while putting a hard ceiling
- * on how stale a quoted rate can be.
+ * so this is 24 requests an hour per environment registration) while putting a
+ * hard ceiling on how stale a quoted rate can be.
  * Vault APYs move with underlying reserve utilisation — meaningfully over
  * hours, not over minutes — so five minutes is comfortably inside the noise and
  * there is nothing to gain from going lower.
  */
 const EARN_METRICS_REFRESH_CRON = "*/5 * * * *";
 
-// Matches the catalogue sync: rows are environment-scoped, so each provider
-// refreshes once per environment, reading that environment's OWN shelf.
+// Rows are environment-scoped, so each registration refreshes its own
+// environment's shelf, reading that environment's OWN provider figures.
 //
 // The mirrored mainnet rows a non-production environment holds since PRO-1742
 // are deliberately NOT covered by this pass: `updateStrategyMetrics` matches
@@ -74,7 +75,6 @@ const EARN_METRICS_REFRESH_CRON = "*/5 * * * *";
 // five-minute-fresh production twin, fine for a browse-only, fundable:false
 // review shelf. (A provider whose catalogue snapshots omit the optional
 // currentApy would mirror with no rate at all; none does today.)
-const REFRESHED_ENVIRONMENTS: readonly SdpEnvironment[] = ["sandbox", "production"];
 
 // Expected steady states, not incidents — same taxonomy as the catalogue sync.
 const SKIPPABLE_REFRESH_ERROR_CODES: ReadonlySet<string> = new Set([
@@ -83,20 +83,20 @@ const SKIPPABLE_REFRESH_ERROR_CODES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Outer bound on ONE provider's read, per environment.
+ * Outer bound on ONE provider's read in one registration's pass.
  *
  * Provider clients cap each HTTP request of their own (Kamino:
  * `KAMINO_REQUEST_TIMEOUT_MS`), but a per-request cap does not bound a read
  * that makes many requests — a server echoing a pagination token forever is
  * twenty prompt responses, not one slow one. This is the bound on the pass.
  *
- * Sized against the cadence, not the provider. With two environments and one
- * live-metrics provider today, 20s each caps the refresh at 40s, inside its
- * five-minute slot. Measured, a real pass is ~1.4s — this is a backstop, not a
- * budget anything runs near.
+ * Sized against the cadence, not the provider. Each environment's registration
+ * runs its own pass, so with one live-metrics provider today 20s caps a pass at
+ * 20s, inside its five-minute slot. Measured, a real pass is ~1.4s: this is a
+ * backstop, not a budget anything runs near.
  *
- * Raising the provider count means re-checking that
- * `providers × environments × this` still clears the five-minute cadence.
+ * Raising the provider count means re-checking that `providers × this` still
+ * clears the five-minute cadence.
  */
 export const EARN_PROVIDER_METRICS_DEADLINE_MS = 20_000;
 
@@ -125,29 +125,30 @@ async function withDeadline<T>(work: Promise<T>, deadlineMs: number): Promise<T 
   }
 }
 
+/**
+ * Refresh the open cluster scope's environment: every live-metrics provider's
+ * figures for that environment's shelf, then its cluster's deposit-mint guard.
+ * Per-provider failures are logged, never thrown.
+ */
 export async function refreshEarnStrategyMetrics(env: Env): Promise<void> {
   const repo = createEarnRepository(env);
-  const providerEnv = env;
+  const { environment } = currentClusterScope();
 
-  for (const environment of REFRESHED_ENVIRONMENTS) {
-    for (const client of Object.values(EARN_PROVIDER_CLIENTS)) {
-      // Capability, not a provider list: a provider joins this pass by
-      // implementing `listStrategyMetrics`.
-      if (!supportsLiveMetrics(client)) {
-        continue;
-      }
-      await refreshProviderMetrics(repo, client, { env: providerEnv, environment });
+  for (const client of Object.values(EARN_PROVIDER_CLIENTS)) {
+    // Capability, not a provider list: a provider joins this pass by
+    // implementing `listStrategyMetrics`.
+    if (!supportsLiveMetrics(client)) {
+      continue;
     }
+    await refreshProviderMetrics(repo, client, { env, environment });
   }
 
   // Deposit-mint extension guard (PRO-1962) rides this pass because its cadence
   // is the point: Kora co-signs PYUSD and USDG movements under
   // `transfer_hook_policy = "allow_all"`, so a hook program appearing on either
-  // mint should reach a human within minutes, not at the next hourly sync. A
-  // handful of account reads per cluster; report-only, never throws.
-  for (const environment of REFRESHED_ENVIRONMENTS) {
-    await guardDepositMints(env, earnClusterFor(environment));
-  }
+  // mint should reach a human within minutes, not at the next hourly sync. One
+  // batched account read on the scope's cluster; report-only, never throws.
+  await guardDepositMints(env);
 }
 
 async function refreshProviderMetrics(
@@ -287,7 +288,7 @@ async function refreshProviderMetrics(
 export const earnMetricsRefreshCron = defineCron({
   name: "refresh-earn-metrics",
   schedule: EARN_METRICS_REFRESH_CRON,
-  scope: "global",
+  scope: "cluster",
   effect: "observes",
   enabled: isEarnEnabled,
   run: refreshEarnStrategyMetrics,

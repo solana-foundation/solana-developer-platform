@@ -1,6 +1,7 @@
 "use client";
 
 import { SignInButton, useAuth } from "@clerk/nextjs";
+import { Badge } from "@sdp/ui/badge";
 import { cn } from "@sdp/ui/cn";
 import { type ThemeScope, themeScopeAttributes } from "@sdp/ui/theme-scope";
 import { ThemeScopeProvider } from "@sdp/ui/theme-scope-provider";
@@ -10,8 +11,6 @@ import { useSearchParams } from "next/navigation";
 import { Fragment, type ReactNode, useEffect, useRef, useState } from "react";
 import { isKnownCustodyProvider } from "@/app/dashboard/[projectId]/custody/provider-catalog";
 import { WalletProviderMark } from "@/app/dashboard/[projectId]/custody/wallet-provider-mark";
-import { enabledTransactionModules } from "@/app/dashboard/[projectId]/payments/transactions/transaction-modules";
-import { DashboardBottomNav } from "@/components/dashboard-bottom-nav";
 import {
   DashboardHeaderAction,
   DashboardTopBar,
@@ -21,7 +20,6 @@ import {
 import { DashboardHeaderTabs } from "@/components/dashboard-header-tabs";
 import { DashboardHeaderTabsTrailingContext } from "@/components/dashboard-header-tabs-trailing-context";
 import { DashboardLoadingScreen } from "@/components/dashboard-loading-screen";
-import { DashboardMoreSheet } from "@/components/dashboard-more-sheet";
 import {
   DASHBOARD_SUBNAV_GROUPS,
   type DashboardSubnavKey,
@@ -39,9 +37,8 @@ import {
   DashboardPageTitleContext,
   type DashboardPageTitleOverride,
 } from "@/components/dashboard-page-title-context";
-import { DashboardQuickStart } from "@/components/dashboard-quick-start.redesign";
+import { DashboardQuickStart } from "@/components/dashboard-quick-start";
 import { DashboardRouteTabs } from "@/components/dashboard-route-tabs";
-import { LanguagePicker } from "@/components/language-picker";
 import { NetworkDebugPanel } from "@/components/network-debug-panel";
 import { PaymentsDemoNotice } from "@/components/payments-demo-notice";
 import { PaymentsDemoToggle } from "@/components/payments-demo-toggle";
@@ -61,7 +58,6 @@ import {
   useDashboardUrlState,
   useSyncDashboardUrlStateWithRouter,
 } from "@/lib/dashboard-url-state";
-import { isDesignModuleOn, isNewDesignPage } from "@/lib/design-modules";
 import { isPaymentsPath } from "@/lib/payments-demo/demo-cookie";
 import {
   isPaymentsDemoOn,
@@ -71,13 +67,6 @@ import {
 import { themeScopeForPath } from "@/lib/theme-scope-routes";
 import { useDashboardPathname, useProjectHref } from "@/lib/use-dashboard-project";
 import { subscribeWalletFavoriteAdded } from "@/lib/wallet-favorites";
-
-// On NEW DESIGN the sidebar is the refresh design's on every route, whatever the page beside it
-// is built on: its container carries the scope, and its menus re-stamp it through the provider
-// when they portal out. The previous design's sidebar takes the page's scope.
-function sidebarThemeScope(newDesign: boolean, pageScope: ThemeScope | null): ThemeScope | null {
-  return newDesign ? "refresh" : pageScope;
-}
 
 // The refresh sidebar is the design's: 40px rows touching, 6px corners, a 20px icon then 16px to
 // the 15px medium label, an ink wash for the active row and a lighter one on hover, no border.
@@ -273,7 +262,6 @@ function SidebarGroup({
 }
 
 function DashboardSidebarContent({
-  canManageOrgSettings,
   navSections,
   pathname,
   onNavigate,
@@ -286,7 +274,6 @@ function DashboardSidebarContent({
   onSubnavToggle,
   onSubnavOpen,
 }: {
-  canManageOrgSettings: boolean;
   navSections: NavSection[];
   pathname: string;
   onNavigate?: () => void;
@@ -351,7 +338,6 @@ function DashboardSidebarContent({
         {showQuickStart ? <DashboardQuickStart collapsed={isCollapsed} /> : null}
         <SidebarUserMenu
           collapsed={isCollapsed}
-          canManageOrgSettings={canManageOrgSettings}
           // The mobile slide-over is a 288px column, so the popover only has
           // room above the trigger there.
           menuSide={variant === "desktop" ? "right" : "top"}
@@ -392,11 +378,7 @@ function clipsDashboardHorizontalOverflow(pathname: string): boolean {
   );
 }
 
-/**
- * @param issuanceRedesigned - The new design's token page scrolls in its own panel, as a
- *   wallet's page does; the previous design's token page keeps the page scroll.
- */
-function usesWorkspaceViewport(pathname: string, issuanceRedesigned: boolean): boolean {
+function usesWorkspaceViewport(pathname: string): boolean {
   const isWalletDetailRoute =
     (pathname.startsWith("/dashboard/wallets/") && pathname !== "/dashboard/wallets/setup") ||
     (pathname.startsWith("/dashboard/custody/") && pathname !== "/dashboard/custody/setup");
@@ -406,7 +388,7 @@ function usesWorkspaceViewport(pathname: string, issuanceRedesigned: boolean): b
   return (
     pathname === "/dashboard/issuance" ||
     pathname === "/dashboard/issuance/create" ||
-    (issuanceRedesigned && /^\/dashboard\/issuance\/[^/]+\/?$/.test(pathname)) ||
+    /^\/dashboard\/issuance\/[^/]+\/?$/.test(pathname) ||
     pathname === "/dashboard/api-keys" ||
     pathname === "/dashboard/api-keys/new" ||
     (pathname.startsWith("/dashboard/api-keys/") && pathname.endsWith("/edit")) ||
@@ -441,7 +423,6 @@ export function DashboardShell({
     heliusRings: heliusRingsEnabled,
     issuance: issuanceEnabled,
     markets: marketsEnabled,
-    newDesign: newDesignEnabled = false,
     payments: paymentsEnabled,
     privateChannels: privateChannelsEnabled,
     ramps: rampsEnabled,
@@ -452,24 +433,16 @@ export function DashboardShell({
   useSyncDashboardUrlStateWithRouter();
   const { dashboardAccess, selectedProjectId, isSidebarOpen, setSidebarOpen, isProjectSwitching } =
     useDashboardWorkspace();
-  // NEW DESIGN styles the shell; the page itself follows its design module's flag too.
-  const newDesignPage = isNewDesignPage(pathname, flags);
-  // Demo data is part of the new design and has a flag of its own (payments-demo-mode; absent in
-  // older fixtures, it follows NEW DESIGN). A page on the previous design never shows it or its
-  // switch.
-  const demoAvailable =
-    isPaymentsPath(pathname) && newDesignPage && flags.paymentsDemoMode !== false;
+  // Demo data has a flag of its own; absent in older fixtures, it is on.
+  const demoAvailable = isPaymentsPath(pathname) && flags.paymentsDemoMode !== false;
   const demoMode =
-    newDesignEnabled &&
-    flags.paymentsDemoMode !== false &&
-    isPaymentsDemoOn(paymentsDemo, selectedProjectId);
+    flags.paymentsDemoMode !== false && isPaymentsDemoOn(paymentsDemo, selectedProjectId);
   const paymentsDemoOn = demoAvailable && demoMode;
   useEffect(() => {
     setTabShowsDemo(paymentsDemoOn);
     return () => setTabShowsDemo(false);
   }, [paymentsDemoOn]);
   const [isMobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [isMoreSheetOpen, setMoreSheetOpen] = useState(false);
   const [isOrganizationSwitching, setOrganizationSwitching] = useState(false);
   // A page whose title is data (a contact's name) names itself here.
   const [pageTitleOverride, setPageTitleOverride] = useState<DashboardPageTitleOverride | null>(
@@ -488,28 +461,15 @@ export function DashboardShell({
   const subnavHydratedRef = useRef(false);
   const previousPathnameRef = useRef(pathname);
   const loadingRoute = resolveDashboardLoadingRoute(pathname) ?? "home";
-  const PageLoadingComponent = resolvePageLoadingComponent(loadingRoute, newDesignPage);
+  const PageLoadingComponent = resolvePageLoadingComponent(loadingRoute);
   const isWorkspaceSwitching = isProjectSwitching || isOrganizationSwitching;
-  const themeScope = themeScopeForPath(pathname, newDesignPage);
+  const themeScope = themeScopeForPath(pathname);
   const isRefresh = themeScope === "refresh";
-  // NEW DESIGN's phone has no bottom bar on any route: the header's menu button opens the
-  // navigation, including on a page no area has redesigned yet.
-  const hasBottomNav = !newDesignEnabled;
-  // The design's sidebar is 280px (17.5rem) including its rule; the previous design's is 296.
-  const sidebarExpandedWidth = newDesignEnabled ? 280 : 296;
-  const sidebarScope = sidebarThemeScope(newDesignEnabled, themeScope);
+  // The design's sidebar is 280px (17.5rem) including its rule.
+  const sidebarExpandedWidth = 280;
+  const sidebarScope: ThemeScope = "refresh";
   const sidebarCollapsedWidth = 64;
-  const pageConfig = getDashboardPageConfig(
-    pathname,
-    t,
-    assetProfilesEnabled,
-    privateChannelsEnabled,
-    enabledTransactionModules(flags),
-    custodyEnabled,
-    paymentsEnabled,
-    newDesignEnabled,
-    flags.newDesignModules
-  );
+  const pageConfig = getDashboardPageConfig(pathname, t, paymentsEnabled);
   const { favorites: walletFavorites } = useWalletFavorites();
   const walletFavoriteItems: SubNavItem[] = walletFavorites.map((favorite) => ({
     label: favorite.name,
@@ -533,10 +493,8 @@ export function DashboardShell({
     marketsEnabled,
     paymentsEnabled,
     privateChannelsEnabled,
-    // Pinned wallets are a NEW DESIGN feature; the previous design's sidebar lists none.
-    walletFavorites: isDesignModuleOn(flags, "wallets") ? walletFavoriteItems : undefined,
-    newDesign: newDesignEnabled,
-    newDesignModules: flags.newDesignModules,
+    canWrite: dashboardAccess.capabilities.canWrite,
+    walletFavorites: walletFavoriteItems,
     rampsEnabled,
   });
   const activeTitleOverride =
@@ -545,7 +503,12 @@ export function DashboardShell({
       : null;
   const pageTitle = activeTitleOverride?.title ?? pageConfig.title;
   const contentWidthClass = pageConfig.contentWidthClass ?? "max-w-5xl";
-  const headerTabs = pageConfig.headerTabs;
+  const headerTabs = pageConfig.headerTabs && {
+    ...pageConfig.headerTabs,
+    tabs: pageConfig.headerTabs.tabs.filter(
+      (tab) => !tab.capability || dashboardAccess.capabilities[tab.capability]
+    ),
+  };
   const routeTabs = pageConfig.routeTabs;
   const hasHeaderTabs = Boolean(headerTabs || routeTabs);
   // A refresh action page sets its way back over a left title, in the page's column, as the
@@ -564,10 +527,7 @@ export function DashboardShell({
   const shouldRenderTopBarBorder =
     (pageConfig.titlePosition === "center" || showBackInTopBar) && !hasHeaderTabs && !isRefresh;
   const shouldClipHorizontalOverflow = clipsDashboardHorizontalOverflow(pathname);
-  const shouldLockViewportScroll = usesWorkspaceViewport(
-    pathname,
-    isDesignModuleOn(flags, "issuance")
-  );
+  const shouldLockViewportScroll = usesWorkspaceViewport(pathname);
   const shouldLockShellViewport = shouldLockViewportScroll || isMobileSidebarOpen;
   // The dashboard's own URL store rather than useSearchParams: list filters update the query
   // shallowly, and an export has to follow them.
@@ -578,16 +538,28 @@ export function DashboardShell({
       dashboardAccess.capabilities[pageConfig.headerAction.capability]) ? (
       <DashboardHeaderAction action={pageConfig.headerAction} search={urlSearchParams.toString()} />
     ) : null;
+  // A read-only member sees why no page offers a write, in the slot a route's action would take.
+  const readOnlyBadge = dashboardAccess.capabilities.canWrite ? null : (
+    <Badge variant="outline" data-testid="dashboard-read-only-badge">
+      {/* The badge wraps its children in one block span, so the icon and label need a row. */}
+      <span className="inline-flex items-center gap-1">
+        <LockIcon className="size-3" aria-hidden />
+        {t("Shared.dashboardShell.readOnly")}
+      </span>
+    </Badge>
+  );
   // A page's own actions (a wallet's star) sit before the route's action, in the same slot.
   const pageActions = activeTitleOverride?.actions;
+  const slotItems = [pageActions, routeAction, readOnlyBadge].filter(Boolean);
   const headerAction =
-    pageActions && routeAction ? (
+    slotItems.length > 1 ? (
       <span className="flex items-center gap-2">
         {pageActions}
         {routeAction}
+        {readOnlyBadge}
       </span>
     ) : (
-      (pageActions ?? routeAction)
+      (slotItems[0] ?? null)
     );
   // Refresh pages put the title, the tabs and the content in one column with one gutter, so all
   // three share a left edge, and drop the full-bleed rule under the tabs. The column is the
@@ -605,7 +577,6 @@ export function DashboardShell({
     const closeMobileNavigation = () => {
       if (tabletViewport.matches) {
         setMobileSidebarOpen(false);
-        setMoreSheetOpen(false);
       }
     };
     tabletViewport.addEventListener("change", closeMobileNavigation);
@@ -718,7 +689,7 @@ export function DashboardShell({
     // scope itself on every route.
     <main
       {...themeScopeAttributes(themeScope)}
-      data-sdp-new-design={newDesignEnabled ? "" : undefined}
+      data-sdp-dashboard-shell=""
       // globals.css drops the root's reserved scrollbar track while the shell is locked.
       data-sdp-locked-viewport={shouldLockShellViewport ? "" : undefined}
       aria-busy={isWorkspaceSwitching}
@@ -750,14 +721,10 @@ export function DashboardShell({
                 style={{
                   width: isSidebarOpen ? sidebarExpandedWidth : sidebarCollapsedWidth,
                 }}
-                className={cn(
-                  "relative z-10 hidden bg-[var(--sdp-shell-bg)] md:sticky md:top-0 md:flex md:h-screen md:flex-col md:justify-between",
-                  newDesignEnabled && "border-r border-border-default"
-                )}
+                className="relative z-10 hidden border-r border-border-default bg-[var(--sdp-shell-bg)] md:sticky md:top-0 md:flex md:h-screen md:flex-col md:justify-between"
               >
                 <ThemeScopeProvider scope={sidebarScope}>
                   <DashboardSidebarContent
-                    canManageOrgSettings={dashboardAccess.capabilities.canManageOrgSettings}
                     navSections={navSections}
                     pathname={pathname}
                     onNavigate={undefined}
@@ -790,33 +757,6 @@ export function DashboardShell({
                 </button>
               </aside>
 
-              {/* Unmounted, not CSS-hidden, while the slide-over is open: a covered
-            duplicate of every destination would otherwise sit behind the overlay. NEW DESIGN
-            has no bar at all: the design's phone reaches the navigation through the menu
-            button in the header. */}
-              {!hasBottomNav || isMobileSidebarOpen || isMoreSheetOpen ? null : (
-                <DashboardBottomNav
-                  pathname={pathname}
-                  custodyEnabled={custodyEnabled}
-                  issuanceEnabled={issuanceEnabled}
-                  paymentsEnabled={paymentsEnabled}
-                  onOpenMore={() => setMoreSheetOpen(true)}
-                  newDesign={isDesignModuleOn(flags, "overview")}
-                />
-              )}
-
-              {isMoreSheetOpen ? (
-                <DashboardMoreSheet
-                  pathname={pathname}
-                  canManageOrgSettings={dashboardAccess.capabilities.canManageOrgSettings}
-                  dvpEnabled={dvpEnabled}
-                  earnEnabled={earnEnabled}
-                  heliusRingsEnabled={heliusRingsEnabled}
-                  marketsEnabled={marketsEnabled}
-                  onClose={() => setMoreSheetOpen(false)}
-                />
-              ) : null}
-
               {isMobileSidebarOpen ? (
                 <div className="fixed inset-0 z-50 flex md:hidden">
                   <button
@@ -827,14 +767,10 @@ export function DashboardShell({
                   />
                   <div
                     {...themeScopeAttributes(sidebarScope)}
-                    className={cn(
-                      "relative z-10 flex h-full w-72 max-w-[85vw] flex-col justify-between border-r border-border-default bg-[var(--sdp-shell-bg)]",
-                      !newDesignEnabled && "shadow-lg"
-                    )}
+                    className="relative z-10 flex h-full w-72 max-w-[85vw] flex-col justify-between border-r border-border-default bg-[var(--sdp-shell-bg)]"
                   >
                     <ThemeScopeProvider scope={sidebarScope}>
                       <DashboardSidebarContent
-                        canManageOrgSettings={dashboardAccess.capabilities.canManageOrgSettings}
                         navSections={navSections}
                         pathname={pathname}
                         onNavigate={() => setMobileSidebarOpen(false)}
@@ -852,28 +788,17 @@ export function DashboardShell({
                 </div>
               ) : null}
 
-              {/* On NEW DESIGN the page is flat on every route: no card, no radius; the sidebar's rule
-              separates it. The previous design keeps the rounded card beside the sidebar.
-              The `page` group lets the header react to the content (an empty state hiding the
-              header's action). On a refresh route it is also the work area's size container:
-              the scroll panel reads its width (`100cqw`) to span it edge to edge. */}
+              {/* The page is flat on every route: no card, no radius; the sidebar's rule
+              separates it. The `page` group lets the header react to the content (an empty state
+              hiding the header's action). On a refresh route it is also the work area's size
+              container: the scroll panel reads its width (`100cqw`) to span it edge to edge. */}
               <section
                 className={cn(
-                  "group/page relative min-w-0",
-                  newDesignEnabled
-                    ? "bg-surface-raised"
-                    : "rounded-2xl rounded-tr-none border border-border-subtle bg-surface-raised/80",
+                  "group/page relative min-w-0 bg-surface-raised",
                   isRefresh && "@container",
-                  // The locked layout clears the phone's bottom bar; NEW DESIGN has none, so it
-                  // keeps only the home indicator's inset.
+                  // The locked layout keeps only the home indicator's inset.
                   shouldLockViewportScroll
-                    ? [
-                        "flex min-h-0 flex-col md:pb-0",
-                        newDesignEnabled ? "overflow-clip" : "overflow-hidden",
-                        !hasBottomNav
-                          ? "pb-[env(safe-area-inset-bottom)]"
-                          : "pb-[calc(4rem+env(safe-area-inset-bottom))]",
-                      ]
+                    ? "flex min-h-0 flex-col overflow-clip pb-[env(safe-area-inset-bottom)] md:pb-0"
                     : isRefresh
                       ? "py-0"
                       : "px-3 py-5 md:p-6"
@@ -922,7 +847,6 @@ export function DashboardShell({
                         )}
                       >
                         <DashboardTopBar
-                          isMobileSidebarOpen={isMobileSidebarOpen}
                           setMobileSidebarOpen={setMobileSidebarOpen}
                           titleVisibility={
                             pageConfig.hideTitle
@@ -939,18 +863,8 @@ export function DashboardShell({
                           above={stacksBackAboveTitle ? backAction : undefined}
                           mark={activeTitleOverride?.mark}
                           layout={isRefresh ? "refresh" : "base"}
-                          hasBottomNav={hasBottomNav}
                           utilities={
-                            // The previous design keeps the language switch in the header; the
-                            // new one moves it to the account menu and gives Payments its demo
-                            // switch.
-                            newDesignEnabled ? (
-                              demoAvailable ? (
-                                <PaymentsDemoToggle {...paymentsDemo} />
-                              ) : undefined
-                            ) : (
-                              <LanguagePicker variant="topbar" />
-                            )
+                            demoAvailable ? <PaymentsDemoToggle {...paymentsDemo} /> : undefined
                           }
                         />
                       </div>
@@ -1016,16 +930,10 @@ export function DashboardShell({
                       className={[
                         "mx-auto min-w-0 w-full",
                         contentWidthClass,
-                        // Clears the fixed mobile bottom bar so the last row of any page is
-                        // still reachable; the bar is md:hidden, so the padding is too. NEW DESIGN
-                        // has no bar.
-                        !shouldLockViewportScroll && hasBottomNav ? "pb-20 md:pb-0" : "",
                         // clip, not hidden: hidden makes this a scroll container, and a sticky wizard
                         // footer inside it would then pin to this box instead of the viewport.
                         shouldClipHorizontalOverflow && !shouldLockViewportScroll
-                          ? newDesignEnabled
-                            ? "overflow-x-clip"
-                            : "overflow-x-hidden"
+                          ? "overflow-x-clip"
                           : "",
                         // A refresh page clips only vertically: its scroll panel reaches past the
                         // column to the work area's edges.

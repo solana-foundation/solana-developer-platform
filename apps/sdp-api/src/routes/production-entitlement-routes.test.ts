@@ -1,4 +1,4 @@
-import { SDP_RAMP_PROVIDER_STAGES } from "@sdp/types/release-channels";
+import { SDP_RAMP_PROVIDER_MATURITY } from "@sdp/types/release-channels";
 import { inspectRoutes } from "hono/dev";
 import { beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "@/app";
@@ -22,6 +22,11 @@ const NO_PROJECT_ROUTES: readonly (readonly [RegExp, string])[] = [
   [/^\/pay(\/|$)/, "public payment page; admits its own money movement (lib/money-admission.ts)"],
   [/^\/admin\//, "operator routes behind their own credential"],
   [/^\/v1\/(organizations|onboarding|places)(\/|$)/, "organization-scoped, no project"],
+  [/^\/v1\/members(\/me)?$/, "membership reads and leaving, no project (ADR 0012)"],
+  [
+    /^\/v1\/members\/:memberId\/api-keys$/,
+    "reads one member's keys across every project, so no single project (HOO-2301)",
+  ],
   [/^\/internal\/dashboard\/network(\/|$)/, "chain-wide public figures; reads no tenant data"],
   [/^\/v1\/projects$/, "lists projects; hides production without the entitlement"],
   [
@@ -55,7 +60,7 @@ function exemption(method: string, path: string): string | undefined {
 
 describe("production entitlement covers every project route (APE-351)", () => {
   const app = createApp({
-    rampProviderStages: SDP_RAMP_PROVIDER_STAGES,
+    rampProviderMaturity: SDP_RAMP_PROVIDER_MATURITY,
   });
   const routes = new Map<string, { method: string; path: string }>();
   for (const { method, path, isMiddleware } of inspectRoutes(app)) {

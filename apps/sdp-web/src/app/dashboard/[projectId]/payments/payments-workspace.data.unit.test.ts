@@ -140,7 +140,9 @@ describe("Payments write requests", () => {
   it("uses the exact custody wallet id for batch estimate and create", async () => {
     const fetch = vi
       .fn()
-      .mockResolvedValueOnce(jsonResponse({ data: { estimate: { transactionCount: 1 } } }))
+      .mockResolvedValueOnce(
+        jsonResponse({ data: { estimate: { transactionCount: 1, warnings: [] } } })
+      )
       .mockResolvedValueOnce(
         jsonResponse({
           data: {
@@ -163,7 +165,10 @@ describe("Payments write requests", () => {
       recipients: [{ counterpartyId: "cp_1", counterpartyAccountId: "acct_1", amount: "1" }],
     };
 
-    await estimateTransferBatch(request, t);
+    await expect(estimateTransferBatch(request, t)).resolves.toMatchObject({
+      transactionCount: 1,
+      warnings: [],
+    });
     await expect(
       createTransferBatch(request, t, { value: "idem_batch_1", persisted: true })
     ).resolves.toMatchObject({
@@ -220,6 +225,41 @@ describe("Payments write requests", () => {
         persisted: true,
       })
     ).rejects.toThrow("DashboardPayments.workspace.batchTransferMissing");
+  });
+
+  it("surfaces a disabled batch movement with the API's actionable refusal", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse(
+          {
+            error: {
+              code: "FORBIDDEN",
+              message: "This movement is disabled for the project",
+              details: { reason: "movement_disabled" },
+            },
+          },
+          403
+        )
+      )
+    );
+
+    await expect(
+      createTransferBatch(
+        {
+          sourceCustodyWalletId: "cwlt_1",
+          token: "USDC",
+          recipients: [{ counterpartyId: "cp_1", counterpartyAccountId: "acct_1", amount: "1" }],
+        },
+        t,
+        { value: "idem_batch_disabled", persisted: true }
+      )
+    ).rejects.toMatchObject({
+      name: "TransferBatchRequestError",
+      status: 403,
+      code: "FORBIDDEN",
+      message: "This movement is disabled for the project",
+    });
   });
 });
 

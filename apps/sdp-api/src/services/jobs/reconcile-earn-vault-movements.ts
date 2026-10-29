@@ -1,3 +1,4 @@
+import { currentClusterScope } from "@sdp/rpc/scope";
 import { getDb } from "@/db/client";
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import { logEvent } from "@/runtime/money-path-events";
@@ -24,15 +25,20 @@ const OUTBOX_BATCH_SIZE = 256;
  * state comes from the shared transition matrix — so a status this sweep cannot
  * legitimately reach is unrepresentable rather than merely unlikely.
  *
+ * The sweep is a `cluster` Cron Definition: the Worker runs it once per
+ * environment, inside that environment's cluster scope, and every claim, repair
+ * and backlog query here selects only the scope's environment.
+ *
  * A completed tick emits `sdp_api_earn_vault_reconciliation_tick` (PRO-1863,
- * the `sdp_api_sponsorship_reconciliation_tick` precedent): claimed/settled/
- * failed counts plus the post-tick backlog and ages. The backlog, movement-age
- * and health rules that key on them live as code in the sdp-infra repo
- * (`kora/alert-rules/sdp-earn-*.json`, PRO-1903). A chain read failure or a
- * per-movement failure still emits the tick (at error level, with the failure
- * counts) and then THROWS, so the cron run reads failed instead of ok while
- * nothing settles (EARN-006: an RPC outage used to be swallowed into an ok
- * tick).
+ * the `sdp_api_sponsorship_reconciliation_tick` precedent): the environment,
+ * claimed/settled/failed counts plus the post-tick backlog and ages. The
+ * backlog, movement-age and health rules that key on them live as code in the
+ * sdp-infra repo (`kora/alert-rules/sdp-earn-*.json`, PRO-1903) and group by
+ * that environment, since each environment ticks on its own. A chain read
+ * failure or a per-movement failure still emits the tick (at error level, with
+ * the failure counts) and then THROWS, so the cron run reads failed instead of
+ * ok while nothing settles (EARN-006: an RPC outage used to be swallowed into
+ * an ok tick).
  *
  * "Completed" is the honest qualifier: a rejection from the claim or backlog
  * QUERY itself skips the event, exactly as the sponsorship reconciler skips
@@ -45,6 +51,7 @@ const OUTBOX_BATCH_SIZE = 256;
  * fabricated one.
  */
 export async function reconcileEarnVaultMovements(env: Env): Promise<void> {
+  const { environment } = currentClusterScope();
   // Start the independent queue/PDA projection before touching the instant
   // movement ledger. Even a persistent claim/payout/backlog query failure must
   // not strand escrowed shares by preventing this sibling from running.
@@ -60,13 +67,16 @@ export async function reconcileEarnVaultMovements(env: Env): Promise<void> {
   let backlogStats: Awaited<ReturnType<typeof ledger.getUnsettledVaultMovementStats>>;
   try {
     ledger = createPostgresEarnMovementsRepository(getDb(env));
-    movements = await ledger.claimUnsettledVaultMovements(OUTBOX_BATCH_SIZE);
+    movements = await ledger.claimUnsettledVaultMovements({
+      environment,
+      limit: OUTBOX_BATCH_SIZE,
+    });
     stats = await reconcileEarnVaultMovementBatch(env, movements);
     // Second chance for withdrawal payouts the settlement could not observe;
     // a failed history read must not understate `totalWithdrawn` forever.
     payoutRepair = await repairUnvaluedWithdrawalPayouts(env);
     depositRepair = await repairUnvaluedKaminoDeposits(env);
-    backlogStats = await ledger.getUnsettledVaultMovementStats();
+    backlogStats = await ledger.getUnsettledVaultMovementStats({ environment });
   } catch (movementPipelineFailure) {
     const queuedWithdrawalFailure = await queuedRun;
     if (queuedWithdrawalFailure !== null) {
@@ -93,6 +103,7 @@ export async function reconcileEarnVaultMovements(env: Env): Promise<void> {
     depositRepair.errors;
   logEvent(failures > 0 ? "error" : "info", {
     event: "sdp_api_earn_vault_reconciliation_tick",
+    environment,
     claimed: stats.claimed,
     settled: stats.settled,
     failed: stats.failed,

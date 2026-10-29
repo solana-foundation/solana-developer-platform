@@ -1,5 +1,6 @@
 import { currentClusterScope } from "@sdp/rpc/scope";
 import { assertValidAddress } from "@sdp/solana/address";
+import { isPaymentRequestPayableAt } from "@sdp/types/payments";
 import { getSdpDocsOrigin } from "@sdp/types/site";
 import { encodeURL } from "@solana/pay";
 import type { Context } from "hono";
@@ -27,12 +28,15 @@ const REQUEST_ICON = `${getSdpDocsOrigin()}/icon.svg`;
  * @returns The request's amount, token, recipient, status, and Solana Pay URL.
  */
 export async function getPaymentRequest(c: Context<{ Bindings: Env }, "/:token">) {
-  const existing = await findPaymentRequest(c.env, c.req.param("token"));
-  const request = await reconcilePaymentRequest(c.env, existing, { bestEffort: true });
+  const request = await findPaymentRequest(c.env, c.req.param("token"));
 
   const expired = isPaymentRequestExpired(request.expires_at);
   const status = expired && request.status === "awaiting_payment" ? "expired" : request.status;
-  const payable = status === "awaiting_payment" && request.custody_wallet_id !== null;
+  const payable =
+    isPaymentRequestPayableAt(
+      { status: request.status, expiresAt: request.expires_at },
+      Date.now()
+    ) && request.custody_wallet_id !== null;
 
   let solanaPayUrl: string | null = null;
   if (payable) {
@@ -77,8 +81,15 @@ export async function createSponsoredTransaction(
 ) {
   const { token } = c.req.param();
   const existing = await findPaymentRequest(c.env, token);
-  const request = await reconcilePaymentRequest(c.env, existing, { bestEffort: false });
-  if (request.status !== "awaiting_payment" || isPaymentRequestExpired(request.expires_at)) {
+  const request = await reconcilePaymentRequest(c.env, existing, (seconds) =>
+    c.header("Retry-After", String(seconds))
+  );
+  if (
+    !isPaymentRequestPayableAt(
+      { status: request.status, expiresAt: request.expires_at },
+      Date.now()
+    )
+  ) {
     throw badRequest("Payment request is no longer payable");
   }
   if (!request.project_id) {
