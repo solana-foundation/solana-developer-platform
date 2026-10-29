@@ -17,8 +17,9 @@ async function loadDocs() {
   ]);
   const sample = `\`\`\`bash tab="cURL"\ncurl '${canonicalSite.apiUrl}/v1/widgets/wdg_1'\n\`\`\`\n`;
   const compiled = (path: string) => {
-    const tree = unified().use(remarkParse).use(remarkMdx).parse(sample);
-    blocks.remarkDocsBlocks()(tree, { path });
+    const processor = unified().use(remarkParse).use(remarkMdx).use(blocks.remarkDocsBlocks);
+    const tree = processor.parse(sample);
+    processor.runSync(tree, { path });
     return JSON.stringify(tree);
   };
   return { canonicalSite, expandDocsBlocks: blocks.expandDocsBlocks, sample, compiled };
