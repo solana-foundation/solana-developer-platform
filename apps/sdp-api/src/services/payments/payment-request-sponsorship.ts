@@ -164,7 +164,9 @@ export async function issuePaymentRequestTransaction(
       await resolveProjectSponsorshipScope(c.env, {
         organizationId: request.organization_id,
         projectId: request.project_id,
-        actor: { type: "wallet", id: request.wallet_id },
+        // Kora's daily quota is keyed per payment request, so each request has its own and the
+        // wallet's other sponsored flows keep theirs.
+        actor: { type: "payment_request", id: request.id },
       }),
       "payments.pay_request",
       // No custody wallet signs a `/pay` transaction: the payer signs it.

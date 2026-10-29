@@ -597,6 +597,19 @@ describe("Public payment request routes", () => {
       expect(sponsorship).toHaveBeenCalledTimes(2);
     });
 
+    it("keys the sponsor's Kora quota on the payment request, not its wallet", async () => {
+      const sponsorship = stubSponsorship();
+      const request = await createAwaitingPaymentRequest(SANDBOX_REQUEST_WALLET);
+
+      expect((await postTransaction(request.public_token)).status).toBe(200);
+      expect(sponsorship).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ actor: { type: "payment_request", id: request.id } }),
+        "payments.pay_request",
+        { custodyWalletId: null }
+      );
+    });
+
     it("caps one request's sponsor signatures per hour and still replays its signed claim", async () => {
       const sign = vi.fn(sponsorSignTestTransaction);
       stubSponsorship().mockImplementation(() => ({
