@@ -2710,20 +2710,26 @@ Derive the `externalId` from data you already have, so a worker that crashes and
 ```ts title="payroll-worker.ts"
 // Safe to run again after a crash: the run's id comes from the period, not from storage.
 const externalId = `payroll-${period}`;
-const response = await sdp.post("/v1/payments/transfer-batches", {
-  headers: { "Idempotency-Key": crypto.randomUUID() },
-  body: { externalId, sourceCustodyWalletId, token, recipients },
+const response = await fetch("https://api.solana.com/v1/payments/transfer-batches", {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${process.env.SDP_API_KEY}`,
+    "Content-Type": "application/json",
+    "Idempotency-Key": crypto.randomUUID(),
+  },
+  body: JSON.stringify({ externalId, sourceCustodyWalletId, token, recipients }),
 });
+const body = await response.json();
 // 200: this run's batch, new or replayed. 409 TRANSFER_BATCH_RUN_EXISTS: the run was
 // already sent with a different body; read error.details.batchId instead of resending.
 // Any other error (a 409 AMOUNT_BELOW_RENT_MINIMUM, say) sent nothing: report it.
 let batchId: string;
 if (response.ok) {
-  batchId = response.data.batch.id;
-} else if (response.error.code === "TRANSFER_BATCH_RUN_EXISTS") {
-  batchId = response.error.details.batchId;
+  batchId = body.data.batch.id;
+} else if (body.error.code === "TRANSFER_BATCH_RUN_EXISTS") {
+  batchId = body.error.details.batchId;
 } else {
-  throw new Error(`Payout run ${externalId} was refused: ${response.error.code}`);
+  throw new Error(`Payout run ${externalId} was refused: ${body.error.code}`);
 }
 ```
 
