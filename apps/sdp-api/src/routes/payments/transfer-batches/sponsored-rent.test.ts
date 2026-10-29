@@ -1,6 +1,5 @@
-import { createClusterRpc } from "@sdp/rpc/factory";
 import { runInClusterScope } from "@sdp/rpc/scope";
-import { type Address, address, type Blockhash, createNoopSigner } from "@solana/kit";
+import { type Address, address, blockhash, createNoopSigner } from "@solana/kit";
 import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import { extension, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -25,7 +24,7 @@ const KORA_CAP = 2_500_000n;
 const SOURCE = createNoopSigner(syntheticAddress(1));
 const FEE_PAYER = syntheticAddress(2);
 const LIFETIME = {
-  blockhash: "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N" as Blockhash,
+  blockhash: blockhash("EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N"),
   lastValidBlockHeight: 1000n,
 };
 
@@ -63,11 +62,14 @@ function chunkRent(
   groups: RecipientInstructionGroup[],
   limit: SponsoredRentLimit
 ): bigint {
-  const created = new Set(
-    chunk.recipientIndexes.flatMap((index) => groups[index].destinationTokenAccount ?? [])
-  );
+  const created = new Map<Address, bigint>();
+  for (const index of chunk.recipientIndexes) {
+    const account = groups[index].destinationTokenAccount;
+    const rent = account === undefined ? undefined : limit.rentByTokenAccount.get(account);
+    if (account !== undefined && rent !== undefined) created.set(account, rent);
+  }
   let total = 0n;
-  for (const account of created) total += limit.rentByTokenAccount.get(account) ?? 0n;
+  for (const rent of created.values()) total += rent;
   return total;
 }
 
@@ -113,7 +115,6 @@ describe("batch chunks under the sponsor's rent cap (HOO-2024)", () => {
     rpcSetup(destinationTokenAccounts(groups));
     return runInClusterScope({ projectId: null, environment: "sandbox" }, async () => {
       const sponsoredRent = await readSponsoredRentLimit({
-        rpc: createClusterRpc(),
         groups,
         tokenContext: context,
         readConfiguration,

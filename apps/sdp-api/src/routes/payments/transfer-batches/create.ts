@@ -173,7 +173,6 @@ export async function createTransferBatch(
     feePayer,
   });
   const sponsoredRent = await readSponsoredRentLimit({
-    rpc: resolved.rpc,
     groups,
     tokenContext: resolved.tokenContext,
     readConfiguration: () => feePayment.getSponsorshipConfiguration(),

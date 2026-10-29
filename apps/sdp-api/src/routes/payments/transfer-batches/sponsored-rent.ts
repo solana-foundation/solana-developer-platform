@@ -1,4 +1,5 @@
 import type { SponsorshipProviderConfiguration } from "@sdp/fee-payment/port";
+import { createClusterRpc } from "@sdp/rpc/factory";
 import { GET_MULTIPLE_ACCOUNTS_LIMIT } from "@sdp/rpc/solana";
 import { SPL_TOKEN_PROGRAMS } from "@sdp/types/well-known-tokens";
 import {
@@ -17,14 +18,14 @@ import {
 import { internalError } from "@/lib/errors";
 import { readRentExemptMinimum } from "@/services/payments/rent-exempt-minimum";
 import type { RecipientInstructionGroup, SponsoredRentLimit } from "./transaction";
-import type { Rpc, TokenContext } from "./types";
+import type { TokenContext } from "./types";
 
 /**
  * The account extensions Token-2022 adds to every token account of a mint carrying the key
  * extension (`get_required_init_account_extensions`), which the associated token program sizes
  * the account with. An ElGamal ciphertext is 64 bytes.
  */
-const REQUIRED_ACCOUNT_EXTENSIONS: Partial<Record<Extension["__kind"], ExtensionArgs>> = {
+const REQUIRED_ACCOUNT_EXTENSIONS = {
   TransferFeeConfig: extension("TransferFeeAmount", { withheldAmount: 0n }),
   NonTransferable: extension("NonTransferableAccount", {}),
   TransferHook: extension("TransferHookAccount", { transferring: false }),
@@ -32,7 +33,7 @@ const REQUIRED_ACCOUNT_EXTENSIONS: Partial<Record<Extension["__kind"], Extension
     withheldAmount: new Uint8Array(64),
   }),
   PausableConfig: extension("PausableAccount", {}),
-};
+} as const satisfies Partial<Record<Extension["__kind"], ExtensionArgs>>;
 
 /**
  * The size of the associated token account the sponsor creates for one recipient: 165 bytes
@@ -53,17 +54,18 @@ export function associatedTokenAccountSize(
     throw internalError("The batch mint was not readable as a Token-2022 mint");
   }
   const mintExtensions = unwrapOption(decodeMint(mint).data.extensions) ?? [];
+  // Widened so any mint extension kind can be looked up; most require no account extension.
+  const requiredByMintExtension: Partial<Record<Extension["__kind"], ExtensionArgs>> =
+    REQUIRED_ACCOUNT_EXTENSIONS;
   const required = mintExtensions.flatMap((mintExtension) => {
-    const accountExtension = REQUIRED_ACCOUNT_EXTENSIONS[mintExtension.__kind];
+    const accountExtension = requiredByMintExtension[mintExtension.__kind];
     return accountExtension === undefined ? [] : [accountExtension];
   });
   return getTokenSize([extension("ImmutableOwner", {}), ...required]);
 }
 
-async function fetchAccountPages(
-  rpc: Rpc,
-  addresses: readonly Address[]
-): Promise<MaybeEncodedAccount[]> {
+async function fetchAccountPages(addresses: readonly Address[]): Promise<MaybeEncodedAccount[]> {
+  const rpc = createClusterRpc();
   const pages: Address[][] = [];
   for (let start = 0; start < addresses.length; start += GET_MULTIPLE_ACCOUNTS_LIMIT) {
     pages.push(addresses.slice(start, start + GET_MULTIPLE_ACCOUNTS_LIMIT));
@@ -85,14 +87,12 @@ async function fetchAccountPages(
  * `getMinimumBalanceForRentExemption` for its size (cached per cluster and size for an hour) and
  * one Kora `getConfig` for the cap.
  *
- * @param params.rpc - Solana RPC client.
  * @param params.groups - Instruction groups with derived destination token accounts.
  * @param params.tokenContext - Resolved token parameters for the batch.
  * @param params.readConfiguration - Reads the scope's Kora configuration.
  * @returns Rent by missing destination token account, and the cap (null when none is missing).
  */
 export async function readSponsoredRentLimit(params: {
-  rpc: Rpc;
   groups: readonly RecipientInstructionGroup[];
   tokenContext: TokenContext;
   readConfiguration: () => Promise<SponsorshipProviderConfiguration>;
@@ -104,7 +104,7 @@ export async function readSponsoredRentLimit(params: {
   ];
   const readsMint = tokenContext.tokenProgram === SPL_TOKEN_PROGRAMS["token-2022"];
   const addresses = readsMint ? [tokenContext.mintAddress, ...tokenAccounts] : tokenAccounts;
-  const accounts = await fetchAccountPages(params.rpc, addresses);
+  const accounts = await fetchAccountPages(addresses);
   if (accounts.length !== addresses.length) {
     throw internalError("getMultipleAccounts did not answer for every batch account");
   }

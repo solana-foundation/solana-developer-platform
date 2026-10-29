@@ -105,7 +105,6 @@ export async function estimateTransferBatch(
     feePayer,
   });
   const sponsoredRent = await readSponsoredRentLimit({
-    rpc: resolved.rpc,
     groups,
     tokenContext: resolved.tokenContext,
     readConfiguration: () => getManagedSponsorshipProviderConfiguration(c.env),

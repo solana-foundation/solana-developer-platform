@@ -212,16 +212,15 @@ function sponsoredRentOf(
   groups: readonly RecipientInstructionGroup[],
   limit: SponsoredRentLimit
 ): bigint {
-  const created = new Set(
-    groups.flatMap((group) =>
-      group.destinationTokenAccount !== undefined &&
-      limit.rentByTokenAccount.has(group.destinationTokenAccount)
-        ? [group.destinationTokenAccount]
-        : []
-    )
-  );
+  const created = new Map<Address, bigint>();
+  for (const group of groups) {
+    if (group.destinationTokenAccount === undefined) continue;
+    // Absent from the map: the account exists, so the chunk creates nothing for it.
+    const rent = limit.rentByTokenAccount.get(group.destinationTokenAccount);
+    if (rent !== undefined) created.set(group.destinationTokenAccount, rent);
+  }
   let total = 0n;
-  for (const tokenAccount of created) total += limit.rentByTokenAccount.get(tokenAccount) ?? 0n;
+  for (const rent of created.values()) total += rent;
   return total;
 }
 
