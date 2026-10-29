@@ -23,15 +23,14 @@ import type { TokenContext } from "./types";
 /**
  * The account extensions Token-2022 adds to every token account of a mint carrying the key
  * extension (`get_required_init_account_extensions`), which the associated token program sizes
- * the account with. An ElGamal ciphertext is 64 bytes.
+ * the account with. Confidential-transfer account extensions are added later, by
+ * `ConfigureAccount`, never at creation. Sizes are checked against the chain's own
+ * `GetAccountDataSize` in sponsored-rent.test.ts.
  */
 const REQUIRED_ACCOUNT_EXTENSIONS = {
   TransferFeeConfig: extension("TransferFeeAmount", { withheldAmount: 0n }),
   NonTransferable: extension("NonTransferableAccount", {}),
   TransferHook: extension("TransferHookAccount", { transferring: false }),
-  ConfidentialTransferFee: extension("ConfidentialTransferFeeAmount", {
-    withheldAmount: new Uint8Array(64),
-  }),
   PausableConfig: extension("PausableAccount", {}),
 } as const satisfies Partial<Record<Extension["__kind"], ExtensionArgs>>;
 

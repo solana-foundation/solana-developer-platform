@@ -1,14 +1,28 @@
 import { runInClusterScope } from "@sdp/rpc/scope";
-import { type Address, address, blockhash, createNoopSigner } from "@solana/kit";
+import {
+  type Address,
+  address,
+  blockhash,
+  createNoopSigner,
+  lamports,
+  type MaybeEncodedAccount,
+  none,
+  some,
+} from "@solana/kit";
 import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
-import { extension, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
+import {
+  type ExtensionArgs,
+  extension,
+  getMintEncoder,
+  TOKEN_2022_PROGRAM_ADDRESS,
+} from "@solana-program/token-2022";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { AppError } from "@/lib/errors";
 import { installClusterRpcResponder } from "@/test/helpers/cluster-rpc";
 import { syntheticAddress } from "@/test/helpers/parsed-transactions";
 import { respondTokenAccounts, type StubMint } from "@/test/helpers/token-mints";
-import { readSponsoredRentLimit } from "./sponsored-rent";
+import { associatedTokenAccountSize, readSponsoredRentLimit } from "./sponsored-rent";
 import {
   buildInstructionGroups,
   chunkInstructionGroups,
@@ -253,5 +267,83 @@ describe("batch chunks under the sponsor's rent cap (HOO-2024)", () => {
     );
 
     expect(sponsoredRent.rentByTokenAccount.size).toBe(1);
+  });
+});
+
+describe("associatedTokenAccountSize (HOO-2024)", () => {
+  const authority = syntheticAddress(30);
+  const transferFee = extension("TransferFeeConfig", {
+    transferFeeConfigAuthority: authority,
+    withdrawWithheldAuthority: authority,
+    withheldAmount: 0n,
+    olderTransferFee: { epoch: 0n, maximumFee: 0n, transferFeeBasisPoints: 0 },
+    newerTransferFee: { epoch: 0n, maximumFee: 0n, transferFeeBasisPoints: 0 },
+  });
+  const transferHook = extension("TransferHook", { authority, programId: authority });
+  const pausable = extension("PausableConfig", { authority: some(authority), paused: false });
+  const confidentialMint = extension("ConfidentialTransferMint", {
+    authority: some(authority),
+    autoApproveNewAccounts: true,
+    auditorElgamalPubkey: none(),
+  });
+  const confidentialFee = extension("ConfidentialTransferFee", {
+    authority: some(authority),
+    elgamalPubkey: syntheticAddress(31),
+    harvestToMintEnabled: true,
+    withheldAmount: new Uint8Array(64),
+  });
+
+  function mintAccount(extensions: ExtensionArgs[]): MaybeEncodedAccount {
+    const data = getMintEncoder().encode({
+      mintAuthority: some(authority),
+      supply: 0n,
+      decimals: 6,
+      isInitialized: true,
+      freezeAuthority: none(),
+      extensions: extensions.length === 0 ? none() : some(extensions),
+    });
+    return {
+      exists: true,
+      address: syntheticAddress(32),
+      programAddress: TOKEN_2022_PROGRAM_ADDRESS,
+      data: new Uint8Array(data),
+      executable: false,
+      lamports: lamports(1n),
+      space: BigInt(data.length),
+    };
+  }
+
+  // Each size is what Token-2022's GetAccountDataSize answered on devnet for a mint with these
+  // extensions, asked for [ImmutableOwner] as the associated token program asks (2026-10-29).
+  it.each([
+    { mint: "no extensions", extensions: [], chainSize: 170 },
+    { mint: "TransferFeeConfig", extensions: [transferFee], chainSize: 182 },
+    { mint: "TransferHook", extensions: [transferHook], chainSize: 175 },
+    { mint: "PausableConfig", extensions: [pausable], chainSize: 174 },
+    { mint: "NonTransferable", extensions: [extension("NonTransferable", {})], chainSize: 174 },
+    {
+      mint: "PermanentDelegate",
+      extensions: [extension("PermanentDelegate", { delegate: authority })],
+      chainSize: 170,
+    },
+    { mint: "ConfidentialTransferMint", extensions: [confidentialMint], chainSize: 170 },
+    {
+      mint: "confidential transfer fees",
+      extensions: [transferFee, confidentialMint, confidentialFee],
+      chainSize: 182,
+    },
+    {
+      mint: "TransferFee, TransferHook and Pausable",
+      extensions: [transferFee, transferHook, pausable],
+      chainSize: 191,
+    },
+  ])("sizes a $mint mint's account as the chain does", ({ extensions, chainSize }) => {
+    expect(associatedTokenAccountSize(TOKEN_2022_PROGRAM_ADDRESS, mintAccount(extensions))).toBe(
+      chainSize
+    );
+  });
+
+  it("sizes a legacy token account at 165 bytes without reading the mint", () => {
+    expect(associatedTokenAccountSize(TOKEN_PROGRAM_ADDRESS, undefined)).toBe(165);
   });
 });
