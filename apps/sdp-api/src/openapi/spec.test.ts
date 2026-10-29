@@ -8,6 +8,11 @@ import { SDP_RELEASE_CHANNEL_NAMES, SDP_RELEASE_CHANNELS } from "@sdp/types/rele
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { declaredIdempotency, declaredIdempotencyRecovery } from "@/middleware/idempotency";
+import {
+  ANONYMOUS_MAX_REQUESTS,
+  RATE_LIMIT_TIERS,
+  RATE_LIMIT_WINDOW_MS,
+} from "@/middleware/rate-limit";
 import { routeOwnerOf } from "@/routes/route-modules";
 import { stableMutatingRouteSteps } from "@/test/helpers/route-owners";
 import {
@@ -798,6 +803,16 @@ describe("OpenAPI spec", () => {
         expect(published).not.toContain(`"${value}"`);
       }
       expect(manifest.grantableActions.map(({ module }) => module)).not.toContain("organizations");
+    }
+  });
+
+  it("gives the docs the rate limits the API enforces, the same on every channel", () => {
+    for (const releaseChannel of SDP_RELEASE_CHANNEL_NAMES) {
+      expect(createPublicSurfaceManifest(releaseChannel).rateLimits).toEqual({
+        windowSeconds: RATE_LIMIT_WINDOW_MS / 1000,
+        apiKeyTiers: RATE_LIMIT_TIERS,
+        unauthenticatedPerIp: ANONYMOUS_MAX_REQUESTS,
+      });
     }
   });
 

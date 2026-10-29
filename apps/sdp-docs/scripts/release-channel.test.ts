@@ -10,9 +10,14 @@ import { unified } from "unified";
 import { expandDocsBlocks, remarkDocsBlocks } from "@/lib/docs-blocks";
 import { isPagePublished, type PublicSurface } from "@/lib/release-channel";
 
-const ALL: Pick<PublicSurface, "allModules" | "allRampProviders"> = {
+const ALL: Pick<PublicSurface, "allModules" | "allRampProviders" | "rateLimits"> = {
   allModules: ["custody", "payments", "ramps", "issuance", "compliance", "earn"],
   allRampProviders: ["moonpay", "stripe"],
+  rateLimits: {
+    windowSeconds: 60,
+    apiKeyTiers: { standard: 100, elevated: 500, unlimited: 10_000 },
+    unauthenticatedPerIp: 20,
+  },
 };
 
 const STABLE: PublicSurface = {
@@ -94,6 +99,22 @@ describe("docs follow the release channel", () => {
     assert.doesNotMatch(experimental, /MoonPay/);
     assert.match(experimental, /"provider": "stripe"/);
     assert.match(experimental, /After$/);
+  });
+
+  it("tables the API's rate limits from the manifest", () => {
+    const limits = expandDocsBlocks("<RateLimitTable />\n", "rate-limits.mdx", { surface: STABLE });
+    assert.equal(
+      limits,
+      [
+        "| Caller | Requests per minute |",
+        "| --- | --- |",
+        "| An API key on the `standard` tier | 100 |",
+        "| An API key on the `elevated` tier | 500 |",
+        "| An API key on the `unlimited` tier | 10,000 |",
+        "| No API key, per IP address | 20 |",
+        "",
+      ].join("\n")
+    );
   });
 
   it("renders the same blocks into the compiled page", () => {

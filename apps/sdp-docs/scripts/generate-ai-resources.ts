@@ -85,6 +85,7 @@ const KEY_PAGE_SLUGS = [
   "tutorials/end-to-end-payment-flow",
   "reference/provider-onboarding",
   "reference/docs-for-ai",
+  "reference/conventions/index",
   "reference/postman-collection",
 ];
 
