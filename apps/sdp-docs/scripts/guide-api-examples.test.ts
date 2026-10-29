@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import remarkMdx from "remark-mdx";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
+import type { GuideApiExamples } from "@/lib/api-example";
 import { expandDocsBlocks, remarkDocsBlocks } from "@/lib/docs-blocks";
 import { type PublicSurface, publicSurface } from "@/lib/release-channel";
 
@@ -61,7 +62,7 @@ describe("guide API examples", () => {
       modules: ["custody", "payments", "recurring_payments"],
     };
     const source = '---\nmodule: issuance\n---\n\n<ApiExample operation="get-token" />\n';
-    const examples = { releaseChannel: "stable", operations: {} };
+    const examples: GuideApiExamples = { releaseChannel: "stable", operations: {} };
     assert.doesNotMatch(
       expandDocsBlocks(source, "content/docs/tokens/manage-token-settings.mdx", {
         surface: stable,

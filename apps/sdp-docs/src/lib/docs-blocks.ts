@@ -262,7 +262,13 @@ function spanOf(node: RootContent, where: string): { start: number; end: number 
 }
 
 const parser = unified().use(remarkParse).use(remarkMdx).use(remarkGfm);
-const defaultExamples: GuideApiExamples = generatedExamples;
+if (generatedExamples.releaseChannel !== publicSurface.releaseChannel) {
+  throw new Error("Guide API examples and the public surface use different release channels");
+}
+const defaultExamples: GuideApiExamples = {
+  ...generatedExamples,
+  releaseChannel: publicSurface.releaseChannel,
+};
 
 function compiledPagePublished(
   file: Parameters<typeof embedSource>[0],

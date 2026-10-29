@@ -1,4 +1,5 @@
 import type { SnippetLanguage } from "@sdp/api-catalog/snippets";
+import type { SdpReleaseChannel } from "@sdp/types/release-channels";
 import type { RootContent } from "mdast";
 import { z } from "zod";
 
@@ -20,7 +21,7 @@ export type GuideApiExample = {
 
 /** A release channel's guide examples, generated from its public API reference. */
 export type GuideApiExamples = {
-  releaseChannel: string;
+  releaseChannel: SdpReleaseChannel;
   operations: Record<string, GuideApiExample>;
 };
 
@@ -49,7 +50,7 @@ export function apiExampleOf(node: RootContent, where: string): ApiExampleDirect
 export function renderApiExample(
   directive: ApiExampleDirective,
   catalog: GuideApiExamples,
-  releaseChannel: string,
+  releaseChannel: SdpReleaseChannel,
   where: string,
   pagePublished: boolean
 ): string {

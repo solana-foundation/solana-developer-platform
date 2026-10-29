@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { apiReferenceSchema } from "@sdp/api-catalog/reference";
 import { buildSnippets } from "@sdp/api-catalog/snippets";
-import type { Parent, RootContent } from "mdast";
+import type { Parent } from "mdast";
 import remarkMdx from "remark-mdx";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
@@ -33,7 +33,7 @@ function operationsIn(source: string, where: string): Set<string> {
   const names = new Set<string>();
   const walk = (parent: Parent) => {
     for (const child of parent.children) {
-      const directive = apiExampleOf(child as RootContent, where);
+      const directive = apiExampleOf(child, where);
       if (directive) names.add(directive.operation);
       if ("children" in child) walk(child);
     }
